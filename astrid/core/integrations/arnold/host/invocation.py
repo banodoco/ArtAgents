@@ -13,6 +13,9 @@ from typing import Any
 
 
 STEP_INVOCATION_KIND = "model"
+HOST_CONTROL_KINDS: frozenset[str] = frozenset(
+    {"pattern_select", "dynamic_fanout", "vote_judge", "halt"}
+)
 HUMAN_DECISION_ACTIONS: frozenset[str] = frozenset({"approve", "reject"})
 HUMAN_RESUME_INPUT_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -54,12 +57,22 @@ class InvocationTemplate:
 
     workflow_id: str
     stage_id: str
-    executor_id: str
+    executor_id: str | None = None
+    adapter_invocation_id: str | None = None
+    control_kind: str | None = None
     input_map: dict[str, str] = field(default_factory=dict)
     inputs: dict[str, Any] = field(default_factory=dict)
     mode: str = "inline"
     requires_ack: bool = False
     extra_metadata: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def is_control(self) -> bool:
+        return self.control_kind is not None
+
+    @property
+    def is_invocable(self) -> bool:
+        return self.executor_id is not None or self.adapter_invocation_id is not None
 
 
 ALLOWLISTED_INVOCATION_TEMPLATES: dict[str, dict[str, InvocationTemplate]] = {
@@ -128,14 +141,6 @@ ALLOWLISTED_INVOCATION_TEMPLATES: dict[str, dict[str, InvocationTemplate]] = {
             input_map={"finalist": "finalist"},
             requires_ack=True,
             extra_metadata={"human_gate": True},
-        ),
-    },
-    "text_analysis.summarize": {
-        "summarize": InvocationTemplate(
-            workflow_id="text_analysis.summarize",
-            stage_id="summarize",
-            executor_id="text.summarize",
-            input_map={"text": "text"},
         ),
     },
 }
@@ -264,6 +269,11 @@ def build_workflow_step_invocation(
         raise KeyError(
             f"unknown host invocation template {workflow_id!r}/{stage_id!r}"
         ) from exc
+    if template.executor_id is None:
+        raise KeyError(
+            f"host invocation template {workflow_id!r}/{stage_id!r} is "
+            f"{template.control_kind or 'non-executable'} and cannot build a StepInvocation"
+        )
 
     return build_step_invocation(
         executor_id=template.executor_id,
@@ -280,6 +290,158 @@ def build_workflow_step_invocation(
         stage_id=template.stage_id,
         **template.extra_metadata,
     )
+
+
+class CompiledInvocationTemplateError(ValueError):
+    """Raised when a compiled pipeline cannot produce host invocation templates."""
+
+
+def invocation_templates_from_compiled_pipeline(
+    workflow_id: str,
+    pipeline: Any,
+) -> dict[str, InvocationTemplate]:
+    """Derive host invocation templates from an already-compiled Arnold pipeline.
+
+    The function is intentionally duck-typed and does not import Arnold. It
+    inspects compiled stage metadata, classifies synthetic/control stages as
+    host controls, and requires every executable stage to expose either a real
+    executor id or an adapter invocation id.
+    """
+    if not workflow_id:
+        raise CompiledInvocationTemplateError("workflow_id must be non-empty")
+
+    stages = tuple(getattr(pipeline, "stages", ()) or ())
+    if not stages:
+        raise CompiledInvocationTemplateError(
+            f"compiled pipeline for {workflow_id!r} has no stages"
+        )
+
+    templates: dict[str, InvocationTemplate] = {}
+    for stage in stages:
+        stage_id = _stage_id(stage)
+        if not stage_id:
+            raise CompiledInvocationTemplateError(
+                f"compiled pipeline for {workflow_id!r} contains a stage without stage_id"
+            )
+        if stage_id in templates:
+            raise CompiledInvocationTemplateError(
+                f"compiled pipeline for {workflow_id!r} contains duplicate stage {stage_id!r}"
+            )
+        metadata = _stage_metadata(stage)
+        control_kind = _control_kind(stage_id, metadata)
+        if control_kind is not None:
+            templates[stage_id] = InvocationTemplate(
+                workflow_id=workflow_id,
+                stage_id=stage_id,
+                control_kind=control_kind,
+                extra_metadata=_control_metadata(metadata, control_kind),
+            )
+            continue
+
+        adapter_config = _adapter_config(stage, metadata)
+        executor_id = _string_value(adapter_config.get("executor_id"))
+        adapter_invocation_id = _adapter_invocation_id(metadata)
+        if executor_id is None and adapter_invocation_id is None:
+            raise CompiledInvocationTemplateError(
+                f"compiled pipeline for {workflow_id!r} stage {stage_id!r} is "
+                "executable but exposes neither adapter_config.executor_id, "
+                "metadata.executor_id, nor wrapper adapter invocation metadata"
+            )
+
+        templates[stage_id] = InvocationTemplate(
+            workflow_id=workflow_id,
+            stage_id=stage_id,
+            executor_id=executor_id,
+            adapter_invocation_id=adapter_invocation_id,
+            input_map=dict(adapter_config.get("input_map") or {}),
+            inputs=dict(adapter_config.get("inputs") or {}),
+            mode=_string_value(adapter_config.get("mode")) or "inline",
+            requires_ack=bool(adapter_config.get("requires_ack", False)),
+            extra_metadata=_compiled_extra_metadata(metadata, adapter_config),
+        )
+    return templates
+
+
+def _stage_id(stage: Any) -> str | None:
+    return _string_value(
+        getattr(stage, "stage_id", None)
+        or getattr(stage, "id", None)
+        or getattr(stage, "name", None)
+    )
+
+
+def _stage_metadata(stage: Any) -> dict[str, Any]:
+    metadata = getattr(stage, "metadata", None)
+    return dict(metadata) if isinstance(metadata, dict) else {}
+
+
+def _adapter_config(stage: Any, metadata: dict[str, Any]) -> dict[str, Any]:
+    config = metadata.get("adapter_config")
+    if not isinstance(config, dict):
+        invocation = getattr(stage, "invocation", None)
+        invocation_metadata = getattr(invocation, "metadata", None)
+        if isinstance(invocation_metadata, dict):
+            config = invocation_metadata.get("adapter_config")
+    normalized = dict(config) if isinstance(config, dict) else {}
+    if "executor_id" not in normalized:
+        executor_id = _string_value(metadata.get("executor_id"))
+        if executor_id is not None:
+            normalized["executor_id"] = executor_id
+    return normalized
+
+
+def _control_kind(stage_id: str, metadata: dict[str, Any]) -> str | None:
+    synthetic_kind = _string_value(metadata.get("synthetic_kind"))
+    if synthetic_kind in HOST_CONTROL_KINDS:
+        return synthetic_kind
+    if stage_id == "halt" or metadata.get("terminal") is True:
+        return "halt"
+    return None
+
+
+def _control_metadata(metadata: dict[str, Any], control_kind: str) -> dict[str, Any]:
+    control_metadata = dict(metadata)
+    control_metadata["host_control_kind"] = control_kind
+    control_metadata.pop("executor_id", None)
+    adapter_config = control_metadata.get("adapter_config")
+    if isinstance(adapter_config, dict):
+        adapter_copy = dict(adapter_config)
+        adapter_copy.pop("executor_id", None)
+        control_metadata["adapter_config"] = adapter_copy
+    return control_metadata
+
+
+def _adapter_invocation_id(metadata: dict[str, Any]) -> str | None:
+    adapter = _string_value(metadata.get("adapter"))
+    command = _string_value(metadata.get("command"))
+    if adapter is not None and command is not None:
+        return f"{adapter}:{command}"
+    wrapper_subcommand = _string_value(metadata.get("wrapper_subcommand"))
+    wrapper_orchestrator_id = _string_value(metadata.get("wrapper_orchestrator_id"))
+    if adapter is not None and wrapper_orchestrator_id is not None and wrapper_subcommand is not None:
+        return f"{adapter}:{wrapper_orchestrator_id}:{wrapper_subcommand}"
+    return None
+
+
+def _compiled_extra_metadata(
+    metadata: dict[str, Any],
+    adapter_config: dict[str, Any],
+) -> dict[str, Any]:
+    extra = dict(metadata)
+    extra.pop("adapter_config", None)
+    extra.pop("executor_id", None)
+    for key in ("workflow_id", "stage_id", "mode", "requires_ack"):
+        extra.pop(key, None)
+    extra["compiled_pipeline"] = True
+    if "adapter_config" in metadata:
+        extra["compiled_adapter_config"] = dict(adapter_config)
+    return extra
+
+
+def _string_value(value: Any) -> str | None:
+    if isinstance(value, str) and value.strip():
+        return value
+    return None
 
 
 def build_human_resume_input_schema() -> dict[str, Any]:
@@ -395,6 +557,8 @@ __all__ = [
     "ALLOWLISTED_INVOCATION_TEMPLATES",
     "HUMAN_DECISION_ACTIONS",
     "HUMAN_RESUME_INPUT_SCHEMA",
+    "HOST_CONTROL_KINDS",
+    "CompiledInvocationTemplateError",
     "HumanResumePayloadError",
     "InvocationTemplate",
     "STEP_INVOCATION_KIND",
@@ -404,5 +568,6 @@ __all__ = [
     "build_step_invocation",
     "build_step_metadata",
     "build_workflow_step_invocation",
+    "invocation_templates_from_compiled_pipeline",
     "parse_human_resume_payload",
 ]

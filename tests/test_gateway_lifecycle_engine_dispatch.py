@@ -95,6 +95,28 @@ def test_dispatch_lifecycle_arnold_engine_lazy_imports_host_cli(monkeypatch: pyt
     assert captured["args"] == ["--project", "demo"]
 
 
+def test_dispatch_lifecycle_start_routes_explicit_arnold_engine_to_host_cli(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    fake_cli = types.ModuleType("astrid.core.integrations.arnold.host.cli")
+
+    def fake_start(args: list[str]) -> int:
+        captured["args"] = list(args)
+        return 37
+
+    fake_cli.cmd_start = fake_start
+    monkeypatch.setitem(sys.modules, "astrid.core.integrations.arnold.host.cli", fake_cli)
+    monkeypatch.setattr("astrid.core.task.lifecycle.cmd_start", lambda args: 101)
+
+    rc = dispatch._dispatch_lifecycle("cmd_start")(
+        ["summarize", "--project", "demo", "--engine=arnold"]
+    )
+
+    assert rc == 37
+    assert captured["args"] == ["summarize", "--project", "demo"]
+
+
 def test_dispatch_skip_rejects_arnold_engine() -> None:
     with pytest.raises(AstridError, match="does not support '--engine arnold'"):
         dispatch._dispatch_lifecycle("cmd_skip")(["--project", "demo", "--engine", "arnold"])

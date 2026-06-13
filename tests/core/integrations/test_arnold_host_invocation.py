@@ -93,6 +93,67 @@ class _StepInvocation:
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class _Stage:
+    stage_id: str
+    label: str
+    invocation: Any | None = None
+    suspension: Any | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+    decision_vocabulary: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class _Edge:
+    source: str
+    target: str
+    label: str
+    source_port: str | None = None
+    target_port: str | None = None
+    logical_type: str | None = None
+    artifact_type: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class _ParallelStage:
+    stage_id: str
+    label: str
+    stages: tuple[Any, ...] = field(default_factory=tuple)
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class _BuiltPipeline:
+    entry_stage_id: str
+    stages: tuple[_Stage, ...]
+    edges: tuple[_Edge, ...]
+
+
+class _PipelineBuilder:
+    def __init__(self) -> None:
+        self.entry_stage_id: str | None = None
+        self.stages: list[_Stage] = []
+        self.edges: list[_Edge] = []
+
+    def add_stage(self, stage: _Stage) -> None:
+        self.stages.append(stage)
+
+    def add_edge(self, edge: _Edge) -> None:
+        self.edges.append(edge)
+
+    def set_entry_stage(self, stage_id: str) -> None:
+        self.entry_stage_id = stage_id
+
+    def build(self) -> _BuiltPipeline:
+        assert self.entry_stage_id is not None
+        return _BuiltPipeline(
+            entry_stage_id=self.entry_stage_id,
+            stages=tuple(self.stages),
+            edges=tuple(self.edges),
+        )
+
+
 class _StepwiseDriver:
     def advance(self, envelope: object) -> _AdvanceOutcome:
         return _AdvanceOutcome()
@@ -112,10 +173,10 @@ def _install_fake_pipeline(monkeypatch: pytest.MonkeyPatch) -> None:
         "AdvanceOutcome": _AdvanceOutcome,
         "CheckpointOutcome": _CheckpointOutcome,
         "StepwiseDriver": _StepwiseDriver,
-        "PipelineBuilder": type("PipelineBuilder", (), {}),
-        "Stage": type("Stage", (), {}),
-        "ParallelStage": type("ParallelStage", (), {}),
-        "Edge": type("Edge", (), {}),
+        "PipelineBuilder": _PipelineBuilder,
+        "Stage": _Stage,
+        "ParallelStage": _ParallelStage,
+        "Edge": _Edge,
         "Suspension": _Suspension,
         "StepContext": _StepContext,
         "ExecutorHooks": type("ExecutorHooks", (), {}),
@@ -186,8 +247,131 @@ def test_allowlisted_workflow_invocations_match_adapter_metadata_contract(
     assert seen_workflows == {
         "we.refine_image",
         "we.best_of_4",
-        "text_analysis.summarize",
     }
+
+
+def test_invocation_module_import_does_not_import_arnold() -> None:
+    _clear_modules()
+    sys.modules.pop("arnold", None)
+    sys.modules.pop("arnold.pipeline", None)
+
+    importlib.import_module("astrid.core.integrations.arnold.host.invocation")
+
+    assert "arnold" not in sys.modules
+    assert "arnold.pipeline" not in sys.modules
+
+
+def test_dsl_compiled_pipeline_generates_executor_templates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _clear_modules()
+    _install_fake_pipeline(monkeypatch)
+
+    invocation_module = importlib.import_module("astrid.core.integrations.arnold.host.invocation")
+    shapes_module = importlib.import_module("astrid.core.integrations.arnold.host.shapes")
+
+    pipeline = shapes_module.build_text_analysis_summarize_pipeline(
+        state={"text": "body"},
+        project="demo",
+        run_root="/tmp/run-123",
+    )
+    templates = invocation_module.invocation_templates_from_compiled_pipeline(
+        "text_analysis.summarize",
+        pipeline,
+    )
+
+    assert set(templates) == {"read_input", "write_summary", "write_verdict", "halt"}
+    assert templates["read_input"].executor_id == "task.local"
+    assert templates["write_summary"].executor_id == "task.local"
+    assert templates["write_verdict"].executor_id == "task.local"
+    assert templates["halt"].control_kind == "halt"
+    assert templates["halt"].executor_id is None
+
+
+def test_manifest_wrapper_pipeline_generates_adapter_invocation_templates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _clear_modules()
+    _install_fake_pipeline(monkeypatch)
+
+    invocation_module = importlib.import_module("astrid.core.integrations.arnold.host.invocation")
+    shapes_module = importlib.import_module("astrid.core.integrations.arnold.host.shapes")
+
+    pipeline = shapes_module.build_stream_content_distill_pipeline(
+        state={"video": "clip.mp4"},
+        project="demo",
+        run_root="/tmp/run-123",
+    )
+    templates = invocation_module.invocation_templates_from_compiled_pipeline(
+        "stream_content.distill",
+        pipeline,
+    )
+
+    assert templates["transcribe"].executor_id == "editorial.transcribe"
+    assert templates["segment-map"].executor_id == "stream_content.segment_map"
+    assert templates["extract-segments"].executor_id is None
+    assert templates["extract-segments"].adapter_invocation_id == "orchestrator:extract-segments"
+    assert templates["extract-segments"].extra_metadata["wrapper_then_unroll"]["child_executor_id"] == "media.clip_extract"
+    assert templates["review"].adapter_invocation_id == "orchestrator:review"
+    assert templates["halt"].control_kind == "halt"
+
+
+def test_synthetic_control_pipeline_generates_control_templates_without_fake_executors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _clear_modules()
+    _install_fake_pipeline(monkeypatch)
+
+    invocation_module = importlib.import_module("astrid.core.integrations.arnold.host.invocation")
+    shapes_module = importlib.import_module("astrid.core.integrations.arnold.host.shapes")
+
+    pipeline = shapes_module.build_vary_grid_pipeline(
+        state={"ideas": "variations"},
+        project="demo",
+        run_root="/tmp/run-123",
+    )
+    templates = invocation_module.invocation_templates_from_compiled_pipeline(
+        "video_editing.vary_grid",
+        pipeline,
+    )
+
+    pattern_select = templates["select-prompt-pattern"]
+    assert pattern_select.control_kind == "pattern_select"
+    assert pattern_select.executor_id is None
+    assert pattern_select.extra_metadata["host_control_kind"] == "pattern_select"
+    assert pattern_select.extra_metadata["adapter_config"].get("executor_id") is None
+
+    dynamic_fanout = templates["reference-fanout"]
+    assert dynamic_fanout.control_kind == "dynamic_fanout"
+    assert dynamic_fanout.executor_id is None
+    assert dynamic_fanout.extra_metadata["host_control_kind"] == "dynamic_fanout"
+    assert dynamic_fanout.extra_metadata["adapter_config"].get("executor_id") is None
+    assert templates["halt"].control_kind == "halt"
+
+
+def test_compiled_pipeline_template_generation_rejects_executable_stage_without_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _clear_modules()
+    _install_fake_pipeline(monkeypatch)
+
+    invocation_module = importlib.import_module("astrid.core.integrations.arnold.host.invocation")
+    pipeline = types.SimpleNamespace(
+        stages=(
+            types.SimpleNamespace(
+                stage_id="bad-stage",
+                label="Bad",
+                invocation=None,
+                metadata={"stage_id": "bad-stage", "vocabulary": ["next"]},
+            ),
+        )
+    )
+
+    with pytest.raises(invocation_module.CompiledInvocationTemplateError):
+        invocation_module.invocation_templates_from_compiled_pipeline(
+            "demo.bad",
+            pipeline,
+        )
 
 
 def test_human_resume_schema_and_payload_round_trip(

@@ -144,6 +144,38 @@ def _next_stage_for_decision(
     )
 
 
+def _resolve_start_invocation_templates(
+    *,
+    workflow_id: str,
+    shape: Any,
+    pipeline: Any,
+) -> dict[str, Any]:
+    """Resolve the startup invocation contract for a host workflow.
+
+    Compiled workflows must derive their executable/control stage mappings from
+    the compiled pipeline itself so startup stays data-driven. Legacy static
+    workflows continue to use the frozen allowlisted templates.
+    """
+    from astrid.core.integrations.arnold.host.invocation import (
+        ALLOWLISTED_INVOCATION_TEMPLATES,
+        invocation_templates_from_compiled_pipeline,
+    )
+
+    shape_metadata = getattr(shape, "metadata", {})
+    if isinstance(shape_metadata, dict) and shape_metadata.get("compiled") is True:
+        templates = invocation_templates_from_compiled_pipeline(workflow_id, pipeline)
+    else:
+        templates = dict(ALLOWLISTED_INVOCATION_TEMPLATES.get(workflow_id, {}))
+
+    if getattr(shape, "entry_stage_id", None) not in templates:
+        raise RuntimeError(
+            f"Arnold workflow {workflow_id!r} could not resolve entry stage "
+            f"{getattr(shape, 'entry_stage_id', None)!r} through its startup "
+            "invocation templates"
+        )
+    return templates
+
+
 def _make_human_resume_cursor(
     *,
     run_id: str,
@@ -410,6 +442,11 @@ def _start_validated_arnold_run(
             f"{getattr(pipeline, 'entry_stage_id', None)!r}, expected "
             f"{getattr(shape, 'entry_stage_id', None)!r}"
         )
+    _resolve_start_invocation_templates(
+        workflow_id=workflow_id,
+        shape=shape,
+        pipeline=pipeline,
+    )
 
     created_run_dir = False
     pointer_written = False

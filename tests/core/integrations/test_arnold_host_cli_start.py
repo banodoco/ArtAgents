@@ -371,6 +371,98 @@ def test_arnold_start_rolls_back_run_dir_and_pointer_on_post_validation_failure(
     assert not (tmp_path / "projects" / "demo" / "runs" / "run-fail").exists()
 
 
+@pytest.mark.parametrize(
+    ("workflow_arg", "expected_workflow_id"),
+    [
+        ("summarize", "text_analysis.summarize"),
+        ("agent-probe", "builtin.agent_probe"),
+        ("distill", "stream_content.distill"),
+        ("foley-map", "foley.foley_map"),
+        ("animate-image", "video_editing.animate_image"),
+        ("logo-ideas", "video_editing.logo_ideas"),
+        ("vary-grid", "video_editing.vary_grid"),
+        ("iteration-video", "video_editing.iteration_video"),
+    ],
+)
+def test_arnold_start_allowlists_all_compiled_batch_workflows(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    workflow_arg: str,
+    expected_workflow_id: str,
+) -> None:
+    monkeypatch.setenv("ASTRID_PROJECTS_ROOT", str(tmp_path / "projects"))
+    create_project("demo")
+    calls = _install_fake_pipeline(monkeypatch)
+    cli = importlib.import_module("astrid.core.integrations.arnold.host.cli")
+
+    rc = cli.cmd_start(
+        [
+            workflow_arg,
+            "--project",
+            "demo",
+            "--name",
+            "run-compiled",
+            "--state",
+            "{}",
+        ]
+    )
+
+    run_root = tmp_path / "projects" / "demo" / "runs" / "run-compiled"
+    assert rc == 0
+    assert read_current_run("demo") == "run-compiled"
+    assert json.loads((run_root / "arnold_run.json").read_text())["workflow_id"] == (
+        expected_workflow_id
+    )
+    _assert_no_execution_or_cursor_writes(calls)
+    assert calls[-1] == "checkpoint"
+
+
+def test_arnold_start_compiled_workflows_resolve_templates_from_compiled_pipeline(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("ASTRID_PROJECTS_ROOT", str(tmp_path / "projects"))
+    create_project("demo")
+    _install_fake_pipeline(monkeypatch)
+    cli = importlib.import_module("astrid.core.integrations.arnold.host.cli")
+    invocation_module = importlib.import_module("astrid.core.integrations.arnold.host.invocation")
+
+    captured: dict[str, Any] = {}
+    original = invocation_module.invocation_templates_from_compiled_pipeline
+
+    def _capture_templates(workflow_id: str, pipeline: Any) -> dict[str, Any]:
+        captured["workflow_id"] = workflow_id
+        captured["entry_stage_id"] = getattr(pipeline, "entry_stage_id", None)
+        templates = original(workflow_id, pipeline)
+        captured["stage_ids"] = tuple(templates)
+        return templates
+
+    monkeypatch.setattr(
+        invocation_module,
+        "invocation_templates_from_compiled_pipeline",
+        _capture_templates,
+    )
+
+    rc = cli.cmd_start(
+        [
+            "summarize",
+            "--project",
+            "demo",
+            "--name",
+            "run-compiled-templates",
+            "--state",
+            '{"text":"body"}',
+        ]
+    )
+
+    assert rc == 0
+    assert captured == {
+        "workflow_id": "text_analysis.summarize",
+        "entry_stage_id": "read_input",
+        "stage_ids": ("read_input", "write_summary", "write_verdict", "halt"),
+    }
+
+
 def _seed_active_arnold_run(tmp_path: Path) -> Path:
     create_project("demo")
     project_root = tmp_path / "projects" / "demo"
