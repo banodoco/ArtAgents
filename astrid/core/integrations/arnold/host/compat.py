@@ -1,9 +1,21 @@
 """Arnold compatibility surface for the host package.
 
 This module is the only host submodule allowed to import Arnold runtime
-symbols. It validates the Arnold contract eagerly when this module is
+symbols.  It validates the Arnold contract eagerly when this module is
 imported, while the rest of Astrid remains Arnold-free until an explicit
 ``--engine arnold`` path reaches the host.
+
+The import of ``arnold.pipeline`` is performed lazily via
+``importlib.import_module`` — there is no top-level ``from arnold.pipeline
+import ...`` that would contaminate the core startup path.  Contract
+validation happens at module import time, but only when some caller
+explicitly imports this module.
+
+Design constraints:
+- Does NOT require ``Pipeline``, ``Port``, or ``PortRef`` from Arnold.
+- Exposes a ``compat`` namespace object with validated Arnold symbols.
+- Exposes ``read_resume_cursor`` and ``persist_resume_cursor`` as
+  module-level names.
 """
 
 from __future__ import annotations
@@ -45,6 +57,8 @@ _OPTIONAL_SYMBOLS = (
 )
 
 
+# ── Private helpers ───────────────────────────────────────────────────────────
+
 def _has_field(obj: Any, field_name: str) -> bool:
     if is_dataclass(obj):
         return field_name in getattr(obj, "__dataclass_fields__", {})
@@ -65,7 +79,9 @@ def _field_type(obj: Any, field_name: str) -> Any:
     return None if value is None else type(value)
 
 
-def _validate_driver_signature(driver_type: Any, method_name: str, expected: tuple[str, ...]) -> str | None:
+def _validate_driver_signature(
+    driver_type: Any, method_name: str, expected: tuple[str, ...]
+) -> str | None:
     method = getattr(driver_type, method_name, None)
     if method is None:
         return f"StepwiseDriver missing method '{method_name}'"
@@ -82,6 +98,12 @@ def _validate_driver_signature(driver_type: Any, method_name: str, expected: tup
 
 
 def _load_contract() -> dict[str, Any]:
+    """Import and validate the Arnold contract.
+
+    Uses ``importlib.import_module`` so that no top-level Arnold import
+    pollutes the module namespace or triggers ``pip install arnold`` errors
+    at core startup time.
+    """
     try:
         pipeline = importlib.import_module("arnold.pipeline")
     except ImportError as exc:
@@ -106,14 +128,24 @@ def _load_contract() -> dict[str, Any]:
 
     runtime_envelope = contract.get("RuntimeEnvelope")
     if runtime_envelope is not None:
-        missing = [name for name in ("run_id", "artifact_root", "resume_cursor", "cross_cutting") if not _has_field(runtime_envelope, name)]
+        missing = [
+            name
+            for name in ("run_id", "artifact_root", "resume_cursor", "cross_cutting")
+            if not _has_field(runtime_envelope, name)
+        ]
         if missing:
             problems.append(f"RuntimeEnvelope missing field(s): {', '.join(missing)}")
         cross_cutting_type = _field_type(runtime_envelope, "cross_cutting")
         if cross_cutting_type is None:
-            problems.append("RuntimeEnvelope.cross_cutting has no inspectable type")
+            problems.append(
+                "RuntimeEnvelope.cross_cutting has no inspectable type"
+            )
         else:
-            cross_missing = [name for name in ("cost", "lineage") if not _has_field(cross_cutting_type, name)]
+            cross_missing = [
+                name
+                for name in ("cost", "lineage")
+                if not _has_field(cross_cutting_type, name)
+            ]
             if cross_missing:
                 problems.append(
                     "RuntimeEnvelope.cross_cutting missing field(s): "
@@ -155,8 +187,12 @@ def _load_contract() -> dict[str, Any]:
     return contract
 
 
+# ── Eager contract validation (at module import time) ────────────────────────
+
 _CONTRACT = _load_contract()
 
+
+# ── Centralised compat namespace ──────────────────────────────────────────────
 
 class ArnoldCompat:
     """Centralized namespace for validated Arnold host symbols."""
@@ -166,6 +202,9 @@ for _name, _value in _CONTRACT.items():
     setattr(ArnoldCompat, _name, _value)
 
 compat = ArnoldCompat()
+
+
+# ── Module-level accessors ────────────────────────────────────────────────────
 
 __all__ = ["ArnoldCompat", "compat", *_REQUIRED_SYMBOLS, *_OPTIONAL_SYMBOLS]
 

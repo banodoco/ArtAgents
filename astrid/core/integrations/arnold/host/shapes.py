@@ -96,10 +96,18 @@ def build_refine_image_pipeline(
     cas_project_dir: str | None = None,
 ) -> Any:
     """Build the frozen WE-1 graph: generate -> review -> {halt|generate}."""
+    from astrid.core.integrations.arnold.host.builder import (
+        build_edge,
+        build_stage,
+        builder_add_edge,
+        builder_add_stage,
+        builder_finalize,
+        builder_set_entry_stage,
+    )
     from astrid.core.integrations.arnold.host.compat import compat
 
     builder = compat.PipelineBuilder()
-    generate_stage = _build_stage(
+    generate_stage = build_stage(
         compat.Stage,
         stage_id="generate",
         label=_WE_REFINE_IMAGE_SPEC.stage_labels["generate"],
@@ -118,7 +126,7 @@ def build_refine_image_pipeline(
             "entry": True,
         },
     )
-    review_stage = _build_stage(
+    review_stage = build_stage(
         compat.Stage,
         stage_id="review",
         label=_WE_REFINE_IMAGE_SPEC.stage_labels["review"],
@@ -140,7 +148,7 @@ def build_refine_image_pipeline(
             "human_gate": True,
         },
     )
-    halt_stage = _build_stage(
+    halt_stage = build_stage(
         compat.Stage,
         stage_id="halt",
         label=_WE_REFINE_IMAGE_SPEC.stage_labels["halt"],
@@ -152,32 +160,32 @@ def build_refine_image_pipeline(
     )
 
     for stage in (generate_stage, review_stage, halt_stage):
-        _builder_add_stage(builder, stage)
+        builder_add_stage(builder, stage)
 
     for edge in (
-        _build_edge(
+        build_edge(
             compat.Edge,
             source="generate",
             target="review",
             label="next",
         ),
-        _build_edge(
+        build_edge(
             compat.Edge,
             source="review",
             target="halt",
             label="approve",
         ),
-        _build_edge(
+        build_edge(
             compat.Edge,
             source="review",
             target="generate",
             label="reject",
         ),
     ):
-        _builder_add_edge(builder, edge)
+        builder_add_edge(builder, edge)
 
-    _builder_set_entry_stage(builder, _WE_REFINE_IMAGE_SPEC.entry_stage_id)
-    return _builder_finalize(builder)
+    builder_set_entry_stage(builder, _WE_REFINE_IMAGE_SPEC.entry_stage_id)
+    return builder_finalize(builder)
 
 
 def build_best_of_4_pipeline(
@@ -189,6 +197,15 @@ def build_best_of_4_pipeline(
     cas_project_dir: str | None = None,
 ) -> Any:
     """Build the frozen WE-3 graph: generate(4×) -> judge -> review -> {halt|generate}."""
+    from astrid.core.integrations.arnold.host.builder import (
+        build_edge,
+        build_parallel_stage,
+        build_stage,
+        builder_add_edge,
+        builder_add_stage,
+        builder_finalize,
+        builder_set_entry_stage,
+    )
     from astrid.core.integrations.arnold.host.compat import compat
 
     builder = compat.PipelineBuilder()
@@ -204,7 +221,7 @@ def build_best_of_4_pipeline(
             artifact_root=artifact_root,
             cas_project_dir=cas_project_dir,
         )
-        sub_stage = _build_stage(
+        sub_stage = build_stage(
             compat.Stage,
             stage_id=f"gen_{branch}",
             label=_WE_BEST_OF_4_SPEC.stage_labels[f"gen_{branch}"],
@@ -217,7 +234,7 @@ def build_best_of_4_pipeline(
         )
         gen_sub_stages.append(sub_stage)
 
-    generate_stage = _build_parallel_stage(
+    generate_stage = build_parallel_stage(
         compat.ParallelStage,
         stage_id="generate",
         label=_WE_BEST_OF_4_SPEC.stage_labels["generate"],
@@ -230,7 +247,7 @@ def build_best_of_4_pipeline(
         },
     )
 
-    judge_stage = _build_stage(
+    judge_stage = build_stage(
         compat.Stage,
         stage_id="judge",
         label=_WE_BEST_OF_4_SPEC.stage_labels["judge"],
@@ -251,7 +268,7 @@ def build_best_of_4_pipeline(
         },
     )
 
-    review_stage = _build_stage(
+    review_stage = build_stage(
         compat.Stage,
         stage_id="review",
         label=_WE_BEST_OF_4_SPEC.stage_labels["review"],
@@ -274,7 +291,7 @@ def build_best_of_4_pipeline(
         },
     )
 
-    halt_stage = _build_stage(
+    halt_stage = build_stage(
         compat.Stage,
         stage_id="halt",
         label=_WE_BEST_OF_4_SPEC.stage_labels["halt"],
@@ -286,38 +303,38 @@ def build_best_of_4_pipeline(
     )
 
     for stage in (generate_stage, judge_stage, review_stage, halt_stage):
-        _builder_add_stage(builder, stage)
+        builder_add_stage(builder, stage)
 
     for edge in (
-        _build_edge(
+        build_edge(
             compat.Edge,
             source="generate",
             target="judge",
             label="next",
         ),
-        _build_edge(
+        build_edge(
             compat.Edge,
             source="judge",
             target="review",
             label="next",
         ),
-        _build_edge(
+        build_edge(
             compat.Edge,
             source="review",
             target="halt",
             label="approve",
         ),
-        _build_edge(
+        build_edge(
             compat.Edge,
             source="review",
             target="generate",
             label="reject",
         ),
     ):
-        _builder_add_edge(builder, edge)
+        builder_add_edge(builder, edge)
 
-    _builder_set_entry_stage(builder, _WE_BEST_OF_4_SPEC.entry_stage_id)
-    return _builder_finalize(builder)
+    builder_set_entry_stage(builder, _WE_BEST_OF_4_SPEC.entry_stage_id)
+    return builder_finalize(builder)
 
 
 def build_text_analysis_summarize_pipeline(
@@ -340,11 +357,19 @@ def build_text_analysis_summarize_pipeline(
         workflow_id=TEXT_ANALYSIS_SUMMARIZE_ID,
     )
 
+    from astrid.core.integrations.arnold.host.builder import (
+        build_edge,
+        build_stage,
+        builder_add_edge,
+        builder_add_stage,
+        builder_finalize,
+        builder_set_entry_stage,
+    )
     from astrid.core.integrations.arnold.host.compat import compat
 
     builder = compat.PipelineBuilder()
 
-    summarize_stage = _build_stage(
+    summarize_stage = build_stage(
         compat.Stage,
         stage_id="summarize",
         label=_TEXT_ANALYSIS_SUMMARIZE_SPEC.stage_labels["summarize"],
@@ -365,7 +390,7 @@ def build_text_analysis_summarize_pipeline(
         },
     )
 
-    halt_stage = _build_stage(
+    halt_stage = build_stage(
         compat.Stage,
         stage_id="halt",
         label=_TEXT_ANALYSIS_SUMMARIZE_SPEC.stage_labels["halt"],
@@ -377,174 +402,20 @@ def build_text_analysis_summarize_pipeline(
     )
 
     for stage in (summarize_stage, halt_stage):
-        _builder_add_stage(builder, stage)
+        builder_add_stage(builder, stage)
 
     for edge in (
-        _build_edge(
+        build_edge(
             compat.Edge,
             source="summarize",
             target="halt",
             label="next",
         ),
     ):
-        _builder_add_edge(builder, edge)
+        builder_add_edge(builder, edge)
 
-    _builder_set_entry_stage(builder, _TEXT_ANALYSIS_SUMMARIZE_SPEC.entry_stage_id)
-    return _builder_finalize(builder)
-
-
-def _build_parallel_stage(
-    parallel_stage_type: type[Any],
-    *,
-    stage_id: str,
-    label: str,
-    sub_stages: list[Any],
-    metadata: dict[str, Any] | None = None,
-) -> Any:
-    kwargs_meta = dict(metadata or {})
-    for candidate in (
-        {
-            "stage_id": stage_id,
-            "label": label,
-            "stages": list(sub_stages),
-            "metadata": kwargs_meta,
-        },
-        {
-            "id": stage_id,
-            "label": label,
-            "stages": list(sub_stages),
-            "metadata": kwargs_meta,
-        },
-        {
-            "name": stage_id,
-            "label": label,
-            "stages": list(sub_stages),
-            "metadata": kwargs_meta,
-        },
-        {
-            "stage_id": stage_id,
-            "label": label,
-            "sub_stages": list(sub_stages),
-            "metadata": kwargs_meta,
-        },
-        {
-            "stage_id": stage_id,
-            "label": label,
-            "children": list(sub_stages),
-            "metadata": kwargs_meta,
-        },
-    ):
-        try:
-            return parallel_stage_type(**candidate)
-        except TypeError:
-            continue
-    raise TypeError(
-        f"could not construct ParallelStage for {stage_id!r}"
-    )
-
-
-def _build_stage(
-    stage_type: type[Any],
-    *,
-    stage_id: str,
-    label: str,
-    invocation: Any | None = None,
-    suspension: Any | None = None,
-    metadata: dict[str, Any] | None = None,
-) -> Any:
-    kwargs = {
-        "stage_id": stage_id,
-        "label": label,
-        "invocation": invocation,
-        "suspension": suspension,
-        "metadata": dict(metadata or {}),
-    }
-    for candidate in (
-        kwargs,
-        {
-            "id": stage_id,
-            "label": label,
-            "invocation": invocation,
-            "suspension": suspension,
-            "metadata": dict(metadata or {}),
-        },
-        {
-            "name": stage_id,
-            "label": label,
-            "invocation": invocation,
-            "suspension": suspension,
-            "metadata": dict(metadata or {}),
-        },
-    ):
-        try:
-            return stage_type(**candidate)
-        except TypeError:
-            continue
-    raise TypeError(f"could not construct Stage for {stage_id!r}")
-
-
-def _build_edge(
-    edge_type: type[Any],
-    *,
-    source: str,
-    target: str,
-    label: str,
-) -> Any:
-    for candidate in (
-        {"source": source, "target": target, "label": label},
-        {"from_stage": source, "to_stage": target, "label": label},
-        {"source_id": source, "target_id": target, "label": label},
-    ):
-        try:
-            return edge_type(**candidate)
-        except TypeError:
-            continue
-    raise TypeError(f"could not construct Edge {source!r}->{target!r}")
-
-
-def _builder_add_stage(builder: Any, stage: Any) -> None:
-    for name in ("add_stage", "stage", "with_stage", "register_stage"):
-        method = getattr(builder, name, None)
-        if callable(method):
-            method(stage)
-            return
-    stages = getattr(builder, "stages", None)
-    if isinstance(stages, list):
-        stages.append(stage)
-        return
-    raise TypeError("PipelineBuilder does not support stage registration")
-
-
-def _builder_add_edge(builder: Any, edge: Any) -> None:
-    for name in ("add_edge", "edge", "with_edge", "register_edge"):
-        method = getattr(builder, name, None)
-        if callable(method):
-            method(edge)
-            return
-    edges = getattr(builder, "edges", None)
-    if isinstance(edges, list):
-        edges.append(edge)
-        return
-    raise TypeError("PipelineBuilder does not support edge registration")
-
-
-def _builder_set_entry_stage(builder: Any, stage_id: str) -> None:
-    for name in ("set_entry_stage", "entry_stage", "set_entrypoint"):
-        method = getattr(builder, name, None)
-        if callable(method):
-            method(stage_id)
-            return
-    if hasattr(builder, "entry_stage_id"):
-        builder.entry_stage_id = stage_id
-        return
-    raise TypeError("PipelineBuilder does not support entry-stage selection")
-
-
-def _builder_finalize(builder: Any) -> Any:
-    build = getattr(builder, "build", None)
-    if callable(build):
-        return build()
-    return builder
+    builder_set_entry_stage(builder, _TEXT_ANALYSIS_SUMMARIZE_SPEC.entry_stage_id)
+    return builder_finalize(builder)
 
 
 SHAPE_DEFINITIONS: tuple[ShapeEntry, ...] = (

@@ -12,11 +12,15 @@ import pytest
 
 from astrid.core.project import create_project
 from astrid.core.project.current_run import read_current_run
+from astrid.core.task.events import verify_chain
+from astrid.core.task.plan import Step, TaskPlan
 
 
 def _clear_host_modules() -> None:
     for name in tuple(sys.modules):
-        if name.startswith("astrid.core.integrations.arnold.host"):
+        if name.startswith("astrid.core.integrations.arnold.host") or name.startswith(
+            "astrid.core.integrations.arnold.session"
+        ):
             sys.modules.pop(name, None)
     sys.modules.pop("astrid.core.integrations.arnold", None)
 
@@ -442,10 +446,159 @@ def _seed_active_arnold_run(tmp_path: Path) -> Path:
     return run_root
 
 
+def _seed_active_session_run(
+    tmp_path: Path,
+    *,
+    current_segment: str = "seg-002",
+) -> Path:
+    create_project("demo")
+    project_root = tmp_path / "projects" / "demo"
+    run_root = project_root / "runs" / "run-session"
+    run_root.mkdir(parents=True)
+    (project_root / "current_run.json").write_text(
+        json.dumps({"run_id": "run-session"}),
+        encoding="utf-8",
+    )
+    (run_root / "lease.json").write_text(
+        json.dumps(
+            {
+                "writer_epoch": 2,
+                "attached_session_id": "session-1",
+                "plan_hash": "sha256:plan-2",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_root / "events.jsonl").write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "kind": "plan_initialized",
+                        "ts": "2026-06-13T03:43:00Z",
+                        "hash": "sha256:111",
+                    }
+                ),
+                json.dumps(
+                    {
+                        "kind": "segment_boundary",
+                        "ts": "2026-06-13T03:44:00Z",
+                        "hash": "sha256:222",
+                        "from_segment_id": "seg-001",
+                        "to_segment_id": "seg-002",
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (run_root / "arnold_run.json").write_text(
+        json.dumps(
+            {
+                "engine": "arnold",
+                "workflow_id": "session-succession",
+                "mode": "session-succession",
+                "run_id": "run-session",
+                "status": "running",
+                "current_segment": current_segment,
+                "plan_hash": "sha256:plan-2",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_root / "session-manifest.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "run_id": "run-session",
+                "artifact_root": str(run_root),
+                "current_segment_id": current_segment,
+                "segments": [
+                    {
+                        "segment_id": "seg-001",
+                        "plan_hash": "sha256:plan-1",
+                        "state": {"state_ref": "state.json", "state_hash": "sha256:state-1"},
+                        "status": "frozen",
+                        "pipeline_ref": "pipeline.json",
+                        "cursor_ref": "resume-cursor:review",
+                        "event_lineage": {"segment_start_hash": "sha256:111"},
+                    },
+                    {
+                        "segment_id": "seg-002",
+                        "parent_segment_id": "seg-001",
+                        "plan_hash": "sha256:plan-2",
+                        "state": {
+                            "state_ref": "state.json",
+                            "state_hash": "sha256:state-2",
+                            "state_keys": ["prompt", "seed"],
+                        },
+                        "status": "running",
+                        "pipeline_ref": "pipeline.json",
+                        "cursor_ref": "resume-cursor:review",
+                        "event_lineage": {
+                            "segment_start_hash": "sha256:111",
+                            "segment_boundary_hash": "sha256:222",
+                        },
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_root / "state.json").write_text(
+        json.dumps({"prompt": "draw", "seed": 42}),
+        encoding="utf-8",
+    )
+    (run_root / "pipeline.json").write_text(
+        json.dumps(
+            {
+                "entry_stage_id": "review",
+                "stages": [
+                    {
+                        "stage_id": "review",
+                        "label": "Review",
+                        "metadata": {"manual": True},
+                    },
+                    {
+                        "stage_id": "halt",
+                        "label": "Halt",
+                        "metadata": {"terminal": True},
+                    },
+                ],
+                "edges": [
+                    {"source": "review", "target": "halt", "label": "approve"},
+                    {"source": "review", "target": "review", "label": "reject"},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    return run_root
+
+
 def _assert_no_execution_or_cursor_writes(calls: list[str]) -> None:
     assert "advance" not in calls
     assert "resume" not in calls
     assert "persist_resume_cursor" not in calls
+
+
+def _write_session_source_plan(tmp_path: Path) -> Path:
+    source_root = tmp_path / "session-source-run"
+    source_root.mkdir(parents=True)
+    plan = TaskPlan(
+        plan_id="plan-session",
+        version=2,
+        steps=(
+            Step(
+                id="review",
+                adapter="manual",
+                command="ack --project demo --step review",
+            ),
+        ),
+    )
+    (source_root / "plan.json").write_text(json.dumps(plan.to_dict()), encoding="utf-8")
+    return source_root
 
 
 def test_arnold_next_renders_projection_without_execution_or_state_writes(
@@ -484,6 +637,110 @@ def test_arnold_next_renders_projection_without_execution_or_state_writes(
         run_root / "arnold_run.json",
     ):
         assert path.read_bytes() == before_files[path.name]
+
+
+def test_arnold_next_routes_session_runs_by_mode_and_renders_segment_lineage(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("ASTRID_PROJECTS_ROOT", str(tmp_path / "projects"))
+    run_root = _seed_active_session_run(tmp_path)
+    calls = _install_fake_pipeline(monkeypatch, cursor_stage="review")
+    cli = importlib.import_module("astrid.core.integrations.arnold.host.cli")
+
+    rc = cli.cmd_next(["--project", "demo"])
+
+    stdout = capsys.readouterr().out
+    assert rc == 0
+    assert "Arnold session-succession" in stdout
+    assert "segment: seg-002" in stdout
+    assert "stage: Review (review)" in stdout
+    assert "status: suspended" in stdout
+    assert "successor lineage:\n  seg-001 -> seg-002" in stdout
+    assert "ready for acknowledgement:" in stdout
+    assert calls == ["read_resume_cursor"]
+    assert json.loads((run_root / "arnold_run.json").read_text())["workflow_id"] == (
+        "session-succession"
+    )
+
+
+def test_arnold_start_session_from_plan_initializes_session_files_and_pointer(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("ASTRID_PROJECTS_ROOT", str(tmp_path / "projects"))
+    create_project("demo")
+    persisted_cursors: list[Any] = []
+    _install_fake_pipeline(monkeypatch, persisted_cursors=persisted_cursors)
+    source_run_root = _write_session_source_plan(tmp_path)
+    cli = importlib.import_module("astrid.core.integrations.arnold.host.cli")
+
+    rc = cli.cmd_start(
+        [
+            "--from-plan",
+            str(source_run_root),
+            "--project",
+            "demo",
+            "--name",
+            "run-session",
+            "--state",
+            '{"prompt":"draw"}',
+            "--input",
+            "seed=42",
+        ]
+    )
+
+    run_root = tmp_path / "projects" / "demo" / "runs" / "run-session"
+    assert rc == 0
+    assert read_current_run("demo") == "run-session"
+    assert (run_root / "plan.json").is_file()
+    assert (run_root / "pipeline.json").is_file()
+    assert (run_root / "session-manifest.json").is_file()
+    assert (run_root / "lease.json").is_file()
+    assert (run_root / "events.jsonl").is_file()
+    assert json.loads((run_root / "state.json").read_text()) == {"prompt": "draw"}
+
+    run_record = json.loads((run_root / "arnold_run.json").read_text())
+    assert run_record["workflow_id"] == "session-succession"
+    assert run_record["mode"] == "session-succession"
+    assert run_record["current_segment"] == "seg-001"
+    assert run_record["status"] == "suspended"
+
+    manifest = json.loads((run_root / "session-manifest.json").read_text())
+    assert manifest["current_segment_id"] == "seg-001"
+    assert len(manifest["segments"]) == 1
+    assert manifest["segments"][0]["segment_id"] == "seg-001"
+    assert manifest["segments"][0]["pipeline_ref"] == "pipeline.json"
+    assert manifest["segments"][0]["cursor_ref"] == "resume-cursor:review"
+
+    ok, _, reason = verify_chain(run_root / "events.jsonl")
+    assert ok is True, reason
+    events = [
+        json.loads(line)
+        for line in (run_root / "events.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert [event["kind"] for event in events] == ["plan_initialized"]
+    assert persisted_cursors[0].run_id == "run-session"
+    assert persisted_cursors[0].cursor == {"stage": "review"}
+
+
+def test_arnold_start_static_unknown_workflow_still_rejected_when_not_using_from_plan(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("ASTRID_PROJECTS_ROOT", str(tmp_path / "projects"))
+    create_project("demo")
+    _install_fake_pipeline(monkeypatch)
+    cli = importlib.import_module("astrid.core.integrations.arnold.host.cli")
+
+    rc = cli.cmd_start(["session-succession", "--project", "demo"])
+
+    stderr = capsys.readouterr().err
+    assert rc == 2
+    assert "unknown Arnold workflow 'session-succession'" in stderr
+    assert read_current_run("demo") is None
 
 
 def test_arnold_ack_normalizes_payload_resumes_advances_once_and_persists_cursor(
@@ -658,6 +915,88 @@ def test_arnold_status_json_renders_projection_without_execution_or_state_writes
         run_root / "arnold_run.json",
     ):
         assert path.read_bytes() == before_files[path.name]
+
+
+def test_arnold_status_json_routes_session_runs_by_mode(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("ASTRID_PROJECTS_ROOT", str(tmp_path / "projects"))
+    _seed_active_session_run(tmp_path)
+    calls = _install_fake_pipeline(monkeypatch, cursor_stage="review")
+    cli = importlib.import_module("astrid.core.integrations.arnold.host.cli")
+
+    rc = cli.cmd_status(["--project", "demo", "--json"])
+
+    stdout = capsys.readouterr().out
+    assert rc == 0
+    assert json.loads(stdout) == {
+        "action": "ack",
+        "blocked": False,
+        "command": (
+            "astrid ack --engine arnold --project demo --stage review "
+            "--decision approve|reject --notes <notes>"
+        ),
+        "lineage": ["seg-001", "seg-002"],
+        "mode": "session-succession",
+        "project": "demo",
+        "reason": None,
+        "run_id": "run-session",
+        "schema_version": 1,
+        "segment": "seg-002",
+        "state": "ready",
+        "status": "suspended",
+        "step": "review",
+    }
+    assert calls == ["read_resume_cursor"]
+
+
+def test_arnold_ack_routes_session_runs_to_session_driver(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("ASTRID_PROJECTS_ROOT", str(tmp_path / "projects"))
+    _seed_active_session_run(tmp_path)
+    _install_fake_pipeline(monkeypatch, cursor_stage="review")
+    cli = importlib.import_module("astrid.core.integrations.arnold.host.cli")
+    session_driver = importlib.import_module("astrid.core.integrations.arnold.session.driver")
+    captured: dict[str, Any] = {}
+
+    def _fake_resume_session_run(project_slug: str, **kwargs: Any) -> object:
+        captured["project_slug"] = project_slug
+        captured["kwargs"] = kwargs
+        return object()
+
+    monkeypatch.setattr(session_driver, "resume_session_run", _fake_resume_session_run)
+
+    rc = cli.cmd_ack(
+        [
+            "--project",
+            "demo",
+            "--stage",
+            "review",
+            "--decision",
+            "approve",
+            "--notes",
+            "ship it",
+        ]
+    )
+
+    stdout = capsys.readouterr().out
+    assert rc == 0
+    assert "acknowledged Arnold stage for project demo" in stdout
+    assert captured["project_slug"] == "demo"
+    assert captured["kwargs"]["run_id"] == "run-session"
+    assert captured["kwargs"]["human_input"] == {
+        "decision": {
+            "action": "approve",
+            "notes": "ship it",
+            "state_patch": {},
+        }
+    }
+    assert captured["kwargs"]["resume_cursor"].cursor == {"stage": "review"}
 
 
 def test_we1_acceptance_rejects_regenerates_and_approves_with_distinct_iterations(

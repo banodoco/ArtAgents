@@ -48,6 +48,22 @@ def _load_arnold_run_record(run_root: Path) -> dict[str, Any]:
     return payload
 
 
+def _active_run_context(project_slug: str) -> tuple[str, Path, Any]:
+    from astrid.core.foundation.project_paths import project_dir, validate_project_slug
+    from astrid.core.integrations.arnold.session.records import load_arnold_run_record
+    from astrid.core.project.current_run import read_current_run
+
+    slug = validate_project_slug(project_slug)
+    run_id = read_current_run(slug)
+    if run_id is None:
+        raise RuntimeError(
+            f"project {slug!r} has no active Arnold run; "
+            f"recovery: astrid start <workflow-id> --engine arnold --project {slug}"
+        )
+    run_root = project_dir(slug) / "runs" / run_id
+    return slug, run_root, load_arnold_run_record(run_root)
+
+
 def _resolve_active_workflow_id(project_slug: str, run_root: Path) -> str:
     from astrid.core.integrations.arnold.host.registry import get_host_shape_registry
 
@@ -68,25 +84,23 @@ def _resolve_active_workflow_id(project_slug: str, run_root: Path) -> str:
 
 
 def _render_active_operation(project_slug: str) -> tuple[str, dict[str, Any]]:
-    from astrid.core.foundation.project_paths import project_dir, validate_project_slug
     from astrid.core.integrations.arnold.host.registry import get_host_shape_registry
     from astrid.core.integrations.arnold.host.render import render_operation_snapshot
-    from astrid.core.project.current_run import read_current_run
+    from astrid.core.integrations.arnold.session.render import (
+        load_session_snapshot,
+        render_session_snapshot,
+    )
 
-    slug = validate_project_slug(project_slug)
-    run_id = read_current_run(slug)
-    if run_id is None:
-        raise RuntimeError(
-            f"project {slug!r} has no active Arnold run; "
-            f"recovery: astrid start <workflow-id> --engine arnold --project {slug}"
-        )
+    slug, run_root, run_record = _active_run_context(project_slug)
+    if run_record.mode == "session-succession":
+        rendered = render_session_snapshot(load_session_snapshot(slug, run_root))
+        return rendered.text, rendered.lifecycle_json
 
-    run_root = project_dir(slug) / "runs" / run_id
     workflow_id = _resolve_active_workflow_id(slug, run_root)
     snapshot = get_host_shape_registry().snapshot_operation(
         project_slug=slug,
         workflow_id=workflow_id,
-        run_id=run_id,
+        run_id=run_record.run_id,
     )
     rendered = render_operation_snapshot(snapshot)
     return rendered.text, rendered.lifecycle_json
@@ -213,7 +227,6 @@ def _ack_active_arnold_stage(
     human_payload: dict[str, Any],
 ) -> None:
     from astrid.core._shared.jsonio import write_json_atomic
-    from astrid.core.foundation.project_paths import project_dir, validate_project_slug
     from astrid.core.integrations.arnold.host.compat import persist_resume_cursor
     from astrid.core.integrations.arnold.host.driver import get_driver
     from astrid.core.integrations.arnold.host.envelope import project_runtime_envelope
@@ -223,14 +236,30 @@ def _ack_active_arnold_stage(
     )
     from astrid.core.integrations.arnold.host.invocation import parse_human_resume_payload
     from astrid.core.integrations.arnold.host.registry import get_host_shape_registry
-    from astrid.core.project.current_run import read_current_run
+    from astrid.core.integrations.arnold.session.driver import resume_session_run
+    from astrid.core.integrations.arnold.session.render import load_session_snapshot
 
-    slug = validate_project_slug(project_slug)
-    run_id = read_current_run(slug)
-    if run_id is None:
-        raise RuntimeError(f"project {slug!r} has no active Arnold run")
-    run_root = project_dir(slug) / "runs" / run_id
-    run_record = _load_arnold_run_record(run_root)
+    slug, run_root, run_record = _active_run_context(project_slug)
+    if run_record.mode == "session-succession":
+        snapshot = load_session_snapshot(slug, run_root)
+        current_stage = snapshot.current_stage_id
+        if not current_stage:
+            raise RuntimeError("session run has no current stage")
+        if stage_arg is not None and stage_arg != current_stage:
+            raise RuntimeError(
+                f"ack stage {stage_arg!r} does not match active Arnold stage {current_stage!r}"
+            )
+        from astrid.core.integrations.arnold.host.compat import read_resume_cursor
+
+        resume_session_run(
+            slug,
+            run_id=run_record.run_id,
+            human_input=human_payload,
+            resume_cursor=read_resume_cursor(str(run_root)),
+        )
+        return
+
+    run_id = run_record.run_id
     workflow_id = _resolve_active_workflow_id(slug, run_root)
     pipeline_manifest = json.loads((run_root / "pipeline.json").read_text(encoding="utf-8"))
     if not isinstance(pipeline_manifest, dict):
@@ -281,10 +310,11 @@ def _ack_active_arnold_stage(
     persist_resume_cursor(str(run_root), resulting_cursor)
 
     write_json_atomic(run_root / "state.json", state)
+    raw_run_record = _load_arnold_run_record(run_root)
     write_json_atomic(
         run_root / "arnold_run.json",
         {
-            **run_record,
+            **raw_run_record,
             "status": "running" if next_stage != "halt" else "completed",
             "last_ack": {
                 "stage": current_stage,
@@ -504,6 +534,11 @@ def cmd_start(args: list[str]) -> int:
     parser.add_argument("workflow_arg", nargs="?", help="Workflow shape ID")
     parser.add_argument("--workflow", help="Workflow shape ID")
     parser.add_argument(
+        "--from-plan",
+        dest="from_plan",
+        help="Start a session-succession run from a plan.json path or run reference.",
+    )
+    parser.add_argument(
         "--project",
         required=True,
         help="Project slug for this run.",
@@ -528,11 +563,6 @@ def cmd_start(args: list[str]) -> int:
     except SystemExit as exc:
         return int(exc.code or 2)
 
-    workflow_raw = parsed.workflow or parsed.workflow_arg
-    if not workflow_raw:
-        print("error: Arnold start requires a workflow id", file=sys.stderr)
-        return 2
-
     try:
         initial_state = json.loads(parsed.state)
     except json.JSONDecodeError as exc:
@@ -545,6 +575,34 @@ def cmd_start(args: list[str]) -> int:
         input_values = _parse_inputs(parsed.inputs)
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+    if parsed.from_plan:
+        if parsed.workflow or parsed.workflow_arg:
+            print(
+                "error: --from-plan is mutually exclusive with a static Arnold workflow id",
+                file=sys.stderr,
+            )
+            return 2
+        from astrid.core.integrations.arnold.session.cli import start_session_run
+
+        try:
+            return start_session_run(
+                project_slug=parsed.project,
+                from_plan=parsed.from_plan,
+                initial_state=initial_state,
+                input_values=input_values,
+                requested_run_id=parsed.name,
+                json_mode=bool(parsed.json),
+                argv=list(args),
+            )
+        except Exception as exc:
+            print(f"error: failed to start Arnold session: {exc}", file=sys.stderr)
+            return 1
+
+    workflow_raw = parsed.workflow or parsed.workflow_arg
+    if not workflow_raw:
+        print("error: Arnold start requires a workflow id", file=sys.stderr)
         return 2
 
     # ── Validate workflow shape ──────────────────────────────────────────

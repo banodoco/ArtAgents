@@ -52,6 +52,7 @@ def project_runtime_envelope(
     workflow_id: str,
     run_id: str | None = None,
     root: str | Path | None = None,
+    resume_cursor: Any | None = None,
 ) -> Any:
     """Project Astrid run state into Arnold's validated RuntimeEnvelope."""
     from astrid.core.integrations.arnold.host.compat import compat, read_resume_cursor
@@ -86,7 +87,11 @@ def project_runtime_envelope(
         plugin_state_schema_version=HOST_PLUGIN_STATE_SCHEMA_VERSION,
         run_id=resolved_run_id,
         artifact_root=str(run_root),
-        resume_cursor=_read_resume_cursor(read_resume_cursor, run_root),
+        resume_cursor=(
+            resume_cursor
+            if resume_cursor is not None
+            else _read_resume_cursor(read_resume_cursor, run_root)
+        ),
         created_at=_project_created_at(events),
         cross_cutting=_build_cross_cutting(
             runtime_envelope_type=runtime_envelope_type,
