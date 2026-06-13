@@ -11,6 +11,7 @@ from astrid.core.cli import session as _session_cli
 from astrid.core.contracts.errors import AstridError
 
 _ALIAS_SUNSET_VERSION = "0.3.0"
+_LIFECYCLE_ENGINES = frozenset({"task", "arnold"})
 
 
 def _dispatch(raw: list[str]) -> int:
@@ -85,19 +86,73 @@ def _dispatch_status(args: list[str]) -> int:
     # The session-status verb fires when no --project is given; lifecycle
     # status keeps working with --project.
     if "--project" in args or any(arg.startswith("--project=") for arg in args):
+        engine, stripped_args = _extract_lifecycle_engine(args)
+        if engine == "arnold":
+            from astrid.core.integrations.arnold.host import cli as arnold_cli
+
+            return int(arnold_cli.cmd_status(stripped_args))
         from astrid.core.task.lifecycle import cmd_status
 
-        return cmd_status(args)
+        return cmd_status(stripped_args)
     status_args = ["status", *[arg for arg in args if arg in {"-h", "--help", "--json"}]]
     parsed = _session_cli.build_parser().parse_args(status_args)
     return int(_session_cli.cmd_status(parsed))
 
 
+def _extract_lifecycle_engine(args: list[str]) -> tuple[str, list[str]]:
+    engine = "task"
+    stripped: list[str] = []
+    index = 0
+
+    while index < len(args):
+        arg = args[index]
+        if arg == "--engine":
+            if index + 1 >= len(args):
+                raise AstridError(
+                    "missing value for '--engine'",
+                    valid_options=sorted(_LIFECYCLE_ENGINES),
+                    recovery_command="astrid <verb> --engine task|arnold ...",
+                    state_snapshot={"args": args},
+                )
+            candidate = args[index + 1]
+            index += 2
+        elif arg.startswith("--engine="):
+            candidate = arg.partition("=")[2]
+            index += 1
+        else:
+            stripped.append(arg)
+            index += 1
+            continue
+
+        if candidate not in _LIFECYCLE_ENGINES:
+            raise AstridError(
+                f"unknown lifecycle engine '{candidate}'",
+                valid_options=sorted(_LIFECYCLE_ENGINES),
+                recovery_command="astrid <verb> --engine task|arnold ...",
+                state_snapshot={"args": args, "engine": candidate},
+            )
+        engine = candidate
+
+    return engine, stripped
+
+
 def _dispatch_lifecycle(command: str) -> Any:
     def _handler(args: list[str]) -> int:
+        engine, stripped_args = _extract_lifecycle_engine(args)
+        if engine == "arnold":
+            if command == "cmd_skip":
+                raise AstridError(
+                    "'astrid skip' does not support '--engine arnold'",
+                    valid_options=["task"],
+                    recovery_command="astrid skip --engine task ...",
+                    state_snapshot={"args": args, "command": command},
+                )
+            from astrid.core.integrations.arnold.host import cli as arnold_cli
+
+            return int(getattr(arnold_cli, command)(stripped_args))
         from astrid.core.task import lifecycle
 
-        return int(getattr(lifecycle, command)(args))
+        return int(getattr(lifecycle, command)(stripped_args))
 
     return _handler
 

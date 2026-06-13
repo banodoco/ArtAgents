@@ -72,6 +72,17 @@ def _source_file_mentions_arnold(mod: Any) -> bool:
     return "arnold" in source.lower()
 
 
+@pytest.fixture(autouse=True)
+def _clear_arnold_integration_modules() -> None:
+    for key in list(sys.modules):
+        if key.startswith("astrid.core.integrations.arnold"):
+            del sys.modules[key]
+    yield
+    for key in list(sys.modules):
+        if key.startswith("astrid.core.integrations.arnold"):
+            del sys.modules[key]
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # No-contamination tests (always-on — no importorskip)
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -138,6 +149,159 @@ class TestNoArnoldContamination:
             f"Arnold integration package unexpectedly present in sys.modules: "
             f"{arnold_keys}"
         )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Host package import-boundary tests (always-on — no importorskip)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Modules whose source files are intentionally under
+# astrid/core/integrations/arnold/ — they exist to bridge Arnold and Astrid
+# but must still never trigger an actual ``arnold`` import at the package
+# level.  These are tested separately from _COMMON_CORE_MODULES because the
+# source-file path check intentionally allows the arnold/ directory.
+_HOST_BOUNDARY_MODULES: tuple[str, ...] = (
+    "astrid.core.integrations.arnold.host",
+)
+
+
+class TestHostPackageImportBoundary:
+    """The host ``__init__.py`` must not import ``arnold`` at package level."""
+
+    @pytest.mark.parametrize("module_name", _HOST_BOUNDARY_MODULES)
+    def test_importing_host_package_does_not_import_arnold(
+        self, module_name: str
+    ) -> None:
+        """Import the host package and assert ``arnold`` is absent from sys.modules."""
+        before = _arnold_in_sys_modules()
+        if before:
+            pytest.skip(
+                "arnold already present in sys.modules before importing "
+                f"{module_name}; cannot isolate contamination check"
+            )
+
+        import importlib
+
+        # Clear any cached host submodules that may have been loaded by
+        # previous tests (the host __init__.py re-exports from registry
+        # and shapes, which are safe; other submodules import compat which
+        # imports arnold).
+        for key in list(sys.modules):
+            if key.startswith("astrid.core.integrations.arnold.host"):
+                del sys.modules[key]
+
+        importlib.import_module(module_name)
+
+        assert not _arnold_in_sys_modules(), (
+            f"Importing {module_name} caused 'arnold' (or an arnold.* "
+            f"submodule) to appear in sys.modules.  The host __init__.py "
+            f"must remain free of Arnold imports."
+        )
+
+    def test_host_init_does_not_import_arnold_submodules(self) -> None:
+        """Importing the host package must not pull in compat/driver/envelope.
+
+        These submodules import Arnold at module level; importing the host
+        package itself must not trigger them.
+        """
+        before = _arnold_in_sys_modules()
+        if before:
+            pytest.skip(
+                "arnold already present in sys.modules; "
+                "cannot isolate contamination check"
+            )
+
+        # Clear cached host submodules
+        for key in list(sys.modules):
+            if key.startswith("astrid.core.integrations.arnold.host"):
+                del sys.modules[key]
+
+        import astrid.core.integrations.arnold.host as host_pkg
+
+        # The host package must be importable
+        assert host_pkg is not None
+
+        # But its submodules that import arnold must NOT be in sys.modules
+        arnold_host_keys = [
+            k
+            for k in sys.modules
+            if k.startswith("astrid.core.integrations.arnold.host")
+            and k != "astrid.core.integrations.arnold.host"
+        ]
+        # registry and shapes are safe (no arnold imports); all others
+        # (compat, driver, envelope, invocation, hooks, render, cli) must
+        # not have been auto-imported.
+        unsafe_submodules = [
+            k for k in arnold_host_keys
+            if k.rsplit(".", 1)[-1] not in {"registry", "shapes"}
+        ]
+        assert not unsafe_submodules, (
+            f"Importing astrid.core.integrations.arnold.host unexpectedly "
+            f"auto-imported Arnold-touching submodules: {unsafe_submodules}"
+        )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Gateway/task import-boundary tests (always-on — no importorskip)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Gateway dispatch and task lifecycle modules that must never trigger
+# Arnold imports during normal CLI startup.
+_GATEWAY_TASK_MODULES: tuple[str, ...] = (
+    "astrid.core.gateway",
+    "astrid.core.gateway.dispatch",
+    "astrid.core.gateway.project",
+    "astrid.core.gateway.help",
+    "astrid.core.task",
+    "astrid.core.task.gate.base",
+    "astrid.core.task.gate.dispatch",
+    "astrid.core.task.lifecycle",
+    "astrid.core.task.lifecycle.ack",
+    "astrid.core.task.lifecycle.skip",
+)
+
+
+class TestGatewayTaskImportBoundary:
+    """Gateway and task lifecycle imports must never pull in ``arnold``."""
+
+    @pytest.mark.parametrize("module_name", _GATEWAY_TASK_MODULES)
+    def test_importing_gateway_task_module_does_not_import_arnold(
+        self, module_name: str
+    ) -> None:
+        """Import a gateway/task module and assert ``arnold`` absent from sys.modules."""
+        before = _arnold_in_sys_modules()
+        if before:
+            pytest.skip(
+                "arnold already present in sys.modules before importing "
+                f"{module_name}; cannot isolate contamination check"
+            )
+
+        import importlib
+
+        importlib.import_module(module_name)
+
+        assert not _arnold_in_sys_modules(), (
+            f"Importing {module_name} caused 'arnold' (or an arnold.* "
+            f"submodule) to appear in sys.modules.  Gateway/task modules "
+            f"must never trigger Arnold imports."
+        )
+
+    def test_host_package_importable_without_arnold(self) -> None:
+        """The host package is importable and exposes expected symbols."""
+        import astrid.core.integrations.arnold.host as host_pkg
+
+        # Verify the re-exported symbols are present
+        assert hasattr(host_pkg, "ShapeRegistry")
+        assert hasattr(host_pkg, "get_host_shape_registry")
+        assert hasattr(host_pkg, "WE_REFINE_IMAGE_ID")
+        assert hasattr(host_pkg, "WE_BEST_OF_4_ID")
+        assert hasattr(host_pkg, "TEXT_ANALYSIS_SUMMARIZE_ID")
+        assert hasattr(host_pkg, "ALLOWLISTED_SHAPE_IDS")
+
+        # The allowlisted shape IDs must match the declared constants
+        assert "we.refine_image" in host_pkg.ALLOWLISTED_SHAPE_IDS
+        assert "we.best_of_4" in host_pkg.ALLOWLISTED_SHAPE_IDS
+        assert "text_analysis.summarize" in host_pkg.ALLOWLISTED_SHAPE_IDS
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
