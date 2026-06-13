@@ -75,6 +75,8 @@
     "mode": "none"
   },
   "metadata": {
+    "plan_builder_entrypoint": "build_plan_v2",
+    "plan_builder_module": "astrid.packs.training.orchestrators.dataset_build.plan_template",
     "runtime_module": "astrid.packs.training.orchestrators.dataset_build.run",
     "runtime_file": "run.py",
     "runtime_entrypoint": "main",

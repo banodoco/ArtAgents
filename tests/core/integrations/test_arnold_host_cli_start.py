@@ -675,6 +675,18 @@ def _assert_no_execution_or_cursor_writes(calls: list[str]) -> None:
     assert "persist_resume_cursor" not in calls
 
 
+def _bind_session_writer(monkeypatch: pytest.MonkeyPatch, *, session_id: str = "session-1") -> None:
+    from astrid.core.session.binding import ASTRID_SESSION_ID_ENV
+    from astrid.core.session.paths import session_path
+    from tests.conftest import make_session
+
+    monkeypatch.setenv(ASTRID_SESSION_ID_ENV, session_id)
+    session = make_session(id=session_id, project="demo", agent_id="arnold-test", run_id="run-session")
+    path = session_path(session_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    session.to_json(path)
+
+
 def _write_session_source_plan(tmp_path: Path) -> Path:
     source_root = tmp_path / "session-source-run"
     source_root.mkdir(parents=True)
@@ -1089,6 +1101,68 @@ def test_arnold_ack_routes_session_runs_to_session_driver(
         }
     }
     assert captured["kwargs"]["resume_cursor"].cursor == {"stage": "review"}
+
+
+def test_arnold_ack_session_payload_plan_mutation_appends_event_before_resume(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("ASTRID_PROJECTS_ROOT", str(tmp_path / "projects"))
+    run_root = _seed_active_session_run(tmp_path)
+    _bind_session_writer(monkeypatch)
+    plan = TaskPlan(
+        plan_id="plan-session-mutation",
+        version=2,
+        steps=(
+            Step(id="review", adapter="manual", command="ack --project demo --stage review"),
+            Step(id="draft", adapter="local", command="echo draft"),
+        ),
+    )
+    (run_root / "plan.json").write_text(json.dumps(plan.to_dict()), encoding="utf-8")
+    _install_fake_pipeline(monkeypatch, cursor_stage="review")
+    cli = importlib.import_module("astrid.core.integrations.arnold.host.cli")
+    session_driver = importlib.import_module("astrid.core.integrations.arnold.session.driver")
+    captured: dict[str, Any] = {}
+
+    def _fake_resume_session_run(project_slug: str, **kwargs: Any) -> object:
+        captured["project_slug"] = project_slug
+        captured["kwargs"] = kwargs
+        return object()
+
+    monkeypatch.setattr(session_driver, "resume_session_run", _fake_resume_session_run)
+    payload = {
+        "decision": {"action": "approve", "notes": "micro-fix", "state_patch": {}},
+        "plan_mutation": {
+            "author": "agent:hype-editor-review",
+            "diff": {"op": "remove", "path": "draft"},
+        },
+    }
+
+    rc = cli.cmd_ack(
+        [
+            "--project",
+            "demo",
+            "--stage",
+            "review",
+            "--payload",
+            json.dumps(payload),
+        ]
+    )
+
+    stdout = capsys.readouterr().out
+    assert rc == 0
+    assert "acknowledged Arnold stage for project demo" in stdout
+    events = [
+        json.loads(line)
+        for line in (run_root / "events.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert events[-1]["kind"] == "plan_mutated"
+    assert events[-1]["author"] == "agent:hype-editor-review"
+    assert events[-1]["diff"] == {"op": "remove", "path": "draft"}
+    assert "draft" not in (run_root / "plan.json").read_text(encoding="utf-8")
+    assert captured["project_slug"] == "demo"
+    assert captured["kwargs"]["human_input"] == payload
 
 
 def test_we1_acceptance_rejects_regenerates_and_approves_with_distinct_iterations(

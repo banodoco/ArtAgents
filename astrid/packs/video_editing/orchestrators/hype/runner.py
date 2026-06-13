@@ -554,10 +554,12 @@ def pool_main(args: argparse.Namespace) -> int:
     if getattr(args, "dry_run", False):
         return _write_dry_run_plan(args)
 
+    selected_steps = select_steps(args)
+
     # Sprint 5a: emit the plan v2 to the project root (canonical plan.json
-    # path). The plan uses the leaner 6-stage spine: transcribe → scenes →
-    # cut → render → editor_review → validate. Dynamic discovery (shot count
-    # after cut) is handled by ``astrid plan add-step`` at runtime.
+    # path). Hype's graph is capability-selected at runtime, so plan emission
+    # must happen after parser resolution, brief fact discovery, registry
+    # lookup, and select_steps(args).
     _plan_hash = ""
     project_slug = getattr(args, "project", None)
     if project_slug is not None:
@@ -567,16 +569,14 @@ def pool_main(args: argparse.Namespace) -> int:
         plan_path = proj_root / "plan.json"
         try:
             from astrid.packs.video_editing.orchestrators.hype.plan_template import (
-                build_plan_v2,
+                build_runtime_plan_v2,
                 emit_plan_json,
             )
 
-            plan = build_plan_v2(
-                python_exec=args.python_exec,
-                run_root=args.out,
-                source=getattr(args, "video", None),
-                brief=getattr(args, "brief", None),
-                theme=getattr(args, "theme", None),
+            plan = build_runtime_plan_v2(
+                args=args,
+                selected_steps=selected_steps,
+                run_id=getattr(args, "run_id", None),
             )
             emit_plan_json(plan, plan_path)
 
@@ -601,7 +601,7 @@ def pool_main(args: argparse.Namespace) -> int:
     _write_run_json(args, _plan_hash)
 
     _prefetch_url_inputs(args)
-    steps = [step for step in select_steps(args) if step.name not in set(args.skip)]
+    steps = [step for step in selected_steps if step.name not in set(args.skip)]
     editor_steps = [step for step in steps if step.name != "validate"]
     validate_steps = [step for step in steps if step.name == "validate"]
     args.editor_iteration = 1
@@ -719,4 +719,3 @@ def _register_run_inputs(args: argparse.Namespace) -> None:
         },
     )
     args.audit_parent_ids = parents
-

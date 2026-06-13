@@ -108,10 +108,16 @@ def _build_holding_cmd(
 
 
 def _build_render_cmd(python_exec: str, run_root: Path) -> str:
-    manifest = run_root / "steps" / "ados-sunday-template" / "v1" / "produces" / "ados-sunday-template.json"
+    # Under task-gate / Arnold execution the ados-sunday-template produces
+    # live at ../ados-sunday-template/v1/produces/ relative to this step's
+    # {step_dir}.  That path is stable regardless of the concrete run root.
+    _ = run_root
+    manifest_ref = (
+        "{step_dir}/../ados-sunday-template/v1/produces/ados-sunday-template.json"
+    )
     return (
         f"{shlex.quote(str(python_exec))} -m astrid.packs.video_editing.orchestrators.event_talks.run "
-        f"render --manifest {shlex.quote(str(manifest))} "
+        f"render --manifest {shlex.quote(manifest_ref)} "
         f"--out-dir {shlex.quote('{produces_root}')}"
     )
 

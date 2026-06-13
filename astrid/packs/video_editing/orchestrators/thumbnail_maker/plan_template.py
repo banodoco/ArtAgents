@@ -110,14 +110,11 @@ def _build_discover_cmd(
     query: str,
     source: str | Path | None,
 ) -> str:
-    evidence_plan = (
-        run_root
-        / "steps"
-        / "plan-evidence"
-        / "v1"
-        / "produces"
-        / "evidence"
-        / "evidence-plan.json"
+    _ = run_root
+    # Relative to this step's {step_dir}, the plan-evidence produces live at
+    # ../plan-evidence/v1/produces/ — stable under both task-gate and Arnold.
+    evidence_plan_ref = (
+        "{step_dir}/../plan-evidence/v1/produces/evidence/evidence-plan.json"
     )
     video_flag = ""
     if source is not None:
@@ -127,45 +124,35 @@ def _build_discover_cmd(
         f"discover-video-evidence {video_flag}"
         f"--out {shlex.quote('{produces_root}/evidence/candidates.json')} "
         f"--query {shlex.quote(query)} "
-        f"--previous-manifest {shlex.quote(str(evidence_plan))}"
+        f"--previous-manifest {shlex.quote(evidence_plan_ref)}"
     )
 
 
 def _build_build_ref_cmd(python_exec: str, run_root: Path, query: str) -> str:
-    candidates = (
-        run_root
-        / "steps"
-        / "discover-video-evidence"
-        / "v1"
-        / "produces"
-        / "evidence"
-        / "candidates.json"
+    _ = run_root
+    candidates_ref = (
+        "{step_dir}/../discover-video-evidence/v1/produces/evidence/candidates.json"
     )
     return (
         f"{shlex.quote(str(python_exec))} -m astrid.packs.video_editing.orchestrators.thumbnail_maker.run "
         f"build-reference-pack "
         f"--out {shlex.quote('{produces_root}/evidence/reference-pack.json')} "
         f"--query {shlex.quote(query)} "
-        f"--previous-manifest {shlex.quote(str(candidates))}"
+        f"--previous-manifest {shlex.quote(candidates_ref)}"
     )
 
 
 def _build_generate_cmd(python_exec: str, run_root: Path, query: str) -> str:
-    ref_pack = (
-        run_root
-        / "steps"
-        / "build-reference-pack"
-        / "v1"
-        / "produces"
-        / "evidence"
-        / "reference-pack.json"
+    _ = run_root
+    ref_pack_ref = (
+        "{step_dir}/../build-reference-pack/v1/produces/evidence/reference-pack.json"
     )
     return (
         f"{shlex.quote(str(python_exec))} -m astrid.packs.video_editing.orchestrators.thumbnail_maker.run "
         f"generate-thumbnails "
         f"--out {shlex.quote('{produces_root}/thumbnail-manifest.json')} "
         f"--query {shlex.quote(query)} "
-        f"--previous-manifest {shlex.quote(str(ref_pack))}"
+        f"--previous-manifest {shlex.quote(ref_pack_ref)}"
     )
 
 

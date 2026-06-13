@@ -283,6 +283,12 @@ def _ack_active_arnold_stage(
             )
         from astrid.core.integrations.arnold.host.compat import read_resume_cursor
 
+        _emit_session_plan_mutation_from_payload(
+            slug,
+            run_root=run_root,
+            run_id=run_record.run_id,
+            human_payload=human_payload,
+        )
         resume_session_run(
             slug,
             run_id=run_record.run_id,
@@ -365,6 +371,64 @@ def _ack_active_arnold_stage(
         produces_reverify=produces_reverify,
         lease=lease,
     )
+
+
+def _emit_session_plan_mutation_from_payload(
+    project_slug: str,
+    *,
+    run_root: Path,
+    run_id: str,
+    human_payload: dict[str, Any],
+) -> None:
+    """Append an explicit plan mutation before A3b successor compilation.
+
+    Session-succession treats ``human_input.plan_mutation`` as a mutation
+    marker. When the payload carries a concrete ``diff`` we also persist the
+    canonical ``plan_mutated`` task event first, so the successor segment is
+    compiled from event-ledger state rather than a live Arnold graph edit.
+    """
+    plan_mutation = human_payload.get("plan_mutation")
+    if not isinstance(plan_mutation, dict):
+        return
+    raw_diff = plan_mutation.get("diff")
+    if raw_diff is None and isinstance(plan_mutation.get("op"), str):
+        raw_diff = {
+            key: value
+            for key, value in plan_mutation.items()
+            if key not in {"author", "plan_hash"}
+        }
+    if not isinstance(raw_diff, dict) or not isinstance(raw_diff.get("op"), str):
+        return
+
+    from astrid.core.task.plan import TaskPlanError
+    from astrid.core.task.plan.verbs import (
+        _apply_diff,
+        _load_effective_plan,
+        _validate_and_emit,
+    )
+
+    prior_plan, _events, plan_path = _load_effective_plan(run_root)
+    try:
+        proposed_plan = _apply_diff(prior_plan, raw_diff)
+    except TaskPlanError as exc:
+        raise RuntimeError(f"invalid plan_mutation.diff: {exc}") from exc
+
+    author = plan_mutation.get("author")
+    if not isinstance(author, str) or not author:
+        author = f"agent:{project_slug}"
+    result = _validate_and_emit(
+        run_root,
+        plan_path,
+        project_slug,
+        None,
+        run_id,
+        prior_plan,
+        proposed_plan,
+        diff=raw_diff,
+        author=author,
+    )
+    if result != 0:
+        raise RuntimeError("failed to emit plan_mutated event for Arnold session resume")
 
 
 def _start_validated_arnold_run(
