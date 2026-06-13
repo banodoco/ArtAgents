@@ -493,6 +493,8 @@ def _generate_run_id() -> str:
 
 
 def _pipeline_manifest(pipeline: Any) -> dict[str, Any]:
+    from astrid.core.integrations.arnold.host.builder import edge_manifest_entry
+
     stages = []
     for stage in tuple(getattr(pipeline, "stages", ()) or ()):
         stages.append(
@@ -505,11 +507,16 @@ def _pipeline_manifest(pipeline: Any) -> dict[str, Any]:
     edges = []
     for edge in tuple(getattr(pipeline, "edges", ()) or ()):
         edges.append(
-            {
-                "source": getattr(edge, "source", None),
-                "target": getattr(edge, "target", None),
-                "label": getattr(edge, "label", None),
-            }
+            edge_manifest_entry(
+                source=getattr(edge, "source", None),
+                target=getattr(edge, "target", None),
+                label=getattr(edge, "label", None),
+                source_port=getattr(edge, "source_port", None),
+                target_port=getattr(edge, "target_port", None),
+                logical_type=getattr(edge, "logical_type", None),
+                artifact_type=getattr(edge, "artifact_type", None),
+                metadata=getattr(edge, "metadata", None),
+            )
         )
     return {
         "entry_stage_id": getattr(pipeline, "entry_stage_id", None),

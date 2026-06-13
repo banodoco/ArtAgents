@@ -73,6 +73,25 @@ class TestCompile:
         assert plan.plan_id == "sample.foo"
         assert [s.id for s in plan.steps] == ["transcribe", "process"]
 
+    def test_compile_to_path_preserves_deterministic_json_contract(self, packs_root: Path) -> None:
+        """`compile_to_path()` remains the compatibility writer for author/lifecycle callers."""
+        first_path = compile_to_path("sample.foo", packs_root=packs_root)
+        first_bytes = first_path.read_bytes()
+        second_path = compile_to_path("sample.foo", packs_root=packs_root)
+        second_bytes = second_path.read_bytes()
+
+        assert first_path == packs_root / "sample" / "build" / "foo.json"
+        assert second_path == first_path
+        assert first_bytes == second_bytes
+        assert first_bytes.endswith(b"\n")
+
+        payload = first_path.read_text(encoding="utf-8")
+        assert '"plan_id": "sample.foo"' in payload
+        assert '"steps": [' in payload
+        plan = load_plan(first_path)
+        assert plan.plan_id == "sample.foo"
+        assert [step.id for step in plan.steps] == ["transcribe", "process"]
+
 
 class TestCheckSuccess:
     def test_valid_plan_passes(self, packs_root: Path, capsys: pytest.CaptureFixture) -> None:

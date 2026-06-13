@@ -233,7 +233,13 @@ def _build_minimal_valid_pipeline_module(**extra_attrs: object) -> types.ModuleT
                 setattr(self, k, v)
 
     FakeStage = type("Stage", (_FakeConstructible,), {})
-    FakeParallelStage = type("ParallelStage", (_FakeConstructible,), {})
+
+    # ParallelStage with an optional callable ``join`` for the A4a join probe.
+    class _FakeParallelStage(_FakeConstructible):
+        def join(self, results: list[Any]) -> Any:
+            return results
+
+    FakeParallelStage = _FakeParallelStage
     FakeEdge = type("Edge", (_FakeConstructible,), {})
 
     pipeline = types.ModuleType("arnold.pipeline")
@@ -262,6 +268,7 @@ def _build_minimal_valid_pipeline_module(**extra_attrs: object) -> types.ModuleT
     pipeline.StepInvocationAdapterRegistry = type("StepInvocationAdapterRegistry", (), {})
     pipeline.ContentValidatorRegistry = type("ContentValidatorRegistry", (), {})
     pipeline.no_op_content_validator = lambda *args, **kwargs: None
+    pipeline.SCHEMA_VERSION = 1
 
     for name, value in extra_attrs.items():
         setattr(pipeline, name, value)
@@ -565,3 +572,495 @@ class TestBuilderCompatibility:
         )
         assert parallel is not None
         assert isinstance(parallel, pipeline.ParallelStage)
+
+
+# ── A4a edge metadata contract tests (T5) ──────────────────────────────────────
+
+
+class TestA5EdgeMetadataHostBuilder:
+    """Tests that exercise both Edge constructor shapes at the host builder
+    level and prove the builder's duck-typing tries metadata-capable
+    shapes first before falling back to plain edges.
+    """
+
+    def test_build_edge_passes_metadata_to_capable_constructor(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """``build_edge`` passes source_port, target_port, logical_type,
+        artifact_type, and metadata kwargs to the Edge constructor when
+        the constructor accepts them."""
+        _clear_host_modules()
+
+        # Use a metadata-capable Edge type that records its kwargs
+        constructed_kwargs: list[dict[str, Any]] = []
+
+        class MetadataCapableEdge:
+            def __init__(self, **kwargs: object) -> None:
+                constructed_kwargs.append(dict(kwargs))
+                for k, v in kwargs.items():
+                    setattr(self, k, v)
+
+        pipeline = _build_minimal_valid_pipeline_module(Edge=MetadataCapableEdge)
+        _install_arnold_modules(monkeypatch, pipeline)
+        _assert_no_port_pipeline_portref(pipeline)
+
+        builder_mod = _import_builder()
+
+        edge = builder_mod.build_edge(
+            pipeline.Edge,
+            source="src",
+            target="dst",
+            label="artifact",
+            source_port="out",
+            target_port="in",
+            logical_type="document",
+            artifact_type="text/markdown",
+            metadata={"predicate": "repeat.until"},
+        )
+
+        assert len(constructed_kwargs) == 1
+        kw = constructed_kwargs[0]
+        assert kw["source"] == "src"
+        assert kw["target"] == "dst"
+        assert kw["label"] == "artifact"
+        assert kw["source_port"] == "out"
+        assert kw["target_port"] == "in"
+        assert kw["logical_type"] == "document"
+        assert kw["artifact_type"] == "text/markdown"
+        assert kw["metadata"] == {"predicate": "repeat.until"}
+
+        # Edge attributes match what was passed
+        assert edge.source == "src"
+        assert edge.target == "dst"
+        assert edge.source_port == "out"
+        assert edge.metadata == {"predicate": "repeat.until"}
+
+    def test_build_edge_falls_back_to_plain_constructor(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """When the Edge type only accepts source/target/label (plain, no
+        **kwargs), ``build_edge`` falls back gracefully and still constructs
+        a valid edge."""
+        _clear_host_modules()
+
+        constructed_kwargs: list[dict[str, Any]] = []
+
+        class PlainEdge:
+            def __init__(
+                self,
+                *,
+                source: str = "",
+                target: str = "",
+                label: str = "",
+            ) -> None:
+                constructed_kwargs.append(
+                    {"source": source, "target": target, "label": label}
+                )
+                self.source = source
+                self.target = target
+                self.label = label
+
+        pipeline = _build_minimal_valid_pipeline_module(Edge=PlainEdge)
+        _install_arnold_modules(monkeypatch, pipeline)
+        _assert_no_port_pipeline_portref(pipeline)
+
+        builder_mod = _import_builder()
+
+        edge = builder_mod.build_edge(
+            pipeline.Edge,
+            source="src",
+            target="dst",
+            label="next",
+            source_port="out",
+            target_port="in",
+            logical_type="document",
+            artifact_type="text/markdown",
+            metadata={"predicate": "repeat.until"},
+        )
+
+        # build_edge tries metadata-capable candidates first (they fail
+        # on PlainEdge), then falls back to plain {source,target,label}.
+        assert len(constructed_kwargs) >= 1
+        final_kw = constructed_kwargs[-1]
+        assert final_kw["source"] == "src"
+        assert final_kw["target"] == "dst"
+        assert final_kw["label"] == "next"
+        # Plain constructor never saw metadata fields
+        assert "source_port" not in final_kw
+
+        # Edge is valid
+        assert edge.source == "src"
+        assert edge.target == "dst"
+        assert not hasattr(edge, "source_port")
+
+    def test_edge_manifest_entry_normalizes_all_fields(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """``edge_manifest_entry`` produces the canonical sidecar shape
+        with all metadata fields normalized, independent of runtime edge."""
+        _clear_host_modules()
+
+        pipeline = _build_minimal_valid_pipeline_module()
+        _install_arnold_modules(monkeypatch, pipeline)
+
+        builder_mod = _import_builder()
+        entry = builder_mod.edge_manifest_entry(
+            source="s1",
+            target="s2",
+            label="artifact",
+            source_port="out",
+            target_port="in",
+            logical_type="document",
+            artifact_type="text/markdown",
+            metadata={"predicate": "repeat.until", "operator": "=="},
+        )
+        assert entry == {
+            "source": "s1",
+            "target": "s2",
+            "label": "artifact",
+            "source_port": "out",
+            "target_port": "in",
+            "logical_type": "document",
+            "artifact_type": "text/markdown",
+            "metadata": {"predicate": "repeat.until", "operator": "=="},
+        }
+
+    def test_edge_manifest_entry_defaults_none_for_missing_metadata(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """``edge_manifest_entry`` uses None defaults for port/type fields
+        and empty dict for metadata when not provided."""
+        _clear_host_modules()
+
+        pipeline = _build_minimal_valid_pipeline_module()
+        _install_arnold_modules(monkeypatch, pipeline)
+
+        builder_mod = _import_builder()
+        entry = builder_mod.edge_manifest_entry(
+            source="a",
+            target="b",
+            label="next",
+        )
+        assert entry == {
+            "source": "a",
+            "target": "b",
+            "label": "next",
+            "source_port": None,
+            "target_port": None,
+            "logical_type": None,
+            "artifact_type": None,
+            "metadata": {},
+        }
+
+    def test_edge_manifest_entry_handles_non_dict_metadata(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Non-dict metadata is normalized to empty dict by
+        ``normalize_edge_metadata`` (called inside ``edge_manifest_entry``)."""
+        _clear_host_modules()
+
+        pipeline = _build_minimal_valid_pipeline_module()
+        _install_arnold_modules(monkeypatch, pipeline)
+
+        builder_mod = _import_builder()
+        entry = builder_mod.edge_manifest_entry(
+            source="x",
+            target="y",
+            label="loop",
+            metadata=["not", "a", "dict"],
+        )
+        assert entry["metadata"] == {}
+        entry2 = builder_mod.edge_manifest_entry(
+            source="x", target="y", label="loop", metadata=None
+        )
+        assert entry2["metadata"] == {}
+
+
+# ── A4a contract characterization tests ────────────────────────────────────────
+
+
+# NOTE: These symbols are validated by compat.py as *required* for the Arnold
+# host contract.  Astrid compilers and manifest extraction do NOT require
+# Port, PortRef, or Pipeline from Arnold.
+_REQUIRED_ARNOLD_SYMBOLS = frozenset(
+    {
+        "RuntimeEnvelope",
+        "ResumeCursorRef",
+        "AdvanceOutcome",
+        "CheckpointOutcome",
+        "StepwiseDriver",
+        "PipelineBuilder",
+        "Stage",
+        "ParallelStage",
+        "Edge",
+        "Suspension",
+        "StepContext",
+        "ExecutorHooks",
+        "StepInvocation",
+        "ContractResult",
+        "ContractStatus",
+        "PipelineVerdict",
+        "persist_resume_cursor",
+        "read_resume_cursor",
+    }
+)
+
+_OPTIONAL_ARNOLD_SYMBOLS = frozenset(
+    {
+        "EvidenceArtifactRef",
+        "Provenance",
+        "StepResult",
+        "StepInvocationAdapter",
+        "StepInvocationAdapterRegistry",
+        "ContentValidatorRegistry",
+        "no_op_content_validator",
+    }
+)
+
+# Symbols that are Astrid-internal metadata and MUST NOT be required or assumed
+# from the Arnold contract.  They live in Astrid's manifest sidecar or the
+# shared lowering layer, not in arnold.pipeline.
+_ASTRID_ONLY_NAMES = frozenset(
+    {
+        "Pipeline",
+        "Port",
+        "PortRef",
+        "pipeline_manifest",
+        "CompileResult",
+        "_StageSpec",
+        "_EdgeSpec",
+        "SESSION_MANIFEST_SCHEMA_VERSION",
+        "SessionManifest",
+        "SegmentRecord",
+    }
+)
+
+
+class TestA4aContractCharacterization:
+    """Tests that characterise the Arnold public contract and distinguish
+    required Arnold symbols from Astrid-only manifest sidecar metadata.
+
+    These are characterisation / probe tests — they document the
+    boundary, not change it.
+    """
+
+    def test_required_arnold_symbols_match_compat_declaration(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Every symbol listed as required is declared in compat.py."""
+        _clear_host_modules()
+
+        pipeline = _build_minimal_valid_pipeline_module()
+        _install_arnold_modules(monkeypatch, pipeline)
+
+        compat_mod = importlib.import_module(
+            "astrid.core.integrations.arnold.host.compat"
+        )
+
+        for name in _REQUIRED_ARNOLD_SYMBOLS:
+            assert hasattr(compat_mod.compat, name), (
+                f"compat.compat is missing required Arnold symbol {name!r}"
+            )
+
+    def test_optional_arnold_symbols_appear_when_available(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Optional symbols are present on compat only when the fake Arnold
+        provides them — and they match the compat module's _OPTIONAL_SYMBOLS."""
+        _clear_host_modules()
+
+        pipeline = _build_minimal_valid_pipeline_module()
+        _install_arnold_modules(monkeypatch, pipeline)
+
+        compat_mod = importlib.import_module(
+            "astrid.core.integrations.arnold.host.compat"
+        )
+
+        for name in _OPTIONAL_ARNOLD_SYMBOLS:
+            assert hasattr(compat_mod.compat, name), (
+                f"compat.compat is missing optional symbol {name!r} "
+                f"even though the fake Arnold provides it"
+            )
+
+    def test_astrid_only_names_are_not_exposed_on_compat(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Names that are Astrid-internal metadata must not appear on
+        ``compat.compat`` — they belong in the manifest sidecar, not the
+        Arnold contract."""
+        _clear_host_modules()
+
+        pipeline = _build_minimal_valid_pipeline_module()
+        _install_arnold_modules(monkeypatch, pipeline)
+
+        compat_mod = importlib.import_module(
+            "astrid.core.integrations.arnold.host.compat"
+        )
+
+        for name in _ASTRID_ONLY_NAMES:
+            assert not hasattr(compat_mod.compat, name), (
+                f"compat.compat must not expose Astrid-only name {name!r}"
+            )
+
+    def test_stage_decision_vocabulary_probe(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A stage built through the duck-typed builder can carry a
+        ``decision_vocabulary`` — the A4a optional-stage vocabulary probe."""
+        _clear_host_modules()
+
+        pipeline = _build_minimal_valid_pipeline_module()
+        _install_arnold_modules(monkeypatch, pipeline)
+        _assert_no_port_pipeline_portref(pipeline)
+
+        builder_mod = _import_builder()
+        stage = builder_mod.build_stage(
+            pipeline.Stage,
+            stage_id="optional_step",
+            label="Optional Step",
+            decision_vocabulary=("proceed", "skip"),
+        )
+        assert stage is not None
+        vocab = getattr(stage, "decision_vocabulary", None)
+        assert vocab is not None, "Stage must expose decision_vocabulary"
+        assert set(vocab) == {"proceed", "skip"}
+
+    def test_edge_metadata_capability_probe(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Probe whether an Arnold Edge can carry per-edge metadata fields
+        (source_port, target_port, logical_type, artifact_type, metadata).
+
+        The current duck-typed fake accepts any kwargs, so the probe
+        documents that the surface can carry this data even if the real
+        Arnold Edge does not yet accept all the fields."""
+        _clear_host_modules()
+
+        pipeline = _build_minimal_valid_pipeline_module()
+        _install_arnold_modules(monkeypatch, pipeline)
+        _assert_no_port_pipeline_portref(pipeline)
+
+        builder_mod = _import_builder()
+
+        # The standard build_edge only passes source/target/label.  Construct
+        # an Edge directly to probe extended kwargs.
+        edge = pipeline.Edge(
+            source="s1",
+            target="s2",
+            label="next",
+            source_port="producer_out",
+            target_port="consumer_in",
+            logical_type=None,
+            artifact_type="document",
+            metadata={"predicate": "repeat.until"},
+        )
+        assert edge is not None
+        assert getattr(edge, "source", None) == "s1"
+        assert getattr(edge, "target", None) == "s2"
+        # Probe that extended fields survive construction:
+        assert getattr(edge, "source_port", None) == "producer_out"
+        assert getattr(edge, "target_port", None) == "consumer_in"
+        assert getattr(edge, "logical_type", None) is None
+        assert getattr(edge, "artifact_type", None) == "document"
+        assert getattr(edge, "metadata", None) == {"predicate": "repeat.until"}
+
+    def test_schema_version_constant_probe(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Probe that the Arnold pipeline module exposes a SCHEMA_VERSION
+        constant for A4a contract versioning.
+
+        The constant lives on the pipeline module, not necessarily in the
+        compat namespace (compat only mirrors symbols declared in its
+        _REQUIRED_SYMBOLS/_OPTIONAL_SYMBOLS tuples)."""
+        _clear_host_modules()
+
+        pipeline = _build_minimal_valid_pipeline_module()
+        _install_arnold_modules(monkeypatch, pipeline)
+
+        # Probe the pipeline module directly — compat may not surface it.
+        assert hasattr(pipeline, "SCHEMA_VERSION"), (
+            "Arnold pipeline must expose SCHEMA_VERSION"
+        )
+        assert pipeline.SCHEMA_VERSION == 1
+
+    def test_parallel_stage_join_probe(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Probe that ParallelStage exposes a callable ``join`` for the A4a
+        fan-out join contract."""
+        _clear_host_modules()
+
+        pipeline = _build_minimal_valid_pipeline_module()
+        _install_arnold_modules(monkeypatch, pipeline)
+        _assert_no_port_pipeline_portref(pipeline)
+
+        assert hasattr(pipeline.ParallelStage, "join"), (
+            "ParallelStage must expose a join method for A4a"
+        )
+        join_method = getattr(pipeline.ParallelStage, "join")
+        assert callable(join_method), "ParallelStage.join must be callable"
+
+        # Smoke test: instantiate and call join
+        ps = pipeline.ParallelStage(
+            stage_id="fan", label="Fan-out", stages=[]
+        )
+        joined = ps.join([{"a": 1}, {"b": 2}])
+        assert joined == [{"a": 1}, {"b": 2}]
+
+    def test_stage_level_explicit_join_probe(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Prove that multiple edges converging on a single target stage
+        (explicit join) can be constructed through the duck-typed builder.
+
+        This documents the stage-level join shape needed by A4a fan-out
+        lowering without requiring Arnold to change its Edge surface."""
+        _clear_host_modules()
+
+        class JoinBuilder:
+            """Builder that accepts stages and edges for the join probe."""
+            def __init__(self) -> None:
+                self.stages: list[Any] = []
+                self.edges: list[Any] = []
+
+            def add_stage(self, stage: Any) -> None:
+                self.stages.append(stage)
+
+            def add_edge(self, edge: Any) -> None:
+                self.edges.append(edge)
+
+        pipeline = _build_minimal_valid_pipeline_module(
+            PipelineBuilder=JoinBuilder,
+        )
+        _install_arnold_modules(monkeypatch, pipeline)
+        _assert_no_port_pipeline_portref(pipeline)
+
+        builder_mod = _import_builder()
+
+        builder = pipeline.PipelineBuilder()
+        source_a = builder_mod.build_stage(
+            pipeline.Stage, stage_id="source_a", label="Source A"
+        )
+        source_b = builder_mod.build_stage(
+            pipeline.Stage, stage_id="source_b", label="Source B"
+        )
+        target = builder_mod.build_stage(
+            pipeline.Stage, stage_id="join_target", label="Join Target"
+        )
+        for s in (source_a, source_b, target):
+            builder_mod.builder_add_stage(builder, s)
+
+        edge_a = builder_mod.build_edge(
+            pipeline.Edge, source="source_a", target="join_target", label="a_result"
+        )
+        edge_b = builder_mod.build_edge(
+            pipeline.Edge, source="source_b", target="join_target", label="b_result"
+        )
+        builder_mod.builder_add_edge(builder, edge_a)
+        builder_mod.builder_add_edge(builder, edge_b)
+
+        assert len(builder.stages) == 3
+        assert len(builder.edges) == 2
+        assert {e.source for e in builder.edges} == {"source_a", "source_b"}
+        assert all(e.target == "join_target" for e in builder.edges)

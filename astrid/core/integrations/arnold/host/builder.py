@@ -22,6 +22,37 @@ from __future__ import annotations
 from typing import Any
 
 
+def normalize_edge_metadata(metadata: Any) -> dict[str, Any]:
+    """Return a plain dict for per-edge metadata sidecars."""
+    if isinstance(metadata, dict):
+        return dict(metadata)
+    return {}
+
+
+def edge_manifest_entry(
+    *,
+    source: str | None,
+    target: str | None,
+    label: str | None,
+    source_port: str | None = None,
+    target_port: str | None = None,
+    logical_type: str | None = None,
+    artifact_type: str | None = None,
+    metadata: Any = None,
+) -> dict[str, Any]:
+    """Build the canonical manifest-sidecar shape for one compiled edge."""
+    return {
+        "source": source,
+        "target": target,
+        "label": label,
+        "source_port": source_port,
+        "target_port": target_port,
+        "logical_type": logical_type,
+        "artifact_type": artifact_type,
+        "metadata": normalize_edge_metadata(metadata),
+    }
+
+
 def build_stage(
     stage_type: type[Any],
     *,
@@ -161,13 +192,49 @@ def build_edge(
     source: str,
     target: str,
     label: str,
+    source_port: str | None = None,
+    target_port: str | None = None,
+    logical_type: str | None = None,
+    artifact_type: str | None = None,
+    metadata: dict[str, Any] | None = None,
 ) -> Any:
     """Construct an Edge duck-typed against *edge_type*.
 
     Tries several kwarg shapes for source/target attribute names.
     Raises ``TypeError`` if no shape succeeds.
     """
+    kwargs_meta = normalize_edge_metadata(metadata)
     for candidate in (
+        {
+            "source": source,
+            "target": target,
+            "label": label,
+            "source_port": source_port,
+            "target_port": target_port,
+            "logical_type": logical_type,
+            "artifact_type": artifact_type,
+            "metadata": kwargs_meta,
+        },
+        {
+            "from_stage": source,
+            "to_stage": target,
+            "label": label,
+            "source_port": source_port,
+            "target_port": target_port,
+            "logical_type": logical_type,
+            "artifact_type": artifact_type,
+            "metadata": kwargs_meta,
+        },
+        {
+            "source_id": source,
+            "target_id": target,
+            "label": label,
+            "source_port": source_port,
+            "target_port": target_port,
+            "logical_type": logical_type,
+            "artifact_type": artifact_type,
+            "metadata": kwargs_meta,
+        },
         {"source": source, "target": target, "label": label},
         {"from_stage": source, "to_stage": target, "label": label},
         {"source_id": source, "target_id": target, "label": label},
@@ -257,4 +324,6 @@ __all__ = [
     "builder_add_stage",
     "builder_finalize",
     "builder_set_entry_stage",
+    "edge_manifest_entry",
+    "normalize_edge_metadata",
 ]

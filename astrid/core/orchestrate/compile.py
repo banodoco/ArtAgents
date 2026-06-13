@@ -23,12 +23,15 @@ import importlib.util
 import json
 import os
 import sys
+import tempfile
 import uuid
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from astrid.core.env_vars import ASTRID_INTERNAL_INVOCATION
+from astrid.core.integrations.arnold.session import lowering
 from astrid.core.pack import DEFAULT_PACKS_ROOT
+from astrid.core.task.plan import TaskPlan, load_plan
 
 from .dsl import OrchestrateDefinitionError, _PlanBuilder
 
@@ -141,6 +144,40 @@ def _resolver_for(packs_root: Optional[Path]):
     return _resolve
 
 
+def _task_plan_from_payload(payload: dict[str, Any]) -> TaskPlan:
+    fp = None
+    tmp_path = None
+    try:
+        fp = tempfile.NamedTemporaryFile(
+            "w", suffix=".json", delete=False, encoding="utf-8"
+        )
+        json.dump(payload, fp)
+        fp.flush()
+        tmp_path = fp.name
+    finally:
+        if fp is not None:
+            fp.close()
+    try:
+        if tmp_path is None:
+            raise OrchestrateDefinitionError("failed to materialize compiled DSL payload")
+        return load_plan(tmp_path)
+    finally:
+        if tmp_path is not None:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+
+def _task_plan_from_builder(
+    builder: _PlanBuilder,
+    *,
+    packs_root: Optional[Path] = None,
+) -> TaskPlan:
+    payload = builder.to_dict(_resolver=_resolver_for(packs_root))
+    return _task_plan_from_payload(payload)
+
+
 def compile_to_path(
     qualified_id: str,
     *,
@@ -161,3 +198,63 @@ def compile_to_path(
         encoding="utf-8",
     )
     return out_path
+
+
+def dsl_to_pipeline(
+    builder: _PlanBuilder,
+    *,
+    project: str,
+    run_root: str | Path,
+    state: Optional[dict[str, Any]] = None,
+    segment_id: str | None = None,
+    packs_root: Optional[Path] = None,
+) -> lowering.CompileResult:
+    if not isinstance(builder, _PlanBuilder):
+        raise OrchestrateDefinitionError(
+            f"dsl_to_pipeline expects a _PlanBuilder, got {type(builder).__name__}"
+        )
+
+    from astrid.core.integrations.arnold.host.compat import compat
+
+    plan = _task_plan_from_builder(builder, packs_root=packs_root)
+    resolved_segment_id = segment_id or builder.plan_id
+    lowered = lowering.lower_plan_segment(
+        plan,
+        project=project,
+        run_root=run_root,
+        state=dict(state or {}),
+        segment_id=resolved_segment_id,
+        compat=compat,
+        allow_repeat_for_each=True,
+    )
+    pipeline = lowering.build_pipeline(lowered, compat=compat)
+    return lowering.CompileResult(
+        pipeline=pipeline,
+        pipeline_manifest=lowering.pipeline_manifest(
+            pipeline,
+            edge_specs=lowered.ordered_edge_specs,
+        ),
+        plan_hash=lowered.plan_hash,
+        entry_stage_id=lowered.entry_stage_id,
+        diagnostics=lowered.diagnostics,
+    )
+
+
+def compile_to_pipeline(
+    qualified_id: str,
+    *,
+    project: str,
+    run_root: str | Path,
+    state: Optional[dict[str, Any]] = None,
+    segment_id: str | None = None,
+    packs_root: Optional[Path] = None,
+) -> lowering.CompileResult:
+    builder = resolve_orchestrator(qualified_id, packs_root=packs_root)
+    return dsl_to_pipeline(
+        builder,
+        project=project,
+        run_root=run_root,
+        state=state,
+        segment_id=segment_id or qualified_id,
+        packs_root=packs_root,
+    )

@@ -68,7 +68,7 @@ def _initial_pipeline_manifest() -> dict[str, Any]:
             },
             {"stage_id": "halt", "label": "Halt", "metadata": {"stage_id": "halt", "terminal": True}},
         ],
-        "edges": [{"source": "review", "target": "halt", "label": "next"}],
+        "edges": [{"source": "review", "target": "halt", "label": "next", "source_port": None, "target_port": None, "logical_type": None, "artifact_type": None, "metadata": {}}],
     }
 
 
@@ -226,7 +226,7 @@ def test_add_mutation_freezes_current_segment_and_launches_distinct_successor(
     assert manifest["segments"][0]["artifacts"] == [prior_artifact.to_dict()]
     assert pipeline != initial_pipeline
     assert [stage["stage_id"] for stage in pipeline["stages"]] == ["review", "ship", "halt"]
-    assert pipeline["edges"][-1] == {"source": "ship", "target": "halt", "label": "next"}
+    assert pipeline["edges"][-1] == {"source": "ship", "target": "halt", "label": "next", "source_port": None, "target_port": None, "logical_type": None, "artifact_type": None, "metadata": {}}
     assert pipeline["stages"][-1]["metadata"]["terminal"] is True
     assert [event["kind"] for event in events] == ["plan_initialized", "plan_mutated", "segment_boundary"]
     assert [call[0] for call in fake_driver.calls] == ["advance", "checkpoint"]
