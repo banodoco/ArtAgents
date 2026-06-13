@@ -43,7 +43,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-from astrid.core.task.events import EVENTS_FILENAME, read_events
+from astrid.core.events import EVENTS_FILENAME, read_events
 
 from .events import SEGMENT_BOUNDARY_KIND
 from .records import is_session_run, load_session_manifest

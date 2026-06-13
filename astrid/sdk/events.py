@@ -11,7 +11,7 @@ from pathlib import Path
 
 from astrid.core.foundation.project_paths import run_dir as project_run_dir
 from astrid.core.foundation.project_paths import validate_project_slug
-from astrid.core.task.events import EVENTS_FILENAME
+from astrid.core.events import EVENTS_FILENAME
 
 from ._module import _sdk_module
 from .dto import EventStreamRecord

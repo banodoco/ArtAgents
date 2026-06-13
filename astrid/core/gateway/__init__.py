@@ -279,11 +279,11 @@ def _main_impl(raw: list[str]) -> int:
     if project_slug is None:
         return _dispatch_with_resolved_project(raw, request_project)
 
-    from astrid.core.task import gate as task_gate
+    from astrid.core import gate as core_gate
 
     try:
-        decision = task_gate.gate_command(project_slug, task_gate.command_for_argv(raw), raw)
-    except task_gate.TaskRunGateError as exc:
+        decision = core_gate.gate_command(project_slug, core_gate.command_for_argv(raw), raw)
+    except core_gate.TaskRunGateError as exc:
         raise coerce_astrid_error(
             exc,
             state_snapshot={"argv": raw, "project": project_slug, "gate": "task-mode"},
@@ -302,7 +302,7 @@ def _main_impl(raw: list[str]) -> int:
             returncode = _dispatch_with_resolved_project(raw, request_project)
         return returncode
     finally:
-        task_gate.record_dispatch_complete(decision, returncode)
+        core_gate.record_dispatch_complete(decision, returncode)
 
 
 def _verb_bypasses_task_gate(raw: list[str]) -> bool:

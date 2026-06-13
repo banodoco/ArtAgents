@@ -494,8 +494,8 @@ def _execute_via_task_gate(slug: str, args: argparse.Namespace) -> int:
 
     from astrid.core.foundation.project_paths import project_dir
     from astrid.core.session.current_run_state import read_current_run_state
-    from astrid.core.task.command_render import render_task_command
-    from astrid.core.task.events import read_events
+    from astrid.core.command_render import render_task_command
+    from astrid.core.events import read_events
     from astrid.core.task.gate import peek_current_step
     from astrid.core.task.plan import load_plan
     from astrid.core.task.plan.verbs import apply_mutations

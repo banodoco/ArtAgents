@@ -32,6 +32,7 @@ from astrid.core.task.events import (
     verify_chain,
 )
 from astrid.core.task.plan import Step, TaskPlan
+from astrid.core.task.plan.verbs import _make_plan_mutated_event
 
 
 def _clear_arnold_modules() -> None:
@@ -404,6 +405,64 @@ def test_mutation_resume_commits_one_boundary_then_launches_successor(
     assert manifest["segments"][1]["event_lineage"]["segment_boundary_hash"] == result.boundary_hash
     assert pipeline_manifest["entry_stage_id"] == "review"
     assert [call[0] for call in fake_driver.calls] == ["advance", "checkpoint"]
+
+
+def test_mutation_resume_compiles_successor_from_ledger_not_plan_projection(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    cursor_store: dict[str, Any] = {}
+    _install_fake_pipeline(monkeypatch, cursor_store)
+    run_root = _setup_session_run(tmp_path)
+    write_json_atomic(
+        run_root / "plan.json",
+        TaskPlan(
+            plan_id="poison-projection",
+            version=2,
+            steps=(Step(id="poison", adapter="local", command="echo poison"),),
+        ).to_dict(),
+    )
+    events = [json.loads(line) for line in (run_root / EVENTS_FILENAME).read_text().splitlines()]
+    append_event_locked(
+        run_root,
+        _make_plan_mutated_event(
+            "agent:test",
+            0,
+            {
+                "op": "add",
+                "after": "review",
+                "step": {"id": "ship", "adapter": "local", "command": "echo ship"},
+            },
+        ),
+        expected_writer_epoch=0,
+        expected_prev_hash=str(events[-1]["hash"]),
+    )
+    cursor = _ResumeCursorRef(
+        plugin_id="astrid.arnold.host",
+        run_id="run-session",
+        cursor={"stage": "review"},
+    )
+    writer = _WriterContext(run_root, epoch=0)
+    module = _import_driver_module()
+
+    result = module.resume_session_run(
+        "demo",
+        run_id="run-session",
+        root=tmp_path / "projects",
+        human_input={"plan_mutation": {"op": "add"}},
+        resume_cursor=cursor,
+        driver=_FakeDriver(),
+        writer_context_factory=lambda *_args, **_kwargs: writer,
+    )
+
+    pipeline_manifest = json.loads((run_root / "pipeline.json").read_text())
+    assert result.to_segment_id == "seg-002"
+    assert [stage["stage_id"] for stage in pipeline_manifest["stages"]] == [
+        "review",
+        "ship",
+        "halt",
+    ]
+    assert "poison" not in {stage["stage_id"] for stage in pipeline_manifest["stages"]}
 
 
 def test_mutation_resume_rejects_cursor_for_different_run_before_boundary(

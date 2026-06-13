@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
+from astrid.core.plan import TaskPlanError
 from astrid.core.contracts.schema import Output, Port
 from astrid.core.integrations.arnold.host.builder import edge_manifest_entry
 from astrid.core.integrations.arnold.host.invocation import (
@@ -13,13 +14,12 @@ from astrid.core.integrations.arnold.host.invocation import (
     build_adapter_metadata,
     build_step_invocation,
 )
-from astrid.core.task.events import canonical_event_json
+from astrid.core.events import canonical_event_json
 from astrid.core.task.plan import (
     STEP_PATH_SEP,
     RepeatForEach,
     RepeatUntil,
     Step,
-    TaskPlanError,
     TaskPlan,
     iter_steps_with_path,
     is_legacy_repeat_until_condition,

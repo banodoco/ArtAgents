@@ -7,7 +7,7 @@ via `importlib.util.spec_from_file_location` (without polluting sys.modules
 across test fixtures) and returns the module-level ``_PlanBuilder``.
 
 `compile_to_path(qid)` resolves, calls ``_PlanBuilder.to_dict()`` (which
-round-trips through ``astrid.core.task.plan.load_plan``), and writes the
+round-trips through ``astrid.core.plan.load_plan``), and writes the
 manifest to ``<pack-root>/build/<name>.json`` as deterministic JSON.
 
 Inline expansion of nested string-form refs (``nested(plan="<pack>.<name>")``)
@@ -31,7 +31,7 @@ from typing import Any, Optional
 from astrid.core.env_vars import ASTRID_INTERNAL_INVOCATION
 from astrid.core.integrations.arnold.session import lowering
 from astrid.core.pack import DEFAULT_PACKS_ROOT
-from astrid.core.task.plan import TaskPlan, load_plan
+from astrid.core.plan import TaskPlan, load_plan
 
 from .dsl import OrchestrateDefinitionError, _PlanBuilder
 

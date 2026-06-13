@@ -43,7 +43,7 @@ from astrid.core.session.model import (
     SessionRole,
 )
 from astrid.core.session.paths import sessions_dir
-from astrid.core.task.cli_contract import emit_lifecycle_json
+from astrid.core.cli_contract import emit_lifecycle_json
 from astrid.core.timeline.crud import list_timelines
 from astrid.core.timeline.defaults import read_project_default
 from astrid.core.timeline.paths import find_timeline_by_slug, find_timeline_slug_for_ulid

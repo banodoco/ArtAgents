@@ -22,7 +22,7 @@ from astrid.core._shared.result_manifest import build_manifest, write_manifest
 from astrid.core.audit import register_outputs
 from astrid.core.contracts.errors import AstridError
 from astrid.core.foundation.hash import sha256_file
-from astrid.core.task.managed_binding import is_managed_mode
+from astrid.core.managed_binding import is_managed_mode
 from astrid.core.timeline import (
     canonical_timeline_config,
     is_all_generative_arrangement,

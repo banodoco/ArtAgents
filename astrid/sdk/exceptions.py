@@ -87,7 +87,7 @@ def _sdk_error_from_exception(exc: Any) -> AstridSDKError | None:
     )
     from astrid.core.execution.orchestrator.schema import OrchestratorValidationError
     from astrid.core.session.lease import LeaseError
-    from astrid.core.task.events import NotWriterError, StaleEpochError, StaleTailError
+    from astrid.core.events import NotWriterError, StaleEpochError, StaleTailError
 
     if isinstance(exc, (ExecutorRunnerError, OrchestratorRunnerError)):
         if _looks_like_missing_input(str(exc)):

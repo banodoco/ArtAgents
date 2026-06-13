@@ -24,10 +24,10 @@ from __future__ import annotations
 # ---------------------------------------------------------------------------
 # Events
 # ---------------------------------------------------------------------------
-from astrid.core.task.events.stream import (
+from astrid.core.events.stream import (
     read_event_stream as _read_task_event_stream,
 )
-from astrid.core.task.events.stream import (
+from astrid.core.events.stream import (
     subscribe_event_stream as _subscribe_task_event_stream,
 )
 

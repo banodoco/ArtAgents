@@ -8,7 +8,7 @@ from typing import Any, Callable, Optional
 
 from astrid.core.project.current_run import read_current_run
 from astrid.core.session.lease import read_lease
-from astrid.core.task.events import EVENTS_FILENAME, read_events
+from astrid.core.events import EVENTS_FILENAME, read_events
 
 
 @dataclass(frozen=True)

@@ -107,7 +107,7 @@ def _render_active_operation(project_slug: str) -> tuple[str, dict[str, Any]]:
 
 
 def _event_tail_hash(run_root: Path) -> str:
-    from astrid.core.task.events import EVENTS_FILENAME, ZERO_HASH, read_events
+    from astrid.core.events import EVENTS_FILENAME, ZERO_HASH, read_events
 
     events = read_events(run_root / EVENTS_FILENAME)
     if not events:
@@ -222,7 +222,7 @@ def _append_arnold_ack_event(
     produces_reverify: dict[str, Any],
     lease: dict[str, Any],
 ) -> None:
-    from astrid.core.task.events import append_event_locked
+    from astrid.core.events import append_event_locked
     from astrid.core.util.time import utc_now_iso
 
     append_event_locked(
@@ -400,7 +400,7 @@ def _emit_session_plan_mutation_from_payload(
     if not isinstance(raw_diff, dict) or not isinstance(raw_diff.get("op"), str):
         return
 
-    from astrid.core.task.plan import TaskPlanError
+    from astrid.core.plan import TaskPlanError
     from astrid.core.task.plan.verbs import (
         _apply_diff,
         _load_effective_plan,
@@ -456,7 +456,7 @@ def _start_validated_arnold_run(
     from astrid.core.project.current_run import read_current_run, write_current_run
     from astrid.core.session.binding import SessionBindingError, resolve_current_session
     from astrid.core.session.lease import write_lease_init
-    from astrid.core.task.events import ZERO_HASH, append_event_locked, make_run_started_event
+    from astrid.core.events import ZERO_HASH, append_event_locked, make_run_started_event
     from astrid.core.util.time import utc_now_iso
 
     slug = validate_project_slug(project_slug)
@@ -778,8 +778,15 @@ def cmd_next(args: list[str]) -> int:
 
     Peek/render only — does not execute a pipeline stage.  Renders the
     next operator-facing stage for human review.
+
+    When no active Arnold run exists (or --project is omitted), delegates
+    to the task-engine ``cmd_next`` so the universal port-of-call
+    behaviour is preserved regardless of the default-engine flip.
     """
     import argparse
+
+    from astrid.core.foundation.project_paths import validate_project_slug
+    from astrid.core.project.current_run import read_current_run
 
     parser = argparse.ArgumentParser(
         prog="astrid next --engine arnold",
@@ -787,7 +794,8 @@ def cmd_next(args: list[str]) -> int:
     )
     parser.add_argument(
         "--project",
-        required=True,
+        required=False,
+        default=None,
         help="Project slug for this run.",
     )
 
@@ -796,8 +804,22 @@ def cmd_next(args: list[str]) -> int:
     except SystemExit as exc:
         return int(exc.code or 2)
 
+    if not parsed.project:
+        # No --project flag — delegate to task-engine universal port-of-call.
+        from astrid.core.task.lifecycle import cmd_next as _task_cmd_next
+
+        return _task_cmd_next(args)
+
+    slug = validate_project_slug(parsed.project)
+    if read_current_run(slug) is None:
+        # No active Arnold run — delegate to the task-engine universal
+        # port-of-call so the agent always gets a legal next action.
+        from astrid.core.task.lifecycle import cmd_next as _task_cmd_next
+
+        return _task_cmd_next(args)
+
     try:
-        text, _ = _render_active_operation(parsed.project)
+        text, _ = _render_active_operation(slug)
     except Exception as exc:
         print(f"error: failed to inspect Arnold workflow: {exc}", file=sys.stderr)
         return 1
@@ -909,9 +931,15 @@ def cmd_status(args: list[str]) -> int:
     """Handle ``astrid status --engine arnold``.
 
     Reports the current state of an Arnold run including pipeline stage,
-    suspension status, and feedback ledger.
+    suspension status, and feedback ledger.  When no active Arnold run
+    exists the handler returns a stable no-active-run result (JSON or
+    prose) matching the task-status contract so that the default-engine
+    flip does not produce a barebacktrace on an empty project.
     """
     import argparse
+
+    from astrid.core.foundation.project_paths import validate_project_slug
+    from astrid.core.project.current_run import read_current_run
 
     parser = argparse.ArgumentParser(
         prog="astrid status --engine arnold",
@@ -933,6 +961,25 @@ def cmd_status(args: list[str]) -> int:
     except SystemExit as exc:
         return int(exc.code or 2)
 
+    slug = validate_project_slug(parsed.project)
+    if read_current_run(slug) is None:
+        msg = (
+            f"project {slug!r} has no active Arnold run; "
+            f"recovery: astrid start <workflow-id> --engine arnold --project {slug}"
+        )
+        if parsed.json:
+            payload: dict[str, object] = {
+                "schema_version": 1,
+                "project": slug,
+                "run_id": None,
+                "state": "no_active_run",
+                "error": msg,
+            }
+            print(json.dumps(payload, sort_keys=True))
+            return 0
+        print(f"status: {msg}", file=sys.stderr)
+        return 1
+
     try:
         text, lifecycle_json = _render_active_operation(parsed.project)
     except Exception as exc:
@@ -949,9 +996,14 @@ def cmd_status(args: list[str]) -> int:
 def cmd_abort(args: list[str]) -> int:
     """Handle ``astrid abort --engine arnold``.
 
-    Aborts the active Arnold run and cleans up checkpoint state.
+    Release N conservative contract: reject Arnold abort until it can
+    prove full cleanup rather than reporting a false success while Arnold
+    state remains active. Callers can still force the task-engine fallback.
     """
     import argparse
+
+    from astrid.core.foundation.project_paths import project_dir, validate_project_slug
+    from astrid.core.project.current_run import read_current_run
 
     parser = argparse.ArgumentParser(
         prog="astrid abort --engine arnold",
@@ -968,6 +1020,24 @@ def cmd_abort(args: list[str]) -> int:
     except SystemExit as exc:
         return int(exc.code or 2)
 
-    # ── Placeholder: real abort implementation in later tasks ───────────
-    print(f"[arnold abort] project={parsed.project}")
-    return 0
+    slug = validate_project_slug(parsed.project)
+    run_id = read_current_run(slug)
+    recovery = f"astrid abort --engine task --project {slug}"
+    if run_id is not None:
+        run_root = project_dir(slug) / "runs" / run_id
+        if (run_root / "arnold_run.json").exists():
+            print(
+                "error: Arnold abort is not supported in Release N because it cannot "
+                "yet verify cleanup of active Arnold state.",
+                file=sys.stderr,
+            )
+            print(f"  active_run: {run_id}", file=sys.stderr)
+            print(f"  recovery: {recovery}", file=sys.stderr)
+            return 1
+
+    print(
+        "error: Arnold abort is not supported in Release N.",
+        file=sys.stderr,
+    )
+    print(f"  recovery: {recovery}", file=sys.stderr)
+    return 1

@@ -17,7 +17,7 @@ File                          Owns                                             N
                               (``current_segment``), workflow marker           of truth for what kind of run this is and where it
                                                                                currently sits in the session lifecycle.
 
-``events.jsonl``              hash-chained event ledger                        Owned by ``astrid.core.task.events``.  The session
+``events.jsonl``              hash-chained event ledger                        Owned by ``astrid.core.events``.  The session
                                                                                engine appends through the established locked-append
                                                                                path and never bypasses it.
 

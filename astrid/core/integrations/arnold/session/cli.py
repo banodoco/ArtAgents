@@ -21,7 +21,7 @@ from astrid.core.project.current_run import clear_current_run, read_current_run,
 from astrid.core.project.project import ProjectError
 from astrid.core.session.binding import SessionBindingError, resolve_current_session
 from astrid.core.session.lease import write_lease_init
-from astrid.core.task.events import ZERO_HASH, append_event_locked, make_plan_initialized_event
+from astrid.core.events import ZERO_HASH, append_event_locked, make_plan_initialized_event
 from astrid.core.task.plan import load_plan
 from astrid.core.util.time import utc_now_iso
 

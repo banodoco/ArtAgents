@@ -49,7 +49,7 @@ from astrid.core.session.paths import (
     session_path,
     sessions_dir,
 )
-from astrid.core.task.events import EVENTS_FILENAME
+from astrid.core.events import EVENTS_FILENAME
 
 # NOTE: ``_list_session_files`` is a pinned monkeypatch seam (the contract
 # patches ``session_cli._list_session_files``). The two ``cmd_sessions_*``

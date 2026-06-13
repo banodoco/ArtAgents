@@ -1165,6 +1165,64 @@ def test_arnold_ack_session_payload_plan_mutation_appends_event_before_resume(
     assert captured["kwargs"]["human_input"] == payload
 
 
+def test_arnold_ack_session_plan_mutation_event_precedes_successor_compile(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("ASTRID_PROJECTS_ROOT", str(tmp_path / "projects"))
+    run_root = _seed_active_session_run(tmp_path)
+    _bind_session_writer(monkeypatch)
+    plan = TaskPlan(
+        plan_id="plan-session-mutation",
+        version=2,
+        steps=(
+            Step(id="review", adapter="manual", command="ack --project demo --stage review"),
+            Step(id="draft", adapter="local", command="echo draft"),
+        ),
+    )
+    initial_event = json.loads((run_root / "events.jsonl").read_text(encoding="utf-8").splitlines()[0])
+    initial_event["plan"] = plan.to_dict()
+    initial_event["plan_hash"] = "sha256:plan-from-ledger"
+    lines = (run_root / "events.jsonl").read_text(encoding="utf-8").splitlines()
+    lines[0] = json.dumps(initial_event)
+    (run_root / "events.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    (run_root / "plan.json").write_text(json.dumps(plan.to_dict()), encoding="utf-8")
+    _install_fake_pipeline(monkeypatch, cursor_stage="review")
+    cli = importlib.import_module("astrid.core.integrations.arnold.host.cli")
+    payload = {
+        "decision": {"action": "approve", "notes": "remove draft", "state_patch": {}},
+        "plan_mutation": {
+            "author": "agent:hype-editor-review",
+            "diff": {"op": "remove", "path": "draft"},
+        },
+    }
+
+    rc = cli.cmd_ack(
+        [
+            "--project",
+            "demo",
+            "--stage",
+            "review",
+            "--payload",
+            json.dumps(payload),
+        ]
+    )
+
+    stdout = capsys.readouterr().out
+    assert rc == 0
+    assert "acknowledged Arnold stage for project demo" in stdout
+    events = [
+        json.loads(line)
+        for line in (run_root / "events.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert [event["kind"] for event in events[-2:]] == ["plan_mutated", "segment_boundary"]
+    assert events[-2]["diff"] == {"op": "remove", "path": "draft"}
+    pipeline = json.loads((run_root / "pipeline.json").read_text(encoding="utf-8"))
+    assert [stage["stage_id"] for stage in pipeline["stages"]] == ["review", "halt"]
+    assert "draft" not in {stage["stage_id"] for stage in pipeline["stages"]}
+
+
 def test_we1_acceptance_rejects_regenerates_and_approves_with_distinct_iterations(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

@@ -13,7 +13,7 @@ from astrid.core.integrations.arnold.host.compat import (
     read_resume_cursor,
 )
 from astrid.core.integrations.arnold.host.envelope import project_runtime_envelope
-from astrid.core.task.events import EVENTS_FILENAME, read_events
+from astrid.core.events import EVENTS_FILENAME, read_events
 from astrid.core.task.plan import TaskPlan, load_plan
 from astrid.core.task.plan.verbs import apply_mutations
 
@@ -236,7 +236,7 @@ def _resolve_run_root(
 
 
 def _hash_plan(plan: TaskPlan) -> str:
-    from astrid.core.task.events import canonical_event_json
+    from astrid.core.events import canonical_event_json
     import hashlib
 
     payload = canonical_event_json(plan.to_dict()).encode("utf-8")

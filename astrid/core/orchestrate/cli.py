@@ -22,9 +22,8 @@ from typing import Optional
 
 from astrid.core.contracts.errors import AstridError
 from astrid.core.pack import DEFAULT_PACKS_ROOT
-from astrid.core.task.events import read_events
-from astrid.core.task.normalize import dump_events_jsonl, normalize_events
-from astrid.core.task.plan import (
+from astrid.core.events import read_events
+from astrid.core.plan import (
     RepeatForEach,
     RepeatUntil,
     TaskPlan,
@@ -35,6 +34,7 @@ from astrid.core.task.plan import (
     load_plan,
     parse_from_ref,
 )
+from astrid.core.task.normalize import dump_events_jsonl, normalize_events
 
 from .compile import (
     _qualified_split,

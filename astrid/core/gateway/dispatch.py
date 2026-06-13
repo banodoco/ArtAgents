@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from importlib import import_module
+import logging
 import subprocess
 import sys
 from pathlib import Path
@@ -12,6 +14,9 @@ from astrid.core.contracts.errors import AstridError
 
 _ALIAS_SUNSET_VERSION = "0.3.0"
 _LIFECYCLE_ENGINES = frozenset({"task", "arnold"})
+_RELEASE_ID = "release-n"
+
+_logger = logging.getLogger(__name__)
 
 
 def _dispatch(raw: list[str]) -> int:
@@ -88,8 +93,7 @@ def _dispatch_status(args: list[str]) -> int:
     if "--project" in args or any(arg.startswith("--project=") for arg in args):
         engine, stripped_args = _extract_lifecycle_engine(args)
         if engine == "arnold":
-            from astrid.core.integrations.arnold.host import cli as arnold_cli
-
+            arnold_cli = _load_arnold_host_cli()
             return int(arnold_cli.cmd_status(stripped_args))
         from astrid.core.task.lifecycle import cmd_status
 
@@ -99,8 +103,12 @@ def _dispatch_status(args: list[str]) -> int:
     return int(_session_cli.cmd_status(parsed))
 
 
-def _extract_lifecycle_engine(args: list[str]) -> tuple[str, list[str]]:
-    engine = "task"
+def _extract_lifecycle_engine(
+    args: list[str],
+    *,
+    default_engine: str = "task",
+) -> tuple[str, list[str]]:
+    engine = default_engine
     stripped: list[str] = []
     index = 0
 
@@ -136,9 +144,43 @@ def _extract_lifecycle_engine(args: list[str]) -> tuple[str, list[str]]:
     return engine, stripped
 
 
+def _emit_fallback_engine_task_warning(
+    verb: str,
+    stripped_args: list[str],
+) -> None:
+    project = _extract_project_from_args(stripped_args)
+    _logger.warning(
+        "FALLBACK_ENGINE_TASK verb=%s project=%s argv=%s release=%s",
+        verb,
+        project,
+        stripped_args,
+        _RELEASE_ID,
+    )
+
+
+def _extract_project_from_args(args: list[str]) -> str | None:
+    """Extract --project value from stripped args, or None."""
+    for i, arg in enumerate(args):
+        if arg == "--project" and i + 1 < len(args):
+            return args[i + 1]
+        if arg.startswith("--project="):
+            return arg.partition("=")[2]
+    return None
+
+
+def _load_arnold_host_cli() -> Any:
+    return import_module("astrid.core.integrations.arnold.host.cli")
+
+
 def _dispatch_lifecycle(command: str) -> Any:
     def _handler(args: list[str]) -> int:
-        engine, stripped_args = _extract_lifecycle_engine(args)
+        default_engine = "arnold" if command in {"cmd_start", "cmd_next", "cmd_ack", "cmd_abort"} else "task"
+        engine, stripped_args = _extract_lifecycle_engine(
+            args,
+            default_engine=default_engine,
+        )
+        if engine == "task" and default_engine == "arnold":
+            _emit_fallback_engine_task_warning(command, stripped_args)
         if engine == "arnold":
             if command == "cmd_skip":
                 raise AstridError(
@@ -147,8 +189,7 @@ def _dispatch_lifecycle(command: str) -> Any:
                     recovery_command="astrid skip --engine task ...",
                     state_snapshot={"args": args, "command": command},
                 )
-            from astrid.core.integrations.arnold.host import cli as arnold_cli
-
+            arnold_cli = _load_arnold_host_cli()
             return int(getattr(arnold_cli, command)(stripped_args))
         from astrid.core.task import lifecycle
 
@@ -158,15 +199,27 @@ def _dispatch_lifecycle(command: str) -> Any:
 
 
 def _dispatch_claim(args: list[str]) -> int:
+    """Dispatch ``astrid claim`` (task-only verb)."""
+    engine, stripped_args = _extract_lifecycle_engine(args, default_engine="task")
+    if engine == "arnold":
+        _reject_arnold_for_task_only_verb("claim", args)
+    _emit_task_only_verb_deprecated_warning("claim", stripped_args)
+
     from astrid.core.task.claim import cmd_claim
 
-    return cmd_claim(args)
+    return cmd_claim(stripped_args)
 
 
 def _dispatch_unclaim(args: list[str]) -> int:
+    """Dispatch ``astrid unclaim`` (task-only verb)."""
+    engine, stripped_args = _extract_lifecycle_engine(args, default_engine="task")
+    if engine == "arnold":
+        _reject_arnold_for_task_only_verb("unclaim", args)
+    _emit_task_only_verb_deprecated_warning("unclaim", stripped_args)
+
     from astrid.core.task.claim import cmd_unclaim
 
-    return cmd_unclaim(args)
+    return cmd_unclaim(stripped_args)
 
 
 def _dispatch_publish(args: list[str]) -> int:
@@ -369,9 +422,46 @@ def _dispatch_sessions(args: list[str]) -> int:
     return 2
 
 
+def _emit_task_only_verb_deprecated_warning(
+    verb: str,
+    stripped_args: list[str],
+) -> None:
+    """Emit TASK_ONLY_VERB_DEPRECATED for hardcoded task-only verbs."""
+    project = _extract_project_from_args(stripped_args)
+    _logger.warning(
+        "TASK_ONLY_VERB_DEPRECATED verb=%s project=%s argv=%s release=%s",
+        verb,
+        project,
+        stripped_args,
+        _RELEASE_ID,
+    )
+
+
+def _reject_arnold_for_task_only_verb(
+    verb: str,
+    args: list[str],
+    *,
+    recovery_command: str | None = None,
+) -> None:
+    """Raise AstridError when ``--engine arnold`` is used with a task-only verb."""
+    if recovery_command is None:
+        recovery_command = f"astrid {verb} --engine task ..."
+    raise AstridError(
+        f"'astrid {verb}' does not support '--engine arnold'",
+        valid_options=["task"],
+        recovery_command=recovery_command,
+        state_snapshot={"args": args, "verb": verb},
+    )
+
+
 def _dispatch_runs(args: list[str]) -> int:
     """Dispatch ``astrid runs {ls,show,artifacts,trace,cost,gc}`` sub-verbs."""
     import argparse
+
+    engine, stripped_args = _extract_lifecycle_engine(args, default_engine="task")
+    if engine == "arnold":
+        _reject_arnold_for_task_only_verb("runs", args)
+    _emit_task_only_verb_deprecated_warning("runs", stripped_args)
 
     from astrid.core.task.lifecycle import cmd_runs_ls
     from astrid.core.task.run.audit import (
@@ -390,51 +480,76 @@ def _dispatch_runs(args: list[str]) -> int:
     sub.add_parser("trace").set_defaults(handler=cmd_run_trace)
     sub.add_parser("cost").set_defaults(handler=cmd_run_cost)
     sub.add_parser("gc").set_defaults(handler=cmd_runs_gc)
-    parsed, tail = parser.parse_known_args(args)
+    parsed, tail = parser.parse_known_args(stripped_args)
     return int(parsed.handler(tail))
 
 
 def _dispatch_run(args: list[str]) -> int:
     """Deprecated alias for ``astrid runs``. Delegates to ``_dispatch_runs``."""
+    engine, stripped_args = _extract_lifecycle_engine(args, default_engine="task")
+    if engine == "arnold":
+        _reject_arnold_for_task_only_verb("run", args)
     _warn_deprecated_alias(alias="run", replacement="runs")
-    return _dispatch_runs(args)
+    _emit_task_only_verb_deprecated_warning("run", stripped_args)
+    return _dispatch_runs(stripped_args)
 
 
 def _dispatch_step(args: list[str]) -> int:
-    """Dispatch ``astrid step {retry-fetch}`` sub-verbs."""
+    """Dispatch ``astrid step {retry-fetch}`` sub-verbs (task-only verb)."""
     import argparse
+
+    engine, stripped_args = _extract_lifecycle_engine(args, default_engine="task")
+    if engine == "arnold":
+        _reject_arnold_for_task_only_verb("step", args)
+    _emit_task_only_verb_deprecated_warning("step", stripped_args)
 
     from astrid.core.task.lifecycle import cmd_step_retry_fetch
 
     parser = argparse.ArgumentParser(prog="astrid step")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("retry-fetch").set_defaults(handler=cmd_step_retry_fetch)
-    parsed, tail = parser.parse_known_args(args)
+    parsed, tail = parser.parse_known_args(stripped_args)
     return int(parsed.handler(tail))
 
 
 def _dispatch_hook(args: list[str]) -> int:
+    """Dispatch ``astrid hook {stop}`` sub-verbs (task-only verb)."""
     import argparse
+
+    engine, stripped_args = _extract_lifecycle_engine(args, default_engine="task")
+    if engine == "arnold":
+        _reject_arnold_for_task_only_verb("hook", args)
+    _emit_task_only_verb_deprecated_warning("hook", stripped_args)
 
     from astrid.core.task.hook import cmd_hook_stop
 
     parser = argparse.ArgumentParser(prog="astrid hook")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("stop").set_defaults(handler=cmd_hook_stop)
-    parsed, tail = parser.parse_known_args(args)
+    parsed, tail = parser.parse_known_args(stripped_args)
     return int(parsed.handler(tail))
 
 
 def _dispatch_plan_verbs(args: list[str]) -> int:
-    """Delegate plan sub-verbs to plan_verbs.cmd_plan (T8/T17)."""
+    """Delegate plan sub-verbs to plan_verbs.cmd_plan (task-only verb)."""
+    engine, stripped_args = _extract_lifecycle_engine(args, default_engine="task")
+    if engine == "arnold":
+        _reject_arnold_for_task_only_verb("plan", args)
+    _emit_task_only_verb_deprecated_warning("plan", stripped_args)
+
     from astrid.core.task.plan.verbs import cmd_plan
 
-    return cmd_plan(args)
+    return cmd_plan(stripped_args)
 
 
 def _dispatch_events(args: list[str]) -> int:
-    """Dispatch ``astrid events {verify,tail}`` top-level verbs (Sprint 5b)."""
+    """Dispatch ``astrid events {verify,tail}`` (task-only verb)."""
     import argparse
+
+    engine, stripped_args = _extract_lifecycle_engine(args, default_engine="task")
+    if engine == "arnold":
+        _reject_arnold_for_task_only_verb("events", args)
+    _emit_task_only_verb_deprecated_warning("events", stripped_args)
 
     from astrid.core.task.run.audit import cmd_events_tail, cmd_events_verify
 
@@ -442,7 +557,7 @@ def _dispatch_events(args: list[str]) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("verify").set_defaults(handler=cmd_events_verify)
     sub.add_parser("tail").set_defaults(handler=cmd_events_tail)
-    parsed, tail = parser.parse_known_args(args)
+    parsed, tail = parser.parse_known_args(stripped_args)
     return int(parsed.handler(tail))
 
 

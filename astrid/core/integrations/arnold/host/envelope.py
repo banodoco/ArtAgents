@@ -21,7 +21,7 @@ from astrid.core.foundation.project_paths import run_dir
 from astrid.core.io.cas import canonical_json_digest
 from astrid.core.project.current_run import read_current_run
 from astrid.core.session.lease import LeaseError, read_lease
-from astrid.core.task.events import EVENTS_FILENAME, read_events
+from astrid.core.events import EVENTS_FILENAME, read_events
 
 HOST_PLUGIN_ID = "astrid.arnold.host"
 HOST_PLUGIN_STATE_SCHEMA_VERSION = 1
