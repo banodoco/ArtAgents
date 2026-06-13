@@ -10,6 +10,8 @@ Covers:
 from __future__ import annotations
 
 import json
+import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -30,11 +32,21 @@ from tests.integrations.reigh.conftest import (  # type: ignore[import-not-found
     make_registry_json,
     make_timeline_id,
 )
+import astrid.core.integrations.reigh.local_bridge as local_bridge
 from astrid.core.integrations.reigh.local_bridge import (
     REIGH_LOCAL_EDITOR_ACTOR,
+    BRIDGE_AUDIO_PROXY_PROFILE_VERSION,
+    BRIDGE_VIDEO_PROXY_PROFILE_VERSION,
+    _build_ffmpeg_audio_proxy_command,
+    _build_ffmpeg_video_proxy_command,
     bridge_registry_path,
+    ensure_bridge_audio_proxy,
+    ensure_bridge_video_proxy,
     find_bridge_timeline,
+    get_bridge_audio_proxy_status,
+    get_bridge_video_proxy_status,
     list_bridge_project_dirs,
+    list_bridge_checkpoints,
     list_bridge_projects,
     list_bridge_timelines,
     load_bridge_registry,
@@ -369,6 +381,33 @@ class TestLocalBridgeHelpers:
         assert payload["config_version"] == 0
         assert payload["config"]["tracks"][0]["id"] == "V1"
 
+    def test_load_bridge_timeline_accepts_editor_shaped_legacy_assembly(self, tmp_bridge_root, seed_bridge_project) -> None:
+        ulid = "01JM4K5N7P0000000000000016"
+        project_dir = seed_bridge_project(slug="legacy-editor-shape", timeline_ulid=ulid)
+        (project_dir / "timelines" / ulid / "assembly.json").write_text(
+            json.dumps({
+                "theme": "banodoco-default",
+                "theme_overrides": {"visual": {"canvas": {"width": 1280, "height": 720}}},
+                "tracks": [{"id": "video_main", "kind": "visual", "label": "Video"}],
+                "clips": [{
+                    "id": "clip-1",
+                    "at": 0,
+                    "track": "video_main",
+                    "clipType": "media",
+                    "asset": "source-main",
+                    "from": 1,
+                    "to": 2,
+                }],
+            }),
+            encoding="utf-8",
+        )
+
+        payload = load_bridge_timeline("legacy-editor-shape", ulid, root=tmp_bridge_root)
+
+        assert payload is not None
+        assert payload["config"]["theme"] == "banodoco-default"
+        assert payload["config"]["clips"][0]["asset"] == "source-main"
+
     def test_save_bridge_timeline_appends_editor_save_event_regenerates_projection_and_returns_head_version(
         self,
         tmp_bridge_root,
@@ -430,6 +469,46 @@ class TestLocalBridgeHelpers:
         assert reloaded is not None
         assert reloaded["config"] == saved_config
         assert reloaded["config_version"] == head.version
+
+    def test_list_bridge_checkpoints_projects_config_events(
+        self,
+        tmp_bridge_root,
+        seed_bridge_project,
+    ) -> None:
+        ulid = "01JM4K5N7P000000000000001A"
+        timeline_id = "aaaaaaaa-bbbb-cccc-dddd-aaaaaaaaaaaa"
+        project_dir = seed_bridge_project(slug="history-bridge", timeline_ulid=ulid, timeline_id=timeline_id)
+        timeline_home = project_dir / "timelines" / ulid
+        backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=timeline_home)
+        backend.append_event(
+            timeline_id,
+            "timeline.created",
+            {"timeline_id": timeline_id, "slug": "primary", "name": "Primary"},
+            actor=REIGH_LOCAL_EDITOR_ACTOR,
+        )
+        first_config = {
+            "clips": [],
+            "tracks": [{"id": "V1", "kind": "visual", "label": "Video"}],
+        }
+        second_config = {
+            "clips": [{"id": "clip-1", "at": 12, "track": "V1", "clipType": "media", "asset": "asset-1"}],
+            "tracks": [{"id": "V1", "kind": "visual", "label": "Video"}],
+        }
+
+        save_bridge_timeline("history-bridge", ulid, first_config, root=tmp_bridge_root)
+        save_bridge_timeline("history-bridge", ulid, second_config, root=tmp_bridge_root)
+
+        checkpoints = list_bridge_checkpoints("history-bridge", ulid, root=tmp_bridge_root)
+
+        assert checkpoints is not None
+        assert [checkpoint["label"] for checkpoint in checkpoints] == [
+            "v3 timeline.config_replaced",
+            "v2 timeline.config_replaced",
+        ]
+        assert checkpoints[0]["timelineId"] == timeline_id
+        assert checkpoints[0]["triggerType"] == "manual"
+        assert checkpoints[0]["config"] == second_config
+        assert checkpoints[0]["event"]["kind"] == "timeline.config_replaced"
 
     def test_save_bridge_timeline_strips_editor_superset_top_level_keys(
         self,
@@ -589,32 +668,215 @@ class TestLocalBridgeHelpers:
 
         assert load_bridge_registry("missing-registry", ulid, root=tmp_bridge_root) == {"assets": {}}
 
-    def test_load_bridge_registry_keeps_relative_sources_entries_and_remote_urls(self, tmp_bridge_root, seed_bridge_project) -> None:
+    def test_load_bridge_registry_derives_missing_assets_from_single_source(self, tmp_bridge_root, seed_bridge_project) -> None:
         ulid = "01JM4K5N7P0000000000000019"
+        project_dir = seed_bridge_project(slug="derived-registry", timeline_ulid=ulid, with_registry=False)
+        timeline_home = project_dir / "timelines" / ulid
+        (timeline_home / "assembly.json").write_text(
+            json.dumps({
+                "tracks": [{"id": "V1", "kind": "visual", "label": "Video"}],
+                "clips": [
+                    {
+                        "id": "clip-1",
+                        "at": 0,
+                        "track": "V1",
+                        "clipType": "media",
+                        "asset": "source-main",
+                        "from": 0,
+                        "to": 1,
+                    },
+                    {
+                        "id": "clip-2",
+                        "at": 0,
+                        "track": "A1",
+                        "clipType": "media",
+                        "asset": "source-audio",
+                        "from": 0,
+                        "to": 1,
+                    },
+                ],
+            }),
+            encoding="utf-8",
+        )
+        sources_dir = project_dir / "sources"
+        sources_dir.mkdir(exist_ok=True)
+        (sources_dir / "only-source.mp4").write_bytes(b"fake")
+
+        registry = load_bridge_registry("derived-registry", ulid, root=tmp_bridge_root)
+        resolved = resolve_bridge_asset("derived-registry", ulid, "source-main", root=tmp_bridge_root)
+        sources_payload = json.loads((project_dir / "sources.json").read_text(encoding="utf-8"))
+
+        assert sorted(registry["assets"]) == ["source-audio", "source-main"]
+        assert registry["assets"]["source-main"]["file"] == "only-source.mp4"
+        assert registry["assets"]["source-audio"]["file"] == "only-source.mp4"
+        assert registry["assets"]["source-main"]["type"] == "video/mp4"
+        assert registry["assets"]["source-audio"]["type"] == "video/mp4"
+        assert registry["assets"]["source-main"]["sourceId"] == registry["assets"]["source-audio"]["sourceId"]
+        assert registry["assets"]["source-main"]["sourceVersion"] == registry["assets"]["source-audio"]["sourceVersion"]
+        assert resolved is not None
+        assert resolved.local_path == (sources_dir / "only-source.mp4").resolve()
+        assert resolved.source_id == registry["assets"]["source-main"]["sourceId"]
+        assert sources_payload["version"] == 1
+        assert list(sources_payload["sources"]) == [registry["assets"]["source-main"]["sourceId"]]
+        assert sources_payload["sources"][resolved.source_id]["assetIds"] == {
+            "source-audio": True,
+            "source-main": True,
+        }
+
+    def test_load_bridge_registry_keeps_relative_sources_entries_and_remote_urls(self, tmp_bridge_root, seed_bridge_project) -> None:
+        ulid = "01JM4K5N7P0000000000000021"
         project_dir = seed_bridge_project(
             slug="registry-assets",
             timeline_ulid=ulid,
             assets={
-                "local-video": {"file": "clips/demo.mp4", "type": "video/mp4"},
+                "local-video": {"file": "./clips/../clips/demo.mp4", "type": "video/mp4"},
+                "local-video-copy": {"file": "clips/demo.mp4", "type": "video/mp4"},
                 "remote-image": {"file": "https://cdn.example/cover.png", "type": "image/png"},
             },
         )
         media_path = project_dir / "sources" / "clips" / "demo.mp4"
         media_path.parent.mkdir(parents=True, exist_ok=True)
         media_path.write_bytes(b"demo-bytes")
+        registry_path = project_dir / "timelines" / ulid / "registry.json"
+        registry_path.write_text(
+            json.dumps({
+                "assets": {
+                    "local-video": {"file": "./clips/../clips/demo.mp4", "type": "video/mp4"},
+                    "local-video-copy": {"file": str(media_path.resolve()), "type": "video/mp4"},
+                    "remote-image": {"file": "https://cdn.example/cover.png", "type": "image/png"},
+                },
+            }),
+            encoding="utf-8",
+        )
 
         registry = load_bridge_registry("registry-assets", ulid, root=tmp_bridge_root)
         local_asset = resolve_bridge_asset("registry-assets", ulid, "local-video", root=tmp_bridge_root)
+        local_asset_copy = resolve_bridge_asset("registry-assets", ulid, "local-video-copy", root=tmp_bridge_root)
         remote_asset = resolve_bridge_asset("registry-assets", ulid, "remote-image", root=tmp_bridge_root)
+        sources_payload = json.loads((project_dir / "sources.json").read_text(encoding="utf-8"))
 
-        assert sorted(registry["assets"]) == ["local-video", "remote-image"]
+        assert sorted(registry["assets"]) == ["local-video", "local-video-copy", "remote-image"]
+        assert registry["assets"]["local-video"]["file"] == "clips/demo.mp4"
+        assert registry["assets"]["local-video-copy"]["file"] == "clips/demo.mp4"
+        assert registry["assets"]["local-video"]["sourceId"] == registry["assets"]["local-video-copy"]["sourceId"]
+        assert registry["assets"]["local-video"]["sourceVersion"] == registry["assets"]["local-video-copy"]["sourceVersion"]
         assert local_asset is not None
+        assert local_asset_copy is not None
         assert local_asset.source_kind == "local"
         assert local_asset.local_path == media_path.resolve()
         assert local_asset.size_bytes == len(b"demo-bytes")
+        assert local_asset.source_id == local_asset_copy.source_id
+        assert sources_payload["sources"][local_asset.source_id]["assetIds"] == {
+            "local-video": True,
+            "local-video-copy": True,
+        }
         assert remote_asset is not None
         assert remote_asset.source_kind == "http"
         assert remote_asset.url == "https://cdn.example/cover.png"
+
+    def test_load_bridge_registry_updates_source_version_when_local_metadata_changes(self, tmp_bridge_root, seed_bridge_project) -> None:
+        ulid = "01JM4K5N7P0000000000000029"
+        project_dir = seed_bridge_project(
+            slug="registry-source-version",
+            timeline_ulid=ulid,
+            assets={"local-video": {"file": "clips/demo.mp4", "type": "video/mp4"}},
+        )
+        media_path = project_dir / "sources" / "clips" / "demo.mp4"
+        media_path.parent.mkdir(parents=True, exist_ok=True)
+        media_path.write_bytes(b"demo-v1")
+
+        first_registry = load_bridge_registry("registry-source-version", ulid, root=tmp_bridge_root)
+        first_sources = json.loads((project_dir / "sources.json").read_text(encoding="utf-8"))
+
+        registry_path = project_dir / "timelines" / ulid / "registry.json"
+        registry_path.write_text(
+            json.dumps({
+                "assets": {
+                    "local-video": {
+                        "file": "clips/demo.mp4",
+                        "type": "video/mp4",
+                        "content_sha256": "a" * 64,
+                    },
+                },
+            }),
+            encoding="utf-8",
+        )
+        media_path.write_bytes(b"demo-v2-with-more-bytes")
+
+        second_registry = load_bridge_registry("registry-source-version", ulid, root=tmp_bridge_root)
+        second_sources = json.loads((project_dir / "sources.json").read_text(encoding="utf-8"))
+
+        source_id = first_registry["assets"]["local-video"]["sourceId"]
+        assert second_registry["assets"]["local-video"]["sourceId"] == source_id
+        assert second_registry["assets"]["local-video"]["sourceVersion"] != first_registry["assets"]["local-video"]["sourceVersion"]
+        assert first_sources["sources"][source_id]["sourceVersion"] != second_sources["sources"][source_id]["sourceVersion"]
+        assert second_sources["sources"][source_id]["content_sha256"] == "a" * 64
+
+    def test_load_bridge_registry_updates_source_version_when_audio_proxy_profile_changes(
+        self,
+        tmp_bridge_root,
+        seed_bridge_project,
+        monkeypatch,
+    ) -> None:
+        ulid = "01JM4K5N7P000000000000002A"
+        project_dir = seed_bridge_project(
+            slug="registry-profile-version",
+            timeline_ulid=ulid,
+            assets={"local-video": {"file": "clips/demo.mp4", "type": "video/mp4"}},
+        )
+        media_path = project_dir / "sources" / "clips" / "demo.mp4"
+        media_path.parent.mkdir(parents=True, exist_ok=True)
+        media_path.write_bytes(b"demo-v1")
+
+        first_registry = load_bridge_registry("registry-profile-version", ulid, root=tmp_bridge_root)
+        source_id = first_registry["assets"]["local-video"]["sourceId"]
+
+        monkeypatch.setattr(local_bridge, "BRIDGE_AUDIO_PROXY_PROFILE_VERSION", "aac-m4a-stereo-48000-128k-v2")
+
+        second_registry = load_bridge_registry("registry-profile-version", ulid, root=tmp_bridge_root)
+        second_sources = json.loads((project_dir / "sources.json").read_text(encoding="utf-8"))
+
+        assert second_registry["assets"]["local-video"]["sourceId"] == source_id
+        assert second_registry["assets"]["local-video"]["sourceVersion"] != first_registry["assets"]["local-video"]["sourceVersion"]
+        assert second_sources["sources"][source_id]["audioProxyProfileVersion"] == "aac-m4a-stereo-48000-128k-v2"
+
+    def test_load_bridge_registry_removes_stale_source_asset_mapping_when_asset_points_to_new_file(
+        self,
+        tmp_bridge_root,
+        seed_bridge_project,
+    ) -> None:
+        ulid = "01JM4K5N7P000000000000002B"
+        project_dir = seed_bridge_project(
+            slug="registry-remap",
+            timeline_ulid=ulid,
+            assets={"local-video": {"file": "clips/demo-a.mp4", "type": "video/mp4"}},
+        )
+        first_media_path = project_dir / "sources" / "clips" / "demo-a.mp4"
+        first_media_path.parent.mkdir(parents=True, exist_ok=True)
+        first_media_path.write_bytes(b"demo-a")
+        second_media_path = project_dir / "sources" / "clips" / "demo-b.mp4"
+        second_media_path.write_bytes(b"demo-b")
+
+        first_registry = load_bridge_registry("registry-remap", ulid, root=tmp_bridge_root)
+        first_source_id = first_registry["assets"]["local-video"]["sourceId"]
+
+        registry_path = project_dir / "timelines" / ulid / "registry.json"
+        registry_path.write_text(
+            json.dumps({
+                "assets": {
+                    "local-video": {"file": "clips/demo-b.mp4", "type": "video/mp4"},
+                },
+            }),
+            encoding="utf-8",
+        )
+
+        second_registry = load_bridge_registry("registry-remap", ulid, root=tmp_bridge_root)
+        second_sources = json.loads((project_dir / "sources.json").read_text(encoding="utf-8"))
+        second_source_id = second_registry["assets"]["local-video"]["sourceId"]
+
+        assert second_source_id != first_source_id
+        assert first_source_id not in second_sources["sources"]
+        assert second_sources["sources"][second_source_id]["assetIds"] == {"local-video": True}
 
     def test_load_bridge_registry_rejects_traversal_and_outside_root_assets(self, tmp_bridge_root, seed_bridge_project, tmp_path) -> None:
         ulid = "01JM4K5N7P0000000000000020"
@@ -661,6 +923,392 @@ class TestLocalBridgeHelpers:
         assert registry["assets"]["local-video"]["file"] == "clips/lazy.mp4"
         assert resolved is not None
         assert resolved.local_path == media_path.resolve()
+
+    def test_audio_proxy_ensure_builds_ffmpeg_command_and_records_ready_status(
+        self,
+        tmp_bridge_root,
+        seed_bridge_project,
+    ) -> None:
+        ulid = "01JM4K5N7P0000000000000030"
+        project_dir = seed_bridge_project(
+            slug="proxy-ready",
+            timeline_ulid=ulid,
+            assets={"local-video": {"file": "clips/ready.mp4", "type": "video/mp4"}},
+        )
+        media_path = project_dir / "sources" / "clips" / "ready.mp4"
+        media_path.parent.mkdir(parents=True, exist_ok=True)
+        media_path.write_bytes(b"video-source")
+        registry = load_bridge_registry("proxy-ready", ulid, root=tmp_bridge_root)
+        source_id = registry["assets"]["local-video"]["sourceId"]
+        source_version = registry["assets"]["local-video"]["sourceVersion"]
+        commands: list[list[str]] = []
+
+        def fake_runner(command) -> None:
+            commands.append(list(command))
+            Path(command[-1]).write_bytes(b"m4a-proxy")
+
+        result = ensure_bridge_audio_proxy(
+            "proxy-ready",
+            source_id,
+            root=tmp_bridge_root,
+            runner=fake_runner,
+            background=False,
+        )
+
+        assert result is not None
+        assert result.status == "ready"
+        assert result.source_version == source_version
+        assert result.output == f"proxies/{source_id}/{source_version}/audio.m4a"
+        assert result.output_path is not None
+        assert result.output_path.read_bytes() == b"m4a-proxy"
+        assert commands == [[
+            commands[0][0],
+            "-y",
+            "-i",
+            str(media_path.resolve()),
+            "-vn",
+            "-c:a",
+            "aac",
+            "-ac",
+            "2",
+            "-ar",
+            "48000",
+            "-b:a",
+            "128k",
+            "-movflags",
+            "+faststart",
+            str(result.output_path.with_name(".audio.tmp.m4a")),
+        ]]
+        assert commands[0][0].endswith("ffmpeg")
+
+        sources_payload = json.loads((project_dir / "sources.json").read_text(encoding="utf-8"))
+        proxy_meta = sources_payload["sources"][source_id]["audioProxy"]
+        assert proxy_meta["status"] == "ready"
+        assert proxy_meta["profileVersion"] == BRIDGE_AUDIO_PROXY_PROFILE_VERSION
+        assert proxy_meta["output"] == f"proxies/{source_id}/{source_version}/audio.m4a"
+        assert proxy_meta["createdAt"]
+        assert proxy_meta["updatedAt"]
+
+    def test_audio_proxy_ensure_transitions_missing_queued_and_generating(
+        self,
+        tmp_bridge_root,
+        seed_bridge_project,
+    ) -> None:
+        ulid = "01JM4K5N7P0000000000000031"
+        project_dir = seed_bridge_project(
+            slug="proxy-queued",
+            timeline_ulid=ulid,
+            assets={"local-video": {"file": "queued.mp4", "type": "video/mp4"}},
+        )
+        media_path = project_dir / "sources" / "queued.mp4"
+        media_path.write_bytes(b"video-source")
+        registry = load_bridge_registry("proxy-queued", ulid, root=tmp_bridge_root)
+        source_id = registry["assets"]["local-video"]["sourceId"]
+
+        initial = get_bridge_audio_proxy_status("proxy-queued", source_id, root=tmp_bridge_root)
+        assert initial is not None
+        assert initial.status == "missing"
+
+        gate = threading.Event()
+
+        def blocking_runner(command) -> None:
+            Path(command[-1]).write_bytes(b"queued-proxy")
+            gate.wait(timeout=5)
+
+        queued = ensure_bridge_audio_proxy(
+            "proxy-queued",
+            source_id,
+            root=tmp_bridge_root,
+            runner=blocking_runner,
+            background=True,
+        )
+
+        assert queued is not None
+        assert queued.status == "queued"
+        status = get_bridge_audio_proxy_status("proxy-queued", source_id, root=tmp_bridge_root)
+        for _ in range(100):
+            if status is not None and status.status == "generating":
+                break
+            time.sleep(0.01)
+            status = get_bridge_audio_proxy_status("proxy-queued", source_id, root=tmp_bridge_root)
+        assert status is not None
+        assert status.status == "generating"
+        gate.set()
+
+    def test_audio_proxy_ensure_records_failed_generation(
+        self,
+        tmp_bridge_root,
+        seed_bridge_project,
+    ) -> None:
+        ulid = "01JM4K5N7P0000000000000032"
+        project_dir = seed_bridge_project(
+            slug="proxy-failed",
+            timeline_ulid=ulid,
+            assets={"local-video": {"file": "failed.mp4", "type": "video/mp4"}},
+        )
+        (project_dir / "sources" / "failed.mp4").write_bytes(b"video-source")
+        registry = load_bridge_registry("proxy-failed", ulid, root=tmp_bridge_root)
+        source_id = registry["assets"]["local-video"]["sourceId"]
+
+        def failing_runner(_command) -> None:
+            raise RuntimeError("ffmpeg exploded")
+
+        result = ensure_bridge_audio_proxy(
+            "proxy-failed",
+            source_id,
+            root=tmp_bridge_root,
+            runner=failing_runner,
+            background=False,
+        )
+
+        assert result is not None
+        assert result.status == "failed"
+        assert result.error == "ffmpeg exploded"
+
+    def test_audio_proxy_ensure_rejects_non_video_sources(
+        self,
+        tmp_bridge_root,
+        seed_bridge_project,
+    ) -> None:
+        ulid = "01JM4K5N7P0000000000000033"
+        project_dir = seed_bridge_project(
+            slug="proxy-non-video",
+            timeline_ulid=ulid,
+            assets={"local-image": {"file": "cover.png", "type": "image/png"}},
+        )
+        (project_dir / "sources" / "cover.png").write_bytes(b"png")
+        registry = load_bridge_registry("proxy-non-video", ulid, root=tmp_bridge_root)
+        source_id = registry["assets"]["local-image"]["sourceId"]
+
+        result = ensure_bridge_audio_proxy(
+            "proxy-non-video",
+            source_id,
+            root=tmp_bridge_root,
+            background=False,
+        )
+
+        assert result is not None
+        assert result.status == "failed"
+        assert result.error == "source is not a video-backed local source"
+
+    def test_video_proxy_ensure_builds_ffmpeg_command_and_records_ready_status(
+        self,
+        tmp_bridge_root,
+        seed_bridge_project,
+    ) -> None:
+        ulid = "01JM4K5N7P0000000000000034"
+        project_dir = seed_bridge_project(
+            slug="video-proxy-ready",
+            timeline_ulid=ulid,
+            assets={"local-video": {"file": "clips/ready.mp4", "type": "video/mp4"}},
+        )
+        media_path = project_dir / "sources" / "clips" / "ready.mp4"
+        media_path.parent.mkdir(parents=True, exist_ok=True)
+        media_path.write_bytes(b"video-source")
+        registry = load_bridge_registry("video-proxy-ready", ulid, root=tmp_bridge_root)
+        source_id = registry["assets"]["local-video"]["sourceId"]
+        source_version = registry["assets"]["local-video"]["sourceVersion"]
+        commands: list[list[str]] = []
+
+        def fake_runner(command) -> None:
+            commands.append(list(command))
+            Path(command[-1]).write_bytes(b"mp4-proxy")
+
+        result = ensure_bridge_video_proxy(
+            "video-proxy-ready",
+            source_id,
+            root=tmp_bridge_root,
+            runner=fake_runner,
+            background=False,
+        )
+
+        assert result is not None
+        assert result.status == "ready"
+        assert result.source_version == source_version
+        assert result.output == f"proxies/{source_id}/{source_version}/preview-720p.mp4"
+        assert result.output_path is not None
+        assert result.output_path.read_bytes() == b"mp4-proxy"
+        assert commands == [[
+            commands[0][0],
+            "-y",
+            "-i",
+            str(media_path.resolve()),
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-vf",
+            "scale='min(1280,iw)':'min(720,ih)':force_original_aspect_ratio=decrease",
+            "-crf",
+            "23",
+            "-preset",
+            "veryfast",
+            "-an",
+            "-movflags",
+            "+faststart",
+            str(result.output_path.with_name(".preview-720p.tmp.mp4")),
+        ]]
+        assert commands[0][0].endswith("ffmpeg")
+
+        sources_payload = json.loads((project_dir / "sources.json").read_text(encoding="utf-8"))
+        proxy_meta = sources_payload["sources"][source_id]["videoProxy"]
+        assert proxy_meta["status"] == "ready"
+        assert proxy_meta["profileVersion"] == BRIDGE_VIDEO_PROXY_PROFILE_VERSION
+        assert proxy_meta["output"] == f"proxies/{source_id}/{source_version}/preview-720p.mp4"
+        assert proxy_meta["createdAt"]
+        assert proxy_meta["updatedAt"]
+
+    def test_video_proxy_ensure_is_idempotent_while_background_job_is_active(
+        self,
+        tmp_bridge_root,
+        seed_bridge_project,
+    ) -> None:
+        ulid = "01JM4K5N7P0000000000000035"
+        project_dir = seed_bridge_project(
+            slug="video-proxy-queued",
+            timeline_ulid=ulid,
+            assets={"local-video": {"file": "queued.mp4", "type": "video/mp4"}},
+        )
+        (project_dir / "sources" / "queued.mp4").write_bytes(b"video-source")
+        registry = load_bridge_registry("video-proxy-queued", ulid, root=tmp_bridge_root)
+        source_id = registry["assets"]["local-video"]["sourceId"]
+
+        initial = get_bridge_video_proxy_status("video-proxy-queued", source_id, root=tmp_bridge_root)
+        assert initial is not None
+        assert initial.status == "missing"
+
+        gate = threading.Event()
+        commands: list[list[str]] = []
+
+        def blocking_runner(command) -> None:
+            commands.append(list(command))
+            Path(command[-1]).write_bytes(b"queued-proxy")
+            gate.wait(timeout=5)
+
+        first = ensure_bridge_video_proxy(
+            "video-proxy-queued",
+            source_id,
+            root=tmp_bridge_root,
+            runner=blocking_runner,
+            background=True,
+        )
+        status = get_bridge_video_proxy_status("video-proxy-queued", source_id, root=tmp_bridge_root)
+        for _ in range(100):
+            if status is not None and status.status == "generating" and len(commands) == 1:
+                break
+            time.sleep(0.01)
+            status = get_bridge_video_proxy_status("video-proxy-queued", source_id, root=tmp_bridge_root)
+
+        second = ensure_bridge_video_proxy(
+            "video-proxy-queued",
+            source_id,
+            root=tmp_bridge_root,
+            runner=blocking_runner,
+            background=True,
+        )
+
+        assert first is not None
+        assert first.status == "queued"
+        assert second is not None
+        assert second.status == "generating"
+        assert len(commands) == 1
+
+        assert status is not None
+        assert status.status == "generating"
+
+        gate.set()
+
+        final_status = get_bridge_video_proxy_status("video-proxy-queued", source_id, root=tmp_bridge_root)
+        for _ in range(100):
+            if final_status is not None and final_status.status == "ready":
+                break
+            time.sleep(0.01)
+            final_status = get_bridge_video_proxy_status("video-proxy-queued", source_id, root=tmp_bridge_root)
+        assert final_status is not None
+        assert final_status.status == "ready"
+        assert len(commands) == 1
+
+    def test_video_proxy_ensure_records_failed_generation(
+        self,
+        tmp_bridge_root,
+        seed_bridge_project,
+    ) -> None:
+        ulid = "01JM4K5N7P0000000000000036"
+        project_dir = seed_bridge_project(
+            slug="video-proxy-failed",
+            timeline_ulid=ulid,
+            assets={"local-video": {"file": "failed.mp4", "type": "video/mp4"}},
+        )
+        (project_dir / "sources" / "failed.mp4").write_bytes(b"video-source")
+        registry = load_bridge_registry("video-proxy-failed", ulid, root=tmp_bridge_root)
+        source_id = registry["assets"]["local-video"]["sourceId"]
+
+        def failing_runner(_command) -> None:
+            raise RuntimeError("ffmpeg exploded")
+
+        result = ensure_bridge_video_proxy(
+            "video-proxy-failed",
+            source_id,
+            root=tmp_bridge_root,
+            runner=failing_runner,
+            background=False,
+        )
+
+        assert result is not None
+        assert result.status == "failed"
+        assert result.error == "ffmpeg exploded"
+
+    def test_build_ffmpeg_audio_proxy_command_uses_aac_m4a_profile(self, tmp_path) -> None:
+        source_path = tmp_path / "source.mp4"
+        output_path = tmp_path / "audio.m4a"
+
+        command = _build_ffmpeg_audio_proxy_command(source_path, output_path)
+
+        assert command[1:] == [
+            "-y",
+            "-i",
+            str(source_path),
+            "-vn",
+            "-c:a",
+            "aac",
+            "-ac",
+            "2",
+            "-ar",
+            "48000",
+            "-b:a",
+            "128k",
+            "-movflags",
+            "+faststart",
+            str(output_path),
+        ]
+        assert command[0].endswith("ffmpeg")
+
+    def test_build_ffmpeg_video_proxy_command_uses_h264_mp4_profile(self, tmp_path) -> None:
+        source_path = tmp_path / "source.mp4"
+        output_path = tmp_path / "video.mp4"
+
+        command = _build_ffmpeg_video_proxy_command(source_path, output_path)
+
+        assert command[1:] == [
+            "-y",
+            "-i",
+            str(source_path),
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-vf",
+            "scale='min(1280,iw)':'min(720,ih)':force_original_aspect_ratio=decrease",
+            "-crf",
+            "23",
+            "-preset",
+            "veryfast",
+            "-an",
+            "-movflags",
+            "+faststart",
+            str(output_path),
+        ]
+        assert command[0].endswith("ffmpeg")
 
     def test_resolve_timeline_target_keeps_identity_sidecar_uuid_for_slug_and_ulid_reads(self, tmp_bridge_root, seed_bridge_project) -> None:
         ulid = "01JM4K5N7P0000000000000022"

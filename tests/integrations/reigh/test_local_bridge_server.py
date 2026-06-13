@@ -8,6 +8,7 @@ from typing import Any, Generator
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
+from astrid.core.integrations.reigh.local_bridge import ensure_bridge_audio_proxy, save_bridge_timeline
 from astrid.core.integrations.reigh.local_bridge_server import create_local_bridge_server
 
 
@@ -99,6 +100,15 @@ def _get_bytes(
         return error.code, headers, body
 
 
+def _head(url: str) -> tuple[int, dict[str, str]]:
+    req = Request(url, method="HEAD")
+    try:
+        with urlopen(req) as response:  # noqa: S310
+            return response.status, dict(response.headers)
+    except HTTPError as error:
+        return error.code, dict(error.headers)
+
+
 @contextmanager
 def running_server(projects_root: Path) -> Generator[str, None, None]:
     server = create_local_bridge_server(projects_root=projects_root)
@@ -162,6 +172,35 @@ def test_health_projects_timelines_and_timeline_endpoints(seed_bridge_project, t
     assert timeline["timeline_ulid"] == timeline_ulid
     assert timeline["slug"] == "intro-cut"
     assert timeline["config_version"] == 0  # event head version for empty event log
+
+
+def test_checkpoints_endpoint_returns_projected_config_history(seed_bridge_project, tmp_bridge_root: Path) -> None:
+    timeline_id = "11111111-1111-1111-1111-111111111112"
+    timeline_ulid = "01JM4K5N7P0000000000000098"
+    seed_bridge_project(
+        slug="history-talks",
+        timeline_ulid=timeline_ulid,
+        timeline_id=timeline_id,
+    )
+    config = {
+        "clips": [{"id": "clip-1", "at": 0, "track": "V1", "clipType": "media", "asset": "asset-1"}],
+        "tracks": [{"id": "V1", "kind": "visual", "label": "Video"}],
+    }
+    save_bridge_timeline("history-talks", timeline_id, config, root=tmp_bridge_root)
+
+    with running_server(tmp_bridge_root) as base_url:
+        status, payload = _get_json(
+            f"{base_url}/projects/history-talks/timelines/{timeline_id}/checkpoints",
+        )
+
+    assert status == 200
+    assert len(payload["checkpoints"]) == 1
+    checkpoint = payload["checkpoints"][0]
+    assert checkpoint["timelineId"] == timeline_id
+    assert checkpoint["triggerType"] == "manual"
+    assert checkpoint["label"] == "v1 timeline.config_replaced"
+    assert checkpoint["config"] == config
+    assert checkpoint["event"]["kind"] == "timeline.config_replaced"
 
 
 def test_server_returns_normal_http_errors_for_unknown_or_invalid_resources(
@@ -241,9 +280,47 @@ def test_asset_200_full_response_with_correct_headers(
 
     assert status == 200
     assert headers.get("Accept-Ranges") == "bytes"
+    assert headers.get("Cache-Control") == "private, no-cache"
+    assert headers.get("ETag")
+    assert headers.get("Last-Modified")
     assert headers.get("Content-Type") in ("video/mp4", "application/octet-stream")
     assert int(headers.get("Content-Length", "0")) == len(asset_content)
     assert body == asset_content
+
+
+def test_asset_head_response_with_media_headers(
+    seed_bridge_project, tmp_bridge_root: Path,
+) -> None:
+    timeline_id = "a0a0a0a0-a0a0-a0a0-a0a0-a0a0a0a0a0a0"
+    timeline_ulid = "01JM4K5N7P0000000000000A0A"
+    project_dir = seed_bridge_project(
+        slug="head-media-proj",
+        timeline_ulid=timeline_ulid,
+        timeline_id=timeline_id,
+        assets={},
+    )
+
+    sources_dir = project_dir / "sources"
+    sources_dir.mkdir(parents=True, exist_ok=True)
+    asset_content = b"head metadata only"
+    (sources_dir / "clip-head.mp4").write_bytes(asset_content)
+
+    registry_path = project_dir / "timelines" / timeline_ulid / "registry.json"
+    registry_path.write_text(
+        json.dumps({"assets": {"clip-head": {"file": "clip-head.mp4"}}}),
+        encoding="utf-8",
+    )
+
+    with running_server(tmp_bridge_root) as base_url:
+        url = f"{base_url}/projects/head-media-proj/timelines/{timeline_id}/assets/clip-head"
+        status, headers = _head(url)
+
+    assert status == 200
+    assert headers.get("Accept-Ranges") == "bytes"
+    assert headers.get("Cache-Control") == "private, no-cache"
+    assert headers.get("ETag")
+    assert headers.get("Last-Modified")
+    assert int(headers.get("Content-Length", "0")) == len(asset_content)
 
 
 def test_asset_206_byte_range(
@@ -278,8 +355,51 @@ def test_asset_206_byte_range(
 
     assert status == 206
     assert headers.get("Content-Range") == "bytes 5-14/26"
+    assert headers.get("Cache-Control") == "private, no-cache"
+    assert headers.get("ETag")
     assert int(headers.get("Content-Length", "0")) == 10
     assert body == b"FGHIJKLMNO"
+
+
+def test_asset_range_less_large_response_returns_initial_partial_chunk(
+    seed_bridge_project, tmp_bridge_root: Path, monkeypatch,
+) -> None:
+    """Large range-less asset fetches should not stream the whole source file."""
+    import astrid.core.integrations.reigh.local_bridge_server as bridge_server
+
+    monkeypatch.setattr(bridge_server, "_RANGELESS_FULL_BODY_LIMIT_BYTES", 20)
+    monkeypatch.setattr(bridge_server, "_RANGELESS_INITIAL_CHUNK_BYTES", 8)
+
+    timeline_id = "abababab-abab-abab-abab-abababababab"
+    timeline_ulid = "01JM4K5N7P0000000000000ABA"
+    project_dir = seed_bridge_project(
+        slug="large-media-proj",
+        timeline_ulid=timeline_ulid,
+        timeline_id=timeline_id,
+        assets={},
+    )
+
+    sources_dir = project_dir / "sources"
+    sources_dir.mkdir(parents=True, exist_ok=True)
+    asset_content = b"0123456789abcdefghijklmnopqrstuvwxyz"
+    (sources_dir / "large.mp4").write_bytes(asset_content)
+
+    registry_path = project_dir / "timelines" / timeline_ulid / "registry.json"
+    registry_path.write_text(
+        json.dumps({"assets": {"large": {"file": "large.mp4"}}}),
+        encoding="utf-8",
+    )
+
+    with running_server(tmp_bridge_root) as base_url:
+        url = f"{base_url}/projects/large-media-proj/timelines/{timeline_id}/assets/large"
+        status, headers, body = _get_bytes(url)
+
+    assert status == 206
+    assert headers.get("Accept-Ranges") == "bytes"
+    assert headers.get("Cache-Control") == "private, no-cache"
+    assert headers.get("Content-Range") == f"bytes 0-7/{len(asset_content)}"
+    assert int(headers.get("Content-Length", "0")) == 8
+    assert body == asset_content[:8]
 
 
 def test_asset_206_open_ended_range(
@@ -704,8 +824,9 @@ def test_cors_preflight_options_returns_204_with_cors_headers(
 
     assert status == 204
     assert headers.get("Access-Control-Allow-Origin") == "http://localhost:3000"
-    assert headers.get("Access-Control-Allow-Methods") == "GET, POST, PUT, OPTIONS"
-    assert headers.get("Access-Control-Allow-Headers") == "Content-Type"
+    assert headers.get("Access-Control-Allow-Methods") == "GET, HEAD, POST, PUT, OPTIONS"
+    assert headers.get("Access-Control-Allow-Headers") == "Content-Type, Range, If-None-Match, If-Modified-Since"
+    assert headers.get("Access-Control-Expose-Headers") == "Accept-Ranges, Content-Length, Content-Range, Content-Type, ETag, Last-Modified"
 
 
 def test_cors_preflight_no_origin_omits_cors_headers(
@@ -819,6 +940,184 @@ def test_asset_lookup_after_registry_write_sources_relative(
     assert asset_status == 200
     assert int(asset_headers.get("Content-Length", "0")) == len(asset_content)
     assert asset_body == asset_content
+
+
+def test_audio_proxy_endpoint_serves_ready_m4a_with_range_support(
+    seed_bridge_project, tmp_bridge_root: Path,
+) -> None:
+    timeline_id = "cccccccc-cccc-cccc-cccc-ccccccccccc3"
+    timeline_ulid = "01JM4K5N7P00000000000PRX1"
+    project_dir = seed_bridge_project(
+        slug="proxy-serve-proj",
+        timeline_ulid=timeline_ulid,
+        timeline_id=timeline_id,
+        assets={"clip": {"file": "clip.mp4", "type": "video/mp4"}},
+    )
+    (project_dir / "sources" / "clip.mp4").write_bytes(b"video-source")
+    with running_server(tmp_bridge_root) as base_url:
+        reg_status, registry = _get_json(
+            f"{base_url}/projects/proxy-serve-proj/timelines/{timeline_id}",
+        )
+        assert reg_status == 200
+        source_id = registry["registry"]["assets"]["clip"]["sourceId"]
+
+        def fake_runner(command) -> None:
+            Path(command[-1]).write_bytes(b"0123456789abcdef")
+
+        result = ensure_bridge_audio_proxy(
+            "proxy-serve-proj",
+            source_id,
+            root=tmp_bridge_root,
+            runner=fake_runner,
+            background=False,
+        )
+        assert result is not None
+        assert result.status == "ready"
+
+        url = f"{base_url}/projects/proxy-serve-proj/sources/{source_id}/audio-proxy"
+        full_status, full_headers, full_body = _get_bytes(url)
+        range_status, range_headers, range_body = _get_bytes(url, range_header="bytes=3-7")
+        head_status, head_headers = _head(url)
+
+    assert full_status == 200
+    assert full_headers.get("Content-Type") == "audio/mp4"
+    assert full_headers.get("Accept-Ranges") == "bytes"
+    assert full_body == b"0123456789abcdef"
+    assert range_status == 206
+    assert range_headers.get("Content-Type") == "audio/mp4"
+    assert range_headers.get("Content-Range") == "bytes 3-7/16"
+    assert range_body == b"34567"
+    assert head_status == 200
+    assert head_headers.get("Content-Type") == "audio/mp4"
+    assert int(head_headers.get("Content-Length", "0")) == 16
+
+
+def test_audio_proxy_endpoint_returns_status_json_without_original_fallback(
+    seed_bridge_project, tmp_bridge_root: Path,
+) -> None:
+    timeline_id = "dddddddd-dddd-dddd-dddd-dddddddddddd"
+    timeline_ulid = "01JM4K5N7P00000000000PRX2"
+    project_dir = seed_bridge_project(
+        slug="proxy-missing-proj",
+        timeline_ulid=timeline_ulid,
+        timeline_id=timeline_id,
+        assets={"clip": {"file": "large.mp4", "type": "video/mp4"}},
+    )
+    original_bytes = b"large-original-mp4-bytes"
+    (project_dir / "sources" / "large.mp4").write_bytes(original_bytes)
+
+    with running_server(tmp_bridge_root) as base_url:
+        timeline_status, timeline = _get_json(
+            f"{base_url}/projects/proxy-missing-proj/timelines/{timeline_id}",
+        )
+        assert timeline_status == 200
+        source_id = timeline["registry"]["assets"]["clip"]["sourceId"]
+        proxy_url = f"{base_url}/projects/proxy-missing-proj/sources/{source_id}/audio-proxy"
+        proxy_status, proxy_headers, proxy_body = _get_bytes(proxy_url)
+        payload = json.loads(proxy_body.decode("utf-8"))
+
+    assert proxy_status == 200
+    assert proxy_headers.get("Content-Type") == "application/json"
+    assert payload["status"] == "missing"
+    assert proxy_body != original_bytes
+
+
+def test_audio_proxy_ensure_endpoint_returns_queued_status_without_blocking(
+    seed_bridge_project, tmp_bridge_root: Path, monkeypatch,
+) -> None:
+    timeline_id = "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"
+    timeline_ulid = "01JM4K5N7P00000000000PRX3"
+    project_dir = seed_bridge_project(
+        slug="proxy-ensure-proj",
+        timeline_ulid=timeline_ulid,
+        timeline_id=timeline_id,
+        assets={"clip": {"file": "clip.mp4", "type": "video/mp4"}},
+    )
+    (project_dir / "sources" / "clip.mp4").write_bytes(b"video-source")
+
+    called: list[bool] = []
+
+    def fake_ensure(project_slug, source_id, *, root=None, background=True):
+        called.append(background)
+        from astrid.core.integrations.reigh.local_bridge import BridgeAudioProxyResult
+
+        return BridgeAudioProxyResult(
+            source_id=source_id,
+            source_version="v1",
+            status="queued",
+            profile_version="aac-m4a-stereo-48000-128k-v1",
+            output="proxies/local-source/v1/audio.m4a",
+        )
+
+    import astrid.core.integrations.reigh.local_bridge_server as bridge_server
+
+    monkeypatch.setattr(bridge_server, "ensure_bridge_audio_proxy", fake_ensure)
+
+    with running_server(tmp_bridge_root) as base_url:
+        timeline_status, timeline = _get_json(
+            f"{base_url}/projects/proxy-ensure-proj/timelines/{timeline_id}",
+        )
+        assert timeline_status == 200
+        source_id = timeline["registry"]["assets"]["clip"]["sourceId"]
+        status, payload = _post_json(
+            f"{base_url}/projects/proxy-ensure-proj/sources/{source_id}/audio-proxy/ensure",
+            {},
+        )
+
+    assert status == 200
+    assert called == [True]
+    assert payload["status"] == "queued"
+    assert payload["sourceId"] == source_id
+
+
+def test_video_proxy_ensure_endpoint_returns_queued_status_without_blocking(
+    seed_bridge_project, tmp_bridge_root: Path, monkeypatch,
+) -> None:
+    timeline_id = "ffffffff-ffff-ffff-ffff-ffffffffffff"
+    timeline_ulid = "01JM4K5N7P00000000000PRX4"
+    project_dir = seed_bridge_project(
+        slug="video-proxy-ensure-proj",
+        timeline_ulid=timeline_ulid,
+        timeline_id=timeline_id,
+        assets={"clip": {"file": "clip.mp4", "type": "video/mp4"}},
+    )
+    (project_dir / "sources" / "clip.mp4").write_bytes(b"video-source")
+
+    called: list[bool] = []
+
+    def fake_ensure(project_slug, source_id, *, root=None, background=True):
+        called.append(background)
+        from astrid.core.integrations.reigh.local_bridge import BridgeVideoProxyResult
+
+        return BridgeVideoProxyResult(
+            source_id=source_id,
+            source_version="v1",
+            status="queued",
+            profile_version="h264-mp4-720p-yuv420p-crf23-veryfast-v1",
+            output="proxies/local-source/v1/preview-720p.mp4",
+            output_path=None,
+            error=None,
+        )
+
+    import astrid.core.integrations.reigh.local_bridge_server as bridge_server
+
+    monkeypatch.setattr(bridge_server, "ensure_bridge_video_proxy", fake_ensure)
+
+    with running_server(tmp_bridge_root) as base_url:
+        timeline_status, timeline = _get_json(
+            f"{base_url}/projects/video-proxy-ensure-proj/timelines/{timeline_id}",
+        )
+        assert timeline_status == 200
+        source_id = timeline["registry"]["assets"]["clip"]["sourceId"]
+        status, payload = _post_json(
+            f"{base_url}/projects/video-proxy-ensure-proj/sources/{source_id}/video-proxy/ensure",
+            {},
+        )
+
+    assert status == 200
+    assert called == [True]
+    assert payload["status"] == "queued"
+    assert payload["sourceId"] == source_id
 
 
 # ---------------------------------------------------------------------------
