@@ -11,6 +11,26 @@
     ],
     [
       "astrid.core.execution",
+      "astrid.core.integrations"
+    ],
+    [
+      "astrid.core.execution",
+      "astrid.core.task"
+    ],
+    [
+      "astrid.core.gate",
+      "astrid.core.task"
+    ],
+    [
+      "astrid.core.integrations",
+      "astrid.core.orchestrate"
+    ],
+    [
+      "astrid.core.io",
+      "astrid.core.task"
+    ],
+    [
+      "astrid.core.plan",
       "astrid.core.task"
     ],
     [
@@ -35,10 +55,17 @@
       "astrid.core.adapter",
       "astrid.core.audit",
       "astrid.core.cli",
+      "astrid.core.cli_contract",
+      "astrid.core.command_render",
       "astrid.core.element",
+      "astrid.core.events",
       "astrid.core.execution",
+      "astrid.core.gate",
       "astrid.core.integrations",
+      "astrid.core.io",
+      "astrid.core.orchestrate",
       "astrid.core.pack",
+      "astrid.core.plan",
       "astrid.core.project",
       "astrid.core.registry",
       "astrid.core.runtime",
@@ -49,5 +76,5 @@
       "astrid.core.timeline"
     ]
   ],
-  "pair_count": 7
+  "pair_count": 12
 }

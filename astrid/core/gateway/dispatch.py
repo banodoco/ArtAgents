@@ -427,6 +427,8 @@ def _emit_task_only_verb_deprecated_warning(
     stripped_args: list[str],
 ) -> None:
     """Emit TASK_ONLY_VERB_DEPRECATED for hardcoded task-only verbs."""
+    # TODO(m5b): remove this compatibility warning after task-only lifecycle
+    # verbs finish moving behind explicit engine routing.
     project = _extract_project_from_args(stripped_args)
     _logger.warning(
         "TASK_ONLY_VERB_DEPRECATED verb=%s project=%s argv=%s release=%s",
