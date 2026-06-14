@@ -8,6 +8,7 @@ contract stays centralized and testable.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -310,7 +311,7 @@ def invocation_templates_from_compiled_pipeline(
     if not workflow_id:
         raise CompiledInvocationTemplateError("workflow_id must be non-empty")
 
-    stages = tuple(getattr(pipeline, "stages", ()) or ())
+    stages = _pipeline_stages(pipeline)
     if not stages:
         raise CompiledInvocationTemplateError(
             f"compiled pipeline for {workflow_id!r} has no stages"
@@ -368,6 +369,13 @@ def _stage_id(stage: Any) -> str | None:
         or getattr(stage, "id", None)
         or getattr(stage, "name", None)
     )
+
+
+def _pipeline_stages(pipeline: Any) -> tuple[Any, ...]:
+    stages = getattr(pipeline, "stages", ()) or ()
+    if isinstance(stages, Mapping):
+        return tuple(stages.values())
+    return tuple(stages)
 
 
 def _stage_metadata(stage: Any) -> dict[str, Any]:

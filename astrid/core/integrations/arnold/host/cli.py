@@ -18,7 +18,7 @@ import shutil
 import sys
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 
 def _parse_inputs(raw_inputs: list[str]) -> dict[str, str]:
@@ -500,10 +500,10 @@ def _start_validated_arnold_run(
         artifact_root=str(run_root),
         cas_project_dir=str(proj_root),
     )
-    if getattr(pipeline, "entry_stage_id", None) != getattr(shape, "entry_stage_id", None):
+    if _pipeline_entry_stage_id(pipeline) != getattr(shape, "entry_stage_id", None):
         raise RuntimeError(
             f"shape {workflow_id!r} built entry stage "
-            f"{getattr(pipeline, 'entry_stage_id', None)!r}, expected "
+            f"{_pipeline_entry_stage_id(pipeline)!r}, expected "
             f"{getattr(shape, 'entry_stage_id', None)!r}"
         )
     _resolve_start_invocation_templates(
@@ -593,23 +593,69 @@ def _generate_run_id() -> str:
     return "arnold-" + uuid.uuid4().hex[:12]
 
 
+def _pipeline_entry_stage_id(pipeline: Any) -> str | None:
+    entry = getattr(pipeline, "entry_stage_id", None)
+    if isinstance(entry, str) and entry:
+        return entry
+    entry = getattr(pipeline, "entry", None)
+    return entry if isinstance(entry, str) and entry else None
+
+
+def _iter_pipeline_stages(pipeline: Any) -> tuple[Any, ...]:
+    raw_stages = getattr(pipeline, "stages", ()) or ()
+    if isinstance(raw_stages, Mapping):
+        return tuple(raw_stages.values())
+    return tuple(raw_stages)
+
+
+def _stage_id(stage: Any) -> str | None:
+    value = getattr(stage, "stage_id", None)
+    if isinstance(value, str) and value:
+        return value
+    value = getattr(stage, "name", None)
+    return value if isinstance(value, str) and value else None
+
+
+def _stage_label(stage: Any) -> str | None:
+    value = getattr(stage, "label", None)
+    if isinstance(value, str) and value:
+        return value
+    value = getattr(stage, "name", None)
+    return value if isinstance(value, str) and value else None
+
+
 def _pipeline_manifest(pipeline: Any) -> dict[str, Any]:
     from astrid.core.integrations.arnold.host.builder import edge_manifest_entry
 
     stages = []
-    for stage in tuple(getattr(pipeline, "stages", ()) or ()):
+    pipeline_stages = _iter_pipeline_stages(pipeline)
+    for stage in pipeline_stages:
         stages.append(
             {
-                "stage_id": getattr(stage, "stage_id", None),
-                "label": getattr(stage, "label", None),
+                "stage_id": _stage_id(stage),
+                "label": _stage_label(stage),
                 "metadata": dict(getattr(stage, "metadata", {}) or {}),
             }
         )
     edges = []
-    for edge in tuple(getattr(pipeline, "edges", ()) or ()):
+    raw_edges = tuple(getattr(pipeline, "edges", ()) or ())
+    if not raw_edges:
+        raw_edges = tuple(
+            (stage, edge)
+            for stage in pipeline_stages
+            for edge in tuple(getattr(stage, "edges", ()) or ())
+        )
+    for raw_edge in raw_edges:
+        source_stage = None
+        edge = raw_edge
+        if isinstance(raw_edge, tuple) and len(raw_edge) == 2:
+            source_stage, edge = raw_edge
+        source = getattr(edge, "source", None)
+        if source is None and source_stage is not None:
+            source = _stage_id(source_stage)
         edges.append(
             edge_manifest_entry(
-                source=getattr(edge, "source", None),
+                source=source,
                 target=getattr(edge, "target", None),
                 label=getattr(edge, "label", None),
                 source_port=getattr(edge, "source_port", None),
@@ -620,7 +666,7 @@ def _pipeline_manifest(pipeline: Any) -> dict[str, Any]:
             )
         )
     return {
-        "entry_stage_id": getattr(pipeline, "entry_stage_id", None),
+        "entry_stage_id": _pipeline_entry_stage_id(pipeline),
         "stages": stages,
         "edges": edges,
     }

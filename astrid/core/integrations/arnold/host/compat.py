@@ -23,7 +23,7 @@ from __future__ import annotations
 import importlib
 import inspect
 from dataclasses import is_dataclass
-from typing import Any
+from typing import Any, get_type_hints
 
 _REQUIRED_SYMBOLS = (
     "RuntimeEnvelope",
@@ -47,6 +47,7 @@ _REQUIRED_SYMBOLS = (
 )
 
 _OPTIONAL_SYMBOLS = (
+    "Pipeline",
     "EvidenceArtifactRef",
     "Provenance",
     "StepResult",
@@ -71,10 +72,18 @@ def _has_field(obj: Any, field_name: str) -> bool:
 def _field_type(obj: Any, field_name: str) -> Any:
     dataclass_fields = getattr(obj, "__dataclass_fields__", {})
     if field_name in dataclass_fields:
-        return dataclass_fields[field_name].type
+        try:
+            hints = get_type_hints(obj)
+        except (NameError, TypeError):
+            hints = {}
+        return hints.get(field_name, dataclass_fields[field_name].type)
     annotations = getattr(obj, "__annotations__", {})
     if field_name in annotations:
-        return annotations[field_name]
+        try:
+            hints = get_type_hints(obj)
+        except (NameError, TypeError):
+            hints = {}
+        return hints.get(field_name, annotations[field_name])
     value = getattr(obj, field_name, None)
     return None if value is None else type(value)
 

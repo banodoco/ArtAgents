@@ -19,7 +19,30 @@ Design constraints:
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from typing import Any
+
+
+class _HostNoopStep:
+    """Minimal Step-compatible object for host-managed static graph stages."""
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+        self.kind = "host"
+
+    def run(self, ctx: Any) -> Any:
+        return None
+
+
+def _join_noop(results: list[Any], ctx: Any) -> Any:
+    return results
+
+
+@dataclass
+class _PipelineAssembly:
+    stages: list[Any] = field(default_factory=list)
+    edges: list[Any] = field(default_factory=list)
+    entry_stage_id: str | None = None
 
 
 def normalize_edge_metadata(metadata: Any) -> dict[str, Any]:
@@ -94,6 +117,16 @@ def build_stage(
         },
         {
             "name": stage_id,
+            "step": _HostNoopStep(stage_id),
+            "label": label,
+            "invocation": invocation,
+            "suspension": suspension,
+            "metadata": kwargs_meta,
+            **({"decision_vocabulary": tuple(decision_vocabulary)} if decision_vocabulary is not None else {}),
+            **({"loop_condition": loop_condition} if loop_condition is not None else {}),
+        },
+        {
+            "name": stage_id,
             "label": label,
             "invocation": invocation,
             "suspension": suspension,
@@ -146,6 +179,13 @@ def build_parallel_stage(
     """
     kwargs_meta = dict(metadata or {})
     for candidate in (
+        {
+            "name": stage_id,
+            "steps": tuple(sub_stages),
+            "join": _join_noop,
+            "label": label,
+            "metadata": kwargs_meta,
+        },
         {
             "stage_id": stage_id,
             "label": label,
@@ -303,6 +343,44 @@ def builder_set_entry_stage(builder: Any, stage_id: str) -> None:
     raise TypeError("PipelineBuilder does not support entry-stage selection")
 
 
+def create_pipeline(pipeline_type: type[Any]) -> Any:
+    """Create a mutable pipeline assembly for conformance helpers."""
+    return _PipelineAssembly()
+
+
+def add_stage(pipeline: Any, stage: Any) -> None:
+    """Add *stage* to a mutable pipeline assembly."""
+    stages = getattr(pipeline, "stages", None)
+    if isinstance(stages, list):
+        stages.append(stage)
+        if getattr(pipeline, "entry_stage_id", None) is None:
+            pipeline.entry_stage_id = getattr(stage, "stage_id", None)
+        return
+    if isinstance(stages, dict):
+        stage_id = getattr(stage, "stage_id", getattr(stage, "name", None))
+        if stage_id is not None:
+            stages[stage_id] = stage
+            return
+    builder_add_stage(pipeline, stage)
+
+
+def add_edge(pipeline: Any, edge: Any) -> None:
+    """Add *edge* to a mutable pipeline assembly."""
+    edges = getattr(pipeline, "edges", None)
+    if isinstance(edges, list):
+        edges.append(edge)
+        return
+    builder_add_edge(pipeline, edge)
+
+
+def finalize_pipeline(pipeline: Any) -> Any:
+    """Finalize a mutable pipeline assembly or builder-like object."""
+    build = getattr(pipeline, "build", None)
+    if callable(build):
+        return build()
+    return pipeline
+
+
 def builder_finalize(builder: Any) -> Any:
     """Finalize *builder* into a built pipeline.
 
@@ -320,10 +398,14 @@ __all__ = [
     "build_edge",
     "build_parallel_stage",
     "build_stage",
+    "add_edge",
+    "add_stage",
     "builder_add_edge",
     "builder_add_stage",
     "builder_finalize",
     "builder_set_entry_stage",
+    "create_pipeline",
     "edge_manifest_entry",
+    "finalize_pipeline",
     "normalize_edge_metadata",
 ]

@@ -231,6 +231,45 @@ class DoctorSetupTest(unittest.TestCase):
         self.assertFalse(check.required)
         self.assertIn("runpod-lifecycle", check.detail)
 
+    def test_dependency_audit_treats_missing_arnold_parent_as_optional(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "astrid").mkdir()
+            (root / "astrid" / "app.py").write_text("from arnold.pipeline import Stage\n", encoding="utf-8")
+            (root / "pyproject.toml").write_text(
+                "\n".join(
+                    [
+                        "[project]",
+                        'name = "tmp"',
+                        'version = "0.0.0"',
+                        "dependencies = [",
+                        '  "filelock>=3.13",',
+                        "]",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            real_find_spec = doctor.importlib.util.find_spec
+
+            def fake_find_spec(name: str):
+                if name == "arnold.pipeline":
+                    raise ModuleNotFoundError("No module named 'arnold'")
+                if name == "arnold":
+                    return None
+                return real_find_spec(name)
+
+            with mock.patch.object(doctor.importlib.util, "find_spec", side_effect=fake_find_spec), mock.patch.object(
+                doctor.importlib.metadata,
+                "packages_distributions",
+                return_value={"filelock": ["filelock"]},
+            ):
+                check = doctor._check_dependency_audit(repo_root=root, optional_missing_is_ok=True)
+
+        self.assertEqual(check.status, "ok")
+        self.assertFalse(check.required)
+        self.assertIn("arnold missing", check.detail)
+
     def test_doctor_repairs_confidently_dead_project_run_records(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             projects_root = Path(tmp)
