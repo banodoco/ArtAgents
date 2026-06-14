@@ -1471,6 +1471,50 @@ class RecoveryAndErasureSchemaTest(unittest.TestCase):
         self.assertEqual(restored.kind, "timeline.config_replaced")
         self.assertIsInstance(restored.payload, TimelineConfigReplacedPayload)
 
+    def test_timeline_config_replaced_preserves_editor_save_source(self) -> None:
+        event = TimelineEvent.new(
+            timeline_id=self.tid,
+            ts="2026-05-21T12:00:00Z",
+            actor=self.actor,
+            kind="timeline.config_replaced",
+            payload={
+                "config": {"tracks": [], "clips": []},
+                "source": "editor_save",
+            },
+        )
+
+        self.assertIsInstance(event.payload, TimelineConfigReplacedPayload)
+        assert isinstance(event.payload, TimelineConfigReplacedPayload)
+        self.assertEqual(event.payload.source, "editor_save")
+        restored = TimelineEvent.from_dict(event.to_json_obj())
+        self.assertIsInstance(restored.payload, TimelineConfigReplacedPayload)
+        assert isinstance(restored.payload, TimelineConfigReplacedPayload)
+        self.assertEqual(restored.payload.source, "editor_save")
+
+    def test_timeline_asset_registry_replaced_preserves_editor_save_source(self) -> None:
+        event = TimelineEvent.new(
+            timeline_id=self.tid,
+            ts="2026-05-21T12:00:00Z",
+            actor=self.actor,
+            kind="timeline.asset_registry_replaced",
+            payload={
+                "registry": {
+                    "assets": {
+                        "intro": {
+                            "file": "intro.mp4",
+                            "type": "video/mp4",
+                        },
+                    },
+                },
+                "source": "editor_save",
+            },
+        )
+
+        self.assertEqual(event.kind, "timeline.asset_registry_replaced")
+        restored = TimelineEvent.from_dict(event.to_json_obj())
+        self.assertEqual(restored.kind, "timeline.asset_registry_replaced")
+        self.assertEqual(restored.payload.to_json_obj()["source"], "editor_save")
+
     def test_timeline_config_replaced_rejects_wrappers_and_legacy_keys(self) -> None:
         invalid_configs = [
             {"schema_version": 1, "assembly": {"tracks": [], "clips": []}},

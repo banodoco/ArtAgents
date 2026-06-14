@@ -92,6 +92,7 @@ class TimelineImportedPayload:
 @dataclass(frozen=True)
 class TimelineConfigReplacedPayload:
     config: dict[str, Any]
+    source: str | None = None
 
     def __post_init__(self) -> None:
         try:
@@ -99,6 +100,28 @@ class TimelineConfigReplacedPayload:
         except Exception as exc:
             raise TimelineEventSchemaError(str(exc)) from exc
         object.__setattr__(self, "config", config)
+        if self.source is not None:
+            _require_nonempty_str(self.source, "payload.source")
 
     def to_json_obj(self) -> dict[str, Any]:
-        return {"config": deepcopy(self.config)}
+        payload: dict[str, Any] = {"config": deepcopy(self.config)}
+        if self.source is not None:
+            payload["source"] = self.source
+        return payload
+
+
+@dataclass(frozen=True)
+class TimelineAssetRegistryReplacedPayload:
+    registry: dict[str, Any]
+    source: str | None = None
+
+    def __post_init__(self) -> None:
+        _validate_jsonable(self.registry, "payload.registry")
+        if self.source is not None:
+            _require_nonempty_str(self.source, "payload.source")
+
+    def to_json_obj(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {"registry": deepcopy(self.registry)}
+        if self.source is not None:
+            payload["source"] = self.source
+        return payload

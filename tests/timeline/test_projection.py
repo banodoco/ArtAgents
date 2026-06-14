@@ -132,6 +132,7 @@ def test_every_event_kind_has_projection_classification() -> None:
     assert classify_projector_event_kind("timeline.recovered") == "validated_full_config_replacement"
     assert classify_projector_event_kind("arrangement.replaced") == "migration_only_legacy"
     assert classify_projector_event_kind("pool.asset_added") == "non_container_read_model"
+    assert classify_projector_event_kind("timeline.asset_registry_replaced") == "non_container_read_model"
     assert "migration_only_legacy" not in MATERIALIZER_ALLOWED_CLASSIFICATIONS
     assert "non_container_read_model" not in MATERIALIZER_ALLOWED_CLASSIFICATIONS
 
