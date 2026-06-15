@@ -26,6 +26,12 @@ from astrid.core.model_catalog.taxonomy import (
     Feature,
     GenerationTaxonomyRegistry,
 )
+from astrid.core.model_catalog.taxonomy import (
+    CANONICAL_IMAGE_MODES as CANONICAL_IMAGE_MODES,
+)
+from astrid.core.model_catalog.taxonomy import (
+    CANONICAL_VIDEO_MODES as CANONICAL_VIDEO_MODES,
+)
 
 # ---------------------------------------------------------------------------
 # Dataclasses
