@@ -1065,6 +1065,57 @@ class TestLocalBridgeHelpers:
         assert result.status == "failed"
         assert result.error == "ffmpeg exploded"
 
+    def test_audio_proxy_ensure_regenerates_stale_ready_proxy_for_current_source_version(
+        self,
+        tmp_bridge_root,
+        seed_bridge_project,
+    ) -> None:
+        ulid = "01JM4K5N7P0000000000000036"
+        project_dir = seed_bridge_project(
+            slug="proxy-stale",
+            timeline_ulid=ulid,
+            assets={"local-video": {"file": "stale.mp4", "type": "video/mp4"}},
+        )
+        (project_dir / "sources" / "stale.mp4").write_bytes(b"video-source")
+        registry = load_bridge_registry("proxy-stale", ulid, root=tmp_bridge_root)
+        source_id = registry["assets"]["local-video"]["sourceId"]
+        source_version = registry["assets"]["local-video"]["sourceVersion"]
+        stale_version = "local-v1:stale-audio-version"
+        stale_output = project_dir / "proxies" / source_id / stale_version / "audio.m4a"
+        stale_output.parent.mkdir(parents=True, exist_ok=True)
+        stale_output.write_bytes(b"stale-m4a-proxy")
+
+        sources_payload = json.loads((project_dir / "sources.json").read_text(encoding="utf-8"))
+        sources_payload["sources"][source_id]["audioProxy"] = {
+            "status": "ready",
+            "profileVersion": BRIDGE_AUDIO_PROXY_PROFILE_VERSION,
+            "output": f"proxies/{source_id}/{stale_version}/audio.m4a",
+            "createdAt": "2026-01-01T00:00:00Z",
+            "updatedAt": "2026-01-01T00:00:00Z",
+        }
+        (project_dir / "sources.json").write_text(json.dumps(sources_payload), encoding="utf-8")
+        commands: list[list[str]] = []
+
+        def fake_runner(command) -> None:
+            commands.append(list(command))
+            Path(command[-1]).write_bytes(b"fresh-m4a-proxy")
+
+        result = ensure_bridge_audio_proxy(
+            "proxy-stale",
+            source_id,
+            root=tmp_bridge_root,
+            runner=fake_runner,
+            background=False,
+        )
+
+        assert result is not None
+        assert result.status == "ready"
+        assert result.source_version == source_version
+        assert result.output == f"proxies/{source_id}/{source_version}/audio.m4a"
+        assert result.output_path is not None
+        assert result.output_path.read_bytes() == b"fresh-m4a-proxy"
+        assert len(commands) == 1
+
     def test_audio_proxy_ensure_rejects_non_video_sources(
         self,
         tmp_bridge_root,
@@ -1257,6 +1308,57 @@ class TestLocalBridgeHelpers:
         assert result is not None
         assert result.status == "failed"
         assert result.error == "ffmpeg exploded"
+
+    def test_video_proxy_ensure_regenerates_stale_ready_proxy_for_current_source_version(
+        self,
+        tmp_bridge_root,
+        seed_bridge_project,
+    ) -> None:
+        ulid = "01JM4K5N7P0000000000000037"
+        project_dir = seed_bridge_project(
+            slug="video-proxy-stale",
+            timeline_ulid=ulid,
+            assets={"local-video": {"file": "stale-video.mp4", "type": "video/mp4"}},
+        )
+        (project_dir / "sources" / "stale-video.mp4").write_bytes(b"video-source")
+        registry = load_bridge_registry("video-proxy-stale", ulid, root=tmp_bridge_root)
+        source_id = registry["assets"]["local-video"]["sourceId"]
+        source_version = registry["assets"]["local-video"]["sourceVersion"]
+        stale_version = "local-v1:stale-video-version"
+        stale_output = project_dir / "proxies" / source_id / stale_version / "preview-720p.mp4"
+        stale_output.parent.mkdir(parents=True, exist_ok=True)
+        stale_output.write_bytes(b"stale-mp4-proxy")
+
+        sources_payload = json.loads((project_dir / "sources.json").read_text(encoding="utf-8"))
+        sources_payload["sources"][source_id]["videoProxy"] = {
+            "status": "ready",
+            "profileVersion": BRIDGE_VIDEO_PROXY_PROFILE_VERSION,
+            "output": f"proxies/{source_id}/{stale_version}/preview-720p.mp4",
+            "createdAt": "2026-01-01T00:00:00Z",
+            "updatedAt": "2026-01-01T00:00:00Z",
+        }
+        (project_dir / "sources.json").write_text(json.dumps(sources_payload), encoding="utf-8")
+        commands: list[list[str]] = []
+
+        def fake_runner(command) -> None:
+            commands.append(list(command))
+            Path(command[-1]).write_bytes(b"fresh-mp4-proxy")
+
+        result = ensure_bridge_video_proxy(
+            "video-proxy-stale",
+            source_id,
+            root=tmp_bridge_root,
+            runner=fake_runner,
+            background=False,
+        )
+
+        assert result is not None
+        assert result.status == "ready"
+        assert result.source_version == source_version
+        assert result.output == f"proxies/{source_id}/{source_version}/preview-720p.mp4"
+        assert result.output_path is not None
+        assert result.output_path.read_bytes() == b"fresh-mp4-proxy"
+        assert len(commands) == 1
 
     def test_build_ffmpeg_audio_proxy_command_uses_aac_m4a_profile(self, tmp_path) -> None:
         source_path = tmp_path / "source.mp4"

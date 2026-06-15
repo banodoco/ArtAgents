@@ -551,7 +551,7 @@ def ensure_bridge_audio_proxy(
         return None
 
     current = _audio_proxy_result_from_source(project_slug, source_id, source_entry, root=root)
-    if current.status == "ready" and current.output_path is not None and current.output_path.is_file():
+    if _is_current_audio_proxy_ready(current):
         return current
 
     projects_root = resolve_bridge_projects_root(root=root)
@@ -680,7 +680,7 @@ def ensure_bridge_video_proxy(
         return None
 
     current = _video_proxy_result_from_source(project_slug, source_id, source_entry, root=root)
-    if current.status == "ready" and current.output_path is not None and current.output_path.is_file():
+    if _is_current_video_proxy_ready(current):
         return current
 
     projects_root = resolve_bridge_projects_root(root=root)
@@ -807,6 +807,30 @@ def _video_proxy_result_from_source(
         output=output,
         output_path=output_path,
         error=_coerce_non_empty_str(proxy_meta.get("error")),
+    )
+
+
+def _proxy_output_matches_source_version(output_path: Path | None, source_version: str | None) -> bool:
+    if output_path is None or source_version is None:
+        return False
+    return output_path.parent.name == source_version
+
+
+def _is_current_audio_proxy_ready(result: BridgeAudioProxyResult) -> bool:
+    return (
+        result.status == "ready"
+        and result.output_path is not None
+        and result.output_path.is_file()
+        and _proxy_output_matches_source_version(result.output_path, result.source_version)
+    )
+
+
+def _is_current_video_proxy_ready(result: BridgeVideoProxyResult) -> bool:
+    return (
+        result.status == "ready"
+        and result.output_path is not None
+        and result.output_path.is_file()
+        and _proxy_output_matches_source_version(result.output_path, result.source_version)
     )
 
 
