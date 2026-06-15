@@ -22,6 +22,7 @@ ROOT_FILE_ALLOWLIST = {
     ".env.example",
     ".gitignore",
     "LICENSE",
+    "Makefile",
     "README.md",
     "package.json",
     "pyproject.toml",
@@ -56,8 +57,12 @@ ROOT_GENERATED_PATTERNS = (
 # flagged. We match by path/name only; contents are never inspected.
 TRACKED_PATH_ALLOWLISTS = (
     ".env.example",
+    "astrid/core/util/credentials_scope.py",
     "astrid/core/util/secrets.py",
     "docs/assets/astrid-orchestration.png",
+    "tests/core/test_credentials_scope.py",
+    "tests/core/test_dataset_build_credentials_parity.py",
+    "tests/core/util/test_secrets.py",
     "tests/**/fixtures/**",
     "tests/fixtures/**",
 )
