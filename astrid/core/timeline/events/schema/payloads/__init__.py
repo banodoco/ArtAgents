@@ -33,6 +33,7 @@ from .clip import (
     ClipTextSetPayload,
 )
 from .config import (
+    TimelineAssetRegistryReplacedPayload,
     TimelineConfigReplacedPayload,
     TimelineCreatedPayload,
     TimelineDefaultSetPayload,
@@ -83,6 +84,7 @@ __all__ = [
     "ClipSwappedPayload",
     "ClipTextSetPayload",
     "TimelineConfigReplacedPayload",
+    "TimelineAssetRegistryReplacedPayload",
     "TimelineCreatedPayload",
     "TimelineDefaultSetPayload",
     "TimelineDeletedPayload",

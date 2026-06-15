@@ -7,7 +7,7 @@ Sprint 1 writer-boundary contract:
   session, performs any legacy active/current-run migration before writer-auth,
   reads the canonical lease, and carries the captured writer epoch into the
   locked append.
-* ``astrid.core.task.events`` stays a generic event transport layer. It does
+* ``astrid.core.events`` stays a generic event transport layer. It does
   not know about sessions or projects; production command code must not call
   raw append helpers directly for task-run events.
 * Missing or malformed canonical lease state is a hard writer-auth failure
@@ -58,7 +58,7 @@ from astrid.core.session.current_run_state import (
 )
 from astrid.core.session.model import Session, now_iso
 from astrid.core.session.paths import session_path
-from astrid.core.task.events import (
+from astrid.core.events import (
     NotWriterError,
     append_event_locked,
 )
@@ -69,7 +69,7 @@ class NoRunBoundError(Exception):
 
     Session-state condition. Distinct from the event-log CAS errors
     (StaleTailError / StaleEpochError / NotWriterError) which live in
-    :mod:`astrid.core.task.events`. Callers typically respond by either
+    :mod:`astrid.core.events`. Callers typically respond by either
     prompting the user to ``astrid start`` a run or surfacing the error.
     """
 
@@ -227,7 +227,7 @@ class WriterContext:
         # supply the current tail by reading it (unlocked) immediately
         # prior. If a concurrent appender slipped in, the under-lock tail
         # will differ and StaleTailError fires — exactly the apex contract.
-        from astrid.core.task.events import _peek_tail_hash  # local import
+        from astrid.core.events import _peek_tail_hash  # local import
 
         expected_prev = _peek_tail_hash(self.run_dir / "events.jsonl")
         return append_event_locked(

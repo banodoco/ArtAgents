@@ -2,7 +2,7 @@
 
 Authors construct task plans in Python using the helpers exported from
 ``astrid.core.orchestrate``. The DSL emits a JSON payload byte-shape-equivalent
-to the schema accepted by ``astrid.core.task.plan.load_plan``.
+to the schema accepted by ``astrid.core.plan.load_plan``.
 
 Construction-time guards are intentional: the typo trap on
 ``step.<missing_produces>``, sentinel-only attested rejection, the
@@ -20,7 +20,7 @@ import tempfile
 from dataclasses import dataclass
 from typing import Any, Callable, Optional, Tuple, Union
 
-from astrid.core.task.plan import (
+from astrid.core.plan import (
     TaskPlanError,
     _strip_astrid_prefix,
     is_legacy_repeat_until_condition,

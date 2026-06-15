@@ -34,8 +34,8 @@ from astrid.core.session.lease import (
     read_lease,
 )
 from astrid.core.session.model import Session
-from astrid.core.task.cli_contract import emit_lifecycle_json
-from astrid.core.task.events import EVENTS_FILENAME, read_events
+from astrid.core.cli_contract import emit_lifecycle_json
+from astrid.core.events import EVENTS_FILENAME, read_events
 from astrid.core.timeline import crud as timeline_crud
 from astrid.core.timeline.defaults import read_project_default
 from astrid.core.timeline.paths import find_timeline_slug_for_ulid

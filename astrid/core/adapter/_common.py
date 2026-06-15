@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 from astrid.core.adapter import RunContext
-from astrid.core.task.command_render import step_dir_for_context
+from astrid.core.command_render import step_dir_for_context
 from astrid.core.task.plan import CostEntry
 
 

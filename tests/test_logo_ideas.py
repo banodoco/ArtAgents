@@ -8,6 +8,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from astrid.core.threads.variants import VARIANT_SIDECAR_NAME
 from astrid.packs.video_editing.orchestrators.logo_ideas import run as logo_ideas
 from astrid.core.util.http import HttpClient
 from astrid.core.util import secrets
@@ -275,7 +276,13 @@ class DryRunSmokeTest(unittest.TestCase):
         self.assertEqual(plan["provider"], "gpt-image")
 
         manifest = json.loads((root / "logo-manifest.json").read_text())
+        prompts = json.loads((root / "prompts.json").read_text())
+        sidecar = json.loads((root / VARIANT_SIDECAR_NAME).read_text(encoding="utf-8"))
         self.assertEqual(len(manifest["candidates"]), 2)
+        self.assertEqual(
+            [item["candidate_id"] for item in prompts["prompts"]],
+            ["logo-001", "logo-002"],
+        )
         # Grid mode: every candidate references the SAME grid image at root.
         grid_path = manifest["grid"]["path"]
         self.assertTrue(grid_path.endswith("/grid.png"), grid_path)
@@ -285,6 +292,14 @@ class DryRunSmokeTest(unittest.TestCase):
             self.assertTrue(generated.get("placeholder"))
             self.assertEqual(generated["path"], grid_path)
             self.assertIn("grid_prompt", generated)
+        self.assertEqual(len(sidecar["artifacts"]), 1)
+        artifact = sidecar["artifacts"][0]
+        self.assertEqual(artifact["path"], grid_path)
+        self.assertEqual(artifact["variant_meta"]["candidate_id"], "grid")
+        self.assertEqual(
+            [item["candidate_id"] for item in artifact["variant_meta"]["concepts"]],
+            ["logo-001", "logo-002"],
+        )
 
     def test_dry_run_z_image_provider_writes_per_concept_artifacts(self):
         out_dir = self.make_tempdir() / "logos"
@@ -307,11 +322,25 @@ class DryRunSmokeTest(unittest.TestCase):
 
         root = out_dir.expanduser().resolve()
         manifest = json.loads((root / "logo-manifest.json").read_text())
+        sidecar = json.loads((root / VARIANT_SIDECAR_NAME).read_text(encoding="utf-8"))
         self.assertEqual(len(manifest["candidates"]), 2)
+        candidate_paths = []
         for candidate in manifest["candidates"]:
             generated = candidate["generated"]
             self.assertTrue(generated.get("placeholder"))
             self.assertIn("/images/", generated["path"])
+            candidate_paths.append(generated["path"])
+        self.assertEqual(manifest["grid"]["mode"], "composite")
+        self.assertTrue(str(manifest["grid"]["path"]).endswith("/grid.jpg"))
+        self.assertEqual(len(sidecar["artifacts"]), 2)
+        self.assertEqual(
+            [item["path"] for item in sidecar["artifacts"]],
+            candidate_paths,
+        )
+        self.assertEqual(
+            [item["variant_meta"]["candidate_id"] for item in sidecar["artifacts"]],
+            ["logo-001", "logo-002"],
+        )
 
 
 if __name__ == "__main__":

@@ -244,6 +244,7 @@ PROJECTOR_EVENT_CLASSIFICATION: dict[str, ProjectionKindClassification] = {
     "pool.asset_scored": "non_container_read_model",
     "arrangement.replaced": "migration_only_legacy",
     "timeline.config_replaced": "validated_full_config_replacement",
+    "timeline.asset_registry_replaced": "non_container_read_model",
 }
 
 MATERIALIZER_ALLOWED_CLASSIFICATIONS: frozenset[ProjectionKindClassification] = frozenset({
@@ -533,6 +534,7 @@ _ERASED_SAFE_KINDS: frozenset[str] = frozenset({
     "track.added", "track.removed",
     "audio.bound", "audio.unbound",
     "pool.asset_added", "pool.asset_removed", "pool.asset_scored",
+    "timeline.asset_registry_replaced",
 })
 
 

@@ -243,7 +243,13 @@ def test_start_builtin_canonical_orchestrators_ignore_stale_build_json_and_use_r
         assert consumes == expected_consumes
 
         plan_text = (proj_root / "plan.json").read_text(encoding="utf-8")
-        assert str(run_dir) in plan_text
+        # A5a: plans may use {produces_root}/{step_dir} placeholders instead of
+        # hardcoded absolute run_dir paths.  Either form confirms runtime inputs.
+        assert (
+            str(run_dir) in plan_text
+            or "{produces_root}" in plan_text
+            or "{step_dir}" in plan_text
+        )
         # Verify stale build content did NOT leak into the plan
         assert "STALE-" not in plan_text, (
             f"Plan for {qualified_id} contains stale build content: {plan_text[:200]}"

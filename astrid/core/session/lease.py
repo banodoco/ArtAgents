@@ -5,7 +5,7 @@ The lease lives at ``runs/<run_id>/lease.json`` with schema::
     {"writer_epoch": int, "attached_session_id": str | None, "plan_hash": str}
 
 The epoch is the fence: every event append CAS-checks it (see
-:func:`astrid.core.task.events.append_event_locked`), so a stale writer that
+:func:`astrid.core.events.append_event_locked`), so a stale writer that
 loses a takeover race is rejected at append time, not silently committed.
 
 Takeover/orphan-claim/release ALL acquire the same ``fcntl.flock(LOCK_EX)``
@@ -38,7 +38,7 @@ from typing import Any, Literal
 
 from astrid.core._shared.jsonio import write_json_atomic
 from astrid.core.session.constants import STUCK_NO_EVENT_SECONDS
-from astrid.core.task.events import (
+from astrid.core.events import (
     EVENTS_FILENAME,
     LEASE_FILENAME,
     append_event_to_locked_handle,

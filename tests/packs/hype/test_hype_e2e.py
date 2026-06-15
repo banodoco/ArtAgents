@@ -23,11 +23,11 @@ from pathlib import Path
 
 import pytest
 
+from astrid.core._shared.jsonio import read_json, write_json_atomic
 from astrid.core.execution.executor.cli import _parse_input_values
 from astrid.core.execution.executor.registry import load_default_registry as load_executor_registry
 from astrid.core.execution.executor.runner import ExecutorRunRequest, build_executor_command
 from astrid.core.project.current_run import write_current_run
-from astrid.core._shared.jsonio import read_json, write_json_atomic
 from astrid.core.project.project import create_project
 from astrid.core.session.binding import ASTRID_SESSION_ID_ENV
 from astrid.core.session.paths import session_path
@@ -295,6 +295,58 @@ def test_initial_plan_v2_emission(tmp_path: Path) -> None:
     assert review_step["repeat"]["on_exhaust"] == "fail"
 
 
+def test_runtime_plan_v2_uses_selected_steps_and_sentinel_produces(tmp_path: Path) -> None:
+    from astrid.packs.video_editing.orchestrators.hype.plan_template import build_plan_v2
+
+    run_dir = tmp_path / "runs" / "runtime-hype"
+    run_dir.mkdir(parents=True)
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"media")
+    brief = tmp_path / "brief.txt"
+    brief.write_text("make it sharp", encoding="utf-8")
+
+    plan = build_plan_v2(
+        python_exec="python3",
+        run_root=run_dir,
+        source=source,
+        brief=brief,
+        render=True,
+        skip=("quality_zones",),
+        from_step="pool_build",
+        max_editor_passes=1,
+        run_id="runtime-hype",
+    )
+
+    children = plan["steps"][0]["children"]
+    child_ids = [child["id"] for child in children]
+    assert child_ids == [
+        "pool_build",
+        "pool_merge",
+        "arrange",
+        "cut",
+        "refine",
+        "render",
+        "editor_review",
+        "validate",
+    ]
+    produces_by_id = {child["id"]: child.get("produces", {}) for child in children}
+    assert Path(produces_by_id["pool_build"]["pool"]["path"]).name == "pool.json"
+    assert Path(produces_by_id["arrange"]["arrangement"]["path"]).name == "arrangement.json"
+    assert Path(produces_by_id["cut"]["timeline"]["path"]).name == "hype.timeline.json"
+    assert Path(produces_by_id["render"]["video"]["path"]).name == "hype.mp4"
+    assert Path(produces_by_id["editor_review"]["editor_review"]["path"]).name == "editor_review.json"
+    assert Path(produces_by_id["validate"]["validation"]["path"]).name == "validation.json"
+    review = next(child for child in children if child["id"] == "editor_review")
+    assert review["adapter"] == "manual"
+    assert review["requires_ack"] is True
+    assert review["assignee"] == "any-human"
+    assert "astrid ack --engine arnold" in review["command"]
+    assert "--stage hype/editor_review" in review["command"]
+    assert "plan_mutation.diff" in review["instructions"]
+    assert "do not mutate the live Arnold graph" in review["instructions"]
+    assert review["repeat"]["max_iterations"] == 1
+
+
 def test_start_builtin_hype_emits_executable_task_run_and_dispatches_leaves(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -358,7 +410,8 @@ def test_start_builtin_hype_emits_executable_task_run_and_dispatches_leaves(
     assert events[0]["plan"]["steps"][0]["id"] == "hype"
 
     plan = load_plan(plan_path)
-    transcribe = plan.steps[0].children[0]  # type: ignore[index,union-attr]
+    assert plan.steps[0].children is not None
+    transcribe = next(child for child in plan.steps[0].children if child.id == "transcribe")
     rendered_transcribe = render_task_command(
         transcribe,
         slug=slug,
@@ -366,13 +419,10 @@ def test_start_builtin_hype_emits_executable_task_run_and_dispatches_leaves(
         project_root=projects_root / slug,
         plan_step_path=("hype", "transcribe"),
     )
-    assert rendered_transcribe.canonical_argv[:6] == (
+    assert rendered_transcribe.canonical_argv[:3] == (
         "python3",
         "-m",
-        "astrid",
-        "executors",
-        "run",
-        "editorial.transcribe",
+        "astrid.packs.editorial.executors.transcribe.run",
     )
     assert rendered_transcribe.task_env["ASTRID_TASK_PROJECT"] == slug
     assert rendered_transcribe.task_env["ASTRID_TASK_RUN_ID"] == "run-hype-start"
@@ -384,7 +434,7 @@ def test_start_builtin_hype_emits_executable_task_run_and_dispatches_leaves(
     )
     assert rc == 0, next_stderr
     assert "ASTRID_TASK_PROJECT=demo" in next_stdout
-    assert "python3 -m astrid executors run editorial.transcribe" in next_stdout
+    assert "python3 -m astrid.packs.editorial.executors.transcribe.run" in next_stdout
     assert "add --project" not in next_stdout
     assert "uses task env instead of a local --project" in next_stdout
 
@@ -411,12 +461,10 @@ def test_start_builtin_hype_emits_executable_task_run_and_dispatches_leaves(
     assert str(dispatches[-1]["produces_root"]).endswith(
         "runs/run-hype-start/steps/hype/transcribe/v1/produces"
     )
-    transcribe_produces = run_dir / "steps" / "hype" / "transcribe" / "v1" / "produces"
-    transcribe_produces.mkdir(parents=True, exist_ok=True)
-    (transcribe_produces / "transcript.json").write_text("{}", encoding="utf-8")
+    (run_dir / "transcript.json").write_text("{}", encoding="utf-8")
     record_dispatch_complete(decision, returncode=0)
 
-    scenes = plan.steps[0].children[1]  # type: ignore[index,union-attr]
+    scenes = next(child for child in plan.steps[0].children if child.id == "scenes")
     rendered_scenes = render_task_command(
         scenes,
         slug=slug,
@@ -425,73 +473,22 @@ def test_start_builtin_hype_emits_executable_task_run_and_dispatches_leaves(
         plan_step_path=("hype", "scenes"),
     )
     decision = gate_command(slug, rendered_scenes.canonical_command, [], root=projects_root)
-    scenes_produces = run_dir / "steps" / "hype" / "scenes" / "v1" / "produces"
-    scenes_produces.mkdir(parents=True, exist_ok=True)
-    (scenes_produces / "scene_items.json").write_text(
-        json.dumps(["scene-0001"]), encoding="utf-8"
-    )
-    (scenes_produces / "scenes.json").write_text(
+    (run_dir / "scenes.json").write_text(
         json.dumps([{"id": "scene-0001"}]), encoding="utf-8"
     )
     record_dispatch_complete(decision, returncode=0)
 
-    cut = plan.steps[0].children[2]  # type: ignore[index,union-attr]
-    rendered_cut = render_task_command(
-        cut,
-        slug=slug,
-        run_id="run-hype-start",
-        project_root=projects_root / slug,
-        plan_step_path=("hype", "cut"),
-        item_id="scene-0001",
-    )
-    decision = gate_command(slug, rendered_cut.canonical_command, [], root=projects_root)
-    assert dispatches[-1]["path"] == ("hype", "cut")
-    assert dispatches[-1]["item_id"] == "scene-0001"
-    assert dispatches[-1]["env"]["ASTRID_TASK_ITEM_ID"] == "scene-0001"
-    assert "scene_id=scene-0001" in dispatches[-1]["argv"]
-    assert str(dispatches[-1]["produces_root"]).endswith(
-        "runs/run-hype-start/steps/hype/cut/v1/items/scene-0001/produces"
-    )
-    cut_item_produces = (
-        run_dir
-        / "steps"
-        / "hype"
-        / "cut"
-        / "v1"
-        / "items"
-        / "scene-0001"
-        / "produces"
-    )
-    cut_item_produces.mkdir(parents=True, exist_ok=True)
-    (cut_item_produces / "hype.timeline.json").write_text("{}", encoding="utf-8")
-    (cut_item_produces / "hype.assets.json").write_text("{}", encoding="utf-8")
-    record_dispatch_complete(decision, returncode=0)
-
-    events_after_cut = read_events(run_dir / "events.jsonl")
-    assert any(
-        event.get("kind") == "item_completed"
-        and event.get("plan_step_path") == ["hype", "cut"]
-        and event.get("item_id") == "scene-0001"
-        for event in events_after_cut
-    )
-    assert any(
-        event.get("kind") == "step_completed"
-        and event.get("plan_step_path") == ["hype", "cut"]
-        for event in events_after_cut
-    )
     rc, next_stdout, next_stderr = _capture_stdout_stderr(
         cmd_next,
         ["--project", slug],
         projects_root=projects_root,
     )
     assert rc == 0, next_stderr
-    assert "rendering.render" in next_stdout
+    assert "quality_zones" in next_stdout
 
     kinds = [event["kind"] for event in read_events(run_dir / "events.jsonl")]
-    assert kinds.count("step_dispatched") == 3
-    assert "for_each_expanded" in kinds
-    assert "item_started" in kinds
-    assert "item_completed" in kinds
+    assert kinds.count("step_dispatched") == 2
+    assert "step_completed" in kinds
 
 
 def test_generated_hype_render_command_parses_to_required_downstream_render_argv(

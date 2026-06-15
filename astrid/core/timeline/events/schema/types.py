@@ -32,6 +32,7 @@ from .payloads import (
     PoolAssetScoredPayload,
     ThemeOverriddenPayload,
     ThemeSetPayload,
+    TimelineAssetRegistryReplacedPayload,
     TimelineBranchedFromPayload,
     TimelineConfigReplacedPayload,
     TimelineCreatedPayload,
@@ -77,6 +78,7 @@ TimelineEventKind = Literal[
     "timeline.deleted",
     "timeline.imported",
     "timeline.config_replaced",
+    "timeline.asset_registry_replaced",
     "timeline.recovered",
     "timeline.reverted",
     "timeline.branched_from",
@@ -163,6 +165,7 @@ PayloadModel = (
     | TimelineDeletedPayload
     | TimelineImportedPayload
     | TimelineConfigReplacedPayload
+    | TimelineAssetRegistryReplacedPayload
     | TimelineRecoveredPayload
     | TimelineRevertedPayload
     | TimelineBranchedFromPayload
@@ -203,6 +206,7 @@ _PAYLOAD_TYPES: dict[str, type[PayloadModel]] = {
     "timeline.deleted": TimelineDeletedPayload,
     "timeline.imported": TimelineImportedPayload,
     "timeline.config_replaced": TimelineConfigReplacedPayload,
+    "timeline.asset_registry_replaced": TimelineAssetRegistryReplacedPayload,
     "timeline.recovered": TimelineRecoveredPayload,
     "timeline.reverted": TimelineRevertedPayload,
     "timeline.branched_from": TimelineBranchedFromPayload,

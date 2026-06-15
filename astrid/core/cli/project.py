@@ -218,7 +218,7 @@ def _cmd_project_cost(args: argparse.Namespace) -> int:
     _require_project_session(args.project)
 
     from astrid.core.foundation.project_paths import project_dir
-    from astrid.core.task.events import read_events
+    from astrid.core.events import read_events
     from astrid.core.task.run.audit import _cost_by_source
     from astrid.core.timeline.crud import list_timelines
 
@@ -468,7 +468,7 @@ def _cmd_project_export(args: argparse.Namespace) -> int:
 def _run_initial_plan_payload(events_path: Path) -> dict[str, object] | None:
     if not events_path.is_file():
         return None
-    from astrid.core.task.events import read_events
+    from astrid.core.events import read_events
 
     for event in read_events(events_path):
         if event.get("kind") == "plan_initialized" and isinstance(
@@ -500,7 +500,7 @@ def _project_selected_runs(
     *,
     include_aborted: bool,
 ) -> list[str]:
-    from astrid.core.task.events import read_events
+    from astrid.core.events import read_events
     from astrid.core.task.run.audit import _run_status
 
     selected: list[str] = []

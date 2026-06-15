@@ -384,39 +384,102 @@ def run_orchestrator(args: argparse.Namespace) -> int:
 
 
 def _execute_via_task_gate(slug: str, args: argparse.Namespace) -> int:
-    import subprocess as sp
+    """Advance through the task-gate plan by peeking at each step, dispatching
+    via ``gate_command`` with the step's rendered canonical command, and
+    waiting for the dispatched subprocess to complete.
+
+    Every dispatched step is a local-adapter subprocess that re-enters the
+    task gate through ``_run_step_subcommand``, which calls
+    ``record_dispatch_complete`` so the gate sees step completion on the
+    next iteration.
+    """
+    import os
+    import time
+
+    from astrid.core.foundation.project_paths import project_dir
+    from astrid.core.session.current_run_state import read_current_run_state
+    from astrid.core.command_render import render_task_command
+    from astrid.core.events import read_events
+    from astrid.core.task.gate import peek_current_step
+    from astrid.core.task.plan import load_plan
+    from astrid.core.task.plan.verbs import apply_mutations
+
+    active_run = read_current_run_state(slug)
+    if active_run is None:
+        raise AstridError(
+            f"no active run found for project {slug!r}",
+            recovery_command=f"astrid start --engine arnold --from-plan plan.json --project {slug}",
+        )
+
+    run_id: str = active_run["run_id"]
+    proj_root = project_dir(slug)
+    events_path = proj_root / "runs" / run_id / "events.jsonl"
 
     while True:
+        events = read_events(events_path)
+        base_plan = load_plan(proj_root / "plan.json")
+        plan = apply_mutations(base_plan, events)
+
+        peek = peek_current_step(
+            plan, events, slug,
+            project_root=proj_root,
+            run_id=run_id,
+        )
+
+        if peek.exhausted:
+            return 0
+
+        step = peek.step
+        path_tuple = peek.path_tuple
+
+        # Render the step's canonical command so it matches the
+        # task-gate's own rendering (same produces_root / step_dir).
+        rendered = render_task_command(
+            step,
+            slug=slug,
+            run_id=run_id,
+            project_root=proj_root,
+            plan_step_path=path_tuple,
+            iteration=peek.iteration,
+            item_id=peek.item_id,
+        )
+
         try:
             decision = task_gate.gate_command(
                 slug,
-                task_gate.command_for_argv(
-                    ["python3", "-m", "astrid", "thumbnail_maker", "--project", slug]
-                ),
-                ["thumbnail_maker", "--project", slug],
+                rendered.canonical_command,
+                list(rendered.canonical_argv),
                 reentry=True,
             )
         except task_gate.TaskRunGateError as exc:
             raise AstridError(
-                f"thumbnail_maker: gate error: {exc.reason}",
-                recovery_command="check project status with 'astrid status' and retry",
+                str(exc),
+                recovery_command=getattr(exc, "recovery", "check project state and retry"),
             ) from exc
 
         if not decision.active:
             return 0
 
-        if decision.command is None:
-            continue
-
-        print(f"thumbnail_maker: running step: {' '.join(decision.command)}", flush=True)
-        result = sp.run(decision.command, check=False)
-        if result.returncode != 0:
-            raise AstridError(
-                f"thumbnail_maker: step failed with returncode={result.returncode}",
-                recovery_command="inspect the failed step output and rerun with --verbose",
+        # The local adapter has spawned a subprocess.  Wait for it to
+        # exit so the reentry path can write step_completed before we
+        # peek at the next step.
+        if decision.pid:
+            print(
+                f"thumbnail_maker: waiting for pid={decision.pid} "
+                f"(step={step.id})",
+                flush=True,
             )
-
-    return 0
+            while True:
+                try:
+                    os.kill(decision.pid, 0)
+                    time.sleep(0.5)
+                except (ProcessLookupError, OSError):
+                    break
+        else:
+            # No PID means the adapter handled the step inline (e.g.
+            # a no-op or an already-satisfied produces check).  Give
+            # the filesystem a moment to settle.
+            time.sleep(0.1)
 
 
 # ---------------------------------------------------------------------------

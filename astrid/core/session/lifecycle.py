@@ -18,7 +18,7 @@ from astrid.core.session.lease import (
     mutate_lease_for_takeover,
     read_lease,
 )
-from astrid.core.task.events import EVENTS_FILENAME
+from astrid.core.events import EVENTS_FILENAME
 from astrid.core.threads.ids import generate_ulid
 
 from .model import Session, SessionRole, SessionStore, now_iso

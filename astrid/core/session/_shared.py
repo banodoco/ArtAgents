@@ -36,7 +36,7 @@ from astrid.core.session.model import (
     SessionStore,
 )
 from astrid.core.session.paths import sessions_dir
-from astrid.core.task.events import EVENTS_FILENAME
+from astrid.core.events import EVENTS_FILENAME
 from astrid.core.threads.ids import generate_ulid
 
 # ----- Templates --------------------------------------------------------

@@ -17,6 +17,12 @@ from .plan_template import (
     repeat_for_each_items,
     repeat_until,
 )
+from .pipeline import (
+    compile_folder_orchestrator,
+    compile_orchestrator_definition,
+    compile_orchestrator_manifest,
+    lower_orchestrator_definition,
+)
 from .registry import (
     OrchestratorRegistry,
     OrchestratorRegistryError,
@@ -72,9 +78,13 @@ __all__ = [
     "build_leaf_template",
     "build_plan_template",
     "build_step_command",
+    "compile_folder_orchestrator",
+    "compile_orchestrator_definition",
+    "compile_orchestrator_manifest",
     "cost_entry",
     "emit_plan_json",
     "file_output",
+    "lower_orchestrator_definition",
     "load_default_registry",
     "load_pack_orchestrators",
     "load_folder_orchestrator",

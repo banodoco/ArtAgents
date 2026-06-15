@@ -16,6 +16,7 @@ from astrid.core.verify import (
     json_schema,
 )
 
+from .compile import compile_to_path, compile_to_pipeline, dsl_to_pipeline
 from .dsl import (
     OrchestrateDefinitionError,
     attested,
@@ -33,6 +34,9 @@ __all__ = [
     "attested",
     "audio_duration_min",
     "code",
+    "compile_to_path",
+    "compile_to_pipeline",
+    "dsl_to_pipeline",
     "file_nonempty",
     "image_dimensions",
     "json_file",

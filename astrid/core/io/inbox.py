@@ -37,7 +37,7 @@ from pathlib import Path
 from astrid.core.foundation.project_paths import project_dir
 from astrid.core.project.current_run import clear_current_run, read_current_run
 from astrid.core.session.writer import writer_context_for_project
-from astrid.core.task.events import (
+from astrid.core.events import (
     make_cursor_rewind_event,
     make_item_skipped_event,
     make_run_aborted_event,

@@ -161,4 +161,5 @@ markers = [
     "hype_cut_invariants: standalone hype cut invariant coverage",
     "integration: tests that require external dependencies, heavyweight fixtures, or env prerequisites",
     "opt_in: tests that are explicitly opt-in and should never run in the default lane",
+    "real_arnold: conformance tests that require a real Arnold installation and are skipped otherwise",
 ]

@@ -128,7 +128,7 @@ from astrid.core.session.paths import (
     # session_path moved to cli_sessions
     sessions_dir,
 )
-from astrid.core.task.events import EVENTS_FILENAME, read_events
+from astrid.core.events import EVENTS_FILENAME, read_events
 
 # timeline_crud, read_project_default, find_timeline_slug_for_ulid moved to cli_status
 from astrid.core.threads.ids import generate_ulid

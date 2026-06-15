@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from astrid.core.session.lease import LeaseError, read_lease
-from astrid.core.task.events import ZERO_HASH, StaleTailError, append_event_locked, read_events
+from astrid.core.events import ZERO_HASH, StaleTailError, append_event_locked, read_events
 from astrid.core.util.time import utc_now_iso
 
 logger = logging.getLogger(__name__)

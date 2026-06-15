@@ -33,7 +33,7 @@ from astrid.core.task.env import (
     TASK_STEP_ID_ENV,
     child_subprocess_env,
 )
-from astrid.core.task.events import read_events
+from astrid.core.events import read_events
 from astrid.core.task.gate import (
     TaskRunGateError,
     gate_command,

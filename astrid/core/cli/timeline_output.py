@@ -17,7 +17,7 @@ from typing import Any
 
 from astrid.core.contracts.errors import AstridError
 from astrid.core.foundation.project_paths import project_dir
-from astrid.core.task.events import read_events
+from astrid.core.events import read_events
 from astrid.core.task.run.audit import _cost_by_source, _run_status
 from astrid.core.timeline import crud
 
@@ -140,7 +140,7 @@ def cmd_export(args: argparse.Namespace) -> int:
 def _run_initial_plan_payload(events_path: Path) -> dict[str, object] | None:
     if not events_path.is_file():
         return None
-    from astrid.core.task.events import read_events
+    from astrid.core.events import read_events
 
     for event in read_events(events_path):
         if event.get("kind") == "plan_initialized" and isinstance(

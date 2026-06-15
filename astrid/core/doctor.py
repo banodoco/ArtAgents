@@ -40,6 +40,7 @@ _IMPORT_SCAN_SKIP_DIRS = frozenset(
 )
 _LOCAL_IMPORT_PREFIXES = ("banodoco_timeline_schema", "vibecomfy")
 _OPTIONAL_PRIVATE_IMPORTS = {
+    "arnold": "arnold",
     "runpod_lifecycle": "runpod-lifecycle",
 }
 _IMPORT_TO_DISTRIBUTION_FALLBACKS = {
@@ -565,7 +566,10 @@ def _record_import(imports: dict[str, set[str]], module_name: str, relative: Pat
 def _is_local_import(import_name: str) -> bool:
     if any(import_name == prefix or import_name.startswith(f"{prefix}.") for prefix in _LOCAL_IMPORT_PREFIXES):
         return True
-    spec = importlib.util.find_spec(import_name) or importlib.util.find_spec(import_name.split(".", 1)[0])
+    try:
+        spec = importlib.util.find_spec(import_name) or importlib.util.find_spec(import_name.split(".", 1)[0])
+    except ModuleNotFoundError:
+        return False
     if spec is None:
         return False
     origin = _spec_origin(spec)
