@@ -25,9 +25,10 @@ back to ``service_role_key`` only when ``auth`` is omitted. The worker passes
 ``service_role_key``; the CLI / ``open_in_reigh`` should pass ``auth=("user_jwt",
 token)`` or ``auth=("pat", token)`` instead.
 
-This DataProvider prefers Astrid's append library for Python-owned saves when a
-service-role key is configured, while preserving the legacy blob-RPC fallback
-for environments that have not been migrated yet.
+This DataProvider prefers Astrid's append library for Python-owned worker saves
+when the caller explicitly supplies a service-role key, while preserving the
+legacy blob-RPC fallback for CLI/PAT writes and environments that have not been
+migrated yet.
 """
 
 from __future__ import annotations
@@ -133,7 +134,7 @@ class SupabaseDataProvider:
             force=force,
             timeout=self.timeout,
             asset_registry=asset_registry,
-            append_service_role_key=self.service_role_key,
+            append_service_role_key=service_role_key,
         )
 
     def load_asset_registry(

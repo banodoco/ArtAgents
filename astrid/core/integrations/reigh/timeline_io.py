@@ -293,9 +293,6 @@ def _resolve_append_service_role_key(
 ) -> str | None:
     if append_service_role_key:
         return append_service_role_key
-    scheme, token = write_auth
-    if scheme == "service_role":
-        return token
     return None
 
 
