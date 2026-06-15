@@ -27,6 +27,7 @@ ANIMATE_IMAGE_ID: str = "video_editing.animate_image"
 LOGO_IDEAS_ID: str = "video_editing.logo_ideas"
 VARY_GRID_ID: str = "video_editing.vary_grid"
 ITERATION_VIDEO_ID: str = "video_editing.iteration_video"
+EVENT_TALKS_ID: str = "video_editing.event_talks"
 
 WE_REFINE_IMAGE_ALIAS: str = "refine"
 WE_BEST_OF_4_ALIAS: str = "best4"
@@ -38,6 +39,7 @@ ANIMATE_IMAGE_ALIAS: str = "animate-image"
 LOGO_IDEAS_ALIAS: str = "logo-ideas"
 VARY_GRID_ALIAS: str = "vary-grid"
 ITERATION_VIDEO_ALIAS: str = "iteration-video"
+EVENT_TALKS_ALIAS: str = "event-talks"
 
 ANIMATE_IMAGE_EDIT_MODEL_ID: str = "openai/gpt-image-2/edit"
 ANIMATE_IMAGE_ANIMATE_MODEL_ID: str = "fal-ai/wan/v2.2-14b/animate/move"
@@ -171,6 +173,17 @@ _ITERATION_VIDEO_SPEC = _ShapeGraphSpec(
         "assemble-brief": "Assemble Brief",
         "render-video": "Render Video",
         "finalize-iteration": "Finalize Iteration",
+        "halt": "Halt",
+    },
+)
+
+_EVENT_TALKS_SPEC = _ShapeGraphSpec(
+    entry_stage_id="ados-sunday-template",
+    stage_labels={
+        "ados-sunday-template": "Ados Sunday Template",
+        "search-transcript": "Search Transcript",
+        "find-holding-screens": "Find Holding Screens",
+        "render": "Render",
         "halt": "Halt",
     },
 )
@@ -1765,6 +1778,36 @@ def build_iteration_video_pipeline(
     return lowering.build_pipeline(lowered, compat=compat)
 
 
+def build_event_talks_pipeline(
+    *,
+    state: dict[str, Any] | None = None,
+    project: str | None = None,
+    run_root: str | None = None,
+    artifact_root: str | None = None,
+    cas_project_dir: str | None = None,
+) -> Any:
+    """Build the canonical Event Talks pipeline via the authoring facade.
+
+    The four-step linear pipeline:
+
+        ados-sunday-template → search-transcript → find-holding-screens → render → halt
+
+    All steps use ``adapter: local`` — the pipeline is pure local ffmpeg/OCR/static
+    writes.  Cost is $0 for all steps (no LLM or RunPod calls).
+    """
+    from pathlib import Path
+
+    from astrid.packs.video_editing.orchestrators.event_talks.workflow import (
+        build_workflow as build_event_talks_workflow,
+    )
+
+    resolved_run_root = run_root or artifact_root or "/tmp/arnold-event-talks-run"
+    return build_event_talks_workflow(
+        python_exec="python3",
+        run_root=Path(resolved_run_root),
+    )
+
+
 SHAPE_DEFINITIONS: tuple[ShapeEntry, ...] = (
     ShapeEntry(
         workflow_id=WE_REFINE_IMAGE_ID,
@@ -1968,6 +2011,26 @@ SHAPE_DEFINITIONS: tuple[ShapeEntry, ...] = (
         entry_stage_id=_ITERATION_VIDEO_SPEC.entry_stage_id,
         stage_labels=dict(_ITERATION_VIDEO_SPEC.stage_labels),
         pipeline_builder=build_iteration_video_pipeline,
+    ),
+    ShapeEntry(
+        workflow_id=EVENT_TALKS_ID,
+        description=(
+            "Event Talks four-step linear pipeline: ados-sunday-template → "
+            "search-transcript → find-holding-screens → render. All steps use "
+            "adapter: local (pure ffmpeg/OCR/static writes, $0 cost, no LLM/RunPod)."
+        ),
+        cli_alias=EVENT_TALKS_ALIAS,
+        accepts_human_input=False,
+        metadata={
+            "kind": "video_editing",
+            "parallel_fan_out": 1,
+            "judge_required": False,
+            "compiled": True,
+            "loop_lowering": "linear_facade",
+        },
+        entry_stage_id=_EVENT_TALKS_SPEC.entry_stage_id,
+        stage_labels=dict(_EVENT_TALKS_SPEC.stage_labels),
+        pipeline_builder=build_event_talks_pipeline,
     ),
 )
 

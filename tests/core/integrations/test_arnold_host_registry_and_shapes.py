@@ -79,6 +79,7 @@ class _CheckpointOutcome:
 @dataclass(frozen=True)
 class _Suspension:
     resume_input_schema: dict[str, Any] | None = None
+    decision_routes: dict[str, str] | None = None
 
 
 @dataclass(frozen=True)
@@ -105,6 +106,8 @@ class _Stage:
     invocation: Any | None = None
     suspension: Any | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    decision_vocabulary: tuple[str, ...] = ("next",)
+    loop_condition: Any | None = None
 
 
 @dataclass(frozen=True)
@@ -263,7 +266,7 @@ def test_registry_snapshot_reads_only_arnold_projection_without_task_cursor_help
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    _install_fake_pipeline(monkeypatch, cursor_stage="review")
+    _install_fake_pipeline(monkeypatch, cursor_stage="per_item")
     project_root, run_root = _seed_project(tmp_path / "projects")
 
     monkeypatch.setattr(
@@ -291,14 +294,14 @@ def test_registry_snapshot_reads_only_arnold_projection_without_task_cursor_help
 
     snapshot = registry.snapshot_operation(
         project_slug="demo",
-        workflow_id="we.refine_image",
+        workflow_id="builtin.agent_probe",
         root=tmp_path / "projects",
     )
 
     assert snapshot.run_id == "run-123"
-    assert snapshot.next_stage_id == "review"
-    assert snapshot.next_stage_label == "Review"
-    assert snapshot.cursor == {"stage": "review"}
+    assert snapshot.next_stage_id == "per_item"
+    assert snapshot.next_stage_label == "Per Item"
+    assert snapshot.cursor == {"stage": "per_item"}
     assert snapshot.lease["writer_epoch"] == 7
     assert [event["hash"] for event in snapshot.events_tail] == [
         "sha256:111",
@@ -323,12 +326,12 @@ def test_registry_defaults_to_shape_entry_stage_when_resume_cursor_is_absent(
 
     stage_id, stage_label = registry.get_next_step(
         project_slug="demo",
-        workflow_id="we.refine_image",
+        workflow_id="builtin.agent_probe",
         root=tmp_path / "projects",
     )
 
-    assert stage_id == "generate"
-    assert stage_label == "Generate"
+    assert stage_id == "per_item"
+    assert stage_label == "Per Item"
 
 
 def test_build_refine_image_pipeline_has_expected_topology_and_metadata(
@@ -1677,3 +1680,123 @@ def test_iteration_video_shape_entry_in_registry(
     assert callable(entry.pipeline_builder)
     assert registry.resolve_alias("iteration-video") == "video_editing.iteration_video"
     assert registry.is_allowlisted("video_editing.iteration_video") is True
+
+
+@pytest.mark.parametrize(
+    ("builder_name", "entry_stage_id", "stage_ids"),
+    [
+        (
+            "build_training_dataset_build_pipeline",
+            "dataset-build",
+            ["dataset-build", "halt"],
+        ),
+        (
+            "build_training_run_pipeline",
+            "training-run",
+            ["training-run", "halt"],
+        ),
+        (
+            "build_event_talks_pipeline",
+            "ados-sunday-template",
+            [
+                "ados-sunday-template",
+                "search-transcript",
+                "find-holding-screens",
+                "render",
+                "halt",
+            ],
+        ),
+        (
+            "build_thumbnail_maker_pipeline",
+            "resolve-video",
+            [
+                "resolve-video",
+                "plan-evidence",
+                "discover-video-evidence",
+                "build-reference-pack",
+                "generate-thumbnails",
+                "halt",
+            ],
+        ),
+    ],
+)
+def test_plan_template_backed_shapes_lower_existing_task_plans(
+    monkeypatch: pytest.MonkeyPatch,
+    builder_name: str,
+    entry_stage_id: str,
+    stage_ids: list[str],
+) -> None:
+    _install_fake_pipeline(monkeypatch)
+
+    shapes_module = importlib.import_module("astrid.core.integrations.arnold.host.shapes")
+    builder = getattr(shapes_module, builder_name)
+    pipeline = builder(
+        state={},
+        project="demo",
+        run_root="/tmp/run-plan-backed",
+        artifact_root="/tmp/run-plan-backed",
+        cas_project_dir="/tmp/projects/demo",
+    )
+
+    assert pipeline.entry_stage_id == entry_stage_id
+    assert [stage.stage_id for stage in pipeline.stages] == stage_ids
+
+    for stage in pipeline.stages[:-1]:
+        assert stage.invocation is not None
+        adapter_config = stage.invocation.metadata["adapter_config"]
+        assert adapter_config["executor_id"].startswith("task.")
+        assert adapter_config["segment_id"]
+        assert adapter_config["run_root"] == "/tmp/run-plan-backed"
+
+
+def test_hype_shape_lowers_grouped_repeat_and_manual_review_task_plan(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_fake_pipeline(monkeypatch)
+
+    shapes_module = importlib.import_module("astrid.core.integrations.arnold.host.shapes")
+    pipeline = shapes_module.build_hype_pipeline(
+        state={},
+        project="demo",
+        run_root="/tmp/run-hype",
+        artifact_root="/tmp/run-hype",
+        cas_project_dir="/tmp/projects/demo",
+    )
+
+    assert pipeline.entry_stage_id == "hype/__enter__"
+    assert [stage.stage_id for stage in pipeline.stages] == [
+        "hype/__enter__",
+        "hype/transcribe",
+        "hype/scenes",
+        "hype/cut",
+        "hype/render",
+        "hype/editor_review",
+        "hype/validate",
+        "hype/__exit__",
+        "halt",
+    ]
+    assert {(edge.source, edge.target, edge.label) for edge in pipeline.edges} == {
+        ("hype/__enter__", "hype/transcribe", "next"),
+        ("hype/transcribe", "hype/scenes", "next"),
+        ("hype/scenes", "hype/cut", "next"),
+        ("hype/cut", "hype/render", "next"),
+        ("hype/render", "hype/editor_review", "next"),
+        ("hype/editor_review", "hype/editor_review", "repeat"),
+        ("hype/editor_review", "hype/validate", "next"),
+        ("hype/validate", "hype/__exit__", "next"),
+        ("hype/__exit__", "halt", "next"),
+    }
+
+    cut_stage = next(stage for stage in pipeline.stages if stage.stage_id == "hype/cut")
+    assert cut_stage.metadata["fan_out_shape"] is True
+    assert cut_stage.metadata["repeat_for_each"] == {
+        "kind": "for_each",
+        "items_source": "from",
+        "from_ref": "scenes.produces.scene_items",
+    }
+
+    review_stage = next(stage for stage in pipeline.stages if stage.stage_id == "hype/editor_review")
+    assert review_stage.metadata["manual"] is True
+    assert review_stage.metadata["requires_ack"] is True
+    assert review_stage.metadata["repeat_until"]["literal"] == "ship"
+    assert review_stage.suspension.resume_input_schema["required"] == ["decision"]

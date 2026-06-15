@@ -15,9 +15,10 @@ from typing import Any
 
 STEP_INVOCATION_KIND = "model"
 HOST_CONTROL_KINDS: frozenset[str] = frozenset(
-    {"pattern_select", "dynamic_fanout", "vote_judge", "halt"}
+    {"pattern_select", "dynamic_fanout", "vote_judge", "group_boundary", "halt"}
 )
 HUMAN_DECISION_ACTIONS: frozenset[str] = frozenset({"approve", "reject"})
+HUMAN_DECISION_ROUTES: dict[str, str] = {"approve": "next", "reject": "repeat"}
 HUMAN_RESUME_INPUT_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
@@ -402,6 +403,9 @@ def _control_kind(stage_id: str, metadata: dict[str, Any]) -> str | None:
     synthetic_kind = _string_value(metadata.get("synthetic_kind"))
     if synthetic_kind in HOST_CONTROL_KINDS:
         return synthetic_kind
+    group_boundary = _string_value(metadata.get("group_boundary"))
+    if group_boundary is not None:
+        return "group_boundary"
     if stage_id == "halt" or metadata.get("terminal") is True:
         return "halt"
     return None

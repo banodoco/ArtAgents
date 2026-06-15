@@ -66,6 +66,7 @@ class _CheckpointOutcome:
 @dataclass
 class _Suspension:
     resume_input_schema: dict[str, object] | None = None
+    decision_routes: dict[str, str] | None = None
 
 
 @dataclass

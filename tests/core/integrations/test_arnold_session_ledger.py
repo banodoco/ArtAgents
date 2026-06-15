@@ -112,14 +112,14 @@ class TestOwnershipDefaults:
             run_dir,
             {
                 "engine": "arnold",
-                "workflow_id": "we.refine_image",
+                "workflow_id": "builtin.agent_probe",
                 "run_id": "run-abc",
             },
         )
         record = load_arnold_run_record(run_dir)
         assert record.mode == "static"
         assert record.engine == "arnold"
-        assert record.workflow_id == "we.refine_image"
+        assert record.workflow_id == "builtin.agent_probe"
         assert record.run_id == "run-abc"
 
     def test_load_session_succession_record(self, tmp_path: Path) -> None:
@@ -197,7 +197,7 @@ class TestOwnershipDefaults:
             run_dir,
             {
                 "engine": "arnold",
-                "workflow_id": "we.refine_image",
+                "workflow_id": "builtin.agent_probe",
                 "run_id": "run-static",
             },
         )
@@ -215,7 +215,7 @@ class TestOwnershipDefaults:
             run_dir,
             {
                 "engine": "arnold",
-                "workflow_id": "we.refine_image",
+                "workflow_id": "builtin.agent_probe",
                 "run_id": "run-extra",
                 "custom_field": 42,
                 "nested": {"a": 1},

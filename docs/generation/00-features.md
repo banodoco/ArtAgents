@@ -63,8 +63,50 @@ If a feature is available on only one backend:
 This keeps the registry simple and prevents orchestrators from silently
 getting different behaviour depending on which backend they happen to hit.
 
+## Canonical feature list (video modality)
+
+| Feature           | Meaning                                                                 |
+|-------------------|-------------------------------------------------------------------------|
+| `prompt`          | Text prompt for generation.                                             |
+| `negative_prompt` | Additional prompt describing what the model should *avoid*.             |
+| `seed`            | Deterministic seed for reproducibility (`seed + i` for count > 1).     |
+| `count`           | Generation of multiple videos in a single invocation (batch).           |
+| `resolution`      | Output resolution (e.g. `"1280x720"`).                                  |
+| `image_ref`       | Reference image input (required for i2v and flf modes).                 |
+| `image_end_ref`   | End-frame reference image (required for flf mode).                      |
+| `frames`          | Number of frames to generate.                                           |
+| `fps`             | Frames per second.                                                      |
+| `duration`        | Duration in seconds (alternative to `frames`; used with `fps`).         |
+| `guidance_scale`  | Classifier-free guidance scale.                                         |
+| `steps`           | Sampling steps.                                                         |
+| `shift`           | Flow / timestep shift.                                                  |
+| `loras`           | LoRAs to attach (backend-dependent).                                    |
+| `enable_safety_checker` | Toggle safety checker (wan/cloud).                                |
+| `enable_prompt_expansion` | Toggle prompt expansion (wan/cloud).                            |
+| `acceleration`    | Inference acceleration preset (wan/cloud).                              |
+
+## Canonical feature list (audio modality)
+
+| Feature           | Meaning                                                                 |
+|-------------------|-------------------------------------------------------------------------|
+| `prompt`          | Text prompt for generation.                                             |
+| `negative_prompt` | Additional prompt describing what the model should *avoid*.             |
+| `seed`            | Deterministic seed for reproducibility (`seed + i` for count > 1).     |
+| `count`           | Generation of multiple audio clips in a single invocation (batch).      |
+| `duration`        | Audio duration in seconds.                                              |
+| `guidance_scale`  | Classifier-free guidance scale.                                         |
+| `steps`           | Sampling steps.                                                         |
+| `lyrics_prompt`   | Lyrics prompt for vocal music models (e.g. MiniMax).                    |
+| `instrumental`    | Request instrumental output (boolean).                                  |
+| `output_format`   | Output audio format, e.g. `mp3`, `wav`, `flac` (backend-dependent).     |
+
+## Per-mode applicability (audio)
+
+The `music` mode (wired) requires `prompt` and supports the full audio feature
+set above.  `tts` and `sfx` are canonical audio modes reserved for future
+sprints.
+
 ## Future modalities
 
-Video and audio modalities will add their own canonical features (e.g.,
-`duration`, `fps`, `resolution` for video; `duration`, `sample_rate` for
-audio).  These will be enumerated in future sprints.
+Additional modalities and features will be enumerated in future sprints as
+new backends and model families are integrated.

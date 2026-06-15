@@ -391,6 +391,11 @@ class TestVibeComfyParamMapFallback:
     which re-binds local names from submodule filesystem resolution.
     """
 
+    @classmethod
+    def setup_class(cls) -> None:
+        """Skip the whole class when vibecomfy is not installed."""
+        pytest.importorskip("vibecomfy")
+
     @staticmethod
     def _mock_vibecomfy_imports(wf):
         """Patch the vibecomfy imports that happen inside generate()."""

@@ -159,7 +159,7 @@ class TestStaticRunAlwaysPureData:
     def test_static_mode_returns_pure_data(self, tmp_path: Path):
         run_root = tmp_path / "static_run"
         run_root.mkdir()
-        _write_arnold_run_json(run_root, mode="static", workflow_id="we.refine_image")
+        _write_arnold_run_json(run_root, mode="static", workflow_id="builtin.agent_probe")
 
         intent = classify_resume_intent(run_root)
 
@@ -171,7 +171,7 @@ class TestStaticRunAlwaysPureData:
         """Even if human input carries plan_mutation, static runs ignore it."""
         run_root = tmp_path / "static_run"
         run_root.mkdir()
-        _write_arnold_run_json(run_root, mode="static", workflow_id="we.refine_image")
+        _write_arnold_run_json(run_root, mode="static", workflow_id="builtin.agent_probe")
 
         human_input = {"decision": {"action": "approve"}, "plan_mutation": {"plan_hash": "sha256:ffff"}}
 
@@ -184,7 +184,7 @@ class TestStaticRunAlwaysPureData:
         """Even if plan hash changed, static runs are pure data."""
         run_root = tmp_path / "static_run"
         run_root.mkdir()
-        _write_arnold_run_json(run_root, mode="static", workflow_id="we.refine_image")
+        _write_arnold_run_json(run_root, mode="static", workflow_id="builtin.agent_probe")
 
         intent = classify_resume_intent(
             run_root, effective_plan_hash="sha256:different"

@@ -132,6 +132,36 @@ def _next_stage_for_decision(
     current_stage: str,
     decision: str,
 ) -> str:
+    stages = [
+        raw_stage
+        for raw_stage in pipeline_manifest.get("stages", ())
+        if isinstance(raw_stage, dict) and raw_stage.get("stage_id") == current_stage
+    ]
+    edges = [
+        raw_edge
+        for raw_edge in pipeline_manifest.get("edges", ())
+        if isinstance(raw_edge, dict) and raw_edge.get("source") == current_stage
+    ]
+    if stages:
+        suspension = stages[0].get("suspension")
+        if isinstance(suspension, dict):
+            decision_routes = suspension.get("decision_routes")
+            if isinstance(decision_routes, dict) and decision in decision_routes:
+                route_label = decision_routes[decision]
+                if route_label is None:
+                    raise RuntimeError(
+                        f"stage {current_stage!r} decision {decision!r} does not "
+                        "route to another Arnold stage"
+                    )
+                for raw_edge in edges:
+                    if raw_edge.get("label") == route_label:
+                        target = raw_edge.get("target")
+                        if isinstance(target, str) and target:
+                            return target
+                raise RuntimeError(
+                    f"stage {current_stage!r} decision {decision!r} routes to "
+                    f"edge label {route_label!r}, but no such Arnold edge exists"
+                )
     for raw_edge in pipeline_manifest.get("edges", ()):
         if not isinstance(raw_edge, dict):
             continue
@@ -139,6 +169,18 @@ def _next_stage_for_decision(
             target = raw_edge.get("target")
             if isinstance(target, str) and target:
                 return target
+    if decision == "approve":
+        for raw_edge in edges:
+            if raw_edge.get("label") == "next":
+                target = raw_edge.get("target")
+                if isinstance(target, str) and target:
+                    return target
+    if decision == "reject":
+        for raw_edge in edges:
+            if raw_edge.get("label") == "repeat":
+                target = raw_edge.get("target")
+                if isinstance(target, str) and target:
+                    return target
     raise RuntimeError(
         f"stage {current_stage!r} has no Arnold edge labelled {decision!r}"
     )
