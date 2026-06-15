@@ -267,8 +267,9 @@ def _plan() -> TaskPlan:
 
 
 def _plan_hash(plan: TaskPlan) -> str:
-    from astrid.core.task.events import canonical_event_json
     import hashlib
+
+    from astrid.core.task.events import canonical_event_json
 
     return f"sha256:{hashlib.sha256(canonical_event_json(plan.to_dict()).encode('utf-8')).hexdigest()}"
 

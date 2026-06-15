@@ -18,24 +18,22 @@ from pathlib import Path
 
 import pytest
 
+from astrid.core.integrations.arnold.session.manifest import (
+    SegmentRecord,
+    SessionManifest,
+    write_manifest_file,
+)
+from astrid.core.integrations.arnold.session.records import (
+    ARNOLD_RUN_FILENAME,
+    SESSION_SUCCESSION_WORKFLOW_ID,
+)
 from astrid.core.integrations.arnold.session.resume import (
     ResumeIntent,
     ResumeIntentKind,
     classify_resume_intent,
 )
-from astrid.core.integrations.arnold.session.records import (
-    SESSION_SUCCESSION_WORKFLOW_ID,
-    ARNOLD_RUN_FILENAME,
-)
-from astrid.core.integrations.arnold.session.manifest import (
-    SESSION_MANIFEST_FILENAME,
-    SessionManifest,
-    SegmentRecord,
-    write_manifest_file,
-)
-from astrid.core.integrations.arnold.session.state import StateRef, prefixed_hash
+from astrid.core.integrations.arnold.session.state import StateRef
 from astrid.core.task.events import EVENTS_FILENAME, ZERO_HASH
-
 
 # ── helpers ────────────────────────────────────────────────────────────
 
@@ -103,8 +101,9 @@ def _append_event(
     prev_hash: str = ZERO_HASH,
 ) -> str:
     """Append an event with a computed hash. Returns the event hash."""
-    from astrid.core.task.events import canonical_event_json
     import hashlib
+
+    from astrid.core.task.events import canonical_event_json
 
     event_without_hash = {k: v for k, v in event.items() if k != "hash"}
     event_hash = (

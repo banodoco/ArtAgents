@@ -18,8 +18,6 @@ from typing import Any
 
 from astrid.core.model_catalog.taxonomy import (
     AUDIO_MODALITY,
-    CANONICAL_IMAGE_MODES,
-    CANONICAL_VIDEO_MODES,
     CLOUD_BACKEND_ID,
     GENERATION_TAXONOMY,
     IMAGE_MODALITY,

@@ -18,7 +18,6 @@ from astrid.core.generation.backends.fal import FalBackend
 from astrid.core.generation.backends.vibecomfy import VibeComfyBackend
 from astrid.core.model_catalog.schema import BackendSpec, ModelEntry, ModeSpec
 
-
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------

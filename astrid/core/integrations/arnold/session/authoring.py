@@ -25,7 +25,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-
 # ── Thin typed-port constructors (AF2) ────────────────────────────────────────
 
 
@@ -312,8 +311,8 @@ def build_workflow(
     """
     from pathlib import Path
 
-    from astrid.core.integrations.arnold.session import lowering
     from astrid.core.integrations.arnold.host.compat import compat
+    from astrid.core.integrations.arnold.session import lowering
 
     resolved_run_root = Path(run_root_path)
     active_state = dict(state or {})

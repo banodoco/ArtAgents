@@ -12,7 +12,6 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
-
 STEP_INVOCATION_KIND = "model"
 HOST_CONTROL_KINDS: frozenset[str] = frozenset(
     {"pattern_select", "dynamic_fanout", "vote_judge", "group_boundary", "halt"}

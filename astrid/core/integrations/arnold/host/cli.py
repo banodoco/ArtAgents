@@ -486,6 +486,7 @@ def _start_validated_arnold_run(
     argv: list[str],
 ) -> int:
     from astrid.core._shared.jsonio import write_json_atomic
+    from astrid.core.events import ZERO_HASH, append_event_locked, make_run_started_event
     from astrid.core.foundation.project_paths import (
         project_dir,
         validate_project_slug,
@@ -494,11 +495,10 @@ def _start_validated_arnold_run(
     from astrid.core.integrations.arnold.host.envelope import project_runtime_envelope
     from astrid.core.io.cas import canonical_json_digest
     from astrid.core.project import require_project
-    from astrid.core.project.project import ProjectError
     from astrid.core.project.current_run import read_current_run, write_current_run
+    from astrid.core.project.project import ProjectError
     from astrid.core.session.binding import SessionBindingError, resolve_current_session
     from astrid.core.session.lease import write_lease_init
-    from astrid.core.events import ZERO_HASH, append_event_locked, make_run_started_event
     from astrid.core.util.time import utc_now_iso
 
     slug = validate_project_slug(project_slug)
@@ -624,7 +624,7 @@ def _start_validated_arnold_run(
         )
     else:
         print(f"started {workflow_id}")
-        print(f"  engine:    arnold")
+        print("  engine:    arnold")
         print(f"  project:   {slug}")
         print(f"  run-id:    {run_id}")
         print(f"  plan-hash: {plan_hash}")
@@ -829,8 +829,8 @@ def cmd_start(args: list[str]) -> int:
 
     # ── Check driver availability ───────────────────────────────────────
     from astrid.core.integrations.arnold.host.driver import (
-        get_driver,
         StepwiseDriverContractError,
+        get_driver,
     )
 
     try:

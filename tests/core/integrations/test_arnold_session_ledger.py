@@ -16,12 +16,9 @@ from pathlib import Path
 
 import pytest
 
-from astrid.core.integrations.arnold.session.records import (
-    SESSION_SUCCESSION_WORKFLOW_ID,
-    ArnoldRunRecord,
-    load_arnold_run_record,
-    resolve_mode,
-    is_session_run,
+from astrid.core.integrations.arnold.session.events import (
+    SEGMENT_BOUNDARY_KIND,
+    make_segment_boundary_event,
 )
 from astrid.core.integrations.arnold.session.manifest import (
     SESSION_MANIFEST_FILENAME,
@@ -31,26 +28,25 @@ from astrid.core.integrations.arnold.session.manifest import (
     load_manifest_file,
     write_manifest_file,
 )
+from astrid.core.integrations.arnold.session.records import (
+    SESSION_SUCCESSION_WORKFLOW_ID,
+    is_session_run,
+    load_arnold_run_record,
+    resolve_mode,
+)
 from astrid.core.integrations.arnold.session.state import (
     ArtifactRef,
     StateRef,
-    prefixed_hash,
     load_state_file,
     write_state_file,
 )
-from astrid.core.integrations.arnold.session.events import (
-    SEGMENT_BOUNDARY_KIND,
-    make_segment_boundary_event,
-)
 from astrid.core.task.events import (
-    ZERO_HASH,
     EVENTS_FILENAME,
     LEASE_FILENAME,
-    verify_chain,
     read_events,
+    verify_chain,
 )
 from tests.conftest import seed_event
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Helpers

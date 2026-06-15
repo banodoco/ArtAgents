@@ -8,7 +8,7 @@ topology synthesis or host-side control loop is introduced here.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
 from astrid.core.integrations.arnold.host.invocation import (
     ALLOWLISTED_INVOCATION_TEMPLATES,
@@ -908,15 +908,9 @@ def build_animate_image_pipeline(
     cas_project_dir: str | None = None,
 ) -> Any:
     """Build the canonical Animate Image shape with explicit named phases."""
-    from pathlib import Path
-
     from astrid.core.integrations.arnold.host.compat import compat
     from astrid.core.integrations.arnold.session import lowering
 
-    resolved_run_root = Path(
-        run_root or artifact_root or "/tmp/arnold-video-editing-animate-image-run"
-    )
-    active_state = dict(state or {})
     stage_specs: list[lowering.StageSpec] = []
 
     lowering.add_wrapper_stage(
@@ -1139,7 +1133,6 @@ def build_logo_ideas_pipeline(
     from astrid.core.integrations.arnold.host.compat import compat
     from astrid.core.integrations.arnold.session import lowering
 
-    active_state = dict(state or {})
     stage_specs: list[lowering.StageSpec] = []
 
     lowering.add_wrapper_stage(
@@ -1795,8 +1788,8 @@ def build_event_talks_pipeline(
     All steps use ``adapter: local`` — the pipeline is pure local ffmpeg/OCR/static
     writes.  Cost is $0 for all steps (no LLM or RunPod calls).
     """
-    from pathlib import Path
     import shlex
+    from pathlib import Path
 
     from astrid.core.integrations.arnold.session.authoring import (
         build_workflow,

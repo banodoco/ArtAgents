@@ -9,18 +9,17 @@ behaviour-preserving.
 
 from __future__ import annotations
 
+# ---------------------------------------------------------------------------
+# Load the shipped model catalog once at module level
+# ---------------------------------------------------------------------------
+from pathlib import Path
+
 import pytest
 
 from astrid.core.generation.backends.fal import FalBackend
 from astrid.core.generation.backends.vibecomfy import VibeComfyBackend
 from astrid.core.model_catalog.registry import _load_yaml
 from astrid.core.model_catalog.taxonomy import CODEX_BACKEND_ID
-
-# ---------------------------------------------------------------------------
-# Load the shipped model catalog once at module level
-# ---------------------------------------------------------------------------
-
-from pathlib import Path
 
 _MODELS_YAML_PATH = (
     Path(__file__).resolve().parent.parent.parent.parent

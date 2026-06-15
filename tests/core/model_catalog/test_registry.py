@@ -11,18 +11,18 @@ from pathlib import Path
 
 import pytest
 
-from astrid.core.model_catalog.taxonomy import (
-    GenerationBackendIdDescriptor,
-    GenerationFeatureDescriptor,
-    GenerationModeDescriptor,
-    GenerationTaxonomyRegistry,
-)
 from astrid.core.model_catalog.registry import ModelRegistry
 from astrid.core.model_catalog.schema import (
     CANONICAL_IMAGE_MODES,
     Price,
     validate_registry,
     validate_registry_with_backends,
+)
+from astrid.core.model_catalog.taxonomy import (
+    GenerationBackendIdDescriptor,
+    GenerationFeatureDescriptor,
+    GenerationModeDescriptor,
+    GenerationTaxonomyRegistry,
 )
 
 # ---------------------------------------------------------------------------

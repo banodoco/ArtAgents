@@ -6,8 +6,8 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable
 
-from astrid.core.plan import TaskPlanError
 from astrid.core.contracts.schema import Output, Port
+from astrid.core.events import canonical_event_json
 from astrid.core.integrations.arnold.host.builder import edge_manifest_entry
 from astrid.core.integrations.arnold.host.invocation import (
     HUMAN_DECISION_ROUTES,
@@ -15,20 +15,19 @@ from astrid.core.integrations.arnold.host.invocation import (
     build_adapter_metadata,
     build_step_invocation,
 )
-from astrid.core.events import canonical_event_json
+from astrid.core.plan import TaskPlanError
 from astrid.core.task.plan import (
     STEP_PATH_SEP,
     RepeatForEach,
     RepeatUntil,
     Step,
     TaskPlan,
-    iter_steps_with_path,
     is_legacy_repeat_until_condition,
-    parse_repeat_until_expression,
+    iter_steps_with_path,
     parse_repeat_produces_ref,
+    parse_repeat_until_expression,
     resolve_produces_ref,
 )
-
 
 TASK_ADAPTER_EXECUTOR_PREFIX = "task."
 GROUP_ENTRY_SUFFIX = "__enter__"
