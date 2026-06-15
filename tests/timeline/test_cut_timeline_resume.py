@@ -4,9 +4,13 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from astrid.core import timeline
 from astrid.core.contracts.errors import AstridError
 from astrid.packs.video_editing.executors.cut import run as cut
-
+from astrid.packs.video_editing.executors.cut.registry import (
+    _carry_forward_registry_metadata,
+    build_registry,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 EXAMPLES = ROOT / "examples"
@@ -73,6 +77,21 @@ class CutTimelineResumeTest(unittest.TestCase):
     def test_different_out_rebases_registry_paths(self) -> None:
         source_dir = self.copy_examples()
         timeline_path = source_dir / "hype.timeline.json"
+        assets_path = source_dir / "hype.assets.json"
+        registry_payload = json.loads(assets_path.read_text(encoding="utf-8"))
+        registry_payload["assets"]["main"].update({
+            "origin": "refreshable-from-generation",
+            "etag": '"etag-main"',
+            "content_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "url_expires_at": "2026-12-31T23:59:59Z",
+            "thumbnailUrl": "https://cdn.example.com/main-thumb.jpg",
+            "derivedFrom": {
+                "assetId": "parent-main",
+                "content_sha256": "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+                "role": "proxy",
+            },
+        })
+        assets_path.write_text(json.dumps(registry_payload, indent=2) + "\n", encoding="utf-8")
         out_dir = source_dir.parent / "out"
         original_timeline = json.loads(timeline_path.read_text(encoding="utf-8"))
 
@@ -99,6 +118,22 @@ class CutTimelineResumeTest(unittest.TestCase):
             (source_dir / "broll.mp4").resolve(),
         )
         self.assertTrue(Path(registry["assets"]["main"]["file"]).is_absolute())
+        self.assertEqual(registry["assets"]["main"]["origin"], "refreshable-from-generation")
+        self.assertEqual(registry["assets"]["main"]["etag"], '"etag-main"')
+        self.assertEqual(
+            registry["assets"]["main"]["content_sha256"],
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        )
+        self.assertEqual(registry["assets"]["main"]["url_expires_at"], "2026-12-31T23:59:59Z")
+        self.assertEqual(registry["assets"]["main"]["thumbnailUrl"], "https://cdn.example.com/main-thumb.jpg")
+        self.assertEqual(
+            registry["assets"]["main"]["derivedFrom"],
+            {
+                "assetId": "parent-main",
+                "content_sha256": "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+                "role": "proxy",
+            },
+        )
         self.assertFalse((out_dir / "hype.edl.csv").exists())
 
         # --- universal result manifest assertions ---
@@ -256,6 +291,365 @@ class CutTimelineResumeTest(unittest.TestCase):
         self.assertIn("hype.metadata.json", output_paths)
         self.assertIn("hype.mp4", output_paths)  # render enabled
         self.assertIsInstance(manifest["warnings"], list)
+
+    def test_execute_resume_mode_returns_saved_registry_and_paths_for_bridge_writeback(self) -> None:
+        source_dir = self.copy_examples()
+        timeline_path = source_dir / "hype.timeline.json"
+        out_dir = source_dir.parent / "out"
+
+        args = cut.build_parser().parse_args([
+            "--timeline",
+            str(timeline_path),
+            "--out",
+            str(out_dir),
+        ])
+
+        result = cut.execute_resume_mode(args)
+
+        self.assertEqual(result.source_timeline_path, timeline_path.resolve())
+        self.assertEqual(result.source_assets_path, (source_dir / "hype.assets.json").resolve())
+        self.assertEqual(result.timeline_path, (out_dir / "hype.timeline.json").resolve())
+        self.assertEqual(result.assets_path, (out_dir / "hype.assets.json").resolve())
+        self.assertEqual(result.metadata_path, (out_dir / "hype.metadata.json").resolve())
+        self.assertIsNone(result.rendered_path)
+        self.assertIn("assets", result.registry)
+
+    # -------------------------------------------------------------------
+    # Carry-forward registry metadata — unit-level coverage
+    # -------------------------------------------------------------------
+
+    def test_carry_forward_preserves_all_registry_extended_fields(self) -> None:
+        """_carry_forward_registry_metadata copies every field in
+        _PRESERVED_REGISTRY_FIELDS from the existing entry when values are
+        non-None and non-empty."""
+        existing = {
+            "origin": "refreshable-from-generation",
+            "etag": '"etag-abc123"',
+            "content_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "url_expires_at": "2026-12-31T23:59:59Z",
+            "thumbnailUrl": "https://cdn.example.com/thumb.jpg",
+            "derivedFrom": {
+                "assetId": "parent-main",
+                "content_sha256": "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+                "role": "proxy",
+            },
+            "generationId": "gen-main",
+            "variantId": "variant-main",
+        }
+        entry: dict = {"file": "main.mp4", "type": "video/mp4", "duration": 42.0}
+        _carry_forward_registry_metadata(entry, existing)
+
+        self.assertEqual(entry["origin"], "refreshable-from-generation")
+        self.assertEqual(entry["etag"], '"etag-abc123"')
+        self.assertEqual(
+            entry["content_sha256"],
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        )
+        self.assertEqual(entry["url_expires_at"], "2026-12-31T23:59:59Z")
+        self.assertEqual(entry["thumbnailUrl"], "https://cdn.example.com/thumb.jpg")
+        self.assertEqual(
+            entry["derivedFrom"],
+            {
+                "assetId": "parent-main",
+                "content_sha256": "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+                "role": "proxy",
+            },
+        )
+        self.assertEqual(entry["generationId"], "gen-main")
+        self.assertEqual(entry["variantId"], "variant-main")
+        # Original fields still present
+        self.assertEqual(entry["file"], "main.mp4")
+        self.assertEqual(entry["duration"], 42.0)
+
+    def test_carry_forward_skips_none_and_empty_string_values(self) -> None:
+        """Empty strings and None values are NOT carried forward so they
+        don't pollute the rebuilt entry."""
+        existing = {
+            "origin": None,
+            "etag": "",
+            "content_sha256": None,
+            "url_expires_at": "2026-12-31T23:59:59Z",
+            "thumbnailUrl": "",
+            "derivedFrom": None,
+            "generationId": None,
+            "variantId": "",
+        }
+        entry: dict = {"file": "main.mp4", "type": "video/mp4"}
+        _carry_forward_registry_metadata(entry, existing)
+
+        # Only url_expires_at is non-None, non-empty-string
+        self.assertEqual(entry.get("url_expires_at"), "2026-12-31T23:59:59Z")
+        self.assertNotIn("origin", entry)
+        self.assertNotIn("etag", entry)
+        self.assertNotIn("content_sha256", entry)
+        self.assertNotIn("thumbnailUrl", entry)
+        self.assertNotIn("derivedFrom", entry)
+        self.assertNotIn("generationId", entry)
+        self.assertNotIn("variantId", entry)
+
+    def test_carry_forward_noop_when_existing_is_none(self) -> None:
+        entry: dict = {"file": "main.mp4", "type": "video/mp4"}
+        original = dict(entry)
+        _carry_forward_registry_metadata(entry, None)
+        self.assertEqual(entry, original)
+
+    # -------------------------------------------------------------------
+    # Resume-mode registry preservation — extended metadata round-trip
+    # -------------------------------------------------------------------
+
+    def test_resume_mode_preserves_extended_metadata_in_registry(self) -> None:
+        """Pre-seed the assets file with every extended metadata field,
+        run resume mode to a different output directory, and verify all
+        fields survive the rebase."""
+        source_dir = self.copy_examples()
+        timeline_path = source_dir / "hype.timeline.json"
+        assets_path = source_dir / "hype.assets.json"
+
+        registry_payload = json.loads(assets_path.read_text(encoding="utf-8"))
+        registry_payload["assets"]["main"].update({
+            "origin": "refreshable-from-generation",
+            "etag": '"etag-main-v2"',
+            "content_sha256": "aaaabbbbccccddddaaaabbbbccccddddaaaabbbbccccddddaaaabbbbccccdddd",
+            "url_expires_at": "2027-06-15T00:00:00Z",
+            "thumbnailUrl": "https://cdn.example.com/main-v2.jpg",
+            "derivedFrom": {
+                "assetId": "parent-main",
+                "content_sha256": "bbbbccccddddaaaabbbbccccddddaaaabbbbccccddddaaaabbbbccccddddaaaa",
+                "role": "proxy",
+            },
+            "generationId": "gen-main-v2",
+            "variantId": "variant-main-v2",
+        })
+        # Also add metadata to another asset to test multi-asset preservation
+        if "broll" in registry_payload["assets"]:
+            registry_payload["assets"]["broll"].update({
+                "origin": "immutable-public",
+                "content_sha256": "ccccddddbbbbaaaaccccddddbbbbaaaaccccddddbbbbaaaaccccddddbbbbaaaa",
+                "thumbnailUrl": "https://cdn.example.com/broll-thumb.jpg",
+            })
+        assets_path.write_text(json.dumps(registry_payload, indent=2) + "\n", encoding="utf-8")
+
+        out_dir = source_dir.parent / "out-preserve"
+        result = cut.main(["--timeline", str(timeline_path), "--out", str(out_dir)])
+        self.assertEqual(result, 0)
+
+        reloaded = json.loads((out_dir / "hype.assets.json").read_text(encoding="utf-8"))
+        main_entry = reloaded["assets"]["main"]
+
+        self.assertEqual(main_entry["origin"], "refreshable-from-generation")
+        self.assertEqual(main_entry["etag"], '"etag-main-v2"')
+        self.assertEqual(
+            main_entry["content_sha256"],
+            "aaaabbbbccccddddaaaabbbbccccddddaaaabbbbccccddddaaaabbbbccccdddd",
+        )
+        self.assertEqual(main_entry["url_expires_at"], "2027-06-15T00:00:00Z")
+        self.assertEqual(main_entry["thumbnailUrl"], "https://cdn.example.com/main-v2.jpg")
+        self.assertEqual(
+            main_entry["derivedFrom"],
+            {
+                "assetId": "parent-main",
+                "content_sha256": "bbbbccccddddaaaabbbbccccddddaaaabbbbccccddddaaaabbbbccccddddaaaa",
+                "role": "proxy",
+            },
+        )
+        self.assertEqual(main_entry["generationId"], "gen-main-v2")
+        self.assertEqual(main_entry["variantId"], "variant-main-v2")
+        # Core fields survived
+        self.assertIn("file", main_entry)
+        self.assertIn("duration", main_entry)
+
+        if "broll" in reloaded["assets"]:
+            broll = reloaded["assets"]["broll"]
+            self.assertEqual(broll.get("origin"), "immutable-public")
+            self.assertEqual(
+                broll.get("content_sha256"),
+                "ccccddddbbbbaaaaccccddddbbbbaaaaccccddddbbbbaaaaccccddddbbbbaaaa",
+            )
+            self.assertEqual(broll.get("thumbnailUrl"), "https://cdn.example.com/broll-thumb.jpg")
+
+    def test_resume_mode_saved_registry_is_equivalent_to_on_disk(self) -> None:
+        """The registry returned inside ResumeModeResult must be
+        structurally equivalent to the on-disk JSON so the bridge can
+        safely use the in-memory copy for writeback."""
+        source_dir = self.copy_examples()
+        timeline_path = source_dir / "hype.timeline.json"
+        out_dir = source_dir.parent / "out-equiv"
+
+        args = cut.build_parser().parse_args([
+            "--timeline", str(timeline_path),
+            "--out", str(out_dir),
+        ])
+        result = cut.execute_resume_mode(args)
+
+        on_disk = json.loads(result.assets_path.read_text(encoding="utf-8"))
+        # The in-memory registry and on-disk JSON must carry the same asset keys
+        self.assertEqual(set(result.registry["assets"].keys()), set(on_disk["assets"].keys()))
+        for key in result.registry["assets"]:
+            self.assertEqual(result.registry["assets"][key], on_disk["assets"][key])
+
+    # -------------------------------------------------------------------
+    # Bridge render-output writeback simulation
+    # -------------------------------------------------------------------
+
+    def test_bridge_writeback_simulates_adding_render_output_entry(self) -> None:
+        """Simulate the bridge pattern: take the ResumeModeResult, add a
+        render-output derived entry to the returned registry, save, and
+        verify the render-output survives a reload with correct parent
+        linkage both when the source hash is present and when it is not."""
+        source_dir = self.copy_examples()
+        timeline_path = source_dir / "hype.timeline.json"
+        assets_path = source_dir / "hype.assets.json"
+
+        # Pre-seed the source asset with a content_sha256 so the render-output
+        # entry can carry a parent hash.
+        registry_payload = json.loads(assets_path.read_text(encoding="utf-8"))
+        registry_payload["assets"]["main"].update({
+            "content_sha256": "fffeeeddddccccbbbbfffeeeddddccccbbbbfffeeeddddccccbbbbfffeeedddd",
+            "origin": "refreshable-from-generation",
+        })
+        assets_path.write_text(json.dumps(registry_payload, indent=2) + "\n", encoding="utf-8")
+
+        out_dir = source_dir.parent / "out-writeback"
+        args = cut.build_parser().parse_args([
+            "--timeline", str(timeline_path),
+            "--out", str(out_dir),
+        ])
+        result = cut.execute_resume_mode(args)
+
+        # Bridge: add a render-output derived entry, using the source hash
+        registry = result.registry
+        self.assertIn("main", registry["assets"])
+        render_output_entry = {
+            "file": str(out_dir / "hype-rendered.mp4"),
+            "type": "video/mp4",
+            "duration": 42.0,
+            "origin": "opaque-foreign",
+            "derivedFrom": {
+                "assetId": "main",
+                "content_sha256": registry["assets"]["main"].get("content_sha256"),
+                "role": "render-output",
+            },
+        }
+        registry["assets"]["hype-output"] = render_output_entry
+
+        # Save through the core timeline save_registry
+        assets_out = out_dir / "hype.assets.json"
+        timeline.save_registry(registry, assets_out)
+
+        # Reload and verify
+        reloaded = timeline.load_registry(assets_out)
+        self.assertIn("hype-output", reloaded["assets"])
+        output_entry = reloaded["assets"]["hype-output"]
+        self.assertEqual(output_entry["origin"], "opaque-foreign")
+        self.assertEqual(output_entry["derivedFrom"]["assetId"], "main")
+        self.assertEqual(
+            output_entry["derivedFrom"]["content_sha256"],
+            "fffeeeddddccccbbbbfffeeeddddccccbbbbfffeeeddddccccbbbbfffeeedddd",
+        )
+        self.assertEqual(output_entry["derivedFrom"]["role"], "render-output")
+        # Source entry still intact
+        self.assertIn("main", reloaded["assets"])
+        self.assertEqual(
+            reloaded["assets"]["main"]["content_sha256"],
+            "fffeeeddddccccbbbbfffeeeddddccccbbbbfffeeeddddccccbbbbfffeeedddd",
+        )
+
+    def test_bridge_writeback_render_output_without_parent_hash(self) -> None:
+        """When the source entry has no content_sha256, the render-output
+        derived entry should still be writeable with only assetId and role
+        (no content_sha256 in derivedFrom)."""
+        source_dir = self.copy_examples()
+        timeline_path = source_dir / "hype.timeline.json"
+        assets_path = source_dir / "hype.assets.json"
+
+        # Ensure the source does NOT have content_sha256
+        registry_payload = json.loads(assets_path.read_text(encoding="utf-8"))
+        registry_payload["assets"]["main"].pop("content_sha256", None)
+        registry_payload["assets"]["main"]["origin"] = "immutable-public"
+        assets_path.write_text(json.dumps(registry_payload, indent=2) + "\n", encoding="utf-8")
+
+        out_dir = source_dir.parent / "out-writeback-nohash"
+        args = cut.build_parser().parse_args([
+            "--timeline", str(timeline_path),
+            "--out", str(out_dir),
+        ])
+        result = cut.execute_resume_mode(args)
+
+        # Bridge: add render-output without a parent hash
+        registry = result.registry
+        render_output_entry = {
+            "file": str(out_dir / "hype-rendered.mp4"),
+            "type": "video/mp4",
+            "origin": "opaque-foreign",
+            "derivedFrom": {
+                "assetId": "main",
+                "role": "render-output",
+            },
+        }
+        registry["assets"]["hype-output"] = render_output_entry
+        assets_out = out_dir / "hype.assets.json"
+        timeline.save_registry(registry, assets_out)
+
+        reloaded = timeline.load_registry(assets_out)
+        output_entry = reloaded["assets"]["hype-output"]
+        self.assertEqual(output_entry["derivedFrom"]["assetId"], "main")
+        self.assertEqual(output_entry["derivedFrom"]["role"], "render-output")
+        # No content_sha256 because source had none
+        self.assertNotIn("content_sha256", output_entry["derivedFrom"])
+
+    # -------------------------------------------------------------------
+    # build_registry carry-forward through URL path
+    # -------------------------------------------------------------------
+
+    def test_build_registry_carries_forward_extended_metadata_for_url_assets(self) -> None:
+        """When rebuild_registry sees a URL asset whose key matches an
+        existing registry entry, it carries forward extended metadata
+        through _carry_forward_registry_metadata."""
+        existing_registry = {
+            "assets": {
+                "main": {
+                    "url": "https://cdn.example.com/main.mp4",
+                    "duration": 42.0,
+                    "type": "video",
+                    "resolution": "1920x1080",
+                    "fps": 30.0,
+                    "origin": "immutable-public",
+                    "etag": '"etag-cached"',
+                    "content_sha256": "fffeeeddddccccbbbbfffeeeddddccccbbbbfffeeeddddccccbbbbfffeeedddd",
+                    "url_expires_at": "2027-12-31T23:59:59Z",
+                    "thumbnailUrl": "https://cdn.example.com/old-thumb.jpg",
+                    "derivedFrom": {
+                        "assetId": "origin-asset",
+                        "content_sha256": "aaaabbbbccccddddaaaabbbbccccddddaaaabbbbccccddddaaaabbbbccccdddd",
+                        "role": "proxy",
+                    },
+                    "generationId": "gen-1",
+                    "variantId": "var-1",
+                },
+            },
+        }
+
+        registry, sources_meta = build_registry(
+            asset_paths={},
+            asset_urls={"main": "https://cdn.example.com/main.mp4"},
+            existing_registry=existing_registry,
+            prior_meta=None,
+        )
+
+        self.assertIn("main", registry["assets"])
+        main = registry["assets"]["main"]
+        self.assertEqual(main["origin"], "immutable-public")
+        self.assertEqual(main["etag"], '"etag-cached"')
+        self.assertEqual(
+            main["content_sha256"],
+            "fffeeeddddccccbbbbfffeeeddddccccbbbbfffeeeddddccccbbbbfffeeedddd",
+        )
+        self.assertEqual(main["url_expires_at"], "2027-12-31T23:59:59Z")
+        self.assertEqual(main["thumbnailUrl"], "https://cdn.example.com/old-thumb.jpg")
+        self.assertEqual(main["derivedFrom"]["assetId"], "origin-asset")
+        self.assertEqual(main["derivedFrom"]["role"], "proxy")
+        self.assertEqual(main["generationId"], "gen-1")
+        self.assertEqual(main["variantId"], "var-1")
 
 
 if __name__ == "__main__":

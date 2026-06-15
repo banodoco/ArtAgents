@@ -20,6 +20,7 @@ from ._base import (
     _validate_jsonable,
 )
 from .arrangement import ArrangementReplacedPayload
+from .asset_registry import AssetRegistryReplacedPayload
 from .audio import AudioBoundPayload, AudioUnboundPayload
 from .clip import (
     ClipAddedPayload,
@@ -72,6 +73,7 @@ __all__ = [
     "_require_uuid_str",
     "_validate_jsonable",
     "ArrangementReplacedPayload",
+    "AssetRegistryReplacedPayload",
     "AudioBoundPayload",
     "AudioUnboundPayload",
     "ClipAddedPayload",

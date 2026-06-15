@@ -10,6 +10,12 @@
       "duration": 42.0,
       "resolution": "1920x1080",
       "fps": 30.0,
+      "origin": "refreshable-from-generation",
+      "derivedFrom": {
+        "assetId": "main-source",
+        "content_sha256": "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+        "role": "proxy"
+      },
       "generationId": "gen-main",
       "variantId": "variant-main",
       "thumbnailUrl": "https://example.com/main.jpg"

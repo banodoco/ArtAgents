@@ -413,6 +413,12 @@ def _create_pull_destination(
     """Create a new local timeline home for a pull destination.
 
     Writes ``assembly.identity.json`` with ``provenance: imported``.
+
+    When *remote_source_timeline_id* is provided, the remote UUID is
+    preserved as the canonical ``timeline_id`` (not a fresh local UUID)
+    so the pulled timeline retains the same identity across backends.
+    ``source_timeline_id`` is also recorded as audit provenance and may
+    equal ``timeline_id`` per SD1.
     """
     from uuid import uuid4
 
@@ -431,7 +437,7 @@ def _create_pull_destination(
     from astrid.core.util.time import utc_now_seconds as utc_now_iso
 
     slug = validate_timeline_slug(slug)
-    timeline_id = str(uuid4())
+    timeline_id = remote_source_timeline_id if remote_source_timeline_id else str(uuid4())
 
     # Generate a ULID for the timeline directory
     from astrid.core.threads.ids import generate_ulid
@@ -449,6 +455,9 @@ def _create_pull_destination(
         "provenance": "imported",
         "created_at": utc_now_iso(),
     }
+    # SD1: source_timeline_id is audit provenance only and may equal
+    # timeline_id.  Callers MUST use explicit provenance/backend fields,
+    # NOT infer imported/remote identity from timeline_id != source_timeline_id.
     if remote_source_timeline_id is not None:
         identity["source_timeline_id"] = remote_source_timeline_id
 

@@ -177,7 +177,13 @@ def _looks_like_uuid(value: str) -> bool:
 
 
 def _read_identity(timeline_home: Path) -> dict[str, Any] | None:
-    """Read ``assembly.identity.json``, returning None on any error."""
+    """Read ``assembly.identity.json``, returning None on any error.
+
+    SD1: ``source_timeline_id`` is audit provenance only and may equal
+    ``timeline_id``.  Callers MUST use explicit ``provenance`` and
+    ``backend`` fields, NOT infer imported/remote identity from
+    ``timeline_id != source_timeline_id``.
+    """
     from astrid.core._shared.jsonio import read_json
 
     identity_path = timeline_home / "assembly.identity.json"

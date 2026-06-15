@@ -20,6 +20,7 @@ from astrid.core.timeline.eventlog.types import (
 from astrid.core.timeline.events.schema import (
     EVENT_SCHEMA_VERSION,
     ArrangementReplacedPayload,
+    AssetRegistryReplacedPayload,
     AudioBoundPayload,
     AudioUnboundPayload,
     ClipAddedPayload,
@@ -28,8 +29,8 @@ from astrid.core.timeline.events.schema import (
     ClipPosition,
     ClipRemovedPayload,
     ClipReplacedPayload,
-    ClipRetrackedPayload,
     ClipRetimedPayload,
+    ClipRetrackedPayload,
     ClipSwappedPayload,
     ClipTextSetPayload,
     EffectAddedPayload,
@@ -1091,6 +1092,20 @@ class SecondaryPayloadSchemaTest(unittest.TestCase):
         assert isinstance(p6, TimelineConfigReplacedPayload)
         self.assertEqual(p6.config, {"tracks": [], "clips": []})
 
+        # timeline.asset_registry_replaced from dict
+        event7 = TimelineEvent.new(
+            timeline_id=tid,
+            ts="2026-05-20T12:00:00Z",
+            actor=actor,
+            kind="timeline.asset_registry_replaced",
+            payload={"registry": {"assets": {"a1": {"file": "a.mp4"}}}, "source": "editor_save"},
+        )
+        self.assertIsInstance(event7.payload, AssetRegistryReplacedPayload)
+        p7 = event7.payload
+        assert isinstance(p7, AssetRegistryReplacedPayload)
+        self.assertEqual(p7.registry, {"assets": {"a1": {"file": "a.mp4"}}})
+        self.assertEqual(p7.source, "editor_save")
+
 
 class RecoveryAndErasureSchemaTest(unittest.TestCase):
     """Validate new recovery/lifecycle/erasure event kinds and ErasedPayload envelope."""
@@ -1222,6 +1237,27 @@ class RecoveryAndErasureSchemaTest(unittest.TestCase):
         }
         event = TimelineEvent.from_dict(raw)
         self.assertEqual(event.kind, "transition.set")
+        self.assertIsInstance(event.payload, ErasedPayload)
+
+    def test_erased_envelope_parses_for_unknown_kind(self) -> None:
+        raw = {
+            "event_id": generate_event_ulid(),
+            "timeline_id": self.tid,
+            "ts": "2026-05-21T12:00:00Z",
+            "actor": self.actor.to_json_obj(),
+            "prev_hash": None,
+            "hash": None,
+            "kind": "completely.unknown.future.kind",
+            "payload": {
+                "erased": True,
+                "reason": "policy-violation",
+                "erased_at": "2026-05-21T13:00:00Z",
+                "erased_by": "human:admin",
+            },
+            "schema_version": 1,
+        }
+        event = TimelineEvent.from_dict(raw)
+        self.assertEqual(event.kind, "completely.unknown.future.kind")
         self.assertIsInstance(event.payload, ErasedPayload)
 
     def test_erased_envelope_parses_for_arrangement_replaced(self) -> None:
@@ -1456,13 +1492,27 @@ class RecoveryAndErasureSchemaTest(unittest.TestCase):
         obj["config"]["tracks"][0]["label"] = "Again"
         self.assertEqual(payload.config["tracks"][0]["label"], "Changed")
 
+    def test_timeline_config_replaced_payload_serializes_optional_editor_save_source(self) -> None:
+        payload = TimelineConfigReplacedPayload(
+            config={"tracks": [], "clips": []},
+            source="editor_save",
+        )
+
+        self.assertEqual(
+            canonical_json_text(payload),
+            '{"config":{"clips":[],"tracks":[]},"source":"editor_save"}',
+        )
+
     def test_timeline_config_replaced_event_round_trips(self) -> None:
         event = TimelineEvent.new(
             timeline_id=self.tid,
             ts="2026-05-21T12:00:00Z",
             actor=self.actor,
             kind="timeline.config_replaced",
-            payload=TimelineConfigReplacedPayload(config={"tracks": [], "clips": []}),
+            payload=TimelineConfigReplacedPayload(
+                config={"tracks": [], "clips": []},
+                source="editor_save",
+            ),
         )
         self.assertEqual(event.kind, "timeline.config_replaced")
         self.assertIsInstance(event.payload, TimelineConfigReplacedPayload)
@@ -1470,6 +1520,199 @@ class RecoveryAndErasureSchemaTest(unittest.TestCase):
         restored = TimelineEvent.from_dict(json.loads(text))
         self.assertEqual(restored.kind, "timeline.config_replaced")
         self.assertIsInstance(restored.payload, TimelineConfigReplacedPayload)
+        assert isinstance(restored.payload, TimelineConfigReplacedPayload)
+        self.assertEqual(restored.payload.source, "editor_save")
+
+    def test_timeline_config_replaced_legacy_event_without_source_still_round_trips(self) -> None:
+        raw = {
+            "event_id": "01ABCDEFGHJKMNPQRSTVWXYZ12",
+            "timeline_id": self.tid,
+            "ts": "2026-05-21T12:00:00Z",
+            "actor": self.actor.to_json_obj(),
+            "prev_hash": None,
+            "hash": None,
+            "kind": "timeline.config_replaced",
+            "payload": {"config": {"tracks": [], "clips": []}},
+            "schema_version": 2,
+        }
+
+        restored = TimelineEvent.from_dict(raw)
+
+        self.assertIsInstance(restored.payload, TimelineConfigReplacedPayload)
+        assert isinstance(restored.payload, TimelineConfigReplacedPayload)
+        self.assertIsNone(restored.payload.source)
+        self.assertEqual(restored.to_json_obj()["payload"], {"config": {"tracks": [], "clips": []}})
+
+    def test_timeline_config_replaced_preserves_editor_save_source(self) -> None:
+        event = TimelineEvent.new(
+            timeline_id=self.tid,
+            ts="2026-05-21T12:00:00Z",
+            actor=self.actor,
+            kind="timeline.config_replaced",
+            payload={
+                "config": {"tracks": [], "clips": []},
+                "source": "editor_save",
+            },
+        )
+
+        self.assertIsInstance(event.payload, TimelineConfigReplacedPayload)
+        assert isinstance(event.payload, TimelineConfigReplacedPayload)
+        self.assertEqual(event.payload.source, "editor_save")
+        restored = TimelineEvent.from_dict(event.to_json_obj())
+        self.assertIsInstance(restored.payload, TimelineConfigReplacedPayload)
+        assert isinstance(restored.payload, TimelineConfigReplacedPayload)
+        self.assertEqual(restored.payload.source, "editor_save")
+
+    def test_timeline_asset_registry_replaced_preserves_editor_save_source(self) -> None:
+        event = TimelineEvent.new(
+            timeline_id=self.tid,
+            ts="2026-05-21T12:00:00Z",
+            actor=self.actor,
+            kind="timeline.asset_registry_replaced",
+            payload={
+                "registry": {
+                    "assets": {
+                        "intro": {
+                            "file": "intro.mp4",
+                            "type": "video/mp4",
+                        },
+                    },
+                },
+                "source": "editor_save",
+            },
+        )
+
+        self.assertEqual(event.kind, "timeline.asset_registry_replaced")
+        restored = TimelineEvent.from_dict(event.to_json_obj())
+        self.assertEqual(restored.kind, "timeline.asset_registry_replaced")
+        self.assertEqual(restored.payload.to_json_obj()["source"], "editor_save")
+
+    def test_from_dict_accepts_older_schema_version(self) -> None:
+        raw = {
+            "event_id": "01ABCDEFGHJKMNPQRSTVWXYZ12",
+            "timeline_id": self.tid,
+            "ts": "2026-05-21T12:00:00Z",
+            "actor": self.actor.to_json_obj(),
+            "prev_hash": None,
+            "hash": None,
+            "kind": "timeline.config_replaced",
+            "payload": {"config": {"tracks": [], "clips": []}},
+            "schema_version": 1,
+        }
+
+        restored = TimelineEvent.from_dict(raw)
+
+        self.assertEqual(restored.schema_version, 1)
+        self.assertIsInstance(restored.payload, TimelineConfigReplacedPayload)
+
+    def test_from_dict_accepts_schema_version_zero(self) -> None:
+        """Minimum valid schema_version (0) is accepted."""
+        raw = {
+            "event_id": "01ABCDEFGHJKMNPQRSTVWXYZ12",
+            "timeline_id": self.tid,
+            "ts": "2026-05-21T12:00:00Z",
+            "actor": self.actor.to_json_obj(),
+            "prev_hash": None,
+            "hash": None,
+            "kind": "timeline.config_replaced",
+            "payload": {"config": {"tracks": [], "clips": []}},
+            "schema_version": 0,
+        }
+
+        restored = TimelineEvent.from_dict(raw)
+
+        self.assertEqual(restored.schema_version, 0)
+        self.assertIsInstance(restored.payload, TimelineConfigReplacedPayload)
+
+    def test_from_dict_accepts_current_schema_version(self) -> None:
+        """Current EVENT_SCHEMA_VERSION is accepted."""
+        raw = {
+            "event_id": "01ABCDEFGHJKMNPQRSTVWXYZ12",
+            "timeline_id": self.tid,
+            "ts": "2026-05-21T12:00:00Z",
+            "actor": self.actor.to_json_obj(),
+            "prev_hash": None,
+            "hash": None,
+            "kind": "timeline.config_replaced",
+            "payload": {"config": {"tracks": [], "clips": []}},
+            "schema_version": EVENT_SCHEMA_VERSION,
+        }
+
+        restored = TimelineEvent.from_dict(raw)
+
+        self.assertEqual(restored.schema_version, EVENT_SCHEMA_VERSION)
+        self.assertIsInstance(restored.payload, TimelineConfigReplacedPayload)
+
+    def test_from_dict_rejects_missing_schema_version(self) -> None:
+        raw = {
+            "event_id": "01ABCDEFGHJKMNPQRSTVWXYZ12",
+            "timeline_id": self.tid,
+            "ts": "2026-05-21T12:00:00Z",
+            "actor": self.actor.to_json_obj(),
+            "prev_hash": None,
+            "hash": None,
+            "kind": "timeline.config_replaced",
+            "payload": {"config": {"tracks": [], "clips": []}},
+        }
+
+        with self.assertRaisesRegex(TimelineEventSchemaError, "schema_version must be an integer"):
+            TimelineEvent.from_dict(raw)
+
+    def test_from_dict_rejects_future_schema_version(self) -> None:
+        raw = {
+            "event_id": "01ABCDEFGHJKMNPQRSTVWXYZ12",
+            "timeline_id": self.tid,
+            "ts": "2026-05-21T12:00:00Z",
+            "actor": self.actor.to_json_obj(),
+            "prev_hash": None,
+            "hash": None,
+            "kind": "timeline.config_replaced",
+            "payload": {"config": {"tracks": [], "clips": []}},
+            "schema_version": EVENT_SCHEMA_VERSION + 1,
+        }
+
+        with self.assertRaisesRegex(
+            TimelineEventSchemaError,
+            rf"schema_version must be <= {EVENT_SCHEMA_VERSION}",
+        ):
+            TimelineEvent.from_dict(raw)
+
+    def test_from_dict_rejects_non_integer_schema_version(self) -> None:
+        raw = {
+            "event_id": "01ABCDEFGHJKMNPQRSTVWXYZ12",
+            "timeline_id": self.tid,
+            "ts": "2026-05-21T12:00:00Z",
+            "actor": self.actor.to_json_obj(),
+            "prev_hash": None,
+            "hash": None,
+            "kind": "timeline.config_replaced",
+            "payload": {"config": {"tracks": [], "clips": []}},
+            "schema_version": "2",
+        }
+
+        with self.assertRaisesRegex(TimelineEventSchemaError, "schema_version must be an integer"):
+            TimelineEvent.from_dict(raw)
+
+    def test_from_dict_preserves_unknown_kind_raw_payload(self) -> None:
+        raw_payload = {"surprise": {"nested": [1, 2, 3]}, "source": "db"}
+        raw = {
+            "event_id": "01ABCDEFGHJKMNPQRSTVWXYZ12",
+            "timeline_id": self.tid,
+            "ts": "2026-05-21T12:00:00Z",
+            "actor": self.actor.to_json_obj(),
+            "prev_hash": None,
+            "hash": None,
+            "kind": "completely.unknown.future.kind",
+            "payload": raw_payload,
+            "schema_version": 1,
+        }
+
+        restored = TimelineEvent.from_dict(raw)
+
+        self.assertEqual(restored.kind, "completely.unknown.future.kind")
+        self.assertEqual(restored.payload, raw_payload)
+        self.assertIsNot(restored.payload, raw_payload)
+        self.assertEqual(restored.to_json_obj()["payload"], raw_payload)
 
     def test_timeline_config_replaced_preserves_editor_save_source(self) -> None:
         event = TimelineEvent.new(

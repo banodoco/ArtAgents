@@ -17,9 +17,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from astrid.core.contracts.errors import AstridError
-from astrid.core.cli_choices import AstridArgumentError, StaticChoices
 from astrid.core.cli import timeline as timeline_cli
+from astrid.core.cli_choices import AstridArgumentError, StaticChoices
+from astrid.core.contracts.errors import AstridError
 from astrid.core.timeline import clip_edits
 from astrid.core.timeline.events.schema import (
     AudioBoundPayload,
@@ -32,7 +32,6 @@ from astrid.core.timeline.events.schema import (
     TrackAddedPayload,
     TransitionSetPayload,
 )
-
 
 # ---------------------------------------------------------------------------
 # Help and discovery
@@ -1803,10 +1802,10 @@ def test_preview_out_guard_rejects_paths_inside_timeline_home(
         encoding="utf-8",
     )
 
-    from astrid.core.timeline.observability import ResolvedTarget
-    from astrid.core.timeline import observability as obs_mod
     from astrid.core.timeline import eventlog as evlog_mod
+    from astrid.core.timeline import observability as obs_mod
     from astrid.core.timeline.events.schema import TimelineEvent as TE
+    from astrid.core.timeline.observability import ResolvedTarget
 
     fake_target = ResolvedTarget(
         backend="local_fs",
@@ -1887,8 +1886,8 @@ def test_preview_out_guard_allows_paths_outside_timeline_home(
     def fake_resolve(project_slug: str, slug_or_id: str, *, root=None):
         return fake_target
 
-    from astrid.core.timeline import observability as obs_mod
     from astrid.core.timeline import eventlog as evlog_mod
+    from astrid.core.timeline import observability as obs_mod
 
     monkeypatch.setattr(obs_mod, "resolve_timeline_target", fake_resolve)
 
@@ -2181,9 +2180,9 @@ def _import_timeline(
     If *skip_if_events_exist* is True (the default) and the timeline already has
     events, the import is skipped — the returned dict will have ``imported: False``.
     """
-    from astrid.core.timeline.migration import import_from_legacy_local
     from astrid.core.timeline.eventlog.local_fs import LocalFsBackend
     from astrid.core.timeline.events.schema import TimelineActor
+    from astrid.core.timeline.migration import import_from_legacy_local
 
     backend = LocalFsBackend(timeline_home=tdir, timeline_id=ulid)
     if skip_if_events_exist and backend.read_events():
@@ -2316,8 +2315,8 @@ class TestAuditProjectionParityAfterImport:
         session = SimpleNamespace(project="demo", agent_id="tester", id="session-1")
         monkeypatch.setattr(timeline_cli, "_require_session", lambda slug=None: session)
 
-        from astrid.core.timeline import observability as obs_mod
         from astrid.core.timeline import eventlog as evlog_mod
+        from astrid.core.timeline import observability as obs_mod
 
         fake_target = ResolvedTarget(
             backend="supabase",
@@ -2333,7 +2332,7 @@ class TestAuditProjectionParityAfterImport:
         )
 
         # Provide the fake transport via select_timeline_backend
-        from astrid.core.timeline.eventlog.types import EventLogVerification, EventLogHead
+        from astrid.core.timeline.eventlog.types import EventLogHead, EventLogVerification
 
         class FakeSupabaseBackend:
             def backend_name(self):
@@ -2377,7 +2376,7 @@ class TestAuditProjectionParityAfterImport:
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         """Read-only commands on mocked Supabase config seed must not append."""
-        from astrid.core.timeline.events.schema import TimelineActor, TimelineEvent
+        from astrid.core.timeline.events.schema import TimelineEvent
         from astrid.core.timeline.observability import ResolvedTarget
 
         tid = "00000000-0000-0000-0000-000000000101"
@@ -2404,8 +2403,8 @@ class TestAuditProjectionParityAfterImport:
         session = SimpleNamespace(project="demo", agent_id="tester", id="session-1")
         monkeypatch.setattr(timeline_cli, "_require_session", lambda slug=None: session)
 
-        from astrid.core.timeline import observability as obs_mod
         from astrid.core.timeline import eventlog as evlog_mod
+        from astrid.core.timeline import observability as obs_mod
 
         fake_target = ResolvedTarget(
             backend="supabase",
@@ -2423,7 +2422,7 @@ class TestAuditProjectionParityAfterImport:
         # Track whether append was called
         append_calls: list[object] = []
 
-        from astrid.core.timeline.eventlog.types import EventLogVerification, EventLogHead
+        from astrid.core.timeline.eventlog.types import EventLogHead, EventLogVerification
 
         class ReadOnlySupabaseBackend:
             def backend_name(self):
@@ -2686,3 +2685,531 @@ class TestRealisticEventStreamCLI:
             captured = capsys.readouterr()
             # Must NOT say "invalid choice" for these verbs
             assert "invalid choice" not in captured.err.lower() or verb not in captured.err
+
+
+# ---------------------------------------------------------------------------
+# S5 sync CLI tests — output assertions for sync classification fields
+# ---------------------------------------------------------------------------
+
+
+def _make_result(**overrides: object) -> object:
+    """Build a TransferResult with sensible defaults, overridden as needed."""
+    from astrid.core.timeline.transfer import TransferResult
+
+    defaults: dict[str, object] = {
+        "direction": "push",
+        "source_backend_name": "local_fs",
+        "destination_backend_name": "supabase",
+        "source_timeline_id": "src-11111111-1111-1111-1111-111111111111",
+        "destination_timeline_id": "dst-22222222-2222-2222-2222-222222222222",
+        "scanned": 5,
+        "appended": 3,
+        "skipped_idempotent": 0,
+        "failed": 0,
+        "destination_version": 5,
+        "projection_regenerated": True,
+        "divergent": False,
+        "sync_action": None,
+        "divergence_artifact": None,
+        "bookmark_error": None,
+    }
+    defaults.update(overrides)
+    return TransferResult(**{k: v for k, v in defaults.items() if k != "transfer_failure"})  # type: ignore[arg-type]
+
+
+class TestS5SyncCLI:
+    """CLI output and exit-code assertions for S5 unified sync and standalone
+    push/pull with sync classification fields."""
+
+    # ── source-only action reporting ────────────────────────────────────
+
+    def test_push_reports_source_only_sync_action(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        result = _make_result(
+            direction="push",
+            sync_action="source_only",
+        )
+        monkeypatch.setattr(
+            "astrid.core.timeline.transfer.push_timeline",
+            lambda *a, **kw: result,
+        )
+        from astrid.core.cli.timeline_backends import cmd_push
+
+        rc = cmd_push(
+            argparse.Namespace(slug_or_id="my-tl", project="demo", to_backend="supabase")
+        )
+        assert rc == 0
+        captured = capsys.readouterr()
+        assert "sync action: source_only" in captured.out
+
+    def test_pull_reports_destination_only_sync_action(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        result = _make_result(
+            direction="pull",
+            sync_action="destination_only",
+        )
+        monkeypatch.setattr(
+            "astrid.core.timeline.transfer.pull_timeline",
+            lambda *a, **kw: result,
+        )
+        from astrid.core.cli.timeline_backends import cmd_pull
+
+        rc = cmd_pull(
+            argparse.Namespace(
+                slug_or_id="remote-tl",
+                project="demo",
+                from_backend="supabase",
+                into_slug="local-tl",
+                create_as_slug=None,
+                create=False,
+            )
+        )
+        assert rc == 0
+        captured = capsys.readouterr()
+        assert "sync action: destination_only" in captured.out
+
+    def test_push_omits_sync_action_when_none(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        result = _make_result(direction="push", sync_action=None)
+        monkeypatch.setattr(
+            "astrid.core.timeline.transfer.push_timeline",
+            lambda *a, **kw: result,
+        )
+        from astrid.core.cli.timeline_backends import cmd_push
+
+        rc = cmd_push(
+            argparse.Namespace(slug_or_id="my-tl", project="demo", to_backend="supabase")
+        )
+        assert rc == 0
+        captured = capsys.readouterr()
+        assert "sync action:" not in captured.out
+
+    # ── divergence artifact display ─────────────────────────────────────
+
+    def test_push_shows_local_divergence_artifact_path(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        from astrid.core.timeline.sync_divergence import LocalDivergenceArtifactRef
+
+        artifact = LocalDivergenceArtifactRef(
+            path="/tmp/divergence-12345.json",
+            timeline_id="src-11111111-1111-1111-1111-111111111111",
+            created_at="2026-06-12T10:00:00Z",
+        )
+        result = _make_result(
+            direction="push",
+            divergent=True,
+            sync_action="both_advanced",
+            divergence_artifact=artifact,
+        )
+        monkeypatch.setattr(
+            "astrid.core.timeline.transfer.push_timeline",
+            lambda *a, **kw: result,
+        )
+        from astrid.core.cli.timeline_backends import cmd_push
+
+        rc = cmd_push(
+            argparse.Namespace(slug_or_id="my-tl", project="demo", to_backend="supabase")
+        )
+        assert rc == 0
+        captured = capsys.readouterr()
+        assert "divergent: True" in captured.out
+        assert "divergence artifact path: /tmp/divergence-12345.json" in captured.out
+
+    def test_pull_shows_supabase_divergence_artifact_id(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        from astrid.core.timeline.sync_divergence import SupabaseDivergenceArtifactRef
+
+        artifact = SupabaseDivergenceArtifactRef(
+            entry_id="div-abcdef-001",
+            timeline_id="dst-22222222-2222-2222-2222-222222222222",
+            spoke="local",
+            created_at="2026-06-12T11:00:00Z",
+        )
+        result = _make_result(
+            direction="pull",
+            divergent=True,
+            sync_action="both_advanced",
+            divergence_artifact=artifact,
+        )
+        monkeypatch.setattr(
+            "astrid.core.timeline.transfer.pull_timeline",
+            lambda *a, **kw: result,
+        )
+        from astrid.core.cli.timeline_backends import cmd_pull
+
+        rc = cmd_pull(
+            argparse.Namespace(
+                slug_or_id="remote-tl",
+                project="demo",
+                from_backend="supabase",
+                into_slug="local-tl",
+                create_as_slug=None,
+                create=False,
+            )
+        )
+        assert rc == 0
+        captured = capsys.readouterr()
+        assert "divergent: True" in captured.out
+        assert "divergence artifact id: div-abcdef-001" in captured.out
+
+    def test_push_no_divergence_omits_artifact_output(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        result = _make_result(direction="push", divergent=False)
+        monkeypatch.setattr(
+            "astrid.core.timeline.transfer.push_timeline",
+            lambda *a, **kw: result,
+        )
+        from astrid.core.cli.timeline_backends import cmd_push
+
+        rc = cmd_push(
+            argparse.Namespace(slug_or_id="my-tl", project="demo", to_backend="supabase")
+        )
+        assert rc == 0
+        captured = capsys.readouterr()
+        assert "divergent: True" not in captured.out
+        assert "divergence artifact" not in captured.out
+
+    # ── incompatible bookmark errors ────────────────────────────────────
+
+    def test_push_reports_bookmark_error(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        result = _make_result(
+            direction="push",
+            bookmark_error="bookmark incompatible: stale head (local version 3, bookmark says 1)",
+        )
+        monkeypatch.setattr(
+            "astrid.core.timeline.transfer.push_timeline",
+            lambda *a, **kw: result,
+        )
+        from astrid.core.cli.timeline_backends import cmd_push
+
+        rc = cmd_push(
+            argparse.Namespace(slug_or_id="my-tl", project="demo", to_backend="supabase")
+        )
+        assert rc == 0
+        captured = capsys.readouterr()
+        assert "bookmark error: bookmark incompatible: stale head" in captured.out
+
+    def test_pull_reports_bookmark_error(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        result = _make_result(
+            direction="pull",
+            bookmark_error="bookmark incompatible: wrong timeline_id in stored bookmark",
+        )
+        monkeypatch.setattr(
+            "astrid.core.timeline.transfer.pull_timeline",
+            lambda *a, **kw: result,
+        )
+        from astrid.core.cli.timeline_backends import cmd_pull
+
+        rc = cmd_pull(
+            argparse.Namespace(
+                slug_or_id="remote-tl",
+                project="demo",
+                from_backend="supabase",
+                into_slug="local-tl",
+                create_as_slug=None,
+                create=False,
+            )
+        )
+        assert rc == 0
+        captured = capsys.readouterr()
+        assert "bookmark error: bookmark incompatible: wrong timeline_id" in captured.out
+
+    # ── non-zero exit for failed transfer ───────────────────────────────
+
+    def test_push_exits_nonzero_on_failed_transfer(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        result = _make_result(direction="push", failed=2)
+        monkeypatch.setattr(
+            "astrid.core.timeline.transfer.push_timeline",
+            lambda *a, **kw: result,
+        )
+        from astrid.core.cli.timeline_backends import cmd_push
+
+        rc = cmd_push(
+            argparse.Namespace(slug_or_id="my-tl", project="demo", to_backend="supabase")
+        )
+        assert rc == 1
+        captured = capsys.readouterr()
+        assert "failed: 2" in captured.out
+
+    def test_pull_exits_nonzero_on_failed_transfer(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        result = _make_result(direction="pull", failed=1)
+        monkeypatch.setattr(
+            "astrid.core.timeline.transfer.pull_timeline",
+            lambda *a, **kw: result,
+        )
+        from astrid.core.cli.timeline_backends import cmd_pull
+
+        rc = cmd_pull(
+            argparse.Namespace(
+                slug_or_id="remote-tl",
+                project="demo",
+                from_backend="supabase",
+                into_slug="local-tl",
+                create_as_slug=None,
+                create=False,
+            )
+        )
+        assert rc == 1
+        captured = capsys.readouterr()
+        assert "failed: 1" in captured.out
+
+    # ── sync: unified push-then-pull output ─────────────────────────────
+
+    def test_sync_reports_both_phases(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        push_result = _make_result(direction="push", sync_action="source_only")
+        pull_result = _make_result(
+            direction="pull",
+            sync_action="up_to_date",
+            source_backend_name="supabase",
+            destination_backend_name="local_fs",
+        )
+        monkeypatch.setattr(
+            "astrid.core.timeline.transfer.push_timeline",
+            lambda *a, **kw: push_result,
+        )
+        monkeypatch.setattr(
+            "astrid.core.timeline.transfer.pull_timeline",
+            lambda *a, **kw: pull_result,
+        )
+        from astrid.core.cli.timeline_backends import cmd_sync
+
+        rc = cmd_sync(
+            argparse.Namespace(slug_or_id="my-tl", project="demo")
+        )
+        assert rc == 0
+        captured = capsys.readouterr()
+        assert "Sync ── push:" in captured.out
+        assert "Sync ── pull:" in captured.out
+        assert "sync action: source_only" in captured.out
+        assert "sync action: up_to_date" in captured.out
+        assert "Sync: complete (local ↔ Supabase)." in captured.out
+
+    def test_sync_reports_destination_only_reverse_direction(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """When pull reports destination-only, the reverse-direction result
+        is surfaced so the operator can see remote-only changes."""
+        push_result = _make_result(direction="push", sync_action="up_to_date")
+        pull_result = _make_result(
+            direction="pull",
+            sync_action="destination_only",
+            source_backend_name="supabase",
+            destination_backend_name="local_fs",
+        )
+        monkeypatch.setattr(
+            "astrid.core.timeline.transfer.push_timeline",
+            lambda *a, **kw: push_result,
+        )
+        monkeypatch.setattr(
+            "astrid.core.timeline.transfer.pull_timeline",
+            lambda *a, **kw: pull_result,
+        )
+        from astrid.core.cli.timeline_backends import cmd_sync
+
+        rc = cmd_sync(
+            argparse.Namespace(slug_or_id="my-tl", project="demo")
+        )
+        assert rc == 0
+        captured = capsys.readouterr()
+        assert "sync action: up_to_date" in captured.out
+        assert "sync action: destination_only" in captured.out
+        assert "Sync: complete (local ↔ Supabase)." in captured.out
+
+    def test_sync_push_fails_exits_nonzero(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        push_result = _make_result(direction="push", failed=3)
+        pull_result = _make_result(
+            direction="pull",
+            source_backend_name="supabase",
+            destination_backend_name="local_fs",
+        )
+        monkeypatch.setattr(
+            "astrid.core.timeline.transfer.push_timeline",
+            lambda *a, **kw: push_result,
+        )
+        monkeypatch.setattr(
+            "astrid.core.timeline.transfer.pull_timeline",
+            lambda *a, **kw: pull_result,
+        )
+        from astrid.core.cli.timeline_backends import cmd_sync
+
+        rc = cmd_sync(
+            argparse.Namespace(slug_or_id="my-tl", project="demo")
+        )
+        assert rc == 1
+        captured = capsys.readouterr()
+        assert "Sync: push reported failures (pull succeeded)." in captured.out
+
+    def test_sync_pull_fails_exits_nonzero(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        push_result = _make_result(direction="push")
+        pull_result = _make_result(
+            direction="pull",
+            failed=4,
+            source_backend_name="supabase",
+            destination_backend_name="local_fs",
+        )
+        monkeypatch.setattr(
+            "astrid.core.timeline.transfer.push_timeline",
+            lambda *a, **kw: push_result,
+        )
+        monkeypatch.setattr(
+            "astrid.core.timeline.transfer.pull_timeline",
+            lambda *a, **kw: pull_result,
+        )
+        from astrid.core.cli.timeline_backends import cmd_sync
+
+        rc = cmd_sync(
+            argparse.Namespace(slug_or_id="my-tl", project="demo")
+        )
+        assert rc == 1
+        captured = capsys.readouterr()
+        assert "Sync: pull reported failures (push succeeded)." in captured.out
+
+    def test_sync_both_phases_fail_exits_nonzero(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        push_result = _make_result(direction="push", failed=1)
+        pull_result = _make_result(
+            direction="pull",
+            failed=2,
+            source_backend_name="supabase",
+            destination_backend_name="local_fs",
+        )
+        monkeypatch.setattr(
+            "astrid.core.timeline.transfer.push_timeline",
+            lambda *a, **kw: push_result,
+        )
+        monkeypatch.setattr(
+            "astrid.core.timeline.transfer.pull_timeline",
+            lambda *a, **kw: pull_result,
+        )
+        from astrid.core.cli.timeline_backends import cmd_sync
+
+        rc = cmd_sync(
+            argparse.Namespace(slug_or_id="my-tl", project="demo")
+        )
+        assert rc == 1
+        captured = capsys.readouterr()
+        assert "Sync: both push and pull reported failures." in captured.out
+
+    def test_sync_bookmark_error_notices(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """When push or pull report bookmark errors, sync surfaces notices."""
+        push_result = _make_result(
+            direction="push",
+            bookmark_error="bookmark incompatible: corrupt JSON",
+        )
+        pull_result = _make_result(
+            direction="pull",
+            bookmark_error="bookmark incompatible: stale head",
+            source_backend_name="supabase",
+            destination_backend_name="local_fs",
+        )
+        monkeypatch.setattr(
+            "astrid.core.timeline.transfer.push_timeline",
+            lambda *a, **kw: push_result,
+        )
+        monkeypatch.setattr(
+            "astrid.core.timeline.transfer.pull_timeline",
+            lambda *a, **kw: pull_result,
+        )
+        from astrid.core.cli.timeline_backends import cmd_sync
+
+        rc = cmd_sync(
+            argparse.Namespace(slug_or_id="my-tl", project="demo")
+        )
+        assert rc == 0
+        captured = capsys.readouterr()
+        assert "Sync: completed with bookmark notices:" in captured.out
+        assert "push bookmark: bookmark incompatible: corrupt JSON" in captured.out
+        assert "pull bookmark: bookmark incompatible: stale head" in captured.out
+
+    def test_sync_divergence_notices(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """When push or pull report divergence, sync surfaces notices."""
+        from astrid.core.timeline.sync_divergence import LocalDivergenceArtifactRef
+
+        art = LocalDivergenceArtifactRef(
+            path="/tmp/divergence-67890.json",
+            timeline_id="src-11111111-1111-1111-1111-111111111111",
+            created_at="2026-06-12T12:00:00Z",
+        )
+        push_result = _make_result(
+            direction="push",
+            divergent=True,
+            sync_action="both_advanced",
+            divergence_artifact=art,
+        )
+        pull_result = _make_result(
+            direction="pull",
+            divergent=True,
+            sync_action="both_advanced",
+            source_backend_name="supabase",
+            destination_backend_name="local_fs",
+        )
+        monkeypatch.setattr(
+            "astrid.core.timeline.transfer.push_timeline",
+            lambda *a, **kw: push_result,
+        )
+        monkeypatch.setattr(
+            "astrid.core.timeline.transfer.pull_timeline",
+            lambda *a, **kw: pull_result,
+        )
+        from astrid.core.cli.timeline_backends import cmd_sync
+
+        rc = cmd_sync(
+            argparse.Namespace(slug_or_id="my-tl", project="demo")
+        )
+        assert rc == 0
+        captured = capsys.readouterr()
+        assert "Sync: completed with bookmark notices:" in captured.out
+        assert "push divergence preserved (action=both_advanced)" in captured.out
+        assert "pull divergence preserved (action=both_advanced)" in captured.out
+
+    def test_sync_parses_slug_or_id_and_project(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Verify sync command correctly resolves from main() parser."""
+        seen: dict[str, argparse.Namespace] = {}
+
+        def fake_sync(args: argparse.Namespace) -> int:
+            seen["args"] = args
+            return 0
+
+        monkeypatch.setattr(timeline_cli, "cmd_sync", fake_sync)
+
+        rc = timeline_cli.main(["sync", "my-tl", "--project", "demo"])
+        assert rc == 0
+        assert seen["args"].slug_or_id == "my-tl"
+        assert seen["args"].project == "demo"
+
+    def test_sync_verb_in_help(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Sync should appear in the top-level help output."""
+        with pytest.raises(SystemExit) as excinfo:
+            timeline_cli.main(["--help"])
+        assert excinfo.value.code == 0
+        captured = capsys.readouterr()
+        assert "sync" in captured.out

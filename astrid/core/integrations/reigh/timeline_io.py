@@ -1,18 +1,15 @@
-"""Versioned timeline read/write loop against reigh-data-fetch + blob RPC.
+"""Versioned timeline read/write loop against Reigh fetch surfaces.
 
-The ``save_timeline`` helper here is the legacy compatibility write path used
-by Astrid's current Reigh bridge surfaces. It implements the optimistic-
-concurrency contract documented in ``docs/contracts/integration_contracts.md``: load
+The ``save_timeline`` helper implements the optimistic-concurrency contract
+documented in ``docs/contracts/integration_contracts.md``: load
 ``(timeline, config_version)`` via the ``reigh-data-fetch`` Edge Function,
-apply a caller-supplied mutator, then call the
-``update_timeline_config_versioned(p_timeline_id, p_expected_version,
-p_config)`` RPC. On version-mismatch, re-load and re-apply the mutator up to
-``retries`` times before raising :class:`TimelineVersionConflictError`.
-
-This remains a blob-save compatibility path, not Astrid's future event-first
-architecture. The provisional ``SupabaseBackend`` event-log contract lives in
-``astrid.core.timeline.eventlog`` and still depends on companion SQL/RPC work
-outside this repository.
+apply a caller-supplied mutator, then persist the replacement config. When a
+service-role append transport is configured, Astrid routes the save through the
+timeline-event append library so Python remains the single owner of hashing and
+projection. Without that transport, the helper falls back to the legacy
+``update_timeline_config_versioned`` blob RPC. On version-mismatch, it re-loads
+and re-applies the mutator up to ``retries`` times before raising
+:class:`TimelineVersionConflictError`.
 
 Auth scopes (FLAG-012 / SD-009): the worker write path uses ``service_role``
 auth so it can write any timeline once it has verified ownership separately;
@@ -29,6 +26,9 @@ from dataclasses import dataclass
 from typing import Any, Callable, Mapping
 
 from astrid.core.timeline import Timeline
+from astrid.core.timeline.eventlog.supabase import LiveSupabaseAppendTransport
+from astrid.core.timeline.eventlog.types import EventLogStaleVersionError
+from astrid.core.timeline.events.schema import TimelineActor
 
 from .errors import TimelineNotFoundError, TimelineVersionConflictError
 from .supabase_client import Auth, SupabaseHTTPError, get_json, post_json, rpc
@@ -61,6 +61,15 @@ def _to_storage_payload(config: Mapping[str, Any]) -> dict[str, Any]:
     """Validate + emit the JSON shape the DB column expects."""
 
     return Timeline.from_config(dict(config)).to_json_data()
+
+
+def _canonicalize_config(config: Mapping[str, Any]) -> RawTimelinePayload:
+    """Validate + round-trip config into Astrid's canonical timeline shape."""
+
+    canonical = Timeline.from_config(dict(config)).to_config()  # type: ignore[assignment]
+    canonical.setdefault("tracks", [])
+    canonical.setdefault("clips", [])
+    return canonical  # type: ignore[return-value]
 
 
 def _looks_like_version_conflict(exc: SupabaseHTTPError) -> bool:
@@ -144,6 +153,8 @@ def save_timeline(
     retries: int = 3,
     force: bool = False,
     timeout: float = 60.0,
+    asset_registry: Mapping[str, Any] | None = None,
+    append_service_role_key: str | None = None,
 ) -> SaveResult:
     """Apply ``mutator`` to the timeline and persist via the versioned RPC.
 
@@ -174,6 +185,11 @@ def save_timeline(
 
     last_version: int | None = expected_version
     last_exc: SupabaseHTTPError | None = None
+    last_stale: EventLogStaleVersionError | None = None
+    append_token = _resolve_append_service_role_key(
+        write_auth=write_auth,
+        append_service_role_key=append_service_role_key,
+    )
     for attempt in range(1, retries + 1):
         config, current_version = fetch_timeline(
             fetch_url=fetch_url,
@@ -199,8 +215,38 @@ def save_timeline(
         new_config = mutator(config, current_version)
         if not isinstance(new_config, dict):
             raise TypeError("save_timeline mutator must return a RawTimelinePayload dict")
+        canonical_config = _canonicalize_config(new_config)
 
-        storage_payload = _to_storage_payload(new_config)
+        if append_token is not None:
+            try:
+                result = _save_via_append_transport(
+                    timeline_id=timeline_id,
+                    config=canonical_config,
+                    asset_registry=asset_registry,
+                    supabase_url=supabase_url,
+                    service_role_key=append_token,
+                    expected_version=current_version,
+                    timeout=timeout,
+                    actor=_default_actor_for_auth(write_auth),
+                )
+            except EventLogStaleVersionError as exc:
+                last_stale = exc
+                if not force:
+                    logger.info(
+                        "save_timeline append conflict on attempt %d/%d for %s (expected=%s)",
+                        attempt,
+                        retries,
+                        timeline_id,
+                        current_version,
+                    )
+                    continue
+                raise
+            return SaveResult(
+                timeline=canonical_config,
+                new_version=result.config_version,
+                attempts=attempt,
+            )
+        storage_payload = _to_storage_payload(canonical_config)
         try:
             response = rpc(
                 "update_timeline_config_versioned",
@@ -228,7 +274,7 @@ def save_timeline(
 
         new_version = _extract_new_version(response, fallback=current_version + 1)
         return SaveResult(
-            timeline=new_config,
+            timeline=canonical_config,
             new_version=new_version,
             attempts=attempt,
         )
@@ -237,7 +283,50 @@ def save_timeline(
         f"save_timeline exhausted {retries} attempts for timeline_id={timeline_id}",
         attempts=retries,
         last_expected_version=last_version,
-    ) from last_exc
+    ) from (last_stale or last_exc)
+
+
+def _resolve_append_service_role_key(
+    *,
+    write_auth: Auth,
+    append_service_role_key: str | None,
+) -> str | None:
+    if append_service_role_key:
+        return append_service_role_key
+    return None
+
+
+def _default_actor_for_auth(write_auth: Auth) -> TimelineActor:
+    scheme, _token = write_auth
+    if scheme == "service_role":
+        return TimelineActor(type="system", id="astrid-python")
+    return TimelineActor(type="human", id=f"reigh-{scheme}")
+
+
+def _save_via_append_transport(
+    *,
+    timeline_id: str,
+    config: RawTimelinePayload,
+    asset_registry: Mapping[str, Any] | None,
+    supabase_url: str,
+    service_role_key: str,
+    expected_version: int,
+    timeout: float,
+    actor: TimelineActor,
+):
+    transport = LiveSupabaseAppendTransport(
+        supabase_url=supabase_url,
+        auth_token=service_role_key,
+        timeout=timeout,
+    )
+    return transport.append_config_replaced(
+        timeline_id=timeline_id,
+        config=dict(config),
+        asset_registry=dict(asset_registry) if asset_registry is not None else None,
+        actor=actor,
+        source="editor_save",
+        expected_version=expected_version,
+    )
 
 
 def _extract_new_version(response: Any, *, fallback: int) -> int:

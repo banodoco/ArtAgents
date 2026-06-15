@@ -1040,6 +1040,19 @@ _COMMANDS: list[dict[str, Any]] = [
             },
         ],
     },
+    # ── sync (S5) ──
+    {
+        "name": "sync",
+        "help": "Unified push-then-pull: sync a local timeline with Supabase.",
+        "handler": "cmd_sync",
+        "args": [
+            {
+                "name": "slug_or_id",
+                "help": "Local timeline slug, ULID, or event-stream UUID.",
+            },
+            {"project_arg": True},
+        ],
+    },
     # ── branch (group) ──
     {
         "name": "branch",
@@ -1407,6 +1420,7 @@ def build_parser() -> argparse.ArgumentParser:
         cmd_rename,
         cmd_set_default,
         cmd_show,
+        cmd_sync,
         cmd_theme_override,
         cmd_theme_set,
         cmd_tombstone,
@@ -1439,6 +1453,7 @@ def build_parser() -> argparse.ArgumentParser:
         "cmd_migrate_events": cmd_migrate_events,
         "cmd_push": cmd_push,
         "cmd_pull": cmd_pull,
+        "cmd_sync": cmd_sync,
         "cmd_undo": cmd_undo,
         "cmd_mass_undo": cmd_mass_undo,
         "cmd_erase": cmd_erase,

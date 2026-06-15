@@ -13,16 +13,13 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
-import re
 from collections.abc import Mapping
 from enum import Enum
 from typing import Any, List, Literal, TypedDict, Union, cast
 
-from astrid.core.timeline.kinds import normalize_track_kind
-
 try:
     from banodoco_timeline_schema import (
-        AssetEntry as SharedAssetEntry,
+        AssetEntry as UpstreamSharedAssetEntry,
     )
     from banodoco_timeline_schema import (
         Theme as SharedTheme,
@@ -106,18 +103,6 @@ except ImportError:
         pinnedShotGroups: list[dict[str, Any]]
         output: SharedTimelineOutput
 
-    class SharedAssetEntry(TypedDict, total=False):
-        file: str
-        url: str
-        etag: str
-        content_sha256: str
-        url_expires_at: str
-        type: str
-        duration: float
-        resolution: str
-        fps: float
-        generationId: str
-
     def _materialize_output(config: SharedTimelineConfig, theme: dict[str, Any]) -> SharedTimelineOutput:
         canvas = theme.get("visual", {}).get("canvas", {}) if isinstance(theme, dict) else {}
         width = int(canvas.get("width", 1920)) if isinstance(canvas, dict) else 1920
@@ -131,11 +116,13 @@ except ImportError:
         if not isinstance(config.get("clips"), list):
             raise ValueError("Timeline.clips must be a list")
 
+    class UpstreamSharedAssetEntry(TypedDict, total=False):
+        pass
+
 TimelineClip = SharedTimelineClip
 TimelineConfig = SharedTimelineConfig
 ThemeOverrides = SharedThemeOverrides
 TimelineOutput = SharedTimelineOutput
-AssetEntry = SharedAssetEntry
 Theme = SharedTheme
 
 materialize_output = _materialize_output
@@ -157,6 +144,30 @@ BUILTIN_CLIP_TYPES = ("media", "hold", "text", "effect-layer")
 ClipType = Literal["media", "hold", "text", "effect-layer"]
 TextAlignment = Literal["left", "center", "right"]
 AudioBindingSource = Literal["bass", "mid", "treble", "amplitude"]
+AssetOrigin = Literal["immutable-public", "refreshable-from-generation", "opaque-foreign"]
+
+class DerivedFrom(TypedDict, total=False):
+    assetId: str
+    content_sha256: str
+    role: Literal["thumbnail", "proxy", "render-output"]
+
+class SharedAssetEntry(UpstreamSharedAssetEntry, total=False):
+    file: str
+    url: str
+    etag: str
+    content_sha256: str
+    url_expires_at: str
+    type: str
+    duration: float
+    resolution: str
+    fps: float
+    origin: AssetOrigin
+    derivedFrom: DerivedFrom
+    generationId: str
+    variantId: str
+    thumbnailUrl: str
+
+AssetEntry = SharedAssetEntry
 
 class TimelineEffect(TypedDict, total=False):
     fade_in: float
@@ -396,6 +407,8 @@ _ASSET_ENTRY_ALLOWED = frozenset(
         "duration",
         "resolution",
         "fps",
+        "origin",
+        "derivedFrom",
         "generationId",
         "variantId",
         "thumbnailUrl",
@@ -524,36 +537,36 @@ def timeline_configs_equal(left: Any, right: Any) -> bool:
 # All public names remain importable from this module unchanged.
 # =========================================================================
 from astrid.core.timeline.validators.arrangement import (
-    ArrangementDurationError,
-    _reject_forbidden_arrangement_time_keys,
-    is_all_generative_arrangement,
-    validate_arrangement,
-    validate_arrangement_duration_window,
+    ArrangementDurationError as ArrangementDurationError,
+    _reject_forbidden_arrangement_time_keys as _reject_forbidden_arrangement_time_keys,
+    is_all_generative_arrangement as is_all_generative_arrangement,
+    validate_arrangement as validate_arrangement,
+    validate_arrangement_duration_window as validate_arrangement_duration_window,
 )
 from astrid.core.timeline.validators.metadata import (
-    _validate_generated_at,
-    validate_metadata,
+    _validate_generated_at as _validate_generated_at,
+    validate_metadata as validate_metadata,
 )
 from astrid.core.timeline.validators.pool import (
-    _validate_pool_scores,
-    _validate_source_ids,
-    validate_pool,
+    _validate_pool_scores as _validate_pool_scores,
+    _validate_source_ids as _validate_source_ids,
+    validate_pool as validate_pool,
 )
 from astrid.core.timeline.validators.registry import (
-    _animation_ids,
-    _animation_meta,
-    _effect_ids,
-    _transition_ids,
-    validate_registry,
+    _animation_ids as _animation_ids,
+    _animation_meta as _animation_meta,
+    _effect_ids as _effect_ids,
+    _transition_ids as _transition_ids,
+    validate_registry as validate_registry,
 )
 from astrid.core.timeline.validators.timeline import (
-    _clip_duration_seconds,
-    _schema_params_for_animation_refs,
-    _timeline_fps,
-    _transition_reference,
-    _validate_animation_reference,
-    _validate_animation_reference_list,
-    _validate_clip_transitions,
-    _validate_effect_params,
-    validate_timeline,
+    _clip_duration_seconds as _clip_duration_seconds,
+    _schema_params_for_animation_refs as _schema_params_for_animation_refs,
+    _timeline_fps as _timeline_fps,
+    _transition_reference as _transition_reference,
+    _validate_animation_reference as _validate_animation_reference,
+    _validate_animation_reference_list as _validate_animation_reference_list,
+    _validate_clip_transitions as _validate_clip_transitions,
+    _validate_effect_params as _validate_effect_params,
+    validate_timeline as validate_timeline,
 )

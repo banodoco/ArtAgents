@@ -4,6 +4,7 @@ from .serialize import canonical_json_bytes, canonical_json_text, sha256_hex, wi
 from .types import (
     EVENT_SCHEMA_VERSION,
     ArrangementReplacedPayload,
+    AssetRegistryReplacedPayload,
     AudioBoundPayload,
     AudioUnboundPayload,
     ClipAddedPayload,
@@ -55,6 +56,7 @@ from .types import (
 __all__ = [
     "EVENT_SCHEMA_VERSION",
     "ArrangementReplacedPayload",
+    "AssetRegistryReplacedPayload",
     "AudioBoundPayload",
     "AudioUnboundPayload",
     "ClipAddedPayload",

@@ -130,6 +130,96 @@ class LocalFsBackend:
             _fsync_dir(self.timeline_home)
         return event
 
+    def append_prebuilt_events(
+        self,
+        timeline_id: str,
+        events: list[TimelineEvent],
+        *,
+        expected_version: int | None = None,
+    ) -> list[TimelineEvent]:
+        """Append preconstructed events without changing their IDs or hashes."""
+        if timeline_id != self.timeline_id:
+            raise EventLogError(
+                f"timeline_id mismatch: expected {self.timeline_id!r}, "
+                f"got {timeline_id!r}"
+            )
+        if not events:
+            return []
+
+        self.timeline_home.mkdir(parents=True, exist_ok=True)
+        created = not self.events_path.exists()
+        try:
+            fd = os.open(self.events_path, os.O_CREAT | os.O_APPEND | os.O_RDWR, 0o644)
+        except OSError as exc:
+            raise EventLogError(f"failed to open {self.events_path}: {exc}") from exc
+
+        try:
+            with os.fdopen(fd, "a+b", closefd=True) as handle:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+                try:
+                    identity = self._load_identity_locked()
+                    tail = self._read_tail_event_locked(handle)
+                    locked_head = self._rebuild_head_locked()
+                    prev_hash = tail.hash if tail is not None else None
+
+                    if identity is None:
+                        raise EventLogError(
+                            "timeline identity sidecar is missing; runtime "
+                            "legacy bootstrap is disabled. Run the Sprint 2 "
+                            "migration script before appending events."
+                        )
+
+                    if tail is not None and tail.kind == "timeline.deleted":
+                        raise EventLogError(
+                            f"timeline {identity['timeline_ulid']} rejects appends after timeline.deleted"
+                        )
+
+                    if expected_version is not None and expected_version != locked_head.version:
+                        raise EventLogStaleVersionError(
+                            TimelineVersionConflict(
+                                timeline_id=identity["timeline_id"],
+                                expected_version=expected_version,
+                                current_version=locked_head.version,
+                                last_event_id=locked_head.last_event_id,
+                                last_event_kind=tail.kind if tail is not None else None,
+                                last_event_summary=self._summarize_event(tail),
+                            )
+                        )
+
+                    for event in events:
+                        if event.timeline_id != identity["timeline_id"]:
+                            raise EventLogError(
+                                f"prebuilt event {event.event_id} timeline_id does not match "
+                                f"{identity['timeline_id']}"
+                            )
+                        if event.prev_hash != prev_hash:
+                            raise EventLogError(
+                                f"prebuilt event {event.event_id} prev_hash does not match "
+                                "the current tail"
+                            )
+                        expected = with_event_hash(
+                            TimelineEvent.from_dict({**event.to_json_obj(), "hash": None}),
+                            prev_hash=prev_hash,
+                        )
+                        if event.hash != expected.hash:
+                            raise EventLogError(
+                                f"prebuilt event {event.event_id} hash does not match "
+                                "Astrid canonical hashing"
+                            )
+                        self._append_line_locked(handle, event)
+                        prev_hash = event.hash
+
+                    head = self._rebuild_head_locked()
+                    self._write_head_atomic(head)
+                finally:
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        except OSError as exc:
+            raise EventLogError(f"failed to append prebuilt events to {self.events_path}: {exc}") from exc
+
+        if created:
+            _fsync_dir(self.timeline_home)
+        return list(events)
+
     def append_imported_event(
         self,
         timeline_id: str,

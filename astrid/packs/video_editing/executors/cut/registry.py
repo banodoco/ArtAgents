@@ -15,6 +15,17 @@ from astrid.packs.training.executors.asset_cache import run as asset_cache
 
 from .probe import _FFPROBE_VERBOSE
 
+_PRESERVED_REGISTRY_FIELDS = (
+    "origin",
+    "etag",
+    "content_sha256",
+    "url_expires_at",
+    "thumbnailUrl",
+    "derivedFrom",
+    "generationId",
+    "variantId",
+)
+
 
 def _lookup_probe_asset():
     """Late-bound lookup for ``probe_asset`` through the run.py facade.
@@ -37,6 +48,35 @@ def _url_cache_meta(url: str) -> dict[str, Any]:
     if not cache_path.exists():
         return {}
     return asset_cache._read_meta(cache_path)
+
+
+def _matching_existing_entry(
+    existing_entry: Any,
+    *,
+    url: str | None = None,
+    file_path: Path | None = None,
+) -> dict[str, Any] | None:
+    if not isinstance(existing_entry, dict):
+        return None
+    if url is not None:
+        return existing_entry if existing_entry.get("url") == url else None
+    if file_path is not None:
+        return existing_entry if existing_entry.get("file") == str(file_path) else None
+    return None
+
+
+def _carry_forward_registry_metadata(
+    entry: dict[str, Any],
+    existing_entry: dict[str, Any] | None,
+) -> None:
+    if existing_entry is None:
+        return
+    for field in _PRESERVED_REGISTRY_FIELDS:
+        value = existing_entry.get(field)
+        if isinstance(value, str) and not value:
+            continue
+        if value is not None:
+            entry[field] = value
 
 
 def resolve_asset_paths(args: Any) -> tuple[dict[str, Path], dict[str, str]]:
@@ -87,6 +127,7 @@ def build_registry(
     prior_sources = (prior_meta or {}).get("sources", {})
     for key, url in asset_urls.items():
         existing_entry = existing_assets.get(key) if isinstance(existing_assets, dict) else None
+        matching_entry = _matching_existing_entry(existing_entry, url=url)
         cache_hit = isinstance(existing_entry, dict) and existing_entry.get("url") == url and (
             (
                 existing_entry.get("type") == "audio"
@@ -116,6 +157,7 @@ def build_registry(
             if entry["type"] != "audio":
                 entry["resolution"] = existing_entry["resolution"]
                 entry["fps"] = existing_entry["fps"]
+            _carry_forward_registry_metadata(entry, matching_entry)
             for field in ("content_sha256", "etag"):
                 value = cache_meta.get(field, existing_entry.get(field))
                 if isinstance(value, str) and value:
@@ -135,6 +177,7 @@ def build_registry(
         if probed_type != "audio":
             entry["resolution"] = probed["resolution"]
             entry["fps"] = probed["fps"]
+        _carry_forward_registry_metadata(entry, matching_entry)
         for field in ("content_sha256", "etag"):
             value = cache_meta.get(field)
             if isinstance(value, str) and value:
@@ -145,6 +188,7 @@ def build_registry(
     for key, path in asset_paths.items():
         resolved_path = path.resolve()
         existing_entry = existing_assets.get(key) if isinstance(existing_assets, dict) else None
+        matching_entry = _matching_existing_entry(existing_entry, file_path=resolved_path)
         cache_hit = (
             isinstance(existing_entry, dict)
             and existing_entry.get("file") == str(resolved_path)
@@ -171,6 +215,7 @@ def build_registry(
             if registry["assets"][key]["type"] != "audio":
                 registry["assets"][key]["resolution"] = existing_entry["resolution"]
                 registry["assets"][key]["fps"] = existing_entry["fps"]
+            _carry_forward_registry_metadata(registry["assets"][key], matching_entry)
             continue
 
         if _FFPROBE_VERBOSE:
@@ -185,6 +230,7 @@ def build_registry(
         if probed_type != "audio":
             registry["assets"][key]["resolution"] = probed["resolution"]
             registry["assets"][key]["fps"] = probed["fps"]
+        _carry_forward_registry_metadata(registry["assets"][key], matching_entry)
         sources_meta[key]["codec"] = probed["codec"]
     return registry, sources_meta
 

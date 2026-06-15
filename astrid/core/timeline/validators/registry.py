@@ -46,11 +46,33 @@ def validate_registry(registry: Any) -> None:
         url = entry.get("url")
         if url is not None and (not isinstance(url, str) or not url.startswith(("http://", "https://"))):
             raise ValueError(f"Asset {key!r}.url must be an http(s) URL")
+        origin = entry.get("origin")
+        if origin is not None and origin not in {"immutable-public", "refreshable-from-generation", "opaque-foreign"}:
+            raise ValueError(
+                f"Asset {key!r}.origin must be one of immutable-public, refreshable-from-generation, opaque-foreign"
+            )
         content_sha256 = entry.get("content_sha256")
         if content_sha256 is not None and (
             not isinstance(content_sha256, str) or re.fullmatch(r"[0-9a-f]{64}", content_sha256) is None
         ):
             raise ValueError(f"Asset {key!r}.content_sha256 must be a 64-character lowercase hex string")
+        derived_from = entry.get("derivedFrom")
+        if derived_from is not None:
+            if not isinstance(derived_from, dict):
+                raise ValueError(f"Asset {key!r}.derivedFrom must be an object")
+            role = derived_from.get("role")
+            if role not in {"thumbnail", "proxy", "render-output"}:
+                raise ValueError(f"Asset {key!r}.derivedFrom.role must be thumbnail, proxy, or render-output")
+            asset_id = derived_from.get("assetId")
+            if asset_id is not None and (not isinstance(asset_id, str) or not asset_id):
+                raise ValueError(f"Asset {key!r}.derivedFrom.assetId must be a non-empty string")
+            parent_sha = derived_from.get("content_sha256")
+            if parent_sha is not None and (
+                not isinstance(parent_sha, str) or re.fullmatch(r"[0-9a-f]{64}", parent_sha) is None
+            ):
+                raise ValueError(
+                    f"Asset {key!r}.derivedFrom.content_sha256 must be a 64-character lowercase hex string"
+                )
         if "url_expires_at" in entry:
             _validate_generated_at(entry.get("url_expires_at"), f"Asset {key!r}.url_expires_at")
         etag = entry.get("etag")

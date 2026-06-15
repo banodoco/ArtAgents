@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import os
 import sys
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -61,8 +62,31 @@ def resolve_active_theme(project_slug: str | None = None) -> Path | None:
 
 def _registry(theme: str | Path | None = None, *, project_slug: str | None = None) -> ElementRegistry:
     theme_dir = _resolve_theme_dir(theme) if theme is not None else resolve_active_theme(project_slug)
-    registry = load_default_registry(active_theme=theme_dir, project_root=TOOLS_DIR)
-    legacy_root = WORKSPACE_ROOT
+    return _cached_registry(
+        _path_cache_key(theme_dir),
+        project_slug,
+        _path_cache_key(TOOLS_DIR),
+        _path_cache_key(WORKSPACE_ROOT),
+    )
+
+
+def _path_cache_key(path: str | Path | None) -> str | None:
+    if path is None:
+        return None
+    return str(Path(path).resolve())
+
+
+@lru_cache(maxsize=None)
+def _cached_registry(
+    theme_dir_key: str | None,
+    project_slug: str | None,
+    project_root_key: str | None,
+    legacy_root_key: str | None,
+) -> ElementRegistry:
+    theme_dir = Path(theme_dir_key) if theme_dir_key is not None else None
+    project_root = Path(project_root_key) if project_root_key is not None else TOOLS_DIR
+    registry = load_default_registry(active_theme=theme_dir, project_root=project_root)
+    legacy_root = Path(legacy_root_key) if legacy_root_key is not None else WORKSPACE_ROOT
     if legacy_root.exists():
         legacy_source = ElementSource("legacy_workspace", legacy_root, 15, True)
         for element in load_source_elements(
@@ -71,6 +95,10 @@ def _registry(theme: str | Path | None = None, *, project_slug: str | None = Non
         ):
             registry.register(element)
     return registry
+
+
+def _clear_registry_cache() -> None:
+    _cached_registry.cache_clear()
 
 
 def _warn_conflicts(registry: ElementRegistry, *, kind: ElementKind) -> None:

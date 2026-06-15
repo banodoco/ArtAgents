@@ -256,14 +256,7 @@ MATERIALIZER_ALLOWED_CLASSIFICATIONS: frozenset[ProjectionKindClassification] = 
 
 def classify_projector_event_kind(kind: str) -> ProjectionKindClassification:
     """Return the planned container routing class for a timeline event kind."""
-    try:
-        return PROJECTOR_EVENT_CLASSIFICATION[kind]
-    except KeyError as exc:
-        raise ProjectionError(
-            event_id="(classification)",
-            kind=kind,
-            reason=f"event kind {kind!r} is not classified for projection",
-        ) from exc
+    return PROJECTOR_EVENT_CLASSIFICATION.get(kind, "metadata_noop")
 
 
 _EMPTY_INIT_DEFAULTS: dict[str, Any] = {
@@ -625,6 +618,9 @@ def apply_event_to_assembly(
     """
     # Lifecycle no-ops
     if event.kind in _LIFECYCLE_NOOP_KINDS:
+        return state
+
+    if event.kind not in PROJECTOR_EVENT_CLASSIFICATION:
         return state
 
     # Erased payload envelope: checked BEFORE any kind-specific logic,

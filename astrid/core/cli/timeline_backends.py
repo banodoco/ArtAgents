@@ -24,6 +24,35 @@ from astrid.core.timeline._shared import (
 # ---------------------------------------------------------------------------
 
 
+def _format_sync_fields(result: Any, prefix: str = "  ") -> list[str]:
+    """Format S5 sync classification fields for CLI output.
+
+    Returns a list of strings to be printed line-by-line by the caller.
+    """
+    lines: list[str] = []
+
+    if result.sync_action is not None:
+        lines.append(f"{prefix}sync action: {result.sync_action}")
+
+    if result.divergent:
+        lines.append(f"{prefix}divergent: True")
+
+    if result.divergence_artifact is not None:
+        art = result.divergence_artifact
+        if hasattr(art, "path"):
+            lines.append(f"{prefix}divergence artifact path: {art.path}")
+        elif hasattr(art, "entry_id"):
+            entry_id = art.entry_id
+            lines.append(f"{prefix}divergence artifact id: {entry_id}")
+        else:
+            lines.append(f"{prefix}divergence artifact: {art}")
+
+    if result.bookmark_error:
+        lines.append(f"{prefix}bookmark error: {result.bookmark_error}")
+
+    return lines
+
+
 def cmd_push(args: argparse.Namespace) -> int:
     """Push a local timeline to Supabase via event-log replay."""
     session = _resolve_optional_session(args)
@@ -53,6 +82,8 @@ def cmd_push(args: argparse.Namespace) -> int:
     print(f"  failed: {result.failed}")
     print(f"  destination version: {result.destination_version}")
     print(f"  projection regenerated: {result.projection_regenerated}")
+    for line in _format_sync_fields(result):
+        print(line)
 
     if result.failed > 0:
         return 1
@@ -94,9 +125,124 @@ def cmd_pull(args: argparse.Namespace) -> int:
     print(f"  failed: {result.failed}")
     print(f"  destination version: {result.destination_version}")
     print(f"  projection regenerated: {result.projection_regenerated}")
+    for line in _format_sync_fields(result):
+        print(line)
 
     if result.failed > 0:
         return 1
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Handler: sync (S5)
+# ---------------------------------------------------------------------------
+
+
+def cmd_sync(args: argparse.Namespace) -> int:
+    """Unified push-then-pull: push local changes to Supabase, then pull back.
+
+    Runs push first. If push succeeds, immediately runs pull to fetch any
+    remote-only changes. If push fails, the error is reported and sync stops.
+    When pull reports a destination-only outcome (no new source events), the
+    reverse-direction result is surfaced so the operator can see remote-only
+    changes that were pulled down.
+
+    Returns exit code 0 when both directions succeed (or are no-ops). Returns
+    non-zero when either direction reports failures.
+    """
+    session = _resolve_optional_session(args)
+    project_slug = _resolve_project_slug(args, session)
+
+    from astrid.core.timeline.transfer import pull_timeline, push_timeline
+
+    # ── Phase 1: Push (local → Supabase) ──
+    try:
+        push_result = push_timeline(
+            project_slug,
+            args.slug_or_id,
+            destination_actor=_timeline_actor_from_session(session) if session else None,
+        )
+    except ValueError as exc:
+        raise AstridError(
+            f"timelines sync push phase: {exc}",
+            recovery_command="astrid timelines sync <slug-or-id> --project <slug>",
+            state_snapshot={"timeline": args.slug_or_id, "phase": "push"},
+        ) from exc
+
+    print(f"Sync ── push: {push_result.direction} {push_result.source_backend_name} → {push_result.destination_backend_name}")
+    print(f"  source timeline: {push_result.source_timeline_id}")
+    print(f"  destination timeline: {push_result.destination_timeline_id}")
+    print(f"  scanned: {push_result.scanned}")
+    print(f"  appended: {push_result.appended}")
+    print(f"  skipped (idempotent): {push_result.skipped_idempotent}")
+    print(f"  failed: {push_result.failed}")
+    print(f"  destination version: {push_result.destination_version}")
+    for line in _format_sync_fields(push_result, prefix="  "):
+        print(line)
+
+    push_failed = push_result.failed > 0
+
+    # ── Phase 2: Pull (Supabase → local) ──
+    pull_failed = False
+    try:
+        pull_result = pull_timeline(
+            project_slug,
+            args.slug_or_id,
+            into=args.slug_or_id,  # pull back into the same local timeline
+        )
+    except ValueError as exc:
+        raise AstridError(
+            f"timelines sync pull phase: {exc}",
+            recovery_command="astrid timelines sync <slug-or-id> --project <slug>",
+            state_snapshot={"timeline": args.slug_or_id, "phase": "pull"},
+        ) from exc
+
+    print(f"Sync ── pull: {pull_result.direction} {pull_result.source_backend_name} → {pull_result.destination_backend_name}")
+    print(f"  source timeline: {pull_result.source_timeline_id}")
+    print(f"  destination timeline: {pull_result.destination_timeline_id}")
+    print(f"  scanned: {pull_result.scanned}")
+    print(f"  appended: {pull_result.appended}")
+    print(f"  skipped (idempotent): {pull_result.skipped_idempotent}")
+    print(f"  failed: {pull_result.failed}")
+    print(f"  destination version: {pull_result.destination_version}")
+    for line in _format_sync_fields(pull_result, prefix="  "):
+        print(line)
+
+    pull_failed = pull_result.failed > 0
+
+    # ── Summary ──
+    if push_failed and pull_failed:
+        print("Sync: both push and pull reported failures.")
+        return 1
+    if push_failed:
+        print("Sync: push reported failures (pull succeeded).")
+        return 1
+    if pull_failed:
+        print("Sync: pull reported failures (push succeeded).")
+        return 1
+
+    # Surface any bookmark-level issues that the transfer surfaced
+    bookmark_issues: list[str] = []
+    if push_result.bookmark_error:
+        bookmark_issues.append(f"push bookmark: {push_result.bookmark_error}")
+    if pull_result.bookmark_error:
+        bookmark_issues.append(f"pull bookmark: {pull_result.bookmark_error}")
+
+    if push_result.divergent:
+        bookmark_issues.append(
+            f"push divergence preserved (action={push_result.sync_action})"
+        )
+    if pull_result.divergent:
+        bookmark_issues.append(
+            f"pull divergence preserved (action={pull_result.sync_action})"
+        )
+
+    if bookmark_issues:
+        print("Sync: completed with bookmark notices:")
+        for issue in bookmark_issues:
+            print(f"  - {issue}")
+
+    print("Sync: complete (local ↔ Supabase).")
     return 0
 
 

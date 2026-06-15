@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import unittest
 from typing import Any
 from unittest.mock import patch
@@ -13,6 +12,7 @@ from astrid.core.integrations.reigh.data_provider import SupabaseDataProvider
 from astrid.core.integrations.reigh.errors import TimelineVersionConflictError
 from astrid.core.integrations.reigh.supabase_client import SupabaseHTTPError
 from astrid.core.integrations.reigh.timeline_io import save_timeline
+from astrid.core.timeline.eventlog.types import EventLogStaleVersionError, TimelineVersionConflict
 
 
 def _canonical_timeline() -> dict[str, Any]:
@@ -73,7 +73,7 @@ class SaveTimelineTest(unittest.TestCase):
     def _make_fetch(self, versions: list[int]) -> _FakeFetch:
         return _FakeFetch(versions=versions)
 
-    def test_rpc_called_with_exact_three_param_shape_via_service_role(self) -> None:
+    def test_legacy_rpc_fallback_keeps_three_param_shape_without_append_config(self) -> None:
         fetch = self._make_fetch([0])
         rpc_calls: list[dict[str, Any]] = []
 
@@ -91,7 +91,7 @@ class SaveTimelineTest(unittest.TestCase):
                 fetch_url="https://x/functions/v1/reigh-data-fetch",
                 supabase_url="https://x",
                 read_auth=("pat", "pat-token"),
-                write_auth=("service_role", "srv-key"),
+                write_auth=("pat", "pat-token"),
                 expected_version=0,
             )
         self.assertEqual(result.new_version, 1)
@@ -100,11 +100,10 @@ class SaveTimelineTest(unittest.TestCase):
         self.assertEqual(call["name"], "update_timeline_config_versioned")
         self.assertEqual(set(call["params"].keys()), {"p_timeline_id", "p_expected_version", "p_config"})
         self.assertNotIn("project_id", call["params"])
-        # Service-role on the worker path; explicitly never user_jwt.
-        self.assertEqual(call["auth"][0], "service_role")
+        self.assertEqual(call["auth"][0], "pat")
         self.assertNotEqual(call["auth"][0], "user_jwt")
 
-    def test_version_mismatch_retries_then_exhausts_at_three(self) -> None:
+    def test_legacy_rpc_version_mismatch_retries_then_exhausts_at_three(self) -> None:
         fetch = self._make_fetch([0, 0, 0])
         attempts = {"count": 0}
 
@@ -123,7 +122,7 @@ class SaveTimelineTest(unittest.TestCase):
                     fetch_url="https://x/functions/v1/reigh-data-fetch",
                     supabase_url="https://x",
                     read_auth=("pat", "pat-token"),
-                    write_auth=("service_role", "srv-key"),
+                    write_auth=("pat", "pat-token"),
                     expected_version=0,
                     retries=3,
                 )
@@ -138,7 +137,7 @@ class SaveTimelineTest(unittest.TestCase):
                 fetch_url="https://x",
                 supabase_url="https://x",
                 read_auth=("pat", "t"),
-                write_auth=("service_role", "k"),
+                write_auth=("pat", "k"),
                 expected_version=None,
                 force=False,
             )
@@ -155,11 +154,126 @@ class SaveTimelineTest(unittest.TestCase):
                 fetch_url="https://x",
                 supabase_url="https://x",
                 read_auth=("pat", "t"),
-                write_auth=("service_role", "k"),
+                write_auth=("pat", "k"),
                 expected_version=None,
                 force=True,
             )
         self.assertEqual(result.new_version, 6)
+
+    def test_save_timeline_uses_append_transport_when_service_role_available(self) -> None:
+        fetch = self._make_fetch([4])
+        append_calls: list[dict[str, Any]] = []
+
+        class FakeAppendResult:
+            def __init__(self) -> None:
+                self.config_version = 5
+
+        class FakeTransport:
+            def __init__(self, *, supabase_url: str, auth_token: str, timeout: float) -> None:
+                append_calls.append(
+                    {
+                        "supabase_url": supabase_url,
+                        "auth_token": auth_token,
+                        "timeout": timeout,
+                        "append": None,
+                    }
+                )
+
+            def append_config_replaced(self, **kwargs: Any) -> FakeAppendResult:
+                append_calls[-1]["append"] = kwargs
+                return FakeAppendResult()
+
+        with patch.object(tio, "post_json", side_effect=fetch), patch.object(
+            tio, "LiveSupabaseAppendTransport", FakeTransport
+        ), patch.object(tio, "rpc", side_effect=AssertionError("legacy rpc should not be used")):
+            result = save_timeline(
+                timeline_id="tl-1",
+                project_id="proj-1",
+                mutator=lambda config, _version: {**config, "tracks": [], "clips": list(config["clips"])},
+                fetch_url="https://x/functions/v1/reigh-data-fetch",
+                supabase_url="https://x",
+                read_auth=("pat", "pat-token"),
+                write_auth=("user_jwt", "user-token"),
+                expected_version=4,
+                asset_registry={"assets": {"a1": {"url": "asset"}}},
+                append_service_role_key="srv-key",
+            )
+
+        self.assertEqual(result.new_version, 5)
+        self.assertEqual(result.attempts, 1)
+        self.assertEqual(len(append_calls), 1)
+        self.assertEqual(append_calls[0]["auth_token"], "srv-key")
+        self.assertEqual(
+            append_calls[0]["append"]["asset_registry"],
+            {"assets": {"a1": {"url": "asset"}}},
+        )
+        self.assertEqual(append_calls[0]["append"]["expected_version"], 4)
+        self.assertEqual(append_calls[0]["append"]["source"], "editor_save")
+        self.assertEqual(append_calls[0]["append"]["actor"].type, "human")
+
+    def test_append_transport_conflict_retries_then_raises_timeline_version_conflict(self) -> None:
+        fetch = self._make_fetch([4, 5, 6])
+        attempts = {"count": 0}
+
+        class FakeTransport:
+            def __init__(self, **_kwargs: Any) -> None:
+                pass
+
+            def append_config_replaced(self, **kwargs: Any) -> object:
+                attempts["count"] += 1
+                raise EventLogStaleVersionError(
+                    TimelineVersionConflict(
+                        timeline_id="tl-1",
+                        expected_version=kwargs["expected_version"],
+                        current_version=kwargs["expected_version"] + 1,
+                        last_event_id="01ARZ3NDEKTSV4RRFFQ69G5FAV",
+                        last_event_kind="timeline.config_replaced",
+                    )
+                )
+
+        with patch.object(tio, "post_json", side_effect=fetch), patch.object(
+            tio, "LiveSupabaseAppendTransport", FakeTransport
+        ):
+            with self.assertRaises(TimelineVersionConflictError) as excinfo:
+                save_timeline(
+                    timeline_id="tl-1",
+                    project_id="proj-1",
+                    mutator=lambda config, _version: config,
+                    fetch_url="https://x/functions/v1/reigh-data-fetch",
+                    supabase_url="https://x",
+                    read_auth=("pat", "pat-token"),
+                    write_auth=("service_role", "srv-key"),
+                    expected_version=4,
+                    retries=3,
+                )
+
+        self.assertEqual(attempts["count"], 3)
+        self.assertEqual(excinfo.exception.attempts, 3)
+
+
+class DataProviderSaveTimelineTest(unittest.TestCase):
+    def test_provider_forwards_asset_registry_and_service_role_key_to_timeline_io(self) -> None:
+        provider = SupabaseDataProvider(
+            supabase_url="https://example.supabase.co",
+            fetch_url="https://example.supabase.co/functions/v1/reigh-data-fetch",
+            pat="pat-token",
+            service_role_key="srv-key",
+        )
+
+        with patch.object(dp_mod.timeline_io, "save_timeline", return_value=tio.SaveResult({}, 1, 1)) as mocked:
+            provider.save_timeline(
+                "tl-1",
+                lambda config, _version: config,
+                project_id="proj-1",
+                auth=("pat", "pat-token"),
+                read_auth=("pat", "pat-token"),
+                expected_version=0,
+                asset_registry={"assets": {"a1": {"url": "asset"}}},
+            )
+
+        kwargs = mocked.call_args.kwargs
+        self.assertEqual(kwargs["asset_registry"], {"assets": {"a1": {"url": "asset"}}})
+        self.assertEqual(kwargs["append_service_role_key"], "srv-key")
 
 
 class UploadAssetTest(unittest.TestCase):
