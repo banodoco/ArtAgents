@@ -18,7 +18,6 @@ from astrid.core.timeline.eventlog.types import (
 )
 from astrid.core.timeline.events.schema import EVENT_SCHEMA_VERSION, TimelineActor
 
-
 _ACTOR = TimelineActor(type="human", id="user-1", display="User One")
 _SQL_CONTRACT_MIGRATION = (
     Path(__file__).resolve().parents[3]

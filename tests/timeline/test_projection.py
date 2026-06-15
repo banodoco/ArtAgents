@@ -22,8 +22,8 @@ from typing import Any
 import pytest
 
 from astrid.core import timeline as timeline_contract
-from astrid.core.foundation import project_paths
 from astrid.core._shared.jsonio import read_json, write_json_atomic
+from astrid.core.foundation import project_paths
 from astrid.core.project.project import create_project
 from astrid.core.timeline.crud import create_timeline
 from astrid.core.timeline.eventlog import LocalFsBackend
@@ -31,6 +31,7 @@ from astrid.core.timeline.events.schema import (
     TimelineActor,
     TimelineEvent,
 )
+from astrid.core.timeline.events.schema.types import _PAYLOAD_TYPES
 from astrid.core.timeline.paths import assembly_identity_path
 from astrid.core.timeline.projection import (
     MATERIALIZER_ALLOWED_CLASSIFICATIONS,
@@ -41,7 +42,6 @@ from astrid.core.timeline.projection import (
     project_to_assembly,
     regenerate_projection,
 )
-from astrid.core.timeline.events.schema.types import _PAYLOAD_TYPES
 
 ROOT = Path(__file__).resolve().parents[2]
 GOLDEN_DIR = ROOT / "tests" / "golden"
@@ -1036,6 +1036,7 @@ class TestBootstrapBehavior:
         """A true-legacy timeline (no identity, has compatibility files)
         fails closed instead of emitting timeline.imported."""
         import json
+
         from astrid.core.timeline._edit_helpers import pack_write_gateway
         from astrid.core.timeline.events.schema import TimelineActor
 

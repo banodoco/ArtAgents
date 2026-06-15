@@ -23,16 +23,15 @@ from astrid.core.integrations.reigh.worker_jwt import (
 )
 from astrid.core.timeline.eventlog.supabase import LiveSupabaseAppendTransport
 from astrid.core.timeline.eventlog.types import EventLogStaleVersionError, EventLogTransportError
+from astrid.core.timeline.events.schema import TimelineActor
+from astrid.core.timeline.events.schema.payloads._base import TimelineImportSource
 from astrid.core.timeline.sync_state import (
     HeadSnapshot,
     SyncBookmark,
     SyncStateError,
     compare_head_to_bookmark,
 )
-from astrid.core.timeline.events.schema import TimelineActor
-from astrid.core.timeline.events.schema.payloads._base import TimelineImportSource
 from astrid.core.util.time import utc_now_seconds
-
 
 DEFAULT_INTERNAL_TOKEN_ENV = "REIGH_APPEND_SERVICE_INTERNAL_TOKEN"
 

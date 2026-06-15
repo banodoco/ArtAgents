@@ -13,8 +13,8 @@ from astrid.core.integrations.reigh.append_service import (
     AppendServiceConfig,
     create_append_service_server,
 )
-from astrid.core.timeline.eventlog.types import EventLogStaleVersionError, TimelineVersionConflict
 from astrid.core.integrations.reigh.worker_jwt import VerifiedJwt
+from astrid.core.timeline.eventlog.types import EventLogStaleVersionError, TimelineVersionConflict
 
 
 @dataclass

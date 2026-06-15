@@ -8,17 +8,17 @@ re-processed for re-render or asset rebasing.
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from dataclasses import dataclass
 from typing import Any
 
 from astrid.core._shared.result_manifest import write_manifest
 from astrid.core.contracts.errors import AstridError
 from astrid.core.foundation.paths import REPO_ROOT, WORKSPACE_ROOT
 from astrid.core.timeline import (
-    AssetRegistry,
     METADATA_VERSION,
+    AssetRegistry,
     PipelineMetadata,
     TimelineConfig,
     canonical_timeline_config,

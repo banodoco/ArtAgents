@@ -17,9 +17,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from astrid.core.contracts.errors import AstridError
-from astrid.core.cli_choices import AstridArgumentError, StaticChoices
 from astrid.core.cli import timeline as timeline_cli
+from astrid.core.cli_choices import AstridArgumentError, StaticChoices
+from astrid.core.contracts.errors import AstridError
 from astrid.core.timeline import clip_edits
 from astrid.core.timeline.events.schema import (
     AudioBoundPayload,
@@ -32,7 +32,6 @@ from astrid.core.timeline.events.schema import (
     TrackAddedPayload,
     TransitionSetPayload,
 )
-
 
 # ---------------------------------------------------------------------------
 # Help and discovery
@@ -1803,10 +1802,10 @@ def test_preview_out_guard_rejects_paths_inside_timeline_home(
         encoding="utf-8",
     )
 
-    from astrid.core.timeline.observability import ResolvedTarget
-    from astrid.core.timeline import observability as obs_mod
     from astrid.core.timeline import eventlog as evlog_mod
+    from astrid.core.timeline import observability as obs_mod
     from astrid.core.timeline.events.schema import TimelineEvent as TE
+    from astrid.core.timeline.observability import ResolvedTarget
 
     fake_target = ResolvedTarget(
         backend="local_fs",
@@ -1887,8 +1886,8 @@ def test_preview_out_guard_allows_paths_outside_timeline_home(
     def fake_resolve(project_slug: str, slug_or_id: str, *, root=None):
         return fake_target
 
-    from astrid.core.timeline import observability as obs_mod
     from astrid.core.timeline import eventlog as evlog_mod
+    from astrid.core.timeline import observability as obs_mod
 
     monkeypatch.setattr(obs_mod, "resolve_timeline_target", fake_resolve)
 
@@ -2181,9 +2180,9 @@ def _import_timeline(
     If *skip_if_events_exist* is True (the default) and the timeline already has
     events, the import is skipped — the returned dict will have ``imported: False``.
     """
-    from astrid.core.timeline.migration import import_from_legacy_local
     from astrid.core.timeline.eventlog.local_fs import LocalFsBackend
     from astrid.core.timeline.events.schema import TimelineActor
+    from astrid.core.timeline.migration import import_from_legacy_local
 
     backend = LocalFsBackend(timeline_home=tdir, timeline_id=ulid)
     if skip_if_events_exist and backend.read_events():
@@ -2316,8 +2315,8 @@ class TestAuditProjectionParityAfterImport:
         session = SimpleNamespace(project="demo", agent_id="tester", id="session-1")
         monkeypatch.setattr(timeline_cli, "_require_session", lambda slug=None: session)
 
-        from astrid.core.timeline import observability as obs_mod
         from astrid.core.timeline import eventlog as evlog_mod
+        from astrid.core.timeline import observability as obs_mod
 
         fake_target = ResolvedTarget(
             backend="supabase",
@@ -2333,7 +2332,7 @@ class TestAuditProjectionParityAfterImport:
         )
 
         # Provide the fake transport via select_timeline_backend
-        from astrid.core.timeline.eventlog.types import EventLogVerification, EventLogHead
+        from astrid.core.timeline.eventlog.types import EventLogHead, EventLogVerification
 
         class FakeSupabaseBackend:
             def backend_name(self):
@@ -2377,7 +2376,7 @@ class TestAuditProjectionParityAfterImport:
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         """Read-only commands on mocked Supabase config seed must not append."""
-        from astrid.core.timeline.events.schema import TimelineActor, TimelineEvent
+        from astrid.core.timeline.events.schema import TimelineEvent
         from astrid.core.timeline.observability import ResolvedTarget
 
         tid = "00000000-0000-0000-0000-000000000101"
@@ -2404,8 +2403,8 @@ class TestAuditProjectionParityAfterImport:
         session = SimpleNamespace(project="demo", agent_id="tester", id="session-1")
         monkeypatch.setattr(timeline_cli, "_require_session", lambda slug=None: session)
 
-        from astrid.core.timeline import observability as obs_mod
         from astrid.core.timeline import eventlog as evlog_mod
+        from astrid.core.timeline import observability as obs_mod
 
         fake_target = ResolvedTarget(
             backend="supabase",
@@ -2423,7 +2422,7 @@ class TestAuditProjectionParityAfterImport:
         # Track whether append was called
         append_calls: list[object] = []
 
-        from astrid.core.timeline.eventlog.types import EventLogVerification, EventLogHead
+        from astrid.core.timeline.eventlog.types import EventLogHead, EventLogVerification
 
         class ReadOnlySupabaseBackend:
             def backend_name(self):

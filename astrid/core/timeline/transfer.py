@@ -39,6 +39,11 @@ from .eventlog.supabase import (
 )
 from .events.schema import TimelineActor, TimelineEvent
 from .projection import regenerate_projection
+from .sync_divergence import (
+    DivergenceArtifactRef,
+    TransferFailure,
+    write_keep_both_artifact,
+)
 from .sync_state import (
     HeadSnapshot,
     SyncBookmark,
@@ -46,11 +51,6 @@ from .sync_state import (
     head_snapshot_from_backend,
     read_local_sync_bookmark,
     write_local_sync_bookmark,
-)
-from .sync_divergence import (
-    DivergenceArtifactRef,
-    TransferFailure,
-    write_keep_both_artifact,
 )
 
 # ============================================================================

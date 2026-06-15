@@ -3,8 +3,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from astrid.core.element import catalog as effects_catalog
 from astrid.core import timeline
+from astrid.core.element import catalog as effects_catalog
 
 
 class TimelineElementsCatalogTest(unittest.TestCase):

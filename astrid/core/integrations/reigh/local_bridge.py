@@ -20,18 +20,18 @@ from astrid.core.foundation.project_paths import (
     sources_dir,
     validate_project_slug,
 )
+from astrid.core.timeline.eventlog import LocalFsBackend
+from astrid.core.timeline.events.schema import TimelineActor
 from astrid.core.timeline.paths import (
     find_timeline_by_event_stream_id,
     find_timeline_by_slug,
-    load_display_json_with_repair,
     load_assembly_json_with_repair,
+    load_display_json_with_repair,
     timeline_dir,
     timelines_dir,
     validate_timeline_slug,
     validate_timeline_ulid,
 )
-from astrid.core.timeline.eventlog import LocalFsBackend
-from astrid.core.timeline.events.schema import TimelineActor
 from astrid.core.timeline.projection import regenerate_projection
 
 from .event_construction import asset_registry_to_events, config_to_events

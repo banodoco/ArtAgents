@@ -12,15 +12,12 @@ Coverage:
 from __future__ import annotations
 
 import json
-import os
-import shutil
 import uuid
-from collections.abc import Callable, Generator
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Low-level data factories

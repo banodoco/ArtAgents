@@ -13,12 +13,13 @@ Covers:
 
 from __future__ import annotations
 
-import pytest
 from pathlib import Path
 from uuid import uuid4
 
-from astrid.core.timeline.events.schema import TimelineActor
+import pytest
+
 from astrid.core.timeline.eventlog.local_fs import LocalFsBackend
+from astrid.core.timeline.events.schema import TimelineActor
 from astrid.core.timeline.transfer import (
     TransferResult,
     _transfer_events,
@@ -379,9 +380,9 @@ class TestSupabaseFakeTransfer:
         self, tmp_path: Path, fake_supabase_transport
     ):
         """Push local events to fake Supabase via append_imported_event."""
+        from astrid.core.timeline.eventlog import EventLogTarget
         from astrid.core.timeline.eventlog.local_fs import LocalFsBackend
         from astrid.core.timeline.eventlog.supabase import SupabaseBackend
-        from astrid.core.timeline.eventlog import EventLogTarget
 
         src_tid = str(uuid4())
         dst_tid = str(uuid4())
@@ -451,9 +452,9 @@ class TestSupabaseFakeTransfer:
         self, tmp_path: Path, fake_supabase_transport
     ):
         """Push same events twice to fake Supabase — second is idempotent."""
+        from astrid.core.timeline.eventlog import EventLogTarget
         from astrid.core.timeline.eventlog.local_fs import LocalFsBackend
         from astrid.core.timeline.eventlog.supabase import SupabaseBackend
-        from astrid.core.timeline.eventlog import EventLogTarget
 
         src_tid = str(uuid4())
         dst_tid = str(uuid4())
@@ -520,9 +521,9 @@ class TestSupabaseFakeTransfer:
         self, tmp_path: Path, fake_supabase_transport
     ):
         """Transfer interrupted after one event, retry appends the rest (fake transport)."""
+        from astrid.core.timeline.eventlog import EventLogTarget
         from astrid.core.timeline.eventlog.local_fs import LocalFsBackend
         from astrid.core.timeline.eventlog.supabase import SupabaseBackend
-        from astrid.core.timeline.eventlog import EventLogTarget
 
         src_tid = str(uuid4())
         dst_tid = str(uuid4())
@@ -622,8 +623,9 @@ class TestReighBridgeNotInvoked:
 
     def test_transfer_result_has_no_reigh_fields(self):
         """TransferResult carries no Reigh blob/config fields."""
-        from astrid.core.timeline.transfer import TransferResult
         import dataclasses
+
+        from astrid.core.timeline.transfer import TransferResult
 
         fields = {f.name for f in dataclasses.fields(TransferResult)}
         assert "reigh_config" not in fields
@@ -677,8 +679,8 @@ class TestRemoteOnlyPull:
     ):
         """Pull with --create --as writes provenance: imported identity
         and preserves the remote UUID as the canonical timeline_id."""
-        from astrid.core.timeline.eventlog.selector import resolve_pull_destination
         from astrid.core.timeline import paths as paths_mod
+        from astrid.core.timeline.eventlog.selector import resolve_pull_destination
 
         proj_dir = tmp_path / "test-project"
         tl_dir = proj_dir / "timelines"
@@ -739,8 +741,8 @@ class TestRemoteOnlyPull:
         self, tmp_path: Path, monkeypatch
     ):
         """Pull --create --as with an existing slug fails before writes."""
-        from astrid.core.timeline.eventlog.selector import resolve_pull_destination
         from astrid.core.timeline import paths as paths_mod
+        from astrid.core.timeline.eventlog.selector import resolve_pull_destination
 
         proj_dir = tmp_path / "test-project"
         tl_dir = proj_dir / "timelines" / "01J00000000000000000000001"
@@ -775,8 +777,8 @@ class TestRemoteOnlyPull:
         self, tmp_path: Path, monkeypatch
     ):
         """Implicit --create with remote_source_timeline_id preserves UUID."""
-        from astrid.core.timeline.eventlog.selector import resolve_pull_destination
         from astrid.core.timeline import paths as paths_mod
+        from astrid.core.timeline.eventlog.selector import resolve_pull_destination
 
         proj_dir = tmp_path / "test-project"
         tl_dir = proj_dir / "timelines"
@@ -814,9 +816,10 @@ class TestRemoteOnlyPull:
         self, tmp_path: Path, monkeypatch
     ):
         """--create --as without remote_source_timeline_id generates fresh UUID."""
-        from astrid.core.timeline.eventlog.selector import resolve_pull_destination
-        from astrid.core.timeline import paths as paths_mod
         from uuid import UUID
+
+        from astrid.core.timeline import paths as paths_mod
+        from astrid.core.timeline.eventlog.selector import resolve_pull_destination
 
         proj_dir = tmp_path / "test-project"
         tl_dir = proj_dir / "timelines"
@@ -1645,8 +1648,8 @@ class TestTransferSyncClassification:
 
     def test_bookmark_missing_fields(self, tmp_path: Path):
         """Bookmark with missing required fields aborts before event replay."""
-        from astrid.core.timeline.eventlog.local_fs import LocalFsBackend
         from astrid.core._shared.jsonio import write_json_atomic
+        from astrid.core.timeline.eventlog.local_fs import LocalFsBackend
 
         src_tid = str(uuid4())
         dst_tid = str(uuid4())
@@ -1778,9 +1781,9 @@ class TestTransferSyncClassification:
 
     def test_divergent_keep_both_failure_aborts_without_replay(self, tmp_path: Path, monkeypatch):
         """Artifact failure aborts before any LWW replay can append to destination."""
+        import astrid.core.timeline.transfer as transfer_mod
         from astrid.core.timeline.eventlog.local_fs import LocalFsBackend
         from astrid.core.timeline.sync_divergence import TransferFailure
-        import astrid.core.timeline.transfer as transfer_mod
 
         src_tid = str(uuid4())
         dst_tid = str(uuid4())
@@ -2299,10 +2302,10 @@ class TestTransferSyncClassification:
         self, tmp_path: Path, fake_supabase_transport, monkeypatch
     ):
         """Retry after a post-append bookmark-write failure skips already imported events."""
+        import astrid.core.timeline.transfer as transfer_mod
         from astrid.core.timeline.eventlog.local_fs import LocalFsBackend
         from astrid.core.timeline.eventlog.supabase import SupabaseBackend
         from astrid.core.timeline.sync_divergence import TransferFailure
-        import astrid.core.timeline.transfer as transfer_mod
 
         src_tid = str(uuid4())
         dst_tid = str(uuid4())
@@ -2510,12 +2513,12 @@ class TestBornLocalPromotion:
         self, tmp_path: Path, monkeypatch,
     ):
         """Born-local not-found preflight → append service creates timeline with same UUID."""
+        import astrid.core.timeline.transfer as transfer_mod
         from astrid.core.timeline.eventlog.local_fs import LocalFsBackend
         from astrid.core.timeline.eventlog.supabase import (
             AppendServiceCreateResult,
             TimelineMetadataPreflight,
         )
-        import astrid.core.timeline.transfer as transfer_mod
 
         timeline_id = "b1e10000-0000-4000-8000-000000000001"
         project_id = "p1e10000-0000-4000-8000-000000000001"
@@ -2599,10 +2602,10 @@ class TestBornLocalPromotion:
         self, tmp_path: Path, monkeypatch,
     ):
         """Missing project.json.project_id raises TransferFailure."""
+        import astrid.core.timeline.transfer as transfer_mod
         from astrid.core.timeline.eventlog.local_fs import LocalFsBackend
         from astrid.core.timeline.eventlog.supabase import TimelineMetadataPreflight
         from astrid.core.timeline.sync_divergence import TransferFailure
-        import astrid.core.timeline.transfer as transfer_mod
 
         timeline_id = "b2e20000-0000-4000-8000-000000000002"
 
@@ -2637,10 +2640,10 @@ class TestBornLocalPromotion:
         self, tmp_path: Path, monkeypatch,
     ):
         """Missing sync user ID raises TransferFailure."""
+        import astrid.core.timeline.transfer as transfer_mod
         from astrid.core.timeline.eventlog.local_fs import LocalFsBackend
         from astrid.core.timeline.eventlog.supabase import TimelineMetadataPreflight
         from astrid.core.timeline.sync_divergence import TransferFailure
-        import astrid.core.timeline.transfer as transfer_mod
 
         timeline_id = "b2e30000-0000-4000-8000-000000000003"
 
@@ -2674,10 +2677,10 @@ class TestBornLocalPromotion:
         self, tmp_path: Path, monkeypatch,
     ):
         """Missing append service URL raises TransferFailure."""
+        import astrid.core.timeline.transfer as transfer_mod
         from astrid.core.timeline.eventlog.local_fs import LocalFsBackend
         from astrid.core.timeline.eventlog.supabase import TimelineMetadataPreflight
         from astrid.core.timeline.sync_divergence import TransferFailure
-        import astrid.core.timeline.transfer as transfer_mod
 
         timeline_id = "b2e40000-0000-4000-8000-000000000004"
 
@@ -2711,10 +2714,10 @@ class TestBornLocalPromotion:
         self, tmp_path: Path, monkeypatch,
     ):
         """Missing internal token raises TransferFailure."""
+        import astrid.core.timeline.transfer as transfer_mod
         from astrid.core.timeline.eventlog.local_fs import LocalFsBackend
         from astrid.core.timeline.eventlog.supabase import TimelineMetadataPreflight
         from astrid.core.timeline.sync_divergence import TransferFailure
-        import astrid.core.timeline.transfer as transfer_mod
 
         timeline_id = "b2e50000-0000-4000-8000-000000000005"
 
@@ -2752,9 +2755,9 @@ class TestBornLocalPromotion:
         self, tmp_path: Path, monkeypatch,
     ):
         """Preflight status='not_found' triggers promotion for born-local identity."""
+        import astrid.core.timeline.transfer as transfer_mod
         from astrid.core.timeline.eventlog.local_fs import LocalFsBackend
         from astrid.core.timeline.eventlog.supabase import TimelineMetadataPreflight
-        import astrid.core.timeline.transfer as transfer_mod
 
         timeline_id = "b3e10000-0000-4000-8000-000000000011"
         project_id = "p3e10000-0000-4000-8000-000000000011"
@@ -2794,10 +2797,10 @@ class TestBornLocalPromotion:
         self, tmp_path: Path, monkeypatch,
     ):
         """Preflight status='unauthorized' raises TransferFailure."""
+        import astrid.core.timeline.transfer as transfer_mod
         from astrid.core.timeline.eventlog.local_fs import LocalFsBackend
         from astrid.core.timeline.eventlog.supabase import TimelineMetadataPreflight
         from astrid.core.timeline.sync_divergence import TransferFailure
-        import astrid.core.timeline.transfer as transfer_mod
 
         timeline_id = "b3e20000-0000-4000-8000-000000000012"
 
@@ -2828,10 +2831,10 @@ class TestBornLocalPromotion:
         self, tmp_path: Path, monkeypatch,
     ):
         """Preflight status='network_failure' raises TransferFailure."""
+        import astrid.core.timeline.transfer as transfer_mod
         from astrid.core.timeline.eventlog.local_fs import LocalFsBackend
         from astrid.core.timeline.eventlog.supabase import TimelineMetadataPreflight
         from astrid.core.timeline.sync_divergence import TransferFailure
-        import astrid.core.timeline.transfer as transfer_mod
 
         timeline_id = "b3e30000-0000-4000-8000-000000000013"
 
@@ -2862,10 +2865,10 @@ class TestBornLocalPromotion:
         self, tmp_path: Path, monkeypatch,
     ):
         """Non-born-local (imported) identity with not_found raises TransferFailure."""
+        import astrid.core.timeline.transfer as transfer_mod
         from astrid.core.timeline.eventlog.local_fs import LocalFsBackend
         from astrid.core.timeline.eventlog.supabase import TimelineMetadataPreflight
         from astrid.core.timeline.sync_divergence import TransferFailure
-        import astrid.core.timeline.transfer as transfer_mod
 
         timeline_id = "b3e40000-0000-4000-8000-000000000014"
 
@@ -2897,9 +2900,9 @@ class TestBornLocalPromotion:
         self, tmp_path: Path, monkeypatch,
     ):
         """When preflight='exists' and bookmark missing, recover from DB."""
+        import astrid.core.timeline.transfer as transfer_mod
         from astrid.core.timeline.eventlog.local_fs import LocalFsBackend
         from astrid.core.timeline.eventlog.supabase import TimelineMetadataPreflight
-        import astrid.core.timeline.transfer as transfer_mod
 
         timeline_id = "b4e10000-0000-4000-8000-000000000021"
 
@@ -2944,12 +2947,14 @@ class TestBornLocalPromotion:
         self, tmp_path: Path, monkeypatch,
     ):
         """When preflight='exists' and bookmark present, do nothing."""
+        import astrid.core.timeline.transfer as transfer_mod
         from astrid.core.timeline.eventlog.local_fs import LocalFsBackend
         from astrid.core.timeline.eventlog.supabase import TimelineMetadataPreflight
         from astrid.core.timeline.sync_state import (
-            SyncBookmark, HeadSnapshot, write_local_sync_bookmark,
+            HeadSnapshot,
+            SyncBookmark,
+            write_local_sync_bookmark,
         )
-        import astrid.core.timeline.transfer as transfer_mod
 
         timeline_id = "b4e20000-0000-4000-8000-000000000022"
 
@@ -2997,10 +3002,10 @@ class TestBornLocalPromotion:
         self, tmp_path: Path, monkeypatch,
     ):
         """When hub event_count cannot be reconciled, raise TransferFailure."""
+        import astrid.core.timeline.transfer as transfer_mod
         from astrid.core.timeline.eventlog.local_fs import LocalFsBackend
         from astrid.core.timeline.eventlog.supabase import TimelineMetadataPreflight
         from astrid.core.timeline.sync_divergence import TransferFailure
-        import astrid.core.timeline.transfer as transfer_mod
 
         timeline_id = "b4e30000-0000-4000-8000-000000000023"
 
@@ -3042,9 +3047,9 @@ class TestBornLocalPromotion:
         self, tmp_path: Path, monkeypatch,
     ):
         """When preflight='exists' and event_count=0, skip recovery."""
+        import astrid.core.timeline.transfer as transfer_mod
         from astrid.core.timeline.eventlog.local_fs import LocalFsBackend
         from astrid.core.timeline.eventlog.supabase import TimelineMetadataPreflight
-        import astrid.core.timeline.transfer as transfer_mod
 
         timeline_id = "b4e40000-0000-4000-8000-000000000024"
 
@@ -3080,9 +3085,12 @@ class TestBornLocalPromotion:
         self, tmp_path: Path, monkeypatch, fake_supabase_transport,
     ):
         """After partial promotion, bookmark recovery allows clean transfer."""
-        from astrid.core.timeline.eventlog.local_fs import LocalFsBackend
-        from astrid.core.timeline.eventlog.supabase import SupabaseBackend, TimelineMetadataPreflight
         import astrid.core.timeline.transfer as transfer_mod
+        from astrid.core.timeline.eventlog.local_fs import LocalFsBackend
+        from astrid.core.timeline.eventlog.supabase import (
+            SupabaseBackend,
+            TimelineMetadataPreflight,
+        )
 
         timeline_id = "b5e10000-0000-4000-8000-000000000031"
 
@@ -3175,11 +3183,12 @@ class TestBornLocalPromotion:
         self, tmp_path: Path, monkeypatch,
     ):
         """Promotion adds supabase to synced_backends and writes sync_targets."""
+        import astrid.core.timeline.transfer as transfer_mod
         from astrid.core.timeline.eventlog.local_fs import LocalFsBackend
         from astrid.core.timeline.eventlog.supabase import (
-            AppendServiceCreateResult, TimelineMetadataPreflight,
+            AppendServiceCreateResult,
+            TimelineMetadataPreflight,
         )
-        import astrid.core.timeline.transfer as transfer_mod
 
         timeline_id = "b6e10000-0000-4000-8000-000000000041"
         project_id = "p6e10000-0000-4000-8000-000000000041"
@@ -3265,11 +3274,12 @@ class TestBornLocalPromotion:
         self, tmp_path: Path, monkeypatch,
     ):
         """Re-running promotion preflight after success does not double-create."""
+        import astrid.core.timeline.transfer as transfer_mod
         from astrid.core.timeline.eventlog.local_fs import LocalFsBackend
         from astrid.core.timeline.eventlog.supabase import (
-            AppendServiceCreateResult, TimelineMetadataPreflight,
+            AppendServiceCreateResult,
+            TimelineMetadataPreflight,
         )
-        import astrid.core.timeline.transfer as transfer_mod
 
         timeline_id = "b7e10000-0000-4000-8000-000000000051"
         project_id = "p7e10000-0000-4000-8000-000000000051"
@@ -3346,11 +3356,12 @@ class TestBornLocalPromotion:
         self, tmp_path: Path, monkeypatch,
     ):
         """A second full push with existing Supabase row skips promotion."""
+        import astrid.core.timeline.transfer as transfer_mod
         from astrid.core.timeline.eventlog.local_fs import LocalFsBackend
         from astrid.core.timeline.eventlog.supabase import (
-            AppendServiceCreateResult, TimelineMetadataPreflight,
+            AppendServiceCreateResult,
+            TimelineMetadataPreflight,
         )
-        import astrid.core.timeline.transfer as transfer_mod
 
         timeline_id = "b7e20000-0000-4000-8000-000000000052"
         project_id = "p7e20000-0000-4000-8000-000000000052"
@@ -3420,10 +3431,10 @@ class TestBornLocalPromotion:
         self, tmp_path: Path, monkeypatch,
     ):
         """When append service create fails, EventLogTransportError propagates with no bookmark."""
+        import astrid.core.timeline.transfer as transfer_mod
         from astrid.core.timeline.eventlog.local_fs import LocalFsBackend
         from astrid.core.timeline.eventlog.supabase import TimelineMetadataPreflight
         from astrid.core.timeline.eventlog.types import EventLogTransportError
-        import astrid.core.timeline.transfer as transfer_mod
 
         timeline_id = "b7e30000-0000-4000-8000-000000000053"
 

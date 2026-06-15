@@ -15,11 +15,11 @@ from copy import deepcopy
 from typing import Any
 from uuid import uuid4
 
+from astrid.core.timeline.banodoco_schema import canonical_empty_timeline
 from astrid.core.timeline.events.schema import (
     EVENT_SCHEMA_VERSION,
     AssetRegistryReplacedPayload,
     TimelineActor,
-    TimelineConfigReplacedPayload,
     TimelineEvent,
     TimelineEventSchemaError,
     canonical_json_text,
@@ -31,8 +31,6 @@ from astrid.core.timeline.projection import (
     classify_projector_event_kind,
     project_to_assembly,
 )
-from astrid.core.timeline.banodoco_schema import canonical_empty_timeline
-
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 

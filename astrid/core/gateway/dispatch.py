@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-from importlib import import_module
 import logging
+import signal
 import subprocess
 import sys
+from importlib import import_module
 from pathlib import Path
 from typing import Any
-
-import signal
 
 from astrid.core.cli import session as _session_cli
 from astrid.core.contracts.errors import AstridError

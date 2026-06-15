@@ -10,6 +10,7 @@ import pytest
 
 from astrid.core._shared.jsonio import write_json_atomic
 from astrid.core.timeline.eventlog import EventLogTarget, LocalFsBackend, SupabaseBackend
+from astrid.core.timeline.events.schema import TimelineActor
 from astrid.core.timeline.sync_divergence import (
     LocalDivergenceArtifactRef,
     SupabaseDivergenceArtifactRef,
@@ -17,7 +18,6 @@ from astrid.core.timeline.sync_divergence import (
     write_keep_both_artifact,
 )
 from astrid.core.timeline.sync_state import HeadSnapshot
-from astrid.core.timeline.events.schema import TimelineActor
 
 _ACTOR = TimelineActor(type="agent", id="sync-divergence-test")
 

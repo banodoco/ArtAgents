@@ -2,18 +2,18 @@
 
 from __future__ import annotations
 
-import os
-import pytest
 from pathlib import Path
 from uuid import uuid4
 
+import pytest
+
+from astrid.core.timeline.eventlog.local_fs import LocalFsBackend
 from astrid.core.timeline.eventlog.selector import (
     EventLogTarget,
     PullDestination,
     resolve_event_log_target,
     resolve_pull_destination,
 )
-from astrid.core.timeline.eventlog.local_fs import LocalFsBackend
 
 
 class TestResolveEventLogTarget:
@@ -128,7 +128,6 @@ class TestResolvePullDestination:
 
     def test_into_existing_slug(self, tmp_path: Path, monkeypatch):
         """--into <existing-slug> resolves to existing timeline."""
-        from astrid.core.timeline.paths import find_timeline_by_slug
 
         timeline_id = str(uuid4())
         home = tmp_path / "demo" / "timelines" / "01J00000000000000000000001"
@@ -372,8 +371,9 @@ class TestResolvePullDestination:
         )
         assert dest.created is True
 
-        from astrid.core._shared.jsonio import read_json
         from uuid import UUID
+
+        from astrid.core._shared.jsonio import read_json
         identity = read_json(dest.identity_path)
         # A fresh UUID is generated
         fresh_id = identity["timeline_id"]
@@ -401,8 +401,9 @@ class TestResolvePullDestination:
         )
         assert dest.created is True
 
-        from astrid.core._shared.jsonio import read_json
         from uuid import UUID
+
+        from astrid.core._shared.jsonio import read_json
         identity = read_json(dest.identity_path)
         fresh_id = identity["timeline_id"]
         UUID(fresh_id)

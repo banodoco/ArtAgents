@@ -48,7 +48,6 @@ import jwt as pyjwt
 import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
 
-from astrid.core import timeline as timeline_mod
 from astrid.core.integrations.reigh import worker_jwt
 from astrid.core.integrations.reigh.data_provider import SupabaseDataProvider
 from astrid.core.integrations.reigh.errors import (
@@ -61,7 +60,6 @@ from astrid.core.integrations.reigh.worker_jwt import (
     verify_user_jwt,
 )
 from astrid.core.timeline import banodoco_schema as banodoco_schema_mod
-
 
 # ---------------------------------------------------------------------------
 # Shared fixtures: RSA keypair, JWKS, canonical timeline.

@@ -16,7 +16,6 @@ from uuid import uuid4
 
 import pytest
 
-from astrid.core.util.time import utc_now_iso
 from astrid.core.timeline.eventlog import LocalFsBackend, SupabaseBackend
 from astrid.core.timeline.eventlog.types import (
     EventLogError,
@@ -29,6 +28,7 @@ from astrid.core.timeline.events.schema import (
     TimelineEvent,
     with_event_hash,
 )
+from astrid.core.util.time import utc_now_iso
 
 
 class FakeSupabaseTransport:

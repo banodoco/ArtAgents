@@ -10,14 +10,13 @@ Covers:
 from __future__ import annotations
 
 import json
-import threading
-import time
-from pathlib import Path
-from typing import Any
 
 # Import from the local conftest (pytest will have it available as a fixture module).
 # We use the functions directly since they're defined in conftest.py in the same package.
 import sys
+import threading
+import time
+from pathlib import Path
 from pathlib import Path as _Path
 
 # Ensure the integrations.reigh package is importable
@@ -25,18 +24,11 @@ _pkg_dir = _Path(__file__).resolve().parent
 if str(_pkg_dir) not in sys.path:
     sys.path.insert(0, str(_pkg_dir.parent.parent.parent))
 
-from tests.integrations.reigh.conftest import (  # type: ignore[import-not-found]
-    make_assembly_json,
-    make_identity_json,
-    make_project_json,
-    make_registry_json,
-    make_timeline_id,
-)
 import astrid.core.integrations.reigh.local_bridge as local_bridge
 from astrid.core.integrations.reigh.local_bridge import (
-    REIGH_LOCAL_EDITOR_ACTOR,
     BRIDGE_AUDIO_PROXY_PROFILE_VERSION,
     BRIDGE_VIDEO_PROXY_PROFILE_VERSION,
+    REIGH_LOCAL_EDITOR_ACTOR,
     _build_ffmpeg_audio_proxy_command,
     _build_ffmpeg_video_proxy_command,
     bridge_registry_path,
@@ -45,21 +37,28 @@ from astrid.core.integrations.reigh.local_bridge import (
     find_bridge_timeline,
     get_bridge_audio_proxy_status,
     get_bridge_video_proxy_status,
-    list_bridge_project_dirs,
     list_bridge_checkpoints,
+    list_bridge_project_dirs,
     list_bridge_projects,
     list_bridge_timelines,
     load_bridge_registry,
     load_bridge_timeline,
-    save_bridge_registry,
-    save_bridge_timeline,
     resolve_bridge_asset,
     resolve_bridge_projects_root,
+    save_bridge_registry,
+    save_bridge_timeline,
 )
 from astrid.core.timeline.eventlog import LocalFsBackend
 from astrid.core.timeline.eventlog.selector import resolve_event_log_target
 from astrid.core.timeline.observability import resolve_timeline_target
 from astrid.core.timeline.paths import load_assembly_json_with_repair
+from tests.integrations.reigh.conftest import (  # type: ignore[import-not-found]
+    make_assembly_json,
+    make_identity_json,
+    make_project_json,
+    make_registry_json,
+    make_timeline_id,
+)
 
 
 class TestFixtureDataFactories:
@@ -192,7 +191,9 @@ class TestBridgeSeedProjectEventLogIdentity:
             timeline_ulid=ulid,
             timeline_id=tid,
         )
-        from tests.integrations.reigh.conftest import read_bridge_identity  # type: ignore[import-not-found]
+        from tests.integrations.reigh.conftest import (
+            read_bridge_identity,  # type: ignore[import-not-found]
+        )
 
         identity = read_bridge_identity(pdir, ulid)
         assert identity["timeline_id"] == tid

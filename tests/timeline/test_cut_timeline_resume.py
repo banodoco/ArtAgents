@@ -1,19 +1,16 @@
-import copy
 import json
 import shutil
 import tempfile
 import unittest
 from pathlib import Path
 
-from astrid.core.contracts.errors import AstridError
 from astrid.core import timeline
+from astrid.core.contracts.errors import AstridError
 from astrid.packs.video_editing.executors.cut import run as cut
 from astrid.packs.video_editing.executors.cut.registry import (
     _carry_forward_registry_metadata,
-    _PRESERVED_REGISTRY_FIELDS,
     build_registry,
 )
-
 
 ROOT = Path(__file__).resolve().parents[2]
 EXAMPLES = ROOT / "examples"

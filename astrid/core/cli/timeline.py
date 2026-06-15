@@ -12,13 +12,8 @@ from astrid.core.session.binding import (  # noqa: F401  (resolve_current_sessio
     resolve_current_session,
 )
 from astrid.core.timeline import (
-    audio_edits,  # kept for monkeypatch seams (timeline_cli.audio_edits)
     clip_edits,  # kept for monkeypatch seams (timeline_cli.clip_edits)
-    crud,
-    effect_edits,  # kept for monkeypatch seams
-    theme_edits,  # kept for monkeypatch seams
-    track_edits,  # kept for monkeypatch seams
-    transition_edits,  # kept for monkeypatch seams
+    crud,  # kept for monkeypatch seams
 )
 from astrid.core.timeline._edit_helpers import TimelineEditError
 
@@ -95,7 +90,6 @@ def _resolve_clip_backend_name(project_slug: str, slug: str) -> str:
     or ``"supabase"`` when the sidecar requests it.
     """
     from astrid.core._shared.jsonio import read_json  # noqa: PLC0415
-    from astrid.core.timeline import clip_edits  # noqa: PLC0415
     from astrid.core.timeline.paths import (  # noqa: PLC0415
         assembly_identity_path,
         find_timeline_by_slug,

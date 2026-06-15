@@ -64,6 +64,7 @@ from astrid.core.gateway.dispatch import (
     _dispatch_runpod_volumes,
     _dispatch_runs,
     _dispatch_scratch,
+    _dispatch_serve,
     _dispatch_sessions,
     _dispatch_setup,
     _dispatch_skills,
@@ -74,7 +75,6 @@ from astrid.core.gateway.dispatch import (
     _dispatch_timelines,
     _dispatch_unclaim,
     _dispatch_worker,
-    _dispatch_serve,
     _run_default_brief_from_args,
     _top_level_commands,
 )

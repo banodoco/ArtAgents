@@ -17,7 +17,6 @@ from astrid.core.integrations.reigh.local_bridge import (
     _build_source_summary,
     ensure_bridge_audio_proxy,
     ensure_bridge_video_proxy,
-    find_bridge_timeline,
     get_bridge_audio_proxy_status,
     get_bridge_video_proxy_status,
     list_bridge_checkpoints,

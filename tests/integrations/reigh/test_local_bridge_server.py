@@ -8,7 +8,10 @@ from typing import Any, Generator
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
-from astrid.core.integrations.reigh.local_bridge import ensure_bridge_audio_proxy, save_bridge_timeline
+from astrid.core.integrations.reigh.local_bridge import (
+    ensure_bridge_audio_proxy,
+    save_bridge_timeline,
+)
 from astrid.core.integrations.reigh.local_bridge_server import create_local_bridge_server
 
 
@@ -1136,10 +1139,7 @@ def test_serve_dispatcher_starts_and_serves_health(
     seed_bridge_project, tmp_bridge_root: Path,
 ) -> None:
     """_dispatch_serve creates a working server that responds to /health."""
-    import os
-    import signal
 
-    from astrid.core.gateway.dispatch import _dispatch_serve
 
     timeline_id = "11111111-1111-1111-1111-111111111111"
     seed_bridge_project(slug="ados-talks", timeline_id=timeline_id)
@@ -1153,7 +1153,9 @@ def test_serve_dispatcher_starts_and_serves_health(
         nonlocal server_error
         try:
             # We need to override serve_forever to signal when the server is ready.
-            from astrid.core.integrations.reigh.local_bridge_server import create_local_bridge_server
+            from astrid.core.integrations.reigh.local_bridge_server import (
+                create_local_bridge_server,
+            )
 
             srv = create_local_bridge_server(
                 host="127.0.0.1",
@@ -1199,10 +1201,7 @@ def test_serve_dispatcher_with_host_port_and_projects_root_args(
     tmp_path: Path, seed_bridge_project,
 ) -> None:
     """_dispatch_serve accepts --host, --port, and --projects-root arguments."""
-    import argparse
-    import sys
 
-    from astrid.core.gateway.dispatch import _dispatch_serve
 
     projects_dir = tmp_path / "serve-test-projects"
     projects_dir.mkdir()
@@ -1212,7 +1211,6 @@ def test_serve_dispatcher_with_host_port_and_projects_root_args(
     # Instead, verify the argument parser accepts the expected flags.
     import argparse as _argparse
 
-    from astrid.core.integrations.reigh.local_bridge_server import create_local_bridge_server
 
     parser = _argparse.ArgumentParser(prog="astrid serve", description="Start the Astrid local read bridge.")
     parser.add_argument("--host", default="127.0.0.1")
