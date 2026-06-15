@@ -12,8 +12,13 @@ from astrid.core.session.binding import (  # noqa: F401  (resolve_current_sessio
     resolve_current_session,
 )
 from astrid.core.timeline import (
+    audio_edits as audio_edits,  # kept for monkeypatch seams (timeline_cli.audio_edits)
     clip_edits,  # kept for monkeypatch seams (timeline_cli.clip_edits)
     crud,  # kept for monkeypatch seams
+    effect_edits as effect_edits,  # kept for monkeypatch seams
+    theme_edits as theme_edits,  # kept for monkeypatch seams
+    track_edits as track_edits,  # kept for monkeypatch seams
+    transition_edits as transition_edits,  # kept for monkeypatch seams
 )
 from astrid.core.timeline._edit_helpers import TimelineEditError
 
