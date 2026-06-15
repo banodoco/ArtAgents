@@ -1796,15 +1796,72 @@ def build_event_talks_pipeline(
     writes.  Cost is $0 for all steps (no LLM or RunPod calls).
     """
     from pathlib import Path
+    import shlex
 
-    from astrid.packs.video_editing.orchestrators.event_talks.workflow import (
-        build_workflow as build_event_talks_workflow,
+    from astrid.core.integrations.arnold.session.authoring import (
+        build_workflow,
+        executor_step,
     )
 
     resolved_run_root = run_root or artifact_root or "/tmp/arnold-event-talks-run"
-    return build_event_talks_workflow(
-        python_exec="python3",
-        run_root=Path(resolved_run_root),
+    run_root_path = Path(resolved_run_root)
+
+    cmd_ados = (
+        "python3 -m astrid.packs.video_editing.orchestrators.event_talks.run "
+        f"ados-sunday-template --out {shlex.quote('{produces_root}/ados-sunday-template.json')}"
+    )
+    cmd_search = (
+        "python3 -m astrid.packs.video_editing.orchestrators.event_talks.run "
+        f"search-transcript --out {shlex.quote('{produces_root}/search-results.txt')}"
+    )
+    cmd_holding = (
+        "python3 -m astrid.packs.video_editing.orchestrators.event_talks.run "
+        f"find-holding-screens --video '' --out {shlex.quote('{produces_root}/holding-screens.json')}"
+    )
+    manifest_ref = "{step_dir}/../ados-sunday-template/v1/produces/ados-sunday-template.json"
+    cmd_render = (
+        "python3 -m astrid.packs.video_editing.orchestrators.event_talks.run "
+        f"render --manifest {shlex.quote(manifest_ref)} --out-dir {shlex.quote('{produces_root}')}"
+    )
+
+    return build_workflow(
+        [
+            executor_step(
+                "ados-sunday-template",
+                segment_id=EVENT_TALKS_ID,
+                adapter="local",
+                command=cmd_ados,
+                produces={"template_output": "ados-sunday-template.json"},
+                label="Ados Sunday Template",
+            ),
+            executor_step(
+                "search-transcript",
+                segment_id=EVENT_TALKS_ID,
+                adapter="local",
+                command=cmd_search,
+                produces={"search_output": "search-results.txt"},
+                label="Search Transcript",
+            ),
+            executor_step(
+                "find-holding-screens",
+                segment_id=EVENT_TALKS_ID,
+                adapter="local",
+                command=cmd_holding,
+                produces={"holding_output": "holding-screens.json"},
+                label="Find Holding Screens",
+            ),
+            executor_step(
+                "render",
+                segment_id=EVENT_TALKS_ID,
+                adapter="local",
+                command=cmd_render,
+                produces={"render_output": "render-manifest.json"},
+                label="Render",
+            ),
+        ],
+        segment_id=EVENT_TALKS_ID,
+        project=project or "default",
+        run_root_path=run_root_path,
     )
 
 
