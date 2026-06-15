@@ -16,12 +16,9 @@ from pathlib import Path
 
 import pytest
 
-from astrid.core.integrations.arnold.session.records import (
-    SESSION_SUCCESSION_WORKFLOW_ID,
-    ArnoldRunRecord,
-    load_arnold_run_record,
-    resolve_mode,
-    is_session_run,
+from astrid.core.integrations.arnold.session.events import (
+    SEGMENT_BOUNDARY_KIND,
+    make_segment_boundary_event,
 )
 from astrid.core.integrations.arnold.session.manifest import (
     SESSION_MANIFEST_FILENAME,
@@ -31,26 +28,25 @@ from astrid.core.integrations.arnold.session.manifest import (
     load_manifest_file,
     write_manifest_file,
 )
+from astrid.core.integrations.arnold.session.records import (
+    SESSION_SUCCESSION_WORKFLOW_ID,
+    is_session_run,
+    load_arnold_run_record,
+    resolve_mode,
+)
 from astrid.core.integrations.arnold.session.state import (
     ArtifactRef,
     StateRef,
-    prefixed_hash,
     load_state_file,
     write_state_file,
 )
-from astrid.core.integrations.arnold.session.events import (
-    SEGMENT_BOUNDARY_KIND,
-    make_segment_boundary_event,
-)
 from astrid.core.task.events import (
-    ZERO_HASH,
     EVENTS_FILENAME,
     LEASE_FILENAME,
-    verify_chain,
     read_events,
+    verify_chain,
 )
 from tests.conftest import seed_event
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Helpers
@@ -112,14 +108,14 @@ class TestOwnershipDefaults:
             run_dir,
             {
                 "engine": "arnold",
-                "workflow_id": "we.refine_image",
+                "workflow_id": "builtin.agent_probe",
                 "run_id": "run-abc",
             },
         )
         record = load_arnold_run_record(run_dir)
         assert record.mode == "static"
         assert record.engine == "arnold"
-        assert record.workflow_id == "we.refine_image"
+        assert record.workflow_id == "builtin.agent_probe"
         assert record.run_id == "run-abc"
 
     def test_load_session_succession_record(self, tmp_path: Path) -> None:
@@ -197,7 +193,7 @@ class TestOwnershipDefaults:
             run_dir,
             {
                 "engine": "arnold",
-                "workflow_id": "we.refine_image",
+                "workflow_id": "builtin.agent_probe",
                 "run_id": "run-static",
             },
         )
@@ -215,7 +211,7 @@ class TestOwnershipDefaults:
             run_dir,
             {
                 "engine": "arnold",
-                "workflow_id": "we.refine_image",
+                "workflow_id": "builtin.agent_probe",
                 "run_id": "run-extra",
                 "custom_field": 42,
                 "nested": {"a": 1},

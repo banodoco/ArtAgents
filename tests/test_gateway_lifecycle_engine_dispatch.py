@@ -166,7 +166,7 @@ def _seed_project_with_active_arnold_run(
         json.dumps(
             {
                 "engine": "arnold",
-                "workflow_id": "we.refine_image",
+                "workflow_id": "builtin.agent_probe",
                 "run_id": run_id,
                 "status": "running",
             }

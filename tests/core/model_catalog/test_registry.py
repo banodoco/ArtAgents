@@ -11,18 +11,18 @@ from pathlib import Path
 
 import pytest
 
-from astrid.core.model_catalog.taxonomy import (
-    GenerationBackendIdDescriptor,
-    GenerationFeatureDescriptor,
-    GenerationModeDescriptor,
-    GenerationTaxonomyRegistry,
-)
 from astrid.core.model_catalog.registry import ModelRegistry
 from astrid.core.model_catalog.schema import (
     CANONICAL_IMAGE_MODES,
     Price,
     validate_registry,
     validate_registry_with_backends,
+)
+from astrid.core.model_catalog.taxonomy import (
+    GenerationBackendIdDescriptor,
+    GenerationFeatureDescriptor,
+    GenerationModeDescriptor,
+    GenerationTaxonomyRegistry,
 )
 
 # ---------------------------------------------------------------------------
@@ -787,6 +787,9 @@ class TestShippedRegistry:
         "wan-2.2",
         "ltx-2.3",
         "ltx-2.3-pro",
+        "minimax-music-v2.6",
+        "stable-audio-3-medium",
+        "ace-step",
     }
 
     def test_load_default_succeeds(self) -> None:
@@ -920,9 +923,14 @@ class TestListByModalityV2:
         video_models = registry.list_by_modality("video")
         assert {m.id for m in video_models} == {"wan-2.2", "ltx-2.3", "ltx-2.3-pro"}
 
-    def test_audio_returns_empty(self) -> None:
+    def test_audio_returns_expected_entries(self) -> None:
         registry = ModelRegistry.load_default()
-        assert registry.list_by_modality("audio") == []
+        audio_models = registry.list_by_modality("audio")
+        assert {m.id for m in audio_models} == {
+            "minimax-music-v2.6",
+            "stable-audio-3-medium",
+            "ace-step",
+        }
 
 
 # ---------------------------------------------------------------------------

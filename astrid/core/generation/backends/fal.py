@@ -150,6 +150,18 @@ class FalBackend(BackendAdapter):
             "enable_prompt_expansion": "enable_prompt_expansion",
             "acceleration": "acceleration",
         },
+        # ── Audio modes ────────────────────────────────────────────────
+        "music": {
+            "prompt": "prompt",
+            "negative_prompt": "negative_prompt",
+            "seed": "seed",
+            "duration": "duration",
+            "guidance_scale": "guidance_scale",
+            "steps": "num_inference_steps",
+            "lyrics_prompt": "lyrics",
+            "instrumental": "is_instrumental",
+            "output_format": "output_format",
+        },
     }
 
     def __init__(
@@ -373,7 +385,11 @@ class FalBackend(BackendAdapter):
         # If the API did not report a cost (missing or non-numeric), fall back
         # to the registry price when available.  Unpriced backends keep None.
         if cost_usd is None and backend_spec.price is not None:
-            cost_usd = len(asset_urls) * backend_spec.price.usd
+            if backend_spec.price.unit == "second":
+                duration_s = params.get("duration") or 0
+                cost_usd = duration_s * backend_spec.price.usd
+            else:
+                cost_usd = len(asset_urls) * backend_spec.price.usd
 
         for idx, url in enumerate(asset_urls):
             try:
@@ -426,7 +442,7 @@ def _upload_ref_if_local(
 
 
 def _extract_asset_urls(result: dict[str, Any]) -> list[str]:
-    """Extract image or video URLs from a fal result dict.
+    """Extract image, video, or audio URLs from a fal result dict.
 
     Handles common fal response shapes:
 
@@ -439,6 +455,12 @@ def _extract_asset_urls(result: dict[str, Any]) -> list[str]:
     *Video shapes (Sprint 04):*
     - ``{"video": {"url": "..."}}`` — single video dict
     - ``{"videos": [{"url": "..."}, ...]}`` — video list
+
+    *Audio shapes:*
+    - ``{"audio": {"url": "..."}}`` — single audio dict
+    - ``{"audio_file": {"url": "..."}}`` — single audio dict (alt key)
+    - ``{"audios": [{"url": "..."}, ...]}`` — audio list
+    - ``{"output": {"audio": {"url": "..."}}}`` — nested output.audio
     """
     urls: list[str] = []
 
@@ -476,7 +498,30 @@ def _extract_asset_urls(result: dict[str, Any]) -> list[str]:
         if urls:
             return urls
 
-    # Nested output.image
+    # Single audio object
+    audio = result.get("audio")
+    if isinstance(audio, dict) and "url" in audio:
+        urls.append(audio["url"])
+        return urls
+
+    # Alternative single-audio key used by some endpoints
+    audio_file = result.get("audio_file")
+    if isinstance(audio_file, dict) and "url" in audio_file:
+        urls.append(audio_file["url"])
+        return urls
+
+    # Audio list
+    audios = result.get("audios")
+    if isinstance(audios, list):
+        for item in audios:
+            if isinstance(item, dict) and "url" in item:
+                urls.append(item["url"])
+            elif isinstance(item, str):
+                urls.append(item)
+        if urls:
+            return urls
+
+    # Nested output.image / output.video / output.audio
     output = result.get("output")
     if isinstance(output, dict):
         nested_image = output.get("image")
@@ -486,6 +531,10 @@ def _extract_asset_urls(result: dict[str, Any]) -> list[str]:
         nested_video = output.get("video")
         if isinstance(nested_video, dict) and "url" in nested_video:
             urls.append(nested_video["url"])
+            return urls
+        nested_audio = output.get("audio")
+        if isinstance(nested_audio, dict) and "url" in nested_audio:
+            urls.append(nested_audio["url"])
             return urls
         # output is a direct URL string
     elif isinstance(output, str):
@@ -508,6 +557,10 @@ def _guess_suffix(url: str) -> str:
     """Guess a file extension from a URL path."""
     path = url.split("?")[0]
     suffix = Path(path).suffix.lower()
-    if suffix in {".png", ".jpg", ".jpeg", ".webp", ".gif", ".mp4", ".webm", ".mov"}:
+    if suffix in {
+        ".png", ".jpg", ".jpeg", ".webp", ".gif",
+        ".mp4", ".webm", ".mov",
+        ".wav", ".mp3", ".flac", ".m4a",
+    }:
         return suffix
     return ".png"

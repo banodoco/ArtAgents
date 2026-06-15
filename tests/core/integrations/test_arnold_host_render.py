@@ -9,14 +9,14 @@ from astrid.core.task.operator.render import NEXT_JSON_SCHEMA
 def _snapshot(events: tuple[dict[str, object], ...] = ()) -> ArnoldOperationSnapshot:
     return ArnoldOperationSnapshot(
         project_slug="demo",
-        workflow_id="we.refine_image",
+        workflow_id="builtin.agent_probe",
         run_id="run-1",
         run_root=Path("/tmp/run-1"),
         lease={"writer_epoch": 0},
-        cursor={"stage": "review"},
+        cursor={"stage": "per_item"},
         events_tail=events,
-        next_stage_id="review",
-        next_stage_label="Review",
+        next_stage_id="per_item",
+        next_stage_label="Per Item",
         envelope=object(),
     )
 
@@ -38,16 +38,16 @@ def test_render_snapshot_ready_ack_uses_snapshot_not_task_peek_result() -> None:
         "run_id": "run-1",
         "state": "ready",
         "action": "ack",
-        "command": (
-            "astrid ack --engine arnold --project demo --stage review "
+            "command": (
+            "astrid ack --engine arnold --project demo --stage per_item "
             "--decision approve|reject --notes <notes>"
         ),
-        "step": "review",
+        "step": "per_item",
         "blocked": False,
         "reason": None,
     }
-    assert "Arnold workflow we.refine_image" in rendered.text
-    assert "stage: Review (review)" in rendered.text
+    assert "Arnold workflow builtin.agent_probe" in rendered.text
+    assert "stage: Per Item (per_item)" in rendered.text
     assert "ready for acknowledgement:" in rendered.text
 
 
@@ -59,7 +59,7 @@ def test_render_snapshot_covers_blocked_produces_feedback_items_and_reack() -> N
             (
                 {
                     "kind": "human_feedback",
-                    "stage_id": "review",
+                    "stage_id": "per_item",
                     "action": "reject",
                     "notes": "too soft",
                 },
@@ -67,7 +67,7 @@ def test_render_snapshot_covers_blocked_produces_feedback_items_and_reack() -> N
                     "kind": "item_checklist",
                     "items": [
                         {"id": "a", "status": "completed"},
-                        {"id": "b", "status": "pending", "stage_id": "review"},
+                        {"id": "b", "status": "pending", "stage_id": "per_item"},
                     ],
                 },
                 {
@@ -78,7 +78,7 @@ def test_render_snapshot_covers_blocked_produces_feedback_items_and_reack() -> N
                 },
                 {
                     "kind": "stage_rewritten",
-                    "stage_id": "review",
+                    "stage_id": "per_item",
                     "previous_decision": "approve",
                 },
             )

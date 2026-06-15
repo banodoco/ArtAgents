@@ -2,32 +2,32 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable
 
-from astrid.core.plan import TaskPlanError
 from astrid.core.contracts.schema import Output, Port
+from astrid.core.events import canonical_event_json
 from astrid.core.integrations.arnold.host.builder import edge_manifest_entry
 from astrid.core.integrations.arnold.host.invocation import (
+    HUMAN_DECISION_ROUTES,
     HUMAN_RESUME_INPUT_SCHEMA,
     build_adapter_metadata,
     build_step_invocation,
 )
-from astrid.core.events import canonical_event_json
+from astrid.core.plan import TaskPlanError
 from astrid.core.task.plan import (
     STEP_PATH_SEP,
     RepeatForEach,
     RepeatUntil,
     Step,
     TaskPlan,
-    iter_steps_with_path,
     is_legacy_repeat_until_condition,
-    parse_repeat_until_expression,
+    iter_steps_with_path,
     parse_repeat_produces_ref,
+    parse_repeat_until_expression,
     resolve_produces_ref,
 )
-
 
 TASK_ADAPTER_EXECUTOR_PREFIX = "task."
 GROUP_ENTRY_SUFFIX = "__enter__"
@@ -148,6 +148,32 @@ def resolve_decision_vocabulary(step: Step) -> tuple[str, ...]:
     return ("proceed", "skip") if step.optional else ("next",)
 
 
+def human_decision_routes_for_labels(labels: tuple[str, ...]) -> dict[str, str]:
+    label_set = set(labels)
+    if {"next", "repeat"}.issubset(label_set):
+        return {
+            "approve": HUMAN_DECISION_ROUTES["approve"],
+            "reject": HUMAN_DECISION_ROUTES["reject"],
+        }
+    if {"proceed", "skip"}.issubset(label_set):
+        return {"approve": "proceed", "reject": "skip"}
+    if "next" in label_set:
+        return {"approve": "next"}
+    return {}
+
+
+def _with_suspension_decision_routes(
+    suspension: Any | None,
+    routes: dict[str, str],
+) -> Any | None:
+    if suspension is None or not routes:
+        return suspension
+    try:
+        return replace(suspension, decision_routes=routes)
+    except TypeError:
+        return suspension
+
+
 def task_executor_id(step: Step) -> str:
     return f"{TASK_ADAPTER_EXECUTOR_PREFIX}{step.adapter}"
 
@@ -202,6 +228,15 @@ def pipeline_manifest(
         decision_vocabulary = getattr(stage, "decision_vocabulary", None)
         if decision_vocabulary:
             item["vocabulary"] = list(decision_vocabulary)
+        suspension = getattr(stage, "suspension", None)
+        if suspension is not None:
+            to_json = getattr(suspension, "to_json", None)
+            if callable(to_json):
+                item["suspension"] = to_json()
+            else:
+                decision_routes = getattr(suspension, "decision_routes", None)
+                if decision_routes:
+                    item["suspension"] = {"decision_routes": dict(decision_routes)}
         if getattr(stage, "loop_condition", None) is not None:
             item["has_loop_condition"] = True
         stages.append(item)
@@ -452,7 +487,12 @@ def leaf_stage_spec(
     )
     suspension = None
     if step.adapter == "manual":
-        suspension = compat.Suspension(resume_input_schema=HUMAN_RESUME_INPUT_SCHEMA)
+        suspension = compat.Suspension(
+            resume_input_schema=HUMAN_RESUME_INPUT_SCHEMA,
+            decision_routes=human_decision_routes_for_labels(
+                resolve_decision_vocabulary(step)
+            ),
+        )
     return StageSpec(
         stage_id=stage_id,
         label=step.id,
@@ -765,11 +805,15 @@ def compile_step(
                 loop_condition=stage.loop_condition,
             )
         if repeat_until_metadata is not None:
+            suspension = _with_suspension_decision_routes(
+                stage.suspension,
+                human_decision_routes_for_labels(("repeat", "next")),
+            )
             stage = StageSpec(
                 stage_id=stage.stage_id,
                 label=stage.label,
                 invocation=stage.invocation,
-                suspension=stage.suspension,
+                suspension=suspension,
                 metadata={
                     **stage.metadata,
                     "decision_vocabulary": ["repeat", "next"],

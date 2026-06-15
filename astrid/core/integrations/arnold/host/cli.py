@@ -132,6 +132,36 @@ def _next_stage_for_decision(
     current_stage: str,
     decision: str,
 ) -> str:
+    stages = [
+        raw_stage
+        for raw_stage in pipeline_manifest.get("stages", ())
+        if isinstance(raw_stage, dict) and raw_stage.get("stage_id") == current_stage
+    ]
+    edges = [
+        raw_edge
+        for raw_edge in pipeline_manifest.get("edges", ())
+        if isinstance(raw_edge, dict) and raw_edge.get("source") == current_stage
+    ]
+    if stages:
+        suspension = stages[0].get("suspension")
+        if isinstance(suspension, dict):
+            decision_routes = suspension.get("decision_routes")
+            if isinstance(decision_routes, dict) and decision in decision_routes:
+                route_label = decision_routes[decision]
+                if route_label is None:
+                    raise RuntimeError(
+                        f"stage {current_stage!r} decision {decision!r} does not "
+                        "route to another Arnold stage"
+                    )
+                for raw_edge in edges:
+                    if raw_edge.get("label") == route_label:
+                        target = raw_edge.get("target")
+                        if isinstance(target, str) and target:
+                            return target
+                raise RuntimeError(
+                    f"stage {current_stage!r} decision {decision!r} routes to "
+                    f"edge label {route_label!r}, but no such Arnold edge exists"
+                )
     for raw_edge in pipeline_manifest.get("edges", ()):
         if not isinstance(raw_edge, dict):
             continue
@@ -139,6 +169,18 @@ def _next_stage_for_decision(
             target = raw_edge.get("target")
             if isinstance(target, str) and target:
                 return target
+    if decision == "approve":
+        for raw_edge in edges:
+            if raw_edge.get("label") == "next":
+                target = raw_edge.get("target")
+                if isinstance(target, str) and target:
+                    return target
+    if decision == "reject":
+        for raw_edge in edges:
+            if raw_edge.get("label") == "repeat":
+                target = raw_edge.get("target")
+                if isinstance(target, str) and target:
+                    return target
     raise RuntimeError(
         f"stage {current_stage!r} has no Arnold edge labelled {decision!r}"
     )
@@ -444,6 +486,7 @@ def _start_validated_arnold_run(
     argv: list[str],
 ) -> int:
     from astrid.core._shared.jsonio import write_json_atomic
+    from astrid.core.events import ZERO_HASH, append_event_locked, make_run_started_event
     from astrid.core.foundation.project_paths import (
         project_dir,
         validate_project_slug,
@@ -452,11 +495,10 @@ def _start_validated_arnold_run(
     from astrid.core.integrations.arnold.host.envelope import project_runtime_envelope
     from astrid.core.io.cas import canonical_json_digest
     from astrid.core.project import require_project
-    from astrid.core.project.project import ProjectError
     from astrid.core.project.current_run import read_current_run, write_current_run
+    from astrid.core.project.project import ProjectError
     from astrid.core.session.binding import SessionBindingError, resolve_current_session
     from astrid.core.session.lease import write_lease_init
-    from astrid.core.events import ZERO_HASH, append_event_locked, make_run_started_event
     from astrid.core.util.time import utc_now_iso
 
     slug = validate_project_slug(project_slug)
@@ -582,7 +624,7 @@ def _start_validated_arnold_run(
         )
     else:
         print(f"started {workflow_id}")
-        print(f"  engine:    arnold")
+        print("  engine:    arnold")
         print(f"  project:   {slug}")
         print(f"  run-id:    {run_id}")
         print(f"  plan-hash: {plan_hash}")
@@ -787,8 +829,8 @@ def cmd_start(args: list[str]) -> int:
 
     # ── Check driver availability ───────────────────────────────────────
     from astrid.core.integrations.arnold.host.driver import (
-        get_driver,
         StepwiseDriverContractError,
+        get_driver,
     )
 
     try:

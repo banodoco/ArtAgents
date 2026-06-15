@@ -9,18 +9,17 @@ behaviour-preserving.
 
 from __future__ import annotations
 
+# ---------------------------------------------------------------------------
+# Load the shipped model catalog once at module level
+# ---------------------------------------------------------------------------
+from pathlib import Path
+
 import pytest
 
 from astrid.core.generation.backends.fal import FalBackend
 from astrid.core.generation.backends.vibecomfy import VibeComfyBackend
 from astrid.core.model_catalog.registry import _load_yaml
 from astrid.core.model_catalog.taxonomy import CODEX_BACKEND_ID
-
-# ---------------------------------------------------------------------------
-# Load the shipped model catalog once at module level
-# ---------------------------------------------------------------------------
-
-from pathlib import Path
 
 _MODELS_YAML_PATH = (
     Path(__file__).resolve().parent.parent.parent.parent
@@ -41,18 +40,28 @@ _ADAPTER_MAP: dict[str, type] = {
 
 
 def _enumerate_non_codex_combos() -> list[
-    tuple[str, str, str, dict[str, str], dict[str, str]]
+    tuple[str, str, str, dict[str, str], dict[str, str], bool]
 ]:
-    """Yield (model_id, mode, backend_id, manifest_param_map, default_param_map).
+    """Yield (model_id, mode, backend_id, manifest_param_map, default_param_map, strict_parity).
 
     Excludes codex backends per SD2.
+
+    Audio music models disable strict parity: cloud music endpoints
+    (MiniMax, Stable Audio 3, ACE-Step) use genuinely different remote
+    parameter names, so there is no single DEFAULT_PARAM_MAP that can match
+    every shipped entry.  Per-model param_map remains authoritative.  For
+    those combos we still verify that every canonical feature in the manifest
+    map is recognised by DEFAULT_PARAM_MAP.
     """
     combos: list[
-        tuple[str, str, str, dict[str, str], dict[str, str]]
+        tuple[str, str, str, dict[str, str], dict[str, str], bool]
     ] = []
     for model in _RAW_CATALOG.get("models", []):
         model_id: str = model["id"]
+        modality: str = model.get("modality", "")
         for mode_name, mode_spec in model.get("modes", {}).items():
+            # Audio music models intentionally diverge across endpoints.
+            strict_parity = not (modality == "audio" and mode_name == "music")
             for backend_id, backend_spec in mode_spec.get("backends", {}).items():
                 if backend_id == CODEX_BACKEND_ID:
                     continue  # SD2: Codex exempt
@@ -70,7 +79,14 @@ def _enumerate_non_codex_combos() -> list[
                     adapter_cls.DEFAULT_PARAM_MAP.get(mode_name, {})
                 )
                 combos.append(
-                    (model_id, mode_name, backend_id, manifest_map, default_map)
+                    (
+                        model_id,
+                        mode_name,
+                        backend_id,
+                        manifest_map,
+                        default_map,
+                        strict_parity,
+                    )
                 )
     return combos
 
@@ -110,7 +126,7 @@ def _simulate_payload(params: dict[str, object], param_map: dict[str, str]) -> d
 
 
 @pytest.mark.parametrize(
-    "model_id,mode,backend_id,manifest_map,default_map",
+    "model_id,mode,backend_id,manifest_map,default_map,strict_parity",
     _enumerate_non_codex_combos(),
     ids=lambda combo: (
         f"{combo[0]}/{combo[1]}/{combo[2]}"
@@ -124,11 +140,16 @@ def test_param_map_parity(
     backend_id: str,
     manifest_map: dict[str, str],
     default_map: dict[str, str],
+    strict_parity: bool,
 ) -> None:
     """For each model×mode×backend, old param_map ≡ new DEFAULT_PARAM_MAP.
 
     Builds a canonical-params dict from the union of all keys in both maps,
     then simulates the payload for each path and asserts they are identical.
+
+    Audio music models use relaxed checking because cloud music endpoints
+    (MiniMax, Stable Audio 3, ACE-Step) use different remote parameter names;
+    per-model param_map remains authoritative.
     """
     # 1. Every canonical key in the manifest map MUST exist in the default map
     missing_from_default = set(manifest_map) - set(default_map)
@@ -137,22 +158,30 @@ def test_param_map_parity(
         f"DEFAULT_PARAM_MAP[{mode!r}]: {sorted(missing_from_default)}"
     )
 
-    # 2. Every shared canonical key MUST map to the same remote name
-    mismatched: list[tuple[str, str, str]] = []
-    for canon in set(manifest_map) & set(default_map):
-        if manifest_map[canon] != default_map[canon]:
-            mismatched.append(
-                (canon, manifest_map[canon], default_map[canon])
+    # 2. For non-audio modes, every shared canonical key MUST map to the same
+    #    remote name.  Audio music endpoints diverge, so only check strict
+    #    parity when requested.
+    if strict_parity:
+        mismatched: list[tuple[str, str, str]] = []
+        for canon in set(manifest_map) & set(default_map):
+            if manifest_map[canon] != default_map[canon]:
+                mismatched.append(
+                    (canon, manifest_map[canon], default_map[canon])
+                )
+        assert not mismatched, (
+            f"[{model_id}/{mode}/{backend_id}] Remote-name mismatch: "
+            + "; ".join(
+                f"{c!r}: manifest→{m!r} vs default→{d!r}"
+                for c, m, d in mismatched
             )
-    assert not mismatched, (
-        f"[{model_id}/{mode}/{backend_id}] Remote-name mismatch: "
-        + "; ".join(
-            f"{c!r}: manifest→{m!r} vs default→{d!r}"
-            for c, m, d in mismatched
         )
-    )
 
-    # 3. Build full canonical params from the union of keys and simulate
+    # 3. For strict-parity modes, build full canonical params from the union
+    #    of keys and simulate payloads.  Audio music endpoints diverge, so skip
+    #    payload identity for those combos.
+    if not strict_parity:
+        return
+
     all_canon_keys = set(manifest_map) | set(default_map)
     # Use distinct sentinel values per canonical key for clear diagnostics
     params: dict[str, object] = {

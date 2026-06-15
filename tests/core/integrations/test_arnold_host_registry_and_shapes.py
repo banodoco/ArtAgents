@@ -79,6 +79,7 @@ class _CheckpointOutcome:
 @dataclass(frozen=True)
 class _Suspension:
     resume_input_schema: dict[str, Any] | None = None
+    decision_routes: dict[str, str] | None = None
 
 
 @dataclass(frozen=True)
@@ -105,6 +106,8 @@ class _Stage:
     invocation: Any | None = None
     suspension: Any | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    decision_vocabulary: tuple[str, ...] = ("next",)
+    loop_condition: Any | None = None
 
 
 @dataclass(frozen=True)
@@ -263,7 +266,7 @@ def test_registry_snapshot_reads_only_arnold_projection_without_task_cursor_help
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    _install_fake_pipeline(monkeypatch, cursor_stage="review")
+    _install_fake_pipeline(monkeypatch, cursor_stage="per_item")
     project_root, run_root = _seed_project(tmp_path / "projects")
 
     monkeypatch.setattr(
@@ -291,14 +294,14 @@ def test_registry_snapshot_reads_only_arnold_projection_without_task_cursor_help
 
     snapshot = registry.snapshot_operation(
         project_slug="demo",
-        workflow_id="we.refine_image",
+        workflow_id="builtin.agent_probe",
         root=tmp_path / "projects",
     )
 
     assert snapshot.run_id == "run-123"
-    assert snapshot.next_stage_id == "review"
-    assert snapshot.next_stage_label == "Review"
-    assert snapshot.cursor == {"stage": "review"}
+    assert snapshot.next_stage_id == "per_item"
+    assert snapshot.next_stage_label == "Per Item"
+    assert snapshot.cursor == {"stage": "per_item"}
     assert snapshot.lease["writer_epoch"] == 7
     assert [event["hash"] for event in snapshot.events_tail] == [
         "sha256:111",
@@ -323,12 +326,12 @@ def test_registry_defaults_to_shape_entry_stage_when_resume_cursor_is_absent(
 
     stage_id, stage_label = registry.get_next_step(
         project_slug="demo",
-        workflow_id="we.refine_image",
+        workflow_id="builtin.agent_probe",
         root=tmp_path / "projects",
     )
 
-    assert stage_id == "generate"
-    assert stage_label == "Generate"
+    assert stage_id == "per_item"
+    assert stage_label == "Per Item"
 
 
 def test_build_refine_image_pipeline_has_expected_topology_and_metadata(
@@ -1677,3 +1680,4 @@ def test_iteration_video_shape_entry_in_registry(
     assert callable(entry.pipeline_builder)
     assert registry.resolve_alias("iteration-video") == "video_editing.iteration_video"
     assert registry.is_allowlisted("video_editing.iteration_video") is True
+

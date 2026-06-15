@@ -82,6 +82,70 @@ models:
               steps: num_inference_steps
 ```
 
+## Audio example
+
+```yaml
+schema_version: 2
+models:
+  - id: stable-audio-3-medium
+    modality: audio
+    modes:
+      music:
+        supports:
+          - prompt
+          - negative_prompt
+          - seed
+          - count
+          - duration
+          - guidance_scale
+          - steps
+          - output_format
+        requires:
+          - prompt
+        backends:
+          cloud:
+            endpoint: fal-ai/stable-audio-3/medium/base/text-to-audio
+            param_map:
+              prompt: prompt
+              negative_prompt: negative_prompt
+              seed: seed
+              duration: duration
+              guidance_scale: guidance_scale
+              steps: num_inference_steps
+              output_format: output_format
+            price:
+              unit: audio
+              usd: 0.0479
+
+  - id: ace-step
+    modality: audio
+    modes:
+      music:
+        supports:
+          - prompt
+          - instrumental
+          - seed
+          - count
+          - duration
+          - guidance_scale
+          - steps
+        requires:
+          - prompt
+        backends:
+          cloud:
+            endpoint: fal-ai/ace-step/prompt-to-audio
+            param_map:
+              prompt: prompt
+              instrumental: instrumental
+              seed: seed
+              duration: duration
+              guidance_scale: guidance_scale
+              steps: number_of_steps
+            price:
+              unit: second
+              usd: 0.0002
+```
+
 ## Entry fields
 
 ### ModelEntry
@@ -126,6 +190,19 @@ Six canonical modes for the image modality (SD-002):
 These names are **canonical** — no variants like `img2img`, `editing`, or
 `super-res` are accepted.
 
+## Canonical audio modes
+
+Three canonical modes for the audio modality:
+
+| Mode | Status | Description |
+|------|--------|-------------|
+| `music` | ✅ Wired | Text-to-music generation (prompt → audio). |
+| `tts` | Reserved | Text-to-speech. |
+| `sfx` | Reserved | Sound-effects generation. |
+
+`music` is implemented cloud-first via fal.ai.  `tts` and `sfx` are reserved
+for future sprints.
+
 ## `closed: true` flag (SD-008)
 
 Models marked `closed: true` are hidden from the default `astrid models list`
@@ -139,8 +216,9 @@ may add Recraft, Ideogram, etc.).
    at the sprint-2 migration (rewrite entries in v2 shape).
 2. **No duplicate model IDs**.
 3. **At least one mode per model**.
-4. **Mode names** must be canonical (t2i, i2i, edit, inpaint, outpaint,
-   upscale).  Unknown modes are rejected.
+4. **Mode names** must be canonical (`t2i`, `i2i`, `edit`, `inpaint`,
+   `outpaint`, `upscale` for image; `t2v`, `i2v`, `flf`, `v2v`, `video-edit`
+   for video; `music`, `tts`, `sfx` for audio).  Unknown modes are rejected.
 5. **`requires` ⊆ `supports`** for every mode.
 6. **At least one backend per mode** (the `backends` dict must be non-empty).
 7. **Valid backend keys**: only `local` and `cloud` are recognised.
@@ -150,6 +228,19 @@ may add Recraft, Ideogram, etc.).
     AND must be a subset of the mode's `supports`.
 11. **Per-backend param_map must be non-empty** (each backend must map at
     least one feature).
+
+## Price units
+
+The `price.unit` field declares how the per-output cost is estimated when the
+backend does not report an actual cost:
+
+| Unit | Meaning | Example |
+|------|---------|---------|
+| `image` | Per generated image. | `flux-dev` t2i at `$0.025/image`. |
+| `video` | Per generated video. | Reserved for video models. |
+| `audio` | Per generated audio clip. | `minimax-music-v2.6` at `$0.15/audio`. |
+| `second` | Per second of output duration. | `ace-step` at `$0.0002/second`; cost fallback uses `params["duration"]`. |
+| `output` | Generic per-output unit. | Backend-specific. |
 
 ## Loading
 

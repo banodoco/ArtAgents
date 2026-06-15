@@ -17,8 +17,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from astrid.core.model_catalog.taxonomy import (
-    CANONICAL_IMAGE_MODES,
-    CANONICAL_VIDEO_MODES,
+    AUDIO_MODALITY,
     CLOUD_BACKEND_ID,
     GENERATION_TAXONOMY,
     IMAGE_MODALITY,
@@ -26,6 +25,12 @@ from astrid.core.model_catalog.taxonomy import (
     VIDEO_MODALITY,
     Feature,
     GenerationTaxonomyRegistry,
+)
+from astrid.core.model_catalog.taxonomy import (
+    CANONICAL_IMAGE_MODES as CANONICAL_IMAGE_MODES,
+)
+from astrid.core.model_catalog.taxonomy import (
+    CANONICAL_VIDEO_MODES as CANONICAL_VIDEO_MODES,
 )
 
 # ---------------------------------------------------------------------------
@@ -273,10 +278,10 @@ def _validate_mode_spec(
         raise ValueError(f"{prefix}: must be a dict, got {type(raw).__name__}")
 
     # -- validate mode name is canonical (modality-dispatch) --------------
-    if modality not in {IMAGE_MODALITY, VIDEO_MODALITY}:
+    if modality not in {IMAGE_MODALITY, VIDEO_MODALITY, AUDIO_MODALITY}:
         raise ValueError(
             f"{prefix}: unknown modality {modality!r}; "
-            f"expected 'image' or 'video'"
+            f"expected 'image', 'video', or 'audio'"
         )
     try:
         taxonomy_registry.require_mode(modality, mode_name, path=prefix)
@@ -434,7 +439,7 @@ def _validate_backend_spec(
     )
 
 
-_ALLOWED_PRICE_UNITS = frozenset({"image", "output", "video"})
+_ALLOWED_PRICE_UNITS = frozenset({"image", "output", "video", "audio", "second"})
 
 
 def _validate_backend_price(raw: Any, path: str) -> Price | None:

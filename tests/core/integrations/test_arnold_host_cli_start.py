@@ -84,6 +84,7 @@ class _CheckpointOutcome:
 @dataclass(frozen=True)
 class _Suspension:
     resume_input_schema: dict[str, Any] | None = None
+    decision_routes: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -110,6 +111,8 @@ class _Stage:
     invocation: Any | None = None
     suspension: Any | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    decision_vocabulary: tuple[str, ...] = ("next",)
+    loop_condition: Any | None = None
 
 
 @dataclass(frozen=True)
@@ -154,6 +157,9 @@ def _install_fake_pipeline(
     resume_cursors: list[Any] | None = None,
     persisted_cursors: list[Any] | None = None,
     dynamic_cursor_progression: bool = False,
+    dynamic_stage: str = "review",
+    dynamic_previous_stage: str = "generate",
+    dynamic_forward_stage: str = "halt",
 ) -> list[str]:
     calls: list[str] = []
     cursor_store: dict[str, _ResumeCursorRef] = {}
@@ -192,23 +198,36 @@ def _install_fake_pipeline(
                 if isinstance(current_cursor, dict):
                     stage = current_cursor.get("stage")
                     run_id = getattr(envelope, "run_id", "")
-                    if stage == "generate":
+                    decision = {}
+                    human_input = current_cursor.get("human_input")
+                    if isinstance(human_input, dict) and isinstance(human_input.get("decision"), dict):
+                        decision = human_input["decision"]
+                    if stage == dynamic_stage and decision.get("action") == "reject":
                         iteration = int(current_cursor.get("iteration", 1)) + 1
                         envelope.resume_cursor = _cursor_for_stage(
                             run_id=run_id,
-                            stage="review",
-                            previous_stage="generate",
+                            stage=dynamic_stage,
+                            previous_stage=dynamic_previous_stage,
                             iteration=iteration,
-                            human_input=current_cursor.get("human_input"),
+                            human_input=human_input if isinstance(human_input, dict) else None,
                             artifact=f"candidate-v{iteration}.png",
+                        )
+                    elif stage == dynamic_forward_stage:
+                        envelope.resume_cursor = _cursor_for_stage(
+                            run_id=run_id,
+                            stage=dynamic_forward_stage,
+                            previous_stage=dynamic_stage,
+                            iteration=int(current_cursor.get("iteration", 2)),
+                            human_input=human_input if isinstance(human_input, dict) else None,
+                            artifact=current_cursor.get("artifact"),
                         )
                     elif stage == "halt":
                         envelope.resume_cursor = _cursor_for_stage(
                             run_id=run_id,
                             stage="halt",
-                            previous_stage=str(current_cursor.get("previous_stage", "review")),
+                            previous_stage=str(current_cursor.get("previous_stage", dynamic_stage)),
                             iteration=int(current_cursor.get("iteration", 2)),
-                            human_input=current_cursor.get("human_input"),
+                            human_input=human_input if isinstance(human_input, dict) else None,
                             artifact=current_cursor.get("artifact"),
                         )
             return _AdvanceOutcome()
@@ -225,8 +244,8 @@ def _install_fake_pipeline(
                 elif artifact_root and artifact_root not in cursor_store:
                     cursor_store[str(artifact_root)] = _cursor_for_stage(
                         run_id=run_id,
-                        stage="review",
-                        previous_stage="generate",
+                        stage=dynamic_stage,
+                        previous_stage=dynamic_previous_stage,
                         iteration=1,
                         artifact="candidate-v1.png",
                     )
@@ -239,7 +258,7 @@ def _install_fake_pipeline(
             if dynamic_cursor_progression and isinstance(cursor, _ResumeCursorRef):
                 cursor_payload = dict(cursor.cursor)
                 stage = str(cursor_payload.get("stage"))
-                previous_stage = str(cursor_payload.get("previous_stage", "review"))
+                previous_stage = str(cursor_payload.get("previous_stage", dynamic_stage))
                 human_input = cursor_payload.get("human_input")
                 iteration = int(cursor_payload.get("iteration", 1))
                 artifact = cursor_payload.get("artifact")
@@ -331,7 +350,7 @@ def test_arnold_start_writes_current_run_last_after_validated_envelope(
 
     rc = cli.cmd_start(
         [
-            "we.refine_image",
+            "agent-probe",
             "--project",
             "demo",
             "--name",
@@ -349,7 +368,7 @@ def test_arnold_start_writes_current_run_last_after_validated_envelope(
     assert (run_root / "lease.json").is_file()
     assert (run_root / "events.jsonl").is_file()
     assert json.loads((run_root / "arnold_run.json").read_text())["workflow_id"] == (
-        "we.refine_image"
+        "builtin.agent_probe"
     )
     _assert_no_execution_or_cursor_writes(calls)
     assert calls[-1] == "checkpoint"
@@ -364,7 +383,7 @@ def test_arnold_start_rolls_back_run_dir_and_pointer_on_post_validation_failure(
     _install_fake_pipeline(monkeypatch, checkpoint_error=RuntimeError("boom"))
     cli = importlib.import_module("astrid.core.integrations.arnold.host.cli")
 
-    rc = cli.cmd_start(["we.refine_image", "--project", "demo", "--name", "run-fail"])
+    rc = cli.cmd_start(["agent-probe", "--project", "demo", "--name", "run-fail"])
 
     assert rc == 1
     assert read_current_run("demo") is None
@@ -382,6 +401,11 @@ def test_arnold_start_rolls_back_run_dir_and_pointer_on_post_validation_failure(
         ("logo-ideas", "video_editing.logo_ideas"),
         ("vary-grid", "video_editing.vary_grid"),
         ("iteration-video", "video_editing.iteration_video"),
+        ("dataset-build", "training.dataset_build"),
+        ("training-run", "training.training_run"),
+        ("event-talks", "video_editing.event_talks"),
+        ("hype", "video_editing.hype"),
+        ("thumbnail-maker", "video_editing.thumbnail_maker"),
     ],
 )
 def test_arnold_start_allowlists_all_compiled_batch_workflows(
@@ -497,7 +521,7 @@ def _seed_active_arnold_run(tmp_path: Path) -> Path:
                         "kind": "human_feedback",
                         "ts": "2026-06-13T03:44:00Z",
                         "hash": "sha256:222",
-                        "stage_id": "review",
+                        "stage_id": "per_item",
                         "action": "reject",
                         "notes": "too soft",
                     }
@@ -511,7 +535,7 @@ def _seed_active_arnold_run(tmp_path: Path) -> Path:
         json.dumps(
             {
                 "engine": "arnold",
-                "workflow_id": "we.refine_image",
+                "workflow_id": "builtin.agent_probe",
                 "run_id": "run-arnold",
             }
         ),
@@ -520,16 +544,24 @@ def _seed_active_arnold_run(tmp_path: Path) -> Path:
     (run_root / "pipeline.json").write_text(
         json.dumps(
             {
-                "entry_stage_id": "generate",
+                "entry_stage_id": "per_item",
                 "stages": [
-                    {"stage_id": "generate", "label": "Generate", "metadata": {}},
-                    {"stage_id": "review", "label": "Review", "metadata": {}},
+                    {
+                        "stage_id": "per_item",
+                        "label": "Per Item",
+                        "metadata": {},
+                        "suspension": {
+                            "decision_routes": {
+                                "approve": "next",
+                                "reject": "repeat",
+                            }
+                        },
+                    },
                     {"stage_id": "halt", "label": "Halt", "metadata": {}},
                 ],
                 "edges": [
-                    {"source": "generate", "target": "review", "label": "next"},
-                    {"source": "review", "target": "halt", "label": "approve"},
-                    {"source": "review", "target": "generate", "label": "reject"},
+                    {"source": "per_item", "target": "halt", "label": "next"},
+                    {"source": "per_item", "target": "per_item", "label": "repeat"},
                 ],
             }
         ),
@@ -712,7 +744,7 @@ def test_arnold_next_renders_projection_without_execution_or_state_writes(
 ) -> None:
     monkeypatch.setenv("ASTRID_PROJECTS_ROOT", str(tmp_path / "projects"))
     run_root = _seed_active_arnold_run(tmp_path)
-    calls = _install_fake_pipeline(monkeypatch, cursor_stage="review")
+    calls = _install_fake_pipeline(monkeypatch, cursor_stage="per_item")
     cli = importlib.import_module("astrid.core.integrations.arnold.host.cli")
 
     before_files = {
@@ -729,8 +761,8 @@ def test_arnold_next_renders_projection_without_execution_or_state_writes(
 
     stdout = capsys.readouterr().out
     assert rc == 0
-    assert "Arnold workflow we.refine_image" in stdout
-    assert "stage: Review (review)" in stdout
+    assert "Arnold workflow builtin.agent_probe" in stdout
+    assert "stage: Per Item (per_item)" in stdout
     assert "ready for acknowledgement:" in stdout
     _assert_no_execution_or_cursor_writes(calls)
     assert calls == ["read_resume_cursor", "read_resume_cursor", "read_resume_cursor"]
@@ -750,7 +782,7 @@ def test_arnold_next_routes_session_runs_by_mode_and_renders_segment_lineage(
 ) -> None:
     monkeypatch.setenv("ASTRID_PROJECTS_ROOT", str(tmp_path / "projects"))
     run_root = _seed_active_session_run(tmp_path)
-    calls = _install_fake_pipeline(monkeypatch, cursor_stage="review")
+    calls = _install_fake_pipeline(monkeypatch, cursor_stage="per_item")
     cli = importlib.import_module("astrid.core.integrations.arnold.host.cli")
 
     rc = cli.cmd_next(["--project", "demo"])
@@ -759,10 +791,10 @@ def test_arnold_next_routes_session_runs_by_mode_and_renders_segment_lineage(
     assert rc == 0
     assert "Arnold session-succession" in stdout
     assert "segment: seg-002" in stdout
-    assert "stage: Review (review)" in stdout
-    assert "status: suspended" in stdout
+    assert "stage: per_item (per_item)" in stdout
+    assert "status: running" in stdout
     assert "successor lineage:\n  seg-001 -> seg-002" in stdout
-    assert "ready for acknowledgement:" in stdout
+    assert "No acknowledgement pending." in stdout
     assert calls == ["read_resume_cursor"]
     assert json.loads((run_root / "arnold_run.json").read_text())["workflow_id"] == (
         "session-succession"
@@ -858,7 +890,7 @@ def test_arnold_ack_normalizes_payload_resumes_advances_once_and_persists_cursor
     persisted_cursors: list[Any] = []
     calls = _install_fake_pipeline(
         monkeypatch,
-        cursor_stage="review",
+        cursor_stage="per_item",
         resume_cursors=resume_cursors,
         persisted_cursors=persisted_cursors,
     )
@@ -869,7 +901,7 @@ def test_arnold_ack_normalizes_payload_resumes_advances_once_and_persists_cursor
             "--project",
             "demo",
             "--stage",
-            "review",
+            "per_item",
             "--decision",
             "reject",
             "--notes",
@@ -893,8 +925,8 @@ def test_arnold_ack_normalizes_payload_resumes_advances_once_and_persists_cursor
     assert resume_cursors == persisted_cursors
     cursor_ref = resume_cursors[0]
     cursor = cursor_ref.cursor
-    assert cursor["stage"] == "generate"
-    assert cursor["previous_stage"] == "review"
+    assert cursor["stage"] == "per_item"
+    assert cursor["previous_stage"] == "per_item"
     assert cursor["human_input"] == {
         "decision": {
             "action": "reject",
@@ -914,7 +946,7 @@ def test_arnold_ack_normalizes_payload_resumes_advances_once_and_persists_cursor
     ]
     assert events[-1]["kind"] == "human_feedback"
     assert events[-1]["action"] == "reject"
-    assert events[-1]["next_stage_id"] == "generate"
+    assert events[-1]["next_stage_id"] == "per_item"
 
 
 def test_arnold_ack_accepts_composite_payload_and_approve_routes_to_halt(
@@ -924,7 +956,7 @@ def test_arnold_ack_accepts_composite_payload_and_approve_routes_to_halt(
     monkeypatch.setenv("ASTRID_PROJECTS_ROOT", str(tmp_path / "projects"))
     run_root = _seed_active_arnold_run(tmp_path)
     resume_cursors: list[Any] = []
-    _install_fake_pipeline(monkeypatch, cursor_stage="review", resume_cursors=resume_cursors)
+    _install_fake_pipeline(monkeypatch, cursor_stage="per_item", resume_cursors=resume_cursors)
     cli = importlib.import_module("astrid.core.integrations.arnold.host.cli")
 
     rc = cli.cmd_ack(
@@ -959,7 +991,7 @@ def test_arnold_ack_rejects_malformed_payload_before_driver_calls(
 ) -> None:
     monkeypatch.setenv("ASTRID_PROJECTS_ROOT", str(tmp_path / "projects"))
     _seed_active_arnold_run(tmp_path)
-    calls = _install_fake_pipeline(monkeypatch, cursor_stage="review")
+    calls = _install_fake_pipeline(monkeypatch, cursor_stage="per_item")
     cli = importlib.import_module("astrid.core.integrations.arnold.host.cli")
 
     rc = cli.cmd_ack(["--project", "demo", "--payload", '{"decision":{"action":"maybe"}}'])
@@ -979,7 +1011,7 @@ def test_arnold_status_json_renders_projection_without_execution_or_state_writes
 ) -> None:
     monkeypatch.setenv("ASTRID_PROJECTS_ROOT", str(tmp_path / "projects"))
     run_root = _seed_active_arnold_run(tmp_path)
-    calls = _install_fake_pipeline(monkeypatch, cursor_stage="review")
+    calls = _install_fake_pipeline(monkeypatch, cursor_stage="per_item")
     cli = importlib.import_module("astrid.core.integrations.arnold.host.cli")
 
     before_files = {
@@ -1000,7 +1032,7 @@ def test_arnold_status_json_renders_projection_without_execution_or_state_writes
         "action": "ack",
         "blocked": False,
         "command": (
-            "astrid ack --engine arnold --project demo --stage review "
+            "astrid ack --engine arnold --project demo --stage per_item "
             "--decision approve|reject --notes <notes>"
         ),
         "project": "demo",
@@ -1008,7 +1040,7 @@ def test_arnold_status_json_renders_projection_without_execution_or_state_writes
         "run_id": "run-arnold",
         "schema_version": 1,
         "state": "ready",
-        "step": "review",
+        "step": "per_item",
     }
     _assert_no_execution_or_cursor_writes(calls)
     assert calls == ["read_resume_cursor", "read_resume_cursor", "read_resume_cursor"]
@@ -1239,17 +1271,20 @@ def test_we1_acceptance_rejects_regenerates_and_approves_with_distinct_iteration
         resume_cursors=resume_cursors,
         persisted_cursors=persisted_cursors,
         dynamic_cursor_progression=True,
+        dynamic_stage="hype/editor_review",
+        dynamic_previous_stage="hype/render",
+        dynamic_forward_stage="hype/validate",
     )
     cli = importlib.import_module("astrid.core.integrations.arnold.host.cli")
 
     assert (
         cli.cmd_start(
             [
-                "we.refine_image",
+                "hype",
                 "--project",
                 "demo",
                 "--name",
-                "run-we1",
+                "run-hype-feedback",
                 "--state",
                 '{"prompt":"soft portrait"}',
             ]
@@ -1259,7 +1294,7 @@ def test_we1_acceptance_rejects_regenerates_and_approves_with_distinct_iteration
 
     assert cli.cmd_next(["--project", "demo"]) == 0
     first_render = capsys.readouterr().out
-    assert "stage: Review (review)" in first_render
+    assert "stage: Editor Review (hype/editor_review)" in first_render
     assert "feedback ledger:\n  (no feedback yet)" in first_render
 
     assert (
@@ -1268,7 +1303,7 @@ def test_we1_acceptance_rejects_regenerates_and_approves_with_distinct_iteration
                 "--project",
                 "demo",
                 "--stage",
-                "review",
+                "hype/editor_review",
                 "--decision",
                 "reject",
                 "--notes",
@@ -1287,7 +1322,7 @@ def test_we1_acceptance_rejects_regenerates_and_approves_with_distinct_iteration
 
     assert cli.cmd_next(["--project", "demo"]) == 0
     second_render = capsys.readouterr().out
-    assert "stage: Review (review)" in second_render
+    assert "stage: Editor Review (hype/editor_review)" in second_render
     assert "push contrast" in second_render
 
     assert (
@@ -1296,7 +1331,7 @@ def test_we1_acceptance_rejects_regenerates_and_approves_with_distinct_iteration
                 "--project",
                 "demo",
                 "--stage",
-                "review",
+                "hype/editor_review",
                 "--payload",
                 json.dumps(
                     {
@@ -1316,7 +1351,7 @@ def test_we1_acceptance_rejects_regenerates_and_approves_with_distinct_iteration
         == 0
     )
 
-    run_root = tmp_path / "projects" / "demo" / "runs" / "run-we1"
+    run_root = tmp_path / "projects" / "demo" / "runs" / "run-hype-feedback"
     final_record = json.loads((run_root / "arnold_run.json").read_text(encoding="utf-8"))
     state = json.loads((run_root / "state.json").read_text(encoding="utf-8"))
     events = [
@@ -1324,7 +1359,8 @@ def test_we1_acceptance_rejects_regenerates_and_approves_with_distinct_iteration
         for line in (run_root / "events.jsonl").read_text(encoding="utf-8").splitlines()
     ]
 
-    assert final_record["status"] == "completed"
+    assert final_record["status"] == "running"
+    assert final_record["last_ack"]["next_stage"] == "hype/validate"
     assert state == {"prompt": "high contrast portrait", "approved": True}
     assert [event["action"] for event in events if event["kind"] == "human_feedback"] == [
         "reject",
@@ -1343,7 +1379,7 @@ def test_we1_acceptance_rejects_regenerates_and_approves_with_distinct_iteration
         "artifacts": ["candidate-v2.png"],
         "inputs": {"grader": "simulated"},
     }
-    assert persisted_cursors[0].cursor["stage"] == "review"
+    assert persisted_cursors[0].cursor["stage"] == "hype/editor_review"
     assert persisted_cursors[0].cursor["iteration"] == 2
     assert persisted_cursors[0].cursor["artifact"] == "candidate-v2.png"
-    assert persisted_cursors[1].cursor["stage"] == "halt"
+    assert persisted_cursors[1].cursor["stage"] == "hype/validate"
