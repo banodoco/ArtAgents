@@ -299,9 +299,10 @@ class TestGatewayTaskImportBoundary:
         assert hasattr(host_pkg, "ALLOWLISTED_SHAPE_IDS")
 
         # The allowlisted shape IDs must match the declared constants
-        assert "we.refine_image" in host_pkg.ALLOWLISTED_SHAPE_IDS
-        assert "we.best_of_4" in host_pkg.ALLOWLISTED_SHAPE_IDS
         assert "text_analysis.summarize" in host_pkg.ALLOWLISTED_SHAPE_IDS
+        assert "builtin.agent_probe" in host_pkg.ALLOWLISTED_SHAPE_IDS
+        assert "we.refine_image" not in host_pkg.ALLOWLISTED_SHAPE_IDS
+        assert "we.best_of_4" not in host_pkg.ALLOWLISTED_SHAPE_IDS
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

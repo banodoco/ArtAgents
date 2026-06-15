@@ -18,7 +18,6 @@ from astrid.core.generation.backends.fal import FalBackend
 from astrid.core.generation.backends.vibecomfy import VibeComfyBackend
 from astrid.core.model_catalog.schema import BackendSpec, ModelEntry, ModeSpec
 
-
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
@@ -390,6 +389,11 @@ class TestVibeComfyParamMapFallback:
     ``vibecomfy.registry.ready.workflow_from_ready`` inside the method body,
     which re-binds local names from submodule filesystem resolution.
     """
+
+    @classmethod
+    def setup_class(cls) -> None:
+        """Skip the whole class when vibecomfy is not installed."""
+        pytest.importorskip("vibecomfy")
 
     @staticmethod
     def _mock_vibecomfy_imports(wf):

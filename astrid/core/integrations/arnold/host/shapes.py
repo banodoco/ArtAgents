@@ -8,7 +8,7 @@ topology synthesis or host-side control loop is introduced here.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
 from astrid.core.integrations.arnold.host.invocation import (
     ALLOWLISTED_INVOCATION_TEMPLATES,
@@ -27,6 +27,7 @@ ANIMATE_IMAGE_ID: str = "video_editing.animate_image"
 LOGO_IDEAS_ID: str = "video_editing.logo_ideas"
 VARY_GRID_ID: str = "video_editing.vary_grid"
 ITERATION_VIDEO_ID: str = "video_editing.iteration_video"
+EVENT_TALKS_ID: str = "video_editing.event_talks"
 
 WE_REFINE_IMAGE_ALIAS: str = "refine"
 WE_BEST_OF_4_ALIAS: str = "best4"
@@ -38,6 +39,7 @@ ANIMATE_IMAGE_ALIAS: str = "animate-image"
 LOGO_IDEAS_ALIAS: str = "logo-ideas"
 VARY_GRID_ALIAS: str = "vary-grid"
 ITERATION_VIDEO_ALIAS: str = "iteration-video"
+EVENT_TALKS_ALIAS: str = "event-talks"
 
 ANIMATE_IMAGE_EDIT_MODEL_ID: str = "openai/gpt-image-2/edit"
 ANIMATE_IMAGE_ANIMATE_MODEL_ID: str = "fal-ai/wan/v2.2-14b/animate/move"
@@ -171,6 +173,17 @@ _ITERATION_VIDEO_SPEC = _ShapeGraphSpec(
         "assemble-brief": "Assemble Brief",
         "render-video": "Render Video",
         "finalize-iteration": "Finalize Iteration",
+        "halt": "Halt",
+    },
+)
+
+_EVENT_TALKS_SPEC = _ShapeGraphSpec(
+    entry_stage_id="ados-sunday-template",
+    stage_labels={
+        "ados-sunday-template": "Ados Sunday Template",
+        "search-transcript": "Search Transcript",
+        "find-holding-screens": "Find Holding Screens",
+        "render": "Render",
         "halt": "Halt",
     },
 )
@@ -895,15 +908,9 @@ def build_animate_image_pipeline(
     cas_project_dir: str | None = None,
 ) -> Any:
     """Build the canonical Animate Image shape with explicit named phases."""
-    from pathlib import Path
-
     from astrid.core.integrations.arnold.host.compat import compat
     from astrid.core.integrations.arnold.session import lowering
 
-    resolved_run_root = Path(
-        run_root or artifact_root or "/tmp/arnold-video-editing-animate-image-run"
-    )
-    active_state = dict(state or {})
     stage_specs: list[lowering.StageSpec] = []
 
     lowering.add_wrapper_stage(
@@ -1126,7 +1133,6 @@ def build_logo_ideas_pipeline(
     from astrid.core.integrations.arnold.host.compat import compat
     from astrid.core.integrations.arnold.session import lowering
 
-    active_state = dict(state or {})
     stage_specs: list[lowering.StageSpec] = []
 
     lowering.add_wrapper_stage(
@@ -1765,6 +1771,93 @@ def build_iteration_video_pipeline(
     return lowering.build_pipeline(lowered, compat=compat)
 
 
+def build_event_talks_pipeline(
+    *,
+    state: dict[str, Any] | None = None,
+    project: str | None = None,
+    run_root: str | None = None,
+    artifact_root: str | None = None,
+    cas_project_dir: str | None = None,
+) -> Any:
+    """Build the canonical Event Talks pipeline via the authoring facade.
+
+    The four-step linear pipeline:
+
+        ados-sunday-template → search-transcript → find-holding-screens → render → halt
+
+    All steps use ``adapter: local`` — the pipeline is pure local ffmpeg/OCR/static
+    writes.  Cost is $0 for all steps (no LLM or RunPod calls).
+    """
+    import shlex
+    from pathlib import Path
+
+    from astrid.core.integrations.arnold.session.authoring import (
+        build_workflow,
+        executor_step,
+    )
+
+    resolved_run_root = run_root or artifact_root or "/tmp/arnold-event-talks-run"
+    run_root_path = Path(resolved_run_root)
+
+    cmd_ados = (
+        "python3 -m astrid.packs.video_editing.orchestrators.event_talks.run "
+        f"ados-sunday-template --out {shlex.quote('{produces_root}/ados-sunday-template.json')}"
+    )
+    cmd_search = (
+        "python3 -m astrid.packs.video_editing.orchestrators.event_talks.run "
+        f"search-transcript --out {shlex.quote('{produces_root}/search-results.txt')}"
+    )
+    cmd_holding = (
+        "python3 -m astrid.packs.video_editing.orchestrators.event_talks.run "
+        f"find-holding-screens --video '' --out {shlex.quote('{produces_root}/holding-screens.json')}"
+    )
+    manifest_ref = "{step_dir}/../ados-sunday-template/v1/produces/ados-sunday-template.json"
+    cmd_render = (
+        "python3 -m astrid.packs.video_editing.orchestrators.event_talks.run "
+        f"render --manifest {shlex.quote(manifest_ref)} --out-dir {shlex.quote('{produces_root}')}"
+    )
+
+    return build_workflow(
+        [
+            executor_step(
+                "ados-sunday-template",
+                segment_id=EVENT_TALKS_ID,
+                adapter="local",
+                command=cmd_ados,
+                produces={"template_output": "ados-sunday-template.json"},
+                label="Ados Sunday Template",
+            ),
+            executor_step(
+                "search-transcript",
+                segment_id=EVENT_TALKS_ID,
+                adapter="local",
+                command=cmd_search,
+                produces={"search_output": "search-results.txt"},
+                label="Search Transcript",
+            ),
+            executor_step(
+                "find-holding-screens",
+                segment_id=EVENT_TALKS_ID,
+                adapter="local",
+                command=cmd_holding,
+                produces={"holding_output": "holding-screens.json"},
+                label="Find Holding Screens",
+            ),
+            executor_step(
+                "render",
+                segment_id=EVENT_TALKS_ID,
+                adapter="local",
+                command=cmd_render,
+                produces={"render_output": "render-manifest.json"},
+                label="Render",
+            ),
+        ],
+        segment_id=EVENT_TALKS_ID,
+        project=project or "default",
+        run_root_path=run_root_path,
+    )
+
+
 SHAPE_DEFINITIONS: tuple[ShapeEntry, ...] = (
     ShapeEntry(
         workflow_id=WE_REFINE_IMAGE_ID,
@@ -1968,6 +2061,26 @@ SHAPE_DEFINITIONS: tuple[ShapeEntry, ...] = (
         entry_stage_id=_ITERATION_VIDEO_SPEC.entry_stage_id,
         stage_labels=dict(_ITERATION_VIDEO_SPEC.stage_labels),
         pipeline_builder=build_iteration_video_pipeline,
+    ),
+    ShapeEntry(
+        workflow_id=EVENT_TALKS_ID,
+        description=(
+            "Event Talks four-step linear pipeline: ados-sunday-template → "
+            "search-transcript → find-holding-screens → render. All steps use "
+            "adapter: local (pure ffmpeg/OCR/static writes, $0 cost, no LLM/RunPod)."
+        ),
+        cli_alias=EVENT_TALKS_ALIAS,
+        accepts_human_input=False,
+        metadata={
+            "kind": "video_editing",
+            "parallel_fan_out": 1,
+            "judge_required": False,
+            "compiled": True,
+            "loop_lowering": "linear_facade",
+        },
+        entry_stage_id=_EVENT_TALKS_SPEC.entry_stage_id,
+        stage_labels=dict(_EVENT_TALKS_SPEC.stage_labels),
+        pipeline_builder=build_event_talks_pipeline,
     ),
 )
 

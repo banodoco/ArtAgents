@@ -102,6 +102,8 @@ class TimelineConfigReplacedPayload:
         except Exception as exc:
             raise TimelineEventSchemaError(str(exc)) from exc
         object.__setattr__(self, "config", config)
+        if self.source is not None:
+            _require_nonempty_str(self.source, "payload.source")
 
     def to_json_obj(self) -> dict[str, Any]:
         payload: dict[str, Any] = {"config": deepcopy(self.config)}

@@ -20,6 +20,7 @@ Feature = str
 
 IMAGE_MODALITY = "image"
 VIDEO_MODALITY = "video"
+AUDIO_MODALITY = "audio"
 
 LOCAL_BACKEND_ID = "local"
 CLOUD_BACKEND_ID = "cloud"
@@ -59,6 +60,19 @@ VIDEO_FEATURES: tuple[Feature, ...] = (
     "acceleration",
 )
 
+AUDIO_FEATURES: tuple[Feature, ...] = (
+    "prompt",
+    "negative_prompt",
+    "seed",
+    "count",
+    "duration",
+    "guidance_scale",
+    "steps",
+    "lyrics_prompt",
+    "instrumental",
+    "output_format",
+)
+
 CANONICAL_IMAGE_MODES: tuple[str, ...] = (
     "t2i",
     "i2i",
@@ -74,6 +88,12 @@ CANONICAL_VIDEO_MODES: tuple[str, ...] = (
     "flf",
     "v2v",
     "video-edit",
+)
+
+CANONICAL_AUDIO_MODES: tuple[str, ...] = (
+    "tts",
+    "music",
+    "sfx",
 )
 
 BUILTIN_GENERATION_BACKEND_IDS: tuple[str, ...] = (
@@ -228,9 +248,10 @@ class GenerationTaxonomyRegistry:
             value,
             field_name="generation modality",
         )
-        if modality not in {IMAGE_MODALITY, VIDEO_MODALITY}:
+        if modality not in {IMAGE_MODALITY, VIDEO_MODALITY, AUDIO_MODALITY}:
             raise ValueError(
-                f"generation modality must be one of [{IMAGE_MODALITY}, {VIDEO_MODALITY}]"
+                f"generation modality must be one of "
+                f"[{IMAGE_MODALITY}, {VIDEO_MODALITY}, {AUDIO_MODALITY}]"
             )
         return modality
 
@@ -238,7 +259,7 @@ class GenerationTaxonomyRegistry:
 def _builtin_feature_descriptors() -> tuple[GenerationFeatureDescriptor, ...]:
     return tuple(
         GenerationFeatureDescriptor(id=feature_id)
-        for feature_id in VIDEO_FEATURES
+        for feature_id in set(VIDEO_FEATURES) | set(AUDIO_FEATURES)
     )
 
 
@@ -251,6 +272,10 @@ def _builtin_mode_descriptors() -> tuple[GenerationModeDescriptor, ...]:
         + [
             GenerationModeDescriptor(id=mode_id, modalities=(VIDEO_MODALITY,))
             for mode_id in CANONICAL_VIDEO_MODES
+        ]
+        + [
+            GenerationModeDescriptor(id=mode_id, modalities=(AUDIO_MODALITY,))
+            for mode_id in CANONICAL_AUDIO_MODES
         ]
     )
 

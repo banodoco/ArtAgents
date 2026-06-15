@@ -31,24 +31,24 @@ def _make_entry(
     endpoint: str = "fal-ai/flux/dev",
     price: Price | None = None,
     lora_endpoint: str | None = None,
+    modality: str = "image",
+    supports: tuple[str, ...] | None = None,
 ) -> ModelEntry:
     """Build a minimal ModelEntry with a single cloud backend."""
+    if supports is None:
+        supports = ("prompt", "seed", "size")
     return ModelEntry(
         id=model_id,
-        modality="image",
+        modality=modality,
         modes={
             mode: ModeSpec(
-                supports=("prompt", "seed", "size"),
+                supports=supports,
                 requires=("prompt",),
                 backends={
                     "cloud": BackendSpec(
                         endpoint=endpoint,
                         lora_endpoint=lora_endpoint,
-                        param_map={
-                            "prompt": "prompt",
-                            "seed": "seed",
-                            "size": "image_size",
-                        },
+                        param_map={feature: feature for feature in supports},
                         price=price,
                     )
                 },
@@ -324,3 +324,85 @@ class TestFalCostSelection:
                     )
 
         assert gen_result.cost_usd == 0.025
+
+    def test_second_based_registry_fallback(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When price unit is 'second', fallback uses params['duration'] * usd."""
+        from astrid.core.generation.backends import fal as fal_mod
+
+        monkeypatch.setenv("FAL_KEY", "test-key")
+        out_dir = tmp_path / "out"
+
+        result = {
+            "audio": {"url": "https://example.com/output_000.mp3"},
+            # No API-reported cost
+        }
+        entry = _make_entry(
+            model_id="ace-step",
+            mode="music",
+            endpoint="fal-ai/ace-step/prompt-to-audio",
+            modality="audio",
+            supports=("prompt", "seed", "duration"),
+            price=Price(usd=0.0002, unit="second"),
+        )
+
+        with patch.object(fal_mod, "fal_submit_and_poll", return_value=result):
+            with patch.object(
+                fal_mod.FalBackend,
+                "_resolve_api_key",
+                return_value="test-key",
+            ):
+                backend = FalBackend()
+                with patch.object(
+                    backend._client, "get_bytes", return_value=b"fake_mp3_data"
+                ):
+                    gen_result = backend.generate(
+                        entry=entry,
+                        mode="music",
+                        params={"prompt": "test", "seed": 42, "duration": 30},
+                        out_dir=out_dir,
+                    )
+
+        # 30 seconds * $0.0002/second = $0.006
+        assert gen_result.cost_usd == 0.006
+
+    def test_second_based_registry_fallback_no_duration(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When price unit is 'second' and duration is absent, cost is zero."""
+        from astrid.core.generation.backends import fal as fal_mod
+
+        monkeypatch.setenv("FAL_KEY", "test-key")
+        out_dir = tmp_path / "out"
+
+        result = {
+            "audio": {"url": "https://example.com/output_000.mp3"},
+        }
+        entry = _make_entry(
+            model_id="ace-step",
+            mode="music",
+            endpoint="fal-ai/ace-step/prompt-to-audio",
+            modality="audio",
+            supports=("prompt", "seed", "duration"),
+            price=Price(usd=0.0002, unit="second"),
+        )
+
+        with patch.object(fal_mod, "fal_submit_and_poll", return_value=result):
+            with patch.object(
+                fal_mod.FalBackend,
+                "_resolve_api_key",
+                return_value="test-key",
+            ):
+                backend = FalBackend()
+                with patch.object(
+                    backend._client, "get_bytes", return_value=b"fake_mp3_data"
+                ):
+                    gen_result = backend.generate(
+                        entry=entry,
+                        mode="music",
+                        params={"prompt": "test", "seed": 42},
+                        out_dir=out_dir,
+                    )
+
+        assert gen_result.cost_usd == 0.0

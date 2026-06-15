@@ -646,3 +646,89 @@ models:
         backends:
           cloud:
             endpoint: fal-ai/ltx-2.3/image-to-video
+  # =====================================================================
+  # Audio models — music mode (cloud-first; local templates are follow-up)
+  # =====================================================================
+  - id: minimax-music-v2.6
+    modality: audio
+    modes:
+      music:
+        supports:
+          - prompt
+          - lyrics_prompt
+          - instrumental
+          - seed
+          - count
+          - duration
+        requires:
+          - prompt
+        backends:
+          cloud:
+            endpoint: fal-ai/minimax-music/v2.6
+            param_map:
+              prompt: prompt
+              lyrics_prompt: lyrics
+              instrumental: is_instrumental
+              seed: seed
+              duration: duration
+            price:
+              unit: audio
+              usd: 0.15
+
+  - id: stable-audio-3-medium
+    modality: audio
+    modes:
+      music:
+        supports:
+          - prompt
+          - negative_prompt
+          - seed
+          - count
+          - duration
+          - guidance_scale
+          - steps
+          - output_format
+        requires:
+          - prompt
+        backends:
+          cloud:
+            endpoint: fal-ai/stable-audio-3/medium/base/text-to-audio
+            param_map:
+              prompt: prompt
+              negative_prompt: negative_prompt
+              seed: seed
+              duration: duration
+              guidance_scale: guidance_scale
+              steps: num_inference_steps
+              output_format: output_format
+            price:
+              unit: audio
+              usd: 0.0479
+
+  - id: ace-step
+    modality: audio
+    modes:
+      music:
+        supports:
+          - prompt
+          - instrumental
+          - seed
+          - count
+          - duration
+          - guidance_scale
+          - steps
+        requires:
+          - prompt
+        backends:
+          cloud:
+            endpoint: fal-ai/ace-step/prompt-to-audio
+            param_map:
+              prompt: prompt
+              instrumental: instrumental
+              seed: seed
+              duration: duration
+              guidance_scale: guidance_scale
+              steps: number_of_steps
+            price:
+              unit: second
+              usd: 0.0002

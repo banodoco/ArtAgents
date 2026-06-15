@@ -18,24 +18,22 @@ from pathlib import Path
 
 import pytest
 
+from astrid.core.integrations.arnold.session.manifest import (
+    SegmentRecord,
+    SessionManifest,
+    write_manifest_file,
+)
+from astrid.core.integrations.arnold.session.records import (
+    ARNOLD_RUN_FILENAME,
+    SESSION_SUCCESSION_WORKFLOW_ID,
+)
 from astrid.core.integrations.arnold.session.resume import (
     ResumeIntent,
     ResumeIntentKind,
     classify_resume_intent,
 )
-from astrid.core.integrations.arnold.session.records import (
-    SESSION_SUCCESSION_WORKFLOW_ID,
-    ARNOLD_RUN_FILENAME,
-)
-from astrid.core.integrations.arnold.session.manifest import (
-    SESSION_MANIFEST_FILENAME,
-    SessionManifest,
-    SegmentRecord,
-    write_manifest_file,
-)
-from astrid.core.integrations.arnold.session.state import StateRef, prefixed_hash
+from astrid.core.integrations.arnold.session.state import StateRef
 from astrid.core.task.events import EVENTS_FILENAME, ZERO_HASH
-
 
 # ── helpers ────────────────────────────────────────────────────────────
 
@@ -103,8 +101,9 @@ def _append_event(
     prev_hash: str = ZERO_HASH,
 ) -> str:
     """Append an event with a computed hash. Returns the event hash."""
-    from astrid.core.task.events import canonical_event_json
     import hashlib
+
+    from astrid.core.task.events import canonical_event_json
 
     event_without_hash = {k: v for k, v in event.items() if k != "hash"}
     event_hash = (
@@ -159,7 +158,7 @@ class TestStaticRunAlwaysPureData:
     def test_static_mode_returns_pure_data(self, tmp_path: Path):
         run_root = tmp_path / "static_run"
         run_root.mkdir()
-        _write_arnold_run_json(run_root, mode="static", workflow_id="we.refine_image")
+        _write_arnold_run_json(run_root, mode="static", workflow_id="builtin.agent_probe")
 
         intent = classify_resume_intent(run_root)
 
@@ -171,7 +170,7 @@ class TestStaticRunAlwaysPureData:
         """Even if human input carries plan_mutation, static runs ignore it."""
         run_root = tmp_path / "static_run"
         run_root.mkdir()
-        _write_arnold_run_json(run_root, mode="static", workflow_id="we.refine_image")
+        _write_arnold_run_json(run_root, mode="static", workflow_id="builtin.agent_probe")
 
         human_input = {"decision": {"action": "approve"}, "plan_mutation": {"plan_hash": "sha256:ffff"}}
 
@@ -184,7 +183,7 @@ class TestStaticRunAlwaysPureData:
         """Even if plan hash changed, static runs are pure data."""
         run_root = tmp_path / "static_run"
         run_root.mkdir()
-        _write_arnold_run_json(run_root, mode="static", workflow_id="we.refine_image")
+        _write_arnold_run_json(run_root, mode="static", workflow_id="builtin.agent_probe")
 
         intent = classify_resume_intent(
             run_root, effective_plan_hash="sha256:different"
