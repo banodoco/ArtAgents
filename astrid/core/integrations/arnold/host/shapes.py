@@ -1789,15 +1789,12 @@ def build_dataset_build_pipeline(
     one-stage pipeline that re-enters the existing entrypoint with the same CLI
     contract.
     """
+    import shlex
+    import sys
     from pathlib import Path
-    from tempfile import NamedTemporaryFile
 
     from astrid.core.integrations.arnold.host.compat import compat
     from astrid.core.integrations.arnold.session import lowering
-    from astrid.core.task.plan import TaskPlan, load_plan
-    from astrid.packs.training.orchestrators.dataset_build.plan_template import (
-        build_plan_v2,
-    )
 
     resolved_run_root = Path(run_root or artifact_root or "/tmp/arnold-dataset-build-run")
     resolved_run_root.mkdir(parents=True, exist_ok=True)
@@ -1806,27 +1803,42 @@ def build_dataset_build_pipeline(
         "media_type: video\nsource_paths: []\n",
         encoding="utf-8",
     )
-    plan_dict = build_plan_v2(
-        python_exec="python3",
-        run_root=resolved_run_root,
-        config=config_path,
+    command = " ".join(
+        [
+            shlex.quote(sys.executable),
+            "-m",
+            "astrid.packs.training.orchestrators.dataset_build.run",
+            "--config",
+            shlex.quote(str(config_path)),
+            "--out",
+            shlex.quote(str(resolved_run_root)),
+        ]
     )
-    with NamedTemporaryFile(
-        mode="w", suffix=".json", delete=False, dir=resolved_run_root
-    ) as plan_file:
-        import json
-
-        json.dump(plan_dict, plan_file)
-        plan_path = plan_file.name
-    plan = load_plan(plan_path)
-    assert isinstance(plan, TaskPlan)
-    lowered = lowering.lower_plan_segment(
-        plan,
-        project=project or "default",
-        run_root=resolved_run_root,
-        state=dict(state or {}),
+    stage = lowering.adapter_stage_spec(
+        stage_id="dataset-build",
+        label="Dataset Build",
+        executor_id="task.local",
         segment_id=DATASET_BUILD_ID,
-        compat=compat,
+        project=project or "default",
+        run_root_path=resolved_run_root,
+        state=dict(state or {}),
+        capability_kind="orchestrator",
+        metadata={
+            "command": command,
+            "adapter": "local",
+            "produces": ["review_state"],
+            "output_paths": {"review_state": str(resolved_run_root / "review_state.json")},
+        },
+    )
+    halt_stage = lowering.halt_stage()
+    lowered = lowering.LoweredSegment(
+        entry_stage_id=stage.stage_id,
+        ordered_stage_specs=(stage, halt_stage),
+        ordered_edge_specs=(
+            lowering.resolve_port_edge(source=stage.stage_id, target=halt_stage.stage_id, label="next"),
+        ),
+        plan_hash=DATASET_BUILD_ID,
+        diagnostics=(),
     )
     return lowering.build_pipeline(lowered, compat=compat)
 
@@ -1845,15 +1857,12 @@ def build_training_run_pipeline(
     one-stage pipeline that re-enters the existing entrypoint with the same CLI
     contract.
     """
+    import shlex
+    import sys
     from pathlib import Path
-    from tempfile import NamedTemporaryFile
 
     from astrid.core.integrations.arnold.host.compat import compat
     from astrid.core.integrations.arnold.session import lowering
-    from astrid.core.task.plan import TaskPlan, load_plan
-    from astrid.packs.training.orchestrators.training_run.plan_template import (
-        build_plan_v2,
-    )
 
     resolved_run_root = Path(run_root or artifact_root or "/tmp/arnold-training-run-run")
     resolved_run_root.mkdir(parents=True, exist_ok=True)
@@ -1862,27 +1871,42 @@ def build_training_run_pipeline(
         "trainer: ai-toolkit-ltx\nbase_model: placeholder\n",
         encoding="utf-8",
     )
-    plan_dict = build_plan_v2(
-        python_exec="python3",
-        run_root=resolved_run_root,
-        config=config_path,
+    command = " ".join(
+        [
+            shlex.quote(sys.executable),
+            "-m",
+            "astrid.packs.training.orchestrators.training_run.run",
+            "--config",
+            shlex.quote(str(config_path)),
+            "--out",
+            shlex.quote(str(resolved_run_root)),
+        ]
     )
-    with NamedTemporaryFile(
-        mode="w", suffix=".json", delete=False, dir=resolved_run_root
-    ) as plan_file:
-        import json
-
-        json.dump(plan_dict, plan_file)
-        plan_path = plan_file.name
-    plan = load_plan(plan_path)
-    assert isinstance(plan, TaskPlan)
-    lowered = lowering.lower_plan_segment(
-        plan,
-        project=project or "default",
-        run_root=resolved_run_root,
-        state=dict(state or {}),
+    stage = lowering.adapter_stage_spec(
+        stage_id="training-run",
+        label="Training Run",
+        executor_id="task.local",
         segment_id=TRAINING_RUN_ID,
-        compat=compat,
+        project=project or "default",
+        run_root_path=resolved_run_root,
+        state=dict(state or {}),
+        capability_kind="orchestrator",
+        metadata={
+            "command": command,
+            "adapter": "local",
+            "produces": ["run_state"],
+            "output_paths": {"run_state": str(resolved_run_root / "last_run.json")},
+        },
+    )
+    halt_stage = lowering.halt_stage()
+    lowered = lowering.LoweredSegment(
+        entry_stage_id=stage.stage_id,
+        ordered_stage_specs=(stage, halt_stage),
+        ordered_edge_specs=(
+            lowering.resolve_port_edge(source=stage.stage_id, target=halt_stage.stage_id, label="next"),
+        ),
+        plan_hash=TRAINING_RUN_ID,
+        diagnostics=(),
     )
     return lowering.build_pipeline(lowered, compat=compat)
 
