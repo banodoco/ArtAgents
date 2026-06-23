@@ -90,8 +90,8 @@ class _CheckpointOutcome:
 
 @dataclass(frozen=True)
 class _Suspension:
+    kind: str = "human"
     resume_input_schema: dict[str, Any] | None = None
-    decision_routes: dict[str, str] | None = None
 
 
 @dataclass(frozen=True)
@@ -113,27 +113,69 @@ class _StepInvocation:
 
 @dataclass(frozen=True)
 class _Stage:
-    stage_id: str
-    label: str
+    name: str
+    step: Any | None = None
+    edges: tuple[Any, ...] = ()
+    decision_vocabulary: Any = frozenset()
+    decision_routes: dict[str, str | None] = field(default_factory=dict)
+    suspension_schema: dict[str, Any] | None = None
     invocation: Any | None = None
+    loop_condition: Any | None = None
+    # Aliases / backward-compat for duck-typed access
+    stage_id: str | None = None
+    label: str | None = None
     suspension: Any | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
-    decision_vocabulary: tuple[str, ...] = field(default_factory=tuple)
+
+    def __post_init__(self) -> None:
+        if self.stage_id is None:
+            object.__setattr__(self, "stage_id", self.name)
+        if self.label is None:
+            object.__setattr__(self, "label", self.name)
+        if self.suspension is None and self.suspension_schema is not None:
+            object.__setattr__(
+                self,
+                "suspension",
+                _Suspension(
+                    resume_input_schema=self.suspension_schema.get("resume_input_schema")
+                ),
+            )
 
 
 @dataclass(frozen=True)
 class _ParallelStage:
-    stage_id: str
-    label: str
+    name: str
+    steps: tuple[Any, ...] = field(default_factory=tuple)
+    join: Any | None = None
+    edges: tuple[Any, ...] = ()
+    # Aliases / backward-compat for duck-typed access
+    stage_id: str | None = None
+    label: str | None = None
     stages: tuple[Any, ...] = field(default_factory=tuple)
     metadata: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.stage_id is None:
+            object.__setattr__(self, "stage_id", self.name)
+        if self.label is None:
+            object.__setattr__(self, "label", self.name)
+        if not self.stages:
+            object.__setattr__(self, "stages", self.steps)
 
 
 @dataclass(frozen=True)
 class _Edge:
-    source: str
-    target: str
     label: str
+    target: str
+    kind: str = "normal"
+    recommendation: Any | None = None
+    # Backward-compat for duck-typed / manifest access
+    source: str | None = None
+    source_port: str | None = None
+    target_port: str | None = None
+    logical_type: str | None = None
+    artifact_type: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

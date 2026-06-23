@@ -40,8 +40,7 @@ from astrid.core.integrations.arnold.host.registry import (
     get_host_shape_registry,
 )
 from astrid.core.integrations.arnold.host.shapes import (
-    WE_BEST_OF_4_ID,
-    WE_REFINE_IMAGE_ID,
+    THUMBNAIL_MAKER_ID,
     TEXT_ANALYSIS_SUMMARIZE_ID,
     ALLOWLISTED_SHAPE_IDS,
 )
@@ -49,8 +48,7 @@ from astrid.core.integrations.arnold.host.shapes import (
 __all__ = [
     "ShapeRegistry",
     "get_host_shape_registry",
-    "WE_BEST_OF_4_ID",
-    "WE_REFINE_IMAGE_ID",
+    "THUMBNAIL_MAKER_ID",
     "TEXT_ANALYSIS_SUMMARIZE_ID",
     "ALLOWLISTED_SHAPE_IDS",
 ]

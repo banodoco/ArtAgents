@@ -64,12 +64,19 @@ def _arnold_in_sys_modules() -> bool:
 
 
 def _source_file_mentions_arnold(mod: Any) -> bool:
-    """Return True if the module's source file path contains 'arnold'."""
+    """Return True if the module's source file is inside the Arnold integration package."""
     try:
-        source = str(mod.__file__)
+        source = Path(mod.__file__).resolve()
     except AttributeError:
         return False
-    return "arnold" in source.lower()
+    # Use the path relative to the repo root so worktree directory names that
+    # happen to contain 'arnold' do not produce false positives.
+    repo_root = Path(__file__).resolve().parents[3]
+    try:
+        rel = source.relative_to(repo_root)
+    except ValueError:
+        rel = source
+    return "arnold" in rel.parts
 
 
 @pytest.fixture(autouse=True)
@@ -293,8 +300,7 @@ class TestGatewayTaskImportBoundary:
         # Verify the re-exported symbols are present
         assert hasattr(host_pkg, "ShapeRegistry")
         assert hasattr(host_pkg, "get_host_shape_registry")
-        assert hasattr(host_pkg, "WE_REFINE_IMAGE_ID")
-        assert hasattr(host_pkg, "WE_BEST_OF_4_ID")
+        assert hasattr(host_pkg, "THUMBNAIL_MAKER_ID")
         assert hasattr(host_pkg, "TEXT_ANALYSIS_SUMMARIZE_ID")
         assert hasattr(host_pkg, "ALLOWLISTED_SHAPE_IDS")
 

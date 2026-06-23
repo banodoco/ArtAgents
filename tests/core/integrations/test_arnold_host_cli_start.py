@@ -83,8 +83,8 @@ class _CheckpointOutcome:
 
 @dataclass(frozen=True)
 class _Suspension:
+    kind: str = "human"
     resume_input_schema: dict[str, Any] | None = None
-    decision_routes: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -106,20 +106,48 @@ class _StepInvocation:
 
 @dataclass(frozen=True)
 class _Stage:
-    stage_id: str
-    label: str
+    name: str
+    step: Any | None = None
+    edges: tuple[Any, ...] = ()
+    decision_vocabulary: Any = frozenset()
+    decision_routes: dict[str, str | None] = field(default_factory=dict)
+    suspension_schema: dict[str, Any] | None = None
     invocation: Any | None = None
+    loop_condition: Any | None = None
+    # Aliases / backward-compat for duck-typed access
+    stage_id: str | None = None
+    label: str | None = None
     suspension: Any | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
-    decision_vocabulary: tuple[str, ...] = ("next",)
-    loop_condition: Any | None = None
+
+    def __post_init__(self) -> None:
+        if self.stage_id is None:
+            object.__setattr__(self, "stage_id", self.name)
+        if self.label is None:
+            object.__setattr__(self, "label", self.name)
+        if self.suspension is None and self.suspension_schema is not None:
+            object.__setattr__(
+                self,
+                "suspension",
+                _Suspension(
+                    resume_input_schema=self.suspension_schema.get("resume_input_schema")
+                ),
+            )
 
 
 @dataclass(frozen=True)
 class _Edge:
-    source: str
-    target: str
     label: str
+    target: str
+    kind: str = "normal"
+    recommendation: Any | None = None
+    # Backward-compat for duck-typed / manifest access
+    source: str | None = None
+    source_port: str | None = None
+    target_port: str | None = None
+    logical_type: str | None = None
+    artifact_type: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -550,11 +578,9 @@ def _seed_active_arnold_run(tmp_path: Path) -> Path:
                         "stage_id": "per_item",
                         "label": "Per Item",
                         "metadata": {},
-                        "suspension": {
-                            "decision_routes": {
-                                "approve": "next",
-                                "reject": "repeat",
-                            }
+                        "decision_routes": {
+                            "approve": "next",
+                            "reject": "repeat",
                         },
                     },
                     {"stage_id": "halt", "label": "Halt", "metadata": {}},
@@ -1255,6 +1281,82 @@ def test_arnold_ack_session_plan_mutation_event_precedes_successor_compile(
     assert "draft" not in {stage["stage_id"] for stage in pipeline["stages"]}
 
 
+def test_arnold_start_creates_run_root_before_pipeline_builder(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Regression: pipeline_builder may write artifacts into run_root.
+
+    The host must create ``run_root`` before invoking the workflow's
+    ``pipeline_builder``.  Previously the directory was created only after
+    the builder returned, so any builder that touched its run directory
+    raised ``FileNotFoundError``.
+    """
+    monkeypatch.setenv("ASTRID_PROJECTS_ROOT", str(tmp_path / "projects"))
+    create_project("demo")
+    _install_fake_pipeline(monkeypatch)
+
+    from astrid.core.integrations.arnold.host import registry as registry_module
+    from astrid.core.integrations.arnold.host.registry import ShapeEntry, ShapeRegistry
+
+    def _builder_that_touches_run_root(*, run_root: str, **kwargs: Any) -> _BuiltPipeline:
+        del kwargs
+        # Before the fix this directory did not exist yet.
+        Path(run_root).mkdir(parents=True, exist_ok=True)
+        (Path(run_root) / "builder-marker.txt").write_text("ok", encoding="utf-8")
+        return _BuiltPipeline(
+            entry_stage_id="only",
+            stages=(
+                _Stage(
+                    name="only",
+                    metadata={"adapter_config": {"executor_id": "noop"}},
+                ),
+                _Stage(name="halt", metadata={"terminal": True}),
+            ),
+            edges=(_Edge(label="next", source="only", target="halt"),),
+        )
+
+    custom_registry = ShapeRegistry()
+    custom_registry.register(
+        ShapeEntry(
+            workflow_id="test.touch_run_root",
+            description="builder writes to run_root",
+            cli_alias="touch-run-root",
+            entry_stage_id="only",
+            stage_labels={"only": "Only", "halt": "Halt"},
+            pipeline_builder=_builder_that_touches_run_root,
+        )
+    )
+    monkeypatch.setattr(
+        registry_module,
+        "get_host_shape_registry",
+        lambda: custom_registry,
+    )
+
+    cli = importlib.import_module("astrid.core.integrations.arnold.host.cli")
+
+    rc = cli.cmd_start(
+        [
+            "touch-run-root",
+            "--project",
+            "demo",
+            "--name",
+            "run-touch",
+            "--state",
+            "{}",
+        ]
+    )
+
+    run_root = tmp_path / "projects" / "demo" / "runs" / "run-touch"
+    assert rc == 0
+    assert read_current_run("demo") == "run-touch"
+    assert (run_root / "builder-marker.txt").read_text(encoding="utf-8") == "ok"
+    assert (
+        json.loads((run_root / "arnold_run.json").read_text())["workflow_id"]
+        == "test.touch_run_root"
+    )
+
+
 def test_we1_acceptance_rejects_regenerates_and_approves_with_distinct_iterations(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -1271,9 +1373,9 @@ def test_we1_acceptance_rejects_regenerates_and_approves_with_distinct_iteration
         resume_cursors=resume_cursors,
         persisted_cursors=persisted_cursors,
         dynamic_cursor_progression=True,
-        dynamic_stage="hype/editor_review",
-        dynamic_previous_stage="hype/render",
-        dynamic_forward_stage="hype/validate",
+        dynamic_stage="review",
+        dynamic_previous_stage="noop",
+        dynamic_forward_stage="verdict",
     )
     cli = importlib.import_module("astrid.core.integrations.arnold.host.cli")
 
@@ -1294,7 +1396,7 @@ def test_we1_acceptance_rejects_regenerates_and_approves_with_distinct_iteration
 
     assert cli.cmd_next(["--project", "demo"]) == 0
     first_render = capsys.readouterr().out
-    assert "stage: Editor Review (hype/editor_review)" in first_render
+    assert "stage: review (review)" in first_render
     assert "feedback ledger:\n  (no feedback yet)" in first_render
 
     assert (
@@ -1303,7 +1405,7 @@ def test_we1_acceptance_rejects_regenerates_and_approves_with_distinct_iteration
                 "--project",
                 "demo",
                 "--stage",
-                "hype/editor_review",
+                "review",
                 "--decision",
                 "reject",
                 "--notes",
@@ -1322,7 +1424,7 @@ def test_we1_acceptance_rejects_regenerates_and_approves_with_distinct_iteration
 
     assert cli.cmd_next(["--project", "demo"]) == 0
     second_render = capsys.readouterr().out
-    assert "stage: Editor Review (hype/editor_review)" in second_render
+    assert "stage: review (review)" in second_render
     assert "push contrast" in second_render
 
     assert (
@@ -1331,7 +1433,7 @@ def test_we1_acceptance_rejects_regenerates_and_approves_with_distinct_iteration
                 "--project",
                 "demo",
                 "--stage",
-                "hype/editor_review",
+                "review",
                 "--payload",
                 json.dumps(
                     {
@@ -1360,7 +1462,7 @@ def test_we1_acceptance_rejects_regenerates_and_approves_with_distinct_iteration
     ]
 
     assert final_record["status"] == "running"
-    assert final_record["last_ack"]["next_stage"] == "hype/validate"
+    assert final_record["last_ack"]["next_stage"] == "verdict"
     assert state == {"prompt": "high contrast portrait", "approved": True}
     assert [event["action"] for event in events if event["kind"] == "human_feedback"] == [
         "reject",
@@ -1379,7 +1481,7 @@ def test_we1_acceptance_rejects_regenerates_and_approves_with_distinct_iteration
         "artifacts": ["candidate-v2.png"],
         "inputs": {"grader": "simulated"},
     }
-    assert persisted_cursors[0].cursor["stage"] == "hype/editor_review"
+    assert persisted_cursors[0].cursor["stage"] == "review"
     assert persisted_cursors[0].cursor["iteration"] == 2
     assert persisted_cursors[0].cursor["artifact"] == "candidate-v2.png"
-    assert persisted_cursors[1].cursor["stage"] == "hype/validate"
+    assert persisted_cursors[1].cursor["stage"] == "verdict"

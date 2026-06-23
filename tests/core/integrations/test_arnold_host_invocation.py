@@ -73,8 +73,8 @@ class _CheckpointOutcome:
 
 @dataclass(frozen=True)
 class _Suspension:
+    kind: str = "human"
     resume_input_schema: dict[str, Any] | None = None
-    decision_routes: dict[str, str] | None = None
 
 
 @dataclass(frozen=True)
@@ -96,19 +96,43 @@ class _StepInvocation:
 
 @dataclass(frozen=True)
 class _Stage:
-    stage_id: str
-    label: str
+    name: str
+    step: Any | None = None
+    edges: tuple[Any, ...] = ()
+    decision_vocabulary: Any = frozenset()
+    decision_routes: dict[str, str | None] = field(default_factory=dict)
+    suspension_schema: dict[str, Any] | None = None
     invocation: Any | None = None
+    loop_condition: Any | None = None
+    # Aliases / backward-compat for duck-typed access
+    stage_id: str | None = None
+    label: str | None = None
     suspension: Any | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
-    decision_vocabulary: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.stage_id is None:
+            object.__setattr__(self, "stage_id", self.name)
+        if self.label is None:
+            object.__setattr__(self, "label", self.name)
+        if self.suspension is None and self.suspension_schema is not None:
+            object.__setattr__(
+                self,
+                "suspension",
+                _Suspension(
+                    resume_input_schema=self.suspension_schema.get("resume_input_schema")
+                ),
+            )
 
 
 @dataclass(frozen=True)
 class _Edge:
-    source: str
-    target: str
     label: str
+    target: str
+    kind: str = "normal"
+    recommendation: Any | None = None
+    # Backward-compat for duck-typed access / manifest use
+    source: str | None = None
     source_port: str | None = None
     target_port: str | None = None
     logical_type: str | None = None
@@ -118,10 +142,23 @@ class _Edge:
 
 @dataclass(frozen=True)
 class _ParallelStage:
-    stage_id: str
-    label: str
+    name: str
+    steps: tuple[Any, ...] = field(default_factory=tuple)
+    join: Any | None = None
+    edges: tuple[Any, ...] = ()
+    # Aliases / backward-compat for duck-typed access
+    stage_id: str | None = None
+    label: str | None = None
     stages: tuple[Any, ...] = field(default_factory=tuple)
     metadata: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.stage_id is None:
+            object.__setattr__(self, "stage_id", self.name)
+        if self.label is None:
+            object.__setattr__(self, "label", self.name)
+        if not self.stages:
+            object.__setattr__(self, "stages", self.steps)
 
 
 @dataclass(frozen=True)
@@ -209,46 +246,6 @@ def _clean_modules_fixture() -> None:
     _clear_modules()
     yield
     _clear_modules()
-
-
-def test_allowlisted_workflow_invocations_match_adapter_metadata_contract(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _clear_modules()
-    _install_fake_pipeline(monkeypatch)
-
-    invocation_module = importlib.import_module("astrid.core.integrations.arnold.host.invocation")
-    step_adapter = importlib.import_module("astrid.core.integrations.arnold.step_adapter")
-
-    seen_workflows: set[str] = set()
-    for workflow_id, stages in invocation_module.ALLOWLISTED_INVOCATION_TEMPLATES.items():
-        for stage_id in stages:
-            invocation = invocation_module.build_workflow_step_invocation(
-                workflow_id,
-                stage_id,
-                state={"prompt": "hello", "text": "body", "candidates": ["a", "b"]},
-                project="demo",
-                run_root="/tmp/run-123",
-                artifact_root="/tmp/run-123",
-                cas_project_dir="/tmp/projects/demo",
-            )
-            config = step_adapter._parse_adapter_metadata(invocation.metadata)
-
-            assert not isinstance(config, step_adapter.StepResult)
-            assert invocation.kind == "model"
-            assert config["executor_id"] == stages[stage_id].executor_id
-            assert config["project"] == "demo"
-            assert config["run_root"] == "/tmp/run-123"
-            assert config["artifact_root"] == "/tmp/run-123"
-            assert config["cas_project_dir"] == "/tmp/projects/demo"
-            assert config["workflow_id"] == workflow_id
-            assert config["stage_id"] == stage_id
-            seen_workflows.add(workflow_id)
-
-    assert seen_workflows == {
-        "we.refine_image",
-        "we.best_of_4",
-    }
 
 
 def test_invocation_module_import_does_not_import_arnold() -> None:

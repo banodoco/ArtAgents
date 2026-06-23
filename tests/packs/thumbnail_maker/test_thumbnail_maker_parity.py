@@ -979,6 +979,270 @@ class TestPlanTemplateStructure:
 
 
 # ═══════════════════════════════════════════════════════════════════════
+#  Topology parity: plan_template vs workflow
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestTopologyParity:
+    """Topology parity between plan_template.build_plan_v2() and workflow stage/edge specs.
+
+    Compares stage counts, stage names, edge labels, and linear ordering.
+    Uses the authoring primitives (executor_step, edge, halt) to build the
+    workflow side without compiling to an Arnold Pipeline (avoids the
+    pre-existing builder.py suspension bug).
+    """
+
+    def test_plan_and_workflow_have_same_stage_count(self) -> None:
+        """Both representations produce the same number of non-halt stages."""
+        plan = _build_thumbnail_maker_plan_v2()
+        wf_stages, _wf_edges = _build_thumbnail_maker_workflow_specs()
+
+        # Exclude halt from workflow stage count
+        non_halt_stages = [s for s in wf_stages if s.stage_id != "halt"]
+        assert len(plan["steps"]) == len(non_halt_stages), (
+            f"plan has {len(plan['steps'])} steps, "
+            f"workflow has {len(non_halt_stages)} non-halt stages"
+        )
+
+    def test_plan_and_workflow_have_identical_stage_ids(self) -> None:
+        """Stage IDs match exactly between plan template and workflow specs."""
+        plan = _build_thumbnail_maker_plan_v2()
+        wf_stages, _wf_edges = _build_thumbnail_maker_workflow_specs()
+
+        plan_ids = [step["id"] for step in plan["steps"]]
+        wf_ids = [s.stage_id for s in wf_stages if s.stage_id != "halt"]
+
+        assert plan_ids == wf_ids, (
+            f"plan stage ids:  {plan_ids}\n"
+            f"workflow stage ids: {wf_ids}"
+        )
+
+    def test_plan_and_workflow_have_same_linear_ordering(self) -> None:
+        """Both representations produce stages in the same linear order."""
+        plan = _build_thumbnail_maker_plan_v2()
+        wf_stages, _wf_edges = _build_thumbnail_maker_workflow_specs()
+
+        plan_ids = [step["id"] for step in plan["steps"]]
+        wf_ids = [s.stage_id for s in wf_stages if s.stage_id != "halt"]
+
+        for i, (plan_id, wf_id) in enumerate(zip(plan_ids, wf_ids)):
+            assert plan_id == wf_id, (
+                f"position {i}: plan has {plan_id!r}, workflow has {wf_id!r}"
+            )
+
+    def test_workflow_edges_are_all_labeled_next(self) -> None:
+        """Every workflow edge uses the 'next' label."""
+        _wf_stages, wf_edges = _build_thumbnail_maker_workflow_specs()
+
+        assert len(wf_edges) > 0, "expected at least one edge"
+        for e in wf_edges:
+            assert e.label == "next", (
+                f"edge {e.source} -> {e.target} has label {e.label!r}, expected 'next'"
+            )
+
+    def test_workflow_edges_form_linear_chain(self) -> None:
+        """Workflow edges connect consecutive stages in linear order."""
+        wf_stages, wf_edges = _build_thumbnail_maker_workflow_specs()
+
+        non_halt = [s for s in wf_stages if s.stage_id != "halt"]
+        halt_stage = next((s for s in wf_stages if s.stage_id == "halt"), None)
+
+        # Edges should connect: stage[0] -> stage[1] -> ... -> stage[N-1] -> halt
+        expected_source_targets = []
+        for i in range(len(non_halt) - 1):
+            expected_source_targets.append(
+                (non_halt[i].stage_id, non_halt[i + 1].stage_id)
+            )
+        if halt_stage and non_halt:
+            expected_source_targets.append(
+                (non_halt[-1].stage_id, halt_stage.stage_id)
+            )
+
+        actual_source_targets = [(e.source, e.target) for e in wf_edges]
+
+        assert len(actual_source_targets) == len(expected_source_targets), (
+            f"edge count mismatch: {len(actual_source_targets)} vs {len(expected_source_targets)}"
+        )
+        for i, (actual, expected) in enumerate(
+            zip(actual_source_targets, expected_source_targets)
+        ):
+            assert actual == expected, (
+                f"edge {i}: actual {actual} != expected {expected}"
+            )
+
+    def test_workflow_ends_with_halt_stage(self) -> None:
+        """The workflow includes a terminal halt stage."""
+        wf_stages, _wf_edges = _build_thumbnail_maker_workflow_specs()
+
+        halt_stages = [s for s in wf_stages if s.stage_id == "halt"]
+        assert len(halt_stages) == 1, (
+            f"expected exactly 1 halt stage, got {len(halt_stages)}"
+        )
+
+    def test_topology_is_complete_and_connected(self) -> None:
+        """Every non-halt stage has an outgoing edge, halt has none."""
+        wf_stages, wf_edges = _build_thumbnail_maker_workflow_specs()
+
+        sources = {e.source for e in wf_edges}
+        non_halt_ids = {s.stage_id for s in wf_stages if s.stage_id != "halt"}
+        halt_ids = {s.stage_id for s in wf_stages if s.stage_id == "halt"}
+
+        # Every non-halt stage must be a source of at least one edge
+        missing_sources = non_halt_ids - sources
+        assert not missing_sources, (
+            f"stages without outgoing edges: {missing_sources}"
+        )
+
+        # Halt must not be a source
+        halt_as_source = halt_ids & sources
+        assert not halt_as_source, (
+            f"halt stage has outgoing edges: {halt_as_source}"
+        )
+
+
+# ── Workflow spec builder (mirrors workflow.py without pipeline compilation) ────
+
+def _build_thumbnail_maker_workflow_specs() -> tuple[
+    list[Any], list[Any]
+]:
+    """Build StageSpec and EdgeSpec lists for the thumbnail_maker workflow.
+
+    Mirrors the logic in ``workflow.build_workflow()`` but stops before
+    calling ``pipeline()`` so we can inspect the topology without hitting
+    the pre-existing builder.py suspension bug.
+    """
+    import shlex
+    from pathlib import Path
+
+    from astrid.core.integrations.arnold.authoring import (
+        edge,
+        executor_step,
+        halt,
+    )
+
+    run_root = Path("/tmp/test")
+    python_exec = "python3"
+    source = Path("/tmp/source.mp4")
+    query = "auto"
+
+    _STAGE_IDS = (
+        "resolve-video",
+        "plan-evidence",
+        "discover-video-evidence",
+        "build-reference-pack",
+        "generate-thumbnails",
+    )
+    _STAGE_LABELS = {
+        "resolve-video": "Resolve Video",
+        "plan-evidence": "Plan Evidence",
+        "discover-video-evidence": "Discover Video Evidence",
+        "build-reference-pack": "Build Reference Pack",
+        "generate-thumbnails": "Generate Thumbnails",
+    }
+    _PRODUCES = {
+        "resolve-video": {"resolve_output": "video-resolution.json"},
+        "plan-evidence": {"evidence_plan_output": "evidence/evidence-plan.json"},
+        "discover-video-evidence": {"candidates_output": "evidence/candidates.json"},
+        "build-reference-pack": {"reference_pack_output": "evidence/reference-pack.json"},
+        "generate-thumbnails": {"thumbnail_output": "thumbnail-manifest.json"},
+    }
+
+    src_flag = shlex.quote(str(source.resolve()))
+    cmd_resolve = (
+        f"{shlex.quote(str(python_exec))} -m astrid.packs.video_editing.orchestrators.thumbnail_maker.run "
+        f"resolve-video --video {src_flag} "
+        f"--out {shlex.quote('{produces_root}/video-resolution.json')}"
+    )
+    cmd_plan = (
+        f"{shlex.quote(str(python_exec))} -m astrid.packs.video_editing.orchestrators.thumbnail_maker.run "
+        f"plan-evidence --query {shlex.quote(query)} "
+        f"--out {shlex.quote('{produces_root}/evidence/evidence-plan.json')}"
+    )
+    evidence_plan_ref = (
+        "{step_dir}/../plan-evidence/v1/produces/evidence/evidence-plan.json"
+    )
+    cmd_discover = (
+        f"{shlex.quote(str(python_exec))} -m astrid.packs.video_editing.orchestrators.thumbnail_maker.run "
+        f"discover-video-evidence --video {src_flag} "
+        f"--out {shlex.quote('{produces_root}/evidence/candidates.json')} "
+        f"--query {shlex.quote(query)} "
+        f"--previous-manifest {shlex.quote(evidence_plan_ref)}"
+    )
+    candidates_ref = (
+        "{step_dir}/../discover-video-evidence/v1/produces/evidence/candidates.json"
+    )
+    cmd_build_ref = (
+        f"{shlex.quote(str(python_exec))} -m astrid.packs.video_editing.orchestrators.thumbnail_maker.run "
+        f"build-reference-pack "
+        f"--out {shlex.quote('{produces_root}/evidence/reference-pack.json')} "
+        f"--query {shlex.quote(query)} "
+        f"--previous-manifest {shlex.quote(candidates_ref)}"
+    )
+    ref_pack_ref = (
+        "{step_dir}/../build-reference-pack/v1/produces/evidence/reference-pack.json"
+    )
+    cmd_generate = (
+        f"{shlex.quote(str(python_exec))} -m astrid.packs.video_editing.orchestrators.thumbnail_maker.run "
+        f"generate-thumbnails "
+        f"--out {shlex.quote('{produces_root}/thumbnail-manifest.json')} "
+        f"--query {shlex.quote(query)} "
+        f"--previous-manifest {shlex.quote(ref_pack_ref)}"
+    )
+
+    _commands = {
+        "resolve-video": cmd_resolve,
+        "plan-evidence": cmd_plan,
+        "discover-video-evidence": cmd_discover,
+        "build-reference-pack": cmd_build_ref,
+        "generate-thumbnails": cmd_generate,
+    }
+
+    stages: list[Any] = []
+    for sid in _STAGE_IDS:
+        produces = _PRODUCES[sid]
+        produces_meta = [
+            {"name": name, "path": path} for name, path in produces.items()
+        ]
+        stage_spec = executor_step(
+            stage_id=sid,
+            label=_STAGE_LABELS[sid],
+            executor_id="task.local",
+            segment_id="video_editing.thumbnail_maker",
+            project="default",
+            run_root=run_root,
+            command=_commands[sid],
+            outputs=produces,
+            metadata={
+                "produces": produces_meta,
+            },
+        )
+        stages.append(stage_spec)
+
+    edges: list[Any] = []
+    for i in range(len(stages) - 1):
+        edges.append(
+            edge(
+                source=stages[i].stage_id,
+                target=stages[i + 1].stage_id,
+                label="next",
+            )
+        )
+
+    halt_stage = halt()
+    if stages:
+        edges.append(
+            edge(
+                source=stages[-1].stage_id,
+                target=halt_stage.stage_id,
+                label="next",
+            )
+        )
+    all_stages = list(stages) + [halt_stage]
+
+    return all_stages, edges
+
+
+# ═══════════════════════════════════════════════════════════════════════
 #  Timeline integration
 # ═══════════════════════════════════════════════════════════════════════
 

@@ -7,18 +7,12 @@ topology synthesis or host-side control loop is introduced here.
 
 from __future__ import annotations
 
+import importlib
 from dataclasses import dataclass, field
 from typing import Any
 
-from astrid.core.integrations.arnold.host.invocation import (
-    ALLOWLISTED_INVOCATION_TEMPLATES,
-    build_human_resume_input_schema,
-    build_workflow_step_invocation,
-)
 from astrid.core.integrations.arnold.host.registry import ShapeEntry
 
-WE_REFINE_IMAGE_ID: str = "we.refine_image"
-WE_BEST_OF_4_ID: str = "we.best_of_4"
 TEXT_ANALYSIS_SUMMARIZE_ID: str = "text_analysis.summarize"
 BUILTIN_AGENT_PROBE_ID: str = "builtin.agent_probe"
 STREAM_CONTENT_DISTILL_ID: str = "stream_content.distill"
@@ -28,9 +22,11 @@ LOGO_IDEAS_ID: str = "video_editing.logo_ideas"
 VARY_GRID_ID: str = "video_editing.vary_grid"
 ITERATION_VIDEO_ID: str = "video_editing.iteration_video"
 EVENT_TALKS_ID: str = "video_editing.event_talks"
+THUMBNAIL_MAKER_ID: str = "video_editing.thumbnail_maker"
+DATASET_BUILD_ID: str = "training.dataset_build"
+TRAINING_RUN_ID: str = "training.training_run"
+HYPE_ID: str = "video_editing.hype"
 
-WE_REFINE_IMAGE_ALIAS: str = "refine"
-WE_BEST_OF_4_ALIAS: str = "best4"
 TEXT_ANALYSIS_SUMMARIZE_ALIAS: str = "summarize"
 BUILTIN_AGENT_PROBE_ALIAS: str = "agent-probe"
 STREAM_CONTENT_DISTILL_ALIAS: str = "distill"
@@ -40,6 +36,10 @@ LOGO_IDEAS_ALIAS: str = "logo-ideas"
 VARY_GRID_ALIAS: str = "vary-grid"
 ITERATION_VIDEO_ALIAS: str = "iteration-video"
 EVENT_TALKS_ALIAS: str = "event-talks"
+THUMBNAIL_MAKER_ALIAS: str = "thumbnail-maker"
+DATASET_BUILD_ALIAS: str = "dataset-build"
+TRAINING_RUN_ALIAS: str = "training-run"
+HYPE_ALIAS: str = "hype"
 
 ANIMATE_IMAGE_EDIT_MODEL_ID: str = "openai/gpt-image-2/edit"
 ANIMATE_IMAGE_ANIMATE_MODEL_ID: str = "fal-ai/wan/v2.2-14b/animate/move"
@@ -59,28 +59,6 @@ class _ShapeGraphSpec:
     stage_labels: dict[str, str] = field(default_factory=dict)
 
 
-_WE_REFINE_IMAGE_SPEC = _ShapeGraphSpec(
-    entry_stage_id="generate",
-    stage_labels={
-        "generate": "Generate",
-        "review": "Review",
-        "halt": "Halt",
-    },
-)
-
-_WE_BEST_OF_4_SPEC = _ShapeGraphSpec(
-    entry_stage_id="generate",
-    stage_labels={
-        "generate": "Generate",
-        "gen_0": "Gen 0",
-        "gen_1": "Gen 1",
-        "gen_2": "Gen 2",
-        "gen_3": "Gen 3",
-        "judge": "Judge",
-        "review": "Review",
-        "halt": "Halt",
-    },
-)
 
 _TEXT_ANALYSIS_SUMMARIZE_SPEC = _ShapeGraphSpec(
     entry_stage_id="read_input",
@@ -187,278 +165,41 @@ _EVENT_TALKS_SPEC = _ShapeGraphSpec(
         "halt": "Halt",
     },
 )
+_THUMBNAIL_MAKER_SPEC = _ShapeGraphSpec(
+    entry_stage_id="resolve-video",
+    stage_labels={
+        "resolve-video": "Resolve Video",
+        "plan-evidence": "Plan Evidence",
+        "discover-video-evidence": "Discover Video Evidence",
+        "build-reference-pack": "Build Reference Pack",
+        "generate-thumbnails": "Generate Thumbnails",
+        "halt": "Halt",
+    },
+)
 
+_DATASET_BUILD_SPEC = _ShapeGraphSpec(
+    entry_stage_id="dataset-build",
+    stage_labels={
+        "dataset-build": "Dataset Build",
+        "halt": "Halt",
+    },
+)
 
-class UnsupportedStepError(ValueError):
-    """Raised when a shape leaf is not backed by a known executor."""
+_TRAINING_RUN_SPEC = _ShapeGraphSpec(
+    entry_stage_id="training-run",
+    stage_labels={
+        "training-run": "Training Run",
+        "halt": "Halt",
+    },
+)
 
-
-def _validate_leaves_executor_backed(
-    *leaf_stage_ids: str,
-    workflow_id: str,
-) -> None:
-    """Fail shape construction before any state mutation when a leaf has no executor."""
-    missing: list[str] = []
-    templates = ALLOWLISTED_INVOCATION_TEMPLATES.get(workflow_id, {})
-    for stage_id in leaf_stage_ids:
-        if stage_id not in templates:
-            missing.append(stage_id)
-    if missing:
-        raise UnsupportedStepError(
-            f"workflow {workflow_id!r} contains unsupported step(s) "
-            f"that are not executor-backed: {missing!r}"
-        )
-
-
-def build_refine_image_pipeline(
-    *,
-    state: dict[str, Any] | None = None,
-    project: str | None = None,
-    run_root: str | None = None,
-    artifact_root: str | None = None,
-    cas_project_dir: str | None = None,
-) -> Any:
-    """Build the frozen WE-1 graph: generate -> review -> {halt|generate}."""
-    from astrid.core.integrations.arnold.host.builder import (
-        build_edge,
-        build_stage,
-        builder_add_edge,
-        builder_add_stage,
-        builder_finalize,
-        builder_set_entry_stage,
-    )
-    from astrid.core.integrations.arnold.host.compat import compat
-
-    builder = compat.PipelineBuilder()
-    generate_stage = build_stage(
-        compat.Stage,
-        stage_id="generate",
-        label=_WE_REFINE_IMAGE_SPEC.stage_labels["generate"],
-        invocation=build_workflow_step_invocation(
-            WE_REFINE_IMAGE_ID,
-            "generate",
-            state=state,
-            project=project,
-            run_root=run_root,
-            artifact_root=artifact_root,
-            cas_project_dir=cas_project_dir,
-        ),
-        metadata={
-            "workflow_id": WE_REFINE_IMAGE_ID,
-            "stage_id": "generate",
-            "entry": True,
-        },
-    )
-    review_stage = build_stage(
-        compat.Stage,
-        stage_id="review",
-        label=_WE_REFINE_IMAGE_SPEC.stage_labels["review"],
-        invocation=build_workflow_step_invocation(
-            WE_REFINE_IMAGE_ID,
-            "review",
-            state=state,
-            project=project,
-            run_root=run_root,
-            artifact_root=artifact_root,
-            cas_project_dir=cas_project_dir,
-        ),
-        suspension=compat.Suspension(
-            resume_input_schema=build_human_resume_input_schema()
-        ),
-        metadata={
-            "workflow_id": WE_REFINE_IMAGE_ID,
-            "stage_id": "review",
-            "human_gate": True,
-        },
-    )
-    halt_stage = build_stage(
-        compat.Stage,
-        stage_id="halt",
-        label=_WE_REFINE_IMAGE_SPEC.stage_labels["halt"],
-        metadata={
-            "workflow_id": WE_REFINE_IMAGE_ID,
-            "stage_id": "halt",
-            "terminal": True,
-        },
-    )
-
-    for stage in (generate_stage, review_stage, halt_stage):
-        builder_add_stage(builder, stage)
-
-    for edge in (
-        build_edge(
-            compat.Edge,
-            source="generate",
-            target="review",
-            label="next",
-        ),
-        build_edge(
-            compat.Edge,
-            source="review",
-            target="halt",
-            label="approve",
-        ),
-        build_edge(
-            compat.Edge,
-            source="review",
-            target="generate",
-            label="reject",
-        ),
-    ):
-        builder_add_edge(builder, edge)
-
-    builder_set_entry_stage(builder, _WE_REFINE_IMAGE_SPEC.entry_stage_id)
-    return builder_finalize(builder)
-
-
-def build_best_of_4_pipeline(
-    *,
-    state: dict[str, Any] | None = None,
-    project: str | None = None,
-    run_root: str | None = None,
-    artifact_root: str | None = None,
-    cas_project_dir: str | None = None,
-) -> Any:
-    """Build the frozen WE-3 graph: generate(4×) -> judge -> review -> {halt|generate}."""
-    from astrid.core.integrations.arnold.host.builder import (
-        build_edge,
-        build_parallel_stage,
-        build_stage,
-        builder_add_edge,
-        builder_add_stage,
-        builder_finalize,
-        builder_set_entry_stage,
-    )
-    from astrid.core.integrations.arnold.host.compat import compat
-
-    builder = compat.PipelineBuilder()
-
-    gen_sub_stages: list[Any] = []
-    for branch in range(4):
-        sub_invocation = build_workflow_step_invocation(
-            WE_BEST_OF_4_ID,
-            f"gen_{branch}",
-            state=state,
-            project=project,
-            run_root=run_root,
-            artifact_root=artifact_root,
-            cas_project_dir=cas_project_dir,
-        )
-        sub_stage = build_stage(
-            compat.Stage,
-            stage_id=f"gen_{branch}",
-            label=_WE_BEST_OF_4_SPEC.stage_labels[f"gen_{branch}"],
-            invocation=sub_invocation,
-            metadata={
-                "workflow_id": WE_BEST_OF_4_ID,
-                "stage_id": f"gen_{branch}",
-                "branch": branch,
-            },
-        )
-        gen_sub_stages.append(sub_stage)
-
-    generate_stage = build_parallel_stage(
-        compat.ParallelStage,
-        stage_id="generate",
-        label=_WE_BEST_OF_4_SPEC.stage_labels["generate"],
-        sub_stages=gen_sub_stages,
-        metadata={
-            "workflow_id": WE_BEST_OF_4_ID,
-            "stage_id": "generate",
-            "entry": True,
-            "parallel_fan_out": 4,
-        },
-    )
-
-    judge_stage = build_stage(
-        compat.Stage,
-        stage_id="judge",
-        label=_WE_BEST_OF_4_SPEC.stage_labels["judge"],
-        invocation=build_workflow_step_invocation(
-            WE_BEST_OF_4_ID,
-            "judge",
-            state=state,
-            project=project,
-            run_root=run_root,
-            artifact_root=artifact_root,
-            cas_project_dir=cas_project_dir,
-        ),
-        metadata={
-            "workflow_id": WE_BEST_OF_4_ID,
-            "stage_id": "judge",
-            "judge_required": True,
-            "lowers_verdict": True,
-        },
-    )
-
-    review_stage = build_stage(
-        compat.Stage,
-        stage_id="review",
-        label=_WE_BEST_OF_4_SPEC.stage_labels["review"],
-        invocation=build_workflow_step_invocation(
-            WE_BEST_OF_4_ID,
-            "review",
-            state=state,
-            project=project,
-            run_root=run_root,
-            artifact_root=artifact_root,
-            cas_project_dir=cas_project_dir,
-        ),
-        suspension=compat.Suspension(
-            resume_input_schema=build_human_resume_input_schema()
-        ),
-        metadata={
-            "workflow_id": WE_BEST_OF_4_ID,
-            "stage_id": "review",
-            "human_gate": True,
-        },
-    )
-
-    halt_stage = build_stage(
-        compat.Stage,
-        stage_id="halt",
-        label=_WE_BEST_OF_4_SPEC.stage_labels["halt"],
-        metadata={
-            "workflow_id": WE_BEST_OF_4_ID,
-            "stage_id": "halt",
-            "terminal": True,
-        },
-    )
-
-    for stage in (generate_stage, judge_stage, review_stage, halt_stage):
-        builder_add_stage(builder, stage)
-
-    for edge in (
-        build_edge(
-            compat.Edge,
-            source="generate",
-            target="judge",
-            label="next",
-        ),
-        build_edge(
-            compat.Edge,
-            source="judge",
-            target="review",
-            label="next",
-        ),
-        build_edge(
-            compat.Edge,
-            source="review",
-            target="halt",
-            label="approve",
-        ),
-        build_edge(
-            compat.Edge,
-            source="review",
-            target="generate",
-            label="reject",
-        ),
-    ):
-        builder_add_edge(builder, edge)
-
-    builder_set_entry_stage(builder, _WE_BEST_OF_4_SPEC.entry_stage_id)
-    return builder_finalize(builder)
-
+_HYPE_SPEC = _ShapeGraphSpec(
+    entry_stage_id="noop",
+    stage_labels={
+        "noop": "No-op",
+        "halt": "Halt",
+    },
+)
 
 def build_text_analysis_summarize_pipeline(
     *,
@@ -1791,9 +1532,11 @@ def build_event_talks_pipeline(
     import shlex
     from pathlib import Path
 
-    from astrid.core.integrations.arnold.session.authoring import (
-        build_workflow,
+    from astrid.core.integrations.arnold.authoring import (
+        edge,
         executor_step,
+        halt,
+        pipeline,
     )
 
     resolved_run_root = run_root or artifact_root or "/tmp/arnold-event-talks-run"
@@ -1817,84 +1560,378 @@ def build_event_talks_pipeline(
         f"render --manifest {shlex.quote(manifest_ref)} --out-dir {shlex.quote('{produces_root}')}"
     )
 
-    return build_workflow(
-        [
-            executor_step(
-                "ados-sunday-template",
-                segment_id=EVENT_TALKS_ID,
-                adapter="local",
-                command=cmd_ados,
-                produces={"template_output": "ados-sunday-template.json"},
-                label="Ados Sunday Template",
-            ),
-            executor_step(
-                "search-transcript",
-                segment_id=EVENT_TALKS_ID,
-                adapter="local",
-                command=cmd_search,
-                produces={"search_output": "search-results.txt"},
-                label="Search Transcript",
-            ),
-            executor_step(
-                "find-holding-screens",
-                segment_id=EVENT_TALKS_ID,
-                adapter="local",
-                command=cmd_holding,
-                produces={"holding_output": "holding-screens.json"},
-                label="Find Holding Screens",
-            ),
-            executor_step(
-                "render",
-                segment_id=EVENT_TALKS_ID,
-                adapter="local",
-                command=cmd_render,
-                produces={"render_output": "render-manifest.json"},
-                label="Render",
-            ),
-        ],
-        segment_id=EVENT_TALKS_ID,
-        project=project or "default",
-        run_root_path=run_root_path,
+    _stage_ids = (
+        "ados-sunday-template",
+        "search-transcript",
+        "find-holding-screens",
+        "render",
+    )
+    _stage_labels = {
+        "ados-sunday-template": "Ados Sunday Template",
+        "search-transcript": "Search Transcript",
+        "find-holding-screens": "Find Holding Screens",
+        "render": "Render",
+    }
+    _produces = {
+        "ados-sunday-template": {"template_output": "ados-sunday-template.json"},
+        "search-transcript": {"search_output": "search-results.txt"},
+        "find-holding-screens": {"holding_output": "holding-screens.json"},
+        "render": {"render_output": "render-manifest.json"},
+    }
+    _commands = {
+        "ados-sunday-template": cmd_ados,
+        "search-transcript": cmd_search,
+        "find-holding-screens": cmd_holding,
+        "render": cmd_render,
+    }
+
+    resolved_project = project or "default"
+
+    stages: list[Any] = []
+    for sid in _stage_ids:
+        produces = _produces[sid]
+        produces_meta = [{"name": name, "path": path} for name, path in produces.items()]
+        stage_spec = executor_step(
+            stage_id=sid,
+            label=_stage_labels[sid],
+            executor_id="task.local",
+            segment_id=EVENT_TALKS_ID,
+            project=resolved_project,
+            run_root=run_root_path,
+            command=_commands[sid],
+            outputs=produces,
+            metadata={"produces": produces_meta},
+        )
+        stages.append(stage_spec)
+
+    edges: list[Any] = []
+    for idx in range(len(stages) - 1):
+        edges.append(
+            edge(
+                source=stages[idx].stage_id,
+                target=stages[idx + 1].stage_id,
+                label="next",
+            )
+        )
+
+    halt_stage = halt()
+    if stages:
+        edges.append(
+            edge(
+                source=stages[-1].stage_id,
+                target=halt_stage.stage_id,
+                label="next",
+            )
+        )
+    all_stages = tuple(stages) + (halt_stage,)
+
+    return pipeline(
+        entry_stage_id=stages[0].stage_id if stages else "halt",
+        stages=all_stages,
+        edges=tuple(edges),
     )
 
 
+
+def build_thumbnail_maker_pipeline(
+    *,
+    state: dict[str, Any] | None = None,
+    project: str | None = None,
+    run_root: str | None = None,
+    artifact_root: str | None = None,
+    cas_project_dir: str | None = None,
+) -> Any:
+    """Build the canonical Thumbnail Maker pipeline via the authoring facade.
+
+    The five-step linear pipeline:
+
+        resolve-video → plan-evidence → discover-video-evidence →
+        build-reference-pack → generate-thumbnails → halt
+
+    All steps use ``adapter: orchestrator`` — each step is a command-based
+    wrapper that calls the thumbnail_maker.run module.
+    """
+    import shlex
+    from pathlib import Path
+
+    from astrid.core.integrations.arnold.authoring import (
+        edge,
+        executor_step,
+        halt,
+        pipeline,
+    )
+
+    resolved_run_root = run_root or artifact_root or "/tmp/arnold-thumbnail-maker-run"
+    run_root_path = Path(resolved_run_root)
+
+    python_exec = "python3"
+
+    cmd_resolve = (
+        f"{shlex.quote(str(python_exec))} -m astrid.packs.video_editing.orchestrators.thumbnail_maker.run "
+        f"resolve-video --video '' --out {shlex.quote('{produces_root}/video-resolution.json')}"
+    )
+    cmd_plan = (
+        f"{shlex.quote(str(python_exec))} -m astrid.packs.video_editing.orchestrators.thumbnail_maker.run "
+        f"plan-evidence --query auto --out {shlex.quote('{produces_root}/evidence/evidence-plan.json')}"
+    )
+    evidence_plan_ref = (
+        "{step_dir}/../plan-evidence/v1/produces/evidence/evidence-plan.json"
+    )
+    cmd_discover = (
+        f"{shlex.quote(str(python_exec))} -m astrid.packs.video_editing.orchestrators.thumbnail_maker.run "
+        f"discover-video-evidence --video '' --out {shlex.quote('{produces_root}/evidence/candidates.json')} "
+        f"--query auto --previous-manifest {shlex.quote(evidence_plan_ref)}"
+    )
+    candidates_ref = (
+        "{step_dir}/../discover-video-evidence/v1/produces/evidence/candidates.json"
+    )
+    cmd_build_ref = (
+        f"{shlex.quote(str(python_exec))} -m astrid.packs.video_editing.orchestrators.thumbnail_maker.run "
+        f"build-reference-pack --out {shlex.quote('{produces_root}/evidence/reference-pack.json')} "
+        f"--query auto --previous-manifest {shlex.quote(candidates_ref)}"
+    )
+    ref_pack_ref = (
+        "{step_dir}/../build-reference-pack/v1/produces/evidence/reference-pack.json"
+    )
+    cmd_generate = (
+        f"{shlex.quote(str(python_exec))} -m astrid.packs.video_editing.orchestrators.thumbnail_maker.run "
+        f"generate-thumbnails --out {shlex.quote('{produces_root}/thumbnail-manifest.json')} "
+        f"--query auto --previous-manifest {shlex.quote(ref_pack_ref)}"
+    )
+
+    _stage_ids = (
+        "resolve-video",
+        "plan-evidence",
+        "discover-video-evidence",
+        "build-reference-pack",
+        "generate-thumbnails",
+    )
+    _stage_labels = {
+        "resolve-video": "Resolve Video",
+        "plan-evidence": "Plan Evidence",
+        "discover-video-evidence": "Discover Video Evidence",
+        "build-reference-pack": "Build Reference Pack",
+        "generate-thumbnails": "Generate Thumbnails",
+    }
+    _produces = {
+        "resolve-video": {"resolve_output": "video-resolution.json"},
+        "plan-evidence": {"evidence_plan_output": "evidence/evidence-plan.json"},
+        "discover-video-evidence": {"candidates_output": "evidence/candidates.json"},
+        "build-reference-pack": {"reference_pack_output": "evidence/reference-pack.json"},
+        "generate-thumbnails": {"thumbnail_output": "thumbnail-manifest.json"},
+    }
+    _commands = {
+        "resolve-video": cmd_resolve,
+        "plan-evidence": cmd_plan,
+        "discover-video-evidence": cmd_discover,
+        "build-reference-pack": cmd_build_ref,
+        "generate-thumbnails": cmd_generate,
+    }
+
+    resolved_project = project or "default"
+
+    stages: list[Any] = []
+    for sid in _stage_ids:
+        produces = _produces[sid]
+        produces_meta = [{"name": name, "path": path} for name, path in produces.items()]
+        stage_spec = executor_step(
+            stage_id=sid,
+            label=_stage_labels[sid],
+            executor_id="task.local",
+            segment_id=THUMBNAIL_MAKER_ID,
+            project=resolved_project,
+            run_root=run_root_path,
+            command=_commands[sid],
+            outputs=produces,
+            metadata={"produces": produces_meta},
+        )
+        stages.append(stage_spec)
+
+    edges: list[Any] = []
+    for idx in range(len(stages) - 1):
+        edges.append(
+            edge(
+                source=stages[idx].stage_id,
+                target=stages[idx + 1].stage_id,
+                label="next",
+            )
+        )
+
+    halt_stage = halt()
+    if stages:
+        edges.append(
+            edge(
+                source=stages[-1].stage_id,
+                target=halt_stage.stage_id,
+                label="next",
+            )
+        )
+    all_stages = tuple(stages) + (halt_stage,)
+
+    return pipeline(
+        entry_stage_id=stages[0].stage_id if stages else "halt",
+        stages=all_stages,
+        edges=tuple(edges),
+    )
+
+
+def build_dataset_build_pipeline(
+    *,
+    state: dict[str, Any] | None = None,
+    project: str | None = None,
+    run_root: str | None = None,
+    artifact_root: str | None = None,
+    cas_project_dir: str | None = None,
+) -> Any:
+    """Build the canonical training.dataset_build shape as a single opaque stage.
+
+    The dataset_build runtime remains opaque to Arnold: the host shape is a
+    one-stage pipeline that re-enters the existing entrypoint with the same CLI
+    contract.
+    """
+    from pathlib import Path
+    from tempfile import NamedTemporaryFile
+
+    from astrid.core.integrations.arnold.host.compat import compat
+    from astrid.core.integrations.arnold.session import lowering
+    from astrid.core.task.plan import TaskPlan, load_plan
+    from astrid.packs.training.orchestrators.dataset_build.plan_template import (
+        build_plan_v2,
+    )
+
+    resolved_run_root = Path(run_root or artifact_root or "/tmp/arnold-dataset-build-run")
+    resolved_run_root.mkdir(parents=True, exist_ok=True)
+    config_path = resolved_run_root / "dataset-config.yaml"
+    config_path.write_text(
+        "media_type: video\nsource_paths: []\n",
+        encoding="utf-8",
+    )
+    plan_dict = build_plan_v2(
+        python_exec="python3",
+        run_root=resolved_run_root,
+        config=config_path,
+    )
+    with NamedTemporaryFile(
+        mode="w", suffix=".json", delete=False, dir=resolved_run_root
+    ) as plan_file:
+        import json
+
+        json.dump(plan_dict, plan_file)
+        plan_path = plan_file.name
+    plan = load_plan(plan_path)
+    assert isinstance(plan, TaskPlan)
+    lowered = lowering.lower_plan_segment(
+        plan,
+        project=project or "default",
+        run_root=resolved_run_root,
+        state=dict(state or {}),
+        segment_id=DATASET_BUILD_ID,
+        compat=compat,
+    )
+    return lowering.build_pipeline(lowered, compat=compat)
+
+
+def build_training_run_pipeline(
+    *,
+    state: dict[str, Any] | None = None,
+    project: str | None = None,
+    run_root: str | None = None,
+    artifact_root: str | None = None,
+    cas_project_dir: str | None = None,
+) -> Any:
+    """Build the canonical training.training_run shape as a single opaque stage.
+
+    The training_run runtime remains opaque to Arnold: the host shape is a
+    one-stage pipeline that re-enters the existing entrypoint with the same CLI
+    contract.
+    """
+    from pathlib import Path
+    from tempfile import NamedTemporaryFile
+
+    from astrid.core.integrations.arnold.host.compat import compat
+    from astrid.core.integrations.arnold.session import lowering
+    from astrid.core.task.plan import TaskPlan, load_plan
+    from astrid.packs.training.orchestrators.training_run.plan_template import (
+        build_plan_v2,
+    )
+
+    resolved_run_root = Path(run_root or artifact_root or "/tmp/arnold-training-run-run")
+    resolved_run_root.mkdir(parents=True, exist_ok=True)
+    config_path = resolved_run_root / "training-run-config.yaml"
+    config_path.write_text(
+        "trainer: ai-toolkit-ltx\nbase_model: placeholder\n",
+        encoding="utf-8",
+    )
+    plan_dict = build_plan_v2(
+        python_exec="python3",
+        run_root=resolved_run_root,
+        config=config_path,
+    )
+    with NamedTemporaryFile(
+        mode="w", suffix=".json", delete=False, dir=resolved_run_root
+    ) as plan_file:
+        import json
+
+        json.dump(plan_dict, plan_file)
+        plan_path = plan_file.name
+    plan = load_plan(plan_path)
+    assert isinstance(plan, TaskPlan)
+    lowered = lowering.lower_plan_segment(
+        plan,
+        project=project or "default",
+        run_root=resolved_run_root,
+        state=dict(state or {}),
+        segment_id=TRAINING_RUN_ID,
+        compat=compat,
+    )
+    return lowering.build_pipeline(lowered, compat=compat)
+
+
+def build_hype_pipeline(
+    *,
+    state: dict[str, Any] | None = None,
+    project: str | None = None,
+    run_root: str | None = None,
+    artifact_root: str | None = None,
+    cas_project_dir: str | None = None,
+) -> Any:
+    """Build the canonical video_editing.hype shape via the DSL compiler.
+
+    The hype orchestrator compiles to a multi-stage Arnold pipeline with an
+    explicit noop entry stage.
+    """
+    from astrid.core.orchestrate.compile import compile_to_pipeline
+
+    resolved_run_root = run_root or artifact_root or "/tmp/arnold-hype-run"
+    return compile_to_pipeline(
+        HYPE_ID,
+        project=project or "default",
+        run_root=resolved_run_root,
+        state=dict(state or {}),
+    ).pipeline
+
+
 SHAPE_DEFINITIONS: tuple[ShapeEntry, ...] = (
-    ShapeEntry(
-        workflow_id=WE_REFINE_IMAGE_ID,
+        ShapeEntry(
+        workflow_id=THUMBNAIL_MAKER_ID,
         description=(
-            "WE-1: Single-generation refinement workflow. Generates an image, "
-            "presents it for human review, and re-enters generation on reject."
+            "Thumbnail Maker five-step linear pipeline: resolve-video → "
+            "plan-evidence → discover-video-evidence → "
+            "build-reference-pack → generate-thumbnails. "
+            "All steps use adapter: orchestrator (command-based)."
         ),
-        cli_alias=WE_REFINE_IMAGE_ALIAS,
-        accepts_human_input=True,
+        cli_alias=THUMBNAIL_MAKER_ALIAS,
+        accepts_human_input=False,
         metadata={
-            "kind": "generation",
-            "max_iterations": 10,
-            "judge_required": False,
+            "kind": "video_editing",
             "parallel_fan_out": 1,
+            "judge_required": False,
+            "compiled": True,
+            "loop_lowering": "linear_facade",
         },
-        entry_stage_id=_WE_REFINE_IMAGE_SPEC.entry_stage_id,
-        stage_labels=dict(_WE_REFINE_IMAGE_SPEC.stage_labels),
-        pipeline_builder=build_refine_image_pipeline,
-    ),
-    ShapeEntry(
-        workflow_id=WE_BEST_OF_4_ID,
-        description=(
-            "WE-3: Four-way parallel fan-out generation workflow. Runs 4 "
-            "independent image generations in parallel, lowers a judge to "
-            "select the best output, and gates the finalist for human review."
-        ),
-        cli_alias=WE_BEST_OF_4_ALIAS,
-        accepts_human_input=True,
-        metadata={
-            "kind": "generation",
-            "parallel_fan_out": 4,
-            "judge_required": True,
-            "max_iterations": 3,
-        },
-        entry_stage_id=_WE_BEST_OF_4_SPEC.entry_stage_id,
-        stage_labels=dict(_WE_BEST_OF_4_SPEC.stage_labels),
-        pipeline_builder=build_best_of_4_pipeline,
+        entry_stage_id=_THUMBNAIL_MAKER_SPEC.entry_stage_id,
+        stage_labels=dict(_THUMBNAIL_MAKER_SPEC.stage_labels),
+        pipeline_builder=build_thumbnail_maker_pipeline,
     ),
     ShapeEntry(
         workflow_id=TEXT_ANALYSIS_SUMMARIZE_ID,
@@ -2081,6 +2118,63 @@ SHAPE_DEFINITIONS: tuple[ShapeEntry, ...] = (
         entry_stage_id=_EVENT_TALKS_SPEC.entry_stage_id,
         stage_labels=dict(_EVENT_TALKS_SPEC.stage_labels),
         pipeline_builder=build_event_talks_pipeline,
+    ),
+    ShapeEntry(
+        workflow_id=DATASET_BUILD_ID,
+        description=(
+            "Canonical training.dataset_build shape compiled as a single opaque "
+            "local stage that re-enters the existing dataset_build entrypoint."
+        ),
+        cli_alias=DATASET_BUILD_ALIAS,
+        accepts_human_input=False,
+        metadata={
+            "kind": "training",
+            "parallel_fan_out": 1,
+            "judge_required": False,
+            "compiled": True,
+            "loop_lowering": "opaque_single_stage",
+        },
+        entry_stage_id=_DATASET_BUILD_SPEC.entry_stage_id,
+        stage_labels=dict(_DATASET_BUILD_SPEC.stage_labels),
+        pipeline_builder=build_dataset_build_pipeline,
+    ),
+    ShapeEntry(
+        workflow_id=TRAINING_RUN_ID,
+        description=(
+            "Canonical training.training_run shape compiled as a single opaque "
+            "local stage that re-enters the existing training_run entrypoint."
+        ),
+        cli_alias=TRAINING_RUN_ALIAS,
+        accepts_human_input=False,
+        metadata={
+            "kind": "training",
+            "parallel_fan_out": 1,
+            "judge_required": False,
+            "compiled": True,
+            "loop_lowering": "opaque_single_stage",
+        },
+        entry_stage_id=_TRAINING_RUN_SPEC.entry_stage_id,
+        stage_labels=dict(_TRAINING_RUN_SPEC.stage_labels),
+        pipeline_builder=build_training_run_pipeline,
+    ),
+    ShapeEntry(
+        workflow_id=HYPE_ID,
+        description=(
+            "Canonical video_editing.hype shape compiled from the DSL "
+            "orchestrator definition into a multi-stage Arnold pipeline."
+        ),
+        cli_alias=HYPE_ALIAS,
+        accepts_human_input=False,
+        metadata={
+            "kind": "video_editing",
+            "parallel_fan_out": 1,
+            "judge_required": False,
+            "compiled": True,
+            "loop_lowering": "dsl_compiled",
+        },
+        entry_stage_id=_HYPE_SPEC.entry_stage_id,
+        stage_labels=dict(_HYPE_SPEC.stage_labels),
+        pipeline_builder=build_hype_pipeline,
     ),
 )
 

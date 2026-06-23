@@ -58,6 +58,7 @@ class _CheckpointOutcome:
 
 @dataclass(frozen=True)
 class _Suspension:
+    kind: str = "human"
     resume_input_schema: dict[str, Any] | None = None
 
 
@@ -80,45 +81,104 @@ class _StepInvocation:
 
 @dataclass(frozen=True)
 class _Stage:
-    stage_id: str
-    label: str
+    name: str
+    step: Any | None = None
+    edges: tuple[Any, ...] = ()
+    decision_vocabulary: Any = frozenset()
+    decision_routes: dict[str, str | None] = field(default_factory=dict)
+    suspension_schema: dict[str, Any] | None = None
     invocation: Any | None = None
+    loop_condition: Any | None = None
+    # Aliases / backward-compat for duck-typed access
+    stage_id: str | None = None
+    label: str | None = None
     suspension: Any | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
-    decision_vocabulary: tuple[str, ...] = field(default_factory=tuple)
-    loop_condition: Any | None = None
+
+    def __post_init__(self) -> None:
+        if self.stage_id is None:
+            object.__setattr__(self, "stage_id", self.name)
+        if self.label is None:
+            object.__setattr__(self, "label", self.name)
+        if self.suspension is None and self.suspension_schema is not None:
+            object.__setattr__(
+                self,
+                "suspension",
+                _Suspension(
+                    resume_input_schema=self.suspension_schema.get("resume_input_schema")
+                ),
+            )
 
 
 @dataclass(frozen=True)
 class _StageWithoutLoopCondition:
-    stage_id: str
-    label: str
+    name: str
+    step: Any | None = None
+    edges: tuple[Any, ...] = ()
+    decision_vocabulary: Any = frozenset()
+    decision_routes: dict[str, str | None] = field(default_factory=dict)
+    suspension_schema: dict[str, Any] | None = None
     invocation: Any | None = None
+    # Aliases / backward-compat for duck-typed access
+    stage_id: str | None = None
+    label: str | None = None
     suspension: Any | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
-    decision_vocabulary: tuple[str, ...] = field(default_factory=tuple)
+
+    def __post_init__(self) -> None:
+        if self.stage_id is None:
+            object.__setattr__(self, "stage_id", self.name)
+        if self.label is None:
+            object.__setattr__(self, "label", self.name)
+        if self.suspension is None and self.suspension_schema is not None:
+            object.__setattr__(
+                self,
+                "suspension",
+                _Suspension(
+                    resume_input_schema=self.suspension_schema.get("resume_input_schema")
+                ),
+            )
 
 
 @dataclass(frozen=True)
 class _ParallelStage:
-    stage_id: str
-    label: str
+    name: str
+    steps: tuple[Any, ...] = field(default_factory=tuple)
+    join: Any | None = None
+    edges: tuple[Any, ...] = ()
+    # Aliases / backward-compat for duck-typed access
+    stage_id: str | None = None
+    label: str | None = None
     stages: tuple[Any, ...] = field(default_factory=tuple)
     metadata: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.stage_id is None:
+            object.__setattr__(self, "stage_id", self.name)
+        if self.label is None:
+            object.__setattr__(self, "label", self.name)
+        if not self.stages:
+            object.__setattr__(self, "stages", self.steps)
 
 
 @dataclass(frozen=True)
 class _Edge:
-    source: str
-    target: str
     label: str
+    target: str
+    kind: str = "normal"
+    recommendation: Any | None = None
+    # Backward-compat for duck-typed access
+    source: str | None = None
 
 
 @dataclass(frozen=True)
 class _MetadataEdge:
-    source: str
-    target: str
     label: str
+    target: str
+    kind: str = "normal"
+    recommendation: Any | None = None
+    # Extra metadata fields for port-aware edges
+    source: str | None = None
     source_port: str | None = None
     target_port: str | None = None
     logical_type: str | None = None
@@ -232,6 +292,40 @@ def _install_fake_pipeline(
     fake_arnold.pipeline = pipeline
     monkeypatch.setitem(sys.modules, "arnold", fake_arnold)
     monkeypatch.setitem(sys.modules, "arnold.pipeline", pipeline)
+
+    # Patch the host builder so the fake Stage/Edge helpers preserve the
+    # spec sidecars (metadata, label, source, etc.) that the real Arnold
+    # contract intentionally keeps off runtime objects.  This lets tests
+    # continue to assert on duck-typed aliases without changing the real
+    # builder contract.
+    from astrid.core.integrations.arnold.host import builder as _builder
+
+    _orig_build_stage = _builder.build_stage
+
+    def _build_stage(stage_type: type[Any], **kwargs: Any) -> Any:
+        stage = _orig_build_stage(stage_type, **kwargs)
+        if kwargs.get("metadata") is not None and hasattr(stage, "metadata"):
+            object.__setattr__(stage, "metadata", dict(kwargs["metadata"]))
+        if kwargs.get("label") is not None and hasattr(stage, "label"):
+            object.__setattr__(stage, "label", kwargs["label"])
+        if kwargs.get("stage_id") is not None and hasattr(stage, "stage_id"):
+            object.__setattr__(stage, "stage_id", kwargs["stage_id"])
+        if kwargs.get("suspension") is not None and hasattr(stage, "suspension"):
+            object.__setattr__(stage, "suspension", kwargs["suspension"])
+        return stage
+
+    monkeypatch.setattr(_builder, "build_stage", _build_stage)
+
+    _orig_build_edge = _builder.build_edge
+
+    def _build_edge(edge_type: type[Any], **kwargs: Any) -> Any:
+        edge = _orig_build_edge(edge_type, **kwargs)
+        for key in ("source", "source_port", "target_port", "logical_type", "artifact_type", "metadata"):
+            if kwargs.get(key) is not None and hasattr(edge, key):
+                object.__setattr__(edge, key, kwargs[key])
+        return edge
+
+    monkeypatch.setattr(_builder, "build_edge", _build_edge)
 
 
 @pytest.fixture(autouse=True)
@@ -353,11 +447,11 @@ def test_compile_plan_segment_uses_fresh_builder_and_emits_stable_metadata(
     second_stage = built_pipeline.stages[1]
     # ── T9: runtime stage vocabulary assertions ──
     assert first_stage.metadata["vocabulary"] == ["next"]
-    assert first_stage.decision_vocabulary == ("next",)
+    assert first_stage.decision_vocabulary == frozenset({"next"})
     assert second_stage.metadata["vocabulary"] == ["next"]
-    assert second_stage.decision_vocabulary == ("next",)
+    assert second_stage.decision_vocabulary == frozenset({"next"})
     assert built_pipeline.stages[2].metadata["vocabulary"] == ["terminal"]
-    assert built_pipeline.stages[2].decision_vocabulary == ("terminal",)
+    assert built_pipeline.stages[2].decision_vocabulary == frozenset({"terminal"})
     # ── end T9 ──
     first_adapter = first_stage.invocation.metadata["adapter_config"]
     second_adapter = second_stage.invocation.metadata["adapter_config"]
@@ -434,9 +528,9 @@ def test_compile_plan_segment_does_not_require_pipeline_type(
     assert first_stage.metadata["vocabulary"] == ["next"]
     assert second_stage.metadata["vocabulary"] == ["next"]
     assert result.pipeline.stages[2].metadata["vocabulary"] == ["terminal"]
-    assert first_stage.decision_vocabulary == ("next",)
-    assert second_stage.decision_vocabulary == ("next",)
-    assert result.pipeline.stages[2].decision_vocabulary == ("terminal",)
+    assert first_stage.decision_vocabulary == frozenset({"next"})
+    assert second_stage.decision_vocabulary == frozenset({"next"})
+    assert result.pipeline.stages[2].decision_vocabulary == frozenset({"terminal"})
 
 
 def test_compile_plan_segment_supports_minimal_group_steps(
@@ -485,10 +579,10 @@ def test_compile_plan_segment_supports_minimal_group_steps(
     assert leaf_stage.metadata["vocabulary"] == ["next"]
     assert exit_stage.metadata["vocabulary"] == ["next"]
     assert halt.metadata["vocabulary"] == ["terminal"]
-    assert enter_stage.decision_vocabulary == ("next",)
-    assert leaf_stage.decision_vocabulary == ("next",)
-    assert exit_stage.decision_vocabulary == ("next",)
-    assert halt.decision_vocabulary == ("terminal",)
+    assert enter_stage.decision_vocabulary == frozenset({"next"})
+    assert leaf_stage.decision_vocabulary == frozenset({"next"})
+    assert exit_stage.decision_vocabulary == frozenset({"next"})
+    assert halt.decision_vocabulary == frozenset({"terminal"})
     # Edge labels match declared stage vocabularies
     edges = result.pipeline.edges
     assert edges[0].label in enter_stage.decision_vocabulary  # next
@@ -570,25 +664,25 @@ def test_compile_plan_segment_compiles_groups_re_exports_and_optional_skip_route
     assert edit_stage.metadata["optional"] is True
     assert edit_stage.metadata["decision_vocabulary"] == ["proceed", "skip"]
     assert edit_stage.metadata["vocabulary"] == ["proceed", "skip"]
-    assert edit_stage.decision_vocabulary == ("proceed", "skip")
+    assert edit_stage.decision_vocabulary == frozenset({"proceed", "skip"})
 
     # ── T9: verify vocabulary on all stages ──
     draft_stage = next(stage for stage in result.pipeline.stages if stage.stage_id == "draft")
     assert draft_stage.metadata["vocabulary"] == ["next"]
-    assert draft_stage.decision_vocabulary == ("next",)
+    assert draft_stage.decision_vocabulary == frozenset({"next"})
 
     enter_stage = next(stage for stage in result.pipeline.stages if stage.stage_id == "revise/__enter__")
     assert enter_stage.metadata["vocabulary"] == ["next"]
-    assert enter_stage.decision_vocabulary == ("next",)
+    assert enter_stage.decision_vocabulary == frozenset({"next"})
 
     exit_stage = next(stage for stage in result.pipeline.stages if stage.stage_id == "revise/__exit__")
     assert exit_stage.metadata["group_boundary"] == "exit"
     assert exit_stage.metadata["vocabulary"] == ["next"]
-    assert exit_stage.decision_vocabulary == ("next",)
+    assert exit_stage.decision_vocabulary == frozenset({"next"})
 
     halt = next(stage for stage in result.pipeline.stages if stage.stage_id == "halt")
     assert halt.metadata["vocabulary"] == ["terminal"]
-    assert halt.decision_vocabulary == ("terminal",)
+    assert halt.decision_vocabulary == frozenset({"terminal"})
 
     # ── T9: edge labels match declared stage vocabularies ──
     for edge in result.pipeline.edges:
@@ -711,7 +805,7 @@ def test_compile_plan_segment_lowers_typed_repeat_until_leaf_with_loop_back_meta
     )
 
     review_stage = next(s for s in result.pipeline.stages if s.stage_id == "review_loop")
-    assert review_stage.decision_vocabulary == ("repeat", "next")
+    assert review_stage.decision_vocabulary == frozenset({"repeat", "next"})
     assert review_stage.metadata["vocabulary"] == ["repeat", "next"]
     assert review_stage.loop_condition is not None
     assert review_stage.metadata["repeat_until"] == {
@@ -819,7 +913,7 @@ def test_compile_plan_segment_lowers_group_repeat_until_via_re_exported_descenda
     )
 
     exit_stage = next(s for s in result.pipeline.stages if s.stage_id == "editor_review/__exit__")
-    assert exit_stage.decision_vocabulary == ("repeat", "next")
+    assert exit_stage.decision_vocabulary == frozenset({"repeat", "next"})
     assert exit_stage.metadata["vocabulary"] == ["repeat", "next"]
     assert exit_stage.loop_condition is not None
     assert exit_stage.metadata["repeat_until"]["source_plan_path"] == ["editor_review", "review"]
@@ -950,7 +1044,7 @@ def test_repeat_until_edge_sidecar_individual_fields_verified(
 
     # ── Stage assertions ──
     review_stage = next(s for s in result.pipeline.stages if s.stage_id == "review_loop")
-    assert review_stage.decision_vocabulary == ("repeat", "next")
+    assert review_stage.decision_vocabulary == frozenset({"repeat", "next"})
     assert review_stage.metadata["vocabulary"] == ["repeat", "next"]
 
     # ── Edge sidecar: find the loop-back repeat edge ──
@@ -1795,7 +1889,7 @@ def test_pipeline_manifest_without_specs_handles_plain_runtime_edges(
     ]
 
 
-# ── T9: stage vocabulary and edge label conformance ───────────────────────────\n\n\ndef test_every_compiled_stage_has_vocabulary_metadata(\n    monkeypatch: pytest.MonkeyPatch,\n    tmp_path: Path,\n) -> None:\n    \"\"\"Compile a plan with normal, optional, group-boundary, and terminal\n    stages; assert every compiled stage has vocabulary metadata and the\n    manifest records it for every stage.\"\"\"\n    _install_fake_pipeline(monkeypatch, builder_type=_BuilderWithBuild)\n    compiler = _import_compiler_module()\n    plan = TaskPlan(\n        plan_id=\"plan-vocab\",\n        version=2,\n        steps=(\n            Step(id=\"start\", adapter=\"local\", command=\"echo start\"),\n            Step(\n                id=\"review\",\n                adapter=\"manual\",\n                command=\"ack\",\n                optional=True,\n            ),\n        ),\n    )\n\n    result = compiler.compile_plan_segment(\n        plan,\n        project=\"demo\",\n        run_root=tmp_path / \"run-vocab\",\n        state={},\n        segment_id=\"seg-vocab\",\n    )\n\n    # Every runtime stage must carry metadata[\"vocabulary\"]\n    for stage in result.pipeline.stages:\n        assert \"vocabulary\" in stage.metadata, (\n            f\"Stage {stage.stage_id} missing metadata['vocabulary']\"\n        )\n        assert isinstance(stage.metadata[\"vocabulary\"], list)\n        assert len(stage.metadata[\"vocabulary\"]) >= 1\n        # decision_vocabulary must be a non-empty tuple\n        assert isinstance(stage.decision_vocabulary, tuple)\n        assert len(stage.decision_vocabulary) >= 1\n        # metadata[\"vocabulary\"] must match decision_vocabulary\n        assert stage.metadata[\"vocabulary\"] == list(stage.decision_vocabulary), (\n            f\"Stage {stage.stage_id}: metadata['vocabulary']={stage.metadata['vocabulary']!r} \"\n            f\"!= list(decision_vocabulary)={list(stage.decision_vocabulary)!r}\"\n        )\n\n    # Every manifest stage must carry \"vocabulary\"\n    manifest_stages = result.pipeline_manifest[\"stages\"]\n    for manifest_stage in manifest_stages:\n        assert \"vocabulary\" in manifest_stage, (\n            f\"Manifest stage {manifest_stage.get('stage_id')} missing 'vocabulary'\"\n        )\n        assert isinstance(manifest_stage[\"vocabulary\"], list)\n        assert len(manifest_stage[\"vocabulary\"]) >= 1\n\n    # Concrete assertions for this plan\n    stages_by_id = {s.stage_id: s for s in result.pipeline.stages}\n    assert stages_by_id[\"start\"].metadata[\"vocabulary\"] == [\"next\"]\n    assert stages_by_id[\"review\"].metadata[\"vocabulary\"] == [\"proceed\", \"skip\"]\n    assert stages_by_id[\"halt\"].metadata[\"vocabulary\"] == [\"terminal\"]\n\n\ndef test_normal_stage_edges_use_next_label(\n    monkeypatch: pytest.MonkeyPatch,\n    tmp_path: Path,\n) -> None:\n    \"\"\"All edges from a normal (non-optional, non-terminal) stage must use\n    the label 'next' — the only label declared in the (\"next\",) vocabulary.\"\"\"\n    _install_fake_pipeline(monkeypatch, builder_type=_BuilderWithBuild)\n    compiler = _import_compiler_module()\n    plan = TaskPlan(\n        plan_id=\"plan-normal\",\n        version=2,\n        steps=(\n            Step(id=\"first\", adapter=\"local\", command=\"echo first\"),\n            Step(id=\"second\", adapter=\"local\", command=\"echo second\"),\n        ),\n    )\n\n    result = compiler.compile_plan_segment(\n        plan,\n        project=\"demo\",\n        run_root=tmp_path / \"run-normal\",\n        state={},\n        segment_id=\"seg-normal\",\n    )\n\n    for edge in result.pipeline.edges:\n        source_stage = next(\n            s for s in result.pipeline.stages if s.stage_id == edge.source\n        )\n        if source_stage.decision_vocabulary == (\"next\",):\n            assert edge.label == \"next\", (\n                f\"Normal stage {edge.source} edge to {edge.target} \"\n                f\"has label {edge.label!r}, expected 'next'\"\n            )\n\n\ndef test_optional_stage_edges_use_proceed_and_skip_labels(\n    monkeypatch: pytest.MonkeyPatch,\n    tmp_path: Path,\n) -> None:\n    \"\"\"Edges from an optional stage must use only 'proceed' or 'skip' —\n    the labels declared in the (\"proceed\", \"skip\") vocabulary.\"\"\"\n    _install_fake_pipeline(monkeypatch, builder_type=_BuilderWithBuild)\n    compiler = _import_compiler_module()\n    plan = TaskPlan(\n        plan_id=\"plan-optional\",\n        version=2,\n        steps=(\n            Step(\n                id=\"opt_step\",\n                adapter=\"local\",\n                command=\"echo maybe\",\n                optional=True,\n            ),\n        ),\n    )\n\n    result = compiler.compile_plan_segment(\n        plan,\n        project=\"demo\",\n        run_root=tmp_path / \"run-optional\",\n        state={},\n        segment_id=\"seg-optional\",\n    )\n\n    opt_stage = next(\n        s for s in result.pipeline.stages if s.stage_id == \"opt_step\"\n    )\n    assert opt_stage.decision_vocabulary == (\"proceed\", \"skip\")\n\n    for edge in result.pipeline.edges:\n        if edge.source == \"opt_step\":\n            assert edge.label in (\"proceed\", \"skip\"), (\n                f\"Optional stage edge has label {edge.label!r}, \"\n                f\"expected 'proceed' or 'skip'\"\n            )\n\n\ndef test_group_boundary_stages_carry_vocabulary_metadata(\n    monkeypatch: pytest.MonkeyPatch,\n    tmp_path: Path,\n) -> None:\n    \"\"\"Group boundary stages (enter/exit) must carry vocabulary metadata\n    and edges from them must use labels declared in their vocabulary.\"\"\"\n    _install_fake_pipeline(monkeypatch, builder_type=_BuilderWithBuild)\n    compiler = _import_compiler_module()\n    plan = TaskPlan(\n        plan_id=\"plan-group-vocab\",\n        version=2,\n        steps=(\n            Step(\n                id=\"group\",\n                children=(\n                    Step(id=\"leaf\", adapter=\"local\", command=\"echo child\"),\n                ),\n            ),\n        ),\n    )\n\n    result = compiler.compile_plan_segment(\n        plan,\n        project=\"demo\",\n        run_root=tmp_path / \"run-group-vocab\",\n        state={},\n        segment_id=\"seg-group-vocab\",\n    )\n\n    enter_stage = next(\n        s for s in result.pipeline.stages if s.stage_id == \"group/__enter__\"\n    )\n    exit_stage = next(\n        s for s in result.pipeline.stages if s.stage_id == \"group/__exit__\"\n    )\n\n    # Normal group boundaries use (\"next\",)\n    assert enter_stage.decision_vocabulary == (\"next\",)\n    assert enter_stage.metadata[\"vocabulary\"] == [\"next\"]\n    assert exit_stage.decision_vocabulary == (\"next\",)\n    assert exit_stage.metadata[\"vocabulary\"] == [\"next\"]\n\n    # Edges from group boundaries must use labels in their vocabulary\n    for edge in result.pipeline.edges:\n        if edge.source in (\"group/__enter__\", \"group/__exit__\"):\n            source_stage = next(\n                s for s in result.pipeline.stages if s.stage_id == edge.source\n            )\n            assert edge.label in source_stage.decision_vocabulary, (\n                f\"Group boundary {edge.source} edge label {edge.label!r} \"\n                f\"not in {source_stage.decision_vocabulary}\"\n            )\n\n\ndef test_terminal_stage_has_terminal_vocabulary(\n    monkeypatch: pytest.MonkeyPatch,\n    tmp_path: Path,\n) -> None:\n    \"\"\"The terminal halt stage must have vocabulary=(\"terminal\",) and no\n    outgoing edges — it is a sink.\"\"\"\n    _install_fake_pipeline(monkeypatch, builder_type=_BuilderWithBuild)\n    compiler = _import_compiler_module()\n    plan = TaskPlan(\n        plan_id=\"plan-terminal\",\n        version=2,\n        steps=(\n            Step(id=\"only\", adapter=\"local\", command=\"echo done\"),\n        ),\n    )\n\n    result = compiler.compile_plan_segment(\n        plan,\n        project=\"demo\",\n        run_root=tmp_path / \"run-terminal\",\n        state={},\n        segment_id=\"seg-terminal\",\n    )\n\n    halt = next(\n        s for s in result.pipeline.stages if s.stage_id == \"halt\"\n    )\n    assert halt.decision_vocabulary == (\"terminal\",)\n    assert halt.metadata[\"vocabulary\"] == [\"terminal\"]\n    assert halt.metadata[\"terminal\"] is True\n\n    # The halt stage is a sink — no outgoing edges\n    outgoing = [e for e in result.pipeline.edges if e.source == \"halt\"]\n    assert len(outgoing) == 0, f\"halt stage must have no outgoing edges, got {outgoing}\"\n\n\ndef test_optional_group_entry_boundary_uses_proceed_skip_vocabulary(\n    monkeypatch: pytest.MonkeyPatch,\n    tmp_path: Path,\n) -> None:\n    \"\"\"When a group is optional, the entry boundary must use\n    (\"proceed\", \"skip\") vocabulary and edge labels must match.\"\"\"\n    _install_fake_pipeline(monkeypatch, builder_type=_BuilderWithBuild)\n    compiler = _import_compiler_module()\n    plan = TaskPlan(\n        plan_id=\"plan-opt-group\",\n        version=2,\n        steps=(\n            Step(\n                id=\"opt_group\",\n                optional=True,\n                children=(\n                    Step(id=\"task\", adapter=\"local\", command=\"echo task\"),\n                ),\n            ),\n        ),\n    )\n\n    result = compiler.compile_plan_segment(\n        plan,\n        project=\"demo\",\n        run_root=tmp_path / \"run-opt-group\",\n        state={},\n        segment_id=\"seg-opt-group\",\n    )\n\n    enter_stage = next(\n        s for s in result.pipeline.stages if s.stage_id == \"opt_group/__enter__\"\n    )\n    assert enter_stage.decision_vocabulary == (\"proceed\", \"skip\")\n    assert enter_stage.metadata[\"vocabulary\"] == [\"proceed\", \"skip\"]\n    assert enter_stage.metadata[\"optional\"] is True\n\n    # Edges from the optional entry: proceed to first child, skip to exit\n    enter_edges = [\n        e for e in result.pipeline.edges if e.source == \"opt_group/__enter__\"\n    ]\n    enter_labels = {e.label for e in enter_edges}\n    assert enter_labels == {\"proceed\", \"skip\"}, (\n        f\"Optional entry edges must have labels {{proceed, skip}}, got {enter_labels}\"\n    )\n\n\n# ── T7: port validation tests ─────────────────────────────────────────────────
+# ── T9: stage vocabulary and edge label conformance ───────────────────────────\n\n\ndef test_every_compiled_stage_has_vocabulary_metadata(\n    monkeypatch: pytest.MonkeyPatch,\n    tmp_path: Path,\n) -> None:\n    \"\"\"Compile a plan with normal, optional, group-boundary, and terminal\n    stages; assert every compiled stage has vocabulary metadata and the\n    manifest records it for every stage.\"\"\"\n    _install_fake_pipeline(monkeypatch, builder_type=_BuilderWithBuild)\n    compiler = _import_compiler_module()\n    plan = TaskPlan(\n        plan_id=\"plan-vocab\",\n        version=2,\n        steps=(\n            Step(id=\"start\", adapter=\"local\", command=\"echo start\"),\n            Step(\n                id=\"review\",\n                adapter=\"manual\",\n                command=\"ack\",\n                optional=True,\n            ),\n        ),\n    )\n\n    result = compiler.compile_plan_segment(\n        plan,\n        project=\"demo\",\n        run_root=tmp_path / \"run-vocab\",\n        state={},\n        segment_id=\"seg-vocab\",\n    )\n\n    # Every runtime stage must carry metadata[\"vocabulary\"]\n    for stage in result.pipeline.stages:\n        assert \"vocabulary\" in stage.metadata, (\n            f\"Stage {stage.stage_id} missing metadata['vocabulary']\"\n        )\n        assert isinstance(stage.metadata[\"vocabulary\"], list)\n        assert len(stage.metadata[\"vocabulary\"]) >= 1\n        # decision_vocabulary must be a non-empty frozenset\n        assert isinstance(stage.decision_vocabulary, frozenset)\n        assert len(stage.decision_vocabulary) >= 1\n        # metadata[\"vocabulary\"] must match decision_vocabulary\n        assert stage.metadata[\"vocabulary\"] == list(stage.decision_vocabulary), (\n            f\"Stage {stage.stage_id}: metadata['vocabulary']={stage.metadata['vocabulary']!r} \"\n            f\"!= list(decision_vocabulary)={list(stage.decision_vocabulary)!r}\"\n        )\n\n    # Every manifest stage must carry \"vocabulary\"\n    manifest_stages = result.pipeline_manifest[\"stages\"]\n    for manifest_stage in manifest_stages:\n        assert \"vocabulary\" in manifest_stage, (\n            f\"Manifest stage {manifest_stage.get('stage_id')} missing 'vocabulary'\"\n        )\n        assert isinstance(manifest_stage[\"vocabulary\"], list)\n        assert len(manifest_stage[\"vocabulary\"]) >= 1\n\n    # Concrete assertions for this plan\n    stages_by_id = {s.stage_id: s for s in result.pipeline.stages}\n    assert stages_by_id[\"start\"].metadata[\"vocabulary\"] == [\"next\"]\n    assert stages_by_id[\"review\"].metadata[\"vocabulary\"] == [\"proceed\", \"skip\"]\n    assert stages_by_id[\"halt\"].metadata[\"vocabulary\"] == [\"terminal\"]\n\n\ndef test_normal_stage_edges_use_next_label(\n    monkeypatch: pytest.MonkeyPatch,\n    tmp_path: Path,\n) -> None:\n    \"\"\"All edges from a normal (non-optional, non-terminal) stage must use\n    the label 'next' — the only label declared in the (\"next\",) vocabulary.\"\"\"\n    _install_fake_pipeline(monkeypatch, builder_type=_BuilderWithBuild)\n    compiler = _import_compiler_module()\n    plan = TaskPlan(\n        plan_id=\"plan-normal\",\n        version=2,\n        steps=(\n            Step(id=\"first\", adapter=\"local\", command=\"echo first\"),\n            Step(id=\"second\", adapter=\"local\", command=\"echo second\"),\n        ),\n    )\n\n    result = compiler.compile_plan_segment(\n        plan,\n        project=\"demo\",\n        run_root=tmp_path / \"run-normal\",\n        state={},\n        segment_id=\"seg-normal\",\n    )\n\n    for edge in result.pipeline.edges:\n        source_stage = next(\n            s for s in result.pipeline.stages if s.stage_id == edge.source\n        )\n        if source_stage.decision_vocabulary == (\"next\",):\n            assert edge.label == \"next\", (\n                f\"Normal stage {edge.source} edge to {edge.target} \"\n                f\"has label {edge.label!r}, expected 'next'\"\n            )\n\n\ndef test_optional_stage_edges_use_proceed_and_skip_labels(\n    monkeypatch: pytest.MonkeyPatch,\n    tmp_path: Path,\n) -> None:\n    \"\"\"Edges from an optional stage must use only 'proceed' or 'skip' —\n    the labels declared in the (\"proceed\", \"skip\") vocabulary.\"\"\"\n    _install_fake_pipeline(monkeypatch, builder_type=_BuilderWithBuild)\n    compiler = _import_compiler_module()\n    plan = TaskPlan(\n        plan_id=\"plan-optional\",\n        version=2,\n        steps=(\n            Step(\n                id=\"opt_step\",\n                adapter=\"local\",\n                command=\"echo maybe\",\n                optional=True,\n            ),\n        ),\n    )\n\n    result = compiler.compile_plan_segment(\n        plan,\n        project=\"demo\",\n        run_root=tmp_path / \"run-optional\",\n        state={},\n        segment_id=\"seg-optional\",\n    )\n\n    opt_stage = next(\n        s for s in result.pipeline.stages if s.stage_id == \"opt_step\"\n    )\n    assert opt_stage.decision_vocabulary == (\"proceed\", \"skip\")\n\n    for edge in result.pipeline.edges:\n        if edge.source == \"opt_step\":\n            assert edge.label in (\"proceed\", \"skip\"), (\n                f\"Optional stage edge has label {edge.label!r}, \"\n                f\"expected 'proceed' or 'skip'\"\n            )\n\n\ndef test_group_boundary_stages_carry_vocabulary_metadata(\n    monkeypatch: pytest.MonkeyPatch,\n    tmp_path: Path,\n) -> None:\n    \"\"\"Group boundary stages (enter/exit) must carry vocabulary metadata\n    and edges from them must use labels declared in their vocabulary.\"\"\"\n    _install_fake_pipeline(monkeypatch, builder_type=_BuilderWithBuild)\n    compiler = _import_compiler_module()\n    plan = TaskPlan(\n        plan_id=\"plan-group-vocab\",\n        version=2,\n        steps=(\n            Step(\n                id=\"group\",\n                children=(\n                    Step(id=\"leaf\", adapter=\"local\", command=\"echo child\"),\n                ),\n            ),\n        ),\n    )\n\n    result = compiler.compile_plan_segment(\n        plan,\n        project=\"demo\",\n        run_root=tmp_path / \"run-group-vocab\",\n        state={},\n        segment_id=\"seg-group-vocab\",\n    )\n\n    enter_stage = next(\n        s for s in result.pipeline.stages if s.stage_id == \"group/__enter__\"\n    )\n    exit_stage = next(\n        s for s in result.pipeline.stages if s.stage_id == \"group/__exit__\"\n    )\n\n    # Normal group boundaries use (\"next\",)\n    assert enter_stage.decision_vocabulary == (\"next\",)\n    assert enter_stage.metadata[\"vocabulary\"] == [\"next\"]\n    assert exit_stage.decision_vocabulary == (\"next\",)\n    assert exit_stage.metadata[\"vocabulary\"] == [\"next\"]\n\n    # Edges from group boundaries must use labels in their vocabulary\n    for edge in result.pipeline.edges:\n        if edge.source in (\"group/__enter__\", \"group/__exit__\"):\n            source_stage = next(\n                s for s in result.pipeline.stages if s.stage_id == edge.source\n            )\n            assert edge.label in source_stage.decision_vocabulary, (\n                f\"Group boundary {edge.source} edge label {edge.label!r} \"\n                f\"not in {source_stage.decision_vocabulary}\"\n            )\n\n\ndef test_terminal_stage_has_terminal_vocabulary(\n    monkeypatch: pytest.MonkeyPatch,\n    tmp_path: Path,\n) -> None:\n    \"\"\"The terminal halt stage must have vocabulary=(\"terminal\",) and no\n    outgoing edges — it is a sink.\"\"\"\n    _install_fake_pipeline(monkeypatch, builder_type=_BuilderWithBuild)\n    compiler = _import_compiler_module()\n    plan = TaskPlan(\n        plan_id=\"plan-terminal\",\n        version=2,\n        steps=(\n            Step(id=\"only\", adapter=\"local\", command=\"echo done\"),\n        ),\n    )\n\n    result = compiler.compile_plan_segment(\n        plan,\n        project=\"demo\",\n        run_root=tmp_path / \"run-terminal\",\n        state={},\n        segment_id=\"seg-terminal\",\n    )\n\n    halt = next(\n        s for s in result.pipeline.stages if s.stage_id == \"halt\"\n    )\n    assert halt.decision_vocabulary == (\"terminal\",)\n    assert halt.metadata[\"vocabulary\"] == [\"terminal\"]\n    assert halt.metadata[\"terminal\"] is True\n\n    # The halt stage is a sink — no outgoing edges\n    outgoing = [e for e in result.pipeline.edges if e.source == \"halt\"]\n    assert len(outgoing) == 0, f\"halt stage must have no outgoing edges, got {outgoing}\"\n\n\ndef test_optional_group_entry_boundary_uses_proceed_skip_vocabulary(\n    monkeypatch: pytest.MonkeyPatch,\n    tmp_path: Path,\n) -> None:\n    \"\"\"When a group is optional, the entry boundary must use\n    (\"proceed\", \"skip\") vocabulary and edge labels must match.\"\"\"\n    _install_fake_pipeline(monkeypatch, builder_type=_BuilderWithBuild)\n    compiler = _import_compiler_module()\n    plan = TaskPlan(\n        plan_id=\"plan-opt-group\",\n        version=2,\n        steps=(\n            Step(\n                id=\"opt_group\",\n                optional=True,\n                children=(\n                    Step(id=\"task\", adapter=\"local\", command=\"echo task\"),\n                ),\n            ),\n        ),\n    )\n\n    result = compiler.compile_plan_segment(\n        plan,\n        project=\"demo\",\n        run_root=tmp_path / \"run-opt-group\",\n        state={},\n        segment_id=\"seg-opt-group\",\n    )\n\n    enter_stage = next(\n        s for s in result.pipeline.stages if s.stage_id == \"opt_group/__enter__\"\n    )\n    assert enter_stage.decision_vocabulary == (\"proceed\", \"skip\")\n    assert enter_stage.metadata[\"vocabulary\"] == [\"proceed\", \"skip\"]\n    assert enter_stage.metadata[\"optional\"] is True\n\n    # Edges from the optional entry: proceed to first child, skip to exit\n    enter_edges = [\n        e for e in result.pipeline.edges if e.source == \"opt_group/__enter__\"\n    ]\n    enter_labels = {e.label for e in enter_edges}\n    assert enter_labels == {\"proceed\", \"skip\"}, (\n        f\"Optional entry edges must have labels {{proceed, skip}}, got {enter_labels}\"\n    )\n\n\n# ── T7: port validation tests ─────────────────────────────────────────────────
 
 
 def test_index_port_declarations_with_valid_ports() -> None:
@@ -2551,12 +2645,12 @@ def test_dsl_to_pipeline_linear_code(
     # Every non-halt stage has "next" vocabulary
     for stage_id in ("first", "second", "third"):
         stage = next(s for s in result.pipeline.stages if s.stage_id == stage_id)
-        assert stage.decision_vocabulary == ("next",)
+        assert stage.decision_vocabulary == frozenset({"next"})
         assert stage.metadata["vocabulary"] == ["next"]
 
     # Halt stage vocabulary
     halt = result.pipeline.stages[-1]
-    assert halt.decision_vocabulary == ("terminal",)
+    assert halt.decision_vocabulary == frozenset({"terminal"})
     assert halt.metadata["vocabulary"] == ["terminal"]
 
     # Edge topology: first->second, second->third, third->halt
@@ -2630,7 +2724,7 @@ def compat_orch():
     assert result.entry_stage_id == "validate"
     validate_stage = result.pipeline.stages[0]
     assert validate_stage.stage_id == "validate"
-    assert validate_stage.decision_vocabulary == ("next",)
+    assert validate_stage.decision_vocabulary == frozenset({"next"})
     assert validate_stage.metadata["vocabulary"] == ["next"]
 
     # 3. compile_to_path JSON round-trips through load_plan
@@ -2735,7 +2829,7 @@ def test_dsl_to_pipeline_repeat_until_loop_back_edge_metadata(
 
     # Poll stage has repeat/next vocabulary with loop_condition
     poll = result.pipeline.stages[0]
-    assert poll.decision_vocabulary == ("repeat", "next")
+    assert poll.decision_vocabulary == frozenset({"repeat", "next"})
     assert poll.metadata["vocabulary"] == ["repeat", "next"]
     assert poll.loop_condition is not None
     assert poll.metadata["repeat_until"]["predicate"] == "repeat.until"
@@ -2863,12 +2957,12 @@ def test_dsl_to_pipeline_nested_workflow_preserves_stage_hierarchy(
     # Enter stage metadata
     enter = stages_by_id["group/__enter__"]
     assert enter.metadata["group_boundary"] == "entry"
-    assert enter.decision_vocabulary == ("next",)
+    assert enter.decision_vocabulary == frozenset({"next"})
 
     # Exit stage metadata
     exit_ = stages_by_id["group/__exit__"]
     assert exit_.metadata["group_boundary"] == "exit"
-    assert exit_.decision_vocabulary == ("next",)
+    assert exit_.decision_vocabulary == frozenset({"next"})
 
     # Full stage ordering
     assert [s.stage_id for s in result.pipeline.stages] == [
@@ -2947,33 +3041,33 @@ def test_optional_vocabulary_conformance_full_compile(
 
     # ── Optional leaf stage vocabulary ──
     opt_leaf = result.pipeline.stages[0]
-    assert opt_leaf.decision_vocabulary == ("proceed", "skip")
+    assert opt_leaf.decision_vocabulary == frozenset({"proceed", "skip"})
     assert opt_leaf.metadata["vocabulary"] == ["proceed", "skip"]
     assert opt_leaf.metadata["decision_vocabulary"] == ["proceed", "skip"]
     assert opt_leaf.metadata["optional"] is True
 
     # ── Optional group entry vocabulary ──
     opt_enter = result.pipeline.stages[1]
-    assert opt_enter.decision_vocabulary == ("proceed", "skip")
+    assert opt_enter.decision_vocabulary == frozenset({"proceed", "skip"})
     assert opt_enter.metadata["vocabulary"] == ["proceed", "skip"]
     assert opt_enter.metadata["optional"] is True
     assert opt_enter.metadata["group_boundary"] == "entry"
 
     # ── Inner leaf (non-optional child) vocabulary ──
     inner = result.pipeline.stages[2]
-    assert inner.decision_vocabulary == ("next",)
+    assert inner.decision_vocabulary == frozenset({"next"})
     assert inner.metadata["vocabulary"] == ["next"]
     assert "optional" not in inner.metadata  # child is NOT optional
 
     # ── Group exit vocabulary ──
     opt_exit = result.pipeline.stages[3]
-    assert opt_exit.decision_vocabulary == ("next",)
+    assert opt_exit.decision_vocabulary == frozenset({"next"})
     assert opt_exit.metadata["vocabulary"] == ["next"]
     assert opt_exit.metadata["group_boundary"] == "exit"
 
     # ── Halt vocabulary ──
     halt = result.pipeline.stages[4]
-    assert halt.decision_vocabulary == ("terminal",)
+    assert halt.decision_vocabulary == frozenset({"terminal"})
     assert halt.metadata["vocabulary"] == ["terminal"]
 
     # ── Edge labels match source stage vocabularies ──
@@ -3134,7 +3228,7 @@ def test_superseded_by_vocabulary_conformance_full_compile(
         "scope": "future-items",
     }
     # Vocabulary remains normal for superseded steps
-    assert review_stage.decision_vocabulary == ("next",)
+    assert review_stage.decision_vocabulary == frozenset({"next"})
     assert review_stage.metadata["vocabulary"] == ["next"]
     assert review_stage.metadata["decision_vocabulary"] == ["next"]
 
@@ -3146,7 +3240,7 @@ def test_superseded_by_vocabulary_conformance_full_compile(
         "to_version": 3,
         "scope": "all",
     }
-    assert enter_stage.decision_vocabulary == ("next",)
+    assert enter_stage.decision_vocabulary == frozenset({"next"})
 
     exit_stage = next(
         s for s in result.pipeline.stages if s.stage_id == "superseded_group/__exit__"
@@ -3155,7 +3249,7 @@ def test_superseded_by_vocabulary_conformance_full_compile(
         "to_version": 3,
         "scope": "all",
     }
-    assert exit_stage.decision_vocabulary == ("next",)
+    assert exit_stage.decision_vocabulary == frozenset({"next"})
 
     # ── Non-superseded stage has no superseded_by key ──
     start_stage = next(s for s in result.pipeline.stages if s.stage_id == "start")
@@ -3289,7 +3383,7 @@ def test_re_export_vocabulary_conformance_full_compile(
     assert re_export_entry["produces"]["path"] == "out/artifact.tar.gz"
 
     # Vocabulary is normal
-    assert exit_stage.decision_vocabulary == ("next",)
+    assert exit_stage.decision_vocabulary == frozenset({"next"})
     assert exit_stage.metadata["vocabulary"] == ["next"]
     assert exit_stage.metadata["group_boundary"] == "exit"
 
@@ -3416,7 +3510,7 @@ def test_combined_vocabulary_conformance(
     # ── begin: superseded_by + normal vocabulary ──
     begin = stages_by_id["begin"]
     assert begin.metadata["superseded_by"] == {"to_version": 2, "scope": "all"}
-    assert begin.decision_vocabulary == ("next",)
+    assert begin.decision_vocabulary == frozenset({"next"})
     assert begin.metadata["vocabulary"] == ["next"]
     assert "optional" not in begin.metadata
     assert "re_exports" not in begin.metadata
@@ -3428,14 +3522,14 @@ def test_combined_vocabulary_conformance(
         "scope": "future-items",
     }
     assert middle_enter.metadata["optional"] is True
-    assert middle_enter.decision_vocabulary == ("proceed", "skip")
+    assert middle_enter.decision_vocabulary == frozenset({"proceed", "skip"})
     assert middle_enter.metadata["vocabulary"] == ["proceed", "skip"]
     assert "re_exports" not in middle_enter.metadata
 
     # ── middle/task: optional child ──
     task = stages_by_id["middle/task"]
     assert task.metadata["optional"] is True
-    assert task.decision_vocabulary == ("proceed", "skip")
+    assert task.decision_vocabulary == frozenset({"proceed", "skip"})
     assert task.metadata["vocabulary"] == ["proceed", "skip"]
     assert "superseded_by" not in task.metadata
     assert "re_exports" not in task.metadata
@@ -3449,12 +3543,12 @@ def test_combined_vocabulary_conformance(
     assert "re_exports" in middle_exit.metadata
     assert len(middle_exit.metadata["re_exports"]) == 1
     assert middle_exit.metadata["re_exports"][0]["export_name"] == "final_result"
-    assert middle_exit.decision_vocabulary == ("next",)
+    assert middle_exit.decision_vocabulary == frozenset({"next"})
     assert middle_exit.metadata["vocabulary"] == ["next"]
 
     # ── end: normal ──
     end = stages_by_id["end"]
-    assert end.decision_vocabulary == ("next",)
+    assert end.decision_vocabulary == frozenset({"next"})
     assert "superseded_by" not in end.metadata
     assert "optional" not in end.metadata
 
@@ -4272,7 +4366,7 @@ def test_join_parallel_results_raises_diagnostic_when_join_missing(
     )
 
     # Stage with stage_id but NO join attribute at all
-    stage_no_join = _Stage(stage_id="plain_stage", label="Plain")
+    stage_no_join = _Stage(name="plain_stage", label="Plain")
     with pytest.raises(lowering.CompileUnsupportedFeature) as exc_info:
         lowering.join_parallel_results(stage_no_join, [{"x": 1}])
     msg = str(exc_info.value)
@@ -4281,7 +4375,7 @@ def test_join_parallel_results_raises_diagnostic_when_join_missing(
     assert "ParallelStage" in msg
 
     # Stage with a non-callable join attribute
-    stage_bad_join = _Stage(stage_id="bad_join_stage", label="Bad Join")
+    stage_bad_join = _Stage(name="bad_join_stage", label="Bad Join")
     object.__setattr__(stage_bad_join, "join", "not_callable_string")
     with pytest.raises(lowering.CompileUnsupportedFeature) as exc_info2:
         lowering.join_parallel_results(stage_bad_join, [{"x": 1}])

@@ -183,7 +183,7 @@ def test_compat_layer_accepts_the_public_arnold_protocol(
     assert compat.ContractResult is pipeline.ContractResult
     assert compat.StepInvocation is pipeline.StepInvocation
     assert stage.stage_id == "protocol-stage"
-    assert stage.decision_vocabulary == ("next",)
+    assert stage.decision_vocabulary == frozenset({"next"})
     assert edge.label == "next"
     assert getattr(edge, "metadata", None) == {"conformance": True}
 
@@ -375,7 +375,7 @@ def test_required_vocabulary_items_have_conformance_coverage(
     target_stage = stages_by_id[expectation.stage_id]
     target_manifest = manifest_stages[expectation.stage_id]
 
-    assert target_stage.decision_vocabulary == expectation.vocabulary
+    assert set(target_stage.decision_vocabulary) == set(expectation.vocabulary)
     assert target_stage.metadata["vocabulary"] == list(expectation.vocabulary)
     assert target_stage.metadata["decision_vocabulary"] == list(expectation.vocabulary)
     assert expectation.metadata_key in target_stage.metadata
@@ -427,10 +427,10 @@ def test_every_compiled_stage_declares_a_vocabulary(
     manifest_stages = {stage["stage_id"]: stage for stage in result.pipeline_manifest["stages"]}
     for stage in result.pipeline.stages:
         assert stage.decision_vocabulary, f"{stage.stage_id} is missing a runtime vocabulary"
-        assert stage.metadata["vocabulary"] == list(stage.decision_vocabulary)
+        assert sorted(stage.metadata["vocabulary"]) == sorted(stage.decision_vocabulary)
         if "decision_vocabulary" in stage.metadata:
-            assert stage.metadata["decision_vocabulary"] == list(stage.decision_vocabulary)
-        assert manifest_stages[stage.stage_id]["vocabulary"] == list(stage.decision_vocabulary)
+            assert sorted(stage.metadata["decision_vocabulary"]) == sorted(stage.decision_vocabulary)
+        assert sorted(manifest_stages[stage.stage_id]["vocabulary"]) == sorted(stage.decision_vocabulary)
 
 
 def test_join_parallel_results_conformance_delegates_to_join(
@@ -454,7 +454,7 @@ def test_join_parallel_results_conformance_reports_missing_join(
     _install_fake_pipeline(monkeypatch, builder_type=_BuilderWithBuild)
     lowering = importlib.import_module("astrid.core.integrations.arnold.session.lowering")
 
-    stage = _Stage(stage_id="parallel-missing-join", label="Parallel Missing Join")
+    stage = _Stage(name="parallel-missing-join", label="Parallel Missing Join")
 
     with pytest.raises(lowering.CompileUnsupportedFeature) as exc_info:
         lowering.join_parallel_results(stage, [{"branch": 1}])
@@ -494,12 +494,10 @@ def test_real_arnold_stage_construction_through_compat_layer() -> None:
         decision_vocabulary=("next",),
     )
 
-    assert stage.stage_id == "real-conformance-stage"
-    assert stage.decision_vocabulary == ("next",)
-    assert getattr(stage, "metadata", None) == {
-        "vocabulary": ["next"],
-        "conformance": "real-arnold",
-    }
+    assert stage.name == "real-conformance-stage"
+    assert stage.decision_vocabulary == frozenset({"next"})
+    # Real Arnold dataclasses do not accept Astrid-only metadata sidecars.
+    assert getattr(stage, "metadata", None) is None
 
 
 @pytest.mark.real_arnold
@@ -529,15 +527,13 @@ def test_real_arnold_edge_construction_with_metadata() -> None:
         artifact_type="text/plain",
     )
 
-    assert edge.source == "real-conformance-stage"
+    # Real Arnold ``Edge`` is sourceless: ``label`` and ``target`` are the
+    # canonical fields.  Metadata sidecars live in the manifest, not on the
+    # runtime edge object.
     assert edge.target == "halt"
     assert edge.label == "next"
-    # Real Arnold metadata may be on the edge object or absent (plain
-    # fallback).  Either is acceptable — the manifest sidecar remains
-    # the canonical record.
-    edge_metadata = getattr(edge, "metadata", None)
-    if edge_metadata is not None:
-        assert edge_metadata.get("conformance") == "real-arnold-edge"
+    assert getattr(edge, "source", None) is None
+    assert getattr(edge, "metadata", None) is None
 
 
 @pytest.mark.real_arnold
@@ -589,8 +585,8 @@ def test_real_arnold_pipeline_assembly_and_finalize() -> None:
     finalized = builder.finalize_pipeline(pipeline)
     assert finalized is not None
 
-    # The finalized pipeline should have the stages and edges we added.
-    stage_ids = {s.stage_id for s in finalized.stages}
+    # The finalized pipeline assembly should have the stages and edges we added.
+    stage_ids = {s.name for s in finalized.stages}
     assert "a" in stage_ids
     assert "b" in stage_ids
 

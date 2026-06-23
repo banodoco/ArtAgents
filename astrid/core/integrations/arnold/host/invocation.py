@@ -76,75 +76,17 @@ class InvocationTemplate:
         return self.executor_id is not None or self.adapter_invocation_id is not None
 
 
-ALLOWLISTED_INVOCATION_TEMPLATES: dict[str, dict[str, InvocationTemplate]] = {
-    "we.refine_image": {
-        "generate": InvocationTemplate(
-            workflow_id="we.refine_image",
-            stage_id="generate",
-            executor_id="image.generate",
-            input_map={"prompt": "prompt"},
-            inputs={"variant": "refine"},
-            extra_metadata={"iteration_key": "iter"},
-        ),
-        "review": InvocationTemplate(
-            workflow_id="we.refine_image",
-            stage_id="review",
-            executor_id="human.review",
-            input_map={"candidate": "candidate"},
-            requires_ack=True,
-            extra_metadata={"human_gate": True},
-        ),
-    },
-    "we.best_of_4": {
-        "gen_0": InvocationTemplate(
-            workflow_id="we.best_of_4",
-            stage_id="gen_0",
-            executor_id="image.generate",
-            input_map={"prompt": "prompt"},
-            inputs={"variant": "branch_0"},
-            extra_metadata={"branch": 0},
-        ),
-        "gen_1": InvocationTemplate(
-            workflow_id="we.best_of_4",
-            stage_id="gen_1",
-            executor_id="image.generate",
-            input_map={"prompt": "prompt"},
-            inputs={"variant": "branch_1"},
-            extra_metadata={"branch": 1},
-        ),
-        "gen_2": InvocationTemplate(
-            workflow_id="we.best_of_4",
-            stage_id="gen_2",
-            executor_id="image.generate",
-            input_map={"prompt": "prompt"},
-            inputs={"variant": "branch_2"},
-            extra_metadata={"branch": 2},
-        ),
-        "gen_3": InvocationTemplate(
-            workflow_id="we.best_of_4",
-            stage_id="gen_3",
-            executor_id="image.generate",
-            input_map={"prompt": "prompt"},
-            inputs={"variant": "branch_3"},
-            extra_metadata={"branch": 3},
-        ),
-        "judge": InvocationTemplate(
-            workflow_id="we.best_of_4",
-            stage_id="judge",
-            executor_id="judge.exec",
-            input_map={"candidates": "candidates"},
-            inputs={"strategy": "best_of_4"},
-        ),
-        "review": InvocationTemplate(
-            workflow_id="we.best_of_4",
-            stage_id="review",
-            executor_id="human.review",
-            input_map={"finalist": "finalist"},
-            requires_ack=True,
-            extra_metadata={"human_gate": True},
-        ),
-    },
-}
+@dataclass(frozen=True)
+class StepInvocationMetadata:
+    """Metadata-compatible fallback used when Arnold is not installed.
+
+    Authoring and topology tests only need the invocation metadata sidecar.
+    Real Arnold runtime paths still receive ``arnold.pipeline.StepInvocation``
+    when the package is present.
+    """
+
+    kind: str
+    metadata: Mapping[str, Any] = field(default_factory=dict)
 
 
 def build_adapter_metadata(
@@ -232,64 +174,29 @@ def build_step_invocation(
     kind: str = STEP_INVOCATION_KIND,
     **extra: Any,
 ) -> Any:
-    """Construct a real Arnold StepInvocation with canonical metadata."""
-    from astrid.core.integrations.arnold.host.compat import compat
-
-    return compat.StepInvocation(
-        kind=kind,
-        metadata=build_step_metadata(
-            executor_id=executor_id,
-            inputs=inputs,
-            input_map=input_map,
-            state=state,
-            mode=mode,
-            project=project,
-            run_root=run_root,
-            artifact_root=artifact_root,
-            cas_project_dir=cas_project_dir,
-            requires_ack=requires_ack,
-            **extra,
-        ),
-    )
-
-
-def build_workflow_step_invocation(
-    workflow_id: str,
-    stage_id: str,
-    *,
-    state: dict[str, Any] | None = None,
-    project: str | None = None,
-    run_root: str | None = None,
-    artifact_root: str | None = None,
-    cas_project_dir: str | None = None,
-) -> Any:
-    """Build the canonical StepInvocation template for an allowlisted stage."""
-    try:
-        template = ALLOWLISTED_INVOCATION_TEMPLATES[workflow_id][stage_id]
-    except KeyError as exc:
-        raise KeyError(
-            f"unknown host invocation template {workflow_id!r}/{stage_id!r}"
-        ) from exc
-    if template.executor_id is None:
-        raise KeyError(
-            f"host invocation template {workflow_id!r}/{stage_id!r} is "
-            f"{template.control_kind or 'non-executable'} and cannot build a StepInvocation"
-        )
-
-    return build_step_invocation(
-        executor_id=template.executor_id,
-        inputs=template.inputs,
-        input_map=template.input_map,
+    """Construct a StepInvocation-like object with canonical metadata."""
+    metadata = build_step_metadata(
+        executor_id=executor_id,
+        inputs=inputs,
+        input_map=input_map,
         state=state,
-        mode=template.mode,
+        mode=mode,
         project=project,
         run_root=run_root,
         artifact_root=artifact_root,
         cas_project_dir=cas_project_dir,
-        requires_ack=template.requires_ack,
-        workflow_id=template.workflow_id,
-        stage_id=template.stage_id,
-        **template.extra_metadata,
+        requires_ack=requires_ack,
+        **extra,
+    )
+
+    try:
+        from astrid.core.integrations.arnold.host.compat import compat
+    except ImportError:
+        return StepInvocationMetadata(kind=kind, metadata=metadata)
+
+    return compat.StepInvocation(
+        kind=kind,
+        metadata=metadata,
     )
 
 
@@ -328,7 +235,7 @@ def invocation_templates_from_compiled_pipeline(
             raise CompiledInvocationTemplateError(
                 f"compiled pipeline for {workflow_id!r} contains duplicate stage {stage_id!r}"
             )
-        metadata = _stage_metadata(stage)
+        metadata = _stage_metadata(stage, pipeline)
         control_kind = _control_kind(stage_id, metadata)
         if control_kind is not None:
             templates[stage_id] = InvocationTemplate(
@@ -378,9 +285,17 @@ def _pipeline_stages(pipeline: Any) -> tuple[Any, ...]:
     return tuple(stages)
 
 
-def _stage_metadata(stage: Any) -> dict[str, Any]:
+def _stage_metadata(stage: Any, pipeline: Any) -> dict[str, Any]:
     metadata = getattr(stage, "metadata", None)
-    return dict(metadata) if isinstance(metadata, dict) else {}
+    if isinstance(metadata, dict) and metadata:
+        return dict(metadata)
+    stage_id = _stage_id(stage)
+    stage_specs = getattr(pipeline, "_astrid_stage_specs", None)
+    if stage_specs is not None and stage_id:
+        for spec in stage_specs:
+            if spec.stage_id == stage_id and isinstance(spec.metadata, dict):
+                return dict(spec.metadata)
+    return {}
 
 
 def _adapter_config(stage: Any, metadata: dict[str, Any]) -> dict[str, Any]:
@@ -565,7 +480,6 @@ def parse_human_resume_payload(
 
 
 __all__ = [
-    "ALLOWLISTED_INVOCATION_TEMPLATES",
     "HUMAN_DECISION_ACTIONS",
     "HUMAN_RESUME_INPUT_SCHEMA",
     "HOST_CONTROL_KINDS",
@@ -573,12 +487,12 @@ __all__ = [
     "HumanResumePayloadError",
     "InvocationTemplate",
     "STEP_INVOCATION_KIND",
+    "StepInvocationMetadata",
     "build_adapter_metadata",
     "build_human_resume_input_schema",
     "build_human_resume_payload",
     "build_step_invocation",
     "build_step_metadata",
-    "build_workflow_step_invocation",
     "invocation_templates_from_compiled_pipeline",
     "parse_human_resume_payload",
 ]

@@ -143,25 +143,23 @@ def _next_stage_for_decision(
         if isinstance(raw_edge, dict) and raw_edge.get("source") == current_stage
     ]
     if stages:
-        suspension = stages[0].get("suspension")
-        if isinstance(suspension, dict):
-            decision_routes = suspension.get("decision_routes")
-            if isinstance(decision_routes, dict) and decision in decision_routes:
-                route_label = decision_routes[decision]
-                if route_label is None:
-                    raise RuntimeError(
-                        f"stage {current_stage!r} decision {decision!r} does not "
-                        "route to another Arnold stage"
-                    )
-                for raw_edge in edges:
-                    if raw_edge.get("label") == route_label:
-                        target = raw_edge.get("target")
-                        if isinstance(target, str) and target:
-                            return target
+        decision_routes = stages[0].get("decision_routes")
+        if isinstance(decision_routes, dict) and decision in decision_routes:
+            route_label = decision_routes[decision]
+            if route_label is None:
                 raise RuntimeError(
-                    f"stage {current_stage!r} decision {decision!r} routes to "
-                    f"edge label {route_label!r}, but no such Arnold edge exists"
+                    f"stage {current_stage!r} decision {decision!r} does not "
+                    "route to another Arnold stage"
                 )
+            for raw_edge in edges:
+                if raw_edge.get("label") == route_label:
+                    target = raw_edge.get("target")
+                    if isinstance(target, str) and target:
+                        return target
+            raise RuntimeError(
+                f"stage {current_stage!r} decision {decision!r} routes to "
+                f"edge label {route_label!r}, but no such Arnold edge exists"
+            )
     for raw_edge in pipeline_manifest.get("edges", ()):
         if not isinstance(raw_edge, dict):
             continue
@@ -181,6 +179,18 @@ def _next_stage_for_decision(
                 target = raw_edge.get("target")
                 if isinstance(target, str) and target:
                     return target
+        # Human-attended stages that don't declare an explicit repeat edge
+        # interpret reject as "try the same stage again" (self-loop). This
+        # matches the semantics of attested DSL steps with ack.kind=human.
+        if stages:
+            metadata = stages[0].get("metadata") or {}
+            if (
+                stages[0].get("manual")
+                or stages[0].get("requires_ack")
+                or metadata.get("manual")
+                or metadata.get("requires_ack")
+            ):
+                return current_stage
     raise RuntimeError(
         f"stage {current_stage!r} has no Arnold edge labelled {decision!r}"
     )
@@ -194,20 +204,15 @@ def _resolve_start_invocation_templates(
 ) -> dict[str, Any]:
     """Resolve the startup invocation contract for a host workflow.
 
-    Compiled workflows must derive their executable/control stage mappings from
-    the compiled pipeline itself so startup stays data-driven. Legacy static
-    workflows continue to use the frozen allowlisted templates.
+    All host workflows are now compiled; their executable/control stage
+    mappings are derived from the compiled pipeline itself so startup
+    stays data-driven.
     """
     from astrid.core.integrations.arnold.host.invocation import (
-        ALLOWLISTED_INVOCATION_TEMPLATES,
         invocation_templates_from_compiled_pipeline,
     )
 
-    shape_metadata = getattr(shape, "metadata", {})
-    if isinstance(shape_metadata, dict) and shape_metadata.get("compiled") is True:
-        templates = invocation_templates_from_compiled_pipeline(workflow_id, pipeline)
-    else:
-        templates = dict(ALLOWLISTED_INVOCATION_TEMPLATES.get(workflow_id, {}))
+    templates = invocation_templates_from_compiled_pipeline(workflow_id, pipeline)
 
     if getattr(shape, "entry_stage_id", None) not in templates:
         raise RuntimeError(
@@ -532,33 +537,34 @@ def _start_validated_arnold_run(
         }
     )
 
-    pipeline_builder = getattr(shape, "pipeline_builder", None)
-    if pipeline_builder is None:
-        raise RuntimeError(f"Arnold workflow {workflow_id!r} has no pipeline builder")
-    pipeline = pipeline_builder(
-        state=initial_state,
-        project=slug,
-        run_root=str(run_root),
-        artifact_root=str(run_root),
-        cas_project_dir=str(proj_root),
-    )
-    if _pipeline_entry_stage_id(pipeline) != getattr(shape, "entry_stage_id", None):
-        raise RuntimeError(
-            f"shape {workflow_id!r} built entry stage "
-            f"{_pipeline_entry_stage_id(pipeline)!r}, expected "
-            f"{getattr(shape, 'entry_stage_id', None)!r}"
-        )
-    _resolve_start_invocation_templates(
-        workflow_id=workflow_id,
-        shape=shape,
-        pipeline=pipeline,
-    )
-
     created_run_dir = False
     pointer_written = False
     try:
         run_root.mkdir(parents=True)
         created_run_dir = True
+
+        pipeline_builder = getattr(shape, "pipeline_builder", None)
+        if pipeline_builder is None:
+            raise RuntimeError(f"Arnold workflow {workflow_id!r} has no pipeline builder")
+        pipeline = pipeline_builder(
+            state=initial_state,
+            project=slug,
+            run_root=str(run_root),
+            artifact_root=str(run_root),
+            cas_project_dir=str(proj_root),
+        )
+        if _pipeline_entry_stage_id(pipeline) != getattr(shape, "entry_stage_id", None):
+            raise RuntimeError(
+                f"shape {workflow_id!r} built entry stage "
+                f"{_pipeline_entry_stage_id(pipeline)!r}, expected "
+                f"{getattr(shape, 'entry_stage_id', None)!r}"
+            )
+        _resolve_start_invocation_templates(
+            workflow_id=workflow_id,
+            shape=shape,
+            pipeline=pipeline,
+        )
+
         write_json_atomic(run_root / "arnold_run.json", {
             "engine": "arnold",
             "workflow_id": workflow_id,
@@ -669,44 +675,75 @@ def _stage_label(stage: Any) -> str | None:
 def _pipeline_manifest(pipeline: Any) -> dict[str, Any]:
     from astrid.core.integrations.arnold.host.builder import edge_manifest_entry
 
+    stage_specs = getattr(pipeline, "_astrid_stage_specs", None) or ()
+    edge_specs = getattr(pipeline, "_astrid_edge_specs", None)
+    stage_spec_by_id = {spec.stage_id: spec for spec in stage_specs}
+
     stages = []
     pipeline_stages = _iter_pipeline_stages(pipeline)
     for stage in pipeline_stages:
+        stage_id = _stage_id(stage)
+        spec = stage_spec_by_id.get(stage_id) if stage_id else None
+        metadata = (
+            dict(spec.metadata)
+            if spec is not None
+            else dict(getattr(stage, "metadata", {}) or {})
+        )
+        label = (
+            spec.label
+            if spec is not None
+            else _stage_label(stage)
+        )
         stages.append(
             {
-                "stage_id": _stage_id(stage),
-                "label": _stage_label(stage),
-                "metadata": dict(getattr(stage, "metadata", {}) or {}),
+                "stage_id": stage_id,
+                "label": label,
+                "metadata": metadata,
             }
         )
     edges = []
-    raw_edges = tuple(getattr(pipeline, "edges", ()) or ())
-    if not raw_edges:
-        raw_edges = tuple(
-            (stage, edge)
-            for stage in pipeline_stages
-            for edge in tuple(getattr(stage, "edges", ()) or ())
-        )
-    for raw_edge in raw_edges:
-        source_stage = None
-        edge = raw_edge
-        if isinstance(raw_edge, tuple) and len(raw_edge) == 2:
-            source_stage, edge = raw_edge
-        source = getattr(edge, "source", None)
-        if source is None and source_stage is not None:
-            source = _stage_id(source_stage)
-        edges.append(
-            edge_manifest_entry(
-                source=source,
-                target=getattr(edge, "target", None),
-                label=getattr(edge, "label", None),
-                source_port=getattr(edge, "source_port", None),
-                target_port=getattr(edge, "target_port", None),
-                logical_type=getattr(edge, "logical_type", None),
-                artifact_type=getattr(edge, "artifact_type", None),
-                metadata=getattr(edge, "metadata", None),
+    if edge_specs is not None:
+        for spec in edge_specs:
+            edges.append(
+                edge_manifest_entry(
+                    source=spec.source,
+                    target=spec.target,
+                    label=spec.label,
+                    source_port=spec.source_port,
+                    target_port=spec.target_port,
+                    logical_type=spec.logical_type,
+                    artifact_type=spec.artifact_type,
+                    metadata=spec.metadata,
+                )
             )
-        )
+    else:
+        raw_edges = tuple(getattr(pipeline, "edges", ()) or ())
+        if not raw_edges:
+            raw_edges = tuple(
+                (stage, edge)
+                for stage in pipeline_stages
+                for edge in tuple(getattr(stage, "edges", ()) or ())
+            )
+        for raw_edge in raw_edges:
+            source_stage = None
+            edge = raw_edge
+            if isinstance(raw_edge, tuple) and len(raw_edge) == 2:
+                source_stage, edge = raw_edge
+            source = getattr(edge, "source", None)
+            if source is None and source_stage is not None:
+                source = _stage_id(source_stage)
+            edges.append(
+                edge_manifest_entry(
+                    source=source,
+                    target=getattr(edge, "target", None),
+                    label=getattr(edge, "label", None),
+                    source_port=getattr(edge, "source_port", None),
+                    target_port=getattr(edge, "target_port", None),
+                    logical_type=getattr(edge, "logical_type", None),
+                    artifact_type=getattr(edge, "artifact_type", None),
+                    metadata=getattr(edge, "metadata", None),
+                )
+            )
     return {
         "entry_stage_id": _pipeline_entry_stage_id(pipeline),
         "stages": stages,

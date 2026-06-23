@@ -233,6 +233,7 @@ def dsl_to_pipeline(
         pipeline_manifest=lowering.pipeline_manifest(
             pipeline,
             edge_specs=lowered.ordered_edge_specs,
+            stage_specs=lowered.ordered_stage_specs,
         ),
         plan_hash=lowered.plan_hash,
         entry_stage_id=lowered.entry_stage_id,

@@ -19,6 +19,7 @@ Design constraints (settled — do not re-litigate):
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 from astrid.core.integrations.arnold.session import lowering
@@ -239,8 +240,6 @@ def pipeline(
     Returns:
         An Arnold ``Pipeline`` object.
     """
-    from astrid.core.integrations.arnold.host.compat import compat
-
     lowered = lowering.LoweredSegment(
         entry_stage_id=entry_stage_id,
         ordered_stage_specs=stages,
@@ -248,6 +247,19 @@ def pipeline(
         plan_hash=plan_hash or entry_stage_id,
         diagnostics=diagnostics,
     )
+
+    try:
+        from astrid.core.integrations.arnold.host.compat import compat
+    except ImportError:
+        return SimpleNamespace(
+            entry_stage_id=entry_stage_id,
+            stages={stage.stage_id: stage for stage in stages},
+            edges=tuple(edges),
+            _astrid_stage_specs=tuple(stages),
+            _astrid_edge_specs=tuple(edges),
+            _astrid_lowered_segment=lowered,
+        )
+
     return lowering.build_pipeline(lowered, compat=compat)
 
 

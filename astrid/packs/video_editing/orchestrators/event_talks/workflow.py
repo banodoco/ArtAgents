@@ -16,14 +16,38 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from astrid.core.integrations.arnold.session.authoring import (
-    build_workflow as _build_workflow,
-)
-from astrid.core.integrations.arnold.session.authoring import (
+from astrid.core.integrations.arnold.authoring import (
+    edge,
     executor_step,
+    halt,
+    pipeline,
 )
 
 EVENT_TALKS_WORKFLOW_ID = "video_editing.event_talks"
+
+# Ordered stage ids for the linear topology
+_STAGE_IDS = (
+    "ados-sunday-template",
+    "search-transcript",
+    "find-holding-screens",
+    "render",
+)
+
+# Human-readable labels matching plan_template.py / shapes.py
+_STAGE_LABELS = {
+    "ados-sunday-template": "Ados Sunday Template",
+    "search-transcript": "Search Transcript",
+    "find-holding-screens": "Find Holding Screens",
+    "render": "Render",
+}
+
+# Produces mappings (name -> output filename)
+_PRODUCES = {
+    "ados-sunday-template": {"template_output": "ados-sunday-template.json"},
+    "search-transcript": {"search_output": "search-results.txt"},
+    "find-holding-screens": {"holding_output": "holding-screens.json"},
+    "render": {"render_output": "render-manifest.json"},
+}
 
 
 def build_workflow(
@@ -90,47 +114,64 @@ def build_workflow(
         f"--out-dir {shlex.quote('{produces_root}')}"
     )
 
-    # ── Declare steps via the facade ───────────────────────────────────────
-    steps = [
-        executor_step(
-            "ados-sunday-template",
-            segment_id=EVENT_TALKS_WORKFLOW_ID,
-            adapter="local",
-            command=cmd_ados,
-            produces={"template_output": "ados-sunday-template.json"},
-            label="Ados Sunday Template",
-        ),
-        executor_step(
-            "search-transcript",
-            segment_id=EVENT_TALKS_WORKFLOW_ID,
-            adapter="local",
-            command=cmd_search,
-            produces={"search_output": "search-results.txt"},
-            label="Search Transcript",
-        ),
-        executor_step(
-            "find-holding-screens",
-            segment_id=EVENT_TALKS_WORKFLOW_ID,
-            adapter="local",
-            command=cmd_holding,
-            produces={"holding_output": "holding-screens.json"},
-            label="Find Holding Screens",
-        ),
-        executor_step(
-            "render",
-            segment_id=EVENT_TALKS_WORKFLOW_ID,
-            adapter="local",
-            command=cmd_render,
-            produces={"render_output": "render-manifest.json"},
-            label="Render",
-        ),
-    ]
+    # ── Build stage commands keyed by stage id ──────────────────────────────
+    _commands = {
+        "ados-sunday-template": cmd_ados,
+        "search-transcript": cmd_search,
+        "find-holding-screens": cmd_holding,
+        "render": cmd_render,
+    }
 
-    return _build_workflow(
-        steps,
-        segment_id=EVENT_TALKS_WORKFLOW_ID,
-        project="default",
-        run_root_path=run_root_path,
+    # ── Declare steps via the real facade (returns StageSpec) ──────────────
+    stages: list[Any] = []
+    for sid in _STAGE_IDS:
+        produces = _PRODUCES[sid]
+        produces_meta = [
+            {"name": name, "path": path} for name, path in produces.items()
+        ]
+        stage_spec = executor_step(
+            stage_id=sid,
+            label=_STAGE_LABELS[sid],
+            executor_id="task.local",
+            segment_id=EVENT_TALKS_WORKFLOW_ID,
+            project="default",
+            run_root=run_root_path,
+            command=_commands[sid],
+            outputs=produces,
+            metadata={
+                "produces": produces_meta,
+            },
+        )
+        stages.append(stage_spec)
+
+    # ── Stitch linear edges between consecutive stages ────────────────────
+    edges: list[Any] = []
+    for i in range(len(stages) - 1):
+        edges.append(
+            edge(
+                source=stages[i].stage_id,
+                target=stages[i + 1].stage_id,
+                label="next",
+            )
+        )
+
+    # ── Append halt stage ─────────────────────────────────────────────────
+    halt_stage = halt()
+    if stages:
+        edges.append(
+            edge(
+                source=stages[-1].stage_id,
+                target=halt_stage.stage_id,
+                label="next",
+            )
+        )
+    all_stages = tuple(stages) + (halt_stage,)
+
+    # ── Compile into an Arnold Pipeline ────────────────────────────────────
+    return pipeline(
+        entry_stage_id=stages[0].stage_id if stages else "halt",
+        stages=all_stages,
+        edges=tuple(edges),
     )
 
 

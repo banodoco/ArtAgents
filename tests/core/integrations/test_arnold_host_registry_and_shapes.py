@@ -78,8 +78,8 @@ class _CheckpointOutcome:
 
 @dataclass(frozen=True)
 class _Suspension:
+    kind: str = "human"
     resume_input_schema: dict[str, Any] | None = None
-    decision_routes: dict[str, str] | None = None
 
 
 @dataclass(frozen=True)
@@ -101,28 +101,69 @@ class _StepInvocation:
 
 @dataclass(frozen=True)
 class _Stage:
-    stage_id: str
-    label: str
+    name: str
+    step: Any | None = None
+    edges: tuple[Any, ...] = ()
+    decision_vocabulary: Any = frozenset()
+    decision_routes: dict[str, str | None] = field(default_factory=dict)
+    suspension_schema: dict[str, Any] | None = None
     invocation: Any | None = None
+    loop_condition: Any | None = None
+    # Aliases / backward-compat for duck-typed access
+    stage_id: str | None = None
+    label: str | None = None
     suspension: Any | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
-    decision_vocabulary: tuple[str, ...] = ("next",)
-    loop_condition: Any | None = None
+
+    def __post_init__(self) -> None:
+        if self.stage_id is None:
+            object.__setattr__(self, "stage_id", self.name)
+        if self.label is None:
+            object.__setattr__(self, "label", self.name)
+        if self.suspension is None and self.suspension_schema is not None:
+            object.__setattr__(
+                self,
+                "suspension",
+                _Suspension(
+                    resume_input_schema=self.suspension_schema.get("resume_input_schema")
+                ),
+            )
 
 
 @dataclass(frozen=True)
 class _Edge:
-    source: str
-    target: str
     label: str
+    target: str
+    kind: str = "normal"
+    recommendation: Any | None = None
+    # Backward-compat for duck-typed / manifest access
+    source: str | None = None
+    source_port: str | None = None
+    target_port: str | None = None
+    logical_type: str | None = None
+    artifact_type: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
 class _ParallelStage:
-    stage_id: str
-    label: str
+    name: str
+    steps: tuple[Any, ...] = field(default_factory=tuple)
+    join: Any | None = None
+    edges: tuple[Any, ...] = ()
+    # Aliases / backward-compat for duck-typed access
+    stage_id: str | None = None
+    label: str | None = None
     stages: tuple[Any, ...] = field(default_factory=tuple)
     metadata: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.stage_id is None:
+            object.__setattr__(self, "stage_id", self.name)
+        if self.label is None:
+            object.__setattr__(self, "label", self.name)
+        if not self.stages:
+            object.__setattr__(self, "stages", self.steps)
 
 
 @dataclass(frozen=True)
@@ -210,6 +251,38 @@ def _install_fake_pipeline(
     fake_arnold.pipeline = pipeline
     monkeypatch.setitem(sys.modules, "arnold", fake_arnold)
     monkeypatch.setitem(sys.modules, "arnold.pipeline", pipeline)
+
+    # Patch the host builder so the fake Stage/Edge helpers preserve spec
+    # sidecars (metadata, label, source, etc.) that the real Arnold contract
+    # keeps off runtime objects.
+    from astrid.core.integrations.arnold.host import builder as _builder
+
+    _orig_build_stage = _builder.build_stage
+
+    def _build_stage(stage_type: type[Any], **kwargs: Any) -> Any:
+        stage = _orig_build_stage(stage_type, **kwargs)
+        if kwargs.get("metadata") is not None and hasattr(stage, "metadata"):
+            object.__setattr__(stage, "metadata", dict(kwargs["metadata"]))
+        if kwargs.get("label") is not None and hasattr(stage, "label"):
+            object.__setattr__(stage, "label", kwargs["label"])
+        if kwargs.get("stage_id") is not None and hasattr(stage, "stage_id"):
+            object.__setattr__(stage, "stage_id", kwargs["stage_id"])
+        if kwargs.get("suspension") is not None and hasattr(stage, "suspension"):
+            object.__setattr__(stage, "suspension", kwargs["suspension"])
+        return stage
+
+    monkeypatch.setattr(_builder, "build_stage", _build_stage)
+
+    _orig_build_edge = _builder.build_edge
+
+    def _build_edge(edge_type: type[Any], **kwargs: Any) -> Any:
+        edge = _orig_build_edge(edge_type, **kwargs)
+        for key in ("source", "source_port", "target_port", "logical_type", "artifact_type", "metadata"):
+            if kwargs.get(key) is not None and hasattr(edge, key):
+                object.__setattr__(edge, key, kwargs[key])
+        return edge
+
+    monkeypatch.setattr(_builder, "build_edge", _build_edge)
 
 
 @pytest.fixture(autouse=True)
@@ -332,184 +405,6 @@ def test_registry_defaults_to_shape_entry_stage_when_resume_cursor_is_absent(
 
     assert stage_id == "per_item"
     assert stage_label == "Per Item"
-
-
-def test_build_refine_image_pipeline_has_expected_topology_and_metadata(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _install_fake_pipeline(monkeypatch)
-
-    shapes_module = importlib.import_module("astrid.core.integrations.arnold.host.shapes")
-    pipeline = shapes_module.build_refine_image_pipeline(
-        state={"prompt": "refine this", "candidate": "produces/draft.png"},
-        project="demo",
-        run_root="/tmp/run-123",
-        artifact_root="/tmp/run-123",
-        cas_project_dir="/tmp/projects/demo",
-    )
-
-    assert pipeline.entry_stage_id == "generate"
-    assert [stage.stage_id for stage in pipeline.stages] == ["generate", "review", "halt"]
-    assert [stage.label for stage in pipeline.stages] == ["Generate", "Review", "Halt"]
-    assert [(edge.source, edge.target, edge.label) for edge in pipeline.edges] == [
-        ("generate", "review", "next"),
-        ("review", "halt", "approve"),
-        ("review", "generate", "reject"),
-    ]
-
-    generate_stage = next(stage for stage in pipeline.stages if stage.stage_id == "generate")
-    review_stage = next(stage for stage in pipeline.stages if stage.stage_id == "review")
-
-    assert generate_stage.invocation.metadata["adapter_config"]["workflow_id"] == "we.refine_image"
-    assert generate_stage.invocation.metadata["adapter_config"]["stage_id"] == "generate"
-    assert review_stage.invocation.metadata["adapter_config"]["workflow_id"] == "we.refine_image"
-    assert review_stage.invocation.metadata["adapter_config"]["stage_id"] == "review"
-    assert review_stage.invocation.metadata["adapter_config"]["requires_ack"] is True
-    assert review_stage.suspension.resume_input_schema == {
-        "type": "object",
-        "additionalProperties": False,
-        "properties": {
-            "decision": {
-                "type": "object",
-                "additionalProperties": False,
-                "properties": {
-                    "action": {"type": "string", "enum": ["approve", "reject"]},
-                    "notes": {"type": "string"},
-                    "state_patch": {"type": "object"},
-                },
-                "required": ["action"],
-            },
-            "produces_reverify": {
-                "type": "object",
-                "additionalProperties": False,
-                "properties": {
-                    "artifacts": {"type": "array", "items": {"type": "string"}},
-                    "inputs": {"type": "object"},
-                },
-            },
-        },
-        "required": ["decision"],
-    }
-
-
-def test_build_refine_image_pipeline_contains_no_host_side_while_loop() -> None:
-    source = inspect.getsource(
-        importlib.import_module("astrid.core.integrations.arnold.host.shapes").build_refine_image_pipeline
-    )
-    tree = ast.parse(source)
-
-    assert not any(isinstance(node, ast.While) for node in ast.walk(tree))
-
-
-def test_build_best_of_4_pipeline_has_expected_topology_and_metadata(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _install_fake_pipeline(monkeypatch)
-
-    shapes_module = importlib.import_module("astrid.core.integrations.arnold.host.shapes")
-    pipeline = shapes_module.build_best_of_4_pipeline(
-        state={"prompt": "best of 4", "candidate": "produces/draft.png"},
-        project="demo",
-        run_root="/tmp/run-456",
-        artifact_root="/tmp/run-456",
-        cas_project_dir="/tmp/projects/demo",
-    )
-
-    assert pipeline.entry_stage_id == "generate"
-
-    stage_ids = [stage.stage_id for stage in pipeline.stages]
-    assert stage_ids == ["generate", "judge", "review", "halt"]
-
-    labels = [stage.label for stage in pipeline.stages]
-    assert labels == ["Generate", "Judge", "Review", "Halt"]
-
-    assert [(edge.source, edge.target, edge.label) for edge in pipeline.edges] == [
-        ("generate", "judge", "next"),
-        ("judge", "review", "next"),
-        ("review", "halt", "approve"),
-        ("review", "generate", "reject"),
-    ]
-
-    # Four parallel generate sub-stages
-    generate_stage = next(stage for stage in pipeline.stages if stage.stage_id == "generate")
-    sub_stages = getattr(generate_stage, "stages", None) or getattr(generate_stage, "sub_stages", None) or getattr(
-        generate_stage, "children", None
-    )
-    assert sub_stages is not None, "ParallelStage must expose sub-stages via stages/sub_stages/children"
-    assert len(sub_stages) == 4
-
-    sub_stage_ids = [
-        getattr(s, "stage_id", None) or getattr(s, "id", None) or getattr(s, "name", None)
-        for s in sub_stages
-    ]
-    assert sub_stage_ids == ["gen_0", "gen_1", "gen_2", "gen_3"]
-
-    # Each gen branch has a deterministic invocation
-    for idx, sub_stage in enumerate(sub_stages):
-        invocation = getattr(sub_stage, "invocation", None)
-        assert invocation is not None, f"gen_{idx} missing invocation"
-        inv_metadata = getattr(invocation, "metadata", {})
-        adapter_cfg = inv_metadata.get("adapter_config", {})
-        assert adapter_cfg.get("workflow_id") == "we.best_of_4"
-        assert adapter_cfg.get("stage_id") == f"gen_{idx}"
-        assert adapter_cfg.get("inputs", {}).get("variant") == f"branch_{idx}"
-
-    # Judge stage
-    judge_stage = next(stage for stage in pipeline.stages if stage.stage_id == "judge")
-    assert judge_stage.invocation.metadata["adapter_config"]["workflow_id"] == "we.best_of_4"
-    assert judge_stage.invocation.metadata["adapter_config"]["stage_id"] == "judge"
-    assert judge_stage.invocation.metadata["adapter_config"]["inputs"]["strategy"] == "best_of_4"
-
-    # Review stage — human gate
-    review_stage = next(stage for stage in pipeline.stages if stage.stage_id == "review")
-    assert review_stage.invocation.metadata["adapter_config"]["workflow_id"] == "we.best_of_4"
-    assert review_stage.invocation.metadata["adapter_config"]["stage_id"] == "review"
-    assert review_stage.invocation.metadata["adapter_config"]["requires_ack"] is True
-    assert review_stage.suspension.resume_input_schema == {
-        "type": "object",
-        "additionalProperties": False,
-        "properties": {
-            "decision": {
-                "type": "object",
-                "additionalProperties": False,
-                "properties": {
-                    "action": {"type": "string", "enum": ["approve", "reject"]},
-                    "notes": {"type": "string"},
-                    "state_patch": {"type": "object"},
-                },
-                "required": ["action"],
-            },
-            "produces_reverify": {
-                "type": "object",
-                "additionalProperties": False,
-                "properties": {
-                    "artifacts": {"type": "array", "items": {"type": "string"}},
-                    "inputs": {"type": "object"},
-                },
-            },
-        },
-        "required": ["decision"],
-    }
-
-    # Judge metadata lowering: judge stage metadata declares lowers_verdict
-    judge_metadata = getattr(judge_stage, "metadata", {})
-    assert judge_metadata.get("judge_required") is True
-    assert judge_metadata.get("lowers_verdict") is True
-
-    # Generate stage metadata declares parallel fan-out
-    generate_metadata = getattr(generate_stage, "metadata", {})
-    assert generate_metadata.get("parallel_fan_out") == 4
-    assert generate_metadata.get("entry") is True
-
-
-def test_build_best_of_4_pipeline_contains_no_host_side_while_loop() -> None:
-    source = inspect.getsource(
-        importlib.import_module("astrid.core.integrations.arnold.host.shapes").build_best_of_4_pipeline
-    )
-    tree = ast.parse(source)
-
-    assert not any(isinstance(node, ast.While) for node in ast.walk(tree))
-
 
 # ── T9: text_analysis.summarize linear shape tests ────────────────────────
 # ── T9: text_analysis.summarize DSL-compiled 3-stage shape tests ───────────
@@ -1680,4 +1575,81 @@ def test_iteration_video_shape_entry_in_registry(
     assert callable(entry.pipeline_builder)
     assert registry.resolve_alias("iteration-video") == "video_editing.iteration_video"
     assert registry.is_allowlisted("video_editing.iteration_video") is True
+
+
+def test_thumbnail_maker_shape_entry_in_registry(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Registry exposes Thumbnail Maker with five-step linear pipeline metadata."""
+    _install_fake_pipeline(monkeypatch, cursor_stage="resolve-video")
+    _seed_project(tmp_path / "projects")
+
+    monkeypatch.setattr(
+        "astrid.core.task.gate.peek_current_step",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("peek_current_step must not be used by Arnold registry")
+        ),
+    )
+
+    registry_module = importlib.import_module(
+        "astrid.core.integrations.arnold.host.registry"
+    )
+    registry = registry_module.get_host_shape_registry()
+
+    entry = registry.get("video_editing.thumbnail_maker")
+    assert entry is not None
+    assert entry.workflow_id == "video_editing.thumbnail_maker"
+    assert entry.cli_alias == "thumbnail-maker"
+    assert entry.accepts_human_input is False
+    assert entry.entry_stage_id == "resolve-video"
+    assert entry.stage_labels == {
+        "resolve-video": "Resolve Video",
+        "plan-evidence": "Plan Evidence",
+        "discover-video-evidence": "Discover Video Evidence",
+        "build-reference-pack": "Build Reference Pack",
+        "generate-thumbnails": "Generate Thumbnails",
+        "halt": "Halt",
+    }
+    assert entry.metadata["kind"] == "video_editing"
+    assert entry.metadata["parallel_fan_out"] == 1
+    assert entry.metadata["judge_required"] is False
+    assert entry.metadata["compiled"] is True
+    assert entry.metadata["loop_lowering"] == "linear_facade"
+    assert callable(entry.pipeline_builder)
+    assert registry.resolve_alias("thumbnail-maker") == "video_editing.thumbnail_maker"
+    assert registry.is_allowlisted("video_editing.thumbnail_maker") is True
+
+
+def test_shape_definitions_ids_match_registry_allowlisted_ids(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """SHAPE_DEFINITIONS workflow ids must exactly match registry.allowlisted_ids."""
+    _install_fake_pipeline(monkeypatch)
+    _seed_project(tmp_path / "projects")
+
+    monkeypatch.setattr(
+        "astrid.core.task.gate.peek_current_step",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("peek_current_step must not be used by Arnold registry")
+        ),
+    )
+
+    shapes_module = importlib.import_module("astrid.core.integrations.arnold.host.shapes")
+    registry_module = importlib.import_module("astrid.core.integrations.arnold.host.registry")
+    registry = registry_module.get_host_shape_registry()
+
+    definition_ids = frozenset(entry.workflow_id for entry in shapes_module.SHAPE_DEFINITIONS)
+    assert definition_ids == registry.allowlisted_ids, (
+        f"SHAPE_DEFINITIONS has {sorted(definition_ids)} but "
+        f"registry has {sorted(registry.allowlisted_ids)}"
+    )
+
+    # Verify no legacy WE demo shapes are present
+    assert "we.refine_image" not in definition_ids
+    assert "we.best_of_4" not in definition_ids
+
+    # Verify thumbnail_maker is present
+    assert "video_editing.thumbnail_maker" in definition_ids
 

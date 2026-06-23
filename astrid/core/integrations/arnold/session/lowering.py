@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
@@ -59,6 +59,7 @@ class StageSpec:
     metadata: dict[str, Any]
     decision_vocabulary: tuple[str, ...] = ("next",)
     loop_condition: Callable[[Any], bool] | None = None
+    decision_routes: dict[str, str | None] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -162,17 +163,6 @@ def human_decision_routes_for_labels(labels: tuple[str, ...]) -> dict[str, str]:
     return {}
 
 
-def _with_suspension_decision_routes(
-    suspension: Any | None,
-    routes: dict[str, str],
-) -> Any | None:
-    if suspension is None or not routes:
-        return suspension
-    try:
-        return replace(suspension, decision_routes=routes)
-    except TypeError:
-        return suspension
-
 
 def task_executor_id(step: Step) -> str:
     return f"{TASK_ADAPTER_EXECUTOR_PREFIX}{step.adapter}"
@@ -217,26 +207,54 @@ def pipeline_manifest(
     pipeline: Any,
     *,
     edge_specs: tuple[EdgeSpec, ...] | None = None,
+    stage_specs: tuple[StageSpec, ...] | None = None,
 ) -> dict[str, Any]:
+    if stage_specs is None:
+        stage_specs = getattr(pipeline, "_astrid_stage_specs", None)
+    if edge_specs is None:
+        edge_specs = getattr(pipeline, "_astrid_edge_specs", None)
+    stage_spec_by_id: dict[str, StageSpec] = {}
+    if stage_specs is not None:
+        stage_spec_by_id = {spec.stage_id: spec for spec in stage_specs}
+
     stages = []
-    for stage in tuple(getattr(pipeline, "stages", ()) or ()):
-        item = {
-            "stage_id": getattr(stage, "stage_id", None),
-            "label": getattr(stage, "label", None),
-            "metadata": dict(getattr(stage, "metadata", {}) or {}),
+    stages_attr = getattr(pipeline, "stages", None)
+    if isinstance(stages_attr, dict):
+        stage_iter = tuple(stages_attr.values())
+    elif stages_attr:
+        stage_iter = tuple(stages_attr)
+    else:
+        stage_iter = ()
+    for stage in stage_iter:
+        stage_id = getattr(stage, "stage_id", None) or getattr(stage, "name", None)
+        spec = stage_spec_by_id.get(stage_id) if stage_id is not None else None
+        item: dict[str, Any] = {
+            "stage_id": stage_id,
+            "label": spec.label if spec is not None else getattr(stage, "label", None),
+            "metadata": dict(spec.metadata) if spec is not None else dict(getattr(stage, "metadata", {}) or {}),
         }
         decision_vocabulary = getattr(stage, "decision_vocabulary", None)
         if decision_vocabulary:
-            item["vocabulary"] = list(decision_vocabulary)
+            # Preserve the ordered tuple from the spec when available; the
+            # runtime frozenset is unordered and only used as a fallback.
+            ordered_vocabulary = (
+                spec.decision_vocabulary
+                if spec is not None and spec.decision_vocabulary
+                else decision_vocabulary
+            )
+            item["vocabulary"] = list(ordered_vocabulary)
         suspension = getattr(stage, "suspension", None)
         if suspension is not None:
             to_json = getattr(suspension, "to_json", None)
             if callable(to_json):
                 item["suspension"] = to_json()
-            else:
-                decision_routes = getattr(suspension, "decision_routes", None)
-                if decision_routes:
-                    item["suspension"] = {"decision_routes": dict(decision_routes)}
+        elif spec is not None and spec.suspension is not None:
+            to_json = getattr(spec.suspension, "to_json", None)
+            if callable(to_json):
+                item["suspension"] = to_json()
+        decision_routes = getattr(stage, "decision_routes", None)
+        if decision_routes:
+            item["decision_routes"] = dict(decision_routes)
         if getattr(stage, "loop_condition", None) is not None:
             item["has_loop_condition"] = True
         stages.append(item)
@@ -488,10 +506,8 @@ def leaf_stage_spec(
     suspension = None
     if step.adapter == "manual":
         suspension = compat.Suspension(
+            kind="human",
             resume_input_schema=HUMAN_RESUME_INPUT_SCHEMA,
-            decision_routes=human_decision_routes_for_labels(
-                resolve_decision_vocabulary(step)
-            ),
         )
     return StageSpec(
         stage_id=stage_id,
@@ -506,6 +522,9 @@ def leaf_stage_spec(
             adapter_config=adapter_config,
         ),
         decision_vocabulary=resolve_decision_vocabulary(step),
+        decision_routes=human_decision_routes_for_labels(
+            resolve_decision_vocabulary(step)
+        ),
     )
 
 
@@ -805,15 +824,11 @@ def compile_step(
                 loop_condition=stage.loop_condition,
             )
         if repeat_until_metadata is not None:
-            suspension = _with_suspension_decision_routes(
-                stage.suspension,
-                human_decision_routes_for_labels(("repeat", "next")),
-            )
             stage = StageSpec(
                 stage_id=stage.stage_id,
                 label=stage.label,
                 invocation=stage.invocation,
-                suspension=suspension,
+                suspension=stage.suspension,
                 metadata={
                     **stage.metadata,
                     "decision_vocabulary": ["repeat", "next"],
@@ -822,6 +837,7 @@ def compile_step(
                 },
                 decision_vocabulary=("repeat", "next"),
                 loop_condition=(lambda _value: False),
+                decision_routes=human_decision_routes_for_labels(("repeat", "next")),
             )
             edges = (
                 EdgeSpec(
@@ -1040,8 +1056,31 @@ def build_pipeline(
         builder_set_entry_stage,
     )
 
+    # Pre-build edges and group them by source stage so they can be attached
+    # directly to the owning Stage. Real Arnold edges are sourceless; the
+    # PipelineBuilder's add_edge path cannot reliably attach them, so we pass
+    # them through the Stage constructor's ``edges`` parameter instead.
+    edges_by_source: dict[str, list[Any]] = {}
+    built_edges: list[Any] = []
+    for edge_spec in lowered.ordered_edge_specs:
+        edge = build_edge(
+            compat.Edge,
+            source=edge_spec.source,
+            target=edge_spec.target,
+            label=edge_spec.label,
+            source_port=edge_spec.source_port,
+            target_port=edge_spec.target_port,
+            logical_type=edge_spec.logical_type,
+            artifact_type=edge_spec.artifact_type,
+            metadata=edge_spec.metadata,
+        )
+        built_edges.append(edge)
+        source = edge_spec.source or ""
+        edges_by_source.setdefault(source, []).append(edge)
+
     builder = compat.PipelineBuilder()
     for spec in lowered.ordered_stage_specs:
+        stage_edges = tuple(edges_by_source.get(spec.stage_id, []))
         builder_add_stage(
             builder,
             build_stage(
@@ -1053,25 +1092,31 @@ def build_pipeline(
                 metadata=spec.metadata,
                 decision_vocabulary=spec.decision_vocabulary,
                 loop_condition=spec.loop_condition,
+                decision_routes=spec.decision_routes,
+                edges=stage_edges,
             ),
         )
-    for edge_spec in lowered.ordered_edge_specs:
-        builder_add_edge(
-            builder,
-            build_edge(
-                compat.Edge,
-                source=edge_spec.source,
-                target=edge_spec.target,
-                label=edge_spec.label,
-                source_port=edge_spec.source_port,
-                target_port=edge_spec.target_port,
-                logical_type=edge_spec.logical_type,
-                artifact_type=edge_spec.artifact_type,
-                metadata=edge_spec.metadata,
-            ),
-        )
+    # Also register edges through the builder helper so legacy / fake builders
+    # that surface a ``pipeline.edges`` collection still populate it. For the
+    # real Arnold builder this is a no-op because sourceless edges are ignored
+    # by ``add_edge`` and have already been attached to their owning Stage.
+    for edge in built_edges:
+        builder_add_edge(builder, edge)
     builder_set_entry_stage(builder, lowered.entry_stage_id)
-    return builder_finalize(builder)
+    pipeline = builder_finalize(builder)
+    # Attach spec sidecars so downstream manifest/invocation consumers can
+    # recover metadata that the real Arnold contract intentionally keeps off
+    # runtime Stage/Edge objects.
+    try:
+        object.__setattr__(
+            pipeline, "_astrid_stage_specs", tuple(lowered.ordered_stage_specs)
+        )
+        object.__setattr__(
+            pipeline, "_astrid_edge_specs", tuple(lowered.ordered_edge_specs)
+        )
+    except (AttributeError, TypeError):
+        pass
+    return pipeline
 
 
 def compile_plan_segment(
@@ -1100,6 +1145,7 @@ def compile_plan_segment(
         pipeline_manifest=pipeline_manifest(
             pipeline,
             edge_specs=lowered.ordered_edge_specs,
+            stage_specs=lowered.ordered_stage_specs,
         ),
         plan_hash=lowered.plan_hash,
         entry_stage_id=lowered.entry_stage_id,
