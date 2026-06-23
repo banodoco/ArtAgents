@@ -8,6 +8,7 @@ guard_canonical_entrypoint('rendering.render')
 
 
 import argparse
+import hashlib
 import json
 import os
 import shutil
@@ -22,13 +23,21 @@ from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import Any, Sequence
 
 from astrid.core import timeline
 from astrid.core.audit import AuditContext
+from astrid.core.element.registry import load_default_registry
+from astrid.core.element.schema import ElementDefinition
 from astrid.core.foundation.paths import REPO_ROOT, WORKSPACE_ROOT
+from astrid.core.pack.discovery import discover_pack_metadata
 from astrid.core.subprocess_env import build_child_subprocess_env
 from astrid.core.theme import load_theme
 from astrid.packs.training.executors.asset_cache import run as asset_cache
+from scripts import gen_effect_registry
+
+
+_REGISTRY_STATE_PATH = ".astrid-registry-state.json"
 
 
 def _pick_free_port() -> int:
@@ -261,6 +270,11 @@ def _resolve_assets(
             ) from err
         entry["file"] = f"http://localhost:{server_port}/{rel.as_posix()}"
     return registry
+
+
+def _write_empty_asset_registry(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    timeline.save_registry({"assets": {}}, path)
 
 
 def _validate_project_dir(project_dir: Path) -> None:
@@ -808,6 +822,7 @@ def _render_hybrid(timeline_path: Path, assets_path: Path, out_path: Path, **rem
     with TemporaryDirectory(prefix="astrid-hybrid-", dir=str(out_path.parent)) as tmp:
         tmp_dir = Path(tmp)
         segment_paths: list[Path] = []
+        segment_provenance: list[dict[str, Any]] = []
         for index, segment in enumerate(segments):
             engine = str(segment["engine"])
             start = float(segment["from"])
@@ -828,8 +843,25 @@ def _render_hybrid(timeline_path: Path, assets_path: Path, out_path: Path, **rem
                     engine="remotion",
                     **remotion_kwargs,
                 )
+                sidecar_path = _render_provenance_sidecar_path(segment_out_path)
+                if sidecar_path.exists():
+                    segment_provenance.append(json.loads(sidecar_path.read_text(encoding="utf-8")))
             segment_paths.append(segment_out_path)
         _concat_segments(segment_paths, out_path)
+        _write_render_provenance(
+            out_path,
+            engine="hybrid",
+            timeline_path=timeline_path,
+            assets_path=assets_path,
+            project_dir=Path(remotion_kwargs.get("project_dir") or (REPO_ROOT / "remotion")),
+            composition_id=str(remotion_kwargs.get("composition_id") or "TimelineComposition"),
+            theme_path=remotion_kwargs.get("theme_path"),
+            active_theme=None,
+            registry_state=_effective_registry_state(remotion_kwargs.get("theme_path")),
+            stage_summary={"root": None, "effects": []},
+            segments=segments,
+            segment_provenance=segment_provenance,
+        )
 
     audit = AuditContext.from_env()
     if audit is not None:
@@ -853,14 +885,86 @@ def _render_hybrid(timeline_path: Path, assets_path: Path, out_path: Path, **rem
     return out_path
 
 
+def _timeline_composition_src(project_dir: Path) -> Path | None:
+    composition_src = project_dir / "node_modules" / "@banodoco" / "timeline-composition" / "typescript" / "src"
+    return composition_src if composition_src.is_dir() else None
+
+
+def _registry_output_paths(project_dir: Path) -> list[Path]:
+    composition_src = _timeline_composition_src(project_dir)
+    package_src = composition_src or (WORKSPACE_ROOT / "packages" / "timeline-composition" / "typescript" / "src")
+    paths = [
+        package_src / f"{kind}.generated.ts"
+        for kind in ("effects", "animations", "transitions")
+    ]
+    remotion_src = REPO_ROOT / "remotion" / "src"
+    for kind in ("effects", "animations", "transitions"):
+        base = remotion_src / f"{kind}.generated"
+        paths.extend(Path(f"{base}{extension}") for extension in gen_effect_registry.SHIM_EXTENSIONS)
+    return paths
+
+
+def _registry_outputs_exist(project_dir: Path) -> bool:
+    return all(path.exists() for path in _registry_output_paths(project_dir))
+
+
+def _active_theme_pointer_current(theme_path: Path | None) -> bool:
+    link = gen_effect_registry.ACTIVE_THEME_LINK
+    pointer = gen_effect_registry.ACTIVE_THEME_POINTER
+    if theme_path is None:
+        return not link.exists() and not pointer.exists()
+
+    theme_dir = _resolve_theme_path(theme_path).parent.resolve()
+    if os.name == "nt":
+        try:
+            return pointer.read_text(encoding="utf-8").strip() == str(theme_dir)
+        except OSError:
+            return False
+    if not link.is_symlink():
+        return False
+    try:
+        return link.resolve() == theme_dir
+    except OSError:
+        return False
+
+
+def _effective_registry_state(theme_path: Path | None) -> dict[str, Any]:
+    theme_dir = _resolve_theme_path(theme_path) if theme_path is not None else None
+    return gen_effect_registry.compute_generated_registry_state(theme_dir=theme_dir)
+
+
+def _read_registry_state(project_dir: Path) -> dict[str, Any] | None:
+    state_path = project_dir / _REGISTRY_STATE_PATH
+    try:
+        payload = json.loads(state_path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _write_registry_state(project_dir: Path, state: dict[str, Any]) -> None:
+    state_path = project_dir / _REGISTRY_STATE_PATH
+    state_path.write_text(json.dumps(state, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+
+
 def _regenerate_element_registries(project_dir: Path, theme_path: Path | None) -> None:
+    state = _effective_registry_state(theme_path)
+    cached_state = _read_registry_state(project_dir)
+    if (
+        cached_state is not None
+        and cached_state.get("hash") == state.get("hash")
+        and _registry_outputs_exist(project_dir)
+        and _active_theme_pointer_current(theme_path)
+    ):
+        return
+
     generator = REPO_ROOT / "scripts" / "gen_effect_registry.py"
     cmd = [sys.executable, str(generator)]
     if theme_path is not None:
         cmd.extend(["--theme", str(_resolve_theme_path(theme_path))])
     env: dict[str, str] = {}
-    composition_src = project_dir / "node_modules" / "@banodoco" / "timeline-composition" / "typescript" / "src"
-    if composition_src.is_dir():
+    composition_src = _timeline_composition_src(project_dir)
+    if composition_src is not None:
         env["ASTRID_TIMELINE_COMPOSITION_SRC"] = str(composition_src)
     subprocess.run(
         cmd,
@@ -870,6 +974,220 @@ def _regenerate_element_registries(project_dir: Path, theme_path: Path | None) -
         check=True,
         text=True,
     )
+    _write_registry_state(project_dir, state)
+
+
+def _render_asset_stage_hash(timeline_path: Path, assets_path: Path, out_path: Path) -> str:
+    digest = hashlib.sha256()
+    for path in (timeline_path, assets_path):
+        resolved = path.resolve()
+        digest.update(str(resolved).encode("utf-8"))
+        digest.update(b"\0")
+        if resolved.exists():
+            digest.update(resolved.read_bytes())
+        digest.update(b"\0")
+    digest.update(str(out_path.resolve()).encode("utf-8"))
+    return digest.hexdigest()[:16]
+
+
+def _effect_registry_for_assets(theme_path: Path | None) -> tuple[dict[str, ElementDefinition], dict[str, str]]:
+    active_theme: Path | None = None
+    if theme_path is not None:
+        active_theme = _resolve_theme_path(theme_path)
+    registry = load_default_registry(active_theme=active_theme, project_root=REPO_ROOT)
+    effects = {element.id: element for element in registry.list(kind="effects")}
+    aliases: dict[str, str] = {}
+    if "text-card" in effects:
+        aliases["text"] = "text-card"
+    for effect_id, element in effects.items():
+        raw_aliases = element.metadata.get("clipTypeAliases")
+        if not isinstance(raw_aliases, list):
+            continue
+        for alias in raw_aliases:
+            if isinstance(alias, str) and alias:
+                aliases[alias] = effect_id
+    return effects, aliases
+
+
+def _effect_id_for_clip(clip: dict[str, Any], effects: dict[str, ElementDefinition], aliases: dict[str, str]) -> str | None:
+    clip_type = clip.get("clipType")
+    if not isinstance(clip_type, str) or clip_type == "effect-layer":
+        return None
+    if clip_type in effects:
+        return clip_type
+    return aliases.get(clip_type)
+
+
+def _source_pack_id(element: ElementDefinition) -> str:
+    pack_id = element.metadata.get("pack_id")
+    if isinstance(pack_id, str) and pack_id:
+        return pack_id
+    if element.source.startswith("pack:"):
+        return element.source.split(":", 1)[1]
+    return element.source
+
+
+def _inject_clip_asset_params(clip: dict[str, Any], staged_assets: dict[str, str]) -> None:
+    params = clip.get("params")
+    if isinstance(params, dict):
+        next_params = dict(params)
+    else:
+        next_params = {}
+    next_params["__astridAssets"] = staged_assets
+    clip["params"] = next_params
+
+
+def _stage_effect_assets_for_timeline(
+    timeline_data: dict[str, Any],
+    *,
+    project_dir: Path,
+    theme_path: Path | None,
+    render_hash: str,
+) -> dict[str, Any]:
+    effects, aliases = _effect_registry_for_assets(theme_path)
+    clips = timeline_data.get("clips")
+    if not isinstance(clips, list):
+        return {"root": None, "effects": []}
+
+    used_effect_ids: set[str] = set()
+    clip_effect_ids: dict[int, str] = {}
+    clip_ids_by_effect: dict[str, list[str]] = {}
+    for index, clip in enumerate(clips):
+        if not isinstance(clip, dict):
+            continue
+        effect_id = _effect_id_for_clip(clip, effects, aliases)
+        if effect_id is None:
+            continue
+        element = effects[effect_id]
+        used_effect_ids.add(effect_id)
+        clip_effect_ids[index] = effect_id
+        clip_id = clip.get("id")
+        if isinstance(clip_id, str) and clip_id:
+            clip_ids_by_effect.setdefault(effect_id, []).append(clip_id)
+
+    if not used_effect_ids:
+        return {"root": None, "effects": []}
+
+    public_root = project_dir / "public" / "astrid-effects" / render_hash
+    staged_by_effect: dict[str, dict[str, str]] = {}
+    for effect_id in sorted(used_effect_ids):
+        element = effects[effect_id]
+        staged_assets: dict[str, str] = {}
+        for asset in element.assets:
+            source = (element.root / asset.path).resolve()
+            relative_target = Path(effect_id) / asset.path
+            target = public_root / relative_target
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+            staged_assets[asset.name] = f"astrid-effects/{render_hash}/{relative_target.as_posix()}"
+        staged_by_effect[effect_id] = staged_assets
+
+    for index, effect_id in clip_effect_ids.items():
+        clip = clips[index]
+        if isinstance(clip, dict) and staged_by_effect[effect_id]:
+            _inject_clip_asset_params(clip, staged_by_effect[effect_id])
+    return {
+        "root": str(public_root),
+        "effects": [
+            {
+                "effect_id": effect_id,
+                "source_pack_id": _source_pack_id(effects[effect_id]),
+                "source": effects[effect_id].source,
+                "element_root": str(effects[effect_id].root),
+                "clip_ids": sorted(clip_ids_by_effect.get(effect_id, ())),
+                "staged_asset_ids": sorted(staged_by_effect[effect_id]),
+                "staged_assets": dict(sorted(staged_by_effect[effect_id].items())),
+            }
+            for effect_id in sorted(used_effect_ids)
+        ],
+    }
+
+
+def _render_provenance_sidecar_path(out_path: Path) -> Path:
+    return Path(f"{out_path}.provenance.json")
+
+
+def _active_pack_order_for_provenance() -> list[dict[str, Any]]:
+    return [
+        {
+            "id": discovered.id,
+            "source_kind": discovered.source_kind,
+            "priority_index": discovered.priority_index,
+            "root": str(discovered.pack_dir),
+        }
+        for discovered in discover_pack_metadata(project_root=REPO_ROOT)
+    ]
+
+
+def _active_theme_for_provenance(theme_path: Path | None, active_theme: dict[str, Any] | None) -> dict[str, Any] | None:
+    theme_id = active_theme.get("id") if isinstance(active_theme, dict) else None
+    if theme_path is None:
+        return {"id": theme_id or "banodoco-default", "path": None}
+    resolved = _resolve_theme_path(theme_path)
+    return {"id": theme_id or resolved.parent.name, "path": str(resolved)}
+
+
+def _write_render_provenance(
+    out_path: Path,
+    *,
+    engine: str,
+    timeline_path: Path,
+    assets_path: Path,
+    project_dir: Path,
+    composition_id: str,
+    theme_path: Path | None,
+    active_theme: dict[str, Any] | None,
+    registry_state: dict[str, Any],
+    stage_summary: dict[str, Any],
+    segments: list[dict[str, float | str]] | None = None,
+    segment_provenance: list[dict[str, Any]] | None = None,
+) -> Path:
+    effects = list(stage_summary.get("effects") or [])
+    payload: dict[str, Any] = {
+        "schema_version": 1,
+        "engine": engine,
+        "output": str(out_path.resolve()),
+        "timeline": str(timeline_path.resolve()),
+        "assets_registry": str(assets_path.resolve()),
+        "project_dir": str(project_dir.resolve()),
+        "composition_id": composition_id,
+        "active_pack_order": _active_pack_order_for_provenance(),
+        "active_theme": _active_theme_for_provenance(theme_path, active_theme),
+        "registry_hash": registry_state.get("hash"),
+        "registry_state": registry_state,
+        "resolved_effect_ids": [str(effect["effect_id"]) for effect in effects if "effect_id" in effect],
+        "resolved_effects": effects,
+        "source_pack_ids": sorted(
+            {
+                str(effect["source_pack_id"])
+                for effect in effects
+                if isinstance(effect, dict) and effect.get("source_pack_id")
+            }
+        ),
+        "element_roots": sorted(
+            {
+                str(effect["element_root"])
+                for effect in effects
+                if isinstance(effect, dict) and effect.get("element_root")
+            }
+        ),
+        "staged_asset_ids": sorted(
+            {
+                str(asset_id)
+                for effect in effects
+                if isinstance(effect, dict)
+                for asset_id in effect.get("staged_asset_ids", ())
+            }
+        ),
+        "staged_asset_root": stage_summary.get("root"),
+    }
+    if segments is not None:
+        payload["segments"] = segments
+    if segment_provenance is not None:
+        payload["segment_provenance"] = segment_provenance
+    sidecar_path = _render_provenance_sidecar_path(out_path)
+    sidecar_path.write_text(json.dumps(payload, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    return sidecar_path
 
 
 def _stderr_tail(stderr: str) -> str:
@@ -920,6 +1238,7 @@ def render(
     project_dir = project_dir or (REPO_ROOT / "remotion")
     _validate_project_dir(project_dir)
     _regenerate_element_registries(project_dir, theme_path)
+    registry_state = _effective_registry_state(theme_path)
     out_path = out_path.resolve()
     _require_free_space(out_path.parent, min_free_gb)
     props_path = (out_path.parent / ".remotion-props.json").resolve()
@@ -934,6 +1253,8 @@ def render(
         raise RuntimeError(f"Permission denied (1100): local HTTP asset server blocked: {exc}") from exc
     server_thread = threading.Thread(target=server.serve_forever, daemon=True)
     server_thread.start()
+    render_hash = _render_asset_stage_hash(timeline_path, assets_path, out_path)
+    staged_public_root = project_dir / "public" / "astrid-effects" / render_hash
     try:
         resolved_registry = _resolve_assets(assets_path, server_root, port, classified)
         resolved_theme = theme_path or (WORKSPACE_ROOT / "themes" / "banodoco-default" / "theme.json")
@@ -948,6 +1269,12 @@ def render(
             "assets": resolved_registry,
             "theme": theme_for_props,
         }
+        stage_summary = _stage_effect_assets_for_timeline(
+            merged_props["timeline"],
+            project_dir=project_dir,
+            theme_path=theme_path,
+            render_hash=render_hash,
+        )
         out_path.parent.mkdir(parents=True, exist_ok=True)
         props_path.write_text(json.dumps(merged_props), encoding="utf-8")
         # Build the Remotion launch env from the canonical safe base plus the
@@ -985,8 +1312,21 @@ def render(
             if stderr_tail:
                 message = f"{message}\n{stderr_tail}"
             raise RuntimeError(message)
-        props_path.unlink(missing_ok=True)
+        _write_render_provenance(
+            out_path,
+            engine="remotion",
+            timeline_path=timeline_path,
+            assets_path=assets_path,
+            project_dir=project_dir,
+            composition_id=composition_id,
+            theme_path=theme_path,
+            active_theme=theme_for_props,
+            registry_state=registry_state,
+            stage_summary=stage_summary,
+        )
     finally:
+        props_path.unlink(missing_ok=True)
+        shutil.rmtree(staged_public_root, ignore_errors=True)
         server.shutdown()
         server.server_close()
     audit = AuditContext.from_env()
@@ -1011,10 +1351,10 @@ def render(
     return out_path
 
 
-def main() -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--timeline", type=Path, required=True)
-    parser.add_argument("--assets", type=Path, required=True)
+    parser.add_argument("--assets", type=Path)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--engine", choices=("remotion", "ffmpeg", "hybrid"), default="remotion")
     parser.add_argument("--project-dir", type=Path, default=REPO_ROOT / "remotion")
@@ -1025,18 +1365,33 @@ def main() -> int:
         type=Path,
         default=REPO_ROOT / "themes" / "banodoco-default" / "theme.json",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     try:
-        output = render(
-            args.timeline,
-            args.assets,
-            args.out,
-            engine=args.engine,
-            project_dir=args.project_dir,
-            composition_id=args.composition,
-            theme_path=args.theme,
-            min_free_gb=args.min_free_gb,
-        )
+        if args.assets is None:
+            with TemporaryDirectory(prefix="astrid-render-assets-") as tmp_text:
+                assets_path = Path(tmp_text) / "hype.assets.json"
+                _write_empty_asset_registry(assets_path)
+                output = render(
+                    args.timeline,
+                    assets_path,
+                    args.out,
+                    engine=args.engine,
+                    project_dir=args.project_dir,
+                    composition_id=args.composition,
+                    theme_path=args.theme,
+                    min_free_gb=args.min_free_gb,
+                )
+        else:
+            output = render(
+                args.timeline,
+                args.assets,
+                args.out,
+                engine=args.engine,
+                project_dir=args.project_dir,
+                composition_id=args.composition,
+                theme_path=args.theme,
+                min_free_gb=args.min_free_gb,
+            )
     except Exception as exc:  # pragma: no cover - CLI path
         print(str(exc), file=sys.stderr)
         return 1

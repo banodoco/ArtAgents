@@ -19,6 +19,7 @@ from typing import Any
 
 from astrid.core._shared.result_manifest import build_manifest, write_manifest
 from astrid.core.foundation.paths import REPO_ROOT
+from astrid.core.pack import ensure_local_pack_for_elements
 
 _EFFECT_ID_RE = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 _TEMPLATE_ROOT = Path(__file__).resolve().parent / "templates" / "card"
@@ -26,13 +27,6 @@ _TEMPLATE_ROOT = Path(__file__).resolve().parent / "templates" / "card"
 
 def _title_from_id(effect_id: str) -> str:
     return " ".join(part.capitalize() for part in effect_id.split("-"))
-
-
-def _ensure_local_pack(local_pack: Path) -> None:
-    local_pack.mkdir(parents=True, exist_ok=True)
-    pack_yaml = local_pack / "pack.yaml"
-    if not pack_yaml.exists():
-        pack_yaml.write_text("id: local\nname: Local Scratch Pack\nversion: 0.1.0\n", encoding="utf-8")
 
 
 def _component_source() -> str:
@@ -119,7 +113,6 @@ def scaffold(
             raise FileExistsError(f"local effect already exists: {element_root}; pass --force to overwrite")
         shutil.rmtree(element_root)
 
-    _ensure_local_pack(local_pack)
     element_root.mkdir(parents=True, exist_ok=False)
     component_path = element_root / "component.tsx"
     manifest_path = element_root / "element.yaml"
@@ -128,6 +121,7 @@ def scaffold(
         json.dumps(_element_manifest(effect_id, resolved_label, resolved_description), indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+    ensure_local_pack_for_elements(project_root=project_root)
 
     timeline_clip = {
         "id": f"{effect_id}-sample",

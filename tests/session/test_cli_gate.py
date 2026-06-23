@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
@@ -19,9 +21,11 @@ from astrid.core.session.identity import Identity, write_identity
 # Settled Sprint 1 unbound contract. The implementation may temporarily carry
 # compatibility exceptions during migration, but the final gate must match this
 # list exactly: help/version, status, next, attach, pack management,
-# projects ls/create/default/theme, themes ls, sessions ls, sessions takeover, and doctor.
+# projects ls/create/default/theme, themes ls, sessions ls, sessions takeover,
+# doctor, and serve.
 # `doctor` is a diagnostic that must run before any session exists (you run it
 # precisely to debug an unconfigured workspace), so it is unbound-allowlisted.
+# `serve` starts the local read bridge for local effect asset serving.
 EXPECTED_SPRINT1_UNBOUND_ALLOWLIST = (
     ("-h",),
     ("--help",),
@@ -40,6 +44,7 @@ EXPECTED_SPRINT1_UNBOUND_ALLOWLIST = (
     ("packs",),
     ("test",),
     ("doctor",),
+    ("serve",),
 )
 
 
@@ -521,6 +526,59 @@ def test_stateless_executor_run_auto_binds_default_project_without_attach(
 
     assert (env["projects"] / "default" / ".astrid-session").is_file()
     assert os.environ.get(ASTRID_SESSION_ID_ENV)
+
+
+def test_render_executor_run_accepts_asset_free_timeline_input(
+    env: dict[str, Path], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.delenv(ASTRID_SESSION_ID_ENV, raising=False)
+    timeline_path = tmp_path / "asset-free.timeline.json"
+    timeline_path.write_text(
+        json.dumps(
+            {
+                "theme": "banodoco-default",
+                "tracks": [{"id": "v1", "kind": "visual", "label": "Generated"}],
+                "clips": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    out_dir = tmp_path / "render-out"
+    commands: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):
+        commands.append([str(part) for part in cmd])
+        return subprocess.CompletedProcess(cmd, 0)
+
+    from astrid.core.execution.executor import runner as executor_runner
+
+    monkeypatch.setattr(executor_runner.subprocess, "run", fake_run)
+
+    rc, stdout, stderr = _run_pipeline(
+        [
+            "executors",
+            "run",
+            "rendering.render",
+            "--out",
+            str(out_dir),
+            "--input",
+            f"timeline={timeline_path}",
+        ]
+    )
+
+    assert rc == 0
+    assert json.loads(stdout)["returncode"] == 0
+    assert "no session bound" not in stderr
+    assert len(commands) == 1
+    command = commands[0]
+    assert command[:3] == [
+        sys.executable,
+        "-m",
+        "astrid.packs.rendering.executors.render.run",
+    ]
+    assert command[command.index("--timeline") + 1] == str(timeline_path)
+    assert command[command.index("--out") + 1] == str(out_dir.resolve() / "hype.mp4")
+    assert "--assets" not in command
 
 
 def test_auto_bind_honors_configured_workspace_default_project(

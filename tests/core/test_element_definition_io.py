@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from astrid.core.element.schema import (
+    ElementAsset,
     ElementDefinition,
     ElementValidationError,
     load_element_definition,
@@ -47,6 +48,8 @@ class ElementDefinitionIOFieldsTest(unittest.TestCase):
         )
         self.assertEqual(ed.inputs, ())
         self.assertEqual(ed.outputs, ())
+        self.assertEqual(ed.assets, ())
+        self.assertNotIn("assets", ed.to_dict())
 
     def test_inputs_outputs_stored_as_tuples(self) -> None:
         """Inputs/outputs are stored as tuples of Port/Output."""
@@ -73,6 +76,149 @@ class ElementDefinitionIOFieldsTest(unittest.TestCase):
         self.assertEqual(len(ed.outputs), 1)
         self.assertIsInstance(ed.outputs[0], Output)
         self.assertEqual(ed.outputs[0].artifact_type, "clip/visual")
+
+
+class ManifestAssetDeclarationsTest(unittest.TestCase):
+    """Element manifests may declare local asset files."""
+
+    def setUp(self) -> None:
+        import tempfile
+
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._tmpdir.name)
+
+    def tearDown(self) -> None:
+        self._tmpdir.cleanup()
+
+    def _write_element(self, element_id: str, assets: Any | None = None) -> Path:
+        import json
+
+        root = self.tmp / element_id
+        (root / "media").mkdir(parents=True)
+        (root / "textures").mkdir()
+        (root / "media" / "noise.png").write_bytes(b"noise")
+        (root / "media" / "lut.cube").write_text("lut\n", encoding="utf-8")
+        (root / "component.tsx").write_text("export default function Element() { return null; }\n", encoding="utf-8")
+        payload: dict[str, Any] = {
+            "schema_version": 1,
+            "id": element_id,
+            "kind": "effect",
+            "pack_id": "test",
+            "metadata": {},
+            "schema": {},
+            "defaults": {},
+            "dependencies": {"js_packages": [], "python_requirements": []},
+        }
+        if assets is not None:
+            payload["assets"] = assets
+        (root / "element.yaml").write_text(json.dumps(payload) + "\n", encoding="utf-8")
+        return root
+
+    def test_manifest_without_assets_preserves_empty_assets_tuple(self) -> None:
+        definition = load_element_definition(
+            self._write_element("asset-free"),
+            kind="effects",
+            source="test",
+            editable=False,
+            priority=0,
+        )
+
+        self.assertEqual(definition.assets, ())
+        self.assertNotIn("assets", definition.to_dict())
+
+    def test_existing_asset_free_text_card_manifest_stays_backward_compatible(self) -> None:
+        definition = load_element_definition(
+            _RENDERING_ROOT / "effects" / "text-card",
+            kind="effects",
+            source="pack:rendering",
+            editable=False,
+            priority=0,
+        )
+
+        self.assertEqual(definition.id, "text-card")
+        self.assertEqual(definition.assets, ())
+        self.assertNotIn("assets", definition.to_dict())
+
+    def test_manifest_assets_are_normalized_sorted_immutable_entries(self) -> None:
+        definition = load_element_definition(
+            self._write_element(
+                "assetful",
+                {
+                    "noise": "textures/../media/noise.png",
+                    "lut": "media/lut.cube",
+                },
+            ),
+            kind="effects",
+            source="test",
+            editable=False,
+            priority=0,
+        )
+
+        self.assertEqual(
+            definition.assets,
+            (
+                ElementAsset(name="lut", path=Path("media/lut.cube")),
+                ElementAsset(name="noise", path=Path("media/noise.png")),
+            ),
+        )
+        self.assertEqual(
+            definition.to_dict()["assets"],
+            {"lut": "media/lut.cube", "noise": "media/noise.png"},
+        )
+        with self.assertRaises(AttributeError):
+            definition.assets[0].path = Path("other.png")  # type: ignore[misc]
+
+    def test_manifest_asset_paths_reject_missing_files(self) -> None:
+        root = self._write_element("bad-missing", {"asset": "media/missing.png"})
+
+        with self.assertRaisesRegex(ElementValidationError, "file does not exist"):
+            load_element_definition(
+                root,
+                kind="effects",
+                source="test",
+                editable=False,
+                priority=0,
+            )
+
+    def test_manifest_asset_paths_reject_path_traversal(self) -> None:
+        outside = self.tmp / "outside.png"
+        outside.write_bytes(b"outside")
+        root = self._write_element("bad-traversal", {"asset": "../outside.png"})
+
+        with self.assertRaisesRegex(ElementValidationError, "must stay inside"):
+            load_element_definition(
+                root,
+                kind="effects",
+                source="test",
+                editable=False,
+                priority=0,
+            )
+
+    def test_manifest_asset_paths_reject_absolute_paths(self) -> None:
+        outside = self.tmp / "outside.png"
+        outside.write_bytes(b"outside")
+        root = self._write_element("bad-absolute", {"asset": str(outside.resolve())})
+
+        with self.assertRaisesRegex(ElementValidationError, "must be relative"):
+            load_element_definition(
+                root,
+                kind="effects",
+                source="test",
+                editable=False,
+                priority=0,
+            )
+
+    def test_manifest_asset_paths_reject_directories(self) -> None:
+        root = self._write_element("bad-directory", {"asset": "media"})
+
+        with self.assertRaisesRegex(ElementValidationError, "file does not exist"):
+            load_element_definition(
+                root,
+                kind="effects",
+                source="test",
+                editable=False,
+                priority=0,
+            )
 
 
 class ToCapabilityHandlePropagationTest(unittest.TestCase):

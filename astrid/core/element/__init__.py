@@ -18,6 +18,7 @@ from .registry import (
 from .schema import (
     ELEMENT_KINDS,
     REQUIRED_ELEMENT_FILES,
+    ElementAsset,
     ElementDefinition,
     ElementDependencies,
     ElementValidationError,
@@ -31,6 +32,7 @@ __all__ = [
     "ELEMENT_KIND_REGISTRY",
     "REQUIRED_ELEMENT_FILES",
     "ElementConflict",
+    "ElementAsset",
     "ElementDefinition",
     "ElementDependencies",
     "ElementKind",

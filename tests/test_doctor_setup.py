@@ -31,8 +31,19 @@ class DoctorSetupTest(unittest.TestCase):
             required=False,
         )
 
+    def _stable_dependency_audit_check(self, **_kwargs) -> doctor.DoctorCheck:
+        return doctor.DoctorCheck(
+            name="dependency audit",
+            status="ok",
+            detail="test-provisioned dependency audit",
+        )
+
     def test_doctor_text_and_json_reports_required_checks(self) -> None:
-        with mock.patch.object(doctor, "_check_env_template", side_effect=self._stable_env_template_check):
+        with mock.patch.object(
+            doctor,
+            "_check_dependency_audit",
+            side_effect=self._stable_dependency_audit_check,
+        ), mock.patch.object(doctor, "_check_env_template", side_effect=self._stable_env_template_check):
             result, stdout, stderr = self.capture(doctor.main, [])
 
         self.assertEqual(result, 0, stderr)
@@ -42,6 +53,7 @@ class DoctorSetupTest(unittest.TestCase):
         self.assertIn("[ok] env template:", stdout)
         self.assertIn("[ok] executor registry:", stdout)
         self.assertIn("[ok] orchestrator registry:", stdout)
+        self.assertIn("[ok] local pack manifest:", stdout)
         self.assertIn("[ok] element registry:", stdout)
         self.assertIn("[ok] repo structure:", stdout)
         self.assertIn("[ok] vibecomfy metadata:", stdout)
@@ -50,7 +62,11 @@ class DoctorSetupTest(unittest.TestCase):
         self.assertIn("stale project runs:", stdout)
         self.assertIn("runpod stale handles:", stdout)
 
-        with mock.patch.object(doctor, "_check_env_template", side_effect=self._stable_env_template_check):
+        with mock.patch.object(
+            doctor,
+            "_check_dependency_audit",
+            side_effect=self._stable_dependency_audit_check,
+        ), mock.patch.object(doctor, "_check_env_template", side_effect=self._stable_env_template_check):
             result, stdout, stderr = self.capture(doctor.main, ["--json"])
         self.assertEqual(result, 0, stderr)
         payload = json.loads(stdout)
@@ -59,6 +75,7 @@ class DoctorSetupTest(unittest.TestCase):
         self.assertIn("vibecomfy metadata", {item["name"] for item in payload["checks"]})
         self.assertIn("dependency audit", {item["name"] for item in payload["checks"]})
         self.assertIn("env template", {item["name"] for item in payload["checks"]})
+        self.assertIn("local pack manifest", {item["name"] for item in payload["checks"]})
         self.assertIn("stale project runs", {item["name"] for item in payload["checks"]})
 
     def test_doctor_required_check_failure_returns_nonzero(self) -> None:
@@ -70,7 +87,11 @@ class DoctorSetupTest(unittest.TestCase):
         self.assertIn("[fail] executor registry: registry exploded", stdout)
 
     def test_doctor_optional_binaries_warn_by_default_and_can_be_strict(self) -> None:
-        with mock.patch.object(doctor.shutil, "which", return_value=None), mock.patch.object(
+        with mock.patch.object(
+            doctor,
+            "_check_dependency_audit",
+            side_effect=self._stable_dependency_audit_check,
+        ), mock.patch.object(doctor.shutil, "which", return_value=None), mock.patch.object(
             doctor,
             "_check_env_template",
             side_effect=self._stable_env_template_check,
@@ -230,6 +251,47 @@ class DoctorSetupTest(unittest.TestCase):
         self.assertEqual(check.status, "warn")
         self.assertFalse(check.required)
         self.assertIn("runpod-lifecycle", check.detail)
+
+    def test_local_pack_manifest_check_ignores_empty_local_pack_dir(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "astrid" / "packs" / "local").mkdir(parents=True)
+
+            check = doctor._check_local_pack_manifest(repo_root=root)
+
+        self.assertEqual(check.status, "ok")
+        self.assertFalse(check.required)
+        self.assertIn("no local pack manifest", check.detail)
+
+    def test_local_pack_manifest_check_materializes_missing_manifest_for_local_elements(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            local_pack = root / "astrid" / "packs" / "local"
+            element_root = local_pack / "elements" / "effects" / "stamp"
+            element_root.mkdir(parents=True)
+            (element_root / "element.yaml").write_text("id: stamp\n", encoding="utf-8")
+
+            check = doctor._check_local_pack_manifest(repo_root=root)
+
+            self.assertEqual(check.status, "ok")
+            self.assertFalse(check.required)
+            self.assertIn("created for local element manifests", check.detail)
+            self.assertTrue((local_pack / "pack.yaml").is_file())
+
+    def test_local_pack_manifest_check_fails_for_invalid_existing_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            local_pack = root / "astrid" / "packs" / "local"
+            element_root = local_pack / "elements" / "effects" / "stamp"
+            element_root.mkdir(parents=True)
+            (element_root / "element.yaml").write_text("id: stamp\n", encoding="utf-8")
+            (local_pack / "pack.yaml").write_text("id: not_local\nname: Broken\n", encoding="utf-8")
+
+            check = doctor._check_local_pack_manifest(repo_root=root)
+
+        self.assertEqual(check.status, "fail")
+        self.assertIn("astrid/packs/local/pack.yaml is invalid", check.detail)
+        self.assertIn("must match folder name", check.detail)
 
     def test_dependency_audit_treats_missing_arnold_parent_as_optional(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -16,7 +16,13 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from astrid.core.pack import discover_packs, load_pack_manifest, pack_manifest_path
+from astrid.core.pack import (
+    PackValidationError,
+    discover_packs,
+    ensure_local_pack_for_elements,
+    load_pack_manifest,
+    pack_manifest_path,
+)
 from astrid.core.pack.discovery import (
     ASTRID_PACKS_PATH_ENV,
     SOURCE_KINDS,
@@ -84,6 +90,84 @@ def _make_pack(root: Path, pack_id: str, *, folder: str | None = None):
 
 
 class PackDiscoveryMetadataTest(unittest.TestCase):
+    def test_local_pack_manifest_not_materialized_without_element_manifests(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            local_pack = project_root / "astrid" / "packs" / "local"
+            (local_pack / "elements" / "effects" / "scratch").mkdir(parents=True)
+
+            result = ensure_local_pack_for_elements(project_root=project_root)
+
+            self.assertIsNone(result)
+            self.assertFalse((local_pack / "pack.yaml").exists())
+
+    def test_repo_root_local_layer_materializes_when_element_manifest_exists(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp) / "repo"
+            packs_root = repo_root / "astrid" / "packs"
+            local_pack = packs_root / "local"
+            element_root = local_pack / "elements" / "effects" / "stamp"
+            element_root.mkdir(parents=True)
+            (element_root / "component.tsx").write_text("export default function Element() { return null; }\n")
+            (element_root / "element.yaml").write_text(
+                json.dumps(
+                    {
+                        "id": "stamp",
+                        "kind": "effect",
+                        "pack_id": "local",
+                        "metadata": {"label": "stamp"},
+                        "schema": {"type": "object"},
+                        "defaults": {},
+                        "dependencies": {"js_packages": [], "python_requirements": []},
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            def scan(arg=None):
+                if arg is None or Path(arg).resolve() == packs_root.resolve():
+                    return discover_packs(packs_root)
+                return ()
+
+            with mock.patch("astrid.core.pack.discovery.REPO_ROOT", repo_root):
+                discovered = discover_pack_metadata(
+                    project_root=repo_root,
+                    discover_packs_fn=scan,
+                    include_installed=False,
+                )
+
+            self.assertTrue((local_pack / "pack.yaml").is_file())
+            self.assertEqual([dp.id for dp in discovered], ["local"])
+            self.assertEqual([dp.source_kind for dp in discovered], ["local"])
+
+    def test_existing_invalid_local_pack_manifest_is_not_overwritten(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp) / "repo"
+            packs_root = repo_root / "astrid" / "packs"
+            local_pack = packs_root / "local"
+            element_root = local_pack / "elements" / "effects" / "stamp"
+            element_root.mkdir(parents=True)
+            (element_root / "element.yaml").write_text("id: stamp\n", encoding="utf-8")
+            local_manifest = local_pack / "pack.yaml"
+            local_manifest.write_text("id: not_local\nname: Broken\n", encoding="utf-8")
+
+            def scan(arg=None):
+                if arg is None:
+                    return ()
+                if Path(arg).resolve() == packs_root.resolve():
+                    return discover_packs(packs_root)
+                return ()
+
+            with self.assertRaisesRegex(PackValidationError, "must match folder name"):
+                discover_pack_metadata(
+                    project_root=repo_root,
+                    discover_packs_fn=scan,
+                    include_installed=False,
+                )
+
+            self.assertEqual(local_manifest.read_text(encoding="utf-8"), "id: not_local\nname: Broken\n")
+
     def test_source_layer_excludes_local_and_indexes_in_order(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -94,7 +178,8 @@ class PackDiscoveryMetadataTest(unittest.TestCase):
             def scan(arg=None):
                 return (alpha, local, beta)
 
-            discovered = discover_pack_metadata(discover_packs_fn=scan, include_installed=False)
+            with mock.patch("astrid.core.pack.discovery.ensure_local_pack_for_elements", return_value=None):
+                discovered = discover_pack_metadata(discover_packs_fn=scan, include_installed=False)
 
         self.assertEqual([dp.id for dp in discovered], ["alpha", "beta"])
         self.assertTrue(all(dp.source_kind == "source" for dp in discovered))

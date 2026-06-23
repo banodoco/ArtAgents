@@ -81,6 +81,7 @@ def run_checks(*, optional_binaries: tuple[str, ...] = ("ffmpeg", "npx", "uv", "
     executor_registry = _capture_check("executor registry", _check_executor_registry)
     checks.append(executor_registry)
     checks.append(_capture_check("orchestrator registry", _check_orchestrator_registry))
+    checks.append(_check_local_pack_manifest())
     checks.append(_capture_check("element registry", _check_element_registry))
     checks.append(_capture_check("repo structure", _check_repo_structure))
     checks.append(_capture_check("vibecomfy metadata", _check_vibecomfy_metadata))
@@ -293,6 +294,54 @@ def _check_orchestrator_registry() -> str:
     if count == 0:
         raise RuntimeError("no orchestrators discovered")
     return f"{count} orchestrator(s)"
+
+
+def _check_local_pack_manifest(*, repo_root: Path = REPO_ROOT) -> DoctorCheck:
+    from astrid.core.pack import (
+        PackValidationError,
+        ensure_local_pack_for_elements,
+        load_pack_manifest,
+        pack_manifest_path,
+    )
+
+    local_pack_root = repo_root / "astrid" / "packs" / "local"
+    had_manifest = pack_manifest_path(local_pack_root) is not None
+    pack_root = ensure_local_pack_for_elements(project_root=repo_root)
+    if pack_root is None:
+        return DoctorCheck(
+            name="local pack manifest",
+            status="ok",
+            detail="no local pack manifest or local element manifests found",
+            required=False,
+        )
+
+    manifest_path = pack_manifest_path(pack_root)
+    if manifest_path is None:
+        return DoctorCheck(
+            name="local pack manifest",
+            status="fail",
+            detail=f"{pack_root.relative_to(repo_root)} contains local elements but no pack manifest",
+        )
+    try:
+        load_pack_manifest(manifest_path)
+    except PackValidationError as exc:
+        return DoctorCheck(
+            name="local pack manifest",
+            status="fail",
+            detail=f"{manifest_path.relative_to(repo_root)} is invalid: {exc}",
+        )
+
+    rel_manifest = manifest_path.relative_to(repo_root)
+    if had_manifest:
+        detail = f"{rel_manifest} ok"
+    else:
+        detail = f"{rel_manifest} created for local element manifests"
+    return DoctorCheck(
+        name="local pack manifest",
+        status="ok",
+        detail=detail,
+        required=False,
+    )
 
 
 def _check_element_registry() -> str:

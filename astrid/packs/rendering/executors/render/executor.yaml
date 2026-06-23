@@ -23,12 +23,15 @@
       "astrid.packs.rendering.executors.render.run",
       "--timeline",
       "{timeline}",
-      "--assets",
-      "{assets_registry}",
       "--out",
       "{out}/hype.mp4"
     ],
     "input_args": [
+      {
+        "input": "assets_registry",
+        "flag": "--assets",
+        "optional": true
+      },
       {
         "input": "theme",
         "flag": "--theme",
@@ -74,7 +77,7 @@
     {
       "description": "",
       "name": "assets_registry",
-      "required": true,
+      "required": false,
       "type": "file",
       "artifact_type": "clip/visual"
     },
@@ -127,6 +130,14 @@
       "path_template": "{out}/hype.mp4",
       "type": "file",
       "artifact_type": "clip/visual"
+    },
+    {
+      "description": "Render provenance sidecar for the video output.",
+      "mode": "create_or_replace",
+      "name": "provenance",
+      "path_template": "{out}/hype.mp4.provenance.json",
+      "type": "file",
+      "artifact_type": "metadata/provenance"
     }
   ],
   "pipeline_requirements": [

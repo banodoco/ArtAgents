@@ -19,6 +19,7 @@ from astrid.core.foundation.paths import REPO_ROOT
 from astrid.core.pack import (
     PackDefinition,
     discover_packs,
+    ensure_local_pack_for_elements,
     iter_element_roots,
     iter_executor_roots,
     iter_orchestrator_roots,
@@ -98,6 +99,7 @@ def discover_pack_metadata(
     scan = discover_packs_fn if discover_packs_fn is not None else discover_packs
     repo_pack_root = (REPO_ROOT / "astrid" / "packs").resolve()
     project_pack_root = (Path(project_root) / "astrid" / "packs").resolve()
+    local_pack_root = ensure_local_pack_for_elements(project_root=project_root)
 
     discovered: list[DiscoveredPack] = []
 
@@ -115,7 +117,7 @@ def discover_pack_metadata(
             continue
         _add(pack, "source")
 
-    if project_pack_root != repo_pack_root and project_pack_root.is_dir():
+    if local_pack_root is not None and project_pack_root.is_dir():
         for pack in scan(project_pack_root):
             if pack.id == "local":
                 _add(pack, "local")

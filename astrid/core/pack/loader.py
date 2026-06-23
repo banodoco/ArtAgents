@@ -9,6 +9,7 @@ from typing import Any
 import yaml
 
 from astrid.core.pack._common import (
+    ELEMENT_MANIFEST_NAMES,
     PACK_MANIFEST_NAMES,
     PackValidationError,
     _optional_string,
@@ -47,6 +48,37 @@ def ensure_local_pack(*, project_root: str | Path = None) -> Path:
     if not manifest.exists():
         manifest.write_text("id: local\nname: Local Scratch Pack\nversion: 0.1.0\n", encoding="utf-8")
     return pack_root
+
+
+def ensure_local_pack_for_elements(*, project_root: str | Path = None) -> Path | None:
+    """Materialize the local pack manifest when local elements exist.
+
+    Local render elements can be authored directly under
+    ``astrid/packs/local/elements``. Discovery needs a pack manifest to load
+    them, but an empty local pack should not appear just because discovery ran.
+    """
+    from astrid.core.foundation.paths import REPO_ROOT
+
+    root = Path(project_root) if project_root is not None else REPO_ROOT
+    pack_root = root / "astrid" / "packs" / "local"
+    manifest = pack_root / "pack.yaml"
+    if manifest.exists():
+        return pack_root
+    elements_root = pack_root / "elements"
+    if not _has_local_element_manifest(elements_root):
+        return None
+    pack_root.mkdir(parents=True, exist_ok=True)
+    manifest.write_text("id: local\nname: Local Scratch Pack\nversion: 0.1.0\n", encoding="utf-8")
+    return pack_root
+
+
+def _has_local_element_manifest(elements_root: Path) -> bool:
+    if not elements_root.is_dir():
+        return False
+    for candidate in elements_root.glob("*/*"):
+        if candidate.is_dir() and any((candidate / name).is_file() for name in ELEMENT_MANIFEST_NAMES):
+            return True
+    return False
 
 
 def discover_packs(

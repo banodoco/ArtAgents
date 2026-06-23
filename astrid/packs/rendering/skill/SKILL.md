@@ -1,36 +1,38 @@
 ---
 name: rendering
 description: >
-  Rendering pack: the Remotion compositor that turns a timeline+assets
-  pair into hype.mp4, plus escape-hatch element scaffolding for custom
+  Rendering pack: the Remotion compositor that turns a timeline, and
+  optional assets registry, into hype.mp4 plus provenance; also includes
+  escape-hatch element scaffolding for custom
   visual effects (html_canvas_effect, sprite_sheet).  Auto-starts an
   HTTP server with Range request support for Remotion media streaming.
 ---
 
 # Rendering
 
-The rendering pack turns assembled timeline + asset registry pairs into
-finished video files through the Remotion compositor. It also provides
-element-system escape hatches for custom visual effects and sprite sheet
-generation.
+The rendering pack turns assembled timelines, and optional media asset
+registries, into finished video files through the Remotion compositor. It also
+provides element-system escape hatches for custom visual effects and sprite
+sheet generation.
 
 ## Render flow
 
 The core rendering path is:
 
 ```
-timeline.json + assets.json  →  Remotion compositor  →  hype.mp4
+timeline.json + optional assets.json  →  Remotion compositor  →  hype.mp4 + provenance
 ```
 
 1. **Input**: `hype.timeline.json` (clip sequence, effects, animations,
-   transitions) and `hype.assets.json` (asset registry with file paths).
+   transitions) and, when the timeline references media files,
+   `hype.assets.json` (asset registry with file paths).
 2. **HTTP server start**: Before launching Remotion, the executor starts a
    local `ThreadingHTTPServer` on a randomly-chosen free port bound to
-   `127.0.0.1`. All asset paths are rewritten to `http://localhost:<port>/...`
-   URLs so Remotion can stream them directly.
+   `127.0.0.1`. Media asset paths are rewritten to
+   `http://localhost:<port>/...` URLs so Remotion can stream them directly.
 3. **Composition**: Remotion renders the timeline using the resolved theme
    and composition entry point (default: `HypeComposition`).
-4. **Output**: `hype.mp4` — the final rendered video file.
+4. **Output**: `hype.mp4` and `hype.mp4.provenance.json`.
 
 ## Auto-started HTTP server
 
@@ -51,6 +53,10 @@ renders. Key details:
 - **Port**: Auto-picked via `_pick_free_port()` (binds to `127.0.0.1:0`
   and reads the assigned port).
 
+When `assets_registry` is omitted, the runner supplies an empty media registry.
+This is the normal path for timelines that contain only text, effects,
+generated visuals, or other clips that do not reference media entries.
+
 ## Theme support
 
 The executor resolves the timeline's theme slug against the workspace
@@ -63,7 +69,7 @@ specified.
 
 | Executor | What it does |
 |---|---|
-| `rendering.render` | Render a hype timeline + assets pair into `hype.mp4` through the Remotion compositor. Pipeline step 12 — the terminal step before optional YouTube upload or Reigh publish. |
+| `rendering.render` | Render a hype timeline, with optional media assets, into `hype.mp4` and a provenance sidecar through Remotion, ffmpeg, or hybrid rendering. Pipeline step 12 — the terminal step before optional YouTube upload or Reigh publish. |
 | `rendering.sprite_sheet` | Generate, slice, and preview GPT Image sprite sheets for batch image work. Produces a sprite atlas (`sprite_sheet.png`), alpha-processed variant, manifest, and MP4 preview. |
 | `rendering.html_canvas_effect` | Scaffold a local Remotion HTML-in-canvas effect element. Creates a user-editable effect under `astrid/packs/local/elements/effects/<effect_id>/` with DOM content wrapped in Remotion's `HtmlInCanvas` for optional canvas/WebGL post-processing. |
 
@@ -87,6 +93,20 @@ and can be freely edited. Once created, it integrates into the standard
 Remotion render flow — you reference it by id in the timeline and render
 via `rendering.render`.
 
+Local effect, animation, and transition manifests may declare static files with
+optional top-level syntax:
+
+```yaml
+assets:
+  badge: assets/badge.png
+  palette: assets/palette.json
+```
+
+Each value is a file path relative to the element root. During render, only
+declared assets for elements used by the timeline are staged under
+`remotion/public/astrid-effects/<render-hash>/<effect-id>/`, exposed to the
+component as `params.__astridAssets`, and cleaned up after Remotion exits.
+
 Requires Remotion ≥ 4.0.455.
 
 ### `rendering.sprite_sheet`
@@ -104,8 +124,8 @@ Requires `OPENAI_API_KEY` and `ffmpeg` on the system path.
 
 ## When to use
 
-- Use `rendering.render` to produce the final video from a timeline +
-  assets pair. This is the standard rendering path.
+- Use `rendering.render` to produce the final video from a timeline and,
+  only when needed, an asset registry. This is the standard rendering path.
 - Use `rendering.sprite_sheet` when you need to generate a batch of
   related images as a sprite atlas for animation.
 - Use `rendering.html_canvas_effect` when you need a custom visual effect
@@ -121,27 +141,46 @@ Requires `OPENAI_API_KEY` and `ffmpeg` on the system path.
 ## CLI quick-start
 
 ```bash
-# Render timeline + assets to video
-python3 -m astrid executors run rendering.render -- \
+# Render a timeline to video
+python3 -m astrid executors run rendering.render \
+  --out ./out \
+  --input timeline=./out/hype.timeline.json
+
+# Render a timeline with a media asset registry
+python3 -m astrid executors run rendering.render \
+  --out ./out \
+  --input timeline=./out/hype.timeline.json \
+  --input assets_registry=./out/hype.assets.json
+
+# Render with custom theme and backend
+python3 -m astrid executors run rendering.render \
+  --out ./out \
+  --input timeline=./out/hype.timeline.json \
+  --input assets_registry=./out/hype.assets.json \
+  --input theme=./themes/my-theme \
+  --input engine=hybrid
+```
+
+The normal executor CLI writes `./out/hype.mp4` and
+`./out/hype.mp4.provenance.json`. Direct `run.py` execution is reserved for
+debugging the executor itself:
+
+```bash
+python3 -m astrid.packs.rendering.executors.render.run \
   --timeline ./out/hype.timeline.json \
   --assets ./out/hype.assets.json \
   --out ./out/hype.mp4
+```
 
-# Render with custom theme and composition
-python3 -m astrid executors run rendering.render -- \
+Omit `--assets` in direct debug runs only for asset-free timelines.
+
+```bash
+python3 -m astrid.packs.rendering.executors.render.run \
   --timeline ./out/hype.timeline.json \
-  --assets ./out/hype.assets.json \
-  --out ./out/hype.mp4 \
-  --theme ./themes/my-theme \
-  --composition MyComposition
+  --out ./out/hype.mp4
+```
 
-# Render with free-space guard (aborts if < N GB free)
-python3 -m astrid executors run rendering.render -- \
-  --timeline ./out/hype.timeline.json \
-  --assets ./out/hype.assets.json \
-  --out ./out/hype.mp4 \
-  --min-free-gb 10
-
+```bash
 # Generate a sprite sheet
 python3 -m astrid executors run rendering.sprite_sheet -- \
   --animation "a character waving" \

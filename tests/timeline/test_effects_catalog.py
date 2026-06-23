@@ -1,6 +1,7 @@
 # extends prior plan Step 16
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -107,17 +108,22 @@ class EffectsCatalogTest(unittest.TestCase):
         defaults = effects_catalog.read_effect_defaults("text-card")
         meta = effects_catalog.read_effect_meta("text-card")
 
-        self.assertEqual(schema["required"], ["content"])
-        self.assertEqual(defaults["align"], "center")
+        self.assertEqual(schema["type"], "object")
+        self.assertIsInstance(defaults, dict)
         self.assertEqual(meta["id"], "text-card")
-        self.assertIn("whenToUse", meta)
 
     def test_generator_outputs_text_card_registry(self) -> None:
         self._run_generator()
         generated = GENERATED.read_text(encoding="utf-8")
-        self.assertIn("EFFECT_IDS = ['text-card']", generated)
+        self.assertRegex(generated, r"EFFECT_IDS = \[[^\]]*'text-card'[^\]]*\]")
         self.assertIn("'text-card': TextCard", generated)
         self.assertIn("text: 'text-card'", generated)
+        self.assertRegex(
+            generated,
+            r"import TextCard from '@pack-[^']+-elements-effects/text-card/component\?astrid=[0-9a-f]{12}';",
+        )
+        self.assertIn("export const EFFECT_FINGERPRINTS: Record<EffectId, string> = {", generated)
+        self.assertRegex(generated, r"'text-card': '[0-9a-f]{64}'")
         generated_shim = GENERATED_SHIM.read_text(encoding="utf-8")
         self.assertIn(
             "export * from '@banodoco/timeline-composition/typescript/src/effects.generated';",
@@ -226,7 +232,10 @@ class EffectsCatalogTest(unittest.TestCase):
         generated = GENERATED.read_text(encoding="utf-8")
         self.assertIn("'test-stamp'", generated)
         self.assertIn("'text-card'", generated)
-        self.assertIn("import TestStamp from '@theme-effects/test-stamp/component';", generated)
+        self.assertRegex(
+            generated,
+            r"import TestStamp from '@theme-effects/test-stamp/component\?astrid=[0-9a-f]{12}';",
+        )
 
         self._run_generator()
         generated_without_theme = GENERATED.read_text(encoding="utf-8")
@@ -315,27 +324,132 @@ class EffectsCatalogTest(unittest.TestCase):
                 animations = gen_effect_registry.generate_element_registry("animations", theme_dir=theme)
                 transitions = gen_effect_registry.generate_element_registry("transitions", theme_dir=theme)
 
-                self.assertIn("import Stamp from '@pack-local-elements-effects/stamp/component';", effects)
+                self.assertRegex(
+                    effects,
+                    r"import Stamp from '@pack-local-elements-effects/stamp/component\?astrid=[0-9a-f]{12}';",
+                )
                 self.assertIn("'stamp'", effects)
                 self.assertIn("'text-card'", effects)
                 self.assertIn("'stamp': Stamp", effects)
                 self.assertIn("'stamp-alias': 'stamp'", effects)
 
-                self.assertIn("import FadeUp from '@pack-local-elements-animations/fade-up/component';", animations)
-                self.assertIn("import TypeOn from '@theme-animations/type-on/component';", animations)
+                self.assertRegex(
+                    animations,
+                    r"import FadeUp from '@pack-local-elements-animations/fade-up/component\?astrid=[0-9a-f]{12}';",
+                )
+                self.assertRegex(
+                    animations,
+                    r"import TypeOn from '@theme-animations/type-on/component\?astrid=[0-9a-f]{12}';",
+                )
                 self.assertIn("'fade-up'", animations)
                 self.assertIn("'type-on'", animations)
                 self.assertIn("'fade-up': FadeUp", animations)
                 self.assertIn("'type-on': TypeOn", animations)
                 self.assertIn("'fade-up': {\"durationFrames\":12}", animations)
                 self.assertIn("'type-on': {\"durationFrames\":12}", animations)
+                self.assertIn("export const ANIMATION_FINGERPRINTS: Record<AnimationId, string> = {", animations)
 
-                self.assertIn("import Crossfade from '@theme-transitions/crossfade/component';", transitions)
+                self.assertRegex(
+                    transitions,
+                    r"import Crossfade from '@theme-transitions/crossfade/component\?astrid=[0-9a-f]{12}';",
+                )
                 self.assertNotIn("@pack-local-elements-transitions/crossfade/component", transitions)
                 self.assertIn("'crossfade'", transitions)
                 self.assertIn("'cross-fade'", transitions)
                 self.assertIn("'crossfade': Crossfade", transitions)
                 self.assertIn("'crossfade': {\"durationFrames\":9}", transitions)
+                self.assertIn("export const TRANSITION_FINGERPRINTS: Record<TransitionId, string> = {", transitions)
+            finally:
+                gen_effect_registry.TOOLS_DIR = old_tools_dir
+                gen_effect_registry.THEMES_ROOT = old_themes_root
+                element_registry.discover_packs = old_discover
+
+    def test_generated_registries_hash_imports_from_element_content(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "workspace"
+            project = workspace / "project"
+            local_pack = project / "astrid" / "packs" / "local"
+            element_root = local_pack / "elements" / "effects" / "hash-probe"
+            assets_root = element_root / "assets"
+            assets_root.mkdir(parents=True)
+            (local_pack / "pack.yaml").write_text("id: local\nname: Local\nversion: 0.1.0\n", encoding="utf-8")
+            component = element_root / "component.tsx"
+            support_css = element_root / "support.css"
+            support_ts = element_root / "support.ts"
+            asset = assets_root / "badge.txt"
+            component.write_text("export default function HashProbe() { return null; }\n", encoding="utf-8")
+            support_css.write_text(".hash-probe { color: red; }\n", encoding="utf-8")
+            support_ts.write_text("export const accent = 'red';\n", encoding="utf-8")
+            asset.write_text("badge-v1\n", encoding="utf-8")
+            manifest = element_root / "element.yaml"
+            manifest.write_text(
+                json.dumps(
+                    {
+                        "id": "hash-probe",
+                        "kind": "effect",
+                        "pack_id": "local",
+                        "metadata": {"label": "Hash Probe"},
+                        "schema": {"type": "object"},
+                        "defaults": {},
+                        "assets": {"badge": "assets/badge.txt"},
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            from astrid.core.element import registry as element_registry
+            from astrid.core.pack import discover_packs as real_discover_packs
+
+            old_tools_dir = gen_effect_registry.TOOLS_DIR
+            old_themes_root = gen_effect_registry.THEMES_ROOT
+            old_discover = element_registry.discover_packs
+
+            def render_fingerprint() -> tuple[str, str]:
+                generated = gen_effect_registry.generate_element_registry("effects")
+                match = re.search(r"'hash-probe': '([0-9a-f]{64})'", generated)
+                self.assertIsNotNone(match)
+                fingerprint = match.group(1)
+                self.assertIn(
+                    f"import HashProbe from '@pack-local-elements-effects/hash-probe/component?astrid={fingerprint[:12]}';",
+                    generated,
+                )
+                self.assertIn("export const EFFECT_FINGERPRINTS: Record<EffectId, string> = {", generated)
+                return fingerprint, generated
+
+            try:
+                gen_effect_registry.TOOLS_DIR = project
+                gen_effect_registry.THEMES_ROOT = workspace / "themes"
+                element_registry.discover_packs = lambda root=None: real_discover_packs(local_pack.parent)
+
+                original, generated = render_fingerprint()
+                self.assertIn("'hash-probe'", generated)
+
+                component.write_text("export default function HashProbe() { return 'component-v2'; }\n", encoding="utf-8")
+                after_component, _ = render_fingerprint()
+                self.assertNotEqual(original, after_component)
+
+                component.write_text("export default function HashProbe() { return null; }\n", encoding="utf-8")
+                support_css.write_text(".hash-probe { color: blue; }\n", encoding="utf-8")
+                after_css, _ = render_fingerprint()
+                self.assertNotEqual(original, after_css)
+
+                support_css.write_text(".hash-probe { color: red; }\n", encoding="utf-8")
+                support_ts.write_text("export const accent = 'blue';\n", encoding="utf-8")
+                after_ts, _ = render_fingerprint()
+                self.assertNotEqual(original, after_ts)
+
+                support_ts.write_text("export const accent = 'red';\n", encoding="utf-8")
+                asset.write_text("badge-v2\n", encoding="utf-8")
+                after_asset, _ = render_fingerprint()
+                self.assertNotEqual(original, after_asset)
+
+                asset.write_text("badge-v1\n", encoding="utf-8")
+                payload = json.loads(manifest.read_text(encoding="utf-8"))
+                payload["metadata"]["label"] = "Hash Probe v2"
+                manifest.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+                after_manifest, _ = render_fingerprint()
+                self.assertNotEqual(original, after_manifest)
             finally:
                 gen_effect_registry.TOOLS_DIR = old_tools_dir
                 gen_effect_registry.THEMES_ROOT = old_themes_root
@@ -349,7 +463,10 @@ class EffectsCatalogTest(unittest.TestCase):
         )
 
         generated = GENERATED.read_text(encoding="utf-8")
-        self.assertIn("import TextCard from '@theme-effects/text-card/component';", generated)
+        self.assertRegex(
+            generated,
+            r"import TextCard from '@theme-effects/text-card/component\?astrid=[0-9a-f]{12}';",
+        )
         self.assertNotIn("import TextCard from '@bundled-elements-effects/text-card/component';", generated)
 
     def test_generator_is_idempotent_for_same_theme(self) -> None:

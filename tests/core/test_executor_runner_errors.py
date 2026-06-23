@@ -164,27 +164,52 @@ def test_builtin_render_expands_semantic_timeline_assets_and_out_argv(tmp_path: 
         "astrid.packs.rendering.executors.render.run",
         "--timeline",
         str(tmp_path / "hype.timeline.json"),
+        "--out",
+        str((tmp_path / "render").resolve() / "hype.mp4"),
         "--assets",
         str(tmp_path / "hype.assets.json"),
+    )
+
+
+def test_builtin_render_omits_optional_assets_registry_when_absent(tmp_path: Path) -> None:
+    command = build_executor_command(
+        ExecutorRunRequest(
+            executor_id="rendering.render",
+            out=tmp_path / "render",
+            inputs={
+                "timeline": tmp_path / "hype.timeline.json",
+            },
+            python_exec="/opt/python",
+        ),
+        load_default_registry(),
+    )
+
+    assert command == (
+        "/opt/python",
+        "-m",
+        "astrid.packs.rendering.executors.render.run",
+        "--timeline",
+        str(tmp_path / "hype.timeline.json"),
         "--out",
         str((tmp_path / "render").resolve() / "hype.mp4"),
     )
 
 
-def test_builtin_render_rejects_legacy_assets_input_name(tmp_path: Path) -> None:
-    with pytest.raises(ExecutorRunnerError, match="missing required input\\(s\\): assets_registry"):
-        build_executor_command(
-            ExecutorRunRequest(
-                executor_id="rendering.render",
-                out=tmp_path / "render",
-                inputs={
-                    "timeline": tmp_path / "hype.timeline.json",
-                    "assets": tmp_path / "hype.assets.json",
-                },
-                python_exec="/opt/python",
-            ),
-            load_default_registry(),
-        )
+def test_builtin_render_does_not_treat_legacy_assets_input_as_assets_registry(tmp_path: Path) -> None:
+    command = build_executor_command(
+        ExecutorRunRequest(
+            executor_id="rendering.render",
+            out=tmp_path / "render",
+            inputs={
+                "timeline": tmp_path / "hype.timeline.json",
+                "assets": tmp_path / "hype.assets.json",
+            },
+            python_exec="/opt/python",
+        ),
+        load_default_registry(),
+    )
+
+    assert "--assets" not in command
 
 
 def test_builtin_render_omits_optional_theme_when_not_supplied_and_forwards_when_supplied(

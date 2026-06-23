@@ -50,6 +50,12 @@ class ElementDependencies:
 
 
 @dataclass(frozen=True)
+class ElementAsset:
+    name: str
+    path: Path
+
+
+@dataclass(frozen=True)
 class ElementDefinition:
     id: str
     kind: ElementKind
@@ -68,11 +74,16 @@ class ElementDefinition:
     inputs: tuple[Port, ...] = ()
     outputs: tuple[Output, ...] = ()
     runtime: dict[str, Any] = field(default_factory=dict)
+    assets: tuple[ElementAsset, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["root"] = str(self.root)
         data["component"] = str(self.component)
+        if self.assets:
+            data["assets"] = {asset.name: asset.path.as_posix() for asset in self.assets}
+        else:
+            data.pop("assets", None)
         return data
 
     def to_json(self, *, indent: int | None = 2) -> str:
@@ -193,6 +204,7 @@ def load_element_definition(
         for index, item in enumerate(payload.get("outputs") or ())
     )
     runtime = _parse_runtime(payload.get("runtime"), path=f"{manifest_path}.runtime")
+    assets = _parse_assets(payload.get("assets"), element_root=element_root, path=f"{manifest_path}.assets")
     definition = ElementDefinition(
         id=element_id,
         kind=folder_kind,
@@ -211,6 +223,7 @@ def load_element_definition(
         inputs=element_inputs,
         outputs=element_outputs,
         runtime=runtime,
+        assets=assets,
     )
     return validate_element_definition(
         definition,
@@ -249,6 +262,7 @@ def validate_element_definition(
         raise ElementValidationError("element.metadata must be an object")
     if not isinstance(definition.runtime, dict):
         raise ElementValidationError("element.runtime must be an object")
+    _validate_assets(definition.assets, element_root=definition.root, path="element.assets")
     _validate_runtime_adapter(definition.runtime, f"{definition.kind}/{definition.id}")
     _validate_capability_text(
         definition.description,
@@ -279,6 +293,7 @@ def _parse_definition(raw: dict[str, Any]) -> ElementDefinition:
         inputs=tuple(raw.get("inputs", ()) or ()),
         outputs=tuple(raw.get("outputs", ()) or ()),
         runtime=_parse_runtime(raw.get("runtime"), path="element.runtime"),
+        assets=_parse_assets(raw.get("assets"), element_root=Path(raw["root"]), path="element.assets"),
     )
 
 
@@ -306,6 +321,60 @@ def _parse_dependencies(raw: Any, *, path: str) -> ElementDependencies:
         js_packages=tuple(_string_list(raw.get("js_packages", ()), path=f"{path}.js_packages")),
         python_requirements=tuple(_string_list(raw.get("python_requirements", ()), path=f"{path}.python_requirements")),
     )
+
+
+def _parse_assets(raw: Any, *, element_root: Path, path: str) -> tuple[ElementAsset, ...]:
+    if raw is None:
+        return ()
+    if not isinstance(raw, dict):
+        raise ElementValidationError(f"{path} must be an object")
+    parsed: list[ElementAsset] = []
+    for name, value in sorted(raw.items()):
+        asset_path = f"{path}.{name}"
+        if not isinstance(name, str) or not name.strip():
+            raise ElementValidationError(f"{path} keys must be non-empty strings")
+        _validate_id(name, asset_path)
+        if not isinstance(value, str) or not value.strip():
+            raise ElementValidationError(f"{asset_path} must be a non-empty relative file path")
+        parsed.append(
+            ElementAsset(
+                name=name,
+                path=_normalize_asset_path(value, element_root=element_root, path=asset_path),
+            )
+        )
+    return tuple(parsed)
+
+
+def _validate_assets(assets: Any, *, element_root: Path, path: str) -> None:
+    if not isinstance(assets, tuple):
+        raise ElementValidationError(f"{path} must be an immutable tuple")
+    names: set[str] = set()
+    for index, asset in enumerate(assets):
+        item_path = f"{path}[{index}]"
+        if not isinstance(asset, ElementAsset):
+            raise ElementValidationError(f"{item_path} must be an ElementAsset")
+        _validate_id(asset.name, f"{item_path}.name")
+        if asset.name in names:
+            raise ElementValidationError(f"{item_path}.name duplicates asset {asset.name!r}")
+        names.add(asset.name)
+        _normalize_asset_path(asset.path, element_root=element_root, path=f"{item_path}.path")
+
+
+def _normalize_asset_path(value: str | Path, *, element_root: Path, path: str) -> Path:
+    candidate = Path(value)
+    if candidate.is_absolute():
+        raise ElementValidationError(f"{path} must be relative to the element root")
+    if not candidate.parts or any(part == "" for part in candidate.parts):
+        raise ElementValidationError(f"{path} must be a non-empty relative file path")
+    root = element_root.resolve()
+    resolved = (root / candidate).resolve()
+    try:
+        normalized = resolved.relative_to(root)
+    except ValueError as exc:
+        raise ElementValidationError(f"{path} must stay inside the element root") from exc
+    if not resolved.is_file():
+        raise ElementValidationError(f"{path} file does not exist: {normalized.as_posix()}")
+    return normalized
 
 
 def _string_list(raw: Any, *, path: str) -> list[str]:

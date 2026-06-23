@@ -34,7 +34,9 @@ class HtmlCanvasEffectExecutorTest(unittest.TestCase):
             )
 
             element_root = project / "astrid" / "packs" / "local" / "elements" / "effects" / "glass-product-card"
+            local_pack_manifest = project / "astrid" / "packs" / "local" / "pack.yaml"
             self.assertEqual(Path(report["element_root"]), element_root)
+            self.assertTrue(local_pack_manifest.is_file())
             self.assertTrue((element_root / "component.tsx").is_file())
             self.assertTrue((element_root / "element.yaml").is_file())
             self.assertTrue(report_path.is_file())

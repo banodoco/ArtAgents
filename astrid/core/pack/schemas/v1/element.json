@@ -70,6 +70,10 @@
         "required": ["name"]
       }
     },
+    "assets": {
+      "type": "object",
+      "additionalProperties": {"type": "string"}
+    },
     "runtime": {
       "type": "object",
       "properties": {

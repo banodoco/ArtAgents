@@ -465,8 +465,15 @@ def resolve_bridge_asset(
     asset_key: str,
     *,
     root: str | Path | None = None,
+    sync_sources: bool = True,
 ) -> BridgeResolvedAsset | None:
-    """Resolve one registry asset without reading the media bytes into memory."""
+    """Resolve one registry asset without reading the media bytes into memory.
+
+    When *sync_sources* is False, the registry is read (and derived if missing)
+    but the sources.json sync/write step is skipped. This is appropriate for
+    read-only hot-paths such as byte-range media serving where the sync side
+    effects are unnecessary on every chunk request.
+    """
     record = find_bridge_timeline(project_slug, timeline, root=root)
     if record is None:
         return None
@@ -474,7 +481,8 @@ def resolve_bridge_asset(
     registry = _read_registry_payload(record.timeline_home / "registry.json")
     if "assets" not in registry:
         registry = _derive_registry_from_sources(record, root=root)
-    registry = _sync_bridge_sources(record, registry, root=root)
+    if sync_sources:
+        registry = _sync_bridge_sources(record, registry, root=root)
     assets = registry.get("assets")
     if not isinstance(assets, dict):
         return None

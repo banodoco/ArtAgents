@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -17,7 +18,7 @@ if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
 from astrid.core.element.registry import ElementRegistry, load_default_registry
-from astrid.core.element.schema import ElementDefinition
+from astrid.core.element.schema import ELEMENT_MANIFEST_NAMES, ElementDefinition
 
 WORKSPACE_ROOT = TOOLS_DIR.parent
 THEMES_ROOT = WORKSPACE_ROOT / "themes"
@@ -53,6 +54,7 @@ ACTIVE_THEME_POINTER = TOOLS_DIR / "remotion" / "_active_theme.txt"
 ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
 ElementKind = Literal["effects", "animations", "transitions"]
+REGISTRY_STATE_VERSION = 1
 
 
 @dataclass(frozen=True)
@@ -63,6 +65,7 @@ class PluginRecord:
     root: Path
     meta: dict[str, Any]
     defaults: dict[str, Any]
+    fingerprint: str
     import_scope: str | None = None
 
 
@@ -148,7 +151,7 @@ def discover_transitions(theme_dir: Path | None = None) -> dict[str, PluginRecor
 
 def _import_path(plugin: PluginRecord) -> str:
     scope = plugin.import_scope or plugin.scope
-    return f"@{scope}-{plugin.kind}/{plugin.plugin_id}/component"
+    return f"@{scope}-{plugin.kind}/{plugin.plugin_id}/component?astrid={plugin.fingerprint[:12]}"
 
 
 def _element_registry(theme_dir: Path | None) -> ElementRegistry:
@@ -163,8 +166,56 @@ def _plugin_from_element(element: ElementDefinition, *, theme_dir: Path | None) 
         root=element.root,
         meta=element.metadata,
         defaults=element.defaults,
+        fingerprint=_fingerprint_element(element),
         import_scope=_import_scope_for_element(element, theme_dir=theme_dir),
     )
+
+
+def _fingerprint_element(element: ElementDefinition) -> str:
+    root = element.root.resolve()
+    files: dict[str, Path] = {}
+
+    manifest_path = _manifest_path(root)
+    if manifest_path is not None:
+        files[_fingerprint_key("manifest", manifest_path.relative_to(root))] = manifest_path
+
+    component_path = element.component
+    if not component_path.is_absolute():
+        component_path = root / component_path
+    if component_path.is_file():
+        files[_fingerprint_key("component", component_path.resolve().relative_to(root))] = component_path.resolve()
+
+    for suffix in (".ts", ".tsx", ".css"):
+        for support_path in root.rglob(f"*{suffix}"):
+            if support_path.is_file():
+                files[_fingerprint_key("support", support_path.resolve().relative_to(root))] = support_path.resolve()
+
+    for asset in element.assets:
+        asset_path = (root / asset.path).resolve()
+        if asset_path.is_file():
+            files[_fingerprint_key(f"asset:{asset.name}", asset.path)] = asset_path
+
+    digest = hashlib.sha256()
+    digest.update(b"astrid-element-fingerprint-v1\n")
+    digest.update(f"{element.kind}/{element.id}\n".encode("utf-8"))
+    for key in sorted(files):
+        digest.update(key.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(files[key].read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def _manifest_path(root: Path) -> Path | None:
+    for name in ELEMENT_MANIFEST_NAMES:
+        candidate = root / name
+        if candidate.is_file():
+            return candidate.resolve()
+    return None
+
+
+def _fingerprint_key(role: str, path: Path) -> str:
+    return f"{role}:{path.as_posix()}"
 
 
 def _import_scope_for_element(element: ElementDefinition, *, theme_dir: Path | None) -> str:
@@ -281,6 +332,30 @@ def _write_generated_registry(path: Path, content: str) -> bool:
     return True
 
 
+def compute_generated_registry_state(*, theme_dir: Path | None = None) -> dict[str, Any]:
+    """Return a deterministic fingerprint of the generated registry sources."""
+    generated = {
+        kind: generate_element_registry(kind, theme_dir=theme_dir)
+        for kind in sorted(OUTPUTS)
+    }
+    digest = hashlib.sha256()
+    digest.update(f"astrid-registry-state-v{REGISTRY_STATE_VERSION}\n".encode("utf-8"))
+    content_hashes: dict[str, str] = {}
+    for kind, content in generated.items():
+        content_digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
+        content_hashes[kind] = content_digest
+        digest.update(kind.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(content_digest.encode("utf-8"))
+        digest.update(b"\0")
+    return {
+        "version": REGISTRY_STATE_VERSION,
+        "hash": digest.hexdigest(),
+        "theme": _theme_id(theme_dir),
+        "content_hashes": content_hashes,
+    }
+
+
 def generate(*, theme_dir: Path | None = None) -> str:
     return generate_element_registry("effects", theme_dir=theme_dir)
 
@@ -310,6 +385,10 @@ def generate_element_registry(kind: ElementKind, *, theme_dir: Path | None = Non
         f"  '{plugin_id}': {_ts_json(plugins[plugin_id].meta)},"
         for plugin_id in plugin_ids
     ]
+    fingerprint_entries = [
+        f"  '{plugin_id}': {_ts_string(plugins[plugin_id].fingerprint)},"
+        for plugin_id in plugin_ids
+    ]
     ids = ", ".join(_ts_string(plugin_id) for plugin_id in plugin_ids)
     active_theme = f"{json.dumps(_theme_id(theme_dir))} as const" if theme_dir is not None else "null"
     ids_name = _ids_name(kind)
@@ -317,6 +396,7 @@ def generate_element_registry(kind: ElementKind, *, theme_dir: Path | None = Non
     registry_name = _registry_name(kind)
     defaults_name = f"{_constant_prefix(kind)}_DEFAULTS"
     meta_name = f"{_constant_prefix(kind)}_META"
+    fingerprints_name = f"{_constant_prefix(kind)}_FINGERPRINTS"
     blocks = [
         "// DO NOT EDIT - generated by tools/scripts/gen_effect_registry.py",
         f"import type {{{component_type}, {meta_type}}} from './effects-types';"
@@ -336,6 +416,9 @@ def generate_element_registry(kind: ElementKind, *, theme_dir: Path | None = Non
         f"export const {meta_name}: Record<{type_name}, {meta_type}> = {{",
         *meta_entries,
         "};",
+        f"export const {fingerprints_name}: Record<{type_name}, string> = {{",
+        *fingerprint_entries,
+        "};",
         "",
     ]
     return "\n".join(blocks)
@@ -350,6 +433,10 @@ def _generate_effect_registry(*, theme_dir: Path | None = None) -> str:
     ]
     registry_entries = [
         f"  '{effect_id}': {_component_name(effect_id)},"
+        for effect_id in effect_ids
+    ]
+    fingerprint_entries = [
+        f"  '{effect_id}': {_ts_string(effects[effect_id].fingerprint)},"
         for effect_id in effect_ids
     ]
     ids = ", ".join(_ts_string(effect_id) for effect_id in effect_ids)
@@ -372,6 +459,9 @@ def _generate_effect_registry(*, theme_dir: Path | None = None) -> str:
         "};",
         "export const CLIP_TYPE_ALIASES: Record<string, EffectId> = {",
         *alias_entries,
+        "};",
+        "export const EFFECT_FINGERPRINTS: Record<EffectId, string> = {",
+        *fingerprint_entries,
         "};",
         "",
     ]

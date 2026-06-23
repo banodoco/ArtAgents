@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import json
 import mimetypes
+import os
 import re
+import time
 from email.utils import formatdate
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 from urllib.parse import unquote, urlparse
 
 from astrid.core.foundation.project_paths import validate_project_slug
@@ -34,6 +36,8 @@ from astrid.core.timeline.paths import validate_timeline_slug, validate_timeline
 _RANGE_RE = re.compile(r"^bytes\s*=\s*(\d*)\s*-\s*(\d*)\s*$")
 _RANGELESS_FULL_BODY_LIMIT_BYTES = 64 * 1024 * 1024
 _RANGELESS_INITIAL_CHUNK_BYTES = 1024 * 1024
+_OPEN_ENDED_RANGE_CHUNK_BYTES = 4 * 1024 * 1024
+_DIAGNOSTICS_ENABLED = os.environ.get("ASTRID_BRIDGE_DIAGNOSTICS", "0") != "0"
 
 
 class LocalBridgeHTTPServer(ThreadingHTTPServer):
@@ -57,16 +61,81 @@ def make_local_bridge_handler(*, projects_root: Path):
     """Build a request handler bound to one resolved projects root."""
 
     class Handler(BaseHTTPRequestHandler):
+        _asset_resolution_cache: ClassVar[dict[tuple[str, str, str], dict[str, Any]]] = {}
+
         def log_message(self, _fmt: str, *_args: Any) -> None:
             return
+
+        def handle_one_request(self) -> None:
+            self._diag_started_at: float | None = None
+            self._diag_response_status: int | None = None
+            self._diag_content_range: str | None = None
+            self._diag_content_length: str | None = None
+            try:
+                super().handle_one_request()
+            finally:
+                self._diag_finish_request()
+
+        def parse_request(self) -> bool:
+            parsed = super().parse_request()
+            if parsed:
+                self._diag_begin_request()
+            return parsed
+
+        def send_response(self, code: int, message: str | None = None) -> None:
+            self._diag_response_status = code
+            super().send_response(code, message)
+
+        def send_header(self, keyword: str, value: str) -> None:
+            lower_keyword = keyword.lower()
+            if lower_keyword == "content-range":
+                self._diag_content_range = value
+            elif lower_keyword == "content-length":
+                self._diag_content_length = value
+            super().send_header(keyword, value)
+
+        def _diag_begin_request(self) -> None:
+            if not _DIAGNOSTICS_ENABLED:
+                return
+            self._diag_started_at = time.perf_counter()
+            print(
+                "[AstridBridge] request",
+                {
+                    "method": self.command,
+                    "path": self.path,
+                    "range": self.headers.get("Range"),
+                    "origin": self.headers.get("Origin"),
+                    "userAgent": self.headers.get("User-Agent"),
+                },
+                flush=True,
+            )
+
+        def _diag_finish_request(self) -> None:
+            if not _DIAGNOSTICS_ENABLED or self._diag_started_at is None:
+                return
+            duration_ms = (time.perf_counter() - self._diag_started_at) * 1000
+            print(
+                "[AstridBridge] response",
+                {
+                    "method": getattr(self, "command", None),
+                    "path": getattr(self, "path", None),
+                    "status": self._diag_response_status,
+                    "contentRange": self._diag_content_range,
+                    "bytesServed": self._diag_content_length,
+                    "durationMs": round(duration_ms, 2),
+                },
+                flush=True,
+            )
 
         # ------------------------------------------------------------------
         # CORS / shared headers
         # ------------------------------------------------------------------
 
         _ALLOWED_ORIGINS: tuple[str, ...] = (
+            "http://localhost:2222",
             "http://localhost:3000",
             "http://localhost:5173",
+            "http://127.0.0.1:2222",
             "http://127.0.0.1:3000",
             "http://127.0.0.1:5173",
         )
@@ -277,6 +346,70 @@ def make_local_bridge_handler(*, projects_root: Path):
                 return
             stream_file_range(range_start, content_len)
 
+
+
+        def _resolve_cached_asset(
+            self,
+            project_slug: str,
+            timeline_ref: str,
+            asset_key: str,
+        ) -> tuple[Path, int, str, str, str, bool] | None:
+            """Resolve an asset path once and cache the result per file identity.
+
+            The cache is keyed by (project, timeline, asset_key) and invalidated
+            when the underlying file's mtime or size changes. This avoids the
+            expensive registry re-sync and timeline lookup on every byte-range
+            request for the same asset.
+            """
+            cache_key = (project_slug, timeline_ref, asset_key)
+            cached = self._asset_resolution_cache.get(cache_key)
+            if cached is not None:
+                local_path = cached["local_path"]
+                try:
+                    stat = local_path.stat()
+                except OSError:
+                    self._asset_resolution_cache.pop(cache_key, None)
+                    return None
+                if stat.st_mtime_ns == cached["mtime_ns"] and stat.st_size == cached["file_size"]:
+                    return (
+                        local_path,
+                        cached["file_size"],
+                        cached["content_type"],
+                        cached["etag"],
+                        cached["last_modified"],
+                        True,
+                    )
+                self._asset_resolution_cache.pop(cache_key, None)
+
+            resolved = resolve_bridge_asset(
+                project_slug, timeline_ref, asset_key, root=projects_root, sync_sources=False,
+            )
+            if resolved is None:
+                return None
+            if resolved.source_kind == "http":
+                return None
+            local_path = resolved.local_path
+            if local_path is None or not local_path.is_file():
+                return None
+
+            stat = local_path.stat()
+            file_size = stat.st_size
+            content_type, _ = mimetypes.guess_type(str(local_path))
+            if content_type is None:
+                content_type = "application/octet-stream"
+            etag = f'"{stat.st_mtime_ns:x}-{file_size:x}"'
+            last_modified = formatdate(stat.st_mtime, usegmt=True)
+
+            self._asset_resolution_cache[cache_key] = {
+                "local_path": local_path,
+                "file_size": file_size,
+                "mtime_ns": stat.st_mtime_ns,
+                "content_type": content_type,
+                "etag": etag,
+                "last_modified": last_modified,
+            }
+            return local_path, file_size, content_type, etag, last_modified, False
+
         def _serve_asset(
             self,
             project_slug: str,
@@ -292,9 +425,7 @@ def make_local_bridge_handler(*, projects_root: Path):
             416 — unsatisfiable range (start >= file size, etc.).
             404 — asset key not in registry, file missing, or HTTP-only.
             """
-            resolved = resolve_bridge_asset(
-                project_slug, timeline_ref, asset_key, root=projects_root,
-            )
+            resolved = self._resolve_cached_asset(project_slug, timeline_ref, asset_key)
             if resolved is None:
                 self._send_error(
                     404, "asset_not_found",
@@ -302,29 +433,7 @@ def make_local_bridge_handler(*, projects_root: Path):
                 )
                 return
 
-            if resolved.source_kind == "http":
-                self._send_error(
-                    404, "asset_not_local",
-                    f"asset {asset_key!r} is an HTTP reference, not a local file",
-                )
-                return
-
-            local_path = resolved.local_path
-            if local_path is None or not local_path.is_file():
-                self._send_error(
-                    404, "asset_file_missing",
-                    f"file for asset {asset_key!r} does not exist on disk",
-                )
-                return
-
-            stat = local_path.stat()
-            file_size = stat.st_size
-            etag = f'"{stat.st_mtime_ns:x}-{file_size:x}"'
-            last_modified = formatdate(stat.st_mtime, usegmt=True)
-
-            content_type, _ = mimetypes.guess_type(str(local_path))
-            if content_type is None:
-                content_type = "application/octet-stream"
+            local_path, file_size, content_type, etag, last_modified, _was_cached = resolved
 
             def send_asset_headers(
                 *,
@@ -425,7 +534,10 @@ def make_local_bridge_handler(*, projects_root: Path):
             elif range_start_str != "" and range_end_str == "":
                 # ---- open-ended: bytes=N- ----
                 range_start = int(range_start_str)
-                range_end = file_size - 1
+                if file_size > _RANGELESS_FULL_BODY_LIMIT_BYTES:
+                    range_end = min(file_size - 1, range_start + _OPEN_ENDED_RANGE_CHUNK_BYTES - 1)
+                else:
+                    range_end = file_size - 1
             else:
                 range_start = int(range_start_str)
                 range_end = int(range_end_str)
