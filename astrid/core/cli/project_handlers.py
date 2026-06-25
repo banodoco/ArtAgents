@@ -298,6 +298,7 @@ def _cmd_edit(args: argparse.Namespace) -> int:
         expected_version=current_version,
         retries=3,
         force=False,
+        use_append_transport=False,
     )
     if args.json:
         _print_json(

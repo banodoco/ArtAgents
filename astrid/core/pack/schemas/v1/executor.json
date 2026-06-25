@@ -35,7 +35,8 @@
               "input": {"type": "string"},
               "flag": {"type": ["string", "null"]},
               "repeatable": {"type": "boolean"},
-              "optional": {"type": "boolean"}
+              "optional": {"type": "boolean"},
+              "before": {"type": ["string", "null"]}
             },
             "required": ["input"],
             "additionalProperties": false

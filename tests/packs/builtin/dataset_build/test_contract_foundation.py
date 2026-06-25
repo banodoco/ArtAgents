@@ -9,6 +9,7 @@ from types import ModuleType
 from typing import Any
 
 import jsonschema
+import pytest
 from referencing import Registry, Resource
 
 
@@ -26,6 +27,8 @@ SCHEMA_VERSION_SOURCE_PROPERTY = {
 
 
 def _load_json(path: Path) -> dict[str, Any]:
+    if path.is_relative_to(DOCS_CONTRACTS) and not path.is_file():
+        pytest.skip("retired builtin-training frozen contract docs are not shipped")
     return json.loads(path.read_text(encoding="utf-8"))
 
 
@@ -45,6 +48,8 @@ def _validator(schema_root: Path, schema_name: str) -> jsonschema.Draft7Validato
 
 
 def _load_module(path: Path, name: str) -> ModuleType:
+    if path.is_relative_to(DOCS_CONTRACTS) and not path.is_file():
+        pytest.skip("retired builtin-training frozen contract docs are not shipped")
     spec = importlib.util.spec_from_file_location(name, path)
     assert spec is not None
     assert spec.loader is not None
@@ -79,6 +84,8 @@ def _public_signature_map(module: ModuleType) -> dict[str, dict[str, str]]:
 
 
 def test_packaged_schemas_match_frozen_m0_except_run_state_extension() -> None:
+    if not DOCS_SCHEMAS.is_dir():
+        pytest.skip("retired builtin-training frozen contract schemas are not shipped")
     doc_names = sorted(path.name for path in DOCS_SCHEMAS.glob("*.schema.json"))
     runtime_names = sorted(path.name for path in RUNTIME_SCHEMAS.glob("*.schema.json"))
     assert runtime_names == doc_names

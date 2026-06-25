@@ -168,7 +168,7 @@ def validate_registry_with_backends(
     if not isinstance(raw, dict):
         raise ValueError(f"registry must be a dict, got {type(raw).__name__}")
 
-    registry = taxonomy_registry or GENERATION_TAXONOMY
+    registry = taxonomy_registry or GenerationTaxonomyRegistry()
     backend_ids = frozenset(allowed_backend_ids or registry.backend_ids())
     if not backend_ids:
         raise ValueError("allowed backend ids must not be empty")

@@ -6,7 +6,11 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
-from ._base import TimelineEventSchemaError, _require_nonempty_str, _validate_jsonable
+from ._base import (
+    TimelineEventSchemaError,
+    TimelineImportSource,
+    _validate_jsonable,
+)
 
 
 @dataclass(frozen=True)
@@ -22,14 +26,21 @@ class AssetRegistryReplacedPayload:
     """
 
     registry: dict[str, Any]
-    source: str | None = None
+    source: TimelineImportSource | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.registry, dict):
             raise TimelineEventSchemaError("payload.registry must be an object")
         _validate_jsonable(self.registry, "payload.registry")
-        if self.source is not None:
-            _require_nonempty_str(self.source, "payload.source")
+        if self.source is not None and self.source not in {
+            "legacy_local",
+            "supabase_config",
+            "editor_save",
+            "other",
+        }:
+            raise TimelineEventSchemaError(
+                "payload.source must be legacy_local, supabase_config, editor_save, or other"
+            )
 
     def to_json_obj(self) -> dict[str, Any]:
         payload: dict[str, Any] = {"registry": deepcopy(self.registry)}

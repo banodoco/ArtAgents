@@ -91,7 +91,9 @@ def test_platform_contract_test_avoids_internal_astrid_imports() -> None:
 # areas, and preserves the disclosure-only trust block invariants.
 # ---------------------------------------------------------------------------
 
-PLATFORM_CONTRACT_DOC = Path(__file__).resolve().parents[1] / "docs" / "platform-contract.md"
+PLATFORM_CONTRACT_DOC = (
+    Path(__file__).resolve().parents[1] / "docs" / "contracts" / "platform-contract.md"
+)
 
 _REQUIRED_V1_SCHEMA_FILES = frozenset(
     {

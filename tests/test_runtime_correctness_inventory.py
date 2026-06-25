@@ -4,6 +4,7 @@ import ast
 import re
 from pathlib import Path
 
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 INVENTORY = ROOT / "docs" / "runtime-correctness-m3-inventory.md"
@@ -17,6 +18,8 @@ PLANNED_ASSERT_CONVERSIONS = {
 
 
 def _inventory_text() -> str:
+    if not INVENTORY.is_file():
+        pytest.skip("retired runtime-correctness M3 inventory is not shipped")
     return INVENTORY.read_text(encoding="utf-8")
 
 

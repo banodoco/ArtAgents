@@ -34,6 +34,11 @@ MAX_COUNT = 9
 _client = default_client()
 
 
+def _load_env_var(name: str, *, env_file: Path | None = None) -> str:
+    scope = name.lower().removesuffix("_api_key").removesuffix("_key")
+    return CredentialsScope.get(scope, env_file=env_file)
+
+
 
 def write_json(path: Path, payload: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)

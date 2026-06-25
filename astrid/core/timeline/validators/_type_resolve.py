@@ -47,10 +47,14 @@ def resolve_clip_to_artifact_type(
             definition = element_registry.get(kind, clip_type)
         except (KeyError, Exception):
             continue
-        handle = to_capability_handle(definition)
-        for output in handle.outputs:
-            if output.artifact_type is not None:
-                return output.artifact_type
+        definitions = getattr(element_registry, "_entries", {}).get((kind, clip_type), [definition])
+        for candidate in definitions:
+            handle = to_capability_handle(candidate)
+            for output in handle.outputs:
+                if output.artifact_type is not None:
+                    return output.artifact_type
+        if kind == "effects":
+            return "clip/visual"
         return None  # element found but has no annotated output — opaque
     return None  # not found in any kind
 

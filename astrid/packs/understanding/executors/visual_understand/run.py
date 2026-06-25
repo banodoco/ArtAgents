@@ -52,6 +52,10 @@ def _die(message: str) -> None:
     pack_die(message, recovery_command="check the inputs and retry; see --help for usage")
 
 
+def load_api_key(*, env_file: Path | None = None) -> str:
+    return CredentialsScope.get("openai", env_file=env_file)
+
+
 def _parse_timestamp(value: str) -> float:
     raw = value.strip()
     if not raw:
@@ -415,7 +419,7 @@ def run(args: argparse.Namespace) -> int:
     if args.dry_run:
         return emit_dry_run_preview(payload_preview, "understanding.visual_understand")
 
-    api_key = CredentialsScope.get("openai", env_file=args.env_file)
+    api_key = load_api_key(env_file=args.env_file)
     response_schema: dict[str, Any] | None = None
     if args.response_schema:
         schema_path = args.response_schema.expanduser()

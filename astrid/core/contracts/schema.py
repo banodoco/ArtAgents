@@ -51,6 +51,7 @@ class CommandInputArg:
     flag: str | None = None
     repeatable: bool = False
     optional: bool = False
+    before: str | None = None
 
 
 @dataclass(frozen=True)

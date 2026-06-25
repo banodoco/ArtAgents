@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from astrid.packs.training.orchestrators.dataset_build.config import load_dataset_config
 
 
@@ -42,6 +44,8 @@ def test_always_sunny_example_is_distinct_strict_generic_dataset_config() -> Non
 
 
 def test_migration_docs_explain_m1_scope_and_no_compatibility_shim() -> None:
+    if not MIGRATION_DOC.is_file():
+        pytest.skip("retired builtin dataset-build migration doc is not shipped")
     text = MIGRATION_DOC.read_text(encoding="utf-8")
 
     assert "M1 reproduces the prototype's generic VLM bucket-judge and caption flow" in text

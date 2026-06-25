@@ -570,3 +570,11 @@ from astrid.core.timeline.validators.timeline import (
     _validate_effect_params as _validate_effect_params,
     validate_timeline as validate_timeline,
 )
+
+for _exported_name in (
+    "ArrangementDurationError",
+    "_effect_ids",
+    "validate_timeline",
+):
+    globals()[_exported_name].__module__ = __name__
+del _exported_name

@@ -187,7 +187,7 @@ def _dispatch_lifecycle(command: str) -> Any:
                 raise AstridError(
                     "'astrid skip' does not support '--engine arnold'",
                     valid_options=["task"],
-                    recovery_command="astrid skip --engine task ...",
+                    recovery_command="astrid skip --reason recover",
                     state_snapshot={"args": args, "command": command},
                 )
             arnold_cli = _load_arnold_host_cli()
@@ -492,7 +492,7 @@ def _reject_arnold_for_task_only_verb(
 ) -> None:
     """Raise AstridError when ``--engine arnold`` is used with a task-only verb."""
     if recovery_command is None:
-        recovery_command = f"astrid {verb} --engine task ..."
+        recovery_command = f"astrid {verb} --help"
     raise AstridError(
         f"'astrid {verb}' does not support '--engine arnold'",
         valid_options=["task"],

@@ -23,6 +23,8 @@ FIXTURES = ROOT / "docs" / "megaplan" / "epics" / "builtin-training" / "contract
 
 
 def _fixture(name: str) -> Path:
+    if not FIXTURES.is_dir():
+        pytest.skip("retired builtin-training contract fixtures are not shipped")
     return FIXTURES / name
 
 

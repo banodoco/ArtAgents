@@ -119,6 +119,7 @@ class SupabaseDataProvider:
         force: bool = False,
         read_auth: Auth | None = None,
         asset_registry: Mapping[str, Any] | None = None,
+        use_append_transport: bool = True,
     ) -> SaveResult:
         write_auth = self._resolve_write_auth(auth, service_role_key)
         return timeline_io.save_timeline(
@@ -134,7 +135,11 @@ class SupabaseDataProvider:
             force=force,
             timeout=self.timeout,
             asset_registry=asset_registry,
-            append_service_role_key=service_role_key,
+            append_service_role_key=(
+                (service_role_key or self.service_role_key)
+                if use_append_transport
+                else None
+            ),
         )
 
     def load_asset_registry(

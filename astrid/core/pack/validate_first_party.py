@@ -6,6 +6,7 @@ Validates the ``astrid/packs/`` source tree structure and inventory.
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 from astrid.core.pack.validate_layout import LayoutValidationIssue
@@ -107,6 +108,7 @@ def _validate_first_party_packs_root_inventory(root: Path) -> list[str]:
         if child.is_dir()
         and not child.name.startswith(".")
         and child.name not in _IGNORED_PACKS_ROOT_DIRS
+        and not _is_repo_ignored_first_party_child(root, child)
     }
     expected_pack_ids = set(_FIRST_PARTY_PACK_IDS)
     allowed_names = expected_pack_ids | _FIRST_PARTY_INTERNAL_DIRS
@@ -153,6 +155,32 @@ def _validate_first_party_packs_root_inventory(root: Path) -> list[str]:
         )
 
     return errors
+
+
+def _is_repo_ignored_first_party_child(root: Path, child: Path) -> bool:
+    if root != _FIRST_PARTY_PACKS_ROOT:
+        return False
+    rel = child.relative_to(_REPO_ROOT).as_posix()
+    tracked = subprocess.run(
+        ["git", "ls-files", "--", rel],
+        cwd=_REPO_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if not tracked.stdout.strip():
+        return True
+    try:
+        subprocess.run(
+            ["git", "check-ignore", "-q", "--", rel],
+            cwd=_REPO_ROOT,
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except (OSError, ValueError, subprocess.CalledProcessError):
+        return False
+    return True
 
 
 def _aggregate_first_party_packs_root_errors(

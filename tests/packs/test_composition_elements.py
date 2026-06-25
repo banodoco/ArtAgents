@@ -88,9 +88,9 @@ class CompositionElementTest(unittest.TestCase):
             timeline.validate_timeline(config)
 
     def test_bundled_element_registries_generate_together(self) -> None:
-        effects = gen_effect_registry.generate_element_registry("effects")
-        animations = gen_effect_registry.generate_element_registry("animations")
-        transitions = gen_effect_registry.generate_element_registry("transitions")
+        effects = gen_effect_registry.generate_element_registry("effects", include_local=False)
+        animations = gen_effect_registry.generate_element_registry("animations", include_local=False)
+        transitions = gen_effect_registry.generate_element_registry("transitions", include_local=False)
 
         self.assertIn("'text-card'", effects)
         self.assertRegex(effects, r"@pack-rendering-elements-effects/text-card/component")

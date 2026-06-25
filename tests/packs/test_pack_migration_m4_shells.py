@@ -41,6 +41,7 @@ EXPECTED_PACKS = {
             "builtin.generate_image": "generation.generate_image",
             "builtin.generate_image_openai": "generation.generate_image_openai",
             "builtin.generate_video": "generation.generate_video",
+            "builtin.generate_audio": "generation.generate_audio",
         },
     },
     "editorial": {

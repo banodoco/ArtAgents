@@ -9,7 +9,6 @@ import subprocess
 import threading
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +32,7 @@ from astrid.core.timeline.paths import (
     validate_timeline_ulid,
 )
 from astrid.core.timeline.projection import regenerate_projection
+from astrid.core.util.time import utc_now_seconds as utc_now_iso
 
 from .event_construction import asset_registry_to_events, config_to_events
 
@@ -862,7 +862,7 @@ def _write_video_proxy_metadata(
         prior_proxy = next_entry.get("videoProxy")
         proxy_meta = dict(prior_proxy) if isinstance(prior_proxy, dict) else {}
 
-        now = _utc_now_iso()
+        now = utc_now_iso()
         if "createdAt" not in proxy_meta:
             proxy_meta["createdAt"] = now
         proxy_meta["updatedAt"] = now
@@ -1212,7 +1212,7 @@ def _write_audio_proxy_metadata(
         prior_proxy = next_entry.get("audioProxy")
         proxy_meta = dict(prior_proxy) if isinstance(prior_proxy, dict) else {}
 
-        now = _utc_now_iso()
+        now = utc_now_iso()
         if "createdAt" not in proxy_meta:
             proxy_meta["createdAt"] = now
         proxy_meta["updatedAt"] = now
@@ -1388,10 +1388,6 @@ def _is_video_backed_source(source_entry: dict[str, Any], normalized_file: str) 
     if media_type and media_type.startswith("video/"):
         return True
     return Path(normalized_file).suffix.lower() in {".mp4", ".mov", ".m4v", ".webm", ".mkv", ".avi"}
-
-
-def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
 def _load_bridge_config(timeline_home: Path) -> dict[str, Any] | None:

@@ -134,11 +134,12 @@ class GenerationTaxonomyRegistry:
         feature_descriptors: Iterable[GenerationFeatureDescriptor] = (),
         mode_descriptors: Iterable[GenerationModeDescriptor] = (),
         backend_descriptors: Iterable[GenerationBackendIdDescriptor] = (),
+        include_audio_features: bool = True,
     ) -> None:
         self._feature_descriptors: dict[str, GenerationFeatureDescriptor] = {}
         self._mode_descriptors: dict[str, GenerationModeDescriptor] = {}
         self._backend_descriptors: dict[str, GenerationBackendIdDescriptor] = {}
-        self.register_features(_builtin_feature_descriptors())
+        self.register_features(_builtin_feature_descriptors(include_audio=include_audio_features))
         self.register_modes(_builtin_mode_descriptors())
         self.register_backends(_builtin_backend_descriptors())
         self.register_features(feature_descriptors)
@@ -256,11 +257,13 @@ class GenerationTaxonomyRegistry:
         return modality
 
 
-def _builtin_feature_descriptors() -> tuple[GenerationFeatureDescriptor, ...]:
-    return tuple(
-        GenerationFeatureDescriptor(id=feature_id)
-        for feature_id in set(VIDEO_FEATURES) | set(AUDIO_FEATURES)
-    )
+def _builtin_feature_descriptors(*, include_audio: bool = True) -> tuple[GenerationFeatureDescriptor, ...]:
+    feature_ids = [*VIDEO_FEATURES]
+    if include_audio:
+        for feature_id in AUDIO_FEATURES:
+            if feature_id not in feature_ids:
+                feature_ids.append(feature_id)
+    return tuple(GenerationFeatureDescriptor(id=feature_id) for feature_id in feature_ids)
 
 
 def _builtin_mode_descriptors() -> tuple[GenerationModeDescriptor, ...]:
@@ -287,4 +290,4 @@ def _builtin_backend_descriptors() -> tuple[GenerationBackendIdDescriptor, ...]:
     )
 
 
-GENERATION_TAXONOMY = GenerationTaxonomyRegistry()
+GENERATION_TAXONOMY = GenerationTaxonomyRegistry(include_audio_features=False)

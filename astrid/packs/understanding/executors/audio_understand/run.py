@@ -70,6 +70,10 @@ def _die(message: str) -> None:
     pack_die(message, recovery_command="fix the audio_understand inputs and rerun the command")
 
 
+def load_api_key(*, env_file: Path | None = None) -> str:
+    return CredentialsScope.get("openai", env_file=env_file)
+
+
 def _run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         cmd,
@@ -456,7 +460,7 @@ def run(args: argparse.Namespace) -> int:
     if args.dry_run:
         return emit_dry_run_preview(preview, "understanding.audio_understand")
 
-    api_key = CredentialsScope.get("openai", env_file=args.env_file)
+    api_key = load_api_key(env_file=args.env_file)
     results: list[dict[str, Any]] = []
     for model in models:
         for audio_input in audio_inputs:

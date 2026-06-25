@@ -43,6 +43,13 @@ RawTimelinePayload = dict[str, Any]
 Mutator = Callable[[RawTimelinePayload, int], RawTimelinePayload]
 
 
+class _AppendServiceRoleKeyUnset:
+    pass
+
+
+APPEND_SERVICE_ROLE_KEY_UNSET = _AppendServiceRoleKeyUnset()
+
+
 @dataclass(frozen=True)
 class SaveResult:
     timeline: RawTimelinePayload
@@ -154,7 +161,7 @@ def save_timeline(
     force: bool = False,
     timeout: float = 60.0,
     asset_registry: Mapping[str, Any] | None = None,
-    append_service_role_key: str | None = None,
+    append_service_role_key: str | None | _AppendServiceRoleKeyUnset = APPEND_SERVICE_ROLE_KEY_UNSET,
 ) -> SaveResult:
     """Apply ``mutator`` to the timeline and persist via the versioned RPC.
 
@@ -289,10 +296,15 @@ def save_timeline(
 def _resolve_append_service_role_key(
     *,
     write_auth: Auth,
-    append_service_role_key: str | None,
+    append_service_role_key: str | None | _AppendServiceRoleKeyUnset,
 ) -> str | None:
-    if append_service_role_key:
+    if isinstance(append_service_role_key, str) and append_service_role_key:
         return append_service_role_key
+    if append_service_role_key is None:
+        return None
+    scheme, token = write_auth
+    if scheme == "service_role":
+        return token
     return None
 
 

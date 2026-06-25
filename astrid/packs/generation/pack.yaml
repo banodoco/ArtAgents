@@ -20,11 +20,11 @@ permissions:
     reason: Reads FAL_KEY for cloud generation backends.
 description: Text-to-image and text-to-video generation across local (vibecomfy/ComfyUI) and cloud (fal, OpenAI) backends, with t2i/i2i/edit and t2v/i2v/flf modes.
 keywords: [image, video, generate, flux, fal, vibecomfy, t2i, t2v]
-capabilities: [generate_image, generate_image_openai, generate_video]
+capabilities: [generate_image, generate_image_openai, generate_video, generate_audio]
 agent:
   purpose: "Use to synthesize new image or video frames from text prompts (optionally with reference images), choosing a model and a local or cloud execution backend."
   do_not_use_for: "Editing/arranging existing footage (use video_editing for end-to-end assembly or editorial for analysis stages), Foley/audio generation (use the foley or fal packs), or lossless clip trimming (use the media pack)."
-  normal_entrypoints: [generation.generate_image, generation.generate_video, generation.generate_image_openai]
+  normal_entrypoints: [generation.generate_image, generation.generate_video, generation.generate_image_openai, generation.generate_audio]
 content:
   executors: executors
 aliases:
@@ -43,3 +43,8 @@ aliases:
   canonical_id: generation.generate_video
   deprecated: true
   deprecation_message: Moved to generation.generate_video
+- kind: executor
+  alias: builtin.generate_audio
+  canonical_id: generation.generate_audio
+  deprecated: true
+  deprecation_message: Moved to generation.generate_audio

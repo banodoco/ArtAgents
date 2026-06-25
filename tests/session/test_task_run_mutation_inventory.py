@@ -68,7 +68,7 @@ EXPECTED_TASK_RUN_CALLS: dict[CallSite, tuple[int, str]] = {
         "claim_orphan_lease",
         "append_event_to_locked_handle",
     ): (1, "same_lock_takeover_event_exception"),
-    CallSite("astrid/core/task/operator/inbox.py", "consume_inbox_entry", "release_writer_lease"): (
+    CallSite("astrid/core/io/inbox.py", "consume_inbox_entry", "release_writer_lease"): (
         1,
         "lease_release_after_inbox_abort",
     ),
@@ -105,6 +105,21 @@ EXPECTED_TASK_RUN_CALLS: dict[CallSite, tuple[int, str]] = {
         "append_runpod_sweeper_event",
         "append_event_locked",
     ): (1, "runpod_sweeper_owned_event_append"),
+    CallSite(
+        "astrid/core/integrations/arnold/host/cli.py",
+        "_append_arnold_ack_event",
+        "append_event_locked",
+    ): (1, "arnold_host_owned_event_append"),
+    CallSite(
+        "astrid/core/integrations/arnold/host/cli.py",
+        "_start_validated_arnold_run",
+        "append_event_locked",
+    ): (1, "arnold_host_owned_event_append"),
+    CallSite(
+        "astrid/core/integrations/arnold/session/cli.py",
+        "start_session_run",
+        "append_event_locked",
+    ): (1, "arnold_session_owned_event_append"),
 }
 
 EXPECTED_LEASE_REWRITE_CALLS = {
@@ -127,15 +142,6 @@ EXPECTED_LEASE_REWRITE_CALLS = {
 }
 
 EXPECTED_DIRECT_EVENT_WRITES = {
-    CallSite("astrid/core/task/events/__init__.py", "append_event_locked", "handle.write"): (
-        1,
-        "generic_event_transport",
-    ),
-    CallSite(
-        "astrid/core/task/events/__init__.py",
-        "append_event_to_locked_handle",
-        "handle.write",
-    ): (1, "generic_same_lock_event_transport"),
     CallSite("astrid/core/task/normalize.py", "dump_events_jsonl", "fh.write"): (
         2,
         "author_test_normalized_event_output",
@@ -160,6 +166,21 @@ APPROVED_PRODUCTION_APPEND_EVENT_LOCKED_CALLS: dict[CallSite, str] = {
         "append_runpod_sweeper_event",
         "append_event_locked",
     ): "runpod_sweeper_owned_event_append",
+    CallSite(
+        "astrid/core/integrations/arnold/host/cli.py",
+        "_append_arnold_ack_event",
+        "append_event_locked",
+    ): "arnold_host_owned_event_append",
+    CallSite(
+        "astrid/core/integrations/arnold/host/cli.py",
+        "_start_validated_arnold_run",
+        "append_event_locked",
+    ): "arnold_host_owned_event_append",
+    CallSite(
+        "astrid/core/integrations/arnold/session/cli.py",
+        "start_session_run",
+        "append_event_locked",
+    ): "arnold_session_owned_event_append",
 }
 
 APPROVED_PRODUCTION_IN_HANDLE_APPEND_CALLS: dict[CallSite, str] = {
@@ -176,16 +197,6 @@ APPROVED_PRODUCTION_IN_HANDLE_APPEND_CALLS: dict[CallSite, str] = {
 }
 
 APPROVED_PRODUCTION_DIRECT_EVENT_WRITES: dict[CallSite, str] = {
-    CallSite(
-        "astrid/core/task/events/__init__.py",
-        "append_event_locked",
-        "handle.write",
-    ): "generic_event_transport",
-    CallSite(
-        "astrid/core/task/events/__init__.py",
-        "append_event_to_locked_handle",
-        "handle.write",
-    ): "generic_same_lock_event_transport",
     CallSite(
         "astrid/core/task/normalize.py",
         "dump_events_jsonl",

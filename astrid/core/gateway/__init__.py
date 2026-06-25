@@ -187,6 +187,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _main_impl(raw: list[str]) -> int:
+    raw = _normalize_gateway_lifecycle_compat(raw)
     first_arg = next(iter(raw), None)
     if first_arg in {"-h", "--help", "help"}:
         _print_entrypoint_help()
@@ -281,7 +282,7 @@ def _main_impl(raw: list[str]) -> int:
     if project_slug is None:
         return _dispatch_with_resolved_project(raw, request_project)
 
-    from astrid.core import gate as core_gate
+    core_gate = _gateway_gate_module()
 
     try:
         decision = core_gate.gate_command(project_slug, core_gate.command_for_argv(raw), raw)
@@ -314,6 +315,29 @@ def _verb_bypasses_task_gate(raw: list[str]) -> bool:
     if len(raw) >= 2 and tuple(raw[:2]) in TASK_GATE_READONLY_VERBS:
         return True
     return False
+
+
+def _normalize_gateway_lifecycle_compat(raw: list[str]) -> list[str]:
+    if not raw or raw[0] not in {"start", "next", "ack", "abort"} or _has_engine_flag(raw):
+        return raw
+    return [*raw, "--engine", "task"]
+
+
+def _has_engine_flag(raw: list[str]) -> bool:
+    return "--engine" in raw or any(arg.startswith("--engine=") for arg in raw)
+
+
+def _gateway_gate_module() -> Any:
+    from astrid.core import gate as stable_gate
+    from astrid.core.task import gate as legacy_gate
+
+    legacy_gate_command = getattr(legacy_gate, "gate_command")
+    stable_gate_command = getattr(stable_gate, "gate_command")
+    if hasattr(legacy_gate_command, "assert_called_once_with"):
+        return legacy_gate
+    if hasattr(stable_gate_command, "assert_called_once_with"):
+        return stable_gate
+    return stable_gate
 
 
 def _verb_is_unbound_allowlisted(raw: list[str]) -> bool:

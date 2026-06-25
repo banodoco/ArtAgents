@@ -427,6 +427,20 @@ def make_local_bridge_handler(*, projects_root: Path):
             """
             resolved = self._resolve_cached_asset(project_slug, timeline_ref, asset_key)
             if resolved is None:
+                unresolved = resolve_bridge_asset(
+                    project_slug,
+                    timeline_ref,
+                    asset_key,
+                    root=projects_root,
+                    sync_sources=False,
+                )
+                if unresolved is not None and unresolved.source_kind == "http":
+                    self._send_error(
+                        404,
+                        "asset_not_local",
+                        f"asset {asset_key!r} is not available as a local file",
+                    )
+                    return
                 self._send_error(
                     404, "asset_not_found",
                     f"asset {asset_key!r} was not found in timeline {timeline_ref!r}",

@@ -10,17 +10,8 @@ from dataclasses import asdict, dataclass, is_dataclass
 from typing import Any
 from urllib.parse import quote
 
-from astrid.core.integrations.reigh.event_construction import (
-    ReighEventBatch,
-    asset_registry_to_events,
-    config_to_events,
-)
-from astrid.core.integrations.reigh.supabase_client import (
-    SupabaseHTTPError,
-    get_json,
-    post_json,
-    rpc,
-)
+from astrid.core.timeline.eventlog import reigh_events, supabase_client
+from astrid.core.timeline.eventlog.reigh_events import ReighEventBatch
 
 from ..events.schema import TimelineActor, TimelineEvent
 from ..events.schema.payloads._base import TimelineImportSource
@@ -37,6 +28,11 @@ from .types import (
 )
 
 _VERSION_MISMATCH_RE = re.compile(r"expected\s+(\d+),\s+found\s+(\d+)", re.IGNORECASE)
+
+SupabaseHTTPError = supabase_client.SupabaseHTTPError
+get_json = supabase_client.get_json
+post_json = supabase_client.post_json
+rpc = supabase_client.rpc
 
 
 @dataclass(frozen=True)
@@ -144,7 +140,7 @@ class LiveSupabaseAppendTransport:
                 txn_id=txn_id,
             ).primary_event
         raise EventLogUnsupportedRpcError(
-            "Supabase live append transport only supports "
+            f"{self.rpc_append_name} only supports "
             "timeline.config_replaced and timeline.asset_registry_replaced"
         )
 
@@ -161,7 +157,7 @@ class LiveSupabaseAppendTransport:
     ) -> SupabaseAppendResult:
         state = self._load_tail_state(timeline_id)
         cas_version = state.config_version if expected_version is None else expected_version
-        batch = config_to_events(
+        batch = reigh_events.config_to_events(
             config,
             asset_registry,
             timeline_id,
@@ -186,7 +182,7 @@ class LiveSupabaseAppendTransport:
     ) -> SupabaseAppendResult:
         state = self._load_tail_state(timeline_id)
         cas_version = state.config_version if expected_version is None else expected_version
-        batch = asset_registry_to_events(
+        batch = reigh_events.asset_registry_to_events(
             asset_registry,
             state.config,
             timeline_id,

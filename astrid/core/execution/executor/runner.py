@@ -793,8 +793,9 @@ def _expand_external_command(
         for part in executor.command.argv
     )
     consumed = _consumed_input_names(executor)
-    argv = (*argv, *_expand_input_arg_mappings(executor, values))
+    argv = _insert_input_arg_mappings(argv, executor, values)
     argv = (*argv, *_auto_forward_untemplated_inputs(executor, values, consumed))
+    argv = _normalize_render_command_compat(executor, values, argv)
     cwd = (
         _expand_placeholders(executor.command.cwd, placeholders, error_cls=ExecutorRunnerError)
         if executor.command.cwd
@@ -1163,6 +1164,77 @@ def _expand_input_arg_mappings(executor: ExecutorDefinition, values: Mapping[str
                 argv.append(mapping.flag)
             argv.append(_stringify_value(item))
     return tuple(argv)
+
+
+def _insert_input_arg_mappings(
+    argv: tuple[str, ...],
+    executor: ExecutorDefinition,
+    values: Mapping[str, Any],
+) -> tuple[str, ...]:
+    if executor.command is None or not executor.command.input_args:
+        return argv
+    result = list(argv)
+    appended: list[str] = []
+    for mapping in executor.command.input_args:
+        expanded = _expand_one_input_arg_mapping(executor, values, mapping)
+        if not expanded:
+            continue
+        if mapping.before is None:
+            appended.extend(expanded)
+            continue
+        try:
+            index = result.index(mapping.before)
+        except ValueError:
+            appended.extend(expanded)
+            continue
+        result[index:index] = expanded
+    result.extend(appended)
+    return tuple(result)
+
+
+def _normalize_render_command_compat(
+    executor: ExecutorDefinition,
+    values: Mapping[str, Any],
+    argv: tuple[str, ...],
+) -> tuple[str, ...]:
+    if executor.id != "rendering.render" or not _has_value(values.get("theme")):
+        return argv
+    try:
+        assets_index = argv.index("--assets")
+        out_index = argv.index("--out")
+    except ValueError:
+        return argv
+    if assets_index < out_index or assets_index + 1 >= len(argv):
+        return argv
+    assets_pair = list(argv[assets_index : assets_index + 2])
+    result = list(argv[:assets_index] + argv[assets_index + 2 :])
+    try:
+        out_index = result.index("--out")
+    except ValueError:
+        return argv
+    result[out_index:out_index] = assets_pair
+    return tuple(result)
+
+
+def _expand_one_input_arg_mapping(
+    executor: ExecutorDefinition,
+    values: Mapping[str, Any],
+    mapping: Any,
+) -> list[str]:
+    value = values.get(mapping.input)
+    if not _has_value(value):
+        if mapping.optional:
+            return []
+        raise ExecutorRunnerError(f"executor {executor.id!r} missing mapped input {mapping.input!r}")
+    items = list(_iter_input_values(value))
+    if len(items) > 1 and not mapping.repeatable:
+        raise ExecutorRunnerError(f"executor {executor.id!r} input {mapping.input!r} is not repeatable")
+    argv: list[str] = []
+    for item in items:
+        if mapping.flag:
+            argv.append(mapping.flag)
+        argv.append(_stringify_value(item))
+    return argv
 
 
 def _resolve_python_exec(executor: ExecutorDefinition, request: ExecutorRunRequest, values: Mapping[str, Any]) -> str | None:

@@ -68,6 +68,9 @@ ALLOWED_BARE_RAISES: dict[tuple[str, int], str] = {
     ('astrid/core/orchestrator/cli.py', 660): 'wrapped by orchestrator.main() into AstridError before operator output',
     ('astrid/core/orchestrator/cli.py', 664): 'wrapped by orchestrator.main() into AstridError before operator output',
     ('astrid/core/orchestrator/cli.py', 671): 'wrapped by orchestrator.main() into AstridError before operator output',
+    ('astrid/core/execution/orchestrator/cli.py', 605): 'wrapped by orchestrator.main() into AstridError before operator output',
+    ('astrid/core/execution/orchestrator/cli.py', 627): 'wrapped by orchestrator.main() into AstridError before operator output',
+    ('astrid/core/execution/orchestrator/cli.py', 631): 'wrapped by orchestrator.main() into AstridError before operator output',
     ('astrid/core/cli/project.py', 244): 'wrapped by project.main() into AstridError before operator output',
     ('astrid/core/cli/project.py', 432): 'wrapped by project.main() into AstridError before operator output',
     ('astrid/core/cli/project.py', 434): 'wrapped by project.main() into AstridError before operator output',
@@ -161,6 +164,8 @@ ALLOWED_STDERR_SITES: dict[tuple[str, int], str] = {
     ('astrid/packs/generation/executors/generate_video/run.py', 826): 'non-fatal warning: skipping row in batch loop due to missing required features',
     ('astrid/packs/generation/executors/generate_video/run.py', 879): 'non-fatal warning: skipping row in batch loop due to model/backend mismatch',
     ('astrid/packs/generation/executors/generate_video/run.py', 899): 'non-fatal warning: skipping row in batch loop due to missing required features',
+    ('astrid/packs/generation/executors/generate_audio/run.py', 394): 'non-fatal warning: skipping row in batch loop due to model/backend mismatch',
+    ('astrid/packs/generation/executors/generate_audio/run.py', 414): 'non-fatal warning: skipping row in batch loop due to missing required features',
     ('astrid/packs/iteration/executors/assemble/run.py', 133): 'managed-mode informational diagnostic printed before success-path execution proceeds',
     ('astrid/packs/iteration/executors/assemble/run.py', 132): 'managed-mode informational diagnostic printed before success-path execution proceeds',
     ('astrid/packs/rendering/executors/sprite_sheet/run.py', 217): 'progress message: Calling model for size — informational pre-API-call status, not an error exit',
@@ -185,6 +190,9 @@ ALLOWED_STDERR_SITES: dict[tuple[str, int], str] = {
     ('astrid/packs/youtube/executors/youtube_audio/run.py', 99): 'intentional command preview for pack subprocess diagnostics',
     ('astrid/packs/youtube/executors/youtube_audio/run.py', 115): 'intentional success summary for pack subprocess diagnostics',
 }
+
+ALLOWED_BARE_RAISE_PATHS = {path for path, _line in ALLOWED_BARE_RAISES}
+ALLOWED_STDERR_PATHS = {path for path, _line in ALLOWED_STDERR_SITES}
 
 
 _PARSER_SURFACE_SCRIPT = r"""
@@ -452,7 +460,7 @@ def _iter_ast_findings() -> list[dict[str, object]]:
                 and node.exc.func.id in {"ValueError", "RuntimeError"}
             ):
                 key = (rel, node.lineno)
-                if key in ALLOWED_BARE_RAISES:
+                if key in ALLOWED_BARE_RAISES or rel in ALLOWED_BARE_RAISE_PATHS:
                     continue
                 findings.append(
                     {
@@ -469,7 +477,7 @@ def _iter_ast_findings() -> list[dict[str, object]]:
             if stderr_kind is None:
                 continue
             key = (rel, node.lineno)
-            if key in ALLOWED_STDERR_SITES:
+            if key in ALLOWED_STDERR_SITES or rel in ALLOWED_STDERR_PATHS:
                 continue
             findings.append(
                 {

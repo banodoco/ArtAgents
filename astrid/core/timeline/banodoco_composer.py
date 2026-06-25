@@ -46,7 +46,7 @@ def _swap_from_dump(clip: dict[str, Any]) -> dict[str, Any]:
 
 
 def _round_at_for_dump(clip: dict[str, Any]) -> dict[str, Any]:
-    if "at" in clip and isinstance(clip["at"], (int, float)):
+    if "at" in clip and isinstance(clip["at"], float):
         clip["at"] = round(float(clip["at"]), 3)
     return clip
 

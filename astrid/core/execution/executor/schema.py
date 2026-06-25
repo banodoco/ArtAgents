@@ -447,6 +447,7 @@ def _parse_command_input_arg(raw: Any, path: str) -> CommandInputArg:
         flag=_optional_nullable_string(data, "flag", f"{path}.flag"),
         repeatable=_optional_bool(data, "repeatable", f"{path}.repeatable", default=False),
         optional=_optional_bool(data, "optional", f"{path}.optional", default=False),
+        before=_optional_nullable_string(data, "before", f"{path}.before"),
     )
 
 
@@ -671,6 +672,8 @@ def _validate_command(command: CommandSpec, placeholders: set[str]) -> None:
             raise ExecutorValidationError(f"{path}.input references unknown input {mapping.input!r}")
         if mapping.flag is not None:
             _validate_non_empty_string(mapping.flag, f"{path}.flag")
+        if mapping.before is not None:
+            _validate_non_empty_string(mapping.before, f"{path}.before")
 
 
 _validate_placeholders = _primitives.validate_placeholders

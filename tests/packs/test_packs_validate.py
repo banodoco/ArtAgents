@@ -12,6 +12,7 @@ Covers:
 from __future__ import annotations
 
 import shutil
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -36,7 +37,21 @@ def _mirror_first_party_packs_root(dest: Path) -> None:
     for child in sorted(_FIRST_PARTY_PACKS_ROOT.iterdir()):
         if not child.is_dir() or child.name.startswith("."):
             continue
+        if not _has_tracked_files(child):
+            continue
         (dest / child.name).symlink_to(child, target_is_directory=True)
+
+
+def _has_tracked_files(path: Path) -> bool:
+    rel = path.resolve().relative_to(_FIRST_PARTY_PACKS_ROOT.parents[1])
+    result = subprocess.run(
+        ["git", "ls-files", "--", rel.as_posix()],
+        cwd=_FIRST_PARTY_PACKS_ROOT.parents[1],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    return bool(result.stdout.strip())
 
 
 class MinimalPackTestCase(unittest.TestCase):

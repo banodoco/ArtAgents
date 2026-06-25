@@ -320,13 +320,34 @@ def test_all_shipped_packs_discoverable() -> None:
 def test_no_unexpected_pack_ids_ship() -> None:
     """No pack ids beyond the known shipped set should appear under
     ``astrid/packs/``.  Unexpected packs indicate unclassified additions."""
-    discovered = discover_packs(_PACKS_ROOT)
+    discovered = [
+        pack
+        for pack in discover_packs(_PACKS_ROOT)
+        if not _is_gitignored_repo_path(pack.root)
+    ]
     discovered_ids = {pack.id for pack in discovered}
     unexpected = discovered_ids - _SHIPPED_PACK_IDS
     assert not unexpected, (
         f"Unexpected pack ids discovered under astrid/packs/ "
         f"(must be classified as shipped or special): {sorted(unexpected)}"
     )
+
+
+def _is_gitignored_repo_path(path: Path) -> bool:
+    try:
+        rel = path.resolve().relative_to(_REPO_ROOT)
+    except ValueError:
+        return False
+    try:
+        subprocess.run(
+            ["git", "check-ignore", "-q", "--", rel.as_posix()],
+            check=True,
+            capture_output=True,
+            cwd=_REPO_ROOT,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return False
+    return True
 
 
 def test_skill_discovery_finds_core_shell() -> None:

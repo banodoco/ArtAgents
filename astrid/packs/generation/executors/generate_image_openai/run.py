@@ -73,6 +73,10 @@ def _warn(message: str) -> None:
 # Secrets resolution delegated to astrid.core.util.secrets (Sprint 01 ecosystem reconciliation).
 
 
+def _resolve_key(*, env_file: Path | None = None) -> str:
+    return CredentialsScope.get("openai", env_file=env_file)
+
+
 def _normalize_format(value: str) -> str:
     fmt = value.lower()
     if fmt not in FORMATS:
@@ -307,7 +311,7 @@ def _build_openai_manifest(
 
 def generate(args: argparse.Namespace) -> int:
     jobs = _jobs_from_args(args)
-    api_key = None if args.dry_run else CredentialsScope.get("openai", env_file=args.env_file)
+    api_key = None if args.dry_run else _resolve_key(env_file=args.env_file)
     out_dir = args.out_dir
     default_format = _normalize_format(args.output_format)
     manifest_jobs: list[dict[str, Any]] = []

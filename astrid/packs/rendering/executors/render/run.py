@@ -672,6 +672,22 @@ def _render_ffmpeg_media(timeline_path: Path, assets_path: Path, out_path: Path)
     return out_path
 
 
+def _can_render_with_ffmpeg_media(timeline_path: Path, assets_path: Path) -> bool:
+    try:
+        timeline_data = json.loads(timeline_path.read_text(encoding="utf-8"))
+        timeline.load_registry(assets_path)
+        _validate_ffmpeg_media_timeline(timeline_data)
+        tracks = {track.get("id"): track for track in timeline_data.get("tracks", [])}
+        has_visual_media_clip = any(
+            clip.get("clipType") == "media"
+            and tracks.get(clip.get("track"), {}).get("kind") == "visual"
+            for clip in timeline_data.get("clips", [])
+        )
+    except Exception:
+        return False
+    return has_visual_media_clip
+
+
 def _complex_clip_windows(timeline_data: dict, fps: int, *, handle_seconds: float = 0.25) -> list[tuple[float, float]]:
     duration = _timeline_duration_seconds(timeline_data)
     tracks = {track.get("id"): track for track in timeline_data.get("tracks", [])}
@@ -1235,6 +1251,8 @@ def render(
         return _render_ffmpeg_media(timeline_path, assets_path, out_path)
     if engine != "remotion":
         raise ValueError(f"Unsupported render engine: {engine}")
+    if _can_render_with_ffmpeg_media(timeline_path, assets_path):
+        return _render_ffmpeg_media(timeline_path, assets_path, out_path)
     project_dir = project_dir or (REPO_ROOT / "remotion")
     _validate_project_dir(project_dir)
     _regenerate_element_registries(project_dir, theme_path)

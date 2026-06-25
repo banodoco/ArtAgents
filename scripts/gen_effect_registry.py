@@ -121,7 +121,12 @@ def _workspace_root(kind: ElementKind) -> Path:
     return WORKSPACE_ROOT / kind
 
 
-def discover_plugins(kind: ElementKind, theme_dir: Path | None = None) -> dict[str, PluginRecord]:
+def discover_plugins(
+    kind: ElementKind,
+    theme_dir: Path | None = None,
+    *,
+    include_local: bool = True,
+) -> dict[str, PluginRecord]:
     _validate_kind(kind)
     registry = _element_registry(theme_dir)
     plugins: dict[str, PluginRecord] = {}
@@ -132,21 +137,45 @@ def discover_plugins(kind: ElementKind, theme_dir: Path | None = None) -> dict[s
                 f"WARN theme '{_theme_id(theme_dir) or _theme_id_from_element(conflict.winner) or 'unknown'}' overrides workspace {singular} '{conflict.id}'",
                 file=sys.stderr,
             )
-    for element in registry.list(kind=kind):
+    if include_local:
+        elements = registry.list(kind=kind)
+    else:
+        elements = tuple(
+            definitions[0]
+            for (item_kind, _), definitions in registry._entries.items()
+            if item_kind == kind
+            for definitions in [
+                [element for element in definitions if element.source != "pack:local"]
+            ]
+            if definitions
+        )
+    for element in elements:
         plugins[element.id] = _plugin_from_element(element, theme_dir=theme_dir)
     return plugins
 
 
-def discover_effects(theme_dir: Path | None = None) -> dict[str, EffectRecord]:
-    return discover_plugins("effects", theme_dir)
+def discover_effects(
+    theme_dir: Path | None = None,
+    *,
+    include_local: bool = True,
+) -> dict[str, EffectRecord]:
+    return discover_plugins("effects", theme_dir, include_local=include_local)
 
 
-def discover_animations(theme_dir: Path | None = None) -> dict[str, PluginRecord]:
-    return discover_plugins("animations", theme_dir)
+def discover_animations(
+    theme_dir: Path | None = None,
+    *,
+    include_local: bool = True,
+) -> dict[str, PluginRecord]:
+    return discover_plugins("animations", theme_dir, include_local=include_local)
 
 
-def discover_transitions(theme_dir: Path | None = None) -> dict[str, PluginRecord]:
-    return discover_plugins("transitions", theme_dir)
+def discover_transitions(
+    theme_dir: Path | None = None,
+    *,
+    include_local: bool = True,
+) -> dict[str, PluginRecord]:
+    return discover_plugins("transitions", theme_dir, include_local=include_local)
 
 
 def _import_path(plugin: PluginRecord) -> str:
@@ -332,10 +361,14 @@ def _write_generated_registry(path: Path, content: str) -> bool:
     return True
 
 
-def compute_generated_registry_state(*, theme_dir: Path | None = None) -> dict[str, Any]:
+def compute_generated_registry_state(
+    *,
+    theme_dir: Path | None = None,
+    include_local: bool = True,
+) -> dict[str, Any]:
     """Return a deterministic fingerprint of the generated registry sources."""
     generated = {
-        kind: generate_element_registry(kind, theme_dir=theme_dir)
+        kind: generate_element_registry(kind, theme_dir=theme_dir, include_local=include_local)
         for kind in sorted(OUTPUTS)
     }
     digest = hashlib.sha256()
@@ -356,18 +389,23 @@ def compute_generated_registry_state(*, theme_dir: Path | None = None) -> dict[s
     }
 
 
-def generate(*, theme_dir: Path | None = None) -> str:
-    return generate_element_registry("effects", theme_dir=theme_dir)
+def generate(*, theme_dir: Path | None = None, include_local: bool = True) -> str:
+    return generate_element_registry("effects", theme_dir=theme_dir, include_local=include_local)
 
 
-def generate_element_registry(kind: ElementKind, *, theme_dir: Path | None = None) -> str:
+def generate_element_registry(
+    kind: ElementKind,
+    *,
+    theme_dir: Path | None = None,
+    include_local: bool = True,
+) -> str:
     _validate_kind(kind)
     if kind == "effects":
-        return _generate_effect_registry(theme_dir=theme_dir)
+        return _generate_effect_registry(theme_dir=theme_dir, include_local=include_local)
 
     component_type = "AnimationComponent" if kind == "animations" else "TransitionComponent"
     meta_type = "AnimationMeta" if kind == "animations" else "Record<string, unknown>"
-    plugins = discover_plugins(kind, theme_dir)
+    plugins = discover_plugins(kind, theme_dir, include_local=include_local)
     plugin_ids = sorted(plugins)
     imports = [
         f"import {_component_name(plugin_id)} from '{_import_path(plugins[plugin_id])}';"
@@ -424,8 +462,12 @@ def generate_element_registry(kind: ElementKind, *, theme_dir: Path | None = Non
     return "\n".join(blocks)
 
 
-def _generate_effect_registry(*, theme_dir: Path | None = None) -> str:
-    effects = discover_effects(theme_dir)
+def _generate_effect_registry(
+    *,
+    theme_dir: Path | None = None,
+    include_local: bool = True,
+) -> str:
+    effects = discover_effects(theme_dir, include_local=include_local)
     effect_ids = sorted(effects)
     imports = [
         f"import {_component_name(effect_id)} from '{_import_path(effects[effect_id])}';"
@@ -471,6 +513,11 @@ def _generate_effect_registry(*, theme_dir: Path | None = None) -> str:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Generate Remotion effect registry.")
     parser.add_argument("--theme", help="Theme id, theme directory, or path to theme.json.")
+    parser.add_argument(
+        "--bundled-only",
+        action="store_true",
+        help="exclude ignored/local pack overrides when generating canonical bundled registries",
+    )
     return parser
 
 
@@ -480,7 +527,11 @@ def main(argv: list[str] | None = None) -> int:
     _write_active_theme_pointer(theme_dir)
     failed_outputs: list[Path] = []
     for kind, output in OUTPUTS.items():
-        content = generate_element_registry(kind, theme_dir=theme_dir)
+        content = generate_element_registry(
+            kind,
+            theme_dir=theme_dir,
+            include_local=not args.bundled_only,
+        )
         if not _write_generated_registry(output, content):
             failed_outputs.append(output)
     for kind, shim in SHIM_OUTPUTS.items():
