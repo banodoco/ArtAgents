@@ -16,19 +16,9 @@ from urllib.parse import unquote, urlparse
 from astrid.core.foundation.project_paths import validate_project_slug
 from astrid.core.integrations.reigh.local_bridge import (
     BridgeTimelineRecord,
-    _build_source_summary,
-    ensure_bridge_audio_proxy,
-    ensure_bridge_video_proxy,
-    get_bridge_audio_proxy_status,
-    get_bridge_video_proxy_status,
-    list_bridge_checkpoints,
-    list_bridge_projects,
-    list_bridge_timelines,
-    load_bridge_sources,
     load_bridge_timeline,
     resolve_bridge_asset,
     resolve_bridge_projects_root,
-    save_bridge_registry,
     save_bridge_timeline,
 )
 from astrid.core.timeline.eventlog.types import EventLogStaleVersionError
@@ -141,7 +131,7 @@ def make_local_bridge_handler(*, projects_root: Path):
             "http://127.0.0.1:3000",
             "http://127.0.0.1:5173",
         )
-        _ALLOWED_METHODS = "GET, HEAD, POST, PUT, OPTIONS"
+        _ALLOWED_METHODS = "GET, HEAD, POST, OPTIONS"
         _ALLOWED_HEADERS = "Content-Type, Range, If-None-Match, If-Modified-Since"
         _EXPOSED_HEADERS = "Accept-Ranges, Content-Length, Content-Range, Content-Type, ETag, Last-Modified"
 
@@ -172,71 +162,7 @@ def make_local_bridge_handler(*, projects_root: Path):
         # Asset serving helpers
         # ------------------------------------------------------------------
 
-        def _serve_audio_proxy(
-            self,
-            project_slug: str,
-            source_id: str,
-            *,
-            head_only: bool = False,
-        ) -> None:
-            proxy = get_bridge_audio_proxy_status(project_slug, source_id, root=projects_root)
-            if proxy is None:
-                self._send_error(
-                    404, "source_not_found", f"source {source_id!r} was not found",
-                )
-                return
 
-            if proxy.status != "ready":
-                self._send_json(200, _serialize_audio_proxy_status(proxy))
-                return
-
-            proxy_path = proxy.output_path
-            if proxy_path is None or not proxy_path.is_file():
-                payload = _serialize_audio_proxy_status(proxy)
-                payload["status"] = "missing"
-                payload["error"] = "ready proxy file is missing"
-                self._send_json(200, payload)
-                return
-
-            self._serve_file(
-                proxy_path,
-                content_type="audio/mp4",
-                cache_control="private, no-cache",
-                head_only=head_only,
-            )
-
-        def _serve_video_proxy(
-            self,
-            project_slug: str,
-            source_id: str,
-            *,
-            head_only: bool = False,
-        ) -> None:
-            proxy = get_bridge_video_proxy_status(project_slug, source_id, root=projects_root)
-            if proxy is None:
-                self._send_error(
-                    404, "source_not_found", f"source {source_id!r} was not found",
-                )
-                return
-
-            if proxy.status != "ready":
-                self._send_json(200, _serialize_video_proxy_status(proxy))
-                return
-
-            proxy_path = proxy.output_path
-            if proxy_path is None or not proxy_path.is_file():
-                payload = _serialize_video_proxy_status(proxy)
-                payload["status"] = "missing"
-                payload["error"] = "ready proxy file is missing"
-                self._send_json(200, payload)
-                return
-
-            self._serve_file(
-                proxy_path,
-                content_type="video/mp4",
-                cache_control="private, no-cache",
-                head_only=head_only,
-            )
 
         def _serve_file(
             self,
@@ -602,61 +528,6 @@ def make_local_bridge_handler(*, projects_root: Path):
                 })
                 return
 
-            if parts == ["projects"]:
-                self._send_json(200, {"projects": list_bridge_projects(projects_root)})
-                return
-
-            if len(parts) == 3 and parts[0] == "projects" and parts[2] == "sources":
-                project_slug = self._validate_project(parts[1])
-                if project_slug is None:
-                    return
-                sources_payload = load_bridge_sources(project_slug, root=projects_root)
-                summaries = {
-                    sid: _build_source_summary(entry, sid)
-                    for sid, entry in sources_payload.get("sources", {}).items()
-                }
-                self._send_json(200, {
-                    "project": project_slug,
-                    "version": sources_payload.get("version"),
-                    "sources": summaries,
-                })
-                return
-
-            if (
-                len(parts) == 5
-                and parts[0] == "projects"
-                and parts[2] == "sources"
-                and parts[4] == "audio-proxy"
-            ):
-                project_slug = self._validate_project(parts[1])
-                if project_slug is None:
-                    return
-                self._serve_audio_proxy(project_slug, parts[3])
-                return
-
-            if (
-                len(parts) == 5
-                and parts[0] == "projects"
-                and parts[2] == "sources"
-                and parts[4] == "video-proxy"
-            ):
-                project_slug = self._validate_project(parts[1])
-                if project_slug is None:
-                    return
-                self._serve_video_proxy(project_slug, parts[3])
-                return
-
-            if len(parts) == 3 and parts[0] == "projects" and parts[2] == "timelines":
-                project_slug = self._validate_project(parts[1])
-                if project_slug is None:
-                    return
-                rows = list_bridge_timelines(project_slug, root=projects_root)
-                self._send_json(200, {
-                    "project": project_slug,
-                    "timelines": [_serialize_timeline_row(row) for row in rows],
-                })
-                return
-
             if len(parts) == 4 and parts[0] == "projects" and parts[2] == "timelines":
                 project_slug = self._validate_project(parts[1])
                 if project_slug is None:
@@ -669,25 +540,6 @@ def make_local_bridge_handler(*, projects_root: Path):
                     self._send_error(404, "timeline_not_found", f"timeline {timeline_ref!r} was not found")
                     return
                 self._send_json(200, payload)
-                return
-
-            if (
-                len(parts) == 5
-                and parts[0] == "projects"
-                and parts[2] == "timelines"
-                and parts[4] == "checkpoints"
-            ):
-                project_slug = self._validate_project(parts[1])
-                if project_slug is None:
-                    return
-                timeline_ref = self._validate_timeline_ref(parts[3])
-                if timeline_ref is None:
-                    return
-                checkpoints = list_bridge_checkpoints(project_slug, timeline_ref, root=projects_root)
-                if checkpoints is None:
-                    self._send_error(404, "timeline_not_found", f"timeline {timeline_ref!r} was not found")
-                    return
-                self._send_json(200, {"checkpoints": checkpoints})
                 return
 
             # ---- Asset endpoint ----
@@ -725,30 +577,6 @@ def make_local_bridge_handler(*, projects_root: Path):
                 if timeline_ref is None:
                     return
                 self._serve_asset(project_slug, timeline_ref, parts[5], head_only=True)
-                return
-
-            if (
-                len(parts) == 5
-                and parts[0] == "projects"
-                and parts[2] == "sources"
-                and parts[4] == "audio-proxy"
-            ):
-                project_slug = self._validate_project(parts[1])
-                if project_slug is None:
-                    return
-                self._serve_audio_proxy(project_slug, parts[3], head_only=True)
-                return
-
-            if (
-                len(parts) == 5
-                and parts[0] == "projects"
-                and parts[2] == "sources"
-                and parts[4] == "video-proxy"
-            ):
-                project_slug = self._validate_project(parts[1])
-                if project_slug is None:
-                    return
-                self._serve_video_proxy(project_slug, parts[3], head_only=True)
                 return
 
             self.send_response(404)
@@ -838,134 +666,8 @@ def make_local_bridge_handler(*, projects_root: Path):
                 self._send_json(200, result)
                 return
 
-            # POST /projects/:project/sources/:sourceId/audio-proxy/ensure
-            if (
-                len(parts) == 6
-                and parts[0] == "projects"
-                and parts[2] == "sources"
-                and parts[4] == "audio-proxy"
-                and parts[5] == "ensure"
-            ):
-                project_slug = self._validate_project(parts[1])
-                if project_slug is None:
-                    return
-                body = self._read_optional_request_body()
-                if body is None:
-                    self._send_error(400, "invalid_body", "request body must be valid JSON")
-                    return
-                background = body.get("background", True)
-                if not isinstance(background, bool):
-                    self._send_error(400, "invalid_proxy_request", "background must be a boolean when provided")
-                    return
-                result = ensure_bridge_audio_proxy(
-                    project_slug,
-                    parts[3],
-                    root=projects_root,
-                    background=background,
-                )
-                if result is None:
-                    self._send_error(404, "source_not_found", f"source {parts[3]!r} was not found")
-                    return
-                self._send_json(200, _serialize_audio_proxy_status(result))
-                return
-
-            # POST /projects/:project/sources/:sourceId/video-proxy/ensure
-            if (
-                len(parts) == 6
-                and parts[0] == "projects"
-                and parts[2] == "sources"
-                and parts[4] == "video-proxy"
-                and parts[5] == "ensure"
-            ):
-                project_slug = self._validate_project(parts[1])
-                if project_slug is None:
-                    return
-                body = self._read_optional_request_body()
-                if body is None:
-                    self._send_error(400, "invalid_body", "request body must be valid JSON")
-                    return
-                background = body.get("background", True)
-                if not isinstance(background, bool):
-                    self._send_error(400, "invalid_proxy_request", "background must be a boolean when provided")
-                    return
-                result = ensure_bridge_video_proxy(
-                    project_slug,
-                    parts[3],
-                    root=projects_root,
-                    background=background,
-                )
-                if result is None:
-                    self._send_error(404, "source_not_found", f"source {parts[3]!r} was not found")
-                    return
-                self._send_json(200, _serialize_video_proxy_status(result))
-                return
-
             self._send_error(404, "not_found", f"unknown POST route: {path}")
 
-        # ------------------------------------------------------------------
-        # PUT — replace registry
-        # ------------------------------------------------------------------
-
-        def do_PUT(self) -> None:  # noqa: N802
-            path = urlparse(self.path).path
-            parts = [part for part in unquote(path).split("/") if part]
-
-            # PUT /projects/:project/timelines/:timeline/registry
-            if (
-                len(parts) == 5
-                and parts[0] == "projects"
-                and parts[2] == "timelines"
-                and parts[4] == "registry"
-            ):
-                project_slug = self._validate_project(parts[1])
-                if project_slug is None:
-                    return
-                timeline_ref = self._validate_timeline_ref(parts[3])
-                if timeline_ref is None:
-                    return
-                body = self._read_request_body()
-                if body is None:
-                    self._send_error(400, "invalid_body", "request body must be valid JSON")
-                    return
-                registry = body.get("registry")
-                if not isinstance(registry, dict) or not isinstance(registry.get("assets"), dict):
-                    self._send_error(400, "invalid_registry", "body must contain a 'registry' object with an 'assets' dict")
-                    return
-                expected_version = body.get("expected_version")
-                if not isinstance(expected_version, int):
-                    self._send_error(400, "invalid_expected_version", "body must contain an integer 'expected_version'")
-                    return
-                # Normalize: ensure all asset entries are dicts with string keys
-                normalized: dict[str, dict[str, Any]] = {}
-                for key, entry in registry["assets"].items():
-                    if not isinstance(key, str) or not isinstance(entry, dict):
-                        continue
-                    normalized[key] = dict(entry)
-                try:
-                    registry_payload = save_bridge_registry(
-                        project_slug,
-                        timeline_ref,
-                        {"assets": normalized},
-                        expected_version=expected_version,
-                        root=projects_root,
-                    )
-                except EventLogStaleVersionError as exc:
-                    backend_head = self._get_head_version(project_slug, timeline_ref)
-                    self._send_json(409, {
-                        "error": "timeline_version_conflict",
-                        "detail": str(exc),
-                        "config_version": backend_head,
-                    })
-                    return
-                if registry_payload is None:
-                    self._send_error(404, "timeline_not_found", f"timeline {timeline_ref!r} was not found")
-                    return
-                self._send_json(200, registry_payload)
-                return
-
-            self._send_error(404, "not_found", f"unknown PUT route: {path}")
-
-        # ------------------------------------------------------------------
         # Request helpers
         # ------------------------------------------------------------------
 
@@ -1064,30 +766,8 @@ def _serialize_timeline_row(row: BridgeTimelineRecord) -> dict[str, Any]:
     }
 
 
-def _serialize_audio_proxy_status(proxy: Any) -> dict[str, Any]:
-    payload = {
-        "sourceId": proxy.source_id,
-        "sourceVersion": proxy.source_version,
-        "status": proxy.status,
-        "profileVersion": proxy.profile_version,
-        "output": proxy.output,
-    }
-    if proxy.error:
-        payload["error"] = proxy.error
-    return payload
 
 
-def _serialize_video_proxy_status(proxy: Any) -> dict[str, Any]:
-    payload = {
-        "sourceId": proxy.source_id,
-        "sourceVersion": proxy.source_version,
-        "status": proxy.status,
-        "profileVersion": proxy.profile_version,
-        "output": proxy.output,
-    }
-    if proxy.error:
-        payload["error"] = proxy.error
-    return payload
 
 
 def _looks_like_uuid(value: str) -> bool:

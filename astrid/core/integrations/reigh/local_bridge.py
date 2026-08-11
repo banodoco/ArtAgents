@@ -64,9 +64,7 @@ def _bridge_save_lock(project_slug: str, timeline: str) -> threading.Lock:
 
 BRIDGE_SOURCES_VERSION = 1
 BRIDGE_AUDIO_PROXY_PROFILE_VERSION = "aac-m4a-stereo-48000-128k-v1"
-BRIDGE_AUDIO_PROXY_FILENAME = "audio.m4a"
 BRIDGE_VIDEO_PROXY_PROFILE_VERSION = "h264-mp4-720p-yuv420p-crf23-veryfast-v1"
-BRIDGE_VIDEO_PROXY_FILENAME = "preview-720p.mp4"
 _BRIDGE_CANONICAL_TOP_KEYS = (
     "tracks",
     "clips",
@@ -76,8 +74,6 @@ _BRIDGE_CANONICAL_TOP_KEYS = (
     "pinnedShotGroups",
     "generation_defaults",
 )
-_AUDIO_PROXY_LOCK = threading.Lock()
-_VIDEO_PROXY_LOCK = threading.Lock()
 REIGH_LOCAL_EDITOR_ACTOR = TimelineActor(
     type="human",
     id="reigh-app:local-editor",
@@ -108,31 +104,6 @@ class BridgeResolvedAsset:
     source_version: str | None = None
 
 
-@dataclass(frozen=True)
-class BridgeAudioProxyResult:
-    source_id: str
-    source_version: str | None
-    status: str
-    profile_version: str
-    output: str | None = None
-    output_path: Path | None = None
-    error: str | None = None
-
-
-@dataclass(frozen=True)
-class BridgeVideoProxyResult:
-    source_id: str
-    source_version: str | None
-    status: str
-    profile_version: str
-    output: str | None = None
-    output_path: Path | None = None
-    error: str | None = None
-
-
-BridgeSubprocessRunner = Callable[[Sequence[str]], Any]
-
-
 def resolve_bridge_projects_root(root: str | Path | None = None) -> Path:
     """Resolve the bridge projects root using Astrid's standard precedence."""
     return resolve_projects_root(root=root)
@@ -158,57 +129,26 @@ def list_bridge_project_dirs(root: str | Path | None = None) -> list[Path]:
     return result
 
 
-def list_bridge_projects(root: str | Path | None = None) -> list[dict[str, str]]:
-    """Return sorted bridge-visible project metadata."""
-    projects_root = resolve_bridge_projects_root(root=root)
-    rows: list[dict[str, str]] = []
-    for project_dir in list_bridge_project_dirs(projects_root):
-        payload = read_json(project_dir / "project.json")
-        rows.append({
-            "slug": str(payload.get("slug") or project_dir.name),
-            "name": str(payload.get("name") or payload.get("slug") or project_dir.name),
-        })
-    return rows
 
 
-def list_bridge_timelines(
-    project_slug: str,
-    *,
-    root: str | Path | None = None,
-) -> list[BridgeTimelineRecord]:
-    """Return bridge timeline rows sorted by ULID."""
-    projects_root = resolve_bridge_projects_root(root=root)
-    slug = validate_project_slug(project_slug)
-    project_payload = _read_project_payload(projects_root / slug / "project.json")
-    default_timeline_id = project_payload.get("default_timeline_id")
-    timelines_root = timelines_dir(slug, root=projects_root)
-    rows: list[BridgeTimelineRecord] = []
-    if not timelines_root.is_dir():
-        return rows
 
-    for timeline_home in sorted(timelines_root.iterdir(), key=lambda item: item.name):
-        if not timeline_home.is_dir():
-            continue
-        raw_display = load_display_json_with_repair(timeline_home)
-        if not isinstance(raw_display, dict):
-            continue
-        timeline_slug = raw_display.get("slug")
-        timeline_name = raw_display.get("name")
-        if not isinstance(timeline_slug, str) or not isinstance(timeline_name, str):
-            continue
-        ulid = timeline_home.name
-        rows.append(
-            BridgeTimelineRecord(
-                project_slug=slug,
-                timeline_ulid=ulid,
-                timeline_id=_load_canonical_timeline_id(timeline_home, ulid),
-                slug=timeline_slug,
-                name=timeline_name,
-                is_default=(default_timeline_id == ulid),
-                timeline_home=timeline_home,
-            )
-        )
-    return rows
+
+def _load_canonical_timeline_id(timeline_home: Path, timeline_ulid: str) -> str:
+    """Resolve the canonical timeline id from the assembly identity file."""
+    identity_path = timeline_home / "assembly.identity.json"
+    if not identity_path.is_file():
+        return timeline_ulid
+
+    try:
+        identity = read_json(identity_path)
+    except Exception:
+        return timeline_ulid
+
+    if isinstance(identity, dict):
+        timeline_id = identity.get("timeline_id")
+        if isinstance(timeline_id, str) and timeline_id:
+            return timeline_id
+    return timeline_ulid
 
 
 def find_bridge_timeline(
@@ -256,16 +196,31 @@ def find_bridge_timeline(
     if found_ulid is None:
         return None
 
-    for row in list_bridge_timelines(slug, root=projects_root):
-        if row.timeline_ulid == found_ulid:
-            return row
-    fallback_record = _load_bridge_timeline_record(
+    # Build the row directly (like the removed list route) so a malformed dir
+    # name never passes through timeline_dir()'s strict ULID validation before
+    # we know the identity sidecar resolves it. Fall back to the record load.
+    timeline_home = timelines_dir(slug, root=projects_root) / found_ulid
+    raw_display = load_display_json_with_repair(timeline_home)
+    if isinstance(raw_display, dict):
+        timeline_slug = raw_display.get("slug")
+        timeline_name = raw_display.get("name")
+        if isinstance(timeline_slug, str) and isinstance(timeline_name, str):
+            default_timeline_id = project_payload.get("default_timeline_id")
+            return BridgeTimelineRecord(
+                project_slug=slug,
+                timeline_ulid=found_ulid,
+                timeline_id=_load_canonical_timeline_id(timeline_home, found_ulid),
+                slug=timeline_slug,
+                name=timeline_name,
+                is_default=(default_timeline_id == found_ulid or default_timeline_id == _load_canonical_timeline_id(timeline_home, found_ulid)),
+                timeline_home=timeline_home,
+            )
+    return _load_bridge_timeline_record(
         slug,
         found_ulid,
         project_payload=project_payload,
         root=projects_root,
     )
-    return fallback_record
 
 
 def load_bridge_timeline(
@@ -290,42 +245,6 @@ def load_bridge_timeline(
     )
 
 
-def list_bridge_checkpoints(
-    project_slug: str,
-    timeline: str,
-    *,
-    root: str | Path | None = None,
-    limit: int = 50,
-) -> list[dict[str, Any]] | None:
-    """Project config-bearing timeline events into Reigh editor checkpoints."""
-    record = find_bridge_timeline(project_slug, timeline, root=root)
-    if record is None:
-        return None
-
-    backend = LocalFsBackend(
-        timeline_id=record.timeline_id,
-        timeline_home=record.timeline_home,
-    )
-    events = backend.read_events()
-    checkpoints: list[dict[str, Any]] = []
-    for version, event in enumerate(events, start=1):
-        payload = event.payload.to_json_obj() if hasattr(event.payload, "to_json_obj") else event.payload
-        if not isinstance(payload, dict):
-            continue
-        config = payload.get("config")
-        if not isinstance(config, dict):
-            continue
-        checkpoints.append({
-            "id": event.event_id,
-            "timelineId": record.timeline_id,
-            "config": config,
-            "createdAt": event.ts,
-            "triggerType": "manual",
-            "label": f"v{version} {event.kind}",
-            "editsSinceLastCheckpoint": 0,
-            "event": event.to_json_obj(),
-        })
-    return list(reversed(checkpoints))[:max(limit, 0)]
 
 
 def save_bridge_timeline(
@@ -436,60 +355,6 @@ def save_bridge_timeline(
         )
 
 
-def save_bridge_registry(
-        project_slug: str,
-        timeline: str,
-        registry: dict[str, Any],
-        *,
-        expected_version: int | None = None,
-        root: str | Path | None = None,
-) -> dict[str, Any] | None:
-    with _bridge_save_lock(project_slug, timeline):
-
-        """Append one registry replacement event, refresh projections, and persist the sidecar.
-
-        *expected_version* enables CAS guards on the registry write; when ``None``
-        the current head version is used (backward-compatible default).
-        """
-    record = find_bridge_timeline(project_slug, timeline, root=root)
-    if record is None:
-        return None
-
-    backend = LocalFsBackend(
-        timeline_id=record.timeline_id,
-        timeline_home=record.timeline_home,
-    )
-    current_config = _load_bridge_config(record.timeline_home)
-    head = backend.head()
-
-    # NEVER substitute a caller-supplied expected_version with a fresh read.
-    cas_version: int = head.version if expected_version is None else expected_version
-
-    batch = asset_registry_to_events(
-        registry,
-        current_config,
-        record.timeline_id,
-        head.last_hash,
-        head.version + 1,
-        REIGH_LOCAL_EDITOR_ACTOR,
-        "editor_save",
-        expected_version=cas_version,
-    )
-    backend.append_prebuilt_events(
-        record.timeline_id,
-        [item.event for item in batch.events],
-        expected_version=cas_version,
-    )
-    regenerate_projection(
-        record.timeline_id,
-        backend,
-        timeline_home=record.timeline_home,
-    )
-    write_json_atomic(
-        record.timeline_home / "registry.json",
-        batch.projected_asset_registry or {"assets": {}},
-    )
-    return batch.projected_asset_registry or {"assets": {}}
 
 
 def _bridge_timeline_payload(
@@ -736,527 +601,38 @@ def resolve_bridge_asset(
     )
 
 
-def get_bridge_audio_proxy_status(
-    project_slug: str,
-    source_id: str,
-    *,
-    root: str | Path | None = None,
-) -> BridgeAudioProxyResult | None:
-    """Return persisted audio proxy status for one project source."""
-    source_entry = _load_source_entry(project_slug, source_id, root=root)
-    if source_entry is None:
-        return None
-    return _audio_proxy_result_from_source(project_slug, source_id, source_entry, root=root)
 
 
-def ensure_bridge_audio_proxy(
-    project_slug: str,
-    source_id: str,
-    *,
-    root: str | Path | None = None,
-    runner: BridgeSubprocessRunner | None = None,
-    background: bool = True,
-) -> BridgeAudioProxyResult | None:
-    """Ensure the current source version has an AAC ``.m4a`` audio proxy.
-
-    By default the function records a queued state and starts a daemon worker.
-    Tests and maintenance scripts can pass ``background=False`` plus an
-    injectable runner to perform deterministic synchronous generation.
-    """
-    source_entry = _load_source_entry(project_slug, source_id, root=root)
-    if source_entry is None:
-        return None
-
-    current = _audio_proxy_result_from_source(project_slug, source_id, source_entry, root=root)
-    if _is_current_audio_proxy_ready(current):
-        return current
-
-    projects_root = resolve_bridge_projects_root(root=root)
-    source_version = _coerce_non_empty_str(source_entry.get("sourceVersion"))
-    if source_version is None:
-        updated = _write_audio_proxy_metadata(
-            project_slug,
-            source_id,
-            source_entry,
-            status="failed",
-            error="sourceVersion is missing",
-            root=projects_root,
-        )
-        return _audio_proxy_result_from_source(project_slug, source_id, updated, root=projects_root)
-
-    file_value = _coerce_non_empty_str(source_entry.get("file"))
-    normalized = _normalize_bridge_local_asset_reference(project_slug, file_value or "", root=projects_root)
-    if file_value is None or normalized is None:
-        updated = _write_audio_proxy_metadata(
-            project_slug,
-            source_id,
-            source_entry,
-            status="failed",
-            error="source file is missing or outside the project sources directory",
-            root=projects_root,
-        )
-        return _audio_proxy_result_from_source(project_slug, source_id, updated, root=projects_root)
-
-    source_path, normalized_file = normalized
-    if not source_path.is_file():
-        updated = _write_audio_proxy_metadata(
-            project_slug,
-            source_id,
-            source_entry,
-            status="failed",
-            error="source file does not exist",
-            root=projects_root,
-        )
-        return _audio_proxy_result_from_source(project_slug, source_id, updated, root=projects_root)
-
-    if not _is_video_backed_source(source_entry, normalized_file):
-        updated = _write_audio_proxy_metadata(
-            project_slug,
-            source_id,
-            source_entry,
-            status="failed",
-            error="source is not a video-backed local source",
-            root=projects_root,
-        )
-        return _audio_proxy_result_from_source(project_slug, source_id, updated, root=projects_root)
-
-    output_path = _audio_proxy_output_path(project_slug, source_id, source_version, root=projects_root)
-    if output_path.is_file():
-        updated = _write_audio_proxy_metadata(
-            project_slug,
-            source_id,
-            source_entry,
-            status="ready",
-            output_path=output_path,
-            error=None,
-            root=projects_root,
-        )
-        return _audio_proxy_result_from_source(project_slug, source_id, updated, root=projects_root)
-
-    queued = _write_audio_proxy_metadata(
-        project_slug,
-        source_id,
-        source_entry,
-        status="queued",
-        output_path=output_path,
-        error=None,
-        root=projects_root,
-    )
-
-    if background:
-        worker = threading.Thread(
-            target=_generate_bridge_audio_proxy_worker,
-            args=(project_slug, source_id, source_version, source_path, output_path),
-            kwargs={"root": projects_root, "runner": runner},
-            daemon=True,
-        )
-        worker.start()
-        return _audio_proxy_result_from_source(project_slug, source_id, queued, root=projects_root)
-
-    _generate_bridge_audio_proxy_worker(
-        project_slug,
-        source_id,
-        source_version,
-        source_path,
-        output_path,
-        root=projects_root,
-        runner=runner,
-    )
-    return get_bridge_audio_proxy_status(project_slug, source_id, root=projects_root)
 
 
-def get_bridge_video_proxy_status(
-    project_slug: str,
-    source_id: str,
-    *,
-    root: str | Path | None = None,
-) -> BridgeVideoProxyResult | None:
-    """Return persisted video proxy status for one project source."""
-    source_entry = _load_source_entry(project_slug, source_id, root=root)
-    if source_entry is None:
-        return None
-    return _video_proxy_result_from_source(project_slug, source_id, source_entry, root=root)
 
 
-def ensure_bridge_video_proxy(
-    project_slug: str,
-    source_id: str,
-    *,
-    root: str | Path | None = None,
-    runner: BridgeSubprocessRunner | None = None,
-    background: bool = True,
-) -> BridgeVideoProxyResult | None:
-    """Ensure the current source version has an H.264 ``.mp4`` video proxy.
-
-    By default the function records a queued state and starts a daemon worker.
-    Tests and maintenance scripts can pass ``background=False`` plus an
-    injectable runner to perform deterministic synchronous generation.
-    """
-    source_entry = _load_source_entry(project_slug, source_id, root=root)
-    if source_entry is None:
-        return None
-
-    current = _video_proxy_result_from_source(project_slug, source_id, source_entry, root=root)
-    if _is_current_video_proxy_ready(current):
-        return current
-
-    projects_root = resolve_bridge_projects_root(root=root)
-    source_version = _coerce_non_empty_str(source_entry.get("sourceVersion"))
-    if source_version is None:
-        updated = _write_video_proxy_metadata(
-            project_slug,
-            source_id,
-            source_entry,
-            status="failed",
-            error="sourceVersion is missing",
-            root=projects_root,
-        )
-        return _video_proxy_result_from_source(project_slug, source_id, updated, root=projects_root)
-
-    file_value = _coerce_non_empty_str(source_entry.get("file"))
-    normalized = _normalize_bridge_local_asset_reference(project_slug, file_value or "", root=projects_root)
-    if file_value is None or normalized is None:
-        updated = _write_video_proxy_metadata(
-            project_slug,
-            source_id,
-            source_entry,
-            status="failed",
-            error="source file is missing or outside the project sources directory",
-            root=projects_root,
-        )
-        return _video_proxy_result_from_source(project_slug, source_id, updated, root=projects_root)
-
-    source_path, normalized_file = normalized
-    if not source_path.is_file():
-        updated = _write_video_proxy_metadata(
-            project_slug,
-            source_id,
-            source_entry,
-            status="failed",
-            error="source file does not exist",
-            root=projects_root,
-        )
-        return _video_proxy_result_from_source(project_slug, source_id, updated, root=projects_root)
-
-    if not _is_video_backed_source(source_entry, normalized_file):
-        updated = _write_video_proxy_metadata(
-            project_slug,
-            source_id,
-            source_entry,
-            status="failed",
-            error="source is not a video-backed local source",
-            root=projects_root,
-        )
-        return _video_proxy_result_from_source(project_slug, source_id, updated, root=projects_root)
-
-    output_path = _video_proxy_output_path(project_slug, source_id, source_version, root=projects_root)
-    if (
-        current.status in {"queued", "generating"}
-        and current.profile_version == BRIDGE_VIDEO_PROXY_PROFILE_VERSION
-        and current.output_path is not None
-        and current.output_path == output_path
-    ):
-        return current
-
-    if output_path.is_file():
-        updated = _write_video_proxy_metadata(
-            project_slug,
-            source_id,
-            source_entry,
-            status="ready",
-            output_path=output_path,
-            error=None,
-            root=projects_root,
-        )
-        return _video_proxy_result_from_source(project_slug, source_id, updated, root=projects_root)
-
-    queued = _write_video_proxy_metadata(
-        project_slug,
-        source_id,
-        source_entry,
-        status="queued",
-        output_path=output_path,
-        error=None,
-        root=projects_root,
-    )
-
-    if background:
-        worker = threading.Thread(
-            target=_generate_bridge_video_proxy_worker,
-            args=(project_slug, source_id, source_version, source_path, output_path),
-            kwargs={"root": projects_root, "runner": runner},
-            daemon=True,
-        )
-        worker.start()
-        return _video_proxy_result_from_source(project_slug, source_id, queued, root=projects_root)
-
-    _generate_bridge_video_proxy_worker(
-        project_slug,
-        source_id,
-        source_version,
-        source_path,
-        output_path,
-        root=projects_root,
-        runner=runner,
-    )
-    return get_bridge_video_proxy_status(project_slug, source_id, root=projects_root)
 
 
-def _video_proxy_result_from_source(
-    project_slug: str,
-    source_id: str,
-    source_entry: dict[str, Any],
-    *,
-    root: str | Path | None = None,
-) -> BridgeVideoProxyResult:
-    source_version = _coerce_non_empty_str(source_entry.get("sourceVersion"))
-    video_proxy = source_entry.get("videoProxy")
-    proxy_meta = video_proxy if isinstance(video_proxy, dict) else {}
-    status = _coerce_non_empty_str(proxy_meta.get("status")) or "missing"
-    profile_version = _coerce_non_empty_str(proxy_meta.get("profileVersion")) or BRIDGE_VIDEO_PROXY_PROFILE_VERSION
-    output = _coerce_non_empty_str(proxy_meta.get("output"))
-    output_path = _resolve_video_proxy_output(project_slug, output, root=root) if output else None
-    return BridgeVideoProxyResult(
-        source_id=source_id,
-        source_version=source_version,
-        status=status,
-        profile_version=profile_version,
-        output=output,
-        output_path=output_path,
-        error=_coerce_non_empty_str(proxy_meta.get("error")),
-    )
 
 
-def _proxy_output_matches_source_version(output_path: Path | None, source_version: str | None) -> bool:
-    if output_path is None or source_version is None:
-        return False
-    return output_path.parent.name == source_version
 
 
-def _is_current_audio_proxy_ready(result: BridgeAudioProxyResult) -> bool:
-    return (
-        result.status == "ready"
-        and result.output_path is not None
-        and result.output_path.is_file()
-        and _proxy_output_matches_source_version(result.output_path, result.source_version)
-    )
 
 
-def _is_current_video_proxy_ready(result: BridgeVideoProxyResult) -> bool:
-    return (
-        result.status == "ready"
-        and result.output_path is not None
-        and result.output_path.is_file()
-        and _proxy_output_matches_source_version(result.output_path, result.source_version)
-    )
 
 
-def _write_video_proxy_metadata(
-    project_slug: str,
-    source_id: str,
-    source_entry: dict[str, Any],
-    *,
-    status: str,
-    root: str | Path | None = None,
-    output_path: Path | None = None,
-    error: str | None = None,
-) -> dict[str, Any]:
-    projects_root = resolve_bridge_projects_root(root=root)
-    with _VIDEO_PROXY_LOCK:
-        payload = load_bridge_sources(project_slug, root=projects_root)
-        sources = payload.get("sources")
-        next_sources = dict(sources) if isinstance(sources, dict) else {}
-        current_entry = next_sources.get(source_id)
-        next_entry = dict(current_entry) if isinstance(current_entry, dict) else dict(source_entry)
-        prior_proxy = next_entry.get("videoProxy")
-        proxy_meta = dict(prior_proxy) if isinstance(prior_proxy, dict) else {}
-
-        now = utc_now_iso()
-        if "createdAt" not in proxy_meta:
-            proxy_meta["createdAt"] = now
-        proxy_meta["updatedAt"] = now
-        proxy_meta["status"] = status
-        proxy_meta["profileVersion"] = BRIDGE_VIDEO_PROXY_PROFILE_VERSION
-        if output_path is not None:
-            proxy_meta["output"] = _project_relative_video_proxy_output(project_slug, output_path, root=projects_root)
-        if error:
-            proxy_meta["error"] = error
-        else:
-            proxy_meta.pop("error", None)
-
-        next_entry["videoProxy"] = proxy_meta
-        next_sources[source_id] = next_entry
-        save_bridge_sources(project_slug, {"sources": next_sources}, root=projects_root)
-        return next_entry
 
 
-def _public_video_proxy_metadata(video_proxy: dict[str, Any]) -> dict[str, Any]:
-    public = {
-        "status": video_proxy.get("status", "missing"),
-        "profileVersion": video_proxy.get("profileVersion", BRIDGE_VIDEO_PROXY_PROFILE_VERSION),
-        "output": video_proxy.get("output"),
-        "updatedAt": video_proxy.get("updatedAt"),
-    }
-    if video_proxy.get("error") is not None:
-        public["error"] = video_proxy.get("error")
-    if video_proxy.get("createdAt") is not None:
-        public["createdAt"] = video_proxy.get("createdAt")
-    return public
 
 
-def _generate_bridge_video_proxy_worker(
-    project_slug: str,
-    source_id: str,
-    source_version: str,
-    source_path: Path,
-    output_path: Path,
-    *,
-    root: str | Path | None = None,
-    runner: BridgeSubprocessRunner | None = None,
-) -> None:
-    projects_root = resolve_bridge_projects_root(root=root)
-    source_entry = _load_source_entry(project_slug, source_id, root=projects_root)
-    if source_entry is None:
-        return
-
-    if _coerce_non_empty_str(source_entry.get("sourceVersion")) != source_version:
-        return
-
-    _write_video_proxy_metadata(
-        project_slug,
-        source_id,
-        source_entry,
-        status="generating",
-        output_path=output_path,
-        error=None,
-        root=projects_root,
-    )
-
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    temp_output = output_path.with_name(f".{output_path.stem}.tmp{output_path.suffix}")
-    if temp_output.exists():
-        temp_output.unlink()
-    command = _build_ffmpeg_video_proxy_command(source_path, temp_output)
-
-    try:
-        _run_video_proxy_command(command, runner=runner)
-        if temp_output.is_file():
-            temp_output.replace(output_path)
-        elif not output_path.is_file():
-            raise FileNotFoundError(f"ffmpeg did not create {temp_output}")
-    except Exception as exc:
-        if temp_output.exists():
-            temp_output.unlink()
-        latest_entry = _load_source_entry(project_slug, source_id, root=projects_root) or source_entry
-        _write_video_proxy_metadata(
-            project_slug,
-            source_id,
-            latest_entry,
-            status="failed",
-            output_path=output_path,
-            error=str(exc),
-            root=projects_root,
-        )
-        return
-
-    latest_entry = _load_source_entry(project_slug, source_id, root=projects_root) or source_entry
-    _write_video_proxy_metadata(
-        project_slug,
-        source_id,
-        latest_entry,
-        status="ready",
-        output_path=output_path,
-        error=None,
-        root=projects_root,
-    )
 
 
-def _build_ffmpeg_video_proxy_command(source_path: Path, output_path: Path) -> list[str]:
-    ffmpeg = shutil.which("ffmpeg") or "ffmpeg"
-    return [
-        ffmpeg,
-        "-y",
-        "-i",
-        str(source_path),
-        "-c:v",
-        "libx264",
-        "-pix_fmt",
-        "yuv420p",
-        "-vf",
-        "scale='min(1280,iw)':'min(720,ih)':force_original_aspect_ratio=decrease",
-        "-crf",
-        "23",
-        "-preset",
-        "veryfast",
-        "-an",
-        "-movflags",
-        "+faststart",
-        str(output_path),
-    ]
 
 
-def _run_video_proxy_command(command: Sequence[str], *, runner: BridgeSubprocessRunner | None) -> None:
-    if runner is not None:
-        runner(command)
-        return
-    subprocess.run(command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
 
-def _video_proxy_output_path(
-    project_slug: str,
-    source_id: str,
-    source_version: str,
-    *,
-    root: str | Path | None = None,
-) -> Path:
-    return (
-        project_dir(project_slug, root=resolve_bridge_projects_root(root=root))
-        / "proxies"
-        / source_id
-        / source_version
-        / BRIDGE_VIDEO_PROXY_FILENAME
-    )
 
 
-def _project_relative_video_proxy_output(
-    project_slug: str,
-    output_path: Path,
-    *,
-    root: str | Path | None = None,
-) -> str:
-    project_root = project_dir(project_slug, root=resolve_bridge_projects_root(root=root)).resolve()
-    return output_path.resolve().relative_to(project_root).as_posix()
 
 
-def _resolve_video_proxy_output(
-    project_slug: str,
-    output: str,
-    *,
-    root: str | Path | None = None,
-) -> Path | None:
-    project_root = project_dir(project_slug, root=resolve_bridge_projects_root(root=root)).resolve()
-    candidate = (project_root / output).resolve()
-    proxies_root = (project_root / "proxies").resolve()
-    if not _is_path_within_root(candidate, proxies_root):
-        return None
-    return candidate
 
 
-def _load_canonical_timeline_id(timeline_home: Path, timeline_ulid: str) -> str:
-    identity_path = timeline_home / "assembly.identity.json"
-    if not identity_path.is_file():
-        return timeline_ulid
-
-    try:
-        identity = read_json(identity_path)
-    except Exception:
-        return timeline_ulid
-
-    if isinstance(identity, dict):
-        timeline_id = identity.get("timeline_id")
-        if isinstance(timeline_id, str) and timeline_id:
-            return timeline_id
-    return timeline_ulid
 
 
 def _read_project_payload(path: Path) -> dict[str, Any]:
@@ -1283,320 +659,32 @@ def _read_sources_payload(path: Path) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
-def load_bridge_sources(
-    project_slug: str,
-    *,
-    root: str | Path | None = None,
-) -> dict[str, Any]:
-    """Return the project-level ``sources.json`` payload for *project_slug*.
-
-    The returned dict always contains ``version`` (int) and ``sources``
-    (dict of ``sourceId`` → source entry).
-    """
-    projects_root = resolve_bridge_projects_root(root=root)
-    slug = validate_project_slug(project_slug)
-    sources_path = project_dir(slug, root=projects_root) / "sources.json"
-    payload = _read_sources_payload(sources_path)
-    sources = payload.get("sources")
-    if not isinstance(sources, dict):
-        return {"version": BRIDGE_SOURCES_VERSION, "sources": {}}
-    return {
-        "version": payload.get("version", BRIDGE_SOURCES_VERSION),
-        "sources": dict(sorted(sources.items())),
-    }
 
 
-def save_bridge_sources(
-    project_slug: str,
-    sources: dict[str, Any],
-    *,
-    root: str | Path | None = None,
-) -> dict[str, Any]:
-    """Atomically persist a sources payload for *project_slug*.
-
-    *sources* must be a dict with an optional ``"sources"`` key containing
-    the per-source entries.  The payload is validated, normalized, and
-    written via :func:`write_json_atomic`.
-    """
-    projects_root = resolve_bridge_projects_root(root=root)
-    slug = validate_project_slug(project_slug)
-    project_dir_path = project_dir(slug, root=projects_root)
-    project_dir_path.mkdir(parents=True, exist_ok=True)
-
-    sources_data = sources.get("sources")
-    normalized_sources = dict(sources_data) if isinstance(sources_data, dict) else {}
-
-    validated: dict[str, dict[str, Any]] = {}
-    for source_id, entry in sorted(normalized_sources.items()):
-        if not isinstance(source_id, str) or not isinstance(entry, dict):
-            continue
-        validated[source_id] = dict(entry)
-
-    payload: dict[str, Any] = {
-        "version": BRIDGE_SOURCES_VERSION,
-        "sources": dict(sorted(validated.items())),
-    }
-
-    write_json_atomic(project_dir_path / "sources.json", payload)
-    return payload
 
 
-def _build_source_summary(source_entry: dict[str, Any], source_id: str) -> dict[str, Any]:
-    """Produce a compact API-facing summary for a single source entry."""
-    asset_ids = source_entry.get("assetIds")
-    asset_count = len(asset_ids) if isinstance(asset_ids, dict) else 0
-    summary = {
-        "sourceId": source_id,
-        "sourceVersion": source_entry.get("sourceVersion"),
-        "origin": source_entry.get("origin", "local"),
-        "file": source_entry.get("file"),
-        "assetCount": asset_count,
-        "sizeBytes": source_entry.get("sizeBytes"),
-    }
-    audio_proxy = source_entry.get("audioProxy")
-    if isinstance(audio_proxy, dict):
-        summary["audioProxy"] = _public_audio_proxy_metadata(audio_proxy)
-    video_proxy = source_entry.get("videoProxy")
-    if isinstance(video_proxy, dict):
-        summary["videoProxy"] = _public_video_proxy_metadata(video_proxy)
-    return summary
 
 
-def _load_source_entry(
-    project_slug: str,
-    source_id: str,
-    *,
-    root: str | Path | None = None,
-) -> dict[str, Any] | None:
-    payload = load_bridge_sources(project_slug, root=root)
-    sources = payload.get("sources")
-    if not isinstance(sources, dict):
-        return None
-    entry = sources.get(source_id)
-    return dict(entry) if isinstance(entry, dict) else None
 
 
-def _audio_proxy_result_from_source(
-    project_slug: str,
-    source_id: str,
-    source_entry: dict[str, Any],
-    *,
-    root: str | Path | None = None,
-) -> BridgeAudioProxyResult:
-    source_version = _coerce_non_empty_str(source_entry.get("sourceVersion"))
-    audio_proxy = source_entry.get("audioProxy")
-    proxy_meta = audio_proxy if isinstance(audio_proxy, dict) else {}
-    status = _coerce_non_empty_str(proxy_meta.get("status")) or "missing"
-    profile_version = _coerce_non_empty_str(proxy_meta.get("profileVersion")) or BRIDGE_AUDIO_PROXY_PROFILE_VERSION
-    output = _coerce_non_empty_str(proxy_meta.get("output"))
-    output_path = _resolve_audio_proxy_output(project_slug, output, root=root) if output else None
-    return BridgeAudioProxyResult(
-        source_id=source_id,
-        source_version=source_version,
-        status=status,
-        profile_version=profile_version,
-        output=output,
-        output_path=output_path,
-        error=_coerce_non_empty_str(proxy_meta.get("error")),
-    )
 
 
-def _write_audio_proxy_metadata(
-    project_slug: str,
-    source_id: str,
-    source_entry: dict[str, Any],
-    *,
-    status: str,
-    root: str | Path | None = None,
-    output_path: Path | None = None,
-    error: str | None = None,
-) -> dict[str, Any]:
-    projects_root = resolve_bridge_projects_root(root=root)
-    with _AUDIO_PROXY_LOCK:
-        payload = load_bridge_sources(project_slug, root=projects_root)
-        sources = payload.get("sources")
-        next_sources = dict(sources) if isinstance(sources, dict) else {}
-        current_entry = next_sources.get(source_id)
-        next_entry = dict(current_entry) if isinstance(current_entry, dict) else dict(source_entry)
-        prior_proxy = next_entry.get("audioProxy")
-        proxy_meta = dict(prior_proxy) if isinstance(prior_proxy, dict) else {}
-
-        now = utc_now_iso()
-        if "createdAt" not in proxy_meta:
-            proxy_meta["createdAt"] = now
-        proxy_meta["updatedAt"] = now
-        proxy_meta["status"] = status
-        proxy_meta["profileVersion"] = BRIDGE_AUDIO_PROXY_PROFILE_VERSION
-        if output_path is not None:
-            proxy_meta["output"] = _project_relative_audio_proxy_output(project_slug, output_path, root=projects_root)
-        if error:
-            proxy_meta["error"] = error
-        else:
-            proxy_meta.pop("error", None)
-
-        next_entry["audioProxy"] = proxy_meta
-        next_sources[source_id] = next_entry
-        save_bridge_sources(project_slug, {"sources": next_sources}, root=projects_root)
-        return next_entry
 
 
-def _public_audio_proxy_metadata(audio_proxy: dict[str, Any]) -> dict[str, Any]:
-    public = {
-        "status": audio_proxy.get("status", "missing"),
-        "profileVersion": audio_proxy.get("profileVersion", BRIDGE_AUDIO_PROXY_PROFILE_VERSION),
-        "output": audio_proxy.get("output"),
-        "updatedAt": audio_proxy.get("updatedAt"),
-    }
-    if audio_proxy.get("error") is not None:
-        public["error"] = audio_proxy.get("error")
-    if audio_proxy.get("createdAt") is not None:
-        public["createdAt"] = audio_proxy.get("createdAt")
-    return public
 
 
-def _generate_bridge_audio_proxy_worker(
-    project_slug: str,
-    source_id: str,
-    source_version: str,
-    source_path: Path,
-    output_path: Path,
-    *,
-    root: str | Path | None = None,
-    runner: BridgeSubprocessRunner | None = None,
-) -> None:
-    projects_root = resolve_bridge_projects_root(root=root)
-    source_entry = _load_source_entry(project_slug, source_id, root=projects_root)
-    if source_entry is None:
-        return
-
-    if _coerce_non_empty_str(source_entry.get("sourceVersion")) != source_version:
-        return
-
-    _write_audio_proxy_metadata(
-        project_slug,
-        source_id,
-        source_entry,
-        status="generating",
-        output_path=output_path,
-        error=None,
-        root=projects_root,
-    )
-
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    temp_output = output_path.with_name(f".{output_path.stem}.tmp{output_path.suffix}")
-    if temp_output.exists():
-        temp_output.unlink()
-    command = _build_ffmpeg_audio_proxy_command(source_path, temp_output)
-
-    try:
-        _run_audio_proxy_command(command, runner=runner)
-        if temp_output.is_file():
-            temp_output.replace(output_path)
-        elif not output_path.is_file():
-            raise FileNotFoundError(f"ffmpeg did not create {temp_output}")
-    except Exception as exc:
-        if temp_output.exists():
-            temp_output.unlink()
-        latest_entry = _load_source_entry(project_slug, source_id, root=projects_root) or source_entry
-        _write_audio_proxy_metadata(
-            project_slug,
-            source_id,
-            latest_entry,
-            status="failed",
-            output_path=output_path,
-            error=str(exc),
-            root=projects_root,
-        )
-        return
-
-    latest_entry = _load_source_entry(project_slug, source_id, root=projects_root) or source_entry
-    _write_audio_proxy_metadata(
-        project_slug,
-        source_id,
-        latest_entry,
-        status="ready",
-        output_path=output_path,
-        error=None,
-        root=projects_root,
-    )
 
 
-def _build_ffmpeg_audio_proxy_command(source_path: Path, output_path: Path) -> list[str]:
-    ffmpeg = shutil.which("ffmpeg") or "ffmpeg"
-    return [
-        ffmpeg,
-        "-y",
-        "-i",
-        str(source_path),
-        "-vn",
-        "-c:a",
-        "aac",
-        "-ac",
-        "2",
-        "-ar",
-        "48000",
-        "-b:a",
-        "128k",
-        "-movflags",
-        "+faststart",
-        str(output_path),
-    ]
 
 
-def _run_audio_proxy_command(command: Sequence[str], *, runner: BridgeSubprocessRunner | None) -> None:
-    if runner is not None:
-        runner(command)
-        return
-    subprocess.run(command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
 
-def _audio_proxy_output_path(
-    project_slug: str,
-    source_id: str,
-    source_version: str,
-    *,
-    root: str | Path | None = None,
-) -> Path:
-    return (
-        project_dir(project_slug, root=resolve_bridge_projects_root(root=root))
-        / "proxies"
-        / source_id
-        / source_version
-        / BRIDGE_AUDIO_PROXY_FILENAME
-    )
 
 
-def _project_relative_audio_proxy_output(
-    project_slug: str,
-    output_path: Path,
-    *,
-    root: str | Path | None = None,
-) -> str:
-    project_root = project_dir(project_slug, root=resolve_bridge_projects_root(root=root)).resolve()
-    return output_path.resolve().relative_to(project_root).as_posix()
 
 
-def _resolve_audio_proxy_output(
-    project_slug: str,
-    output: str,
-    *,
-    root: str | Path | None = None,
-) -> Path | None:
-    project_root = project_dir(project_slug, root=resolve_bridge_projects_root(root=root)).resolve()
-    candidate = (project_root / output).resolve()
-    proxies_root = (project_root / "proxies").resolve()
-    if not _is_path_within_root(candidate, proxies_root):
-        return None
-    return candidate
 
 
-def _is_video_backed_source(source_entry: dict[str, Any], normalized_file: str) -> bool:
-    media_type = _coerce_non_empty_str(source_entry.get("type"))
-    if media_type is None:
-        media_type, _encoding = mimetypes.guess_type(normalized_file)
-    if media_type and media_type.startswith("video/"):
-        return True
-    return Path(normalized_file).suffix.lower() in {".mp4", ".mov", ".m4v", ".webm", ".mkv", ".avi"}
 
 
 def _load_bridge_config(timeline_home: Path) -> dict[str, Any] | None:
