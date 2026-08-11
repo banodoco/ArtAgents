@@ -237,6 +237,13 @@
                 "type": "object",
                 "additionalProperties": {}
               },
+              "app": {
+                "type": "object",
+                "additionalProperties": {}
+              },
+              "label": {
+                "type": "string"
+              },
               "pool_id": {
                 "type": "string"
               },
@@ -303,6 +310,10 @@
                   "soft-light",
                   "hard-light"
                 ]
+              },
+              "app": {
+                "type": "object",
+                "additionalProperties": {}
               }
             },
             "required": [
@@ -378,6 +389,10 @@
           "additionalProperties": false
         },
         "generation_defaults": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "app": {
           "type": "object",
           "additionalProperties": {}
         },
@@ -645,6 +660,13 @@
         "generation": {
           "type": "object",
           "additionalProperties": {}
+        },
+        "app": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "label": {
+          "type": "string"
         },
         "pool_id": {
           "type": "string"

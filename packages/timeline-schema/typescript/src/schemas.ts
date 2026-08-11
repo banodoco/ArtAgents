@@ -81,6 +81,13 @@ export const TimelineClip = z.object({
   effects: z.union([z.array(TimelineEffect), z.record(z.number())]).optional(),
   params: z.record(z.any()).optional(),
   generation: z.record(z.any()).optional(),
+  // Editor-extension metadata (e.g. scale-bake markers, clip-local shader
+  // refs) round-trips through providers; keep the shared schema a superset
+  // of Reigh's own TimelineClip type (types/index.ts:384).
+  app: z.record(z.any()).optional(),
+  // Human-readable clip label (extension-authored "Shot N" names) round-trips
+  // through providers; Reigh's patch compiler writes it via clip.update.
+  label: z.string().optional(),
   pool_id: z.string().optional(),
   clip_order: z.number().int().positive().optional(),
 });
@@ -95,6 +102,10 @@ export const TrackDefinition = z.object({
   volume: z.number().optional(),
   muted: z.boolean().optional(),
   blendMode: TrackBlendMode.optional(),
+  // Editor-extension metadata (e.g. TRACK_SCALE_BAKE_MARKER) round-trips
+  // through providers; keep the shared schema a superset of Reigh's own
+  // TrackDefinition type (types/index.ts:86).
+  app: z.record(z.any()).optional(),
 });
 
 export const PinnedShotGroup = z.object({
@@ -146,6 +157,9 @@ export const TimelineConfig = z.object({
   pinnedShotGroups: z.array(PinnedShotGroup).optional(),
   theme_overrides: ThemeOverrides.optional(),
   generation_defaults: z.record(z.unknown()).optional(),
+  // Extension-owned project data (project-data.write ops) keyed by extension
+  // ID; the SDK contract homes it in TimelineConfig.app.
+  app: z.record(z.any()).optional(),
   output: TimelineOutput.optional(),
 });
 

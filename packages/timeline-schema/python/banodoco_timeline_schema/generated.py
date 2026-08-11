@@ -88,6 +88,8 @@ Clip = TypedDict(
         "effects": NotRequired[list[Effect] | dict[str, float]],
         "params": NotRequired[dict[str, Any]],
         "generation": NotRequired[dict[str, Any]],
+        "app": NotRequired[dict[str, Any]],
+        "label": NotRequired[str],
         "pool_id": NotRequired[str],
         "clip_order": NotRequired[int],
     },
@@ -116,6 +118,7 @@ class Track(TypedDict, closed=True):
             "hard-light",
         ]
     ]
+    app: NotRequired[dict[str, Any]]
 
 
 class PinnedShotGroup(TypedDict, closed=True):
@@ -150,6 +153,7 @@ class TimelineConfig(TypedDict, closed=True):
     pinnedShotGroups: NotRequired[list[PinnedShotGroup]]
     theme_overrides: NotRequired[ThemeOverrides]
     generation_defaults: NotRequired[dict[str, Any]]
+    app: NotRequired[dict[str, Any]]
     output: NotRequired[Output]
 
 
@@ -197,6 +201,8 @@ TimelineClip = TypedDict(
         "effects": NotRequired[list[Effect] | dict[str, float]],
         "params": NotRequired[dict[str, Any]],
         "generation": NotRequired[dict[str, Any]],
+        "app": NotRequired[dict[str, Any]],
+        "label": NotRequired[str],
         "pool_id": NotRequired[str],
         "clip_order": NotRequired[int],
     },
