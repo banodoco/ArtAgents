@@ -1,0 +1,27 @@
+## Ranked findings
+
+**1. Fail-open validation gaps** — `_validate_ffmpeg_media_timeline` (run.py:491–515) enforces only: one visual track, media-only clips, speed==1, visual-clip `volume==0`, non-overlapping audio. **Not validated:** track-level `muted`/`volume` (schema fields, banodoco_schema.py:168/349 — never read); visual-clip overlap/gaps (concat at 596 has no coverage check); x/y/crop/effects/transition/opacity on a single visual clip — copy-path check (577–580) only gates `-c:v copy`, filter path (584–595) silently drops them; asset file existence (555–556 checks string only); `from/to` vs source duration; audio clips lacking an audio stream.
+
+**2. Command construction** — `_render_ffmpeg_media` (run.py:518–673): full-source single clip → stream copy (581–582, 642); else trim→scale→pad→fps→yuv420p→concat (589–596). Audio: **silence always synthesized** — gaps via `anullsrc=r=44100:cl=stereo,atrim` (606), no audio → full-duration anullsrc (622–625), clip `volume=` filter (617), aac 192k. `_concat_segments` re-encodes with **hardcoded fps=30** (793).
+
+**3. audio_reactive_colour.py** — lavfi color source → `drawbox@bg` + `sendcmd` (exact-frame markers, 281–312), yuv420p/libx264, `-frames:v`, `-an` video pass; mux pass stream-copies video + atrim/aformat/volume → aac (342–375). `marker_sha256` = sha256 of `{initialColor, events[{frame,color,id}]}` (62–73); fps from canvas; strictly-increasing int frames; provenance records event_count/fps/frame_count/marker_sha256 (run.py:1349–1354).
+
+**4. MediaProbe** (media.py:27–40): only `duration_seconds, fps` (r_frame_rate, 105–111), `resolution, width, height, _raw`. probe.py:33–94 adds `codec_name`, avg_frame_rate→r_frame_rate fallback, stream kind, fails closed (AstridError).
+
+**5. Audio ownership** — ffmpeg always muxes an audio track; clip volume flows (617), fades rejected (audio_reactive_colour.py:237–240) and routed to Remotion via `has_audio_fade` (run.py:715–717); track muted/volume ignored; visual clips' embedded audio never mapped (only `[inp:v]`).
+
+**6. Binary** — no pre-check in run.py; bare `subprocess.run(["ffmpeg"...], check=True)` (629–653, 797–824) → raw FileNotFoundError. `shutil.which` only elsewhere (animate_image run.py:125; event_talks run.py:271). MediaProbe uses `shutil.which("ffprobe")` fail-open (54–56).
+
+**7. Tests** — no unit test asserts filter_complex strings. test_audio_reactive_colour.py asserts spec/markers (82–95) + real-ffmpeg integration (165, skipif); test_audio_render.py:30 asserts output has audio (skipUnless); hybrid test mocks `_concat_segments` (test_render_remotion_registry.py:718).
+
+## Verified facts
+Silence synthesis is unconditional; track muted/volume never reach ffmpeg; visual adjustments silently dropped; fps=30 hardcoded in concat.
+
+## Unknowns
+Remotion-side handling of muted/volume/fades (props side); whether silent visual-adjustment dropping is relied upon.
+
+## Risks
+Extracting a backend finalizer with audio-ownership modes must: preserve always-audio contract, honor track muted/volume, reject or implement visual adjustments, parameterize fps/44100/192k, add binary pre-check.
+
+## Suggested approach
+Extract `_render_ffmpeg_media`/`_concat_segments` into a backend module with an `AudioOwnership` enum (synthesize|passthrough|none); close validation gaps first; add unit tests asserting constructed commands before refactor.

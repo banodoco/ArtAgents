@@ -1,0 +1,27 @@
+# Timeline Audio Control Semantics — Findings
+
+## Ranked findings
+
+1. **Track-level `muted` is real; clip-level mute does not exist.** `TrackDefinition` has `volume: float, muted: bool` (`banodoco_schema.py:163-169`); `_TRACK_ALLOWED` includes `muted` (`:349`). Clip `_CLIP_ALLOWED` has `volume` but no `muted` (`:340-348`) — clip mute is expressed as `volume: 0`. Precedence documented in `SKILL.md:667`: "track and clip volume multiply. `track.muted: true` forces silence regardless."
+
+2. **Fades are free-form clip params, not schema fields.** `params.fadeIn/fadeOut` in seconds (`SKILL.md:668`); `TimelineEffect.fade_in/fade_out` (`banodoco_schema.py:123-125`) is visual text-card, not audio.
+
+3. **FFmpeg validator (`run.py:491-515`) checks only:** exactly one visual track (`:495`), media-only clips (`:498`), speed==1 (`:500`), visual clips `volume==0` (`:503`), non-overlapping audio clips (`:510-514`). It **never inspects `track.muted`, `track.volume`, or fades**.
+
+4. **FFmpeg renderer (`run.py:600-626`) honors only clip `volume`** (`:612,:617` volume filter) and `from/to` trim (`:610-615`). Track volume/muted are **silently ignored**; fades are accidentally routed to Remotion via `has_audio_fade` complex windows (`:715-717`). No `afade`/`amix` anywhere.
+
+5. **AudioTrack.tsx is not vendored** — @banodoco packages are GitHub-tarball adapter installs (`run.py:297-300`, `:905-907`); `remotion/src` has no audio code. Local evidence is SKILL.md:668 only.
+
+6. **Zero test coverage.** `tests/packs/rendering/*` grep for muted/volume/fade/overlap: 0 hits. `audio_reactive_colour.py:230-251` rejects fades/effects/overlaps/negative volume (only audio assertions in repo).
+
+## Verified facts
+Clip `volume` (0..1) multiplies track `volume`; `muted` overrides all; no clip-mute field; ffmpeg supports clip volume+trim+sequential concat; track mute/volume silently dropped.
+
+## Unknowns
+Remotion per-frame volume function source (external package); clip-`muted` absence confirmation in canonical TS schema.
+
+## Risks
+`_can_render_with_ffmpeg_media` (`:676-689`) swallows all exceptions → falls back to Remotion, masking silent-ignore bugs. Claiming "muted/fades supported" on the ffmpeg backend is false.
+
+## Suggested validator rules
+FFmpeg supports: clip `volume` 0..1 (validate/clamp), `from/to` trim, non-overlapping audio. Reject or implement: `track.muted`, `track.volume` (multiply into `volume=` chain), `params.fadeIn/fadeOut` (needs `afade`), overlapping audio, `speed≠1`.

@@ -1,0 +1,21 @@
+## Findings (ranked)
+
+**1. `scripts/gen_effect_registry.py` mutation inventory** — `main()` (L524-548) is the only writer: `_write_active_theme_pointer` (L527 → L299-317: `remotion/_active_theme` symlink + `_active_theme.txt`), three package `*.generated.ts` (L39-43), and 5-extension shim families (L46-51, L344-352: `.ts/.js/.d.ts/.js.map/.d.ts.map`) under `remotion/src/`. No `node_modules` writes, no state-file writes — `.astrid-registry-state.json` is written only by `run.py:_write_registry_state` (L962-964).
+
+**2. `run.py` regeneration & lifecycle** — `_regenerate_element_registries` (L967-994): reads `.astrid-registry-state.json` (L954-959), compares hash + `_registry_outputs_exist` + `_active_theme_pointer_current` (L970-975), else runs the generator subprocess (L978-993) then writes state (L994). Classic check-then-act: two concurrent renders both see stale state and both spawn the generator — no lock exists anywhere in `run.py`. Order in `render()`: regeneration L1443 → HTTP server start L1453-1457 → staging L1474-1479 → props write L1481 → Remotion subprocess L1493-1510. Hybrid recurses into `render()` (L856-862), so it inherits the same path.
+
+**3. Lock pattern to mirror** — `asset_cache/run.py`: `_lock_for(path)` (L151-155: `FileLock(str(path)+".lock")`, `_FcntlLock` fallback L119-148); usage `with lock:` wrapping the full check-then-act fetch (L289-303).
+
+**4. Concurrent writers** — `remotion/package.json` `"gen-types"` (L10) runs `gen_remotion_types.py && gen_effect_registry.py` (manual/dev path, unlocked); `gen_remotion_types.py` writes `remotion/src/types.generated.ts` (L34) — distinct file, same tree. Documented in SKILL.md (L319-320, L746).
+
+## Verified facts
+Complete shared-state mutation set: 3 package registries, 15 shims, symlink+pointer, state json. All generation occurs pre-server/pre-subprocess inside `render()`.
+
+## Unknowns
+Whether concurrent `gen-types` runs are expected during renders; Windows pointer semantics.
+
+## Risks
+**No lock exists today.** Any concurrent render (or dev `gen-types`) racing `_regenerate_element_registries` can interleave: stale state written after fresh generation, symlink flipped mid-`npm run bundle`, mixed shim/package generations.
+
+## Suggested approach (V1)
+Acquire one `filelock` on `remotion/.astrid-registry.lock` at the top of `render()`'s remotion branch (before L1443), holding it through generation **and** the Remotion subprocess (L1493) — release in `finally`. Mirror `_lock_for` from asset_cache.
