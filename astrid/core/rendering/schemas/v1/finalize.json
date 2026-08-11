@@ -1,84 +1,93 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://astrid.dev/schemas/rendering/v1/finalize.json",
-  "title": "Astrid finalization request v1",
-  "description": "Ordered segment artifacts consumed by the plan's selected finalizer. The operation writes result.json.",
+  "$id": "https://astrid.local/schemas/rendering/v1/finalize.json",
+  "title": "Astrid finalize request v1",
   "type": "object",
+  "additionalProperties": false,
   "required": ["schema_version", "plan", "artifacts", "output_name"],
   "properties": {
     "schema_version": {"type": "integer", "const": 1},
-    "plan": {"$ref": "#/definitions/renderPlan"},
+    "plan": {
+      "allOf": [
+        {"$ref": "#/definitions/renderPlan"},
+        {"properties": {"total_frames": {"minimum": 1}}}
+      ]
+    },
     "artifacts": {
       "type": "array",
-      "items": {"$ref": "#/definitions/videoArtifact"},
-      "description": "Ordered one-for-one with plan.segments."
+      "minItems": 1,
+      "items": {"$ref": "#/definitions/videoArtifact"}
     },
-    "output_name": {"$ref": "#/definitions/portableName"},
-    "backend_config": {
-      "$ref": "#/definitions/backendConfig",
-      "default": {}
+    "output_name": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+      "not": {"enum": [".", ".."]}
     },
-    "metadata": {
-      "type": "object",
-      "propertyNames": {"minLength": 1},
-      "additionalProperties": {"type": "string", "minLength": 1},
-      "default": {}
-    }
+    "backend_config": {"$ref": "#/definitions/backendConfig"},
+    "metadata": {"$ref": "#/definitions/stringMap"}
   },
-  "additionalProperties": false,
   "definitions": {
     "qualifiedId": {
       "type": "string",
-      "pattern": "^[a-z][a-z0-9_]*(?:\\.[a-z][a-z0-9_]*)+$"
+      "pattern": "^[a-z0-9][a-z0-9-]*(?:\\.[a-z0-9][a-z0-9-]*)+$"
     },
     "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "workspacePath": {
       "type": "string",
       "minLength": 1,
-      "pattern": "^(?!/)(?![A-Za-z]:/)(?!.*//)(?!.*[/]$)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*\\\\).+$"
+      "pattern": "^(?![A-Za-z]:)(?!/)(?!\\.{1,2}(?:/|$))(?!.*?/\\.{1,2}(?:/|$))(?!.*//)(?!.*\\\\)(?!.*\\u0000)(?!.*/$).+$"
     },
     "portableName": {
       "type": "string",
       "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
       "not": {"enum": [".", ".."]}
     },
-    "rational": {
-      "type": "array",
-      "items": {"type": "integer", "minimum": 1},
-      "minItems": 2,
-      "maxItems": 2
-    },
-    "frameRange": {
-      "type": "array",
-      "items": [
-        {"type": "integer", "minimum": 0},
-        {"type": "integer", "minimum": 1}
-      ],
-      "additionalItems": false,
-      "minItems": 2,
-      "maxItems": 2
-    },
-    "frameWindow": {
-      "type": "object",
-      "required": ["start_frame", "end_frame", "fps_rational"],
-      "properties": {
-        "start_frame": {"type": "integer", "minimum": 0},
-        "end_frame": {"type": "integer", "minimum": 1},
-        "fps_rational": {"$ref": "#/definitions/rational"},
-        "source_range": {
-          "oneOf": [{"$ref": "#/definitions/frameRange"}, {"type": "null"}],
-          "default": null
-        },
-        "speed": {"type": ["number", "null"], "exclusiveMinimum": 0, "default": null}
-      },
-      "additionalProperties": false
+    "requestedPolicy": {
+      "oneOf": [
+        {"type": "string", "minLength": 1},
+        {"type": "object"}
+      ]
     },
     "audioOwnership": {
       "type": "string",
       "enum": ["rendered", "passthrough", "none"]
     },
+    "positiveRational": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {"type": "integer", "minimum": 1}
+    },
+    "frameRange": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": [
+        {"type": "integer", "minimum": 0},
+        {"type": "integer", "minimum": 1}
+      ],
+      "additionalItems": false
+    },
+    "frameWindow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["start_frame", "end_frame", "fps_rational"],
+      "properties": {
+        "start_frame": {"type": "integer", "minimum": 0},
+        "end_frame": {"type": "integer", "minimum": 1},
+        "fps_rational": {"$ref": "#/definitions/positiveRational"},
+        "source_range": {
+          "anyOf": [
+            {"$ref": "#/definitions/frameRange"},
+            {"type": "null"}
+          ]
+        },
+        "speed": {"type": ["number", "null"], "exclusiveMinimum": 0}
+      }
+    },
     "renderProfile": {
       "type": "object",
+      "additionalProperties": false,
       "required": [
         "width", "height", "fps_rational", "time_base", "container",
         "video_codec", "video_profile", "video_level", "pixel_format",
@@ -87,8 +96,8 @@
       "properties": {
         "width": {"type": "integer", "minimum": 1},
         "height": {"type": "integer", "minimum": 1},
-        "fps_rational": {"$ref": "#/definitions/rational"},
-        "time_base": {"$ref": "#/definitions/rational"},
+        "fps_rational": {"$ref": "#/definitions/positiveRational"},
+        "time_base": {"$ref": "#/definitions/positiveRational"},
         "container": {"type": "string", "minLength": 1},
         "video_codec": {"type": "string", "minLength": 1},
         "video_profile": {"type": ["string", "null"], "minLength": 1},
@@ -101,7 +110,6 @@
       },
       "oneOf": [
         {
-          "required": ["audio_codec", "audio_sample_rate", "audio_channel_layout"],
           "properties": {
             "audio_codec": {"type": "null"},
             "audio_sample_rate": {"type": "null"},
@@ -109,82 +117,146 @@
           }
         },
         {
+          "required": ["audio_codec", "audio_sample_rate", "audio_channel_layout"],
           "properties": {
             "audio_codec": {"type": "string", "minLength": 1},
             "audio_sample_rate": {"type": "integer", "minimum": 1},
             "audio_channel_layout": {"type": "string", "minLength": 1}
           }
         }
-      ],
-      "additionalProperties": false
+      ]
     },
     "supportReport": {
       "type": "object",
-      "required": ["supported", "reasons", "features", "alternatives", "backend", "backend_version"],
+      "additionalProperties": false,
+      "required": [
+        "schema_version", "supported", "reasons", "features", "alternatives",
+        "backend", "backend_version"
+      ],
       "properties": {
+        "schema_version": {"type": "integer", "const": 1},
         "supported": {"type": "boolean"},
         "reasons": {"type": "array", "items": {"type": "string", "minLength": 1}},
         "features": {
           "type": "object",
-          "additionalProperties": {"oneOf": [{"type": "boolean"}, {"type": "string"}]}
+          "additionalProperties": {"type": ["boolean", "string"]}
         },
         "alternatives": {
           "type": "array",
-          "items": {"$ref": "#/definitions/qualifiedId"},
-          "uniqueItems": true
+          "uniqueItems": true,
+          "items": {"$ref": "#/definitions/qualifiedId"}
         },
         "backend": {"$ref": "#/definitions/qualifiedId"},
         "backend_version": {"type": ["string", "null"], "minLength": 1}
-      },
-      "additionalProperties": false
+      }
     },
-    "backendConfig": {
+    "plannerResolution": {
       "type": "object",
-      "propertyNames": {"$ref": "#/definitions/qualifiedId"},
-      "additionalProperties": {"type": "object"}
+      "additionalProperties": false,
+      "required": ["id", "source_pack", "manifest_digest", "trust_eligibility"],
+      "properties": {
+        "id": {"$ref": "#/definitions/qualifiedId"},
+        "source_pack": {"type": "object"},
+        "manifest_digest": {"$ref": "#/definitions/sha256"},
+        "trust_eligibility": {"type": "object"}
+      }
+    },
+    "rendererResolution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id", "source_pack", "manifest_digest", "alias_chain", "override",
+        "support_decision"
+      ],
+      "properties": {
+        "id": {"$ref": "#/definitions/qualifiedId"},
+        "source_pack": {"type": "object"},
+        "manifest_digest": {"$ref": "#/definitions/sha256"},
+        "alias_chain": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "override": {"type": ["object", "null"]},
+        "support_decision": {"$ref": "#/definitions/supportReport"}
+      }
+    },
+    "finalizerResolution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "source_pack", "manifest_digest"],
+      "properties": {
+        "id": {"$ref": "#/definitions/qualifiedId"},
+        "source_pack": {"type": "object"},
+        "manifest_digest": {"$ref": "#/definitions/sha256"}
+      }
+    },
+    "hashMap": {
+      "type": "object",
+      "additionalProperties": {"$ref": "#/definitions/sha256"}
     },
     "renderSegment": {
       "type": "object",
-      "required": ["window", "backend", "backend_config", "support", "input_hashes"],
+      "additionalProperties": false,
+      "required": ["window", "renderer", "input_hashes"],
       "properties": {
         "window": {"$ref": "#/definitions/frameWindow"},
-        "backend": {"$ref": "#/definitions/qualifiedId"},
-        "backend_config": {"$ref": "#/definitions/backendConfig"},
-        "support": {
-          "oneOf": [{"$ref": "#/definitions/supportReport"}, {"type": "null"}]
-        },
-        "input_hashes": {
-          "type": "object",
-          "additionalProperties": {"type": "string", "minLength": 1}
-        }
-      },
-      "additionalProperties": false
+        "renderer": {"$ref": "#/definitions/rendererResolution"},
+        "input_hashes": {"$ref": "#/definitions/hashMap"}
+      }
     },
     "renderPlan": {
       "type": "object",
-      "required": ["segments", "finalizer", "profile", "reasons"],
+      "additionalProperties": false,
+      "required": [
+        "schema_version", "request_digest", "requested_policy", "planner", "segments",
+        "finalizer", "profile", "total_frames", "reasons", "window"
+      ],
       "properties": {
+        "schema_version": {"type": "integer", "const": 1},
+        "request_digest": {"$ref": "#/definitions/sha256"},
+        "requested_policy": {"$ref": "#/definitions/requestedPolicy"},
+        "planner": {"$ref": "#/definitions/plannerResolution"},
         "segments": {"type": "array", "items": {"$ref": "#/definitions/renderSegment"}},
-        "finalizer": {"$ref": "#/definitions/qualifiedId"},
+        "finalizer": {"$ref": "#/definitions/finalizerResolution"},
         "profile": {"$ref": "#/definitions/renderProfile"},
+        "total_frames": {"type": "integer", "minimum": 0},
         "reasons": {
           "type": "object",
           "propertyNames": {"pattern": "^(0|[1-9][0-9]*)$"},
           "additionalProperties": {"type": "string", "minLength": 1}
+        },
+        "window": {
+          "anyOf": [
+            {"$ref": "#/definitions/frameWindow"},
+            {"type": "null"}
+          ]
         }
       },
-      "additionalProperties": false
+      "allOf": [
+        {
+          "if": {"properties": {"total_frames": {"const": 0}}},
+          "then": {
+            "properties": {
+              "segments": {"maxItems": 0},
+              "reasons": {"maxProperties": 0},
+              "window": {"type": "null"}
+            }
+          },
+          "else": {"properties": {"segments": {"minItems": 1}}}
+        }
+      ]
     },
     "attachment": {
       "type": "object",
+      "additionalProperties": false,
       "required": ["name", "path", "kind", "sha256"],
       "properties": {
         "name": {"$ref": "#/definitions/portableName"},
         "path": {"$ref": "#/definitions/workspacePath"},
         "kind": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"},
         "sha256": {"$ref": "#/definitions/sha256"}
-      },
-      "additionalProperties": false
+      }
     },
     "attachments": {
       "type": "object",
@@ -193,6 +265,7 @@
     },
     "videoArtifact": {
       "type": "object",
+      "additionalProperties": false,
       "required": ["path", "profile", "sha256", "duration_frames"],
       "properties": {
         "path": {"$ref": "#/definitions/workspacePath"},
@@ -200,36 +273,88 @@
         "sha256": {"$ref": "#/definitions/sha256"},
         "duration_frames": {"type": "integer", "minimum": 1},
         "audio": {
-          "oneOf": [{"$ref": "#/definitions/audioOwnership"}, {"type": "null"}],
-          "default": null
+          "anyOf": [
+            {"$ref": "#/definitions/audioOwnership"},
+            {"type": "null"}
+          ]
         },
-        "attachments": {"$ref": "#/definitions/attachments", "default": {}}
+        "attachments": {"$ref": "#/definitions/attachments"}
       },
-      "additionalProperties": false
-    }
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "profile": {
+                "required": ["audio_codec"],
+                "properties": {"audio_codec": {"type": "string"}}
+              }
+            }
+          },
+          "then": {
+            "required": ["audio"],
+            "properties": {"audio": {"const": "rendered"}}
+          },
+          "else": {
+            "properties": {"audio": {"enum": ["passthrough", "none", null]}}
+          }
+        }
+      ]
+    },
+    "backendConfig": {
+      "type": "object",
+      "propertyNames": {"$ref": "#/definitions/qualifiedId"},
+      "additionalProperties": {"type": "object"}
+    },
+    "stringMap": {"type": "object", "additionalProperties": {"type": "string"}}
   },
   "examples": [
     {
       "schema_version": 1,
       "plan": {
+        "schema_version": 1,
+        "request_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "requested_policy": "hybrid",
+        "planner": {
+          "id": "rendering.legacy-hybrid",
+          "source_pack": {"id": "rendering"},
+          "manifest_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "trust_eligibility": {"eligible": true}
+        },
         "segments": [
           {
             "window": {
               "start_frame": 0,
               "end_frame": 48,
               "fps_rational": [24, 1],
-              "source_range": null,
-              "speed": null
+              "source_range": [10, 58],
+              "speed": 1.0
             },
-            "backend": "rendering.remotion",
-            "backend_config": {},
-            "support": null,
+            "renderer": {
+              "id": "acme.example",
+              "source_pack": {"id": "acme"},
+              "manifest_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "alias_chain": ["example", "acme.example"],
+              "override": null,
+              "support_decision": {
+                "schema_version": 1,
+                "supported": true,
+                "reasons": [],
+                "features": {"media": true, "audio_mode": "rendered"},
+                "alternatives": [],
+                "backend": "acme.example",
+                "backend_version": "1.0.0"
+              }
+            },
             "input_hashes": {
-              "timeline": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+              "timeline": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
             }
           }
         ],
-        "finalizer": "rendering.ffmpeg_finalizer",
+        "finalizer": {
+          "id": "rendering.ffmpeg-finalizer",
+          "source_pack": {"id": "rendering"},
+          "manifest_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        },
         "profile": {
           "width": 1920,
           "height": 1080,
@@ -245,7 +370,9 @@
           "audio_channel_layout": "stereo",
           "duration_tolerance": 1
         },
-        "reasons": {"0": "single supported segment"}
+        "total_frames": 48,
+        "reasons": {"0": "the request is supported"},
+        "window": null
       },
       "artifacts": [
         {
@@ -265,16 +392,21 @@
             "audio_channel_layout": "stereo",
             "duration_tolerance": 1
           },
-          "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
           "duration_frames": 48,
           "audio": "rendered",
-          "attachments": {}
+          "attachments": {
+            "project.blend": {
+              "name": "project.blend",
+              "path": "outputs/project.blend",
+              "kind": "project",
+              "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+            }
+          }
         }
       ],
       "output_name": "preview.mp4",
-      "backend_config": {
-        "rendering.ffmpeg_finalizer": {"faststart": true}
-      },
+      "backend_config": {"rendering.ffmpeg-finalizer": {"faststart": true}},
       "metadata": {"request_id": "render-001"}
     }
   ]

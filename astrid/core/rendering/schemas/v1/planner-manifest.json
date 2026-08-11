@@ -51,7 +51,7 @@
   "definitions": {
     "qualifiedId": {
       "type": "string",
-      "pattern": "^[a-z][a-z0-9_]*(?:\\.[a-z][a-z0-9_]*)+$"
+      "pattern": "^[a-z0-9][a-z0-9-]*(?:\\.[a-z0-9][a-z0-9-]*)+$"
     },
     "permissions": {
       "type": "array",
@@ -86,7 +86,7 @@
   "examples": [
     {
       "schema_version": 1,
-      "id": "rendering.legacy_hybrid",
+      "id": "rendering.legacy-hybrid",
       "name": "Legacy Hybrid Planner",
       "version": "1.0.0",
       "protocol_version": 1,

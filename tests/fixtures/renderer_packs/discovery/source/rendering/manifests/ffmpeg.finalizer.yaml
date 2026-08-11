@@ -1,5 +1,5 @@
 schema_version: 1
-id: rendering.ffmpeg_finalizer
+id: rendering.ffmpeg-finalizer
 name: Fixture FFmpeg Finalizer
 version: 1.0.0
 protocol_version: 1

@@ -32,7 +32,7 @@ RendererErrorKind: TypeAlias = Literal[
     "internal",
 ]
 
-_QUALIFIED_ID_RE = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$")
+_QUALIFIED_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*(?:\.[a-z0-9][a-z0-9-]*)+$")
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _OUTPUT_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _KIND_RE = re.compile(r"^[a-z][a-z0-9-]*$")
@@ -41,7 +41,6 @@ RENDER_RESULT_CORE_KEYS = frozenset(
     {
         "schema_version",
         "video",
-        "attachments",
         "backend_fragments",
         "audio_ownership",
         "normalization",
@@ -57,15 +56,9 @@ PROVENANCE_V2_CORE_KEYS = frozenset(
         "output",
         "timeline",
         "assets_registry",
+        "request_digest",
         "requested_policy",
-        "resolved_backend",
-        "source_pack",
-        "alias_chain",
-        "override",
-        "trust_eligibility",
-        "manifest_digest",
-        "support_decision",
-        "input_hashes",
+        "planner",
         "segments",
         "artifact_profiles",
         "audio_ownership",
@@ -113,8 +106,24 @@ PROVENANCE_V1_ALWAYS_KEYS = frozenset(
     }
 )
 
+_RETIRED_PROVENANCE_V2_KEYS = frozenset(
+    {
+        "resolved_backend",
+        "source_pack",
+        "alias_chain",
+        "override",
+        "trust_eligibility",
+        "manifest_digest",
+        "support_decision",
+        "input_hashes",
+    }
+)
+
 RESERVED_BACKEND_FRAGMENT_KEYS = frozenset(
-    RENDER_RESULT_CORE_KEYS | PROVENANCE_V2_CORE_KEYS | PROVENANCE_V1_COMPATIBILITY_KEYS
+    RENDER_RESULT_CORE_KEYS
+    | PROVENANCE_V2_CORE_KEYS
+    | PROVENANCE_V1_COMPATIBILITY_KEYS
+    | _RETIRED_PROVENANCE_V2_KEYS
 )
 
 
@@ -213,8 +222,8 @@ def _require_qualified_id(value: Any, label: str) -> str:
     result = _require_string(value, label)
     if not _QUALIFIED_ID_RE.fullmatch(result):
         raise ValueError(
-            f"{label} must be a qualified id '<pack>.<name>' using lowercase letters, "
-            "digits, and underscores"
+            f"{label} must be a qualified id '<pack>.<name>' whose dot-separated "
+            "segments use lowercase letters, digits, and hyphens"
         )
     return result
 
@@ -240,6 +249,24 @@ def _require_string_mapping(value: Any, label: str) -> dict[str, str]:
     }
 
 
+def _require_hash_mapping(value: Any, label: str) -> dict[str, str]:
+    mapping = _require_mapping(value, label)
+    return {
+        _require_string(key, f"{label} key"): _require_sha256(item, f"{label}[{key!r}]")
+        for key, item in mapping.items()
+    }
+
+
+def _require_schema_version(value: Any, label: str) -> int:
+    if type(value) is not int or value != SCHEMA_VERSION:
+        _protocol_failure(
+            f"unknown or malformed {label} schema_version {value!r}; "
+            f"expected integer {SCHEMA_VERSION}",
+            details={"received": value, "supported": [SCHEMA_VERSION]},
+        )
+    return value
+
+
 def _require_rational(value: Any, label: str) -> tuple[int, int]:
     if isinstance(value, (str, bytes)) or not isinstance(value, Sequence) or len(value) != 2:
         raise TypeError(f"{label} must be a two-item [numerator, denominator] array")
@@ -263,7 +290,7 @@ def _require_workspace_relative_path(value: Any, label: str) -> str:
     if "\\" in raw:
         raise ValueError(f"{label} must be a normalized workspace path using forward slashes")
     normalized = raw.replace("\\", "/")
-    if normalized.startswith("/") or re.match(r"^[A-Za-z]:/", normalized):
+    if normalized.startswith("/") or re.match(r"^[A-Za-z]:", normalized):
         raise ValueError(f"{label} must be relative to the invocation workspace")
     if normalized.startswith("//"):
         raise ValueError(f"{label} must not be a UNC path")
@@ -507,6 +534,25 @@ class RenderProfile:
         )
 
 
+def _validate_artifact_audio(
+    profile: RenderProfile,
+    ownership: AudioOwnership | None,
+    label: str,
+) -> None:
+    """Keep probed media audio and ownership semantically aligned.
+
+    ``rendered`` means the artifact itself contains audio and therefore has a
+    populated audio profile. ``passthrough`` and ``none`` describe visual-only
+    artifacts; the former asks the host/finalizer to supply canonical audio.
+    """
+
+    if profile.has_audio:
+        if ownership is not AudioOwnership.RENDERED:
+            raise ValueError(f"{label} with an audio profile must declare audio='rendered'")
+    elif ownership is AudioOwnership.RENDERED:
+        raise ValueError(f"{label} with audio='rendered' must have an audio profile")
+
+
 @dataclass(frozen=True)
 class Attachment:
     """A named, opaque artifact preserved alongside the primary video."""
@@ -605,11 +651,9 @@ class VideoArtifact:
             "duration_frames",
             _require_int(self.duration_frames, "duration_frames", minimum=1),
         )
-        object.__setattr__(
-            self,
-            "audio",
-            _coerce_audio_ownership(self.audio, "video audio", nullable=True),
-        )
+        audio = _coerce_audio_ownership(self.audio, "video audio", nullable=True)
+        _validate_artifact_audio(profile, audio, "video artifact")
+        object.__setattr__(self, "audio", audio)
         object.__setattr__(
             self,
             "attachments",
@@ -724,12 +768,12 @@ class RenderRequest:
             raise ValueError("output_name must be a portable basename without path separators")
         object.__setattr__(self, "output_name", output_name)
         object.__setattr__(self, "window", _coerce_window(self.window, "window", nullable=True))
-        object.__setattr__(
-            self,
-            "audio",
-            _coerce_audio_ownership(self.audio, "audio", nullable=True),
-        )
-        object.__setattr__(self, "profile", _coerce_profile(self.profile, "profile", nullable=True))
+        audio = _coerce_audio_ownership(self.audio, "audio", nullable=True)
+        profile = _coerce_profile(self.profile, "profile", nullable=True)
+        if audio is not None and profile is not None:
+            _validate_artifact_audio(profile, audio, "render request")
+        object.__setattr__(self, "audio", audio)
+        object.__setattr__(self, "profile", profile)
         object.__setattr__(
             self,
             "backend_config",
@@ -823,6 +867,7 @@ class RenderRequest:
 class SupportReport:
     """Request-sensitive support evidence returned by an implementation."""
 
+    schema_version: int
     supported: bool
     reasons: list[str]
     features: dict[str, bool | str]
@@ -831,6 +876,11 @@ class SupportReport:
     backend_version: str | None = None
 
     def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "schema_version",
+            _require_schema_version(self.schema_version, "support report"),
+        )
         if not isinstance(self.supported, bool):
             raise TypeError("supported must be a boolean")
         object.__setattr__(self, "reasons", _require_string_list(self.reasons, "reasons"))
@@ -859,6 +909,7 @@ class SupportReport:
     def to_dict(self) -> dict[str, Any]:
         return _json_safe_mapping(
             {
+                "schema_version": self.schema_version,
                 "supported": self.supported,
                 "reasons": self.reasons,
                 "features": self.features,
@@ -870,24 +921,225 @@ class SupportReport:
 
     @classmethod
     def from_dict(cls, payload: Mapping[str, Any]) -> SupportReport:
-        data = _require_mapping(payload, "support report")
-        required = {
-            "supported",
-            "reasons",
-            "features",
-            "alternatives",
-            "backend",
-            "backend_version",
-        }
-        _validate_object_keys(data, required=required, allowed=required, label="support report")
-        return cls(
-            supported=data["supported"],
-            reasons=data["reasons"],
-            features=data["features"],
-            alternatives=data["alternatives"],
-            backend=data["backend"],
-            backend_version=data["backend_version"],
+        try:
+            data = _require_mapping(payload, "support report")
+            required = {
+                "schema_version",
+                "supported",
+                "reasons",
+                "features",
+                "alternatives",
+                "backend",
+                "backend_version",
+            }
+            _validate_object_keys(
+                data,
+                required=required,
+                allowed=required,
+                label="support report",
+            )
+            return cls(
+                schema_version=data["schema_version"],
+                supported=data["supported"],
+                reasons=data["reasons"],
+                features=data["features"],
+                alternatives=data["alternatives"],
+                backend=data["backend"],
+                backend_version=data["backend_version"],
+            )
+        except Exception as exc:
+            from .errors import RendererException
+
+            if isinstance(exc, RendererException):
+                raise
+            _protocol_failure(
+                f"malformed support report: {exc}",
+                details={"error_type": type(exc).__name__},
+            )
+
+
+@dataclass(frozen=True)
+class PlannerResolution:
+    """Resolved planner identity and trust evidence frozen into a plan."""
+
+    id: str
+    source_pack: dict[str, Any]
+    manifest_digest: str
+    trust_eligibility: dict[str, Any]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "id", _require_qualified_id(self.id, "planner id"))
+        object.__setattr__(
+            self,
+            "source_pack",
+            _json_safe_mapping(self.source_pack, label="planner source_pack"),
         )
+        object.__setattr__(
+            self,
+            "manifest_digest",
+            _require_sha256(self.manifest_digest, "planner manifest_digest"),
+        )
+        object.__setattr__(
+            self,
+            "trust_eligibility",
+            _json_safe_mapping(
+                self.trust_eligibility,
+                label="planner trust_eligibility",
+            ),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return _json_safe_mapping(
+            {
+                "id": self.id,
+                "source_pack": self.source_pack,
+                "manifest_digest": self.manifest_digest,
+                "trust_eligibility": self.trust_eligibility,
+            }
+        )
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any]) -> PlannerResolution:
+        data = _require_mapping(payload, "planner resolution")
+        required = {"id", "source_pack", "manifest_digest", "trust_eligibility"}
+        _validate_object_keys(data, required=required, allowed=required, label="planner resolution")
+        return cls(
+            id=data["id"],
+            source_pack=data["source_pack"],
+            manifest_digest=data["manifest_digest"],
+            trust_eligibility=data["trust_eligibility"],
+        )
+
+
+@dataclass(frozen=True)
+class RendererResolution:
+    """Resolved renderer identity and request-sensitive routing evidence."""
+
+    id: str
+    source_pack: dict[str, Any]
+    manifest_digest: str
+    alias_chain: list[str]
+    override: dict[str, Any] | None
+    support_decision: SupportReport
+
+    def __post_init__(self) -> None:
+        renderer_id = _require_qualified_id(self.id, "renderer id")
+        support = (
+            self.support_decision
+            if isinstance(self.support_decision, SupportReport)
+            else SupportReport.from_dict(
+                _require_mapping(self.support_decision, "renderer support_decision")
+            )
+        )
+        if support.backend != renderer_id:
+            raise ValueError("renderer support_decision.backend must match renderer id")
+        object.__setattr__(self, "id", renderer_id)
+        object.__setattr__(
+            self,
+            "source_pack",
+            _json_safe_mapping(self.source_pack, label="renderer source_pack"),
+        )
+        object.__setattr__(
+            self,
+            "manifest_digest",
+            _require_sha256(self.manifest_digest, "renderer manifest_digest"),
+        )
+        aliases = [
+            _require_string(alias, f"renderer alias_chain[{index}]")
+            for index, alias in enumerate(_require_string_list(self.alias_chain, "renderer alias_chain"))
+        ]
+        if len(aliases) != len(set(aliases)):
+            raise ValueError("renderer alias_chain must not contain duplicates")
+        object.__setattr__(self, "alias_chain", aliases)
+        object.__setattr__(
+            self,
+            "override",
+            None
+            if self.override is None
+            else _json_safe_mapping(self.override, label="renderer override"),
+        )
+        object.__setattr__(self, "support_decision", support)
+
+    def to_dict(self) -> dict[str, Any]:
+        return _json_safe_mapping(
+            {
+                "id": self.id,
+                "source_pack": self.source_pack,
+                "manifest_digest": self.manifest_digest,
+                "alias_chain": self.alias_chain,
+                "override": self.override,
+                "support_decision": self.support_decision,
+            }
+        )
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any]) -> RendererResolution:
+        data = _require_mapping(payload, "renderer resolution")
+        required = {
+            "id",
+            "source_pack",
+            "manifest_digest",
+            "alias_chain",
+            "override",
+            "support_decision",
+        }
+        _validate_object_keys(data, required=required, allowed=required, label="renderer resolution")
+        return cls(
+            id=data["id"],
+            source_pack=data["source_pack"],
+            manifest_digest=data["manifest_digest"],
+            alias_chain=data["alias_chain"],
+            override=data["override"],
+            support_decision=SupportReport.from_dict(data["support_decision"]),
+        )
+
+
+@dataclass(frozen=True)
+class FinalizerResolution:
+    """Resolved finalizer identity pinned for standalone finalization."""
+
+    id: str
+    source_pack: dict[str, Any]
+    manifest_digest: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "id", _require_qualified_id(self.id, "finalizer id"))
+        object.__setattr__(
+            self,
+            "source_pack",
+            _json_safe_mapping(self.source_pack, label="finalizer source_pack"),
+        )
+        object.__setattr__(
+            self,
+            "manifest_digest",
+            _require_sha256(self.manifest_digest, "finalizer manifest_digest"),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return _json_safe_mapping(
+            {
+                "id": self.id,
+                "source_pack": self.source_pack,
+                "manifest_digest": self.manifest_digest,
+            }
+        )
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any]) -> FinalizerResolution:
+        data = _require_mapping(payload, "finalizer resolution")
+        required = {"id", "source_pack", "manifest_digest"}
+        _validate_object_keys(data, required=required, allowed=required, label="finalizer resolution")
+        return cls(
+            id=data["id"],
+            source_pack=data["source_pack"],
+            manifest_digest=data["manifest_digest"],
+        )
+
+
+def _normalize_requested_policy(value: Any, label: str = "requested_policy") -> str | dict[str, Any]:
+    if isinstance(value, str):
+        return _require_string(value, label)
+    return _json_safe_mapping(value, label=label)
 
 
 @dataclass(frozen=True)
@@ -895,47 +1147,40 @@ class RenderSegment:
     """One complete temporal window assigned to one qualified backend."""
 
     window: FrameWindow
-    backend: str
-    backend_config: BackendConfig = field(default_factory=dict)
-    support: SupportReport | None = None
+    renderer: RendererResolution
     input_hashes: dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "window", _coerce_window(self.window, "segment window", nullable=False))
-        object.__setattr__(self, "backend", _require_qualified_id(self.backend, "segment backend"))
-        backend_config = _coerce_namespaced_backend_config(
-            self.backend_config,
-            "segment backend_config",
+        renderer = (
+            self.renderer
+            if isinstance(self.renderer, RendererResolution)
+            else RendererResolution.from_dict(_require_mapping(self.renderer, "segment renderer"))
         )
-        unexpected_config = sorted(set(backend_config) - {self.backend})
-        if unexpected_config:
-            raise ValueError(
-                "segment backend_config may contain only the selected backend namespace "
-                f"{self.backend!r}"
-            )
-        object.__setattr__(self, "backend_config", backend_config)
-        if self.support is not None:
-            support = (
-                self.support
-                if isinstance(self.support, SupportReport)
-                else SupportReport.from_dict(_require_mapping(self.support, "segment support"))
-            )
-            if support.backend != self.backend:
-                raise ValueError("segment support.backend must match segment backend")
-            object.__setattr__(self, "support", support)
+        object.__setattr__(self, "renderer", renderer)
         object.__setattr__(
             self,
             "input_hashes",
-            _require_string_mapping(self.input_hashes, "segment input_hashes"),
+            _require_hash_mapping(self.input_hashes, "segment input_hashes"),
         )
+
+    @property
+    def backend(self) -> str:
+        """Compatibility accessor; ``renderer.id`` is authoritative."""
+
+        return self.renderer.id
+
+    @property
+    def support(self) -> SupportReport:
+        """Compatibility accessor; ``renderer.support_decision`` is authoritative."""
+
+        return self.renderer.support_decision
 
     def to_dict(self) -> dict[str, Any]:
         return _json_safe_mapping(
             {
                 "window": self.window,
-                "backend": self.backend,
-                "backend_config": self.backend_config,
-                "support": self.support,
+                "renderer": self.renderer,
                 "input_hashes": self.input_hashes,
             }
         )
@@ -943,13 +1188,11 @@ class RenderSegment:
     @classmethod
     def from_dict(cls, payload: Mapping[str, Any]) -> RenderSegment:
         data = _require_mapping(payload, "render segment")
-        required = {"window", "backend", "backend_config", "support", "input_hashes"}
+        required = {"window", "renderer", "input_hashes"}
         _validate_object_keys(data, required=required, allowed=required, label="render segment")
         return cls(
             window=FrameWindow.from_dict(data["window"]),
-            backend=data["backend"],
-            backend_config=data["backend_config"],
-            support=SupportReport.from_dict(data["support"]) if data["support"] is not None else None,
+            renderer=RendererResolution.from_dict(data["renderer"]),
             input_hashes=data["input_hashes"],
         )
 
@@ -958,12 +1201,39 @@ class RenderSegment:
 class RenderPlan:
     """A deterministic temporal plan plus its explicit finalizer."""
 
+    schema_version: int
+    request_digest: str
+    requested_policy: str | dict[str, Any]
+    planner: PlannerResolution
     segments: list[RenderSegment]
-    finalizer: str
+    finalizer: FinalizerResolution
     profile: RenderProfile
+    total_frames: int
     reasons: dict[str, str]
+    window: FrameWindow | None = None
 
     def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "schema_version",
+            _require_schema_version(self.schema_version, "render plan"),
+        )
+        object.__setattr__(
+            self,
+            "request_digest",
+            _require_sha256(self.request_digest, "request_digest"),
+        )
+        object.__setattr__(
+            self,
+            "requested_policy",
+            _normalize_requested_policy(self.requested_policy),
+        )
+        planner = (
+            self.planner
+            if isinstance(self.planner, PlannerResolution)
+            else PlannerResolution.from_dict(_require_mapping(self.planner, "planner"))
+        )
+        object.__setattr__(self, "planner", planner)
         if isinstance(self.segments, (str, bytes)) or not isinstance(self.segments, Sequence):
             raise TypeError("segments must be an array")
         segments = [
@@ -973,8 +1243,46 @@ class RenderPlan:
             for index, item in enumerate(self.segments)
         ]
         object.__setattr__(self, "segments", segments)
-        object.__setattr__(self, "finalizer", _require_qualified_id(self.finalizer, "finalizer"))
-        object.__setattr__(self, "profile", _coerce_profile(self.profile, "plan profile", nullable=False))
+        finalizer = (
+            self.finalizer
+            if isinstance(self.finalizer, FinalizerResolution)
+            else FinalizerResolution.from_dict(_require_mapping(self.finalizer, "finalizer"))
+        )
+        object.__setattr__(self, "finalizer", finalizer)
+        profile = _coerce_profile(self.profile, "plan profile", nullable=False)
+        object.__setattr__(self, "profile", profile)
+        total_frames = _require_int(self.total_frames, "total_frames", minimum=0)
+        object.__setattr__(self, "total_frames", total_frames)
+        window = _coerce_window(self.window, "plan window", nullable=True)
+        object.__setattr__(self, "window", window)
+        if window is not None:
+            if window.fps_rational != profile.fps_rational:
+                raise ValueError("plan window FPS must exactly match the canonical profile FPS")
+            if window.end_frame > total_frames:
+                raise ValueError("plan window must not extend beyond total_frames")
+        if total_frames == 0:
+            if window is not None or segments:
+                raise ValueError("a zero-frame plan must have no window or segments")
+        else:
+            if not segments:
+                raise ValueError("a positive-frame plan must contain at least one segment")
+            target_start = window.start_frame if window is not None else 0
+            target_end = window.end_frame if window is not None else total_frames
+            expected_start = target_start
+            for index, segment in enumerate(segments):
+                if segment.window.fps_rational != profile.fps_rational:
+                    raise ValueError(
+                        f"segments[{index}] FPS must exactly match the canonical profile FPS"
+                    )
+                actual_start = segment.window.start_frame
+                if actual_start != expected_start:
+                    relation = "overlaps or is out of order" if actual_start < expected_start else "leaves a gap"
+                    raise ValueError(f"segments[{index}] {relation} at frame {expected_start}")
+                if segment.window.end_frame > target_end:
+                    raise ValueError(f"segments[{index}] extends beyond the plan target window")
+                expected_start = segment.window.end_frame
+            if expected_start != target_end:
+                raise ValueError("plan segments leave a trailing gap")
         reasons = _require_string_mapping(self.reasons, "reasons")
         expected_reason_keys = {str(index) for index in range(len(segments))}
         if set(reasons) != expected_reason_keys:
@@ -986,27 +1294,60 @@ class RenderPlan:
     def to_dict(self) -> dict[str, Any]:
         return _json_safe_mapping(
             {
+                "schema_version": self.schema_version,
+                "request_digest": self.request_digest,
+                "requested_policy": self.requested_policy,
+                "planner": self.planner,
                 "segments": self.segments,
                 "finalizer": self.finalizer,
                 "profile": self.profile,
+                "total_frames": self.total_frames,
                 "reasons": self.reasons,
+                "window": self.window,
             }
         )
 
     @classmethod
     def from_dict(cls, payload: Mapping[str, Any]) -> RenderPlan:
-        data = _require_mapping(payload, "render plan")
-        required = {"segments", "finalizer", "profile", "reasons"}
-        _validate_object_keys(data, required=required, allowed=required, label="render plan")
-        raw_segments = data["segments"]
-        if isinstance(raw_segments, (str, bytes)) or not isinstance(raw_segments, Sequence):
-            raise TypeError("segments must be an array")
-        return cls(
-            segments=[RenderSegment.from_dict(item) for item in raw_segments],
-            finalizer=data["finalizer"],
-            profile=RenderProfile.from_dict(data["profile"]),
-            reasons=data["reasons"],
-        )
+        try:
+            data = _require_mapping(payload, "render plan")
+            required = {
+                "schema_version",
+                "request_digest",
+                "requested_policy",
+                "planner",
+                "segments",
+                "finalizer",
+                "profile",
+                "total_frames",
+                "reasons",
+                "window",
+            }
+            _validate_object_keys(data, required=required, allowed=required, label="render plan")
+            raw_segments = data["segments"]
+            if isinstance(raw_segments, (str, bytes)) or not isinstance(raw_segments, Sequence):
+                raise TypeError("segments must be an array")
+            return cls(
+                schema_version=data["schema_version"],
+                request_digest=data["request_digest"],
+                requested_policy=data["requested_policy"],
+                planner=PlannerResolution.from_dict(data["planner"]),
+                segments=[RenderSegment.from_dict(item) for item in raw_segments],
+                finalizer=FinalizerResolution.from_dict(data["finalizer"]),
+                profile=RenderProfile.from_dict(data["profile"]),
+                total_frames=data["total_frames"],
+                reasons=data["reasons"],
+                window=FrameWindow.from_dict(data["window"]) if data["window"] is not None else None,
+            )
+        except Exception as exc:
+            from .errors import RendererException
+
+            if isinstance(exc, RendererException):
+                raise
+            _protocol_failure(
+                f"malformed render plan: {exc}",
+                details={"error_type": type(exc).__name__},
+            )
 
 
 def _validate_backend_fragments(value: Any) -> dict[str, dict[str, Any]]:
@@ -1032,41 +1373,27 @@ class RenderResult:
     schema_version: int
     video: VideoArtifact
     audio_ownership: AudioOwnership
-    attachments: dict[str, Attachment] = field(default_factory=dict)
     backend_fragments: dict[str, dict[str, Any]] = field(default_factory=dict)
     normalization: list[str] = field(default_factory=list)
     logs: list[str] = field(default_factory=list)
     metadata: dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        version = _require_int(self.schema_version, "schema_version")
-        if version != SCHEMA_VERSION:
-            _protocol_failure(
-                f"unknown render result schema_version {version}; expected {SCHEMA_VERSION}",
-                details={"received": version, "supported": [SCHEMA_VERSION]},
-            )
+        version = _require_schema_version(self.schema_version, "render result")
         video = (
             self.video
             if isinstance(self.video, VideoArtifact)
             else VideoArtifact.from_dict(_require_mapping(self.video, "video"))
         )
-        attachments = _coerce_attachment_mapping(self.attachments, "result attachments")
-        duplicate_names = sorted(set(video.attachments) & set(attachments))
-        if duplicate_names:
-            raise ValueError(
-                "duplicate attachment names across video and result attachments: "
-                + ", ".join(duplicate_names)
-            )
         ownership = _coerce_audio_ownership(
             self.audio_ownership,
             "audio_ownership",
             nullable=False,
         )
-        if video.audio is not None and video.audio != ownership:
-            raise ValueError("video.audio must match result audio_ownership when declared")
+        if video.audio is None or video.audio != ownership:
+            raise ValueError("video.audio must be present and match result audio_ownership")
         object.__setattr__(self, "schema_version", version)
         object.__setattr__(self, "video", video)
-        object.__setattr__(self, "attachments", attachments)
         object.__setattr__(self, "backend_fragments", _validate_backend_fragments(self.backend_fragments))
         object.__setattr__(self, "audio_ownership", ownership)
         object.__setattr__(
@@ -1077,12 +1404,17 @@ class RenderResult:
         object.__setattr__(self, "logs", _require_string_list(self.logs, "logs"))
         object.__setattr__(self, "metadata", _require_string_mapping(self.metadata, "metadata"))
 
+    @property
+    def attachments(self) -> dict[str, Attachment]:
+        """The sole authoritative attachment map, owned by the primary video."""
+
+        return self.video.attachments
+
     def to_dict(self) -> dict[str, Any]:
         return _json_safe_mapping(
             {
                 "schema_version": self.schema_version,
                 "video": self.video,
-                "attachments": self.attachments,
                 "backend_fragments": self.backend_fragments,
                 "audio_ownership": self.audio_ownership,
                 "normalization": self.normalization,
@@ -1102,18 +1434,11 @@ class RenderResult:
                 allowed=allowed,
                 label="render result",
             )
-            version = data["schema_version"]
-            if type(version) is not int or version != SCHEMA_VERSION:
-                _protocol_failure(
-                    f"unknown or malformed render result schema_version {version!r}; "
-                    f"expected integer {SCHEMA_VERSION}",
-                    details={"received": version, "supported": [SCHEMA_VERSION]},
-                )
+            version = _require_schema_version(data["schema_version"], "render result")
             return cls(
                 schema_version=version,
                 video=VideoArtifact.from_dict(data["video"]),
                 audio_ownership=data["audio_ownership"],
-                attachments=data.get("attachments", {}),
                 backend_fragments=data.get("backend_fragments", {}),
                 normalization=data.get("normalization", []),
                 logs=data.get("logs", []),
@@ -1134,6 +1459,7 @@ class RenderResult:
 class RendererError:
     """Language-neutral structured renderer failure payload."""
 
+    schema_version: int
     kind: RendererErrorKind
     backend: str
     message: str
@@ -1153,6 +1479,11 @@ class RendererError:
     )
 
     def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "schema_version",
+            _require_schema_version(self.schema_version, "renderer error"),
+        )
         kind = _require_string(self.kind, "renderer error kind")
         if kind not in self.KINDS:
             raise ValueError(f"unknown renderer error kind: {kind}")
@@ -1169,6 +1500,7 @@ class RendererError:
     def to_dict(self) -> dict[str, Any]:
         return _json_safe_mapping(
             {
+                "schema_version": self.schema_version,
                 "kind": self.kind,
                 "backend": self.backend,
                 "message": self.message,
@@ -1179,16 +1511,34 @@ class RendererError:
 
     @classmethod
     def from_dict(cls, payload: Mapping[str, Any]) -> RendererError:
-        data = _require_mapping(payload, "renderer error")
-        required = {"kind", "backend", "message", "recovery_command", "details"}
-        _validate_object_keys(data, required=required, allowed=required, label="renderer error")
-        return cls(
-            kind=data["kind"],
-            backend=data["backend"],
-            message=data["message"],
-            recovery_command=data["recovery_command"],
-            details=data["details"],
-        )
+        try:
+            data = _require_mapping(payload, "renderer error")
+            required = {
+                "schema_version",
+                "kind",
+                "backend",
+                "message",
+                "recovery_command",
+                "details",
+            }
+            _validate_object_keys(data, required=required, allowed=required, label="renderer error")
+            return cls(
+                schema_version=data["schema_version"],
+                kind=data["kind"],
+                backend=data["backend"],
+                message=data["message"],
+                recovery_command=data["recovery_command"],
+                details=data["details"],
+            )
+        except Exception as exc:
+            from .errors import RendererException
+
+            if isinstance(exc, RendererException):
+                raise
+            _protocol_failure(
+                f"malformed renderer error: {exc}",
+                details={"error_type": type(exc).__name__},
+            )
 
 
 @dataclass(frozen=True)
@@ -1203,12 +1553,7 @@ class FinalizeRequest:
     metadata: dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        version = _require_int(self.schema_version, "schema_version")
-        if version != SCHEMA_VERSION:
-            _protocol_failure(
-                f"unknown finalize request schema_version {version}; expected {SCHEMA_VERSION}",
-                details={"received": version, "supported": [SCHEMA_VERSION]},
-            )
+        version = _require_schema_version(self.schema_version, "finalize request")
         plan = (
             self.plan
             if isinstance(self.plan, RenderPlan)
@@ -1224,6 +1569,17 @@ class FinalizeRequest:
         ]
         if len(artifacts) != len(plan.segments):
             raise ValueError("finalize artifacts must correspond one-for-one with plan segments")
+        if plan.total_frames == 0:
+            raise ValueError("an empty render plan must not be finalized")
+        attachment_names: set[str] = set()
+        for index, artifact in enumerate(artifacts):
+            duplicates = sorted(attachment_names & set(artifact.attachments))
+            if duplicates:
+                raise ValueError(
+                    "duplicate attachment names across segment artifacts at "
+                    f"artifacts[{index}]: {', '.join(duplicates)}"
+                )
+            attachment_names.update(artifact.attachments)
         output_name = _require_string(self.output_name, "output_name")
         if not _OUTPUT_NAME_RE.fullmatch(output_name) or output_name in {".", ".."}:
             raise ValueError("output_name must be a portable basename without path separators")
@@ -1235,14 +1591,51 @@ class FinalizeRequest:
             self.backend_config,
             "backend_config",
         )
-        unexpected_config = sorted(set(backend_config) - {plan.finalizer})
+        unexpected_config = sorted(set(backend_config) - {plan.finalizer.id})
         if unexpected_config:
             raise ValueError(
                 "finalize backend_config may contain only the selected finalizer namespace "
-                f"{plan.finalizer!r}"
+                f"{plan.finalizer.id!r}"
             )
         object.__setattr__(self, "backend_config", backend_config)
         object.__setattr__(self, "metadata", _require_string_mapping(self.metadata, "metadata"))
+
+    @property
+    def expected_attachments(self) -> dict[str, Attachment]:
+        """Return the globally unique attachments a finalizer must preserve."""
+
+        return {
+            name: attachment
+            for artifact in self.artifacts
+            for name, attachment in artifact.attachments.items()
+        }
+
+    def validate_final_result(
+        self,
+        result: RenderResult | Mapping[str, Any],
+    ) -> RenderResult:
+        """Validate attachment preservation on a standalone finalizer response.
+
+        Finalizers may add new attachments, but every input attachment must be
+        present under the same name with the exact same descriptor and digest.
+        """
+
+        final_result = (
+            result
+            if isinstance(result, RenderResult)
+            else RenderResult.from_dict(_require_mapping(result, "final result"))
+        )
+        missing = sorted(set(self.expected_attachments) - set(final_result.attachments))
+        if missing:
+            raise ValueError("finalizer dropped attachments: " + ", ".join(missing))
+        changed = sorted(
+            name
+            for name, expected in self.expected_attachments.items()
+            if final_result.attachments[name] != expected
+        )
+        if changed:
+            raise ValueError("finalizer changed attachments: " + ", ".join(changed))
+        return final_result
 
     def to_dict(self) -> dict[str, Any]:
         return _json_safe_mapping(
@@ -1274,13 +1667,7 @@ class FinalizeRequest:
                 allowed=allowed,
                 label="finalize request",
             )
-            version = data["schema_version"]
-            if type(version) is not int or version != SCHEMA_VERSION:
-                _protocol_failure(
-                    f"unknown or malformed finalize request schema_version {version!r}; "
-                    f"expected integer {SCHEMA_VERSION}",
-                    details={"received": version, "supported": [SCHEMA_VERSION]},
-                )
+            version = _require_schema_version(data["schema_version"], "finalize request")
             return cls(
                 schema_version=version,
                 plan=RenderPlan.from_dict(data["plan"]),
@@ -1636,9 +2023,11 @@ __all__ = [
     "AudioOwnership",
     "BackendConfig",
     "FinalizeRequest",
+    "FinalizerResolution",
     "FinalizerManifest",
     "FrameWindow",
     "PlannerManifest",
+    "PlannerResolution",
     "RenderPlan",
     "RenderProfile",
     "RenderRequest",
@@ -1646,6 +2035,7 @@ __all__ = [
     "RenderSegment",
     "RendererError",
     "RendererManifest",
+    "RendererResolution",
     "SupportReport",
     "VideoArtifact",
     "parse_wire_result",

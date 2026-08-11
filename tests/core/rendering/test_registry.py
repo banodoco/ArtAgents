@@ -36,6 +36,39 @@ INSTALLED_FIXTURES = FIXTURES / "installed"
 CYCLE_ROOT = FIXTURES / "cycle"
 
 
+def _canonical_fixture_root(source_root: Path, project_root: Path) -> Path:
+    """Stage shared fixtures using IDs valid at both pack and wire layers."""
+
+    try:
+        relative = source_root.resolve().relative_to(FIXTURES.resolve())
+    except ValueError:
+        return source_root
+
+    destination = project_root / ".canonical-renderer-fixtures" / relative
+    if destination.exists():
+        return destination
+    shutil.copytree(source_root, destination)
+    replacement = "-" if relative.parts[0] == "source" else ""
+    for manifest_path in destination.rglob("*.yaml"):
+        rewritten: list[str] = []
+        for line in manifest_path.read_text(encoding="utf-8").splitlines(keepends=True):
+            stripped = line.lstrip()
+            if stripped.startswith(("id: ", "alias: ", "canonical_id: ")):
+                key, value = line.split(":", 1)
+                line = f"{key}:{value.replace('_', replacement)}"
+            rewritten.append(line)
+        manifest_path.write_text("".join(rewritten), encoding="utf-8")
+    for pack_manifest in list(destination.rglob("pack.yaml")):
+        pack_id = next(
+            line.removeprefix("id: ")
+            for line in pack_manifest.read_text(encoding="utf-8").splitlines()
+            if line.startswith("id: ")
+        )
+        if pack_manifest.parent.name != pack_id:
+            pack_manifest.parent.rename(pack_manifest.parent.with_name(pack_id))
+    return destination
+
+
 def _scanner(source_root: Path):
     def scan(root: str | Path | None = None):
         return discover_packs(source_root if root is None else root)
@@ -49,15 +82,25 @@ def _load_with_source(
     source_root: Path = SOURCE_ROOT,
     *,
     extra_pack_roots: tuple[str, ...] = (),
+    env_pack_roots: tuple[str, ...] = (),
     include_installed: bool = False,
 ):
+    source_root = _canonical_fixture_root(source_root, project_root)
+    extra_pack_roots = tuple(
+        str(_canonical_fixture_root(Path(root), project_root))
+        for root in extra_pack_roots
+    )
     with (
         mock.patch.object(
             rendering_registry_module,
             "discover_packs",
             side_effect=_scanner(source_root),
         ),
-        mock.patch.dict(os.environ, {"ASTRID_PACKS_PATH": ""}, clear=False),
+        mock.patch.dict(
+            os.environ,
+            {"ASTRID_PACKS_PATH": os.pathsep.join(env_pack_roots)},
+            clear=False,
+        ),
     ):
         yield load_default_registries(
             project_root,
@@ -127,6 +170,26 @@ def _write_renderer_pack(
     return pack_root
 
 
+def _append_renderer_aliases(
+    pack_root: Path,
+    *aliases: tuple[str, str],
+) -> None:
+    manifest = pack_root / "pack.yaml"
+    lines = ["aliases:"]
+    for alias, canonical_id in aliases:
+        lines.extend(
+            [
+                "  - kind: renderer",
+                f"    alias: {alias}",
+                f"    canonical_id: {canonical_id}",
+            ]
+        )
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8") + "\n".join(lines) + "\n",
+        encoding="utf-8",
+    )
+
+
 def _stage_installed_fixture(
     astrid_home: Path,
     pack_id: str,
@@ -134,11 +197,25 @@ def _stage_installed_fixture(
     record_mode: str = "valid",
     active: bool = True,
 ) -> Path:
-    fixture = INSTALLED_FIXTURES / pack_id
+    fixture_name = {
+        "installedrender": "installed_render",
+        "corruptrender": "corrupt_render",
+        "inactiverender": "inactive_render",
+    }.get(pack_id, pack_id)
+    fixture = INSTALLED_FIXTURES / fixture_name
     install_root = astrid_home / "packs" / pack_id
     revision = install_root / "revisions" / pack_id
     revision.parent.mkdir(parents=True)
     shutil.copytree(fixture, revision)
+    for manifest_path in revision.rglob("*.yaml"):
+        rewritten: list[str] = []
+        for line in manifest_path.read_text(encoding="utf-8").splitlines(keepends=True):
+            stripped = line.lstrip()
+            if stripped.startswith(("id: ", "alias: ", "canonical_id: ")):
+                key, value = line.split(":", 1)
+                line = f"{key}:{value.replace('_', '')}"
+            rewritten.append(line)
+        manifest_path.write_text("".join(rewritten), encoding="utf-8")
 
     if active:
         (install_root / "active").symlink_to(Path("revisions") / pack_id)
@@ -185,8 +262,8 @@ def test_default_loader_returns_all_three_registry_types(tmp_path: Path) -> None
     assert isinstance(renderers, RendererRegistry)
     assert isinstance(planners, PlannerRegistry)
     assert isinstance(finalizers, FinalizerRegistry)
-    assert planners.get("rendering.legacy_hybrid").manifest.name == "Fixture Hybrid Planner"
-    assert finalizers.get("rendering.ffmpeg_finalizer").manifest.name == "Fixture FFmpeg Finalizer"
+    assert planners.get("rendering.legacy-hybrid").manifest.name == "Fixture Hybrid Planner"
+    assert finalizers.get("rendering.ffmpeg-finalizer").manifest.name == "Fixture FFmpeg Finalizer"
 
 
 def test_discovery_is_static_and_never_imports_or_executes_backend_code(tmp_path: Path) -> None:
@@ -212,15 +289,15 @@ def test_priority_index_selects_the_lowest_index_and_conflicts_are_reported(
 ) -> None:
     source_root = tmp_path / "source"
     extra_root = tmp_path / "extra"
-    _write_renderer_pack(source_root, "shared_render", renderer_name="Source Winner")
-    _write_renderer_pack(extra_root, "shared_render", renderer_name="Extra Shadow")
+    _write_renderer_pack(source_root, "sharedrender", renderer_name="Source Winner")
+    _write_renderer_pack(extra_root, "sharedrender", renderer_name="Extra Shadow")
 
     with _load_with_source(
         tmp_path / "project",
         source_root,
         extra_pack_roots=(str(extra_root),),
     ) as (renderers, _, _):
-        winner = renderers.get("shared_render.renderer")
+        winner = renderers.get("sharedrender.renderer")
         conflicts = renderers.conflicts()
 
     assert winner.manifest.name == "Source Winner"
@@ -236,7 +313,7 @@ def test_same_pack_conflict_report_is_deterministic(tmp_path: Path) -> None:
     source_root = tmp_path / "source"
     _write_renderer_pack(
         source_root,
-        "conflict_render",
+        "conflictrender",
         renderer_name="First",
         duplicate_name="Second",
     )
@@ -244,7 +321,7 @@ def test_same_pack_conflict_report_is_deterministic(tmp_path: Path) -> None:
     with _load_with_source(tmp_path / "project", source_root) as (renderers, _, _):
         conflict = renderers.conflicts()[0]
 
-    assert conflict.key == "conflict_render.renderer"
+    assert conflict.key == "conflictrender.renderer"
     assert conflict.winner.manifest.name == "First"
     assert [candidate.manifest.name for candidate in conflict.shadowed] == ["Second"]
 
@@ -267,10 +344,11 @@ def test_alias_chain_and_programmatic_compatibility_aliases(tmp_path: Path) -> N
 
 
 def test_alias_cycle_is_rejected_as_structured_registry_error(tmp_path: Path) -> None:
+    cycle_root = _canonical_fixture_root(CYCLE_ROOT, tmp_path)
     with (
         mock.patch(
             "astrid.core.rendering.registry.discover_packs",
-            side_effect=_scanner(CYCLE_ROOT),
+            side_effect=_scanner(cycle_root),
         ),
         mock.patch.dict(os.environ, {"ASTRID_PACKS_PATH": ""}, clear=False),
     ):
@@ -287,34 +365,185 @@ def test_alias_to_ineligible_direct_target_does_not_shadow_eligible_alias(
     source_root = tmp_path / "source"
     bad_root = _write_renderer_pack(
         source_root,
-        "a_bad",
+        "abad",
         renderer_name="Denied",
         required_permissions=("network",),
     )
     good_root = _write_renderer_pack(
         source_root,
-        "b_good",
+        "bgood",
         renderer_name="Eligible",
     )
     for pack_root, target in (
-        (bad_root, "a_bad.renderer"),
-        (good_root, "b_good.renderer"),
+        (bad_root, "abad.renderer"),
+        (good_root, "bgood.renderer"),
     ):
         manifest = pack_root / "pack.yaml"
         manifest.write_text(
             manifest.read_text(encoding="utf-8")
             + "aliases:\n"
             + "  - kind: renderer\n"
-            + "    alias: shared.renderer_alias\n"
+            + "    alias: shared.renderer-alias\n"
             + f"    canonical_id: {target}\n",
             encoding="utf-8",
         )
 
     with _load_with_source(tmp_path / "project", source_root) as (renderers, _, _):
-        selected = renderers.get("shared.renderer_alias")
+        selected = renderers.get("shared.renderer-alias")
 
-    assert selected.id == "b_good.renderer"
+    assert selected.id == "bgood.renderer"
     assert selected.manifest.name == "Eligible"
+
+
+def test_two_hop_alias_to_ineligible_env_renderer_falls_through(
+    tmp_path: Path,
+) -> None:
+    source_root = tmp_path / "source"
+    extra_root = tmp_path / "extra"
+    env_root = tmp_path / "env"
+    high = _write_renderer_pack(source_root, "highchain", renderer_name="High")
+    fallback = _write_renderer_pack(
+        extra_root,
+        "trustedfallback",
+        renderer_name="Trusted Fallback",
+    )
+    _write_renderer_pack(env_root, "envdenied", renderer_name="Environment Denied")
+    _append_renderer_aliases(
+        high,
+        ("shared.transitive", "highchain.middle"),
+        ("highchain.middle", "envdenied.renderer"),
+    )
+    _append_renderer_aliases(
+        fallback,
+        ("shared.transitive", "trustedfallback.renderer"),
+    )
+
+    with _load_with_source(
+        tmp_path / "project",
+        source_root,
+        extra_pack_roots=(str(extra_root),),
+        env_pack_roots=(str(env_root),),
+    ) as (renderers, _, _):
+        selected = renderers.get("shared.transitive")
+        evidence = renderers.resolve_evidence("shared.transitive")
+        denied = renderers.inspect("envdenied.renderer")
+
+    assert selected.id == "trustedfallback.renderer"
+    assert evidence["alias_chain"] == [
+        "shared.transitive",
+        "trustedfallback.renderer",
+    ]
+    assert len(denied) == 1
+    assert denied[0].execution_eligible is False
+
+
+def test_two_hop_alias_to_missing_terminal_falls_through(tmp_path: Path) -> None:
+    source_root = tmp_path / "source"
+    extra_root = tmp_path / "extra"
+    high = _write_renderer_pack(source_root, "highchain", renderer_name="High")
+    fallback = _write_renderer_pack(
+        extra_root,
+        "trustedfallback",
+        renderer_name="Trusted Fallback",
+    )
+    _append_renderer_aliases(
+        high,
+        ("shared.transitive", "highchain.middle"),
+        ("highchain.middle", "missing.renderer"),
+    )
+    _append_renderer_aliases(
+        fallback,
+        ("shared.transitive", "trustedfallback.renderer"),
+    )
+
+    with _load_with_source(
+        tmp_path / "project",
+        source_root,
+        extra_pack_roots=(str(extra_root),),
+    ) as (renderers, _, _):
+        selected = renderers.get("shared.transitive")
+        evidence = renderers.resolve_evidence("shared.transitive")
+
+    assert selected.id == "trustedfallback.renderer"
+    assert evidence["alias_chain"] == [
+        "shared.transitive",
+        "trustedfallback.renderer",
+    ]
+
+
+def test_alias_chain_uses_eligible_fallback_for_ineligible_intermediate_hop(
+    tmp_path: Path,
+) -> None:
+    source_root = tmp_path / "source"
+    extra_root = tmp_path / "extra"
+    env_root = tmp_path / "env"
+    high = _write_renderer_pack(source_root, "highchain", renderer_name="High")
+    fallback = _write_renderer_pack(
+        extra_root,
+        "trustedfallback",
+        renderer_name="Trusted Fallback",
+    )
+    _write_renderer_pack(env_root, "envdenied", renderer_name="Environment Denied")
+    _append_renderer_aliases(
+        high,
+        ("shared.transitive", "shared.middle"),
+        ("shared.middle", "envdenied.renderer"),
+    )
+    _append_renderer_aliases(
+        fallback,
+        ("shared.middle", "trustedfallback.renderer"),
+    )
+
+    with _load_with_source(
+        tmp_path / "project",
+        source_root,
+        extra_pack_roots=(str(extra_root),),
+        env_pack_roots=(str(env_root),),
+    ) as (renderers, _, _):
+        selected = renderers.get("shared.transitive")
+        evidence = renderers.resolve_evidence("shared.transitive")
+
+    assert selected.id == "trustedfallback.renderer"
+    assert evidence["alias_chain"] == [
+        "shared.transitive",
+        "shared.middle",
+        "trustedfallback.renderer",
+    ]
+
+
+def test_dangling_programmatic_alias_falls_through_to_eligible_pack_alias(
+    tmp_path: Path,
+) -> None:
+    source_root = tmp_path / "source"
+    fallback = _write_renderer_pack(
+        source_root,
+        "trustedfallback",
+        renderer_name="Trusted Fallback",
+    )
+    _append_renderer_aliases(
+        fallback,
+        ("shared.programmatic", "trustedfallback.renderer"),
+    )
+
+    with (
+        mock.patch.object(
+            rendering_registry_module,
+            "_PROGRAMMATIC_RENDERER_ALIASES",
+            (("shared.programmatic", "missing.renderer"),),
+        ),
+        _load_with_source(
+            tmp_path / "project",
+            source_root,
+        ) as (renderers, _, _),
+    ):
+        selected = renderers.get("shared.programmatic")
+        evidence = renderers.resolve_evidence("shared.programmatic")
+
+    assert selected.id == "trustedfallback.renderer"
+    assert evidence["alias_chain"] == [
+        "shared.programmatic",
+        "trustedfallback.renderer",
+    ]
 
 
 def test_override_is_applied_after_alias_resolution(tmp_path: Path) -> None:
@@ -378,23 +607,24 @@ def test_source_and_project_local_candidates_are_executable(tmp_path: Path) -> N
 def test_environment_candidate_is_inspectable_but_not_executable(tmp_path: Path) -> None:
     empty_source = tmp_path / "empty-source"
     empty_source.mkdir()
+    env_root = _canonical_fixture_root(ENV_ROOT, tmp_path)
     with (
         mock.patch(
             "astrid.core.rendering.registry.discover_packs",
             side_effect=_scanner(empty_source),
         ),
-        mock.patch.dict(os.environ, {"ASTRID_PACKS_PATH": str(ENV_ROOT)}, clear=False),
+        mock.patch.dict(os.environ, {"ASTRID_PACKS_PATH": str(env_root)}, clear=False),
     ):
         renderers, _, _ = load_default_registries(tmp_path, include_installed=False)
 
-    inspected = renderers.inspect("env_render.legacy")
+    inspected = renderers.inspect("envrender.legacy")
     assert len(inspected) == 1
     assert inspected[0].source_kind == "env"
     assert inspected[0].execution_eligible is False
     with pytest.raises(RendererRegistryError) as caught:
-        renderers.get("env_render.renderer")
+        renderers.get("envrender.renderer")
     assert caught.value.code == "execution_ineligible"
-    evidence = renderers.resolve_evidence("env_render.renderer")
+    evidence = renderers.resolve_evidence("envrender.renderer")
     assert evidence["eligible"] is False
     assert evidence["resolution_error"]["code"] == "execution_ineligible"
 
@@ -407,8 +637,8 @@ def test_explicit_extra_root_is_executable_and_records_trust_method(tmp_path: Pa
         empty_source,
         extra_pack_roots=(str(EXTRA_ROOT),),
     ) as (renderers, _, _):
-        candidate = renderers.get("extra_render.renderer")
-        evidence = renderers.resolve_evidence("extra_render.renderer")
+        candidate = renderers.get("extrarender.renderer")
+        evidence = renderers.resolve_evidence("extrarender.renderer")
 
     assert candidate.source_kind == "extra"
     assert candidate.execution_eligible is True
@@ -419,7 +649,7 @@ def test_installed_active_revision_with_valid_audit_is_executable(tmp_path: Path
     astrid_home = tmp_path / "astrid-home"
     empty_source = tmp_path / "empty-source"
     empty_source.mkdir()
-    _stage_installed_fixture(astrid_home, "installed_render")
+    _stage_installed_fixture(astrid_home, "installedrender")
 
     with (
         mock.patch.dict(
@@ -434,7 +664,7 @@ def test_installed_active_revision_with_valid_audit_is_executable(tmp_path: Path
     ):
         renderers, _, _ = load_default_registries(tmp_path, include_installed=True)
 
-    candidate = renderers.get("installed_render.renderer")
+    candidate = renderers.get("installedrender.renderer")
     assert candidate.source_kind == "installed"
     assert candidate.execution_eligible is True
     assert candidate.eligibility.trust_method == "test"
@@ -451,7 +681,7 @@ def test_installed_missing_or_corrupt_record_fails_closed(
     empty_source.mkdir()
     _stage_installed_fixture(
         astrid_home,
-        "corrupt_render",
+        "corruptrender",
         record_mode=record_mode,
     )
 
@@ -468,10 +698,10 @@ def test_installed_missing_or_corrupt_record_fails_closed(
     ):
         renderers, _, _ = load_default_registries(tmp_path, include_installed=True)
 
-    candidate = renderers.inspect("corrupt_render.renderer")[0]
+    candidate = renderers.inspect("corruptrender.renderer")[0]
     assert candidate.execution_eligible is False
     with pytest.raises(RendererRegistryError) as caught:
-        renderers.get("corrupt_render.renderer")
+        renderers.get("corruptrender.renderer")
     assert caught.value.code == "execution_ineligible"
 
 
@@ -483,7 +713,7 @@ def test_installed_type_corrupt_audit_remains_inspectable_and_fails_closed(
     astrid_home = tmp_path / "astrid-home"
     empty_source = tmp_path / "empty-source"
     empty_source.mkdir()
-    revision = _stage_installed_fixture(astrid_home, "corrupt_render")
+    revision = _stage_installed_fixture(astrid_home, "corruptrender")
     record_path = revision / ".astrid" / "install.json"
     record = json.loads(record_path.read_text(encoding="utf-8"))
     record["install_root"] = bad_install_root
@@ -502,7 +732,7 @@ def test_installed_type_corrupt_audit_remains_inspectable_and_fails_closed(
     ):
         renderers, _, _ = load_default_registries(tmp_path, include_installed=True)
 
-    candidate = renderers.inspect("corrupt_render.renderer")[0]
+    candidate = renderers.inspect("corruptrender.renderer")[0]
     assert candidate.execution_eligible is False
     assert "install" in candidate.eligibility.reason
 
@@ -513,7 +743,7 @@ def test_inactive_installed_revision_is_not_discovered(tmp_path: Path) -> None:
     empty_source.mkdir()
     _stage_installed_fixture(
         astrid_home,
-        "inactive_render",
+        "inactiverender",
         active=False,
     )
 
@@ -530,16 +760,16 @@ def test_inactive_installed_revision_is_not_discovered(tmp_path: Path) -> None:
     ):
         renderers, _, _ = load_default_registries(tmp_path, include_installed=True)
 
-    assert renderers.inspect("inactive_render.renderer") == ()
+    assert renderers.inspect("inactiverender.renderer") == ()
 
 
 def test_ineligible_higher_precedence_candidate_cannot_shadow_trusted_lower(
     tmp_path: Path,
 ) -> None:
-    env_root = tmp_path / "env" / "shared_render"
-    source_root = tmp_path / "source" / "shared_render"
-    _write_renderer_pack(env_root.parent, "shared_render", renderer_name="Untrusted First")
-    _write_renderer_pack(source_root.parent, "shared_render", renderer_name="Trusted Second")
+    env_root = tmp_path / "env" / "sharedrender"
+    source_root = tmp_path / "source" / "sharedrender"
+    _write_renderer_pack(env_root.parent, "sharedrender", renderer_name="Untrusted First")
+    _write_renderer_pack(source_root.parent, "sharedrender", renderer_name="Trusted Second")
     env_pack = load_pack_manifest(pack_manifest_path(env_root))
     source_pack = load_pack_manifest(pack_manifest_path(source_root))
     discovered = (
@@ -553,7 +783,7 @@ def test_ineligible_higher_precedence_candidate_cannot_shadow_trusted_lower(
     ):
         renderers, _, _ = load_default_registries(tmp_path, include_installed=False)
 
-    selected = renderers.get("shared_render.renderer")
+    selected = renderers.get("sharedrender.renderer")
     assert selected.manifest.name == "Trusted Second"
     assert selected.priority_index == 1
     assert renderers.conflicts() == ()
@@ -567,13 +797,13 @@ def test_manifest_permission_not_declared_by_pack_is_ineligible(tmp_path: Path) 
     source_root = tmp_path / "source"
     _write_renderer_pack(
         source_root,
-        "permission_render",
+        "permissionrender",
         renderer_name="Missing Declaration",
         required_permissions=("network",),
     )
 
     with _load_with_source(tmp_path / "project", source_root) as (renderers, _, _):
-        candidate = renderers.inspect("permission_render.renderer")[0]
+        candidate = renderers.inspect("permissionrender.renderer")[0]
 
     assert candidate.execution_eligible is False
     assert "not declared" in candidate.eligibility.reason
@@ -581,7 +811,7 @@ def test_manifest_permission_not_declared_by_pack_is_ineligible(tmp_path: Path) 
 
 def test_hybrid_is_never_a_renderer_alias(tmp_path: Path) -> None:
     with _load_with_source(tmp_path) as (renderers, planners, _):
-        assert planners.get("rendering.legacy_hybrid").id == "rendering.legacy_hybrid"
+        assert planners.get("rendering.legacy-hybrid").id == "rendering.legacy-hybrid"
         with pytest.raises(RendererRegistryError) as caught:
             renderers.get("hybrid")
 

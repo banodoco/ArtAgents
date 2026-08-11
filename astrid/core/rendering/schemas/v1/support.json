@@ -1,51 +1,43 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://astrid.dev/schemas/rendering/v1/support.json",
+  "$id": "https://astrid.local/schemas/rendering/v1/support.json",
   "title": "Astrid renderer support report v1",
-  "description": "Request-sensitive capability evidence. Static manifest hints are never a substitute for this report.",
   "type": "object",
-  "required": ["supported", "reasons", "features", "alternatives", "backend", "backend_version"],
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "supported", "reasons", "features", "alternatives",
+    "backend", "backend_version"
+  ],
   "properties": {
+    "schema_version": {"type": "integer", "const": 1},
     "supported": {"type": "boolean"},
-    "reasons": {
-      "type": "array",
-      "items": {"type": "string", "minLength": 1}
-    },
+    "reasons": {"type": "array", "items": {"type": "string", "minLength": 1}},
     "features": {
       "type": "object",
-      "additionalProperties": {
-        "oneOf": [
-          {"type": "boolean"},
-          {"type": "string"}
-        ]
-      }
+      "additionalProperties": {"type": ["boolean", "string"]}
     },
     "alternatives": {
       "type": "array",
-      "items": {"$ref": "#/definitions/qualifiedId"},
-      "uniqueItems": true
+      "uniqueItems": true,
+      "items": {"$ref": "#/definitions/qualifiedId"}
     },
     "backend": {"$ref": "#/definitions/qualifiedId"},
     "backend_version": {"type": ["string", "null"], "minLength": 1}
   },
-  "additionalProperties": false,
   "definitions": {
     "qualifiedId": {
       "type": "string",
-      "pattern": "^[a-z][a-z0-9_]*(?:\\.[a-z][a-z0-9_]*)+$"
+      "pattern": "^[a-z0-9][a-z0-9-]*(?:\\.[a-z0-9][a-z0-9-]*)+$"
     }
   },
   "examples": [
     {
-      "supported": false,
-      "reasons": ["speed changes are not supported"],
-      "features": {
-        "media_clips": true,
-        "speed_changes": false,
-        "audio_mode": "passthrough"
-      },
-      "alternatives": ["rendering.remotion"],
-      "backend": "rendering.ffmpeg",
+      "schema_version": 1,
+      "supported": true,
+      "reasons": [],
+      "features": {"media": true, "audio_mode": "rendered"},
+      "alternatives": [],
+      "backend": "acme.example",
       "backend_version": "1.0.0"
     }
   ]

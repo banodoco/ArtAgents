@@ -1,41 +1,40 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://astrid.dev/schemas/rendering/v1/result.json",
-  "title": "Astrid render result v1",
-  "description": "The authoritative result file: either a successful RenderResult or a structured RendererError.",
+  "$id": "https://astrid.local/schemas/rendering/v1/result.json",
+  "title": "Astrid renderer result v1",
   "oneOf": [
-    {"$ref": "#/definitions/renderResult"},
-    {"$ref": "#/definitions/rendererError"}
+    {"$ref": "#/definitions/success"},
+    {"$ref": "#/definitions/error"}
   ],
   "definitions": {
     "qualifiedId": {
       "type": "string",
-      "pattern": "^[a-z][a-z0-9_]*(?:\\.[a-z][a-z0-9_]*)+$"
+      "pattern": "^[a-z0-9][a-z0-9-]*(?:\\.[a-z0-9][a-z0-9-]*)+$"
     },
     "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "workspacePath": {
       "type": "string",
       "minLength": 1,
-      "pattern": "^(?!/)(?![A-Za-z]:/)(?!.*//)(?!.*[/]$)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*\\\\).+$",
-      "description": "Normalized path relative to the invocation workspace; traversal and backslashes are forbidden."
+      "pattern": "^(?![A-Za-z]:)(?!/)(?!\\.{1,2}(?:/|$))(?!.*?/\\.{1,2}(?:/|$))(?!.*//)(?!.*\\\\)(?!.*\\u0000)(?!.*/$).+$"
     },
     "portableName": {
       "type": "string",
       "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
       "not": {"enum": [".", ".."]}
     },
-    "rational": {
-      "type": "array",
-      "items": {"type": "integer", "minimum": 1},
-      "minItems": 2,
-      "maxItems": 2
-    },
     "audioOwnership": {
       "type": "string",
       "enum": ["rendered", "passthrough", "none"]
     },
+    "positiveRational": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {"type": "integer", "minimum": 1}
+    },
     "renderProfile": {
       "type": "object",
+      "additionalProperties": false,
       "required": [
         "width", "height", "fps_rational", "time_base", "container",
         "video_codec", "video_profile", "video_level", "pixel_format",
@@ -44,8 +43,8 @@
       "properties": {
         "width": {"type": "integer", "minimum": 1},
         "height": {"type": "integer", "minimum": 1},
-        "fps_rational": {"$ref": "#/definitions/rational"},
-        "time_base": {"$ref": "#/definitions/rational"},
+        "fps_rational": {"$ref": "#/definitions/positiveRational"},
+        "time_base": {"$ref": "#/definitions/positiveRational"},
         "container": {"type": "string", "minLength": 1},
         "video_codec": {"type": "string", "minLength": 1},
         "video_profile": {"type": ["string", "null"], "minLength": 1},
@@ -58,7 +57,6 @@
       },
       "oneOf": [
         {
-          "required": ["audio_codec", "audio_sample_rate", "audio_channel_layout"],
           "properties": {
             "audio_codec": {"type": "null"},
             "audio_sample_rate": {"type": "null"},
@@ -66,25 +64,25 @@
           }
         },
         {
+          "required": ["audio_codec", "audio_sample_rate", "audio_channel_layout"],
           "properties": {
             "audio_codec": {"type": "string", "minLength": 1},
             "audio_sample_rate": {"type": "integer", "minimum": 1},
             "audio_channel_layout": {"type": "string", "minLength": 1}
           }
         }
-      ],
-      "additionalProperties": false
+      ]
     },
     "attachment": {
       "type": "object",
+      "additionalProperties": false,
       "required": ["name", "path", "kind", "sha256"],
       "properties": {
         "name": {"$ref": "#/definitions/portableName"},
         "path": {"$ref": "#/definitions/workspacePath"},
         "kind": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"},
         "sha256": {"$ref": "#/definitions/sha256"}
-      },
-      "additionalProperties": false
+      }
     },
     "attachments": {
       "type": "object",
@@ -93,6 +91,7 @@
     },
     "videoArtifact": {
       "type": "object",
+      "additionalProperties": false,
       "required": ["path", "profile", "sha256", "duration_frames"],
       "properties": {
         "path": {"$ref": "#/definitions/workspacePath"},
@@ -100,93 +99,119 @@
         "sha256": {"$ref": "#/definitions/sha256"},
         "duration_frames": {"type": "integer", "minimum": 1},
         "audio": {
-          "oneOf": [
+          "anyOf": [
             {"$ref": "#/definitions/audioOwnership"},
             {"type": "null"}
-          ],
-          "default": null
-        },
-        "attachments": {"$ref": "#/definitions/attachments", "default": {}}
-      },
-      "additionalProperties": false
-    },
-    "backendFragment": {
-      "type": "object",
-      "propertyNames": {
-        "not": {
-          "enum": [
-            "schema_version", "engine", "output", "timeline", "assets_registry",
-            "requested_policy", "resolved_backend", "source_pack", "alias_chain",
-            "override", "trust_eligibility", "manifest_digest", "support_decision",
-            "input_hashes", "segments", "artifact_profiles", "audio_ownership",
-            "normalization", "finalizer", "attachments", "backend_fragments",
-            "video", "logs", "metadata", "project_dir", "composition_id",
-            "active_pack_order", "active_theme", "registry_hash", "registry_state",
-            "resolved_effect_ids", "resolved_effects", "source_pack_ids",
-            "element_roots", "staged_asset_ids", "staged_asset_root",
-            "segment_provenance", "ffmpeg_specialization", "audio_reactive_colour"
           ]
-        }
+        },
+        "attachments": {"$ref": "#/definitions/attachments"}
       },
-      "additionalProperties": true
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "profile": {
+                "required": ["audio_codec"],
+                "properties": {"audio_codec": {"type": "string"}}
+              }
+            }
+          },
+          "then": {
+            "required": ["audio"],
+            "properties": {"audio": {"const": "rendered"}}
+          },
+          "else": {
+            "properties": {"audio": {"enum": ["passthrough", "none", null]}}
+          }
+        }
+      ]
     },
-    "renderResult": {
+    "backendFragments": {
       "type": "object",
+      "propertyNames": {"$ref": "#/definitions/qualifiedId"},
+      "additionalProperties": {
+        "type": "object",
+        "propertyNames": {
+          "not": {
+            "enum": [
+              "schema_version", "video", "backend_fragments", "audio_ownership",
+              "normalization", "logs", "metadata", "engine", "output", "timeline",
+              "assets_registry", "request_digest", "requested_policy", "planner",
+              "segments", "artifact_profiles", "finalizer", "attachments",
+              "project_dir", "composition_id", "active_pack_order", "active_theme",
+              "registry_hash", "registry_state", "resolved_effect_ids", "resolved_effects",
+              "source_pack_ids", "element_roots", "staged_asset_ids", "staged_asset_root",
+              "segment_provenance", "ffmpeg_specialization", "audio_reactive_colour",
+              "resolved_backend", "source_pack", "alias_chain", "override",
+              "trust_eligibility", "manifest_digest", "support_decision", "input_hashes"
+            ]
+          }
+        }
+      }
+    },
+    "stringArray": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "stringMap": {"type": "object", "additionalProperties": {"type": "string"}},
+    "success": {
+      "type": "object",
+      "additionalProperties": false,
       "required": ["schema_version", "video", "audio_ownership"],
       "properties": {
         "schema_version": {"type": "integer", "const": 1},
         "video": {"$ref": "#/definitions/videoArtifact"},
-        "attachments": {"$ref": "#/definitions/attachments", "default": {}},
-        "backend_fragments": {
-          "type": "object",
-          "propertyNames": {"$ref": "#/definitions/qualifiedId"},
-          "additionalProperties": {"$ref": "#/definitions/backendFragment"},
-          "default": {}
-        },
+        "backend_fragments": {"$ref": "#/definitions/backendFragments"},
         "audio_ownership": {"$ref": "#/definitions/audioOwnership"},
-        "normalization": {
-          "type": "array",
-          "items": {"type": "string", "minLength": 1},
-          "default": []
-        },
-        "logs": {
-          "type": "array",
-          "items": {"type": "string", "minLength": 1},
-          "default": []
-        },
-        "metadata": {
-          "type": "object",
-          "propertyNames": {"minLength": 1},
-          "additionalProperties": {"type": "string", "minLength": 1},
-          "default": {}
-        }
+        "normalization": {"$ref": "#/definitions/stringArray"},
+        "logs": {"$ref": "#/definitions/stringArray"},
+        "metadata": {"$ref": "#/definitions/stringMap"}
       },
-      "additionalProperties": false
+      "oneOf": [
+        {
+          "properties": {
+            "audio_ownership": {"const": "rendered"},
+            "video": {"properties": {"audio": {"const": "rendered"}}, "required": ["audio"]}
+          }
+        },
+        {
+          "properties": {
+            "audio_ownership": {"const": "passthrough"},
+            "video": {"properties": {"audio": {"const": "passthrough"}}, "required": ["audio"]}
+          }
+        },
+        {
+          "properties": {
+            "audio_ownership": {"const": "none"},
+            "video": {"properties": {"audio": {"const": "none"}}, "required": ["audio"]}
+          }
+        }
+      ]
     },
-    "rendererError": {
+    "error": {
       "type": "object",
-      "required": ["kind", "backend", "message", "recovery_command", "details"],
+      "additionalProperties": false,
+      "required": [
+        "schema_version", "kind", "backend", "message", "recovery_command", "details"
+      ],
       "properties": {
+        "schema_version": {"type": "integer", "const": 1},
         "kind": {
           "type": "string",
           "enum": [
-            "protocol", "unsupported", "binary_missing", "timeout",
-            "interrupted", "invalid_artifact", "internal"
+            "protocol", "unsupported", "binary_missing", "timeout", "interrupted",
+            "invalid_artifact", "internal"
           ]
         },
         "backend": {"$ref": "#/definitions/qualifiedId"},
         "message": {"type": "string", "minLength": 1},
         "recovery_command": {"type": ["string", "null"], "minLength": 1},
         "details": {"type": "object"}
-      },
-      "additionalProperties": false
+      }
     }
   },
   "examples": [
     {
       "schema_version": 1,
       "video": {
-        "path": "outputs/preview.mp4",
+        "path": "outputs/video.mp4",
         "profile": {
           "width": 1920,
           "height": 1080,
@@ -206,34 +231,25 @@
         "duration_frames": 48,
         "audio": "rendered",
         "attachments": {
-          "alpha.mov": {
-            "name": "alpha.mov",
-            "path": "outputs/alpha.mov",
-            "kind": "alpha",
-            "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          "project.blend": {
+            "name": "project.blend",
+            "path": "outputs/project.blend",
+            "kind": "project",
+            "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
           }
         }
       },
-      "attachments": {
-        "project.blend": {
-          "name": "project.blend",
-          "path": "outputs/project.blend",
-          "kind": "project",
-          "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
-        }
-      },
-      "backend_fragments": {
-        "acme.example": {"renderer": "example", "quality": "preview"}
-      },
+      "backend_fragments": {"acme.example": {"renderer": "example"}},
       "audio_ownership": "rendered",
       "normalization": [],
       "logs": ["render completed"],
       "metadata": {"request_id": "render-001"}
     },
     {
+      "schema_version": 1,
       "kind": "unsupported",
       "backend": "acme.example",
-      "message": "the request uses unsupported transitions",
+      "message": "transitions are unsupported",
       "recovery_command": "select rendering.remotion",
       "details": {"features": ["transitions"]}
     }

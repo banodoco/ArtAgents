@@ -7,7 +7,7 @@ from typing import Any, NoReturn
 
 from astrid.core.contracts.errors import AstridError
 
-from .contracts import RendererError, RendererErrorKind
+from .contracts import SCHEMA_VERSION, RendererError, RendererErrorKind
 
 
 class RendererException(AstridError):
@@ -87,6 +87,7 @@ def make_renderer_error(
     """Build a validated structured failure without raising it."""
 
     return RendererError(
+        schema_version=SCHEMA_VERSION,
         kind=kind,
         backend=backend,
         message=message,

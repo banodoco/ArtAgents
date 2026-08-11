@@ -10,12 +10,20 @@ from referencing import Registry, Resource
 
 from astrid.core.pack import PackValidationError, load_pack_manifest
 from astrid.core.pack.alias_resolver import extract_pack_aliases
+from astrid.core.pack.cli_basic import cmd_validate
+from astrid.core.pack.install import install_pack
 from astrid.core.pack.registry import pack_rendering_manifest_paths
+from astrid.core.pack.store import InstalledPackStore
+from astrid.core.pack.validate import validate_pack
 
 
-SCHEMAS_ROOT = (
-    Path(__file__).resolve().parents[2] / "astrid" / "core" / "pack" / "schemas" / "v1"
-)
+REPO_ROOT = Path(__file__).resolve().parents[2]
+SCHEMAS_ROOT = REPO_ROOT / "astrid" / "core" / "pack" / "schemas" / "v1"
+RENDERING_OPERATIONS = {
+    "renderer": "render",
+    "planner": "plan",
+    "finalizer": "finalize",
+}
 
 
 def _write_pack(tmp_path: Path, body: str, *, pack_id: str = "render_pack") -> Path:
@@ -32,6 +40,58 @@ def _schema_errors(body: str) -> list[str]:
     registry = Registry().with_resource("_defs.json", Resource.from_contents(defs_schema))
     validator = jsonschema.Draft7Validator(pack_schema, registry=registry)
     return [error.message for error in validator.iter_errors(yaml.safe_load(body))]
+
+
+def _write_valid_rendering_pack(tmp_path: Path, *, aliases: bool) -> Path:
+    alias_block = ""
+    if aliases:
+        alias_block = """aliases:
+  - kind: renderer
+    alias: renderpack.legacy-renderer
+    canonical_id: renderpack.compat-renderer
+  - kind: renderer
+    alias: renderpack.compat-renderer
+    canonical_id: renderpack.primary-renderer
+  - kind: planner
+    alias: renderpack.legacy-planner
+    canonical_id: renderpack.primary-planner
+  - kind: finalizer
+    alias: renderpack.legacy-finalizer
+    canonical_id: renderpack.primary-finalizer
+"""
+    body = f"""schema_version: 1
+id: renderpack
+name: Rendering Pack
+version: 1.0.0
+{alias_block}extensions:
+  rendering:
+    renderers:
+      - manifests/renderer.yaml
+    planners:
+      - manifests/planner.yaml
+    finalizers:
+      - manifests/finalizer.yaml
+"""
+    pack_root = _write_pack(tmp_path, body, pack_id="renderpack").parent
+    manifests_root = pack_root / "manifests"
+    manifests_root.mkdir()
+    for kind, operation in RENDERING_OPERATIONS.items():
+        (manifests_root / f"{kind}.yaml").write_text(
+            f"""schema_version: 1
+id: renderpack.primary-{kind}
+name: Primary {kind.title()}
+version: 1.0.0
+protocol_version: 1
+command: [python3, {kind}.py]
+operations: [{operation}]
+""",
+            encoding="utf-8",
+        )
+        (pack_root / f"{kind}.py").write_text(
+            "raise SystemExit('must not import')\n",
+            encoding="utf-8",
+        )
+    return pack_root
 
 
 def test_rendering_extensions_round_trip_through_schema_and_normalizer(tmp_path: Path) -> None:
@@ -104,6 +164,9 @@ extensions:
     with pytest.raises(PackValidationError, match="must stay within the pack root"):
         pack_rendering_manifest_paths(pack)
 
+    errors, _warnings = validate_pack(pack.root)
+    assert any("must stay within the pack root" in error for error in errors), errors
+
 
 def test_rendering_manifest_paths_resolve_relative_to_pack_root(tmp_path: Path) -> None:
     body = """schema_version: 1
@@ -156,3 +219,67 @@ aliases:
                 "source_pack_id": "render_pack",
             }
         ]
+
+
+def test_validate_pack_accepts_rendering_extension_manifests(
+    tmp_path: Path,
+) -> None:
+    pack_root = _write_valid_rendering_pack(tmp_path, aliases=False)
+
+    errors, _warnings = validate_pack(pack_root)
+
+    assert errors == []
+
+
+def test_validate_pack_accepts_renderer_planner_and_finalizer_aliases(
+    tmp_path: Path,
+) -> None:
+    pack_root = _write_valid_rendering_pack(tmp_path, aliases=True)
+
+    errors, _warnings = validate_pack(pack_root)
+
+    assert errors == []
+
+
+@pytest.mark.parametrize("manifest_kind", tuple(RENDERING_OPERATIONS))
+def test_validate_pack_rejects_malformed_rendering_manifests(
+    tmp_path: Path,
+    manifest_kind: str,
+) -> None:
+    pack_root = _write_valid_rendering_pack(tmp_path, aliases=False)
+    manifest_path = pack_root / "manifests" / f"{manifest_kind}.yaml"
+    payload = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+    del payload["operations"]
+    manifest_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+
+    errors, _warnings = validate_pack(pack_root)
+
+    assert any(
+        f"manifests/{manifest_kind}.yaml" in error
+        and "missing required field operations" in error
+        for error in errors
+    ), errors
+
+
+def test_pack_cli_validate_and_local_install_accept_rendering_aliases(
+    tmp_path: Path,
+) -> None:
+    pack_root = _write_valid_rendering_pack(tmp_path, aliases=True)
+    store = InstalledPackStore(packs_home=tmp_path / "installed-packs")
+
+    assert cmd_validate([str(pack_root)]) == 0
+    assert install_pack(
+        pack_root,
+        store=store,
+        skip_confirm=True,
+        trust_acknowledged=True,
+        trust_method="test",
+        trust_actor="test",
+    ) == 0
+
+    installed_root = store.active_revision_path("renderpack")
+    assert installed_root is not None
+    errors, _warnings = validate_pack(installed_root)
+    assert errors == []
+    for kind in RENDERING_OPERATIONS:
+        assert (installed_root / "manifests" / f"{kind}.yaml").is_file()

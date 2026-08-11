@@ -465,6 +465,155 @@ def test_hybrid_segments_effect_clip_marks_remotion_window() -> None:
 
 
 # ---------------------------------------------------------------------------
+# real transitions in _complex_clip_windows (default duration, precedence,
+# handle padding, rounding)
+# ---------------------------------------------------------------------------
+
+
+def _two_media_clips_timeline(transition: dict | None) -> dict:
+    """Two back-to-back media clips on one visual track (fps 30).
+
+    clip_a spans [0, 2]; clip_b starts at 2.0 and spans [2, 4]. The timeline
+    duration (no metadata) is 4.0. clip_a optionally carries *transition*.
+    """
+    clips = [
+        {
+            "id": "clip_a",
+            "at": 0,
+            "track": "v",
+            "clipType": "media",
+            "asset": "main",
+            "from": 0,
+            "to": 2,
+            "speed": 1,
+            "volume": 0,
+        },
+        {
+            "id": "clip_b",
+            "at": 2,
+            "track": "v",
+            "clipType": "media",
+            "asset": "main",
+            "from": 0,
+            "to": 2,
+            "speed": 1,
+            "volume": 0,
+        },
+    ]
+    if transition is not None:
+        clips[0]["transition"] = transition
+    return {
+        "theme": "banodoco-default",
+        "theme_overrides": {"visual": {"canvas": {"width": 1920, "height": 1080, "fps": 30}}},
+        "tracks": [{"id": "v", "kind": "visual", "label": "Video"}],
+        "clips": clips,
+    }
+
+
+def test_transition_default_duration_is_8_frames() -> None:
+    """A transition dict without duration keys defaults to 8 frames / fps.
+
+    For clip_a ending at 2.0 with the next clip at 2.0: window is
+    (2.0 - 8/30 - 0.25, 2.0 + 8/30 + 0.25) floor/ceil-rounded to frames.
+    """
+    windows = render_run._complex_clip_windows(_two_media_clips_timeline({"type": "crossfade"}), 30)
+    assert windows == [
+        (pytest.approx(44 / 30), pytest.approx(76 / 30)),
+    ]
+
+
+def test_transition_default_duration_scales_with_fps() -> None:
+    windows = render_run._complex_clip_windows(_two_media_clips_timeline({"type": "crossfade"}), 24)
+    assert windows == [
+        (pytest.approx(34 / 24), pytest.approx(62 / 24)),
+    ]
+
+
+def test_transition_duration_seconds_overrides_default() -> None:
+    windows = render_run._complex_clip_windows(_two_media_clips_timeline({"duration": 0.5}), 30)
+    assert windows == [
+        (pytest.approx(37 / 30), pytest.approx(83 / 30)),
+    ]
+
+
+def test_transition_duration_frames_divide_by_fps() -> None:
+    windows = render_run._complex_clip_windows(_two_media_clips_timeline({"durationFrames": 12}), 30)
+    assert windows == [
+        (pytest.approx(40 / 30), pytest.approx(80 / 30)),
+    ]
+
+
+def test_transition_duration_seconds_take_precedence_over_duration_frames() -> None:
+    windows = render_run._complex_clip_windows(
+        _two_media_clips_timeline({"duration": 0.5, "durationFrames": 12}), 30
+    )
+    assert windows == [
+        (pytest.approx(37 / 30), pytest.approx(83 / 30)),
+    ]
+
+
+def test_transition_handle_padding_and_frame_rounding_without_transition() -> None:
+    """An effect clip (no transition) is padded by handle_seconds=0.25 and the
+    window is frame-rounded (floor start, ceil end)."""
+    data = _two_media_clips_timeline(None)
+    data["clips"][0]["effects"] = [{"id": "zoom"}]
+    windows = render_run._complex_clip_windows(data, 30)
+    # clip_a [0, 2] padded -> (max(0, 0-0.25), min(4, 2+0.25)) = (0, 2.25)
+    # rounded -> frames 0 and ceil(2.25*30)=68.
+    assert windows == [(0.0, pytest.approx(68 / 30))]
+
+
+def test_transition_handle_padding_rounds_off_frame_boundaries() -> None:
+    """A clip starting mid-frame pads to non-frame-aligned edges that are then
+    rounded: at=0.5 hold=1.0 -> (0.5-0.25, 1.5+0.25) = (0.25, 1.75) -> frames 7/53."""
+    data = {
+        "theme": "banodoco-default",
+        "theme_overrides": {"visual": {"canvas": {"width": 1920, "height": 1080, "fps": 30}}},
+        "tracks": [{"id": "v", "kind": "visual", "label": "Video"}],
+        "clips": [
+            {"id": "card", "at": 0.5, "track": "v", "clipType": "text-card", "hold": 1.0},
+            {"id": "media", "at": 0, "track": "v", "clipType": "media", "asset": "main", "from": 0, "to": 4, "speed": 1, "volume": 0},
+        ],
+    }
+    windows = render_run._complex_clip_windows(data, 30)
+    assert windows == [(pytest.approx(7 / 30), pytest.approx(53 / 30))]
+
+
+def test_transition_takes_precedence_over_effect_window() -> None:
+    """A media clip with BOTH effects and a transition uses the transition
+    window (centered on the boundary), not the effect's padded clip window."""
+    data = _two_media_clips_timeline({"duration": 0.5})
+    data["clips"][0]["effects"] = [{"id": "zoom"}]
+    windows = render_run._complex_clip_windows(data, 30)
+    assert windows == [
+        (pytest.approx(37 / 30), pytest.approx(83 / 30)),
+    ]
+
+
+def test_transition_ignored_for_non_media_clip() -> None:
+    """'transition' is only honored on media clips: a text-card carrying a
+    transition dict still gets the plain padded clip window."""
+    data = {
+        "theme": "banodoco-default",
+        "theme_overrides": {"visual": {"canvas": {"width": 1920, "height": 1080, "fps": 30}}},
+        "tracks": [{"id": "v", "kind": "visual", "label": "Video"}],
+        "clips": [
+            {"id": "card", "at": 0.5, "track": "v", "clipType": "text-card", "hold": 1.0, "transition": {"duration": 0.5}},
+            {"id": "media", "at": 0, "track": "v", "clipType": "media", "asset": "main", "from": 0, "to": 4, "speed": 1, "volume": 0},
+        ],
+    }
+    windows = render_run._complex_clip_windows(data, 30)
+    assert windows == [(pytest.approx(7 / 30), pytest.approx(53 / 30))]
+
+
+def test_transition_longer_than_clip_clamps_to_timeline_bounds() -> None:
+    """A transition longer than the clip's lead-in clamps the window start to
+    0 and the end to the timeline duration (with rounding)."""
+    windows = render_run._complex_clip_windows(_two_media_clips_timeline({"duration": 3.0}), 30)
+    assert windows == [(0.0, pytest.approx(4.0))]
+
+
+# ---------------------------------------------------------------------------
 # standalone vs attached run ownership
 # ---------------------------------------------------------------------------
 

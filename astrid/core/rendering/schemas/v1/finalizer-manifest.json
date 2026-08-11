@@ -51,7 +51,7 @@
   "definitions": {
     "qualifiedId": {
       "type": "string",
-      "pattern": "^[a-z][a-z0-9_]*(?:\\.[a-z][a-z0-9_]*)+$"
+      "pattern": "^[a-z0-9][a-z0-9-]*(?:\\.[a-z0-9][a-z0-9-]*)+$"
     },
     "permissions": {
       "type": "array",
@@ -91,7 +91,7 @@
   "examples": [
     {
       "schema_version": 1,
-      "id": "rendering.ffmpeg_finalizer",
+      "id": "rendering.ffmpeg-finalizer",
       "name": "FFmpeg Finalizer",
       "version": "1.0.0",
       "protocol_version": 1,

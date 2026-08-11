@@ -1,7 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import FrozenInstanceError
+from collections.abc import Callable
+from copy import deepcopy
+from dataclasses import FrozenInstanceError, replace
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -20,10 +23,13 @@ from astrid.core.rendering import (
 from astrid.core.rendering.contracts import (
     FinalizeRequest,
     FinalizerManifest,
+    FinalizerResolution,
     PlannerManifest,
+    PlannerResolution,
     PROVENANCE_V1_COMPATIBILITY_KEYS,
     RenderSegment,
     RendererManifest,
+    RendererResolution,
     parse_wire_result,
 )
 from astrid.core.rendering.errors import RendererProtocolError
@@ -38,13 +44,15 @@ from astrid.core.rendering.provenance import (
 SHA_A = "a" * 64
 SHA_B = "b" * 64
 SHA_C = "c" * 64
+SHA_D = "d" * 64
+SHA_E = "e" * 64
 
 
-def _profile(*, audio: bool = True) -> RenderProfile:
+def _profile(*, audio: bool = True, fps: tuple[int, int] = (24, 1)) -> RenderProfile:
     return RenderProfile(
         width=1920,
         height=1080,
-        fps_rational=(24, 1),
+        fps_rational=fps,
         time_base=(1, 12288),
         container="mp4",
         video_codec="h264",
@@ -58,54 +66,143 @@ def _profile(*, audio: bool = True) -> RenderProfile:
     )
 
 
-def _window() -> FrameWindow:
+def _window(
+    start: int = 0,
+    end: int = 48,
+    *,
+    fps: tuple[int, int] = (24, 1),
+) -> FrameWindow:
     return FrameWindow(
-        start_frame=0,
-        end_frame=48,
-        fps_rational=(24, 1),
-        source_range=(10, 58),
+        start_frame=start,
+        end_frame=end,
+        fps_rational=fps,
+        source_range=(10 + start, 10 + end),
         speed=1.0,
     )
 
 
-def _support() -> SupportReport:
+def _support(backend: str = "acme.example") -> SupportReport:
     return SupportReport(
+        schema_version=1,
         supported=True,
         reasons=[],
         features={"media": True, "audio_mode": "rendered"},
         alternatives=[],
-        backend="acme.example",
+        backend=backend,
         backend_version="1.0.0",
     )
 
 
-def _segment() -> RenderSegment:
+def _planner() -> PlannerResolution:
+    return PlannerResolution(
+        id="rendering.legacy-hybrid",
+        source_pack={"id": "rendering"},
+        manifest_digest=SHA_C,
+        trust_eligibility={"eligible": True, "method": "source-tree"},
+    )
+
+
+def _renderer(backend: str = "acme.example", *, digest: str = SHA_B) -> RendererResolution:
+    return RendererResolution(
+        id=backend,
+        source_pack={"id": backend.split(".", 1)[0]},
+        manifest_digest=digest,
+        alias_chain=[backend],
+        override=None,
+        support_decision=_support(backend),
+    )
+
+
+def _finalizer() -> FinalizerResolution:
+    return FinalizerResolution(
+        id="rendering.ffmpeg-finalizer",
+        source_pack={"id": "rendering"},
+        manifest_digest=SHA_E,
+    )
+
+
+def _segment(
+    start: int = 0,
+    end: int = 48,
+    *,
+    backend: str = "acme.example",
+    fps: tuple[int, int] = (24, 1),
+    digest: str = SHA_B,
+) -> RenderSegment:
     return RenderSegment(
-        window=_window(),
-        backend="acme.example",
-        backend_config={"acme.example": {"quality": "preview"}},
-        support=_support(),
+        window=_window(start, end, fps=fps),
+        renderer=_renderer(backend, digest=digest),
         input_hashes={"timeline": SHA_A},
     )
 
 
-def _plan() -> RenderPlan:
+def _plan(
+    *,
+    segments: list[RenderSegment] | None = None,
+    total_frames: int = 48,
+    profile: RenderProfile | None = None,
+    window: FrameWindow | None = None,
+) -> RenderPlan:
+    selected = [_segment()] if segments is None else segments
     return RenderPlan(
-        segments=[_segment()],
-        finalizer="rendering.ffmpeg_finalizer",
-        profile=_profile(),
-        reasons={"0": "the request is supported"},
+        schema_version=1,
+        request_digest=SHA_D,
+        requested_policy="hybrid",
+        planner=_planner(),
+        segments=selected,
+        finalizer=_finalizer(),
+        profile=profile or _profile(),
+        total_frames=total_frames,
+        reasons={str(index): "the request is supported" for index in range(len(selected))},
+        window=window,
     )
 
 
-def _video(*, attachments: dict[str, Attachment] | None = None) -> VideoArtifact:
+def _video(
+    *,
+    path: str = "outputs/video.mp4",
+    duration_frames: int = 48,
+    profile: RenderProfile | None = None,
+    audio: AudioOwnership = AudioOwnership.RENDERED,
+    attachments: dict[str, Attachment] | None = None,
+) -> VideoArtifact:
     return VideoArtifact(
-        path="outputs/video.mp4",
-        profile=_profile(),
+        path=path,
+        profile=profile or _profile(),
         sha256=SHA_A,
-        duration_frames=48,
-        audio=AudioOwnership.RENDERED,
+        duration_frames=duration_frames,
+        audio=audio,
         attachments=attachments or {},
+    )
+
+
+def _result(*, video: VideoArtifact | None = None) -> RenderResult:
+    selected = video or _video()
+    assert selected.audio is not None
+    return RenderResult(
+        schema_version=1,
+        video=selected,
+        backend_fragments={"acme.example": {"renderer": "example"}},
+        audio_ownership=selected.audio,
+        normalization=[],
+        logs=["render completed"],
+        metadata={"request_id": "render-001"},
+    )
+
+
+def _finalize(
+    *,
+    plan: RenderPlan | None = None,
+    artifacts: list[VideoArtifact] | None = None,
+) -> FinalizeRequest:
+    selected_plan = plan or _plan()
+    return FinalizeRequest(
+        schema_version=1,
+        plan=selected_plan,
+        artifacts=[_video()] if artifacts is None else artifacts,
+        output_name="preview.mp4",
+        backend_config={"rendering.ffmpeg-finalizer": {"faststart": True}},
+        metadata={"request_id": "render-001"},
     )
 
 
@@ -121,37 +218,20 @@ def test_dto_json_round_trip() -> None:
         backend_config={"acme.example": {"quality": "preview"}},
         metadata={"project_id": "demo"},
     )
-    alpha = Attachment(name="alpha.mov", path="outputs/alpha.mov", kind="alpha", sha256=SHA_B)
     project = Attachment(
         name="project.blend",
         path="outputs/project.blend",
         kind="project",
         sha256=SHA_C,
     )
-    result = RenderResult(
-        schema_version=1,
-        video=_video(attachments={alpha.name: alpha}),
-        attachments={project.name: project},
-        backend_fragments={"acme.example": {"renderer": "example"}},
-        audio_ownership=AudioOwnership.RENDERED,
-        normalization=[],
-        logs=["render completed"],
-        metadata={"request_id": "render-001"},
-    )
+    result = _result(video=_video(attachments={project.name: project}))
     error = RendererError(
+        schema_version=1,
         kind="unsupported",
         backend="acme.example",
         message="transitions are unsupported",
         recovery_command="select rendering.remotion",
         details={"features": ["transitions"]},
-    )
-    finalize = FinalizeRequest(
-        schema_version=1,
-        plan=_plan(),
-        artifacts=[_video()],
-        output_name="preview.mp4",
-        backend_config={"rendering.ffmpeg_finalizer": {"faststart": True}},
-        metadata={"request_id": "render-001"},
     )
 
     pairs = [
@@ -160,7 +240,7 @@ def test_dto_json_round_trip() -> None:
         (RenderPlan, _plan()),
         (RenderResult, result),
         (RendererError, error),
-        (FinalizeRequest, finalize),
+        (FinalizeRequest, _finalize()),
     ]
     for dto_type, dto in pairs:
         payload = dto.to_dict()
@@ -195,22 +275,54 @@ def test_optional_request_fields_default_and_selected_config_isolated() -> None:
     }
 
 
-@pytest.mark.parametrize("version", [0, 2, "1", True, None])
-def test_unknown_or_malformed_request_version_is_protocol_error(version: object) -> None:
+def _versioned_payloads() -> dict[str, tuple[Callable[[dict[str, Any]], Any], dict[str, Any]]]:
+    request = RenderRequest(
+        schema_version=1,
+        timeline_path="/workspace/timeline.json",
+        output_name="video.mp4",
+    ).to_dict()
+    error = RendererError(
+        schema_version=1,
+        kind="unsupported",
+        backend="acme.example",
+        message="unsupported",
+        recovery_command=None,
+        details={},
+    ).to_dict()
+    return {
+        "request": (RenderRequest.from_dict, request),
+        "support": (SupportReport.from_dict, _support().to_dict()),
+        "plan": (RenderPlan.from_dict, _plan().to_dict()),
+        "finalize": (FinalizeRequest.from_dict, _finalize().to_dict()),
+        "result-success": (parse_wire_result, _result().to_dict()),
+        "result-error": (parse_wire_result, error),
+    }
+
+
+@pytest.mark.parametrize("case", ["missing", "boolean", "malformed", "unknown"])
+@pytest.mark.parametrize("operation", list(_versioned_payloads()))
+def test_every_wire_reader_rejects_missing_malformed_or_unknown_versions(
+    operation: str,
+    case: str,
+) -> None:
+    parser, base = _versioned_payloads()[operation]
+    payload = deepcopy(base)
+    if case == "missing":
+        payload.pop("schema_version")
+    else:
+        payload["schema_version"] = {
+            "boolean": True,
+            "malformed": "1",
+            "unknown": 2,
+        }[case]
     with pytest.raises(RendererProtocolError) as caught:
-        RenderRequest.from_dict(
-            {
-                "schema_version": version,
-                "timeline_path": "/workspace/timeline.json",
-                "output_name": "video.mp4",
-            }
-        )
+        parser(payload)
     assert caught.value.error.kind == "protocol"
     assert caught.value.error.backend == "astrid.core"
 
 
 def test_unknown_request_top_level_field_is_protocol_error() -> None:
-    with pytest.raises(RendererProtocolError) as caught:
+    with pytest.raises(RendererProtocolError):
         RenderRequest.from_dict(
             {
                 "schema_version": 1,
@@ -219,29 +331,6 @@ def test_unknown_request_top_level_field_is_protocol_error() -> None:
                 "remotion_composition": "TimelineComposition",
             }
         )
-    assert caught.value.error.kind == "protocol"
-
-
-def test_direct_malformed_request_version_is_protocol_error() -> None:
-    with pytest.raises(RendererProtocolError) as caught:
-        RenderRequest(
-            schema_version=True,
-            timeline_path="/workspace/timeline.json",
-            output_name="video.mp4",
-        )
-    assert caught.value.error.kind == "protocol"
-
-
-def test_malformed_error_result_is_protocol_error() -> None:
-    with pytest.raises(RendererProtocolError) as caught:
-        parse_wire_result(
-            {
-                "kind": "unsupported",
-                "backend": "acme.example",
-                "message": "not supported",
-            }
-        )
-    assert caught.value.error.kind == "protocol"
 
 
 @pytest.mark.parametrize(
@@ -266,54 +355,131 @@ def test_partial_audio_profile_rejected() -> None:
         )
 
 
-def test_visual_only_profile_and_artifact_may_omit_optional_audio_fields() -> None:
+def test_visual_only_profile_may_omit_nullable_audio_fields() -> None:
     profile_payload = _profile(audio=False).to_dict()
     profile_payload.pop("audio_codec")
     profile_payload.pop("audio_sample_rate")
     profile_payload.pop("audio_channel_layout")
     profile = RenderProfile.from_dict(profile_payload)
+    artifact = VideoArtifact.from_dict(
+        {
+            "path": "outputs/visual.mp4",
+            "profile": profile_payload,
+            "sha256": SHA_A,
+            "duration_frames": 48,
+        }
+    )
     assert profile.has_audio is False
-
-    artifact_payload = {
-        "path": "outputs/visual.mp4",
-        "profile": profile_payload,
-        "sha256": SHA_A,
-        "duration_frames": 48,
-    }
-    artifact = VideoArtifact.from_dict(artifact_payload)
     assert artifact.audio is None
     assert artifact.attachments == {}
 
 
-def test_duplicate_attachment_names_rejected_across_result_surfaces() -> None:
-    attachment = Attachment(
-        name="alpha.mov",
-        path="outputs/alpha.mov",
-        kind="alpha",
-        sha256=SHA_B,
+def test_artifact_audio_ownership_matches_profile_presence() -> None:
+    with pytest.raises(ValueError, match="audio profile"):
+        _video(profile=_profile(audio=False), audio=AudioOwnership.RENDERED)
+    with pytest.raises(ValueError, match="must declare audio='rendered'"):
+        _video(profile=_profile(), audio=AudioOwnership.PASSTHROUGH)
+
+    passthrough = _video(profile=_profile(audio=False), audio=AudioOwnership.PASSTHROUGH)
+    assert _result(video=passthrough).audio_ownership is AudioOwnership.PASSTHROUGH
+
+
+def test_explicit_request_audio_ownership_matches_explicit_profile() -> None:
+    with pytest.raises(ValueError, match="audio profile"):
+        RenderRequest(
+            schema_version=1,
+            timeline_path="timeline.json",
+            output_name="video.mp4",
+            audio=AudioOwnership.RENDERED,
+            profile=_profile(audio=False),
+        )
+    with pytest.raises(ValueError, match="must declare audio='rendered'"):
+        RenderRequest(
+            schema_version=1,
+            timeline_path="timeline.json",
+            output_name="video.mp4",
+            audio=AudioOwnership.NONE,
+            profile=_profile(),
+        )
+
+    unresolved = RenderRequest(
+        schema_version=1,
+        timeline_path="timeline.json",
+        output_name="video.mp4",
+        audio=None,
+        profile=_profile(),
     )
-    with pytest.raises(ValueError, match="duplicate attachment names"):
+    assert unresolved.audio is None
+
+
+def test_result_requires_video_audio_to_match_top_level_ownership() -> None:
+    video = _video()
+    with pytest.raises(ValueError, match="must be present and match"):
         RenderResult(
             schema_version=1,
-            video=_video(attachments={attachment.name: attachment}),
-            attachments={attachment.name: attachment},
-            backend_fragments={},
-            audio_ownership=AudioOwnership.RENDERED,
-            normalization=[],
-            logs=[],
-            metadata={},
+            video=video,
+            audio_ownership=AudioOwnership.NONE,
         )
 
 
-def test_attachment_mapping_key_must_match_name() -> None:
-    attachment = Attachment(
-        name="alpha.mov",
-        path="outputs/alpha.mov",
-        kind="alpha",
-        sha256=SHA_B,
+def _attachment(name: str, *, sha256: str = SHA_B) -> Attachment:
+    return Attachment(name=name, path=f"outputs/{name}", kind="project", sha256=sha256)
+
+
+def test_video_is_the_only_authoritative_attachment_surface() -> None:
+    attachment = _attachment("project.blend")
+    result = _result(video=_video(attachments={attachment.name: attachment}))
+    assert result.attachments == {attachment.name: attachment}
+    assert "attachments" not in result.to_dict()
+    with pytest.raises(RendererProtocolError):
+        RenderResult.from_dict({**result.to_dict(), "attachments": {}})
+
+
+def test_finalize_round_trip_preserves_global_segment_attachments() -> None:
+    first = _attachment("first.blend", sha256=SHA_B)
+    second = _attachment("second.blend", sha256=SHA_C)
+    plan = _plan(segments=[_segment(0, 24), _segment(24, 48)])
+    request = _finalize(
+        plan=plan,
+        artifacts=[
+            _video(path="segments/0.mp4", duration_frames=24, attachments={first.name: first}),
+            _video(path="segments/1.mp4", duration_frames=24, attachments={second.name: second}),
+        ],
     )
+    round_trip = FinalizeRequest.from_dict(request.to_dict())
+    assert round_trip.expected_attachments == {first.name: first, second.name: second}
+
+    final_video = _video(attachments={first.name: first, second.name: second})
+    assert request.validate_final_result(_result(video=final_video)).video == final_video
+
+
+def test_finalize_rejects_attachment_name_collisions_across_segments() -> None:
+    attachment = _attachment("same.blend")
+    plan = _plan(segments=[_segment(0, 24), _segment(24, 48)])
+    with pytest.raises(ValueError, match="duplicate attachment names across segment"):
+        _finalize(
+            plan=plan,
+            artifacts=[
+                _video(path="segments/0.mp4", duration_frames=24, attachments={attachment.name: attachment}),
+                _video(path="segments/1.mp4", duration_frames=24, attachments={attachment.name: attachment}),
+            ],
+        )
+
+
+def test_finalize_rejects_dropped_or_changed_attachments() -> None:
+    attachment = _attachment("project.blend")
+    request = _finalize(artifacts=[_video(attachments={attachment.name: attachment})])
+    with pytest.raises(ValueError, match="dropped attachments"):
+        request.validate_final_result(_result())
+
+    changed = _attachment("project.blend", sha256=SHA_C)
+    with pytest.raises(ValueError, match="changed attachments"):
+        request.validate_final_result(_result(video=_video(attachments={changed.name: changed})))
+
+
+def test_attachment_mapping_key_must_match_name() -> None:
     with pytest.raises(ValueError, match="must match attachment.name"):
-        _video(attachments={"other.mov": attachment})
+        _video(attachments={"other.blend": _attachment("project.blend")})
 
 
 @pytest.mark.parametrize(
@@ -325,50 +491,24 @@ def test_attachment_mapping_key_must_match_name() -> None:
         "outputs//escape.mp4",
         "outputs/",
         "/tmp/escape.mp4",
+        "C:escape.mp4",
         r"C:\\temp\\escape.mp4",
         r"\\\\server\\share\\escape.mp4",
     ],
 )
-def test_artifact_path_traversal_rejected(path: str) -> None:
+def test_artifact_path_traversal_and_windows_drives_rejected(path: str) -> None:
     with pytest.raises(ValueError, match="workspace|contained|relative"):
-        VideoArtifact(
-            path=path,
-            profile=_profile(),
-            sha256=SHA_A,
-            duration_frames=48,
-            audio=AudioOwnership.RENDERED,
-        )
+        _video(path=path)
 
 
-def test_backend_fragment_cannot_overwrite_core_provenance_key() -> None:
-    with pytest.raises(ValueError, match="core-owned keys: output"):
-        validate_backend_fragments({"acme.example": {"output": "/tmp/stolen.mp4"}})
-
-    with pytest.raises(ValueError, match="core-owned keys: resolved_backend"):
-        RenderResult(
-            schema_version=1,
-            video=_video(),
-            audio_ownership=AudioOwnership.RENDERED,
-            backend_fragments={"acme.example": {"resolved_backend": "acme.example"}},
-        )
+def test_backend_fragment_cannot_overwrite_current_or_retired_core_keys() -> None:
+    for key in ("output", "planner", "resolved_backend", "request_digest"):
+        with pytest.raises(ValueError, match=f"core-owned keys: {key}"):
+            validate_backend_fragments({"acme.example": {key: "stolen"}})
 
 
-def test_provenance_requires_always_emitted_v1_projection() -> None:
-    with pytest.raises(ValueError, match="v1_compatibility is required"):
-        assemble_provenance_v2(
-            engine="remotion",
-            output="/workspace/video.mp4",
-            timeline="/workspace/timeline.json",
-            assets_registry=None,
-            requested_policy="remotion",
-            resolved_backend="rendering.remotion",
-            source_pack={"id": "rendering"},
-            finalizer="rendering.ffmpeg_finalizer",
-        )
-
-
-def test_provenance_v2_preserves_v1_projection_and_namespace(tmp_path: Path) -> None:
-    compatibility = {
+def _compatibility() -> dict[str, Any]:
+    return {
         "project_dir": "/workspace/remotion",
         "composition_id": "TimelineComposition",
         "active_pack_order": [],
@@ -381,47 +521,83 @@ def test_provenance_v2_preserves_v1_projection_and_namespace(tmp_path: Path) -> 
         "element_roots": [],
         "staged_asset_ids": [],
         "staged_asset_root": None,
-        "segment_provenance": [],
+        "segment_provenance": [{"engine": "spoofed", "from": -1, "to": -1}],
         "ffmpeg_specialization": None,
         "audio_reactive_colour": None,
     }
+
+
+def test_provenance_requires_always_emitted_v1_projection() -> None:
+    with pytest.raises(ValueError, match="v1_compatibility is required"):
+        assemble_provenance_v2(
+            engine="remotion",
+            output="/workspace/video.mp4",
+            timeline="/workspace/timeline.json",
+            assets_registry=None,
+            plan=_plan(),
+        )
+
+
+def test_provenance_v2_preserves_lineage_and_derives_legacy_segments(tmp_path: Path) -> None:
+    compatibility = _compatibility()
     assert set(compatibility) == set(PROVENANCE_V1_COMPATIBILITY_KEYS)
+    plan = _plan(
+        segments=[
+            _segment(0, 24, backend="acme.first", digest=SHA_B),
+            _segment(24, 48, backend="other.second", digest=SHA_C),
+        ]
+    )
     kwargs = {
         "engine": "hybrid",
         "output": "/workspace/out/video.mp4",
         "timeline": "/workspace/timeline.json",
         "assets_registry": "/workspace/assets.json",
-        "requested_policy": "hybrid",
-        "resolved_backend": "acme.example",
-        "source_pack": {"id": "acme"},
-        "alias_chain": ["acme.alias", "acme.example"],
-        "override": None,
-        "trust_eligibility": {"eligible": True},
-        "manifest_digest": SHA_C,
-        "support_decision": _support(),
-        "input_hashes": {"timeline": SHA_A},
-        "segments": [_segment()],
+        "plan": plan,
         "artifact_profiles": {"outputs/video.mp4": _profile()},
         "audio_ownership": AudioOwnership.RENDERED,
         "normalization": [],
-        "finalizer": "rendering.ffmpeg_finalizer",
         "attachments": {},
-        "backend_fragments": {"acme.example": {"vendor": "Acme"}},
+        "backend_fragments": {"acme.first": {"vendor": "Acme"}},
         "v1_compatibility": compatibility,
     }
     payload = assemble_provenance_v2(**kwargs)
     assert payload["schema_version"] == 2
-    assert payload["engine"] == "hybrid"
-    assert payload["resolved_backend"] == "acme.example"
-    assert payload["segments"][0]["engine"] == "example"
-    assert payload["segments"][0]["from"] == 0.0
-    assert payload["segments"][0]["to"] == 2.0
+    assert payload["request_digest"] == SHA_D
+    assert payload["requested_policy"] == "hybrid"
+    assert payload["planner"] == _planner().to_dict()
+    assert [segment["renderer"]["id"] for segment in payload["segments"]] == [
+        "acme.first",
+        "other.second",
+    ]
+    assert payload["segments"] == [segment.to_dict() for segment in plan.segments]
+    assert [set(segment) for segment in payload["segments"]] == [
+        {"window", "renderer", "input_hashes"},
+        {"window", "renderer", "input_hashes"},
+    ]
+    assert payload["segment_provenance"] == [
+        {"engine": "first", "from": 0.0, "to": 1.0},
+        {"engine": "second", "from": 1.0, "to": 2.0},
+    ]
+    assert payload["finalizer"] == _finalizer().to_dict()
     assert payload["composition_id"] == "TimelineComposition"
-    assert payload["backend_fragments"] == {"acme.example": {"vendor": "Acme"}}
 
     sidecar = tmp_path / "video.mp4.provenance.json"
     assert write_provenance_v2(sidecar, **kwargs) == payload
     assert sidecar.read_text(encoding="utf-8").endswith("\n")
+
+
+def test_provenance_rejects_spoofed_segment_projection_in_plan_mapping() -> None:
+    plan = _plan().to_dict()
+    plan["segments"][0]["engine"] = "spoofed"
+    with pytest.raises(RendererProtocolError):
+        assemble_provenance_v2(
+            engine="hybrid",
+            output="out/video.mp4",
+            timeline="timeline.json",
+            assets_registry=None,
+            plan=plan,
+            v1_compatibility=_compatibility(),
+        )
 
 
 def test_shared_sha256_helper_is_used_for_input_hashes(tmp_path: Path) -> None:
@@ -429,6 +605,67 @@ def test_shared_sha256_helper_is_used_for_input_hashes(tmp_path: Path) -> None:
     input_path.write_text("abc", encoding="utf-8")
     hashes = hash_input_files({"timeline": input_path})
     assert hashes["timeline"] == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+
+
+def test_plan_accepts_adjacent_segments_and_exact_window_coverage() -> None:
+    plan = _plan(
+        segments=[_segment(12, 24), _segment(24, 36)],
+        total_frames=48,
+        window=_window(12, 36),
+    )
+    assert plan.total_frames == 48
+    assert plan.window == _window(12, 36)
+
+
+@pytest.mark.parametrize(
+    ("segments", "total_frames", "match"),
+    [
+        ([_segment(1, 48)], 48, "gap"),
+        ([_segment(0, 47)], 48, "trailing gap"),
+        ([_segment(0, 20), _segment(21, 48)], 48, "gap"),
+        ([_segment(0, 25), _segment(24, 48)], 48, "overlaps"),
+        ([_segment(24, 48), _segment(0, 24)], 48, "gap"),
+    ],
+)
+def test_plan_rejects_gaps_overlaps_and_out_of_order_segments(
+    segments: list[RenderSegment],
+    total_frames: int,
+    match: str,
+) -> None:
+    with pytest.raises(ValueError, match=match):
+        _plan(segments=segments, total_frames=total_frames)
+
+
+def test_plan_rejects_noncanonical_segment_or_window_fps() -> None:
+    with pytest.raises(ValueError, match="segment.*FPS"):
+        _plan(segments=[_segment(fps=(48, 2))])
+    with pytest.raises(ValueError, match="window FPS"):
+        _plan(window=_window(0, 48, fps=(48, 2)))
+
+
+def test_zero_frame_plan_semantics_and_no_finalization() -> None:
+    empty = _plan(segments=[], total_frames=0, profile=_profile(audio=False))
+    assert empty.segments == []
+    assert empty.reasons == {}
+    with pytest.raises(ValueError, match="zero-frame plan"):
+        _plan(segments=[_segment()], total_frames=0)
+    with pytest.raises(ValueError, match="positive-frame plan"):
+        _plan(segments=[], total_frames=48)
+    with pytest.raises(ValueError, match="must not be finalized"):
+        _finalize(plan=empty, artifacts=[])
+
+
+def test_qualified_id_grammar_allows_hyphens_and_rejects_underscores() -> None:
+    assert _finalizer().id == "rendering.ffmpeg-finalizer"
+    assert replace(_finalizer(), id="1render.2-finalizer").id == "1render.2-finalizer"
+    for invalid in (
+        "rendering.ffmpeg_finalizer",
+        "Rendering.Ffmpeg",
+        "rendering.-finalizer",
+        "unqualified",
+    ):
+        with pytest.raises(ValueError, match="qualified id"):
+            replace(_finalizer(), id=invalid)
 
 
 def test_contracts_are_frozen() -> None:

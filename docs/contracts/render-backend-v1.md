@@ -14,10 +14,12 @@ batches.
 ## Identity, discovery, and trust
 
 A renderer, planner, or finalizer has a qualified ID with at least one dot,
-such as `rendering.remotion`, `rendering.legacy_hybrid`, or
-`rendering.ffmpeg_finalizer`. IDs contain lowercase ASCII letters, digits, and
-underscores. Bare `remotion` and `ffmpeg` are legacy selectors translated by
-the host; `hybrid` names a planning policy and is never a renderer ID.
+such as `rendering.remotion`, `rendering.legacy-hybrid`, or the canonical
+`rendering.ffmpeg-finalizer`. Each dot-separated ID segment matches
+`[a-z0-9][a-z0-9-]*`: lowercase ASCII letters, digits, and hyphens are valid;
+underscores are not. Bare `remotion` and `ffmpeg` are legacy selectors
+translated by the host; `hybrid` names a planning policy and is never a
+renderer ID.
 
 Packs advertise static manifests through the strict pack extension:
 
@@ -208,16 +210,16 @@ is scoped like this:
 {
   "backend_config": {
     "acme.example": {"quality": "preview"},
-    "rendering.ffmpeg_finalizer": {"faststart": true}
+    "rendering.ffmpeg-finalizer": {"faststart": true}
   }
 }
 ```
 
 Before invoking an implementation, the host removes unrelated namespaces.
-A render segment may carry an empty mapping or only its selected renderer's
-namespace. A finalize request may carry an empty mapping or only the selected
-finalizer's namespace. Backends must ignore no unknown core fields: unknown
-core fields are protocol errors.
+The renderer receives an empty mapping or only its own namespace. A finalize
+request carries an empty mapping or only its selected finalizer's namespace.
+Backends must ignore no unknown core fields: unknown core fields are protocol
+errors.
 
 ## Assets and workspace paths
 
@@ -227,9 +229,10 @@ canonical replay inputs; remote URLs and cached assets are materialized or
 made available by later host plumbing according to declared permissions.
 
 Artifact paths in results have a different rule: they are normalized paths
-relative to the unique invocation workspace. They cannot be absolute, contain
-backslashes, drives, UNC prefixes, `.` or `..` traversal, or NUL. The host
-resolves the path, rejects symlink escapes, requires the expected file or
+relative to the unique invocation workspace. They cannot be absolute, begin
+with a Windows drive prefix such as `C:`, contain backslashes, UNC prefixes,
+`.` or `..` traversal, empty path components, trailing separators, or NUL. The
+host resolves the path, rejects symlink escapes, requires the expected file or
 directory, and verifies its hash before publication. This relative rule lets
 the same result and replay bundle move between machines.
 
@@ -242,7 +245,8 @@ Every successful render and finalization result contains exactly one primary
 - the probed `RenderProfile`;
 - lowercase 64-character `sha256`;
 - positive `duration_frames`;
-- optional nullable artifact `audio` ownership;
+- artifact `audio` ownership (nullable only before it is wrapped in a successful
+  result);
 - optional named attachments (default `{}`).
 
 The host validates existence, non-empty output, workspace containment,
@@ -256,11 +260,17 @@ Audio ownership values have precise meanings:
   or mux the canonical source/timeline audio;
 - `none`: the intended output has no audio.
 
-The request may leave audio `null` for a backend default. A successful
-`RenderResult.audio_ownership` is never null. If `VideoArtifact.audio` is set,
-it must agree with the result. Visual-only renderers are valid and are never
-required to synthesize silence. The host/finalizer, not an arbitrary backend,
-owns passthrough, muxing, normalization, or compatibility silence.
+The probed profile and artifact ownership are coupled. `rendered` requires the
+complete populated audio trio because the returned artifact contains audio.
+`passthrough` and `none` require a visual-only profile: passthrough asks the
+host/finalizer to supply canonical audio later, while none declares that no
+audio is intended. When a request supplies both non-null fields, it follows the
+same relationship; it may leave audio or profile `null` for a backend/host
+default.
+A successful `RenderResult.audio_ownership` is never null and must exactly
+match its non-null `VideoArtifact.audio`. Visual-only renderers are valid and
+are never required to synthesize silence. The host/finalizer, not an arbitrary
+backend, owns passthrough, muxing, normalization, or compatibility silence.
 
 ## Attachments
 
@@ -269,17 +279,22 @@ hyphenated `kind`, and `sha256`. Typical kinds include `alpha`, `depth`,
 `frames`, `audio-stem`, and `project`; the list is illustrative, not an enum.
 
 Attachments are maps keyed by name. The key must equal `Attachment.name`.
-Names must be unique within and across the primary video's attachment map and
-the result-level attachment map. Planners and default finalizers preserve
-attachments and their hashes unchanged but do not interpret them. A custom
-finalizer may interpret a kind only when its contract explicitly says so.
+`VideoArtifact.attachments` is the one authoritative attachment surface;
+`RenderResult` has no second attachment map. Names must be globally unique
+across every segment artifact in one `FinalizeRequest`, even when two
+descriptors are otherwise identical. Planners and finalizers preserve every
+input attachment's name, path, kind, and hash unchanged. A finalizer may add a
+new attachment, and a custom finalizer may interpret a kind only when its
+contract explicitly says so, but it may not silently drop, rename, or mutate an
+input attachment.
 
 ## Successful render result
 
-`RenderResult` has `schema_version: 1`, the primary `video`, optional named
-`attachments`, qualified-ID-keyed `backend_fragments`, explicit
+`RenderResult` has `schema_version: 1`, the primary `video` (including its
+attachments), qualified-ID-keyed `backend_fragments`, explicit
 `audio_ownership`, `normalization` descriptions, redacted `logs`, and string
-`metadata`. Successful result fields are core-owned.
+`metadata`. Successful result fields are core-owned. A top-level result
+`attachments` member is invalid rather than a compatibility alias.
 
 Backend fragments are JSON objects beneath their qualified namespace:
 
@@ -304,6 +319,7 @@ strings, and secret environment values are forbidden.
 
 `SupportReport` contains:
 
+- required integer `schema_version: 1`;
 - `supported`, the request-sensitive verdict;
 - ordered human-readable `reasons`;
 - `features`, a string-keyed map of boolean or string evidence;
@@ -314,33 +330,55 @@ strings, and secret environment values are forbidden.
 An unsupported report should contain at least one actionable reason. Support
 is evidence, not routing authority: fallback happens only when an explicit
 planner or fallback policy permits it. Static manifest capabilities never turn
-an unsupported report into support. A segment's report, when present, must
-name the same backend as the segment.
+an unsupported report into support. Every segment's required report must name
+the same backend as the segment.
 
 ## Planning
 
-`RenderPlan` contains an ordered `segments` array, qualified `finalizer`, one
-canonical output `profile`, and `reasons`. Each `RenderSegment` contains its
-half-open `window`, qualified `backend`, selected namespaced `backend_config`,
-nullable `support` evidence, and string `input_hashes`.
+`RenderPlan` is itself a versioned response. It contains required integer
+`schema_version: 1`, the SHA-256 `request_digest`, `requested_policy`, explicit
+`planner`, ordered `segments`, explicit `finalizer`, one canonical output
+`profile`, `total_frames`, `reasons`, and a nullable target `window`.
+
+Resolution evidence has one canonical representation:
+
+- `planner` is `{id, source_pack, manifest_digest, trust_eligibility}`;
+- every segment is `{window, renderer, input_hashes}`, where `renderer` is
+  `{id, source_pack, manifest_digest, alias_chain, override,
+  support_decision}`;
+- `finalizer` is `{id, source_pack, manifest_digest}`.
+
+Manifest, request, and input-hash values are lowercase SHA-256 digests. Every
+`support_decision` is a versioned `SupportReport` whose backend equals the
+renderer ID. There is no parallel `segment.backend`, `segment.support`, or
+string-only finalizer field that could disagree with these records.
+
+`total_frames` is the complete timeline frame count. A zero-frame plan has
+`window: null`, no segments, and an empty reasons map; it is not finalized and
+does not invent a frame. A positive-frame plan has at least one segment. Its
+target is the explicit window when present, otherwise `[0,total_frames)`; an
+explicit window cannot exceed `total_frames`. The target window and every
+segment use the canonical profile's exact rational FPS (equivalent but
+noncanonical ratios are rejected). The first segment starts at the target,
+every subsequent start equals the preceding end, and the last end equals the
+target end. This tiles the target without leading, internal, or trailing gaps,
+overlap, or reordering. JSON Schema expresses the zero/nonzero structural
+branches; the DTO enforces adjacency, bounds, and exact FPS equality.
 
 Reasons are keyed by zero-based decimal segment index (`"0"`, `"1"`, ...),
-with exactly one entry per segment. An empty plan has an empty reasons map and
-represents a timeline with no renderable frames; it is not an implicit request
-to invent a frame. Non-empty plans must be deterministic, ordered, and cover
-the intended output without overlaps. A backend owns all pixels for its
-assigned temporal window; V1 does not combine overlapping backend layers.
-
-Planner selection and backend support are separate. The dispatcher validates
-each assignment with the backend's support report. The plan records input
-hashes and reasons so the decision can be replayed and inspected.
+with exactly one entry per segment. A renderer owns all pixels for its assigned
+temporal window; V1 does not combine overlapping renderer layers.
 
 ## Finalization
 
 `FinalizeRequest` contains `schema_version: 1`, the complete `plan`, an ordered
 `artifacts` array, neutral `output_name`, selected finalizer configuration,
 and metadata. Artifacts correspond one-for-one with plan segments. A finalizer
-returns the same `RenderResult` shape as a renderer.
+returns the same `RenderResult` shape as a renderer. Empty plans are not sent
+to finalizers. Before invocation, the host rejects any attachment name reused
+by two segment artifacts. After invocation, it verifies that the final video's
+attachment map contains the unchanged union of all input attachments;
+additional globally unique finalizer-created attachments are permitted.
 
 Final assembly is explicit even when it is a one-segment pass-through.
 Finalizers probe every input and compare it with the plan profile. Compatible
@@ -349,7 +387,8 @@ rational FPS/time base, container, video codec/profile/level, pixel format,
 audio codec/sample rate/channel layout, and audio presence. Every performed
 normalization is appended to `normalization`. The finalizer preserves
 attachments it does not understand. The first built-in finalizer uses FFmpeg;
-FFmpeg is not part of the generic contract.
+its one canonical qualified ID is `rendering.ffmpeg-finalizer`. FFmpeg is not
+part of the generic contract.
 
 ## Structured errors
 
@@ -357,17 +396,19 @@ A `RendererError` contains:
 
 | Field | Meaning |
 | --- | --- |
+| `schema_version` | Required integer `1`. |
 | `kind` | One of `protocol`, `unsupported`, `binary_missing`, `timeout`, `interrupted`, `invalid_artifact`, or `internal`. |
 | `backend` | Qualified implementation ID; host validation uses `astrid.core`. |
 | `message` | Non-empty actionable message. |
 | `recovery_command` | Nullable concrete recovery command or action. |
 | `details` | JSON-safe structured evidence. |
 
-Unknown, missing, boolean, non-integer, or unsupported request versions are
-always `kind="protocol"`. So are malformed request/result JSON and missing
-authoritative results. Unsupported timelines use `unsupported`; a missing
-manifest-declared executable uses `binary_missing`; deadline expiry uses
-`timeout`; transport cancellation uses `interrupted`; missing, escaping,
+Unknown, missing, boolean, non-integer, or unsupported versions on requests,
+support reports, plans, finalize requests, successful results, and error
+results are always `kind="protocol"`. So are malformed request/result JSON and
+missing authoritative results. Unsupported timelines use `unsupported`; a
+missing manifest-declared executable uses `binary_missing`; deadline expiry
+uses `timeout`; transport cancellation uses `interrupted`; missing, escaping,
 empty, hash-mismatched, or media-incompatible outputs use
 `invalid_artifact`; unexpected implementation bugs use `internal`.
 
@@ -407,16 +448,23 @@ claiming an incomplete artifact; the sidecar is the publication commit marker.
 Provenance v2 is additive and has `schema_version: 2`. Core owns and writes:
 
 `schema_version`, `engine`, `output`, `timeline`, `assets_registry`,
-`requested_policy`, `resolved_backend`, `source_pack`, `alias_chain`,
-`override`, `trust_eligibility`, `manifest_digest`, `support_decision`,
-`input_hashes`, `segments`, `artifact_profiles`, `audio_ownership`,
-`normalization`, `finalizer`, `attachments`, and `backend_fragments`.
+`request_digest`, `requested_policy`, `planner`, `segments`,
+`artifact_profiles`, `audio_ownership`, `normalization`, `finalizer`,
+`attachments`, and `backend_fragments`.
 
-`engine` is the legacy request projection, not the selected implementation.
-The authoritative selected qualified ID is `resolved_backend`. Segment records
-use the normalized v2 fields and also retain legacy `engine`, `from`, and `to`
-projections. `from`/`to` are derived from integer window frames and rational
-FPS; they never drive rendering.
+`request_digest`, `requested_policy`, `planner`, every segment's nested
+`renderer`, and `finalizer` are copied from the validated `RenderPlan`; the
+assembler accepts no parallel singular renderer identity. The nested records
+have exactly the resolution shapes defined in Planning, so a hybrid plan keeps
+distinct source pack, manifest, alias/override, support, and input-hash evidence
+for every renderer invocation.
+
+`engine` is only the legacy request projection. Every v2 segment has exactly
+`window`, `renderer`, and `input_hashes`; it never carries a second temporal
+representation. When the v1 `segment_provenance` top-level projection applies,
+core derives its `engine`, `from`, and `to` members unconditionally from
+`renderer.id` and the validated integer `FrameWindow` at its rational FPS.
+Caller-supplied projections are rejected and never drive rendering.
 
 For the whole epic, core also preserves every current v1 top-level projection:
 
@@ -435,8 +483,11 @@ conditional fields (`segment_provenance`, `ffmpeg_specialization`, and
 
 Backend-owned data appears only under `backend_fragments[qualified_id]`. Before
 assembly, core rejects a fragment whose top-level member collides with any v2
-or v1 core-owned name. Backends cannot replace routing, identity, inputs,
-segments, artifacts, audio, finalization, or compatibility projections.
+or v1 core-owned name. Retired singular v2 names such as `resolved_backend`,
+`source_pack`, `manifest_digest`, `support_decision`, and `input_hashes` remain
+reserved so a fragment cannot revive an ambiguous authority surface. Backends
+cannot replace routing, identity, inputs, segments, artifacts, audio,
+finalization, or compatibility projections.
 Provenance JSON is written with Astrid's atomic JSON helper; file and manifest
 digests use the shared chunked SHA-256 helper.
 
@@ -466,10 +517,13 @@ requests retention. V1 defines no cleanup daemon or TTL service.
 
 Schema paths and `schema_version` are independent of an implementation's
 `version`. V1 readers accept only integer version `1`; they do not guess,
-coerce, or silently down-convert unknown versions. Additive backend-private
-data belongs in fragments, not new core fields. A new required core field,
-operation, asynchronous lifecycle, different path semantics, or incompatible
-media meaning requires a new protocol/schema version and parallel schemas.
+coerce, or silently down-convert unknown versions. The version is required on
+`RenderRequest`, `SupportReport`, `RenderPlan`, `FinalizeRequest`, successful
+`RenderResult`, and `RendererError`; missing, boolean, malformed, and unknown
+values are rejected on every operation. Additive backend-private data belongs
+in fragments, not new core fields. A new required core field, operation,
+asynchronous lifecycle, different path semantics, or incompatible media
+meaning requires a new protocol/schema version and parallel schemas.
 
 M2 may wrap these types, provide helpers, scaffold code, and improve error
 presentation. It must emit the same JSON. If tooling finds a kernel defect,

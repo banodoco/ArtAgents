@@ -1,0 +1,94 @@
+{
+  "schema_version": 1,
+  "plan": {
+    "schema_version": 1,
+    "request_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "requested_policy": "hybrid",
+    "planner": {
+      "id": "rendering.legacy-hybrid",
+      "source_pack": {"id": "rendering"},
+      "manifest_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "trust_eligibility": {"eligible": true}
+    },
+    "segments": [
+      {
+        "window": {
+          "start_frame": 0,
+          "end_frame": 1,
+          "fps_rational": [24, 1],
+          "source_range": null,
+          "speed": null
+        },
+        "renderer": {
+          "id": "acme.visual",
+          "source_pack": {"id": "acme"},
+          "manifest_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "alias_chain": [],
+          "override": null,
+          "support_decision": {
+            "schema_version": 1,
+            "supported": true,
+            "reasons": [],
+            "features": {"visual_only": true},
+            "alternatives": [],
+            "backend": "acme.visual",
+            "backend_version": null
+          }
+        },
+        "input_hashes": {
+          "timeline": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      }
+    ],
+    "finalizer": {
+      "id": "rendering.ffmpeg-finalizer",
+      "source_pack": {"id": "rendering"},
+      "manifest_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    },
+    "profile": {
+      "width": 1280,
+      "height": 720,
+      "fps_rational": [24, 1],
+      "time_base": [1, 12288],
+      "container": "mp4",
+      "video_codec": "h264",
+      "video_profile": null,
+      "video_level": null,
+      "pixel_format": "yuv420p",
+      "audio_codec": null,
+      "audio_sample_rate": null,
+      "audio_channel_layout": null,
+      "duration_tolerance": 1
+    },
+    "total_frames": 1,
+    "reasons": {"0": "visual-only fixture"},
+    "window": null
+  },
+  "artifacts": [
+    {
+      "path": "segments/visual.mp4",
+      "profile": {
+        "width": 1280,
+        "height": 720,
+        "fps_rational": [24, 1],
+        "time_base": [1, 12288],
+        "container": "mp4",
+        "video_codec": "h264",
+        "video_profile": null,
+        "video_level": null,
+        "pixel_format": "yuv420p",
+        "audio_codec": null,
+        "audio_sample_rate": null,
+        "audio_channel_layout": null,
+        "duration_tolerance": 1
+      },
+      "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "duration_frames": 1,
+      "audio": "none",
+      "attachments": {}
+    }
+  ],
+  "output_name": "video.mp4",
+  "backend_config": {"rendering.ffmpeg-finalizer": {}},
+  "metadata": {}
+}

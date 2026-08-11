@@ -892,6 +892,7 @@ def _build_alias_resolvers(
             eligible_only=False,
             pack_trust=pack_trust,
             registry=registry,
+            programmatic_aliases=programmatic_aliases,
         )
         resolver = create_shared_alias_resolver()
         _populate_alias_resolver(
@@ -901,14 +902,8 @@ def _build_alias_resolvers(
             eligible_only=True,
             pack_trust=pack_trust,
             registry=registry,
+            programmatic_aliases=programmatic_aliases,
         )
-        for alias, canonical_id in programmatic_aliases:
-            for target_resolver in (inspection_resolver, resolver):
-                target_resolver.register_alias(
-                    alias,
-                    canonical_id,
-                    source_pack_id="astrid.core",
-                )
         inspection_resolver.validate_no_cycles()
         resolver.validate_no_cycles()
         return resolver, inspection_resolver
@@ -928,43 +923,165 @@ def _populate_alias_resolver(
     eligible_only: bool,
     pack_trust: Mapping[int, _PackTrust],
     registry: _RenderingRegistry[Any],
+    programmatic_aliases: Iterable[tuple[str, str]] = (),
 ) -> None:
+    if eligible_only:
+        _populate_executable_alias_resolver(
+            resolver,
+            discovered,
+            kind=kind,
+            pack_trust=pack_trust,
+            registry=registry,
+            programmatic_aliases=programmatic_aliases,
+        )
+        return
+
     # Alias collisions follow the same precedence as candidates.  Register
     # lowest-precedence packs first so a lower priority_index wins last.
     for item in reversed(discovered):
-        if eligible_only and not pack_trust[item.priority_index].eligible:
-            continue
         aliases = [
             alias
             for alias in item.pack.aliases
             if alias.get("kind") == kind
-            and (
-                not eligible_only
-                or _alias_target_can_participate(alias, registry)
-            )
         ]
         if aliases:
             resolver.register_pack_aliases(item.id, aliases)
+    for alias, canonical_id in programmatic_aliases:
+        resolver.register_alias(
+            alias,
+            canonical_id,
+            source_pack_id="astrid.core",
+        )
+
+
+def _populate_executable_alias_resolver(
+    resolver: AliasResolver,
+    discovered: tuple[DiscoveredPack, ...],
+    *,
+    kind: str,
+    pack_trust: Mapping[int, _PackTrust],
+    registry: _RenderingRegistry[Any],
+    programmatic_aliases: Iterable[tuple[str, str]],
+) -> None:
+    """Register the highest-precedence executable declaration per alias.
+
+    Candidates are retained in their real registration order so that a
+    declaration whose chain ends outside the executable graph can fall back
+    to the declaration it would otherwise have overwritten.  Peeling the
+    deepest dangling hop first preserves upstream aliases when an
+    intermediate alias has a usable lower-precedence declaration.
+
+    A core compatibility alias may also terminate at a canonical id with an
+    explicit override.  That alias remains only as the routing key needed to
+    apply the override; normal winner selection still enforces eligibility on
+    the override target.
+    """
+
+    declarations: dict[str, list[tuple[str, Mapping[str, Any]]]] = {}
+    for item in reversed(discovered):
+        if not pack_trust[item.priority_index].eligible:
+            continue
+        for alias in item.pack.aliases:
+            if alias.get("kind") != kind:
+                continue
+            alias_name = alias.get("alias")
+            canonical_id = alias.get("canonical_id")
+            if not alias_name or not canonical_id:
+                raise AliasResolutionError(
+                    f"pack {item.id!r}: alias entry missing 'alias' or 'canonical_id'"
+                )
+            declarations.setdefault(str(alias_name), []).append((item.id, alias))
+
+    for alias_name, canonical_id in programmatic_aliases:
+        declarations.setdefault(alias_name, []).append(
+            (
+                "astrid.core",
+                {"alias": alias_name, "canonical_id": canonical_id},
+            )
+        )
+
+    selected_indexes = {
+        alias_name: len(candidates) - 1
+        for alias_name, candidates in declarations.items()
+    }
+    selected = {
+        alias_name: candidates[-1]
+        for alias_name, candidates in declarations.items()
+    }
+
+    override_routing_aliases: set[str] = set()
+    while True:
+        blocked: list[str] = []
+        override_routing_aliases = set()
+        for alias_name, (source_pack_id, declaration) in selected.items():
+            target = declaration.get("canonical_id")
+            if not isinstance(target, str):
+                blocked.append(alias_name)
+                continue
+            if target in selected or target in registry._entries:
+                continue
+            if (
+                source_pack_id == "astrid.core"
+                and registry._resolve_override_key(kind, target) is not None
+            ):
+                override_routing_aliases.add(alias_name)
+                continue
+            blocked.append(alias_name)
+        if not blocked:
+            break
+
+        for alias_name in blocked:
+            next_index = selected_indexes[alias_name] - 1
+            selected_indexes[alias_name] = next_index
+            if next_index < 0:
+                del selected[alias_name]
+            else:
+                selected[alias_name] = declarations[alias_name][next_index]
+
+    for alias_name, (source_pack_id, declaration) in selected.items():
+        if (
+            alias_name not in override_routing_aliases
+            and not _alias_target_can_participate(
+                declaration,
+                registry,
+                aliases=selected,
+                override_routing_aliases=override_routing_aliases,
+            )
+        ):
+            continue
+        resolver.register_alias(
+            alias_name,
+            str(declaration["canonical_id"]),
+            deprecated=bool(declaration.get("deprecated", False)),
+            deprecation_message=str(declaration.get("deprecation_message", "")),
+            source_pack_id=source_pack_id,
+        )
 
 
 def _alias_target_can_participate(
     alias: Mapping[str, Any],
     registry: _RenderingRegistry[Any],
+    *,
+    aliases: Mapping[str, tuple[str, Mapping[str, Any]]],
+    override_routing_aliases: set[str] | frozenset[str] = frozenset(),
 ) -> bool:
-    """Keep aliases to unknown/chained ids, but skip known denied targets.
-
-    An alias-only compatibility pack may legitimately point at a backend from
-    another pack, so absence is not grounds for dropping the declaration.
-    When the direct target was discovered and every candidate was denied,
-    however, letting that alias win would reintroduce the shadowing problem
-    that the executable-only registry is designed to prevent.
-    """
+    """Return whether a chain reaches an executable or override-routed terminal."""
 
     target = alias.get("canonical_id")
     if not isinstance(target, str):
-        return True
-    discovered = registry._discovered.get(target)
-    return discovered is None or target in registry._entries
+        return False
+
+    seen: set[str] = set()
+    while target in aliases:
+        if target in override_routing_aliases:
+            return True
+        if target in seen:
+            raise AliasResolutionError(f"alias cycle detected while resolving {target!r}")
+        seen.add(target)
+        target = aliases[target][1].get("canonical_id")
+        if not isinstance(target, str):
+            return False
+    return target in registry._entries
 
 
 __all__ = [
