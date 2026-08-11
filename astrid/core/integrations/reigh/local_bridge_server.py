@@ -32,6 +32,7 @@ from astrid.core.integrations.reigh.local_bridge import (
     save_bridge_timeline,
 )
 from astrid.core.timeline.eventlog.types import EventLogStaleVersionError
+from astrid.core.timeline.events.schema import TimelineEventSchemaError
 from astrid.core.timeline.paths import validate_timeline_slug, validate_timeline_ulid
 
 _RANGE_RE = re.compile(r"^bytes\s*=\s*(\d*)\s*-\s*(\d*)\s*$")
@@ -817,6 +818,18 @@ def make_local_bridge_handler(*, projects_root: Path):
                         "error": "timeline_version_conflict",
                         "detail": str(exc),
                         "config_version": backend_head,
+                    })
+                    return
+                except (TimelineEventSchemaError, ValueError) as exc:
+                    # The editor's config is a superset; a schema/validation
+                    # rejection is a typed 422 with JSON-pointer-style issues,
+                    # never a connection-close 500 (the incident's failure mode).
+                    self._send_json(422, {
+                        "error": "schema_incompatible",
+                        "detail": str(exc),
+                        "issues": [
+                            {"pointer": "", "code": "schema_incompatible", "message": str(exc)},
+                        ],
                     })
                     return
                 if result is None:

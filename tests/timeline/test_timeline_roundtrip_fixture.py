@@ -27,6 +27,16 @@ FIXTURE_PATH = REPO_ROOT / "examples" / "hype.timeline.full.json"
 # That's the only on-disk copy available without network. If the install
 # moves we surface a clear skip rather than a misleading pass.
 _SHARED_SCHEMA_CANDIDATES = (
+    # Canonical artifact first (plan-v5 B2): the shared schema's single source
+    # of truth lives in the banodoco-workspace package. The remotion npm copy
+    # below is a fallback for environments without the workspace checkout.
+    REPO_ROOT.parent.parent
+    / "banodoco-workspace"
+    / "packages"
+    / "timeline-schema"
+    / "python"
+    / "banodoco_timeline_schema"
+    / "timeline.schema.json",
     REPO_ROOT
     / "remotion"
     / "node_modules"
@@ -156,7 +166,9 @@ class TimelineRoundTripFixtureTest(unittest.TestCase):
             )
 
         defs = schema.get("definitions") or schema.get("$defs") or {}
-        timeline_def = defs.get("TimelineConfig")
+        # Plan-v5 B2: TimelineConfig is the schema ROOT (the old $ref-root was
+        # restructured); fall back to the root when no definition is present.
+        timeline_def = defs.get("TimelineConfig") or schema
         clip_def = defs.get("TimelineClip")
         self.assertIsNotNone(timeline_def, "TimelineConfig missing in shared schema")
         self.assertIsNotNone(clip_def, "TimelineClip missing in shared schema")

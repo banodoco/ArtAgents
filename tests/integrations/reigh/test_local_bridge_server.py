@@ -592,7 +592,7 @@ def test_asset_404_for_invalid_timeline(
 def test_save_endpoint_200_for_valid_config(
     seed_bridge_project, tmp_bridge_root: Path,
 ) -> None:
-    """POST /save with a valid config object persists the event and returns the bridge payload."""
+    """POST /save with valid config, registry, and expected_version persists both events."""
     from astrid.core.integrations.reigh.local_bridge import REIGH_LOCAL_EDITOR_ACTOR
     from astrid.core.timeline.eventlog import LocalFsBackend
 
@@ -619,19 +619,25 @@ def test_save_endpoint_200_for_valid_config(
         ],
         "tracks": [{"id": "V1", "kind": "visual", "label": "Video"}],
     }
+    new_registry = {"assets": {"a1": {"file": "a1.mp4", "type": "video/mp4"}}}
 
     with running_server(tmp_bridge_root) as base_url:
         url = f"{base_url}/projects/save-proj/timelines/{timeline_id}/save"
-        status, result = _post_json(url, {"config": new_config})
+        status, result = _post_json(url, {
+            "config": new_config,
+            "registry": new_registry,
+            "expected_version": 1,
+        })
 
     assert status == 200
     assert result["timeline_id"] == timeline_id
     assert result["timeline_ulid"] == timeline_ulid
     assert result["config"] == new_config
+    assert result["registry"] == new_registry
     assert "config_version" in result
     assert isinstance(result["config_version"], int)
-    # First config_replaced after creation → event head version >= 2
-    assert result["config_version"] >= 2
+    # Combined batch: created(1) + config_replaced(2) + asset_registry_replaced(3) → version >= 3
+    assert result["config_version"] >= 3
     assert "registry" in result
 
 
@@ -650,34 +656,40 @@ def test_save_endpoint_400_for_malformed_body_not_json(
     assert error["error"] == "invalid_body"
 
 
-def test_save_endpoint_400_for_missing_config_field(
+def test_save_endpoint_400_for_missing_expected_version(
     seed_bridge_project, tmp_bridge_root: Path,
 ) -> None:
-    """POST /save with JSON that lacks a 'config' key returns 400."""
+    """POST /save with JSON that lacks an 'expected_version' returns 400."""
     timeline_id = "cccccccc-cccc-cccc-cccc-cccccccccccc"
-    seed_bridge_project(slug="no-config-proj", timeline_id=timeline_id)
+    seed_bridge_project(slug="no-version-proj", timeline_id=timeline_id)
 
     with running_server(tmp_bridge_root) as base_url:
-        url = f"{base_url}/projects/no-config-proj/timelines/{timeline_id}/save"
-        status, error = _post_json(url, {"other_key": 1})
+        url = f"{base_url}/projects/no-version-proj/timelines/{timeline_id}/save"
+        status, error = _post_json(url, {
+            "config": {"tracks": []},
+            "registry": {"assets": {}},
+        })
 
     assert status == 400
-    assert error["error"] == "invalid_config"
+    assert error["error"] == "invalid_expected_version"
 
 
-def test_save_endpoint_400_for_config_not_a_dict(
+def test_save_endpoint_400_for_missing_registry(
     seed_bridge_project, tmp_bridge_root: Path,
 ) -> None:
-    """POST /save with config as a non-dict value returns 400."""
+    """POST /save with JSON that lacks a 'registry' returns 400."""
     timeline_id = "dddddddd-dddd-dddd-dddd-dddddddddddd"
-    seed_bridge_project(slug="bad-config-proj", timeline_id=timeline_id)
+    seed_bridge_project(slug="no-registry-proj", timeline_id=timeline_id)
 
     with running_server(tmp_bridge_root) as base_url:
-        url = f"{base_url}/projects/bad-config-proj/timelines/{timeline_id}/save"
-        status, error = _post_json(url, {"config": "not-a-dict"})
+        url = f"{base_url}/projects/no-registry-proj/timelines/{timeline_id}/save"
+        status, error = _post_json(url, {
+            "config": {"tracks": []},
+            "expected_version": 1,
+        })
 
     assert status == 400
-    assert error["error"] == "invalid_config"
+    assert error["error"] == "invalid_registry"
 
 
 def test_save_endpoint_404_for_unknown_timeline(
@@ -688,7 +700,11 @@ def test_save_endpoint_404_for_unknown_timeline(
 
     with running_server(tmp_bridge_root) as base_url:
         url = f"{base_url}/projects/known-proj/timelines/ffffffff-ffff-ffff-ffff-ffffffffffff/save"
-        status, error = _post_json(url, {"config": {"output": {}}})
+        status, error = _post_json(url, {
+            "config": {"tracks": []},
+            "registry": {"assets": {}},
+            "expected_version": 1,
+        })
 
     assert status == 404
     assert error["error"] == "timeline_not_found"
@@ -702,7 +718,11 @@ def test_save_endpoint_400_for_invalid_project_slug(
 
     with running_server(tmp_bridge_root) as base_url:
         url = f"{base_url}/projects/%2E%2E/timelines/11111111-1111-1111-1111-111111111111/save"
-        status, error = _post_json(url, {"config": {"output": {}}})
+        status, error = _post_json(url, {
+            "config": {"tracks": []},
+            "registry": {"assets": {}},
+            "expected_version": 1,
+        })
 
     assert status == 400
     assert error["error"] == "invalid_project"
@@ -716,7 +736,11 @@ def test_save_endpoint_404_for_unknown_project(
 
     with running_server(tmp_bridge_root) as base_url:
         url = f"{base_url}/projects/no-such-proj/timelines/22222222-2222-2222-2222-222222222222/save"
-        status, error = _post_json(url, {"config": {"output": {}}})
+        status, error = _post_json(url, {
+            "config": {"tracks": []},
+            "registry": {"assets": {}},
+            "expected_version": 1,
+        })
 
     assert status == 404
     assert error["error"] == "project_not_found"
@@ -730,7 +754,7 @@ def test_save_endpoint_404_for_unknown_project(
 def test_registry_put_200_success(
     seed_bridge_project, tmp_bridge_root: Path,
 ) -> None:
-    """PUT /registry with a valid assets object persists and returns the normalized registry."""
+    """PUT /registry with valid registry and expected_version persists and returns the normalized registry."""
     from astrid.core.timeline.eventlog import LocalFsBackend
 
     timeline_id = "11111111-1111-1111-1111-111111111101"
@@ -744,10 +768,13 @@ def test_registry_put_200_success(
     backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=timeline_home)
 
     registry_body = {
-        "assets": {
-            "my-clip": {"file": "my-clip.mp4", "label": "My Clip"},
-            "bg-music": {"file": "bg.mp3"},
+        "registry": {
+            "assets": {
+                "my-clip": {"file": "my-clip.mp4", "label": "My Clip"},
+                "bg-music": {"file": "bg.mp3"},
+            },
         },
+        "expected_version": 0,
     }
 
     with running_server(tmp_bridge_root) as base_url:
@@ -764,19 +791,19 @@ def test_registry_put_200_success(
     assert events[0].payload.to_json_obj()["registry"] == result
 
 
-def test_registry_put_400_for_missing_assets_field(
+def test_registry_put_400_for_missing_expected_version(
     seed_bridge_project, tmp_bridge_root: Path,
 ) -> None:
-    """PUT /registry without an 'assets' key returns 400."""
+    """PUT /registry without an 'expected_version' returns 400."""
     timeline_id = "22222222-2222-2222-2222-222222222202"
-    seed_bridge_project(slug="no-assets-proj", timeline_id=timeline_id)
+    seed_bridge_project(slug="no-version-reg-proj", timeline_id=timeline_id)
 
     with running_server(tmp_bridge_root) as base_url:
-        url = f"{base_url}/projects/no-assets-proj/timelines/{timeline_id}/registry"
-        status, error = _put_json(url, {"wrong_key": {}})
+        url = f"{base_url}/projects/no-version-reg-proj/timelines/{timeline_id}/registry"
+        status, error = _put_json(url, {"registry": {"assets": {"a": {"file": "x.mp4"}}}})
 
     assert status == 400
-    assert error["error"] == "invalid_registry"
+    assert error["error"] == "invalid_expected_version"
 
 
 def test_registry_put_400_for_malformed_body(
@@ -802,7 +829,10 @@ def test_registry_put_404_for_unknown_timeline(
 
     with running_server(tmp_bridge_root) as base_url:
         url = f"{base_url}/projects/known-reg-proj/timelines/55555555-5555-5555-5555-555555555555/registry"
-        status, error = _put_json(url, {"assets": {"a": {"file": "x.mp4"}}})
+        status, error = _put_json(url, {
+            "registry": {"assets": {"a": {"file": "x.mp4"}}},
+            "expected_version": 0,
+        })
 
     assert status == 404
     assert error["error"] == "timeline_not_found"
@@ -891,7 +921,8 @@ def test_asset_lookup_after_registry_write(
         # Step 1: Write the registry with an asset mapping
         reg_url = f"{base_url}/projects/rarw-proj/timelines/{timeline_id}/registry"
         reg_status, reg_result = _put_json(reg_url, {
-            "assets": {"rarw-clip": {"file": "rarw-clip.webm"}},
+            "registry": {"assets": {"rarw-clip": {"file": "rarw-clip.webm"}}},
+            "expected_version": 0,
         })
         assert reg_status == 200
         assert "rarw-clip" in reg_result["assets"]
@@ -932,7 +963,8 @@ def test_asset_lookup_after_registry_write_sources_relative(
         # Write registry pointing to nested file
         reg_url = f"{base_url}/projects/rarw-src-proj/timelines/{timeline_id}/registry"
         reg_status, reg_result = _put_json(reg_url, {
-            "assets": {"deep-asset": {"file": "nested/deep.bin"}},
+            "registry": {"assets": {"deep-asset": {"file": "nested/deep.bin"}}},
+            "expected_version": 0,
         })
         assert reg_status == 200
 
@@ -1124,6 +1156,162 @@ def test_video_proxy_ensure_endpoint_returns_queued_status_without_blocking(
 
 
 # ---------------------------------------------------------------------------
+# CAS conflict tests (409 timeline_version_conflict)
+# ---------------------------------------------------------------------------
+
+
+def test_save_endpoint_409_for_stale_expected_version(
+    seed_bridge_project, tmp_bridge_root: Path,
+) -> None:
+    """POST /save with a stale expected_version returns 409 with conflict body."""
+    from astrid.core.integrations.reigh.local_bridge import REIGH_LOCAL_EDITOR_ACTOR
+    from astrid.core.timeline.eventlog import LocalFsBackend
+
+    timeline_id = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaa409"
+    timeline_ulid = "01JM4K5N7P00000000000409SAV"
+    project_dir = seed_bridge_project(
+        slug="conflict-proj",
+        timeline_ulid=timeline_ulid,
+        timeline_id=timeline_id,
+    )
+    timeline_home = project_dir / "timelines" / timeline_ulid
+    backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=timeline_home)
+    backend.append_event(
+        timeline_id,
+        "timeline.created",
+        {"timeline_id": timeline_id, "slug": "primary", "name": "Primary"},
+        actor=REIGH_LOCAL_EDITOR_ACTOR,
+    )
+
+    config = {"clips": [], "tracks": [{"id": "V1", "kind": "visual", "label": "Video"}]}
+    registry = {"assets": {}}
+
+    with running_server(tmp_bridge_root) as base_url:
+        url = f"{base_url}/projects/conflict-proj/timelines/{timeline_id}/save"
+        # expected_version=999 is far in the future → stale
+        status, error = _post_json(url, {
+            "config": config,
+            "registry": registry,
+            "expected_version": 999,
+        })
+
+    assert status == 409
+    assert error["error"] == "timeline_version_conflict"
+    assert "detail" in error
+    assert isinstance(error["config_version"], int)
+
+
+def test_registry_put_409_for_stale_expected_version(
+    seed_bridge_project, tmp_bridge_root: Path,
+) -> None:
+    """PUT /registry with a stale expected_version returns 409 with conflict body."""
+    from astrid.core.integrations.reigh.local_bridge import REIGH_LOCAL_EDITOR_ACTOR
+    from astrid.core.timeline.eventlog import LocalFsBackend
+
+    timeline_id = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbb409"
+    timeline_ulid = "01JM4K5N7P00000000000409REG"
+    project_dir = seed_bridge_project(
+        slug="reg-conflict-proj",
+        timeline_ulid=timeline_ulid,
+        timeline_id=timeline_id,
+    )
+    # A real timeline needs its created event; without it the bridge falls
+    # back to the ULID path and cannot resolve the UUID timeline reference.
+    backend = LocalFsBackend(
+        timeline_id=timeline_id,
+        timeline_home=project_dir / "timelines" / timeline_ulid,
+    )
+    backend.append_event(
+        timeline_id,
+        "timeline.created",
+        {"timeline_id": timeline_id, "slug": "primary", "name": "Primary"},
+        actor=REIGH_LOCAL_EDITOR_ACTOR,
+    )
+
+    with running_server(tmp_bridge_root) as base_url:
+        url = f"{base_url}/projects/reg-conflict-proj/timelines/{timeline_id}/registry"
+        status, error = _put_json(url, {
+            "registry": {"assets": {"a": {"file": "x.mp4"}}},
+            "expected_version": 999,
+        })
+
+    assert status == 409
+    assert error["error"] == "timeline_version_conflict"
+    assert "detail" in error
+    assert isinstance(error["config_version"], int)
+
+
+def test_two_concurrent_saves_exactly_one_wins(
+    seed_bridge_project, tmp_bridge_root: Path,
+) -> None:
+    """Two concurrent saves with the same expected_version: exactly one wins,
+    the loser gets 409."""
+    from astrid.core.integrations.reigh.local_bridge import REIGH_LOCAL_EDITOR_ACTOR
+    from astrid.core.timeline.eventlog import LocalFsBackend
+
+    timeline_id = "cccccccc-cccc-cccc-cccc-cccccccccc01"
+    timeline_ulid = "01JM4K5N7P00000000000RACE01"
+    project_dir = seed_bridge_project(
+        slug="race-proj",
+        timeline_ulid=timeline_ulid,
+        timeline_id=timeline_id,
+    )
+    timeline_home = project_dir / "timelines" / timeline_ulid
+    backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=timeline_home)
+    backend.append_event(
+        timeline_id,
+        "timeline.created",
+        {"timeline_id": timeline_id, "slug": "primary", "name": "Primary"},
+        actor=REIGH_LOCAL_EDITOR_ACTOR,
+    )
+
+    config_a = {
+        "clips": [{"id": "ca", "at": 0, "track": "V1", "clipType": "media", "asset": "aa"}],
+        "tracks": [{"id": "V1", "kind": "visual", "label": "Video"}],
+    }
+    config_b = {
+        "clips": [{"id": "cb", "at": 0, "track": "V1", "clipType": "media", "asset": "bb"}],
+        "tracks": [{"id": "V1", "kind": "visual", "label": "Video"}],
+    }
+    registry = {"assets": {}}
+
+    results: list[tuple[int, dict]] = []
+
+    def do_save(cfg: dict) -> None:
+        with running_server(tmp_bridge_root) as base_url:
+            url = f"{base_url}/projects/race-proj/timelines/{timeline_id}/save"
+            status, body = _post_json(url, {
+                "config": cfg,
+                "registry": registry,
+                "expected_version": 1,
+            })
+            results.append((status, body))
+
+    t1 = threading.Thread(target=do_save, args=(config_a,))
+    t2 = threading.Thread(target=do_save, args=(config_b,))
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+
+    assert len(results) == 2
+    statuses = {r[0] for r in results}
+    assert statuses == {200, 409}, f"Expected one 200 and one 409, got {statuses}"
+
+    winner = next(r for r in results if r[0] == 200)
+    loser = next(r for r in results if r[0] == 409)
+    assert loser[1]["error"] == "timeline_version_conflict"
+    assert isinstance(loser[1]["config_version"], int)
+
+    # Winner config must appear in the event stream.
+    events = backend.read_events()
+    config_events = [e for e in events if e.kind == "timeline.config_replaced"]
+    assert len(config_events) == 1
+    persisted_config = config_events[0].payload.to_json_obj()["config"]
+    assert persisted_config in (config_a, config_b)
+
+
+# ---------------------------------------------------------------------------
 # Serve command registration tests
 # ---------------------------------------------------------------------------
 
@@ -1221,3 +1409,50 @@ def test_serve_dispatcher_with_host_port_and_projects_root_args(
     assert parsed.host == "0.0.0.0"
     assert parsed.port == 9999
     assert parsed.projects_root == str(projects_dir)
+
+
+def test_save_endpoint_422_for_schema_incompatible_config(
+    seed_bridge_project, tmp_bridge_root: Path,
+) -> None:
+    """POST /save with a config that violates the shared schema returns a typed 422.
+
+    Plan-v5 B3: a schema rejection is `schema_incompatible` with issues, never
+    a connection-close 500 (the incident's failure mode).
+    """
+    from astrid.core.integrations.reigh.local_bridge import REIGH_LOCAL_EDITOR_ACTOR
+    from astrid.core.timeline.eventlog import LocalFsBackend
+
+    timeline_id = "cccccccc-cccc-cccc-cccc-cccccccccc01"
+    timeline_ulid = "01JM4K5N7P0000000000004221"
+    project_dir = seed_bridge_project(
+        slug="save-422-proj",
+        timeline_ulid=timeline_ulid,
+        timeline_id=timeline_id,
+    )
+    timeline_home = project_dir / "timelines" / timeline_ulid
+    backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=timeline_home)
+    backend.append_event(
+        timeline_id,
+        "timeline.created",
+        {"timeline_id": timeline_id, "slug": "primary", "name": "Primary"},
+        actor=REIGH_LOCAL_EDITOR_ACTOR,
+    )
+
+    # A track carrying an unknown core key must be rejected with a typed 422.
+    bad_config = {
+        "clips": [{"id": "c1", "at": 0, "track": "V1", "clipType": "media", "asset": "a1"}],
+        "tracks": [{"id": "V1", "kind": "visual", "label": "Video", "bogus_unknown_key": True}],
+    }
+
+    with running_server(tmp_bridge_root) as base_url:
+        url = f"{base_url}/projects/save-422-proj/timelines/{timeline_id}/save"
+        status, result = _post_json(url, {
+            "config": bad_config,
+            "registry": {"assets": {"a1": {"file": "a1.mp4", "type": "video/mp4"}}},
+            "expected_version": 1,
+        })
+
+    assert status == 422
+    assert result["error"] == "schema_incompatible"
+    assert isinstance(result.get("issues"), list) and result["issues"]
+    assert "message" in result["issues"][0]
