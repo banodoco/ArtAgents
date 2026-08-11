@@ -40,70 +40,21 @@ try:
         materialize_output as _materialize_output,
     )
     from banodoco_timeline_schema import validate_timeline as _shared_validate_timeline
-except ImportError:
-    class SharedTimelineOutput(TypedDict, total=False):
-        resolution: str
-        fps: float
-        file: str
-        background: str
-        background_scale: float
+except ImportError:  # pragma: no cover
+    # Neutralized fallback (plan-v5 B2): there is deliberately NO hand-written
+    # schema mirror here. The old TypedDict stubs drifted and silently accepted
+    # invalid timelines — the exact class of bug behind the save incident.
+    # Without the contract package, typing degrades to plain dicts and
+    # validation fails loudly with install instructions. Install with:
+    #   pip install -e packages/timeline-schema/python
+    SharedTimelineOutput = dict  # type: ignore[assignment,misc]
+    SharedTimelineClip = dict  # type: ignore[assignment,misc]
+    SharedThemeOverrides = dict  # type: ignore[assignment,misc]
+    SharedTheme = dict  # type: ignore[assignment,misc]
+    SharedTimelineConfig = dict  # type: ignore[assignment,misc]
+    UpstreamSharedAssetEntry = dict  # type: ignore[assignment,misc]
 
-    class SharedTimelineClip(TypedDict, total=False):
-        id: str
-        at: float
-        track: str
-        clipType: str
-        asset: str
-        from_: float
-        to: float
-        speed: float
-        hold: float
-        volume: float
-        x: float
-        y: float
-        width: float
-        height: float
-        cropTop: float
-        cropBottom: float
-        cropLeft: float
-        cropRight: float
-        opacity: float
-        params: dict[str, Any]
-        text: "TextClipData"
-        entrance: "AnimationReferenceList"
-        exit: "AnimationReferenceList"
-        continuous: "AnimationReferenceList"
-        transition: "ClipTransitionReference"
-        effects: list["TimelineEffect"]
-        source_uuid: str
-        generation: dict[str, Any]
-        pool_id: str
-        clip_order: int
-
-    class SharedThemeOverrides(TypedDict, total=False):
-        visual: dict[str, Any]
-        generation: dict[str, Any]
-        voice: dict[str, Any]
-        audio: dict[str, Any]
-        pacing: dict[str, Any]
-
-    class SharedTheme(TypedDict, total=False):
-        visual: dict[str, Any]
-        generation: dict[str, Any]
-        voice: dict[str, Any]
-        audio: dict[str, Any]
-        pacing: dict[str, Any]
-
-    class SharedTimelineConfig(TypedDict, total=False):
-        theme: str
-        theme_overrides: SharedThemeOverrides
-        generation_defaults: dict[str, Any]
-        clips: list[SharedTimelineClip]
-        tracks: list[dict[str, Any]]
-        pinnedShotGroups: list[dict[str, Any]]
-        output: SharedTimelineOutput
-
-    def _materialize_output(config: SharedTimelineConfig, theme: dict[str, Any]) -> SharedTimelineOutput:
+    def _materialize_output(config: Any, theme: Any) -> dict[str, Any]:
         canvas = theme.get("visual", {}).get("canvas", {}) if isinstance(theme, dict) else {}
         width = int(canvas.get("width", 1920)) if isinstance(canvas, dict) else 1920
         height = int(canvas.get("height", 1080)) if isinstance(canvas, dict) else 1080
@@ -111,13 +62,13 @@ except ImportError:
         return {"resolution": f"{width}x{height}", "fps": fps, "file": "output.mp4"}
 
     def _shared_validate_timeline(config: Any, *, strict: bool = True) -> None:
-        if not isinstance(config, dict):
-            raise ValueError("Timeline must be a JSON object")
-        if not isinstance(config.get("clips"), list):
-            raise ValueError("Timeline.clips must be a list")
+        raise ImportError(
+            "banodoco_timeline_schema is required for timeline validation — "
+            "pip install -e packages/timeline-schema/python. Without the "
+            "canonical JSON Schema artifact, validation is refused, not "
+            "silently degraded."
+        )
 
-    class UpstreamSharedAssetEntry(TypedDict, total=False):
-        pass
 
 TimelineClip = SharedTimelineClip
 TimelineConfig = SharedTimelineConfig
