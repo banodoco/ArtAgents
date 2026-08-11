@@ -37,8 +37,14 @@ def find_component_manifest(comp_dir: Path, kind: str) -> Path | None:
         if candidate.is_file():
             return candidate
     return None
-PACK_ALIAS_KINDS: tuple[Literal["executor", "orchestrator"], ...] = ("executor", "orchestrator")
-PackAliasKind = Literal["executor", "orchestrator"]
+PackAliasKind = Literal["executor", "orchestrator", "renderer", "planner", "finalizer"]
+PACK_ALIAS_KINDS: tuple[PackAliasKind, ...] = (
+    "executor",
+    "orchestrator",
+    "renderer",
+    "planner",
+    "finalizer",
+)
 PACK_PERMISSION_IDS: tuple[str, ...] = (
     "project_files",
     "network",

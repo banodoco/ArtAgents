@@ -1,0 +1,113 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://astrid.dev/schemas/rendering/v1/finalizer-manifest.json",
+  "title": "Astrid render finalizer manifest v1",
+  "type": "object",
+  "required": [
+    "schema_version", "id", "name", "version", "protocol_version",
+    "command", "operations"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "id": {"$ref": "#/definitions/qualifiedId"},
+    "name": {"type": "string", "minLength": 1},
+    "version": {"type": "string", "minLength": 1},
+    "protocol_version": {"type": "integer", "const": 1},
+    "command": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "minItems": 1
+    },
+    "operations": {
+      "type": "array",
+      "items": {"type": "string", "enum": ["finalize", "support"]},
+      "contains": {"const": "finalize"},
+      "uniqueItems": true
+    },
+    "description": {"type": ["string", "null"], "minLength": 1, "default": null},
+    "capabilities": {
+      "$ref": "#/definitions/finalizerCapabilities",
+      "default": {}
+    },
+    "required_permissions": {
+      "$ref": "#/definitions/permissions",
+      "default": []
+    },
+    "required_binaries": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "uniqueItems": true,
+      "default": []
+    },
+    "timeout_seconds": {"type": ["integer", "null"], "minimum": 1, "default": null},
+    "metadata": {
+      "type": "object",
+      "propertyNames": {"minLength": 1},
+      "additionalProperties": {"type": "string", "minLength": 1},
+      "default": {}
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "qualifiedId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*(?:\\.[a-z][a-z0-9_]*)+$"
+    },
+    "permissions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "project_files", "network", "subprocess", "environment",
+          "accelerator", "external_services"
+        ]
+      },
+      "uniqueItems": true
+    },
+    "finalizerCapabilities": {
+      "type": "object",
+      "properties": {
+        "containers": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "uniqueItems": true
+        },
+        "preserves_attachments": {"type": "boolean"},
+        "audio_ownership": {
+          "type": "array",
+          "items": {"type": "string", "enum": ["rendered", "passthrough", "none"]},
+          "uniqueItems": true
+        },
+        "features": {
+          "type": "object",
+          "additionalProperties": {
+            "oneOf": [{"type": "boolean"}, {"type": "string"}]
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "examples": [
+    {
+      "schema_version": 1,
+      "id": "rendering.ffmpeg_finalizer",
+      "name": "FFmpeg Finalizer",
+      "version": "1.0.0",
+      "protocol_version": 1,
+      "command": ["python3", "finalize.py"],
+      "operations": ["finalize"],
+      "description": "Validates, normalizes, and concatenates segment artifacts",
+      "capabilities": {
+        "containers": ["mp4", "mov"],
+        "preserves_attachments": true,
+        "audio_ownership": ["rendered", "passthrough", "none"],
+        "features": {"stream_copy": true}
+      },
+      "required_permissions": ["project_files", "subprocess"],
+      "required_binaries": ["ffmpeg", "ffprobe"],
+      "timeout_seconds": 600,
+      "metadata": {"owner": "rendering"}
+    }
+  ]
+}

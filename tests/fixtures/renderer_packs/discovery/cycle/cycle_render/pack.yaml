@@ -1,0 +1,11 @@
+schema_version: 1
+id: cycle_render
+name: Alias Cycle Fixture
+version: 1.0.0
+aliases:
+  - kind: renderer
+    alias: cycle_render.first
+    canonical_id: cycle_render.second
+  - kind: renderer
+    alias: cycle_render.second
+    canonical_id: cycle_render.first

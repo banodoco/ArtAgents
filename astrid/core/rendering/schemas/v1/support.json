@@ -1,0 +1,52 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://astrid.dev/schemas/rendering/v1/support.json",
+  "title": "Astrid renderer support report v1",
+  "description": "Request-sensitive capability evidence. Static manifest hints are never a substitute for this report.",
+  "type": "object",
+  "required": ["supported", "reasons", "features", "alternatives", "backend", "backend_version"],
+  "properties": {
+    "supported": {"type": "boolean"},
+    "reasons": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1}
+    },
+    "features": {
+      "type": "object",
+      "additionalProperties": {
+        "oneOf": [
+          {"type": "boolean"},
+          {"type": "string"}
+        ]
+      }
+    },
+    "alternatives": {
+      "type": "array",
+      "items": {"$ref": "#/definitions/qualifiedId"},
+      "uniqueItems": true
+    },
+    "backend": {"$ref": "#/definitions/qualifiedId"},
+    "backend_version": {"type": ["string", "null"], "minLength": 1}
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "qualifiedId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*(?:\\.[a-z][a-z0-9_]*)+$"
+    }
+  },
+  "examples": [
+    {
+      "supported": false,
+      "reasons": ["speed changes are not supported"],
+      "features": {
+        "media_clips": true,
+        "speed_changes": false,
+        "audio_mode": "passthrough"
+      },
+      "alternatives": ["rendering.remotion"],
+      "backend": "rendering.ffmpeg",
+      "backend_version": "1.0.0"
+    }
+  ]
+}

@@ -1,0 +1,241 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://astrid.dev/schemas/rendering/v1/result.json",
+  "title": "Astrid render result v1",
+  "description": "The authoritative result file: either a successful RenderResult or a structured RendererError.",
+  "oneOf": [
+    {"$ref": "#/definitions/renderResult"},
+    {"$ref": "#/definitions/rendererError"}
+  ],
+  "definitions": {
+    "qualifiedId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*(?:\\.[a-z][a-z0-9_]*)+$"
+    },
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "workspacePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?![A-Za-z]:/)(?!.*//)(?!.*[/]$)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*\\\\).+$",
+      "description": "Normalized path relative to the invocation workspace; traversal and backslashes are forbidden."
+    },
+    "portableName": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+      "not": {"enum": [".", ".."]}
+    },
+    "rational": {
+      "type": "array",
+      "items": {"type": "integer", "minimum": 1},
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "audioOwnership": {
+      "type": "string",
+      "enum": ["rendered", "passthrough", "none"]
+    },
+    "renderProfile": {
+      "type": "object",
+      "required": [
+        "width", "height", "fps_rational", "time_base", "container",
+        "video_codec", "video_profile", "video_level", "pixel_format",
+        "duration_tolerance"
+      ],
+      "properties": {
+        "width": {"type": "integer", "minimum": 1},
+        "height": {"type": "integer", "minimum": 1},
+        "fps_rational": {"$ref": "#/definitions/rational"},
+        "time_base": {"$ref": "#/definitions/rational"},
+        "container": {"type": "string", "minLength": 1},
+        "video_codec": {"type": "string", "minLength": 1},
+        "video_profile": {"type": ["string", "null"], "minLength": 1},
+        "video_level": {"type": ["string", "null"], "minLength": 1},
+        "pixel_format": {"type": "string", "minLength": 1},
+        "audio_codec": {"type": ["string", "null"], "minLength": 1},
+        "audio_sample_rate": {"type": ["integer", "null"], "minimum": 1},
+        "audio_channel_layout": {"type": ["string", "null"], "minLength": 1},
+        "duration_tolerance": {"type": "integer", "minimum": 0}
+      },
+      "oneOf": [
+        {
+          "required": ["audio_codec", "audio_sample_rate", "audio_channel_layout"],
+          "properties": {
+            "audio_codec": {"type": "null"},
+            "audio_sample_rate": {"type": "null"},
+            "audio_channel_layout": {"type": "null"}
+          }
+        },
+        {
+          "properties": {
+            "audio_codec": {"type": "string", "minLength": 1},
+            "audio_sample_rate": {"type": "integer", "minimum": 1},
+            "audio_channel_layout": {"type": "string", "minLength": 1}
+          }
+        }
+      ],
+      "additionalProperties": false
+    },
+    "attachment": {
+      "type": "object",
+      "required": ["name", "path", "kind", "sha256"],
+      "properties": {
+        "name": {"$ref": "#/definitions/portableName"},
+        "path": {"$ref": "#/definitions/workspacePath"},
+        "kind": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"},
+        "sha256": {"$ref": "#/definitions/sha256"}
+      },
+      "additionalProperties": false
+    },
+    "attachments": {
+      "type": "object",
+      "propertyNames": {"$ref": "#/definitions/portableName"},
+      "additionalProperties": {"$ref": "#/definitions/attachment"}
+    },
+    "videoArtifact": {
+      "type": "object",
+      "required": ["path", "profile", "sha256", "duration_frames"],
+      "properties": {
+        "path": {"$ref": "#/definitions/workspacePath"},
+        "profile": {"$ref": "#/definitions/renderProfile"},
+        "sha256": {"$ref": "#/definitions/sha256"},
+        "duration_frames": {"type": "integer", "minimum": 1},
+        "audio": {
+          "oneOf": [
+            {"$ref": "#/definitions/audioOwnership"},
+            {"type": "null"}
+          ],
+          "default": null
+        },
+        "attachments": {"$ref": "#/definitions/attachments", "default": {}}
+      },
+      "additionalProperties": false
+    },
+    "backendFragment": {
+      "type": "object",
+      "propertyNames": {
+        "not": {
+          "enum": [
+            "schema_version", "engine", "output", "timeline", "assets_registry",
+            "requested_policy", "resolved_backend", "source_pack", "alias_chain",
+            "override", "trust_eligibility", "manifest_digest", "support_decision",
+            "input_hashes", "segments", "artifact_profiles", "audio_ownership",
+            "normalization", "finalizer", "attachments", "backend_fragments",
+            "video", "logs", "metadata", "project_dir", "composition_id",
+            "active_pack_order", "active_theme", "registry_hash", "registry_state",
+            "resolved_effect_ids", "resolved_effects", "source_pack_ids",
+            "element_roots", "staged_asset_ids", "staged_asset_root",
+            "segment_provenance", "ffmpeg_specialization", "audio_reactive_colour"
+          ]
+        }
+      },
+      "additionalProperties": true
+    },
+    "renderResult": {
+      "type": "object",
+      "required": ["schema_version", "video", "audio_ownership"],
+      "properties": {
+        "schema_version": {"type": "integer", "const": 1},
+        "video": {"$ref": "#/definitions/videoArtifact"},
+        "attachments": {"$ref": "#/definitions/attachments", "default": {}},
+        "backend_fragments": {
+          "type": "object",
+          "propertyNames": {"$ref": "#/definitions/qualifiedId"},
+          "additionalProperties": {"$ref": "#/definitions/backendFragment"},
+          "default": {}
+        },
+        "audio_ownership": {"$ref": "#/definitions/audioOwnership"},
+        "normalization": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "default": []
+        },
+        "logs": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "default": []
+        },
+        "metadata": {
+          "type": "object",
+          "propertyNames": {"minLength": 1},
+          "additionalProperties": {"type": "string", "minLength": 1},
+          "default": {}
+        }
+      },
+      "additionalProperties": false
+    },
+    "rendererError": {
+      "type": "object",
+      "required": ["kind", "backend", "message", "recovery_command", "details"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "protocol", "unsupported", "binary_missing", "timeout",
+            "interrupted", "invalid_artifact", "internal"
+          ]
+        },
+        "backend": {"$ref": "#/definitions/qualifiedId"},
+        "message": {"type": "string", "minLength": 1},
+        "recovery_command": {"type": ["string", "null"], "minLength": 1},
+        "details": {"type": "object"}
+      },
+      "additionalProperties": false
+    }
+  },
+  "examples": [
+    {
+      "schema_version": 1,
+      "video": {
+        "path": "outputs/preview.mp4",
+        "profile": {
+          "width": 1920,
+          "height": 1080,
+          "fps_rational": [24, 1],
+          "time_base": [1, 12288],
+          "container": "mp4",
+          "video_codec": "h264",
+          "video_profile": "high",
+          "video_level": "4.1",
+          "pixel_format": "yuv420p",
+          "audio_codec": "aac",
+          "audio_sample_rate": 48000,
+          "audio_channel_layout": "stereo",
+          "duration_tolerance": 1
+        },
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "duration_frames": 48,
+        "audio": "rendered",
+        "attachments": {
+          "alpha.mov": {
+            "name": "alpha.mov",
+            "path": "outputs/alpha.mov",
+            "kind": "alpha",
+            "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        }
+      },
+      "attachments": {
+        "project.blend": {
+          "name": "project.blend",
+          "path": "outputs/project.blend",
+          "kind": "project",
+          "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        }
+      },
+      "backend_fragments": {
+        "acme.example": {"renderer": "example", "quality": "preview"}
+      },
+      "audio_ownership": "rendered",
+      "normalization": [],
+      "logs": ["render completed"],
+      "metadata": {"request_id": "render-001"}
+    },
+    {
+      "kind": "unsupported",
+      "backend": "acme.example",
+      "message": "the request uses unsupported transitions",
+      "recovery_command": "select rendering.remotion",
+      "details": {"features": ["transitions"]}
+    }
+  ]
+}

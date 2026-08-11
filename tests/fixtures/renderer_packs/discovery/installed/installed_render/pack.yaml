@@ -1,0 +1,11 @@
+schema_version: 1
+id: installed_render
+name: Installed Renderer Fixture
+version: 1.0.0
+permissions:
+  - id: subprocess
+    reason: Run the installed fixture backend.
+extensions:
+  rendering:
+    renderers:
+      - renderer.yaml

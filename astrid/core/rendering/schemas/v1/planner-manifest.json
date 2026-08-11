@@ -1,0 +1,107 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://astrid.dev/schemas/rendering/v1/planner-manifest.json",
+  "title": "Astrid render planner manifest v1",
+  "type": "object",
+  "required": [
+    "schema_version", "id", "name", "version", "protocol_version",
+    "command", "operations"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "id": {"$ref": "#/definitions/qualifiedId"},
+    "name": {"type": "string", "minLength": 1},
+    "version": {"type": "string", "minLength": 1},
+    "protocol_version": {"type": "integer", "const": 1},
+    "command": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "minItems": 1
+    },
+    "operations": {
+      "type": "array",
+      "items": {"type": "string", "enum": ["plan", "support"]},
+      "contains": {"const": "plan"},
+      "uniqueItems": true
+    },
+    "description": {"type": ["string", "null"], "minLength": 1, "default": null},
+    "capabilities": {
+      "$ref": "#/definitions/plannerCapabilities",
+      "default": {}
+    },
+    "required_permissions": {
+      "$ref": "#/definitions/permissions",
+      "default": []
+    },
+    "required_binaries": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "uniqueItems": true,
+      "default": []
+    },
+    "timeout_seconds": {"type": ["integer", "null"], "minimum": 1, "default": null},
+    "metadata": {
+      "type": "object",
+      "propertyNames": {"minLength": 1},
+      "additionalProperties": {"type": "string", "minLength": 1},
+      "default": {}
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "qualifiedId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*(?:\\.[a-z][a-z0-9_]*)+$"
+    },
+    "permissions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "project_files", "network", "subprocess", "environment",
+          "accelerator", "external_services"
+        ]
+      },
+      "uniqueItems": true
+    },
+    "plannerCapabilities": {
+      "type": "object",
+      "properties": {
+        "policies": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "uniqueItems": true
+        },
+        "supports_fallback": {"type": "boolean"},
+        "features": {
+          "type": "object",
+          "additionalProperties": {
+            "oneOf": [{"type": "boolean"}, {"type": "string"}]
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "examples": [
+    {
+      "schema_version": 1,
+      "id": "rendering.legacy_hybrid",
+      "name": "Legacy Hybrid Planner",
+      "version": "1.0.0",
+      "protocol_version": 1,
+      "command": ["python3", "planner.py"],
+      "operations": ["plan"],
+      "description": "Preserves the legacy hybrid segmentation policy",
+      "capabilities": {
+        "policies": ["hybrid"],
+        "supports_fallback": true,
+        "features": {"half_open_frames": true}
+      },
+      "required_permissions": ["project_files"],
+      "required_binaries": [],
+      "timeout_seconds": 60,
+      "metadata": {"owner": "rendering"}
+    }
+  ]
+}

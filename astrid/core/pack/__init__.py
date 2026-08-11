@@ -68,6 +68,8 @@ from astrid.core.pack.permissions import (
     _normalize_named_extension_list,
     _normalize_pack_permission_services,
     _normalize_pack_permissions,
+    _normalize_rendering_extensions,
+    _normalize_rendering_manifest_paths,
     _normalize_timeline_extensions,
     _normalize_timeline_kinds,
     _optional_pack_aliases,
@@ -87,6 +89,7 @@ from astrid.core.pack.registry import (
     pack_artifact_type_descriptors,
     pack_element_kind_descriptors,
     pack_kind_descriptors,
+    pack_rendering_manifest_paths,
     pack_timeline_kind_descriptors,
 )
 from astrid.core.pack.walkers import (
@@ -116,6 +119,7 @@ __all__ = [
     "load_pack_manifest",
     "pack_taxonomy_from_manifest",
     "pack_manifest_path",
+    "pack_rendering_manifest_paths",
     "packs_root",
     "qualified_id_pack_id",
     "validate_content_id_in_pack",

@@ -1,0 +1,189 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://astrid.dev/schemas/rendering/v1/request.json",
+  "title": "Astrid render request v1",
+  "description": "Backend-neutral input for render, support, and plan operations.",
+  "type": "object",
+  "required": ["schema_version", "timeline_path", "output_name"],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "timeline_path": {"type": "string", "minLength": 1},
+    "assets_registry_path": {"type": ["string", "null"], "minLength": 1, "default": null},
+    "output_name": {"$ref": "#/definitions/outputName"},
+    "window": {
+      "oneOf": [
+        {"$ref": "#/definitions/frameWindow"},
+        {"type": "null"}
+      ],
+      "default": null
+    },
+    "audio": {
+      "oneOf": [
+        {"$ref": "#/definitions/audioOwnership"},
+        {"type": "null"}
+      ],
+      "default": null
+    },
+    "profile": {
+      "oneOf": [
+        {"$ref": "#/definitions/renderProfile"},
+        {"type": "null"}
+      ],
+      "default": null
+    },
+    "backend_config": {
+      "type": "object",
+      "propertyNames": {"$ref": "#/definitions/qualifiedId"},
+      "additionalProperties": {"type": "object"},
+      "default": {}
+    },
+    "metadata": {
+      "type": "object",
+      "propertyNames": {"minLength": 1},
+      "additionalProperties": {"type": "string", "minLength": 1},
+      "default": {}
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "qualifiedId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*(?:\\.[a-z][a-z0-9_]*)+$"
+    },
+    "outputName": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+      "not": {"enum": [".", ".."]}
+    },
+    "rational": {
+      "type": "array",
+      "items": {"type": "integer", "minimum": 1},
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "frameRange": {
+      "type": "array",
+      "items": [
+        {"type": "integer", "minimum": 0},
+        {"type": "integer", "minimum": 1}
+      ],
+      "additionalItems": false,
+      "minItems": 2,
+      "maxItems": 2,
+      "description": "Half-open source range [start_frame,end_frame); end must exceed start."
+    },
+    "frameWindow": {
+      "type": "object",
+      "required": ["start_frame", "end_frame", "fps_rational"],
+      "properties": {
+        "start_frame": {"type": "integer", "minimum": 0},
+        "end_frame": {"type": "integer", "minimum": 1},
+        "fps_rational": {"$ref": "#/definitions/rational"},
+        "source_range": {
+          "oneOf": [
+            {"$ref": "#/definitions/frameRange"},
+            {"type": "null"}
+          ],
+          "default": null
+        },
+        "speed": {"type": ["number", "null"], "exclusiveMinimum": 0, "default": null}
+      },
+      "additionalProperties": false,
+      "description": "Half-open [start_frame,end_frame); end must exceed start."
+    },
+    "audioOwnership": {
+      "type": "string",
+      "enum": ["rendered", "passthrough", "none"]
+    },
+    "renderProfile": {
+      "type": "object",
+      "required": [
+        "width",
+        "height",
+        "fps_rational",
+        "time_base",
+        "container",
+        "video_codec",
+        "video_profile",
+        "video_level",
+        "pixel_format",
+        "duration_tolerance"
+      ],
+      "properties": {
+        "width": {"type": "integer", "minimum": 1},
+        "height": {"type": "integer", "minimum": 1},
+        "fps_rational": {"$ref": "#/definitions/rational"},
+        "time_base": {"$ref": "#/definitions/rational"},
+        "container": {"type": "string", "minLength": 1},
+        "video_codec": {"type": "string", "minLength": 1},
+        "video_profile": {"type": ["string", "null"], "minLength": 1},
+        "video_level": {"type": ["string", "null"], "minLength": 1},
+        "pixel_format": {"type": "string", "minLength": 1},
+        "audio_codec": {"type": ["string", "null"], "minLength": 1},
+        "audio_sample_rate": {"type": ["integer", "null"], "minimum": 1},
+        "audio_channel_layout": {"type": ["string", "null"], "minLength": 1},
+        "duration_tolerance": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum accepted duration mismatch in frames."
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "audio_codec": {"type": "null"},
+            "audio_sample_rate": {"type": "null"},
+            "audio_channel_layout": {"type": "null"}
+          }
+        },
+        {
+          "required": ["audio_codec", "audio_sample_rate", "audio_channel_layout"],
+          "properties": {
+            "audio_codec": {"type": "string", "minLength": 1},
+            "audio_sample_rate": {"type": "integer", "minimum": 1},
+            "audio_channel_layout": {"type": "string", "minLength": 1}
+          }
+        }
+      ],
+      "additionalProperties": false
+    }
+  },
+  "examples": [
+    {
+      "schema_version": 1,
+      "timeline_path": "/workspace/inputs/timeline.json",
+      "assets_registry_path": "/workspace/inputs/assets.json",
+      "output_name": "preview.mp4",
+      "window": {
+        "start_frame": 0,
+        "end_frame": 48,
+        "fps_rational": [24, 1],
+        "source_range": [0, 48],
+        "speed": 1.0
+      },
+      "audio": "rendered",
+      "profile": {
+        "width": 1920,
+        "height": 1080,
+        "fps_rational": [24, 1],
+        "time_base": [1, 12288],
+        "container": "mp4",
+        "video_codec": "h264",
+        "video_profile": "high",
+        "video_level": "4.1",
+        "pixel_format": "yuv420p",
+        "audio_codec": "aac",
+        "audio_sample_rate": 48000,
+        "audio_channel_layout": "stereo",
+        "duration_tolerance": 1
+      },
+      "backend_config": {
+        "acme.example": {"quality": "preview"}
+      },
+      "metadata": {
+        "project_id": "demo",
+        "session_id": "session-001"
+      }
+    }
+  ]
+}

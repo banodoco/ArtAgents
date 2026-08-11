@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import OrderedDict
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Iterable
 
 from astrid.core.pack._common import (
@@ -254,6 +255,52 @@ _BUILTIN_KIND_IDS_BY_CATALOG = {
 
 
 ELEMENT_KIND_REGISTRY = ElementKindRegistry()
+
+
+def pack_rendering_manifest_paths(
+    pack: "PackDefinition",
+) -> tuple[tuple[Path, ...], tuple[Path, ...], tuple[Path, ...]]:
+    """Return contained renderer, planner, and finalizer manifest paths.
+
+    Rendering extensions name manifests relative to the pack root. Resolving
+    every path before returning it also rejects traversal and symlink escapes.
+    """
+    rendering = pack.extensions.get("rendering", {})
+    renderers = _resolve_pack_rendering_manifest_paths(
+        pack,
+        rendering.get("renderers", ()),
+        kind="renderers",
+    )
+    planners = _resolve_pack_rendering_manifest_paths(
+        pack,
+        rendering.get("planners", ()),
+        kind="planners",
+    )
+    finalizers = _resolve_pack_rendering_manifest_paths(
+        pack,
+        rendering.get("finalizers", ()),
+        kind="finalizers",
+    )
+    return renderers, planners, finalizers
+
+
+def _resolve_pack_rendering_manifest_paths(
+    pack: "PackDefinition",
+    paths: Iterable[str],
+    *,
+    kind: str,
+) -> tuple[Path, ...]:
+    root = pack.root.resolve()
+    resolved_paths: list[Path] = []
+    for index, raw_path in enumerate(paths):
+        relative_path = Path(raw_path)
+        resolved = (root / relative_path).resolve()
+        if relative_path.is_absolute() or not resolved.is_relative_to(root):
+            raise PackValidationError(
+                f"pack.extensions.rendering.{kind}[{index}] must stay within the pack root"
+            )
+        resolved_paths.append(resolved)
+    return tuple(resolved_paths)
 
 
 def pack_element_kind_descriptors(pack: "PackDefinition") -> tuple[ElementKindDescriptor, ...]:

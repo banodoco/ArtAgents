@@ -1,0 +1,224 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://astrid.dev/schemas/rendering/v1/plan.json",
+  "title": "Astrid render plan v1",
+  "description": "Deterministic half-open temporal segments and an explicit finalizer.",
+  "type": "object",
+  "required": ["segments", "finalizer", "profile", "reasons"],
+  "properties": {
+    "segments": {
+      "type": "array",
+      "items": {"$ref": "#/definitions/renderSegment"}
+    },
+    "finalizer": {"$ref": "#/definitions/qualifiedId"},
+    "profile": {"$ref": "#/definitions/renderProfile"},
+    "reasons": {
+      "type": "object",
+      "propertyNames": {"pattern": "^(0|[1-9][0-9]*)$"},
+      "additionalProperties": {"type": "string", "minLength": 1},
+      "description": "One reason per segment, keyed by its zero-based decimal index."
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "qualifiedId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*(?:\\.[a-z][a-z0-9_]*)+$"
+    },
+    "rational": {
+      "type": "array",
+      "items": {"type": "integer", "minimum": 1},
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "frameRange": {
+      "type": "array",
+      "items": [
+        {"type": "integer", "minimum": 0},
+        {"type": "integer", "minimum": 1}
+      ],
+      "additionalItems": false,
+      "minItems": 2,
+      "maxItems": 2,
+      "description": "Half-open source range; end must exceed start."
+    },
+    "frameWindow": {
+      "type": "object",
+      "required": ["start_frame", "end_frame", "fps_rational"],
+      "properties": {
+        "start_frame": {"type": "integer", "minimum": 0},
+        "end_frame": {"type": "integer", "minimum": 1},
+        "fps_rational": {"$ref": "#/definitions/rational"},
+        "source_range": {
+          "oneOf": [
+            {"$ref": "#/definitions/frameRange"},
+            {"type": "null"}
+          ],
+          "default": null
+        },
+        "speed": {"type": ["number", "null"], "exclusiveMinimum": 0, "default": null}
+      },
+      "additionalProperties": false,
+      "description": "Half-open [start_frame,end_frame); end must exceed start."
+    },
+    "audioOwnership": {
+      "type": "string",
+      "enum": ["rendered", "passthrough", "none"]
+    },
+    "renderProfile": {
+      "type": "object",
+      "required": [
+        "width", "height", "fps_rational", "time_base", "container",
+        "video_codec", "video_profile", "video_level", "pixel_format",
+        "duration_tolerance"
+      ],
+      "properties": {
+        "width": {"type": "integer", "minimum": 1},
+        "height": {"type": "integer", "minimum": 1},
+        "fps_rational": {"$ref": "#/definitions/rational"},
+        "time_base": {"$ref": "#/definitions/rational"},
+        "container": {"type": "string", "minLength": 1},
+        "video_codec": {"type": "string", "minLength": 1},
+        "video_profile": {"type": ["string", "null"], "minLength": 1},
+        "video_level": {"type": ["string", "null"], "minLength": 1},
+        "pixel_format": {"type": "string", "minLength": 1},
+        "audio_codec": {"type": ["string", "null"], "minLength": 1},
+        "audio_sample_rate": {"type": ["integer", "null"], "minimum": 1},
+        "audio_channel_layout": {"type": ["string", "null"], "minLength": 1},
+        "duration_tolerance": {"type": "integer", "minimum": 0}
+      },
+      "oneOf": [
+        {
+          "required": ["audio_codec", "audio_sample_rate", "audio_channel_layout"],
+          "properties": {
+            "audio_codec": {"type": "null"},
+            "audio_sample_rate": {"type": "null"},
+            "audio_channel_layout": {"type": "null"}
+          }
+        },
+        {
+          "properties": {
+            "audio_codec": {"type": "string", "minLength": 1},
+            "audio_sample_rate": {"type": "integer", "minimum": 1},
+            "audio_channel_layout": {"type": "string", "minLength": 1}
+          }
+        }
+      ],
+      "additionalProperties": false
+    },
+    "supportReport": {
+      "type": "object",
+      "required": ["supported", "reasons", "features", "alternatives", "backend", "backend_version"],
+      "properties": {
+        "supported": {"type": "boolean"},
+        "reasons": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "features": {
+          "type": "object",
+          "additionalProperties": {
+            "oneOf": [{"type": "boolean"}, {"type": "string"}]
+          }
+        },
+        "alternatives": {
+          "type": "array",
+          "items": {"$ref": "#/definitions/qualifiedId"},
+          "uniqueItems": true
+        },
+        "backend": {"$ref": "#/definitions/qualifiedId"},
+        "backend_version": {"type": ["string", "null"], "minLength": 1}
+      },
+      "additionalProperties": false
+    },
+    "backendConfig": {
+      "type": "object",
+      "propertyNames": {"$ref": "#/definitions/qualifiedId"},
+      "additionalProperties": {"type": "object"}
+    },
+    "renderSegment": {
+      "type": "object",
+      "required": ["window", "backend", "backend_config", "support", "input_hashes"],
+      "properties": {
+        "window": {"$ref": "#/definitions/frameWindow"},
+        "backend": {"$ref": "#/definitions/qualifiedId"},
+        "backend_config": {"$ref": "#/definitions/backendConfig"},
+        "support": {
+          "oneOf": [
+            {"$ref": "#/definitions/supportReport"},
+            {"type": "null"}
+          ]
+        },
+        "input_hashes": {
+          "type": "object",
+          "additionalProperties": {"type": "string", "minLength": 1}
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "examples": [
+    {
+      "segments": [
+        {
+          "window": {
+            "start_frame": 0,
+            "end_frame": 48,
+            "fps_rational": [24, 1],
+            "source_range": null,
+            "speed": null
+          },
+          "backend": "rendering.remotion",
+          "backend_config": {
+            "rendering.remotion": {"composition": "TimelineComposition"}
+          },
+          "support": {
+            "supported": true,
+            "reasons": [],
+            "features": {"transitions": true},
+            "alternatives": [],
+            "backend": "rendering.remotion",
+            "backend_version": "1.0.0"
+          },
+          "input_hashes": {
+            "timeline": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+          }
+        }
+      ],
+      "finalizer": "rendering.ffmpeg_finalizer",
+      "profile": {
+        "width": 1920,
+        "height": 1080,
+        "fps_rational": [24, 1],
+        "time_base": [1, 12288],
+        "container": "mp4",
+        "video_codec": "h264",
+        "video_profile": "high",
+        "video_level": "4.1",
+        "pixel_format": "yuv420p",
+        "audio_codec": "aac",
+        "audio_sample_rate": 48000,
+        "audio_channel_layout": "stereo",
+        "duration_tolerance": 1
+      },
+      "reasons": {"0": "transition requires the Remotion backend"}
+    },
+    {
+      "segments": [],
+      "finalizer": "rendering.ffmpeg_finalizer",
+      "profile": {
+        "width": 1920,
+        "height": 1080,
+        "fps_rational": [24, 1],
+        "time_base": [1, 12288],
+        "container": "mp4",
+        "video_codec": "h264",
+        "video_profile": null,
+        "video_level": null,
+        "pixel_format": "yuv420p",
+        "audio_codec": null,
+        "audio_sample_rate": null,
+        "audio_channel_layout": null,
+        "duration_tolerance": 1
+      },
+      "reasons": {}
+    }
+  ]
+}

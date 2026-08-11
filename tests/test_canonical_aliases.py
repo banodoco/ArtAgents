@@ -1,12 +1,19 @@
 import importlib.util
+from typing import get_args
 import unittest
 
+from astrid.core.pack import PACK_ALIAS_KINDS, PackAliasKind
 from astrid.core.execution.executor import ExecutorDefinition, ExecutorRegistry, load_default_registry as load_executor_registry
 from astrid.core.execution.orchestrator import OrchestratorDefinition, OrchestratorRegistry, load_default_registry as load_orchestrator_registry
 from astrid.core.element import ElementDefinition, ElementRegistry
 
 
 class CanonicalAliasTest(unittest.TestCase):
+    def test_pack_alias_kinds_include_rendering_extensions(self) -> None:
+        expected = ("executor", "orchestrator", "renderer", "planner", "finalizer")
+        self.assertEqual(PACK_ALIAS_KINDS, expected)
+        self.assertEqual(get_args(PackAliasKind), expected)
+
     def test_orchestrator_api_uses_canonical_implementation(self) -> None:
         self.assertEqual(OrchestratorDefinition.__module__, "astrid.core.execution.orchestrator.schema")
         self.assertEqual(OrchestratorRegistry.__module__, "astrid.core.execution.orchestrator.registry")

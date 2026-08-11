@@ -1,0 +1,11 @@
+schema_version: 1
+id: rendering.legacy_hybrid
+name: Fixture Hybrid Planner
+version: 1.0.0
+protocol_version: 1
+command: [python3, backend_should_not_import.py]
+operations: [plan, support]
+capabilities:
+  policies: [hybrid]
+  supports_fallback: true
+required_permissions: [project_files, subprocess]
