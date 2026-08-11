@@ -1,4 +1,4 @@
-import type { TimelineConfigT, ThemeT } from "./schemas.js";
+import type { TimelineConfigT, ThemeT } from "./generated.js";
 
 export type ThemeRegistry = Record<string, ThemeT>;
 export type ThemeResolvableTimeline = Pick<TimelineConfigT, "theme_overrides"> & { theme: string };

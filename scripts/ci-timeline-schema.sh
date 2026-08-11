@@ -16,8 +16,6 @@ fi
 # resolves the local source. Idempotent.
 pip install -q -e python
 
-pip show datamodel-code-generator >/dev/null 2>&1 || pip install -q datamodel-code-generator
-
 bash scripts/check-codegen.sh
 npm test
 python -m unittest discover -s tests

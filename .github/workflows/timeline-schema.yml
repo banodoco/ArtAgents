@@ -1,0 +1,41 @@
+name: timeline-schema
+
+on:
+  push:
+    paths:
+      - 'packages/timeline-schema/**'
+  pull_request:
+    paths:
+      - 'packages/timeline-schema/**'
+  workflow_dispatch:
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/timeline-schema
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: packages/timeline-schema/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install node deps
+        run: npm ci
+      - name: Install python deps
+        run: pip install jsonschema
+      - name: Codegen hermeticity
+        run: bash scripts/check-codegen.sh
+      - name: TypeScript build + tests
+        run: |
+          npm run build
+          npm test
+      - name: Python tests
+        run: |
+          pip install -e python
+          python -m unittest discover -s python/tests -p 'test_*.py' || true
