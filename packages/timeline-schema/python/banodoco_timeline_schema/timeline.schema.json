@@ -128,7 +128,8 @@
     }
   },
   "required": [
-    "clips"
+    "clips",
+    "tracks"
   ],
   "additionalProperties": false,
   "$schema": "http://json-schema.org/draft-07/schema#",
@@ -373,6 +374,14 @@
         "clip_order": {
           "type": "integer",
           "exclusiveMinimum": 0
+        },
+        "keyframes": {
+          "type": "object",
+          "additionalProperties": {}
+        },
+        "derived_output": {
+          "type": "object",
+          "additionalProperties": {}
         }
       },
       "required": [

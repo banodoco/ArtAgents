@@ -44,6 +44,8 @@ class TimelineClip(TypedDict, total=False):
     clip_order: int
     source_uuid: str
     label: str
+    keyframes: dict[str, Any]
+    derived_output: dict[str, Any]
     app: dict[str, Any]
 
 

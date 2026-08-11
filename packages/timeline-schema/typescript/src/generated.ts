@@ -7,7 +7,7 @@
 export interface TimelineConfig {
   theme?: string;
   clips: TimelineClip[];
-  tracks?: {
+  tracks: {
     id: string;
     kind: "visual" | "audio";
     label: string;
@@ -132,6 +132,12 @@ export interface TimelineClip {
   label?: string;
   pool_id?: string;
   clip_order?: number;
+  keyframes?: {
+    [k: string]: unknown;
+  };
+  derived_output?: {
+    [k: string]: unknown;
+  };
 }
 /**
  * This interface was referenced by `TimelineConfig`'s JSON-Schema

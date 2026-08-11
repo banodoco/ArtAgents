@@ -1,0 +1,161 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Astrid timeline bridge — wire envelope (plan-v5 B3)",
+    "version": "1.0.0",
+    "description": "The editor-facing HTTP contract for the local Astrid bridge. The document body is the canonical TimelineConfig (see timeline.schema.json); this file owns the routes, request/response shapes, and error semantics. `config_version` is an opaque, non-negative CAS token: writes echo it as `expected_version`; clients never infer increments."
+  },
+  "paths": {
+    "/projects/{project}/timelines/{timeline}": {
+      "get": {
+        "summary": "Load a timeline document",
+        "parameters": [
+          { "name": "project", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "timeline", "in": "path", "required": true, "schema": { "type": "string" }, "description": "Timeline slug, ULID, or event-stream UUID" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Timeline payload",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/TimelinePayload" }
+              }
+            }
+          },
+          "404": { "$ref": "#/components/responses/TimelineNotFound" }
+        }
+      }
+    },
+    "/projects/{project}/timelines/{timeline}/save": {
+      "post": {
+        "summary": "Save a timeline document (combined config + registry, CAS)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/SaveRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Saved payload with the new opaque config_version",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/TimelinePayload" }
+              }
+            }
+          },
+          "409": { "$ref": "#/components/responses/VersionConflict" },
+          "422": { "$ref": "#/components/responses/SchemaIncompatible" },
+          "404": { "$ref": "#/components/responses/TimelineNotFound" }
+        }
+      }
+    },
+    "/projects/{project}/timelines/{timeline}/assets/{assetKey}": {
+      "get": {
+        "summary": "Serve a media asset (byte-range supported)",
+        "parameters": [
+          { "name": "assetKey", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Media bytes" },
+          "206": { "description": "Partial content (range request)" },
+          "404": { "description": "Asset not found" }
+        }
+      },
+      "head": {
+        "summary": "Asset headers only",
+        "responses": {
+          "200": { "description": "Headers for the media asset" },
+          "404": { "description": "Asset not found" }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "TimelinePayload": {
+        "type": "object",
+        "required": ["timeline_id", "config", "config_version"],
+        "properties": {
+          "timeline_id": { "type": "string" },
+          "timeline_ulid": { "type": "string" },
+          "slug": { "type": "string" },
+          "name": { "type": "string" },
+          "is_default": { "type": "boolean" },
+          "config": { "type": "object", "description": "Canonical TimelineConfig (timeline.schema.json)" },
+          "registry": { "type": "object", "properties": { "assets": { "type": "object" } } },
+          "config_version": { "type": "integer", "minimum": 0, "description": "Opaque CAS token" }
+        }
+      },
+      "SaveRequest": {
+        "type": "object",
+        "required": ["config", "registry", "expected_version"],
+        "properties": {
+          "config": { "type": "object" },
+          "registry": { "type": "object", "properties": { "assets": { "type": "object" } } },
+          "expected_version": { "type": "integer", "minimum": 0 }
+        }
+      },
+      "ErrorBody": {
+        "type": "object",
+        "required": ["error", "detail"],
+        "properties": {
+          "error": { "type": "string" },
+          "detail": { "type": "string" },
+          "config_version": { "type": "integer", "description": "Present on 409: the current server version" },
+          "issues": {
+            "type": "array",
+            "description": "Present on 422: JSON-pointer-style diagnostics",
+            "items": {
+              "type": "object",
+              "required": ["pointer", "code", "message"],
+              "properties": {
+                "pointer": { "type": "string" },
+                "code": { "type": "string" },
+                "message": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "responses": {
+      "VersionConflict": {
+        "description": "Stale expected_version — the document changed elsewhere. Clients must not silently retry; show the conflict banner.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "allOf": [
+                { "$ref": "#/components/schemas/ErrorBody" },
+                { "properties": { "error": { "enum": ["timeline_version_conflict"] } } }
+              ]
+            }
+          }
+        }
+      },
+      "SchemaIncompatible": {
+        "description": "The config violates the canonical schema. Typed 422 — never a connection close.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "allOf": [
+                { "$ref": "#/components/schemas/ErrorBody" },
+                { "properties": { "error": { "enum": ["schema_incompatible"] } } }
+              ]
+            }
+          }
+        }
+      },
+      "TimelineNotFound": {
+        "description": "Timeline does not exist",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ErrorBody" }
+          }
+        }
+      }
+    }
+  }
+}

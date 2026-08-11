@@ -94,12 +94,13 @@ class ResolveThemeTests(unittest.TestCase):
 
 class ValidateTimelineTests(unittest.TestCase):
     def test_validate_timeline_accepts_no_theme_persisted_shape(self) -> None:
-        validate_timeline({"clips": []}, strict=False)
+        validate_timeline({"clips": [], "tracks": []}, strict=False)
 
     def test_validate_timeline_accepts_open_generation_defaults(self) -> None:
         payload = {
             "theme": "2rp",
             "clips": [],
+            "tracks": [],
             "generation_defaults": {
                 "model": "sequence-v1",
                 "image": {"quality": "high", "provider": "reigh"},

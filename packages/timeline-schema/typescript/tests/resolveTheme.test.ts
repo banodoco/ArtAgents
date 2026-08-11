@@ -45,7 +45,7 @@ test("resolveTheme throws when theme missing", () => {
 });
 
 test("TimelineConfig type accepts persisted no-theme timelines", () => {
-  const out: TimelineConfig = { clips: [] };
+  const out: TimelineConfig = { clips: [], tracks: [] };
   assert.deepEqual(out, { clips: [] });
 });
 
@@ -57,6 +57,7 @@ test("TimelineConfig type permits open generation_defaults objects", () => {
   const payload: TimelineConfig = {
     theme: "2rp",
     clips: [],
+    tracks: [],
     generation_defaults: {
       model: "sequence-v1",
       image: { quality: "high", provider: "reigh" },
