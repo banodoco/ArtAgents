@@ -18,6 +18,7 @@ from astrid.core.timeline._shared import (
     _resolve_project_slug,
     _timeline_actor_from_session,
 )
+from astrid.core.cli.usage_counter import count_cli_usage
 
 # ---------------------------------------------------------------------------
 # Handler: push (m9)
@@ -54,6 +55,7 @@ def _format_sync_fields(result: Any, prefix: str = "  ") -> list[str]:
 
 
 def cmd_push(args: argparse.Namespace) -> int:
+    count_cli_usage('push')
     """Push a local timeline to Supabase via event-log replay."""
     session = _resolve_optional_session(args)
     project_slug = _resolve_project_slug(args, session)
@@ -96,6 +98,7 @@ def cmd_push(args: argparse.Namespace) -> int:
 
 
 def cmd_pull(args: argparse.Namespace) -> int:
+    count_cli_usage('pull')
     """Pull a Supabase timeline to a local destination via event-log replay."""
     project_slug = args.project  # --project is required for pull
 
@@ -139,6 +142,7 @@ def cmd_pull(args: argparse.Namespace) -> int:
 
 
 def cmd_sync(args: argparse.Namespace) -> int:
+    count_cli_usage('sync')
     """Unified push-then-pull: push local changes to Supabase, then pull back.
 
     Runs push first. If push succeeds, immediately runs pull to fetch any
@@ -252,6 +256,7 @@ def cmd_sync(args: argparse.Namespace) -> int:
 
 
 def cmd_branch_create(args: argparse.Namespace) -> int:
+    count_cli_usage('branch')
     """Create a branch timeline from a source timeline."""
     from .timeline import _require_session  # noqa: PLC0415
 
@@ -296,6 +301,7 @@ def cmd_branch_create(args: argparse.Namespace) -> int:
 
 
 def cmd_branch_list(args: argparse.Namespace) -> int:
+    count_cli_usage('branch')
     """List branches of a source timeline."""
     from .timeline import _require_session  # noqa: PLC0415
 
@@ -333,6 +339,7 @@ def cmd_branch_list(args: argparse.Namespace) -> int:
 
 
 def cmd_undo(args: argparse.Namespace) -> int:
+    count_cli_usage('undo')
     """Undo the latest undoable event on a timeline."""
     from .timeline import _require_session  # noqa: PLC0415
 
@@ -485,6 +492,7 @@ def cmd_undo(args: argparse.Namespace) -> int:
 
 
 def cmd_mass_undo(args: argparse.Namespace) -> int:
+    count_cli_usage('mass-undo')
     """Mass-undo events matching filter criteria (preview-first, chunked writes)."""
     from .timeline import _require_session  # noqa: PLC0415
 
@@ -615,6 +623,7 @@ def cmd_mass_undo(args: argparse.Namespace) -> int:
 
 
 def cmd_erase(args: argparse.Namespace) -> int:
+    count_cli_usage('erase')
     """Erase (redact) event payloads matching a selector."""
     from .timeline import _require_session  # noqa: PLC0415
 
@@ -734,6 +743,7 @@ def cmd_erase(args: argparse.Namespace) -> int:
 
 
 def cmd_recover(args: argparse.Namespace) -> int:
+    count_cli_usage('recover')
     """Recover a timeline to a known-good anchor event."""
     from .timeline import _require_session  # noqa: PLC0415
 

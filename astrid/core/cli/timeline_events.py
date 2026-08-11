@@ -16,6 +16,7 @@ from typing import Any
 
 from astrid.core.contracts.errors import AstridError
 from astrid.core.timeline.events.schema import TimelineActor
+from astrid.core.cli.usage_counter import count_cli_usage
 
 # ---------------------------------------------------------------------------
 # Shared helpers (used only by event/history handlers in this module)
@@ -72,6 +73,7 @@ def _diff_keys(before: dict[str, Any], after: dict[str, Any]) -> list[str]:
 
 
 def cmd_migrate_events(args: argparse.Namespace) -> int:
+    count_cli_usage('migrate-events')
     """Run timeline event-stream migration (dry-run or --apply).
 
     Supports --project <slug> or --all-projects.  --dry-run is the default;
@@ -253,6 +255,7 @@ def cmd_migrate_events(args: argparse.Namespace) -> int:
 
 
 def cmd_history(args: argparse.Namespace) -> int:
+    count_cli_usage('history')
     """Read and pretty-print the event history of a timeline."""
     from .timeline import _require_session  # noqa: PLC0415
 
@@ -317,6 +320,7 @@ def cmd_history(args: argparse.Namespace) -> int:
 
 
 def cmd_diff(args: argparse.Namespace) -> int:
+    count_cli_usage('diff')
     """Semantic diff between two events in a timeline."""
     from .timeline import _require_session  # noqa: PLC0415
 
@@ -431,6 +435,7 @@ def cmd_diff(args: argparse.Namespace) -> int:
 
 
 def cmd_audit(args: argparse.Namespace) -> int:
+    count_cli_usage('audit')
     """Verify event chain integrity and projection parity."""
     from .timeline import _require_session  # noqa: PLC0415
 
@@ -577,6 +582,7 @@ def cmd_audit(args: argparse.Namespace) -> int:
 
 
 def cmd_preview(args: argparse.Namespace) -> int:
+    count_cli_usage('preview')
     """Project a past state at a specific event."""
     from .timeline import _require_session  # noqa: PLC0415
 
@@ -645,6 +651,7 @@ def cmd_preview(args: argparse.Namespace) -> int:
 
 
 def cmd_who_edited(args: argparse.Namespace) -> int:
+    count_cli_usage('who-edited')
     """Show actor rollup for a timeline."""
     from .timeline import _require_session  # noqa: PLC0415
 
