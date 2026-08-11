@@ -129,6 +129,10 @@ def test_prepare_project_run_is_central_chokepoint_for_project_callers(tmp_path:
     monkeypatch.setattr(executor_runner, "prepare_project_run", fake_prepare)
     monkeypatch.setattr(orchestrator_runner, "prepare_project_run", fake_prepare)
     monkeypatch.setattr(hype_run, "prepare_project_run", fake_prepare)
+    monkeypatch.setattr(
+        "astrid.packs.video_editing.orchestrators.hype.project_adapter.bind_managed_timeline",
+        lambda project, slug: ("timeline-1", slug, "stream-1"),
+    )
 
     executor_runner._prepare_project_request(
         ExecutorRunRequest(executor_id="builtin.noop", out="", project="demo"),

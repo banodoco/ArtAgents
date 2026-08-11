@@ -77,6 +77,20 @@ def build_parser() -> argparse.ArgumentParser:
     create_parser.add_argument("slug")
     create_parser.add_argument("--name")
     create_parser.add_argument(
+        "--description",
+        help="Short purpose statement shown in project discovery and selection.",
+    )
+    create_parser.add_argument(
+        "--attach",
+        action="store_true",
+        help="Attach the new project immediately for this session.",
+    )
+    create_parser.add_argument(
+        "--default",
+        action="store_true",
+        help="Also remember the new project as the workspace default suggestion.",
+    )
+    create_parser.add_argument(
         "--project-id",
         dest="project_id",
         help="Optional reigh-app project UUID (stored opaque in project.json).",
@@ -86,7 +100,36 @@ def build_parser() -> argparse.ArgumentParser:
 
     ls_parser = subparsers.add_parser("ls", help="List local Astrid projects.")
     ls_parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
+    ls_parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Include agentic test projects hidden from the normal chooser.",
+    )
     ls_parser.set_defaults(handler=_cmd_ls)
+
+    select_parser = subparsers.add_parser(
+        "select",
+        aliases=["use"],
+        help="Select a project for this session.",
+    )
+    select_parser.add_argument("slug")
+    select_parser.add_argument(
+        "--default",
+        action="store_true",
+        help="Also remember this project as the workspace default suggestion.",
+    )
+    select_parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
+    select_parser.set_defaults(handler=_cmd_select)
+
+    update_parser = subparsers.add_parser(
+        "update",
+        help="Update a project's display name or description.",
+    )
+    update_parser.add_argument("slug")
+    update_parser.add_argument("--name")
+    update_parser.add_argument("--description")
+    update_parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
+    update_parser.set_defaults(handler=_cmd_update)
 
     default_parser = subparsers.add_parser("default", help="Show, set, or clear the default project.")
     default_parser.add_argument("slug", nargs="?", help="Project slug to remember as the default.")
@@ -137,6 +180,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     source_add.add_argument("--type", help="Asset type such as video/mp4, image/png, or audio/mpeg.")
     source_add.add_argument("--duration", type=float, help="Asset duration in seconds.")
+    source_add.add_argument("--force", action="store_true", help="Overwrite an existing source.")
     source_add.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
     source_add.set_defaults(handler=_cmd_source_add)
 
@@ -573,9 +617,11 @@ from astrid.core.cli.project_handlers import (
     _cmd_list,
     _cmd_ls,
     _cmd_register_source,
+    _cmd_select,
     _cmd_show,
     _cmd_source_add,
     _cmd_theme,
+    _cmd_update,
     _print_json,
     _print_project_header,
     _print_project_tree,

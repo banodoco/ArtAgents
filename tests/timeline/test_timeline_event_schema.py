@@ -478,6 +478,71 @@ class ClipPayloadSchemaTest(unittest.TestCase):
         with self.assertRaises(TimelineEventSchemaError):
             ClipAddedPayload(clip_id="c1", kind="visual", asset_id="", track_id="visual")
 
+    # ── start / duration (P1c) ────────────────────────────────────────
+
+    def test_clip_added_default_start_and_duration(self) -> None:
+        """Old events (without start/duration) remain valid."""
+        payload = ClipAddedPayload(
+            clip_id="c1", kind="visual", asset_id="a", track_id="visual",
+        )
+        self.assertEqual(payload.start, 0.0)
+        self.assertIsNone(payload.duration)
+        obj = payload.to_json_obj()
+        # start=0.0 and duration=None are omitted from serialisation
+        self.assertNotIn("start", obj)
+        self.assertNotIn("duration", obj)
+
+    def test_clip_added_start_and_duration_serialised(self) -> None:
+        payload = ClipAddedPayload(
+            clip_id="c1", kind="visual", asset_id="a", track_id="visual",
+            start=3.5, duration=10.0,
+        )
+        self.assertEqual(payload.start, 3.5)
+        self.assertEqual(payload.duration, 10.0)
+        obj = payload.to_json_obj()
+        self.assertEqual(obj["start"], 3.5)
+        self.assertEqual(obj["duration"], 10.0)
+
+    def test_clip_added_rejects_negative_start(self) -> None:
+        with self.assertRaises(TimelineEventSchemaError):
+            ClipAddedPayload(clip_id="c1", kind="visual", asset_id="a", track_id="visual", start=-1)
+
+    def test_clip_added_rejects_zero_or_negative_duration(self) -> None:
+        with self.assertRaises(TimelineEventSchemaError):
+            ClipAddedPayload(clip_id="c1", kind="visual", asset_id="a", track_id="visual", duration=0)
+
+    def test_clip_added_accepts_duration_none(self) -> None:
+        """duration=None is valid (optional)."""
+        payload = ClipAddedPayload(clip_id="c1", kind="visual", asset_id="a", track_id="visual", duration=None)
+        self.assertIsNone(payload.duration)
+
+    def test_clip_added_rejects_non_finite_start(self) -> None:
+        with self.assertRaises(TimelineEventSchemaError):
+            ClipAddedPayload(clip_id="c1", kind="visual", asset_id="a", track_id="visual", start=float("inf"))
+        with self.assertRaises(TimelineEventSchemaError):
+            ClipAddedPayload(clip_id="c1", kind="visual", asset_id="a", track_id="visual", start=float("nan"))
+
+    def test_clip_added_rejects_non_finite_duration(self) -> None:
+        with self.assertRaises(TimelineEventSchemaError):
+            ClipAddedPayload(clip_id="c1", kind="visual", asset_id="a", track_id="visual", duration=float("inf"))
+        with self.assertRaises(TimelineEventSchemaError):
+            ClipAddedPayload(clip_id="c1", kind="visual", asset_id="a", track_id="visual", duration=float("nan"))
+
+    def test_clip_added_parse_old_event_without_start_duration(self) -> None:
+        """Old events without these fields remain valid — compat."""
+        raw = {
+            "clip_id": "c1",
+            "kind": "visual",
+            "track_id": "visual",
+            "asset_id": "a",
+        }
+        # coerce_payload should handle this
+        from astrid.core.timeline.events.schema.types import coerce_payload
+        payload = coerce_payload("clip.added", raw)
+        self.assertIsInstance(payload, ClipAddedPayload)
+        self.assertEqual(payload.start, 0.0)
+        self.assertIsNone(payload.duration)
+
     # ------------------------------------------------------------------
     # ClipRemovedPayload
     # ------------------------------------------------------------------

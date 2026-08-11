@@ -673,6 +673,46 @@ class TestTimelineConfigReplacedProjection:
         assert event.payload.config["tracks"][0]["label"] == "Video"  # type: ignore[attr-defined]
         timeline_contract.validate_timeline_config_for_container(result)
 
+    def test_config_replaced_preserves_storyboard_top_level_fields(self):
+        config = {
+            "tracks": [
+                {"id": "storyboard", "kind": "visual", "label": "Storyboard", "fit": "cover"}
+            ],
+            "clips": [
+                {
+                    "id": "plant-frame-1",
+                    "at": 0,
+                    "track": "storyboard",
+                    "clipType": "media",
+                    "asset": "plant-frame-1",
+                    "hold": 1.5,
+                }
+            ],
+            "generation_defaults": {"model": "storyboard-default"},
+            "pinnedShotGroups": [
+                {
+                    "shotId": "desert-plant-growth",
+                    "trackId": "storyboard",
+                    "clipIds": ["plant-frame-1"],
+                    "mode": "images",
+                }
+            ],
+            "output": {
+                "resolution": "1280x720",
+                "fps": 24,
+                "file": "storyboard-preview.mp4",
+            },
+        }
+        event = _make_event(
+            "timeline.config_replaced",
+            {"config": config, "source": "standalone-import"},
+        )
+
+        result = project_to_assembly([event])
+
+        assert result == config
+        timeline_contract.validate_timeline_config_for_container(result)
+
     def test_config_replaced_projects_editor_save_payload_and_preserves_source_on_round_trip(self):
         event = _make_event(
             "timeline.config_replaced",
@@ -1225,6 +1265,46 @@ class TestEdgeCases:
         })
         result = apply_event_to_assembly(state, event)
         assert result["clips"] == []
+
+    # ── at / hold projection (P1c) ─────────────────────────────────────
+
+    def test_clip_added_with_start_projects_at(self):
+        state = {"clips": []}
+        event = _make_event("clip.added", {
+            "clip_id": "c1", "kind": "visual", "track_id": "visual",
+            "asset_id": "a1", "position": None, "start": 3.5,
+        })
+        result = apply_event_to_assembly(state, event)
+        assert len(result["clips"]) == 1
+        assert result["clips"][0]["at"] == 3.5
+
+    def test_clip_added_with_duration_projects_hold(self):
+        state = {"clips": []}
+        event = _make_event("clip.added", {
+            "clip_id": "c1", "kind": "visual", "track_id": "visual",
+            "asset_id": "a1", "position": None, "duration": 10.0,
+        })
+        result = apply_event_to_assembly(state, event)
+        assert len(result["clips"]) == 1
+        assert result["clips"][0]["hold"] == 10.0
+
+    def test_clip_added_without_duration_omits_hold(self):
+        state = {"clips": []}
+        event = _make_event("clip.added", {
+            "clip_id": "c1", "kind": "visual", "track_id": "visual",
+            "asset_id": "a1", "position": None,
+        })
+        result = apply_event_to_assembly(state, event)
+        assert "hold" not in result["clips"][0]
+
+    def test_clip_added_default_start_is_zero(self):
+        state = {"clips": []}
+        event = _make_event("clip.added", {
+            "clip_id": "c1", "kind": "visual", "track_id": "visual",
+            "asset_id": "a1", "position": None,
+        })
+        result = apply_event_to_assembly(state, event)
+        assert result["clips"][0]["at"] == 0.0
 
 
 # ============================================================================

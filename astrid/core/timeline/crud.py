@@ -16,7 +16,7 @@ except ImportError:  # pragma: no cover
     fcntl = None  # type: ignore[assignment]
 
 from astrid.core._shared.jsonio import read_json, write_json_atomic
-from astrid.core.project.project import load_project
+from astrid.core.project.project import load_project, require_project
 from astrid.core.threads.ids import generate_ulid
 from astrid.core.timeline.banodoco_schema import canonical_empty_timeline
 from astrid.core.util.time import utc_now_seconds as utc_now_iso
@@ -85,6 +85,7 @@ def create_timeline(
     Milestone 1 keeps create on the legacy write path. This seeds the identity
     sidecar for later eventlog use, but it does not emit ``timeline.created``.
     """
+    require_project(project_slug, root=root)
     slug = validate_timeline_slug(slug)
     human_name = name or slug
 

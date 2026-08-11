@@ -135,7 +135,7 @@ def test_status_json_unbound_emits_structured_recovery_context(
     assert payload["project"] is None
     assert payload["session_id"] is None
     assert payload["discovered_projects"] == ["demo"]
-    assert payload["next_command"] == "astrid attach demo"
+    assert payload["next_command"] == "astrid projects select demo"
     assert result.stderr == ""
 
 

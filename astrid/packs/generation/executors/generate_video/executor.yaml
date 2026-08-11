@@ -32,12 +32,13 @@
       "kind": "requires_input"
     }
   ],
-  "description": "Generate videos from text prompts using local (vibecomfy) or cloud (fal) backends. v2: model\u2192mode\u2192backend taxonomy with required --mode. Modes: t2v, i2v, flf.",
+  "description": "Generate videos from text prompts using local (vibecomfy) or cloud (fal) backends. v2: model\u2192mode\u2192backend taxonomy with required --mode. Modes: t2v, i2v, flf, v2v.",
   "graph": {
     "consumes": [
       "prompt_or_prompts_file",
       "image_ref",
-      "image_end_ref"
+      "image_end_ref",
+      "video_ref"
     ],
     "provides": [
       "generated_videos",
@@ -47,7 +48,7 @@
   "id": "generation.generate_video",
   "inputs": [
     {
-      "description": "Generation mode: t2v (text-to-video), i2v (image-to-video), flf (first-last-frame). v2v and video-edit are not wired this sprint.",
+      "description": "Generation mode: t2v (text-to-video), i2v (image-to-video), flf (first-last-frame), v2v (video-to-video). video-edit is not wired this sprint.",
       "name": "mode",
       "required": true,
       "type": "string"
@@ -89,6 +90,14 @@
       "required": false,
       "type": "string",
       "artifact_type": "image"
+    },
+    {
+      "default": "",
+      "description": "Driving motion video path or URL for v2v mode.",
+      "name": "video_ref",
+      "required": false,
+      "type": "string",
+      "artifact_type": "video"
     },
     {
       "description": "Execution backend: 'local' (vibecomfy) or 'cloud' (fal).",
@@ -162,6 +171,20 @@
     },
     {
       "default": "",
+      "description": "SCAIL-2 driving signal: end_to_end (default) or pose.",
+      "name": "driving_type",
+      "required": false,
+      "type": "string"
+    },
+    {
+      "default": "",
+      "description": "SCAIL-2 subject type: human (default) or animal.",
+      "name": "subject_type",
+      "required": false,
+      "type": "string"
+    },
+    {
+      "default": "",
       "description": "LoRAs to apply (cloud/fal backends with a lora_endpoint). JSON array of {\"path\": <url>, \"scale\": <float>, \"transformer\": \"both\"|\"high\"|\"low\"} items, or comma-separated url:scale entries. Routes the request to the model's lora_endpoint.",
       "name": "loras",
       "required": false,
@@ -179,11 +202,12 @@
     "ltx",
     "fal",
     "vibecomfy",
-    "img2vid",
     "i2v",
     "t2v",
     "first-last-frame",
-    "wan-2.2"
+    "video-to-video",
+    "v2v",
+    "scail-2"
   ],
   "kind": "built_in",
   "metadata": {
@@ -218,6 +242,6 @@
     }
   ],
   "scoped_configs": ["credentials.fal"],
-  "short_description": "Generate videos from text prompts via local or cloud backends. v2: model→mode→backend with t2v/i2v/flf modes.",
+  "short_description": "Generate videos from text prompts via local or cloud backends. v2: model→mode→backend with t2v/i2v/flf/v2v modes.",
   "version": "2.0"
 }

@@ -107,9 +107,12 @@ class CapabilityRunner(Generic[RequestT, ResultT, DefinitionT]):
         self.maybe_gate(request)
         active_registry = registry if registry is not None else self.load_default_registry()
         definition = active_registry.get(self.request_id(request))
-        if self.is_dry_run(request, definition):
-            return self.run_inner(self.prepare_dry_run_request(request, definition), definition)
         resolved_request = self.resolve_project_request(request, definition)
+        if self.is_dry_run(resolved_request, definition):
+            return self.run_inner(
+                self.prepare_dry_run_request(resolved_request, definition),
+                definition,
+            )
         project_context, effective_request = self.prepare_project(resolved_request, definition)
         try:
             result = self.run_inner(effective_request, definition)

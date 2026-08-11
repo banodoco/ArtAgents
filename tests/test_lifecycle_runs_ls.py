@@ -35,10 +35,10 @@ def app(): return [code("b1", argv=["echo","b1"])]
 
 def _start_one(packs: Path, projects: Path, qid: str, project: str, run_id: str) -> None:
     create_project(project, root=projects, exist_ok=True)
-    if not (projects / project / "timelines").exists():
+    timeline_root = projects / project / "timelines"
+    timeline = None
+    if not any(timeline_root.glob("*/assembly.json")):
         timeline = create_timeline(project, "main", is_default=True, root=projects)
-    else:
-        timeline = None
     bind_writer_session(projects, project)
     with redirect_stdout(io.StringIO()):
         rc = cmd_start([qid, "--project", project, "--name", run_id], packs_root=packs, projects_root=projects)

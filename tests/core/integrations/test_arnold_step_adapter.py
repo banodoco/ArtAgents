@@ -505,6 +505,7 @@ class TestAstridStepInvocationAdapterInvoke:
             kind="astrid",
             metadata={
                 "adapter_config": {
+                    "project": "demo",
                     "executor_id": "image.generate",
                     "input_map": {"prompt": "hero_prompt"},
                     "inputs": {"style": "ink"},
@@ -521,7 +522,7 @@ class TestAstridStepInvocationAdapterInvoke:
             "style": "ink",
         }
         assert request.execution_mode == "subprocess"
-        assert request.project is None
+        assert request.project == "demo"
         assert request.out == tmp_path / "artifacts" / "image.generate"
         assert request.run_root is None
         assert result.contract_result is not None
@@ -642,6 +643,7 @@ class TestAstridStepInvocationAdapterInvoke:
             kind="astrid",
             metadata={
                 "adapter_config": {
+                    "project": "demo",
                     "executor_id": "image.generate",
                     "input_map": {"prompt": "hero_prompt"},
                     "inputs": {"style": "ink"},
@@ -788,7 +790,7 @@ class TestAstridStepInvocationAdapterInvoke:
         result = adapter.invoke(
             StepInvocation(
                 kind="astrid",
-                metadata={"adapter_config": {"executor_id": "image.generate"}},
+                metadata={"adapter_config": {"project": "demo", "executor_id": "image.generate"}},
             )
         )
 
@@ -844,7 +846,7 @@ class TestAstridStepInvocationAdapterInvoke:
         result = adapter.invoke(
             StepInvocation(
                 kind="astrid",
-                metadata={"adapter_config": {"executor_id": "image.generate"}},
+                metadata={"adapter_config": {"project": "demo", "executor_id": "image.generate"}},
             )
         )
 
@@ -929,8 +931,7 @@ class TestAstridStepInvocationAdapterInvoke:
         )
 
         assert run_count == 1
-        assert result.contract_result.payload["cache_status"] == "miss_unresolved_paths"
-        assert not (tmp_path / "projects" / "demo" / ".cas").exists()
+        assert result.contract_result.payload["cache_status"] == "miss"
 
     def test_invoke_rejects_conflicting_duplicate_inputs(self, tmp_path: Path) -> None:
         """Duplicate input keys fail closed unless the values are identical."""
@@ -949,6 +950,7 @@ class TestAstridStepInvocationAdapterInvoke:
             kind="astrid",
             metadata={
                 "adapter_config": {
+                    "project": "demo",
                     "executor_id": "image.generate",
                     "input_map": {"prompt": "hero_prompt"},
                     "inputs": {"prompt": "literal prompt"},
@@ -998,7 +1000,7 @@ class TestAstridStepInvocationAdapterInvoke:
         )
         invocation = StepInvocation(
             kind="astrid",
-            metadata={"adapter_config": {"executor_id": "image.generate"}},
+            metadata={"adapter_config": {"project": "demo", "executor_id": "image.generate"}},
         )
         result = adapter.invoke(invocation)
         assert result.contract_result is not None
@@ -1021,7 +1023,7 @@ class TestAstridStepInvocationAdapterInvoke:
         result = adapter.invoke(
             StepInvocation(
                 kind="astrid",
-                metadata={"adapter_config": {"executor_id": "image.generate"}},
+                metadata={"adapter_config": {"project": "demo", "executor_id": "image.generate"}},
             )
         )
         assert result.contract_result is not None
@@ -1049,7 +1051,7 @@ class TestAstridStepInvocationAdapterInvoke:
         result = adapter.invoke(
             StepInvocation(
                 kind="astrid",
-                metadata={"adapter_config": {"executor_id": "image.generate"}},
+                metadata={"adapter_config": {"project": "demo", "executor_id": "image.generate"}},
             )
         )
         assert result.contract_result is not None
@@ -1087,7 +1089,7 @@ class TestAstridStepInvocationAdapterInvoke:
         result = adapter.invoke(
             StepInvocation(
                 kind="astrid",
-                metadata={"adapter_config": {"executor_id": "image.generate"}},
+                metadata={"adapter_config": {"project": "demo", "executor_id": "image.generate"}},
             )
         )
         assert result.contract_result is not None
@@ -1168,7 +1170,7 @@ class TestAstridStepInvocationAdapterInvoke:
         result = adapter.invoke(
             StepInvocation(
                 kind="astrid",
-                metadata={"adapter_config": {"executor_id": "judge.exec"}},
+                metadata={"adapter_config": {"project": "demo", "executor_id": "judge.exec"}},
             )
         )
 
@@ -1221,7 +1223,7 @@ class TestAstridStepInvocationAdapterInvoke:
         result = adapter.invoke(
             StepInvocation(
                 kind="astrid",
-                metadata={"adapter_config": {"executor_id": "judge.exec"}},
+                metadata={"adapter_config": {"project": "demo", "executor_id": "judge.exec"}},
             )
         )
 
@@ -1274,7 +1276,7 @@ class TestAstridStepInvocationAdapterInvoke:
         result = adapter.invoke(
             StepInvocation(
                 kind="astrid",
-                metadata={"adapter_config": {"executor_id": "judge.exec"}},
+                metadata={"adapter_config": {"project": "demo", "executor_id": "judge.exec"}},
             )
         )
 
@@ -1317,7 +1319,7 @@ class TestAstridStepInvocationAdapterInvoke:
         result = adapter.invoke(
             StepInvocation(
                 kind="astrid",
-                metadata={"adapter_config": {"executor_id": "image.generate"}},
+                metadata={"adapter_config": {"project": "demo", "executor_id": "image.generate"}},
             )
         )
 
@@ -1370,6 +1372,7 @@ class TestAstridStepInvocationAdapterInvoke:
                 kind="astrid",
                 metadata={
                     "adapter_config": {
+                    "project": "demo",
                         "executor_id": "image.generate",
                         "content_validator_registry": validator_registry,
                     }
@@ -1422,6 +1425,7 @@ class TestAstridStepInvocationAdapterInvoke:
                 kind="astrid",
                 metadata={
                     "adapter_config": {
+                    "project": "demo",
                         "executor_id": "image.generate",
                         # content_validator_registry absent
                     }
@@ -1476,6 +1480,7 @@ class TestAstridStepInvocationAdapterInvoke:
                 kind="astrid",
                 metadata={
                     "adapter_config": {
+                    "project": "demo",
                         "executor_id": "image.generate",
                         "content_validator_registry": "not-a-registry",
                     }

@@ -138,8 +138,8 @@ def test_capability_runner_orders_normal_lifecycle_and_threads_resolved_request(
         "maybe_gate",
         "load_default_registry",
         "request_id",
-        "is_dry_run:definition:demo",
         "resolve_project_request:definition:demo",
+        "is_dry_run:definition:demo",
         "prepare_project:True",
         "run_inner:resolved=True:prepared=True",
         "status_for_result",
@@ -149,7 +149,7 @@ def test_capability_runner_orders_normal_lifecycle_and_threads_resolved_request(
     assert runner.mark_calls == 0
 
 
-def test_capability_runner_short_circuits_dry_run_before_project_resolution_and_finalize() -> None:
+def test_capability_runner_requires_project_resolution_before_dry_run() -> None:
     runner = _ProbeRunner()
 
     result = runner.run(_Request("demo", dry_run=True))
@@ -159,9 +159,10 @@ def test_capability_runner_short_circuits_dry_run_before_project_resolution_and_
         "maybe_gate",
         "load_default_registry",
         "request_id",
+        "resolve_project_request:definition:demo",
         "is_dry_run:definition:demo",
         "prepare_dry_run_request:definition:demo",
-        "run_inner:resolved=False:prepared=False",
+        "run_inner:resolved=True:prepared=False",
     ]
     assert runner.mark_calls == 0
 
@@ -245,8 +246,8 @@ def test_capability_runner_skips_finalize_when_project_context_is_none_on_succes
         "maybe_gate",
         "load_default_registry",
         "request_id",
-        "is_dry_run:definition:demo",
         "resolve_project_request:definition:demo",
+        "is_dry_run:definition:demo",
         "prepare_project:True",
         "run_inner:resolved=True:prepared=True",
     ]
@@ -295,8 +296,8 @@ def test_capability_runner_full_event_order_on_execution_failure_path() -> None:
         "maybe_gate",
         "load_default_registry",
         "request_id",
-        "is_dry_run:definition:demo",
         "resolve_project_request:definition:demo",
+        "is_dry_run:definition:demo",
         "prepare_project:True",
         "run_inner:resolved=True:prepared=True",
         "finalize_project:failed:returncode=-1:error=RuntimeError",
@@ -316,8 +317,8 @@ def test_capability_runner_full_event_order_on_success_path_finalize_failure() -
         "maybe_gate",
         "load_default_registry",
         "request_id",
-        "is_dry_run:definition:demo",
         "resolve_project_request:definition:demo",
+        "is_dry_run:definition:demo",
         "prepare_project:True",
         "run_inner:resolved=True:prepared=True",
         "status_for_result",

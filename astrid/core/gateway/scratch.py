@@ -19,7 +19,7 @@ from astrid.core.runtime.log_capture import (
 )
 from astrid.core.subprocess_env import build_child_subprocess_env
 
-from . import ASTRID_GATEWAY_RESOLVED_PROJECT_ENV, DEFAULT_PROJECT_SLUG
+from . import ASTRID_GATEWAY_RESOLVED_PROJECT_ENV
 
 
 def dispatch_scratch(args: list[str]) -> int:
@@ -27,6 +27,10 @@ def dispatch_scratch(args: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="astrid scratch")
     sub = parser.add_subparsers(dest="scratch_command")
     run_parser = sub.add_parser("run", help="Run a throwaway Python script")
+    run_parser.add_argument(
+        "--project",
+        help="Owning project slug; omit only when a project session is attached.",
+    )
     run_parser.add_argument("file", help="Python file to run")
     run_parser.add_argument(
         "extra", nargs=argparse.REMAINDER, help="Extra arguments forwarded to the script"
@@ -42,7 +46,7 @@ def dispatch_scratch(args: list[str]) -> int:
         print(f"scratch: file not found: {file_path}", file=sys.__stderr__)
         return 1
 
-    project_slug = os.environ.get(ASTRID_GATEWAY_RESOLVED_PROJECT_ENV)
+    project_slug = parsed.project or os.environ.get(ASTRID_GATEWAY_RESOLVED_PROJECT_ENV)
     if not project_slug:
         try:
             from astrid.core.foundation.project_paths import resolve_projects_root
@@ -56,7 +60,13 @@ def dispatch_scratch(args: list[str]) -> int:
         except Exception:
             pass
     if not project_slug:
-        project_slug = DEFAULT_PROJECT_SLUG
+        from astrid.core.contracts.errors import AstridError
+        from astrid.core.project.guidance import format_project_required_guidance
+
+        raise AstridError(
+            format_project_required_guidance(operation="scratch run"),
+            recovery_command="astrid projects ls",
+        )
 
     extra = parsed.extra or []
     argv = [str(file_path)] + extra
@@ -67,7 +77,10 @@ def dispatch_scratch(args: list[str]) -> int:
         kind="scratch",
         argv=argv,
         requires_timeline=False,
-        auto_bound=True,
+        auto_bound=False,
+        metadata={
+            "project_resolution": "explicit" if parsed.project else "attached",
+        },
         invocation="scratch",
     )
 

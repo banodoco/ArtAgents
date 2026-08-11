@@ -510,7 +510,9 @@ def test_get_capability_supports_pack_declared_element_kinds_and_invalid_kind_er
             )
 
 
-def test_invoke_rejects_elements_and_missing_executor_out() -> None:
+def test_invoke_rejects_elements_and_missing_executor_project(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     astrid = _import_public_module()
 
     with pytest.raises(astrid.UnsupportedCapabilityError):
@@ -520,7 +522,8 @@ def test_invoke_rejects_elements_and_missing_executor_out() -> None:
             include_installed=False,
         )
 
-    with pytest.raises(astrid.CapabilityInvocationError):
+    monkeypatch.delenv("ASTRID_SESSION_ID", raising=False)
+    with pytest.raises(astrid.CapabilityValidationError, match="project required"):
         astrid.invoke(
             "editorial.arrange",
             kind="executor",
@@ -2628,7 +2631,7 @@ def test_generate_explicit_out_routing_image(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """When ``out`` is supplied, ``invoke(out=out, project=None)`` is called."""
+    """Explicit output still carries required project ownership."""
     astrid = _import_public_module()
     sdk = importlib.import_module("astrid.sdk")
     fake_invoke, seen = _make_success_invoke_with_seen(astrid, tmp_path)
@@ -2637,20 +2640,20 @@ def test_generate_explicit_out_routing_image(
     result = astrid.generate.image(
         model="flux-dev",
         out=tmp_path,
+        project="demo",
         prompt="test",
     )
 
     assert result.ok is True
     assert seen["kwargs"]["out"] == tmp_path
-    assert seen["kwargs"]["project"] is None
+    assert seen["kwargs"]["project"] == "demo"
 
 
 def test_generate_explicit_out_routing_video(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """When ``out`` is supplied to video, ``invoke(out=out, project=None)``
-    is called."""
+    """Explicit video output still carries required project ownership."""
     astrid = _import_public_module()
     sdk = importlib.import_module("astrid.sdk")
     fake_invoke, seen = _make_success_invoke_with_seen(astrid, tmp_path)
@@ -2659,11 +2662,12 @@ def test_generate_explicit_out_routing_video(
     result = astrid.generate.video(
         model="wan-2.2",
         out=tmp_path,
+        project="demo",
     )
 
     assert result.ok is True
     assert seen["kwargs"]["out"] == tmp_path
-    assert seen["kwargs"]["project"] is None
+    assert seen["kwargs"]["project"] == "demo"
 
 
 # --- explicit ``project`` routing --------------------------------------------
@@ -2712,40 +2716,18 @@ def test_generate_explicit_project_routing_video(
     assert seen["kwargs"]["project"] == "my-project"
 
 
-# --- default project resolution (no ``out``, no ``project``) ------------------
+# --- attached project resolution (no explicit ``project``) --------------------
 
 
-def test_generate_default_project_resolution_image(
+def test_generate_attached_project_resolution_image(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """When neither ``out`` nor ``project`` is supplied,
-    ``resolve_default_project_for_sdk()`` is called and the result is forwarded
-    as ``project`` to ``invoke(out=None, project=resolved_slug)``."""
+    """The genuinely attached session project is forwarded to invoke."""
     astrid = _import_public_module()
     sdk = importlib.import_module("astrid.sdk")
     fake_invoke, seen = _make_success_invoke_with_seen(astrid, tmp_path)
     monkeypatch.setattr(sdk, "invoke", fake_invoke)
-
-    resolve_calls: list[dict[str, Any]] = []
-
-    def fake_resolve(*, cwd=None, projects_root=None, fallback_slug="default"):
-        resolve_calls.append(
-            {"cwd": cwd, "projects_root": projects_root, "fallback_slug": fallback_slug}
-        )
-        return "resolved-default"
-
-    # The facade does a lazy ``from astrid.core.session.config import
-    # resolve_default_project_for_sdk`` inside the else branch, so we must
-    # patch at the source module.
-    import astrid.core.session.config as session_config
-
-    monkeypatch.setattr(
-        session_config,
-        "resolve_default_project_for_sdk",
-        fake_resolve,
-        raising=False,
-    )
 
     result = astrid.generate.image(
         model="flux-dev",
@@ -2753,48 +2735,27 @@ def test_generate_default_project_resolution_image(
     )
 
     assert result.ok is True
-    # The resolve function should have been called exactly once
-    assert len(resolve_calls) == 1
-    # invoke should receive out=None and project=resolved slug
     assert seen["kwargs"]["out"] is None
-    assert seen["kwargs"]["project"] == "resolved-default"
+    assert seen["kwargs"]["project"] == "autouse-session-demo"
 
 
-def test_generate_default_project_resolution_video(
+def test_generate_attached_project_resolution_video(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """Same as image, but for the video facade method."""
+    """Same attached-project behavior for video generation."""
     astrid = _import_public_module()
     sdk = importlib.import_module("astrid.sdk")
     fake_invoke, seen = _make_success_invoke_with_seen(astrid, tmp_path)
     monkeypatch.setattr(sdk, "invoke", fake_invoke)
-
-    resolve_calls: list[dict[str, Any]] = []
-
-    def fake_resolve(*, cwd=None, projects_root=None, fallback_slug="default"):
-        resolve_calls.append(
-            {"cwd": cwd, "projects_root": projects_root, "fallback_slug": fallback_slug}
-        )
-        return "resolved-default"
-
-    import astrid.core.session.config as session_config
-
-    monkeypatch.setattr(
-        session_config,
-        "resolve_default_project_for_sdk",
-        fake_resolve,
-        raising=False,
-    )
 
     result = astrid.generate.video(
         model="wan-2.2",
     )
 
     assert result.ok is True
-    assert len(resolve_calls) == 1
     assert seen["kwargs"]["out"] is None
-    assert seen["kwargs"]["project"] == "resolved-default"
+    assert seen["kwargs"]["project"] == "autouse-session-demo"
 
 
 # --- out + project both passed through (runner enforces SD1 rejection) --------
@@ -2989,11 +2950,11 @@ def fake_invoke(capability_id, **kwargs):
 
 session_before = os.environ.get("ASTRID_SESSION_ID")
 
-with patch.object(sdk, "invoke", fake_invoke), \\
-     patch.object(session_config, "resolve_default_project_for_sdk", return_value="default"):
+with patch.object(sdk, "invoke", fake_invoke):
     getattr(astrid.generate, {method!r})(
         model={model!r},
         out=tmp,
+        project="demo",
     )
 
 session_after = os.environ.get("ASTRID_SESSION_ID")
@@ -3035,16 +2996,11 @@ def test_generate_video_no_astrid_session_id_mutation() -> None:
     )
 
 
-# --- continued CLI side-effect behavior: gateway auto-bind --------------------
+# --- gateway failure is explicit and side-effect free -------------------------
 
 
-def test_gateway_auto_bind_still_produces_stderr_output() -> None:
-    """The gateway auto-bind path must still print its informational message
-    to stderr when binding a default project for a stateless run.
-
-    This is tested via a subprocess invocation of
-    ``astrid executors run ...`` without a bound session.
-    """
+def test_gateway_missing_project_prints_selection_help() -> None:
+    """Projectless runs print the chooser and never auto-bind."""
     import os as _os
 
     worktree_root = str(Path(__file__).resolve().parent.parent)
@@ -3052,11 +3008,8 @@ def test_gateway_auto_bind_still_produces_stderr_output() -> None:
         **_os.environ,
         "PYTHONPATH": worktree_root,
     }
-    # Ensure no session is bound so auto-bind triggers
     env.pop("ASTRID_SESSION_ID", None)
 
-    # Use --dry-run to avoid actual execution; the auto-bind message should
-    # appear on stderr regardless of whether the executor exists.
     completed = subprocess.run(
         [sys.executable, "-m", "astrid", "executors", "run", "--dry-run", "generation.nonexistent_99"],
         capture_output=True,
@@ -3065,18 +3018,16 @@ def test_gateway_auto_bind_still_produces_stderr_output() -> None:
     )
 
     stderr = completed.stderr
-    assert "auto-bound default project" in stderr, (
-        f"Gateway auto-bind stderr message missing. stderr={stderr!r}"
-    )
+    assert completed.returncode == 2
+    assert "project required: every executor run" in stderr
+    assert "astrid projects ls" in stderr
+    assert "astrid projects select <project>" in stderr
+    assert "--project <project>" in stderr
+    assert "auto-bound default project" not in stderr
 
 
-def test_gateway_auto_bind_still_sets_session_id() -> None:
-    """The gateway auto-bind path must still set ``ASTRID_SESSION_ID``
-    in the process environment after binding a default project.
-
-    This is tested via a subprocess probe that runs
-    ``astrid executors run`` through the gate.
-    """
+def test_gateway_missing_project_does_not_set_session_id() -> None:
+    """Failure must not create or bind a session as a side effect."""
     import os as _os
 
     script = '''
@@ -3086,13 +3037,13 @@ os.environ.pop("ASTRID_SESSION_ID", None)
 
 # Import and call the gate main
 from astrid.core.gateway import main
-# Use --dry-run to avoid actual execution; auto-bind should still happen
+# Use --dry-run to prove dry runs enforce the same project requirement.
 try:
     exit_code = main(["executors", "run", "--dry-run", "generation.nonexistent_99"])
 except SystemExit as e:
     exit_code = e.code
 
-# Check if session id was set by auto-bind
+# Check that failure left the process unbound.
 session_id = os.environ.get("ASTRID_SESSION_ID", "__UNSET__")
 print(f"SESSION_ID={session_id}")
 print(f"EXIT_CODE={exit_code}")
@@ -3111,14 +3062,11 @@ print(f"EXIT_CODE={exit_code}")
 
     stdout = completed.stdout
     assert "SESSION_ID=" in stdout, f"Missing SESSION_ID in stdout: {stdout!r}"
-    # The session ID should have been set by auto-bind (not __UNSET__)
     session_line = [line for line in stdout.splitlines() if line.startswith("SESSION_ID=")]
     assert session_line
     session_value = session_line[0].split("=", 1)[1]
-    assert session_value != "__UNSET__", (
-        f"Gateway auto-bind did not set ASTRID_SESSION_ID. "
-        f"stdout={stdout!r} stderr={completed.stderr!r}"
-    )
+    assert session_value == "__UNSET__"
+    assert "EXIT_CODE=2" in stdout
 
 
 def test_gateway_run_passes_bound_project_via_request_metadata(

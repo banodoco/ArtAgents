@@ -46,12 +46,12 @@ def _enumerate_non_codex_combos() -> list[
 
     Excludes codex backends per SD2.
 
-    Audio music models disable strict parity: cloud music endpoints
-    (MiniMax, Stable Audio 3, ACE-Step) use genuinely different remote
-    parameter names, so there is no single DEFAULT_PARAM_MAP that can match
-    every shipped entry.  Per-model param_map remains authoritative.  For
-    those combos we still verify that every canonical feature in the manifest
-    map is recognised by DEFAULT_PARAM_MAP.
+    Audio music models and explicitly polymorphic image endpoints disable
+    strict parity: some cloud APIs use genuinely different remote parameter
+    names, so there is no single DEFAULT_PARAM_MAP that can match every
+    shipped entry. Per-model param_map remains authoritative. For those
+    combos we still verify that every canonical feature in the manifest map
+    is recognised by DEFAULT_PARAM_MAP.
     """
     combos: list[
         tuple[str, str, str, dict[str, str], dict[str, str], bool]
@@ -60,8 +60,13 @@ def _enumerate_non_codex_combos() -> list[
         model_id: str = model["id"]
         modality: str = model.get("modality", "")
         for mode_name, mode_spec in model.get("modes", {}).items():
-            # Audio music models intentionally diverge across endpoints.
-            strict_parity = not (modality == "audio" and mode_name == "music")
+            # These endpoint families intentionally diverge in remote names.
+            # Seedream's edit schema requires plural ``image_urls`` rather
+            # than the singular ``image_url`` used by most fal editors.
+            strict_parity = not (
+                (modality == "audio" and mode_name == "music")
+                or model_id == "seedream-v5-pro"
+            )
             for backend_id, backend_spec in mode_spec.get("backends", {}).items():
                 if backend_id == CODEX_BACKEND_ID:
                     continue  # SD2: Codex exempt
@@ -147,9 +152,8 @@ def test_param_map_parity(
     Builds a canonical-params dict from the union of all keys in both maps,
     then simulates the payload for each path and asserts they are identical.
 
-    Audio music models use relaxed checking because cloud music endpoints
-    (MiniMax, Stable Audio 3, ACE-Step) use different remote parameter names;
-    per-model param_map remains authoritative.
+    Endpoint-specific mappings use relaxed checking when the remote schema
+    differs from the mode-wide default; per-model param_map is authoritative.
     """
     # 1. Every canonical key in the manifest map MUST exist in the default map
     missing_from_default = set(manifest_map) - set(default_map)

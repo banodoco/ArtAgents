@@ -1,0 +1,38 @@
+schema_version: 1
+id: blender
+name: Astrid Blender
+version: 1.0.0
+origin: builtin
+install_tier: core
+pack_type: capability
+domain: media
+stability: stable
+support: core
+visibility: visible
+permissions:
+  - id: subprocess
+    reason: Runs the blender binary (local render) and ffmpeg (animation encode).
+  - id: project_files
+    reason: Reads scene/blend inputs and writes rendered image/video output.
+  - id: network
+    reason: Cloud execution POSTs to a remote Blender render API host (Hetzner / RunPod).
+description: Render 3D scenes with Blender, locally or on a remote cloud render host (a Hetzner box or an on-demand RunPod GPU pod).
+keywords:
+  - blender
+  - render
+  - 3d
+  - cycles
+  - eevee
+  - animation
+  - runpod
+  - hetzner
+  - cloud-render
+capabilities:
+  - render_scene
+agent:
+  purpose: Choose this pack to render a Blender scene (declarative spec or .blend file) to a still image or animation, either on this machine or on a remote GPU/CPU render host.
+  do_not_use_for: Not for timeline/video-edit rendering (use rendering.render); this pack renders standalone 3D scenes.
+  normal_entrypoints:
+  - blender.render
+content:
+  executors: executors

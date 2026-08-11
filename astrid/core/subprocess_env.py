@@ -18,6 +18,9 @@ from astrid.core.env_vars import (
     ASTRID_PROJECT_RUN as PROJECT_RUN_ENV,
 )
 from astrid.core.env_vars import (
+    ASTRID_PROJECT_SLUG as PROJECT_SLUG_ENV,
+)
+from astrid.core.env_vars import (
     ASTRID_PROJECTS_ROOT as PROJECTS_ROOT_ENV,
 )
 from astrid.core.env_vars import (
@@ -69,6 +72,7 @@ _ASTRID_PROPAGATED_ENV = frozenset(
         ASTRID_SESSION_ID_ENV,
         PROJECTS_ROOT_ENV,
         PROJECT_RUN_ENV,
+        PROJECT_SLUG_ENV,
         ASTRID_AUTHOR_TEST,
         ASTRID_INTERNAL_INVOCATION,
         TASK_RUN_ID_ENV,

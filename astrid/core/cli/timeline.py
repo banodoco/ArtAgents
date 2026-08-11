@@ -30,6 +30,7 @@ from astrid.core.timeline._shared import (  # noqa: F401
     _SESSION_GATE_HINT,
     _expected_version_kwargs,
     _require_session,
+    _resolve_edit_context,
     _resolve_optional_session,
     _resolve_project_slug,
     _timeline_actor_from_session,
@@ -200,4 +201,7 @@ from .timeline_events import (  # noqa: E402, F401
 from .timeline_output import (  # noqa: E402, F401
     cmd_cost,
     cmd_export,
+)
+from .timeline_registry import (  # noqa: E402, F401
+    cmd_registry_sync,
 )

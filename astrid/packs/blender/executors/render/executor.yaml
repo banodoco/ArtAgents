@@ -1,0 +1,82 @@
+{
+  "schema_version": 1,
+  "id": "blender.render",
+  "name": "Blender Render",
+  "kind": "built_in",
+  "version": "1.0",
+  "short_description": "Render a Blender scene (declarative spec or .blend file) to a still or animation, locally or on a cloud render host.",
+  "description": "Renders a Blender scene either locally (runs the blender binary on this machine) or on a cloud render host (HTTP POST to a Blender render API such as the Hetzner box or a RunPod GPU pod). Accepts a declarative scene spec JSON or an existing .blend file; emits a still PNG (--frames 1) or an mp4 animation (--frames N>1) plus a manifest.",
+  "keywords": ["blender", "render", "3d", "cycles", "eevee", "animation", "runpod", "hetzner", "cloud"],
+  "cache": {"mode": "none"},
+  "isolation": {"mode": "subprocess", "network": true, "binaries": ["blender", "ffmpeg"]},
+  "inputs": [
+    {
+      "name": "execution",
+      "type": "string",
+      "required": true,
+      "description": "local = run blender on this machine; cloud = POST to a Blender render API host (--cloud-url)."
+    },
+    {"name": "scene", "type": "file", "required": false, "description": "Declarative scene spec JSON (see render_core.DEFAULT_SCENE). Mutually exclusive with --blend."},
+    {"name": "blend", "type": "file", "required": false, "description": "Existing .blend file to render (overrides --scene).", "artifact_type": "image"},
+    {"name": "engine", "type": "string", "required": false, "description": "cycles (default), eevee, or workbench."},
+    {"name": "device", "type": "string", "required": false, "description": "cpu (default) or gpu (Cycles only)."},
+    {"name": "samples", "type": "integer", "required": false, "description": "Cycles samples (default 64)."},
+    {"name": "resolution", "type": "string", "required": false, "description": "WxH, e.g. 1920x1080 (default 1280x720)."},
+    {"name": "frames", "type": "integer", "required": false, "description": "1 = still PNG; >1 = mp4 animation (default 1)."},
+    {"name": "fps", "type": "integer", "required": false, "description": "Frames per second for animation (default 24)."},
+    {"name": "denoise", "type": "boolean", "required": false, "description": "Enable Cycles denoising (needs an OIDN-enabled blender build)."},
+    {"name": "blender", "type": "string", "required": false, "description": "Path to blender executable (local mode)."},
+    {"name": "cloud_url", "type": "string", "required": false, "description": "Base URL of the Blender render API host (cloud mode), e.g. http://host:8778."},
+    {"name": "cloud_token", "type": "string", "required": false, "description": "Bearer token if the render host requires auth."},
+    {"name": "cloud_timeout", "type": "integer", "required": false, "description": "Cloud request timeout in seconds (default 1800)."},
+    {"name": "preset", "type": "string", "required": false, "description": "Named render preset from astrid.packs.blender.renders (e.g. wink_turn). Overrides scene/blend."},
+    {"name": "mesh_url", "type": "string", "required": false, "description": "Direct mesh URL (.glb/.gltf/.fbx/.zip) used by presets."},
+    {"name": "sketchfab_uid", "type": "string", "required": false, "description": "Sketchfab model uid; resolved to a mesh_url via the API token."},
+    {"name": "head_yaw_deg", "type": "number", "required": false, "description": "wink_turn: head turn angle in degrees."},
+    {"name": "body_yaw_deg", "type": "number", "required": false, "description": "wink_turn: body facing flip in degrees."}
+  ],
+  "outputs": [
+    {"name": "render", "type": "directory", "mode": "create_or_replace", "path_template": "{out}/render", "description": "Rendered still (render.png) or animation (render.mp4).", "artifact_type": "image"},
+    {"name": "manifest", "type": "file", "mode": "create_or_replace", "path_template": "{out}/manifest.json", "description": "Run manifest (engine, execution, timing, output type)."}
+  ],
+  "command": {
+    "argv": [
+      "{python_exec}",
+      "-m",
+      "astrid.packs.blender.executors.render.run",
+      "--out",
+      "{out}",
+      "--execution",
+      "{execution}"
+    ],
+    "input_args": [
+      {"input": "scene", "flag": "--scene", "optional": true},
+      {"input": "blend", "flag": "--blend", "optional": true},
+      {"input": "engine", "flag": "--engine", "optional": true},
+      {"input": "device", "flag": "--device", "optional": true},
+      {"input": "samples", "flag": "--samples", "optional": true},
+      {"input": "resolution", "flag": "--resolution", "optional": true},
+      {"input": "frames", "flag": "--frames", "optional": true},
+      {"input": "fps", "flag": "--fps", "optional": true},
+      {"input": "denoise", "flag": "--denoise", "optional": true},
+      {"input": "blender", "flag": "--blender", "optional": true},
+      {"input": "cloud_url", "flag": "--cloud-url", "optional": true},
+      {"input": "cloud_token", "flag": "--cloud-token", "optional": true},
+      {"input": "cloud_timeout", "flag": "--cloud-timeout", "optional": true},
+      {"input": "preset", "flag": "--preset", "optional": true},
+      {"input": "mesh_url", "flag": "--mesh-url", "optional": true},
+      {"input": "sketchfab_uid", "flag": "--sketchfab-uid", "optional": true},
+      {"input": "head_yaw_deg", "flag": "--head-yaw-deg", "optional": true},
+      {"input": "body_yaw_deg", "flag": "--body-yaw-deg", "optional": true}
+    ]
+  },
+  "conditions": [
+    {"input": "execution", "kind": "requires_input"}
+  ],
+  "metadata": {
+    "runtime_entrypoint": "main",
+    "runtime_file": "run.py",
+    "runtime_module": "astrid.packs.blender.executors.render.run",
+    "requires_timeline": false
+  }
+}

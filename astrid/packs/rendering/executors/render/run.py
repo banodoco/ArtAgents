@@ -33,6 +33,7 @@ from astrid.core.foundation.paths import REPO_ROOT, WORKSPACE_ROOT
 from astrid.core.pack.discovery import discover_pack_metadata
 from astrid.core.subprocess_env import build_child_subprocess_env
 from astrid.core.theme import load_theme
+from astrid.packs.rendering.executors.render import audio_reactive_colour
 from astrid.packs.training.executors.asset_cache import run as asset_cache
 from scripts import gen_effect_registry
 
@@ -1123,6 +1124,32 @@ def _render_provenance_sidecar_path(out_path: Path) -> Path:
     return Path(f"{out_path}.provenance.json")
 
 
+def _delete_previous_render_outputs_for_timeline(out_path: Path, timeline_path: Path) -> None:
+    out_path = out_path.resolve()
+    if out_path.name != "hype.mp4":
+        return
+    run_dir = out_path.parent
+    runs_dir = run_dir.parent
+    if runs_dir.name != "runs" or not runs_dir.is_dir():
+        return
+    current_timeline = str(timeline_path.resolve())
+    for candidate_run_dir in runs_dir.iterdir():
+        if not candidate_run_dir.is_dir() or candidate_run_dir == run_dir:
+            continue
+        candidate_out = candidate_run_dir / out_path.name
+        sidecar_path = _render_provenance_sidecar_path(candidate_out)
+        if not candidate_out.exists() or not sidecar_path.exists():
+            continue
+        try:
+            provenance = json.loads(sidecar_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if provenance.get("timeline") != current_timeline:
+            continue
+        candidate_out.unlink(missing_ok=True)
+        sidecar_path.unlink(missing_ok=True)
+
+
 def _active_pack_order_for_provenance() -> list[dict[str, Any]]:
     return [
         {
@@ -1226,6 +1253,150 @@ def _require_free_space(path: Path, min_free_gb: float | None) -> None:
         )
 
 
+def _parse_bool_arg(value: str | bool | None) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, bool):
+        return value
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "y", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "n", "off"}:
+        return False
+    raise argparse.ArgumentTypeError(f"expected boolean value, got {value!r}")
+
+
+def _audio_reactive_ffmpeg_element(
+    theme_path: Path | None,
+) -> ElementDefinition | None:
+    effects, _aliases = _effect_registry_for_assets(theme_path)
+    element = effects.get(audio_reactive_colour.EFFECT_ID)
+    if (
+        element is None
+        or element.metadata.get("ffmpegAdapter")
+        != audio_reactive_colour.ADAPTER_ID
+    ):
+        return None
+    return element
+
+
+def _render_audio_reactive_colour_if_supported(
+    timeline_path: Path,
+    assets_path: Path,
+    out_path: Path,
+    *,
+    project_dir: Path | None,
+    composition_id: str,
+    theme_path: Path | None,
+) -> Path | None:
+    timeline_data = json.loads(timeline_path.read_text(encoding="utf-8"))
+    clips = timeline_data.get("clips")
+    if (
+        not isinstance(clips, list)
+        or len(clips) != 2
+        or sum(
+            isinstance(clip, dict)
+            and clip.get("clipType") == audio_reactive_colour.EFFECT_ID
+            for clip in clips
+        )
+        != 1
+    ):
+        return None
+    element = _audio_reactive_ffmpeg_element(theme_path)
+    if element is None:
+        return None
+    registry = timeline.load_registry(assets_path)
+    spec = audio_reactive_colour.match_and_validate(
+        timeline_data, registry, assets_path
+    )
+    if spec is None:
+        return None
+
+    output = audio_reactive_colour.render(spec, out_path)
+    stage_summary = {
+        "root": None,
+        "effects": [
+            {
+                "effect_id": element.id,
+                "source_pack_id": _source_pack_id(element),
+                "source": element.source,
+                "element_root": str(element.root),
+                "clip_ids": [
+                    str(clip.get("id"))
+                    for clip in timeline_data.get("clips", [])
+                    if isinstance(clip, dict)
+                    and clip.get("clipType") == element.id
+                ],
+                "staged_asset_ids": [],
+                "staged_assets": {},
+            }
+        ],
+    }
+    sidecar_path = _write_render_provenance(
+        output,
+        engine="ffmpeg",
+        timeline_path=timeline_path,
+        assets_path=assets_path,
+        project_dir=project_dir or (REPO_ROOT / "remotion"),
+        composition_id=composition_id,
+        theme_path=theme_path,
+        active_theme=None,
+        registry_state=_effective_registry_state(theme_path),
+        stage_summary=stage_summary,
+    )
+    provenance = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    provenance["ffmpeg_specialization"] = audio_reactive_colour.ADAPTER_ID
+    provenance["audio_reactive_colour"] = {
+        "event_count": len(spec.events),
+        "fps": spec.fps,
+        "frame_count": spec.total_frames,
+        "marker_sha256": spec.marker_sha256,
+    }
+    sidecar_path.write_text(
+        json.dumps(provenance, sort_keys=True, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+    audit = AuditContext.from_env()
+    if audit is not None:
+        timeline_id = audit.register_asset(
+            kind="timeline",
+            path=timeline_path,
+            label="Audio-reactive render timeline",
+            stage="render_ffmpeg_audio_reactive_colour",
+        )
+        assets_id = audit.register_asset(
+            kind="assets_registry",
+            path=assets_path,
+            label="Audio-reactive asset registry",
+            stage="render_ffmpeg_audio_reactive_colour",
+        )
+        render_id = audit.register_asset(
+            kind="render",
+            path=output,
+            label="Rendered audio-reactive colour video",
+            parents=[timeline_id, assets_id],
+            stage="render_ffmpeg_audio_reactive_colour",
+            metadata={
+                "engine": "ffmpeg",
+                "specialization": audio_reactive_colour.ADAPTER_ID,
+                "event_count": len(spec.events),
+                "marker_sha256": spec.marker_sha256,
+            },
+        )
+        audit.register_node(
+            stage="render_ffmpeg_audio_reactive_colour",
+            label="Render audio-reactive colour timeline with FFmpeg",
+            parents=[timeline_id, assets_id],
+            outputs=[render_id],
+            metadata={
+                "engine": "ffmpeg",
+                "specialization": audio_reactive_colour.ADAPTER_ID,
+            },
+        )
+    return output
+
+
 def render(
     timeline_path: Path,
     assets_path: Path,
@@ -1236,7 +1407,21 @@ def render(
     composition_id: str = "TimelineComposition",
     theme_path: Path | None = None,
     min_free_gb: float | None = None,
+    keep_previous_renders: bool = False,
 ) -> Path:
+    out_path = out_path.resolve()
+    if not keep_previous_renders:
+        _delete_previous_render_outputs_for_timeline(out_path, timeline_path)
+    audio_reactive_output = _render_audio_reactive_colour_if_supported(
+        timeline_path,
+        assets_path,
+        out_path,
+        project_dir=project_dir,
+        composition_id=composition_id,
+        theme_path=theme_path,
+    )
+    if audio_reactive_output is not None:
+        return audio_reactive_output
     if engine == "hybrid":
         return _render_hybrid(
             timeline_path,
@@ -1257,7 +1442,6 @@ def render(
     _validate_project_dir(project_dir)
     _regenerate_element_registries(project_dir, theme_path)
     registry_state = _effective_registry_state(theme_path)
-    out_path = out_path.resolve()
     _require_free_space(out_path.parent, min_free_gb)
     props_path = (out_path.parent / ".remotion-props.json").resolve()
     classified = _classify_assets(assets_path)
@@ -1379,6 +1563,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--composition", default="TimelineComposition")
     parser.add_argument("--min-free-gb", type=float, default=None, help="Abort before rendering unless this much free disk is available near --out.")
     parser.add_argument(
+        "--keep-previous-renders",
+        nargs="?",
+        const=True,
+        default=False,
+        type=_parse_bool_arg,
+        help="Preserve previous sibling hype.mp4 outputs for the same timeline.",
+    )
+    parser.add_argument(
         "--theme",
         type=Path,
         default=REPO_ROOT / "themes" / "banodoco-default" / "theme.json",
@@ -1398,6 +1590,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     composition_id=args.composition,
                     theme_path=args.theme,
                     min_free_gb=args.min_free_gb,
+                    keep_previous_renders=args.keep_previous_renders,
                 )
         else:
             output = render(
@@ -1409,6 +1602,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 composition_id=args.composition,
                 theme_path=args.theme,
                 min_free_gb=args.min_free_gb,
+                keep_previous_renders=args.keep_previous_renders,
             )
     except Exception as exc:  # pragma: no cover - CLI path
         print(str(exc), file=sys.stderr)

@@ -20,6 +20,7 @@ from astrid.core.session.lease import (
     release_writer_lease,
     write_lease_init,
 )
+from astrid.core.session.lifecycle import write_session_pointer
 from astrid.core.task.events import ZERO_HASH, append_event_locked
 
 
@@ -45,8 +46,8 @@ def test_unbound_no_identity_triggers_bootstrap_then_lists_projects(
     assert rc == 0
     out = buf.getvalue()
     assert cli.STATUS_UNBOUND_HEADER in out
-    assert "astrid attach alpha" in out
-    assert "astrid attach beta" in out
+    assert "astrid projects select alpha" in out
+    assert "astrid projects select beta" in out
 
 
 def test_unbound_status_start_uses_single_concrete_project(
@@ -58,12 +59,40 @@ def test_unbound_status_start_uses_single_concrete_project(
     rc = cli.cmd_status(argparse.Namespace(), out=buf)
     assert rc == 0
     out = buf.getvalue()
-    assert "start:\n  astrid attach demo" in out
+    assert "select a project:\n  astrid projects select demo" in out
     assert "after attach:" in out
     assert "astrid skills list" in out
     assert "astrid orchestrators list" in out
     assert "astrid executors list" in out
     assert "astrid elements list" in out
+
+
+def test_status_resolves_project_selected_in_a_prior_cli_process(
+    env: dict[str, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    mint_session: Any,
+) -> None:
+    create_project("demo")
+    session = mint_session(
+        env["home"],
+        "S-SELECTED",
+        project="demo",
+        run_id=None,
+        timeline=None,
+    )
+    write_session_pointer(
+        project_slug="demo",
+        session_id=session.id,
+        projects_root=env["projects"],
+    )
+    monkeypatch.delenv(ASTRID_SESSION_ID_ENV, raising=False)
+
+    buf = StringIO()
+    assert cli.cmd_status(argparse.Namespace(), out=buf) == 0
+    output = buf.getvalue()
+    assert f"session: {session.id}" in output
+    assert "project: demo" in output
+    assert "project selection: attached session" in output
 
 
 def test_unbound_no_projects_under_root_prints_no_projects(
@@ -93,7 +122,7 @@ def test_unbound_status_warns_when_default_project_is_not_discoverable(
     out = buf.getvalue()
     assert "configured default project: missing (not found under current projects root)" in out
     assert "astrid attach              # attach default project" not in out
-    assert "astrid attach demo" in out
+    assert "astrid projects select demo" in out
 
 
 def test_bound_writer_breadcrumb_template(

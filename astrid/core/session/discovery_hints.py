@@ -163,36 +163,9 @@ def _most_recent_session_slug(projects_root: Optional[Path]) -> str | None:
     if len(candidates) > 1:
         candidates.sort(key=lambda t: t[0], reverse=True)  # freshest first
 
-        # Default-project preference (M2 / T15): when the operator has
-        # configured a default project AND that slug is among the
-        # candidates, auto-resolve to it with a stderr notice.
-        # Otherwise stay fail-closed — the cost of a silently wrong
-        # binding is higher than one extra ``--project`` flag.
-        try:
-            from astrid.core.session.config import resolve_default_project
-            default = resolve_default_project()
-        except Exception:
-            default = None
-
-        if default is not None:
-            default_mtime = None
-            for mtime, pslug in candidates:
-                if pslug == default:
-                    default_mtime = mtime
-                    break
-            if default_mtime is not None:
-                print(
-                    f"_most_recent_session_slug: {len(candidates)} projects"
-                    f" have a bound session on disk — preferring configured"
-                    f" default project {default!r}.",
-                    file=sys.stderr,
-                )
-                return default
-
-        # Ambiguous: more than one bound project on disk and no
-        # matching default. Print an enumerated stderr nudge so the
-        # caller (often an agent reading stderr) can pick the right
-        # project explicitly.
+        # Ambiguous: more than one bound project on disk. A configured default
+        # is only an attach-time suggestion; it never resolves live execution
+        # context.
         print(
             f"_most_recent_session_slug: {len(candidates)} projects have a"
             f" bound session on disk — refusing to guess.",

@@ -1,0 +1,161 @@
+{
+  "schema_version": 1,
+  "cache": {
+    "mode": "none"
+  },
+  "command": {
+    "argv": [
+      "{python_exec}",
+      "-m",
+      "astrid.packs.iteration.executors.experiment_import.run",
+      "--root",
+      "{root}",
+      "--out",
+      "{out}"
+    ],
+    "input_args": [
+      {
+        "input": "mapping",
+        "flag": "--mapping",
+        "optional": true
+      },
+      {
+        "input": "rubric_file",
+        "flag": "--rubric-file",
+        "optional": true
+      },
+      {
+        "input": "project_slug",
+        "flag": "--project-slug",
+        "optional": true
+      },
+      {
+        "input": "experiment_id",
+        "flag": "--experiment-id",
+        "optional": true
+      },
+      {
+        "input": "title",
+        "flag": "--title",
+        "optional": true
+      },
+      {
+        "input": "question",
+        "flag": "--question",
+        "optional": true
+      }
+    ]
+  },
+  "conditions": [
+    {
+      "input": "root",
+      "kind": "requires_input"
+    }
+  ],
+  "description": "Import an unmanaged/legacy run root (e.g. Discord-command POC) into a provider-independent experiment with an honest import report. Read-only over source evidence; idempotent and byte-stable.",
+  "graph": {
+    "consumes": [
+      "unmanaged_run_root",
+      "optional_manual_mappings"
+    ],
+    "provides": [
+      "imported_experiment_definition",
+      "import_report"
+    ]
+  },
+  "id": "iteration.experiment_import",
+  "inputs": [
+    {
+      "description": "Unmanaged run root directory (timestamped submission subdirectories).",
+      "name": "root",
+      "required": true,
+      "type": "directory"
+    },
+    {
+      "description": "Optional JSON file of manual subdir -> {prompt, seed, label} mappings.",
+      "name": "mapping",
+      "required": false,
+      "type": "file"
+    },
+    {
+      "description": "Optional JSON file with a rubric array (defaults to a generic 0/1 usable-output rubric).",
+      "name": "rubric_file",
+      "required": false,
+      "type": "file"
+    },
+    {
+      "description": "Project slug for the imported experiment (defaults to the root dir name).",
+      "name": "project_slug",
+      "required": false,
+      "type": "string"
+    },
+    {
+      "description": "Experiment id (defaults to <project-slug>-import). Must match ^[a-z0-9][a-z0-9._-]*$.",
+      "name": "experiment_id",
+      "required": false,
+      "type": "string"
+    },
+    {
+      "description": "Experiment title (defaults to 'Imported runs from <root name>').",
+      "name": "title",
+      "required": false,
+      "type": "string"
+    },
+    {
+      "description": "Experiment question (defaults to 'What do these legacy runs show?').",
+      "name": "question",
+      "required": false,
+      "type": "string"
+    }
+  ],
+  "isolation": {
+    "mode": "subprocess",
+    "network": false,
+    "env_passthrough": [
+      "ASTRID_REPO_ROOT"
+    ]
+  },
+  "keywords": [
+    "experiment",
+    "import",
+    "legacy",
+    "discord",
+    "provider-independent",
+    "idempotent",
+    "capture"
+  ],
+  "kind": "built_in",
+  "metadata": {
+    "output_result_manifest": true,
+    "requires_timeline": false,
+    "runtime_entrypoint": "main",
+    "runtime_file": "run.py",
+    "runtime_module": "astrid.packs.iteration.executors.experiment_import.run"
+  },
+  "name": "Experiment Import",
+  "outputs": [
+    {
+      "description": "Imported experiment definition referencing synthesized run ids.",
+      "mode": "create_or_replace",
+      "name": "experiment",
+      "path_template": "{out}/experiment.json",
+      "type": "file"
+    },
+    {
+      "description": "Honest import report: counts, ambiguous/screenshot-only cases, dedup, capture gaps.",
+      "mode": "create_or_replace",
+      "name": "import_report",
+      "path_template": "{out}/import.report.json",
+      "type": "file"
+    },
+    {
+      "description": "Synthesized imported run tree: one subdir per case with manifest.json and hardlinked source media.",
+      "mode": "create_or_replace",
+      "name": "runs",
+      "path_template": "{out}/runs",
+      "type": "directory"
+    }
+  ],
+  "short_description": "Import an unmanaged run root into an experiment without rewriting history or guessing ambiguous associations.",
+  "version": "1.0"
+}

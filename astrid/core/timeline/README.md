@@ -128,6 +128,13 @@ may indicate a network partition or RLS misconfiguration.
 
 ## Migration note for pack authors
 
+Managed timelines are always owned by a project and live under
+`projects/<project-slug>/timelines/<timeline-ulid>/`. Standalone TimelineConfig
+JSON remains a portable interchange format, but project-scoped executors must
+consume it from within the selected project's tree (either a managed timeline
+container or a derived file in one of that project's runs). Import standalone
+work before treating it as managed project state.
+
 If your pack writes timeline state directly (e.g., by mutating
 `assembly.json` or `display.json` without going through the event log):
 

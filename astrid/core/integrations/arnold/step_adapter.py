@@ -38,7 +38,6 @@ from astrid.core.io.cas import (
     executor_definition_digest,
     identity_digest,
 )
-from astrid.core.project.run import ProjectRunError, reject_project_with_out
 
 # ── Lazy Arnold imports (gated — the ONLY Arnold import surface in Astrid) ───
 try:
@@ -928,6 +927,14 @@ def _build_run_request(
             "adapter_config['project'] must be a non-empty string when provided",
         )
     project = project.strip() if isinstance(project, str) else None
+    if project is None:
+        return _failed_step_result(
+            "project_required",
+            (
+                "Astrid executor steps require adapter_config['project']; "
+                "propagate the owning Arnold/Astrid project explicitly"
+            ),
+        )
 
     run_root = config.get("run_root")
     if run_root is not None and not isinstance(run_root, (str, Path)):
@@ -936,17 +943,12 @@ def _build_run_request(
             "adapter_config['run_root'] must be a string or Path when provided",
         )
 
-    if project is not None:
-        out: Path | None = None
-        request_run_root = run_root
-    else:
-        out = artifact_root / _safe_invocation_slug(executor_id)
-        request_run_root = None
-
-    try:
-        reject_project_with_out(project, out)
-    except ProjectRunError as exc:
-        return _failed_step_result("project_out_conflict", str(exc))
+    out = (
+        None
+        if run_root is not None
+        else artifact_root / _safe_invocation_slug(executor_id)
+    )
+    request_run_root = run_root
 
     request = ExecutorRunRequest(
         executor_id=executor.id,
@@ -956,6 +958,7 @@ def _build_run_request(
         execution_mode=mode,
         invocation="sdk",
         run_root=request_run_root,
+        project_was_auto_resolved=True,
     )
     return executor, request
 

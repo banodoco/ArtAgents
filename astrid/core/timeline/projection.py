@@ -141,6 +141,10 @@ _PROJECTED_TOP_ALLOWED = frozenset({
     "clips",
     "theme",
     "theme_overrides",
+    "generation_defaults",
+    "pinnedShotGroups",
+    "output",
+    "app",
 })
 _PROJECTED_FORBIDDEN_CLIP_KEYS = frozenset({"kind", "asset_id", "start", "duration"})
 
@@ -315,12 +319,14 @@ def _make_clip_entry(payload: ClipAddedPayload) -> dict[str, Any]:
     clip_type = "text" if payload.kind == "text" else "media"
     entry: dict[str, Any] = {
         "id": payload.clip_id,
-        "at": 0.0,
+        "at": payload.start,
         "track": payload.track_id,
         "clipType": clip_type,
     }
     if payload.asset_id:
         entry["asset"] = payload.asset_id
+    if payload.duration is not None:
+        entry["hold"] = payload.duration
     if clip_type == "text":
         entry["text"] = {"content": ""}
     return entry

@@ -79,6 +79,7 @@ def create_project(
     slug: str,
     *,
     name: str | None = None,
+    description: str | None = None,
     project_id: str | None = None,
     root: str | Path | None = None,
     exist_ok: bool = False,
@@ -97,12 +98,19 @@ def create_project(
     project_root.mkdir(parents=True, exist_ok=True)
     (project_root / "sources").mkdir(exist_ok=True)
     (project_root / "runs").mkdir(exist_ok=True)
+    (project_root / "timelines").mkdir(exist_ok=True)
+    (project_root / "experiments").mkdir(exist_ok=True)
     # T9 / FLAG-S1-003 / all_locations-2: defensive double-coverage gitignore
     # for the file-bound session pointer so it never lands in git.
     _project_gitignore = project_root / ".gitignore"
     if not _project_gitignore.exists():
         _project_gitignore.write_text(".astrid-session\n", encoding="utf-8")
-    payload = build_project(slug, name=name, project_id=project_id)
+    payload = build_project(
+        slug,
+        name=name,
+        description=description,
+        project_id=project_id,
+    )
     if exist_ok and project_path.exists():
         payload = validate_project(read_json(project_path))
     else:
@@ -151,6 +159,28 @@ def show_project(slug: str, *, root: str | Path | None = None) -> dict[str, Any]
         "sources": list_project_sources(slug, root=root),
         "theme": project.get("theme"),
     }
+
+
+def update_project_details(
+    slug: str,
+    *,
+    name: str | None = None,
+    description: str | None = None,
+    root: str | Path | None = None,
+) -> dict[str, Any]:
+    """Update the human-facing fields used during project selection."""
+
+    if name is None and description is None:
+        raise ProjectError("provide --name and/or --description")
+    payload = require_project(slug, root=root)
+    if name is not None:
+        payload["name"] = name
+    if description is not None:
+        payload["description"] = description
+    payload["updated_at"] = utc_now_seconds()
+    payload = validate_project(payload)
+    write_json_atomic(paths.project_json_path(slug, root=root), payload)
+    return payload
 
 
 def set_project_theme(

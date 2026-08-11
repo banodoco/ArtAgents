@@ -43,7 +43,11 @@ def clip_timeline_duration_sec(clip: dict[str, Any]) -> float:
         hold = clip.get("hold")
         if isinstance(hold, (int, float)):
             return max(0.0, float(hold))
+    # ``load_timeline`` returns the model's Python field name (``from_``),
+    # while callers may also pass raw JSON clips containing the ``from`` alias.
     frm = clip.get("from")
+    if frm is None:
+        frm = clip.get("from_")
     to = clip.get("to")
     if isinstance(frm, (int, float)) and isinstance(to, (int, float)):
         speed = clip.get("speed") or 1.0

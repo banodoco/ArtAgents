@@ -111,7 +111,8 @@ def test_dispatch_status_default_without_project_routes_to_session_prose(
     assert rc == 0
     # Session status default prose contains the unbound header.
     assert "no session bound" in stdout
-    assert "discovered projects:" in stdout
+    assert "recent projects:" in stdout
+    assert "astrid projects select demo" in stdout
 
 
 def test_dispatch_status_default_with_project_routes_to_task_prose(

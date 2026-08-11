@@ -183,6 +183,44 @@ models:
               steps: steps
 
   # =========================================================================
+  # seedream-v5-pro — ByteDance Seedream 5.0 Pro image editing (cloud-only)
+  #
+  # Cloud endpoint (fal):
+  #   edit: bytedance/seedream/v5/pro/edit
+  #
+  # fal requires ``image_urls`` (an array supporting up to ten references).
+  # Astrid's basic image contract is intentionally singular, so the fal
+  # adapter wraps canonical ``image_ref`` as a one-item array. The endpoint
+  # has no seed, guidance-scale, step-count, negative-prompt, or strength
+  # inputs. PNG is selected declaratively to avoid lossy continuity frames.
+  # =========================================================================
+  - id: seedream-v5-pro
+    modality: image
+    modes:
+      edit:
+        supports:
+          - prompt
+          - count
+          - image_ref
+          - size
+        requires:
+          - prompt
+          - image_ref
+        backends:
+          cloud:
+            endpoint: bytedance/seedream/v5/pro/edit
+            param_map:
+              prompt: prompt
+              count: num_images
+              image_ref: image_urls
+              size: image_size
+            hints:
+              output_format: png
+            price:
+              unit: image
+              usd: 0.0675
+
+  # =========================================================================
   # flux-dev — Flux Dev (text-to-image + image-to-image; no local template)
   #
   # No local vibecomfy template for actual Flux Dev checkpoint exists.
@@ -646,6 +684,44 @@ models:
         backends:
           cloud:
             endpoint: fal-ai/ltx-2.3/image-to-video
+  # =========================================================================
+  # scail-2 — SCAIL-2 video-to-video character animation (cloud-only)
+  #
+  # Cloud endpoint (fal):
+  #   v2v: fal-ai/scail-2 — confirmed via model card and live API call.
+  #
+  # Requires a reference image (image_ref) and a driving motion video
+  # (video_ref).  Mode defaults to "animation" (animate the reference
+  # character with the driving motion).  driving_type="pose" is exposed as
+  # a canonical feature for cases where SAM3 subject detection fails on
+  # stylised 3D characters.
+  # =========================================================================
+  - id: scail-2
+    modality: video
+    modes:
+      v2v:
+        supports:
+          - prompt
+          - seed
+          - image_ref
+          - video_ref
+          - driving_type
+          - subject_type
+          - resolution
+          - guidance_scale
+          - steps
+          - shift
+        requires:
+          - prompt
+          - image_ref
+          - video_ref
+        backends:
+          cloud:
+            endpoint: fal-ai/scail-2
+            price:
+              unit: second
+              usd: 0.20
+
   # =====================================================================
   # Audio models — music mode (cloud-first; local templates are follow-up)
   # =====================================================================

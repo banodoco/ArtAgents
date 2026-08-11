@@ -217,10 +217,12 @@ def _read_json_file(path: Path) -> dict[str, Any]:
 
 
 def _ensure_m4_timeline(project_dir: Path, projects_root: Path, slug: str, *, name: str) -> tuple[str, Path, Any]:
+    from astrid.core.project.project import create_project
     from astrid.core.timeline._edit_helpers import _resolve_backend
     from astrid.core.timeline.crud import TimelineCrudError, create_timeline
 
     project_slug = project_dir.name
+    create_project(project_slug, root=projects_root, exist_ok=True)
     try:
         create_timeline(project_slug, slug, name=name, root=projects_root)
     except TimelineCrudError as exc:

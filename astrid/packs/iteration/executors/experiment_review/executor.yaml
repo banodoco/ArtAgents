@@ -1,0 +1,119 @@
+{
+  "schema_version": 1,
+  "cache": {
+    "mode": "none"
+  },
+  "command": {
+    "argv": [
+      "{python_exec}",
+      "-m",
+      "astrid.packs.iteration.executors.experiment_review.run",
+      "--review",
+      "{review}",
+      "--out",
+      "{out}"
+    ],
+    "input_args": [
+      {
+        "input": "conclusions",
+        "flag": "--conclusions",
+        "optional": true
+      },
+      {
+        "input": "review_final",
+        "flag": "--review-final",
+        "optional": true
+      },
+      {
+        "input": "runs_dir",
+        "flag": "--runs-dir",
+        "optional": true
+      }
+    ]
+  },
+  "conditions": [
+    {
+      "input": "review",
+      "kind": "requires_input"
+    }
+  ],
+  "description": "Render a provider-independent deterministic HTML review page from a normalized review.json.",
+  "graph": {
+    "consumes": [
+      "normalized_review"
+    ],
+    "provides": [
+      "review_html_page"
+    ]
+  },
+  "id": "iteration.experiment_review",
+  "inputs": [
+    {
+      "description": "Path to normalized review.json from experiment_prepare.",
+      "name": "review",
+      "required": true,
+      "type": "file"
+    },
+    {
+      "description": "Optional conclusions.json (observations/inferences/decisions) bound to the same experiment.",
+      "name": "conclusions",
+      "required": false,
+      "type": "file"
+    },
+    {
+      "description": "Optional review.final.json with recorded rubric decisions for the same experiment.",
+      "name": "review_final",
+      "required": false,
+      "type": "file"
+    },
+    {
+      "description": "Optional owning runs directory for verified offline media playback.",
+      "name": "runs_dir",
+      "required": false,
+      "type": "directory"
+    }
+  ],
+  "isolation": {
+    "mode": "subprocess",
+    "network": false,
+    "env_passthrough": [
+      "ASTRID_REPO_ROOT"
+    ]
+  },
+  "keywords": [
+    "experiment",
+    "review",
+    "html",
+    "render",
+    "provider-independent",
+    "comparison",
+    "gallery"
+  ],
+  "kind": "built_in",
+  "metadata": {
+    "output_result_manifest": true,
+    "requires_timeline": false,
+    "runtime_entrypoint": "main",
+    "runtime_file": "run.py",
+    "runtime_module": "astrid.packs.iteration.executors.experiment_review.run"
+  },
+  "name": "Experiment Review",
+  "outputs": [
+    {
+      "description": "Deterministic provider-independent HTML review page.",
+      "mode": "create_or_replace",
+      "name": "review_html",
+      "path_template": "{out}/review.html",
+      "type": "file"
+    },
+    {
+      "description": "Portable deterministic case summary for external analysis.",
+      "mode": "create_or_replace",
+      "name": "review_summary",
+      "path_template": "{out}/review.summary.csv",
+      "type": "file"
+    }
+  ],
+  "short_description": "Render a deterministic HTML gallery comparing provider outputs with prompt, parameters, warnings, and diagnostics.",
+  "version": "1.0"
+}

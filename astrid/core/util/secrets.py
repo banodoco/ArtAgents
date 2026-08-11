@@ -10,6 +10,10 @@ from astrid.core.contracts.errors import AstridError
 
 EnvSearchProfile = Literal["default", "reigh"]
 
+_RECOVERY_HINTS: dict[str, str] = {
+    "GIPHY_API_KEY": "Get a GIPHY API key at https://developers.giphy.com/dashboard/.",
+}
+
 
 def read_env_value(env_path: Path, key: str) -> str:
     if not env_path.is_file():
@@ -105,9 +109,12 @@ def load_api_key(name: str, env_file: Path | None = None) -> str:
     if key := os.environ.get(name, "").strip():
         return key
     tried.append(f"{name} environment variable")
+    recovery = f"set {name} in your environment or a .env file"
+    if hint := _RECOVERY_HINTS.get(name):
+        recovery = f"{recovery}. {hint}"
     raise AstridError(
         f"{name} not found. Tried: {', '.join(tried)}",
-        recovery_command=f"set {name} in your environment or a .env file",
+        recovery_command=recovery,
     )
 
 

@@ -179,6 +179,7 @@ class TestAddClip:
         add_clip(
             "demo", "primary",
             kind="audio", asset_id="second",
+            duration=4.0,
             position=ClipPosition(mode="index", index=0),
             actor=_actor(),
             root=demo_timeline["root"],
@@ -262,6 +263,98 @@ class TestAddClip:
 
         assert seen.get("expected_version") == 42
         assert seen.get("txn_id") == "01J00000000000000000000000"
+
+    # ── start / duration (P1c) ──────────────────────────────────────────
+
+    def test_add_clip_with_explicit_start_and_duration(self, demo_timeline: dict) -> None:
+        ulid = demo_timeline["ulid"]
+        tdir = timeline_dir("demo", ulid, root=demo_timeline["root"])
+
+        event = add_clip(
+            "demo", "primary",
+            kind="visual", asset_id="v1",
+            actor=_actor(),
+            root=demo_timeline["root"],
+            start=2.0,
+            duration=5.0,
+        )
+
+        assert event.kind == "clip.added"
+        assert event.payload.start == 2.0  # type: ignore[union-attr]
+        assert event.payload.duration == 5.0  # type: ignore[union-attr]
+
+        assembly = _read_assembly_json(tdir)
+        clip = assembly["clips"][0]
+        assert clip["at"] == 2.0
+        assert clip["hold"] == 5.0
+
+    def test_add_clip_duration_from_registry(self, demo_timeline: dict) -> None:
+        """Duration resolved from registry when not explicitly passed."""
+        ulid = demo_timeline["ulid"]
+        tdir = timeline_dir("demo", ulid, root=demo_timeline["root"])
+
+        # Write a registry with duration for this asset
+        import json as _json
+        registry_path = tdir / "registry.json"
+        registry_path.write_text(_json.dumps({
+            "assets": {
+                "v1": {"file": "v1.mp4", "type": "video/mp4", "duration": 15.0},
+            },
+        }), encoding="utf-8")
+
+        event = add_clip(
+            "demo", "primary",
+            kind="visual", asset_id="v1",
+            actor=_actor(),
+            root=demo_timeline["root"],
+        )
+
+        assert event.payload.duration == 15.0  # type: ignore[union-attr]
+
+    def test_add_clip_explicit_duration_wins_over_registry(self, demo_timeline: dict) -> None:
+        """Explicit duration takes precedence over registry."""
+        ulid = demo_timeline["ulid"]
+        tdir = timeline_dir("demo", ulid, root=demo_timeline["root"])
+
+        import json as _json
+        registry_path = tdir / "registry.json"
+        registry_path.write_text(_json.dumps({
+            "assets": {
+                "v1": {"file": "v1.mp4", "type": "video/mp4", "duration": 15.0},
+            },
+        }), encoding="utf-8")
+
+        event = add_clip(
+            "demo", "primary",
+            kind="visual", asset_id="v1",
+            actor=_actor(),
+            root=demo_timeline["root"],
+            duration=25.0,
+        )
+
+        assert event.payload.duration == 25.0  # type: ignore[union-attr]
+
+    def test_add_audio_clip_without_duration_fails(self, demo_timeline: dict) -> None:
+        """Audio clip without duration fails with 'probe or pass --duration'."""
+        with pytest.raises(ClipEditError, match="probe or pass --duration"):
+            add_clip(
+                "demo", "primary",
+                kind="audio", asset_id="song1",
+                actor=_actor(),
+                root=demo_timeline["root"],
+            )
+
+    def test_add_audio_clip_with_explicit_duration_succeeds(self, demo_timeline: dict) -> None:
+        """Audio clip with explicit --duration succeeds."""
+        event = add_clip(
+            "demo", "primary",
+            kind="audio", asset_id="song1",
+            actor=_actor(),
+            root=demo_timeline["root"],
+            duration=30.0,
+        )
+        assert event.kind == "clip.added"
+        assert event.payload.duration == 30.0  # type: ignore[union-attr]
 
 
 # ── remove_clip ─────────────────────────────────────────────────────────────
@@ -539,7 +632,7 @@ class TestAssemblyShapeEdgeCases:
         tdir = timeline_dir("demo", ulid, root=demo_timeline["root"])
 
         add_clip("demo", "primary", kind="visual", asset_id="v1", actor=_actor(), root=demo_timeline["root"])
-        add_clip("demo", "primary", kind="audio", asset_id="a1", actor=_actor(), root=demo_timeline["root"])
+        add_clip("demo", "primary", kind="audio", asset_id="a1", duration=4.0, actor=_actor(), root=demo_timeline["root"])
 
         assembly = _read_assembly_json(tdir)
         assert len(assembly["clips"]) == 2
@@ -561,7 +654,7 @@ class TestAssemblyShapeEdgeCases:
 
         # Now add another clip — assembly.json is regenerated from the event stream,
         # so the manually injected key is overwritten.
-        add_clip("demo", "primary", kind="audio", asset_id="a1", actor=_actor(), root=demo_timeline["root"])
+        add_clip("demo", "primary", kind="audio", asset_id="a1", duration=4.0, actor=_actor(), root=demo_timeline["root"])
 
         assembly_after = _read_assembly_json(tdir)
         # The manually injected key is NOT preserved because assembly.json is
@@ -740,7 +833,7 @@ class TestHashChainIntegrity:
 
         # Perform all 8 operations
         add_clip("demo", "primary", kind="visual", asset_id="a", actor=_actor(), root=demo_timeline["root"])
-        add_clip("demo", "primary", kind="audio", asset_id="b", actor=_actor(), root=demo_timeline["root"])
+        add_clip("demo", "primary", kind="audio", asset_id="b", duration=4.0, actor=_actor(), root=demo_timeline["root"])
         add_clip("demo", "primary", kind="text", asset_id="c", actor=_actor(), root=demo_timeline["root"])
         move_clip("demo", "primary", clip_id="c", position=ClipPosition(mode="before", ref_clip_id="a"), actor=_actor(), root=demo_timeline["root"])
         retime_clip("demo", "primary", clip_id="b", start=2.0, duration=8.0, actor=_actor(), root=demo_timeline["root"])

@@ -11,9 +11,9 @@ description: >
 # Rendering
 
 The rendering pack turns assembled timelines, and optional media asset
-registries, into finished video files through the Remotion compositor. It also
-provides element-system escape hatches for custom visual effects and sprite
-sheet generation.
+registries, into finished video files through Remotion, FFmpeg, or the hybrid
+renderer. It also provides element-system escape hatches for custom visual
+effects and sprite sheet generation.
 
 ## Render flow
 
@@ -33,6 +33,12 @@ timeline.json + optional assets.json  →  Remotion compositor  →  hype.mp4 + 
 3. **Composition**: Remotion renders the timeline using the resolved theme
    and composition entry point (default: `HypeComposition`).
 4. **Output**: `hype.mp4` and `hype.mp4.provenance.json`.
+
+For the built-in `audio-reactive-colour` effect, the same normal render command
+has a strict fast path: one full-duration frame-aligned effect plus one
+coextensive local audio clip is compiled to FFmpeg `sendcmd`. The effect
+parameters remain the single editable source of truth, and unsupported shapes
+fall through to ordinary rendering.
 
 ## Auto-started HTTP server
 
@@ -126,6 +132,9 @@ Requires `OPENAI_API_KEY` and `ffmpeg` on the system path.
 
 - Use `rendering.render` to produce the final video from a timeline and,
   only when needed, an asset registry. This is the standard rendering path.
+- Use the `audio-reactive-colour` effect for frozen integer-frame colour
+  markers. Keep one effect clip rather than expanding each state into a clip;
+  `rendering.render` selects the fast final-export adapter automatically.
 - Use `rendering.sprite_sheet` when you need to generate a batch of
   related images as a sprite atlas for animation.
 - Use `rendering.html_canvas_effect` when you need a custom visual effect

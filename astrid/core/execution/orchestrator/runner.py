@@ -29,6 +29,10 @@ from astrid.core.project.run import (
     project_run_env,
     reject_project_with_out,
 )
+from astrid.core.project.guidance import (
+    format_project_required_guidance,
+    selected_project,
+)
 from astrid.core.runtime import (
     InProcessExecutionPreconditionError,
     InProcessInvocationError,
@@ -39,7 +43,6 @@ from astrid.core.runtime.log_capture import (
     open_run_log_capture,
     run_subprocess_with_capture,
 )
-from astrid.core.session.config import resolve_default_project_for_sdk
 from astrid.core.subprocess_env import build_child_subprocess_env
 from astrid.core.task import env as task_env
 from astrid.core.task import gate as task_gate
@@ -602,8 +605,6 @@ def _prepare_project_request(
         return None, request
     if not request.project_was_auto_resolved:
         reject_project_with_out(request.project, request.out)
-    if orchestrator.runtime.kind != "command":
-        raise OrchestratorRunnerError("--project is currently supported only for command-runtime orchestrators")
     if _orchestrator_requires_output_path(orchestrator) and _has_cli_option(tuple(request.orchestrator_args), "--out"):
         raise OrchestratorRunnerError(
             f"--project cannot be combined with passthrough --out for {orchestrator.id}"
@@ -616,8 +617,11 @@ def _prepare_project_request(
         argv=_project_argv(request),
         metadata={
             "dry_run": bool(request.dry_run),
-            "project_was_auto_resolved": bool(request.project_was_auto_resolved),
+            "project_resolution": (
+                "attached" if request.project_was_auto_resolved else "explicit"
+            ),
         },
+        auto_bound=False,
         record_out=record_out,
         requires_timeline=False if request.project_was_auto_resolved else None,
         invocation=request.invocation,
@@ -694,12 +698,17 @@ def _resolve_project_request(
     request: OrchestratorRunRequest,
     orchestrator: OrchestratorDefinition,
 ) -> OrchestratorRunRequest:
-    if request.project or request.out in (None, "") or orchestrator.runtime.kind != "command":
+    project, source = selected_project(request.project)
+    if source == "explicit":
         return request
-    return replace(
-        request,
-        project=resolve_default_project_for_sdk(),
-        project_was_auto_resolved=True,
+    if project is not None:
+        return replace(
+            request,
+            project=project,
+            project_was_auto_resolved=True,
+        )
+    raise OrchestratorRunnerError(
+        format_project_required_guidance(operation="orchestrator run")
     )
 
 

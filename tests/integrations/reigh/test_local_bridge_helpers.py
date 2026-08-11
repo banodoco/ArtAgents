@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 # Import from the local conftest (pytest will have it available as a fixture module).
 # We use the functions directly since they're defined in conftest.py in the same package.
 import sys
@@ -50,6 +52,7 @@ from astrid.core.integrations.reigh.local_bridge import (
 )
 from astrid.core.timeline.eventlog import LocalFsBackend
 from astrid.core.timeline.eventlog.selector import resolve_event_log_target
+from astrid.core.timeline.eventlog.types import EventLogStaleVersionError
 from astrid.core.timeline.observability import resolve_timeline_target
 from astrid.core.timeline.paths import load_assembly_json_with_repair
 from tests.integrations.reigh.conftest import (  # type: ignore[import-not-found]
@@ -898,6 +901,131 @@ class TestLocalBridgeHelpers:
         assert resolve_bridge_asset("registry-guardrails", ulid, "traversal", root=tmp_bridge_root) is None
         assert resolve_bridge_asset("registry-guardrails", ulid, "absolute-outside", root=tmp_bridge_root) is None
 
+class TestBridgeRegistryRecovery:
+    """Registry sidecar recovery: event stream > legacy assets.json > derivation.
+
+    Regression for the .DS_Store bug: real sources live in per-source
+    directories, so the flat-file derivation heuristic saw only .DS_Store and
+    mapped it onto every media asset. Recovery must prefer the canonical event
+    stream, and derivation must never map hidden files onto assets.
+    """
+
+    @staticmethod
+    def _seed_media_project(
+        seed_bridge_project,
+        *,
+        slug: str,
+        ulid: str,
+        project_dir,
+    ) -> None:
+        seed_bridge_project(
+            slug=slug,
+            timeline_ulid=ulid,
+            with_registry=False,
+        )
+        timeline_home = project_dir / "timelines" / ulid
+        (timeline_home / "assembly.json").write_text(
+            json.dumps({
+                "tracks": [{"id": "V1", "kind": "visual", "label": "Video"}],
+                "clips": [
+                    {
+                        "id": "clip-1",
+                        "at": 0,
+                        "track": "V1",
+                        "clipType": "media",
+                        "asset": "frame-1",
+                        "from": 0,
+                        "to": 1,
+                    },
+                ],
+            }),
+            encoding="utf-8",
+        )
+        sources_dir = project_dir / "sources"
+        (sources_dir / "frame-1.png").mkdir(parents=True, exist_ok=True)
+        (sources_dir / "frame-1.png" / "frame-1.png").write_bytes(b"png-bytes")
+        # The only flat file in sources/ is macOS Finder junk.
+        (sources_dir / ".DS_Store").write_bytes(b"finder-junk")
+
+    def test_recovers_registry_from_event_stream_when_sidecar_missing(
+        self, tmp_bridge_root, seed_bridge_project
+    ) -> None:
+        ulid = "01JM4K5N7P0000000000000031"
+        project_dir = tmp_bridge_root / "recover-events"
+        self._seed_media_project(seed_bridge_project, slug="recover-events", ulid=ulid, project_dir=project_dir)
+        timeline_home = project_dir / "timelines" / ulid
+
+        # Canonical event stream carries the authoritative registry.
+        (timeline_home / "assembly.jsonl").write_text(
+            json.dumps({
+                "actor": {"type": "agent", "id": "agent:test-migration", "display": "test migration"},
+                "event_id": "01JM4K5N7P00000000000000A1",
+                "timeline_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+                "ts": "2026-07-29T12:00:00Z",
+                "schema_version": 1,
+                "kind": "timeline.asset_registry_replaced",
+                "payload": {
+                    "registry": {
+                        "assets": {
+                            "frame-1": {
+                                "file": "frame-1.png/frame-1.png",
+                                "type": "image/png",
+                                "resolution": "64x64",
+                            }
+                        }
+                    }
+                },
+            }) + "\n",
+            encoding="utf-8",
+        )
+
+        registry = load_bridge_registry("recover-events", ulid, root=tmp_bridge_root)
+        resolved = resolve_bridge_asset("recover-events", ulid, "frame-1", root=tmp_bridge_root)
+
+        # Recovered from the event, NOT mapped onto .DS_Store.
+        assert registry["assets"]["frame-1"]["file"] == "frame-1.png/frame-1.png"
+        assert registry["assets"]["frame-1"]["type"] == "image/png"
+        # Sidecar persisted so downstream readers see the same authoritative assets.
+        sidecar = json.loads((timeline_home / "registry.json").read_text(encoding="utf-8"))
+        assert sidecar["assets"]["frame-1"]["type"] == "image/png"
+        assert resolved is not None
+        assert resolved.local_path == (project_dir / "sources" / "frame-1.png" / "frame-1.png").resolve()
+
+    def test_recovers_registry_from_legacy_assets_json(self, tmp_bridge_root, seed_bridge_project) -> None:
+        ulid = "01JM4K5N7P0000000000000032"
+        project_dir = tmp_bridge_root / "recover-legacy"
+        self._seed_media_project(seed_bridge_project, slug="recover-legacy", ulid=ulid, project_dir=project_dir)
+        timeline_home = project_dir / "timelines" / ulid
+
+        # Pre-bridge migration sidecar with absolute source paths.
+        (timeline_home / "assets.json").write_text(
+            json.dumps({
+                "assets": {
+                    "frame-1": {
+                        "file": str((project_dir / "sources" / "frame-1.png" / "frame-1.png").resolve()),
+                        "type": "image/png",
+                    }
+                }
+            }),
+            encoding="utf-8",
+        )
+
+        registry = load_bridge_registry("recover-legacy", ulid, root=tmp_bridge_root)
+        resolved = resolve_bridge_asset("recover-legacy", ulid, "frame-1", root=tmp_bridge_root)
+
+        assert registry["assets"]["frame-1"]["type"] == "image/png"
+        assert resolved is not None
+        assert resolved.local_path == (project_dir / "sources" / "frame-1.png" / "frame-1.png").resolve()
+
+    def test_derivation_skips_dotfiles_so_junk_never_maps_to_assets(self, tmp_bridge_root, seed_bridge_project) -> None:
+        ulid = "01JM4K5N7P0000000000000033"
+        project_dir = tmp_bridge_root / "recover-nojunk"
+        self._seed_media_project(seed_bridge_project, slug="recover-nojunk", ulid=ulid, project_dir=project_dir)
+
+        # No registry.json, no event stream, no legacy sidecar: derivation runs,
+        # but with the only flat file being a dotfile it must yield nothing.
+        assert load_bridge_registry("recover-nojunk", ulid, root=tmp_bridge_root) == {"assets": {}}
+
     def test_bridge_registry_helpers_do_not_read_media_bytes(self, tmp_bridge_root, seed_bridge_project, monkeypatch) -> None:
         ulid = "01JM4K5N7P0000000000000021"
         project_dir = seed_bridge_project(
@@ -1443,3 +1571,123 @@ class TestLocalBridgeHelpers:
         eventlog_target = resolve_event_log_target("eventlog-layout", eventlog_ulid, root=tmp_bridge_root)
 
         assert eventlog_target.timeline_id == eventlog_uuid
+
+
+class TestBridgeAtomicSave:
+    """CAS save behaviour: combined config+registry batches and stale-version guards."""
+
+    def test_combined_save_appends_adjacent_config_and_registry_events(
+        self,
+        tmp_bridge_root,
+        seed_bridge_project,
+    ) -> None:
+        """save_bridge_timeline with registry appends config+registry in one atomic batch."""
+        ulid = "01JM4K5N7P00000000000000A1"
+        timeline_id = "aaaaaaaa-bbbb-cccc-dddd-c0ab1def0001"
+        project_dir = seed_bridge_project(
+            slug="combined-save",
+            timeline_ulid=ulid,
+            timeline_id=timeline_id,
+        )
+        timeline_home = project_dir / "timelines" / ulid
+        backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=timeline_home)
+        backend.append_event(
+            timeline_id,
+            "timeline.created",
+            {"timeline_id": timeline_id, "slug": "primary", "name": "Primary"},
+            actor=REIGH_LOCAL_EDITOR_ACTOR,
+        )
+
+        config = {
+            "clips": [{"id": "c1", "at": 0, "track": "V1", "clipType": "media", "asset": "a1"}],
+            "tracks": [{"id": "V1", "kind": "visual", "label": "Video"}],
+        }
+        registry = {"assets": {"a1": {"file": "a1.mp4", "type": "video/mp4"}}}
+
+        payload = save_bridge_timeline(
+            "combined-save",
+            ulid,
+            config,
+            registry=registry,
+            root=tmp_bridge_root,
+        )
+
+        assert payload is not None
+        events = backend.read_events()
+        kinds = [event.kind for event in events]
+        assert kinds == [
+            "timeline.created",
+            "timeline.config_replaced",
+            "timeline.asset_registry_replaced",
+        ]
+        # Adjacent: config then registry.
+        assert events[1].payload.to_json_obj()["config"] == config
+        assert events[2].payload.to_json_obj()["registry"] == registry
+        # Chain integrity.
+        assert events[2].prev_hash == events[1].hash
+        assert backend.head().version == 3
+
+        # Sidecar written.
+        sidecar = json.loads((timeline_home / "registry.json").read_text(encoding="utf-8"))
+        assert sidecar == registry
+
+        # Payload carries the registry.
+        assert payload["registry"] == registry
+        assert payload["config"] == config
+
+    def test_stale_expected_version_changes_neither_event_log_nor_sidecars(
+        self,
+        tmp_bridge_root,
+        seed_bridge_project,
+    ) -> None:
+        """A stale expected_version must raise and leave the event log + sidecars unchanged."""
+        ulid = "01JM4K5N7P00000000000000B1"
+        timeline_id = "aaaaaaaa-bbbb-cccc-dddd-aaaaaa000001"
+        project_dir = seed_bridge_project(
+            slug="stale-save",
+            timeline_ulid=ulid,
+            timeline_id=timeline_id,
+        )
+        timeline_home = project_dir / "timelines" / ulid
+        backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=timeline_home)
+        backend.append_event(
+            timeline_id,
+            "timeline.created",
+            {"timeline_id": timeline_id, "slug": "primary", "name": "Primary"},
+            actor=REIGH_LOCAL_EDITOR_ACTOR,
+        )
+
+        # Snapshot before the failing call.
+        head_before = backend.head()
+        events_before = backend.read_events()
+        registry_before = load_bridge_registry("stale-save", ulid, root=tmp_bridge_root)
+
+        config = {
+            "clips": [{"id": "c1", "at": 0, "track": "V1", "clipType": "media", "asset": "a1"}],
+            "tracks": [{"id": "V1", "kind": "visual", "label": "Video"}],
+        }
+        registry = {"assets": {"a1": {"file": "a1.mp4", "type": "video/mp4"}}}
+
+        # expected_version=999 is far ahead — guaranteed stale.
+        with pytest.raises(EventLogStaleVersionError):
+            save_bridge_timeline(
+                "stale-save",
+                ulid,
+                config,
+                registry=registry,
+                expected_version=999,
+                root=tmp_bridge_root,
+            )
+
+        # Nothing changed.
+        head_after = backend.head()
+        assert head_after.version == head_before.version
+        assert head_after.last_event_id == head_before.last_event_id
+        assert head_after.event_count == head_before.event_count
+
+        events_after = backend.read_events()
+        assert [e.event_id for e in events_after] == [e.event_id for e in events_before]
+
+        registry_after = load_bridge_registry("stale-save", ulid, root=tmp_bridge_root)
+        assert registry_after == registry_before
+

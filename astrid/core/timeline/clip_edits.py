@@ -145,6 +145,8 @@ def add_clip(
     expected_version: int | None = None,
     txn_id: str | None = None,
     root: str | Path | None = None,
+    start: float = 0.0,
+    duration: float | None = None,
 ) -> TimelineEvent:
     """Append a ``clip.added`` event to *slug* in *project_slug*.
 
@@ -160,6 +162,10 @@ def add_clip(
         expected_version: Optional CAS guard (enforced in m5).
         txn_id: Optional transaction id (enforced in m5).
         root: Filesystem root override.
+        start: Start time in seconds (>= 0, default 0.0).
+        duration: Duration in seconds (> 0). For audio clips without an
+            explicit duration, the asset registry is consulted; if no
+            duration is available an error is raised.
     """
     timeline_id, tdir, backend, _bootstrap = _resolve_backend(project_slug, slug, root=root)
 
@@ -175,6 +181,30 @@ def add_clip(
 
     pos = _normalise_position(position)
 
+    # Resolve duration with precedence: explicit > registry > fail for audio
+    resolved_duration = duration
+    if resolved_duration is None:
+        from astrid.core._shared.jsonio import read_json
+
+        registry_path = tdir / "registry.json"
+        try:
+            registry = read_json(registry_path)
+        except Exception:
+            registry = {}
+        if isinstance(registry, dict):
+            assets = registry.get("assets", {})
+            if isinstance(assets, dict):
+                asset_entry = assets.get(asset_id)
+                if isinstance(asset_entry, dict):
+                    reg_duration = asset_entry.get("duration")
+                    if isinstance(reg_duration, (int, float)) and reg_duration > 0:
+                        resolved_duration = float(reg_duration)
+        if resolved_duration is None and kind == "audio":
+            raise ClipEditError(
+                f"audio clip '{asset_id}' has no duration; "
+                "probe or pass --duration"
+            )
+
     act = actor or _default_actor("add_clip")
     event = backend.append_event(
         timeline_id,
@@ -185,6 +215,8 @@ def add_clip(
             track_id=resolved_track_id,
             asset_id=asset_id,
             position=pos,
+            start=start,
+            duration=resolved_duration,
         ),
         actor=act,
         expected_version=expected_version,

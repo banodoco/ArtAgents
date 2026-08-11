@@ -15,7 +15,9 @@ from typing import Any
 
 from astrid.core.contracts.errors import AstridError
 from astrid.core.foundation.project_paths import project_dir
+from astrid.core.foundation.project_paths import resolve_projects_root
 from astrid.core.project.current_run import read_current_run
+from astrid.core.project.guidance import project_summaries
 from astrid.core.session._shared import (
     NONE_PLACEHOLDER,
     TAKEOVER_HINT_ORPHAN,
@@ -24,7 +26,7 @@ from astrid.core.session._shared import (
 )
 from astrid.core.session.binding import (
     SessionBindingError,
-    resolve_current_session,
+    resolve_current_session_with_fs_fallback,
 )
 from astrid.core.session.config import resolve_default_project
 from astrid.core.session.discovery import discover_projects
@@ -84,10 +86,9 @@ def cmd_status(args: argparse.Namespace, *, out: Any = None) -> int:
     if out is None:
         out = sys.stdout
     try:
-        # T9 / FLAG-S1-003: INTENTIONALLY env-only (no slug=). ``session
-        # status`` reports on the live env binding; pulling a file fallback
-        # would mask the unbound-state it exists to surface.
-        session = resolve_current_session()
+        session = resolve_current_session_with_fs_fallback(
+            projects_root=resolve_projects_root(),
+        )
     except SessionBindingError as exc:
         raise AstridError(f"status: {exc}", recovery_command="astrid status") from exc
 
@@ -106,10 +107,14 @@ def cmd_status(args: argparse.Namespace, *, out: Any = None) -> int:
 def _render_unbound_status(*, out: Any) -> int:
     print(STATUS_UNBOUND_HEADER, file=out)
     default = resolve_default_project()
-    projects = discover_projects()
+    summaries = project_summaries()
+    projects = [row["slug"] for row in summaries]
     default_is_available = bool(default and default in projects)
     if default_is_available:
-        print(f"default project: {default}", file=out)
+        print(
+            f"configured default: {default} (suggestion only; not selected)",
+            file=out,
+        )
     elif default:
         print(
             f"configured default project: {default} (not found under current projects root)",
@@ -120,22 +125,28 @@ def _render_unbound_status(*, out: Any) -> int:
         print("create one with: astrid projects create <slug>", file=out)
         return 0
     print("", file=out)
-    print("start:", file=out)
+    print("select a project:", file=out)
     if default_is_available:
-        print("  astrid attach              # attach default project", file=out)
+        print(
+            f"  astrid projects select {default}   # select configured default",
+            file=out,
+        )
     elif len(projects) == 1:
-        print(f"  astrid attach {projects[0]}", file=out)
+        print(f"  astrid projects select {projects[0]}", file=out)
     else:
-        print("  astrid attach <project>", file=out)
+        print("  astrid projects select <project>", file=out)
     print("", file=out)
-    print("discovered projects:", file=out)
-    for slug in projects:
-        print(ATTACH_SUGGESTION_TEMPLATE.format(slug=slug), file=out)
+    print("recent projects:", file=out)
+    for row in summaries[:5]:
+        name = f" — {row['name']}" if row["name"] != row["slug"] else ""
+        print(f"  {row['slug']}{name}", file=out)
+        if row["description"]:
+            print(f"    {row['description']}", file=out)
+        print(f"    select: astrid projects select {row['slug']}", file=out)
     print("", file=out)
     print("manage:", file=out)
     print("  astrid projects ls", file=out)
-    if projects:
-        print(f"  astrid projects default {projects[0]}", file=out)
+    print('  astrid projects create <slug> --description "…" --attach', file=out)
     print("", file=out)
     print("after attach:", file=out)
     _print_discovery_hints(out=out)
@@ -144,14 +155,15 @@ def _render_unbound_status(*, out: Any) -> int:
 
 def _render_unbound_status_json(*, out: Any) -> int:
     default = resolve_default_project()
-    projects = discover_projects()
+    summaries = project_summaries()
+    projects = [row["slug"] for row in summaries]
     default_is_available = bool(default and default in projects)
     if default_is_available:
-        next_command = "astrid attach"
+        next_command = f"astrid projects select {default}"
     elif len(projects) == 1:
-        next_command = f"astrid attach {projects[0]}"
+        next_command = f"astrid projects select {projects[0]}"
     elif projects:
-        next_command = "astrid attach <project>"
+        next_command = "astrid projects select <project>"
     else:
         next_command = "astrid projects create <slug>"
     return emit_lifecycle_json(
@@ -163,6 +175,7 @@ def _render_unbound_status_json(*, out: Any) -> int:
         default_project=default,
         default_project_available=default_is_available,
         discovered_projects=projects,
+        project_summaries=summaries,
         next_command=next_command,
     )
 
@@ -221,6 +234,7 @@ def _render_bound_status(session: Session, *, out: Any) -> int:
     print(f"session: {session.id}", file=out)
     print(f"agent: {agent_id}", file=out)
     print(f"project: {session.project}", file=out)
+    print("project selection: attached session", file=out)
     print(timeline_line, file=out)
     print(f"run: {run_id or NONE_PLACEHOLDER}", file=out)
 
@@ -385,6 +399,7 @@ def _render_bound_status_json(session: Session, *, out: Any) -> int:
         state=_status_state_for(role, run_id),
         stream=out,
         session_id=session.id,
+        project_selection="attached_session",
         agent_id=agent_id,
         timeline=timeline_slug,
         timeline_final_output_count=timeline_final_count,

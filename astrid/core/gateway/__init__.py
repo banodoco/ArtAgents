@@ -92,6 +92,7 @@ from astrid.core.gateway.project import (
     _extract_project_slug,
     _extract_project_slug_from_run_paths,
     _has_cli_option,
+    _is_request_scoped_run,
     _invocation_is_auto_bindable_run,
     _raise_on_ambiguous_run_path_projects,
     _resolved_request_project_slug,
@@ -155,6 +156,8 @@ SPRINT1_UNBOUND_ALLOWLIST_CONTRACT: tuple[tuple[str, ...], ...] = (
     ("attach",),
     ("projects", "ls"),
     ("projects", "create"),
+    ("projects", "select"),
+    ("projects", "use"),
     ("projects", "default"),
     ("projects", "theme"),
     ("themes", "ls"),
@@ -259,9 +262,32 @@ def _main_impl(raw: list[str]) -> int:
                 state_snapshot={"argv": raw},
             ) from exc
         if session is None:
-            session = _auto_bind_default_project_session(raw)
-        if session is None:
-            project_hint = _extract_project_slug(raw) or _extract_project_slug_from_run_paths(raw)
+            project_hint = _extract_project_slug(raw)
+            needs_project_guidance = _is_request_scoped_run(raw) or tuple(raw[:2]) == (
+                "timelines",
+                "create",
+            )
+            if needs_project_guidance and project_hint is None:
+                from astrid.core.project.guidance import format_project_required_guidance
+
+                operation = (
+                    "executor run"
+                    if tuple(raw[:2]) == ("executors", "run")
+                    else (
+                        "scratch run"
+                        if tuple(raw[:2]) == ("scratch", "run")
+                        else (
+                            "timeline"
+                            if tuple(raw[:2]) == ("timelines", "create")
+                            else "orchestrator run"
+                        )
+                    )
+                )
+                raise AstridError(
+                    format_project_required_guidance(operation=operation),
+                    recovery_command="astrid projects ls",
+                    state_snapshot={"argv": raw, "project": None},
+                )
             attach_hint = (
                 f"`astrid attach {project_hint}`"
                 if project_hint
@@ -270,12 +296,21 @@ def _main_impl(raw: list[str]) -> int:
             recovery_cmd = f"astrid attach {project_hint}" if project_hint else "astrid status"
             raise AstridError(
                 f"no session bound — run `astrid status` to list projects, then {attach_hint} "
-                "(or `astrid attach` if a default project is configured)",
+                "or pass `--project <slug>` on the operation",
                 recovery_command=recovery_cmd,
                 state_snapshot={"argv": raw, "project": project_hint},
             )
 
     request_project = _resolved_request_project_slug(raw, session)
+    if _is_request_scoped_run(raw):
+        explicit_project = _extract_project_slug(raw)
+        effective_project = explicit_project or request_project
+        if effective_project:
+            source = "explicit --project" if explicit_project else "attached session"
+            print(
+                f"project: {effective_project} ({source})",
+                file=sys.__stderr__,
+            )
     if _verb_bypasses_task_gate(raw):
         return _dispatch_with_resolved_project(raw, request_project)
     project_slug = _extract_project_slug(raw)
@@ -351,6 +386,26 @@ def _verb_is_unbound_allowlisted(raw: list[str]) -> bool:
 
     if not raw:
         return True  # empty argv → entrypoint help
+
+    # An explicit project is complete context for one-shot capability runs and
+    # timeline creation. These commands do not require a persistent attached
+    # session merely to identify their owner.
+    if _extract_project_slug(raw) is not None:
+        if tuple(raw[:2]) in {
+            ("executors", "run"),
+            ("orchestrators", "run"),
+            ("scratch", "run"),
+            ("timelines", "create"),
+            ("projects", "source"),
+        }:
+            return True
+        # Timeline edit verbs that are exempt with explicit --project:
+        # clip, track, effect, transition, theme, audio, arrangement, pool, registry
+        if raw[0] == "timelines" and len(raw) >= 2 and raw[1] in {
+            "clip", "track", "effect", "transition", "theme", "audio",
+            "arrangement", "pool", "registry",
+        }:
+            return True
 
     for allowed in _SPRINT1_UNBOUND_ALLOWLIST:
         if tuple(raw[: len(allowed)]) == allowed:

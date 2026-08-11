@@ -71,22 +71,30 @@ python3 -m astrid setup
 
 ## Projects
 
-A project is the durable workspace for timelines, task runs, events, and
-generated artifacts. Most commands need either an attached session or an
-explicit `--project <slug>`.
+A project is the durable workspace for timelines, experiments, task runs,
+events, and generated artifacts. Every executor, orchestrator, scratch run,
+SDK generation, and timeline creation requires either an attached session or
+an explicit `--project <slug>`. This includes read-only executors and dry runs.
+Configured defaults are attach-time conveniences; they are never silently
+selected when a capability runs.
 
 Use `status` first: when no session is bound, it lists discovered projects and
 prints the exact attach and default-project commands to run.
 
 ```bash
 python3 -m astrid status
-python3 -m astrid projects ls
+python3 -m astrid projects ls                   # names, descriptions, activity
 python3 -m astrid projects default
 python3 -m astrid projects default <slug>
+python3 -m astrid projects select <slug>
 python3 -m astrid attach [<project>] [--default]
+python3 -m astrid projects create <slug> --description "..." --attach
+python3 -m astrid timelines create <timeline> --project <slug> --default
 ```
 
 If `attach` has no project argument, it uses the configured default project.
+That is an explicit attach action: the default is never selected merely because
+an executor, orchestrator, or timeline command was invoked.
 Use `projects create` only when the work needs a new durable project, not just a
 new run inside an existing project.
 
@@ -120,6 +128,37 @@ python3 -m astrid skills list --json
 If you create a custom pack whose conventions agents need to remember, add
 `astrid/packs/<pack>/skill/SKILL.md` and follow `docs/guides/skills-install.md`.
 
+## Shared Knowledge With Hivemind
+
+Hivemind is Astrid's default shared knowledge pack. Use `hivemind.search`
+before researching community best practices, model behavior, settings, known
+failures, or workflow precedents. Use `hivemind.get_item` when a search result
+needs its full body or citation context.
+
+Astrid project files remain the source of truth for raw runs, experiment
+reviews, and `conclusions.json`. Hivemind is the cross-project publication and
+retrieval layer for generalizable learnings:
+
+1. Record observations and evidence-backed inferences locally.
+2. Search Hivemind for an existing equivalent learning.
+3. Contribute a concise experiment report as a resource.
+4. Submit the reusable learning as a distillation citing that resource.
+5. Preserve the returned Hivemind IDs beside the local experiment.
+
+Hivemind writes are public publication, including pending distillations. Never
+publish automatically: dry-run or preview the payload, remove private paths,
+prompts, media, and URLs, and obtain explicit user confirmation before calling
+`hivemind.contribute`. If Hivemind is unavailable, install its pack and shared
+skill:
+
+```bash
+python3 -m astrid packs install https://github.com/banodoco/hivemind.git
+python3 -m astrid skills install hivemind --harness all
+```
+
+Read the Hivemind pack skill for its search, citation, contribution, and
+curation rules before using those executors.
+
 ## Run A Tool
 
 Find an id before you run anything.
@@ -143,7 +182,7 @@ Read only that one `STAGE.md`; it is the source of truth for invocation details.
 Then run:
 
 ```bash
-python3 -m astrid [executors|orchestrators] run <id> -- <args>
+python3 -m astrid [executors|orchestrators] run <id> --project <slug> -- <args>
 ```
 
 ## Continue A Task Run
@@ -397,7 +436,9 @@ Every project has a `plan.md` at its root — a per-project markdown doc for liv
 
 | id | short_description |
 | --- | --- |
+| `blender.render` | Render a Blender scene (declarative spec or .blend file) to a still or animation, locally or on a cloud render host. |
 | `comfy_wrap.run` | Generate an image by injecting a prompt into a ComfyUI workflow JSON and running it via vibecomfy. |
+| `discord_local.command` | Preview, submit once, or recover one Discord generation as an experiment-ready run. |
 | `editorial.arrange` | Compose a brief-specific shot arrangement from the source clip pool. |
 | `editorial.boundary_candidates` | Package candidate video frames for visual scene-boundary review. |
 | `editorial.editor_review` | Run heuristic editorial reviewers over an arrangement and emit notes. |
@@ -416,31 +457,40 @@ Every project has a `plan.md` at its root — a per-project markdown doc for liv
 | `fal.fal_foley` | Generate Foley audio for one short video clip via fal.ai's hunyuan-video-foley model. |
 | `foley.foley_review` | Build a static review.html pairing each tile clip with its generated Foley audio for sense-checking. |
 | `foley.tile_video` | Crop a video into an MxN grid of overlapping spatial tiles plus first-frame PNGs. |
+| `generation.generate_audio` | Generate audio from text prompts via local or cloud backends. v2: model→mode→backend with music mode. |
 | `generation.generate_image` | Generate images from text prompts via local, cloud, or Codex backends. v2: model→mode→backend. |
 | `generation.generate_image_openai` | Generate image files with OpenAI GPT Image models from a prompt file. |
-| `generation.generate_video` | Generate videos from text prompts via local or cloud backends. v2: model→mode→backend with t2v/i2v/flf modes. |
+| `generation.generate_video` | Generate videos from text prompts via local or cloud backends. v2: model→mode→backend with t2v/i2v/flf/v2v modes. |
 | `hivemind.contribute` | Submit a resource or distillation to the Hivemind corpus via the contribute edge function. |
 | `hivemind.get_item` | Fetch a single full row from the Hivemind corpus by kind and id. |
 | `hivemind.ingest_article` | Fetch a web article, extract readable text, and submit as a resource. |
 | `hivemind.ingest_workflow` | Parse a ComfyUI workflow JSON and submit as a resource with model metadata. |
 | `hivemind.ingest_youtube` | Extract YouTube captions via yt-dlp and submit as a transcript resource. |
+| `hivemind.refresh_media` | Refresh expiring Discord CDN attachment URLs for a message. |
 | `hivemind.search` | Search the Hivemind unified corpus with distillations-first merging. |
 | `iteration.assemble` | Adapt prepared iteration data into canonical iteration artifacts and render-ready hype inputs. |
+| `iteration.experiment_import` | Import an unmanaged run root into an experiment without rewriting history or guessing ambiguous associations. |
+| `iteration.experiment_prepare` | Normalize an experiment's provider manifests into a provider-independent review model with diagnostics. |
+| `iteration.experiment_review` | Render a deterministic HTML gallery comparing provider outputs with prompt, parameters, warnings, and diagnostics. |
 | `iteration.prepare` | Collect thread provenance, quality scores, and candidate runs into iteration prepare artifacts. |
 | `media.clip_extract` | Extract a clip segment from a video using ffmpeg stream copy. |
+| `media.gif_search` | Search GIPHY for GIF or sticker assets and optionally download a selected rendition. |
+| `media.speech_repair_lavasr` | Repair weak-mic speech with hotter pre-lift, fal.ai LavaSR, optional DeepFilterNet3, and a final loudness pass. |
 | `moirae.moirae` | Run a Moirae screenplay through the terminal-as-cinema renderer to produce a video. |
 | `reigh.open_in_reigh` | Copy or stage generated timeline+assets for handoff into a Reigh project. |
 | `reigh.publish` | Publish a finished timeline + assets pair into a Reigh project via API. |
 | `reigh.reigh_data` | Fetch canonical Reigh project data through the reigh-data Edge Function. |
 | `reigh.spatial_audio_page` | Build a static page that mixes Foley tracks anchored to spatial rectangles via Web Audio. |
 | `rendering.html_canvas_effect` | Scaffold a local Remotion HTML-in-canvas effect element. |
-| `rendering.render` | Render a hype timeline to hype.mp4 through the Remotion compositor. |
+| `rendering.render` | Render a hype timeline to hype.mp4 through Remotion, ffmpeg, or hybrid rendering. |
 | `rendering.sprite_sheet` | Generate, slice, and preview GPT Image sprite sheets for batch image work. |
+| `rendering.timeline_storyboard` | Build a static visual storyboard of image inputs associated with timeline shots. |
 | `runpod.exec` | Execute a script on an existing RunPod pod and download artifacts. |
 | `runpod.provision` | Provision a RunPod GPU pod and emit a pod handle for later exec/teardown. |
 | `runpod.pull` | Pull artifacts from an existing RunPod pod into local storage. |
 | `runpod.session` | Composite provision → exec → teardown session with guaranteed cleanup. |
 | `runpod.teardown` | Terminate a RunPod pod. Idempotent. |
+| `seedance_local.reference_video` | Generate one Seedance 2.0 video using a local clip as its motion and camera reference. |
 | `stream_content.clip_candidates` | Score transcript windows as publishable stream clip candidates. |
 | `stream_content.segment_map` | Fuse OCR, transcript density, and scene cuts into a complete stream timeline. |
 | `training.asset_cache` | Manage the repo-local hype asset cache (download, prune, list). |
@@ -462,8 +512,11 @@ Every project has a `plan.md` at its root — a per-project markdown doc for liv
 
 | id | short_description |
 | --- | --- |
+| `builtin.agent_probe` | Legacy task-mode probe orchestrator used by regression tests. |
 | `foley.foley_map` | Spatial Foley pipeline: tile a video, prompt a VLM, score Foley per tile, and emit a viewer. |
+| `iteration.experiment_review_session` | Interactive rubric review session over a prepared experiment, reusing editorial.human_review with safe mounted media. |
 | `stream_content.distill` | Distill a long event stream into segments, extracted blocks, candidates, and a review page. |
+| `text_analysis.summarize` | Summarize the bundled sample text fixture into content, summary, and verdict JSON outputs. |
 | `training.dataset_build` | Build a generic reviewed video training dataset from configured sources. |
 | `training.training_run` | Run a generic LoRA training job from a prepared dataset manifest. |
 | `video_editing.animate_image` | Two-stage Fal pipeline: edit a reference image with GPT Image 2, then animate it with WAN 2.2. |
@@ -484,7 +537,13 @@ Every project has a `plan.md` at its root — a per-project markdown doc for liv
 | `animations/slide-left` | Slide left entrance animation. |
 | `animations/slide-up` | Slide up exit animation. |
 | `animations/type-on` | Typewriter-style text reveal animation. |
-| `effects/text-card` | Default text card effect for captions and titles. |
+| `effects/audio-reactive-colour` | Fill the frame with colours selected by frozen integer-frame markers. |
+| `effects/model-trends` | Animated stacked-area chart of model-family share-of-conversation, driven by Remotion frame. |
+| `effects/neon-orbit-card` | DOM-to-canvas Remotion effect for post-processed cards. |
+| `effects/sliding-media` | Full-screen media clip with slide-in/out motion. |
+| `effects/text-card` | Anchored text card overlay with built-in fade in/out. |
+| `effects/vibe-comfy-asset-overlay` | Asset-driven Vibe Comfy overlay with procedural noodle. |
+| `effects/vibe-comfy-bumper` | Procedural Remotion bumper for Vibe Comfy. |
 | `transitions/cross-fade` | Cross fade transition. |
 | `transitions/fade` | Fade-through-black transition. |
 

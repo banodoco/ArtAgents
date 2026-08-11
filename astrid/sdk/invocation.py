@@ -260,8 +260,6 @@ def invoke(
 
     try:
         if capability.capability_type == "executor":
-            if out is None and project is None:
-                raise CapabilityInvocationError("executor invocations require an out path")
             from astrid.core.execution.executor.runner import ExecutorRunRequest
 
             executor_registry, _, _ = registries

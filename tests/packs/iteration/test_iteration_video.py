@@ -5,6 +5,7 @@ from pathlib import Path
 
 from astrid.packs.video_editing.orchestrators.iteration_video import run as iteration_video
 from astrid.core.execution.orchestrator.runner import OrchestratorRunRequest, run_orchestrator
+from astrid.core.project.project import create_project
 from astrid.core.threads.index import ThreadIndexStore
 from astrid.core.threads.schema import make_thread_record
 
@@ -16,6 +17,7 @@ ROOT_RUN_ID = "01ARZ3NDEKTSV4RRFFQ69G5FV2"
 
 def test_iteration_video_renders_hype_adapter_and_records_five_output_variant_group(tmp_path: Path, monkeypatch) -> None:
     repo = tmp_path
+    projects_root = repo / "projects"
     out_dir = repo / "runs" / "iteration-video"
     forwarded: dict[str, object] = {}
     _write_thread(repo)
@@ -35,6 +37,8 @@ def test_iteration_video_renders_hype_adapter_and_records_five_output_variant_gr
         return hype_mp4
 
     monkeypatch.setenv("ASTRID_REPO_ROOT", str(repo))
+    monkeypatch.setenv("ASTRID_PROJECTS_ROOT", str(projects_root))
+    create_project("demo", root=projects_root)
     monkeypatch.setattr(iteration_video.prepare, "prepare_iteration", fake_prepare_iteration)
     monkeypatch.setattr(iteration_video, "run_builtin_render", fake_render)
 
@@ -44,6 +48,8 @@ def test_iteration_video_renders_hype_adapter_and_records_five_output_variant_gr
             OrchestratorRunRequest(
                 orchestrator_id="video_editing.iteration_video",
                 out=out_dir,
+                project="demo",
+                project_was_auto_resolved=True,
                 inputs={"thread": THREAD_ID, "target_run_id": TARGET_RUN_ID, "repo_root": str(repo)},
                 orchestrator_args=("--max-iterations", "7", "--direction", "label only", "--clip-mode", "hold"),
             )

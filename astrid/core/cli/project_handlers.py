@@ -22,9 +22,11 @@ from astrid.core.project.project import (
     require_project,
     set_project_theme,
     show_project,
+    update_project_details,
 )
+from astrid.core.project.guidance import project_summaries, selected_project
 from astrid.core.project.source import add_source
-from astrid.core.session.binding import resolve_current_session
+from astrid.core.session.binding import SESSION_FILE_NAME, resolve_current_session
 from astrid.core.session.config import (
     load_user_config,
     load_workspace_config,
@@ -45,20 +47,48 @@ class OpsHelperResponse(TypedDict):
 
 
 def _cmd_create(args: argparse.Namespace) -> int:
-    project = create_project(args.slug, name=args.name, project_id=getattr(args, "project_id", None))
+    project = create_project(
+        args.slug,
+        name=args.name,
+        description=getattr(args, "description", None),
+        project_id=getattr(args, "project_id", None),
+    )
+    if getattr(args, "default", False):
+        set_default_project(project["slug"], scope="workspace")
+    if getattr(args, "attach", False):
+        return _select_project_session(
+            project["slug"],
+            default=False,
+            json_mode=bool(args.json),
+        )
     if args.json:
-        _print_json({"project": project, "root": str(paths.project_dir(project["slug"]))})
+        _print_json(
+            {
+                "project": project,
+                "root": str(paths.project_dir(project["slug"])),
+                "attached": False,
+                "default_project": bool(getattr(args, "default", False)),
+            }
+        )
         return 0
     _print_project_header(project["slug"])
     print(f"created: {project['name']}")
+    if project.get("description"):
+        print(f"description: {project['description']}")
     if project.get("project_id"):
         print(f"project_id: {project['project_id']}")
-    print(f"next: python3 -m astrid attach {project['slug']} --default")
+    if getattr(args, "default", False):
+        print(f"default suggestion: {project['slug']}")
+    print(f"next: astrid projects select {project['slug']}")
     return 0
 
 
 def _cmd_ls(args: argparse.Namespace) -> int:
-    projects = discover_projects()
+    summaries = project_summaries(
+        include_test_projects=bool(getattr(args, "all", False))
+    )
+    projects = [row["slug"] for row in summaries]
+    selected, selected_source = selected_project(None)
     default = resolve_default_project()
     default_is_available = bool(default and default in projects)
     if args.json:
@@ -66,8 +96,13 @@ def _cmd_ls(args: argparse.Namespace) -> int:
             {
                 "default_project": default,
                 "default_available": default_is_available,
+                "selected_project": selected,
+                "selection_source": selected_source,
                 "projects": projects,
-                "project_themes": {slug: get_project_theme(slug) for slug in projects},
+                "project_summaries": summaries,
+                "project_themes": {
+                    row["slug"]: row["theme"] or None for row in summaries
+                },
             }
         )
         return 0
@@ -77,16 +112,99 @@ def _cmd_ls(args: argparse.Namespace) -> int:
         print(f"configured default project: {default} (not found under current projects root)")
     if not projects:
         print("no projects discovered under the projects root")
-        print("create one with: python3 -m astrid projects create <slug>")
+        print('create one with: astrid projects create <slug> --description "…" --attach')
         return 0
-    print("projects:")
-    for slug in projects:
-        marker = " *" if slug == default and default_is_available else ""
-        print(f"  {slug}{_project_theme_suffix(slug)}{marker}")
-    print("attach:")
-    if default_is_available:
-        print("  python3 -m astrid attach")
-    print("  python3 -m astrid attach <project>")
+    print("projects (most recently active first):")
+    for row in summaries:
+        markers: list[str] = []
+        if row["slug"] == selected:
+            markers.append("selected")
+        if row["is_default"]:
+            markers.append("configured default")
+        marker = f" [{', '.join(markers)}]" if markers else ""
+        name = f" — {row['name']}" if row["name"] != row["slug"] else ""
+        theme = f"  (theme: {row['theme']})" if row["theme"] else ""
+        print(f"  {row['slug']}{theme}{name}{marker}")
+        if row["description"]:
+            print(f"    {row['description']}")
+        print(
+            f"    {row['runs']} runs · {row['timelines']} timelines · "
+            f"{row['experiments']} experiments"
+        )
+        print(f"    select: astrid projects select {row['slug']}")
+    print()
+    print("select:")
+    print("  astrid projects select <project>         # for this session")
+    print("  <command> --project <project>            # for one operation")
+    print()
+    print("create:")
+    print('  astrid projects create <slug> --description "…" --attach')
+    if not getattr(args, "all", False):
+        print()
+        print("show test projects too: astrid projects ls --all")
+    return 0
+
+
+def _cmd_select(args: argparse.Namespace) -> int:
+    """Friendly project-selection alias over the session attach primitive."""
+
+    require_project(args.slug)
+    return _select_project_session(
+        args.slug,
+        default=bool(args.default),
+        json_mode=bool(args.json),
+    )
+
+
+def _select_project_session(
+    slug: str,
+    *,
+    default: bool,
+    json_mode: bool,
+) -> int:
+    """Attach *slug* and make its pointer the unambiguous CLI fallback."""
+
+    from astrid.core.cli import session as session_cli
+
+    attach_argv = ["attach", slug]
+    if default:
+        attach_argv.append("--default")
+    if json_mode:
+        attach_argv.append("--json")
+    attach_args = session_cli.build_parser().parse_args(attach_argv)
+    result = int(session_cli.cmd_attach(attach_args))
+    if result == 0:
+        _clear_other_project_session_pointers(slug)
+    return result
+
+
+def _clear_other_project_session_pointers(selected_slug: str) -> None:
+    """Keep cross-process selection deterministic without deleting sessions."""
+
+    for slug in discover_projects(root=paths.resolve_projects_root()):
+        if slug == selected_slug:
+            continue
+        pointer = paths.project_dir(slug) / SESSION_FILE_NAME
+        try:
+            pointer.unlink(missing_ok=True)
+        except OSError:
+            # Selection already succeeded. A stale pointer only makes fallback
+            # fail closed later; it must not roll back the live session.
+            continue
+
+
+def _cmd_update(args: argparse.Namespace) -> int:
+    project = update_project_details(
+        args.slug,
+        name=args.name,
+        description=args.description,
+    )
+    if args.json:
+        _print_json({"project": project})
+        return 0
+    _print_project_header(project["slug"])
+    print(f"name: {project['name']}")
+    print(f"description: {project.get('description') or '(none)'}")
     return 0
 
 
@@ -134,7 +252,7 @@ def _cmd_default(args: argparse.Namespace) -> int:
                 elif projects:
                     print(f"choose an available project with: python3 -m astrid projects default {projects[0]}")
                 else:
-                    print("create one with: python3 -m astrid projects create <slug>")
+                    print('create one with: astrid projects create <slug> --description "…" --attach')
         return 0
     require_project(args.slug)
     path = set_default_project(args.slug, scope=scope)
@@ -142,7 +260,7 @@ def _cmd_default(args: argparse.Namespace) -> int:
         _print_json({"default_project": args.slug, "scope": scope, "path": str(path)})
         return 0
     print(f"default project ({scope}): {args.slug}")
-    print("attach with: python3 -m astrid attach")
+    print(f"select it with: astrid projects select {args.slug}")
     return 0
 
 
@@ -191,7 +309,7 @@ def _cmd_source_add(args: argparse.Namespace) -> int:
         asset["type"] = args.type
     if args.duration is not None:
         asset["duration"] = args.duration
-    source = add_source(args.project, args.source_id, asset=asset, kind=args.kind)
+    source = add_source(args.project, args.source_id, asset=asset, kind=args.kind, exist_ok=bool(getattr(args, "force", False)))
     if args.json:
         _print_json({"source": source})
         return 0

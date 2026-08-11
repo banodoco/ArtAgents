@@ -9,6 +9,11 @@ hybrid renderer. This is the terminal step of the editorial pipeline: it takes
 the assembled timeline, optionally an asset registry, and produces the final
 video file plus a provenance sidecar.
 
+A timeline containing one built-in `audio-reactive-colour` effect and one
+coextensive audio clip is compiled automatically to a dedicated FFmpeg
+`sendcmd` path. The compact effect remains the editable timeline
+representation; callers do not choose a different render command.
+
 Normal Astrid usage goes through the first-class executor CLI. The direct
 `run.py` entrypoint is a lower-level debug surface for reproducing runner
 behavior outside the Astrid executor wrapper.
@@ -55,6 +60,11 @@ The executor writes `./out/hype.mp4` and
 | assets_registry | file   | no       | Optional Hype media asset registry JSON. Pass as `--input assets_registry=<path>` when the timeline references media assets. If omitted, the runner supplies an empty registry. |
 | theme           | file   | no       | Optional theme configuration. |
 | engine          | string | no       | Render backend. Defaults to Remotion; `ffmpeg` handles media-only timelines, and `hybrid` renders complex windows with Remotion. |
+
+The audio-reactive specialization is selected before the nominal engine
+dispatch when its strict contract matches, so `remotion`, `ffmpeg`, and
+`hybrid` requests produce the same frame-exact result. If the contract does
+not match, normal engine dispatch continues unchanged.
 
 ## Outputs
 
@@ -123,12 +133,14 @@ exits.
 
 ## Provenance sidecar
 
-Successful full Remotion renders and hybrid renders write
+Successful full Remotion renders, hybrid renders, and specialized
+audio-reactive renders write
 `<output>.provenance.json`. The sidecar records the active pack order, active
 theme, generated registry hash/state, resolved effect ids, source pack ids,
 element roots, staged asset ids and paths, and hybrid segment provenance when
-applicable. Use it when debugging which local overlay or pack supplied a
-rendered effect.
+applicable. Audio-reactive renders also record the adapter id, event count,
+frame count, fps, and marker hash. Use it when debugging which local overlay
+or pack supplied a rendered effect.
 
 ## Lower-level debug commands
 

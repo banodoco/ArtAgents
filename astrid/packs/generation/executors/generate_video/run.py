@@ -75,6 +75,7 @@ _VIDEO_CLI_FEATURES: tuple[str, ...] = (
     "resolution",
     "image_ref",
     "image_end_ref",
+    "video_ref",
     "frames",
     "fps",
     "duration",
@@ -85,6 +86,8 @@ _VIDEO_CLI_FEATURES: tuple[str, ...] = (
     "enable_safety_checker",
     "enable_prompt_expansion",
     "acceleration",
+    "driving_type",
+    "subject_type",
 )
 
 _VIDEO_ARGV_FLAG_NAMES: tuple[str, ...] = (
@@ -94,6 +97,7 @@ _VIDEO_ARGV_FLAG_NAMES: tuple[str, ...] = (
     "model",
     "image_ref",
     "image_end_ref",
+    "video_ref",
     "execution",
     "count",
     "seed",
@@ -109,6 +113,8 @@ _VIDEO_ARGV_FLAG_NAMES: tuple[str, ...] = (
     "enable_safety_checker",
     "enable_prompt_expansion",
     "acceleration",
+    "driving_type",
+    "subject_type",
     "env_file",
 )
 
@@ -181,12 +187,12 @@ def _parse_bool_str(value: Any) -> bool | None:
 # Video-only: mode validation
 # ---------------------------------------------------------------------------
 
-_VALID_MODES = {"t2v", "i2v", "flf"}
-_UNWIRED_MODES = {"v2v", "video-edit"}
+_VALID_MODES = {"t2v", "i2v", "flf", "v2v"}
+_UNWIRED_MODES: set[str] = {"video-edit"}
 
 
 def _validate_mode(mode: str) -> str:
-    """Validate --mode: accept t2v/i2v/flf, reject v2v/video-edit with clear message."""
+    """Validate --mode: accept t2v/i2v/flf/v2v, reject video-edit with clear message."""
     if mode in _VALID_MODES:
         return mode
     if mode in _UNWIRED_MODES:
@@ -254,7 +260,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--mode",
         required=True,
         help="Generation mode: t2v (text-to-video), i2v (image-to-video), "
-        "flf (first-last-frame). v2v and video-edit are not wired this sprint.",
+        "flf (first-last-frame), v2v (video-to-video). video-edit is not wired this sprint.",
     )
     prompt_group = p.add_mutually_exclusive_group()
     prompt_group.add_argument(
@@ -280,6 +286,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--image-end-ref",
         dest="image_end_ref",
         help="End-frame reference image path or URL for flf mode.",
+    )
+    p.add_argument(
+        "--video-ref",
+        dest="video_ref",
+        help="Driving motion video path or URL for v2v mode.",
     )
     p.add_argument(
         "--execution",
@@ -375,6 +386,22 @@ def build_parser() -> argparse.ArgumentParser:
         values=("none", "regular", "high"),
         default=None,
         help="Inference acceleration preset (wan-only).",
+    )
+    add_choice_arg(
+        p,
+        "--driving-type",
+        values=("end_to_end", "pose"),
+        dest="driving_type",
+        default=None,
+        help="SCAIL-2 driving signal: end_to_end (default) or pose.",
+    )
+    add_choice_arg(
+        p,
+        "--subject-type",
+        values=("human", "animal"),
+        dest="subject_type",
+        default=None,
+        help="SCAIL-2 subject type: human (default) or animal.",
     )
     p.add_argument(
         "--out",
@@ -490,6 +517,16 @@ def generate_core(
             image_end_ref_resolved = str(ref_path.resolve())
         else:
             image_end_ref_resolved = ref
+
+    # --- resolve video_ref path (for manifest tracking) ----------------------
+    video_ref_resolved: str | None = None
+    if args.video_ref:
+        ref = args.video_ref
+        ref_path = Path(ref)
+        if ref_path.exists():
+            video_ref_resolved = str(ref_path.resolve())
+        else:
+            video_ref_resolved = ref
 
     # --- sequential N=1 generation loop -------------------------------------
     all_outputs: list[dict[str, Any]] = []
@@ -630,6 +667,7 @@ def generate_core(
                     inputs, request = _build_inputs_request(
                         args, entry, mode_name, final_seed, prompt_text,
                         image_ref_resolved, image_end_ref_resolved,
+                        video_ref_resolved,
                     )
                     manifest = build_generation_manifest(
                         kind="generation.generate_video",
@@ -665,6 +703,7 @@ def generate_core(
     inputs, request = _build_inputs_request(
         args, entry, mode_name, final_seed, prompt_text,
         image_ref_resolved, image_end_ref_resolved,
+        video_ref_resolved,
     )
     manifest = build_generation_manifest(
         kind="generation.generate_video",
@@ -722,6 +761,7 @@ def _build_inputs_request(
     prompt_text: str | None,
     image_ref_resolved: str | None,
     image_end_ref_resolved: str | None,
+    video_ref_resolved: str | None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Build inputs and request dicts for the video generation manifest."""
     requested_prompt = prompt_text or getattr(args, "prompt", None)
@@ -732,6 +772,7 @@ def _build_inputs_request(
         "count": max(1, args.count or 1),
         "image_ref_resolved": image_ref_resolved,
         "image_end_ref_resolved": image_end_ref_resolved,
+        "video_ref_resolved": video_ref_resolved,
         "frames": getattr(args, "frames", None),
         "fps": getattr(args, "fps", None),
         "duration": getattr(args, "duration", None),
@@ -746,7 +787,8 @@ def _build_inputs_request(
         "count": max(1, args.count or 1),
     }
     for key in ("negative_prompt", "resolution", "frames", "fps", "duration",
-                "image_ref", "image_end_ref", "guidance_scale", "steps", "shift"):
+                "image_ref", "image_end_ref", "video_ref", "guidance_scale",
+                "steps", "shift", "mode", "driving_type", "subject_type"):
         val = getattr(args, key, None)
         if val is not None:
             inputs[key] = val
@@ -754,6 +796,8 @@ def _build_inputs_request(
         inputs["image_ref_resolved"] = image_ref_resolved
     if image_end_ref_resolved is not None:
         inputs["image_end_ref_resolved"] = image_end_ref_resolved
+    if video_ref_resolved is not None:
+        inputs["video_ref_resolved"] = video_ref_resolved
     return inputs, request
 
 

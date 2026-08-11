@@ -41,6 +41,11 @@
         "input": "engine",
         "flag": "--engine",
         "optional": true
+      },
+      {
+        "input": "keep_previous_renders",
+        "flag": "--keep-previous-renders",
+        "optional": true
       }
     ]
   },
@@ -72,14 +77,14 @@
       "name": "timeline",
       "required": true,
       "type": "file",
-      "artifact_type": "clip/visual"
+      "artifact_type": "timeline"
     },
     {
       "description": "",
       "name": "assets_registry",
       "required": false,
       "type": "file",
-      "artifact_type": "clip/visual"
+      "artifact_type": "timeline/assets"
     },
     {
       "description": "",
@@ -93,6 +98,13 @@
       "name": "engine",
       "required": false,
       "type": "string",
+      "artifact_type": null
+    },
+    {
+      "description": "Preserve previous provenance-linked hype.mp4 outputs for the same timeline.",
+      "name": "keep_previous_renders",
+      "required": false,
+      "type": "boolean",
       "artifact_type": null
     }
   ],

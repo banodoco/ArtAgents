@@ -65,16 +65,20 @@ def cmd_ls(args: argparse.Namespace) -> int:
 def cmd_create(args: argparse.Namespace) -> int:
     from .timeline import _require_session  # noqa: PLC0415
 
-    session = _require_session(slug=getattr(args, "project", None))
+    project_slug = getattr(args, "project", None)
+    if not project_slug:
+        project_slug = _require_session().project
     result = crud.create_timeline(
-        session.project,
+        project_slug,
         args.slug,
         name=args.name,
         is_default=args.is_default,
     )
+    source = "explicit --project" if getattr(args, "project", None) else "attached session"
+    print(f"project: {project_slug} ({source})")
     print(f"created timeline '{result['slug']}' (ulid: {result['ulid']})")
     if args.is_default:
-        print(f"set as default timeline for project '{session.project}'")
+        print(f"set as default timeline for project '{project_slug}'")
     return 0
 
 
