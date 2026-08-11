@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import sys
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Iterable
 
@@ -182,6 +183,69 @@ class ElementRegistry(CapabilityRegistry[tuple[str, str], ElementDefinition]):
         """
         return {key: definitions[0] for key, definitions in self._entries.items()}
 
+@lru_cache(maxsize=None)
+def _load_default_registry_data(
+    active_theme_key: str | None,
+    project_root_key: str,
+    include_missing_roots: bool,
+    extra_pack_roots_key: tuple[str, ...],
+    include_installed: bool,
+) -> tuple[tuple[ElementDefinition, ...], ElementKindRegistry]:
+    """Parse the static element corpus once; return raw definitions.
+
+    The corpus (packs + default element sources) is static repo content.  A
+    fresh parse costs seconds of YAML work per call (measured: ~2s per load,
+    ~189 ``yaml.safe_load`` calls — a 93-event timeline replay that validates
+    four config events spends ~6s total).  Callers rebuild a fresh
+    :class:`ElementRegistry` from the cached raw definitions, so per-call
+    registry mutation (e.g. the element catalog's legacy-source registration)
+    never leaks into the shared cache.
+    """
+    project_root = Path(project_root_key)
+    pack_defs = tuple(
+        discovered.pack
+        for discovered in discover_pack_metadata(
+            project_root=project_root,
+            extra_pack_roots=tuple(Path(key) for key in extra_pack_roots_key),
+            include_installed=include_installed,
+            discover_packs_fn=discover_packs,
+        )
+    )
+    element_kind_registry = _element_kind_registry_for_packs(pack_defs)
+    elements: list[ElementDefinition] = list(
+        _load_pack_elements_from_packs(
+            pack_defs,
+            element_kind_registry=element_kind_registry,
+        )
+    )
+    for source in default_sources(
+        active_theme=Path(active_theme_key) if active_theme_key is not None else None,
+        project_root=project_root,
+    ):
+        if not source.root.exists():
+            if include_missing_roots:
+                source.root.mkdir(parents=True, exist_ok=True)
+            else:
+                continue
+        elements.extend(
+            load_source_elements(
+                source,
+                element_kind_registry=element_kind_registry,
+            )
+        )
+    return (tuple(elements), element_kind_registry)
+
+
+def clear_default_registry_cache() -> None:
+    """Drop the cached element corpus.
+
+    Test seam / hot-reload hook: tests that patch pack discovery must clear
+    this cache (the catalog's ``_clear_registry_cache`` does) so a re-discovered
+    corpus (e.g. a temp pack declaring a custom element kind) is re-parsed.
+    """
+    _load_default_registry_data.cache_clear()
+
+
 def load_default_registry(
     *,
     active_theme: str | Path | None = None,
@@ -190,38 +254,27 @@ def load_default_registry(
     extra_pack_roots: tuple[str, ...] = (),
     include_installed: bool = True,
 ) -> ElementRegistry:
+    """Load the default element registry (corpus parse is cached).
+
+    Registry assembly stays per-call so callers may register additional
+    elements (e.g. the legacy-workspace source in the element catalog)
+    without polluting the shared corpus cache.
+    """
+    elements, element_kind_registry = _load_default_registry_data(
+        str(Path(active_theme).resolve()) if active_theme is not None else None,
+        str(Path(project_root).resolve()),
+        include_missing_roots,
+        tuple(str(Path(root).resolve()) for root in extra_pack_roots),
+        include_installed,
+    )
     resolver = create_shared_alias_resolver()
     _register_pack_aliases(resolver, {})  # M1: no aliases yet
-    pack_defs = tuple(
-        discovered.pack
-        for discovered in discover_pack_metadata(
-            project_root=project_root,
-            extra_pack_roots=extra_pack_roots,
-            include_installed=include_installed,
-            discover_packs_fn=discover_packs,
-        )
-    )
-    element_kind_registry = _element_kind_registry_for_packs(pack_defs)
     registry = ElementRegistry(
         alias_resolver=resolver,
         element_kind_registry=element_kind_registry,
     )
-    for element in _load_pack_elements_from_packs(
-        pack_defs,
-        element_kind_registry=element_kind_registry,
-    ):
+    for element in elements:
         registry.register(element)
-    for source in default_sources(active_theme=active_theme, project_root=project_root):
-        if not source.root.exists():
-            if include_missing_roots:
-                source.root.mkdir(parents=True, exist_ok=True)
-            else:
-                continue
-        for element in load_source_elements(
-            source,
-            element_kind_registry=element_kind_registry,
-        ):
-            registry.register(element)
     return registry
 
 

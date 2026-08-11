@@ -12,6 +12,7 @@ from typing import Any
 from astrid.core.element.registry import (
     ElementRegistry,
     ElementSource,
+    clear_default_registry_cache,
     load_default_registry,
     load_source_elements,
 )
@@ -43,6 +44,7 @@ def _validate_kind(kind: str) -> ElementKind:
     return _registry().element_kind_registry.normalize(kind)
 
 
+@lru_cache(maxsize=None)
 def _resolve_theme_dir(theme: str | Path | None) -> Path | None:
     return resolve_theme_dir(theme)
 
@@ -99,6 +101,8 @@ def _cached_registry(
 
 def _clear_registry_cache() -> None:
     _cached_registry.cache_clear()
+    _resolve_theme_dir.cache_clear()
+    clear_default_registry_cache()
 
 
 def _warn_conflicts(registry: ElementRegistry, *, kind: ElementKind) -> None:

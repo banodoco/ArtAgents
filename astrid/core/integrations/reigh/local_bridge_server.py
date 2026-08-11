@@ -31,6 +31,7 @@ from astrid.core.integrations.reigh.local_bridge import (
     save_bridge_registry,
     save_bridge_timeline,
 )
+from astrid.core.timeline.eventlog.types import EventLogStaleVersionError
 from astrid.core.timeline.paths import validate_timeline_slug, validate_timeline_ulid
 
 _RANGE_RE = re.compile(r"^bytes\s*=\s*(\d*)\s*-\s*(\d*)\s*$")
@@ -793,7 +794,31 @@ def make_local_bridge_handler(*, projects_root: Path):
                 if not isinstance(config, dict):
                     self._send_error(400, "invalid_config", "body must contain a 'config' object")
                     return
-                result = save_bridge_timeline(project_slug, timeline_ref, config, root=projects_root)
+                registry = body.get("registry")
+                if not isinstance(registry, dict):
+                    self._send_error(400, "invalid_registry", "body must contain a 'registry' object")
+                    return
+                expected_version = body.get("expected_version")
+                if not isinstance(expected_version, int):
+                    self._send_error(400, "invalid_expected_version", "body must contain an integer 'expected_version'")
+                    return
+                try:
+                    result = save_bridge_timeline(
+                        project_slug,
+                        timeline_ref,
+                        config,
+                        registry=registry,
+                        expected_version=expected_version,
+                        root=projects_root,
+                    )
+                except EventLogStaleVersionError as exc:
+                    backend_head = self._get_head_version(project_slug, timeline_ref)
+                    self._send_json(409, {
+                        "error": "timeline_version_conflict",
+                        "detail": str(exc),
+                        "config_version": backend_head,
+                    })
+                    return
                 if result is None:
                     self._send_error(404, "timeline_not_found", f"timeline {timeline_ref!r} was not found")
                     return
@@ -889,21 +914,36 @@ def make_local_bridge_handler(*, projects_root: Path):
                 if body is None:
                     self._send_error(400, "invalid_body", "request body must be valid JSON")
                     return
-                if not isinstance(body.get("assets"), dict):
-                    self._send_error(400, "invalid_registry", "body must contain an 'assets' object")
+                registry = body.get("registry")
+                if not isinstance(registry, dict) or not isinstance(registry.get("assets"), dict):
+                    self._send_error(400, "invalid_registry", "body must contain a 'registry' object with an 'assets' dict")
+                    return
+                expected_version = body.get("expected_version")
+                if not isinstance(expected_version, int):
+                    self._send_error(400, "invalid_expected_version", "body must contain an integer 'expected_version'")
                     return
                 # Normalize: ensure all asset entries are dicts with string keys
                 normalized: dict[str, dict[str, Any]] = {}
-                for key, entry in body["assets"].items():
+                for key, entry in registry["assets"].items():
                     if not isinstance(key, str) or not isinstance(entry, dict):
                         continue
                     normalized[key] = dict(entry)
-                registry_payload = save_bridge_registry(
-                    project_slug,
-                    timeline_ref,
-                    {"assets": normalized},
-                    root=projects_root,
-                )
+                try:
+                    registry_payload = save_bridge_registry(
+                        project_slug,
+                        timeline_ref,
+                        {"assets": normalized},
+                        expected_version=expected_version,
+                        root=projects_root,
+                    )
+                except EventLogStaleVersionError as exc:
+                    backend_head = self._get_head_version(project_slug, timeline_ref)
+                    self._send_json(409, {
+                        "error": "timeline_version_conflict",
+                        "detail": str(exc),
+                        "config_version": backend_head,
+                    })
+                    return
                 if registry_payload is None:
                     self._send_error(404, "timeline_not_found", f"timeline {timeline_ref!r} was not found")
                     return
@@ -980,6 +1020,23 @@ def make_local_bridge_handler(*, projects_root: Path):
 
             self._send_error(400, "invalid_timeline", f"invalid timeline selector: {raw_timeline!r}")
             return None
+
+        def _get_head_version(self, project_slug: str, timeline_ref: str) -> int:
+            """Return the current event-log head version for a timeline, or 0 on failure."""
+            from astrid.core.integrations.reigh.local_bridge import find_bridge_timeline
+            from astrid.core.timeline.eventlog import LocalFsBackend
+
+            try:
+                record = find_bridge_timeline(project_slug, timeline_ref, root=projects_root)
+                if record is None:
+                    return 0
+                backend = LocalFsBackend(
+                    timeline_id=record.timeline_id,
+                    timeline_home=record.timeline_home,
+                )
+                return backend.head().version
+            except Exception:
+                return 0
 
     return Handler
 

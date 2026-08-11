@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import mimetypes
 import shutil
 import subprocess
@@ -34,15 +35,47 @@ from astrid.core.timeline.paths import (
 from astrid.core.timeline.projection import regenerate_projection
 from astrid.core.util.time import utc_now_seconds as utc_now_iso
 
-from .event_construction import asset_registry_to_events, config_to_events
+from .event_construction import (
+    asset_registry_to_events,
+    config_to_events,
+    construct_reigh_timeline_events,
+)
 
 BRIDGE_CONFIG_VERSION = 1
+
+# Per-timeline save locks. The bridge server is threaded: a save must be
+# atomic across head-read → CAS append → projection → registry.json sidecar,
+# otherwise a concurrent append can land between steps and the response pairs
+# a newer version with an older registry (or an older sidecar overwrites a
+# newer one).
+_SAVE_LOCKS: dict[tuple[str, str], threading.Lock] = {}
+_SAVE_LOCKS_GUARD = threading.Lock()
+
+
+def _bridge_save_lock(project_slug: str, timeline: str) -> threading.Lock:
+    """Return the per-timeline lock serializing bridge save/registry writes."""
+    key = (project_slug, timeline)
+    with _SAVE_LOCKS_GUARD:
+        lock = _SAVE_LOCKS.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _SAVE_LOCKS[key] = lock
+        return lock
+
 BRIDGE_SOURCES_VERSION = 1
 BRIDGE_AUDIO_PROXY_PROFILE_VERSION = "aac-m4a-stereo-48000-128k-v1"
 BRIDGE_AUDIO_PROXY_FILENAME = "audio.m4a"
 BRIDGE_VIDEO_PROXY_PROFILE_VERSION = "h264-mp4-720p-yuv420p-crf23-veryfast-v1"
 BRIDGE_VIDEO_PROXY_FILENAME = "preview-720p.mp4"
-_BRIDGE_CANONICAL_TOP_KEYS = ("tracks", "clips", "theme", "theme_overrides")
+_BRIDGE_CANONICAL_TOP_KEYS = (
+    "tracks",
+    "clips",
+    "theme",
+    "theme_overrides",
+    "app",
+    "pinnedShotGroups",
+    "generation_defaults",
+)
 _AUDIO_PROXY_LOCK = threading.Lock()
 _VIDEO_PROXY_LOCK = threading.Lock()
 REIGH_LOCAL_EDITOR_ACTOR = TimelineActor(
@@ -253,7 +286,7 @@ def load_bridge_timeline(
     return _bridge_timeline_payload(
         record,
         config=config,
-        registry=load_bridge_registry(project_slug, record.timeline_id, root=root),
+        registry=_load_bridge_registry_for_record(record, root=root),
     )
 
 
@@ -296,13 +329,24 @@ def list_bridge_checkpoints(
 
 
 def save_bridge_timeline(
-    project_slug: str,
-    timeline: str,
-    config: dict[str, Any],
-    *,
-    root: str | Path | None = None,
+        project_slug: str,
+        timeline: str,
+        config: dict[str, Any],
+        *,
+        registry: dict | None = None,
+        expected_version: int | None = None,
+        root: str | Path | None = None,
 ) -> dict[str, Any] | None:
-    """Append one editor-save config replacement event and reload bridge payload."""
+    with _bridge_save_lock(project_slug, timeline):
+
+        """Append one editor-save event batch and reload bridge payload.
+
+        When *registry* is provided the config and registry events are appended
+        in a single atomic ``append_prebuilt_events`` call so that both succeed or
+        both fail together.  *expected_version* enables CAS guards across the
+        bridge save/registry endpoints; when ``None`` the current head version is
+        used (backward-compatible default).
+        """
     record = find_bridge_timeline(project_slug, timeline, root=root)
     if record is None:
         return None
@@ -312,49 +356,101 @@ def save_bridge_timeline(
         timeline_home=record.timeline_home,
     )
     head = backend.head()
-    # The Reigh editor sends a superset config with render-only top-level keys
-    # such as "output"; Astrid's canonical TimelineConfig must not persist them.
+
+    # NEVER substitute a caller-supplied expected_version with a fresh read.
+    cas_version: int = head.version if expected_version is None else expected_version
+
+    # The Reigh editor sends a superset config. Persist canonical editor and
+    # extension state (tracks, clips, theme, theme_overrides, app — extension
+    # project-data — plus pinnedShotGroups / generation_defaults); explicitly
+    # derived render state such as "output" is re-materialized by Astrid and
+    # must not be persisted.
     canonical_config = {
         key: config[key]
         for key in _BRIDGE_CANONICAL_TOP_KEYS
         if key in config
     }
-    batch = config_to_events(
-        canonical_config,
-        None,
-        record.timeline_id,
-        head.last_hash,
-        head.version + 1,
-        REIGH_LOCAL_EDITOR_ACTOR,
-        "editor_save",
-        expected_version=head.version,
-    )
-    backend.append_prebuilt_events(
-        record.timeline_id,
-        [item.event for item in batch.events],
-        expected_version=head.version,
-    )
-    regenerated = regenerate_projection(
-        record.timeline_id,
-        backend,
-        timeline_home=record.timeline_home,
-    )
-    return _bridge_timeline_payload(
-        record,
-        config=regenerated,
-        registry=load_bridge_registry(project_slug, record.timeline_id, root=root),
-        config_version=backend.head().version,
-    )
+
+    if registry is not None:
+        # Combined batch: config event + registry event in one atomic append.
+        current_config = _load_bridge_config(record.timeline_home)
+        batch = construct_reigh_timeline_events(
+            timeline_id=record.timeline_id,
+            tail_hash=head.last_hash,
+            next_event_version=head.version + 1,
+            actor=REIGH_LOCAL_EDITOR_ACTOR,
+            source="editor_save",
+            config=canonical_config,
+            asset_registry=registry,
+            current_config=current_config,
+            expected_version=cas_version,
+        )
+        backend.append_prebuilt_events(
+            record.timeline_id,
+            [item.event for item in batch.events],
+            expected_version=cas_version,
+        )
+        regenerated = regenerate_projection(
+            record.timeline_id,
+            backend,
+            timeline_home=record.timeline_home,
+        )
+        # Persist the projected registry sidecar from the combined batch.
+        write_json_atomic(
+            record.timeline_home / "registry.json",
+            batch.projected_asset_registry or {"assets": {}},
+        )
+        return _bridge_timeline_payload(
+            record,
+            config=regenerated,
+            registry=batch.projected_asset_registry or {"assets": {}},
+            config_version=backend.head().version,
+        )
+    else:
+        # Config-only batch (backward-compatible path).
+        batch = config_to_events(
+            canonical_config,
+            None,
+            record.timeline_id,
+            head.last_hash,
+            head.version + 1,
+            REIGH_LOCAL_EDITOR_ACTOR,
+            "editor_save",
+            expected_version=cas_version,
+        )
+        backend.append_prebuilt_events(
+            record.timeline_id,
+            [item.event for item in batch.events],
+            expected_version=cas_version,
+        )
+        regenerated = regenerate_projection(
+            record.timeline_id,
+            backend,
+            timeline_home=record.timeline_home,
+        )
+        return _bridge_timeline_payload(
+            record,
+            config=regenerated,
+            registry=_load_bridge_registry_for_record(record, root=root),
+            config_version=backend.head().version,
+        )
 
 
 def save_bridge_registry(
-    project_slug: str,
-    timeline: str,
-    registry: dict[str, Any],
-    *,
-    root: str | Path | None = None,
+        project_slug: str,
+        timeline: str,
+        registry: dict[str, Any],
+        *,
+        expected_version: int | None = None,
+        root: str | Path | None = None,
 ) -> dict[str, Any] | None:
-    """Append one registry replacement event, refresh projections, and persist the sidecar."""
+    with _bridge_save_lock(project_slug, timeline):
+
+        """Append one registry replacement event, refresh projections, and persist the sidecar.
+
+        *expected_version* enables CAS guards on the registry write; when ``None``
+        the current head version is used (backward-compatible default).
+        """
     record = find_bridge_timeline(project_slug, timeline, root=root)
     if record is None:
         return None
@@ -365,6 +461,10 @@ def save_bridge_registry(
     )
     current_config = _load_bridge_config(record.timeline_home)
     head = backend.head()
+
+    # NEVER substitute a caller-supplied expected_version with a fresh read.
+    cas_version: int = head.version if expected_version is None else expected_version
+
     batch = asset_registry_to_events(
         registry,
         current_config,
@@ -373,12 +473,12 @@ def save_bridge_registry(
         head.version + 1,
         REIGH_LOCAL_EDITOR_ACTOR,
         "editor_save",
-        expected_version=head.version,
+        expected_version=cas_version,
     )
     backend.append_prebuilt_events(
         record.timeline_id,
         [item.event for item in batch.events],
-        expected_version=head.version,
+        expected_version=cas_version,
     )
     regenerate_projection(
         record.timeline_id,
@@ -429,21 +529,114 @@ def bridge_registry_path(
     return record.timeline_home / "registry.json"
 
 
-def load_bridge_registry(
-    project_slug: str,
-    timeline: str,
+REGISTRY_REPLACED_EVENT_KIND = "timeline.asset_registry_replaced"
+
+
+def _registry_from_event_stream(record: BridgeTimelineRecord) -> dict[str, Any] | None:
+    """Recover the asset registry from the canonical event stream.
+
+    ``registry.json`` is a recoverable sidecar of the timeline event log (see
+    asset-library-design.md, "latest registry event → registry.json sidecar
+    repair"). When the sidecar is missing, replay the most recent
+    ``timeline.asset_registry_replaced`` event instead of falling back to the
+    unsafe flat-file heuristic (which can map macOS ``.DS_Store`` junk onto
+    every media asset when real sources live in per-source directories).
+    """
+    event_path = record.timeline_home / "assembly.jsonl"
+    try:
+        lines = event_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    for line in reversed(lines):
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if event.get("kind") != REGISTRY_REPLACED_EVENT_KIND:
+            continue
+        payload = event.get("payload")
+        if not isinstance(payload, dict):
+            continue
+        registry = payload.get("registry")
+        if isinstance(registry, dict) and isinstance(registry.get("assets"), dict):
+            return {"assets": dict(registry["assets"])}
+    return None
+
+
+def _registry_from_legacy_assets(record: BridgeTimelineRecord) -> dict[str, Any] | None:
+    """Legacy fallback: the pre-bridge ``assets.json`` sidecar written by
+    project-migration tooling (its entries carry absolute source paths)."""
+    payload = _read_registry_payload(record.timeline_home / "assets.json")
+    assets = payload.get("assets")
+    if isinstance(assets, dict):
+        return {"assets": dict(assets)}
+    return None
+
+
+def _ensure_bridge_registry(
+    record: BridgeTimelineRecord,
     *,
     root: str | Path | None = None,
 ) -> dict[str, Any]:
-    """Return a normalized registry payload for bridge-visible assets only."""
-    record = find_bridge_timeline(project_slug, timeline, root=root)
-    if record is None:
-        return {"assets": {}}
+    """Return the registry payload, recovering and persisting it when the
+    sidecar is missing.
 
-    registry_path = record.timeline_home / "registry.json"
-    raw = _read_registry_payload(registry_path)
-    if "assets" not in raw:
-        raw = _derive_registry_from_sources(record, root=root)
+    Recovery order: ``registry.json`` sidecar → canonical event stream →
+    legacy ``assets.json`` → defensive source-file derivation. The sidecar is
+    written back when recovery succeeds so that every downstream reader
+    (including byte-range asset serving) sees the same authoritative assets
+    instead of re-deriving junk on each request.
+    """
+    raw = _read_registry_payload(record.timeline_home / "registry.json")
+    if "assets" in raw:
+        return raw
+    recovered = _registry_from_event_stream(record)
+    if recovered is None:
+        recovered = _registry_from_legacy_assets(record)
+    if recovered is not None:
+        write_json_atomic(record.timeline_home / "registry.json", recovered)
+        return recovered
+    return _derive_registry_from_sources(record, root=root)
+
+
+def _bridge_asset_resolvable_from_record(
+    record: BridgeTimelineRecord,
+    entry: dict[str, Any],
+    *,
+    root: str | Path | None = None,
+) -> bool:
+    """Return whether one normalized registry entry resolves to media.
+
+    Record-scoped variant of the existence check inside
+    :func:`resolve_bridge_asset`, used by the registry normalization loop so
+    per-asset validation does not re-run the (expensive) timeline lookup.
+    """
+    file_value = entry.get("file")
+    if not isinstance(file_value, str) or not file_value.strip():
+        return False
+    file_value = file_value.strip()
+    if _is_http_url(file_value):
+        return True
+    normalized = _normalize_bridge_local_asset_reference(record.project_slug, file_value, root=root)
+    if normalized is None:
+        return False
+    local_path, _normalized_file = normalized
+    return local_path.exists()
+
+
+def _load_bridge_registry_for_record(
+    record: BridgeTimelineRecord,
+    *,
+    root: str | Path | None = None,
+) -> dict[str, Any]:
+    """Normalize the registry for an already-resolved timeline record.
+
+    The GET hot path previously re-ran ``find_bridge_timeline`` (full event
+    replay + display repair) once for the registry and once more per asset
+    (measured: 6 full resolutions for a 5-asset timeline).  Threading the
+    record through keeps it to a single resolution.
+    """
+    raw = _ensure_bridge_registry(record, root=root)
     raw = _sync_bridge_sources(record, raw, root=root)
     assets = raw.get("assets")
     if not isinstance(assets, dict):
@@ -453,10 +646,28 @@ def load_bridge_registry(
     for asset_key, entry in sorted(assets.items()):
         if not isinstance(asset_key, str) or not isinstance(entry, dict):
             continue
-        if resolve_bridge_asset(project_slug, timeline, asset_key, root=root) is None:
+        if not _bridge_asset_resolvable_from_record(record, entry, root=root):
             continue
         normalized_assets[asset_key] = dict(entry)
     return {"assets": normalized_assets}
+
+
+def load_bridge_registry(
+    project_slug: str,
+    timeline: str,
+    *,
+    root: str | Path | None = None,
+) -> dict[str, Any]:
+    """Return a normalized registry payload for bridge-visible assets only.
+
+    Assets are recovered from the event stream (or legacy sidecar) before the
+    source-file heuristic runs, so projects whose real sources live in
+    per-source directories are not mapped onto stray flat files.
+    """
+    record = find_bridge_timeline(project_slug, timeline, root=root)
+    if record is None:
+        return {"assets": {}}
+    return _load_bridge_registry_for_record(record, root=root)
 
 
 def resolve_bridge_asset(
@@ -478,9 +689,7 @@ def resolve_bridge_asset(
     if record is None:
         return None
 
-    registry = _read_registry_payload(record.timeline_home / "registry.json")
-    if "assets" not in registry:
-        registry = _derive_registry_from_sources(record, root=root)
+    registry = _ensure_bridge_registry(record, root=root)
     if sync_sources:
         registry = _sync_bridge_sources(record, registry, root=root)
     assets = registry.get("assets")
@@ -1424,7 +1633,10 @@ def _derive_registry_from_sources(
         return {"assets": {}}
 
     sources_root = sources_dir(record.project_slug, root=resolve_bridge_projects_root(root=root))
-    source_files = sorted(path for path in sources_root.iterdir() if path.is_file()) if sources_root.is_dir() else []
+    source_files = sorted(
+        path for path in sources_root.iterdir()
+        if path.is_file() and not path.name.startswith(".")
+    ) if sources_root.is_dir() else []
     if not source_files:
         return {"assets": {}}
 

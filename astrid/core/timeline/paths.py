@@ -169,11 +169,27 @@ def find_timeline_by_event_stream_id(
         except (ProjectJsonError, OSError, ValueError):
             continue
         if isinstance(identity, dict) and identity.get("timeline_id") == event_stream_id:
+            # The identity sidecar carries the display block, so the common
+            # case resolves without touching the event log at all.
+            raw_display = identity.get("display")
+            if isinstance(raw_display, dict):
+                slug = raw_display.get("slug")
+                if isinstance(slug, str):
+                    return (child.name, slug)
+            # Fall back to a direct display.json read, then to event-log
+            # repair only for timelines whose identity sidecar predates the
+            # embedded display block.
             try:
-                data = load_display_json_with_repair(child)
-                slug = data.get("slug") if isinstance(data, dict) else None
+                data = read_json(child / "display.json")
             except (ProjectJsonError, OSError, ValueError):
-                slug = None
+                data = None
+            slug = data.get("slug") if isinstance(data, dict) else None
+            if not isinstance(slug, str):
+                try:
+                    repaired = load_display_json_with_repair(child)
+                    slug = repaired.get("slug") if isinstance(repaired, dict) else None
+                except (ProjectJsonError, OSError, ValueError):
+                    slug = None
             if isinstance(slug, str):
                 return (child.name, slug)
     return None
@@ -210,6 +226,19 @@ def load_display_json_with_repair(timeline_home: str | Path) -> dict[str, object
             fallback_display = Display.from_dict(raw_identity_display)
         except TimelineValidationError:
             fallback_display = None
+
+    # Fast path: the identity sidecar's display block is the projection written
+    # at creation. When display.json matches it exactly, no event has changed
+    # the display since — return it without replaying (and validating) the whole
+    # event log. The replay below remains the repair fallback for renamed,
+    # re-defaulted, or corrupted displays.
+    if fallback_display is not None and display_file.is_file():
+        try:
+            current_display = read_json(display_file)
+        except (ProjectJsonError, FileNotFoundError):
+            current_display = None
+        if current_display == fallback_display.to_json_obj():
+            return current_display
 
     backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=timeline_dir_path)
     projection = project_display(backend.read_events(), fallback_display=fallback_display)
