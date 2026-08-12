@@ -64,6 +64,15 @@ from astrid.packs.rendering.executors.timeline_visualize.navigation import (
     assign_range_ids,
 )
 from astrid.packs.rendering.executors.timeline_visualize.scope import Scope
+from astrid.packs.rendering.executors.timeline_visualize.transcript_attach import (
+    TranscriptAttachment,
+)
+from astrid.packs.rendering.executors.timeline_visualize.transcripts import (
+    SpeechOccurrence,
+    TranscriptSegment,
+    speech_occurrence_authored_id,
+    transcript_segment_authored_id,
+)
 from astrid.packs.rendering.executors.timeline_visualize.snapshot_digest import (
     canonical_json_bytes,
     sha256_bytes,
@@ -360,6 +369,16 @@ def _in_scope_refs(
             asset_ref = _lookup_semantic(identity_map, "asset", asset_key)
             if asset_ref is not None:
                 refs.add(asset_ref)
+    # Transcript identity is a frozen evidence layer. Keeping its complete
+    # TS/SP graph in descendants makes every CL/AS/TS/SP action resolvable
+    # without reopening the transcript or consulting current project state.
+    for ref in _ordered_object_refs(model, identity_map):
+        identity = _lookup_display(identity_map, ref)
+        if identity is not None and identity[1] in {
+            "transcript_source_segment",
+            "speech_occurrence",
+        }:
+            refs.add(ref)
     scope_ref = _scope_ref(model, identity_map, scope)
     if scope_ref is not None:
         try:
@@ -636,6 +655,8 @@ def _clips(
     identity_map: Any,
     snapshot: TimelineSnapshot,
     scope: Scope | None = None,
+    occurrences: list[SpeechOccurrence] | None = None,
+    attachment: TranscriptAttachment | None = None,
 ) -> list[dict[str, Any]]:
     raw_by_id: dict[str, Mapping[str, Any]] = {}
     raw_clips = snapshot.assembly.get("clips", [])
@@ -687,6 +708,29 @@ def _clips(
             "speed": clip.speed,
             "transition": _transition(model, clip),
             "asset_refs": asset_refs,
+            "authored_text": clip.authored_text,
+            "pixel_text": (
+                "not_inspected"
+                if _track_kind(model, clip.track_id) == "visual" and clip.kind != "text"
+                else None
+            ),
+            "mapped_speech": [
+                (
+                    _lookup_semantic(
+                        identity_map,
+                        "speech_occurrence",
+                        speech_occurrence_authored_id(
+                            attachment.transcript_sha256,
+                            occurrence.segment_id,
+                            occurrence.clip_id,
+                        ),
+                    )
+                    if attachment is not None
+                    else occurrence.occurrence_id
+                )
+                for occurrence in (occurrences or [])
+                if occurrence.clip_id == clip.clip_id
+            ],
         }
         if emphasized is not None:
             entry["emphasized"] = clip.clip_id in emphasized
@@ -834,14 +878,32 @@ def _timeline_entry(
     identity_map: Any,
     snapshot: TimelineSnapshot,
     scope: Scope | None = None,
+    attachment: TranscriptAttachment | None = None,
+    occurrences: list[SpeechOccurrence] | None = None,
 ) -> dict[str, Any]:
-    return {
+    result = {
         "timeline_ref": _TIMELINE_REF,
         "durations": _durations(model),
         "tracks": _tracks(model, snapshot),
-        "clips": _clips(model, identity_map, snapshot, scope),
+        "clips": _clips(
+            model, identity_map, snapshot, scope, occurrences, attachment
+        ),
         "assets": _assets(model, identity_map, scope),
     }
+    if attachment is not None:
+        result["transcript_attachment"] = {
+            "schema_version": attachment.schema_version,
+            "source_id": attachment.source_id,
+            "source_version": attachment.source_version,
+            "transcript_sha256": attachment.transcript_sha256,
+            "media_identity": attachment.media_identity,
+            "media_sha256": attachment.media_sha256,
+            "producer": attachment.producer,
+            "producer_version": attachment.producer_version,
+            "model": attachment.model,
+            "integrity": attachment.integrity,
+        }
+    return result
 
 
 def emit_ground_truth(
@@ -849,6 +911,8 @@ def emit_ground_truth(
     identity_map: Any,
     snapshot: TimelineSnapshot,
     scope: Scope | None = None,
+    attachment: TranscriptAttachment | None = None,
+    occurrences: list[SpeechOccurrence] | None = None,
 ) -> dict[str, Any]:
     """Return the ``ground-truth.json`` content for one root visualization.
 
@@ -874,13 +938,19 @@ def emit_ground_truth(
         "project_slug": snapshot.project_slug,
         "scope": _scope_block(model, effective, scope),
         "objects": _objects(model, effective, scope),
-        "timelines": [_timeline_entry(model, effective, snapshot, scope)],
+        "timelines": [
+            _timeline_entry(
+                model, effective, snapshot, scope, attachment, occurrences
+            )
+        ],
         # These three fields are the frozen-lineage substrate.  The ordinary
         # objects/timelines fields remain scope-filtered for consumers, while
         # descendants reconstruct the complete root map and normalized model
         # exclusively from these hashed facts.  A child copies them verbatim.
         "frozen_objects": _objects(model, effective, None),
-        "frozen_timeline": _timeline_entry(model, effective, snapshot, None),
+        "frozen_timeline": _timeline_entry(
+            model, effective, snapshot, None, attachment, occurrences
+        ),
         "frozen_shots": _frozen_shots(model, effective),
         "frozen_ranges": _frozen_ranges(model, effective, scope),
         "timestamps": {"frozen_at": FROZEN_AT_SENTINEL},
@@ -1126,6 +1196,8 @@ def _relations(
     identity_map: Any,
     ref: str,
     in_scope: set[str] | None = None,
+    attachment: TranscriptAttachment | None = None,
+    occurrences: list[SpeechOccurrence] | None = None,
 ) -> dict[str, Any]:
     parsed = parse_qualified_ref(ref)
     all_refs = _ordered_object_refs(model, identity_map)
@@ -1149,16 +1221,111 @@ def _relations(
             previous = _lookup_semantic(identity_map, "clip", same_track[index - 1].clip_id)
         if index + 1 < len(same_track):
             next_ref = _lookup_semantic(identity_map, "clip", same_track[index + 1].clip_id)
+    children: list[str] = []
+    parent = _TIMELINE_REF
+    if attachment is not None:
+        transcript_hash = attachment.transcript_sha256
+        transcript_asset_key = next(
+            (
+                occurrence.asset_key
+                for occurrence in (occurrences or [])
+                if occurrence.asset_key is not None
+            ),
+            None,
+        )
+        if transcript_asset_key is None and attachment.media_identity in model.registry_keys:
+            transcript_asset_key = attachment.media_identity
+        transcript_asset_ref = (
+            _lookup_semantic(identity_map, "asset", transcript_asset_key)
+            if transcript_asset_key is not None
+            else None
+        )
+        if parsed.kind == "CL":
+            clip = _clip_with_ref(model, identity_map, ref)
+            children = [
+                sp_ref
+                for occurrence in (occurrences or [])
+                if occurrence.clip_id == clip.clip_id
+                and (
+                    sp_ref := _lookup_semantic(
+                        identity_map,
+                        "speech_occurrence",
+                        speech_occurrence_authored_id(
+                            transcript_hash, occurrence.segment_id, occurrence.clip_id
+                        ),
+                    )
+                )
+                is not None
+            ]
+        elif parsed.kind == "AS":
+            if ref == transcript_asset_ref:
+                children = [
+                    candidate
+                    for candidate in all_refs
+                    if parse_qualified_ref(candidate).kind == "TS"
+                ]
+        elif parsed.kind == "TS":
+            identity = _lookup_display(identity_map, ref)
+            authored_id = identity[2] if identity is not None else ""
+            segment_id = next(
+                (
+                    occurrence.segment_id
+                    for occurrence in (occurrences or [])
+                    if transcript_segment_authored_id(
+                        transcript_hash, occurrence.segment_id
+                    )
+                    == authored_id
+                ),
+                None,
+            )
+            children = [
+                sp_ref
+                for occurrence in (occurrences or [])
+                if segment_id is not None and occurrence.segment_id == segment_id
+                and (
+                    sp_ref := _lookup_semantic(
+                        identity_map,
+                        "speech_occurrence",
+                        speech_occurrence_authored_id(
+                            transcript_hash, occurrence.segment_id, occurrence.clip_id
+                        ),
+                    )
+                )
+                is not None
+            ]
+            parent = transcript_asset_ref or _TIMELINE_REF
+        elif parsed.kind == "SP":
+            identity = _lookup_display(identity_map, ref)
+            authored_id = identity[2] if identity is not None else ""
+            matching = next(
+                (
+                    occurrence
+                    for occurrence in (occurrences or [])
+                    if speech_occurrence_authored_id(
+                        transcript_hash, occurrence.segment_id, occurrence.clip_id
+                    )
+                    == authored_id
+                ),
+                None,
+            )
+            if matching is not None:
+                parent = _lookup_semantic(
+                    identity_map,
+                    "transcript_source_segment",
+                    transcript_segment_authored_id(transcript_hash, matching.segment_id),
+                ) or _TIMELINE_REF
+                clip_ref = _lookup_semantic(identity_map, "clip", matching.clip_id)
+                children = [clip_ref] if clip_ref is not None else []
     if in_scope is not None:
         if previous is not None and previous not in in_scope:
             previous = None
         if next_ref is not None and next_ref not in in_scope:
             next_ref = None
     return {
-        "parent": _TIMELINE_REF,
+        "parent": parent,
         "previous": previous,
         "next": next_ref,
-        "children": [],
+        "children": children,
     }
 
 
@@ -1309,6 +1476,8 @@ def _actions(
     snapshot: TimelineSnapshot,
     manifest_path: str,
     ref: str,
+    attachment: TranscriptAttachment | None = None,
+    occurrences: list[SpeechOccurrence] | None = None,
 ) -> dict[str, dict[str, Any]]:
     parsed = parse_qualified_ref(ref)
     actions: dict[str, dict[str, Any]] = {}
@@ -1324,6 +1493,14 @@ def _actions(
     elif parsed.kind == "AS":
         actions["focus_context"] = _focus_context_action(manifest_path, ref, "asset")
         actions["inspect_original"] = _inspect_original_action(model, identity_map, manifest_path, ref)
+    elif parsed.kind == "TS":
+        actions["focus_occurrences"] = _focus_context_action(
+            manifest_path, ref, "text"
+        )
+    elif parsed.kind == "SP":
+        actions["focus_clip_context"] = _focus_context_action(
+            manifest_path, ref, "speech"
+        )
     return actions
 
 
@@ -1333,6 +1510,8 @@ def emit_action_index(
     snapshot: TimelineSnapshot,
     manifest_path: str | Path,
     scope: Scope | None = None,
+    attachment: TranscriptAttachment | None = None,
+    occurrences: list[SpeechOccurrence] | None = None,
 ) -> dict[str, Any]:
     """Return the ``action-index.json`` content for one root visualization.
 
@@ -1351,8 +1530,12 @@ def emit_action_index(
             continue
         entries[ref] = {
             "canonical_ref": _canonical_ref(effective, ref),
-            "relations": _relations(model, effective, ref, in_scope),
-            "actions": _actions(model, effective, snapshot, manifest, ref),
+            "relations": _relations(
+                model, effective, ref, in_scope, attachment, occurrences
+            ),
+            "actions": _actions(
+                model, effective, snapshot, manifest, ref, attachment, occurrences
+            ),
         }
     return {
         "schema_version": SCHEMA_VERSION,
@@ -1409,13 +1592,151 @@ def emit_transcript_index(
     model: TimelineInspectionModel,
     identity_map: Any,
     snapshot: TimelineSnapshot,
+    attachment: TranscriptAttachment | None = None,
+    segments: list[TranscriptSegment] | None = None,
+    occurrences: list[SpeechOccurrence] | None = None,
+    asset_key: str | None = None,
 ) -> dict[str, Any]:
-    """Return the empty-valid ``transcript-index.json`` (TS/SP declared)."""
+    """Return hash-scoped TS records and occurrence-specific SP records.
+
+    Missing/non-verifiable attachment state remains the M1 empty-valid shape;
+    transcript content is never fabricated or substituted.
+    """
+    normalized_segments = list(segments or [])
+    normalized_occurrences = list(occurrences or [])
+    if attachment is None or attachment.integrity != "ok":
+        normalized_segments = []
+        normalized_occurrences = []
+    segment_by_id = {item.segment_id: item for item in normalized_segments}
+    resolved_asset_key = asset_key
+    if resolved_asset_key is None and normalized_occurrences:
+        resolved_asset_key = normalized_occurrences[0].asset_key
+    if resolved_asset_key is None and attachment is not None:
+        if attachment.media_identity in model.registry_keys:
+            resolved_asset_key = attachment.media_identity
+        else:
+            matches = sorted(
+                key
+                for key, integrity in model.media_integrity.items()
+                if integrity.source_id == attachment.media_identity
+            )
+            if len(matches) == 1:
+                resolved_asset_key = matches[0]
+    asset_ref = (
+        _lookup_semantic(identity_map, "asset", resolved_asset_key)
+        if resolved_asset_key is not None
+        else None
+    )
+    if (normalized_segments or normalized_occurrences) and asset_ref is None:
+        raise ValueError("transcript attachment media has no frozen asset ref")
+
+    source_rows: list[dict[str, Any]] = []
+    for segment in normalized_segments:
+        assert attachment is not None and asset_ref is not None
+        authored_id = transcript_segment_authored_id(
+            attachment.transcript_sha256, segment.segment_id
+        )
+        ref = _lookup_semantic(identity_map, "transcript_source_segment", authored_id)
+        if ref is None:
+            raise ValueError(f"transcript segment {segment.segment_id!r} has no TS id")
+        source_rows.append(
+            {
+                "stable_id": parse_qualified_ref(ref).stable_id,
+                "qualified_ref": ref,
+                "canonical_ref": _canonical_ref(identity_map, ref),
+                "asset_ref": asset_ref,
+                "transcript_sha256": attachment.transcript_sha256,
+                "source_segment_id": segment.segment_id,
+                "source_interval": {
+                    "start_seconds": segment.source_start,
+                    "end_seconds": segment.source_end,
+                },
+                "speaker_state": segment.speaker_state,
+                "speaker": segment.speaker,
+                "text": segment.text,
+                "word_timing": (
+                    "available" if segment.word_timing is not None else "unavailable"
+                ),
+                "words": (
+                    [
+                        {
+                            "start_seconds": start,
+                            "end_seconds": end,
+                            "text": text,
+                        }
+                        for start, end, text in segment.word_timing
+                    ]
+                    if segment.word_timing is not None
+                    else None
+                ),
+            }
+        )
+
+    occurrence_rows: list[dict[str, Any]] = []
+    for occurrence in normalized_occurrences:
+        assert attachment is not None and asset_ref is not None
+        segment = segment_by_id.get(occurrence.segment_id)
+        if segment is None:
+            raise ValueError(f"speech occurrence references unknown segment {occurrence.segment_id!r}")
+        source_authored_id = transcript_segment_authored_id(
+            attachment.transcript_sha256, occurrence.segment_id
+        )
+        occurrence_authored_id = speech_occurrence_authored_id(
+            attachment.transcript_sha256, occurrence.segment_id, occurrence.clip_id
+        )
+        source_ref = _lookup_semantic(
+            identity_map, "transcript_source_segment", source_authored_id
+        )
+        occurrence_ref = _lookup_semantic(
+            identity_map, "speech_occurrence", occurrence_authored_id
+        )
+        clip_ref = _lookup_semantic(identity_map, "clip", occurrence.clip_id)
+        if None in (source_ref, occurrence_ref, clip_ref):
+            raise ValueError("speech occurrence TS/SP/CL identity is incomplete")
+
+        def mapping(
+            state: str, start: float | None, end: float | None
+        ) -> dict[str, Any]:
+            if start is None or end is None:
+                return {"state": "unavailable", "interval": None}
+            return {
+                "state": state,
+                "interval": {
+                    "start_frame": _frame_round(start, model.fps),
+                    "end_frame": _frame_round(end, model.fps),
+                    "start_seconds": start,
+                    "end_seconds": end,
+                },
+            }
+
+        occurrence_rows.append(
+            {
+                "stable_id": parse_qualified_ref(occurrence_ref).stable_id,
+                "qualified_ref": occurrence_ref,
+                "canonical_ref": _canonical_ref(identity_map, occurrence_ref),
+                "source_ref": source_ref,
+                "clip_ref": clip_ref,
+                "asset_ref": asset_ref,
+                "authored_mapping": mapping(
+                    occurrence.mapping_state,
+                    occurrence.timeline_start,
+                    occurrence.timeline_end,
+                ),
+                "effective_mapping": mapping(
+                    occurrence.effective_state,
+                    occurrence.effective_start,
+                    occurrence.effective_end,
+                ),
+                "speaker_state": segment.speaker_state,
+                "speaker": segment.speaker,
+                "text": segment.text,
+            }
+        )
     return {
         "schema_version": SCHEMA_VERSION,
         "snapshots": _snapshot_block(model, snapshot),
-        "sources": [],
-        "speech_occurrences": [],
+        "sources": source_rows,
+        "speech_occurrences": occurrence_rows,
     }
 
 
@@ -1637,6 +1958,9 @@ def emit_structure_md(
     model: TimelineInspectionModel,
     identity_map: Any,
     snapshot: TimelineSnapshot,
+    attachment: TranscriptAttachment | None = None,
+    segments: list[TranscriptSegment] | None = None,
+    occurrences: list[SpeechOccurrence] | None = None,
 ) -> str:
     """Return the factual ``structure.md`` content (breadcrumb + next actions)."""
     lines: list[str] = [
@@ -1671,10 +1995,68 @@ def emit_structure_md(
         "- transition_registry_defaults: "
         + json.dumps(dict(sorted(_PINNED_TRANSITION_DEFAULTS.items())), sort_keys=True),
         f"- transition_default_fingerprint: {_transition_default_fingerprint()}",
-        "",
-        "## Suggested next actions",
-        "",
     ]
+    if attachment is not None:
+        lines.extend(
+            [
+                "",
+                "## Transcript attachment",
+                "",
+                f"- source: {attachment.source_id}@{attachment.source_version}",
+                f"- transcript_sha256: {attachment.transcript_sha256}",
+                f"- media_identity: {attachment.media_identity}",
+                f"- media_sha256: {attachment.media_sha256 or 'unavailable'}",
+                f"- producer: {attachment.producer}",
+                f"- model: {attachment.model or 'unavailable'}",
+                f"- integrity: {attachment.integrity}",
+            ]
+        )
+    lines.extend(["", "## Text evidence", ""])
+    segment_by_id = {item.segment_id: item for item in (segments or [])}
+    if not segments:
+        lines.append("- SPEECH: unavailable (no verified transcript attachment)")
+    else:
+        for segment in segments:
+            assert attachment is not None
+            ref = _lookup_semantic(
+                identity_map,
+                "transcript_source_segment",
+                transcript_segment_authored_id(
+                    attachment.transcript_sha256, segment.segment_id
+                ),
+            )
+            lines.append(
+                f"- SPEECH SOURCE {ref}: [{segment.source_start:g},{segment.source_end:g}) "
+                f"speaker={segment.speaker if segment.speaker is not None else segment.speaker_state}; "
+                f"word_timing={'available' if segment.word_timing is not None else 'unavailable'}; "
+                f"text={json.dumps(segment.text, ensure_ascii=False)}"
+            )
+        for occurrence in occurrences or []:
+            segment = segment_by_id[occurrence.segment_id]
+            ref = _lookup_semantic(
+                identity_map,
+                "speech_occurrence",
+                speech_occurrence_authored_id(
+                    attachment.transcript_sha256,
+                    occurrence.segment_id,
+                    occurrence.clip_id,
+                ),
+            )
+            lines.append(
+                f"- SPEECH {ref}: clip={occurrence.clip_id}; "
+                f"authored=[{occurrence.timeline_start:g},{occurrence.timeline_end:g}); "
+                f"effective={('[%g,%g)' % (occurrence.effective_start, occurrence.effective_end)) if occurrence.effective_start is not None and occurrence.effective_end is not None else 'unavailable'}; "
+                f"text={json.dumps(segment.text, ensure_ascii=False)}"
+            )
+    for clip in model.clips:
+        clip_ref = _lookup_semantic(identity_map, "clip", clip.clip_id)
+        if clip.authored_text is not None:
+            lines.append(
+                f"- CAPTION {clip_ref}: {json.dumps(clip.authored_text, ensure_ascii=False)}"
+            )
+        elif _track_kind(model, clip.track_id) == "visual":
+            lines.append(f"- OTHER TEXT {clip_ref}: not_inspected")
+    lines.extend(["", "## Suggested next actions", ""])
     suggested = ["Refresh against current state (action-index.json: TL01 → refresh_root)"]
     for ref in _ordered_object_refs(model, identity_map):
         parsed = parse_qualified_ref(ref)
@@ -1693,6 +2075,14 @@ def emit_structure_md(
                     f"Recover asset {ref} (action-index.json: {ref} → inspect_original, "
                     f"unavailable: {integrity.state})"
                 )
+        elif parsed.kind == "TS":
+            suggested.append(
+                f"Focus transcript segment {ref} (action-index.json: {ref} → focus_occurrences)"
+            )
+        elif parsed.kind == "SP":
+            suggested.append(
+                f"Focus speech occurrence {ref} (action-index.json: {ref} → focus_clip_context)"
+            )
     lines.extend(f"- {item}" for item in suggested)
     return "\n".join(lines) + "\n"
 

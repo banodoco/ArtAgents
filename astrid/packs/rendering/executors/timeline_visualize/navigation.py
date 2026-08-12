@@ -55,6 +55,12 @@ from astrid.packs.rendering.executors.timeline_visualize.ids import (
 from astrid.packs.rendering.executors.timeline_visualize.model import (
     TimelineInspectionModel,
 )
+from astrid.packs.rendering.executors.timeline_visualize.transcripts import (
+    SpeechOccurrence,
+    TranscriptSegment,
+    speech_occurrence_authored_id,
+    transcript_segment_authored_id,
+)
 
 _TIMELINE_DISPLAY_ID: Final[str] = "TL01"
 _TIMELINE_ORDINAL: Final[int] = 1
@@ -66,6 +72,8 @@ _KIND_NOUNS: Final[Mapping[str, str]] = MappingProxyType(
         "clip": "clip id",
         "asset": "asset key",
         "range": "range id",
+        "transcript_source_segment": "transcript segment id",
+        "speech_occurrence": "speech occurrence id",
     }
 )
 
@@ -296,6 +304,66 @@ def assign_range_ids(
     )
 
 
+def assign_transcript_ids(
+    identity_map: IdentityMap,
+    segments: list[TranscriptSegment],
+    occurrences: list[SpeechOccurrence],
+    *,
+    transcript_sha256: str,
+) -> IdentityMap:
+    """Add hash-scoped TS and occurrence-specific SP ids to a root map.
+
+    TS order is normalized transcript order. SP order is the deterministic
+    order returned by ``map_occurrences`` (model clip order, then source order).
+    Existing allocations are retained verbatim, which is what frozen children
+    require.
+    """
+
+    if not isinstance(identity_map, IdentityMap):
+        raise TypeError("identity_map must be an IdentityMap")
+    candidates: list[tuple[tuple[str, str, str], str]] = list(
+        identity_map.semantic_to_display.items()
+    )
+    seen_segments: set[str] = set()
+    for ordinal, segment in enumerate(segments, start=1):
+        authored_id = transcript_segment_authored_id(
+            transcript_sha256, segment.segment_id
+        )
+        if authored_id in seen_segments:
+            raise ValueError(f"duplicate transcript segment identity {authored_id!r}")
+        seen_segments.add(authored_id)
+        existing = identity_map.lookup_semantic("transcript_source_segment", authored_id)
+        if existing is None:
+            candidates.append(
+                (
+                    (identity_map.timeline_uuid, "transcript_source_segment", authored_id),
+                    format_qualified_ref(_TIMELINE_ORDINAL, "TS", ordinal),
+                )
+            )
+    seen_occurrences: set[str] = set()
+    for ordinal, occurrence in enumerate(occurrences, start=1):
+        authored_id = speech_occurrence_authored_id(
+            transcript_sha256, occurrence.segment_id, occurrence.clip_id
+        )
+        if authored_id in seen_occurrences:
+            raise ValueError(f"duplicate speech occurrence identity {authored_id!r}")
+        seen_occurrences.add(authored_id)
+        existing = identity_map.lookup_semantic("speech_occurrence", authored_id)
+        if existing is None:
+            candidates.append(
+                (
+                    (identity_map.timeline_uuid, "speech_occurrence", authored_id),
+                    format_qualified_ref(_TIMELINE_ORDINAL, "SP", ordinal),
+                )
+            )
+    return _materialize(
+        candidates,
+        root_sns=identity_map.root_sns,
+        timeline_uuid=identity_map.timeline_uuid,
+        timeline_ulid=identity_map.timeline_ulid,
+    )
+
+
 def stable_id_for(
     model: TimelineInspectionModel,
     kind: str,
@@ -326,8 +394,8 @@ def stable_id_for(
         raise KeyError(
             f"no display id allocated for {kind!r} authored id {authored_id!r} "
             f"(snapshot {model.snapshot_sns!r}); M1 allocates timeline/shot/clip/"
-            f"asset ordinals only — tracks have no R3 code, ranges await R9, "
-            f"TS/SP await R20"
+            f"asset ordinals only — tracks have no R3 code; range and "
+            f"transcript ids require their explicit assignment helpers"
         )
     return display_id
 
@@ -335,6 +403,7 @@ def stable_id_for(
 __all__ = [
     "IdentityMap",
     "assign_range_ids",
+    "assign_transcript_ids",
     "build_identity_map",
     "stable_id_for",
 ]

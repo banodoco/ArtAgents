@@ -51,6 +51,7 @@ from astrid.packs.rendering.executors.timeline_visualize.model import (
 from astrid.packs.rendering.executors.timeline_visualize.navigation import (
     IdentityMap,
     assign_range_ids,
+    assign_transcript_ids,
     build_identity_map,
 )
 from astrid.packs.rendering.executors.timeline_visualize.schemas import (
@@ -58,6 +59,10 @@ from astrid.packs.rendering.executors.timeline_visualize.schemas import (
     SCHEMAS,
 )
 from astrid.packs.rendering.executors.timeline_visualize.scope import Scope, select_scope
+from astrid.packs.rendering.executors.timeline_visualize.transcripts import (
+    SpeechOccurrence,
+    TranscriptSegment,
+)
 
 
 class FrozenViewError(ValueError):
@@ -461,6 +466,13 @@ def _verify_model_refs(ground_truth: dict, identity_map: IdentityMap) -> None:
                     f"frozen clip {clip_ref!r} asset ref {asset_ref!r} does not "
                     "resolve to frozen_timeline.assets[].qualified_ref"
                 )
+        for speech_ref in row.get("mapped_speech", []):
+            speech_identity = identity_map.lookup_display(speech_ref)
+            if speech_identity is None or speech_identity[1] != "speech_occurrence":
+                raise FrozenIntegrityError(
+                    f"frozen clip {clip_ref!r} speech ref {speech_ref!r} does not "
+                    "resolve to a frozen speech occurrence"
+                )
 
     for key, expected_kind in (("frozen_shots", "shot"), ("frozen_ranges", "range")):
         rows = ground_truth.get(key, [])
@@ -683,6 +695,38 @@ def load_frozen_view(manifest_path: Path, *, project_root: Path) -> FrozenView:
         if identity is None or identity[1] != "asset" or asset.get("canonical_ref") != _canonical_ref(identity):
             raise FrozenIntegrityError(f"asset-index ref does not resolve through ground truth: {ref!r}")
 
+    transcript_index = core["transcript-index"]
+    source_refs: set[str] = set()
+    for source in transcript_index.get("sources", []):
+        ref = source.get("qualified_ref") if isinstance(source, dict) else None
+        identity = identity_map.lookup_display(ref) if isinstance(ref, str) else None
+        asset_identity = identity_map.lookup_display(source.get("asset_ref")) if isinstance(source, dict) else None
+        if (
+            identity is None
+            or identity[1] != "transcript_source_segment"
+            or source.get("canonical_ref") != _canonical_ref(identity)
+            or asset_identity is None
+            or asset_identity[1] != "asset"
+        ):
+            raise FrozenIntegrityError(f"transcript source ref does not resolve: {ref!r}")
+        source_refs.add(ref)
+    for occurrence in transcript_index.get("speech_occurrences", []):
+        ref = occurrence.get("qualified_ref") if isinstance(occurrence, dict) else None
+        identity = identity_map.lookup_display(ref) if isinstance(ref, str) else None
+        clip_identity = identity_map.lookup_display(occurrence.get("clip_ref")) if isinstance(occurrence, dict) else None
+        asset_identity = identity_map.lookup_display(occurrence.get("asset_ref")) if isinstance(occurrence, dict) else None
+        if (
+            identity is None
+            or identity[1] != "speech_occurrence"
+            or occurrence.get("canonical_ref") != _canonical_ref(identity)
+            or occurrence.get("source_ref") not in source_refs
+            or clip_identity is None
+            or clip_identity[1] != "clip"
+            or asset_identity is None
+            or asset_identity[1] != "asset"
+        ):
+            raise FrozenIntegrityError(f"speech occurrence ref does not resolve: {ref!r}")
+
     timeline = snapshot["timeline"]
     timeline_uuid = timeline["uuid"]
     timeline_ulid = timeline["ulid"]
@@ -697,7 +741,7 @@ def load_frozen_view(manifest_path: Path, *, project_root: Path) -> FrozenView:
         timeline_uuid=timeline_uuid,
         timeline_ulid=timeline_ulid,
         asset_index=asset_index,
-        transcript_index=core["transcript-index"],
+        transcript_index=transcript_index,
         diagnostics=core["diagnostics"],
     )
     _verify_deterministic_identity_map(frozen)
@@ -810,6 +854,8 @@ def model_from_frozen(frozen: FrozenView) -> TimelineInspectionModel:
                 kind=row["clip_type"],
                 asset_keys=tuple(asset_keys),
                 mounted=mounted,
+                authored_text=row.get("authored_text"),
+                pixel_text_state=row.get("pixel_text") or "not_inspected",
             )
         )
 
@@ -910,6 +956,55 @@ def _verify_deterministic_identity_map(frozen: FrozenView) -> None:
         )
     if ranges:
         rebuilt = assign_range_ids(rebuilt, ranges)
+    transcript = frozen.transcript_index
+    segment_rows = transcript.get("sources", [])
+    occurrence_rows = transcript.get("speech_occurrences", [])
+    if segment_rows:
+        timeline = frozen.ground_truth.get("frozen_timeline", {})
+        attachment = timeline.get("transcript_attachment", {}) if isinstance(timeline, dict) else {}
+        transcript_hash = attachment.get("transcript_sha256")
+        if not isinstance(transcript_hash, str):
+            raise FrozenIntegrityError("frozen transcript identities lack transcript hash scope")
+        segments = [
+            TranscriptSegment(
+                row["source_segment_id"],
+                float(row["source_interval"]["start_seconds"]),
+                float(row["source_interval"]["end_seconds"]),
+                row["text"],
+                row["speaker"],
+                None,
+                row["speaker_state"],
+            )
+            for row in segment_rows
+        ]
+        occurrences: list[SpeechOccurrence] = []
+        for row in occurrence_rows:
+            source = next(
+                item for item in segment_rows if item["qualified_ref"] == row["source_ref"]
+            )
+            clip_identity = frozen.identity_map.lookup_display(row["clip_ref"])
+            if clip_identity is None:
+                raise FrozenIntegrityError("frozen speech occurrence clip ref is unresolved")
+            interval = row["authored_mapping"]["interval"]
+            if interval is None:
+                continue
+            occurrences.append(
+                SpeechOccurrence(
+                    row["qualified_ref"],
+                    source["source_segment_id"],
+                    clip_identity[2],
+                    float(interval["start_seconds"]),
+                    float(interval["end_seconds"]),
+                    0.0,
+                    float(interval["end_seconds"]) - float(interval["start_seconds"]),
+                )
+            )
+        rebuilt = assign_transcript_ids(
+            rebuilt,
+            segments,
+            occurrences,
+            transcript_sha256=transcript_hash,
+        )
 
     actual_semantic = dict(frozen.identity_map.semantic_to_display)
     expected_semantic = dict(rebuilt.semantic_to_display)
@@ -968,6 +1063,8 @@ def snapshot_from_frozen(frozen: FrozenView, model: TimelineInspectionModel) -> 
             raw["hold"] = source_bounds["duration_seconds"]
         if clip.transition is not None:
             raw["transition"] = dict(clip.transition)
+        if clip.authored_text is not None:
+            raw["text"] = {"content": clip.authored_text}
         if len(clip.asset_keys) == 1:
             raw["asset"] = clip.asset_keys[0]
         assembly_clips.append(raw)
@@ -1008,7 +1105,11 @@ def snapshot_from_frozen(frozen: FrozenView, model: TimelineInspectionModel) -> 
         media_hashes={},
         assembly_sha256="0" * 64,
         registry_sha256="0" * 64,
-        transcript_sha256=None,
+        transcript_sha256=(
+            frozen.ground_truth.get("frozen_timeline", {})
+            .get("transcript_attachment", {})
+            .get("transcript_sha256")
+        ),
         diagnostics=(),
     )
 
@@ -1066,8 +1167,50 @@ def resolve_focus(
             raise FocusResolutionError("neighbors applies only to clip focus in M1")
         return select_scope(model, kind="timeline", ref=str(parsed), context_seconds=0, neighbors=0)
     if parsed.kind in {"TS", "SP"}:
-        noun = "transcript segment" if parsed.kind == "TS" else "mapped speech occurrence"
-        raise FocusResolutionError(f"{noun} {focus_ref!r} is not available in this snapshot (M1)")
+        identity = frozen.identity_map.lookup_display(str(parsed))
+        expected = (
+            "transcript_source_segment" if parsed.kind == "TS" else "speech_occurrence"
+        )
+        if identity is None or identity[1] != expected:
+            noun = "transcript segment" if parsed.kind == "TS" else "mapped speech occurrence"
+            raise FocusResolutionError(f"{noun} {focus_ref!r} is not available in this snapshot")
+        rows = frozen.transcript_index.get("speech_occurrences", [])
+        if parsed.kind == "SP":
+            rows = [row for row in rows if row.get("qualified_ref") == str(parsed)]
+        else:
+            rows = [row for row in rows if row.get("source_ref") == str(parsed)]
+        clip_ids: list[str] = []
+        for row in rows:
+            clip_identity = frozen.identity_map.lookup_display(row.get("clip_ref"))
+            if clip_identity is not None and clip_identity[2] not in clip_ids:
+                clip_ids.append(clip_identity[2])
+        if not clip_ids:
+            return Scope(
+                "text" if parsed.kind == "TS" else "speech",
+                str(parsed),
+                None,
+                None,
+                (),
+                (),
+                0,
+                ("transcript evidence has no timeline occurrence",),
+            )
+        selected = [clip for clip in model.clips if clip.clip_id in set(clip_ids)]
+        context_frames = int(math.floor(context * model.fps + 0.5))
+        start = max(0, min(clip.mounted.start_frame for clip in selected) - context_frames)
+        end = min(
+            model.extents.composition_frames,
+            max(clip.mounted.end_frame for clip in selected) + context_frames,
+        )
+        return Scope(
+            "text" if parsed.kind == "TS" else "speech",
+            str(parsed),
+            start,
+            end,
+            tuple(clip.clip_id for clip in model.clips if clip.clip_id in set(clip_ids)),
+            tuple(clip_ids),
+            context_frames,
+        )
 
     identity = frozen.identity_map.lookup_display(str(parsed))
     if identity is None:

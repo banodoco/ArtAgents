@@ -227,6 +227,23 @@
                   "items": {"$ref": "_defs.json#/$defs/asset_qualified_ref"},
                   "uniqueItems": true
                 },
+                "mapped_speech": {
+                  "type": "array",
+                  "items": {"$ref": "_defs.json#/$defs/speech_qualified_ref"},
+                  "uniqueItems": true
+                },
+                "authored_text": {
+                  "oneOf": [
+                    {"type": "string"},
+                    {"type": "null"}
+                  ]
+                },
+                "pixel_text": {
+                  "oneOf": [
+                    {"type": "string", "const": "not_inspected"},
+                    {"type": "null"}
+                  ]
+                },
                 "emphasized": {
                   "description": "True when this clip is part of the scope's active-stack emphasis set (the focused object or the exact visual compositor stack at a timestamp instant); false for context clips. Absent on unscoped emissions.",
                   "type": "boolean"
@@ -264,6 +281,39 @@
               },
               "additionalProperties": false
             }
+          },
+          "transcript_attachment": {
+            "type": "object",
+            "required": [
+              "schema_version", "source_id", "source_version",
+              "transcript_sha256", "media_identity", "media_sha256",
+              "producer", "producer_version", "model", "integrity"
+            ],
+            "properties": {
+              "schema_version": {"type": "integer", "const": 1},
+              "source_id": {"type": "string", "minLength": 1},
+              "source_version": {"type": "string", "minLength": 1},
+              "transcript_sha256": {"$ref": "_defs.json#/$defs/raw_sha256"},
+              "media_identity": {"type": "string", "minLength": 1},
+              "media_sha256": {
+                "oneOf": [
+                  {"$ref": "_defs.json#/$defs/raw_sha256"},
+                  {"type": "null"}
+                ]
+              },
+              "producer": {"type": "string", "minLength": 1},
+              "producer_version": {
+                "oneOf": [{"type": "string", "minLength": 1}, {"type": "null"}]
+              },
+              "model": {
+                "oneOf": [{"type": "string", "minLength": 1}, {"type": "null"}]
+              },
+              "integrity": {
+                "type": "string",
+                "enum": ["ok", "missing", "hash_mismatch", "unreadable"]
+              }
+            },
+            "additionalProperties": false
           }
         },
         "additionalProperties": false

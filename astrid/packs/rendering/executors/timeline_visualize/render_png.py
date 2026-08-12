@@ -29,6 +29,9 @@ _CLIP = (183, 156, 228)  # #B79CE4
 _CLIP_EDGE = (143, 111, 208)  # #8F6FD0
 _CONTINUATION = (95, 168, 160)  # #5FA8A0
 _GAP_MARKER = (224, 164, 88)  # #E0A458
+_SPEECH = (70, 183, 200)  # #46B7C8
+_CAPTION = (231, 196, 90)  # #E7C45A
+_PIXEL_TEXT = (116, 116, 128)  # #747480
 _TICK = (138, 138, 150)  # #8A8A96
 _TEXT = (250, 250, 250)  # #FAFAFA
 _MUTED = (184, 184, 196)  # #B8B8C4
@@ -37,6 +40,9 @@ _FILL_BY_KIND = {
     "clip": _CLIP,
     "continuation": _CONTINUATION,
     "gap_marker": _GAP_MARKER,
+    "speech": _SPEECH,
+    "caption": _CAPTION,
+    "pixel_text": _PIXEL_TEXT,
 }
 
 _BADGE_KINDS = frozenset({"breadcrumb", "snapshot_badge", "scope_badge"})
@@ -51,6 +57,10 @@ _FONT_SIZE_BY_KIND = {
     "continuation": 18,
     "gap_marker": 16,
     "ruler_tick": 16,
+    "speech": 16,
+    "caption": 16,
+    "pixel_text": 16,
+    "text_lane": 16,
 }
 
 # Bundled TrueType font: repo-owned, license-safe (already tracked in the
@@ -136,7 +146,7 @@ def render_page_png(page: LayoutPage, *, scale: int = 1) -> bytes:
 
     # Lane bands: topmost-first reading order from page.objects.
     for item in page.objects:
-        if item.kind == "track_lane":
+        if item.kind in {"track_lane", "text_lane"}:
             _rect(draw, item.box, _LANE, scale=scale, outline=_LANE_EDGE)
             if item.label:
                 _label(
@@ -144,7 +154,7 @@ def render_page_png(page: LayoutPage, *, scale: int = 1) -> bytes:
                     item.box,
                     item.label,
                     scale=scale,
-                    size=_FONT_SIZE_BY_KIND["track_lane"],
+                    size=_FONT_SIZE_BY_KIND[item.kind],
                     fill=_MUTED,
                     pad_x=10,
                 )

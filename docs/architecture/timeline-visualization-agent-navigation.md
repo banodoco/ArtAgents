@@ -229,6 +229,14 @@ transition grouping mounts source `[F, F+Df)`, destination
 
 ## 10. M2 interface (what R19+ consumes)
 
+R20 identity rule: `TS` display ordinals remain lineage-local (`TL01.TS01`,
+...), while their canonical authored identity is
+`transcript:<full transcript_sha256>:segment:<declared-or-positional-id>`.
+Changing transcript bytes therefore creates a different TS identity space even
+when a fresh root happens to allocate the same display ordinal. An `SP`
+canonical identity appends its carrying clip id; every `(TS, clip)` use is a
+separate occurrence and reuse never collapses.
+
 1. This document + the eight schemas (v1) as the contract.
 2. `transcript-index.json` empty-valid shape: `sources` (TS: stable_id,
    qualified_ref, canonical_ref, asset_ref, transcript_sha256,

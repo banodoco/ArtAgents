@@ -58,6 +58,7 @@ from astrid.packs.rendering.executors.timeline_visualize.layout import (
 from astrid.packs.rendering.executors.timeline_visualize.model import build_model
 from astrid.packs.rendering.executors.timeline_visualize.navigation import (
     assign_range_ids,
+    assign_transcript_ids,
     build_identity_map,
 )
 from astrid.packs.rendering.executors.timeline_visualize.render_png import (
@@ -67,6 +68,19 @@ from astrid.packs.rendering.executors.timeline_visualize.render_svg import (
     render_page_svg_bytes,
 )
 from astrid.packs.rendering.executors.timeline_visualize.scope import select_scope
+from astrid.packs.rendering.executors.timeline_visualize.transcript_attach import (
+    TranscriptAttachment,
+    discover_attachment,
+)
+from astrid.packs.rendering.executors.timeline_visualize.transcripts import (
+    SpeechOccurrence,
+    TranscriptSegment,
+    map_occurrences,
+    normalize_transcript,
+    resolve_attachment_asset_key,
+    speech_occurrence_authored_id,
+    with_occurrence_ids,
+)
 from astrid.packs.rendering.executors.timeline_visualize.select import (
     ManagedTimeline,
     select_timeline,
@@ -308,12 +322,27 @@ def _mint_cold_range_root(
     return effective_map, replace(scope, ref=display_ref)
 
 
-def _pages_for(args: argparse.Namespace, model: Any, identity_map: Any, scope: Any) -> tuple[LayoutPage, ...]:
+def _pages_for(
+    args: argparse.Namespace,
+    model: Any,
+    identity_map: Any,
+    scope: Any,
+    *,
+    segments: list[TranscriptSegment] | None = None,
+    occurrences: list[SpeechOccurrence] | None = None,
+) -> tuple[LayoutPage, ...]:
     layouts = _LAYOUTS if args.layout == "both" else (args.layout,)
     pages = tuple(
         page
         for layout_name in layouts
-        for page in layout_timeline(model, identity_map, scope, layout=layout_name)
+        for page in layout_timeline(
+            model,
+            identity_map,
+            scope,
+            layout=layout_name,
+            transcript_segments=segments,
+            speech_occurrences=occurrences,
+        )
     )
     return tuple(
         replace(page, page_index=index, page_id=f"PG{index:03d}")
@@ -510,6 +539,111 @@ def _parent_action_index(
     return result
 
 
+def _frozen_transcript_evidence(
+    frozen: FrozenView,
+) -> tuple[
+    TranscriptAttachment | None,
+    list[TranscriptSegment],
+    list[SpeechOccurrence],
+    str | None,
+]:
+    """Rehydrate only hashed transcript facts; never reopen source content."""
+
+    timeline = frozen.ground_truth.get("frozen_timeline", {})
+    block = timeline.get("transcript_attachment") if isinstance(timeline, dict) else None
+    if not isinstance(block, dict):
+        return None, [], [], None
+    attachment = TranscriptAttachment(
+        source_id=block["source_id"],
+        source_version=block["source_version"],
+        transcript_sha256=block["transcript_sha256"],
+        media_identity=block["media_identity"],
+        media_sha256=block["media_sha256"],
+        producer=block["producer"],
+        producer_version=block["producer_version"],
+        model=block["model"],
+        schema_version=block["schema_version"],
+        integrity=block["integrity"],
+    )
+    segments: list[TranscriptSegment] = []
+    for row in frozen.transcript_index.get("sources", []):
+        words = row.get("words")
+        segments.append(
+            TranscriptSegment(
+                segment_id=row["source_segment_id"],
+                source_start=float(row["source_interval"]["start_seconds"]),
+                source_end=float(row["source_interval"]["end_seconds"]),
+                text=row["text"],
+                speaker=row["speaker"],
+                word_timing=(
+                    tuple(
+                        (
+                            float(word["start_seconds"]),
+                            float(word["end_seconds"]),
+                            word["text"],
+                        )
+                        for word in words
+                    )
+                    if isinstance(words, list)
+                    else None
+                ),
+                speaker_state=row["speaker_state"],
+            )
+        )
+    asset_key: str | None = None
+    occurrences: list[SpeechOccurrence] = []
+    for row in frozen.transcript_index.get("speech_occurrences", []):
+        source_identity = frozen.identity_map.lookup_display(row["source_ref"])
+        clip_identity = frozen.identity_map.lookup_display(row["clip_ref"])
+        asset_identity = frozen.identity_map.lookup_display(row["asset_ref"])
+        if source_identity is None or clip_identity is None or asset_identity is None:
+            raise ValueError("frozen transcript occurrence has an unresolved TS/CL/AS ref")
+        source_row = next(
+            item
+            for item in frozen.transcript_index["sources"]
+            if item["qualified_ref"] == row["source_ref"]
+        )
+        authored = row["authored_mapping"]
+        effective = row["effective_mapping"]
+        authored_interval = authored["interval"]
+        effective_interval = effective["interval"]
+        if authored_interval is None:
+            continue
+        asset_key = asset_identity[2]
+        occurrences.append(
+            SpeechOccurrence(
+                occurrence_id=row["qualified_ref"],
+                segment_id=source_row["source_segment_id"],
+                clip_id=clip_identity[2],
+                timeline_start=float(authored_interval["start_seconds"]),
+                timeline_end=float(authored_interval["end_seconds"]),
+                clip_start=0.0,
+                clip_end=float(authored_interval["end_seconds"])
+                - float(authored_interval["start_seconds"]),
+                effective_start=(
+                    float(effective_interval["start_seconds"])
+                    if effective_interval is not None
+                    else None
+                ),
+                effective_end=(
+                    float(effective_interval["end_seconds"])
+                    if effective_interval is not None
+                    else None
+                ),
+                mapping_state=authored["state"],
+                effective_state=effective["state"],
+                asset_key=asset_identity[2],
+            )
+        )
+    if asset_key is None and frozen.transcript_index.get("sources"):
+        asset_identity = frozen.identity_map.lookup_display(
+            frozen.transcript_index["sources"][0]["asset_ref"]
+        )
+        if asset_identity is not None:
+            asset_key = asset_identity[2]
+    return attachment, segments, occurrences, asset_key
+
+
 def _materialize_view(
     *,
     args: argparse.Namespace,
@@ -521,8 +655,19 @@ def _materialize_view(
     scope: Any,
     pack_snapshot: Any | None = None,
     frozen_parent: FrozenView | None = None,
+    transcript_attachment: TranscriptAttachment | None = None,
+    transcript_segments: list[TranscriptSegment] | None = None,
+    speech_occurrences: list[SpeechOccurrence] | None = None,
+    transcript_asset_key: str | None = None,
 ) -> PackLayout:
-    pages = _pages_for(args, model, identity_map, scope)
+    pages = _pages_for(
+        args,
+        model,
+        identity_map,
+        scope,
+        segments=transcript_segments,
+        occurrences=speech_occurrences,
+    )
     formats = _normalized_formats(args.format)
     png_bytes = (
         {page.page_id: render_page_png(page) for page in pages}
@@ -548,9 +693,22 @@ def _materialize_view(
             sample_root=Path(raw_sample_root),
             pages=pages,
         )
-        ground_truth = emit_ground_truth(model, identity_map, snapshot, scope)
+        ground_truth = emit_ground_truth(
+            model,
+            identity_map,
+            snapshot,
+            scope,
+            transcript_attachment,
+            speech_occurrences,
+        )
         action_index = emit_action_index(
-            model, identity_map, snapshot, pack_root / "manifest.json", scope
+            model,
+            identity_map,
+            snapshot,
+            pack_root / "manifest.json",
+            scope,
+            transcript_attachment,
+            speech_occurrences,
         )
         from_view: str | None = None
         focus: str | None = None
@@ -590,12 +748,27 @@ def _materialize_view(
             transcript_index=(
                 deepcopy(frozen_parent.transcript_index)
                 if frozen_parent is not None
-                else emit_transcript_index(model, identity_map, snapshot)
+                else emit_transcript_index(
+                    model,
+                    identity_map,
+                    snapshot,
+                    transcript_attachment,
+                    transcript_segments,
+                    speech_occurrences,
+                    transcript_asset_key,
+                )
             ),
             diagnostics=emit_diagnostics(model, identity_map, snapshot, scope),
             reading_guide=emit_reading_guide(model, identity_map, snapshot),
             structure_md=(
-                emit_structure_md(model, identity_map, snapshot)
+                emit_structure_md(
+                    model,
+                    identity_map,
+                    snapshot,
+                    transcript_attachment,
+                    transcript_segments,
+                    speech_occurrences,
+                )
                 if "md" in formats
                 else None
             ),
@@ -624,13 +797,51 @@ def _render_one(
         project_root=project_root,
         retries=2,
     )
+    attachment = discover_attachment(
+        project_root,
+        timeline_dir=selected.timeline_dir,
+    )
+    if attachment is not None and attachment.integrity == "ok":
+        snapshot = replace(snapshot, transcript_sha256=attachment.transcript_sha256)
     model = build_model(snapshot, project_root=project_root)
+    transcript_segments: list[TranscriptSegment] = []
+    speech_occurrences: list[SpeechOccurrence] = []
+    transcript_asset_key: str | None = None
+    if attachment is not None and attachment.integrity == "ok" and attachment.file is not None:
+        transcript_asset_key = resolve_attachment_asset_key(attachment, model)
+        if transcript_asset_key is not None:
+            transcript_segments = normalize_transcript(attachment, attachment.file)
+            speech_occurrences = map_occurrences(
+                transcript_segments, model, asset_key=transcript_asset_key
+            )
     identity_map = build_identity_map(
         model,
         root_sns=model.snapshot_sns,
         timeline_uuid=model.timeline_uuid,
         timeline_ulid=model.timeline_ulid,
     )
+    if transcript_segments:
+        identity_map = assign_transcript_ids(
+            identity_map,
+            transcript_segments,
+            speech_occurrences,
+            transcript_sha256=attachment.transcript_sha256,
+        )
+        speech_occurrences = with_occurrence_ids(
+            speech_occurrences,
+            [
+                identity_map.lookup_semantic(
+                    "speech_occurrence",
+                    speech_occurrence_authored_id(
+                        attachment.transcript_sha256,
+                        occurrence.segment_id,
+                        occurrence.clip_id,
+                    ),
+                )
+                or occurrence.occurrence_id
+                for occurrence in speech_occurrences
+            ],
+        )
     scope = _scope_for(args, model)
     identity_map, scope = _mint_cold_range_root(model, identity_map, scope)
     return _materialize_view(
@@ -641,6 +852,10 @@ def _render_one(
         model=model,
         identity_map=identity_map,
         scope=scope,
+        transcript_attachment=attachment,
+        transcript_segments=transcript_segments,
+        speech_occurrences=speech_occurrences,
+        transcript_asset_key=transcript_asset_key,
     )
 
 
@@ -666,15 +881,53 @@ def refresh_root(
         project_root=project_root,
         retries=2,
     )
+    attachment = discover_attachment(
+        project_root,
+        timeline_dir=timeline_dir,
+    )
+    if attachment is not None and attachment.integrity == "ok":
+        snapshot = replace(snapshot, transcript_sha256=attachment.transcript_sha256)
     if snapshot.timeline_id != frozen.timeline_uuid or snapshot.timeline_ulid != frozen.timeline_ulid:
         raise ValueError("current managed timeline identity disagrees with the frozen lineage")
     model = build_model(snapshot, project_root=project_root)
+    transcript_segments: list[TranscriptSegment] = []
+    speech_occurrences: list[SpeechOccurrence] = []
+    transcript_asset_key: str | None = None
+    if attachment is not None and attachment.integrity == "ok" and attachment.file is not None:
+        transcript_asset_key = resolve_attachment_asset_key(attachment, model)
+        if transcript_asset_key is not None:
+            transcript_segments = normalize_transcript(attachment, attachment.file)
+            speech_occurrences = map_occurrences(
+                transcript_segments, model, asset_key=transcript_asset_key
+            )
     identity_map = build_identity_map(
         model,
         root_sns=model.snapshot_sns,
         timeline_uuid=model.timeline_uuid,
         timeline_ulid=model.timeline_ulid,
     )
+    if transcript_segments:
+        identity_map = assign_transcript_ids(
+            identity_map,
+            transcript_segments,
+            speech_occurrences,
+            transcript_sha256=attachment.transcript_sha256,
+        )
+        speech_occurrences = with_occurrence_ids(
+            speech_occurrences,
+            [
+                identity_map.lookup_semantic(
+                    "speech_occurrence",
+                    speech_occurrence_authored_id(
+                        attachment.transcript_sha256,
+                        occurrence.segment_id,
+                        occurrence.clip_id,
+                    ),
+                )
+                or occurrence.occurrence_id
+                for occurrence in speech_occurrences
+            ],
+        )
     return _materialize_view(
         args=args,
         project_root=project_root,
@@ -683,6 +936,10 @@ def refresh_root(
         model=model,
         identity_map=identity_map,
         scope=select_scope(model, kind="timeline"),
+        transcript_attachment=attachment,
+        transcript_segments=transcript_segments,
+        speech_occurrences=speech_occurrences,
+        transcript_asset_key=transcript_asset_key,
     )
 
 
@@ -785,6 +1042,12 @@ def execute(argv: list[str] | None = None) -> dict[str, Any]:
         else:
             model = model_from_frozen(frozen)
             snapshot = snapshot_from_frozen(frozen, model)
+            (
+                transcript_attachment,
+                transcript_segments,
+                speech_occurrences,
+                transcript_asset_key,
+            ) = _frozen_transcript_evidence(frozen)
             scope = resolve_focus(
                 frozen,
                 args.focus,
@@ -801,6 +1064,10 @@ def execute(argv: list[str] | None = None) -> dict[str, Any]:
                 scope=scope,
                 pack_snapshot={"snapshots": deepcopy(frozen.manifest["snapshots"])},
                 frozen_parent=frozen,
+                transcript_attachment=transcript_attachment,
+                transcript_segments=transcript_segments,
+                speech_occurrences=speech_occurrences,
+                transcript_asset_key=transcript_asset_key,
             )
         manifest_path = layout.manifest_path
         pages = list(layout.pages)

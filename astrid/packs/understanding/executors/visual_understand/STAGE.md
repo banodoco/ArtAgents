@@ -34,6 +34,29 @@ Schema file may be either the raw JSON schema or an object of the form
 `{ "name": "<id>", "schema": {...}, "strict": true }`. If you pass the raw
 schema, the name defaults to `"response"` and strict defaults to true.
 
+## Ordered multi-image evidence API
+
+Evaluation gates that must preserve original page resolution and order use the
+additive Python API in `visual_understand.run`:
+
+```python
+evidence = understand_ordered(
+    ordered_png_paths,
+    prompt=reading_guide,
+    model="gpt-5.6-sol",  # explicit provider id; aliases are rejected
+    settings={"detail": "high", "max_output_tokens": 700, "cost_ceiling": 12},
+    structured=answer_schema,
+)
+artifact_path.write_bytes(evidence.to_json_bytes())
+```
+
+This sends one Responses API request with one `input_image` block per source
+file, in caller order. It never enters the crop/contact-sheet pipeline. The
+returned `OrderedImageEvidence` contains the exact paths and byte hashes,
+prompt hash, resolved settings and ceiling, requested and returned model ids,
+response id, usage, and client-validated answers. Its canonical JSON excludes
+wall-clock metadata and is suitable for an ignorable run artifact.
+
 ## Use cases
 
 - **VLM bucket-judge / caption with locked vocab.** Generate a schema whose

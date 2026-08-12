@@ -9,17 +9,22 @@ from astrid.core.pack.entrypoint import guard_canonical_entrypoint
 guard_canonical_entrypoint('understanding.visual_understand')
 import argparse
 import base64
+import hashlib
 import json
 import math
 import mimetypes
 import subprocess
 import sys
 import time
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+
+import jsonschema
 
 from astrid.core._shared.result_manifest import build_manifest, write_manifest
 from astrid.core.cli_choices import add_choice_arg
@@ -35,6 +40,73 @@ MODEL_PRESETS = {
 }
 DEFAULT_MODE = "fast"
 DEFAULT_MAX_IMAGES = 20
+DEFAULT_ORDERED_SETTINGS: dict[str, Any] = {
+    "cost_ceiling": DEFAULT_MAX_IMAGES,
+    "detail": "high",
+    "max_output_tokens": 700,
+    "timeout": 120,
+}
+_ORDERED_LOCAL_SETTINGS = frozenset({"cost_ceiling", "detail", "timeout"})
+_ORDERED_RESERVED_SETTINGS = frozenset({"input", "model", "stream", "structured", "text"})
+
+
+def _canonical_json(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+
+
+def _canonical_json_copy(value: Any, *, label: str) -> Any:
+    try:
+        return json.loads(_canonical_json(value))
+    except (TypeError, ValueError) as exc:
+        raise AstridError(
+            f"{label} must contain only JSON-serializable values: {exc}",
+            recovery_command=f"replace non-JSON values in {label} and retry",
+        ) from exc
+
+
+@dataclass(frozen=True)
+class OrderedImageEvidence:
+    """Provenance and validated answers from one ordered-image request."""
+
+    prompt: str
+    prompt_sha256: str
+    image_paths: tuple[str, ...]
+    image_hashes: tuple[str, ...]
+    model: str
+    settings: Mapping[str, Any]
+    response_id: str | None
+    returned_model: str | None
+    usage: Mapping[str, Any] | None
+    answers: Mapping[str, Any]
+    cost_ceiling: int
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a deterministic, JSON-native representation of this evidence."""
+
+        payload = {
+            "answers": dict(self.answers),
+            "cost_ceiling": self.cost_ceiling,
+            "image_hashes": list(self.image_hashes),
+            "image_paths": list(self.image_paths),
+            "model": self.model,
+            "prompt": self.prompt,
+            "prompt_sha256": self.prompt_sha256,
+            "response_id": self.response_id,
+            "returned_model": self.returned_model,
+            "settings": dict(self.settings),
+            "usage": dict(self.usage) if self.usage is not None else None,
+        }
+        return _canonical_json_copy(payload, label="ordered image evidence")
+
+    def to_json(self) -> str:
+        """Serialize evidence as canonical JSON suitable for a run artifact."""
+
+        return _canonical_json(self.to_dict())
+
+    def to_json_bytes(self) -> bytes:
+        """Serialize evidence to deterministic UTF-8 bytes."""
+
+        return self.to_json().encode("utf-8")
 
 
 def _pil():
@@ -292,6 +364,47 @@ def _response_text(response: dict[str, Any]) -> str:
     return "\n".join(chunks).strip()
 
 
+def _send_responses_request(
+    *,
+    api_key: str,
+    payload: Mapping[str, Any],
+    timeout: int,
+) -> dict[str, Any]:
+    """POST one Responses API payload.
+
+    This narrow transport seam is shared by the legacy single/contact-sheet
+    path and the additive ordered-image path, and is intentionally easy to
+    replace in hermetic tests.
+    """
+
+    request = Request(
+        API_URL,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            decoded = json.loads(response.read().decode("utf-8"))
+    except HTTPError as exc:
+        detail_text = exc.read().decode("utf-8", errors="replace")
+        raise AstridError(
+            f"OpenAI API error {exc.code}: {detail_text}",
+            recovery_command="verify the API key and model name, then retry",
+        ) from exc
+    except URLError as exc:
+        raise AstridError(
+            f"Network error: {exc}",
+            recovery_command="check network connectivity and retry",
+        ) from exc
+    if not isinstance(decoded, dict):
+        raise AstridError(
+            "OpenAI Responses API returned a non-object response",
+            recovery_command="retry the request and inspect the provider response",
+        )
+    return decoded
+
+
 def _call_responses_api(
     *,
     api_key: str,
@@ -330,26 +443,246 @@ def _call_responses_api(
                 "strict": response_schema.get("strict", True),
             }
         }
-    request = Request(
-        API_URL,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-        method="POST",
-    )
+    return _send_responses_request(api_key=api_key, payload=payload, timeout=timeout)
+
+
+def _normalize_ordered_settings(settings: Mapping[str, Any] | None) -> dict[str, Any]:
+    supplied = dict(settings or {})
+    if any(not isinstance(key, str) for key in supplied):
+        raise AstridError(
+            "ordered-image setting names must be strings",
+            recovery_command="use string keys for ordered-image settings and retry",
+        )
+    forbidden = sorted(_ORDERED_RESERVED_SETTINGS.intersection(supplied))
+    if forbidden:
+        raise AstridError(
+            f"ordered-image settings may not override reserved request fields: {', '.join(forbidden)}",
+            recovery_command="pass model and structured schema through their dedicated arguments",
+        )
+
+    normalized = {**DEFAULT_ORDERED_SETTINGS, **supplied}
+    detail = normalized["detail"]
+    if detail not in {"auto", "high", "low"}:
+        raise AstridError(
+            f"invalid ordered-image detail setting: {detail!r}",
+            valid_options=("auto", "high", "low"),
+            recovery_command="set settings['detail'] to auto, high, or low",
+        )
+
+    for key in ("cost_ceiling", "max_output_tokens", "timeout"):
+        value = normalized[key]
+        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+            raise AstridError(
+                f"ordered-image setting {key!r} must be a positive integer",
+                recovery_command=f"set settings['{key}'] to a positive integer",
+            )
+    if normalized["cost_ceiling"] > DEFAULT_MAX_IMAGES:
+        raise AstridError(
+            f"ordered-image cost_ceiling exceeds the hard maximum of {DEFAULT_MAX_IMAGES}",
+            recovery_command=f"set settings['cost_ceiling'] to at most {DEFAULT_MAX_IMAGES}",
+        )
+    return _canonical_json_copy(normalized, label="ordered-image settings")
+
+
+def _ordered_schema_format(
+    structured: Mapping[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    wrapper = _canonical_json_copy(dict(structured), label="structured schema")
+    schema = wrapper.get("schema", wrapper)
+    if not isinstance(schema, dict):
+        raise AstridError(
+            "structured schema must be a JSON object",
+            recovery_command="pass a raw JSON schema or {name, schema, strict} wrapper",
+        )
+    name = wrapper.get("name", "response") if "schema" in wrapper else "response"
+    strict = wrapper.get("strict", True) if "schema" in wrapper else True
+    if not isinstance(name, str) or not name:
+        raise AstridError(
+            "structured schema name must be a non-empty string",
+            recovery_command="provide a non-empty JSON-schema response name",
+        )
+    if not isinstance(strict, bool):
+        raise AstridError(
+            "structured schema strict must be a boolean",
+            recovery_command="set structured['strict'] to true or false",
+        )
     try:
-        with urlopen(request, timeout=timeout) as response:
-            return json.loads(response.read().decode("utf-8"))
-    except HTTPError as exc:
-        detail_text = exc.read().decode("utf-8", errors="replace")
+        validator_class = jsonschema.validators.validator_for(schema)
+        validator_class.check_schema(schema)
+    except jsonschema.SchemaError as exc:
         raise AstridError(
-            f"OpenAI API error {exc.code}: {detail_text}",
-            recovery_command="verify the API key and model name, then retry",
+            f"invalid structured JSON schema: {exc.message}",
+            recovery_command="fix the structured JSON schema and retry",
         ) from exc
-    except URLError as exc:
+    return (
+        {"name": name, "schema": schema, "strict": strict, "type": "json_schema"},
+        schema,
+    )
+
+
+def _assert_exact_ordered_images(payload: Mapping[str, Any], expected_urls: Sequence[str]) -> None:
+    inputs = payload.get("input")
+    if not isinstance(inputs, list) or len(inputs) != 1 or not isinstance(inputs[0], dict):
         raise AstridError(
-            f"Network error: {exc}",
-            recovery_command="check network connectivity and retry",
+            "ordered-image request must contain exactly one user input",
+            recovery_command="repair the ordered-image request builder before retrying",
+        )
+    content = inputs[0].get("content")
+    if not isinstance(content, list):
+        raise AstridError(
+            "ordered-image request content is malformed",
+            recovery_command="repair the ordered-image request builder before retrying",
+        )
+    image_blocks = [block for block in content if block.get("type") == "input_image"]
+    actual_urls = tuple(block.get("image_url") for block in image_blocks)
+    if len(image_blocks) != len(expected_urls) or actual_urls != tuple(expected_urls):
+        raise AstridError(
+            "ordered-image request did not preserve the exact image count and order",
+            recovery_command="repair the ordered-image request builder before retrying",
+        )
+
+
+def _parse_ordered_answers(
+    response: dict[str, Any],
+    *,
+    schema: dict[str, Any] | None,
+) -> dict[str, Any]:
+    response_text = _response_text(response)
+    try:
+        answers = json.loads(response_text)
+    except json.JSONDecodeError as exc:
+        raise AstridError(
+            f"ordered-image response is not valid JSON: {exc.msg}",
+            recovery_command="retry with a structured response schema",
         ) from exc
+    if not isinstance(answers, dict):
+        raise AstridError(
+            "ordered-image response must be a JSON object",
+            recovery_command="use a structured schema whose root type is object",
+        )
+    if schema is not None:
+        validator_class = jsonschema.validators.validator_for(schema)
+        try:
+            validator_class(schema).validate(answers)
+        except jsonschema.ValidationError as exc:
+            raise AstridError(
+                f"ordered-image response failed client-side schema validation: {exc.message}",
+                recovery_command="reject this response before scoring and retry the evaluation",
+            ) from exc
+    return _canonical_json_copy(answers, label="ordered-image answers")
+
+
+def understand_ordered(
+    images: Sequence[Path],
+    *,
+    prompt: str,
+    model: str,
+    settings: Mapping[str, Any] | None = None,
+    structured: Mapping[str, Any] | None = None,
+) -> OrderedImageEvidence:
+    """Send exact image bytes as separate, ordered inputs in one request."""
+
+    if not isinstance(model, str) or not model or model != model.strip():
+        raise AstridError(
+            "ordered-image understanding requires an explicit pinned model id",
+            recovery_command="pass the exact provider model id, for example gpt-5.6-sol",
+        )
+    if model.casefold() in MODEL_PRESETS:
+        raise AstridError(
+            f"ordered-image understanding rejects model alias {model!r}",
+            recovery_command="replace the alias with an explicit pinned provider model id",
+        )
+    if not isinstance(prompt, str) or not prompt:
+        raise AstridError(
+            "ordered-image understanding requires a non-empty prompt",
+            recovery_command="provide the evaluator prompt and retry",
+        )
+
+    resolved_settings = _normalize_ordered_settings(settings)
+    cost_ceiling = resolved_settings["cost_ceiling"]
+    image_paths = tuple(Path(path) for path in images)
+    if not image_paths:
+        raise AstridError(
+            "ordered-image understanding requires at least one image",
+            recovery_command="provide the ordered PNG bundle and retry",
+        )
+    if len(image_paths) > cost_ceiling:
+        raise AstridError(
+            f"ordered-image cost ceiling exceeded: {len(image_paths)} images > {cost_ceiling}",
+            recovery_command="reduce the image bundle or explicitly raise its bounded cost_ceiling",
+        )
+
+    image_bytes: list[bytes] = []
+    for path in image_paths:
+        if not path.is_file():
+            raise AstridError(
+                f"ordered image not found: {path}",
+                recovery_command="provide an existing image path and retry",
+            )
+        image_bytes.append(path.read_bytes())
+    image_hashes = tuple(hashlib.sha256(data).hexdigest() for data in image_bytes)
+
+    content: list[dict[str, Any]] = [{"type": "input_text", "text": prompt}]
+    expected_urls: list[str] = []
+    for path, data in zip(image_paths, image_bytes, strict=True):
+        media_type = mimetypes.guess_type(path.name)[0] or "image/png"
+        image_url = f"data:{media_type};base64,{base64.b64encode(data).decode('ascii')}"
+        expected_urls.append(image_url)
+        content.append(
+            {
+                "type": "input_image",
+                "image_url": image_url,
+                "detail": resolved_settings["detail"],
+            }
+        )
+
+    payload: dict[str, Any] = {
+        "input": [{"content": content, "role": "user"}],
+        "model": model,
+    }
+    for key, value in resolved_settings.items():
+        if key not in _ORDERED_LOCAL_SETTINGS:
+            payload[key] = value
+
+    schema: dict[str, Any] | None = None
+    evidence_settings = dict(resolved_settings)
+    if structured is not None:
+        response_format, schema = _ordered_schema_format(structured)
+        payload["text"] = {"format": response_format}
+        evidence_settings["structured"] = response_format
+
+    _assert_exact_ordered_images(payload, expected_urls)
+    response = _send_responses_request(
+        api_key=load_api_key(),
+        payload=payload,
+        timeout=resolved_settings["timeout"],
+    )
+    answers = _parse_ordered_answers(response, schema=schema)
+    usage = response.get("usage")
+    if usage is not None and not isinstance(usage, Mapping):
+        raise AstridError(
+            "OpenAI Responses API returned malformed usage provenance",
+            recovery_command="retry the request and inspect the provider response",
+        )
+    response_id = response.get("id")
+    returned_model = response.get("model")
+    return OrderedImageEvidence(
+        prompt=prompt,
+        prompt_sha256=hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
+        image_paths=tuple(str(path) for path in image_paths),
+        image_hashes=image_hashes,
+        model=model,
+        settings=_canonical_json_copy(evidence_settings, label="ordered-image settings"),
+        response_id=response_id if isinstance(response_id, str) else None,
+        returned_model=returned_model if isinstance(returned_model, str) else None,
+        usage=(
+            _canonical_json_copy(dict(usage), label="ordered-image usage")
+            if usage is not None
+            else None
+        ),
+        answers=answers,
+        cost_ceiling=cost_ceiling,
+    )
 
 
 def _collect_inputs(args: argparse.Namespace) -> tuple[list[tuple[Path, str]], Path]:

@@ -26,6 +26,9 @@ _CLIP = "#B79CE4"
 _CLIP_EDGE = "#8F6FD0"
 _CONTINUATION = "#5FA8A0"
 _GAP_MARKER = "#E0A458"
+_SPEECH = "#46B7C8"
+_CAPTION = "#E7C45A"
+_PIXEL_TEXT = "#747480"
 _TICK = "#8A8A96"
 _TEXT = "#FAFAFA"
 _MUTED = "#B8B8C4"
@@ -39,6 +42,9 @@ _FILL_BY_KIND = {
     "clip": _CLIP,
     "continuation": _CONTINUATION,
     "gap_marker": _GAP_MARKER,
+    "speech": _SPEECH,
+    "caption": _CAPTION,
+    "pixel_text": _PIXEL_TEXT,
 }
 
 _BADGE_KINDS = frozenset({"breadcrumb", "snapshot_badge", "scope_badge"})
@@ -53,6 +59,10 @@ _FONT_SIZE_BY_KIND = {
     "continuation": 18,
     "gap_marker": 16,
     "ruler_tick": 16,
+    "speech": 16,
+    "caption": 16,
+    "pixel_text": 16,
+    "text_lane": 16,
 }
 
 
@@ -113,14 +123,14 @@ def render_page_svg(page: LayoutPage) -> str:
 
     # Lane bands: topmost-first reading order from page.objects.
     for item in page.objects:
-        if item.kind == "track_lane":
+        if item.kind in {"track_lane", "text_lane"}:
             parts.append(_rect(item.box, _LANE, stroke=_LANE_EDGE))
             if item.label:
                 parts.append(
                     _text(
                         item.box,
                         item.label,
-                        size=_FONT_SIZE_BY_KIND["track_lane"],
+                        size=_FONT_SIZE_BY_KIND[item.kind],
                         fill=_MUTED,
                         baseline_ratio=0.38,
                         pad_x=10.0,

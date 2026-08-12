@@ -39,7 +39,7 @@ from __future__ import annotations
 
 import math
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Mapping, Sequence
 
 from astrid.packs.rendering.executors.timeline_visualize.model import (
@@ -52,6 +52,10 @@ from astrid.packs.rendering.executors.timeline_visualize.navigation import (
     assign_range_ids,
 )
 from astrid.packs.rendering.executors.timeline_visualize.scope import Scope
+from astrid.packs.rendering.executors.timeline_visualize.transcripts import (
+    SpeechOccurrence,
+    TranscriptSegment,
+)
 
 PAGE_W = 1920
 PAGE_H = 1080
@@ -84,6 +88,9 @@ _Z_CLIP_BASE = 1_000_000
 _Z_STRIDE = 1_000_000
 _Z_ANNOTATION = 20_000_000
 _Z_CHROME = 30_000_000
+_TEXT_LANE_Y = 844.0
+_TEXT_LANE_H = 54.0
+_TEXT_LANE_GAP = 8.0
 
 
 @dataclass(frozen=True)
@@ -179,6 +186,8 @@ def _resolved_scope_ref(
         "range": "range",
         "clip": "clip",
         "asset": "asset",
+        "text": "transcript_source_segment",
+        "speech": "speech_occurrence",
     }.get(scope.kind)
     if semantic_kind is None:
         return timeline_ref
@@ -1063,6 +1072,125 @@ def _layout_linear(
     return tuple(pages)
 
 
+def _excerpt(value: str, limit: int = 72) -> str:
+    compact = " ".join(value.split())
+    return compact if len(compact) <= limit else compact[: limit - 1] + "…"
+
+
+def _with_text_lanes(
+    pages: tuple[LayoutPage, ...],
+    model: TimelineInspectionModel,
+    identity_map: IdentityMap,
+    segments: Sequence[TranscriptSegment],
+    occurrences: Sequence[SpeechOccurrence],
+) -> tuple[LayoutPage, ...]:
+    """Overlay three provenance-distinct compact evidence lanes on each page."""
+
+    segment_by_id = {item.segment_id: item for item in segments}
+    clip_by_id = {item.clip_id: item for item in model.clips}
+    base_lane = len(model.tracks)
+    result: list[LayoutPage] = []
+    for page in pages:
+        start_frame, end_frame = page.scope_bounds_frames
+        span = max(1, end_frame - start_frame)
+        objects = list(page.objects)
+        for offset, label in enumerate(("SPEECH", "CAPTION", "OTHER TEXT · not_inspected")):
+            y = _TEXT_LANE_Y + offset * (_TEXT_LANE_H + _TEXT_LANE_GAP)
+            objects.append(
+                LayoutObject(
+                    _timeline_ref(model, identity_map),
+                    "text_lane",
+                    Box(40.0, y, 175.0, _TEXT_LANE_H),
+                    base_lane + offset,
+                    _Z_LANE + base_lane + offset,
+                    label,
+                    None,
+                )
+            )
+
+        def evidence_box(start: float, end: float, lane_offset: int) -> Box | None:
+            first = max(start_frame, int(math.floor(start * model.fps + 0.5)))
+            last = min(end_frame, int(math.floor(end * model.fps + 0.5)))
+            if last <= first:
+                return None
+            x = _PLOT_X + ((first - start_frame) / span) * _PLOT_W
+            width = max(_MIN_CLIP_W, ((last - first) / span) * _PLOT_W)
+            return Box(
+                x,
+                _TEXT_LANE_Y + lane_offset * (_TEXT_LANE_H + _TEXT_LANE_GAP) + 6.0,
+                min(width, _PLOT_X + _PLOT_W - x),
+                _TEXT_LANE_H - 12.0,
+            )
+
+        for occurrence in occurrences:
+            start = occurrence.effective_start
+            end = occurrence.effective_end
+            if start is None or end is None:
+                start, end = occurrence.timeline_start, occurrence.timeline_end
+            box = evidence_box(start, end, 0)
+            segment = segment_by_id.get(occurrence.segment_id)
+            if box is None or segment is None:
+                continue
+            objects.append(
+                LayoutObject(
+                    occurrence.occurrence_id,
+                    "speech",
+                    box,
+                    base_lane,
+                    _Z_CLIP_BASE + 10,
+                    f"{occurrence.occurrence_id} · SPEECH · {_excerpt(segment.text)}",
+                    None if box.w >= 72 else "speech box is too narrow for excerpt",
+                )
+            )
+        visual_tracks = {track.track_id for track in model.tracks if track.kind == "visual"}
+        for clip in model.clips:
+            clip_ref = _clip_ref(identity_map, clip)
+            if clip.authored_text is not None:
+                box = evidence_box(
+                    clip.frames.start_frame / model.fps,
+                    clip.frames.end_frame / model.fps,
+                    1,
+                )
+                if box is not None:
+                    objects.append(
+                        LayoutObject(
+                            clip_ref,
+                            "caption",
+                            box,
+                            base_lane + 1,
+                            _Z_CLIP_BASE + 20,
+                            f"{clip_ref} · CAPTION · {_excerpt(clip.authored_text)}",
+                            None if box.w >= 72 else "caption box is too narrow for excerpt",
+                        )
+                    )
+            elif clip.track_id in visual_tracks:
+                box = evidence_box(
+                    clip.frames.start_frame / model.fps,
+                    clip.frames.end_frame / model.fps,
+                    2,
+                )
+                if box is not None:
+                    objects.append(
+                        LayoutObject(
+                            clip_ref,
+                            "pixel_text",
+                            box,
+                            base_lane + 2,
+                            _Z_CLIP_BASE + 30,
+                            f"{clip_ref} · OTHER TEXT · not_inspected",
+                            None if box.w >= 72 else "pixel-text state box is too narrow",
+                        )
+                    )
+        result.append(
+            replace(
+                page,
+                objects=tuple(objects),
+                reading_order=tuple(item.display_id for item in objects),
+            )
+        )
+    return tuple(result)
+
+
 def layout_timeline(
     model: TimelineInspectionModel,
     identity_map: IdentityMap,
@@ -1070,6 +1198,8 @@ def layout_timeline(
     *,
     layout: str,
     max_objects_per_page: int = 24,
+    transcript_segments: Sequence[TranscriptSegment] | None = None,
+    speech_occurrences: Sequence[SpeechOccurrence] | None = None,
 ) -> tuple[LayoutPage, ...]:
     """Lay out one cold scope in the requested deterministic reading.
 
@@ -1096,19 +1226,27 @@ def layout_timeline(
 
     scope_ref = _resolved_scope_ref(model, identity_map, scope)
     if layout == "time-scaled":
-        return _layout_time_scaled(
+        pages = _layout_time_scaled(
             model,
             identity_map,
             scope,
             scope_ref,
             max_objects_per_page,
         )
-    return _layout_linear(
+    else:
+        pages = _layout_linear(
+            model,
+            identity_map,
+            scope,
+            scope_ref,
+            max_objects_per_page,
+        )
+    return _with_text_lanes(
+        pages,
         model,
         identity_map,
-        scope,
-        scope_ref,
-        max_objects_per_page,
+        transcript_segments or (),
+        speech_occurrences or (),
     )
 
 
@@ -1205,7 +1343,11 @@ def _semantic_layout_objects(
     page: LayoutPage,
     identity_map: IdentityMap,
 ) -> list[LayoutObject]:
-    expected_semantic_kind = {"clip": "clip", "asset_card": "asset"}
+    expected_semantic_kind = {
+        "clip": "clip",
+        "asset_card": "asset",
+        "speech": "speech_occurrence",
+    }
     result: list[LayoutObject] = []
     seen: set[str] = set()
     for item in page.objects:

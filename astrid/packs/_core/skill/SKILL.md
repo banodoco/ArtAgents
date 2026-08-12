@@ -503,7 +503,6 @@ Every project has a `plan.md` at its root — a per-project markdown doc for liv
 | `rendering.sprite_sheet` | Generate, slice, and preview GPT Image sprite sheets for batch image work. |
 | `rendering.timeline_storyboard` | Build a static visual storyboard of image inputs associated with timeline shots. |
 | `rendering.timeline_visualize` | Build a deterministic, agent-navigable evidence pack from managed timeline event logs. |
->>>>>>> d30440a8 (feat(timeline_visualize): B5 — verified sources, evidence pack, executor packaging)
 | `runpod.exec` | Execute a script on an existing RunPod pod and download artifacts. |
 | `runpod.provision` | Provision a RunPod GPU pod and emit a pod handle for later exec/teardown. |
 | `runpod.pull` | Pull artifacts from an existing RunPod pod into local storage. |
@@ -563,7 +562,6 @@ Every project has a `plan.md` at its root — a per-project markdown doc for liv
 | `effects/text-card` | Anchored text card overlay with built-in fade in/out. |
 | `effects/vibe-comfy-asset-overlay` | Asset-driven Vibe Comfy overlay with procedural noodle. |
 | `effects/vibe-comfy-bumper` | Procedural Remotion bumper for Vibe Comfy. |
->>>>>>> d30440a8 (feat(timeline_visualize): B5 — verified sources, evidence pack, executor packaging)
 | `transitions/cross-fade` | Cross fade transition. |
 | `transitions/fade` | Fade-through-black transition. |
 

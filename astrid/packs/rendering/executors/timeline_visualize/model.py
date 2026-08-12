@@ -155,6 +155,10 @@ class ClipModel:
     # preserves direct ``asset`` / legacy ``source`` references without keeping
     # the whole assembly clip alive.
     asset_keys: tuple[str, ...] = ()
+    # Authored text is preserved only from an explicit timeline text payload.
+    # Pixel-baked text is never inferred; visual media remains not_inspected.
+    authored_text: str | None = None
+    pixel_text_state: str = "not_inspected"
     # ``None`` is an init-only compatibility sentinel.  Existing ClipModel
     # constructions automatically retain their raw frame interval.
     mounted: IntervalFrames = None  # type: ignore[assignment]
@@ -272,6 +276,17 @@ def _asset_keys(clip: Mapping[str, Any]) -> tuple[str, ...]:
         for value in raw_assets:
             add(value)
     return tuple(values)
+
+
+def _authored_text(clip: Mapping[str, Any]) -> str | None:
+    raw = clip.get("text")
+    if isinstance(raw, str):
+        return raw
+    if isinstance(raw, Mapping):
+        content = raw.get("content")
+        if isinstance(content, str):
+            return content
+    return None
 
 
 def _raw_transition(value: Any) -> dict[str, Any] | None:
@@ -536,6 +551,8 @@ def build_model(
                 source=_source_bounds(raw_clip),
                 kind=kind,
                 asset_keys=_asset_keys(raw_clip),
+                authored_text=_authored_text(raw_clip) if kind == "text" else None,
+                pixel_text_state="not_inspected",
             )
         )
 
