@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 from pathlib import Path
@@ -91,6 +92,46 @@ def _json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _json_bytes(value: object, *, ordered: bool = False) -> bytes:
+    return json.dumps(
+        value,
+        sort_keys=not ordered,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        allow_nan=False,
+    ).encode("utf-8")
+
+
+def _rewrite_ground_truth_with_valid_hashes(manifest_path: Path, value: dict) -> None:
+    pack_root = manifest_path.parent
+    ground_truth_path = pack_root / "ground-truth.json"
+    ground_truth_bytes = _json_bytes(value)
+    ground_truth_path.write_bytes(ground_truth_bytes)
+    ground_truth_digest = hashlib.sha256(ground_truth_bytes).hexdigest()
+
+    manifest = _json(manifest_path)
+    output = next(
+        row for row in manifest["outputs"] if row["path"] == "ground-truth.json"
+    )
+    output["bytes"] = len(ground_truth_bytes)
+    output["content_hash"] = f"sha256:{ground_truth_digest}"
+    output["sha256"] = ground_truth_digest
+    manifest_bytes = _json_bytes(manifest)
+    manifest_path.write_bytes(manifest_bytes)
+
+    ledger_path = pack_root / "pack-hashes.json"
+    ledger = _json(ledger_path)
+    ledger["files"]["ground-truth.json"] = {
+        "sha256": ground_truth_digest,
+        "bytes": len(ground_truth_bytes),
+    }
+    ledger["files"]["manifest.json"] = {
+        "sha256": hashlib.sha256(manifest_bytes).hexdigest(),
+        "bytes": len(manifest_bytes),
+    }
+    ledger_path.write_bytes(_json_bytes(ledger, ordered=True))
+
+
 def test_valid_drill_down_keeps_root_ids_sns_and_exact_parent(
     tmp_projects_root: Path,
 ) -> None:
@@ -177,6 +218,68 @@ def test_containment_and_full_hash_preflight_reject_forgery(
     )
     with pytest.raises(FrozenIntegrityError, match="ground-truth.json"):
         load_frozen_view(root_manifest, project_root=project_root)
+
+
+def test_hash_valid_dangling_frozen_clip_track_is_rejected(
+    tmp_projects_root: Path,
+) -> None:
+    project_root, _timeline, root = _root_view(
+        tmp_projects_root, "timeline-frozen-dangling-track"
+    )
+    root_manifest = Path(root.manifest_path or "").resolve()
+    ground_truth = _json(root_manifest.parent / "ground-truth.json")
+    clip = ground_truth["frozen_timeline"]["clips"][0]
+    clip_ref = clip["qualified_ref"]
+    clip["track_authored_id"] = "MISSING_TRACK"
+    _rewrite_ground_truth_with_valid_hashes(root_manifest, ground_truth)
+
+    with pytest.raises(FrozenIntegrityError, match="MISSING_TRACK") as rejected:
+        load_frozen_view(root_manifest, project_root=project_root)
+    assert clip_ref in str(rejected.value)
+    assert "frozen_timeline.tracks[].authored_id" in str(rejected.value)
+
+
+def test_hash_valid_dangling_frozen_shot_member_is_rejected(
+    tmp_projects_root: Path,
+) -> None:
+    project_root, _timeline, root = _root_view(
+        tmp_projects_root, "timeline-frozen-dangling-shot-member"
+    )
+    root_manifest = Path(root.manifest_path or "").resolve()
+    ground_truth = _json(root_manifest.parent / "ground-truth.json")
+    shot_ref = "TL01.SH01"
+    canonical_ref = {
+        "timeline_uuid": TIMELINE_UUID,
+        "kind": "shot",
+        "authored_id": "synthetic-shot",
+    }
+    ground_truth["frozen_objects"].append(
+        {
+            "stable_id": "SH01",
+            "qualified_ref": shot_ref,
+            "canonical_ref": canonical_ref,
+        }
+    )
+    ground_truth["frozen_shots"].append(
+        {
+            "stable_id": "SH01",
+            "qualified_ref": shot_ref,
+            "canonical_ref": canonical_ref,
+            "member_clip_ids": ["MISSING_CLIP"],
+            "authored_interval": None,
+            "frame_interval": None,
+            "warnings": [],
+        }
+    )
+    _rewrite_ground_truth_with_valid_hashes(root_manifest, ground_truth)
+
+    with pytest.raises(FrozenIntegrityError, match="MISSING_CLIP") as rejected:
+        load_frozen_view(root_manifest, project_root=project_root)
+    assert shot_ref in str(rejected.value)
+    assert (
+        "frozen_timeline.clips[].canonical_ref.authored_id"
+        in str(rejected.value)
+    )
 
 
 def test_unknown_display_id_and_m1_text_refs_fail_closed(

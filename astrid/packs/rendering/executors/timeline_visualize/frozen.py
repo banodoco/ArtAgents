@@ -331,7 +331,7 @@ def _canonical_ref(identity: tuple[str, str, str]) -> dict[str, str]:
 
 
 def _reconstruct_identity_map(ground_truth: dict, snapshot: dict) -> IdentityMap:
-    rows = ground_truth.get("frozen_objects", ground_truth.get("objects"))
+    rows = ground_truth.get("frozen_objects")
     if not isinstance(rows, list) or not rows:
         raise FrozenIntegrityError("ground-truth.json has no frozen identity map")
     timeline = snapshot.get("timeline")
@@ -399,18 +399,36 @@ def _reconstruct_identity_map(ground_truth: dict, snapshot: dict) -> IdentityMap
 def _verify_model_refs(ground_truth: dict, identity_map: IdentityMap) -> None:
     timeline = ground_truth.get("frozen_timeline")
     if not isinstance(timeline, dict):
-        timelines = ground_truth.get("timelines")
-        timeline = timelines[0] if isinstance(timelines, list) and len(timelines) == 1 else None
-    if not isinstance(timeline, dict):
         raise FrozenIntegrityError("ground-truth.json has no frozen timeline model")
     timeline_ref = timeline.get("timeline_ref")
     timeline_identity = identity_map.lookup_display(timeline_ref) if isinstance(timeline_ref, str) else None
     if timeline_identity is None or timeline_identity[1] != "timeline":
         raise FrozenIntegrityError("frozen timeline_ref does not resolve through the ID map")
+
+    track_rows = timeline.get("tracks")
+    if not isinstance(track_rows, list):
+        raise FrozenIntegrityError("frozen timeline tracks must be an array")
+    track_ids: set[str] = set()
+    for row in track_rows:
+        track_id = row.get("authored_id") if isinstance(row, dict) else None
+        if not isinstance(track_id, str) or not track_id:
+            raise FrozenIntegrityError("frozen timeline tracks contains an invalid authored_id")
+        if track_id in track_ids:
+            raise FrozenIntegrityError(
+                f"frozen track authored_id {track_id!r} does not resolve uniquely in "
+                "frozen_timeline.tracks"
+            )
+        track_ids.add(track_id)
+
+    model_rows: dict[str, list[dict]] = {}
+    model_refs: dict[str, set[str]] = {}
+    clip_ids: set[str] = set()
     for collection, expected_kind in (("clips", "clip"), ("assets", "asset")):
         rows = timeline.get(collection)
         if not isinstance(rows, list):
             raise FrozenIntegrityError(f"frozen timeline {collection} must be an array")
+        typed_rows: list[dict] = []
+        refs: set[str] = set()
         for row in rows:
             if not isinstance(row, dict):
                 raise FrozenIntegrityError(f"frozen timeline {collection} contains a non-object")
@@ -418,11 +436,32 @@ def _verify_model_refs(ground_truth: dict, identity_map: IdentityMap) -> None:
             identity = identity_map.lookup_display(ref) if isinstance(ref, str) else None
             if identity is None or identity[1] != expected_kind or row.get("canonical_ref") != _canonical_ref(identity):
                 raise FrozenIntegrityError(f"frozen timeline ref does not match the ID map: {ref!r}")
+            typed_rows.append(row)
+            refs.add(ref)
             if collection == "clips":
-                for asset_ref in row.get("asset_refs", []):
-                    asset_identity = identity_map.lookup_display(asset_ref)
-                    if asset_identity is None or asset_identity[1] != "asset":
-                        raise FrozenIntegrityError(f"clip asset ref does not resolve: {asset_ref!r}")
+                clip_ids.add(identity[2])
+        model_rows[collection] = typed_rows
+        model_refs[collection] = refs
+
+    for row in model_rows["clips"]:
+        clip_ref = row["qualified_ref"]
+        if not isinstance(row.get("mounted_interval"), dict):
+            raise FrozenIntegrityError(
+                f"frozen clip {clip_ref!r} has no compositor-mounted interval"
+            )
+        track_id = row.get("track_authored_id")
+        if track_id not in track_ids:
+            raise FrozenIntegrityError(
+                f"frozen clip {clip_ref!r} track_authored_id {track_id!r} does not "
+                "resolve to frozen_timeline.tracks[].authored_id"
+            )
+        for asset_ref in row.get("asset_refs", []):
+            if asset_ref not in model_refs["assets"]:
+                raise FrozenIntegrityError(
+                    f"frozen clip {clip_ref!r} asset ref {asset_ref!r} does not "
+                    "resolve to frozen_timeline.assets[].qualified_ref"
+                )
+
     for key, expected_kind in (("frozen_shots", "shot"), ("frozen_ranges", "range")):
         rows = ground_truth.get(key, [])
         if not isinstance(rows, list):
@@ -432,6 +471,13 @@ def _verify_model_refs(ground_truth: dict, identity_map: IdentityMap) -> None:
             identity = identity_map.lookup_display(ref) if isinstance(ref, str) else None
             if identity is None or identity[1] != expected_kind or row.get("canonical_ref") != _canonical_ref(identity):
                 raise FrozenIntegrityError(f"{key} ref does not match the ID map: {ref!r}")
+            if key == "frozen_shots":
+                for clip_id in row.get("member_clip_ids", []):
+                    if clip_id not in clip_ids:
+                        raise FrozenIntegrityError(
+                            f"frozen shot {ref!r} member clip ref {clip_id!r} does not "
+                            "resolve to frozen_timeline.clips[].canonical_ref.authored_id"
+                        )
 
 
 def _verify_action_refs(action_index: dict, identity_map: IdentityMap) -> None:
@@ -482,8 +528,16 @@ def _verify_run_ownership(manifest_path: Path, project_root: Path, manifest: dic
     if len(parts) < 4 or parts[0] != "runs" or parts[2] != "agent-view" or parts[-1] != MANIFEST_NAME:
         raise ContainmentError("manifest is not inside a project-owned visualization run")
     run_id = parts[1]
-    run_root = (project_root / "runs" / run_id).resolve(strict=True)
-    if not run_root.is_dir() or not manifest_path.is_relative_to(run_root):
+    runs_root = (project_root / "runs").resolve(strict=True)
+    declared_run_root = project_root / "runs" / run_id
+    if declared_run_root.is_symlink():
+        raise ContainmentError("owning visualization run directory must not be a symlink")
+    run_root = declared_run_root.resolve(strict=True)
+    if (
+        run_root.parent != runs_root
+        or not run_root.is_dir()
+        or not manifest_path.is_relative_to(run_root)
+    ):
         raise ContainmentError("manifest run path escapes the owning run")
     run_json = run_root / "run.json"
     if run_json.is_symlink() or not run_json.is_file():
@@ -494,6 +548,7 @@ def _verify_run_ownership(manifest_path: Path, project_root: Path, manifest: dic
     except Exception as exc:  # validation error is an ownership failure at this boundary
         raise ContainmentError(f"cannot validate owning run.json: {exc}") from exc
     metadata = record.get("metadata")
+    timeline_ids = metadata.get("timeline_ids") if isinstance(metadata, dict) else None
     if (
         record.get("project_slug") != project_slug
         or record.get("run_id") != run_id
@@ -501,7 +556,9 @@ def _verify_run_ownership(manifest_path: Path, project_root: Path, manifest: dic
         or record.get("status") != "completed"
         or not isinstance(metadata, dict)
         or metadata.get("evidence") is not True
-        or timeline_ulid not in metadata.get("timeline_ids", [])
+        or not isinstance(timeline_ids, list)
+        or not all(isinstance(item, str) for item in timeline_ids)
+        or timeline_ulid not in timeline_ids
     ):
         raise ContainmentError("run.json does not own this timeline visualization pack")
     raw_record_manifest = record.get("manifest_path")
@@ -593,6 +650,16 @@ def load_frozen_view(manifest_path: Path, *, project_root: Path) -> FrozenView:
     # 4. Cross-artifact chain of trust and deterministic ID reconstruction.
     ground_truth = core["ground-truth"]
     action_index = core["action-index"]
+    for key, expected_type in (
+        ("frozen_objects", list),
+        ("frozen_timeline", dict),
+        ("frozen_shots", list),
+        ("frozen_ranges", list),
+    ):
+        if not isinstance(ground_truth.get(key), expected_type):
+            raise FrozenIntegrityError(
+                f"ground-truth.json is missing required R16 lineage facts: {key}"
+            )
     if ground_truth.get("snapshots") != snapshots:
         raise FrozenIntegrityError("ground-truth snapshot block disagrees with manifest")
     for name in ("action-index", "asset-index", "transcript-index", "diagnostics", "view-map"):
@@ -644,9 +711,6 @@ def _frozen_timeline(frozen: FrozenView) -> dict:
     value = frozen.ground_truth.get("frozen_timeline")
     if isinstance(value, dict):
         return value
-    timelines = frozen.ground_truth.get("timelines")
-    if isinstance(timelines, list) and len(timelines) == 1 and isinstance(timelines[0], dict):
-        return timelines[0]
     raise FrozenIntegrityError("ground truth does not contain a reconstructable frozen timeline")
 
 
@@ -702,7 +766,11 @@ def model_from_frozen(frozen: FrozenView) -> TimelineInspectionModel:
             float(row["at_seconds"]) + float(source_bounds["duration_seconds"]),
         )
         frames = IntervalFrames(int(row["start_frame"]), int(row["end_frame"]), fps)
-        mounted = _interval_frames(row.get("mounted_interval"), fps=fps, label="mounted_interval") or frames
+        mounted = _interval_frames(
+            row["mounted_interval"], fps=fps, label="mounted_interval"
+        )
+        if mounted is None:  # schema plus preflight make this unreachable
+            raise FrozenIntegrityError("mounted_interval must not be null")
         transition_document = row.get("transition")
         transition: dict[str, Any] | None = None
         effective = frames.as_seconds()
