@@ -1202,7 +1202,15 @@ def _relations(
     parsed = parse_qualified_ref(ref)
     all_refs = _ordered_object_refs(model, identity_map)
     if parsed.kind == "TL":
-        children = all_refs[1:]
+        # Transcript source segments and mapped speech occurrences form their
+        # own evidence namespace.  They are not timeline children: TS is the
+        # root of each TS -> SP evidence subtree, while CL <-> SP semantic
+        # linkage lives in ground-truth/transcript-index relations.
+        children = [
+            child
+            for child in all_refs[1:]
+            if parse_qualified_ref(child).kind in {"SH", "RG", "CL", "AS"}
+        ]
         if in_scope is not None:
             children = [child for child in children if child in in_scope]
         return {
@@ -1225,46 +1233,7 @@ def _relations(
     parent = _TIMELINE_REF
     if attachment is not None:
         transcript_hash = attachment.transcript_sha256
-        transcript_asset_key = next(
-            (
-                occurrence.asset_key
-                for occurrence in (occurrences or [])
-                if occurrence.asset_key is not None
-            ),
-            None,
-        )
-        if transcript_asset_key is None and attachment.media_identity in model.registry_keys:
-            transcript_asset_key = attachment.media_identity
-        transcript_asset_ref = (
-            _lookup_semantic(identity_map, "asset", transcript_asset_key)
-            if transcript_asset_key is not None
-            else None
-        )
-        if parsed.kind == "CL":
-            clip = _clip_with_ref(model, identity_map, ref)
-            children = [
-                sp_ref
-                for occurrence in (occurrences or [])
-                if occurrence.clip_id == clip.clip_id
-                and (
-                    sp_ref := _lookup_semantic(
-                        identity_map,
-                        "speech_occurrence",
-                        speech_occurrence_authored_id(
-                            transcript_hash, occurrence.segment_id, occurrence.clip_id
-                        ),
-                    )
-                )
-                is not None
-            ]
-        elif parsed.kind == "AS":
-            if ref == transcript_asset_ref:
-                children = [
-                    candidate
-                    for candidate in all_refs
-                    if parse_qualified_ref(candidate).kind == "TS"
-                ]
-        elif parsed.kind == "TS":
+        if parsed.kind == "TS":
             identity = _lookup_display(identity_map, ref)
             authored_id = identity[2] if identity is not None else ""
             segment_id = next(
@@ -1293,7 +1262,9 @@ def _relations(
                 )
                 is not None
             ]
-            parent = transcript_asset_ref or _TIMELINE_REF
+            # TS is a top-level node in the separate text-evidence namespace,
+            # not a child of TL or the media asset it describes.
+            parent = None
         elif parsed.kind == "SP":
             identity = _lookup_display(identity_map, ref)
             authored_id = identity[2] if identity is not None else ""
@@ -1314,13 +1285,17 @@ def _relations(
                     "transcript_source_segment",
                     transcript_segment_authored_id(transcript_hash, matching.segment_id),
                 ) or _TIMELINE_REF
-                clip_ref = _lookup_semantic(identity_map, "clip", matching.clip_id)
-                children = [clip_ref] if clip_ref is not None else []
+                # The reverse SP -> CL semantic relation is emitted as
+                # transcript-index.clip_ref, not as a hierarchy edge.
+                children = []
     if in_scope is not None:
+        if parent is not None and parent not in in_scope:
+            parent = None
         if previous is not None and previous not in in_scope:
             previous = None
         if next_ref is not None and next_ref not in in_scope:
             next_ref = None
+        children = [child for child in children if child in in_scope]
     return {
         "parent": parent,
         "previous": previous,

@@ -83,14 +83,17 @@ def discover_attachment(
     *,
     timeline_dir: Path | None = None,
     timeline_metadata: Mapping | None = None,
+    pipeline_metadata: Mapping | None = None,
+    pipeline_metadata_base: Path | None = None,
+    pipeline_root: Path | None = None,
 ) -> TranscriptAttachment | None:
     """Find the one explicitly declared transcript attachment for a timeline.
 
-    Resolution is strictly ordered: supplied timeline metadata, project
-    ``sources.json``, then a run record's explicit transcript artifact.  A
-    declaration at a higher-priority level blocks lower-priority fallbacks even
-    when malformed or ambiguous; stale metadata must never be silently replaced
-    by a different authority.
+    Resolution is strictly ordered: supplied timeline metadata, preserved
+    pipeline metadata, project ``sources.json``, then a run record's explicit
+    transcript artifact.  A declaration at a higher-priority level blocks
+    lower-priority fallbacks even when malformed or ambiguous; stale metadata
+    must never be silently replaced by a different authority.
     """
 
     project_base = Path(project_root).expanduser().resolve()
@@ -104,7 +107,34 @@ def discover_attachment(
         declaration = timeline_metadata.get("transcript")
         if not isinstance(declaration, Mapping):
             return None
-        return _attachment_from_declaration(declaration, base=timeline_base)
+        return _attachment_from_declaration(
+            declaration,
+            base=timeline_base,
+            root=project_base,
+        )
+
+    pipeline_declarations = _pipeline_declarations(pipeline_metadata)
+    if pipeline_declarations is not None:
+        if len(pipeline_declarations) != 1:
+            return None
+        declaration = pipeline_declarations[0]
+        if not isinstance(declaration, Mapping):
+            return None
+        metadata_base = (
+            Path(pipeline_metadata_base).expanduser().resolve()
+            if pipeline_metadata_base is not None
+            else project_base
+        )
+        metadata_root = (
+            Path(pipeline_root).expanduser().resolve()
+            if pipeline_root is not None
+            else project_base
+        )
+        return _attachment_from_declaration(
+            declaration,
+            base=metadata_base,
+            root=metadata_root,
+        )
 
     source_declarations = _source_declarations(project_base / "sources.json")
     if source_declarations:
@@ -113,6 +143,7 @@ def discover_attachment(
         return _attachment_from_declaration(
             source_declarations[0],
             base=project_base / "sources",
+            root=project_base / "sources",
         )
 
     run_declarations = _run_declarations(project_base, timeline_base if timeline_dir else None)
@@ -120,12 +151,12 @@ def discover_attachment(
         return None
     if len(run_declarations) != 1:
         return None
-    declaration, run_base = run_declarations[0]
-    if run_base is None and not _has_absolute_file(declaration):
-        return None
+    declaration, run_base, run_root, base_is_contained = run_declarations[0]
     return _attachment_from_declaration(
         declaration,
-        base=run_base or project_base,
+        base=run_base or run_root,
+        root=run_root,
+        force_uncontained=not base_is_contained,
     )
 
 
@@ -133,6 +164,8 @@ def _attachment_from_declaration(
     declaration: Mapping,
     *,
     base: Path,
+    root: Path,
+    force_uncontained: bool = False,
 ) -> TranscriptAttachment | None:
     schema_version = declaration.get("schema_version", 1)
     if schema_version != 1:
@@ -168,12 +201,18 @@ def _attachment_from_declaration(
     if media.get("sha256") is not None and media_sha256 is None:
         return None
 
-    transcript_file = _resolve_declared_path(file_value, base=base)
+    transcript_file = (
+        None
+        if force_uncontained
+        else _resolve_contained_path(file_value, base=base, root=root)
+    )
     observed: str | None = None
-    integrity = "missing"
+    integrity = "uncontained" if transcript_file is None else "missing"
     notes: list[str] = []
+    if transcript_file is None:
+        notes.append("declared transcript path is outside its owning root")
     try:
-        if transcript_file.is_file():
+        if transcript_file is not None and transcript_file.is_file():
             observed = _sha256_file(transcript_file)
             if observed == transcript_sha256:
                 integrity = "ok"
@@ -182,7 +221,7 @@ def _attachment_from_declaration(
                 notes.append(
                     "transcript hash mismatch: the declared file was not substituted"
                 )
-        else:
+        elif transcript_file is not None:
             notes.append("declared transcript file is missing")
     except OSError:
         integrity = "unreadable"
@@ -229,10 +268,48 @@ def _source_declarations(sources_path: Path) -> list[Mapping]:
     return declarations
 
 
+def _pipeline_declarations(metadata: Mapping | None) -> list[object] | None:
+    """Return explicitly declared pipeline transcript authorities.
+
+    New producers use the top-level ``transcript`` contract.  Existing cut
+    metadata may place the path at ``sources.<asset>.transcript_ref``; that
+    path is accepted only as part of a complete hash-bound declaration in the
+    same source entry (or its nested ``transcript`` mapping).  A bare ref is
+    therefore reachable but malformed, and blocks lower-priority fallbacks
+    rather than being guessed into a trusted attachment.
+    """
+
+    if metadata is None:
+        return None
+    if "transcript" in metadata:
+        return [metadata.get("transcript")]
+    sources = metadata.get("sources")
+    if not isinstance(sources, Mapping):
+        return None
+    declarations: list[object] = []
+    for asset_key in sorted(sources, key=str):
+        source = sources[asset_key]
+        if not isinstance(source, Mapping):
+            continue
+        transcript_ref = _non_empty_string(source.get("transcript_ref"))
+        nested = source.get("transcript")
+        if nested is None and transcript_ref is None:
+            continue
+        if nested is not None and not isinstance(nested, Mapping):
+            declarations.append(nested)
+            continue
+        normalized = dict(nested) if isinstance(nested, Mapping) else dict(source)
+        if transcript_ref is not None:
+            normalized.setdefault("file", transcript_ref)
+        normalized.setdefault("media", {"asset_key": str(asset_key)})
+        declarations.append(normalized)
+    return declarations or None
+
+
 def _run_declarations(
     project_root: Path,
     timeline_dir: Path | None,
-) -> list[tuple[Mapping, Path | None]]:
+) -> list[tuple[Mapping, Path | None, Path, bool]]:
     run_paths = _declared_timeline_run_paths(project_root, timeline_dir)
     if run_paths is None:
         runs_dir = project_root / "runs"
@@ -245,9 +322,18 @@ def _run_declarations(
         except OSError:
             run_paths = []
 
-    declarations: list[tuple[Mapping, Path | None]] = []
+    runs_root = (project_root / "runs").resolve()
+    declarations: list[tuple[Mapping, Path | None, Path, bool]] = []
     for run_path in run_paths:
-        record = _read_mapping(run_path)
+        if run_path.parent.is_symlink():
+            continue
+        run_root = run_path.parent.resolve()
+        if run_root.parent != runs_root:
+            continue
+        resolved_run_path = run_path.resolve()
+        if resolved_run_path.parent != run_root:
+            continue
+        record = _read_mapping(resolved_run_path)
         if record is None:
             continue
         artifacts = record.get("artifacts")
@@ -256,7 +342,12 @@ def _run_declarations(
         declaration = artifacts.get("transcript")
         if not isinstance(declaration, Mapping):
             continue
-        declarations.append((declaration, _declared_run_base(record, project_root)))
+        run_base, base_is_contained = _declared_run_base(
+            record,
+            project_root,
+            run_root,
+        )
+        declarations.append((declaration, run_base, run_root, base_is_contained))
     return declarations
 
 
@@ -272,17 +363,30 @@ def _declared_timeline_run_paths(
     run_ids = manifest.get("contributing_runs")
     if not isinstance(run_ids, list) or not all(isinstance(item, str) for item in run_ids):
         return []
-    return [project_root / "runs" / run_id / "run.json" for run_id in run_ids]
+    runs_root = (project_root / "runs").resolve()
+    paths: list[Path] = []
+    for run_id in run_ids:
+        declared_root = runs_root / run_id
+        run_root = declared_root.resolve()
+        if not declared_root.is_symlink() and run_root.parent == runs_root and run_root.name == run_id:
+            paths.append(run_root / "run.json")
+    return paths
 
 
-def _declared_run_base(record: Mapping, project_root: Path) -> Path | None:
+def _declared_run_base(
+    record: Mapping,
+    project_root: Path,
+    run_root: Path,
+) -> tuple[Path | None, bool]:
     out = _non_empty_string(record.get("out"))
     if out is None:
-        return None
+        return run_root, True
     path = Path(out).expanduser()
     if path.is_absolute():
-        return path.resolve()
-    return (project_root / path).resolve()
+        resolved = path.resolve()
+    else:
+        resolved = (project_root / path).resolve()
+    return (resolved, True) if resolved.is_relative_to(run_root) else (None, False)
 
 
 def _declared_media_identity(media: Mapping) -> str | None:
@@ -293,16 +397,14 @@ def _declared_media_identity(media: Mapping) -> str | None:
     return asset_key if asset_key is not None else source_id
 
 
-def _resolve_declared_path(value: str, *, base: Path) -> Path:
+def _resolve_contained_path(value: str, *, base: Path, root: Path) -> Path | None:
     path = Path(value).expanduser()
     if path.is_absolute():
-        return path.resolve()
-    return (base / path).resolve()
-
-
-def _has_absolute_file(declaration: Mapping) -> bool:
-    value = _non_empty_string(declaration.get("file", declaration.get("path")))
-    return value is not None and Path(value).expanduser().is_absolute()
+        resolved = path.resolve()
+    else:
+        resolved = (base / path).resolve()
+    contained_root = Path(root).expanduser().resolve()
+    return resolved if resolved.is_relative_to(contained_root) else None
 
 
 def _read_mapping(path: Path) -> dict[str, Any] | None:

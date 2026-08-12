@@ -78,6 +78,51 @@ def test_metadata_declared_attachment_resolves_with_integrity_ok(tmp_path: Path)
     assert result.file == (timeline / "evidence" / "spoken.json").resolve()
 
 
+@pytest.mark.parametrize("outside_kind", ["absolute", "relative_escape"])
+def test_metadata_declared_path_outside_project_is_uncontained(
+    tmp_path: Path,
+    outside_kind: str,
+) -> None:
+    project = tmp_path / "project"
+    timeline = project / "timelines" / "TL"
+    outside = tmp_path / "outside.json"
+    digest = _write(outside, b"must not be read")
+    declared = str(outside) if outside_kind == "absolute" else "../../../outside.json"
+
+    result = discover_attachment(
+        project,
+        timeline_dir=timeline,
+        timeline_metadata={
+            "transcript": _declaration(file=declared, sha256=digest)
+        },
+    )
+
+    assert result is not None
+    assert result.integrity == "uncontained"
+    assert result.file is None
+    assert result.observed_transcript_sha256 is None
+    assert "outside its owning root" in (result.note or "")
+
+
+def test_metadata_declared_contained_absolute_path_is_allowed(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    timeline = project / "timelines" / "TL"
+    transcript = project / "evidence" / "absolute.json"
+    digest = _write(transcript, b"contained absolute")
+
+    result = discover_attachment(
+        project,
+        timeline_dir=timeline,
+        timeline_metadata={
+            "transcript": _declaration(file=str(transcript), sha256=digest)
+        },
+    )
+
+    assert result is not None
+    assert result.integrity == "ok"
+    assert result.file == transcript.resolve()
+
+
 def test_hash_mismatch_is_reported_without_substitution(tmp_path: Path) -> None:
     project = tmp_path / "project"
     timeline = project / "timeline"
@@ -133,6 +178,29 @@ def test_sources_json_declared_transcript_entry_resolves(tmp_path: Path) -> None
     assert result.file == (project / "sources" / "words" / "main.json").resolve()
 
 
+@pytest.mark.parametrize("outside_kind", ["absolute", "relative_escape"])
+def test_sources_json_path_outside_sources_is_uncontained(
+    tmp_path: Path,
+    outside_kind: str,
+) -> None:
+    project = tmp_path / "project"
+    outside = project / "outside.json"
+    digest = _write(outside, b"outside sources")
+    declared = str(outside) if outside_kind == "absolute" else "../outside.json"
+    declaration = _declaration(file=declared, sha256=digest)
+    declaration["kind"] = "transcript"
+    _json(
+        project / "sources.json",
+        {"version": 1, "sources": {"transcript:main": declaration}},
+    )
+
+    result = discover_attachment(project)
+
+    assert result is not None
+    assert result.integrity == "uncontained"
+    assert result.file is None
+
+
 def test_run_artifact_uses_declared_out_path_not_cwd(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -159,6 +227,135 @@ def test_run_artifact_uses_declared_out_path_not_cwd(
     assert result is not None
     assert result.integrity == "ok"
     assert result.file == (declared_out / "attached.json").resolve()
+
+
+@pytest.mark.parametrize("outside_kind", ["absolute", "relative_escape"])
+def test_run_artifact_path_outside_owning_run_is_uncontained(
+    tmp_path: Path,
+    outside_kind: str,
+) -> None:
+    project = tmp_path / "project"
+    run_root = project / "runs" / "R19"
+    outside = project / "runs" / "outside.json"
+    digest = _write(outside, b"outside owning run")
+    declared = str(outside) if outside_kind == "absolute" else "../../outside.json"
+    _json(
+        run_root / "run.json",
+        {
+            "out": "runs/R19/output",
+            "artifacts": {
+                "transcript": _declaration(file=declared, sha256=digest)
+            },
+        },
+    )
+
+    result = discover_attachment(project)
+
+    assert result is not None
+    assert result.integrity == "uncontained"
+    assert result.file is None
+
+
+def test_run_artifact_contained_absolute_path_is_allowed(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    run_root = project / "runs" / "R19"
+    transcript = run_root / "evidence" / "absolute.json"
+    digest = _write(transcript, b"run-contained absolute")
+    _json(
+        run_root / "run.json",
+        {
+            "out": "runs/R19",
+            "artifacts": {
+                "transcript": _declaration(file=str(transcript), sha256=digest)
+            },
+        },
+    )
+
+    result = discover_attachment(project)
+
+    assert result is not None
+    assert result.integrity == "ok"
+    assert result.file == transcript.resolve()
+
+
+def test_run_artifact_with_uncontained_declared_out_is_refused(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    run_root = project / "runs" / "R19"
+    outside_out = project / "runs" / "other"
+    digest = _write(outside_out / "attached.json", b"wrong run")
+    _json(
+        run_root / "run.json",
+        {
+            "out": "runs/other",
+            "artifacts": {
+                "transcript": _declaration(file="attached.json", sha256=digest)
+            },
+        },
+    )
+
+    result = discover_attachment(project)
+
+    assert result is not None
+    assert result.integrity == "uncontained"
+    assert result.file is None
+
+
+def test_pipeline_metadata_precedes_sources_json(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    run_root = project / "runs" / "pipeline"
+    transcript = run_root / "spoken.json"
+    digest = _write(transcript, b"pipeline transcript")
+    fallback_digest = _write(project / "sources" / "fallback.json", b"fallback")
+    fallback = _declaration(file="fallback.json", sha256=fallback_digest)
+    fallback["kind"] = "transcript"
+    _json(
+        project / "sources.json",
+        {"sources": {"transcript:fallback": fallback}},
+    )
+
+    result = discover_attachment(
+        project,
+        pipeline_metadata={
+            "transcript": _declaration(file="spoken.json", sha256=digest)
+        },
+        pipeline_metadata_base=run_root,
+        pipeline_root=run_root,
+    )
+
+    assert result is not None
+    assert result.integrity == "ok"
+    assert result.file == transcript.resolve()
+
+
+def test_pipeline_source_transcript_ref_resolves_complete_declaration(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    run_root = project / "runs" / "pipeline"
+    transcript = run_root / "spoken.json"
+    digest = _write(transcript, b"source-linked pipeline transcript")
+
+    result = discover_attachment(
+        project,
+        pipeline_metadata={
+            "sources": {
+                "source-main": {
+                    "transcript_ref": "spoken.json",
+                    "source_id": "transcript:pipeline",
+                    "source_version": "1",
+                    "sha256": digest,
+                    "producer": "editorial.transcribe",
+                }
+            }
+        },
+        pipeline_metadata_base=run_root,
+        pipeline_root=run_root,
+    )
+
+    assert result is not None
+    assert result.integrity == "ok"
+    assert result.media_identity == "source-main"
+    assert result.file == transcript.resolve()
 
 
 def test_media_hash_absence_is_explicit_and_never_inferred(tmp_path: Path) -> None:
@@ -229,4 +426,3 @@ def test_discovery_is_read_only_and_confined_to_supplied_project(
     assert result is not None
     assert result.integrity == "ok"
     assert before == after
-

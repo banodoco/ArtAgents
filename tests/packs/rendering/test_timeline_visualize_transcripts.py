@@ -252,6 +252,74 @@ def test_emission_populates_indexes_actions_and_distinct_text_lanes(tmp_path: Pa
     assert "SPEECH" in structure and "CAPTION" in structure and "OTHER TEXT" in structure
 
 
+def test_action_index_parent_child_edges_are_reciprocal_for_ts_sp(
+    tmp_path: Path,
+) -> None:
+    model = _model(_clip("media", at=0, source_from=0, source_to=2, speed=1))
+    segments = [TranscriptSegment("0", 0, 1, "spoken", None, None, "absent")]
+    occurrences = map_occurrences(segments, model, asset_key="source-main")
+    identity = build_identity_map(
+        model, root_sns=model.snapshot_sns, timeline_uuid=UUID, timeline_ulid=ULID
+    )
+    identity = assign_transcript_ids(
+        identity, segments, occurrences, transcript_sha256=HASH
+    )
+    occurrences = with_occurrence_ids(
+        occurrences,
+        [
+            identity.lookup_semantic(
+                "speech_occurrence",
+                speech_occurrence_authored_id(HASH, item.segment_id, item.clip_id),
+            )
+            for item in occurrences
+        ],
+    )
+    attachment = _attachment(tmp_path / "spoken.json")
+    snapshot = _snapshot(model)
+    actions = emit_action_index(
+        model,
+        identity,
+        snapshot,
+        tmp_path / "manifest.json",
+        None,
+        attachment,
+        occurrences,
+    )
+    ground = emit_ground_truth(
+        model, identity, snapshot, None, attachment, occurrences
+    )
+    transcript = emit_transcript_index(
+        model, identity, snapshot, attachment, segments, occurrences, "source-main"
+    )
+
+    entries = actions["entries"]
+    for parent_ref, entry in entries.items():
+        relations = entry["relations"]
+        for child_ref in relations["children"]:
+            assert child_ref in entries
+            assert entries[child_ref]["relations"]["parent"] == parent_ref
+        parent_ref_of_entry = relations["parent"]
+        if parent_ref_of_entry is not None:
+            assert parent_ref_of_entry in entries
+            assert parent_ref in entries[parent_ref_of_entry]["relations"]["children"]
+
+    assert all(
+        not ref.startswith(("TL01.TS", "TL01.SP"))
+        for ref in entries["TL01"]["relations"]["children"]
+    )
+    assert entries["TL01.TS01"]["relations"] == {
+        "parent": None,
+        "previous": None,
+        "next": None,
+        "children": ["TL01.SP01"],
+    }
+    assert entries["TL01.SP01"]["relations"]["parent"] == "TL01.TS01"
+    assert entries["TL01.SP01"]["relations"]["children"] == []
+    assert entries["TL01.CL01"]["relations"]["children"] == []
+    assert ground["timelines"][0]["clips"][0]["mapped_speech"] == ["TL01.SP01"]
+    assert transcript["speech_occurrences"][0]["clip_ref"] == "TL01.CL01"
+
+
 def test_child_identity_copy_preserves_ts_sp_and_missing_attachment_stays_empty() -> None:
     model = _model(_clip("media", at=0, source_from=0, source_to=2, speed=1))
     segment = TranscriptSegment("0", 0, 1, "hello", None, None)
@@ -321,3 +389,95 @@ def test_frozen_child_resolves_ts_and_sp_without_live_transcript(
     assert dict(child_frozen.identity_map.semantic_to_display) == dict(
         frozen.identity_map.semantic_to_display
     )
+
+
+def test_run_declared_hype_metadata_reaches_transcript_discovery(
+    tmp_projects_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    slug = "speech-pipeline-metadata"
+    project_root, timeline = _prepare_project(tmp_projects_root, slug)
+    run_id = "pipeline-transcript"
+    run_root = project_root / "runs" / run_id
+    artifact_root = run_root / "artifacts"
+    transcript_path = artifact_root / "transcript.json"
+    transcript_path.parent.mkdir(parents=True, exist_ok=True)
+    transcript_path.write_text(
+        json.dumps(
+            {
+                "segments": [
+                    {"id": "declared", "start": 0, "end": 1, "text": "from run"}
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    digest = hashlib.sha256(transcript_path.read_bytes()).hexdigest()
+    metadata_path = artifact_root / "hype.metadata.json"
+    metadata_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "pipeline": {},
+                "clips": {},
+                "sources": {
+                    "plant-frame-1": {"transcript_ref": "transcript.json"}
+                },
+                "transcript": {
+                    "schema_version": 1,
+                    "source_id": "transcript:run",
+                    "source_version": "1",
+                    "file": "transcript.json",
+                    "sha256": digest,
+                    "media": {"asset_key": "plant-frame-1"},
+                    "producer": "editorial.transcribe",
+                    "producer_version": "1",
+                    "model": "whisper-1",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_root / "run.json").write_text(
+        json.dumps(
+            {
+                "out": f"runs/{run_id}",
+                "artifacts": {
+                    "metadata": {
+                        "path": f"runs/{run_id}/artifacts/hype.metadata.json"
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (timeline / "manifest.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "contributing_runs": [run_id],
+                "final_outputs": [],
+                "tombstoned_at": None,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    decoy_cwd = tmp_projects_root / "decoy-cwd"
+    decoy_cwd.mkdir()
+    (decoy_cwd / "transcript.json").write_text(
+        json.dumps({"segments": []}), encoding="utf-8"
+    )
+    monkeypatch.chdir(decoy_cwd)
+
+    result = _invoke(slug, timeline_source=str(timeline))
+
+    assert result.ok is True, result.error
+    frozen = load_frozen_view(
+        Path(result.manifest_path or "").resolve(), project_root=project_root
+    )
+    attachment = frozen.ground_truth["timelines"][0]["transcript_attachment"]
+    assert attachment["source_id"] == "transcript:run"
+    assert attachment["integrity"] == "ok"
+    assert frozen.transcript_index["sources"][0]["text"] == "from run"
+    assert frozen.transcript_index["speech_occurrences"][0]["clip_ref"] == "TL01.CL01"
