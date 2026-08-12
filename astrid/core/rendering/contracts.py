@@ -38,6 +38,15 @@ _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _OUTPUT_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _KIND_RE = re.compile(r"^[a-z][a-z0-9-]*$")
 
+# ECMAScript \s whitespace set, spelled as explicit characters so it is
+# identical in the DTO and the JSON Schemas (Python str.strip() has no
+# range syntax and differs from ECMAScript on \u0085 and \uFEFF).
+_ECMA_WHITESPACE = (
+    " \t\n\r\f\v\u00a0\u1680"
+    "\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a"
+    "\u2028\u2029\u202f\u205f\u3000\ufeff"
+)
+
 RENDER_RESULT_CORE_KEYS = frozenset(
     {
         "schema_version",
@@ -219,7 +228,7 @@ def _require_string(value: Any, label: str, *, allow_empty: bool = False) -> str
         raise TypeError(f"{label} must be a string")
     if "\x00" in value:
         raise ValueError(f"{label} must not contain NUL")
-    if not allow_empty and not value.strip():
+    if not allow_empty and not value.strip(_ECMA_WHITESPACE):
         raise ValueError(f"{label} must not be empty")
     return value
 
@@ -324,10 +333,7 @@ def _require_workspace_relative_path(value: Any, label: str) -> str:
     parts = PurePosixPath(normalized).parts
     if not parts or any(part in {"", ".", ".."} for part in raw_parts):
         raise ValueError(f"{label} must be a normalized contained workspace path")
-    # ECMAScript \s whitespace set, used so DTO and schema agree across
-    # languages (Python str.strip() would diverge on \u0085 and \uFEFF).
-    _WS = " \t\n\r\f\v\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff"
-    if any(not part.strip(_WS) for part in raw_parts):
+    if any(not part.strip(_ECMA_WHITESPACE) for part in raw_parts):
         raise ValueError(f"{label} must not contain empty or whitespace-only path components")
     return raw
 

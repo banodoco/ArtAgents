@@ -162,8 +162,13 @@ def _normalize_artifact_profiles(value: Any, *, segments: Sequence[Any]) -> Any:
             elif isinstance(raw_profile, Mapping):
                 # Already-emitted lineage record: re-validate and re-key by
                 # its (validated) path so emitted provenance round-trips.
+                raw_path = raw_profile.get("path")
+                if not isinstance(raw_path, str) or not raw_path.strip():
+                    raise ValueError(
+                        "emitted lineage record must carry a non-empty string path"
+                    )
                 record = _artifact_lineage_from_mapping(
-                    raw_profile, key=str(raw_profile.get("path", ""))
+                    raw_profile, key=_require_workspace_relative_path(raw_path, "artifact path")
                 )
                 path = record["path"]
             else:

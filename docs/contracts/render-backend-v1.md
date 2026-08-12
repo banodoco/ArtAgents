@@ -479,18 +479,20 @@ are REQUIRED in `artifact_profiles` for any positive render plan: exactly one
 hashed lineage entry PER SEGMENT. Multi-segment plans MUST use the ordered
 sequence form (one VideoArtifact or emitted lineage record per segment, in
 segment order); single-segment plans may use a path-keyed mapping. Emitted
-lineage records round-trip (re-passing them validates identically). Every
-record carries its `path`, `profile`, a validated 64-hex string `sha256`, and
-`attachments` — each attachment `{path, kind, sha256}` with a workspace-relative
-path, kind matching `[a-z][a-z0-9-]*`, and globally unique names across all
-segment artifacts. All plan, artifact, and attachment values are reconstructed
-through their DTO validators at the provenance boundary (mutated frozen
-instances cannot bypass validation); duplicate paths, duplicate attachment
-names, path escapes, invalid kinds, profile-only entries, null/malformed
-hashes, and cardinality mismatches are rejected. All JSON Schema patterns are
-language-neutral (ECMAScript-valid; no Python-only anchors), and workspacePath
-uses an explicit ECMAScript `\s` whitespace class shared with the DTO so
-Python and non-Python validators agree on whitespace-only components. Replay
+lineage records round-trip (re-passing them validates identically) and every
+record MUST carry a non-empty string `path` (missing, `None`, or numeric
+paths are rejected). Every record carries `profile`, a validated 64-hex string
+`sha256`, and `attachments` — each attachment `{path, kind, sha256}` with a
+workspace-relative path, kind matching `[a-z][a-z0-9-]*`, and globally unique
+names across all segment artifacts. All plan, artifact, and attachment values
+are reconstructed through their DTO validators at the provenance boundary
+(mutated frozen instances cannot bypass validation); duplicate paths,
+duplicate attachment names, path escapes, invalid kinds, profile-only entries,
+null/malformed hashes, and cardinality mismatches are rejected. All JSON
+Schema patterns are language-neutral (ECMAScript-valid; no Python-only
+anchors), and whitespace is an explicit ECMAScript `\s` class shared verbatim
+by the DTO and schemas — Python and non-Python validators agree on every
+character including `\u0085`, `\uFEFF`, and the `\u2000-\u200a` block. Replay
 can verify rendered outputs byte-for-byte. `input_hashes` describe inputs
 only, never rendered outputs.
 

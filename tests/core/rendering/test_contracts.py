@@ -30,6 +30,7 @@ from astrid.core.rendering.contracts import (
     RenderSegment,
     RendererManifest,
     RendererResolution,
+    _require_workspace_relative_path,
     parse_wire_result,
 )
 from astrid.core.rendering.errors import RendererProtocolError
@@ -971,6 +972,17 @@ def test_provenance_rejects_spoofed_artifact_lineage() -> None:
                 ),
             ],
         )
+    with pytest.raises(ValueError, match="must carry a non-empty string path"):
+        assemble_provenance_v2(
+            **base,
+            plan=_plan(segments=[_segment(0, 24), _segment(24, 48)]),
+            artifact_profiles=[
+                {"profile": _profile(audio=False).to_dict(), "sha256": SHA_B, "attachments": {}},
+                {"path": 123, "profile": _profile(audio=False).to_dict(), "sha256": SHA_C, "attachments": {}},
+            ],
+        )
+    with pytest.raises(ValueError, match="whitespace-only path components"):
+        _require_workspace_relative_path("dir/\u2001/v.mp4", "path")
     with pytest.raises(ValueError, match="workspace path"):
         assemble_provenance_v2(
             **base,
