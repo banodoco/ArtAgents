@@ -216,15 +216,22 @@ def _delete_previous_outputs(
         if pair is None:
             continue
         video, sidecar = pair
-        # Never delete through a symlink: the raw candidate path must not be
-        # a link (the resolved pair may point elsewhere entirely).
+        # Never delete through a symlink: neither the raw video nor the raw
+        # sidecar path may be a link (the resolved pair may point elsewhere).
         raw_candidate = candidate.get("out_path", candidate.get("output")) if isinstance(candidate, Mapping) else (candidate[0] if isinstance(candidate, (list, tuple)) and candidate else candidate)
+        raw_sidecar_candidate = candidate.get("sidecar_path", candidate.get("sidecar")) if isinstance(candidate, Mapping) else (candidate[1] if isinstance(candidate, (list, tuple)) and len(candidate) == 2 else None)
         try:
             raw_path = Path(raw_candidate).expanduser()
             if raw_path.is_symlink():
                 continue
         except (OSError, TypeError):
             continue
+        if raw_sidecar_candidate is not None:
+            try:
+                if Path(raw_sidecar_candidate).expanduser().is_symlink():
+                    continue
+            except (OSError, TypeError):
+                continue
         if video == live_output or video in seen:
             continue
         seen.add(video)

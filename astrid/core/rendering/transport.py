@@ -485,12 +485,20 @@ def _terminate_process_group(
         _signal_process_group(process, signal.SIGKILL)
 
     if process.returncode is None:
+        drain_deadline = time.monotonic() + max(grace, 2.0)
         while True:
             try:
                 captured = process.communicate()
                 break
             except KeyboardInterrupt:
-                _signal_process_group(process, signal.SIGKILL)
+                try:
+                    _signal_process_group(process, signal.SIGKILL)
+                except (OSError, PermissionError):
+                    pass
+                if time.monotonic() > drain_deadline:
+                    process.kill()
+                    captured = process.communicate()
+                    break
                 continue
     elif captured is None:
         # ``poll`` may have reaped the child while checking the fallback path.
@@ -526,6 +534,15 @@ def _wait_for_group_exit(
     deadline = time.monotonic() + timeout
     while _process_group_exists(process) and time.monotonic() < deadline:
         time.sleep(min(0.01, max(0.0, deadline - time.monotonic())))
+    # A group that ignores SIGKILL cannot exist on POSIX; if it somehow
+    # survives the grace window, keep SIGKILLing until it is gone so cleanup
+    # never returns with a live orphan.
+    while _process_group_exists(process):
+        try:
+            _signal_process_group(process, signal.SIGKILL)
+        except (OSError, PermissionError):
+            break
+        time.sleep(0.01)
 
 
 def _secret_environment_values(

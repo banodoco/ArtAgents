@@ -299,7 +299,15 @@ def _sowt_entry() -> bytes:
         + struct.pack(">HH", 0, 0)         # compressionid, packetsize
         + struct.pack(">I", AUDIO_SAMPLE_RATE << 16)
     )
-    return _box(b"sowt", audio + wave)
+    # QuickTime channel layout atom so ffprobe reports a concrete
+    # channel_layout (stereo = layout tag 3) instead of None.
+    chan = _box(
+        b"chan",
+        struct.pack(">I", 0)   # version/flags
+        + struct.pack(">I", 3 if AUDIO_CHANNELS == 2 else 1)
+        + struct.pack(">I", 0),  # bitmap
+    )
+    return _box(b"sowt", audio + wave + chan)
 
 
 def _sample_tables(
@@ -407,9 +415,10 @@ def _write_error(result_path: Path, kind: str, message: str, details: dict) -> N
 
 
 def _validate_request(request: dict) -> None:
-    if request.get("schema_version") != 1:
+    version = request.get("schema_version")
+    if not isinstance(version, int) or isinstance(version, bool) or version != 1:
         raise ValueError(
-            f"unsupported request schema_version {request.get('schema_version')!r}; expected 1"
+            f"unsupported request schema_version {version!r}; expected 1"
         )
     output_name = request.get("output_name")
     if not isinstance(output_name, str) or output_name in (".", ".."):
@@ -535,6 +544,10 @@ def main(argv: list[str]) -> int:
     result_path = Path(args.result)
     try:
         request = json.loads(request_path.read_text(encoding="utf-8"))
+        if not isinstance(request, dict):
+            raise TypeError(
+                f"request must be a JSON object, got {type(request).__name__}"
+            )
     except Exception as exc:
         _write_error(
             result_path,

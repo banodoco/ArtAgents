@@ -1456,7 +1456,7 @@ def render(
 ) -> Path:
     """Render privately and publish one locked video-plus-sidecar pair."""
 
-    out_path = out_path.resolve()
+    out_path = Path(out_path)
     previous_outputs = (
         ()
         if keep_previous_renders

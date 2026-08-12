@@ -218,7 +218,20 @@ def _parse_ffprobe_payload(data: dict[str, Any], file_path: str | Path) -> Media
     if audio_stream is not None:
         probe.audio_codec = _nonempty_string(audio_stream.get("codec_name"))
         probe.audio_sample_rate = _int_or_none(audio_stream.get("sample_rate"), minimum=1)
-        probe.audio_channel_layout = _nonempty_string(audio_stream.get("channel_layout"))
+        probe.audio_channel_layout = _nonempty_string(
+            audio_stream.get("channel_layout")
+        )
+        # Some containers (e.g. QuickTime sowt) report channel counts without
+        # a channel_layout; derive the standard layout so strict profile
+        # validation can still compare audio placement.
+        if probe.audio_channel_layout is None:
+            channels = _int_or_none(audio_stream.get("channels"), minimum=1)
+            probe.audio_channel_layout = {
+                1: "mono",
+                2: "stereo",
+                6: "5.1",
+                8: "7.1",
+            }.get(channels or 0)
         if probe.duration_rational is None:
             probe.duration_rational = _duration_rational(audio_stream.get("duration"))
             if probe.duration_rational is not None:

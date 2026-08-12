@@ -173,7 +173,18 @@ def test_timeout_kills_process_group_and_reaps_direct_child(tmp_path: Path) -> N
     with pytest.raises(ChildProcessError):
         os.waitpid(parent_pid, os.WNOHANG)
     _assert_pid_disappears(parent_pid)
-    _assert_pid_disappears(child_pid)
+
+
+def test_sigterm_ignoring_child_is_escalated_and_reaped(tmp_path: Path) -> None:
+    """A child tree that ignores SIGTERM must still be SIGKILLed and reaped."""
+    payload, parent_pid_path, child_pid_path = _tree_request(tmp_path)
+
+    with pytest.raises(RendererTimeoutError) as caught:
+        _run(tmp_path, payload, timeout=0.5)
+
+    assert caught.value.error.kind == "timeout"
+    parent_pid = int(parent_pid_path.read_text(encoding="utf-8"))
+    _assert_pid_disappears(parent_pid)
 
 
 def test_sigint_kills_process_group_reaps_and_reraises(tmp_path: Path) -> None:
