@@ -469,23 +469,23 @@ def _support(request: dict, result_path: Path) -> int:
             requested = profile.get(field)
             if requested is not None and requested != fixed:
                 mismatches.append(f"{field}={requested!r} (fixed {fixed!r})")
-        if mismatches:
-            _write_json(
-                result_path,
-                {
-                    "schema_version": 1,
-                    "supported": False,
-                    "reasons": [
-                        "profile not produced by " + BACKEND_ID + ": "
-                        + "; ".join(mismatches)
-                    ],
-                    "features": {"media": False, "audio_mode": "none"},
-                    "alternatives": [],
-                    "backend": BACKEND_ID,
-                    "backend_version": "1.0.0",
-                },
-            )
-            return 0
+    if mismatches:
+        _write_json(
+            result_path,
+            {
+                "schema_version": 1,
+                "supported": False,
+                "reasons": [
+                    "profile not produced by " + BACKEND_ID + ": "
+                    + "; ".join(mismatches)
+                ],
+                "features": {"media": False, "audio_mode": "none"},
+                "alternatives": [],
+                "backend": BACKEND_ID,
+                "backend_version": "1.0.0",
+            },
+        )
+        return 0
     _write_json(
         result_path,
         {

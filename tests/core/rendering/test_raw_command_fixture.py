@@ -303,6 +303,37 @@ def test_render_verb_via_command_transport(tmp_path: Path) -> None:
     assert result.video.sha256 == second_result.video.sha256
 
 
+def test_support_rejects_audio_none_even_with_null_profile(tmp_path: Path) -> None:
+    """A request for audio='none' with profile=null is unsupported: the
+    renderer always produces rendered PCM stereo audio."""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir(parents=True, exist_ok=True)
+    request_path = workspace / "request.json"
+    request_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "output_name": "raw_command.mp4",
+                "audio": "none",
+                "profile": None,
+            }
+        ),
+        encoding="utf-8",
+    )
+    result_path = workspace / "result.json"
+    transport = CommandTransport(BACKEND_ID, termination_grace=0.15)
+    report = transport.run(
+        "support",
+        [sys.executable, "backend.py"],
+        request_path=request_path,
+        result_path=result_path,
+        cwd=PACK_ROOT,
+        timeout=30,
+    )
+    assert report.supported is False
+    assert report.features == {"media": False, "audio_mode": "none"}
+
+
 def test_support_verb_via_command_transport(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     _, report, _ = _run_transport(workspace, PACK_ROOT, verb="support", request_name="support.json")
