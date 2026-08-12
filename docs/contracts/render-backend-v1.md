@@ -7,9 +7,11 @@ for wire shape; this document is normative for lifecycle and semantic rules
 that JSON Schema cannot express, such as `end_frame > start_frame` and
 workspace containment after symlink resolution.
 
-This contract defines data and ownership only. Discovery, transport, the render
-service, built-in backends, and installation tooling are implemented in later
-batches.
+The M1 implementation is live. Pack discovery, trust-aware renderer/planner/
+finalizer registries, the synchronous command transport, artifact validation,
+the backend-neutral render service, publication, and provenance all implement
+this boundary. Backend authors extend rendering by adding pack data and a
+protocol command; they do not edit core or the `rendering.render` executor.
 
 ## Identity, discovery, and trust
 
@@ -20,6 +22,12 @@ such as `rendering.remotion`, `rendering.legacy_hybrid`, or the canonical
 underscores are valid. Bare `remotion` and `ffmpeg` are legacy selectors
 translated by the host; `hybrid` names a planning policy and is never a
 renderer ID.
+
+The first ID segment is the contributing pack's `id`. A pack named
+`video_tool` therefore owns ids such as `video_tool.renderer`; it cannot claim
+`rendering.video-tool`. The one reserved identity is `rendering.render`: it is
+the public executor facade, not a renderer, and renderer registration or an
+override that resolves back to it is rejected as recursion.
 
 Packs advertise static manifests through the strict pack extension:
 
@@ -50,6 +58,32 @@ execution-eligible discovered candidate may run:
 Trust and permission declarations do not create an operating-system sandbox.
 An eligible command retains the invoking user's OS authority, subject to the
 host's sanitized environment and invocation staging.
+
+### Public entry points
+
+Normal callers invoke the stable executor capability:
+
+```bash
+python3 -m astrid executors run rendering.render \
+  --out ./out \
+  --input timeline=./out/hype.timeline.json \
+  --input assets_registry=./out/hype.assets.json \
+  --input backend=video_tool.renderer
+```
+
+The facade is `astrid/packs/rendering/executors/render/run.py`. It validates
+the legacy-compatible command surface, converts it into a neutral
+`RenderRequest`, and delegates selection and the entire lifecycle to
+`astrid/core/rendering/service.py::RenderService`. Embedding code may call
+`RenderService` directly. Neither entry point imports a concrete renderer;
+pack commands are discovered from manifests and invoked by the transport.
+
+`engine` remains a compatibility spelling accepted by the facade. `backend`
+is its neutral synonym, and callers must not supply conflicting values.
+`remotion`, `ffmpeg`, and `hybrid` are the only legacy short selectors;
+qualified renderer ids are strict apart from ordinary aliases and overrides.
+New integrations should prefer `backend=<qualified-id>` and place private
+settings in `backend_config[<qualified-id>]`.
 
 ## Manifest format
 
@@ -138,6 +172,15 @@ failure. A nonzero exit is mapped to a structured failure even if diagnostics
 were printed. V1 is synchronous: submit/status/cancel/resume semantics require
 a future protocol version.
 
+The request and result files are created in the root of the unique invocation
+workspace. A command obtains that workspace as the resolved parent of
+`--request`; every artifact path it reports is relative to that directory.
+The command must not use its pack-root working directory for invocation output.
+The sanitized child environment includes `ASTRID_RENDER_BACKEND` set to the
+selected qualified implementation id. A pack may use it to route a shared
+command prefix among sibling renderer, planner, and finalizer adapters; it must
+not infer its identity from timeline shape or unrelated configuration.
+
 ## Wire primitives
 
 JSON numbers must be finite. Python booleans do not count as integers. Fixed
@@ -186,6 +229,25 @@ A visual-only profile omits all three audio fields or sets them all to `null`;
 canonical DTO output uses explicit nulls. One frame is the V1 default duration
 tolerance. This tolerance never changes window bounds; it only controls
 artifact acceptance.
+
+### Profile anchoring
+
+Profiles are evidence, not encoder wishes. The anchor depends on the route:
+
+- A direct request with a non-null `profile` anchors validation to that exact
+  profile. A renderer cannot silently substitute dimensions, frame rate,
+  codecs, time base, pixel format, duration tolerance, or audio shape.
+- A direct request with `profile: null` lets the renderer declare the profile
+  actually probed from its artifact; Astrid validates the file against that
+  declaration and records it in the generated direct plan and provenance.
+- A planner MUST set `RenderPlan.profile`. That value is the canonical final
+  output profile and fixes the FPS used by the plan window and every segment
+  window. Individual segment artifacts may differ only because the pinned
+  finalizer can normalize them. The final artifact MUST match the plan profile.
+
+The service, not a backend-private fragment or legacy engine field, owns this
+anchor. `duration_tolerance` is evaluated in frames at the canonical profile's
+rational FPS.
 
 ## Render request and configuration namespacing
 
@@ -552,6 +614,180 @@ replay never silently resolves another backend. Credentials, authorization
 headers, private environment values, and signed URL query strings are removed.
 Successful disposable workspaces are deleted unless the caller explicitly
 requests retention. V1 defines no cleanup daemon or TTL service.
+
+## Worked example: a third renderer pack
+
+This hypothetical `video_tool` pack adds a renderer without changing Astrid
+core, the rendering pack, or the public facade.
+
+### 1. Pack layout and registration
+
+```text
+video_tool/
+  pack.yaml
+  rendering/
+    renderer.yaml
+    run.py
+```
+
+`video_tool/pack.yaml` declares the permission superset and the pack-relative
+manifest path:
+
+```yaml
+schema_version: 1
+id: video_tool
+name: Video Tool Renderer
+version: 1.0.0
+permissions:
+  - id: project_files
+    reason: Reads localized timeline assets and writes an invocation artifact
+  - id: subprocess
+    reason: Runs the vendor video-tool executable
+extensions:
+  rendering:
+    renderers:
+      - rendering/renderer.yaml
+aliases:
+  - kind: renderer
+    alias: video_tool.legacy
+    canonical_id: video_tool.renderer
+    deprecated: true
+    deprecation_message: Use video_tool.renderer
+```
+
+`video_tool/rendering/renderer.yaml` is static data. Discovery can inspect and
+validate it without importing `run.py`:
+
+```yaml
+schema_version: 1
+id: video_tool.renderer
+name: Video Tool Timeline Renderer
+version: 1.0.0
+protocol_version: 1
+command: [python3, rendering/run.py]
+operations: [render, support]
+description: Renders complete media and text timelines with video-tool
+capabilities:
+  clip_types: [media, text]
+  track_types: [visual, audio]
+  features:
+    transitions: false
+    vendor_project_export: true
+  supports_full_timeline: true
+  supports_windows: false
+  output_profiles: [video/mp4]
+  audio_ownership: [rendered, none]
+required_permissions: [project_files, subprocess]
+required_binaries: [video-tool, ffprobe]
+timeout_seconds: 900
+metadata: {vendor: ExampleCo}
+```
+
+The backend id begins with the owning pack id. Its manifest permissions are a
+subset of the pack declarations. `rendering.render` is intentionally absent:
+the pack contributes an implementation behind that existing facade.
+
+### 2. Command behavior
+
+`rendering/run.py` parses exactly one verb plus `--request` and `--result`.
+For either verb it validates `schema_version`, uses `Path(request).parent` as
+the invocation workspace, and writes exactly one authoritative JSON result.
+
+For `support`, suppose this renderer accepts only a complete timeline with no
+transition clips. It returns:
+
+```json
+{
+  "schema_version": 1,
+  "supported": true,
+  "reasons": [],
+  "features": {
+    "full_timeline": true,
+    "transitions": false,
+    "audio_mode": "rendered"
+  },
+  "alternatives": [],
+  "backend": "video_tool.renderer",
+  "backend_version": "1.0.0"
+}
+```
+
+If the request contains a transition it instead sets `supported: false`, adds
+an actionable reason, and may suggest `rendering.remotion` in `alternatives`.
+It does not invoke another renderer itself. With a qualified selector, Astrid
+fails closed; only an explicit planner or fallback policy may choose an
+alternative.
+
+For `render`, the command reads only
+`backend_config["video_tool.renderer"]`, invokes the vendor executable without
+a shell, probes the generated media, hashes it, and returns a relative path:
+
+```json
+{
+  "schema_version": 1,
+  "video": {
+    "path": "video-tool/output.mp4",
+    "profile": {
+      "width": 1920,
+      "height": 1080,
+      "fps_rational": [24, 1],
+      "time_base": [1, 12288],
+      "container": "mp4",
+      "video_codec": "h264",
+      "video_profile": "high",
+      "video_level": "4.1",
+      "pixel_format": "yuv420p",
+      "audio_codec": "aac",
+      "audio_sample_rate": 48000,
+      "audio_channel_layout": "stereo",
+      "duration_tolerance": 1
+    },
+    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "duration_frames": 240,
+    "audio": "rendered",
+    "attachments": {}
+  },
+  "backend_fragments": {
+    "video_tool.renderer": {
+      "vendor_version": "7.2",
+      "preset": "high"
+    }
+  },
+  "audio_ownership": "rendered",
+  "normalization": [],
+  "logs": ["video-tool render completed"],
+  "metadata": {}
+}
+```
+
+The digest above is illustrative; a real response contains the SHA-256 of the
+actual file. If the backend chooses `audio_ownership: none`, it must return a
+visual-only profile with all three audio fields `null`. If it chooses
+`passthrough`, the same visual-only rule applies and Astrid owns later audio
+completion. The backend never writes core provenance or publishes the final
+destination itself.
+
+### 3. Validate and invoke through the facade
+
+After installing or placing the pack in an eligible pack root:
+
+```bash
+python3 -m astrid packs validate ./video_tool
+python3 -m astrid executors run rendering.render \
+  --out ./out \
+  --input timeline=./out/hype.timeline.json \
+  --input assets_registry=./out/hype.assets.json \
+  --input backend=video_tool.renderer \
+  --input 'backend_config={"video_tool.renderer":{"preset":"high"}}'
+```
+
+Astrid resolves the qualified id and any renderer alias/override, checks trust,
+permissions, binaries, protocol version, and request-sensitive support, invokes
+the command, validates the artifact and profile, then publishes the video plus
+its core-owned provenance sidecar. The sidecar records the source pack,
+manifest digest, alias chain, override, trust eligibility, support decision,
+input hashes, artifact hash/profile, audio ownership, and the namespaced vendor
+fragment. No registry or service edit is needed.
 
 ## Versioning
 

@@ -256,8 +256,8 @@ if ! $JSON_MODE; then
   # Named Remotion typecheck lane.
   if [ ! -d remotion/node_modules ]; then
     echo "LANE remotion-typecheck: SKIP (remotion/node_modules absent; run 'cd remotion && npm ci' to enable)"
-  elif [ ! -f remotion/src/types.augmentations.ts ]; then
-    echo "LANE remotion-typecheck: SKIP (remotion/src/types.augmentations.ts absent; generated augmentation surface not provisioned)"
+  elif [ ! -f remotion/src/types.augmentations.d.ts ]; then
+    echo "LANE remotion-typecheck: SKIP (remotion/src/types.augmentations.d.ts absent; generated augmentation surface not provisioned)"
   else
     echo "LANE remotion-typecheck: running (remotion/node_modules + generated surface present)"
     (cd remotion && npm run typecheck)
@@ -368,8 +368,8 @@ echo "--- remotion_typecheck ---" >&2
 if [ ! -d remotion/node_modules ]; then
   echo "LANE remotion-typecheck: SKIP (remotion/node_modules absent; run 'cd remotion && npm ci' to enable)" >&2
   _accum remotion_typecheck 0 0 1
-elif [ ! -f remotion/src/types.augmentations.ts ]; then
-  echo "LANE remotion-typecheck: SKIP (remotion/src/types.augmentations.ts absent; generated augmentation surface not provisioned)" >&2
+elif [ ! -f remotion/src/types.augmentations.d.ts ]; then
+  echo "LANE remotion-typecheck: SKIP (remotion/src/types.augmentations.d.ts absent; generated augmentation surface not provisioned)" >&2
   _accum remotion_typecheck 0 0 1
 else
   echo "LANE remotion-typecheck: running (remotion/node_modules + generated surface present)" >&2

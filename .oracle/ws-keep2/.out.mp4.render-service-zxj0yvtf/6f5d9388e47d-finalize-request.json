@@ -1,0 +1,313 @@
+{
+  "artifacts": [
+    {
+      "attachments": {},
+      "audio": "rendered",
+      "duration_frames": 7,
+      "path": "outputs/segment-0000.mp4",
+      "profile": {
+        "audio_channel_layout": "stereo",
+        "audio_codec": "aac",
+        "audio_sample_rate": 48000,
+        "container": "mp4",
+        "duration_tolerance": 1,
+        "fps_rational": [
+          10,
+          1
+        ],
+        "height": 90,
+        "pixel_format": "yuv420p",
+        "time_base": [
+          1,
+          90000
+        ],
+        "video_codec": "h264",
+        "video_level": null,
+        "video_profile": null,
+        "width": 160
+      },
+      "sha256": "5be2ae93cc7f0fcae05c9562921f2ee54fed7438fffced0f28ab79e0d019b7a2"
+    },
+    {
+      "attachments": {},
+      "audio": "rendered",
+      "duration_frames": 13,
+      "path": "outputs/segment-0001.mp4",
+      "profile": {
+        "audio_channel_layout": "stereo",
+        "audio_codec": "aac",
+        "audio_sample_rate": 48000,
+        "container": "mp4",
+        "duration_tolerance": 1,
+        "fps_rational": [
+          10,
+          1
+        ],
+        "height": 90,
+        "pixel_format": "yuv420p",
+        "time_base": [
+          1,
+          10240
+        ],
+        "video_codec": "h264",
+        "video_level": "10",
+        "video_profile": "High",
+        "width": 160
+      },
+      "sha256": "d8248304ea39cded784720e7b793f9812ffc4745dec8a5ba1dd2c2bb133d6dfb"
+    }
+  ],
+  "backend_config": {},
+  "metadata": {},
+  "output_name": "x.mp4",
+  "plan": {
+    "finalizer": {
+      "alias_chain": [],
+      "id": "rendering.ffmpeg-finalizer",
+      "manifest_digest": "154e28c7ec9885f056e9d37f65be58832f3d569c98f750dc4837c3de5b42a75a",
+      "override": null,
+      "source_pack": {
+        "id": "rendering",
+        "manifest_path": "/Users/peteromalley/Documents/reigh-workspace/Astrid-oracle/astrid/packs/rendering/finalizers/ffmpeg/finalizer.yaml",
+        "priority_index": 11,
+        "root": "/Users/peteromalley/Documents/reigh-workspace/Astrid-oracle/astrid/packs/rendering",
+        "source_kind": "source"
+      },
+      "support_decision": {
+        "alternatives": [],
+        "backend": "rendering.ffmpeg-finalizer",
+        "backend_version": "1.0.0",
+        "features": {
+          "audio_ownership": "rendered",
+          "preserves_attachments": true,
+          "profile_normalization": true,
+          "stream_copy": true,
+          "strict_probe": true
+        },
+        "reasons": [],
+        "schema_version": 1,
+        "supported": true
+      },
+      "trust_eligibility": {
+        "accepted_permissions": [],
+        "active_revision": null,
+        "declared_permissions": [
+          "subprocess",
+          "project_files",
+          "network"
+        ],
+        "eligible": true,
+        "reason": "source-tree pack is execution-eligible",
+        "required_permissions": [
+          "project_files",
+          "subprocess"
+        ],
+        "trust_method": "source_tree"
+      }
+    },
+    "planner": {
+      "alias_chain": [],
+      "id": "rendering.legacy_hybrid",
+      "manifest_digest": "1c7dfc642905f56f8e094e36397dc79ef3e9da710aac7600628f80ea27749f70",
+      "override": null,
+      "source_pack": {
+        "id": "rendering",
+        "manifest_path": "/Users/peteromalley/Documents/reigh-workspace/Astrid-oracle/astrid/packs/rendering/planners/legacy_hybrid/planner.yaml",
+        "priority_index": 11,
+        "root": "/Users/peteromalley/Documents/reigh-workspace/Astrid-oracle/astrid/packs/rendering",
+        "source_kind": "source"
+      },
+      "support_decision": {
+        "alternatives": [],
+        "backend": "rendering.legacy_hybrid",
+        "backend_version": "1.0.0",
+        "features": {
+          "explicit_finalizer": true,
+          "integer_frame_windows": true,
+          "non_recursive_dispatch": true,
+          "support_based_assignment": true,
+          "transition_handles": true
+        },
+        "reasons": [],
+        "schema_version": 1,
+        "supported": true
+      },
+      "trust_eligibility": {
+        "accepted_permissions": [],
+        "active_revision": null,
+        "declared_permissions": [
+          "subprocess",
+          "project_files",
+          "network"
+        ],
+        "eligible": true,
+        "reason": "source-tree pack is execution-eligible",
+        "required_permissions": [
+          "project_files",
+          "subprocess"
+        ],
+        "trust_method": "source_tree"
+      }
+    },
+    "profile": {
+      "audio_channel_layout": "stereo",
+      "audio_codec": "aac",
+      "audio_sample_rate": 48000,
+      "container": "mp4",
+      "duration_tolerance": 1,
+      "fps_rational": [
+        10,
+        1
+      ],
+      "height": 90,
+      "pixel_format": "yuv420p",
+      "time_base": [
+        1,
+        10240
+      ],
+      "video_codec": "h264",
+      "video_level": null,
+      "video_profile": null,
+      "width": 160
+    },
+    "reasons": {
+      "0": "complex legacy window assigned to rendering.remotion by supported report",
+      "1": "simple legacy window assigned to rendering.ffmpeg by supported report"
+    },
+    "request_digest": "d10ff11bcfd271352c25331e908cdc368b66a941cc9b9f01cea4e84e857c1bfa",
+    "requested_policy": "hybrid",
+    "schema_version": 1,
+    "segments": [
+      {
+        "input_hashes": {
+          "assets_registry": "35d625a3d64ce55f8d5ced096bb012c7551069c6cd4b1951d304693b315dbf02",
+          "materialized_timeline": "870b19877b93d88080a46939df4ec4be2eaede6fb6629ec9f4b9963ce524265b",
+          "timeline": "e3bf702180e9f775f22ffb094f50024228b1525b7a8c81649508fc9c0900e157"
+        },
+        "renderer": {
+          "alias_chain": [],
+          "id": "rendering.remotion",
+          "manifest_digest": "e44ec8fb1d2b0185a81bb5ee05401290aebe9a8287b99a92a7d6fdf6366b3a56",
+          "override": null,
+          "source_pack": {
+            "id": "rendering",
+            "manifest_path": "/Users/peteromalley/Documents/reigh-workspace/Astrid-oracle/astrid/packs/rendering/backends/remotion/renderer.yaml",
+            "priority_index": 11,
+            "root": "/Users/peteromalley/Documents/reigh-workspace/Astrid-oracle/astrid/packs/rendering",
+            "source_kind": "source"
+          },
+          "support_decision": {
+            "alternatives": [],
+            "backend": "rendering.remotion",
+            "backend_version": "1.0.0",
+            "features": {
+              "asset_serving": "invocation-scoped",
+              "audio_ownership": "rendered",
+              "effects": true,
+              "full_timeline": true,
+              "timeline_composition": true,
+              "windows": false
+            },
+            "reasons": [],
+            "schema_version": 1,
+            "supported": true
+          },
+          "trust_eligibility": {
+            "accepted_permissions": [],
+            "active_revision": null,
+            "declared_permissions": [
+              "subprocess",
+              "project_files",
+              "network"
+            ],
+            "eligible": true,
+            "reason": "source-tree pack is execution-eligible",
+            "required_permissions": [
+              "project_files",
+              "subprocess"
+            ],
+            "trust_method": "source_tree"
+          }
+        },
+        "window": {
+          "end_frame": 7,
+          "fps_rational": [
+            10,
+            1
+          ],
+          "source_range": null,
+          "speed": null,
+          "start_frame": 0
+        }
+      },
+      {
+        "input_hashes": {
+          "assets_registry": "35d625a3d64ce55f8d5ced096bb012c7551069c6cd4b1951d304693b315dbf02",
+          "materialized_timeline": "34e9ffe52c70fdd9e9a93e6d64fd2ec24388e2360f2489c8db17dece05037bf7",
+          "timeline": "e3bf702180e9f775f22ffb094f50024228b1525b7a8c81649508fc9c0900e157"
+        },
+        "renderer": {
+          "alias_chain": [],
+          "id": "rendering.ffmpeg",
+          "manifest_digest": "61f37636567470f3561e09f4694b344263b6b7d6fa1224e8ea520debd39a2107",
+          "override": null,
+          "source_pack": {
+            "id": "rendering",
+            "manifest_path": "/Users/peteromalley/Documents/reigh-workspace/Astrid-oracle/astrid/packs/rendering/backends/ffmpeg/renderer.yaml",
+            "priority_index": 11,
+            "root": "/Users/peteromalley/Documents/reigh-workspace/Astrid-oracle/astrid/packs/rendering",
+            "source_kind": "source"
+          },
+          "support_decision": {
+            "alternatives": [],
+            "backend": "rendering.ffmpeg",
+            "backend_version": "1.0.0",
+            "features": {
+              "audio_ownership": "rendered",
+              "audio_reactive_colour": false,
+              "full_timeline": true,
+              "media_only": true,
+              "sequential_audio": true,
+              "stream_copy": false,
+              "whole_media": false,
+              "whole_media_optimization": false,
+              "windows": false
+            },
+            "reasons": [],
+            "schema_version": 1,
+            "supported": true
+          },
+          "trust_eligibility": {
+            "accepted_permissions": [],
+            "active_revision": null,
+            "declared_permissions": [
+              "subprocess",
+              "project_files",
+              "network"
+            ],
+            "eligible": true,
+            "reason": "source-tree pack is execution-eligible",
+            "required_permissions": [
+              "project_files",
+              "subprocess"
+            ],
+            "trust_method": "source_tree"
+          }
+        },
+        "window": {
+          "end_frame": 20,
+          "fps_rational": [
+            10,
+            1
+          ],
+          "source_range": null,
+          "speed": null,
+          "start_frame": 7
+        }
+      }
+    ],
+    "total_frames": 20,
+    "window": null
+  },
+  "schema_version": 1
+}

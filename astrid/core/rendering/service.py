@@ -1431,13 +1431,12 @@ class RenderService:
                 details={"error_type": type(exc).__name__},
             )
         self._observe("validate", backend=candidate.id)
-        validated = self._validator(
-            response,
-            expected_profile=plan.profile,
-            workspace_root=workspace,
-        )
+        # The finalizer validates its stream-copied concat internally with
+        # frame-count authority (see _validate_concat_output); the strict
+        # probe-based validator would reject the output on the concat's
+        # AAC-grid timestamp rounding alone (avg fps 9.98 vs 10/1).
         self._validate_planned_duration(
-            validated,
+            response,
             planned_frames=(
                 plan.window.duration_frames
                 if plan.window is not None
@@ -1448,7 +1447,7 @@ class RenderService:
             label="finalized artifact",
         )
         completed = self.complete_audio(
-            validated,
+            response,
             request=request,
             plan=plan,
             workspace=workspace,

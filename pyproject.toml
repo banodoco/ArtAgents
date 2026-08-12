@@ -154,7 +154,7 @@ norecursedirs = [
 markers = [
     "slow: slower integration-style tests that should remain opt-in for tight loops",
     "performance_smoke: lightweight performance smoke tests with loose CI-safe thresholds",
-    "renderer_parity: optional renderer parity integration against committed sprint-08 fixtures",
+    "renderer_parity: blocking semantic parity integration for shipped timeline renderers",
     "pack_recoverability_exhaustive: opt-in exhaustive sweep of importable pack enum recoverability surfaces",
     "timeout: per-test timeout marker used when pytest-timeout is installed",
     "standalone: tests intended to run independently from the default suite",

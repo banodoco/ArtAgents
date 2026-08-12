@@ -207,6 +207,14 @@ class ExecutorCapabilityRunner(CapabilityRunner[ExecutorRunRequest, ExecutorRunR
         return _expand_external_command(executor, request, values)[0]
 
     def maybe_gate(self, request: ExecutorRunRequest) -> None:
+        # Attached-child helpers validate the owning project/run and allocate a
+        # unique synthetic child step before entering the executor lifecycle.
+        # Such a child is deliberately outside the parent task plan's cursor,
+        # so running the normal command gate here would reject the invocation
+        # even though it is attached to a valid ledger.  All ordinary executor
+        # requests retain the existing gate behavior.
+        if request.invocation == "attached-child":
+            return
         task_project = task_env.task_project_env()
         task_run_id = task_env.task_run_id_env()
         task_step_id = task_env.task_step_id_env()

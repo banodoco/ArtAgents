@@ -1,0 +1,19 @@
+{
+  "backend": "rendering.ffmpeg-finalizer",
+  "details": {
+    "actual": [
+      204800,
+      20521
+    ],
+    "expected": [
+      10,
+      1
+    ],
+    "field": "fps_rational",
+    "reason": "profile_mismatch"
+  },
+  "kind": "invalid_artifact",
+  "message": "probed video fps_rational does not match the declared profile",
+  "recovery_command": "rerun the renderer in a fresh invocation workspace and emit a contained, non-empty artifact matching the canonical render profile",
+  "schema_version": 1
+}

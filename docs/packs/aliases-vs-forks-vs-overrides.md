@@ -13,6 +13,8 @@ guide builds on the vocabulary in
 | Redirect a capability id to a replacement | Override | `.overrides.json` in local pack | Your project |
 | Shadow a builtin with a local replacement | Override | `.overrides.json` in local pack | Your project |
 | Maintain backward-compat after renaming | Alias | In pack manifest | All consumers |
+| Keep an old renderer/planner/finalizer id working | Alias with the matching rendering `kind` | In pack manifest | All render-service callers |
+| Redirect one rendering implementation to another | Typed override | `.overrides.json` in local pack | Facade and direct-service calls in your project |
 
 ---
 
@@ -32,15 +34,15 @@ Each alias entry is an object with:
 
 | Field | Required | Type | Description |
 |---|---|---|---|
-| `kind` | Yes | `"executor"` or `"orchestrator"` | The capability kind the alias routes to |
+| `kind` | Yes | `"executor"`, `"orchestrator"`, `"renderer"`, `"planner"`, or `"finalizer"` | The capability kind the alias routes to |
 | `alias` | Yes | Qualified id (`pack.slug`) | The old or alternate public id |
 | `canonical_id` | Yes | Qualified id (`pack.slug`) | The canonical id this alias points to |
 | `deprecated` | No | `boolean` (default `false`) | Whether the alias is deprecated |
 | `deprecation_message` | No | `string` (default `""`) | Human-readable deprecation note shown in inspect/search |
 
 Both `alias` and `canonical_id` must be qualified ids (e.g. `rendering.render`,
-not bare `render`). The `kind` enum is `executor` or `orchestrator` — element
-aliases are deferred to a future milestone.
+not bare `render`). Element aliases are still deferred; renderer, planner, and
+finalizer aliases are independent rendering-registry namespaces.
 
 **Example** in `pack.yaml`:
 
@@ -52,11 +54,11 @@ aliases:
     canonical_id: rendering.render
     deprecated: true
     deprecation_message: "Moved to rendering.render — update your references"
-  - kind: executor
-    alias: external.vibecomfy.run
-    canonical_id: vibecomfy.run
+  - kind: renderer
+    alias: rendering.old-remotion
+    canonical_id: rendering.remotion
     deprecated: true
-    deprecation_message: "The 'external' prefix is no longer needed"
+    deprecation_message: "Use rendering.remotion"
 ```
 
 Multiple aliases can point to the same canonical id, and aliases are resolved
@@ -84,8 +86,8 @@ blocked.
 
 **What aliases are NOT:**
 
-- **Element aliases** — The `kind` enum only accepts `executor` and
-  `orchestrator`. Element aliasing is deferred to a future milestone.
+- **Element aliases** — element kinds are not accepted. Element aliasing is
+  deferred to a future milestone.
 - **Component-level `metadata.aliases`** — The `metadata.aliases` field on
   individual executor/orchestrator manifests (e.g. `executor.yaml`) is legacy
   validation-only coverage. It is checked during static validation but is not
@@ -220,3 +222,59 @@ canonical target. Both alias resolution and override redirection are transparent
 to the caller — the returned definition is the final canonical or override
 definition, with alias metadata attached to the capability handle's provenance
 for informational display.
+
+## Rendering Implementations
+
+Renderer, planner, and finalizer resolution uses the same ordering, but each is
+its own namespace. These keys are distinct:
+
+```json
+{
+  "executor": {"rendering.render": "local.render"},
+  "renderer": {"rendering.remotion": "video_tool.renderer"},
+  "planner": {"rendering.legacy_hybrid": "video_tool.planner"},
+  "finalizer": {"rendering.ffmpeg-finalizer": "video_tool.finalizer"}
+}
+```
+
+An `executor` override replaces the public `rendering.render` capability before
+the facade runs. The other three override only implementation selection inside
+`RenderService`; they apply to both facade calls and direct public-service
+calls. Changing one kind never redirects another.
+
+The rendering registries apply the following verified rules:
+
+1. Resolve the requested alias transitively to its canonical id.
+2. Apply an override keyed by that canonical id and implementation kind.
+3. Select the highest-precedence execution-eligible candidate for the final id.
+4. Record the requested id, alias chain, `{from,to}` override, source pack,
+   manifest digest, and trust eligibility in resolution evidence and render
+   provenance.
+
+Only aliases from execution-eligible packs can redirect execution. Aliases from
+environment-only or otherwise untrusted packs remain visible to inspection but
+cannot shadow an executable implementation. When a higher-precedence alias
+chain ends at a missing or ineligible target, resolution may use the next
+eligible declaration for that alias. A trusted alias whose canonical target is
+absent remains usable when an override explicitly routes that canonical id to
+an eligible implementation. Alias cycles, missing override targets, and
+ineligible override targets fail closed.
+
+`rendering.render` is reserved for the executor facade. A renderer registration,
+alias terminal, or renderer override that resolves to it is rejected as facade
+recursion. The legacy short names `remotion` and `ffmpeg` are core compatibility
+aliases for renderer lookup, while the facade's legacy selector
+`engine=remotion` retains its characterized auto-route policy. To demand the
+Remotion implementation strictly, select the qualified id
+`backend=rendering.remotion`; qualified selectors have no implicit fallback.
+
+Renderer/planner/finalizer overrides are stored by the same project-local
+`OverrideStore` in `astrid/packs/local/.overrides.json`. There is no separate
+backend override file or backend-specific override format. Pack manifests may
+declare aliases of `kind: renderer`, `kind: planner`, and `kind: finalizer`;
+their extension manifests are registered through
+`extensions.rendering.renderers`, `.planners`, and `.finalizers` respectively.
+The current CLI exposes override management for executors, orchestrators, and
+elements only; do not invent `astrid renderers override ...` commands. Rendering
+hosts and tests set these typed mappings through `OverrideStore` until a public
+rendering-registry CLI is added.

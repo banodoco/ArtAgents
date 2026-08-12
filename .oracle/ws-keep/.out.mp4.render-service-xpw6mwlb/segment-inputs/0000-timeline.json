@@ -1,0 +1,92 @@
+{
+  "clips": [
+    {
+      "asset": "black",
+      "at": 0.0,
+      "clipType": "media",
+      "from": 0.0,
+      "id": "source_a_0_7",
+      "speed": 1,
+      "to": 0.4,
+      "track": "source",
+      "transition": {
+        "duration": 0.2,
+        "id": "cross-fade"
+      },
+      "volume": 0
+    },
+    {
+      "asset": "black",
+      "at": 0.2,
+      "clipType": "media",
+      "from": 0.2,
+      "id": "source_b_0_7",
+      "speed": 1,
+      "to": 0.7,
+      "track": "source",
+      "volume": 0
+    },
+    {
+      "asset": "silence",
+      "at": 0.0,
+      "clipType": "media",
+      "from": 0.0,
+      "id": "audio_silence_0_7",
+      "speed": 1,
+      "to": 0.7,
+      "track": "audio",
+      "volume": 1
+    }
+  ],
+  "metadata": {
+    "duration_seconds": 0.7,
+    "source_window_end_seconds": 0.7,
+    "source_window_start_seconds": 0.0
+  },
+  "theme": "banodoco-default",
+  "theme_overrides": {
+    "visual": {
+      "canvas": {
+        "fps": 10,
+        "height": 90,
+        "width": 160
+      },
+      "color": {
+        "accent": "#ffffff",
+        "bg": "#000000",
+        "fg": "#ffffff"
+      },
+      "motion": {
+        "fadeMs": 250
+      },
+      "type": {
+        "families": {
+          "body": "Georgia, serif",
+          "heading": "Georgia, serif"
+        },
+        "lineHeight": 1.1,
+        "size": {
+          "base": 64,
+          "large": 96,
+          "small": 36
+        },
+        "weight": {
+          "bold": 700,
+          "normal": 400
+        }
+      }
+    }
+  },
+  "tracks": [
+    {
+      "id": "source",
+      "kind": "visual",
+      "label": "Source"
+    },
+    {
+      "id": "audio",
+      "kind": "audio",
+      "label": "Audio"
+    }
+  ]
+}

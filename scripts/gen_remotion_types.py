@@ -89,6 +89,30 @@ def _build_typeddict_registry() -> (
         by_id.setdefault(id(value), []).append(name)
         value_by_id[id(value)] = value
 
+    # Exported TypedDicts can refer to private implementation-detail
+    # TypedDicts (for example SharedAssetEntry -> DerivedFrom).  Walk those
+    # annotations so every name emitted in a field type also gets an interface.
+    queue = list(value_by_id.values())
+    visited: set[int] = set()
+    while queue:
+        typed_dict = queue.pop()
+        if id(typed_dict) in visited:
+            continue
+        visited.add(id(typed_dict))
+        for annotation in get_type_hints(typed_dict, include_extras=True).values():
+            pending = [annotation]
+            while pending:
+                candidate = pending.pop()
+                origin = get_origin(candidate)
+                if isinstance(candidate, type) and is_typeddict(candidate):
+                    if id(candidate) not in value_by_id:
+                        value_by_id[id(candidate)] = candidate
+                        by_id[id(candidate)] = [candidate.__name__]
+                        queue.append(candidate)
+                    continue
+                if origin is not None:
+                    pending.extend(get_args(candidate))
+
     canonical_by_id: dict[int, str] = {}
     aliases_by_id: dict[int, list[str]] = {}
     for type_id, names in by_id.items():

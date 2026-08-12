@@ -24,13 +24,17 @@ Current start points:
 
 ```bash
 # Source-backed edit
-python3 -m astrid --video source.mp4 --brief brief.txt --out runs/example --render
+python3 -m astrid orchestrators run video_editing.hype -- \
+  --video source.mp4 --brief brief.txt --out runs/example --render
 
 # Audio-backed edit
-python3 -m astrid --audio voiceover.wav --brief brief.txt --out runs/audio --render
+python3 -m astrid orchestrators run video_editing.hype -- \
+  --audio voiceover.wav --brief brief.txt --out runs/audio --render
 
 # Pure-generative edit from an existing brief
-python3 -m astrid --brief examples/briefs/cinematic.txt --out runs/generative --render --target-duration 15
+python3 -m astrid orchestrators run video_editing.hype -- \
+  --brief examples/briefs/cinematic.txt --out runs/generative \
+  --target-duration 15 --render
 ```
 
 If the user gives a topic instead of a brief, create or use a brief-generation
@@ -113,8 +117,17 @@ element instead of hard-coding behavior in an executor.
 Create a **shared library** only when the code has no public runtime of its own.
 Hype/editing concepts belong with the owning editorial pack under
 `astrid/packs/editorial/hype`. Generic
-plumbing belongs under `astrid/utilities`. Executor-specific helpers belong
+plumbing belongs under `astrid/core/util`. Executor-specific helpers belong
 inside that executor's optional `src/` package.
+
+Create a **renderer**, **planner**, or **finalizer** only when extending the
+timeline render backend layer. These are protocol commands registered by a
+pack through `extensions.rendering.renderers`, `.planners`, or `.finalizers`;
+they are not public executor kinds. A renderer produces one validated primary
+video, a planner assigns exact frame windows to renderers, and a finalizer
+normalizes/assembles planned artifacts. Keep `rendering.render` as the public
+facade and follow `docs/contracts/render-backend-v1.md`; do not import a
+concrete backend or add engine branches to the facade.
 
 For a one-off experiment, keep outputs and scratch files under `runs/`. Do not
 create a public executor, orchestrator, or element unless the behavior should be
@@ -140,9 +153,11 @@ JSON to force a pool.
 `generation.generate_brief` executor and call it from a topic-to-video
 orchestrator.
 
-**Render is missing assets.** Rendering consumes the timeline and assets pair
-created by cut. Do not skip cut unless both `hype.timeline.json` and
-`hype.assets.json` already exist for that brief.
+**Render is missing assets.** Rendering always needs a timeline. Pass the
+registry created by cut when the timeline references media assets. An
+asset-free timeline may omit it; the facade supplies an empty registry. Do not
+skip cut in the normal media pipeline unless its required timeline/registry
+artifacts already exist.
 
 **No one-command topic creation.** The current one-command path starts from a
 brief file. A topic-only command should be an orchestrator that provisions the
@@ -173,7 +188,7 @@ authoring workflow and manifest schemas.
 Executor folders use:
 
 ```text
-astrid/packs/<pack>/<name>/
+astrid/packs/<pack>/executors/<name>/
   executor.yaml      # id: "<pack>.<name>"
   run.py
   STAGE.md
@@ -183,7 +198,7 @@ astrid/packs/<pack>/<name>/
 Orchestrator folders use:
 
 ```text
-astrid/packs/<pack>/<name>/
+astrid/packs/<pack>/orchestrators/<name>/
   orchestrator.yaml  # id: "<pack>.<name>"
   run.py
   STAGE.md
@@ -231,7 +246,10 @@ plan = build_plan_template(
     steps=[
         build_leaf_template(
             "render",
-            command="python3 -m astrid.packs.rendering.executors.render.run ...",
+            command=(
+                "python3 -m astrid executors run rendering.render "
+                "--out runs/example --input timeline=runs/example/hype.timeline.json"
+            ),
             produces=[file_output("video", "hype.mp4")],
             cost=cost_entry(0, source="local"),
         )

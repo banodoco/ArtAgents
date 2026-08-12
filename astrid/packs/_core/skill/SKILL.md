@@ -285,8 +285,9 @@ For custom pack behavior that agents should remember, add
 rather than expanding `_core`.
 
 Content lives under packs at `astrid/packs/<pack>/`. Executor folders use
-`astrid/packs/<pack>/<slug>/{executor.yaml,STAGE.md,run.py}` and orchestrator
-folders use `astrid/packs/<pack>/<slug>/{orchestrator.yaml,STAGE.md,run.py}`,
+`astrid/packs/<pack>/executors/<slug>/{executor.yaml,STAGE.md,run.py}` and
+orchestrator folders use
+`astrid/packs/<pack>/orchestrators/<slug>/{orchestrator.yaml,STAGE.md,run.py}`,
 with optional local `src/` modules. Element folders live at
 `astrid/packs/<pack>/elements/<kind>/<id>/{component.tsx,element.yaml}` where
 kind is `effects`, `animations`, or `transitions`.
@@ -403,20 +404,20 @@ Three mechanisms let you customize without editing originals:
 - **Overrides** — Redirect a capability id to a preferred fork without
   modifying manifests. Use `executor override set <from> <to>`.
 
-Full details: [aliases-vs-forks-vs-overrides.md](docs/aliases-vs-forks-vs-overrides.md).
+Full details:
+[aliases-vs-forks-vs-overrides.md](../../../../docs/packs/aliases-vs-forks-vs-overrides.md).
 
 ### Further Reading
 
-- [docs/discovery-for-agents.md](docs/guides/discovery-for-agents.md) — Agent-facing
+- [docs/discovery-for-agents.md](../../../../docs/guides/discovery-for-agents.md) — Agent-facing
   CLI contract
-- [docs/creating-packs.md](docs/creating-packs.md) — Pack authoring workflow
-- [docs/creating-tools.md](docs/guides/creating-tools.md) — When to create each
+- [docs/creating-packs.md](../../../../docs/packs/creating-packs.md) — Pack authoring workflow
+- [docs/creating-tools.md](../../../../docs/guides/creating-tools.md) — When to create each
   capability kind
-- [docs/personal-packs.md](docs/personal-packs.md) — Personal pack workflow
-- [docs/adapter-packs.md](docs/adapter-packs.md) — Adapter pack conventions
-- [docs/update-workflow.md](docs/update-workflow.md) — Dirty detection and
-  update management
-- [docs/megaplan/epics/pack-system/pack-contract.md](docs/megaplan/epics/pack-system/pack-contract.md) — Formal definitions
+- [docs/adapter-packs.md](../../../../docs/packs/adapter-packs.md) — Adapter pack conventions
+- [docs/contract.md](../../../../docs/packs/contract.md) — Formal pack-system definitions
+- [docs/fork-and-update.md](../../../../docs/packs/fork-and-update.md) — Personal forks,
+  dirty detection, and update management
 
 The capability index below is **auto-generated** by
 `scripts/gen_capability_index.py`. Re-run it after editing executor,
@@ -482,7 +483,7 @@ Every project has a `plan.md` at its root — a per-project markdown doc for liv
 | `reigh.reigh_data` | Fetch canonical Reigh project data through the reigh-data Edge Function. |
 | `reigh.spatial_audio_page` | Build a static page that mixes Foley tracks anchored to spatial rectangles via Web Audio. |
 | `rendering.html_canvas_effect` | Scaffold a local Remotion HTML-in-canvas effect element. |
-| `rendering.render` | Render a hype timeline to hype.mp4 through Remotion, ffmpeg, or hybrid rendering. |
+| `rendering.render` | Render a hype timeline through the neutral facade using a qualified renderer or planner. |
 | `rendering.sprite_sheet` | Generate, slice, and preview GPT Image sprite sheets for batch image work. |
 | `rendering.timeline_storyboard` | Build a static visual storyboard of image inputs associated with timeline shots. |
 | `runpod.exec` | Execute a script on an existing RunPod pod and download artifacts. |
@@ -573,7 +574,7 @@ Quick recipe: take any `.mp4` and overlay text captions / a wordmark via the tim
 ### The timeline and optional asset registry
 
 - `timeline.json` — defines tracks and clips. Schema: `@banodoco/timeline-schema` (see `remotion/node_modules/@banodoco/timeline-schema/typescript/src/schemas.ts`). Top level: `{theme, theme_overrides?, tracks, clips}`. Each clip has `id, at (seconds), track, clipType, asset?, hold? | from/to, text?, params?, effects?, x?/y?/width?/height?`.
-- `assets.json` — optional media registry: `{"assets": {"<id>": {file?: <relative-or-absolute-path>, type?, resolution?, fps?, duration?}}}`. Include it when clips reference media assets. Files must share a common parent so the renderer's local HTTP server can serve them.
+- `assets.json` — optional media registry: `{"assets": {"<id>": {file?: <relative-or-absolute-path>, url?, content_sha256?, type?, resolution?, fps?, duration?}}}`. Include it when clips reference media assets. Relative paths resolve from the registry directory. The render host stages local/cached files into an invocation directory, so source files do not need a common parent.
 
 ### Layering rule (gotcha)
 
@@ -627,7 +628,11 @@ The canonical small fixture is `examples/hype.timeline.json`. Read it before han
 
 ### Adding music or another audio track
 
-Audio is a first-class track kind — there is no separate audio pipeline and no post-render ffmpeg mux. Declare an `audio` track, register the file as an asset, and add a `media` clip on the audio track. Remotion bakes audio into the rendered MP4 directly.
+Audio is a first-class track kind. On the Remotion path, declare an `audio`
+track, register the file as an asset, and add a `media` clip on the audio track;
+Remotion renders that audio into the MP4. At the generic backend boundary,
+renderers explicitly declare `rendered`, `passthrough`, or `none` ownership,
+and Astrid/finalizers own any required passthrough, muxing, or normalization.
 
 ```jsonc
 // assets.json — add a music asset alongside your video
@@ -666,7 +671,10 @@ Field semantics (the parts that aren't obvious from `types.ts`):
 - `from` / `to` are in **source-media time, seconds** — they trim the asset, they don't move the clip on the timeline. The clip's timeline duration is `to - from`. To start the music *later* in the video, raise `clip.at`, not `from`.
 - `volume` is a scalar 0..1; track and clip volume multiply. `track.muted: true` forces silence regardless.
 - `params.fadeIn` / `params.fadeOut` are in seconds, taper at the clip's local start/end. Implemented inside `AudioTrack.tsx` as a per-frame volume function — no afade pre-bake needed.
-- Local audio paths in `assets.json` resolve like local video: the render runner picks a common parent of all asset files and serves them over `http://localhost:<port>/...`. Remotion's `<Audio src>` consumes that URL natively.
+- Local audio paths in `assets.json` resolve like local video: the shared asset
+  layer resolves from the registry directory, stages the file, and the Remotion
+  backend exposes the invocation stage over loopback. Remotion's `<Audio src>`
+  consumes that URL natively.
 
 You should not need ffmpeg's `atrim` / `afade` / `amix` for any normal "music under the video" use case. Reach for ffmpeg only for things Remotion genuinely doesn't model (offline loudness normalization, sample-accurate cross-fades between two music beds, etc.).
 
@@ -689,7 +697,8 @@ python3 -m astrid executors run rendering.render \
 
 The normal executor CLI writes `runs/<my-run>/hype.mp4` and
 `runs/<my-run>/hype.mp4.provenance.json`. The lower-level direct runner is for
-debugging executor behavior only:
+debugging facade behavior only; it still delegates to the public
+`RenderService`:
 
 ```bash
 python3 -m astrid.packs.rendering.executors.render.run \
@@ -719,14 +728,22 @@ elements used by the timeline under
 static-file-relative paths into `params.__astridAssets`, and cleans the staging
 directory after Remotion exits.
 
-### Where the schemas live (authoritative)
+### Where the schemas and render boundary live (authoritative)
 
 - Timeline + clip Zod schemas: `remotion/node_modules/@banodoco/timeline-schema/typescript/src/schemas.ts`
 - Composition (clip → component dispatch, layering): `remotion/node_modules/@banodoco/timeline-composition/typescript/src/TimelineComposition.tsx`
 - Effect / animation registries: generated by `scripts/gen_effect_registry.py` into `effects.generated.ts` etc. inside the `@banodoco/timeline-composition` package
-- Python timeline IO + validation: `astrid/timeline.py`
-- Render entrypoint: `astrid/packs/rendering/executors/render/run.py`
-- Render provenance: `<video-output>.provenance.json` records active pack order, active theme, registry hash/state, resolved effect ids, source pack ids, element roots, staged asset ids/paths, and hybrid segment provenance when applicable.
+- Python timeline IO + validation: `astrid/core/timeline/`
+- Stable facade: `astrid/packs/rendering/executors/render/run.py`
+- Backend-neutral lifecycle: `astrid/core/rendering/service.py`
+- Rendering protocol schemas: `astrid/core/rendering/schemas/v1/`
+- Built-in protocol commands: `astrid/packs/rendering/backends/`,
+  `planners/`, and `finalizers/`
+- Public pack-author contract: `docs/contracts/render-backend-v1.md`
+- Render provenance: `<video-output>.provenance.json` records the validated
+  plan, renderer/planner/finalizer resolution and trust/support evidence,
+  hashes and artifact profiles, audio/finalization state, backend fragments,
+  plus the retained v1 element/theme/staging projections.
 
 ### Available elements
 

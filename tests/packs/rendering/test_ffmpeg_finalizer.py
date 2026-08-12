@@ -258,6 +258,11 @@ def _finalize_without_real_media(
         "validate_render_result",
         side_effect=lambda result, **_kwargs: result,
     )
+    concat_validate = mock.patch.object(
+        ffmpeg_finalizer,
+        "_validate_concat_output",
+        side_effect=lambda *_args, **_kwargs: None,
+    )
     normalized_probe = mock.patch.object(
         ffmpeg_finalizer,
         "_probe_normalized_segments",
@@ -268,7 +273,7 @@ def _finalize_without_real_media(
         "ffprobe_metadata_strict",
         side_effect=_fake_preflight_probe(request, tmp_path),
     )
-    with validate, strict_probe, normalized_probe:
+    with validate, concat_validate, strict_probe, normalized_probe:
         return ffmpeg_finalizer.finalize(
             request,
             workspace=tmp_path,
@@ -638,6 +643,11 @@ def test_raw_adapter_writes_finalize_result(tmp_path: Path) -> None:
             ffmpeg_finalizer,
             "validate_render_result",
             side_effect=lambda result, **_kwargs: result,
+        ),
+        mock.patch.object(
+            ffmpeg_finalizer,
+            "_validate_concat_output",
+            side_effect=lambda *_args, **_kwargs: None,
         ),
         mock.patch.object(
             ffmpeg_finalizer,

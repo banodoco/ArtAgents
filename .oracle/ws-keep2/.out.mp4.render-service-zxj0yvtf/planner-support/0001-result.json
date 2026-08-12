@@ -1,0 +1,16 @@
+{
+  "alternatives": [],
+  "backend": "rendering.remotion",
+  "backend_version": "1.0.0",
+  "features": {
+    "asset_serving": "invocation-scoped",
+    "audio_ownership": "rendered",
+    "effects": true,
+    "full_timeline": true,
+    "timeline_composition": true,
+    "windows": false
+  },
+  "reasons": [],
+  "schema_version": 1,
+  "supported": true
+}

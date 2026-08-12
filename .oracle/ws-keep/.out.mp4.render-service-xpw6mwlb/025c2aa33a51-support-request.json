@@ -1,0 +1,31 @@
+{
+  "assets_registry_path": "/private/var/folders/_w/b3tthv192m77c760dbyzvk200000gn/T/tmpbbmcjvwh/media/assets.json",
+  "audio": "rendered",
+  "backend_config": {},
+  "metadata": {},
+  "output_name": "x.mp4",
+  "profile": {
+    "audio_channel_layout": "stereo",
+    "audio_codec": "aac",
+    "audio_sample_rate": 48000,
+    "container": "mp4",
+    "duration_tolerance": 1,
+    "fps_rational": [
+      10,
+      1
+    ],
+    "height": 90,
+    "pixel_format": "yuv420p",
+    "time_base": [
+      1,
+      10240
+    ],
+    "video_codec": "h264",
+    "video_level": null,
+    "video_profile": null,
+    "width": 160
+  },
+  "schema_version": 1,
+  "timeline_path": "/private/var/folders/_w/b3tthv192m77c760dbyzvk200000gn/T/tmpbbmcjvwh/media/transition-windows.timeline.json",
+  "window": null
+}

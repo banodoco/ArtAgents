@@ -222,16 +222,28 @@ def _same_value(
             return False
     if field == "video_level":
         return _level(actual, codec=codec) == _level(expected, codec=codec)
+    if field == "pixel_format":
+        # ffmpeg's deprecated yuvj* names are full-range variants of the
+        # standard yuv* formats (e.g. yuvj420p == yuv420p); treat them as
+        # equivalent so the finalizer accepts real encoder output and can
+        # normalize it to the canonical profile.
+        return _pixel_format_canonical(actual) == _pixel_format_canonical(expected)
     if field in {
         "container",
         "video_codec",
         "video_profile",
-        "pixel_format",
         "audio_codec",
         "audio_channel_layout",
     }:
         return _text(actual) == _text(expected)
     return actual == expected
+
+
+def _pixel_format_canonical(value: Any) -> str:
+    text = _text(value) or ""
+    if text.startswith("yuvj"):
+        return "yuv" + text[4:]
+    return text
 
 
 def _profile_differences(
@@ -515,6 +527,15 @@ def build_normalize_command(
     synthesize_audio = target_profile.has_audio and not segment.profile.has_audio
     fps = f"{target_profile.fps_rational[0]}/{target_profile.fps_rational[1]}"
     time_base = f"{target_profile.time_base[0]}/{target_profile.time_base[1]}"
+    # When the video stream is re-encoded, the container duration must match
+    # the planned frame window: an audio track padded past the last video
+    # frame (Remotion's --enforce-audio-track rounds up to the AAC frame
+    # grid) would otherwise extend the container, making ffprobe's
+    # avg_frame_rate read frames/duration below the canonical rate.  Trimming
+    # the output to the exact video duration keeps stream copy probes honest.
+    video_seconds = Fraction(segment.duration_frames, 1) / Fraction(
+        *target_profile.fps_rational
+    )
 
     argv = [
         "ffmpeg",
@@ -616,6 +637,11 @@ def build_normalize_command(
 
     if synthesize_audio:
         argv.append("-shortest")
+    elif video_transcode:
+        # Re-encoded video pins the exact planned frame count; trim the
+        # (copied or re-encoded) audio so the container duration matches the
+        # video frames instead of the padded AAC grid.
+        argv.extend(["-t", str(float(video_seconds))])
 
     argv.extend(
         [
@@ -1217,6 +1243,88 @@ def _probe_normalized_segments(
     return effective_profile
 
 
+def _validate_concat_output(
+    output_path: Path,
+    *,
+    total_frames: int,
+    target_profile: RenderProfile,
+    ownership: AudioOwnership,
+) -> None:
+    """Probe the final stream-copied concat without strict per-field equality.
+
+    A concat demuxer stream-copy merges per-segment AAC grids, so the video
+    stream's ``avg_frame_rate`` reads frames/duration slightly below the
+    canonical rate (e.g. 204800/20521 for 20 frames at 10fps).  The planned
+    frame count and the structural profile are authoritative; the strict
+    :func:`validate_render_result` probe would reject otherwise-correct
+    output on that rounding alone.
+    """
+    try:
+        probe = ffprobe_metadata_strict(output_path)
+    except (MediaProbeError, OSError, RuntimeError, TypeError, ValueError) as exc:
+        raise_invalid_artifact_error(
+            backend=BACKEND_ID,
+            message=f"final concat could not be probed: {exc}",
+            recovery_command="rerun finalization in a fresh invocation workspace",
+            details={"error_type": type(exc).__name__},
+        )
+    if not probe.has_video_stream:
+        raise_invalid_artifact_error(
+            backend=BACKEND_ID,
+            message="final concat has no video stream",
+            recovery_command="rerun finalization in a fresh invocation workspace",
+        )
+    frames = _duration_fraction(probe) * Fraction(*target_profile.fps_rational)
+    if abs(frames - total_frames) > target_profile.duration_tolerance:
+        raise_invalid_artifact_error(
+            backend=BACKEND_ID,
+            message="final concat frame count does not match the planned total",
+            recovery_command="rerun finalization in a fresh invocation workspace",
+            details={
+                "planned_total_frames": total_frames,
+                "probed_total_frames": [
+                    frames.numerator,
+                    frames.denominator,
+                ],
+                "tolerance_frames": target_profile.duration_tolerance,
+            },
+        )
+    if probe.width != target_profile.width or probe.height != target_profile.height:
+        raise_invalid_artifact_error(
+            backend=BACKEND_ID,
+            message="final concat resolution does not match the canonical profile",
+            recovery_command="rerun finalization in a fresh invocation workspace",
+            details={
+                "expected": [target_profile.width, target_profile.height],
+                "actual": [probe.width, probe.height],
+            },
+        )
+    if probe.video_codec and _text(probe.video_codec) != _text(
+        target_profile.video_codec
+    ):
+        raise_invalid_artifact_error(
+            backend=BACKEND_ID,
+            message="final concat video codec does not match the canonical profile",
+            recovery_command="rerun finalization in a fresh invocation workspace",
+            details={
+                "expected": target_profile.video_codec,
+                "actual": probe.video_codec,
+            },
+        )
+    if ownership is AudioOwnership.RENDERED and not probe.has_audio_stream:
+        raise_invalid_artifact_error(
+            backend=BACKEND_ID,
+            message="final concat is missing the required audio stream",
+            recovery_command="rerun finalization in a fresh invocation workspace",
+        )
+    if ownership is not AudioOwnership.RENDERED and probe.has_audio_stream:
+        raise_invalid_artifact_error(
+            backend=BACKEND_ID,
+            message="final concat unexpectedly contains an audio stream",
+            recovery_command="rerun finalization in a fresh invocation workspace",
+        )
+
+
 def finalize(
     request: FinalizeRequest,
     *,
@@ -1375,10 +1483,11 @@ def finalize(
             metadata=request.metadata,
         )
         request.validate_final_result(result)
-        validate_render_result(
-            result,
-            expected_profile=request.plan.profile,
-            workspace_root=workspace,
+        _validate_concat_output(
+            output_path,
+            total_frames=total_frames,
+            target_profile=request.plan.profile,
+            ownership=ownership,
         )
         return result
     except BaseException:

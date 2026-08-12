@@ -1,8 +1,9 @@
 # Render Adapter — Banodoco Publishability Decision Record
 
 **Status**: active (SD2, 2026-06-01)  
-**Scope**: How the Remotion render path consumes `@banodoco/*` packages and why
-they remain adapter-installed rather than published dependencies.
+**Scope**: How the protocol-v1 Remotion backend consumes `@banodoco/*`
+packages and why they remain adapter-installed rather than published
+dependencies. `rendering.render` itself is a backend-neutral facade.
 
 ## Packages
 
@@ -49,7 +50,7 @@ declares them as GitHub tarball dependencies:
 (`@banodoco/timeline-schema` is pulled transitively as a dependency of
 `timeline-composition`.)
 
-The render executor (`astrid/packs/rendering/executors/render/run.py`)
+The Remotion backend (`astrid/packs/rendering/backends/remotion/run.py`)
 validates that `node_modules/` exists after `npm install` **and** that
 each of the three `@banodoco/*` package directories is present.  It fails
 with a clear message naming the missing package(s) and pointing at this
@@ -88,8 +89,8 @@ replaced, the package owner must complete these actions:
    with semver-ranged npm dependencies (e.g.,
    `"@banodoco/timeline-composition": "^0.1.0"`).
 
-7. **Update the render executor guidance** — Update the error message in
-   `astrid/packs/rendering/executors/render/run.py:_validate_project_dir`
+7. **Update the Remotion backend guidance** — Update the error message in
+   `astrid/packs/rendering/backends/remotion/run.py:_validate_project_dir`
    to point at the published package names instead of the adapter install
    instructions. Update this document to reflect the new state.
 
@@ -98,7 +99,7 @@ replaced, the package owner must complete these actions:
 `@banodoco/timeline-theme-2rp` is a **theme package**, not a core render
 dependency. The Remotion compositor resolves themes at runtime and applies
 a fallback `banodoco-default` theme when no theme is specified (see
-`astrid/packs/rendering/executors/render/run.py:_theme_for_props`).
+`astrid/packs/rendering/backends/remotion/run.py:_theme_for_props`).
 
 This means:
 - **For Python installs**: `timeline-theme-2rp` is never in the Python
@@ -121,8 +122,8 @@ that users opt into by:
 2. Running `npm install` in `remotion/`
 3. Invoking `rendering.render`
 
-The render executor fails closed — if `node_modules/` is absent or any
-required `@banodoco/*` package directory is missing, it raises
+The selected Remotion backend fails closed — if `node_modules/` is absent or
+any required `@banodoco/*` package directory is missing, it raises
 `FileNotFoundError` with guidance (including a pointer to this document)
 before any `@banodoco` import is attempted. This keeps the default
 Python SDK importable on any machine with only Python dependencies.
@@ -131,6 +132,7 @@ Python SDK importable on any machine with only Python dependencies.
 
 - [adapter-packs.md](../packs/adapter-packs.md) — General adapter pack conventions
 - [STAGE.md](../../astrid/packs/rendering/executors/render/STAGE.md) — Render executor stage documentation
-- `astrid/packs/rendering/executors/render/run.py:_validate_project_dir` — Fail-closed validation
+- [render-backend-v1.md](../contracts/render-backend-v1.md) — Public pluggable renderer contract
+- `astrid/packs/rendering/backends/remotion/run.py:_validate_project_dir` — Fail-closed adapter validation
 - `remotion/package.json` — Adapter dependency declarations
 - SD2 gate decision — `state.json` settled decision record

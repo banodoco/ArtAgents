@@ -1,0 +1,20 @@
+{
+  "assets_registry_path": "/private/var/folders/_w/b3tthv192m77c760dbyzvk200000gn/T/tmpwylte2fr/media/assets.json",
+  "audio": "rendered",
+  "backend_config": {
+    "rendering.legacy_hybrid": {
+      "complex_renderers": [
+        "rendering.remotion"
+      ],
+      "simple_renderers": [
+        "rendering.ffmpeg"
+      ]
+    }
+  },
+  "metadata": {},
+  "output_name": "x.mp4",
+  "profile": null,
+  "schema_version": 1,
+  "timeline_path": "/private/var/folders/_w/b3tthv192m77c760dbyzvk200000gn/T/tmpwylte2fr/media/transition-windows.timeline.json",
+  "window": null
+}
