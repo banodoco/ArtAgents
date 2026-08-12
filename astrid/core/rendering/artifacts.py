@@ -480,7 +480,7 @@ def _layout_channel_count(layout: str | None) -> int | None:
         "5.1(side)": 6,
         "7.1": 8,
         "7.1(wide)": 8,
-    }.get(layout or "")
+    }.get((layout or "").lower())
 
 
 def _validate_audio(

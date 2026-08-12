@@ -498,7 +498,7 @@ def _terminate_process_group(
             try:
                 captured = process.communicate(timeout=max(grace, 2.0))
                 break
-            except subprocess.TimeoutExpired:
+            except (subprocess.TimeoutExpired, OSError):
                 try:
                     _signal_process_group(process, signal.SIGKILL)
                 except (OSError, PermissionError):
@@ -514,6 +514,17 @@ def _terminate_process_group(
                 if time.monotonic() > drain_deadline:
                     break
                 continue
+        # Deadline exit still owes a reap of the direct child.
+        if process.returncode is None:
+            try:
+                process.wait(timeout=max(grace, 1.0))
+            except (subprocess.TimeoutExpired, OSError):
+                try:
+                    process.kill()
+                except OSError:
+                    pass
+                process.wait()
+            captured = captured or ("", "")
     elif captured is None:
         # ``poll`` may have reaped the child while checking the fallback path.
         # Its pipes still need to be drained; bound the drain so cleanup can

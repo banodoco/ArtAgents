@@ -51,12 +51,13 @@ class MediaProbe:
     audio_codec: str | None = None
     audio_sample_rate: int | None = None
     audio_channel_layout: str | None = None
-    audio_channels: int | None = None
     container: str | None = None
     format_name: str | None = None
     duration_rational: tuple[int, int] | None = None
     video_stream_present: bool | None = None
     audio_stream_present: bool | None = None
+    # Appended last so existing positional construction is unaffected.
+    audio_channels: int | None = None
 
     @property
     def codec(self) -> str | None:

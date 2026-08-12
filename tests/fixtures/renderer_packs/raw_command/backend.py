@@ -441,11 +441,16 @@ def _validate_request(request: dict) -> None:
 
 
 def _support(request: dict, result_path: Path) -> int:
+    mismatches: list[str] = []
+    # The renderer ALWAYS produces rendered PCM stereo audio; a request for
+    # no audio or passthrough contradicts the fixed output.
+    requested_audio = request.get("audio")
+    if requested_audio not in (None, "rendered"):
+        mismatches.append(f"audio={requested_audio!r} (fixed 'rendered')")
     profile = request.get("profile")
     if isinstance(profile, dict):
         # The renderer emits a fixed profile; ANY deviation is unsupported
         # (fail closed on every field, not just codecs/dimensions).
-        mismatches: list[str] = []
         expected = {
             "width": WIDTH,
             "height": HEIGHT,

@@ -91,8 +91,8 @@ def _resolved(path: str | Path) -> Path:
 def _contains_symlink_component(path: str | Path) -> bool:
     """True if a non-system path component is a symbolic link.
 
-    macOS resolves ``/tmp`` -> ``/private/tmp`` and ``/var`` ->
-    ``/private/var``; those system redirects are not containment escapes.
+    Only the macOS system redirects (``/tmp`` -> ``/private/tmp``,
+    ``/var`` -> ``/private/var``, ``/etc`` -> ``/private/etc``) are exempt.
     Any other symlink component (e.g. a symlinked run directory) is treated
     as an escape and rejected.
     """
@@ -109,10 +109,13 @@ def _contains_symlink_component(path: str | Path) -> bool:
             resolved = candidate.resolve(strict=False)
         except (OSError, RuntimeError):
             return True
-        # System redirects: /tmp, /var, /etc, /private/* -> /private/*
-        if str(resolved).startswith("/private/"):
-            continue
-        if candidate.name in ("tmp", "var", "etc", "home", "usr") and str(resolved).startswith("/"):
+        # macOS system redirect: /<name> -> /private/<name> at the ROOT only.
+        if (
+            len(parts[:index]) == 2
+            and parts[0] == "/"
+            and candidate.name in ("tmp", "var", "etc")
+            and str(resolved) == f"/private/{candidate.name}"
+        ):
             continue
         return True
     return False
@@ -166,8 +169,6 @@ def read_committed_provenance(
     conservative recovery without mistaking it for a successful publication.
     """
 
-    video = _resolved(video_path)
-    sidecar = _resolved(sidecar_path or _default_sidecar_path(video))
     try:
         video_unresolved = Path(video_path).expanduser()
         sidecar_unresolved = Path(sidecar_path or _default_sidecar_path(video_unresolved)).expanduser()
@@ -176,12 +177,16 @@ def read_committed_provenance(
             or _contains_symlink_component(sidecar_unresolved)
         ):
             return None
+        # Resolve only AFTER the symlink guard so a symlink loop cannot
+        # raise RuntimeError here — it must fail closed to None.
+        video = _resolved(video_path)
+        sidecar = _resolved(sidecar_path or _default_sidecar_path(video))
         if video.is_symlink() or sidecar.is_symlink():
             return None
         if not video.is_file() or video.stat().st_size <= 0 or not sidecar.is_file():
             return None
         payload = json.loads(sidecar.read_text(encoding="utf-8"))
-    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+    except (OSError, RuntimeError, ValueError, TypeError, json.JSONDecodeError):
         return None
     if not isinstance(payload, dict):
         return None
