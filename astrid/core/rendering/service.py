@@ -465,8 +465,30 @@ class RenderService:
                 plan=plan,
                 workspace=workspace,
                 backend=selected.candidate.id,
+                # The direct plan may pin an executable finalizer; defer
+                # completion to it so a normalizable profile/audio mismatch
+                # is normalized before publication.
+                defer_to_finalizer=(
+                    plan.finalizer.id != _DIRECT_FINALIZER_ID
+                ),
             )
-            if final_result.video.profile != plan.profile or (
+            if plan.finalizer.id != _DIRECT_FINALIZER_ID:
+                # An embedding host pinned a registered finalizer for direct
+                # renders; honor it exactly like planner-produced plans.
+                finalizer, finalizer_evidence = self._resolve_candidate(
+                    self.finalizers,
+                    plan.finalizer.id,
+                    kind="finalizer",
+                    observe=False,
+                )
+                final_result, plan = self._finish_plan(
+                    request,
+                    plan=plan,
+                    segment_results=[final_result],
+                    pinned_finalizer=(finalizer, finalizer_evidence),
+                    workspace=workspace,
+                )
+            elif final_result.video.profile != plan.profile or (
                 final_result.video.duration_frames
                 != (
                     plan.window.duration_frames
@@ -1351,10 +1373,18 @@ class RenderService:
         )
         if not report.supported:
             self._unsupported_report(report, registry=self.finalizers)
-        finalizer_resolution = self._finalizer_resolution(
-            candidate,
-            evidence,
-            support=report,
+        prior_finalizer = plan.finalizer
+        finalizer_resolution = replace(
+            self._finalizer_resolution(
+                candidate,
+                evidence,
+                support=report,
+            ),
+            alias_chain=(
+                prior_finalizer.alias_chain
+                or list(evidence.get("alias_chain") or [])
+            ),
+            override=prior_finalizer.override or evidence.get("override"),
         )
         plan = replace(plan, finalizer=finalizer_resolution)
         finalize_request = FinalizeRequest(

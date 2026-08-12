@@ -2066,3 +2066,116 @@ def test_real_hybrid_plans_assigns_ffmpeg_and_finalizes_through_service(
     resolved = payload["routing"]["resolved_policy"]
     assert resolved["planner"] == "rendering.legacy_hybrid"
     assert resolved["finalizer"] == "rendering.ffmpeg-finalizer"
+
+
+def _real_audio_reactive_inputs(tmp_path: Path) -> tuple[Path, Path]:
+    """A two-clip timeline the strict FFmpeg backend renders through its
+    audio-reactive colour specialization (real AAC audio source)."""
+    root = tmp_path / "reactive"
+    root.mkdir(exist_ok=True)
+    audio_path = root / "tone.wav"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:sample_rate=48000:duration=0.5",
+            str(audio_path),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    timeline_path = root / "timeline.json"
+    assets_path = root / "assets.json"
+    timeline_path.write_text(
+        json.dumps(
+            {
+                "theme": "banodoco-default",
+                "theme_overrides": {
+                    "visual": {"canvas": {"width": 640, "height": 360, "fps": 48}}
+                },
+                "tracks": [
+                    {"id": "colour", "kind": "visual", "label": "Colour"},
+                    {"id": "audio", "kind": "audio", "label": "Audio"},
+                ],
+                "clips": [
+                    {
+                        "id": "colour_map",
+                        "at": 0,
+                        "track": "colour",
+                        "clipType": "audio-reactive-colour",
+                        "hold": 0.5,
+                        "params": {
+                            "schemaVersion": 1,
+                            "initialColor": "#102030",
+                            "events": [
+                                {"id": "a", "frame": 3, "color": "#D47795"},
+                                {"id": "b", "frame": 8, "color": "#26A7D0"},
+                                {"id": "c", "frame": 17, "color": "#B59432"},
+                            ],
+                        },
+                    },
+                    {
+                        "id": "source_audio",
+                        "at": 0,
+                        "track": "audio",
+                        "clipType": "media",
+                        "asset": "audio",
+                        "from": 0,
+                        "to": 0.5,
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    assets_path.write_text(
+        json.dumps(
+            {
+                "assets": {
+                    "audio": {
+                        "file": str(audio_path),
+                        "type": "audio/wav",
+                        "duration": 0.5,
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    return timeline_path, assets_path
+
+
+def test_real_ffmpeg_audio_reactive_through_generic_service(
+    tmp_path: Path,
+) -> None:
+    """The service drives the real FFmpeg backend through its audio-reactive
+    colour specialization end to end (no fake transport)."""
+    _require_ffmpeg()
+    timeline_path, assets_path = _real_audio_reactive_inputs(tmp_path)
+    service = _real_service(tmp_path)
+    output = tmp_path / "real-reactive.mp4"
+
+    service.render_request(
+        replace(
+            _request(tmp_path),
+            timeline_path=str(timeline_path),
+            assets_registry_path=str(assets_path),
+        ),
+        selector="rendering.ffmpeg",
+        out_path=output,
+    )
+
+    assert output.is_file()
+    assert output.stat().st_size > 0
+    sidecars = list(tmp_path.glob("*.provenance.json"))
+    assert sidecars == [Path(f"{output}.provenance.json")]
+    payload = json.loads(sidecars[0].read_text(encoding="utf-8"))
+    assert payload["routing"]["requested_engine"] == "rendering.ffmpeg"
+    assert payload["audio_ownership"] == "rendered"

@@ -238,7 +238,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument(
         "--engine",
-        default="remotion",
+        default=None,
         help="Legacy selector (remotion, ffmpeg, hybrid) or a qualified renderer id.",
     )
     parser.add_argument(
@@ -283,12 +283,16 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
         else:
             validate_output_name(Path(args.out).name)
-        if args.backend is not None and args.engine != "remotion":
+        if args.backend is not None and args.engine is not None:
             raise ValueError(
                 f"--engine {args.engine!r} and --backend {args.backend!r} "
                 "conflict; supply exactly one selector"
             )
-        selector = args.backend if args.backend is not None else args.engine
+        selector = (
+            args.backend
+            if args.backend is not None
+            else (args.engine if args.engine is not None else "remotion")
+        )
         config = _parse_backend_config(args.backend_config)
         if args.assets is None:
             with TemporaryDirectory(prefix="astrid-render-assets-") as tmp_text:

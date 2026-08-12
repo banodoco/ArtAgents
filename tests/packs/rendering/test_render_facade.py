@@ -197,3 +197,49 @@ def test_main_rejects_traversal_output_name(
 
     assert result == 1
     assert "traverse" in capsys.readouterr().err
+
+
+def test_main_rejects_conflicting_engine_and_backend(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    timeline, assets, _out = _inputs(tmp_path)
+
+    result = render_run.main(
+        [
+            "--timeline",
+            str(timeline),
+            "--assets",
+            str(assets),
+            "--out",
+            str(tmp_path / "out" / "hype.mp4"),
+            "--engine",
+            "remotion",
+            "--backend",
+            "ffmpeg",
+        ]
+    )
+
+    assert result == 1
+    assert "conflict" in capsys.readouterr().err
+
+
+def test_main_engine_defaults_to_remotion_when_absent(
+    tmp_path: Path, fake_service: _FakeService
+) -> None:
+    timeline, assets, out = _inputs(tmp_path)
+    fake_service.sentinel = out
+
+    result = render_run.main(
+        [
+            "--timeline",
+            str(timeline),
+            "--assets",
+            str(assets),
+            "--out",
+            str(out),
+        ]
+    )
+
+    assert result == 0
+    assert len(fake_service.calls) == 1
+    assert fake_service.calls[0][1]["selector"] == "remotion"
