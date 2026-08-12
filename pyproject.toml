@@ -159,6 +159,7 @@ norecursedirs = [
     "node_modules",
 ]
 markers = [
+    "grok_iter: grok-4.6-driven UX iteration loop (opt-in, needs grok CLI)",
     "slow: slower integration-style tests that should remain opt-in for tight loops",
     "performance_smoke: lightweight performance smoke tests with loose CI-safe thresholds",
     "renderer_parity: blocking semantic parity integration for shipped timeline renderers",

@@ -89,6 +89,15 @@ def _validate_arguments(args: argparse.Namespace) -> None:
             )
     if args.context < 0:
         raise AstridError("--context must be non-negative")
+    if args.neighbors is None:
+        # A bare clip zoom without same-track neighbors is a weird crop
+        # (Grok UX feedback): default to one neighbor each side — for both
+        # cold --clip and drill-down --focus CL refs.
+        is_clip_focus = args.clip is not None or (
+            getattr(args, "focus", None) is not None
+            and str(args.focus).rsplit(".", 1)[-1].startswith("CL")
+        )
+        args.neighbors = 1 if is_clip_focus else 0
     if args.neighbors < 0:
         raise AstridError("--neighbors must be non-negative")
     if args.rendered_video and args.filmstrip not in {"auto", "rendered"}:

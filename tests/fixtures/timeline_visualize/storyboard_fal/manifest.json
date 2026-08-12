@@ -1,0 +1,34 @@
+{
+  "producer": "fal.ai ideogram/v4",
+  "model": "ideogram/v4",
+  "frames": [
+    [
+      "plant-frame-1",
+      "A tiny green sprout emerging from dry cracked desert soil, wide cinematic shot, golden morning light, photorealistic, shallow depth of field"
+    ],
+    [
+      "plant-frame-2",
+      "The same young desert plant sprout growing taller with two small leaves, dry cracked soil around it, golden morning light, photorealistic, medium shot"
+    ],
+    [
+      "plant-frame-3",
+      "The same desert plant with several leaves and a small budding stem, golden light, close-up of the plant against desert background, photorealistic"
+    ],
+    [
+      "plant-frame-4",
+      "The same mature desert plant with a full small bloom, golden hour backlight, desert landscape behind, photorealistic, final storyboard frame"
+    ]
+  ],
+  "hashes": {
+    "plant-frame-1": "c7a444fb1744114b9b6be7e267e0b5f12f6ce839c0c95bb522d4e2b0248f8d82",
+    "plant-frame-2": "04c2366b83c534d303f076798c617262e79ec9d0f6ff83f0dc84bb04e26a9be1",
+    "plant-frame-3": "d70837b83d0aaa8c75cb75e4bde0ec8290a3fc2b9ebf18015c59ffac7a742d00",
+    "plant-frame-4": "3ea0ef743edc4a57907cee3dcdcc1a0f356e3b08a91119a1c257dbbe686d6e32"
+  },
+  "prompts": {
+    "plant-frame-1": "A tiny green sprout emerging from dry cracked desert soil, wide cinematic shot, golden morning light, photorealistic, shallow depth of field",
+    "plant-frame-2": "The same young desert plant sprout growing taller with two small leaves, dry cracked soil around it, golden morning light, photorealistic, medium shot",
+    "plant-frame-3": "The same desert plant with several leaves and a small budding stem, golden light, close-up of the plant against desert background, photorealistic",
+    "plant-frame-4": "The same mature desert plant with a full small bloom, golden hour backlight, desert landscape behind, photorealistic, final storyboard frame"
+  }
+}

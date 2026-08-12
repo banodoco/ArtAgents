@@ -276,9 +276,9 @@ _COMMANDS: list[dict[str, Any]] = [
             {
                 "flags": ["--neighbors"],
                 "type": int,
-                "default": 0,
+                "default": None,
                 "metavar": "N",
-                "help": "Previous/next clips retained for clip focus (default: 0).",
+                "help": "Previous/next clips retained for clip focus (default: 1 for a readable zoom; pass 0 to disable).",
             },
             {
                 "flags": ["--from-view"],

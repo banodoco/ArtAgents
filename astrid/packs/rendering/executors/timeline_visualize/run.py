@@ -281,6 +281,10 @@ def _scope_for(args: argparse.Namespace, model: Any):
         kind, kwargs["at_seconds"] = "timestamp", _parse_time(args.at)
     elif args.clip is not None:
         kind, kwargs["clip_id"] = "clip", args.clip
+        # A bare clip zoom is a weird crop without its same-track neighbors
+        # (Grok UX: "neighbor clips vanish"). Default to one neighbor each
+        # side; --neighbors still overrides.
+        kwargs.setdefault("neighbors", 1)
     elif args.asset is not None:
         kind, kwargs["asset_key"] = "asset", args.asset
     else:
@@ -322,6 +326,17 @@ def _mint_cold_range_root(
     return effective_map, replace(scope, ref=display_ref)
 
 
+def _snapshot_head_version(snapshot: Any) -> int | None:
+    """Event-head version for either a TimelineSnapshot or a Mapping twin."""
+    version = getattr(snapshot, "head_version", None)
+    if version is None and isinstance(snapshot, Mapping):
+        head = snapshot.get("event_head") or {}
+        version = head.get("version")
+    if isinstance(version, bool) or not isinstance(version, int):
+        return None
+    return version
+
+
 def _pages_for(
     args: argparse.Namespace,
     model: Any,
@@ -330,6 +345,7 @@ def _pages_for(
     *,
     segments: list[TranscriptSegment] | None = None,
     occurrences: list[SpeechOccurrence] | None = None,
+    snapshot_version: int | None = None,
 ) -> tuple[LayoutPage, ...]:
     layouts = _LAYOUTS if args.layout == "both" else (args.layout,)
     pages = tuple(
@@ -342,6 +358,7 @@ def _pages_for(
             layout=layout_name,
             transcript_segments=segments,
             speech_occurrences=occurrences,
+            snapshot_version=snapshot_version,
         )
     )
     return tuple(
@@ -667,6 +684,7 @@ def _materialize_view(
         scope,
         segments=transcript_segments,
         occurrences=speech_occurrences,
+        snapshot_version=_snapshot_head_version(snapshot),
     )
     formats = _normalized_formats(args.format)
     png_bytes = (

@@ -75,7 +75,22 @@ _RULER_LABEL_H = 30.0
 _LANES_Y = 226.0
 _LANE_H = 92.0
 _LANE_GAP = 10.0
+_CLIP_PAD = 8.0
+# Root visual clip 360px at y=234–594 (lane 226 + pad). Audio clip 48px.
+_VISUAL_CLIP_H_ROOT = 220.0
+_VISUAL_LANE_H_ROOT = _VISUAL_CLIP_H_ROOT + 2.0 * _CLIP_PAD
+_AUDIO_CLIP_H = 48.0
+_AUDIO_LANE_H = _AUDIO_CLIP_H + 2.0 * _CLIP_PAD
+# Focused/zoom/range visual clip 420px; audio stays 48px.
+_VISUAL_CLIP_H_FOCUS = 420.0
+_VISUAL_LANE_H_FOCUS = _VISUAL_CLIP_H_FOCUS + 2.0 * _CLIP_PAD
 _MIN_CLIP_W = 4.0
+_MIN_VISUAL_CARD_W = 320.0
+_MIN_VISUAL_CARD_H = 180.0
+_INSET_GAP = 16.0
+_INSET_Y_OFFSET = 48.0
+_DURATION_BAR_H = 24.0
+_FOCUS_RING_PX = 4.0
 _LINEAR_COLUMNS = 3
 _LINEAR_CARD_W = 500.0
 _LINEAR_CARD_H = 176.0
@@ -88,7 +103,8 @@ _Z_CLIP_BASE = 1_000_000
 _Z_STRIDE = 1_000_000
 _Z_ANNOTATION = 20_000_000
 _Z_CHROME = 30_000_000
-_TEXT_LANE_Y = 844.0
+_TEXT_LANE_Y = 700.0
+_TEXT_LANE_Y_FOCUS = 740.0
 _TEXT_LANE_H = 54.0
 _TEXT_LANE_GAP = 8.0
 
@@ -114,6 +130,7 @@ class LayoutObject:
     z_order: int
     label: str | None
     omitted_reason: str | None
+    thumbnail_path: str | None = None
 
 
 @dataclass(frozen=True)
@@ -406,8 +423,13 @@ def _nice_tick_step(window_frames: int, fps: int) -> int:
     if window_frames <= 0:
         return 1
     minimum = window_frames * 60.0 / _PLOT_W
-    # Nice second-based intervals preserve readable, globally aligned ticks.
-    for seconds in (1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 1200, 3600):
+    window_seconds = window_frames / max(1, fps)
+    # 320px labels cannot fit on a 5s / ~89px pitch at a 90s overview.
+    # Root-scale windows use 10s majors only.
+    candidates = (1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 1200, 3600)
+    if window_seconds >= 60:
+        candidates = (10, 15, 30, 60, 120, 300, 600, 1200, 3600)
+    for seconds in candidates:
         step = seconds * fps
         if step >= minimum:
             return step
@@ -581,6 +603,7 @@ def _scope_cue(
     source: str | None = None
     text: str | None = None
     speaker: str = "none"
+    next_target: str | None = None
 
     if scope.kind in {"timeline", "project"}:
         focus = _clip_ref_of(scope.clip_ids[0]) if scope.clip_ids else timeline_ref
@@ -606,7 +629,11 @@ def _scope_cue(
         if focused is None:
             focus = timeline_ref
         else:
-            focus = _clip_asset(focused) or timeline_ref
+            # FOCUS names the subject (the focused clip); NEXT names the
+            # action target (its source asset). Grok UX: "the header names
+            # the asset, not the requested clip" — the subject comes first.
+            focus = _clip_ref_of(focused) or timeline_ref
+            next_target = _clip_asset(focused)
             source = _clip_asset(focused)
             for occurrence in occurrences:
                 if occurrence.clip_id == focused:
@@ -717,7 +744,9 @@ def _scope_cue(
 
     return (
         f"FOCUS {focus or 'none'} · {parent_token} · {source_token} · "
-        f"TEXT {text or 'none'} · SPEAKER {speaker}{clip_window_token}{sp_token}"
+        f"TEXT {text or 'none'} · SPEAKER {speaker}"
+        f"{(' · NEXT ' + next_target) if next_target else ''}"
+        f"{clip_window_token}{sp_token}"
     )
 
 
@@ -810,18 +839,143 @@ def _visual_detail_label(
     )
 
 
+def _track_lane_h(track: TrackModel, *, focused: bool) -> float:
+    if track.kind == "visual":
+        return _VISUAL_LANE_H_FOCUS if focused else _VISUAL_LANE_H_ROOT
+    return _AUDIO_LANE_H
+
+
+def _lane_metrics(
+    tracks: tuple[TrackModel, ...],
+    lane_indices: tuple[int, ...],
+    *,
+    focused: bool,
+) -> tuple[dict[int, float], dict[int, float]]:
+    ys: dict[int, float] = {}
+    hs: dict[int, float] = {}
+    y = _LANES_Y
+    for lane in lane_indices:
+        height = _track_lane_h(tracks[lane], focused=focused)
+        ys[lane] = y
+        hs[lane] = height
+        y += height + _LANE_GAP
+    return ys, hs
+
+
+def _clip_thumbnail(model: TimelineInspectionModel, clip: ClipModel) -> str | None:
+    for asset_key in clip.asset_keys:
+        integrity = model.media_integrity.get(asset_key)
+        if integrity is not None and integrity.state == "verified_original":
+            return integrity.path
+    return None
+
+
+def _visual_cluster_clips(
+    model: TimelineInspectionModel,
+    clips: tuple[ClipModel, ...],
+) -> tuple[ClipModel, ...]:
+    visual_ids = {track.track_id for track in model.tracks if track.kind == "visual"}
+    cluster_end = model.extents.visual_frames
+    return tuple(
+        clip
+        for clip in clips
+        if clip.track_id in visual_ids and clip.frames.start_frame < cluster_end
+    )
+
+
+def _cluster_inset_cards(
+    model: TimelineInspectionModel,
+    identity_map: IdentityMap,
+    *,
+    spec: _PageSpec,
+    tracks: tuple[TrackModel, ...],
+    lanes: Mapping[str, int],
+    lane_y: Mapping[int, float],
+    lane_h: Mapping[int, float],
+    focused: bool,
+    emphasized: set[str],
+) -> list[LayoutObject]:
+    """Readable 320×180 contain-fit cards for the 0–visual_frames cluster.
+
+    Time-scaled overview boxes in that cluster are ~52×76 and cannot show a
+    16:9 frame.  The inset lives inside the first visual lane.
+    """
+
+    cluster = _visual_cluster_clips(model, model.clips)
+    if not cluster:
+        return []
+    window_overlaps = (
+        spec.start_frame < model.extents.visual_frames and spec.end_frame > 0
+    )
+    if not window_overlaps and not focused:
+        return []
+    visual_lane = next(
+        (lane for lane in spec.lane_indices if tracks[lane].kind == "visual"),
+        None,
+    )
+    if visual_lane is None:
+        return []
+    card_y = lane_y[visual_lane] + _INSET_Y_OFFSET
+    max_bottom = lane_y[visual_lane] + lane_h[visual_lane] - _CLIP_PAD
+    if card_y + _MIN_VISUAL_CARD_H > max_bottom:
+        card_y = max(lane_y[visual_lane] + _CLIP_PAD, max_bottom - _MIN_VISUAL_CARD_H)
+    objects: list[LayoutObject] = []
+    for index, clip in enumerate(cluster):
+        if clip.track_id not in lanes or lanes[clip.track_id] not in spec.lane_indices:
+            continue
+        ref = _clip_ref(identity_map, clip)
+        box = Box(
+            _PLOT_X + index * (_MIN_VISUAL_CARD_W + _INSET_GAP),
+            card_y,
+            _MIN_VISUAL_CARD_W,
+            _MIN_VISUAL_CARD_H,
+        )
+        if box.x + box.w > _PLOT_X + _PLOT_W:
+            break
+        objects.append(
+            LayoutObject(
+                ref,
+                "inset_card",
+                box,
+                lanes[clip.track_id],
+                _Z_ANNOTATION + 50 + index,
+                ref.rsplit(".", 1)[-1],
+                None,
+                _clip_thumbnail(model, clip),
+            )
+        )
+        if clip.clip_id in emphasized:
+            objects.append(
+                LayoutObject(
+                    ref,
+                    "focus_ring",
+                    Box(
+                        box.x - _FOCUS_RING_PX,
+                        box.y - _FOCUS_RING_PX,
+                        box.w + 2.0 * _FOCUS_RING_PX,
+                        box.h + 2.0 * _FOCUS_RING_PX,
+                    ),
+                    lanes[clip.track_id],
+                    _Z_ANNOTATION + 201 + index,
+                    None,
+                    None,
+                )
+            )
+    return objects
+
+
 def _lane_object(
     timeline_ref: str,
     track: TrackModel,
     lane_index: int,
-    local_lane: int,
+    y: float,
+    height: float,
 ) -> LayoutObject:
-    y = _LANES_Y + local_lane * (_LANE_H + _LANE_GAP)
     label = track.label or track.track_id
     return LayoutObject(
         timeline_ref,
         "track_lane",
-        Box(40.0, y, 1840.0, _LANE_H),
+        Box(40.0, y, 1840.0, height),
         lane_index,
         _Z_LANE + lane_index,
         f"lane {lane_index} · {label} · {track.kind}",
@@ -927,10 +1081,23 @@ def _layout_time_scaled(
     *,
     snapshot_version: int | None = None,
     cue_text: str | None = None,
+    focused: bool = False,
 ) -> tuple[LayoutPage, ...]:
     start_frame, end_frame = _scope_bounds(model, scope)
     tracks, lanes, paint_rank = _lane_maps(model)
     clips = _clips_in_scope(model, scope, start_frame, end_frame)
+    # Focused visual-cluster zooms must draw the rest of the 0–visual_frames
+    # group (e.g. in-window CL04 next to CL02), not only neighbor-scoped ids.
+    if focused and scope.kind in {"clip", "range", "shot", "timestamp"}:
+        cluster = _visual_cluster_clips(model, model.clips)
+        focused_ids = set(scope.emphasized_clip_ids) or set(scope.clip_ids)
+        if any(clip.clip_id in focused_ids for clip in cluster):
+            have = {clip.clip_id for clip in clips}
+            extras = tuple(clip for clip in cluster if clip.clip_id not in have)
+            if extras:
+                clips = tuple((*clips, *extras))
+            if cluster:
+                end_frame = max(end_frame, model.extents.visual_frames)
     clip_by_id = {clip.clip_id: clip for clip in clips}
     clip_index = {clip.clip_id: index for index, clip in enumerate(model.clips)}
     windows = _frame_windows(start_frame, end_frame, model.fps)
@@ -1020,8 +1187,17 @@ def _layout_time_scaled(
         objects.extend(_ruler(timeline_ref, spec.start_frame, spec.end_frame, model.fps))
 
         local_by_lane = {lane: index for index, lane in enumerate(spec.lane_indices)}
+        lane_y, lane_h = _lane_metrics(tracks, spec.lane_indices, focused=focused)
         for lane in spec.lane_indices:
-            objects.append(_lane_object(timeline_ref, tracks[lane], lane, local_by_lane[lane]))
+            objects.append(
+                _lane_object(
+                    timeline_ref,
+                    tracks[lane],
+                    lane,
+                    lane_y[lane],
+                    lane_h[lane],
+                )
+            )
 
         primary_ids = set(spec.clip_ids)
         continued = [
@@ -1031,18 +1207,33 @@ def _layout_time_scaled(
             and clip.clip_id not in primary_ids
         ]
         page_clips = [clip_by_id[clip_id] for clip_id in spec.clip_ids]
+        emphasized = set(scope.emphasized_clip_ids)
         for clip in (*page_clips, *continued):
             lane = lanes[clip.track_id]
-            local_lane = local_by_lane[lane]
-            y = _LANES_Y + local_lane * (_LANE_H + _LANE_GAP) + 8.0
+            track = tracks[lane]
+            y = lane_y[lane] + _CLIP_PAD
+            height = lane_h[lane] - 2.0 * _CLIP_PAD
             box = _interval_box(
                 clip.frames.start_frame,
                 clip.frames.end_frame,
                 spec.start_frame,
                 spec.end_frame,
                 y,
-                _LANE_H - 16.0,
+                height,
             )
+            if track.kind == "visual" and box.w < _MIN_VISUAL_CARD_W:
+                # A narrow visual clip collapses to a duration bar ONLY when
+                # it has no verified thumbnail (Grok: bare chips read as dead
+                # space). With a frame available, keep the full lane height
+                # so the renderer contain-fits the whole image into a tall,
+                # readable strip — no gutter.
+                has_thumb = any(
+                    model.media_integrity.get(ak) is not None
+                    and model.media_integrity[ak].state == "verified_original"
+                    for ak in clip.asset_keys
+                )
+                if not has_thumb:
+                    box = Box(box.x, y, box.w, _DURATION_BAR_H)
             ref = _clip_ref(identity_map, clip)
             if clip.clip_id in primary_ids:
                 label = _time_clip_label(ref, clip)
@@ -1064,6 +1255,7 @@ def _layout_time_scaled(
                 label = f"{ref} · continued"
                 omitted = None if box.w >= 96.0 else "continuation segment is too narrow"
                 kind = "continuation"
+            thumbnail_path = _clip_thumbnail(model, clip) if kind == "clip" else None
             objects.append(
                 LayoutObject(
                     ref,
@@ -1073,8 +1265,40 @@ def _layout_time_scaled(
                     _clip_z(clip, clip_index, paint_rank),
                     label,
                     omitted,
+                    thumbnail_path,
                 )
             )
+            if kind == "clip" and clip.clip_id in emphasized and box.w >= _MIN_VISUAL_CARD_W:
+                objects.append(
+                    LayoutObject(
+                        ref,
+                        "focus_ring",
+                        Box(
+                            box.x - _FOCUS_RING_PX,
+                            box.y - _FOCUS_RING_PX,
+                            box.w + 2.0 * _FOCUS_RING_PX,
+                            box.h + 2.0 * _FOCUS_RING_PX,
+                        ),
+                        lane,
+                        _Z_ANNOTATION + 200,
+                        None,
+                        None,
+                    )
+                )
+
+        objects.extend(
+            _cluster_inset_cards(
+                model,
+                identity_map,
+                spec=spec,
+                tracks=tracks,
+                lanes=lanes,
+                lane_y=lane_y,
+                lane_h=lane_h,
+                focused=focused,
+                emphasized=emphasized,
+            )
+        )
 
         # Preserve raw one-frame gaps and overlaps as annotations; the clip
         # rectangles themselves remain independently frame-mapped and unsnapped.
@@ -1092,8 +1316,7 @@ def _layout_time_scaled(
             if not (boundary_start < spec.end_frame and boundary_end > spec.start_frame):
                 continue
             lane = lanes[following.track_id]
-            local_lane = local_by_lane[lane]
-            marker_y = _LANES_Y + local_lane * (_LANE_H + _LANE_GAP) + _LANE_H - 20.0
+            marker_y = lane_y[lane] + lane_h[lane] - 20.0
             marker_box = _interval_box(
                 boundary_start,
                 boundary_end,
@@ -1520,6 +1743,10 @@ def layout_timeline(
         occurrences=speech_occurrences or (),
     )
     if layout == "time-scaled":
+        # Focused scopes (clip/range/shot/timestamp) zoom into a small time
+        # window: make the clip lanes TALL so the full source frames render
+        # large and the page's vertical space is used, not left dead.
+        focused_scope = scope.kind in {"clip", "range", "shot", "timestamp"}
         pages = _layout_time_scaled(
             model,
             identity_map,
@@ -1528,6 +1755,7 @@ def layout_timeline(
             max_objects_per_page,
             snapshot_version=snapshot_version,
             cue_text=cue_text,
+            focused=focused_scope,
         )
     else:
         pages = _layout_linear(
@@ -1750,10 +1978,10 @@ def serialize_view_map(
                 continue
             if item.label is None:
                 raise ValueError("label LayoutObjects must carry label text")
-            if identity_map.lookup_display(item.display_id) is None:
-                raise ValueError(
-                    f"label LayoutObject {item.display_id!r} has no semantic identity"
-                )
+            # Timestamp locators (TL01@00:10.000) and continuation refs are
+            # legitimate chrome without a semantic identity; record them with
+            # their text (outside object_boxes/reading_order) instead of
+            # raising.
             labels.append(
                 {
                     "object_ref": item.display_id,

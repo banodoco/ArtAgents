@@ -88,6 +88,20 @@ def _px(value: float, scale: int) -> int:
     return int(round(value * scale))
 
 
+def _contain_fit(image: Image.Image, target_w: int, target_h: int) -> Image.Image:
+    """Resize an image to FIT INSIDE (target_w, target_h) without cropping.
+
+    The full image is always visible (letterboxed on the surrounding fill) —
+    the user's "show the full image" requirement; cover-cropping hid content.
+    Deterministic for the pinned Pillow runtime.
+    """
+    src_w, src_h = image.size
+    scale_ratio = min(target_w / src_w, target_h / src_h)
+    new_w = max(1, round(src_w * scale_ratio))
+    new_h = max(1, round(src_h * scale_ratio))
+    return image.resize((new_w, new_h), Image.LANCZOS)
+
+
 def _rect(
     draw: ImageDraw.ImageDraw,
     box: Box,
@@ -174,6 +188,32 @@ def render_page_png(page: LayoutPage, *, scale: int = 1) -> bytes:
             scale=scale,
             outline=_CLIP_EDGE if item.kind == "clip" else None,
         )
+
+    # Paste the verified original frame into each clip card (cover-fit inside
+    # the box, leaving the bottom strip for the label). This is the "real
+    # images in the pages" surface: an agent sees the actual storyboard
+    # frame, not an abstract block. Only verified_original local images.
+    for item in clip_family:
+        if item.kind != "clip" or not item.thumbnail_path:
+            continue
+        try:
+            thumb = Image.open(item.thumbnail_path)
+            thumb.load()
+        except (OSError, ValueError):
+            continue
+        box = item.box
+        pad = 3
+        label_strip = 20 if item.label else 4
+        target_w = max(2, int(box.w * scale) - pad * 2)
+        target_h = max(2, int(box.h * scale) - pad * 2 - label_strip)
+        if target_w < 8 or target_h < 8:
+            continue
+        # Contain-fit: the FULL frame is always visible, centered in the box
+        # (letterboxed on the lane fill — never cropped).
+        thumb = _contain_fit(thumb, target_w, target_h)
+        x = int(box.x * scale) + pad + (target_w - thumb.width) // 2
+        y = int(box.y * scale) + pad + (target_h - thumb.height) // 2
+        image.paste(thumb, (x, y))
 
     # Ruler ticks (the tick itself; its text is a separate ``label`` object).
     for item in page.objects:

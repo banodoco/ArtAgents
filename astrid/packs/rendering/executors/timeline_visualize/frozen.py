@@ -1131,7 +1131,7 @@ def resolve_focus(
     focus_ref: str,
     *,
     context_seconds: float = 3.0,
-    neighbors: int = 0,
+    neighbors: int | None = None,
 ) -> Scope:
     """Resolve a focus exclusively through the frozen ID map and truth model."""
 
@@ -1142,7 +1142,9 @@ def resolve_focus(
     timeline_identity = frozen.identity_map.lookup_display(parsed.timeline_id)
     if timeline_identity is None or timeline_identity[1] != "timeline":
         raise FocusResolutionError(f"timeline display id {parsed.timeline_id!r} is not in this snapshot")
-    if isinstance(neighbors, bool) or not isinstance(neighbors, int) or neighbors < 0:
+    if neighbors is not None and (
+        isinstance(neighbors, bool) or not isinstance(neighbors, int) or neighbors < 0
+    ):
         raise FocusResolutionError("neighbors must be a non-negative integer")
     if isinstance(context_seconds, bool) or not isinstance(context_seconds, (int, float)):
         raise FocusResolutionError("context_seconds must be a number")
@@ -1228,7 +1230,9 @@ def resolve_focus(
             ref=str(parsed),
             clip_id=authored_id,
             context_seconds=context,
-            neighbors=neighbors,
+            # A bare clip drill-down without same-track neighbors is a weird
+            # crop (Grok UX feedback): default to one neighbor each side.
+            neighbors=neighbors if neighbors is not None else 1,
         )
     if parsed.kind == "SH":
         return select_scope(model, kind="shot", ref=authored_id, context_seconds=0, neighbors=0)

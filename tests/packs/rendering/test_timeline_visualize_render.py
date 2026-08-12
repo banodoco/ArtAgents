@@ -60,7 +60,7 @@ GOLDEN_DIR = FIXTURE_ROOT / "golden"
 # Pillow 12.3.0 vs Python 3.14 + Pillow 12.2.0) may produce different PNG
 # bytes but must decode to exactly these pixels.
 _PIXEL_SHA256 = (
-    "8b340b38eea96c5ff7a31c1184ede174d84458078bda182ba9a3eac5dde74a06"
+    "ba24ea8e459a9cad0818a119c3832fda02dc8a95619926ed5473cd28d9964546"
 )
 
 # Subprocess probe run under the alternate interpreter (python3.11): rebuilds
