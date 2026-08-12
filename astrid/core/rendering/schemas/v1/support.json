@@ -26,7 +26,7 @@
       "items": {
         "type": "string",
         "minLength": 1,
-        "pattern": "^(?!.*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
+        "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
       }
     },
     "features": {
@@ -36,6 +36,9 @@
           "boolean",
           "string"
         ]
+      },
+      "propertyNames": {
+        "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
       }
     },
     "alternatives": {
@@ -54,7 +57,7 @@
         "null"
       ],
       "minLength": 1,
-      "pattern": "^(?!.*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
+      "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
     }
   },
   "definitions": {

@@ -83,50 +83,99 @@ def _legacy_segment_projection(segment: RenderSegment) -> dict[str, Any]:
     }
 
 
-def _normalize_artifact_profiles(value: Any) -> Any:
+def _normalize_artifact_profiles(value: Any, *, segments: Sequence[Any]) -> Any:
     if value is None:
-        return []
+        value = {}
     if isinstance(value, Mapping):
         result: dict[str, Any] = {}
         for key, profile in value.items():
             path = _require_string(str(key), "artifact key")
             if isinstance(profile, VideoArtifact):
+                if path != profile.path:
+                    raise ValueError(
+                        f"artifact_profiles key {path!r} must equal VideoArtifact.path "
+                        f"{profile.path!r}"
+                    )
                 result[path] = _artifact_lineage(profile)
-            elif isinstance(profile, Mapping) and "profile" in profile and "sha256" in profile:
-                result[path] = _artifact_lineage_from_mapping(profile)
+            elif isinstance(profile, Mapping):
+                result[path] = _artifact_lineage_from_mapping(profile, key=path)
             else:
                 raise TypeError(
                     f"artifact_profiles[{path!r}] must be a VideoArtifact or a "
                     "hashed lineage record {profile, sha256, attachments}; "
                     "profile-only entries carry no output hash"
                 )
+        # A positive plan must record a hashed artifact for every segment.
+        if segments and not result:
+            raise ValueError(
+                "artifact_profiles must record a hashed lineage entry for every "
+                "segment of a positive render plan"
+            )
         return result
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
-        return [
+        lineage = [
             (
                 _artifact_lineage(profile)
                 if isinstance(profile, VideoArtifact)
-                else _artifact_lineage_from_mapping(profile)
+                else _artifact_lineage_from_mapping(profile, key=str(profile.get("path", "")))
             )
             for profile in value
         ]
+        if segments and not lineage:
+            raise ValueError(
+                "artifact_profiles must record a hashed lineage entry for every "
+                "segment of a positive render plan"
+            )
+        return lineage
     raise TypeError("artifact_profiles must be an object or array")
 
 
-def _artifact_lineage_from_mapping(raw: Mapping[str, Any]) -> dict[str, Any]:
-    data = _json_safe_mapping(raw, label="artifact")
-    if "sha256" not in data or data["sha256"] is None:
+def _artifact_lineage_from_mapping(raw: Mapping[str, Any], *, key: str) -> dict[str, Any]:
+    raw_keys = set(raw)
+    allowed = {"profile", "sha256", "attachments"}
+    unknown = sorted(raw_keys - allowed)
+    if unknown:
+        raise ValueError(f"artifact lineage has unknown fields: {', '.join(unknown)}")
+    missing = sorted(allowed - raw_keys)
+    if missing:
+        raise ValueError(
+            f"artifact lineage is missing required fields: {', '.join(missing)}"
+        )
+    if raw["sha256"] is None:
         raise ValueError("artifact lineage sha256 is required and must not be null")
-    profile = data["profile"]
+    if not isinstance(raw["sha256"], str):
+        raise TypeError("artifact lineage sha256 must be a string")
+    profile = raw["profile"]
     attachments: dict[str, Any] = {}
-    for name, att in (data.get("attachments") or {}).items():
-        att = _json_safe_mapping(att, label=f"artifact attachment {name!r}")
-        if att.get("sha256") is None:
-            raise ValueError(f"artifact attachment {name!r} sha256 must not be null")
-        attachments[str(name)] = {
-            "path": _require_string(str(att.get("path")), f"attachment {name!r} path"),
-            "kind": _require_string(str(att.get("kind")), f"attachment {name!r} kind"),
-            "sha256": _require_sha256(str(att.get("sha256")), f"attachment {name!r} sha256"),
+    raw_attachments = raw["attachments"]
+    if raw_attachments is None:
+        raise ValueError("artifact lineage attachments must be an object (may be empty)")
+    if not isinstance(raw_attachments, Mapping):
+        raise TypeError("artifact lineage attachments must be an object")
+    for name, att in raw_attachments.items():
+        name = _require_string(name, "attachment name")
+        if isinstance(att, Attachment):
+            att = {
+                "path": att.path,
+                "kind": att.kind,
+                "sha256": att.sha256,
+            }
+        att_unknown = sorted(set(att) - {"path", "kind", "sha256"})
+        if att_unknown:
+            raise ValueError(
+                f"attachment {name!r} has unknown fields: {', '.join(att_unknown)}"
+            )
+        att_missing = sorted({"path", "kind", "sha256"} - set(att))
+        if att_missing:
+            raise ValueError(
+                f"attachment {name!r} is missing required fields: {', '.join(att_missing)}"
+            )
+        if not isinstance(att["sha256"], str):
+            raise TypeError(f"attachment {name!r} sha256 must be a string")
+        attachments[name] = {
+            "path": _require_string(att["path"], f"attachment {name!r} path"),
+            "kind": _require_string(att["kind"], f"attachment {name!r} kind"),
+            "sha256": _require_sha256(att["sha256"], f"attachment {name!r} sha256"),
         }
     return {
         "profile": (
@@ -134,25 +183,21 @@ def _artifact_lineage_from_mapping(raw: Mapping[str, Any]) -> dict[str, Any]:
             if isinstance(profile, RenderProfile)
             else RenderProfile.from_dict(_json_safe_mapping(profile, label="artifact profile"))
         ).to_dict(),
-        "sha256": _require_sha256(str(data["sha256"]), "artifact sha256"),
+        "sha256": _require_sha256(raw["sha256"], "artifact sha256"),
         "attachments": attachments,
     }
 
 
 def _artifact_lineage(artifact: VideoArtifact) -> dict[str, Any]:
     """One hashed artifact lineage record: profile, sha256, attachments."""
-    return {
-        "profile": artifact.profile.to_dict(),
-        "sha256": artifact.sha256,
-        "attachments": {
-            name: {
-                "path": attachment.path,
-                "kind": attachment.kind,
-                "sha256": attachment.sha256,
-            }
-            for name, attachment in artifact.attachments.items()
+    return _artifact_lineage_from_mapping(
+        {
+            "profile": artifact.profile,
+            "sha256": artifact.sha256,
+            "attachments": artifact.attachments,
         },
-    }
+        key=artifact.path,
+    )
 
 
 def _normalize_v1_compatibility(
@@ -220,6 +265,7 @@ def assemble_provenance_v2(
         _require_string(item, f"normalization[{index}]")
         for index, item in enumerate(normalization)
     ]
+    compatibility = _normalize_v1_compatibility(v1_compatibility)
 
     payload: dict[str, Any] = {
         "schema_version": PROVENANCE_SCHEMA_VERSION,
@@ -235,14 +281,16 @@ def assemble_provenance_v2(
         "segments": legacy_segments,
         # Additive normalized v2 segment records; never overwrite v1 fields.
         "segments_v2": normalized_segments,
-        "artifact_profiles": _normalize_artifact_profiles(artifact_profiles),
+        "artifact_profiles": _normalize_artifact_profiles(
+            artifact_profiles,
+            segments=normalized_plan.segments,
+        ),
         "audio_ownership": _normalize_audio_ownership(audio_ownership),
         "normalization": normalized_normalization,
         "finalizer": normalized_plan.finalizer.to_dict(),
         "attachments": _normalize_attachments(attachments),
         "backend_fragments": validate_backend_fragments(backend_fragments),
     }
-    compatibility = _normalize_v1_compatibility(v1_compatibility)
     payload.update(compatibility)
     return _json_safe_mapping(payload, label="provenance")
 

@@ -475,12 +475,13 @@ have exactly the resolution shapes defined in Planning, so a hybrid plan keeps
 distinct source pack, manifest, alias/override, support, and input-hash evidence
 for every renderer invocation. Planner and finalizer records carry the same
 alias/override/trust/support evidence as renderer records. Rendered artifacts
-are REQUIRED in `artifact_profiles` as hashed lineage records: each maps an
-output path to `{profile, sha256, attachments: {name: {path, kind, sha256}}}`
-with a validated 64-hex `sha256` on the artifact and every attachment
-(profile-only entries and null hashes are rejected), so replay can verify
-rendered outputs byte-for-byte. `input_hashes` describe inputs only, never
-rendered outputs.
+are REQUIRED in `artifact_profiles` for any positive render plan as hashed
+lineage records: each maps an output path to exactly `{profile, sha256,
+attachments}` with a validated 64-hex string `sha256` on the artifact and
+every attachment `{path, kind, sha256}` (profile-only entries, null/malformed
+hashes, unknown fields, and missing fields are rejected; mapping keys must
+equal the artifact's own path), so replay can verify rendered outputs
+byte-for-byte. `input_hashes` describe inputs only, never rendered outputs.
 
 `engine` is only the legacy request projection. The `segments` key keeps the
 V1-compatible flat projection: one `{engine, from, to}` entry per segment,

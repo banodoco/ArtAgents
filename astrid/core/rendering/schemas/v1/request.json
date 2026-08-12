@@ -17,7 +17,7 @@
     "timeline_path": {
       "type": "string",
       "minLength": 1,
-      "pattern": "^(?!.*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
+      "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
     },
     "assets_registry_path": {
       "type": [
@@ -25,7 +25,7 @@
         "null"
       ],
       "minLength": 1,
-      "pattern": "^(?!.*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
+      "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
     },
     "output_name": {
       "type": "string",
@@ -101,7 +101,7 @@
             "properties": {
               "audio_codec": {
                 "type": "string",
-                "pattern": "^(?!.*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
+                "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
               }
             }
           }
@@ -255,12 +255,12 @@
         "container": {
           "type": "string",
           "minLength": 1,
-          "pattern": "^(?!.*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
+          "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
         },
         "video_codec": {
           "type": "string",
           "minLength": 1,
-          "pattern": "^(?!.*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
+          "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
         },
         "video_profile": {
           "type": [
@@ -268,7 +268,7 @@
             "null"
           ],
           "minLength": 1,
-          "pattern": "^(?!.*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
+          "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
         },
         "video_level": {
           "type": [
@@ -276,12 +276,12 @@
             "null"
           ],
           "minLength": 1,
-          "pattern": "^(?!.*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
+          "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
         },
         "pixel_format": {
           "type": "string",
           "minLength": 1,
-          "pattern": "^(?!.*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
+          "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
         },
         "audio_codec": {
           "type": [
@@ -289,7 +289,7 @@
             "null"
           ],
           "minLength": 1,
-          "pattern": "^(?!.*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
+          "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
         },
         "audio_sample_rate": {
           "type": [
@@ -304,7 +304,7 @@
             "null"
           ],
           "minLength": 1,
-          "pattern": "^(?!.*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
+          "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
         },
         "duration_tolerance": {
           "type": "integer",
@@ -335,7 +335,7 @@
             "audio_codec": {
               "type": "string",
               "minLength": 1,
-              "pattern": "^(?!.*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
+              "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
             },
             "audio_sample_rate": {
               "type": "integer",
@@ -344,7 +344,7 @@
             "audio_channel_layout": {
               "type": "string",
               "minLength": 1,
-              "pattern": "^(?!.*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
+              "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
             }
           }
         }
@@ -362,11 +362,11 @@
     "stringMap": {
       "type": "object",
       "propertyNames": {
-        "pattern": "^(?!.*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
+        "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
       },
       "additionalProperties": {
         "type": "string",
-        "pattern": "^(?!.*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
+        "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
       }
     }
   },

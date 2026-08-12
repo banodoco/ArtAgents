@@ -689,7 +689,13 @@ def test_resolution_evidence_survives_plan_round_trip_and_provenance() -> None:
         timeline="/workspace/timeline.json",
         assets_registry=None,
         plan=plan,
-        artifact_profiles={},
+        artifact_profiles={
+            "outputs/visual.mp4": {
+                "profile": _profile(),
+                "sha256": SHA_B,
+                "attachments": {},
+            }
+        },
         audio_ownership="rendered",
         normalization=[],
         attachments={},
@@ -812,12 +818,32 @@ def test_provenance_rejects_spoofed_artifact_lineage() -> None:
     with pytest.raises(ValueError, match="sha256"):
         assemble_provenance_v2(
             **base,
-            artifact_profiles={"out/v.mp4": {"profile": _profile(), "sha256": None}},
+            artifact_profiles={
+                "out/v.mp4": {"profile": _profile(), "sha256": None, "attachments": {}}
+            },
         )
     with pytest.raises(ValueError, match="sha256"):
         assemble_provenance_v2(
             **base,
-            artifact_profiles={"out/v.mp4": {"profile": _profile(), "sha256": "not-a-hash"}},
+            artifact_profiles={
+                "out/v.mp4": {
+                    "profile": _profile(),
+                    "sha256": "not-a-hash",
+                    "attachments": {},
+                }
+            },
+        )
+    with pytest.raises(ValueError, match="unknown fields"):
+        assemble_provenance_v2(
+            **base,
+            artifact_profiles={
+                "out/v.mp4": {
+                    "profile": _profile(),
+                    "sha256": SHA_B,
+                    "attachments": {},
+                    "spoof": 1,
+                }
+            },
         )
 
 
