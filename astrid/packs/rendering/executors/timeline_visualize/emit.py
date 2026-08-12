@@ -259,6 +259,9 @@ def _scope_effective(
         return identity_map, scope
     if scope.start_frame is None or scope.end_frame is None:
         return identity_map, scope
+    identity = _lookup_display(identity_map, scope.ref)
+    if identity is not None and identity[1] == "range":
+        return identity_map, scope
     if _lookup_semantic(identity_map, "range", scope.ref) is not None:
         return identity_map, scope
     if not isinstance(identity_map, IdentityMap):

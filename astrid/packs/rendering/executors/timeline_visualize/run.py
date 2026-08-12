@@ -57,6 +57,7 @@ from astrid.packs.rendering.executors.timeline_visualize.layout import (
 )
 from astrid.packs.rendering.executors.timeline_visualize.model import build_model
 from astrid.packs.rendering.executors.timeline_visualize.navigation import (
+    assign_range_ids,
     build_identity_map,
 )
 from astrid.packs.rendering.executors.timeline_visualize.render_png import (
@@ -273,6 +274,38 @@ def _scope_for(args: argparse.Namespace, model: Any):
     if kind != "clip":
         kwargs["neighbors"] = 0
     return select_scope(model, kind=kind, **kwargs)
+
+
+def _mint_cold_range_root(
+    model: Any,
+    identity_map: Any,
+    scope: Any,
+) -> tuple[Any, Any]:
+    """Allocate the root RG id from the selected frozen frame bounds.
+
+    The authored key uses canonical seconds derived from the quantized scope,
+    rather than the caller's spelling, so equivalent selectors (``5`` and
+    ``00:05``) resolve to the same semantic identity.  The returned scope
+    carries the qualified display ref consumed by every emitter and renderer.
+    """
+
+    if scope.kind != "range":
+        return identity_map, scope
+    if scope.start_frame is None or scope.end_frame is None:
+        raise ValueError("cold range scope must have frozen frame bounds")
+    start_seconds = scope.start_frame / model.fps
+    end_seconds = scope.end_frame / model.fps
+    authored_id = (
+        f"range:{format(start_seconds, '.17g')}:{format(end_seconds, '.17g')}"
+    )
+    effective_map = assign_range_ids(
+        identity_map,
+        [(authored_id, start_seconds, end_seconds)],
+    )
+    display_ref = effective_map.lookup_semantic("range", authored_id)
+    if display_ref is None:
+        raise ValueError(f"failed to allocate a display id for range {authored_id!r}")
+    return effective_map, replace(scope, ref=display_ref)
 
 
 def _pages_for(args: argparse.Namespace, model: Any, identity_map: Any, scope: Any) -> tuple[LayoutPage, ...]:
@@ -598,6 +631,8 @@ def _render_one(
         timeline_uuid=model.timeline_uuid,
         timeline_ulid=model.timeline_ulid,
     )
+    scope = _scope_for(args, model)
+    identity_map, scope = _mint_cold_range_root(model, identity_map, scope)
     return _materialize_view(
         args=args,
         project_root=project_root,
@@ -605,7 +640,7 @@ def _render_one(
         snapshot=snapshot,
         model=model,
         identity_map=identity_map,
-        scope=_scope_for(args, model),
+        scope=scope,
     )
 
 
@@ -619,7 +654,10 @@ def refresh_root(
     """The sole frozen-lineage transition to current managed timeline state."""
 
     timelines_root = (project_root / "timelines").resolve(strict=True)
-    timeline_dir = (timelines_root / frozen.timeline_ulid).resolve(strict=True)
+    declared_timeline_dir = timelines_root / frozen.timeline_ulid
+    if declared_timeline_dir.is_symlink():
+        raise ValueError("the frozen timeline path must not be a symlink")
+    timeline_dir = declared_timeline_dir.resolve(strict=True)
     if timeline_dir.parent != timelines_root or not timeline_dir.is_dir():
         raise ValueError("the frozen timeline is no longer a contained managed timeline")
     snapshot = acquire_snapshot(

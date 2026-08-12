@@ -355,7 +355,8 @@ def test_desert_slice_one_recovery_action_per_unavailable_state(desert) -> None:
     # refresh_root reads current state; focus actions read the snapshot.
     tl01 = actions["entries"]["TL01"]["actions"]
     assert tl01["refresh_root"]["reads"] == "current"
-    assert tl01["refresh_root"]["focus"] is None
+    assert tl01["refresh_root"]["focus"] == "TL01"
+    assert "--refresh-root" in tl01["refresh_root"]["argv"]
     assert tl01["focus_timestamp"]["reads"] == "snapshot"
     assert tl01["focus_timestamp"]["result_scope"] == "timestamp"
 

@@ -170,6 +170,92 @@ def test_valid_drill_down_keeps_root_ids_sns_and_exact_parent(
     assert Path(parent["argv"][marker + 1]).resolve() == root_manifest
 
 
+def test_cold_range_root_mints_rg_and_is_a_valid_frozen_parent(
+    tmp_projects_root: Path,
+) -> None:
+    slug = "timeline-frozen-range-root"
+    project_root, timeline = _prepare_project(tmp_projects_root, slug)
+    root = _invoke(
+        slug,
+        timeline_source=str(timeline),
+        range="00:05..00:12",
+    )
+    assert root.ok is True, root.error
+    root_manifest = Path(root.manifest_path or "").resolve()
+    ground_truth = _json(root_manifest.parent / "ground-truth.json")
+
+    assert ground_truth["scope"] == {
+        "kind": "range",
+        "ref": "TL01.RG01",
+        "start_frame": 120,
+        "end_frame": 288,
+        "start_seconds": 5.0,
+        "end_seconds": 12.0,
+    }
+    assert ground_truth["frozen_ranges"] == [
+        {
+            "stable_id": "RG01",
+            "qualified_ref": "TL01.RG01",
+            "canonical_ref": {
+                "timeline_uuid": TIMELINE_UUID,
+                "kind": "range",
+                "authored_id": "range:5:12",
+            },
+            "start_frame": 120,
+            "end_frame": 288,
+            "start_seconds": 5.0,
+            "end_seconds": 12.0,
+        }
+    ]
+
+    root_frozen = load_frozen_view(root_manifest, project_root=project_root)
+    child = _invoke(slug, from_view=str(root_manifest), focus="TL01.RG01")
+    assert child.ok is True, child.error
+    child_manifest = Path(child.manifest_path or "").resolve()
+    child_frozen = load_frozen_view(child_manifest, project_root=project_root)
+
+    assert child_frozen.manifest["scope"] == ground_truth["scope"]
+    assert list(child_frozen.identity_map.semantic_to_display.items()) == list(
+        root_frozen.identity_map.semantic_to_display.items()
+    )
+    assert child_frozen.ground_truth["frozen_ranges"] == ground_truth[
+        "frozen_ranges"
+    ]
+    parent = child_frozen.action_index["entries"]["TL01"]["actions"][
+        "parent_view"
+    ]
+    assert parent["focus"] == "TL01.RG01"
+    assert parent["result_scope"] == "range"
+    marker = parent["argv"].index("--from-view")
+    assert Path(parent["argv"][marker + 1]).resolve() == root_manifest
+
+
+def test_cold_range_root_id_is_deterministic_across_selector_spellings(
+    tmp_projects_root: Path,
+) -> None:
+    slug = "timeline-frozen-range-deterministic"
+    _project_root, timeline = _prepare_project(tmp_projects_root, slug)
+    ground_truths: list[dict] = []
+    for selector in ("5..12", "00:05..00:12"):
+        result = _invoke(
+            slug,
+            timeline_source=str(timeline),
+            range=selector,
+        )
+        assert result.ok is True, result.error
+        pack_root = Path(result.manifest_path or "").resolve().parent
+        ground_truths.append(_json(pack_root / "ground-truth.json"))
+
+    assert [ground_truth["scope"]["ref"] for ground_truth in ground_truths] == [
+        "TL01.RG01",
+        "TL01.RG01",
+    ]
+    assert [
+        ground_truth["frozen_ranges"][0]["canonical_ref"]["authored_id"]
+        for ground_truth in ground_truths
+    ] == ["range:5:12", "range:5:12"]
+
+
 def test_live_append_cannot_change_frozen_child_bytes(
     tmp_projects_root: Path,
 ) -> None:

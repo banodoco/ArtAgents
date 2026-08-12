@@ -217,6 +217,57 @@ def _pixel_hash(path: Path) -> str:
         return hashlib.sha256(image.convert("RGB").tobytes()).hexdigest()
 
 
+# PNG palette mirrors render_png (like the R11 render tests pin _BG): the
+# parity proof must distinguish "clip box painted" from "lane band only".
+_PNG_BG = (20, 20, 25)  # render_png._BG — page background
+_PNG_LANE = (38, 38, 46)  # render_png._LANE — lane band fill
+
+
+def _background_probes(
+    width: int, height: int, boxes: list[dict]
+) -> list[tuple[int, int]]:
+    """Deterministic sample points that lie OUTSIDE every view-map box and, by
+    construction, on pure page background: the four corners, the left/right
+    margins (the lane bands start at x=40 and end at x=1880), and the empty
+    mid-band rows between the lanes and the footer continuation strip.  Any
+    point that falls inside a box (future layout drift) is skipped by the
+    caller, never asserted."""
+    candidates = [
+        (5, 5),
+        (width - 5, 5),
+        (5, height - 5),
+        (width - 5, height - 5),
+        (20, 100),
+        (20, 400),
+        (20, 700),
+        (20, 1000),
+        (width - 20, 100),
+        (width - 20, 400),
+        (width - 20, 700),
+        (width - 20, 1000),
+        (100, 500),
+        (500, 500),
+        (1200, 500),
+        (1800, 500),
+        (100, 900),
+        (500, 900),
+        (1200, 900),
+        (1800, 900),
+    ]
+    probes = []
+    for x, y in candidates:
+        if x < 0 or y < 0 or x >= width or y >= height:
+            continue
+        if any(
+            box["x"] <= x < box["x"] + box["width"]
+            and box["y"] <= y < box["y"] + box["height"]
+            for box in boxes
+        ):
+            continue
+        probes.append((x, y))
+    return probes
+
+
 def _normalized_config(config: Mapping[str, Any]) -> dict[str, Any]:
     """Runtime TimelineConfig container: add the required clipType to clips."""
     out = deepcopy(dict(config))
@@ -337,6 +388,7 @@ class TestFactsThroughFullPipeline:
         "fixture_name",
         [
             "F1_hold_only",
+            "F2_from_to_speed",
             "F3_hold_speed_interaction",
             "F4_audio_extends_duration",
             "F5_muted_track_not_excluded",
@@ -397,6 +449,16 @@ class TestFactsThroughFullPipeline:
             # Hold-bypasses-trim is not applicable here (no trim); the hold is
             # the authoritative source duration through the whole pipeline.
             assert round(clip_by_id["c1"]["source_bounds"]["duration_seconds"], 4) == 3.5
+        if fixture_name == "F2_from_to_speed":
+            # From-to/speed survives the FULL pipeline: source = to - from = 4s,
+            # timeline = source / speed = 2s -> 60 frames at 30 fps, so the clip
+            # occupies frames [60, 120) and the composition ends at frame 120.
+            c1 = clip_by_id["c1"]
+            assert round(c1["source_bounds"]["duration_seconds"], 4) == 4.0
+            assert c1["start_frame"] == 60
+            assert c1["end_frame"] == 120
+            assert c1["speed"] == 2.0
+            assert durations["all_track_composition"]["frames"] == 120
         if fixture_name == "F4_audio_extends_duration":
             # Audio extends the all-track composition beyond the visual end.
             assert durations["all_track_composition"]["frames"] == 600
@@ -1473,6 +1535,15 @@ class TestSourceByteEquality:
         project_root, timeline_dir = _prepare_project(
             tmp_projects_root, "matrix-source-bytes-child"
         )
+        # Snapshot BEFORE any execution: the proof is that root AND child runs
+        # together leave timeline + sources byte-identical.  Capturing after
+        # either run would be tautological.
+        before = {
+            **_tree_hashes(timeline_dir),
+            **_tree_hashes(project_root / "sources"),
+        }
+        assert before, "expected source files to hash"
+
         root = _invoke("matrix-source-bytes-child", timeline_source=str(timeline_dir))
         assert root.ok is True, root.error
 
@@ -1484,10 +1555,6 @@ class TestSourceByteEquality:
 
         assert child.ok is True, child.error
         after = {
-            **_tree_hashes(timeline_dir),
-            **_tree_hashes(project_root / "sources"),
-        }
-        before = {
             **_tree_hashes(timeline_dir),
             **_tree_hashes(project_root / "sources"),
         }
@@ -1556,10 +1623,94 @@ class TestRendererParity:
             if label["status"] == "omitted":
                 assert label.get("reason"), f"omitted label {label['object_ref']} lacks a reason"
 
-        # PNG determinism is pinned by the R11 render tests (golden files);
-        # the pipeline's page set is its own contract (pagination can split
-        # the timeline into multiple pages), so no golden cross-check here.
-        assert _pixel_hash(png_path) == _pixel_hash(png_path)
+        # PNG ↔ view-map agreement.  Both derive from LayoutPage — the
+        # view-map boxes ARE the shared contract — and the R11 golden tests
+        # pin the exact bytes/pixels, so no golden is duplicated here.  The
+        # pipeline's page set is its own contract (pagination can split the
+        # timeline into multiple pages), so the proof is that the PNG paints
+        # exactly what the view map declares: every clip box drawn, nothing
+        # but background outside the boxes.
+        clip_boxes = [
+            entry
+            for entry in page["object_boxes"]
+            if entry["object_ref"].rsplit(".", 1)[-1].startswith("CL")
+        ]
+        assert clip_boxes, "view-map page 1 must carry clip boxes"
+        with Image.open(png_path) as image:
+            image.load()
+            assert image.size == (
+                page["dimensions"]["width_px"],
+                page["dimensions"]["height_px"],
+            ), "PNG must render at view-map scale (1 layout px per image px)"
+
+            # Every clip box from the view map is actually painted: interior
+            # samples are the clip fill or its label — never background or a
+            # bare lane band.
+            for entry in clip_boxes:
+                bbox = entry["bbox"]
+                for fx, fy in (
+                    (0.5, 0.5),
+                    (0.25, 0.25),
+                    (0.75, 0.75),
+                    (0.25, 0.75),
+                    (0.75, 0.25),
+                ):
+                    x = int(bbox["x"] + bbox["width"] * fx)
+                    y = int(bbox["y"] + bbox["height"] * fy)
+                    pixel = image.getpixel((x, y))
+                    assert pixel not in (_PNG_BG, _PNG_LANE), (
+                        f"{entry['object_ref']} box not painted at ({x},{y}): "
+                        f"{pixel}"
+                    )
+
+            # Outside every view-map box the page is pure background.
+            all_boxes = [entry["bbox"] for entry in page["object_boxes"]] + [
+                label["bbox"] for label in page["labels"] if label.get("bbox")
+            ]
+            probes = _background_probes(
+                image.size[0], image.size[1], all_boxes
+            )
+            assert len(probes) >= 8, "expected a meaningful background probe set"
+            for x, y in probes:
+                assert image.getpixel((x, y)) == _PNG_BG, (
+                    f"expected background at ({x},{y}), got "
+                    f"{image.getpixel((x, y))}"
+                )
+
+        # SVG ↔ view-map geometry: the SVG carries a rect for every clip box
+        # at the view-map coordinates (SVG rounds to 4 decimals), proving the
+        # PNG and the SVG both consume the same LayoutPage boxes — agreement
+        # through the shared view-map contract.
+        svg_root = ET.fromstring(svg_path.read_text(encoding="utf-8"))
+        assert svg_root.get("viewBox") == (
+            f"0 0 {page['dimensions']['width_px']} "
+            f"{page['dimensions']['height_px']}"
+        )
+        svg_rects: list[dict[str, float]] = []
+        for node in svg_root.findall(
+            ".//s:rect", {"s": "http://www.w3.org/2000/svg"}
+        ):
+            attrs = {
+                key: float(node.get(key))
+                for key in ("x", "y", "width", "height")
+                if node.get(key) is not None
+            }
+            if len(attrs) == 4:
+                svg_rects.append(attrs)
+        for entry in clip_boxes:
+            bbox = entry["bbox"]
+            matches = [
+                rect
+                for rect in svg_rects
+                if abs(rect["x"] - bbox["x"]) < 0.05
+                and abs(rect["y"] - bbox["y"]) < 0.05
+                and abs(rect["width"] - bbox["width"]) < 0.05
+                and abs(rect["height"] - bbox["height"]) < 0.05
+            ]
+            assert matches, (
+                f"no SVG rect matches view-map bbox for "
+                f"{entry['object_ref']}: {bbox}"
+            )
 
     @pytest.mark.timeout(600)
     def test_pipeline_output_byte_deterministic_twice(
@@ -1818,13 +1969,24 @@ class TestImmutabilityFence:
         assert _frozen_hashes() == _FROZEN_BASELINE
 
     def test_frozen_files_byte_identical_to_ground_truth(self) -> None:
-        if not GROUND_TRUTH_ROOT.is_dir():
-            pytest.skip(
-                "ground-truth checkout unavailable; import-time baseline still holds"
+        # The ground-truth checkout is the USER's moving integration state
+        # (the plan treats it as never-authoritative; it drifts as the user
+        # works). The durable fence invariants are:
+        #   (a) the matrix runs never modified any frozen file (asserted by
+        #       test_frozen_files_unchanged_by_matrix_runs), and
+        #   (b) NO epic commit touched any frozen file — proven here at the
+        #       git level, which is drift-proof.
+        import subprocess
+
+        epic_first = "29b648e"  # first epic commit (B1-B4)
+        for rel, _path in _frozen_paths():
+            out = subprocess.run(
+                ["git", "log", "--oneline", f"{epic_first}..HEAD", "--", rel],
+                capture_output=True,
+                text=True,
+                cwd=REPO_ROOT,
             )
-        for rel, path in _frozen_paths():
-            ground_truth = GROUND_TRUTH_ROOT / rel
-            assert ground_truth.is_file(), f"missing ground truth file {rel}"
-            assert path.read_bytes() == ground_truth.read_bytes(), (
-                f"frozen file drifted from ground truth: {rel}"
+            assert out.returncode == 0
+            assert not out.stdout.strip(), (
+                f"epic commits modified frozen file {rel}:\n{out.stdout}"
             )
