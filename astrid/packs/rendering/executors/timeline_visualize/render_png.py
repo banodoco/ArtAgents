@@ -194,14 +194,17 @@ def render_page_png(page: LayoutPage, *, scale: int = 1) -> bytes:
 
     # Focus rings: a bright outline around the focused clip so a VLM reading
     # the page never mistakes a wide neighbor (e.g. the audio bar) for the
-    # subject. Grok UX: the root FOCUS clip needs visual emphasis.
+    # subject. Grok UX: the root FOCUS clip needs visual emphasis. The ring
+    # must be outline-only — filling it would paint over the clip bar.
     for item in page.objects:
         if item.kind == "focus_ring":
-            _rect(
-                draw,
-                item.box,
-                _LANE,  # fill (mostly hidden behind the clip)
-                scale=scale,
+            draw.rectangle(
+                [
+                    _px(item.box.x, scale),
+                    _px(item.box.y, scale),
+                    _px(item.box.x + item.box.w, scale) - 1,
+                    _px(item.box.y + item.box.h, scale) - 1,
+                ],
                 outline=_FOCUS_RING,
                 width=4,
             )
