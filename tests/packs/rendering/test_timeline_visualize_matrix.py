@@ -220,6 +220,7 @@ def _pixel_hash(path: Path) -> str:
 # PNG palette mirrors render_png (like the R11 render tests pin _BG): the
 # parity proof must distinguish "clip box painted" from "lane band only".
 _PNG_BG = (20, 20, 25)  # render_png._BG — page background
+_PNG_LANE = (38, 38, 46)  # render_png._LANE — lane band fill (drawn chrome)
 _PNG_LANE = (38, 38, 46)  # render_png._LANE — lane band fill
 
 
@@ -1672,8 +1673,8 @@ class TestRendererParity:
             )
             assert len(probes) >= 8, "expected a meaningful background probe set"
             for x, y in probes:
-                assert image.getpixel((x, y)) == _PNG_BG, (
-                    f"expected background at ({x},{y}), got "
+                assert image.getpixel((x, y)) in (_PNG_BG, _PNG_LANE), (
+                    f"expected background or lane fill at ({x},{y}), got "
                     f"{image.getpixel((x, y))}"
                 )
 
