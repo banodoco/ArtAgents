@@ -6,7 +6,7 @@ import hashlib
 import json
 import math
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -222,7 +222,21 @@ def process_evidence_for_gate(
         evidence,
         declared_image_hashes=declared_image_hashes,
     )
-    accuracy, results = score_answers(evidence, specs)
+    # The VLM echoes the prompt's positional ids (Q1..QN); re-key each answer
+    # to its spec question_id so score_answers can index by spec id. The
+    # prompt presents questions in spec order, so positional mapping is
+    # deterministic. Unknown answers are preserved for divergence checks.
+    raw_answers = list(evidence.answers.get("answers", []))
+    rekeyed = []
+    for index, spec in enumerate(specs):
+        if index < len(raw_answers):
+            entry = dict(raw_answers[index])
+            entry["question_id"] = spec.question_id
+            rekeyed.append(entry)
+        else:
+            rekeyed.append({"question_id": spec.question_id})
+    rekeyed_evidence = replace(evidence, answers={**evidence.answers, "answers": rekeyed})
+    accuracy, results = score_answers(rekeyed_evidence, specs)
     return {
         "accuracy": accuracy,
         "divergences": divergences,

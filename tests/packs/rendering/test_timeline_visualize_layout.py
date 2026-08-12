@@ -176,11 +176,15 @@ def test_desert_time_scaled_keeps_full_axis_and_one_frame_artifacts(desert) -> N
     assert frame_2.box.x + frame_2.box.w < frame_3.box.x
     assert frame_3.box.x + frame_3.box.w > frame_4.box.x
     assert any(
-        item.kind == "gap_marker" and item.label == "1fr gap"
+        item.kind == "gap_marker"
+        and item.label.startswith("1fr gap")
+        and "→" in item.label
         for item in pages[0].objects
     )
     assert any(
-        item.kind == "gap_marker" and item.label == "1fr overlap"
+        item.kind == "gap_marker"
+        and item.label.startswith("1fr overlap")
+        and "→" in item.label
         for item in pages[0].objects
     )
     detail = next(

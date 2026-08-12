@@ -440,6 +440,8 @@ def _chrome(
     page_count: int,
     start_frame: int,
     end_frame: int,
+    snapshot_version: int | None = None,
+    cue_text: str | None = None,
 ) -> list[LayoutObject]:
     breadcrumb = timeline_ref if scope_ref == timeline_ref else f"{timeline_ref} > {scope_ref}"
     mode = (
@@ -447,7 +449,8 @@ def _chrome(
         if layout == "time-scaled"
         else "LINEAR — WIDTHS ARE NOT TIME-SCALED"
     )
-    return [
+    version_token = f" · v{snapshot_version}" if snapshot_version is not None else ""
+    objects = [
         LayoutObject(
             timeline_ref,
             "breadcrumb",
@@ -463,7 +466,7 @@ def _chrome(
             Box(1110.0, 28.0, 770.0, 42.0),
             None,
             _Z_CHROME,
-            f"SNAPSHOT · {timeline_ref} · {model.snapshot_sns}",
+            f"SNAPSHOT · {timeline_ref}{version_token} · {model.snapshot_sns}",
             None,
         ),
         LayoutObject(
@@ -480,6 +483,242 @@ def _chrome(
             None,
         ),
     ]
+    if cue_text:
+        objects.append(
+            LayoutObject(
+                scope_ref,
+                "cue",
+                Box(40.0, 134.0, 1840.0, 54.0),
+                None,
+                _Z_CHROME,
+                cue_text,
+                None,
+            )
+        )
+    return objects
+
+
+def _scope_cue(
+    model: TimelineInspectionModel,
+    identity_map: IdentityMap,
+    scope: Scope,
+    scope_ref: str,
+    timeline_ref: str,
+    segments: Sequence[TranscriptSegment] = (),
+    occurrences: Sequence[SpeechOccurrence] = (),
+) -> str:
+    """Return the deterministic FOCUS · SOURCE · TEXT cue line for a page.
+
+    This is the visual grammar the reading guide documents under "Cues in
+    images": one chrome line per page telling a reader which qualified id to
+    focus next, which asset is the source card (with its role and integrity
+    state), which text-evidence id is in scope, and the mapped speaker.
+
+    Rules (single source of truth; mirrored by the reading guide):
+
+    * FOCUS — the id to look up next: the first in-scope clip for
+      timeline/range/shot/timestamp scopes, the focused clip's first source
+      asset for clip scopes, the parent clip for asset scopes, the first
+      speech occurrence for TS scopes, and the mapped clip for SP scopes.
+    * SOURCE — the single source card of the focused object (asset ref, role,
+      integrity state), or ``none`` when the scope has no single card.
+    * TEXT — the first transcript-segment ref mapped into the focused clip
+      (or the scope's own TS/SP ref), or ``none``.
+    * SPEAKER — the mapped segment's speaker (name, else its speaker state),
+      or ``none``.
+    """
+
+    def _clip_ref_of(clip_id: str) -> str | None:
+        return identity_map.lookup_semantic("clip", clip_id)
+
+    def _asset_ref_of(asset_key: str) -> str | None:
+        return identity_map.lookup_semantic("asset", asset_key)
+
+    def _clip_asset(clip_id: str) -> str | None:
+        clip = next((item for item in model.clips if item.clip_id == clip_id), None)
+        if clip is None:
+            return None
+        for asset_key in clip.asset_keys:
+            ref = _asset_ref_of(asset_key)
+            if ref is not None:
+                return ref
+        return None
+
+    def _asset_identity(asset_ref: str | None) -> tuple[str, str] | None:
+        if asset_ref is None:
+            return None
+        semantic = identity_map.lookup_display(asset_ref)
+        if semantic is None:
+            return None
+        integrity = model.media_integrity.get(semantic[2])
+        if integrity is None:
+            return None
+        return integrity.role, integrity.state
+
+    def _speaker_of(segment_id: str) -> str:
+        segment = next((item for item in segments if item.segment_id == segment_id), None)
+        if segment is None:
+            return "none"
+        if segment.speaker is not None:
+            return segment.speaker
+        return segment.speaker_state or "none"
+
+    def _ts_ref_for(segment_id: str) -> str | None:
+        suffix = f":segment:{segment_id}"
+        for (_uuid, kind, authored), ref in identity_map.semantic_to_display.items():
+            if kind == "transcript_source_segment" and authored.endswith(suffix):
+                return ref
+        return None
+
+    def _sp_ref_for(segment_id: str, clip_id: str) -> str | None:
+        tail = f":segment:{segment_id}:clip:{clip_id}"
+        for (_uuid, kind, authored), ref in identity_map.semantic_to_display.items():
+            if kind == "speech_occurrence" and authored.endswith(tail):
+                return ref
+        return None
+
+    focus: str | None = None
+    source: str | None = None
+    text: str | None = None
+    speaker: str = "none"
+
+    if scope.kind in {"timeline", "project"}:
+        focus = _clip_ref_of(scope.clip_ids[0]) if scope.clip_ids else timeline_ref
+    elif scope.kind in {"range", "shot"}:
+        focus = _clip_ref_of(scope.clip_ids[0]) if scope.clip_ids else timeline_ref
+        source = None
+    elif scope.kind == "timestamp":
+        focused = scope.emphasized_clip_ids[0] if scope.emphasized_clip_ids else (
+            scope.clip_ids[0] if scope.clip_ids else None
+        )
+        focus = _clip_ref_of(focused) if focused else timeline_ref
+        if focused:
+            source = _clip_asset(focused)
+            for occurrence in occurrences:
+                if occurrence.clip_id == focused:
+                    text = _ts_ref_for(occurrence.segment_id)
+                    speaker = _speaker_of(occurrence.segment_id)
+                    break
+    elif scope.kind == "clip":
+        focused = scope.emphasized_clip_ids[0] if scope.emphasized_clip_ids else (
+            scope.clip_ids[0] if scope.clip_ids else None
+        )
+        if focused is None:
+            focus = timeline_ref
+        else:
+            focus = _clip_asset(focused) or timeline_ref
+            source = _clip_asset(focused)
+            for occurrence in occurrences:
+                if occurrence.clip_id == focused:
+                    text = _ts_ref_for(occurrence.segment_id)
+                    speaker = _speaker_of(occurrence.segment_id)
+                    break
+    elif scope.kind == "asset":
+        source = scope_ref
+        parent_clip = next(
+            (
+                _clip_ref_of(clip.clip_id)
+                for clip in model.clips
+                if scope_ref in {
+                    _asset_ref_of(asset_key) for asset_key in clip.asset_keys
+                }
+            ),
+            None,
+        )
+        focus = parent_clip or timeline_ref
+    elif scope.kind == "ts" or (scope.kind == "text"):
+        text = scope_ref
+        for occurrence in occurrences:
+            ts_ref = _ts_ref_for(occurrence.segment_id)
+            if ts_ref != scope_ref:
+                continue
+            sp_ref = _sp_ref_for(occurrence.segment_id, occurrence.clip_id)
+            focus = sp_ref or scope_ref
+            source = _clip_asset(occurrence.clip_id)
+            speaker = _speaker_of(occurrence.segment_id)
+            break
+    elif scope.kind == "sp" or (scope.kind == "speech"):
+        text = scope_ref
+        for occurrence in occurrences:
+            sp_ref = _sp_ref_for(occurrence.segment_id, occurrence.clip_id)
+            if sp_ref != scope_ref:
+                continue
+            focus = _clip_ref_of(occurrence.clip_id) or timeline_ref
+            source = _clip_asset(occurrence.clip_id)
+            speaker = _speaker_of(occurrence.segment_id)
+            break
+
+    role_state = _asset_identity(source)
+    if source is None or role_state is None:
+        source_token = "SOURCE none · role none · state none"
+    else:
+        source_token = f"SOURCE {source} · {role_state[0]} · {role_state[1]}"
+
+    # PARENT: the breadcrumb parent of the focused object — the timeline for
+    # timeline/range/shot/timestamp/clip scopes, the parent clip for asset
+    # scopes, the source segment for SP scopes. Printed explicitly so a VLM
+    # never confuses it with the focused id.
+    if scope.kind == "asset":
+        parent_token = f"PARENT {focus or 'none'}"
+    elif scope.kind in {"sp", "speech"} and text:
+        parent_token = f"PARENT {text}"
+    else:
+        parent_token = f"PARENT {timeline_ref}"
+
+    # SP window: exact timeline bounds of the in-scope speech occurrence
+    # (3-decimal seconds), printed so timing questions are answered by the
+    # page, never estimated.
+    sp_token = ""
+    for occurrence in occurrences:
+        in_focus = False
+        if scope.kind in {"ts", "text", "sp", "speech"}:
+            in_focus = True
+        elif scope.kind == "clip":
+            in_focus = occurrence.clip_id in scope.emphasized_clip_ids
+        elif scope.kind == "timestamp":
+            in_focus = occurrence.clip_id in scope.clip_ids
+        if in_focus:
+            sp_token = (
+                f" · SP @ {occurrence.timeline_start:.3f}s–{occurrence.timeline_end:.3f}s"
+            )
+            break
+
+    # Focused-clip window: for clip/timestamp/range scopes whose focused clip
+    # rectangle may be too narrow to carry its own frame label on a
+    # full-timeline page, print the exact window here so the page always
+    # answers "what are this clip's bounds" without estimating from the ruler.
+    clip_window_token = ""
+    focused_clip_id: str | None = None
+    if scope.kind == "clip":
+        focused_clip_id = (
+            scope.emphasized_clip_ids[0]
+            if scope.emphasized_clip_ids
+            else (scope.clip_ids[0] if scope.clip_ids else None)
+        )
+    elif scope.kind == "timestamp":
+        focused_clip_id = (
+            scope.emphasized_clip_ids[0]
+            if scope.emphasized_clip_ids
+            else (scope.clip_ids[0] if scope.clip_ids else None)
+        )
+    elif scope.kind in {"range", "shot"}:
+        focused_clip_id = scope.clip_ids[0] if scope.clip_ids else None
+    if focused_clip_id is not None:
+        focused_clip = next(
+            (item for item in model.clips if item.clip_id == focused_clip_id), None
+        )
+        if focused_clip is not None:
+            clip_window_token = (
+                f" · FOCUS CLIP {focused_clip.frames.start_frame}–"
+                f"{focused_clip.frames.end_frame}fr · "
+                f"{_seconds(focused_clip.frames.start_frame / model.fps)}s→"
+                f"{_seconds(focused_clip.frames.end_frame / model.fps)}s"
+            )
+
+    return (
+        f"FOCUS {focus or 'none'} · {parent_token} · {source_token} · "
+        f"TEXT {text or 'none'} · SPEAKER {speaker}{clip_window_token}{sp_token}"
+    )
 
 
 def _ruler(
@@ -563,7 +802,8 @@ def _visual_detail_label(
         None,
         _Z_ANNOTATION,
         (
-            f"visual detail ends at {model.extents.visual_frames}fr · "
+            f"visual detail ends at {model.extents.visual_frames}fr "
+            f"(frame-quantized {_seconds(model.extents.visual_frames / model.fps)}s) · "
             f"authored end={_seconds(authored_end)}s"
         ),
         None,
@@ -667,7 +907,11 @@ def _add_footer_continuations(
                     Box(x, y, 380.0, 30.0),
                     None,
                     _Z_CHROME,
-                    f"{direction}: {ref}",
+                    (
+                        f"CONTINUE NEXT · {ref}"
+                        if direction == "next"
+                        else f"CONTINUE PREV · {ref}"
+                    ),
                     None,
                 )
             )
@@ -680,6 +924,9 @@ def _layout_time_scaled(
     scope: Scope,
     scope_ref: str,
     max_objects_per_page: int,
+    *,
+    snapshot_version: int | None = None,
+    cue_text: str | None = None,
 ) -> tuple[LayoutPage, ...]:
     start_frame, end_frame = _scope_bounds(model, scope)
     tracks, lanes, paint_rank = _lane_maps(model)
@@ -767,6 +1014,8 @@ def _layout_time_scaled(
             page_count=len(specs),
             start_frame=spec.start_frame,
             end_frame=spec.end_frame,
+            snapshot_version=snapshot_version,
+            cue_text=cue_text,
         )
         objects.extend(_ruler(timeline_ref, spec.start_frame, spec.end_frame, model.fps))
 
@@ -797,12 +1046,19 @@ def _layout_time_scaled(
             ref = _clip_ref(identity_map, clip)
             if clip.clip_id in primary_ids:
                 label = _time_clip_label(ref, clip)
-                needed_width = max(96.0, len(label) * 10.0)
-                omitted = (
-                    None
-                    if box.w >= needed_width
-                    else "time-scaled box is too narrow for its complete frame label"
-                )
+                full_width = max(96.0, len(label) * 10.0)
+                if box.w >= full_width:
+                    omitted = None
+                elif box.w >= 44.0:
+                    # Narrow but visible: print the bare ordinal (the timeline
+                    # is constant on the page, so CL01 is unambiguous) — the
+                    # qualified ref + frame window live in ground-truth and
+                    # the reading guide. Grok UX feedback: unlabeled cells
+                    # are the #1 readability failure; collisions are #2.
+                    label = ref.rsplit(".", 1)[-1]
+                    omitted = None
+                else:
+                    omitted = "time-scaled box is too narrow for its complete frame label"
                 kind = "clip"
             else:
                 label = f"{ref} · continued"
@@ -848,6 +1104,28 @@ def _layout_time_scaled(
             )
             ref = _clip_ref(identity_map, following)
             relation = "gap" if delta > 0 else "overlap"
+            # Name both boundary clips so the marker is self-describing
+            # (Grok UX feedback: "1fr gap/overlap" alone doesn't say which
+            # join). Preceding = the same-track clip ending at the boundary.
+            preceding_ref = None
+            preceding_start = (
+                following.frames.start_frame - delta
+                if delta > 0
+                else following.frames.start_frame + abs(delta)
+            )
+            for candidate in clip_by_id.values():
+                if (
+                    candidate.track_id == following.track_id
+                    and candidate.frames.end_frame == preceding_start
+                ):
+                    preceding_ref = _clip_ref(identity_map, candidate)
+                    break
+            if preceding_ref:
+                marker_label = (
+                    f"{abs(delta)}fr {relation} {preceding_ref}→{ref}"
+                )
+            else:
+                marker_label = f"{abs(delta)}fr {relation}"
             objects.append(
                 LayoutObject(
                     ref,
@@ -855,7 +1133,7 @@ def _layout_time_scaled(
                     marker_box,
                     lane,
                     _Z_ANNOTATION,
-                    f"{abs(delta)}fr {relation}",
+                    marker_label,
                     None,
                 )
             )
@@ -927,6 +1205,9 @@ def _layout_linear(
     scope: Scope,
     scope_ref: str,
     max_objects_per_page: int,
+    *,
+    snapshot_version: int | None = None,
+    cue_text: str | None = None,
 ) -> tuple[LayoutPage, ...]:
     start_frame, end_frame = _scope_bounds(model, scope)
     tracks, lanes, paint_rank = _lane_maps(model)
@@ -960,6 +1241,8 @@ def _layout_linear(
             page_count=len(chunks),
             start_frame=start_frame,
             end_frame=end_frame,
+            snapshot_version=snapshot_version,
+            cue_text=cue_text,
         )
         # These are explicit scope references, not a proportional ruler.
         objects.extend(
@@ -1200,6 +1483,7 @@ def layout_timeline(
     max_objects_per_page: int = 24,
     transcript_segments: Sequence[TranscriptSegment] | None = None,
     speech_occurrences: Sequence[SpeechOccurrence] | None = None,
+    snapshot_version: int | None = None,
 ) -> tuple[LayoutPage, ...]:
     """Lay out one cold scope in the requested deterministic reading.
 
@@ -1225,6 +1509,16 @@ def layout_timeline(
         raise ValueError("max_objects_per_page must be a positive integer")
 
     scope_ref = _resolved_scope_ref(model, identity_map, scope)
+    timeline_ref = _timeline_ref(model, identity_map)
+    cue_text = _scope_cue(
+        model,
+        identity_map,
+        scope,
+        scope_ref,
+        timeline_ref,
+        segments=transcript_segments or (),
+        occurrences=speech_occurrences or (),
+    )
     if layout == "time-scaled":
         pages = _layout_time_scaled(
             model,
@@ -1232,6 +1526,8 @@ def layout_timeline(
             scope,
             scope_ref,
             max_objects_per_page,
+            snapshot_version=snapshot_version,
+            cue_text=cue_text,
         )
     else:
         pages = _layout_linear(
@@ -1240,6 +1536,8 @@ def layout_timeline(
             scope,
             scope_ref,
             max_objects_per_page,
+            snapshot_version=snapshot_version,
+            cue_text=cue_text,
         )
     return _with_text_lanes(
         pages,
@@ -1448,7 +1746,7 @@ def serialize_view_map(
                 )
 
         for item in page.objects:
-            if item.kind != "label":
+            if item.kind not in {"label", "cue"}:
                 continue
             if item.label is None:
                 raise ValueError("label LayoutObjects must carry label text")

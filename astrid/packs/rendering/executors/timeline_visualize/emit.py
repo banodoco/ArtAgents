@@ -1868,16 +1868,48 @@ exactly as written; it is the execution contract, not a display string.
 
 ## Cues in images
 
-Pages print compact cues only, never shell commands:
+Pages print compact cues only, never shell commands. Every page carries one
+chrome line:
 
 ```text
-CL03 · AS02 · 00:04–00:08
-FOCUS · SOURCE · TEXT
+FOCUS {id|none} · PARENT {id} · SOURCE {id|none} · {role|none} · {state|none} · TEXT {id|none} · SPEAKER {name|none} [· SP @ {start}s–{end}s]
 ```
 
-`FOCUS` is the id to look up next, `SOURCE` points at original media, and
-`TEXT` points at authored or mapped text. The same ids appear in
-`ground-truth.json` so every visual claim can be checked exactly.
+- `FOCUS` is the qualified id to look up next (the next action's target:
+  `focus_context` for a clip, `inspect_original` for an asset, the parent
+  scope when returning). A value of `none` means the page directs no further
+  drill-down. Example: `FOCUS TL01.AS03 · PARENT TL01 · SOURCE TL01.AS03 ·
+  timeline_media · verified_original · TEXT none · SPEAKER none` is the cue
+  of a focused clip whose next step is inspecting its exact original.
+- `PARENT` is the breadcrumb parent of the focused object — the timeline
+  (`TL01`) for timeline/range/shot/timestamp/clip scopes, the parent clip
+  for asset scopes, the source segment for `SP` scopes. It is printed
+  explicitly so it is never confused with `FOCUS`.
+- `SOURCE` is the source card: the asset id, its role (`timeline_media`,
+  `rendered_sample`, `thumbnail_only`, …), and its integrity state
+  (`verified_original` means an exact original; every other state is derived,
+  missing, or unavailable). `SOURCE none` means the page has no single source
+  card.
+- `TEXT` is the text-evidence id (`TS…` transcript source segment or `SP…`
+  speech occurrence) bound to the focused object, or `none`.
+- `SPEAKER` is the mapped segment's speaker name, its speaker state
+  (`legacy_unavailable`), or `none`.
+- `SP @ {start}s–{end}s` (present only when a speech occurrence is in scope)
+  is the occurrence's exact timeline window in seconds, three decimals, e.g.
+  `SP @ 9.083s–10.083s`. Timing answers must be read from this token, never
+  estimated from ruler spacing.
+- `FOCUS CLIP {start}–{end}fr · {start}s→{end}s` (present on clip/timestamp/
+  range/shot scopes) is the focused clip's exact frame window and seconds.
+  On a full-timeline page the clip rectangle may be too narrow to carry its
+  own label; this token is the authoritative window.
+- Gap/overlap markers print both boundary clip ids, e.g.
+  `1fr gap TL01.CL02→TL01.CL03`, so a join is never ambiguous.
+
+The same ids appear in `ground-truth.json` so every visual claim can be
+checked exactly. Lane bands print the active tracks (`lane {n} · label ·
+kind`), clip rectangles print their frame intervals, and the three text
+lanes distinguish `SPEECH`, `CAPTION`, and `OTHER TEXT · not_inspected`
+(pixel-baked text with no recorded OCR evidence).
 
 ## Actions and scopes
 

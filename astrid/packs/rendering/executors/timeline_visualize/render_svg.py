@@ -47,12 +47,13 @@ _FILL_BY_KIND = {
     "pixel_text": _PIXEL_TEXT,
 }
 
-_BADGE_KINDS = frozenset({"breadcrumb", "snapshot_badge", "scope_badge"})
+_BADGE_KINDS = frozenset({"breadcrumb", "snapshot_badge", "scope_badge", "cue"})
 
 _FONT_SIZE_BY_KIND = {
     "breadcrumb": 26,
     "snapshot_badge": 26,
     "scope_badge": 24,
+    "cue": 22,
     "label": 16,
     "track_lane": 18,
     "clip": 18,
