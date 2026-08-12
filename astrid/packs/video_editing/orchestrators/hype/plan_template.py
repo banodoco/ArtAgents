@@ -42,6 +42,7 @@ _PRODUCES_NAMES = {
     "hype.metadata.json": "metadata",
     "refine.json": "refinement",
     "hype.mp4": "video",
+    "hype.mp4.provenance.json": "provenance",
     "editor_review.json": "editor_review",
     "validation.json": "validation",
 }
@@ -179,6 +180,7 @@ def _runtime_re_exports(child_ids: set[str]) -> dict[str, str]:
         "arrangement": "arrange.produces.arrangement",
         "timeline": "cut.produces.timeline",
         "video": "render.produces.video",
+        "provenance": "render.produces.provenance",
         "editor_review": "editor_review.produces.editor_review",
         "validation": "validate.produces.validation",
     }
@@ -284,7 +286,10 @@ def build_plan_v2(
         build_leaf_template(
             "render",
             command=cmd_render,
-            produces=[file_output("video_output", "hype.mp4")],
+            produces=[
+                file_output("video_output", "hype.mp4"),
+                file_output("provenance", "hype.mp4.provenance.json"),
+            ],
             cost=cost_entry(0.50, source="runpod"),
         ),
         build_leaf_template(
@@ -318,6 +323,7 @@ def build_plan_v2(
                 "hype",
                 re_export={
                     "final_video": "render.produces.video_output",
+                    "render_provenance": "render.produces.provenance",
                     "timeline": "cut.produces.timeline_output",
                     "transcript": "transcribe.produces.transcript_output",
                     "scenes": "scenes.produces.scenes_list",

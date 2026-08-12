@@ -47,7 +47,7 @@ The script exercises seven stable lanes, plus an optional `--changed` fast path:
 | `baselines` | ruff, mypy, repo hygiene | Plain (exit-code) |
 | `docs` | `tests/verify_docs_commands.sh` | Plain (exit-code) |
 | `reshape` | `tests/reshape/` + hype regression fixture + concurrency smoke | pytest |
-| `blocking` | `TARGETED_BLOCKING_TESTS` (4 targeted test files) | pytest |
+| `blocking` | Targeted tests, all `tests/core/rendering`, and `-m renderer_parity` | pytest |
 | `broad` | Full suite: `-m "not integration and not opt_in"` | pytest |
 | `remotion_typecheck` | `npm run typecheck` in `remotion/` (if node_modules present) | Plain (exit-code) |
 | `quarantine` | `QUARANTINE_TESTS` (opt-in, non-blocking) | pytest (per-file) |
@@ -148,7 +148,7 @@ fast path runs without coverage instrumentation to keep latency under 90 seconds
 | `integration` | Requires external dependencies, heavyweight fixtures, or env prerequisites |
 | `opt_in` | Explicitly opt-in; never runs in the default lane |
 | `slow` | Slower integration-style tests; opt-in for tight loops |
-| `renderer_parity` | Optional renderer parity integration against sprint-08 fixtures |
+| `renderer_parity` | Blocking semantic parity integration against packaged renderer fixtures |
 | `standalone` | Test intended to run independently from the default suite |
 | `hype_cut_invariants` | Standalone hype cut invariant coverage |
 

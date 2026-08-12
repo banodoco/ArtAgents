@@ -110,21 +110,21 @@
       "artifact_type": null
     },
     {
-      "description": "Render selector. Legacy values (remotion, ffmpeg, hybrid) or a qualified backend id (e.g. rendering.remotion, rendering.ffmpeg).",
+      "description": "Render selector. Accepts a legacy selector or a qualified backend id resolved through the rendering registry. Do not combine with backend.",
       "name": "engine",
       "required": false,
       "type": "string",
       "artifact_type": null
     },
     {
-      "description": "Neutral alias for engine: legacy selector or qualified backend id.",
+      "description": "Neutral selector synonym for engine. Prefer a qualified backend id for strict renderer selection. Do not combine with engine.",
       "name": "backend",
       "required": false,
       "type": "string",
       "artifact_type": null
     },
     {
-      "description": "JSON object keyed by qualified backend id with per-backend configuration (e.g. {\"rendering.remotion\": {\"theme_path\": \"/path/theme.json\"}}).",
+      "description": "JSON object keyed by qualified backend id with per-backend configuration. The facade forwards only the selected implementation's namespace.",
       "name": "backend_config",
       "required": false,
       "type": "json",
@@ -155,11 +155,10 @@
   "keywords": [
     "render",
     "video",
-    "remotion",
-    "ffmpeg",
     "timeline",
     "hype",
-    "mp4"
+    "mp4",
+    "backend"
   ],
   "kind": "built_in",
   "metadata": {

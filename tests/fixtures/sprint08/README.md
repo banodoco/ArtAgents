@@ -6,8 +6,10 @@ from reigh-app: `createAgentWorkflowTimelineFixture` and
 `reigh-app/src/tools/video-editor/testing.ts`).
 
 It is no longer the renderer parity gate. The blocking, repository-owned
-semantic fixtures live in `tests/fixtures/renderer_parity/` and are exercised
-by `tests/packs/test_renderer_parity.py` without an environment opt-in.
+semantic fixtures live in
+`astrid/core/rendering/fixtures/renderer_parity/` and are exercised by
+`tests/packs/test_renderer_parity.py` without an environment opt-in. Keeping
+them under `astrid/` makes the same fixtures available from an installed wheel.
 
 For historical reference, the old population recipe was:
 

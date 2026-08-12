@@ -1097,7 +1097,6 @@ __all__ = [
     "RendererRegistry",
     "RendererRegistryError",
     "RenderingCandidate",
-    "RenderingEligibility",
     "RenderingRegistryError",
     "load_default_registries",
 ]

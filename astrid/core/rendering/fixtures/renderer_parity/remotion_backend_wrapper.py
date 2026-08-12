@@ -1,6 +1,6 @@
 """Parity-test Remotion wrapper for socket-restricted test sandboxes.
 
-The production Remotion backend is still executed in its own subprocess.  This
+The production Remotion backend is still executed in its own subprocess. This
 wrapper only replaces its local-file materializer: generated media is copied
 into Remotion's existing public tree, which its own bundle server already
 serves. The staged directory is removed with the backend's normal materializer
@@ -17,11 +17,19 @@ import sys
 import uuid
 from pathlib import Path
 
+# The wrapper can be launched from an arbitrary invocation cwd; the repo root
+# is five parents above this file (astrid/core/rendering/fixtures/
+# renderer_parity/remotion_backend_wrapper.py).  Insert it before importing
+# any astrid module so the backend subprocess resolves this checkout.
+_REPO_ROOT = Path(__file__).resolve().parents[5]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
-repo_root = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(repo_root))
-public_root = repo_root / "remotion" / "public"
-from astrid.core.rendering import assets as assets_module
+from astrid.core.foundation.paths import REPO_ROOT  # noqa: E402
+from astrid.core.rendering import assets as assets_module  # noqa: E402
+
+
+public_root = REPO_ROOT / "remotion" / "public"
 
 
 class StaticPublicAssetMaterializer:

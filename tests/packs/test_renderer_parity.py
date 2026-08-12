@@ -44,7 +44,7 @@ from astrid.core.timeline.crud import create_timeline
 pytestmark = [pytest.mark.renderer_parity, pytest.mark.integration]
 
 ROOT = Path(__file__).resolve().parents[2]
-FIXTURES = ROOT / "tests" / "fixtures" / "renderer_parity"
+FIXTURES = ROOT / "astrid" / "core" / "rendering" / "fixtures" / "renderer_parity"
 RAW_PACK = ROOT / "tests" / "fixtures" / "renderer_packs" / "raw_command"
 RAW_REQUESTS = RAW_PACK / "requests"
 REMOTION = ROOT / "remotion"

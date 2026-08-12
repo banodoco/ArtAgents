@@ -48,6 +48,13 @@
       "path_template": "{out}/iteration.mp4",
       "type": "file",
       "artifact_type": "video/clip"
+    },
+    {
+      "mode": "create_or_replace",
+      "name": "iteration.mp4.provenance.json",
+      "path_template": "{out}/iteration.mp4.provenance.json",
+      "type": "file",
+      "artifact_type": "metadata/provenance"
     }
   ],
   "runtime": {

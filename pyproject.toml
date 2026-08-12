@@ -57,6 +57,13 @@ runpod = [
 [tool.setuptools.packages.find]
 include = ["astrid*"]
 
+[tool.setuptools.package-data]
+astrid = [
+    "core/rendering/schemas/v1/*.json",
+    "core/rendering/fixtures/renderer_parity/*",
+    "packs/rendering/**/*.yaml",
+]
+
 [tool.ruff]
 target-version = "py311"
 line-length = 100

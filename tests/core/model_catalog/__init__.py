@@ -1,0 +1,1 @@
+"""Model-catalog test package."""

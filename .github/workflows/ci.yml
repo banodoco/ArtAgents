@@ -68,27 +68,27 @@ jobs:
         run: |
           python scripts/reshape/compare_mypy_baseline.py
 
-      - name: Run local CI mirror
-        env:
-          ASTRID_CI_SKIP_COVERAGE: "1"
-        run: bash scripts/reshape/run_ci_checks.sh
-
-      - name: Set up Node for Remotion typecheck
+      - name: Set up Node for blocking Remotion typecheck
         uses: actions/setup-node@v4
         with:
           node-version: "20"
           cache: npm
           cache-dependency-path: remotion/package-lock.json
 
-      - name: Remotion typecheck
+      - name: Install pinned Remotion toolchain
         working-directory: remotion
-        run: |
-          # Blocking: install the pinned Remotion toolchain and run the existing
-          # `npm run typecheck` (tsc --noEmit) so the TypeScript surface stays sound.
-          npm ci
-          npm run typecheck
+        run: npm ci
 
-      - name: Renderer parity (blocking)
+      - name: Run local CI mirror
+        env:
+          ASTRID_CI_SKIP_COVERAGE: "1"
+        run: bash scripts/reshape/run_ci_checks.sh
+
+      - name: Remotion typecheck (blocking, explicit)
+        working-directory: remotion
+        run: npm run typecheck
+
+      - name: Renderer parity (blocking, explicit)
         run: python -m pytest -q -m renderer_parity tests/packs/test_renderer_parity.py
 
       - name: Upload coverage report
