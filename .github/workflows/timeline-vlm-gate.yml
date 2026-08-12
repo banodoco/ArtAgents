@@ -1,0 +1,50 @@
+name: Timeline VLM Gate (live, opt-in)
+
+# Authorized live lane for the timeline-visualization VLM proof. Default CI
+# stays credential-free and structurally excludes this workflow: it never
+# runs on push/PR — only manual dispatch or the nightly schedule, and it
+# requires a runner with the grok CLI logged in (Grok 4.6 vision).
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * *" # nightly, UTC
+
+jobs:
+  live-vlm-gate:
+    runs-on: macos-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Install package
+        run: |
+          python -m pip install -e ".[dev]"
+
+      - name: Verify grok CLI available
+        run: |
+          which grok && grok --version
+        # NOTE: grok auth is out-of-band (grok login). A runner must have a
+        # logged-in grok CLI; no secret is stored in this workflow.
+
+      - name: Run image-only VLM gate
+        run: |
+          python -m pytest tests/packs/rendering/test_timeline_visualize_gate_imageonly.py \
+            -m live -q -p no:cacheprovider
+
+      - name: Run discovery VLM gate
+        run: |
+          python -m pytest tests/packs/rendering/test_timeline_visualize_gate_discovery.py \
+            -m live -q -p no:cacheprovider
+
+      - name: Upload gate evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: timeline-vlm-gate-evidence
+          path: tests/packs/rendering/.r24-evidence/
+          retention-days: 30

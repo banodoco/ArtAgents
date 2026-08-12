@@ -1,83 +1,52 @@
 """R24 shared live-gate helpers: VLM transport, answer parsing, evidence.
 
 Live-marked only (``-m live``); hermetic CI never imports this module's
-transport.  The VLM transport uses the Gemini SDK with a ``GEMINI_API_KEY``
-environment variable (the pattern from bndc ``vision_clients`` / Astrid
-``llm_clients``); the key never enters the repository.
+transport.  The VLM transport is Grok 4.6 via the ``grok`` CLI (its own
+auth — the user's directive: use grok for the hard/live batches).
 """
 from __future__ import annotations
 
 import hashlib
 import json
-import mimetypes
 import os
 import re
 import secrets
+import subprocess
 from pathlib import Path
 
 from astrid.packs.understanding.executors.visual_understand.run import (
     OrderedImageEvidence,
 )
 
-GEMINI_MODEL = "gemini-2.5-flash"
+GROK_MODEL = "grok-4.6"
+GROK_BIN = "/Users/peteromalley/.grok/bin/grok"
 
 _FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)```", flags=re.DOTALL)
 
 
-def _sanitize_gemini_schema(node):
-    """Gemini's response_schema rejects JSON-Schema keywords it doesn't know
-    (e.g. ``additionalProperties``); drop them recursively (bndc pattern)."""
-    if isinstance(node, dict):
-        return {
-            k: _sanitize_gemini_schema(v)
-            for k, v in node.items()
-            if k != "additionalProperties"
-        }
-    if isinstance(node, list):
-        return [_sanitize_gemini_schema(v) for v in node]
-    return node
+def codex_exec(prompt: str, *, images: list[Path], timeout: int = 240) -> str:
+    """Run one fresh VLM session via the Grok 4.6 CLI (single-turn).
 
-
-def codex_exec(prompt: str, *, images: list[Path], timeout: int = 180) -> str:
-    """Run one fresh VLM session via the Gemini SDK (inline ordered images).
-
-    Sends the EXACT ordered PNG bytes as separate inline image parts (never
-    a contact sheet) with the prompt and a structured-output schema; returns
-    the structured answers as a JSON string shaped like the codex output so
-    ``parse_answers`` still extracts it. Each invocation is a fresh stateless
-    session (fresh response id).
+    The prompt embeds the exact ordered image paths (the reading guide says
+    which images to look at); each invocation is a fresh stateless session.
+    Returns the model's text (a JSON answer shaped by the prompt).
     """
-    api_key = os.environ.get("GEMINI_API_KEY", "")
-    if not api_key:
-        raise RuntimeError(
-            "live VLM gate requires GEMINI_API_KEY (export the Gemini project key)"
+    cmd = ["script", "-q", "/dev/null", GROK_BIN, "--single", prompt, "-m", GROK_MODEL]
+    try:
+        completed = subprocess.run(
+            cmd, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=timeout
         )
-    from google import genai
-    from google.genai import types
-
-    client = genai.Client(api_key=api_key)
-    parts: list[types.Part] = [types.Part(text=prompt)]
-    for path in images:
-        data = path.read_bytes()
-        media_type = mimetypes.guess_type(path.name)[0] or "image/png"
-        parts.append(
-            types.Part(
-                inline_data=types.Blob(mime_type=media_type, data=data)
-            )
-        )
-    config = types.GenerateContentConfig(
-        response_mime_type="application/json",
-        response_schema=_sanitize_gemini_schema(ANSWER_SCHEMA),
-    )
-    response = client.models.generate_content(
-        model=GEMINI_MODEL,
-        contents=types.Content(role="user", parts=parts),
-        config=config,
-    )
-    text = (response.text or "").strip()
-    if not text:
-        raise RuntimeError("gemini returned an empty response")
-    return text
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(f"grok VLM session timed out after {timeout}s")
+    out = completed.stdout
+    if out.startswith("^D"):
+        out = out[2:]
+    # The `script` pty wrapper injects control characters (^D echo, \x08
+    # backspaces, ANSI escapes); strip them so the trailing JSON parses.
+    out = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", out)
+    out = out.replace("\x08", "").replace("\x07", "")
+    out = re.sub(r"\x00+", "", out)
+    return out.strip()
 
 
 def parse_answers(raw: str) -> dict:
@@ -129,10 +98,10 @@ def make_evidence(
         prompt_sha256=hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
         image_paths=tuple(str(path) for path in image_paths),
         image_hashes=image_hashes,
-        model=GEMINI_MODEL,
+        model=GROK_MODEL,
         settings={"detail": "high", "cost_ceiling": len(image_paths), "timeout": 180},
         response_id=response_id,
-        returned_model=GEMINI_MODEL,
+        returned_model=GROK_MODEL,
         usage={"total_tokens": 0},
         answers=answers,
         cost_ceiling=max(1, len(image_paths)),
@@ -183,10 +152,15 @@ def build_prompt(
 ) -> str:
     lines = [
         "You are evaluating rendered timeline pages. Answer ONLY with one JSON object.",
-        "You have access to the images listed below, in this exact order:",
+        "You have access to ONLY the images listed below, in this exact order:",
     ]
     for index, path in enumerate(images, start=1):
         lines.append(f"{index}. {path.name} ({path})")
+    lines.append(
+        "STRICT: do NOT read, open, or search any other file — no JSON, no index, "
+        "no source. Answer from the images alone. If a fact is not visible on the "
+        "pages, set \"abstain\": true for that question."
+    )
     lines.extend(
         [
             "",
