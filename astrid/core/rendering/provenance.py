@@ -105,27 +105,29 @@ def _normalize_artifact_profiles(value: Any, *, segments: Sequence[Any]) -> Any:
                     "hashed lineage record {profile, sha256, attachments}; "
                     "profile-only entries carry no output hash"
                 )
-        # A positive plan must record a hashed artifact for every segment.
-        if segments and not result:
-            raise ValueError(
-                "artifact_profiles must record a hashed lineage entry for every "
-                "segment of a positive render plan"
-            )
+        # A positive plan must record exactly one hashed artifact per segment.
+        if segments:
+            if len(result) != len(segments):
+                raise ValueError(
+                    f"artifact_profiles must record exactly one hashed lineage entry "
+                    f"per segment: expected {len(segments)}, got {len(result)}"
+                )
         return result
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
-        lineage = [
-            (
-                _artifact_lineage(profile)
-                if isinstance(profile, VideoArtifact)
-                else _artifact_lineage_from_mapping(profile, key=str(profile.get("path", "")))
-            )
-            for profile in value
-        ]
-        if segments and not lineage:
-            raise ValueError(
-                "artifact_profiles must record a hashed lineage entry for every "
-                "segment of a positive render plan"
-            )
+        lineage: dict[str, Any] = {}
+        for profile in value:
+            if not isinstance(profile, VideoArtifact):
+                raise TypeError(
+                    "sequence artifact_profiles entries must be VideoArtifacts "
+                    "so lineage records stay path-keyed"
+                )
+            lineage[profile.path] = _artifact_lineage(profile)
+        if segments:
+            if len(lineage) != len(segments):
+                raise ValueError(
+                    f"artifact_profiles must record exactly one hashed lineage entry "
+                    f"per segment: expected {len(segments)}, got {len(lineage)}"
+                )
         return lineage
     raise TypeError("artifact_profiles must be an object or array")
 
@@ -155,6 +157,10 @@ def _artifact_lineage_from_mapping(raw: Mapping[str, Any], *, key: str) -> dict[
     for name, att in raw_attachments.items():
         name = _require_string(name, "attachment name")
         if isinstance(att, Attachment):
+            if att.name != name:
+                raise ValueError(
+                    f"attachment map key {name!r} must equal Attachment.name {att.name!r}"
+                )
             att = {
                 "path": att.path,
                 "kind": att.kind,
@@ -172,10 +178,18 @@ def _artifact_lineage_from_mapping(raw: Mapping[str, Any], *, key: str) -> dict[
             )
         if not isinstance(att["sha256"], str):
             raise TypeError(f"attachment {name!r} sha256 must be a string")
+        # Validate through the Attachment DTO so workspace-path containment and
+        # kind grammar are enforced uniformly for raw and dataclass values.
+        validated = Attachment(
+            name=name,
+            path=att["path"],
+            kind=att["kind"],
+            sha256=att["sha256"],
+        )
         attachments[name] = {
-            "path": _require_string(att["path"], f"attachment {name!r} path"),
-            "kind": _require_string(att["kind"], f"attachment {name!r} kind"),
-            "sha256": _require_sha256(att["sha256"], f"attachment {name!r} sha256"),
+            "path": validated.path,
+            "kind": validated.kind,
+            "sha256": validated.sha256,
         }
     return {
         "profile": (

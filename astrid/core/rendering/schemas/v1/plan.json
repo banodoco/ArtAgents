@@ -356,6 +356,9 @@
               "boolean",
               "string"
             ]
+          },
+          "propertyNames": {
+            "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
           }
         },
         "alternatives": {

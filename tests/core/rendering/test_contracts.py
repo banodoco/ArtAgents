@@ -569,7 +569,12 @@ def test_provenance_v2_preserves_lineage_and_derives_legacy_segments(tmp_path: P
                 "profile": _profile(),
                 "sha256": SHA_B,
                 "attachments": {},
-            }
+            },
+            "outputs/segment2.mp4": {
+                "profile": _profile(),
+                "sha256": SHA_C,
+                "attachments": {},
+            },
         },
         "audio_ownership": AudioOwnership.RENDERED,
         "normalization": [],
@@ -694,6 +699,11 @@ def test_resolution_evidence_survives_plan_round_trip_and_provenance() -> None:
                 "profile": _profile(),
                 "sha256": SHA_B,
                 "attachments": {},
+            },
+            "outputs/segment2.mp4": {
+                "profile": _profile(),
+                "sha256": SHA_C,
+                "attachments": {},
             }
         },
         audio_ownership="rendered",
@@ -806,7 +816,6 @@ def test_provenance_rejects_spoofed_artifact_lineage() -> None:
         output="/workspace/out/video.mp4",
         timeline="/workspace/timeline.json",
         assets_registry=None,
-        plan=_plan(),
         audio_ownership="rendered",
         normalization=[],
         attachments={},
@@ -814,10 +823,13 @@ def test_provenance_rejects_spoofed_artifact_lineage() -> None:
         v1_compatibility=_compatibility(),
     )
     with pytest.raises(TypeError, match="hashed lineage"):
-        assemble_provenance_v2(**base, artifact_profiles={"out/v.mp4": _profile()})
+        assemble_provenance_v2(
+            **base, plan=_plan(), artifact_profiles={"out/v.mp4": _profile()}
+        )
     with pytest.raises(ValueError, match="sha256"):
         assemble_provenance_v2(
             **base,
+            plan=_plan(),
             artifact_profiles={
                 "out/v.mp4": {"profile": _profile(), "sha256": None, "attachments": {}}
             },
@@ -825,6 +837,7 @@ def test_provenance_rejects_spoofed_artifact_lineage() -> None:
     with pytest.raises(ValueError, match="sha256"):
         assemble_provenance_v2(
             **base,
+            plan=_plan(),
             artifact_profiles={
                 "out/v.mp4": {
                     "profile": _profile(),
@@ -836,12 +849,76 @@ def test_provenance_rejects_spoofed_artifact_lineage() -> None:
     with pytest.raises(ValueError, match="unknown fields"):
         assemble_provenance_v2(
             **base,
+            plan=_plan(),
             artifact_profiles={
                 "out/v.mp4": {
                     "profile": _profile(),
                     "sha256": SHA_B,
                     "attachments": {},
                     "spoof": 1,
+                }
+            },
+        )
+    with pytest.raises(ValueError, match="exactly one hashed lineage entry"):
+        assemble_provenance_v2(
+            **base,
+            plan=_plan(
+                segments=[_segment(0, 24), _segment(24, 48)]
+            ),
+            artifact_profiles={
+                "out/v.mp4": {
+                    "profile": _profile(),
+                    "sha256": SHA_B,
+                    "attachments": {},
+                }
+            },
+        )
+    with pytest.raises(ValueError, match="attachment path"):
+        assemble_provenance_v2(
+            **base,
+            plan=_plan(),
+            artifact_profiles={
+                "out/v.mp4": {
+                    "profile": _profile(),
+                    "sha256": SHA_B,
+                    "attachments": {
+                        "alpha": {"path": "../escape.mp4", "kind": "alpha", "sha256": SHA_C}
+                    },
+                },
+            },
+        )
+    with pytest.raises(ValueError, match="attachment kind"):
+        assemble_provenance_v2(
+            **base,
+            plan=_plan(),
+            artifact_profiles={
+                "out/v.mp4": {
+                    "profile": _profile(),
+                    "sha256": SHA_B,
+                    "attachments": {
+                        "alpha": {"path": "outputs/alpha.mp4", "kind": "Bad_Kind", "sha256": SHA_C}
+                    },
+                },
+            },
+        )
+
+
+    with pytest.raises(ValueError, match="must equal Attachment.name"):
+        assemble_provenance_v2(
+            **base,
+            plan=_plan(),
+            artifact_profiles={
+                "out/v.mp4": {
+                    "profile": _profile(),
+                    "sha256": SHA_B,
+                    "attachments": {
+                        "different_key": Attachment(
+                            name="alpha",
+                            path="outputs/alpha.mp4",
+                            kind="alpha",
+                            sha256=SHA_C,
+                        )
+                    },
                 }
             },
         )
