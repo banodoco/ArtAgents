@@ -13,6 +13,7 @@ from .contracts import (
     PROVENANCE_V1_ALWAYS_KEYS,
     PROVENANCE_V1_COMPATIBILITY_KEYS,
     PROVENANCE_V2_CORE_KEYS,
+    _ECMA_WHITESPACE,
     Attachment,
     AudioOwnership,
     RenderPlan,
@@ -116,8 +117,11 @@ def _normalize_artifact_profiles(value: Any, *, segments: Sequence[Any]) -> Any:
         result: dict[str, Any] = {}
         seen_attachment_names: set[str] = set()
         for key, profile in value.items():
-            path = _require_string(str(key), "artifact key")
-            path = _require_workspace_relative_path(path, "artifact key")
+            if not isinstance(key, str):
+                raise TypeError(
+                    f"artifact_profiles mapping keys must be strings, got {type(key).__name__}"
+                )
+            path = _require_workspace_relative_path(key, "artifact key")
             if isinstance(profile, VideoArtifact):
                 if path != profile.path:
                     raise ValueError(
@@ -163,7 +167,7 @@ def _normalize_artifact_profiles(value: Any, *, segments: Sequence[Any]) -> Any:
                 # Already-emitted lineage record: re-validate and re-key by
                 # its (validated) path so emitted provenance round-trips.
                 raw_path = raw_profile.get("path")
-                if not isinstance(raw_path, str) or not raw_path.strip():
+                if not isinstance(raw_path, str) or not raw_path.strip(_ECMA_WHITESPACE):
                     raise ValueError(
                         "emitted lineage record must carry a non-empty string path"
                     )
@@ -210,7 +214,9 @@ def _artifact_lineage_from_mapping(raw: Mapping[str, Any], *, key: str) -> dict[
     if not isinstance(raw["sha256"], str):
         raise TypeError("artifact lineage sha256 must be a string")
     if "path" in raw:
-        embedded = _require_workspace_relative_path(str(raw["path"]), "artifact path")
+        if not isinstance(raw["path"], str):
+            raise TypeError("artifact lineage path must be a string")
+        embedded = _require_workspace_relative_path(raw["path"], "artifact path")
         if embedded != key:
             raise ValueError(
                 f"artifact lineage path {embedded!r} must equal its map key {key!r}"

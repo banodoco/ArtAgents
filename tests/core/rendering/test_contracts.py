@@ -983,6 +983,26 @@ def test_provenance_rejects_spoofed_artifact_lineage() -> None:
         )
     with pytest.raises(ValueError, match="whitespace-only path components"):
         _require_workspace_relative_path("dir/\u2001/v.mp4", "path")
+    # Mapping-form records must not coerce non-string embedded paths.
+    with pytest.raises(TypeError, match="artifact lineage path must be a string"):
+        assemble_provenance_v2(
+            **base,
+            plan=_plan(),
+            artifact_profiles={
+                "123": {
+                    "path": 123,
+                    "profile": _profile().to_dict(),
+                    "sha256": SHA_B,
+                    "attachments": {},
+                }
+            },
+        )
+    with pytest.raises(TypeError, match="mapping keys must be strings"):
+        assemble_provenance_v2(
+            **base,
+            plan=_plan(),
+            artifact_profiles={123: {"profile": _profile(), "sha256": SHA_B, "attachments": {}}},
+        )
     with pytest.raises(ValueError, match="workspace path"):
         assemble_provenance_v2(
             **base,
