@@ -483,6 +483,32 @@ def test_override_to_discovered_ineligible_target_fails_closed(tmp_path: Path) -
     assert details["canonical_id"] == "rendering.remotion"
 
 
+def _write_alias_to_absent_pack(packs_root: Path) -> Path:
+    """A source pack whose renderer alias points at a canonical that does not
+    exist anywhere in the discovery tree (statically valid in the registry
+    path; validate_pack's same-pack target rule does not apply because the
+    registry does not require static validation for discovery)."""
+    pack_root = _write_renderer_pack(
+        packs_root,
+        "alias_missing",
+        renderer_name="Alias Missing Renderer",
+        renderer_id="alias_missing.renderer",
+    )
+    pack_yaml = pack_root / "pack.yaml"
+    lines = pack_yaml.read_text(encoding="utf-8").splitlines()
+    alias_block = [
+        "aliases:",
+        "  - kind: renderer",
+        "    alias: alias_missing.legacy",
+        "    canonical_id: alias_missing.absent",
+    ]
+    # insert aliases before extensions
+    idx = next(i for i, line in enumerate(lines) if line.startswith("extensions:"))
+    lines[idx:idx] = alias_block
+    pack_yaml.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return pack_root
+
+
 def test_trusted_pack_alias_to_absent_canonical_routes_through_override(
     tmp_path: Path,
 ) -> None:
@@ -493,19 +519,24 @@ def test_trusted_pack_alias_to_absent_canonical_routes_through_override(
     must not silently drop a trusted pack alias when an override supplies the
     implementation.
     """
-    store = OverrideStore(tmp_path / "project")
-    store.set_override("renderer", "rendering.absent", "rendering.ffmpeg")
+    project_root = tmp_path / "project"
+    source_root = tmp_path / "source"
+    source_root.mkdir()
+    _write_alias_to_absent_pack(source_root)
 
-    with _load_with_source(tmp_path / "project") as (renderers, _, _):
-        candidate = renderers.get("rendering.missing")
-        assert candidate.id == "rendering.ffmpeg"
+    store = OverrideStore(project_root)
+    store.set_override("renderer", "alias_missing.absent", "alias_missing.renderer")
 
-        evidence = renderers.resolve_evidence("rendering.missing")
-        assert evidence["canonical_id"] == "rendering.absent"
-        assert evidence["resolved_id"] == "rendering.ffmpeg"
+    with _load_with_source(project_root, source_root=source_root) as (renderers, _, _):
+        candidate = renderers.get("alias_missing.legacy")
+        assert candidate.id == "alias_missing.renderer"
+
+        evidence = renderers.resolve_evidence("alias_missing.legacy")
+        assert evidence["canonical_id"] == "alias_missing.absent"
+        assert evidence["resolved_id"] == "alias_missing.renderer"
         assert evidence["override"] == {
-            "from": "rendering.absent",
-            "to": "rendering.ffmpeg",
+            "from": "alias_missing.absent",
+            "to": "alias_missing.renderer",
         }
 
 
@@ -514,12 +545,17 @@ def test_trusted_pack_alias_to_absent_canonical_without_override_fails_closed(
 ) -> None:
     """Without an override, a pack alias to an absent canonical is dropped
     and resolution reports the missing target."""
-    with _load_with_source(tmp_path / "project") as (renderers, _, _):
+    project_root = tmp_path / "project"
+    source_root = tmp_path / "source"
+    source_root.mkdir()
+    _write_alias_to_absent_pack(source_root)
+
+    with _load_with_source(project_root, source_root=source_root) as (renderers, _, _):
         with pytest.raises(RendererRegistryError) as caught:
-            renderers.get("rendering.missing")
+            renderers.get("alias_missing.legacy")
         assert caught.value.code == "unknown_capability"
         with pytest.raises(RendererRegistryError) as evidence_caught:
-            renderers.resolve_evidence("rendering.missing")
+            renderers.resolve_evidence("alias_missing.legacy")
         assert evidence_caught.value.code == "unknown_capability"
 
 

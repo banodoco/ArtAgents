@@ -128,10 +128,11 @@ def _segment(
     backend: str = "acme.example",
     fps: tuple[int, int] = (24, 1),
     digest: str = SHA_B,
+    renderer: RendererResolution | None = None,
 ) -> RenderSegment:
     return RenderSegment(
         window=_window(start, end, fps=fps),
-        renderer=_renderer(backend, digest=digest),
+        renderer=renderer or _renderer(backend, digest=digest),
         input_hashes={"timeline": SHA_A},
     )
 
@@ -142,15 +143,17 @@ def _plan(
     total_frames: int = 48,
     profile: RenderProfile | None = None,
     window: FrameWindow | None = None,
+    planner: PlannerResolution | None = None,
+    finalizer: FinalizerResolution | None = None,
 ) -> RenderPlan:
     selected = [_segment()] if segments is None else segments
     return RenderPlan(
         schema_version=1,
         request_digest=SHA_D,
         requested_policy="hybrid",
-        planner=_planner(),
+        planner=planner or _planner(),
         segments=selected,
-        finalizer=_finalizer(),
+        finalizer=finalizer or _finalizer(),
         profile=profile or _profile(),
         total_frames=total_frames,
         reasons={str(index): "the request is supported" for index in range(len(selected))},
@@ -622,6 +625,69 @@ def test_shared_sha256_helper_is_used_for_input_hashes(tmp_path: Path) -> None:
     input_path.write_text("abc", encoding="utf-8")
     hashes = hash_input_files({"timeline": input_path})
     assert hashes["timeline"] == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+
+
+def test_resolution_evidence_survives_plan_round_trip_and_provenance() -> None:
+    """Non-default alias/override/trust/support evidence must survive the
+    plan wire round-trip and the final provenance sidecar."""
+    planner = replace(
+        _planner(),
+        alias_chain=["legacy-hybrid", "rendering.legacy_hybrid"],
+        override={"from": "rendering.legacy_hybrid", "to": "acme.hybrid-planner"},
+        support_decision=_support("rendering.legacy_hybrid"),
+    )
+    renderer = replace(
+        _renderer("acme.visual"),
+        alias_chain=["visual", "acme.visual"],
+        override={"from": "acme.visual", "to": "acme.visual-2"},
+        trust_eligibility={"eligible": True, "method": "source-tree"},
+    )
+    finalizer = replace(
+        _finalizer(),
+        alias_chain=["finalizer", "rendering.ffmpeg-finalizer"],
+        override={"from": "rendering.ffmpeg-finalizer", "to": "acme.finalizer-2"},
+        trust_eligibility={"eligible": True, "method": "source-tree"},
+        support_decision=_support("rendering.ffmpeg-finalizer"),
+    )
+    plan = _plan(
+        planner=planner,
+        segments=[
+            _segment(0, 24, renderer=renderer),
+            _segment(24, 48),
+        ],
+        finalizer=finalizer,
+    )
+
+    # Wire round-trip
+    reparsed = RenderPlan.from_dict(plan.to_dict())
+    assert reparsed.planner.alias_chain == planner.alias_chain
+    assert reparsed.planner.override == planner.override
+    assert reparsed.planner.support_decision is not None
+    assert reparsed.segments[0].renderer.trust_eligibility == renderer.trust_eligibility
+    assert reparsed.finalizer.alias_chain == finalizer.alias_chain
+    assert reparsed.finalizer.trust_eligibility == finalizer.trust_eligibility
+    assert reparsed.finalizer.support_decision is not None
+
+    # Provenance sidecar carries the same evidence
+    payload = assemble_provenance_v2(
+        engine="hybrid",
+        output="/workspace/out/video.mp4",
+        timeline="/workspace/timeline.json",
+        assets_registry=None,
+        plan=plan,
+        artifact_profiles={},
+        audio_ownership="rendered",
+        normalization=[],
+        attachments={},
+        backend_fragments={},
+        v1_compatibility=_compatibility(),
+    )
+    assert payload["planner"]["alias_chain"] == planner.alias_chain
+    assert payload["planner"]["override"] == planner.override
+    assert payload["planner"]["support_decision"]["backend"] == "rendering.legacy_hybrid"
+    assert payload["segments_v2"][0]["renderer"]["trust_eligibility"] == renderer.trust_eligibility
+    assert payload["finalizer"]["alias_chain"] == finalizer.alias_chain
+    assert payload["finalizer"]["trust_eligibility"] == finalizer.trust_eligibility
 
 
 def test_plan_accepts_adjacent_segments_and_exact_window_coverage() -> None:

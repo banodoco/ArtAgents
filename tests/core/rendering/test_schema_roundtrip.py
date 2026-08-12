@@ -154,6 +154,8 @@ def _request_cases() -> list[tuple[str, dict[str, Any]]]:
         ("whitespace metadata value", _set(base, ("metadata",), {"project_id": "   "})),
         ("whitespace metadata key", _set(base, ("metadata",), {"   ": "demo"})),
         ("empty metadata value", _set(base, ("metadata",), {"project_id": ""})),
+        ("whitespace assets path", _set(base, ("assets_registry_path",), "   ")),
+        ("empty assets path", _set(base, ("assets_registry_path",), "")),
     ]
     return _with_version_adversaries(base, cases)
 
@@ -164,6 +166,7 @@ def _support_cases() -> list[tuple[str, dict[str, Any]]]:
         ("valid canonical", base),
         ("valid string feature", _set(base, ("features",), {"mode": "visual"})),
         ("whitespace reason", _set(base, ("reasons",), ["   "])),
+        ("whitespace backend version", _set(base, ("backend_version",), "   ")),
         ("missing backend", _delete(base, ("backend",))),
         ("valid underscore backend", _set(base, ("backend",), "acme.bad_id")),
         ("duplicate alternatives", _set(base, ("alternatives",), ["acme.other", "acme.other"])),

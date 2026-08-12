@@ -96,14 +96,16 @@
             "string",
             "null"
           ],
-          "minLength": 1
+          "minLength": 1,
+          "pattern": "\\S"
         },
         "video_level": {
           "type": [
             "string",
             "null"
           ],
-          "minLength": 1
+          "minLength": 1,
+          "pattern": "\\S"
         },
         "pixel_format": {
           "type": "string",
@@ -115,7 +117,8 @@
             "string",
             "null"
           ],
-          "minLength": 1
+          "minLength": 1,
+          "pattern": "\\S"
         },
         "audio_sample_rate": {
           "type": [
@@ -129,7 +132,8 @@
             "string",
             "null"
           ],
-          "minLength": 1
+          "minLength": 1,
+          "pattern": "\\S"
         },
         "duration_tolerance": {
           "type": "integer",
@@ -336,7 +340,8 @@
               "trust_eligibility",
               "manifest_digest",
               "support_decision",
-              "input_hashes"
+              "input_hashes",
+              "segments_v2"
             ]
           }
         }
@@ -487,7 +492,8 @@
             "string",
             "null"
           ],
-          "minLength": 1
+          "minLength": 1,
+          "pattern": "\\S"
         },
         "details": {
           "type": "object"

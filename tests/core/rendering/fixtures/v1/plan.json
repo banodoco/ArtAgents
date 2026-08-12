@@ -10,7 +10,10 @@
     "manifest_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
     "trust_eligibility": {
       "eligible": true
-    }
+    },
+    "alias_chain": [],
+    "override": null,
+    "support_decision": null
   },
   "segments": [
     {
@@ -42,6 +45,10 @@
           "alternatives": [],
           "backend": "acme.visual",
           "backend_version": null
+        },
+        "trust_eligibility": {
+          "eligible": true,
+          "method": "source-tree"
         }
       },
       "input_hashes": {
@@ -56,7 +63,20 @@
     },
     "manifest_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
     "alias_chain": [],
-    "override": null
+    "override": null,
+    "trust_eligibility": {
+      "eligible": true,
+      "method": "source-tree"
+    },
+    "support_decision": {
+      "schema_version": 1,
+      "supported": true,
+      "reasons": [],
+      "features": {},
+      "alternatives": [],
+      "backend": "rendering.ffmpeg-finalizer",
+      "backend_version": null
+    }
   },
   "profile": {
     "width": 1280,

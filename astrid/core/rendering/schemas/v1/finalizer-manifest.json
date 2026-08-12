@@ -63,7 +63,8 @@
         "null"
       ],
       "minLength": 1,
-      "default": null
+      "default": null,
+      "pattern": "\\S"
     },
     "capabilities": {
       "$ref": "#/definitions/finalizerCapabilities",

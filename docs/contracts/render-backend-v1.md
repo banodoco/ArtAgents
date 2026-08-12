@@ -349,20 +349,23 @@ verified byte-for-byte against the one that was planned.
 Resolution evidence has one canonical representation:
 
 - `planner` is `{id, source_pack, manifest_digest, trust_eligibility,
-  alias_chain, override}`;
+  alias_chain, override, support_decision}`;
 - every segment is `{window, renderer, input_hashes}`, where `renderer` is
   `{id, source_pack, manifest_digest, alias_chain, override,
-  support_decision}`;
+  support_decision, trust_eligibility}`;
 - `finalizer` is `{id, source_pack, manifest_digest, alias_chain,
-  override}`.
+  override, trust_eligibility, support_decision}`.
 
 `alias_chain` defaults to `[]` and `override` to `null` when a capability was
-selected directly; both are recorded whenever alias or override resolution
-participated in the selection. Manifest, request, and input-hash values are
-lowercase SHA-256 digests. Every `support_decision` is a versioned
-`SupportReport` whose backend equals the renderer ID. There is no parallel
-`segment.backend`, `segment.support`, or string-only finalizer field that
-could disagree with these records.
+selected directly; `trust_eligibility` records the derived source/install
+trust decision; `support_decision` is the request-sensitive support report
+(or `null` when no probe ran, e.g. for a finalizer). All are recorded whenever
+alias, override, trust, or support evidence participated in the selection.
+Manifest, request, and input-hash values are lowercase SHA-256 digests. Every
+non-null `support_decision` is a versioned `SupportReport` whose backend
+equals the capability ID. There is no parallel `segment.backend`,
+`segment.support`, or string-only finalizer field that could disagree with
+these records.
 
 `total_frames` is the complete timeline frame count. A zero-frame plan has
 `window: null`, no segments, and an empty reasons map; it is not finalized and

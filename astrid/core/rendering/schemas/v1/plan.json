@@ -238,14 +238,16 @@
             "string",
             "null"
           ],
-          "minLength": 1
+          "minLength": 1,
+          "pattern": "\\S"
         },
         "video_level": {
           "type": [
             "string",
             "null"
           ],
-          "minLength": 1
+          "minLength": 1,
+          "pattern": "\\S"
         },
         "pixel_format": {
           "type": "string",
@@ -257,7 +259,8 @@
             "string",
             "null"
           ],
-          "minLength": 1
+          "minLength": 1,
+          "pattern": "\\S"
         },
         "audio_sample_rate": {
           "type": [
@@ -271,7 +274,8 @@
             "string",
             "null"
           ],
-          "minLength": 1
+          "minLength": 1,
+          "pattern": "\\S"
         },
         "duration_tolerance": {
           "type": "integer",
@@ -369,7 +373,8 @@
             "string",
             "null"
           ],
-          "minLength": 1
+          "minLength": 1,
+          "pattern": "\\S"
         }
       }
     },
@@ -405,6 +410,16 @@
           "anyOf": [
             {
               "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "support_decision": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/supportReport"
             },
             {
               "type": "null"
@@ -451,6 +466,9 @@
         },
         "support_decision": {
           "$ref": "#/definitions/supportReport"
+        },
+        "trust_eligibility": {
+          "type": "object"
         }
       }
     },
@@ -482,6 +500,19 @@
           "anyOf": [
             {
               "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "trust_eligibility": {
+          "type": "object"
+        },
+        "support_decision": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/supportReport"
             },
             {
               "type": "null"
@@ -530,7 +561,10 @@
         "manifest_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
         "trust_eligibility": {
           "eligible": true
-        }
+        },
+        "alias_chain": [],
+        "override": null,
+        "support_decision": null
       },
       "segments": [
         {
@@ -569,6 +603,10 @@
               "alternatives": [],
               "backend": "acme.example",
               "backend_version": "1.0.0"
+            },
+            "trust_eligibility": {
+              "eligible": true,
+              "method": "source-tree"
             }
           },
           "input_hashes": {
@@ -583,7 +621,20 @@
         },
         "manifest_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
         "alias_chain": [],
-        "override": null
+        "override": null,
+        "trust_eligibility": {
+          "eligible": true,
+          "method": "source-tree"
+        },
+        "support_decision": {
+          "schema_version": 1,
+          "supported": true,
+          "reasons": [],
+          "features": {},
+          "alternatives": [],
+          "backend": "rendering.ffmpeg-finalizer",
+          "backend_version": null
+        }
       },
       "profile": {
         "width": 1920,
@@ -624,7 +675,10 @@
         "manifest_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
         "trust_eligibility": {
           "eligible": true
-        }
+        },
+        "alias_chain": [],
+        "override": null,
+        "support_decision": null
       },
       "segments": [],
       "finalizer": {
@@ -634,7 +688,20 @@
         },
         "manifest_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
         "alias_chain": [],
-        "override": null
+        "override": null,
+        "trust_eligibility": {
+          "eligible": true,
+          "method": "source-tree"
+        },
+        "support_decision": {
+          "schema_version": 1,
+          "supported": true,
+          "reasons": [],
+          "features": {},
+          "alternatives": [],
+          "backend": "rendering.ffmpeg-finalizer",
+          "backend_version": null
+        }
       },
       "profile": {
         "width": 1920,

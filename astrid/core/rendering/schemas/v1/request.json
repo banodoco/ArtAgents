@@ -24,7 +24,8 @@
         "string",
         "null"
       ],
-      "minLength": 1
+      "minLength": 1,
+      "pattern": "\\S"
     },
     "output_name": {
       "type": "string",
@@ -265,14 +266,16 @@
             "string",
             "null"
           ],
-          "minLength": 1
+          "minLength": 1,
+          "pattern": "\\S"
         },
         "video_level": {
           "type": [
             "string",
             "null"
           ],
-          "minLength": 1
+          "minLength": 1,
+          "pattern": "\\S"
         },
         "pixel_format": {
           "type": "string",
@@ -284,7 +287,8 @@
             "string",
             "null"
           ],
-          "minLength": 1
+          "minLength": 1,
+          "pattern": "\\S"
         },
         "audio_sample_rate": {
           "type": [
@@ -298,7 +302,8 @@
             "string",
             "null"
           ],
-          "minLength": 1
+          "minLength": 1,
+          "pattern": "\\S"
         },
         "duration_tolerance": {
           "type": "integer",
