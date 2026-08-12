@@ -438,10 +438,11 @@ class RenderService:
                 pinned_finalizer=pinned_finalizer,
                 workspace=workspace,
             )
+            finalizer_ran = plan.finalizer.id != _DIRECT_FINALIZER_ID
             artifact_lineage = [item.video for item in segment_results]
             compatibility_results = segment_results
             fragment_results = (
-                segment_results
+                ([*segment_results, final_result] if finalizer_ran else segment_results)
                 if len(segment_results) == 1
                 else [*segment_results, final_result]
             )
@@ -459,6 +460,7 @@ class RenderService:
                 result=final_result,
                 requested_policy=policy.requested,
             )
+            renderer_result = final_result
             final_result = self.complete_audio(
                 final_result,
                 request=request,
@@ -472,7 +474,8 @@ class RenderService:
                     plan.finalizer.id != _DIRECT_FINALIZER_ID
                 ),
             )
-            if plan.finalizer.id != _DIRECT_FINALIZER_ID:
+            finalizer_ran = plan.finalizer.id != _DIRECT_FINALIZER_ID
+            if finalizer_ran:
                 # An embedding host pinned a registered finalizer for direct
                 # renders; honor it exactly like planner-produced plans.
                 finalizer, finalizer_evidence = self._resolve_candidate(
@@ -484,7 +487,7 @@ class RenderService:
                 final_result, plan = self._finish_plan(
                     request,
                     plan=plan,
-                    segment_results=[final_result],
+                    segment_results=[renderer_result],
                     pinned_finalizer=(finalizer, finalizer_evidence),
                     workspace=workspace,
                 )
@@ -502,9 +505,15 @@ class RenderService:
                     result=final_result,
                     requested_policy=policy.requested,
             )
-            artifact_lineage = [final_result.video]
-            compatibility_results = [final_result]
-            fragment_results = [final_result]
+            artifact_lineage = [renderer_result.video]
+            compatibility_results = (
+                [renderer_result] if finalizer_ran else [final_result]
+            )
+            fragment_results = (
+                [renderer_result, final_result]
+                if finalizer_ran
+                else [final_result]
+            )
 
         source_video = self._artifact_path(final_result, workspace)
         compatibility = self._v1_compatibility(

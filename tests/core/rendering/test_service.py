@@ -400,6 +400,7 @@ def _service(
     renderer_registry: RendererRegistry | None = None,
     validator: Any = None,
     publisher: Any = None,
+    finalizer_id: str | None = None,
 ) -> RenderService:
     renderers = renderer_registry or RendererRegistry(
         [_candidate(tmp_path, item, "renderer") for item in renderer_ids]
@@ -417,6 +418,7 @@ def _service(
         publisher=publisher or publish_render_result,
         stage_observer=stage_observer,
         audio_completer=audio_completer,
+        finalizer_id=finalizer_id,
     )
 
 
@@ -2179,3 +2181,67 @@ def test_real_ffmpeg_audio_reactive_through_generic_service(
     payload = json.loads(sidecars[0].read_text(encoding="utf-8"))
     assert payload["routing"]["requested_engine"] == "rendering.ffmpeg"
     assert payload["audio_ownership"] == "rendered"
+
+
+def test_single_segment_plan_records_finalizer_fragment(
+    tmp_path: Path,
+) -> None:
+    """A single-segment plan that pins the ffmpeg finalizer must record BOTH
+    the renderer fragment and the executed finalizer fragment in provenance."""
+    transport = FakeTransport()
+    transport.plan = _plan("fixture.window", segment_frames=(10,))
+    service = _service(
+        tmp_path,
+        transport,
+        renderer_ids=("fixture.window",),
+        planner_ids=("rendering.legacy_hybrid",),
+    )
+    output = tmp_path / "single-finalize.mp4"
+
+    service.render_request(_request(tmp_path), selector="hybrid", out_path=output)
+
+    payload = _sidecar(output)
+    fragments = payload["backend_fragments"]
+    assert fragments["fixture.window"]["fixture_backend"] == "fixture.window"
+    assert (
+        fragments["rendering.ffmpeg-finalizer"]["fixture_backend"]
+        == "rendering.ffmpeg-finalizer"
+    )
+    # One hashed lineage entry per segment (the renderer artifact), while the
+    # finalizer's artifact is represented by the finalizer fragment.
+    assert len(payload["artifact_profiles"]) == 1
+    assert payload["artifact_profiles"][0]["path"].endswith("segment-0000.mp4")
+
+
+def test_direct_render_with_pinned_finalizer_records_both_fragments(
+    tmp_path: Path,
+) -> None:
+    """An embedding host pinning `finalizer_id` on a direct render gets the
+    renderer artifact lineage AND the executed finalizer fragment."""
+    transport = FakeTransport()
+    service = _service(
+        tmp_path,
+        transport,
+        renderer_ids=("rendering.remotion",),
+        planner_ids=(),
+        finalizer_id="rendering.ffmpeg-finalizer",
+    )
+    output = tmp_path / "direct-finalize.mp4"
+
+    service.render_request(
+        replace(_request(tmp_path), backend_config={}),
+        selector="rendering.remotion",
+        out_path=output,
+    )
+
+    payload = _sidecar(output)
+    fragments = payload["backend_fragments"]
+    assert (
+        fragments["rendering.remotion"]["fixture_backend"] == "rendering.remotion"
+    )
+    assert (
+        fragments["rendering.ffmpeg-finalizer"]["fixture_backend"]
+        == "rendering.ffmpeg-finalizer"
+    )
+    assert len(payload["artifact_profiles"]) == 1
+    assert payload["finalizer"]["id"] == "rendering.ffmpeg-finalizer"
