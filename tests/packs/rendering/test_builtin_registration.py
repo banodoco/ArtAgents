@@ -113,7 +113,7 @@ def _write_request(path: Path, request: RenderRequest) -> None:
 def _missing_remotion_dependencies() -> list[str]:
     missing = [
         f"{binary} executable"
-        for binary in ("node", "npx")
+        for binary in ("node", "npx", "ffprobe")
         if shutil.which(binary) is None
     ]
     if not (REMOTION_PROJECT / "node_modules").is_dir():
@@ -178,7 +178,7 @@ def test_builtin_registration_and_inspection_are_static(
         "rendering.ffmpeg-finalizer",
     ]
     assert [candidate.manifest.required_binaries for candidate in resolved] == [
-        ("node", "npx"),
+        ("node", "npx", "ffprobe"),
         ("ffmpeg", "ffprobe"),
         ("ffmpeg", "ffprobe"),
     ]

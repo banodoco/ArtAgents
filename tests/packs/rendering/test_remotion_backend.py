@@ -108,7 +108,7 @@ def test_manifest_registers_static_raw_command_backend() -> None:
     assert manifest.command == ("python3", "run.py")
     assert manifest.operations == ("render", "support")
     assert manifest.required_permissions == ("project_files", "subprocess")
-    assert manifest.required_binaries == ("node", "npx")
+    assert manifest.required_binaries == ("node", "npx", "ffprobe")
     assert (manifest_path.parents[2] / manifest.command[1]).is_file()
 
 
@@ -126,7 +126,7 @@ def test_support_is_request_sensitive_and_accepts_complete_timeline(
     assert report.reasons == []
     assert report.backend == remotion.BACKEND_ID
     assert report.features["timeline_composition"] is True
-    assert report.features["audio_ownership"] == "none"
+    assert report.features["audio_ownership"] == "rendered"
 
 
 def test_support_rejects_native_window_with_actionable_reason(tmp_path: Path) -> None:

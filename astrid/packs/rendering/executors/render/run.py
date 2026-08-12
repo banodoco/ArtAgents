@@ -367,7 +367,11 @@ def _render_hybrid(timeline_path: Path, assets_path: Path, out_path: Path, **rem
         timeline_data,
         fps=Fraction(*canonical_profile.fps_rational),
     )
-    if len(segments) == 1 and segments[0]["engine"] == "ffmpeg":
+    if (
+        canonical_profile.fps_rational[1] == 1
+        and len(segments) == 1
+        and segments[0]["engine"] == "ffmpeg"
+    ):
         return _render_ffmpeg_media(timeline_path, assets_path, out_path)
 
     publication_out = out_path  # unresolved: publication symlink-guards it
@@ -386,6 +390,21 @@ def _render_hybrid(timeline_path: Path, assets_path: Path, out_path: Path, **rem
             segment_timeline_path = segment_dir / "timeline.json"
             segment_out_path = segment_dir / "segment.mp4"
             segment_timeline = _window_timeline_data(timeline_data, start, end, media_only=(engine == "ffmpeg"))
+            if canonical_profile.fps_rational[1] != 1:
+                # Both extracted legacy renderers accept an integer canvas
+                # rate.  Render the window at the nearest rate, then let the
+                # finalizer normalize to the exact canonical rational rate.
+                render_rate = max(
+                    1,
+                    round(Fraction(*canonical_profile.fps_rational)),
+                )
+                overrides = dict(segment_timeline.get("theme_overrides", {}))
+                visual = dict(overrides.get("visual", {}))
+                canvas = dict(visual.get("canvas", {}))
+                canvas["fps"] = render_rate
+                visual["canvas"] = canvas
+                overrides["visual"] = visual
+                segment_timeline["theme_overrides"] = overrides
             segment_timeline_path.write_text(json.dumps(segment_timeline, indent=2) + "\n", encoding="utf-8")
             if engine == "ffmpeg":
                 _render_ffmpeg_media(

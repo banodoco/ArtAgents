@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import math
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +27,11 @@ class RenderCommandInputs:
     output_path: Path
     timeline_data: dict[str, Any]
     registry: dict[str, Any]
+    audio_sample_rate: int = 48000
+    # Probe-derived evidence from strict support: stream-copy is only
+    # permitted when the actual media probe confirmed whole-source
+    # compatibility (never trust registry metadata alone).
+    stream_copy_allowed: bool = False
 
 
 def timeline_canvas(timeline_data: Mapping[str, Any]) -> tuple[int, int, int]:
@@ -249,7 +254,8 @@ def build_filter_graph(
             )
         )
         if (
-            at == 0
+            inputs.stream_copy_allowed
+            and at == 0
             and start == 0
             and full_duration
             and same_resolution
@@ -285,7 +291,7 @@ def build_filter_graph(
             duration = at - cursor
             label = f"a{audio_index}"
             filters.append(
-                "anullsrc=r=44100:cl=stereo,"
+                f"anullsrc=r={inputs.audio_sample_rate}:cl=stereo,"
                 f"atrim=duration={duration:.6f}[{label}]"
             )
             audio_labels.append(f"[{label}]")
@@ -301,7 +307,7 @@ def build_filter_graph(
         filters.append(
             f"[{inp}:a]atrim=start={start:.6f}:end={end:.6f},"
             "asetpts=PTS-STARTPTS,"
-            "aformat=sample_rates=44100:channel_layouts=stereo,"
+            f"aformat=sample_rates={inputs.audio_sample_rate}:channel_layouts=stereo,"
             f"volume={volume:.6f}[{label}]"
         )
         audio_labels.append(f"[{label}]")
@@ -317,7 +323,7 @@ def build_filter_graph(
             duration = visual_duration - cursor
             label = f"a{audio_index}"
             filters.append(
-                "anullsrc=r=44100:cl=stereo,"
+                f"anullsrc=r={inputs.audio_sample_rate}:cl=stereo,"
                 f"atrim=duration={duration:.6f}[{label}]"
             )
             audio_labels.append(f"[{label}]")
@@ -436,11 +442,31 @@ def build_render_command(
     request: RenderRequest | Mapping[str, Any],
     workspace: Path,
 ) -> list[str]:
-    """Build FFmpeg argv for ``workspace/outputs/<request.output_name>``."""
+    """Build FFmpeg argv for ``workspace/outputs/<request.output_name>``.
 
-    return build_render_command_from_inputs(
-        resolve_render_command_inputs(request, workspace)
-    )
+    Stream-copy is permitted only when strict support's probe evidence says
+    the whole source is compatible (never trust registry metadata alone).
+    """
+    inputs = resolve_render_command_inputs(request, workspace)
+    try:
+        from astrid.core.rendering.contracts import RenderRequest
+        from astrid.packs.rendering.backends.ffmpeg.support import support
+
+        normalized_request = (
+            request
+            if isinstance(request, RenderRequest)
+            else RenderRequest.from_dict(request)
+        )
+        report = support(
+            normalized_request,
+            inputs.timeline_data,
+            inputs.registry,
+        )
+        stream_copy_allowed = bool(report.features.get("stream_copy"))
+    except Exception:
+        stream_copy_allowed = False
+    inputs = replace(inputs, stream_copy_allowed=stream_copy_allowed)
+    return build_render_command_from_inputs(inputs)
 
 
 def build_render_command_for_paths(

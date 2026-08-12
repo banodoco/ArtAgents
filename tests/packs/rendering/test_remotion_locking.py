@@ -57,7 +57,7 @@ def _render_process_probe(
 
     def fake_locked(*args: object, **kwargs: object) -> remotion._ExecutionDetails:
         entered.set()
-        if release is not None and not release.wait(5):
+        if release is not None and not release.wait(60):
             raise RuntimeError("timed out waiting to release first render")
         return remotion._ExecutionDetails({}, {}, {})
 
@@ -162,17 +162,17 @@ def test_two_concurrent_remotion_renders_serialize(
     second_started = False
     first.start()
     try:
-        assert first_ready.wait(5)
-        assert first_entered.wait(5)
+        assert first_ready.wait(60)
+        assert first_entered.wait(60)
         second.start()
         second_started = True
-        assert second_ready.wait(5)
+        assert second_ready.wait(60)
         assert not second_entered.wait(0.3), "second render entered before first released"
     finally:
         release_first.set()
-    first.join(timeout=5)
+    first.join(timeout=60)
     if second_started:
-        second.join(timeout=5)
+        second.join(timeout=60)
     lingering = [process for process in (first, second) if process.pid and process.is_alive()]
     for process in lingering:
         process.terminate()

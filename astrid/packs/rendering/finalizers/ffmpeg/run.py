@@ -67,7 +67,22 @@ _VIDEO_TRANSCODE_FIELDS = frozenset(
     }
 )
 _AUDIO_TRANSCODE_FIELDS = frozenset(
-    {"audio_codec", "audio_sample_rate", "audio_channel_layout"}
+    {
+        "audio_presence",
+        "audio_codec",
+        "audio_sample_rate",
+        "audio_channel_layout",
+    }
+)
+_PROFILE_ANCHOR_BLOCKERS = frozenset(
+    {
+        "width",
+        "height",
+        "fps_rational",
+        "time_base",
+        "video_codec",
+        "pixel_format",
+    }
 )
 _SAFE_FILTER_TOKEN = re.compile(r"^[A-Za-z0-9_.+()/-]+$")
 
@@ -175,23 +190,38 @@ def _text(value: Any) -> str | None:
     return value.strip().lower() if isinstance(value, str) and value.strip() else None
 
 
-def _level(value: Any) -> str | None:
+def _level(value: Any, *, codec: Any = None) -> str | None:
     normalized = _text(value)
     if normalized is None:
         return None
-    if normalized.isdigit() and len(normalized) >= 2:
-        return f"{int(normalized[:-1])}.{normalized[-1]}"
+    if normalized.isdigit():
+        level_idc = int(normalized)
+        normalized_codec = _text(codec)
+        divisor = 10 if normalized_codec in {"h264", "avc", "avc1"} else None
+        if normalized_codec in {"hevc", "h265"}:
+            divisor = 30
+        if divisor is not None and level_idc >= divisor:
+            quotient = Fraction(level_idc, divisor)
+            if quotient.denominator == 1:
+                return f"{quotient.numerator}.0"
+            return f"{float(quotient):.1f}"
     return normalized
 
 
-def _same_value(field: str, actual: Any, expected: Any) -> bool:
+def _same_value(
+    field: str,
+    actual: Any,
+    expected: Any,
+    *,
+    codec: Any = None,
+) -> bool:
     if field in {"fps_rational", "time_base"}:
         try:
             return Fraction(*actual) == Fraction(*expected)
         except (TypeError, ValueError, ZeroDivisionError):
             return False
     if field == "video_level":
-        return _level(actual) == _level(expected)
+        return _level(actual, codec=codec) == _level(expected, codec=codec)
     if field in {
         "container",
         "video_codec",
@@ -229,7 +259,10 @@ def _profile_differences(
         expected_value = getattr(expected, field)
         actual_value = getattr(actual, field)
         if expected_value is not None and not _same_value(
-            field, actual_value, expected_value
+            field,
+            actual_value,
+            expected_value,
+            codec=expected.video_codec,
         ):
             differences.append(_ProfileDifference(field, actual_value, expected_value))
 
@@ -262,16 +295,32 @@ def _assembly_profile(
 ) -> RenderProfile:
     """Refine optional H.26x fields so concat inputs share stream metadata."""
 
+    eligible = [
+        segment
+        for segment in segments
+        if not any(
+            difference.field in _PROFILE_ANCHOR_BLOCKERS
+            for difference in _profile_differences(segment.profile, canonical)
+        )
+    ]
     video_profile = canonical.video_profile
     video_level = canonical.video_level
     if video_profile is None:
         video_profile = next(
-            (segment.profile.video_profile for segment in segments if segment.profile.video_profile is not None),
+            (
+                segment.profile.video_profile
+                for segment in eligible
+                if segment.profile.video_profile is not None
+            ),
             None,
         )
     if video_level is None:
         video_level = next(
-            (segment.profile.video_level for segment in segments if segment.profile.video_level is not None),
+            (
+                segment.profile.video_level
+                for segment in eligible
+                if segment.profile.video_level is not None
+            ),
             None,
         )
     if (
@@ -315,10 +364,7 @@ def _video_encoder(codec: str) -> str:
     normalized = _text(codec)
     encoders = {
         "h264": "libx264",
-        "avc": "libx264",
-        "avc1": "libx264",
         "hevc": "libx265",
-        "h265": "libx265",
         "mpeg4": "mpeg4",
         "vp9": "libvpx-vp9",
         "av1": "libaom-av1",
@@ -331,6 +377,47 @@ def _video_encoder(codec: str) -> str:
             details={"video_codec": codec},
         )
     return encoders[normalized]
+
+
+def _encoder_profile(codec: str, profile: str) -> str:
+    normalized_codec = _text(codec)
+    normalized_profile = _text(profile)
+    assert normalized_profile is not None
+    mapping: dict[str, str]
+    if normalized_codec == "h264":
+        mapping = {
+            "baseline": "baseline",
+            "constrained baseline": "baseline",
+            "main": "main",
+            "high": "high",
+            "high 10": "high10",
+            "high 10 intra": "high10",
+            "high 4:2:2": "high422",
+            "high 4:2:2 intra": "high422",
+            "high 4:4:4": "high444",
+            "high 4:4:4 predictive": "high444",
+            "high 4:4:4 intra": "high444",
+        }
+    elif normalized_codec == "hevc":
+        mapping = {
+            "main": "main",
+            "main 10": "main10",
+            "main still picture": "mainstillpicture",
+        }
+    else:
+        mapping = {}
+    encoded = mapping.get(normalized_profile)
+    if encoded is None:
+        raise_unsupported_error(
+            backend=BACKEND_ID,
+            message=(
+                f"unsupported {codec} encoder profile for FFmpeg finalization: "
+                f"{profile}"
+            ),
+            recovery_command="select a supported canonical video profile",
+            details={"video_codec": codec, "video_profile": profile},
+        )
+    return encoded
 
 
 def _audio_encoder(codec: str) -> str:
@@ -379,6 +466,30 @@ def _validate_target_profile(profile: RenderProfile) -> None:
             details={"container": profile.container},
         )
     _video_encoder(profile.video_codec)
+    if profile.video_profile is not None:
+        _encoder_profile(profile.video_codec, profile.video_profile)
+    if profile.video_level is not None:
+        normalized_level = _level(
+            profile.video_level,
+            codec=profile.video_codec,
+        )
+        if (
+            _text(profile.video_codec) not in {"h264", "hevc"}
+            or normalized_level is None
+            or re.fullmatch(r"[1-9][0-9]*(?:\.[0-9]+)?", normalized_level) is None
+        ):
+            raise_unsupported_error(
+                backend=BACKEND_ID,
+                message=(
+                    "unsupported encoder level for FFmpeg finalization: "
+                    f"{profile.video_level}"
+                ),
+                recovery_command="select a supported canonical video level",
+                details={
+                    "video_codec": profile.video_codec,
+                    "video_level": profile.video_level,
+                },
+            )
     if profile.has_audio:
         assert profile.audio_codec is not None
         _audio_encoder(profile.audio_codec)
@@ -401,6 +512,7 @@ def build_normalize_command(
     fields = {difference.field for difference in differences}
     video_transcode = bool(fields & _VIDEO_TRANSCODE_FIELDS)
     audio_transcode = bool(fields & _AUDIO_TRANSCODE_FIELDS)
+    synthesize_audio = target_profile.has_audio and not segment.profile.has_audio
     fps = f"{target_profile.fps_rational[0]}/{target_profile.fps_rational[1]}"
     time_base = f"{target_profile.time_base[0]}/{target_profile.time_base[1]}"
 
@@ -410,9 +522,23 @@ def build_normalize_command(
         "-y",
         "-i",
         str(segment.path),
-        "-map",
-        "0:v:0",
     ]
+    if synthesize_audio:
+        assert target_profile.audio_sample_rate is not None
+        assert target_profile.audio_channel_layout is not None
+        argv.extend(
+            [
+                "-f",
+                "lavfi",
+                "-i",
+                (
+                    "anullsrc="
+                    f"sample_rate={target_profile.audio_sample_rate}:"
+                    f"channel_layout={target_profile.audio_channel_layout}"
+                ),
+            ]
+        )
+    argv.extend(["-map", "0:v:0"])
     if video_transcode:
         filters = ["setpts=PTS-STARTPTS"]
         if fields & {"width", "height"}:
@@ -440,9 +566,26 @@ def build_normalize_command(
         if encoder in {"libx264", "libx265"}:
             argv.extend(["-preset", "veryfast", "-crf", "20"])
         if target_profile.video_profile is not None:
-            argv.extend(["-profile:v", target_profile.video_profile])
+            argv.extend(
+                [
+                    "-profile:v",
+                    _encoder_profile(
+                        target_profile.video_codec,
+                        target_profile.video_profile,
+                    ),
+                ]
+            )
         if target_profile.video_level is not None:
-            argv.extend(["-level:v", _level(target_profile.video_level) or target_profile.video_level])
+            argv.extend(
+                [
+                    "-level:v",
+                    _level(
+                        target_profile.video_level,
+                        codec=target_profile.video_codec,
+                    )
+                    or target_profile.video_level,
+                ]
+            )
         argv.extend(["-pix_fmt", target_profile.pixel_format])
     else:
         argv.extend(["-c:v", "copy"])
@@ -451,7 +594,7 @@ def build_normalize_command(
         assert target_profile.audio_codec is not None
         assert target_profile.audio_sample_rate is not None
         assert target_profile.audio_channel_layout is not None
-        argv.extend(["-map", "0:a:0"])
+        argv.extend(["-map", "1:a:0" if synthesize_audio else "0:a:0"])
         if audio_transcode:
             audio_filter = (
                 "asetpts=PTS-STARTPTS,"
@@ -470,6 +613,9 @@ def build_normalize_command(
             argv.extend(["-c:a", "copy"])
     else:
         argv.append("-an")
+
+    if synthesize_audio:
+        argv.append("-shortest")
 
     argv.extend(
         [
@@ -772,13 +918,6 @@ def concat_segment_files(
             ownership=source_ownership,
             duration_tolerance=target_profile.duration_tolerance,
         )
-        if ownership is AudioOwnership.RENDERED and source_ownership is not AudioOwnership.RENDERED:
-            raise_invalid_artifact_error(
-                backend=BACKEND_ID,
-                message=f"segment[{index}] is missing audio required by rendered mode",
-                recovery_command="render every segment with canonical audio and retry",
-                details={"segment_index": index, "audio_ownership": ownership.value},
-            )
         prepared.append(
             _PreparedSegment(
                 index=index,
@@ -888,17 +1027,22 @@ def _final_audio_ownership(request: FinalizeRequest) -> AudioOwnership:
             )
 
     if request.plan.profile.has_audio:
-        if all(ownership is AudioOwnership.RENDERED for ownership in ownerships):
-            return AudioOwnership.RENDERED
         if all(ownership is AudioOwnership.PASSTHROUGH for ownership in ownerships):
             return AudioOwnership.PASSTHROUGH
+        if any(
+            ownership is AudioOwnership.RENDERED for ownership in ownerships
+        ) and all(
+            ownership in {AudioOwnership.RENDERED, AudioOwnership.NONE}
+            for ownership in ownerships
+        ):
+            return AudioOwnership.RENDERED
         raise_invalid_artifact_error(
             backend=BACKEND_ID,
             message=(
-                "canonical audio requires every segment to provide rendered audio "
-                "or every segment to declare passthrough"
+                "canonical audio requires rendered/visual-only segments or a "
+                "uniform passthrough segment set"
             ),
-            recovery_command="rerender all segments with one consistent audio ownership mode",
+            recovery_command="rerender passthrough segments with one consistent ownership mode",
             details={
                 "audio_ownership": [
                     ownership.value if ownership is not None else None
@@ -993,7 +1137,7 @@ def _preflight_segments(
                 path=_input_path(artifact.path, workspace),
                 profile=probed_profile,
                 audio=artifact.audio,
-                duration_frames=artifact.duration_frames,
+                duration_frames=plan_segment.window.duration_frames,
             )
         )
     return prepared
@@ -1003,9 +1147,10 @@ def _probe_normalized_segments(
     prepared: Sequence[_PreparedSegment],
     *,
     target_profile: RenderProfile,
-) -> None:
+) -> RenderProfile:
     """Strictly probe every normalized segment before final assembly."""
 
+    probed: list[_PreparedSegment] = []
     for segment in prepared:
         try:
             probe = ffprobe_metadata_strict(segment.path)
@@ -1023,7 +1168,37 @@ def _probe_normalized_segments(
                 recovery_command="rerun finalization in a fresh invocation workspace",
                 details={"segment_index": segment.index},
             )
-        differences = _profile_differences(profile, target_profile)
+        actual_frames = _duration_fraction(probe) * Fraction(
+            *target_profile.fps_rational
+        )
+        duration_delta = abs(actual_frames - segment.duration_frames)
+        if duration_delta > target_profile.duration_tolerance:
+            raise_invalid_artifact_error(
+                backend=BACKEND_ID,
+                message=(
+                    f"normalized segment[{segment.index}] duration does not match "
+                    "its planned frame window"
+                ),
+                recovery_command="rerun finalization in a fresh invocation workspace",
+                details={
+                    "segment_index": segment.index,
+                    "expected_duration_frames": segment.duration_frames,
+                    "actual_duration_frames": [
+                        actual_frames.numerator,
+                        actual_frames.denominator,
+                    ],
+                    "delta_frames": [
+                        duration_delta.numerator,
+                        duration_delta.denominator,
+                    ],
+                    "tolerance_frames": target_profile.duration_tolerance,
+                },
+            )
+        probed.append(replace(segment, profile=profile))
+
+    effective_profile = _assembly_profile(target_profile, probed)
+    for segment in probed:
+        differences = _profile_differences(segment.profile, effective_profile)
         if differences:
             raise_invalid_artifact_error(
                 backend=BACKEND_ID,
@@ -1039,6 +1214,7 @@ def _probe_normalized_segments(
                     ],
                 },
             )
+    return effective_profile
 
 
 def finalize(
@@ -1081,11 +1257,11 @@ def finalize(
         if output_path.is_file()
         else None
     )
-    if previous_output is not None:
-        shutil.copy2(output_path, previous_output)
     published = False
     assembly_started = False
     try:
+        if previous_output is not None:
+            shutil.copy2(output_path, previous_output)
         with TemporaryDirectory(
             prefix=f".{output_path.name}.ffmpeg-finalizer-normalize-",
             dir=str(output_path.parent),
@@ -1132,17 +1308,33 @@ def finalize(
                         duration_frames=segment.duration_frames,
                     )
                 )
-            _probe_normalized_segments(
+            effective_profile = _probe_normalized_segments(
                 normalized_prepared,
                 target_profile=assembly_profile,
             )
+            for segment in prepared:
+                if not _profile_differences(segment.profile, assembly_profile):
+                    continue
+                existing = set(normalization)
+                for difference in _profile_differences(
+                    segment.profile,
+                    effective_profile,
+                ):
+                    record = _normalization_record(segment.index, difference)
+                    if record not in existing:
+                        normalization.append(record)
+                        existing.add(record)
+            normalized_prepared = [
+                replace(segment, profile=effective_profile)
+                for segment in normalized_prepared
+            ]
             # The prepared list now has a uniform canonical profile, so this
             # call performs only the concat-demuxer stream-copy assembly.
             assembly_started = True
             extra_normalization = _assemble_prepared_segments(
                 normalized_prepared,
                 output_path,
-                target_profile=assembly_profile,
+                target_profile=effective_profile,
                 faststart=faststart,
                 runner=execute,
             )
@@ -1151,7 +1343,7 @@ def finalize(
         video = VideoArtifact.from_file(
             path=output_path,
             workspace_root=workspace,
-            profile=assembly_profile,
+            profile=effective_profile,
             duration_frames=total_frames,
             audio=ownership,
             attachments=request.expected_attachments,

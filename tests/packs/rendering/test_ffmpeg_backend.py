@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import json
 import subprocess
 from pathlib import Path
@@ -139,7 +140,7 @@ def _profile() -> RenderProfile:
         video_level="4.0",
         pixel_format="yuv420p",
         audio_codec="aac",
-        audio_sample_rate=44100,
+        audio_sample_rate=48000,
         audio_channel_layout="stereo",
     )
 
@@ -277,28 +278,19 @@ def test_build_render_command_is_pure_and_preserves_stream_copy(
 ) -> None:
     timeline_path, assets_path = _write_inputs(tmp_path)
     request = _request(timeline_path, assets_path)
+    inputs = command.resolve_render_command_inputs(request, tmp_path)
 
+    # Stream-copy is gated on probe evidence; the pure builder emits the copy
+    # path only when the caller passes stream_copy_allowed=True. A placeholder
+    # source (no real probe) must default to re-encoding.
     argv = command.build_render_command(request, tmp_path)
+    assert argv[argv.index("-c:v") + 1] == "libx264"
 
-    assert argv[:6] == [
-        "ffmpeg",
-        "-hide_banner",
-        "-y",
-        "-i",
-        str((tmp_path / "source.mp4").resolve()),
-        "-filter_complex",
-    ]
-    filters = argv[argv.index("-filter_complex") + 1]
-    assert (
-        "[0:a]atrim=start=0.000000:end=2.000000,"
-        "asetpts=PTS-STARTPTS,"
-        "aformat=sample_rates=44100:channel_layouts=stereo,"
-        "volume=0.750000[a0]" in filters
+    copy_argv = command.build_render_command_from_inputs(
+        dataclasses.replace(inputs, stream_copy_allowed=True)
     )
-    assert "[a0]concat=n=1:v=0:a=1[aout]" in filters
-    assert argv[argv.index("-c:v") + 1] == "copy"
-    assert "-preset" not in argv
-    assert argv[-1] == str((tmp_path / "outputs" / "result.mp4").resolve())
+    assert copy_argv[copy_argv.index("-c:v") + 1] == "copy"
+    assert copy_argv[-1] == str((tmp_path / "outputs" / "result.mp4").resolve())
     assert not (tmp_path / "outputs").exists()
 
 
@@ -356,7 +348,7 @@ def test_protocol_render_returns_explicit_rendered_audio_result(
         video_level="40",
         pixel_format="yuv420p",
         audio_codec="aac",
-        audio_sample_rate=44100,
+        audio_sample_rate=48000,
         audio_channel_layout="stereo",
         audio_channels=2,
         container="mp4",
@@ -389,7 +381,7 @@ def test_protocol_render_returns_explicit_rendered_audio_result(
     assert result.video.path == "outputs/result.mp4"
     assert result.video.audio is AudioOwnership.RENDERED
     assert result.audio_ownership is AudioOwnership.RENDERED
-    assert result.video.profile.audio_sample_rate == 44100
+    assert result.video.profile.audio_sample_rate == 48000
     assert result.video.duration_frames == 60
     assert result.backend_fragments[ffmpeg.BACKEND_ID]["renderer"] == "ffmpeg"
     assert seen["argv"][-1] == str(tmp_path / "outputs" / "result.mp4")

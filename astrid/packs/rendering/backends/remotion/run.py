@@ -1004,19 +1004,18 @@ def support(request: RenderRequest, *, workspace: Path) -> SupportReport:
         except Exception as exc:
             reasons.append(f"canonical Remotion profile cannot be resolved: {exc}")
         else:
-            canonical_audio = (
-                AudioOwnership.RENDERED
-                if canonical.has_audio
-                else AudioOwnership.NONE
-            )
-            features["audio_ownership"] = canonical_audio.value
-            if request.audio is not None and request.audio is not canonical_audio:
+            # Remotion ALWAYS muxes an audio track (silent when the timeline
+            # has none) and always muxes at the 90 kHz timescale; support must
+            # describe the same contract render() implements.
+            features["audio_ownership"] = AudioOwnership.RENDERED.value
+            if request.audio is not None and request.audio is not AudioOwnership.RENDERED:
                 reasons.append(
                     f"audio={request.audio.value!r} is incompatible with "
-                    f"timeline audio ownership {canonical_audio.value!r}"
+                    f"Remotion's always-rendered audio output"
                 )
             if request.profile is not None:
-                mismatches = _profile_mismatches(request.profile, canonical)
+                render_profile = replace(canonical, time_base=(1, 90000))
+                mismatches = _profile_mismatches(request.profile, render_profile)
                 if mismatches:
                     reasons.append(
                         "requested profile is not produced by Remotion: "

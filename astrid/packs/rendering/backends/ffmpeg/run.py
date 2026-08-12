@@ -77,7 +77,38 @@ def _render_ffmpeg_media_to_path(
     *,
     runner: Any | None = None,
 ) -> Path:
-    """Execute the pure media command builder for one explicit output path."""
+    """Execute the pure media command builder for one explicit output path.
+
+    The legacy facade path must enforce the same strict support as the
+    protocol backend: a timeline whose audio would be silently discarded
+    (e.g. a visual clip with nonzero effective volume) is refused here
+    rather than rendered with -an.
+    """
+    try:
+        timeline_data = json.loads(
+            Path(timeline_path).read_text(encoding="utf-8")
+        )
+        assets_data = timeline.load_registry(Path(assets_path))
+    except Exception as exc:
+        raise ValueError(
+            f"cannot load timeline/assets for FFmpeg render: {exc}"
+        ) from exc
+    from astrid.core.rendering.contracts import RenderRequest
+
+    request = RenderRequest(
+        schema_version=1,
+        timeline_path=str(timeline_path),
+        assets_registry_path=str(assets_path),
+        output_name=Path(out_path).name,
+    )
+    from astrid.packs.rendering.backends.ffmpeg.support import support as _support
+
+    report = _support(request, timeline_data, assets_data)
+    if not report.supported:
+        raise ValueError(
+            "FFmpeg media render refused by strict support: "
+            + "; ".join(report.reasons)
+        )
 
     output = Path(out_path)
     command_argv = build_render_command_for_paths(

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 from dataclasses import replace
 from pathlib import Path
@@ -9,7 +10,7 @@ from unittest import mock
 import pytest
 import yaml
 
-from astrid.core.media import MediaProbe, MediaProbeError
+from astrid.core.media import MediaProbe, MediaProbeError, ffprobe_metadata_strict
 from astrid.core.rendering.contracts import (
     Attachment,
     AudioOwnership,
@@ -260,6 +261,7 @@ def _finalize_without_real_media(
     normalized_probe = mock.patch.object(
         ffmpeg_finalizer,
         "_probe_normalized_segments",
+        side_effect=lambda _prepared, *, target_profile: target_profile,
     )
     strict_probe = mock.patch.object(
         ffmpeg_finalizer,
@@ -453,13 +455,24 @@ def test_codec_mismatch_records_normalization_and_reencodes(tmp_path: Path) -> N
     request = _request(
         tmp_path,
         canonical=canonical,
-        artifact_profiles=[replace(canonical, video_codec="hevc")],
+        artifact_profiles=[
+            replace(
+                canonical,
+                video_codec="hevc",
+                video_profile="Main",
+                video_level="120",
+            )
+        ],
     )
     commands: list[list[str]] = []
 
     result = _finalize_without_real_media(request, tmp_path, commands)
 
     assert commands[0][commands[0].index("-c:v") + 1] == "libx264"
+    # A HEVC Main@120 profile must NEVER be anchored onto the H.264 encoder:
+    # codec differs, so the segment is excluded from profile anchoring.
+    assert "-profile:v" not in commands[0]
+    assert "-level:v" not in commands[0]
     assert result.normalization == ["segment[0] video_codec: hevc -> h264"]
 
 
@@ -485,6 +498,9 @@ def test_unspecified_canonical_profile_normalizes_concrete_stream_mismatch(
     ] == [0]
     assert "segment[1] video_profile: Main -> High" in result.normalization
     assert "segment[1] video_level: 31 -> 40" in result.normalization
+    normalize = commands[0]
+    assert normalize[normalize.index("-profile:v") + 1] == "high"
+    assert normalize[normalize.index("-level:v") + 1] == "4.0"
 
 
 @pytest.mark.parametrize(
@@ -525,6 +541,28 @@ def test_audio_rendered_passthrough_and_none_modes(
         assert "-an" in concat
         assert not any("anullsrc" in item for item in concat)
         assert result.video.profile.has_audio is False
+
+
+def test_rendered_mode_normalizes_visual_only_segment_audio_presence(
+    tmp_path: Path,
+) -> None:
+    canonical = _profile(audio=True)
+    request = _request(
+        tmp_path,
+        canonical=canonical,
+        artifact_profiles=[canonical, _profile(audio=False)],
+        segment_frames=[24, 24],
+        ownerships=[AudioOwnership.RENDERED, AudioOwnership.NONE],
+    )
+    commands: list[list[str]] = []
+
+    result = _finalize_without_real_media(request, tmp_path, commands)
+
+    normalize = commands[0]
+    assert any("anullsrc=" in value for value in normalize)
+    assert "-shortest" in normalize
+    assert "segment[1] audio_presence: absent -> present" in result.normalization
+    assert result.audio_ownership is AudioOwnership.RENDERED
 
 
 def test_attachments_are_preserved_without_interpretation(tmp_path: Path) -> None:
@@ -601,7 +639,11 @@ def test_raw_adapter_writes_finalize_result(tmp_path: Path) -> None:
             "validate_render_result",
             side_effect=lambda result, **_kwargs: result,
         ),
-        mock.patch.object(ffmpeg_finalizer, "_probe_normalized_segments"),
+        mock.patch.object(
+            ffmpeg_finalizer,
+            "_probe_normalized_segments",
+            side_effect=lambda _prepared, *, target_profile: target_profile,
+        ),
         mock.patch.object(
             ffmpeg_finalizer,
             "ffprobe_metadata_strict",
@@ -629,3 +671,87 @@ def test_raw_adapter_writes_finalize_result(tmp_path: Path) -> None:
     assert payload["backend_fragments"][ffmpeg_finalizer.BACKEND_ID][
         "finalizer_kind"
     ] == "ffmpeg"
+
+
+def test_real_ffmpeg_normalizes_rational_profile_and_emits_valid_media(
+    tmp_path: Path,
+) -> None:
+    if shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None:
+        pytest.skip("real FFmpeg finalizer smoke requires ffmpeg and ffprobe")
+
+    source_path = tmp_path / "segments" / "source.mp4"
+    source_path.parent.mkdir(parents=True)
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=size=64x64:rate=25",
+            "-frames:v",
+            "25",
+            "-c:v",
+            "libx264",
+            "-profile:v",
+            "main",
+            "-level:v",
+            "3.1",
+            "-pix_fmt",
+            "yuv420p",
+            "-video_track_timescale",
+            "12800",
+            "-an",
+            str(source_path),
+        ],
+        check=True,
+    )
+    source_probe = ffprobe_metadata_strict(source_path)
+    source_profile = ffmpeg_finalizer._profile_from_probe(
+        source_probe,
+        ownership=AudioOwnership.NONE,
+        duration_tolerance=1,
+    )
+    source = VideoArtifact.from_file(
+        path=source_path,
+        workspace_root=tmp_path,
+        profile=source_profile,
+        duration_frames=ffmpeg_finalizer._duration_frames_from_probe(
+            source_probe,
+            source_profile,
+        ),
+        audio=AudioOwnership.NONE,
+    )
+    canonical = _profile(
+        fps=(30_000, 1001),
+        time_base=(1, 30_000),
+        width=64,
+        height=64,
+        video_profile="High",
+        video_level="4.0",
+    )
+    request = FinalizeRequest(
+        schema_version=SCHEMA_VERSION,
+        plan=_plan(canonical, [30]),
+        artifacts=[source],
+        output_name="rational.mp4",
+        backend_config={ffmpeg_finalizer.BACKEND_ID: {"faststart": True}},
+    )
+
+    result = ffmpeg_finalizer.finalize(request, workspace=tmp_path)
+
+    output = tmp_path / result.video.path
+    output_probe = ffprobe_metadata_strict(output)
+    assert output_probe.fps_rational == (30_000, 1001)
+    assert output_probe.time_base == (1, 30_000)
+    assert output_probe.video_profile == "High"
+    assert ffmpeg_finalizer._level(
+        output_probe.video_level,
+        codec="h264",
+    ) == "4.0"
+    assert result.video.duration_frames == 30
+    assert any("fps_rational" in item for item in result.normalization)
+    assert not list((tmp_path / "outputs").glob(".rational.mp4.ffmpeg-finalizer-*"))

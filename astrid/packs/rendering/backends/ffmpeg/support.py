@@ -492,6 +492,55 @@ def _whole_media_optimization(
     )
 
 
+def _profile_support_reasons(
+    request: RenderRequest, timeline_data: Mapping[str, Any]
+) -> list[str]:
+    """Fail closed when the requested profile deviates from what the FFmpeg
+    backend actually produces (canvas dims/fps, codecs, pixel format, and
+    canonical audio rate/layout)."""
+    profile = request.profile
+    if profile is None:
+        return []
+    reasons: list[str] = []
+    try:
+        width, height, fps = _canvas(timeline_data)
+    except ValueError:
+        return reasons  # canvas failure already reported elsewhere
+    checks = (
+        ("width", profile.width, width),
+        ("height", profile.height, height),
+        ("fps", _fps_int(profile.fps_rational), fps),
+        ("container", profile.container, "mp4"),
+        ("video_codec", profile.video_codec, "h264"),
+        ("pixel_format", profile.pixel_format, "yuv420p"),
+    )
+    for field, requested, produced in checks:
+        if requested is not None and requested != produced:
+            reasons.append(
+                f"requested profile {field}={requested!r} is not produced by "
+                f"rendering.ffmpeg (produces {produced!r})"
+            )
+    if profile.has_audio:
+        for field, requested, produced in (
+            ("audio_sample_rate", profile.audio_sample_rate, 48000),
+            ("audio_channel_layout", profile.audio_channel_layout, "stereo"),
+            ("audio_codec", profile.audio_codec, "aac"),
+        ):
+            if requested is not None and requested != produced:
+                reasons.append(
+                    f"requested profile {field}={requested!r} is not produced by "
+                    f"rendering.ffmpeg (produces {produced!r})"
+                )
+    return reasons
+
+
+def _fps_int(fps_rational: tuple[int, int] | None) -> int | None:
+    if fps_rational is None:
+        return None
+    num, den = fps_rational
+    return num // den if den and num % den == 0 else None
+
+
 def _canvas(timeline_data: Mapping[str, Any]) -> tuple[int, int, int]:
     overrides = timeline_data.get("theme_overrides")
     visual = overrides.get("visual") if isinstance(overrides, Mapping) else None
@@ -667,6 +716,8 @@ def support(
     }
     if specialization:
         features["specialization"] = audio_reactive_colour.ADAPTER_ID
+
+    reasons.extend(_profile_support_reasons(request, timeline_data))
 
     reasons = _dedupe(reasons)
     return SupportReport(

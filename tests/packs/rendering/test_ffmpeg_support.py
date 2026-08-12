@@ -383,7 +383,7 @@ def test_non_overlapping_audio_clips_concat_with_positional_silence(
     filters = argv[argv.index("-filter_complex") + 1]
 
     assert report.supported is True
-    assert "anullsrc=r=44100:cl=stereo,atrim=duration=1.000000" in filters
+    assert "anullsrc=r=48000:cl=stereo,atrim=duration=1.000000" in filters
     assert filters.count("volume=0.200000") == 2
     assert "concat=n=3:v=0:a=1[aout]" in filters
 
@@ -405,10 +405,13 @@ def test_visual_only_command_has_no_synthesized_audio_and_reports_none(
 
     assert report.supported is True
     assert report.features["audio_ownership"] == "none"
-    assert "-filter_complex" not in argv
+    # Without probe evidence of whole-source compatibility, stream-copy must
+    # NOT be trusted from registry metadata: the builder re-encodes via
+    # filter_complex with no audio mapping (-an).
+    assert "-filter_complex" in argv
     assert "-c:a" not in argv
     assert "-an" in argv
-    assert argv[argv.index("-c:v") + 1] == "copy"
+    assert argv[argv.index("-c:v") + 1] == "libx264"
 
 
 def test_visual_only_request_can_delegate_audio_as_passthrough(tmp_path: Path) -> None:
@@ -570,7 +573,7 @@ def test_audio_reactive_support_gain_and_protocol_provenance_fragments(
         video_level="40",
         pixel_format="yuv420p",
         audio_codec="aac",
-        audio_sample_rate=44100,
+        audio_sample_rate=48000,
         audio_channel_layout="stereo",
         audio_channels=2,
         container="mp4",

@@ -32,6 +32,8 @@ def _selects_finalizer(argv: Sequence[str]) -> bool:
 
     if argv and argv[0] == "finalize":
         return True
+    if _transport_selected_backend() == "rendering.ffmpeg-finalizer":
+        return True
     if not argv or argv[0] != "support":
         return False
     request_path = _request_path(argv)
@@ -49,15 +51,27 @@ def _selects_finalizer(argv: Sequence[str]) -> bool:
     )
 
 
-def _selects_ffmpeg(argv: Sequence[str]) -> bool:
-    """Select FFmpeg from its backend-config namespace or legacy media shape.
+def _transport_selected_backend() -> str | None:
+    """The transport sets ASTRID_RENDER_BACKEND to the qualified backend id
+    it selected; this is authoritative over any request content."""
+    value = __import__("os").environ.get("ASTRID_RENDER_BACKEND")
+    if isinstance(value, str) and value:
+        return value
+    return None
 
-    V1 transport does not append an implementation id to the command.  The
-    namespace is authoritative when present.  Config-free requests retain the
-    facade's existing media-only auto-route; all other requests retain
-    Remotion as the pre-extraction compatibility default.
+
+def _selects_ffmpeg(argv: Sequence[str]) -> bool:
+    """Select FFmpeg from the transport-selected backend id or the request's
+    backend-config namespace.
+
+    The launcher never guesses from timeline shape: a shape guess can route a
+    Remotion request to FFmpeg or vice versa.  The legacy media-only
+    auto-route lives inside the Remotion backend's own support logic.
     """
 
+    selected = _transport_selected_backend()
+    if selected is not None:
+        return selected == "rendering.ffmpeg"
     request_path = _request_path(argv)
     if request_path is None:
         return False
@@ -68,28 +82,11 @@ def _selects_ffmpeg(argv: Sequence[str]) -> bool:
     if not isinstance(payload, Mapping):
         return False
     backend_config = payload.get("backend_config")
-    if isinstance(backend_config, Mapping):
-        if "rendering.ffmpeg" in backend_config:
-            return True
-        if "rendering.remotion" in backend_config:
-            return False
-
-    timeline_path = payload.get("timeline_path")
-    assets_path = payload.get("assets_registry_path")
-    if not isinstance(timeline_path, str) or not isinstance(assets_path, str):
+    if not isinstance(backend_config, Mapping):
         return False
-    workspace = request_path.resolve().parent
-    timeline_candidate = Path(timeline_path).expanduser()
-    assets_candidate = Path(assets_path).expanduser()
-    if not timeline_candidate.is_absolute():
-        timeline_candidate = workspace / timeline_candidate
-    if not assets_candidate.is_absolute():
-        assets_candidate = workspace / assets_candidate
-    from astrid.packs.rendering.backends.ffmpeg.run import (
-        can_render_with_ffmpeg_media,
-    )
-
-    return can_render_with_ffmpeg_media(timeline_candidate, assets_candidate)
+    if "rendering.ffmpeg" in backend_config:
+        return True
+    return False
 
 
 def main(argv: Sequence[str] | None = None) -> int:

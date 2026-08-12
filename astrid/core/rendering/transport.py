@@ -143,6 +143,10 @@ class CommandTransport:
             )
 
         child_env = _build_environment(env)
+        # The pack-root launcher routes among sibling manifest commands by the
+        # transport-selected qualified backend id; empty backend_config in a
+        # request must never make it guess from timeline shape.
+        child_env["ASTRID_RENDER_BACKEND"] = selected_backend
         argv_prefix[0] = _resolve_executable(
             argv_prefix[0],
             cwd=cwd_path,

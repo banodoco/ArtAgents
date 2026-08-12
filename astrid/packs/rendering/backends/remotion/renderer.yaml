@@ -37,3 +37,4 @@ required_permissions:
 required_binaries:
   - node
   - npx
+  - ffprobe
