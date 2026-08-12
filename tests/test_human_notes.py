@@ -434,10 +434,11 @@ class HumanNotesTest(unittest.TestCase):
         refine_cmd = calls[2][0]
         for flag in ("--timeline", "--assets", "--metadata"):
             self.assertIn(flag, refine_cmd)
+        brief_dir = apply_paths["brief_dir"].resolve()
         render_call.assert_called_once_with(
-            apply_paths["brief_dir"] / "hype.timeline.json",
-            apply_paths["brief_dir"] / "hype.assets.json",
-            apply_paths["brief_dir"] / "hype.mp4",
+            brief_dir / "hype.timeline.json",
+            brief_dir / "hype.assets.json",
+            brief_dir / "hype.mp4",
         )
 
 
