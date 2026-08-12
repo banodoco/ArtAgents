@@ -35,6 +35,8 @@ from astrid.packs.rendering.executors.timeline_visualize.navigation import (
 from astrid.packs.rendering.executors.timeline_visualize.scorer import (
     AnswerSpec,
     aggregate_sessions,
+    detect_divergences,
+    process_evidence_for_gate,
     score_answers,
     session_identity,
 )
@@ -114,9 +116,7 @@ def _pack_bytes(root: Path) -> dict[str, bytes]:
     }
 
 
-def _rewrite_pack_file_with_valid_hashes(
-    manifest_path: Path, name: str, value: dict
-) -> None:
+def _rewrite_pack_file_with_valid_hashes(manifest_path: Path, name: str, value: dict) -> None:
     """Rewrite one pack artifact and fix manifest.json + pack-hashes.json so
     load_frozen_view's full-hash preflight still passes (frozen-test pattern)."""
     pack_root = manifest_path.parent
@@ -187,9 +187,7 @@ def _write_transcript_run_metadata(
         json.dumps(
             {
                 "out": f"runs/{run_id}",
-                "artifacts": {
-                    "metadata": {"path": f"runs/{run_id}/artifacts/hype.metadata.json"}
-                },
+                "artifacts": {"metadata": {"path": f"runs/{run_id}/artifacts/hype.metadata.json"}},
             }
         ),
         encoding="utf-8",
@@ -253,9 +251,7 @@ def test_changed_media_hash_mismatch_blocks_sampling(
 
     # On-disk bytes for the tampered asset: the committed fixture PNG.  The
     # registry records a DIFFERENT expected hash (never-on-disk bytes).
-    tampered = (
-        ADVERSARIAL_DIR / "changed_media" / "tampered.png"
-    ).read_bytes()
+    tampered = (ADVERSARIAL_DIR / "changed_media" / "tampered.png").read_bytes()
     control = (
         ADVERSARIAL_DIR / "changed_media" / "tampered.png"
     ).read_bytes()  # control bytes; its hash is recorded exactly
@@ -289,9 +285,9 @@ def test_changed_media_hash_mismatch_blocks_sampling(
         canonical = row["canonical_ref"]["authored_id"]
         integrity_by_key[canonical] = row["integrity_state"]
 
-    assert integrity_by_key[case["mutation"]["tampered_asset"]] == case["expected"][
-        "integrity_state"
-    ], case["expected"]["integrity_state"]
+    assert (
+        integrity_by_key[case["mutation"]["tampered_asset"]] == case["expected"]["integrity_state"]
+    ), case["expected"]["integrity_state"]
     assert integrity_by_key[case["mutation"]["control_asset"]] == "verified_original"
 
     # Sampling refused for the tampered asset; the verified control is sampled.
@@ -326,12 +322,8 @@ def test_changed_transcript_attachment_hash_mismatch_is_surfaced(
     slug = "adversarial-changed-transcript"
     project_root, timeline = _prepare_project(tmp_projects_root, slug)
 
-    declared = (
-        ADVERSARIAL_DIR / "changed_transcript" / "transcript.declared.json"
-    ).read_bytes()
-    actual = (
-        ADVERSARIAL_DIR / "changed_transcript" / "transcript.actual.json"
-    ).read_bytes()
+    declared = (ADVERSARIAL_DIR / "changed_transcript" / "transcript.declared.json").read_bytes()
+    actual = (ADVERSARIAL_DIR / "changed_transcript" / "transcript.actual.json").read_bytes()
     declared_digest = _sha256(declared)
     assert declared_digest != _sha256(actual)
 
@@ -344,9 +336,7 @@ def test_changed_transcript_attachment_hash_mismatch_is_surfaced(
 
     result = _invoke(slug, timeline_source=str(timeline))
     assert result.ok is True, result.error
-    frozen = load_frozen_view(
-        Path(result.manifest_path or ""), project_root=project_root
-    )
+    frozen = load_frozen_view(Path(result.manifest_path or ""), project_root=project_root)
 
     attachment = frozen.ground_truth["timelines"][0]["transcript_attachment"]
     assert attachment["integrity"] == case["expected"]["attachment_integrity"]
@@ -406,23 +396,19 @@ def test_image_order_swap_is_recorded_and_never_a_silent_duplicate_session() -> 
     assert session_identity(pack) == session_identity(
         _ordered_evidence(pack_order, answers=case["fixture"]["answers"])
     )
+    assert detect_divergences(gate, declared_image_hashes=pack_order) == [
+        "image-order-divergence: "
+        f"declared={list(pack_order)!r}, observed={list(gate_order)!r}"
+    ]
 
 
 # ---------------------------------------------------------------------------
-# 4. Model changed: evidence.returned_model != requested -> flagged
+# 4. Model changed: production gate processing flags the divergence
 # ---------------------------------------------------------------------------
-
-
-def _model_diverged(evidence: OrderedImageEvidence) -> bool:
-    """Provenance flag: the provider returned a different model revision."""
-    return (
-        evidence.returned_model is not None
-        and evidence.returned_model != evidence.model
-    )
 
 
 @pytest.mark.hermetic
-def test_model_change_divergence_is_recorded_by_provenance() -> None:
+def test_model_change_divergence_is_rejected_by_production_gate_processing() -> None:
     case = _case("model_changed")
     requested = case["fixture"]["requested_model"]
     returned = case["fixture"]["returned_model"]
@@ -439,8 +425,15 @@ def test_model_change_divergence_is_recorded_by_provenance() -> None:
     serialized = divergent.to_dict()
     assert serialized["model"] == requested
     assert serialized["returned_model"] == returned
-    assert _model_diverged(divergent) is True
-    assert _model_diverged(aligned) is False
+    processed = process_evidence_for_gate(
+        divergent,
+        [AnswerSpec("q1", "frames", None, 332)],
+    )
+    assert processed["valid_for_gate"] is False
+    assert processed["divergences"] == [
+        f"model-divergence: requested={requested!r}, returned={returned!r}"
+    ]
+    assert detect_divergences(aligned) == []
     # to_json round-trip preserves the divergence for evidence retention.
     round_tripped = json.loads(divergent.to_json())
     assert round_tripped["model"] == requested
@@ -488,9 +481,7 @@ def test_resegmentation_re_scopes_ts_ids_and_old_refs_do_not_resolve(
             timeline_uuid="11111111-1111-4111-8111-111111111111",
             timeline_ulid="01K00000000000000000000000",
         )
-        identity = assign_transcript_ids(
-            identity, segments, occurrences, transcript_sha256=digest
-        )
+        identity = assign_transcript_ids(identity, segments, occurrences, transcript_sha256=digest)
         lineages[name] = (digest, segments, occurrences, identity)
 
     digest_a, segments_a, occurrences_a, identity_a = lineages["segmentation_a"]
@@ -506,10 +497,13 @@ def test_resegmentation_re_scopes_ts_ids_and_old_refs_do_not_resolve(
     assert identity_b.lookup_semantic("transcript_source_segment", authored_b) == "TL01.TS01"
     # ...but an old-scope authored id NEVER re-resolves in the new lineage.
     assert identity_b.lookup_semantic("transcript_source_segment", authored_a) is None
-    assert identity_b.lookup_semantic(
-        "speech_occurrence",
-        speech_occurrence_authored_id(digest_a, "a", "media"),
-    ) is None
+    assert (
+        identity_b.lookup_semantic(
+            "speech_occurrence",
+            speech_occurrence_authored_id(digest_a, "a", "media"),
+        )
+        is None
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -540,12 +534,8 @@ def test_clip_removal_dangles_sp_with_diagnostic(tmp_projects_root: Path) -> Non
     # clip that no longer exists.  The frozen loader must reject the dangling
     # SP loudly with a diagnostic naming it.
     transcript_index = deepcopy(frozen.transcript_index)
-    transcript_index["speech_occurrences"][0]["clip_ref"] = case["mutation"][
-        "dangling_clip_ref"
-    ]
-    _rewrite_pack_file_with_valid_hashes(
-        root_manifest, "transcript-index.json", transcript_index
-    )
+    transcript_index["speech_occurrences"][0]["clip_ref"] = case["mutation"]["dangling_clip_ref"]
+    _rewrite_pack_file_with_valid_hashes(root_manifest, "transcript-index.json", transcript_index)
 
     with pytest.raises(FrozenIntegrityError, match="speech occurrence ref does not resolve") as exc:
         load_frozen_view(root_manifest, project_root=project_root)
@@ -685,8 +675,13 @@ def test_malformed_answers_score_zero_with_schema_or_parse_detail() -> None:
     assert [result.detail for result in results] == ["parse-failure"]
 
     # Aggregation never averages garbage away: three zero sessions fail.
-    zero_session = (0.0, results)
-    aggregated = aggregate_sessions([zero_session, zero_session, zero_session])
+    aggregated = aggregate_sessions(
+        [
+            ("malformed-a", 0.0, results),
+            ("malformed-b", 0.0, results),
+            ("malformed-c", 0.0, results),
+        ]
+    )
     assert aggregated["passed"] is False
     assert aggregated["session_accuracies"] == [0.0, 0.0, 0.0]
 
@@ -707,9 +702,7 @@ def test_snapshot_drift_drill_down_stays_frozen_and_refresh_mints_new_sns(
 
     old = load_frozen_view(root_manifest, project_root=project_root)
     old_bytes = _pack_bytes(root_manifest.parent)
-    assert old.manifest["snapshots"][0]["event_head"]["version"] == case["mutation"][
-        "root_version"
-    ]
+    assert old.manifest["snapshots"][0]["event_head"]["version"] == case["mutation"]["root_version"]
 
     # Live timeline drifts to v160 while the root pack stays frozen.
     _append_v160(timeline)
@@ -717,9 +710,7 @@ def test_snapshot_drift_drill_down_stays_frozen_and_refresh_mints_new_sns(
     # Drill-down from the frozen root: still resolves with the OLD SNS.
     child = _invoke(slug, from_view=str(root_manifest), focus="TL01.CL03")
     assert child.ok is True, child.error
-    child_frozen = load_frozen_view(
-        Path(child.manifest_path or ""), project_root=project_root
-    )
+    child_frozen = load_frozen_view(Path(child.manifest_path or ""), project_root=project_root)
     assert child_frozen.snapshot_sns == old.snapshot_sns
     assert _pack_bytes(root_manifest.parent) == old_bytes
 
@@ -731,12 +722,10 @@ def test_snapshot_drift_drill_down_stays_frozen_and_refresh_mints_new_sns(
         refresh_root=True,
     )
     assert refreshed.ok is True, refreshed.error
-    fresh = load_frozen_view(
-        Path(refreshed.manifest_path or ""), project_root=project_root
+    fresh = load_frozen_view(Path(refreshed.manifest_path or ""), project_root=project_root)
+    assert (
+        fresh.manifest["snapshots"][0]["event_head"]["version"] == case["mutation"]["live_version"]
     )
-    assert fresh.manifest["snapshots"][0]["event_head"]["version"] == case["mutation"][
-        "live_version"
-    ]
     assert fresh.snapshot_sns != old.snapshot_sns
     # The frozen root pack was never mutated.
     assert _pack_bytes(root_manifest.parent) == old_bytes
@@ -826,15 +815,11 @@ def test_default_ci_is_credential_free_and_excludes_live(
     assert live_node in collect_live.stdout
 
     # (c) The CI script's default broad selection excludes live additively.
-    ci_script = (REPO_ROOT / "scripts" / "reshape" / "run_ci_checks.sh").read_text(
-        encoding="utf-8"
-    )
+    ci_script = (REPO_ROOT / "scripts" / "reshape" / "run_ci_checks.sh").read_text(encoding="utf-8")
     assert '-m "not integration and not opt_in and not live"' in ci_script
 
     # The default workflow sets no VLM credentials and never enters the live lane.
-    workflow = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(
-        encoding="utf-8"
-    )
+    workflow = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     for name in _VLM_CREDENTIAL_ENVS:
         assert name not in workflow
     assert "live" not in workflow

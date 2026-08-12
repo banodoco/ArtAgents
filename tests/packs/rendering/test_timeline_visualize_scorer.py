@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 import pytest
+from sisypy import ActorRun, RunMode, Scenario
 
 from astrid.packs.rendering.executors.timeline_visualize.scorer import (
     AnswerSpec,
@@ -14,13 +15,11 @@ from astrid.packs.rendering.executors.timeline_visualize.scorer import (
     session_identity,
 )
 from astrid.packs.understanding.executors.visual_understand.run import OrderedImageEvidence
-from sisypy import ActorRun, RunMode, Scenario
 from tests.agentic.adapter import (
     AstridProjectAdapter,
     EvidenceCaptureLimitError,
     capture_evidence_dir,
 )
-
 
 ANSWER_SCHEMA = {
     "additionalProperties": False,
@@ -76,7 +75,10 @@ def _answer(question_id: str, **values: object) -> dict[str, object]:
 
 def test_frames_are_exact_and_off_by_one_is_incorrect() -> None:
     evidence = _evidence(
-        {"fixture_id": "frames", "answers": [_answer("exact", frames=332), _answer("off", frames=333)]}
+        {
+            "fixture_id": "frames",
+            "answers": [_answer("exact", frames=332), _answer("off", frames=333)],
+        }
     )
     specs = [
         AnswerSpec("exact", "frames", None, 332),
@@ -165,13 +167,31 @@ def test_three_session_aggregation_never_averages_away_failure() -> None:
     correct = [ScoreResult("q", True, "exact-match", "yes")]
     failed = [ScoreResult("q", False, "off-by", "no")]
 
-    passed = aggregate_sessions([(0.95, correct), (1.0, correct), (0.96, correct)])
-    rejected = aggregate_sessions([(1.0, correct), (0.94, failed), (1.0, correct)])
+    passed = aggregate_sessions(
+        [("session-a", 0.95, correct), ("session-b", 1.0, correct), ("session-c", 0.96, correct)]
+    )
+    rejected = aggregate_sessions(
+        [("session-d", 1.0, correct), ("session-e", 0.94, failed), ("session-f", 1.0, correct)]
+    )
 
     assert passed["passed"] is True
+    assert passed["session_identities"] == ["session-a", "session-b", "session-c"]
     assert passed["session_passes"] == [True, True, True]
     assert rejected["passed"] is False
     assert rejected["session_passes"] == [True, False, True]
+
+
+def test_session_aggregation_rejects_duplicate_identities() -> None:
+    correct = [ScoreResult("q", True, "exact-match", "yes")]
+
+    with pytest.raises(ValueError, match="duplicate session identities: repeated"):
+        aggregate_sessions(
+            [
+                ("repeated", 1.0, correct),
+                ("fresh", 1.0, correct),
+                ("repeated", 1.0, correct),
+            ]
+        )
 
 
 def test_session_identity_uses_response_id_and_ordered_hashes() -> None:
@@ -211,7 +231,9 @@ def test_recursive_capture_skips_external_symlink_with_diagnostic(tmp_path: Path
 
     assert (captured / "inside.txt").read_text(encoding="utf-8") == "inside"
     assert not (captured / "escape.txt").exists()
-    assert "symlink target escapes evidence root" in (tmp_path / "out" / "capture.notes").read_text()
+    assert (
+        "symlink target escapes evidence root" in (tmp_path / "out" / "capture.notes").read_text()
+    )
 
 
 @pytest.mark.parametrize(

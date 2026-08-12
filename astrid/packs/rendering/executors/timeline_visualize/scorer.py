@@ -16,7 +16,6 @@ from astrid.packs.understanding.executors.visual_understand.run import (
     _parse_ordered_answers,
 )
 
-
 SESSION_PASS_THRESHOLD = 0.95
 REQUIRED_SESSION_COUNT = 3
 _KINDS = frozenset({"exact", "seconds", "frames", "choice", "ref"})
@@ -133,8 +132,7 @@ def score_answers(
         entries = _validated_answer_entries(evidence)
     except ValueError:
         return 0.0, [
-            ScoreResult(spec.question_id, False, "schema-failure", None)
-            for spec in frozen_specs
+            ScoreResult(spec.question_id, False, "schema-failure", None) for spec in frozen_specs
         ]
 
     results: list[ScoreResult] = []
@@ -165,9 +163,7 @@ def score_answers(
                     delta = abs(Decimal(str(raw)) - Decimal(str(spec.expected)))
                     correct = delta <= Decimal(str(spec.tolerance_seconds))
                 except InvalidOperation:
-                    results.append(
-                        ScoreResult(spec.question_id, False, "parse-failure", raw)
-                    )
+                    results.append(ScoreResult(spec.question_id, False, "parse-failure", raw))
                     continue
         else:
             if not isinstance(raw, str) or not isinstance(spec.expected, str):
@@ -188,16 +184,76 @@ def score_answers(
     return correct_count / len(frozen_specs), results
 
 
-def aggregate_sessions(
-    session_results: Sequence[tuple[float, list[ScoreResult]]],
+def detect_divergences(
+    evidence: OrderedImageEvidence,
+    *,
+    declared_image_hashes: Sequence[str] | None = None,
+) -> list[str]:
+    """Return deterministic provenance mismatches that invalidate a gate read."""
+
+    divergences: list[str] = []
+    if evidence.returned_model != evidence.model:
+        divergences.append(
+            f"model-divergence: requested={evidence.model!r}, returned={evidence.returned_model!r}"
+        )
+    if declared_image_hashes is not None:
+        declared = tuple(declared_image_hashes)
+        observed = tuple(evidence.image_hashes)
+        if observed != declared:
+            divergences.append(
+                f"image-order-divergence: declared={list(declared)!r}, observed={list(observed)!r}"
+            )
+    return divergences
+
+
+def process_evidence_for_gate(
+    evidence: OrderedImageEvidence,
+    specs: Sequence[AnswerSpec],
+    *,
+    declared_image_hashes: Sequence[str] | None = None,
 ) -> dict[str, Any]:
-    """Require three independent threshold passes; never average away failure."""
+    """Score one response and expose provenance validity for the release gate.
+
+    Gate callers must require ``valid_for_gate`` before aggregating the returned
+    identity, accuracy, and results as a fresh session.
+    """
+
+    divergences = detect_divergences(
+        evidence,
+        declared_image_hashes=declared_image_hashes,
+    )
+    accuracy, results = score_answers(evidence, specs)
+    return {
+        "accuracy": accuracy,
+        "divergences": divergences,
+        "results": results,
+        "session_identity": session_identity(evidence),
+        "valid_for_gate": not divergences,
+    }
+
+
+def aggregate_sessions(
+    sessions: Sequence[tuple[str, float, list[ScoreResult]]],
+) -> dict[str, Any]:
+    """Require three fresh threshold passes; reject repeated session identities."""
 
     accuracies: list[float] = []
-    for accuracy, _results in session_results:
+    identities: list[str] = []
+    seen_identities: set[str] = set()
+    duplicate_identities: set[str] = set()
+    for identity, accuracy, _results in sessions:
+        if not isinstance(identity, str) or not identity:
+            raise ValueError("session identity must be a non-empty string")
+        if identity in seen_identities:
+            duplicate_identities.add(identity)
+        seen_identities.add(identity)
+        identities.append(identity)
         if not _valid_number(accuracy) or not 0.0 <= float(accuracy) <= 1.0:
             raise ValueError("session accuracy must be a finite number between 0 and 1")
         accuracies.append(float(accuracy))
+    if duplicate_identities:
+        duplicates = ", ".join(sorted(duplicate_identities))
+        raise ValueError(f"duplicate session identities: {duplicates}")
     session_passes = [accuracy >= SESSION_PASS_THRESHOLD for accuracy in accuracies]
     passed = len(accuracies) == REQUIRED_SESSION_COUNT and all(session_passes)
     return {
@@ -208,6 +264,7 @@ def aggregate_sessions(
         "required_sessions": REQUIRED_SESSION_COUNT,
         "session_accuracies": accuracies,
         "session_count": len(accuracies),
+        "session_identities": identities,
         "session_passes": session_passes,
         "threshold": SESSION_PASS_THRESHOLD,
     }
