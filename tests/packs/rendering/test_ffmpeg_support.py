@@ -100,6 +100,7 @@ def _video_probe(*, audio: bool = False, duration: float = 4.0) -> MediaProbe:
         width=640,
         height=360,
         fps=30,
+        time_base=(1, 15360),
         resolution="640x360",
         video_codec="h264",
         pixel_format="yuv420p",

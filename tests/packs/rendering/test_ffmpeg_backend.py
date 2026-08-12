@@ -185,6 +185,7 @@ def test_support_is_strict_while_legacy_facade_eligibility_is_preserved(
         width=1920,
         height=1080,
         fps=30,
+        time_base=(1, 15360),
         video_codec="h264",
         pixel_format="yuv420p",
         audio_codec="aac",

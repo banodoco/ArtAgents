@@ -700,6 +700,7 @@ def _execute_remotion_locked(
                     "--output",
                     str(staged_video),
                     "--allow-html-in-canvas",
+                    "--enforce-audio-track",
                 ],
                 cwd=str(project_dir),
                 env=build_child_subprocess_env(explicit_env=remotion_env_additions),

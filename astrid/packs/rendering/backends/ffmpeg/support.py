@@ -11,7 +11,10 @@ import math
 import shutil
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from fractions import Fraction
 from pathlib import Path
+
+from astrid.core.rendering.profile import _mp4_time_base
 from typing import Any
 
 from astrid.core.media import MediaProbe, ffprobe_metadata_strict
@@ -477,21 +480,35 @@ def _whole_media_optimization(
     if probed_fps is None and media_probe.fps_rational is not None:
         numerator, denominator = media_probe.fps_rational
         probed_fps = numerator / denominator
+    # Frame-accurate tolerance: at most ONE frame of drift is acceptable
+    # (half a frame each way), so extra trailing frames at high FPS cannot
+    # slip through a coarse 50 ms window.
+    frame_tolerance = 0.5 / fps if fps > 0 else 0.0
     return (
         bounds.at == 0
         and bounds.source_from == 0
-        and abs(bounds.duration - duration) < 0.05
+        and abs(bounds.duration - duration) < frame_tolerance
         and entry.get("resolution") == f"{width}x{height}"
         and abs(source_fps - fps) < 1e-6
         and probed_duration is not None
-        and abs(bounds.duration - probed_duration) < 0.05
+        and abs(bounds.duration - probed_duration) < frame_tolerance
         and media_probe.width == width
         and media_probe.height == height
         and probed_fps is not None
         and abs(probed_fps - fps) < 1e-6
         and (media_probe.video_codec or "") == "h264"
         and (media_probe.pixel_format or "") == "yuv420p"
+        and _probe_time_base_matches(media_probe, (1, _mp4_time_base(Fraction(fps))[1]))
     )
+
+
+def _probe_time_base_matches(
+    probe: MediaProbe, expected: tuple[int, int]
+) -> bool:
+    """The probed stream time base must equal the canonical MP4 timescale."""
+    if probe.time_base is None:
+        return False
+    return Fraction(*probe.time_base) == Fraction(*expected)
 
 
 def _profile_support_reasons(
@@ -511,14 +528,20 @@ def _profile_support_reasons(
     checks = (
         ("width", profile.width, width),
         ("height", profile.height, height),
-        ("fps", _fps_int(profile.fps_rational), fps),
-        ("time_base", profile.time_base, (1, fps * 512)),
+        ("fps", profile.fps_rational, (fps, 1)),
+        ("time_base", profile.time_base, _mp4_time_base(Fraction(fps))),
         ("container", profile.container, "mp4"),
         ("video_codec", profile.video_codec, "h264"),
         ("pixel_format", profile.pixel_format, "yuv420p"),
     )
     for field, requested, produced in checks:
-        if requested is not None and requested != produced:
+        if requested is None:
+            continue
+        if field in ("fps", "time_base"):
+            equal = _rational_equal(requested, produced)
+        else:
+            equal = requested == produced
+        if not equal:
             reasons.append(
                 f"requested profile {field}={requested!r} is not produced by "
                 f"rendering.ffmpeg (produces {produced!r})"
@@ -542,6 +565,13 @@ def _fps_int(fps_rational: tuple[int, int] | None) -> int | None:
         return None
     num, den = fps_rational
     return num // den if den and num % den == 0 else None
+
+
+def _rational_equal(a: Any, b: Any) -> bool:
+    try:
+        return Fraction(*a) == Fraction(*b)
+    except (TypeError, ValueError, ZeroDivisionError):
+        return False
 
 
 def _canvas(timeline_data: Mapping[str, Any]) -> tuple[int, int, int]:
