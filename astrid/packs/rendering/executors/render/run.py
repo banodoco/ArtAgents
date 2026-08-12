@@ -12,15 +12,10 @@ import hashlib
 import json
 import os
 import shutil
-import socket
 import subprocess
 import sys
-import threading
-import urllib.error
-import urllib.request
-from datetime import datetime, timezone
-from functools import partial
-from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from contextlib import ExitStack
+from contextvars import ContextVar
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, Sequence
@@ -29,206 +24,26 @@ from astrid.core import timeline
 from astrid.core.audit import AuditContext
 from astrid.core.element.registry import load_default_registry
 from astrid.core.element.schema import ElementDefinition
+from astrid.core.foundation.atomic_io import write_json_atomic
 from astrid.core.foundation.paths import REPO_ROOT, WORKSPACE_ROOT
 from astrid.core.pack.discovery import discover_pack_metadata
+from astrid.core.rendering.assets import (
+    AssetMaterializer,
+    InvocationAssetServer,
+    RangeHTTPRequestHandler as _RangeHTTPRequestHandler,
+)
+from astrid.core.rendering.publication import publish_render_result
 from astrid.core.subprocess_env import build_child_subprocess_env
 from astrid.core.theme import load_theme
 from astrid.packs.rendering.executors.render import audio_reactive_colour
-from astrid.packs.training.executors.asset_cache import run as asset_cache
 from scripts import gen_effect_registry
 
 
 _REGISTRY_STATE_PATH = ".astrid-registry-state.json"
-
-
-def _pick_free_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
-
-
-class _RangeHTTPRequestHandler(SimpleHTTPRequestHandler):
-    """SimpleHTTPRequestHandler with HTTP Range support.
-
-    Remotion's media components seek into long source videos via Range
-    requests. Without this, a 2-hour source video gets fully downloaded
-    on every seek, which either times out or renders as black/silence.
-    """
-
-    def log_message(self, format: str, *args) -> None:  # noqa: A002
-        # Quiet the access log; one line per clip byte fetch is noise.
-        return
-
-    def end_headers(self) -> None:
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Range, Content-Type")
-        super().end_headers()
-
-    def send_head(self):
-        path = self.translate_path(self.path)
-        try:
-            f = open(path, "rb")
-        except OSError:
-            self.send_error(404, "File not found")
-            return None
-        try:
-            fs = os.fstat(f.fileno())
-        except OSError:
-            f.close()
-            self.send_error(500, "File stat failed")
-            return None
-        size = fs.st_size
-        range_header = self.headers.get("Range")
-        if range_header and range_header.startswith("bytes="):
-            try:
-                start_s, end_s = range_header[6:].split("-", 1)
-                start = int(start_s) if start_s else 0
-                end = int(end_s) if end_s else size - 1
-                if start < 0 or end >= size or start > end:
-                    raise ValueError
-            except ValueError:
-                f.close()
-                self.send_error(416, "Invalid Range")
-                return None
-            length = end - start + 1
-            f.seek(start)
-            self.send_response(206)
-            self.send_header("Content-Type", self.guess_type(path))
-            self.send_header("Accept-Ranges", "bytes")
-            self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
-            self.send_header("Content-Length", str(length))
-            self.end_headers()
-            self._range_limit = length
-            return f
-        self._range_limit = None
-        self.send_response(200)
-        self.send_header("Content-Type", self.guess_type(path))
-        self.send_header("Accept-Ranges", "bytes")
-        self.send_header("Content-Length", str(size))
-        self.end_headers()
-        return f
-
-    def copyfile(self, source, outputfile) -> None:
-        limit = getattr(self, "_range_limit", None)
-        if limit is None:
-            try:
-                super().copyfile(source, outputfile)
-            except (BrokenPipeError, ConnectionResetError):
-                pass
-            return
-        remaining = limit
-        chunk = 64 * 1024
-        try:
-            while remaining > 0:
-                buf = source.read(min(chunk, remaining))
-                if not buf:
-                    break
-                outputfile.write(buf)
-                remaining -= len(buf)
-        except (BrokenPipeError, ConnectionResetError):
-            pass
-
-
-def _accepts_ranges(url: str) -> bool:
-    request = urllib.request.Request(url, method="HEAD")
-    try:
-        with urllib.request.urlopen(request, timeout=20) as response:
-            return response.headers.get("Accept-Ranges", "").lower() == "bytes"
-    except (urllib.error.URLError, TimeoutError, OSError):
-        return False
-
-
-def _parse_url_expiry(value: str) -> datetime:
-    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
-
-
-def _classify_assets(assets_path: Path) -> dict[str, dict[str, object]]:
-    if not assets_path.exists():
-        raise FileNotFoundError("hype.assets.json missing — did you run cut.py first?")
-    registry = timeline.load_registry(assets_path)
-    classified: dict[str, dict[str, object]] = {}
-    now = datetime.now(timezone.utc)
-    for key, entry in registry["assets"].items():
-        url = entry.get("url")
-        expires_at = entry.get("url_expires_at")
-        if isinstance(expires_at, str) and _parse_url_expiry(expires_at) <= now:
-            raise RuntimeError(f"Asset {key} URL expired at {expires_at}; refresh upstream before rendering")
-        if isinstance(url, str):
-            if _accepts_ranges(url):
-                classified[key] = {"mode": "url-direct", "url": url, "local_path": None}
-            else:
-                classified[key] = {
-                    "mode": "url-fetched",
-                    "url": url,
-                    "local_path": Path(asset_cache.fetch(url, expected_sha256=entry.get("content_sha256"))),
-                }
-            continue
-        file_value = entry.get("file")
-        if not isinstance(file_value, str) or not file_value:
-            raise FileNotFoundError(f"Asset '{key}' has no file path or URL")
-        local_path = Path(file_value)
-        if not local_path.is_absolute():
-            local_path = (assets_path.parent / local_path).resolve()
-        classified[key] = {"mode": "local", "url": None, "local_path": local_path}
-    return classified
-
-
-def _server_root_for(assets_path: Path, classified: dict[str, dict[str, object]]) -> Path:
-    """Pick a serve root that contains every asset file.
-
-    Uses the common parent of all absolute asset paths. Callers must ensure
-    every asset resolves under this root before URL rewriting.
-    """
-    resolved_paths: list[Path] = []
-    for entry in classified.values():
-        if entry.get("mode") == "url-direct":
-            continue
-        local_path = entry.get("local_path")
-        if isinstance(local_path, Path):
-            resolved_paths.append(local_path.resolve())
-    if not resolved_paths:
-        return assets_path.parent
-    common = Path(os.path.commonpath([str(p) for p in resolved_paths]))
-    return common if common.is_dir() else common.parent
-
-
-def _warn_cross_project_assets(classified: dict[str, dict[str, object]]) -> None:
-    owner = os.environ.get("ASTRID_GATEWAY_RESOLVED_PROJECT")
-    if not owner:
-        return
-    try:
-        from astrid.core.foundation.project_paths import resolve_projects_root
-
-        projects_root = resolve_projects_root().resolve()
-    except Exception:
-        return
-    warned: set[tuple[str, str]] = set()
-    for asset_key, entry in classified.items():
-        local_path = entry.get("local_path")
-        if not isinstance(local_path, Path):
-            continue
-        try:
-            relative = local_path.resolve(strict=False).relative_to(projects_root)
-        except ValueError:
-            continue
-        if not relative.parts:
-            continue
-        asset_project = relative.parts[0]
-        if asset_project == owner:
-            continue
-        marker = (str(asset_key), asset_project)
-        if marker in warned:
-            continue
-        warned.add(marker)
-        print(
-            "rendering.render: warning: "
-            f"asset {asset_key!r} is from project {asset_project!r} "
-            f"while the render is owned by project {owner!r}; "
-            "keeping the owner project unchanged.",
-            file=sys.stderr,
-        )
+_PUBLICATION_PREVIOUS_OUTPUTS: ContextVar[tuple[Path, ...]] = ContextVar(
+    "render_publication_previous_outputs",
+    default=(),
+)
 
 
 def _swap_from_dump(clip: dict) -> dict:
@@ -236,41 +51,6 @@ def _swap_from_dump(clip: dict) -> dict:
     if "from_" in out:
         out["from"] = out.pop("from_")
     return out
-
-
-def _resolve_assets(
-    assets_path: Path,
-    server_root: Path,
-    server_port: int,
-    classified: dict[str, dict[str, object]],
-) -> dict:
-    # Remotion's bundler would copy the entire --public-dir into the webpack
-    # bundle, which explodes disk usage for large source videos. We serve
-    # assets over HTTP from their original location instead — Remotion's
-    # <Video src> accepts http:// URLs natively and streams without copying.
-    if not assets_path.exists():
-        raise FileNotFoundError("hype.assets.json missing — did you run cut.py first?")
-    registry = timeline.load_registry(assets_path)
-    for asset_key, entry in registry["assets"].items():
-        asset_info = classified[asset_key]
-        if asset_info.get("mode") == "url-direct":
-            entry["file"] = entry["url"]
-            continue
-        local_path = asset_info.get("local_path")
-        if not isinstance(local_path, Path):
-            raise FileNotFoundError(f"Asset '{asset_key}' has no local path")
-        resolved = local_path.resolve()
-        if not resolved.exists():
-            raise FileNotFoundError(f"Asset '{asset_key}' resolved to missing file: {resolved}")
-        try:
-            rel = resolved.relative_to(server_root)
-        except ValueError as err:
-            raise RuntimeError(
-                f"Asset '{asset_key}' at {resolved} is not inside server root {server_root}; "
-                "all assets must share a common parent directory"
-            ) from err
-        entry["file"] = f"http://localhost:{server_port}/{rel.as_posix()}"
-    return registry
 
 
 def _write_empty_asset_registry(path: Path) -> None:
@@ -515,7 +295,7 @@ def _validate_ffmpeg_media_timeline(timeline_data: dict) -> None:
         cursor = max(cursor, at + _clip_duration_seconds(clip))
 
 
-def _render_ffmpeg_media(timeline_path: Path, assets_path: Path, out_path: Path) -> Path:
+def _render_ffmpeg_media_to_path(timeline_path: Path, assets_path: Path, out_path: Path) -> Path:
     if not timeline_path.exists():
         raise FileNotFoundError(f"Timeline missing: {timeline_path}")
     if not assets_path.exists():
@@ -651,13 +431,57 @@ def _render_ffmpeg_media(timeline_path: Path, assets_path: Path, out_path: Path)
         ],
         check=True,
     )
+    return out_path
+
+
+def _render_ffmpeg_media(
+    timeline_path: Path,
+    assets_path: Path,
+    out_path: Path,
+    *,
+    _previous_outputs: Sequence[Path] | None = None,
+) -> Path:
+    """Render FFmpeg output privately, then publish the committed pair."""
+
+    out_path = out_path.resolve()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with TemporaryDirectory(
+        prefix=f".{out_path.name}.publication-",
+        dir=str(out_path.parent),
+    ) as publication_tmp:
+        staged_video = Path(publication_tmp) / out_path.name
+        _render_ffmpeg_media_to_path(timeline_path, assets_path, staged_video)
+        provenance = _render_provenance_payload(
+            out_path,
+            engine="ffmpeg",
+            timeline_path=timeline_path,
+            assets_path=assets_path,
+            project_dir=REPO_ROOT / "remotion",
+            composition_id="TimelineComposition",
+            theme_path=None,
+            active_theme=None,
+            registry_state=_effective_registry_state(None),
+            stage_summary={"root": None, "effects": []},
+        )
+        output = publish_render_result(
+            staged_video,
+            provenance,
+            out_path=out_path,
+            sidecar_path=_render_provenance_sidecar_path(out_path),
+            previous_outputs=(
+                _PUBLICATION_PREVIOUS_OUTPUTS.get()
+                if _previous_outputs is None
+                else _previous_outputs
+            ),
+        )
+
     audit = AuditContext.from_env()
     if audit is not None:
         timeline_id = audit.register_asset(kind="timeline", path=timeline_path, label="Render timeline", stage="render_ffmpeg")
         assets_id = audit.register_asset(kind="assets_registry", path=assets_path, label="Render asset registry", stage="render_ffmpeg")
         render_id = audit.register_asset(
             kind="render",
-            path=out_path,
+            path=output,
             label="Rendered video",
             parents=[timeline_id, assets_id],
             stage="render_ffmpeg",
@@ -670,7 +494,7 @@ def _render_ffmpeg_media(timeline_path: Path, assets_path: Path, out_path: Path)
             outputs=[render_id],
             metadata={"engine": "ffmpeg"},
         )
-    return out_path
+    return output
 
 
 def _can_render_with_ffmpeg_media(timeline_path: Path, assets_path: Path) -> bool:
@@ -851,7 +675,12 @@ def _render_hybrid(timeline_path: Path, assets_path: Path, out_path: Path, **rem
             segment_timeline = _window_timeline_data(timeline_data, start, end, media_only=(engine == "ffmpeg"))
             segment_timeline_path.write_text(json.dumps(segment_timeline, indent=2) + "\n", encoding="utf-8")
             if engine == "ffmpeg":
-                _render_ffmpeg_media(segment_timeline_path, assets_path, segment_out_path)
+                _render_ffmpeg_media(
+                    segment_timeline_path,
+                    assets_path,
+                    segment_out_path,
+                    _previous_outputs=(),
+                )
             else:
                 render(
                     segment_timeline_path,
@@ -864,8 +693,10 @@ def _render_hybrid(timeline_path: Path, assets_path: Path, out_path: Path, **rem
                 if sidecar_path.exists():
                     segment_provenance.append(json.loads(sidecar_path.read_text(encoding="utf-8")))
             segment_paths.append(segment_out_path)
-        _concat_segments(segment_paths, out_path)
-        _write_render_provenance(
+        staged_video = tmp_dir / "final" / out_path.name
+        staged_video.parent.mkdir(parents=True, exist_ok=True)
+        _concat_segments(segment_paths, staged_video)
+        provenance = _render_provenance_payload(
             out_path,
             engine="hybrid",
             timeline_path=timeline_path,
@@ -878,6 +709,13 @@ def _render_hybrid(timeline_path: Path, assets_path: Path, out_path: Path, **rem
             stage_summary={"root": None, "effects": []},
             segments=segments,
             segment_provenance=segment_provenance,
+        )
+        output = publish_render_result(
+            staged_video,
+            provenance,
+            out_path=out_path,
+            sidecar_path=_render_provenance_sidecar_path(out_path),
+            previous_outputs=_PUBLICATION_PREVIOUS_OUTPUTS.get(),
         )
 
     audit = AuditContext.from_env()
@@ -899,7 +737,7 @@ def _render_hybrid(timeline_path: Path, assets_path: Path, out_path: Path, **rem
             outputs=[render_id],
             metadata={"engine": "hybrid", "segments": segments},
         )
-    return out_path
+    return output
 
 
 def _timeline_composition_src(project_dir: Path) -> Path | None:
@@ -1124,30 +962,30 @@ def _render_provenance_sidecar_path(out_path: Path) -> Path:
     return Path(f"{out_path}.provenance.json")
 
 
-def _delete_previous_render_outputs_for_timeline(out_path: Path, timeline_path: Path) -> None:
+def _previous_render_outputs_for_timeline(
+    out_path: Path,
+    timeline_path: Path,
+) -> tuple[Path, ...]:
+    """Discover legacy sibling outputs; publication validates before deleting.
+
+    The timeline argument remains part of the helper boundary for compatibility
+    with the legacy cleanup call site.  Filtering now happens under each
+    candidate's publication lock using the committed sidecar.
+    """
+
     out_path = out_path.resolve()
     if out_path.name != "hype.mp4":
-        return
+        return ()
     run_dir = out_path.parent
     runs_dir = run_dir.parent
     if runs_dir.name != "runs" or not runs_dir.is_dir():
-        return
-    current_timeline = str(timeline_path.resolve())
+        return ()
+    candidates: list[Path] = []
     for candidate_run_dir in runs_dir.iterdir():
         if not candidate_run_dir.is_dir() or candidate_run_dir == run_dir:
             continue
-        candidate_out = candidate_run_dir / out_path.name
-        sidecar_path = _render_provenance_sidecar_path(candidate_out)
-        if not candidate_out.exists() or not sidecar_path.exists():
-            continue
-        try:
-            provenance = json.loads(sidecar_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            continue
-        if provenance.get("timeline") != current_timeline:
-            continue
-        candidate_out.unlink(missing_ok=True)
-        sidecar_path.unlink(missing_ok=True)
+        candidates.append(candidate_run_dir / out_path.name)
+    return tuple(candidates)
 
 
 def _active_pack_order_for_provenance() -> list[dict[str, Any]]:
@@ -1170,7 +1008,7 @@ def _active_theme_for_provenance(theme_path: Path | None, active_theme: dict[str
     return {"id": theme_id or resolved.parent.name, "path": str(resolved)}
 
 
-def _write_render_provenance(
+def _render_provenance_payload(
     out_path: Path,
     *,
     engine: str,
@@ -1184,7 +1022,7 @@ def _write_render_provenance(
     stage_summary: dict[str, Any],
     segments: list[dict[str, float | str]] | None = None,
     segment_provenance: list[dict[str, Any]] | None = None,
-) -> Path:
+) -> dict[str, Any]:
     effects = list(stage_summary.get("effects") or [])
     payload: dict[str, Any] = {
         "schema_version": 1,
@@ -1228,8 +1066,40 @@ def _write_render_provenance(
         payload["segments"] = segments
     if segment_provenance is not None:
         payload["segment_provenance"] = segment_provenance
+    return payload
+
+
+def _write_render_provenance(
+    out_path: Path,
+    *,
+    engine: str,
+    timeline_path: Path,
+    assets_path: Path,
+    project_dir: Path,
+    composition_id: str,
+    theme_path: Path | None,
+    active_theme: dict[str, Any] | None,
+    registry_state: dict[str, Any],
+    stage_summary: dict[str, Any],
+    segments: list[dict[str, float | str]] | None = None,
+    segment_provenance: list[dict[str, Any]] | None = None,
+) -> Path:
+    payload = _render_provenance_payload(
+        out_path,
+        engine=engine,
+        timeline_path=timeline_path,
+        assets_path=assets_path,
+        project_dir=project_dir,
+        composition_id=composition_id,
+        theme_path=theme_path,
+        active_theme=active_theme,
+        registry_state=registry_state,
+        stage_summary=stage_summary,
+        segments=segments,
+        segment_provenance=segment_provenance,
+    )
     sidecar_path = _render_provenance_sidecar_path(out_path)
-    sidecar_path.write_text(json.dumps(payload, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    write_json_atomic(sidecar_path, payload)
     return sidecar_path
 
 
@@ -1312,7 +1182,8 @@ def _render_audio_reactive_colour_if_supported(
     if spec is None:
         return None
 
-    output = audio_reactive_colour.render(spec, out_path)
+    out_path = out_path.resolve()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     stage_summary = {
         "root": None,
         "effects": [
@@ -1332,30 +1203,38 @@ def _render_audio_reactive_colour_if_supported(
             }
         ],
     }
-    sidecar_path = _write_render_provenance(
-        output,
-        engine="ffmpeg",
-        timeline_path=timeline_path,
-        assets_path=assets_path,
-        project_dir=project_dir or (REPO_ROOT / "remotion"),
-        composition_id=composition_id,
-        theme_path=theme_path,
-        active_theme=None,
-        registry_state=_effective_registry_state(theme_path),
-        stage_summary=stage_summary,
-    )
-    provenance = json.loads(sidecar_path.read_text(encoding="utf-8"))
-    provenance["ffmpeg_specialization"] = audio_reactive_colour.ADAPTER_ID
-    provenance["audio_reactive_colour"] = {
-        "event_count": len(spec.events),
-        "fps": spec.fps,
-        "frame_count": spec.total_frames,
-        "marker_sha256": spec.marker_sha256,
-    }
-    sidecar_path.write_text(
-        json.dumps(provenance, sort_keys=True, indent=2) + "\n",
-        encoding="utf-8",
-    )
+    with TemporaryDirectory(
+        prefix=f".{out_path.name}.publication-",
+        dir=str(out_path.parent),
+    ) as publication_tmp:
+        staged_video = Path(publication_tmp) / out_path.name
+        rendered_video = audio_reactive_colour.render(spec, staged_video)
+        provenance = _render_provenance_payload(
+            out_path,
+            engine="ffmpeg",
+            timeline_path=timeline_path,
+            assets_path=assets_path,
+            project_dir=project_dir or (REPO_ROOT / "remotion"),
+            composition_id=composition_id,
+            theme_path=theme_path,
+            active_theme=None,
+            registry_state=_effective_registry_state(theme_path),
+            stage_summary=stage_summary,
+        )
+        provenance["ffmpeg_specialization"] = audio_reactive_colour.ADAPTER_ID
+        provenance["audio_reactive_colour"] = {
+            "event_count": len(spec.events),
+            "fps": spec.fps,
+            "frame_count": spec.total_frames,
+            "marker_sha256": spec.marker_sha256,
+        }
+        output = publish_render_result(
+            rendered_video,
+            provenance,
+            out_path=out_path,
+            sidecar_path=_render_provenance_sidecar_path(out_path),
+            previous_outputs=_PUBLICATION_PREVIOUS_OUTPUTS.get(),
+        )
 
     audit = AuditContext.from_env()
     if audit is not None:
@@ -1397,7 +1276,7 @@ def _render_audio_reactive_colour_if_supported(
     return output
 
 
-def render(
+def _render_with_publication_context(
     timeline_path: Path,
     assets_path: Path,
     out_path: Path,
@@ -1407,11 +1286,8 @@ def render(
     composition_id: str = "TimelineComposition",
     theme_path: Path | None = None,
     min_free_gb: float | None = None,
-    keep_previous_renders: bool = False,
 ) -> Path:
     out_path = out_path.resolve()
-    if not keep_previous_renders:
-        _delete_previous_render_outputs_for_timeline(out_path, timeline_path)
     audio_reactive_output = _render_audio_reactive_colour_if_supported(
         timeline_path,
         assets_path,
@@ -1444,100 +1320,113 @@ def render(
     registry_state = _effective_registry_state(theme_path)
     _require_free_space(out_path.parent, min_free_gb)
     props_path = (out_path.parent / ".remotion-props.json").resolve()
-    classified = _classify_assets(assets_path)
-    _warn_cross_project_assets(classified)
-    server_root = _server_root_for(assets_path, classified).resolve()
-    try:
-        port = _pick_free_port()
-        handler = partial(_RangeHTTPRequestHandler, directory=str(server_root))
-        server = ThreadingHTTPServer(("127.0.0.1", port), handler)
-    except OSError as exc:
-        raise RuntimeError(f"Permission denied (1100): local HTTP asset server blocked: {exc}") from exc
-    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
-    server_thread.start()
     render_hash = _render_asset_stage_hash(timeline_path, assets_path, out_path)
     staged_public_root = project_dir / "public" / "astrid-effects" / render_hash
-    try:
-        resolved_registry = _resolve_assets(assets_path, server_root, port, classified)
-        resolved_theme = theme_path or (WORKSPACE_ROOT / "themes" / "banodoco-default" / "theme.json")
-        theme_for_props = _resolved_theme_for_render(timeline_path, resolved_theme)
-        # The timeline references a theme by slug + optional theme_overrides;
-        # theme.visual.canvas is the source of truth for Remotion calculateMetadata.
-        merged_props = {
-            "timeline": _serialize_timeline(
-                timeline_path,
-                default_theme=str(theme_for_props.get("id") or "banodoco-default"),
-            ),
-            "assets": resolved_registry,
-            "theme": theme_for_props,
-        }
-        stage_summary = _stage_effect_assets_for_timeline(
-            merged_props["timeline"],
-            project_dir=project_dir,
-            theme_path=theme_path,
-            render_hash=render_hash,
-        )
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        props_path.write_text(json.dumps(merged_props), encoding="utf-8")
-        # Build the Remotion launch env from the canonical safe base plus the
-        # Astrid runtime markers it propagates. We do NOT spread os.environ:
-        # the only Node/Remotion additions are the safe-base PATH/HOME/TMPDIR
-        # that npx + the headless renderer need, and any caller-provided
-        # composition source override declared as a build-tool variable.
-        remotion_env_additions: dict[str, str] = {}
-        composition_src = (
-            project_dir / "node_modules" / "@banodoco" / "timeline-composition" / "typescript" / "src"
-        )
-        if composition_src.is_dir():
-            remotion_env_additions["ASTRID_TIMELINE_COMPOSITION_SRC"] = str(composition_src)
-        result = subprocess.run(
-            [
-                "npx",
-                "remotion",
-                "render",
-                composition_id,
-                "--props",
-                str(props_path),
-                "--output",
-                str(out_path),
-                "--allow-html-in-canvas",
-            ],
-            cwd=str(project_dir),
-            env=build_child_subprocess_env(explicit_env=remotion_env_additions),
-            capture_output=True,
-            check=False,
-            text=True,
-        )
-        if result.returncode != 0:
-            stderr_tail = _stderr_tail(result.stderr)
-            message = f"Remotion render failed with exit code {result.returncode}"
-            if stderr_tail:
-                message = f"{message}\n{stderr_tail}"
-            raise RuntimeError(message)
-        _write_render_provenance(
-            out_path,
-            engine="remotion",
-            timeline_path=timeline_path,
-            assets_path=assets_path,
-            project_dir=project_dir,
-            composition_id=composition_id,
-            theme_path=theme_path,
-            active_theme=theme_for_props,
-            registry_state=registry_state,
-            stage_summary=stage_summary,
-        )
-    finally:
-        props_path.unlink(missing_ok=True)
-        shutil.rmtree(staged_public_root, ignore_errors=True)
-        server.shutdown()
-        server.server_close()
+    with ExitStack() as asset_lifecycle:
+        try:
+            materializer = asset_lifecycle.enter_context(AssetMaterializer(assets_path))
+            asset_server = None
+            if materializer.needs_server:
+                try:
+                    asset_server = asset_lifecycle.enter_context(
+                        InvocationAssetServer(materializer.staging_dir)
+                    )
+                except OSError as exc:
+                    raise RuntimeError(
+                        f"Permission denied (1100): local HTTP asset server blocked: {exc}"
+                    ) from exc
+            resolved_registry = materializer.resolved_registry(asset_server)
+            resolved_theme = theme_path or (WORKSPACE_ROOT / "themes" / "banodoco-default" / "theme.json")
+            theme_for_props = _resolved_theme_for_render(timeline_path, resolved_theme)
+            # The timeline references a theme by slug + optional theme_overrides;
+            # theme.visual.canvas is the source of truth for Remotion calculateMetadata.
+            merged_props = {
+                "timeline": _serialize_timeline(
+                    timeline_path,
+                    default_theme=str(theme_for_props.get("id") or "banodoco-default"),
+                ),
+                "assets": resolved_registry,
+                "theme": theme_for_props,
+            }
+            stage_summary = _stage_effect_assets_for_timeline(
+                merged_props["timeline"],
+                project_dir=project_dir,
+                theme_path=theme_path,
+                render_hash=render_hash,
+            )
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            publication_tmp = asset_lifecycle.enter_context(
+                TemporaryDirectory(
+                    prefix=f".{out_path.name}.publication-",
+                    dir=str(out_path.parent),
+                )
+            )
+            staged_video = Path(publication_tmp) / out_path.name
+            props_path.write_text(json.dumps(merged_props), encoding="utf-8")
+            # Build the Remotion launch env from the canonical safe base plus the
+            # Astrid runtime markers it propagates. We do NOT spread os.environ:
+            # the only Node/Remotion additions are the safe-base PATH/HOME/TMPDIR
+            # that npx + the headless renderer need, and any caller-provided
+            # composition source override declared as a build-tool variable.
+            remotion_env_additions: dict[str, str] = {}
+            composition_src = (
+                project_dir / "node_modules" / "@banodoco" / "timeline-composition" / "typescript" / "src"
+            )
+            if composition_src.is_dir():
+                remotion_env_additions["ASTRID_TIMELINE_COMPOSITION_SRC"] = str(composition_src)
+            result = subprocess.run(
+                [
+                    "npx",
+                    "remotion",
+                    "render",
+                    composition_id,
+                    "--props",
+                    str(props_path),
+                    "--output",
+                    str(staged_video),
+                    "--allow-html-in-canvas",
+                ],
+                cwd=str(project_dir),
+                env=build_child_subprocess_env(explicit_env=remotion_env_additions),
+                capture_output=True,
+                check=False,
+                text=True,
+            )
+            if result.returncode != 0:
+                stderr_tail = _stderr_tail(result.stderr)
+                message = f"Remotion render failed with exit code {result.returncode}"
+                if stderr_tail:
+                    message = f"{message}\n{stderr_tail}"
+                raise RuntimeError(message)
+            provenance = _render_provenance_payload(
+                out_path,
+                engine="remotion",
+                timeline_path=timeline_path,
+                assets_path=assets_path,
+                project_dir=project_dir,
+                composition_id=composition_id,
+                theme_path=theme_path,
+                active_theme=theme_for_props,
+                registry_state=registry_state,
+                stage_summary=stage_summary,
+            )
+            output = publish_render_result(
+                staged_video,
+                provenance,
+                out_path=out_path,
+                sidecar_path=_render_provenance_sidecar_path(out_path),
+                previous_outputs=_PUBLICATION_PREVIOUS_OUTPUTS.get(),
+            )
+        finally:
+            props_path.unlink(missing_ok=True)
+            shutil.rmtree(staged_public_root, ignore_errors=True)
     audit = AuditContext.from_env()
     if audit is not None:
         timeline_id = audit.register_asset(kind="timeline", path=timeline_path, label="Render timeline", stage="render_remotion")
         assets_id = audit.register_asset(kind="assets_registry", path=assets_path, label="Render asset registry", stage="render_remotion")
         render_id = audit.register_asset(
             kind="render",
-            path=out_path,
+            path=output,
             label="Rendered video",
             parents=[timeline_id, assets_id],
             stage="render_remotion",
@@ -1550,7 +1439,43 @@ def render(
             outputs=[render_id],
             metadata={"composition": composition_id, "project_dir": str(project_dir)},
         )
-    return out_path
+    return output
+
+
+def render(
+    timeline_path: Path,
+    assets_path: Path,
+    out_path: Path,
+    *,
+    engine: str = "remotion",
+    project_dir: Path | None = None,
+    composition_id: str = "TimelineComposition",
+    theme_path: Path | None = None,
+    min_free_gb: float | None = None,
+    keep_previous_renders: bool = False,
+) -> Path:
+    """Render privately and publish one locked video-plus-sidecar pair."""
+
+    out_path = out_path.resolve()
+    previous_outputs = (
+        ()
+        if keep_previous_renders
+        else _previous_render_outputs_for_timeline(out_path, timeline_path)
+    )
+    publication_token = _PUBLICATION_PREVIOUS_OUTPUTS.set(previous_outputs)
+    try:
+        return _render_with_publication_context(
+            timeline_path,
+            assets_path,
+            out_path,
+            engine=engine,
+            project_dir=project_dir,
+            composition_id=composition_id,
+            theme_path=theme_path,
+            min_free_gb=min_free_gb,
+        )
+    finally:
+        _PUBLICATION_PREVIOUS_OUTPUTS.reset(publication_token)
 
 
 def main(argv: Sequence[str] | None = None) -> int:

@@ -19,21 +19,11 @@ ROOT = Path(__file__).resolve().parents[3]
 LOCAL_EFFECT_SMOKE_FIXTURE = ROOT / "tests" / "fixtures" / "local_effect_smoke"
 
 
-class _NoopHTTPServer:
-    def __init__(self, address, handler) -> None:
-        self.address = address
-        self.handler = handler
-        self.shutdown_called = False
-        self.server_close_called = False
-
-    def serve_forever(self) -> None:
-        return None
-
-    def shutdown(self) -> None:
-        self.shutdown_called = True
-
-    def server_close(self) -> None:
-        self.server_close_called = True
+def _write_fake_remotion_output(command: list[str]) -> Path:
+    output = Path(command[command.index("--output") + 1])
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_bytes(b"fake-remotion-video")
+    return output
 
 
 class RenderRemotionRegistryGenerationTest(unittest.TestCase):
@@ -233,6 +223,7 @@ class RenderRemotionRegistryGenerationTest(unittest.TestCase):
                         generated_output.write_text("// generated test fixture\n", encoding="utf-8")
                 elif command[:3] == ["npx", "remotion", "render"]:
                     remotion_runs += 1
+                    _write_fake_remotion_output(command)
                 return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
             with (
@@ -240,8 +231,6 @@ class RenderRemotionRegistryGenerationTest(unittest.TestCase):
                 mock.patch.object(render_remotion, "_registry_output_paths", return_value=generated_outputs),
                 mock.patch.object(render_remotion, "_active_theme_pointer_current", return_value=True),
                 mock.patch.object(render_remotion.subprocess, "run", side_effect=fake_run),
-                mock.patch.object(render_remotion, "_pick_free_port", return_value=49152),
-                mock.patch.object(render_remotion, "ThreadingHTTPServer", _NoopHTTPServer),
             ):
                 render_remotion.render(
                     timeline_path,
@@ -314,29 +303,12 @@ class RenderRemotionRegistryGenerationTest(unittest.TestCase):
                     props_path = Path(command[command.index("--props") + 1])
                     props_paths.append(props_path)
                     props_payloads.append(json.loads(props_path.read_text(encoding="utf-8")))
+                    _write_fake_remotion_output(command)
                 return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
-
-            class FakeServer:
-                def __init__(self, address, handler) -> None:
-                    self.address = address
-                    self.handler = handler
-                    self.shutdown_called = False
-                    self.server_close_called = False
-
-                def serve_forever(self) -> None:
-                    return None
-
-                def shutdown(self) -> None:
-                    self.shutdown_called = True
-
-                def server_close(self) -> None:
-                    self.server_close_called = True
 
             with (
                 mock.patch.dict(render_remotion.os.environ, {}, clear=True),
                 mock.patch.object(render_remotion.subprocess, "run", side_effect=fake_run),
-                mock.patch.object(render_remotion, "_pick_free_port", return_value=49152),
-                mock.patch.object(render_remotion, "ThreadingHTTPServer", FakeServer),
             ):
                 result = render_remotion.render(
                     timeline_path,
@@ -361,7 +333,9 @@ class RenderRemotionRegistryGenerationTest(unittest.TestCase):
 
         self.assertEqual(remotion_cmd[:3], ["npx", "remotion", "render"])
         self.assertEqual(remotion_cmd[3], "TimelineComposition")
-        self.assertEqual(remotion_cmd[remotion_cmd.index("--output") + 1], str(out_path.resolve()))
+        remotion_output = Path(remotion_cmd[remotion_cmd.index("--output") + 1])
+        self.assertEqual(remotion_output.name, out_path.name)
+        self.assertNotEqual(remotion_output, out_path.resolve())
         self.assertIn("--allow-html-in-canvas", remotion_cmd)
         self.assertEqual(remotion_kwargs["cwd"], str(project_dir))
         self.assertFalse(remotion_kwargs["check"])
@@ -428,25 +402,11 @@ class RenderRemotionRegistryGenerationTest(unittest.TestCase):
                     staged_roots_seen.append(staged_asset.parents[2])
                     self.assertEqual(staged_asset.read_text(encoding="utf-8"), "used asset")
                     self.assertFalse((staged_asset.parents[2] / "unused" / "assets" / "badge.txt").exists())
+                    _write_fake_remotion_output(command)
                 return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
-
-            class FakeServer:
-                def __init__(self, address, handler) -> None:
-                    pass
-
-                def serve_forever(self) -> None:
-                    return None
-
-                def shutdown(self) -> None:
-                    return None
-
-                def server_close(self) -> None:
-                    return None
 
             with (
                 mock.patch.object(render_remotion.subprocess, "run", side_effect=fake_run),
-                mock.patch.object(render_remotion, "_pick_free_port", return_value=49152),
-                mock.patch.object(render_remotion, "ThreadingHTTPServer", FakeServer),
                 mock.patch.object(
                     render_remotion,
                     "_effect_registry_for_assets",
@@ -519,23 +479,8 @@ class RenderRemotionRegistryGenerationTest(unittest.TestCase):
                     return subprocess.CompletedProcess(cmd, 2, stdout="", stderr="boom\n")
                 return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
-            class FakeServer:
-                def __init__(self, address, handler) -> None:
-                    pass
-
-                def serve_forever(self) -> None:
-                    return None
-
-                def shutdown(self) -> None:
-                    return None
-
-                def server_close(self) -> None:
-                    return None
-
             with (
                 mock.patch.object(render_remotion.subprocess, "run", side_effect=fake_run),
-                mock.patch.object(render_remotion, "_pick_free_port", return_value=49152),
-                mock.patch.object(render_remotion, "ThreadingHTTPServer", FakeServer),
                 mock.patch.object(
                     render_remotion,
                     "_effect_registry_for_assets",
@@ -592,13 +537,12 @@ class RenderRemotionRegistryGenerationTest(unittest.TestCase):
                     staged_asset_paths_seen.extend([staged_badge, staged_palette])
                     self.assertEqual(staged_badge.read_text(encoding="utf-8"), "fixture badge asset\n")
                     self.assertEqual(staged_palette.read_text(encoding="utf-8"), '{"accent":"cyan"}\n')
+                    _write_fake_remotion_output(command)
                 return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
             with (
                 mock.patch.object(render_remotion, "REPO_ROOT", project_root),
                 mock.patch.object(render_remotion.subprocess, "run", side_effect=fake_run),
-                mock.patch.object(render_remotion, "_pick_free_port", return_value=49152),
-                mock.patch.object(render_remotion, "ThreadingHTTPServer", _NoopHTTPServer),
                 mock.patch.object(render_remotion, "load_default_registry", side_effect=capturing_load_default_registry),
             ):
                 result = render_remotion.render(
@@ -649,13 +593,14 @@ class RenderRemotionRegistryGenerationTest(unittest.TestCase):
             expected_effect = expected_registry.get("effects", "fixture-smoke-effect")
 
             def fake_run(cmd, **kwargs):
+                command = [str(part) for part in cmd]
+                if command[:3] == ["npx", "remotion", "render"]:
+                    _write_fake_remotion_output(command)
                 return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
             with (
                 mock.patch.object(render_remotion, "REPO_ROOT", project_root),
                 mock.patch.object(render_remotion.subprocess, "run", side_effect=fake_run),
-                mock.patch.object(render_remotion, "_pick_free_port", return_value=49152),
-                mock.patch.object(render_remotion, "ThreadingHTTPServer", _NoopHTTPServer),
             ):
                 result = render_remotion.render(
                     timeline_path,
@@ -778,20 +723,8 @@ class RenderRemotionRegistryGenerationTest(unittest.TestCase):
                 command = [str(part) for part in cmd]
                 if command[:3] == ["npx", "remotion", "render"]:
                     remotion_envs.append(dict(kwargs["env"]))
+                    _write_fake_remotion_output(command)
                 return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
-
-            class FakeServer:
-                def __init__(self, address, handler) -> None:
-                    pass
-
-                def serve_forever(self) -> None:
-                    return None
-
-                def shutdown(self) -> None:
-                    return None
-
-                def server_close(self) -> None:
-                    return None
 
             host_env = {
                 "OPENAI_API_KEY": "sk-should-not-leak",
@@ -805,8 +738,6 @@ class RenderRemotionRegistryGenerationTest(unittest.TestCase):
             with (
                 mock.patch.dict(render_remotion.os.environ, host_env, clear=True),
                 mock.patch.object(render_remotion.subprocess, "run", side_effect=fake_run),
-                mock.patch.object(render_remotion, "_pick_free_port", return_value=49152),
-                mock.patch.object(render_remotion, "ThreadingHTTPServer", FakeServer),
             ):
                 render_remotion.render(
                     timeline_path,
