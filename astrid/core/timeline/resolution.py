@@ -299,6 +299,20 @@ def _resolve_local_path(
     )
 
 
+def _sources_relative(project_root: Path, path: Path) -> str:
+    """Project-scoped relative rendering of a contained path.
+
+    Returns ``sources/...`` relative to *project_root* when possible (never an
+    absolute path); falls back to the bare file name otherwise.  This is the
+    only path form allowed inside reason strings: diagnostics and manifest
+    warnings must never carry absolute worktree/project paths.
+    """
+    try:
+        return path.relative_to(Path(project_root).resolve()).as_posix()
+    except ValueError:
+        return path.name
+
+
 def _metadata_suffix(entry: dict[str, Any]) -> str:
     parts: list[str] = []
     duration = entry.get("duration")
@@ -346,17 +360,15 @@ def classify_asset(
 
     # Rule 1: thumbnail-only assets require no hash and are never substituted.
     if role == "thumbnail_only":
-        path, failure = _resolve_local_path(entry, project_root)
+        resolved_path, _failure = _resolve_local_path(entry, project_root)
         reason = "thumbnail-only asset — no hash required"
-        if path is not None:
-            reason += f" (local file: {path})"
         return AssetIntegrity(
             asset_key=key,
             role=role,
             state="thumbnail_only",
             expected_sha256=None,
             observed_sha256=None,
-            path=str(path) if path is not None else None,
+            path=str(resolved_path) if resolved_path is not None else None,
             reason=reason,
             source_id=source_id,
             source_version=source_version,
@@ -387,7 +399,10 @@ def classify_asset(
             expected_sha256=_expected_hash(entry),
             observed_sha256=None,
             path=None,
-            reason=f"path escapes project root: {_local_ref(entry)!r}",
+            reason=(
+                "path escapes project root — local reference is not contained "
+                "under project sources"
+            ),
             source_id=source_id,
             source_version=source_version,
         )
@@ -401,7 +416,10 @@ def classify_asset(
             expected_sha256=_expected_hash(entry),
             observed_sha256=None,
             path=None,
-            reason=f"path outside sources: {_local_ref(entry)!r}",
+            reason=(
+                "path outside sources — local reference stays inside "
+                "project_root but outside sources/"
+            ),
             source_id=source_id,
             source_version=source_version,
         )
@@ -415,7 +433,7 @@ def classify_asset(
             expected_sha256=_expected_hash(entry),
             observed_sha256=None,
             path=None,
-            reason=f"symlink escapes sources: {_local_ref(entry)!r}",
+            reason="symlink escapes sources — resolved target leaves the sources tree",
             source_id=source_id,
             source_version=source_version,
         )
@@ -468,7 +486,10 @@ def classify_asset(
             expected_sha256=_expected_hash(entry),
             observed_sha256=None,
             path=str(path),
-            reason=f"file not found or not a regular file: {path}",
+            reason=(
+                f"file not found or not a regular file under sources: "
+                f"{_sources_relative(project_root, path)} (asset {key!r})"
+            ),
             source_id=source_id,
             source_version=source_version,
         )
@@ -493,6 +514,7 @@ def classify_asset(
     try:
         observed = _sha256_file(path)
     except OSError as exc:  # e.g. permission denied, is-a-directory
+        errno = exc.errno if isinstance(exc.errno, int) else None
         return AssetIntegrity(
             asset_key=key,
             role=role,
@@ -500,7 +522,11 @@ def classify_asset(
             expected_sha256=expected,
             observed_sha256=None,
             path=str(path),
-            reason=f"file not readable: {exc}",
+            reason=(
+                f"file not readable under sources (errno {errno})"
+                if errno is not None
+                else "file not readable under sources"
+            ),
             source_id=source_id,
             source_version=source_version,
         )

@@ -14,6 +14,7 @@ facade over `RenderService`: the service resolves a renderer or planner from
 pack manifests, probes support, invokes protocol-v1 commands, validates media,
 completes audio/finalization when required, and publishes the video plus
 provenance. `hybrid` is a legacy planning policy, not a renderer.
+>>>>>>> d30440a8 (feat(timeline_visualize): B5 — verified sources, evidence pack, executor packaging)
 
 ## Render flow
 
@@ -44,6 +45,9 @@ strict request-sensitive specialization: one full-duration frame-aligned
 effect plus one coextensive local audio clip is compiled to FFmpeg `sendcmd`.
 The effect parameters remain the editable source of truth; normal service
 selection and support evidence decide whether this renderer is used.
+
+## Auto-started HTTP server
+>>>>>>> d30440a8 (feat(timeline_visualize): B5 — verified sources, evidence pack, executor packaging)
 
 ## Remotion asset materialization
 
@@ -82,7 +86,12 @@ specified.
 
 | Executor | What it does |
 |---|---|
+<<<<<<< HEAD
 | `rendering.render` | Stable facade that renders a hype timeline through a qualified renderer or planner and writes an MP4 plus provenance. Pipeline step 12 — the terminal step before optional YouTube upload or Reigh publish. |
+=======
+| `rendering.render` | Render a hype timeline, with optional media assets, into `hype.mp4` and a provenance sidecar through Remotion, ffmpeg, or hybrid rendering. Pipeline step 12 — the terminal step before optional YouTube upload or Reigh publish. |
+| `rendering.timeline_visualize` | Read managed timeline event logs without mutation and emit a deterministic, run-owned agent evidence pack with JSON, Markdown, PNG, SVG, and navigation actions. |
+>>>>>>> d30440a8 (feat(timeline_visualize): B5 — verified sources, evidence pack, executor packaging)
 | `rendering.sprite_sheet` | Generate, slice, and preview GPT Image sprite sheets for batch image work. Produces a sprite atlas (`sprite_sheet.png`), alpha-processed variant, manifest, and MP4 preview. |
 | `rendering.html_canvas_effect` | Scaffold a local Remotion HTML-in-canvas effect element. Creates a user-editable effect under `astrid/packs/local/elements/effects/<effect_id>/` with DOM content wrapped in Remotion's `HtmlInCanvas` for optional canvas/WebGL post-processing. |
 
@@ -140,9 +149,18 @@ Requires `OPENAI_API_KEY` and `ffmpeg` on the system path.
 
 - Use `rendering.render` to produce the final video from a timeline and,
   only when needed, an asset registry. This is the standard rendering path.
+<<<<<<< HEAD
 - Use the `audio-reactive-colour` effect for frozen integer-frame colour
   markers. Keep one effect clip rather than expanding each state into a clip;
   the service selects the supporting renderer from request-sensitive evidence.
+=======
+- Use `rendering.timeline_visualize` to inspect one or all managed timelines
+  through a deterministic evidence pack. It reads event logs without repair,
+  owns retention through run metadata, and never mutates timeline manifests.
+- Use the `audio-reactive-colour` effect for frozen integer-frame colour
+  markers. Keep one effect clip rather than expanding each state into a clip;
+  `rendering.render` selects the fast final-export adapter automatically.
+>>>>>>> d30440a8 (feat(timeline_visualize): B5 — verified sources, evidence pack, executor packaging)
 - Use `rendering.sprite_sheet` when you need to generate a batch of
   related images as a sprite atlas for animation.
 - Use `rendering.html_canvas_effect` when you need a custom visual effect

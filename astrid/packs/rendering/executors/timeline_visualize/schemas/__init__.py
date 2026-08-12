@@ -1,6 +1,6 @@
 """Versioned machine-artifact schemas for timeline visualization.
 
-The seven entries are independently versioned even though they currently all
+The eight entries are independently versioned even though they currently all
 start at version 1.  ``_defs.json`` is shared schema infrastructure and is not
 itself an emitted artifact.
 """
@@ -52,6 +52,7 @@ SCHEMAS: dict[str, Schema] = {
         "asset-index",
         "transcript-index",
         "diagnostics",
+        "metric-definitions",
     )
 }
 

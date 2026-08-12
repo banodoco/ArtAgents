@@ -184,6 +184,14 @@ def prepare_project_run(
     base_metadata.setdefault("pid", os.getpid())
     base_metadata.setdefault("prepared_at", prepared_at)
     base_metadata.setdefault("process_platform", sys.platform)
+    if requires_timeline is None:
+        # Preserve the legacy default while allowing callers that own an
+        # executor definition to opt out explicitly.
+        requires_timeline = True
+    if not requires_timeline:
+        # A timeline-unbound run never inherits, records, or contributes to a
+        # timeline even when it is attached to a timeline-bound task run.
+        timeline_id = None
     effective_session_id = session_id or os.environ.get(ASTRID_SESSION_ID)
     if auto_bound is not None:
         base_metadata.pop("project_was_auto_resolved", None)
@@ -195,7 +203,7 @@ def prepare_project_run(
         step_id = task_env.task_step_id_env()
         if not step_id:
             raise ProjectRunError("ASTRID_TASK_STEP_ID must be set when ASTRID_TASK_RUN_ID is set")
-        if timeline_id is None:
+        if timeline_id is None and requires_timeline:
             timeline_id = _timeline_id_from_parent_run(
                 project_slug,
                 parent_run_id,
@@ -227,7 +235,7 @@ def prepare_project_run(
             record["kind"] = kind
         if argv is not None:
             record["argv"] = redact_cli_args(list(argv))
-        if timeline_id is not None:
+        if timeline_id is not None and requires_timeline:
             record["timeline_id"] = timeline_id
             # Contract exemption: task-attached child runs contribute through
             # their parent task run, so the parent is recorded at prepare time.
@@ -240,13 +248,6 @@ def prepare_project_run(
             record=record,
             root=projects_root,
         )
-    if requires_timeline is None:
-        # Default to requiring a timeline. Callers that know an executor opts
-        # out (``metadata.requires_timeline: false``) pass ``requires_timeline``
-        # explicitly — the executor runner resolves this from the executor
-        # definition it already holds, so the project tier never reaches back
-        # up into the executor registry.
-        requires_timeline = True
     if timeline_id is None and requires_timeline:
         timeline_id, _timeline_slug = resolve_required_project_timeline(project_slug, root=projects_root)
     effective_run_id = paths.validate_run_id(run_id or generate_run_id())
@@ -372,6 +373,21 @@ def finalize_project_run(
 ) -> dict[str, Any]:
     record = dict(context.record)
     merged_metadata = dict(record.get("metadata", {}))
+    # In-process executors may add domain metadata (for example the sorted
+    # timelines frozen into a project-scoped evidence pack) after prepare.
+    # Preserve only that validated metadata surface; the lifecycle remains
+    # authoritative for status, paths, timestamps, and artifacts.
+    if context.run_json_path.is_file():
+        try:
+            on_disk = validate_run_record(read_json(context.run_json_path))
+        except Exception:
+            on_disk = None
+        if (
+            isinstance(on_disk, dict)
+            and on_disk.get("project_slug") == context.project_slug
+            and on_disk.get("run_id") == context.run_id
+        ):
+            merged_metadata.update(dict(on_disk.get("metadata", {})))
     if metadata:
         merged_metadata.update(dict(metadata))
     if returncode is not None:
@@ -601,15 +617,21 @@ def discover_manifest_path(
     *,
     fallback_root: str | Path | None = None,
 ) -> Path | None:
-    candidate_root: Path | None = None
-    if out_root not in (None, ""):
-        candidate_root = Path(out_root).expanduser().resolve()
-    elif fallback_root not in (None, ""):
-        candidate_root = Path(fallback_root).expanduser().resolve()
-    if candidate_root is None:
-        return None
-    manifest_path = candidate_root / "manifest.json"
-    return manifest_path if manifest_path.is_file() else None
+    roots: list[Path] = []
+    for raw in (out_root, fallback_root):
+        if raw in (None, ""):
+            continue
+        candidate = Path(raw).expanduser().resolve()
+        if candidate not in roots:
+            roots.append(candidate)
+    for candidate_root in roots:
+        for manifest_path in (
+            candidate_root / "manifest.json",
+            candidate_root / "agent-view" / "manifest.json",
+        ):
+            if manifest_path.is_file():
+                return manifest_path
+    return None
 
 
 def _read_manifest_cost_usd(manifest_path: str | Path) -> float | None:

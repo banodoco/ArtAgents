@@ -114,6 +114,26 @@ _OBJECT_KIND_ORDER: Mapping[str, int] = {
 
 _DIAGNOSTIC_CODE_RE = re.compile(r"^([A-Z][A-Z0-9_]*): (.*)$", flags=re.DOTALL)
 
+#: Multi-segment absolute path token (POSIX ``/a/b`` or Windows ``C:\\a\\b``).
+#: Used only to scrub *defensive* path leaks out of diagnostics; a lookbehind
+#: excludes scheme separators (``https://…``) so URLs survive.
+_ABS_PATH_TOKEN_RE = re.compile(
+    r"(?<![:/\w])(?:/(?:[\w.\-]+/)+[\w.\-]+|[A-Za-z]:[\\/](?:[\w.\-]+[\\/])*[\w.\-]+)"
+)
+
+
+def _sanitize_diagnostic_message(message: str) -> str:
+    """Strip absolute path substrings from one diagnostics message (R13).
+
+    Reasons and warnings must never carry absolute worktree/project paths;
+    this is the emit-side backstop on top of resolution.py's sanitized reason
+    strings.  Deterministic: every match becomes ``[redacted-path]``.
+    """
+
+    if not isinstance(message, str) or not message:
+        return message
+    return _ABS_PATH_TOKEN_RE.sub("[redacted-path]", message)
+
 
 # ---------------------------------------------------------------------------
 # Identity-map access (duck typed: IdentityMap or Mapping-shaped twin).
@@ -770,6 +790,226 @@ def emit_ground_truth(
 
 
 # ---------------------------------------------------------------------------
+# Metric definitions (R13): versioned machine artifact defining every metric.
+# ---------------------------------------------------------------------------
+
+
+#: Metric-definition entries.  Fixed and ordered so identical inputs produce
+#: identical bytes; ``derivation`` names the duration.py / model.py function
+#: the formula mirrors; ``scope`` is ``per-timeline`` (timeline-level extents
+#: and fps) or ``per-scope`` (clip-level intervals emitted inside a scope's
+#: clip set).
+_METRIC_DEFINITIONS: tuple[dict[str, str], ...] = (
+    {
+        "id": "authored_visual_only_end_seconds",
+        "name": "Authored visual-only end (seconds)",
+        "definition": (
+            "Latest authored end, in seconds, across every clip on a visual "
+            "track: authored placement plus source duration.  No speed, no "
+            "frame quantization."
+        ),
+        "formula": "max over visual-track clips of (authored.start + clip_source_duration(clip))",
+        "derivation": "duration.py: clip_source_duration",
+        "unit": "seconds",
+        "scope": "per-timeline",
+    },
+    {
+        "id": "frame_quantized_visual_end_frames",
+        "name": "Frame-quantized visual end (frames)",
+        "definition": (
+            "Compositor frame-quantized end of the visual tracks: the maximum "
+            "independently rounded clip end frame over visual-track clips."
+        ),
+        "formula": "max over visual-track clips of clip_end_frame(clip, fps)",
+        "derivation": "duration.py: clip_end_frame (Math.round, one-frame floor)",
+        "unit": "frames",
+        "scope": "per-timeline",
+    },
+    {
+        "id": "frame_quantized_visual_end_seconds",
+        "name": "Frame-quantized visual end (seconds)",
+        "definition": (
+            "The frame-quantized visual end expressed in seconds: "
+            "visual_frames / fps."
+        ),
+        "formula": "frame_quantized_visual_end_frames / fps",
+        "derivation": "duration.py: clip_end_frame / fps",
+        "unit": "seconds",
+        "scope": "per-timeline",
+    },
+    {
+        "id": "all_track_composition_frames",
+        "name": "All-track composition extent (frames)",
+        "definition": (
+            "All-track composition duration in frames with a one-frame floor; "
+            "every clip counts, including audio and muted tracks."
+        ),
+        "formula": "timeline_duration_frames(assembly, fps)",
+        "derivation": "duration.py: timeline_duration_frames",
+        "unit": "frames",
+        "scope": "per-timeline",
+    },
+    {
+        "id": "all_track_composition_seconds",
+        "name": "All-track composition extent (seconds)",
+        "definition": (
+            "The all-track composition extent in seconds: composition_frames / "
+            "fps."
+        ),
+        "formula": "timeline_duration_frames(assembly, fps) / fps",
+        "derivation": "duration.py: timeline_duration_seconds",
+        "unit": "seconds",
+        "scope": "per-timeline",
+    },
+    {
+        "id": "composition_extent",
+        "name": "Composition extent (seconds)",
+        "definition": (
+            "The frame-quantized all-track composition extent in seconds; "
+            "identical to all_track_composition_seconds.  This is the model "
+            "extent every page ruler window subdivides."
+        ),
+        "formula": "timeline_duration_frames(assembly, fps) / fps",
+        "derivation": "duration.py: timeline_duration_seconds",
+        "unit": "seconds",
+        "scope": "per-timeline",
+    },
+    {
+        "id": "audible_extent",
+        "name": "Audible extent (seconds)",
+        "definition": (
+            "Latest frame-quantized end across audio-track clips, in seconds "
+            "(audible_frames / fps); the audible half of the composition "
+            "extent."
+        ),
+        "formula": "max over audio-track clips of clip_end_frame(clip, fps) / fps",
+        "derivation": "duration.py: clip_end_frame / fps",
+        "unit": "seconds",
+        "scope": "per-timeline",
+    },
+    {
+        "id": "fps",
+        "name": "Timeline frame rate",
+        "definition": (
+            "Timeline canvas frame rate; the compositor's frame-quantization "
+            "divisor for every frame/second conversion in this pack."
+        ),
+        "formula": "assembly.theme_overrides.visual.canvas.fps (default 30)",
+        "derivation": "model.py: _timeline_fps",
+        "unit": "frames_per_second",
+        "scope": "per-timeline",
+    },
+    {
+        "id": "clip_authored_interval",
+        "name": "Clip authored interval (seconds)",
+        "definition": (
+            "Authored placement interval [at, at + source_duration) in "
+            "seconds; no speed applied and no frame quantization."
+        ),
+        "formula": "[clip.at, clip.at + clip_source_duration(clip))",
+        "derivation": "duration.py: clip_source_duration",
+        "unit": "seconds",
+        "scope": "per-scope",
+    },
+    {
+        "id": "clip_frame_interval",
+        "name": "Clip frame interval (frames)",
+        "definition": (
+            "Independently rounded compositor Sequence interval: "
+            "Math.round(at * fps) to rounded start plus a minimum-one-frame "
+            "rounded duration."
+        ),
+        "formula": "[clip_start_frame(clip, fps), clip_end_frame(clip, fps))",
+        "derivation": "duration.py: clip_start_frame, clip_end_frame",
+        "unit": "frames",
+        "scope": "per-scope",
+    },
+    {
+        "id": "clip_mounted_interval",
+        "name": "Clip mounted interval (frames)",
+        "definition": (
+            "Sequence interval actually mounted by the compositor after "
+            "transition-group scheduling (TimelineComposition.tsx:208-237); "
+            "equals the frame interval when no transition is scheduled."
+        ),
+        "formula": "transition_mounted_intervals(model)[clip_id]",
+        "derivation": "model.py: transition_mounted_intervals",
+        "unit": "frames",
+        "scope": "per-scope",
+    },
+    {
+        "id": "clip_effective_interval",
+        "name": "Clip effective interval (seconds)",
+        "definition": (
+            "Non-transition presentation interval after v0.0.6 transition "
+            "grouping, retiming, and composition clipping; the transition-"
+            "clipped interval a viewer actually sees."
+        ),
+        "formula": "transition_effective_intervals(model)[clip_id]",
+        "derivation": "model.py: transition_effective_intervals",
+        "unit": "seconds",
+        "scope": "per-scope",
+    },
+    {
+        "id": "transition_resolved_duration_frames",
+        "name": "Resolved transition duration (frames)",
+        "definition": (
+            "Resolved duration in frames for an accepted transition: explicit "
+            "durationFrames, else explicit seconds rounded at fps, else the "
+            "registered default, else the 12-frame hard fallback; bounded by "
+            "both clip durations (else ignored)."
+        ),
+        "formula": "resolve_transition_duration_frames(transition, from_frames, to_frames, default, fps=fps)",
+        "derivation": "duration.py: resolve_transition_duration_frames",
+        "unit": "frames",
+        "scope": "per-scope",
+    },
+    {
+        "id": "clip_source_duration_seconds",
+        "name": "Clip source duration (seconds)",
+        "definition": (
+            "Source duration in seconds: a numeric hold wins unconditionally; "
+            "otherwise (to ?? 0) - (from ?? 0)."
+        ),
+        "formula": "clip_source_duration(clip)",
+        "derivation": "duration.py: clip_source_duration",
+        "unit": "seconds",
+        "scope": "per-scope",
+    },
+)
+
+#: Version of the metric-definitions artifact (independent of SCHEMA_VERSION).
+METRIC_DEFINITIONS_VERSION = 1
+
+#: Pack-relative artifact name (sibling of pack-hashes.json coverage).
+METRIC_DEFINITIONS_NAME = "metric-definitions.json"
+
+
+def emit_metric_definitions(
+    model: TimelineInspectionModel,
+    identity_map: Any,
+    snapshot: TimelineSnapshot,
+) -> dict[str, Any]:
+    """Return the versioned ``metric-definitions.json`` machine artifact.
+
+    Every metric name ground truth stores a value for is defined here: id,
+    name, precise prose definition, formula/derivation (the ``duration.py`` /
+    ``model.py`` function it mirrors), unit (frames / seconds /
+    frames_per_second), and scope (per-timeline / per-scope).  The block is
+    versioned (``schema_version`` 1) and notes the compositor version it
+    mirrors (0.0.6).  Deterministic: a fixed, ordered tuple — no wall clock,
+    no inputs beyond the model identity.
+    """
+
+    return {
+        "schema_version": METRIC_DEFINITIONS_VERSION,
+        "kind": "timeline_visualize_metric_definitions",
+        "compositor_version": COMPOSITOR_VERSION,
+        "metrics": [dict(entry) for entry in _METRIC_DEFINITIONS],
+    }
+
+
+# ---------------------------------------------------------------------------
 # Action index.
 # ---------------------------------------------------------------------------
 
@@ -1118,7 +1358,7 @@ def emit_diagnostics(
             {
                 "severity": "warning",
                 "code": code,
-                "message": message,
+                "message": _sanitize_diagnostic_message(message),
                 "object_ref": _TIMELINE_REF,
             }
         )
@@ -1135,7 +1375,7 @@ def emit_diagnostics(
             {
                 "severity": "warning",
                 "code": code,
-                "message": integrity.reason,
+                "message": _sanitize_diagnostic_message(integrity.reason),
                 "object_ref": asset_ref,
             }
         )
@@ -1149,7 +1389,7 @@ def emit_diagnostics(
                 {
                     "severity": "warning",
                     "code": "SHOT_MISSING_CLIP",
-                    "message": warning,
+                    "message": _sanitize_diagnostic_message(warning),
                     "object_ref": shot_ref,
                 }
             )
@@ -1174,7 +1414,7 @@ def emit_diagnostics(
                     {
                         "severity": "warning",
                         "code": "CLIP_ASSET_UNRESOLVED",
-                        "message": (
+                        "message": _sanitize_diagnostic_message(
                             f"clip references asset {asset_key!r} that is absent "
                             "from the frozen registry"
                         ),
@@ -1187,7 +1427,7 @@ def emit_diagnostics(
                 {
                     "severity": "warning",
                     "code": "TRANSITION_IGNORED",
-                    "message": (
+                    "message": _sanitize_diagnostic_message(
                         f"transition {transition_id!r} on clip {clip.clip_id!r} "
                         "was not scheduled"
                     ),
@@ -1201,7 +1441,7 @@ def emit_diagnostics(
                 {
                     "severity": "warning",
                     "code": _scope_warning_code(warning),
-                    "message": warning,
+                    "message": _sanitize_diagnostic_message(warning),
                     "object_ref": _scope_warning_ref(model, effective, scope),
                 }
             )
@@ -1261,6 +1501,16 @@ clip, or a different asset: re-run the root query instead.
 Every artifact is bound to one source-normalized-snapshot digest (`SNS:…`)
 and one event-head version. Drill-down never silently reads a newer timeline;
 if current state differs, only `refresh_root` crosses that boundary.
+
+## Metrics
+
+Every metric name in `ground-truth.json` is defined in the sibling machine
+artifact `metric-definitions.json` (schema_version 1, mirroring compositor
+0.0.6): each entry carries an id, name, precise definition, formula/derivation
+(the `duration.py`/`model.py` function it mirrors), unit (frames, seconds, or
+frames per second), and scope (`per-timeline` vs `per-scope`). Read a value,
+then look up its definition before comparing it across packs; the definitions
+block is versioned, so a schema bump is explicit, never silent.
 """
 
 
@@ -1351,12 +1601,15 @@ def emit_structure_md(
 __all__ = [
     "FOCUS_CONTEXT_SECONDS",
     "FROZEN_AT_SENTINEL",
+    "METRIC_DEFINITIONS_NAME",
+    "METRIC_DEFINITIONS_VERSION",
     "SCHEMA_VERSION",
     "TIMESTAMP_CONTEXT_SECONDS",
     "emit_action_index",
     "emit_asset_index",
     "emit_diagnostics",
     "emit_ground_truth",
+    "emit_metric_definitions",
     "emit_reading_guide",
     "emit_structure_md",
     "emit_transcript_index",

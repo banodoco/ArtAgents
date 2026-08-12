@@ -26,6 +26,7 @@ EXPECTED_SCHEMAS = {
     "asset-index",
     "transcript-index",
     "diagnostics",
+    "metric-definitions",
 }
 FIXTURE_ROOT = Path(__file__).parents[2] / "fixtures" / "timeline_visualize" / "negative"
 SNS = "SNS:" + "a" * 64

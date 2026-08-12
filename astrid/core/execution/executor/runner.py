@@ -143,6 +143,8 @@ class ExecutorRunRequest:
     project_was_auto_resolved: bool = False
     invocation: str = "cli"
     run_root: Path | str | None = None
+    run_id: str | None = None
+    project_run_metadata: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -163,6 +165,7 @@ class ExecutorRunResult:
     run_root: Path | str | None = None
     outputs: Mapping[str, Any] = field(default_factory=dict)
     executor_version: str = ""  # derived from executor_definition_digest
+    run_id: str | None = None
 
     def __post_init__(self) -> None:
         if self.error is None:
@@ -351,6 +354,7 @@ def _run_executor_inner(request: ExecutorRunRequest, executor: ExecutorDefinitio
             dry_run=request.dry_run,
             skipped=True,
             skipped_reason=condition_result.reason,
+            run_id=request.run_id,
             run_root=request.run_root,
             executor_version=executor_definition_digest(executor),
         )
@@ -363,6 +367,7 @@ def _run_executor_inner(request: ExecutorRunRequest, executor: ExecutorDefinitio
             payload={"executor_id": executor.id, "missing_binaries": list(missing_binaries)},
             dry_run=request.dry_run,
             missing_binaries=missing_binaries,
+            run_id=request.run_id,
             run_root=request.run_root,
             executor_version=executor_definition_digest(executor),
         )
@@ -447,6 +452,7 @@ def _run_upload_youtube(request: ExecutorRunRequest, executor: ExecutorDefinitio
             kind="built_in",
             dry_run=True,
             payload={"would_run": "youtube.upload", "inputs": inputs},
+            run_id=request.run_id,
             run_root=request.run_root,
             executor_version=executor_definition_digest(executor),
         )
@@ -471,6 +477,7 @@ def _run_upload_youtube(request: ExecutorRunRequest, executor: ExecutorDefinitio
         executor_id=executor.id,
         kind="built_in",
         payload=result,
+        run_id=request.run_id,
         run_root=request.run_root,
         executor_version=executor_definition_digest(executor),
         outputs=_resolve_declared_outputs(executor, request),
@@ -586,6 +593,7 @@ def _run_builtin_executor(executor: ExecutorDefinition, request: ExecutorRunRequ
             command=command,
             payload={"executor_id": executor.id, "missing_binaries": [], "returncode": None, "skipped": False, "skipped_reason": ""},
             dry_run=True,
+            run_id=request.run_id,
             run_root=request.run_root,
             executor_version=executor_definition_digest(executor),
         )
@@ -598,6 +606,7 @@ def _run_builtin_executor(executor: ExecutorDefinition, request: ExecutorRunRequ
         command=command,
         payload={"executor_id": executor.id, "missing_binaries": [], "returncode": returncode, "skipped": False, "skipped_reason": ""},
         returncode=returncode,
+        run_id=request.run_id,
         run_root=request.run_root,
         executor_version=executor_definition_digest(executor),
         outputs=_resolve_declared_outputs(executor, request) if returncode == 0 else {},
@@ -619,6 +628,7 @@ def _run_explicit_command_executor(
             env=env,
             payload={"executor_id": executor.id, "missing_binaries": [], "returncode": None, "skipped": False, "skipped_reason": ""},
             dry_run=True,
+            run_id=request.run_id,
             run_root=request.run_root,
             executor_version=executor_definition_digest(executor),
         )
@@ -663,6 +673,7 @@ def _run_explicit_command_executor(
             "skipped_reason": "",
         },
         returncode=returncode,
+        run_id=request.run_id,
         run_root=request.run_root,
         executor_version=executor_definition_digest(executor),
         outputs=_resolve_declared_outputs(executor, request) if returncode == 0 else {},
@@ -734,6 +745,7 @@ def _run_in_process_executor_command(
             returncode=result.returncode,
         ),
         returncode=result.returncode,
+        run_id=request.run_id,
         run_root=request.run_root,
         executor_version=executor_definition_digest(executor),
         outputs=_resolve_declared_outputs(executor, request) if result.returncode == 0 else {},
@@ -764,6 +776,7 @@ def _in_process_executor_error_result(
         },
         returncode=1,
         error=error,
+        run_id=request.run_id,
         run_root=request.run_root,
         executor_version=executor_definition_digest(executor),
     )
@@ -940,24 +953,80 @@ def _prepare_project_request(
             requires_timeline = bool(_executor_metadata.get("requires_timeline", True))
         else:
             requires_timeline = True
+    run_metadata = _project_run_metadata(request, executor)
     context = prepare_project_run(
         request.project,
         tool_id=executor.id,
         kind="executor",
         argv=_project_argv(request),
-        metadata={
-            "dry_run": bool(request.dry_run),
-            "project_resolution": (
-                "attached" if request.project_was_auto_resolved else "explicit"
-            ),
-        },
+        metadata=run_metadata,
         auto_bound=False,
         record_out=record_out,
         requires_timeline=requires_timeline,
         invocation=request.invocation,
     )
     effective_out = request.out if record_out is not None else context.run_root
-    return context, replace(request, out=effective_out, run_root=context.run_root)
+    return context, replace(
+        request,
+        out=effective_out,
+        run_id=context.run_id,
+        run_root=context.run_root,
+        project_run_metadata=run_metadata,
+    )
+
+
+def _project_run_metadata(
+    request: ExecutorRunRequest,
+    executor: ExecutorDefinition,
+) -> dict[str, Any]:
+    declared = executor.metadata.get("run_metadata")
+    if declared is not None and not isinstance(declared, Mapping):
+        raise ExecutorRunnerError(
+            f"executor {executor.id!r} metadata.run_metadata must be an object"
+        )
+    metadata = dict(declared or {})
+    metadata.update(
+        {
+            "dry_run": bool(request.dry_run),
+            "executor_version": executor_definition_digest(executor),
+            "project_resolution": (
+                "attached" if request.project_was_auto_resolved else "explicit"
+            ),
+        }
+    )
+    return metadata
+
+
+def _validate_project_owned_inputs(
+    request: ExecutorRunRequest,
+    executor: ExecutorDefinition,
+) -> None:
+    """Fail closed for declared timeline/experiment inputs outside the project."""
+
+    if not request.project:
+        return
+    for port in getattr(executor, "inputs", ()):
+        artifact_type = port.artifact_type
+        if not isinstance(artifact_type, str):
+            continue
+        normalized = artifact_type.strip().lower().replace("-", "_")
+        if not (
+            normalized == "timeline"
+            or normalized.startswith("timeline/")
+            or normalized == "experiment"
+            or normalized.startswith("experiment/")
+            or normalized in {"project_runs", "experiment_runs"}
+        ):
+            continue
+        value = request.inputs.get(port.name)
+        if not _has_value(value):
+            continue
+        for item in _iter_input_values(value):
+            require_project_owned_artifact(
+                request.project,
+                normalized,
+                _stringify_value(item),
+            )
 
 
 def _validate_project_owned_inputs(
@@ -1029,12 +1098,15 @@ def _finalize_project_executor(
     error: BaseException | str | None = None,
 ) -> None:
     artifact_roots = [request.out, context.run_root] if request.out not in (None, "") else [context.run_root]
-    metadata = {
-        "dry_run": bool(request.dry_run),
-        "project_resolution": (
-            "attached" if request.project_was_auto_resolved else "explicit"
-        ),
-    }
+    metadata = dict(request.project_run_metadata)
+    metadata.update(
+        {
+            "dry_run": bool(request.dry_run),
+            "project_resolution": (
+                "attached" if request.project_was_auto_resolved else "explicit"
+            ),
+        }
+    )
     finalize_project_run(
         context,
         status=status,
