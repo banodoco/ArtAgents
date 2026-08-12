@@ -11,6 +11,7 @@ import json
 import os
 import re
 import secrets
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -19,7 +20,12 @@ from astrid.packs.understanding.executors.visual_understand.run import (
 )
 
 GROK_MODEL = "grok-4.6"
-GROK_BIN = "/Users/peteromalley/.grok/bin/grok"
+GROK_BIN = (
+    os.environ.get("GROK_BIN")
+    or os.environ.get("GROK_BIN_PATH")
+    or shutil.which("grok")
+    or "/Users/peteromalley/.grok/bin/grok"
+)
 
 _FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)```", flags=re.DOTALL)
 

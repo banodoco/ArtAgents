@@ -12,6 +12,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import os
+import shutil
 import pytest
 
 from astrid.core import gateway
@@ -23,9 +25,9 @@ from tests.packs.rendering.test_timeline_visualize_executor import _prepare_proj
 from astrid.core.timeline.events.schema.serialize import with_event_hash
 from astrid.core.timeline.events.schema.types import TimelineEvent
 
-pytestmark = pytest.mark.grok_iter
+pytestmark = [pytest.mark.opt_in, pytest.mark.grok_iter]
 
-GROK = "/Users/peteromalley/.grok/bin/grok"
+GROK = os.environ.get("GROK_BIN") or os.environ.get("GROK_BIN_PATH") or shutil.which("grok") or "/Users/peteromalley/.grok/bin/grok"
 MODEL = "grok-4.6"
 FAL = Path("tests/fixtures/timeline_visualize/storyboard_fal")
 

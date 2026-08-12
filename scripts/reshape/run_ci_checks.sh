@@ -86,11 +86,15 @@ run_quarantine_lane() {
 #                            marker (-m "not integration and not opt_in and not live")
 #                            so no --ignore= entries are needed for quarantine files,
 #                            and R23 live/VLM gate tests can never be selected.
+#                            grok_iter is ALSO excluded explicitly: the grok-driven
+#                            UX iteration loop invokes the grok CLI and can mutate
+#                            sources, so it must never run in default CI even if
+#                            its opt_in marker is ever dropped.
 BROAD_PYTEST_ARGS=(
   --tb=no
   -q
   --no-header
-  -m "not integration and not opt_in and not live"
+  -m "not integration and not opt_in and not live and not grok_iter"
 )
 
 # ============================================================================
