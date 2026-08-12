@@ -357,15 +357,17 @@ keys are REQUIRED on every capability resolution record:
 - `finalizer` is `{id, source_pack, manifest_digest, alias_chain,
   override, trust_eligibility, support_decision}`.
 
-`alias_chain` is an array of strings and defaults to `[]`; `override` is an
-object or `null`; `trust_eligibility` records the derived source/install trust
-decision; `support_decision` is a versioned `SupportReport` or `null` (when no
-request-sensitive probe ran, e.g. for a finalizer). Every non-null
-`support_decision.backend` MUST equal the capability ID — the DTO rejects a
-mismatch for planner, renderer, and finalizer alike. Manifest, request, and
-input-hash values are lowercase SHA-256 digests. There is no parallel
-`segment.backend`, `segment.support`, or string-only finalizer field that
-could disagree with these records.
+`alias_chain` is an array of strings and defaults to `[]`; `override` is
+`{from, to}` with `to` equal to the resolution id (an override records what
+selected this implementation — the DTO rejects `{from, to}` shapes whose `to`
+differs, and rejects any other shape), or `null`; `trust_eligibility` records
+the derived source/install trust decision; `support_decision` is a versioned
+`SupportReport` or `null` (when no request-sensitive probe ran, e.g. for a
+finalizer). Every non-null `support_decision.backend` MUST equal the
+capability ID — the DTO rejects a mismatch for planner, renderer, and
+finalizer alike. Manifest, request, and input-hash values are lowercase
+SHA-256 digests. There is no parallel `segment.backend`, `segment.support`,
+or string-only finalizer field that could disagree with these records.
 
 `total_frames` is the complete timeline frame count. A zero-frame plan has
 `window: null`, no segments, and an empty reasons map; it is not finalized and
@@ -473,10 +475,12 @@ have exactly the resolution shapes defined in Planning, so a hybrid plan keeps
 distinct source pack, manifest, alias/override, support, and input-hash evidence
 for every renderer invocation. Planner and finalizer records carry the same
 alias/override/trust/support evidence as renderer records. Rendered artifacts
-are recorded in `artifact_profiles` as hashed lineage records: each maps an
+are REQUIRED in `artifact_profiles` as hashed lineage records: each maps an
 output path to `{profile, sha256, attachments: {name: {path, kind, sha256}}}`
-so replay can verify rendered outputs and attachments byte-for-byte.
-`input_hashes` describe inputs only, never rendered outputs.
+with a validated 64-hex `sha256` on the artifact and every attachment
+(profile-only entries and null hashes are rejected), so replay can verify
+rendered outputs byte-for-byte. `input_hashes` describe inputs only, never
+rendered outputs.
 
 `engine` is only the legacy request projection. The `segments` key keeps the
 V1-compatible flat projection: one `{engine, from, to}` entry per segment,

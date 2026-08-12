@@ -55,7 +55,7 @@
       "additionalProperties": {
         "type": "string",
         "minLength": 1,
-        "pattern": "^(?!.*\\u0000).*\\S.*$"
+        "pattern": "^(?!.*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
       }
     },
     "window": {
@@ -114,7 +114,7 @@
         {
           "type": "string",
           "minLength": 1,
-          "pattern": "^(?!.*\\u0000).*\\S.*$"
+          "pattern": "^(?!.*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
         },
         {
           "type": "object"
@@ -226,12 +226,12 @@
         "container": {
           "type": "string",
           "minLength": 1,
-          "pattern": "^(?!.*\\u0000).*\\S.*$"
+          "pattern": "^(?!.*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
         },
         "video_codec": {
           "type": "string",
           "minLength": 1,
-          "pattern": "^(?!.*\\u0000).*\\S.*$"
+          "pattern": "^(?!.*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
         },
         "video_profile": {
           "type": [
@@ -239,7 +239,7 @@
             "null"
           ],
           "minLength": 1,
-          "pattern": "^(?!.*\\u0000).*\\S.*$"
+          "pattern": "^(?!.*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
         },
         "video_level": {
           "type": [
@@ -247,12 +247,12 @@
             "null"
           ],
           "minLength": 1,
-          "pattern": "^(?!.*\\u0000).*\\S.*$"
+          "pattern": "^(?!.*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
         },
         "pixel_format": {
           "type": "string",
           "minLength": 1,
-          "pattern": "^(?!.*\\u0000).*\\S.*$"
+          "pattern": "^(?!.*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
         },
         "audio_codec": {
           "type": [
@@ -260,7 +260,7 @@
             "null"
           ],
           "minLength": 1,
-          "pattern": "^(?!.*\\u0000).*\\S.*$"
+          "pattern": "^(?!.*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
         },
         "audio_sample_rate": {
           "type": [
@@ -275,7 +275,7 @@
             "null"
           ],
           "minLength": 1,
-          "pattern": "^(?!.*\\u0000).*\\S.*$"
+          "pattern": "^(?!.*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
         },
         "duration_tolerance": {
           "type": "integer",
@@ -306,7 +306,7 @@
             "audio_codec": {
               "type": "string",
               "minLength": 1,
-              "pattern": "^(?!.*\\u0000).*\\S.*$"
+              "pattern": "^(?!.*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
             },
             "audio_sample_rate": {
               "type": "integer",
@@ -315,7 +315,7 @@
             "audio_channel_layout": {
               "type": "string",
               "minLength": 1,
-              "pattern": "^(?!.*\\u0000).*\\S.*$"
+              "pattern": "^(?!.*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
             }
           }
         }
@@ -346,7 +346,7 @@
           "items": {
             "type": "string",
             "minLength": 1,
-            "pattern": "^(?!.*\\u0000).*\\S.*$"
+            "pattern": "^(?!.*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
           }
         },
         "features": {
@@ -374,7 +374,7 @@
             "null"
           ],
           "minLength": 1,
-          "pattern": "^(?!.*\\u0000).*\\S.*$"
+          "pattern": "^(?!.*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
         }
       }
     },
@@ -407,13 +407,13 @@
           "type": "array",
           "items": {
             "type": "string",
-            "pattern": "^(?!.*\\u0000).*\\S.*$"
+            "pattern": "^(?!.*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
           }
         },
         "override": {
           "anyOf": [
             {
-              "type": "object"
+              "$ref": "#/definitions/overrideRecord"
             },
             {
               "type": "null"
@@ -460,13 +460,17 @@
           "items": {
             "type": "string",
             "minLength": 1,
-            "pattern": "^(?!.*\\u0000).*\\S.*$"
+            "pattern": "^(?!.*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
           }
         },
         "override": {
-          "type": [
-            "object",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/definitions/overrideRecord"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "support_decision": {
@@ -503,13 +507,13 @@
           "type": "array",
           "items": {
             "type": "string",
-            "pattern": "^(?!.*\\u0000).*\\S.*$"
+            "pattern": "^(?!.*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
           }
         },
         "override": {
           "anyOf": [
             {
-              "type": "object"
+              "$ref": "#/definitions/overrideRecord"
             },
             {
               "type": "null"
@@ -554,6 +558,22 @@
         },
         "input_hashes": {
           "$ref": "#/definitions/hashMap"
+        }
+      }
+    },
+    "overrideRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "from",
+        "to"
+      ],
+      "properties": {
+        "from": {
+          "$ref": "#/definitions/qualifiedId"
+        },
+        "to": {
+          "$ref": "#/definitions/qualifiedId"
         }
       }
     }

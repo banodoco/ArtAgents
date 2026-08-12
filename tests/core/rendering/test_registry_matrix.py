@@ -530,36 +530,56 @@ def test_trusted_pack_alias_to_absent_canonical_routes_through_override(
     # target rule does not apply) so the pack remains installable.
     from astrid.core.pack.validate import validate_pack
     from astrid.core.pack.install_local import install_pack
+    from astrid.core.pack.store import InstalledPackStore
 
     errors, warnings = validate_pack(str(pack_root))
     assert not errors, errors
 
-    install_root = tmp_path / "astrid-home" / "packs"
-    install_root.mkdir(parents=True)
+    astrid_home = tmp_path / "astrid-home"
+    empty_source = tmp_path / "empty-source"
+    empty_source.mkdir()
+    store = InstalledPackStore(astrid_home / "packs")
     exit_code = install_pack(
         pack_root,
+        store=store,
         dry_run=False,
         skip_confirm=True,
         trust_acknowledged=True,
-        trust_method="fixture-test",
+        trust_method="test",
         trust_actor="test",
     )
     assert exit_code == 0, f"install failed with exit {exit_code}"
 
-    store = OverrideStore(project_root)
-    store.set_override("renderer", "other.abstract.renderer", "alias_missing.renderer")
+    override_store = OverrideStore(project_root)
+    override_store.set_override("renderer", "other.abstract.renderer", "alias_missing.renderer")
 
-    with _load_with_source(project_root, source_root=source_root) as (renderers, _, _):
-        candidate = renderers.get("alias_missing.legacy")
-        assert candidate.id == "alias_missing.renderer"
+    # Resolve from the INSTALLED revision (include_installed=True, empty
+    # source tree) so the override route is proven on the installed pack.
+    with (
+        mock.patch.dict(
+            os.environ,
+            {"ASTRID_HOME": str(astrid_home), "ASTRID_PACKS_PATH": ""},
+            clear=False,
+        ),
+        mock.patch(
+            "astrid.core.rendering.registry.discover_packs",
+            side_effect=_scanner(empty_source),
+        ),
+    ):
+        renderers, _, _ = load_default_registries(project_root, include_installed=True)
 
-        evidence = renderers.resolve_evidence("alias_missing.legacy")
-        assert evidence["canonical_id"] == "other.abstract.renderer"
-        assert evidence["resolved_id"] == "alias_missing.renderer"
-        assert evidence["override"] == {
-            "from": "other.abstract.renderer",
-            "to": "alias_missing.renderer",
-        }
+    candidate = renderers.get("alias_missing.legacy")
+    assert candidate.id == "alias_missing.renderer"
+    assert candidate.source_kind == "installed"
+    assert candidate.execution_eligible is True
+
+    evidence = renderers.resolve_evidence("alias_missing.legacy")
+    assert evidence["canonical_id"] == "other.abstract.renderer"
+    assert evidence["resolved_id"] == "alias_missing.renderer"
+    assert evidence["override"] == {
+        "from": "other.abstract.renderer",
+        "to": "alias_missing.renderer",
+    }
 
 
 def test_trusted_pack_alias_to_absent_canonical_without_override_fails_closed(

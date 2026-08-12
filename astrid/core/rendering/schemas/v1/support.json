@@ -26,7 +26,7 @@
       "items": {
         "type": "string",
         "minLength": 1,
-        "pattern": "^(?!.*\\u0000).*\\S.*$"
+        "pattern": "^(?!.*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
       }
     },
     "features": {
@@ -54,7 +54,7 @@
         "null"
       ],
       "minLength": 1,
-      "pattern": "^(?!.*\\u0000).*\\S.*$"
+      "pattern": "^(?!.*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
     }
   },
   "definitions": {

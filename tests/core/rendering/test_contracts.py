@@ -564,7 +564,13 @@ def test_provenance_v2_preserves_lineage_and_derives_legacy_segments(tmp_path: P
         "timeline": "/workspace/timeline.json",
         "assets_registry": "/workspace/assets.json",
         "plan": plan,
-        "artifact_profiles": {"outputs/video.mp4": _profile()},
+        "artifact_profiles": {
+            "outputs/video.mp4": {
+                "profile": _profile(),
+                "sha256": SHA_B,
+                "attachments": {},
+            }
+        },
         "audio_ownership": AudioOwnership.RENDERED,
         "normalization": [],
         "attachments": {},
@@ -641,19 +647,19 @@ def test_resolution_evidence_survives_plan_round_trip_and_provenance() -> None:
     planner = replace(
         _planner(),
         alias_chain=["legacy-hybrid", "rendering.legacy_hybrid"],
-        override={"from": "rendering.legacy_hybrid", "to": "acme.hybrid-planner"},
+        override={"from": "acme.hybrid-planner", "to": "rendering.legacy_hybrid"},
         support_decision=_support("rendering.legacy_hybrid"),
     )
     renderer = replace(
         _renderer("acme.visual"),
         alias_chain=["visual", "acme.visual"],
-        override={"from": "acme.visual", "to": "acme.visual-2"},
+        override={"from": "acme.visual-2", "to": "acme.visual"},
         trust_eligibility={"eligible": True, "method": "source-tree"},
     )
     finalizer = replace(
         _finalizer(),
         alias_chain=["finalizer", "rendering.ffmpeg-finalizer"],
-        override={"from": "rendering.ffmpeg-finalizer", "to": "acme.finalizer-2"},
+        override={"from": "acme.finalizer-2", "to": "rendering.ffmpeg-finalizer"},
         trust_eligibility={"eligible": True, "method": "source-tree"},
         support_decision=_support("rendering.ffmpeg-finalizer"),
     )
@@ -767,6 +773,52 @@ def test_planner_and_finalizer_reject_mismatched_support_backend() -> None:
         payload["support_decision"] = _support("other.backend").to_dict()
         with pytest.raises(ValueError, match=f"{label} support_decision.backend"):
             type(factory()).from_dict(payload)
+
+
+def test_resolutions_reject_incoherent_override_records() -> None:
+    """Override records must be {from, to} with to == resolution id."""
+    cases = (
+        (_planner, "planner"),
+        (_finalizer, "finalizer"),
+        (_renderer, "renderer"),
+    )
+    for factory, label in cases:
+        payload = factory().to_dict()
+        payload["override"] = {"from": "other.origin", "to": "not.the.id"}
+        with pytest.raises(ValueError, match=f"{label} override 'to'"):
+            type(factory()).from_dict(payload)
+        payload["override"] = {"only": "one"}
+        with pytest.raises(ValueError, match=f"{label} override"):
+            type(factory()).from_dict(payload)
+
+
+def test_provenance_rejects_spoofed_artifact_lineage() -> None:
+    """Artifact lineage must carry a real sha256; profile-only entries and
+    null hashes are rejected rather than stringified."""
+    base = dict(
+        engine="hybrid",
+        output="/workspace/out/video.mp4",
+        timeline="/workspace/timeline.json",
+        assets_registry=None,
+        plan=_plan(),
+        audio_ownership="rendered",
+        normalization=[],
+        attachments={},
+        backend_fragments={},
+        v1_compatibility=_compatibility(),
+    )
+    with pytest.raises(TypeError, match="hashed lineage"):
+        assemble_provenance_v2(**base, artifact_profiles={"out/v.mp4": _profile()})
+    with pytest.raises(ValueError, match="sha256"):
+        assemble_provenance_v2(
+            **base,
+            artifact_profiles={"out/v.mp4": {"profile": _profile(), "sha256": None}},
+        )
+    with pytest.raises(ValueError, match="sha256"):
+        assemble_provenance_v2(
+            **base,
+            artifact_profiles={"out/v.mp4": {"profile": _profile(), "sha256": "not-a-hash"}},
+        )
 
 
 def test_plan_accepts_adjacent_segments_and_exact_window_coverage() -> None:

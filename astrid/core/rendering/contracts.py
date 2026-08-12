@@ -247,6 +247,20 @@ def _require_sha256(value: Any, label: str) -> str:
     return result
 
 
+def _require_override(value: Any, *, capability_id: str, label: str) -> dict[str, Any]:
+    """Validate an override record: ``{from, to}`` with ``to`` equal to the
+    resolution id (the override is what selected this implementation)."""
+    mapping = _json_safe_mapping(value, label=label)
+    required = {"from", "to"}
+    if set(mapping) != required:
+        raise ValueError(f"{label} must contain exactly 'from' and 'to'")
+    _require_qualified_id(mapping["from"], f"{label} 'from'")
+    resolved = _require_qualified_id(mapping["to"], f"{label} 'to'")
+    if resolved != capability_id:
+        raise ValueError(f"{label} 'to' must equal the resolved capability id {capability_id!r}")
+    return mapping
+
+
 def _require_string_list(value: Any, label: str) -> list[str]:
     if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
         raise TypeError(f"{label} must be an array of strings")
@@ -1014,7 +1028,11 @@ class PlannerResolution:
             object.__setattr__(
                 self,
                 "override",
-                _json_safe_mapping(self.override, label="planner override"),
+                _require_override(
+                    self.override,
+                    capability_id=self.id,
+                    label="planner override",
+                ),
             )
         if self.support_decision is not None:
             support = (
@@ -1121,7 +1139,11 @@ class RendererResolution:
             "override",
             None
             if self.override is None
-            else _json_safe_mapping(self.override, label="renderer override"),
+            else _require_override(
+                self.override,
+                capability_id=renderer_id,
+                label="renderer override",
+            ),
         )
         object.__setattr__(self, "support_decision", support)
 
@@ -1206,7 +1228,11 @@ class FinalizerResolution:
             object.__setattr__(
                 self,
                 "override",
-                _json_safe_mapping(self.override, label="finalizer override"),
+                _require_override(
+                    self.override,
+                    capability_id=self.id,
+                    label="finalizer override",
+                ),
             )
         if self.support_decision is not None:
             support = (
@@ -1840,9 +1866,12 @@ def _manifest_features(value: Any, label: str) -> dict[str, bool | str]:
     result: dict[str, bool | str] = {}
     for raw_key, raw_value in raw.items():
         key = _require_string(raw_key, f"{label} key")
-        if not isinstance(raw_value, (bool, str)):
+        if isinstance(raw_value, bool):
+            result[key] = raw_value
+        elif isinstance(raw_value, str):
+            result[key] = _require_string(raw_value, f"{label}[{key!r}]")
+        else:
             raise TypeError(f"{label}[{key!r}] must be a boolean or string")
-        result[key] = raw_value
     return result
 
 

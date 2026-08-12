@@ -20,6 +20,7 @@ from .contracts import (
     RenderSegment,
     VideoArtifact,
     _json_safe_mapping,
+    _require_sha256,
     _require_string,
     _validate_backend_fragments,
 )
@@ -92,43 +93,50 @@ def _normalize_artifact_profiles(value: Any) -> Any:
             if isinstance(profile, VideoArtifact):
                 result[path] = _artifact_lineage(profile)
             elif isinstance(profile, Mapping) and "profile" in profile and "sha256" in profile:
-                raw = _json_safe_mapping(profile, label="artifact")
-                attachments = {
-                    name: {
-                        "path": str(att.get("path")),
-                        "kind": str(att.get("kind")),
-                        "sha256": str(att.get("sha256")),
-                    }
-                    for name, att in (raw.get("attachments") or {}).items()
-                }
-                result[path] = {
-                    "profile": (
-                        raw["profile"]
-                        if isinstance(raw["profile"], RenderProfile)
-                        else RenderProfile.from_dict(
-                            _json_safe_mapping(raw["profile"], label="artifact profile")
-                        )
-                    ).to_dict(),
-                    "sha256": str(raw["sha256"]),
-                    "attachments": attachments,
-                }
+                result[path] = _artifact_lineage_from_mapping(profile)
             else:
-                result[path] = (
-                    profile
-                    if isinstance(profile, RenderProfile)
-                    else RenderProfile.from_dict(_json_safe_mapping(profile, label="artifact profile"))
-                ).to_dict()
+                raise TypeError(
+                    f"artifact_profiles[{path!r}] must be a VideoArtifact or a "
+                    "hashed lineage record {profile, sha256, attachments}; "
+                    "profile-only entries carry no output hash"
+                )
         return result
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
         return [
             (
-                profile
-                if isinstance(profile, RenderProfile)
-                else RenderProfile.from_dict(_json_safe_mapping(profile, label="artifact profile"))
-            ).to_dict()
+                _artifact_lineage(profile)
+                if isinstance(profile, VideoArtifact)
+                else _artifact_lineage_from_mapping(profile)
+            )
             for profile in value
         ]
     raise TypeError("artifact_profiles must be an object or array")
+
+
+def _artifact_lineage_from_mapping(raw: Mapping[str, Any]) -> dict[str, Any]:
+    data = _json_safe_mapping(raw, label="artifact")
+    if "sha256" not in data or data["sha256"] is None:
+        raise ValueError("artifact lineage sha256 is required and must not be null")
+    profile = data["profile"]
+    attachments: dict[str, Any] = {}
+    for name, att in (data.get("attachments") or {}).items():
+        att = _json_safe_mapping(att, label=f"artifact attachment {name!r}")
+        if att.get("sha256") is None:
+            raise ValueError(f"artifact attachment {name!r} sha256 must not be null")
+        attachments[str(name)] = {
+            "path": _require_string(str(att.get("path")), f"attachment {name!r} path"),
+            "kind": _require_string(str(att.get("kind")), f"attachment {name!r} kind"),
+            "sha256": _require_sha256(str(att.get("sha256")), f"attachment {name!r} sha256"),
+        }
+    return {
+        "profile": (
+            profile
+            if isinstance(profile, RenderProfile)
+            else RenderProfile.from_dict(_json_safe_mapping(profile, label="artifact profile"))
+        ).to_dict(),
+        "sha256": _require_sha256(str(data["sha256"]), "artifact sha256"),
+        "attachments": attachments,
+    }
 
 
 def _artifact_lineage(artifact: VideoArtifact) -> dict[str, Any]:
