@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080">
+<rect x="0" y="0" width="1920" height="1080" fill="#141419"/>
+<rect x="40" y="226" width="1840" height="92" fill="#26262E" stroke="#3A3A44" stroke-width="1"/>
+<text x="50" y="260.96" font-family="ui-monospace, monospace" font-size="18" fill="#B8B8C4">lane 0 · Storyboard · visual</text>
+<rect x="40" y="328" width="1840" height="92" fill="#26262E" stroke="#3A3A44" stroke-width="1"/>
+<text x="50" y="362.96" font-family="ui-monospace, monospace" font-size="18" fill="#B8B8C4">lane 1 · Music · audio</text>
+<rect x="251.8519" y="234" width="51.8519" height="76" fill="#B79CE4" stroke="#8F6FD0" stroke-width="1"/>
+<rect x="303.7037" y="234" width="88.1481" height="76" fill="#B79CE4" stroke="#8F6FD0" stroke-width="1"/>
+<rect x="392.5926" y="234" width="51.1111" height="76" fill="#B79CE4" stroke="#8F6FD0" stroke-width="1"/>
+<rect x="442.963" y="234" width="42.963" height="76" fill="#B79CE4" stroke="#8F6FD0" stroke-width="1"/>
+<rect x="248.8889" y="336" width="1591.1111" height="76" fill="#B79CE4" stroke="#8F6FD0" stroke-width="1"/>
+<rect x="391.8519" y="298" width="4" height="14" fill="#E0A458"/>
+<rect x="442.963" y="298" width="4" height="14" fill="#E0A458"/>
+<rect x="240" y="150" width="1" height="58" fill="#8A8A96"/>
+<rect x="328.8889" y="150" width="1" height="58" fill="#8A8A96"/>
+<rect x="417.7778" y="150" width="1" height="58" fill="#8A8A96"/>
+<rect x="506.6667" y="150" width="1" height="58" fill="#8A8A96"/>
+<rect x="595.5556" y="150" width="1" height="58" fill="#8A8A96"/>
+<rect x="684.4444" y="150" width="1" height="58" fill="#8A8A96"/>
+<rect x="773.3333" y="150" width="1" height="58" fill="#8A8A96"/>
+<rect x="862.2222" y="150" width="1" height="58" fill="#8A8A96"/>
+<rect x="951.1111" y="150" width="1" height="58" fill="#8A8A96"/>
+<rect x="1040" y="150" width="1" height="58" fill="#8A8A96"/>
+<rect x="1128.8889" y="150" width="1" height="58" fill="#8A8A96"/>
+<rect x="1217.7778" y="150" width="1" height="58" fill="#8A8A96"/>
+<rect x="1306.6667" y="150" width="1" height="58" fill="#8A8A96"/>
+<rect x="1395.5556" y="150" width="1" height="58" fill="#8A8A96"/>
+<rect x="1484.4444" y="150" width="1" height="58" fill="#8A8A96"/>
+<rect x="1573.3333" y="150" width="1" height="58" fill="#8A8A96"/>
+<rect x="1662.2222" y="150" width="1" height="58" fill="#8A8A96"/>
+<rect x="1751.1111" y="150" width="1" height="58" fill="#8A8A96"/>
+<rect x="1839" y="150" width="1" height="58" fill="#8A8A96"/>
+<text x="244" y="232" font-family="ui-monospace, monospace" font-size="16" fill="#B8B8C4">0fr · 0.0000s</text>
+<text x="332.8889" y="232" font-family="ui-monospace, monospace" font-size="16" fill="#B8B8C4">120fr · 5.0000s</text>
+<text x="421.7778" y="232" font-family="ui-monospace, monospace" font-size="16" fill="#B8B8C4">240fr · 10.0000s</text>
+<text x="510.6667" y="232" font-family="ui-monospace, monospace" font-size="16" fill="#B8B8C4">360fr · 15.0000s</text>
+<text x="599.5556" y="232" font-family="ui-monospace, monospace" font-size="16" fill="#B8B8C4">480fr · 20.0000s</text>
+<text x="688.4444" y="232" font-family="ui-monospace, monospace" font-size="16" fill="#B8B8C4">600fr · 25.0000s</text>
+<text x="777.3333" y="232" font-family="ui-monospace, monospace" font-size="16" fill="#B8B8C4">720fr · 30.0000s</text>
+<text x="866.2222" y="232" font-family="ui-monospace, monospace" font-size="16" fill="#B8B8C4">840fr · 35.0000s</text>
+<text x="955.1111" y="232" font-family="ui-monospace, monospace" font-size="16" fill="#B8B8C4">960fr · 40.0000s</text>
+<text x="1044" y="232" font-family="ui-monospace, monospace" font-size="16" fill="#B8B8C4">1080fr · 45.0000s</text>
+<text x="1132.8889" y="232" font-family="ui-monospace, monospace" font-size="16" fill="#B8B8C4">1200fr · 50.0000s</text>
+<text x="1221.7778" y="232" font-family="ui-monospace, monospace" font-size="16" fill="#B8B8C4">1320fr · 55.0000s</text>
+<text x="1310.6667" y="232" font-family="ui-monospace, monospace" font-size="16" fill="#B8B8C4">1440fr · 60.0000s</text>
+<text x="1399.5556" y="232" font-family="ui-monospace, monospace" font-size="16" fill="#B8B8C4">1560fr · 65.0000s</text>
+<text x="1488.4444" y="232" font-family="ui-monospace, monospace" font-size="16" fill="#B8B8C4">1680fr · 70.0000s</text>
+<text x="1577.3333" y="232" font-family="ui-monospace, monospace" font-size="16" fill="#B8B8C4">1800fr · 75.0000s</text>
+<text x="1666.2222" y="232" font-family="ui-monospace, monospace" font-size="16" fill="#B8B8C4">1920fr · 80.0000s</text>
+<text x="1755.1111" y="232" font-family="ui-monospace, monospace" font-size="16" fill="#B8B8C4">2040fr · 85.0000s</text>
+<text x="1843" y="232" font-family="ui-monospace, monospace" font-size="16" fill="#B8B8C4">2160fr · 90.0000s</text>
+<text x="489.9259" y="214" font-family="ui-monospace, monospace" font-size="16" fill="#B8B8C4">visual detail ends at 332fr · authored end=13.8667s</text>
+<rect x="40" y="28" width="760" height="42" fill="#26262E" stroke="#3A3A44" stroke-width="1"/>
+<text x="48" y="54.04" font-family="ui-monospace, monospace" font-size="26" fill="#FAFAFA">TL01</text>
+<rect x="1110" y="28" width="770" height="42" fill="#26262E" stroke="#3A3A44" stroke-width="1"/>
+<text x="1118" y="54.04" font-family="ui-monospace, monospace" font-size="26" fill="#FAFAFA">SNAPSHOT · TL01 · SNS:ef2ce1bd0e2e67f0b07cf5e13b1530aca362b6d9c03b9d83c9abd4f548c6b377</text>
+<rect x="40" y="86" width="1840" height="46" fill="#26262E" stroke="#3A3A44" stroke-width="1"/>
+<text x="48" y="114.52" font-family="ui-monospace, monospace" font-size="24" fill="#FAFAFA">TIME-SCALED · page 1/2 · window=[0,2160)fr · 0.0000s→90.0000s</text>
+<text x="256.8889" y="383.12" font-family="ui-monospace, monospace" font-size="18" fill="#FAFAFA">TL01.CL05 · frames=[12,2352) · duration=2340fr</text>
+<text x="399.8519" y="306.68" font-family="ui-monospace, monospace" font-size="16" fill="#FAFAFA">1fr gap</text>
+<text x="450.963" y="306.68" font-family="ui-monospace, monospace" font-size="16" fill="#FAFAFA">1fr overlap</text>
+<rect x="1500" y="1010" width="380" height="30" fill="#5FA8A0" stroke="#8F6FD0" stroke-width="1"/>
+<text x="1508" y="1028.6" font-family="ui-monospace, monospace" font-size="18" fill="#FAFAFA">next: TL01.CL05</text>
+</svg>

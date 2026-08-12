@@ -1,0 +1,98 @@
+I now have all the evidence needed. Let me compile the findings.
+
+---
+
+## Findings
+
+### 1. Existing Stable-ID Precedents
+
+**Timeline ULIDs (Crockford, 26-char, monotonic):** `astrid/core/threads/ids.py:1-69` generates time-sortable ULIDs used for timeline identity (`crud.py:100`), event IDs (`events/schema/types.py:306`), `txn_id` (`types.py:350`), run IDs, and `FinalOutput.ulid` (`model.py:71`). These are globally unique per process — no collision domain exists.
+
+**Timeline UUID identity:** `crud.py:121-131` creates `assembly.identity.json` with a `timeline_id` (UUID v4 from `uuid4()`) alongside `timeline_ulid`. Events reference `timeline_id` (UUID), not ULID (`types.py:307`). Two parallel identity systems exist.
+
+**Event hash chain (prev_hash→hash):** `eventlog/local_fs.py:83-120` — each `TimelineEvent` carries `prev_hash` (prior event's SHA-256) and `hash` (canonical JSON hash). `verify_chain()` (`local_fs.py:375-409`) validates the complete chain. Event `version` equals event count (`local_fs.py:461`). This is the strongest existing lineage mechanism — cryptographic, append-only, within a single timeline.
+
+**Clip IDs (authored strings, timeline-local):** `events/schema/payloads/clip.py:3-4` documents: "clip 'id' strings are the canonical m2 identity. Migration to UUID entity_id/external_id is deferred." `ClipAddedPayload.clip_id` is any non-empty string (`clip.py:25-26`). Clips live in `assembly.json` flat `clips` array (`banodoco_composer.py:189-192`), each with `"id"` in `_CLIP_ALLOWED` (`banodoco_schema.py:342`). No uniqueness enforcement — duplicates possible within a timeline.
+
+**pinnedShotGroups[].shotId:** Authored strings, timeline-local. `timeline_storyboard/run.py:295` reads `raw_group.get("shotId")`, falls back to `shot-{index+1}`. `plan.md:151` confirms `--shot` matches `pinnedShotGroups[].shotId` within one timeline.
+
+**Track IDs:** `_TRACK_ALLOWED` includes `"id"` (`banodoco_schema.py:349`). Clips reference tracks via `"track"` field (`banodoco_schema.py:342`). Also timeline-local strings.
+
+**No existing snapshot-root lineage:** There is zero parent/child/snapshot-root machinery across visualization runs. The plan introduces this as entirely new.
+
+### 2. Where Duplicate Local IDs Can Arise
+
+**Cross-timeline clip collisions:** Two timelines in a project each have independent clip namespaces. Both can contain `id="plant-frame-2"`. The plan's fixture matrix explicitly requires "multi-timeline project with colliding local clip ids" (`plan.md:812`). Today's disambiguation: each timeline is isolated — `show_timeline(project_slug, slug)` resolves one timeline at a time (`crud.py:221-272`); there's no cross-timeline query that would surface the ambiguity.
+
+**Within-timeline collisions:** Clip `id` has no uniqueness enforcement. The event log's `clip.added` doesn't check for duplicates. Multiple clips could share an `id` string within one assembly — this is a latent bug, not a designed feature.
+
+**Track ID collisions:** Same pattern — tracks have `"id"` with no uniqueness constraint within a timeline.
+
+**Timeline slug collisions:** Prevented at creation (`crud.py:93-97`). A tombstoned timeline could share a slug with a later timeline (disambiguated by ULID), but `find_timeline_by_slug` searches by slug and returns the first match.
+
+**Project-level `--all`:** When `--all` selects multiple timelines, the plan specifies timeline-qualified references `TL01.CL03` to disambiguate (`plan.md:148`). The `TLxx` prefix assigns a deterministic ordinal to each selected timeline within the snapshot.
+
+### 3. Tombstone Semantics
+
+**Timeline tombstones:** `Manifest.tombstoned_at: str | None` (`model.py:163`). `tombstone_timeline()` (`crud.py:524-555`): stamps ISO timestamp, leaves all files (assembly, events, identity, display, manifest) in place. `list_timelines(include_tombstoned=False)` excludes them by default (`crud.py:190-191`). `paths.py:115-123` checks `manifest.json.tombstoned_at`. The event `timeline.tombstoned` is schema-defined but an intentional assembly no-op in m4 (`events/schema/SPEC.md:27,57`). **ULID persists** — files remain, identity sidecar untouched. The timeline is hidden from default listings but fully recoverable.
+
+**Clip "tombstones":** No such concept. `clip.removed` (`ClipRemovedPayload`, `clip.py:77-84`) removes the clip from the projected assembly. The `clip_id` disappears from current state. The removal event (with its own event ULID) persists in `assembly.jsonl` forever, but the clip's authored `id` has no post-removal presence in the projection. **Clip IDs do NOT persist after removal.** This is a critical gap for the plan's requirement that display IDs remain stable — a removed clip would have its `CLxx` ID vanish from subsequent snapshots, potentially renumbering later clips.
+
+### 4. Existing Lineage/Ancestry Machinery
+
+**Event hash chain:** Cryptographic chain within one timeline (`local_fs.py:83-120`). `prev_hash` links each event to its predecessor. `EventLogHead` (`types.py:75-80`) captures `last_event_id`, `last_hash`, `event_count`, `version`. This is the only existing lineage — single-timeline, event-granularity.
+
+**Import metadata:** `TimelineEvent` fields `source_backend`, `source_timeline_id`, `source_event_id`, `source_version`, `source_hash` (`types.py:318-322`) carry cross-backend provenance for imported events only. Not used for snapshot lineage.
+
+**Manifest contributing_runs:** `Manifest.contributing_runs: list[str]` (`model.py:161`) tracks which run IDs contributed to the timeline. This is a flat list, not a tree. No parent/child relationship between runs.
+
+**No snapshot-root, no child-parent link, no refresh ancestry:** The plan introduces all of these as new concepts. The existing codebase has zero infrastructure for:
+- Freezing a root snapshot with hashes of event head, projection, registry, transcripts, and media
+- Children inheriting a parent's id map
+- Detecting that current state has advanced past a frozen snapshot
+- A `refresh_root` action
+
+---
+
+## Tasklist Implications
+
+**T3 (Lock artifact schemas, versions, ID grammar):** Must now explicitly specify:
+- The `canonical_ref` mapping from display ID → `{timeline_ulid, kind, id}` (as shown in `plan.md:233-237`)
+- That display IDs (`TL01.CL03`) are **occurrence IDs** (ordinal within one snapshot) while the canonical ref is the **semantic object ID** (timeline_ulid + kind + authored id)
+- Tombstoned clips produce hole in sequence: `CL01, CL03, CL04` (CL02 removed), or display IDs should use a different deterministic assignment that doesn't renumber when clips are removed
+
+**T10 (Frozen identities + navigation graph):** Must split into two sub-tasks:
+- **T10a:** Semantic object ID assignment (deterministic, survives refresh) — maps `(timeline_ulid, kind, authored_id)` → semantic identity
+- **T10b:** Occurrence/display ID assignment (ordinal within one snapshot, survives pagination but NOT refresh) — `TL01.CL03` as visual label
+
+**New task needed: Tombstone-preserving ID map.** When clips are removed from a timeline, the id map in children must either (a) leave gaps (`CL01, CL03, CL04`) or (b) use a non-ordinal assignment. The plan currently says "deterministically assigned from canonical object identity and ordering" (`plan.md:552`), which implies ordinal assignment that WILL renumber if a clip is removed between a parent and child snapshot. This contradicts "children retain its id map and never silently read newer project state" (NORTHSTAR.md:25).
+
+**T25 (Snapshot-safe drill-down):** Must now include explicit validation that `--focus TL01.CL03` resolves to the same `canonical_ref` as the parent's id map declares — not to whatever clip currently has ordinal 3.
+
+**T33 (Adversarial freshness + integrity fixtures):** Must include a fixture where a clip is removed between parent and child snapshots, proving that `CL03` still resolves to the same canonical object.
+
+---
+
+## Risks & Conflicts
+
+1. **Clip removal breaks ordinal display IDs.** The plan says display IDs are "deterministically assigned from canonical object identity and ordering" but also says "children retain its id map and never renumber." These conflict when a clip is removed between root and child snapshots. The plan doesn't specify whether display IDs are semantic (gap-tolerant) or occurrence-based (renumber on removal).
+
+2. **No existing tombstone for clips.** `clip.removed` deletes from projection entirely. There's no `clip.tombstoned` event. If a clip is removed between a parent snapshot and a child drill-down, the child's canonical ref for `CL03` would point to an absent clip. The plan needs to specify: does the child fail, warn, or adjust?
+
+3. **Timeline-level tombstone vs `--all`.** `--all` says "every non-tombstoned timeline" (`plan.md:126`). But what if a timeline is tombstoned AFTER a root snapshot that included it? The child's frozen id map would reference a tombstoned `TL02` — should it be visible, hidden, or failed?
+
+4. **Two identity systems (ULID + UUID).** Timeline events reference `timeline_id` (UUID), but CRUD uses `timeline_ulid` for directory naming. The plan's `canonical_ref` uses `timeline_ulid` (`plan.md:234`), but the event log uses UUID. The snapshot must capture both.
+
+5. **Within-timeline clip ID duplicates.** The codebase has no uniqueness enforcement on clip `id`. If two clips share `id="plant-frame-2"`, the `canonical_ref` `{timeline_ulid, "clip", "plant-frame-2"}` is ambiguous. The plan needs a disambiguation rule (e.g., index within timeline, or fail validation).
+
+---
+
+## Elegant Simplifications
+
+1. **Separate semantic identity from display ordinal.** Semantic identity = `{timeline_ulid, kind, authored_id}` (stable across refresh, survives tombstone). Display ID = `TL01.CL03` (occurrence ordinal, re-assigned on each root snapshot, frozen in children). This two-layer design eliminates the renumbering conflict: children freeze both layers from their parent, and `refresh_root` recomputes display ordinals while semantic identities stay anchored.
+
+2. **Use timeline ordering (track + `at` position) for clip disambiguation.** If two clips share the same `id`, disambiguate by `(track_id, at)`. This handles the duplicate-id-within-timeline case without requiring a schema change.
+
+3. **Treat removed clips as "absent, not renumbered."** In the frozen id map, every canonical ref from the root snapshot persists. A child that drills down on a now-absent clip gets an explicit "absent" state with the canonical ref preserved — same pattern as missing assets (plan.md:349-353). The display ordinal `CL03` stays stable.
+
+4. **Snapshot badge already provides the lineage anchor.** Instead of building a separate parent-snapshot link, the snapshot badge (`SNS:a83f…` at plan.md:286) plus the root snapshot hash in the child manifest is sufficient to prove lineage. `action-index.json` stores the parent manifest path, making the chain verifiable without additional infrastructure.

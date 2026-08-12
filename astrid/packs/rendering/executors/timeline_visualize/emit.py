@@ -1,0 +1,1363 @@
+"""R9 — semantic core and action graph emitters.
+
+Each emitter returns the *content* of one evidence-pack artifact as a plain
+JSON-ready dict (or, for the two markdown companions, a deterministic string).
+No emitter writes files, reads the wall clock, or mutates its inputs; R13 owns
+materialization, hashing, and ``manifest.json``.
+
+Artifacts produced:
+
+* ``emit_ground_truth`` — frozen semantic model (identity, event head, extents,
+  tracks, clips, assets, snapshot SNS, scope).  With a ``scope`` the ``scope``
+  block narrows to the selected kind/ref/bounds and ``objects``/``clips``/
+  ``assets`` filter to the scoped set (identity ordinals never renumber).
+* ``emit_action_index`` — executable navigation graph per display id; with a
+  ``scope`` only scoped objects are indexed and relations stay resolved.
+* ``emit_asset_index`` — per-asset provenance, integrity, and contained path
+  (always the full frozen project; scoped views never hide library state).
+* ``emit_transcript_index`` — empty-valid M1 shape (TS/SP declared, empty).
+* ``emit_diagnostics`` — every model/snapshot warning with severity/code; with
+  a ``scope`` narrowed to the scoped objects plus the scope's own warnings.
+* ``emit_reading_guide`` — generic prose teaching the qualified-id rule.
+* ``emit_structure_md`` — breadcrumb + deterministic suggested next actions.
+
+Frozen-artifact notes (R13 must know):
+
+* ``timestamps.frozen_at`` is a deterministic sentinel
+  (:data:`FROZEN_AT_SENTINEL`), never wall-clock time and never part of the
+  SNS preimage; R13 may replace it with the real freeze instant when the pack
+  is materialized.
+* The compositor version and transition-default fingerprint have no home in
+  the frozen ``ground-truth.json`` schema (``additionalProperties: false``),
+  so they are emitted as factual lines in ``structure.md``; the fingerprint
+  also belongs in ``manifest.json.compositor`` (R13).
+* The action ``argv`` arrays use the canonical ``python3 -m astrid timelines
+  visualize`` prefix; ``--from-view`` is always the exact manifest path string
+  passed in, so R13 can rewrite it to the final pack-relative absolute path.
+
+Identity maps are duck-typed: any object exposing ``lookup_semantic(kind,
+authored_id)``/``lookup_display(display_id)`` (R8's ``IdentityMap``) or a
+Mapping-shaped twin with ``semantic_to_display``/``display_to_semantic`` fields
+is accepted.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+from pathlib import Path
+from typing import Any, Mapping
+
+from astrid.core.timeline.duration import resolve_transition_duration_frames
+from astrid.core.timeline.snapshot import TimelineSnapshot
+from astrid.packs.rendering.executors.timeline_visualize.ids import (
+    parse_qualified_ref,
+)
+from astrid.packs.rendering.executors.timeline_visualize.model import (
+    _PINNED_TRANSITION_DEFAULTS,
+    COMPOSITOR_VERSION,
+    TRANSITION_FALLBACK_FRAMES,
+    TimelineInspectionModel,
+)
+from astrid.packs.rendering.executors.timeline_visualize.navigation import (
+    IdentityMap,
+    assign_range_ids,
+)
+from astrid.packs.rendering.executors.timeline_visualize.scope import Scope
+from astrid.packs.rendering.executors.timeline_visualize.snapshot_digest import (
+    canonical_json_bytes,
+    sha256_bytes,
+)
+
+SCHEMA_VERSION = 1
+
+#: Deterministic operational sentinel for ``ground-truth.json.timestamps``.
+#: Excluded from every SNS preimage; never derived from the wall clock.
+FROZEN_AT_SENTINEL = "2026-08-11T00:00:00Z"
+
+#: Context window (seconds) attached to ``focus_context`` visualize actions.
+FOCUS_CONTEXT_SECONDS = "2"
+
+#: Context window (seconds) for the root timeline's ``focus_timestamp`` action.
+TIMESTAMP_CONTEXT_SECONDS = "3"
+
+_TIMELINE_REF = "TL01"
+
+_ASSET_ROLES = frozenset(
+    {
+        "timeline_media",
+        "generation_reference",
+        "generation_output",
+        "thumbnail_only",
+        "rendered_sample",
+    }
+)
+
+_ASSET_STATE_CODES: Mapping[str, str] = {
+    "missing": "MISSING_MEDIA",
+    "hash_mismatch": "HASH_MISMATCH",
+    "hash_unrecorded": "HASH_UNRECORDED",
+    "remote": "REMOTE_MEDIA",
+    "thumbnail_only": "THUMBNAIL_ONLY",
+    "unsupported": "UNSUPPORTED_MEDIA",
+}
+
+_OBJECT_KIND_ORDER: Mapping[str, int] = {
+    "timeline": 0,
+    "shot": 1,
+    "clip": 2,
+    "asset": 3,
+    "range": 4,
+    "transcript_source_segment": 5,
+    "speech_occurrence": 6,
+}
+
+_DIAGNOSTIC_CODE_RE = re.compile(r"^([A-Z][A-Z0-9_]*): (.*)$", flags=re.DOTALL)
+
+
+# ---------------------------------------------------------------------------
+# Identity-map access (duck typed: IdentityMap or Mapping-shaped twin).
+# ---------------------------------------------------------------------------
+
+
+def _identity_attr(identity_map: Any, name: str) -> Any:
+    value = getattr(identity_map, name, None)
+    if value is None and isinstance(identity_map, Mapping):
+        value = identity_map.get(name)
+    return value
+
+
+def _lookup_display(identity_map: Any, display_id: str) -> tuple[str, str, str] | None:
+    method = getattr(identity_map, "lookup_display", None)
+    if callable(method):
+        return method(display_id)
+    mapping = _identity_attr(identity_map, "display_to_semantic")
+    if isinstance(mapping, Mapping):
+        return mapping.get(display_id)
+    raise TypeError("identity_map must expose lookup_display or display_to_semantic")
+
+
+def _lookup_semantic(
+    identity_map: Any, kind: str, authored_id: str
+) -> str | None:
+    method = getattr(identity_map, "lookup_semantic", None)
+    if callable(method):
+        return method(kind, authored_id)
+    mapping = _identity_attr(identity_map, "semantic_to_display")
+    timeline_uuid = _identity_attr(identity_map, "timeline_uuid")
+    if isinstance(mapping, Mapping) and isinstance(timeline_uuid, str):
+        return mapping.get((timeline_uuid, kind, authored_id))
+    raise TypeError("identity_map must expose lookup_semantic or semantic_to_display")
+
+
+def _canonical_ref(identity_map: Any, display_id: str) -> dict[str, str]:
+    identity = _lookup_display(identity_map, display_id)
+    if identity is None:
+        raise ValueError(f"display id {display_id!r} has no semantic identity")
+    return {
+        "timeline_uuid": identity[0],
+        "kind": identity[1],
+        "authored_id": identity[2],
+    }
+
+
+def _ordered_object_refs(model: TimelineInspectionModel, identity_map: Any) -> list[str]:
+    """All display ids in deterministic order: TL, SH, CL, AS, RG, TS, SP."""
+    mapping = _identity_attr(identity_map, "display_to_semantic")
+    if not isinstance(mapping, Mapping):
+        raise TypeError("identity_map must expose display_to_semantic")
+    refs = list(mapping.keys())
+
+    def sort_key(ref: str) -> tuple[int, int]:
+        identity = _lookup_display(identity_map, ref)
+        kind_order = _OBJECT_KIND_ORDER.get(identity[1] if identity else "", 99)
+        ordinal = parse_qualified_ref(ref).object_ordinal or 0
+        return (kind_order, ordinal)
+
+    return sorted(refs, key=sort_key)
+
+
+# ---------------------------------------------------------------------------
+# Shared snapshot/scope blocks (byte-identical across every artifact).
+# ---------------------------------------------------------------------------
+
+
+def _snapshot_block(model: TimelineInspectionModel, snapshot: TimelineSnapshot) -> list[dict[str, Any]]:
+    slug = model.slug if isinstance(model.slug, str) and model.slug else model.timeline_ulid.lower()
+    return [
+        {
+            "timeline": {
+                "stable_id": _TIMELINE_REF,
+                "qualified_ref": _TIMELINE_REF,
+                "uuid": model.timeline_uuid,
+                "ulid": model.timeline_ulid,
+                "slug": slug,
+            },
+            "digest": model.snapshot_sns,
+            "event_head": {
+                "version": snapshot.head_version,
+                "last_event_id": snapshot.last_event_id,
+                "last_hash": snapshot.last_hash,
+            },
+            "fps": model.fps,
+        }
+    ]
+
+
+_SCOPE_WARNING_CODES: tuple[tuple[str, str], ...] = (
+    # Emit-side message -> code map keyed on distinctive substrings.  Scope
+    # warnings are plain strings whose configured phrase occurs mid-message
+    # (e.g. "clip 'x' is not present in the snapshot"), so codes are derived
+    # from message content rather than a prefix match.  Substrings are pairwise
+    # non-overlapping and ordered for determinism.
+    ("range was clipped to the composition bounds", "CLIP_RANGE_CLIPPED"),
+    ("timestamp lies outside the composition bounds", "TIMESTAMP_CONTEXT_CLIPPED"),
+    ("unavailable; timeline.pinnedShotGroups has no match", "SHOT_GROUPS_ABSENT"),
+    ("is not present in the snapshot", "CLIP_ABSENT_FROM_SNAPSHOT"),
+    ("has no clip uses in the snapshot", "ASSET_NO_CLIP_USES"),
+    ("has neither valid authored bounds nor present member clips", "SHOT_BOUNDS_ABSENT"),
+)
+
+
+def _scope_effective(
+    model: TimelineInspectionModel,
+    identity_map: Any,
+    scope: Scope | None,
+) -> tuple[Any, Scope | None]:
+    """Return ``(identity_map, scope)`` with range RG ids minted when needed.
+
+    Range scopes carry an authored range id in ``Scope.ref``; the ground-truth
+    scope block and action index require a qualified ``TL01.RGxx`` ref, so the
+    display ordinal is minted via :func:`navigation.assign_range_ids` when the
+    authored id has none yet.  ``assign_range_ids`` never mutates its input and
+    never renumbers an already-allocated range, so re-emission is stable and
+    the caller's map stays untouched.  All other scope kinds (and ``None``)
+    pass through unchanged.
+    """
+
+    if scope is None or scope.kind != "range" or not scope.ref:
+        return identity_map, scope
+    if scope.start_frame is None or scope.end_frame is None:
+        return identity_map, scope
+    if _lookup_semantic(identity_map, "range", scope.ref) is not None:
+        return identity_map, scope
+    if not isinstance(identity_map, IdentityMap):
+        raise ValueError(
+            "range scope emission requires a navigation.IdentityMap so the RG "
+            "display id can be minted via assign_range_ids"
+        )
+    ranges = [
+        (
+            scope.ref,
+            scope.start_frame / model.fps,
+            scope.end_frame / model.fps,
+        )
+    ]
+    return assign_range_ids(identity_map, ranges), scope
+
+
+def _scope_ref(
+    model: TimelineInspectionModel,
+    identity_map: Any,
+    scope: Scope | None,
+) -> str | None:
+    """Qualified ref for a scope block: display id or ``TL01@HH:MM:SS.fff``.
+
+    Timeline/project scopes use the timeline ref or ``None``; timestamp scopes
+    reuse the caller's locator when it parses (the CLI always supplies one),
+    otherwise anchor on ``Scope.at_seconds`` when present, and only fall back
+    to the context-window midpoint for legacy timestamp scopes without
+    ``at_seconds``; clip/asset/shot/range scopes resolve through the identity
+    map — a ``Scope.ref`` may already be the display id or the authored id.
+    Unresolvable authored refs (degenerate empty scopes) pass through
+    verbatim; the R3 schema only accepts qualified refs, so R13 must decide
+    how to serialize those.
+    """
+
+    if scope is None:
+        return _TIMELINE_REF
+    kind = scope.kind
+    if kind == "timeline":
+        return _TIMELINE_REF
+    if kind == "project":
+        return None
+    if kind == "timestamp":
+        if scope.ref is not None:
+            try:
+                parsed = parse_qualified_ref(scope.ref)
+            except ValueError:
+                parsed = None
+            if parsed is not None and parsed.is_timestamp:
+                return scope.ref
+        if scope.at_seconds is not None:
+            return _timestamp_locator(scope.at_seconds, _TIMELINE_REF)
+        if scope.start_frame is None or scope.end_frame is None:
+            return None
+        midpoint_seconds = (scope.start_frame + scope.end_frame) / 2.0 / model.fps
+        return _timestamp_locator(midpoint_seconds, _TIMELINE_REF)
+    semantic_kind = {"shot": "shot", "range": "range", "clip": "clip", "asset": "asset"}.get(kind)
+    if semantic_kind is None:
+        return scope.ref
+    if scope.ref is not None:
+        identity = _lookup_display(identity_map, scope.ref)
+        if identity is not None and identity[1] == semantic_kind:
+            return scope.ref
+    if scope.ref is not None:
+        display = _lookup_semantic(identity_map, semantic_kind, scope.ref)
+        if display is not None:
+            return display
+    return scope.ref
+
+
+def _in_scope_refs(
+    model: TimelineInspectionModel,
+    identity_map: Any,
+    scope: Scope | None,
+) -> set[str]:
+    """Display refs of the objects a scoped emission still shows.
+
+    ``None`` (full timeline) keeps every object.  A real scope keeps the
+    timeline, every clip in ``Scope.clip_ids``, the assets those clips
+    reference, and the scope's own object when it has a display id (the minted
+    ``RG`` for range scopes, the focused ``CL``/``AS``/``SH`` otherwise).
+    Ordinals never renumber: children simply show fewer entries.
+    """
+
+    if scope is None:
+        return set(_ordered_object_refs(model, identity_map))
+    refs: set[str] = {_TIMELINE_REF}
+    clip_ids = set(scope.clip_ids)
+    for clip in model.clips:
+        if clip.clip_id not in clip_ids:
+            continue
+        clip_ref = _lookup_semantic(identity_map, "clip", clip.clip_id)
+        if clip_ref is not None:
+            refs.add(clip_ref)
+        for asset_key in clip.asset_refs:
+            asset_ref = _lookup_semantic(identity_map, "asset", asset_key)
+            if asset_ref is not None:
+                refs.add(asset_ref)
+    scope_ref = _scope_ref(model, identity_map, scope)
+    if scope_ref is not None:
+        try:
+            parsed = parse_qualified_ref(scope_ref)
+        except ValueError:
+            parsed = None
+        if parsed is not None and not parsed.is_timestamp:
+            refs.add(scope_ref)
+    return refs
+
+
+def _scope_warning_code(warning: str) -> str:
+    """Deterministic diagnostics code for a ``Scope.warnings`` string.
+
+    A warning that already carries a ``CODE: message`` prefix keeps its code;
+    otherwise the message is matched against the distinctive-substring map
+    (:data:`_SCOPE_WARNING_CODES`) so mid-message phrases resolve to the
+    structured codes (``CLIP_ABSENT_FROM_SNAPSHOT``, ``ASSET_NO_CLIP_USES``,
+    ``SHOT_GROUPS_ABSENT``, ``SHOT_BOUNDS_ABSENT``, ...).  Unknown messages
+    fall back to ``SCOPE_WARNING``.
+    """
+
+    match = _DIAGNOSTIC_CODE_RE.match(warning)
+    if match is not None:
+        return match.group(1)
+    for fragment, code in _SCOPE_WARNING_CODES:
+        if fragment in warning:
+            return code
+    return "SCOPE_WARNING"
+
+
+def _scope_warning_ref(
+    model: TimelineInspectionModel,
+    identity_map: Any,
+    scope: Scope | None,
+) -> str | None:
+    """Diagnostics ``object_ref`` for scope warnings.
+
+    Timestamp locators are not valid diagnostics refs (the schema accepts only
+    qualified refs or null), so they report against the timeline; unresolvable
+    refs also fall back to the timeline.
+    """
+
+    if scope is None:
+        return None
+    ref = _scope_ref(model, identity_map, scope)
+    if ref is None:
+        return _TIMELINE_REF
+    try:
+        parsed = parse_qualified_ref(ref)
+    except ValueError:
+        return _TIMELINE_REF
+    if parsed.is_timestamp:
+        return _TIMELINE_REF
+    return ref
+
+
+def _scope_block(
+    model: TimelineInspectionModel,
+    identity_map: Any,
+    scope: Scope | None,
+) -> dict[str, Any]:
+    """Serialize the scope block: kind, qualified ref, closed-open bounds.
+
+    ``None`` emits the full timeline scope exactly as before.  A real scope
+    emits its kind, its qualified ref, and its exact frame bounds converted to
+    seconds at the model fps (nullable when the scope is empty).  The timeline
+    entry always stays ``[0, composition)``; only this block narrows.
+    """
+
+    if scope is None:
+        return {
+            "kind": "timeline",
+            "ref": _TIMELINE_REF,
+            "start_frame": 0,
+            "end_frame": model.extents.composition_frames,
+            "start_seconds": 0.0,
+            "end_seconds": model.extents.composition_seconds,
+        }
+    start = scope.start_frame
+    end = scope.end_frame
+    return {
+        "kind": scope.kind,
+        "ref": _scope_ref(model, identity_map, scope),
+        "start_frame": start,
+        "end_frame": end,
+        "start_seconds": (start / model.fps) if start is not None else None,
+        "end_seconds": (end / model.fps) if end is not None else None,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Ground truth.
+# ---------------------------------------------------------------------------
+
+
+def _track_kind(model: TimelineInspectionModel, track_id: str) -> str:
+    for track in model.tracks:
+        if track.track_id == track_id:
+            return track.kind
+    return "other"
+
+
+def _durations(model: TimelineInspectionModel) -> dict[str, Any]:
+    visual_end = max(
+        (
+            clip.authored.end
+            for clip in model.clips
+            if _track_kind(model, clip.track_id) == "visual"
+        ),
+        default=0.0,
+    )
+    return {
+        "authored_visual_only_end_seconds": float(visual_end),
+        "frame_quantized_visual_end": {
+            "frames": model.extents.visual_frames,
+            "seconds": model.extents.visual_seconds,
+        },
+        "all_track_composition": {
+            "frames": model.extents.composition_frames,
+            "seconds": model.extents.composition_seconds,
+        },
+    }
+
+
+def _tracks(model: TimelineInspectionModel, snapshot: TimelineSnapshot) -> list[dict[str, Any]]:
+    raw_by_id: dict[str, Mapping[str, Any]] = {}
+    raw_tracks = snapshot.assembly.get("tracks", [])
+    if isinstance(raw_tracks, list):
+        for raw in raw_tracks:
+            if isinstance(raw, Mapping):
+                track_id = raw.get("id")
+                if isinstance(track_id, str):
+                    raw_by_id[track_id] = raw
+    result: list[dict[str, Any]] = []
+    for track in model.tracks:
+        if track.kind not in {"visual", "audio"}:
+            raise ValueError(
+                f"track {track.track_id!r} has unsupported kind {track.kind!r}; "
+                "ground truth only emits visual/audio tracks"
+            )
+        raw = raw_by_id.get(track.track_id, {})
+        muted = raw.get("muted") if isinstance(raw.get("muted"), bool) else False
+        result.append(
+            {
+                "authored_id": track.track_id,
+                "kind": track.kind,
+                "label": track.label if isinstance(track.label, str) else "",
+                "muted": muted,
+                "config_order": track.config_order,
+                "paint_order": track.paint_index if track.kind == "visual" else None,
+            }
+        )
+    return result
+
+
+def _number_or_none(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
+def _int_or_none(value: Any) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value
+
+
+def _source_bounds(clip: Any, raw: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "from_seconds": _number_or_none(raw.get("from")),
+        "to_seconds": _number_or_none(raw.get("to")),
+        "hold_seconds": _number_or_none(raw.get("hold")),
+        "duration_seconds": clip.authored.duration,
+    }
+
+
+def _frame_round(seconds: float, fps: int) -> int:
+    return int(round(seconds * fps))
+
+
+def _resolved_transition_frames(model: TimelineInspectionModel, clip: Any) -> int | None:
+    same_track = [c for c in model.clips if c.track_id == clip.track_id]
+    index = same_track.index(clip)
+    successor = same_track[index + 1] if index + 1 < len(same_track) else None
+    if successor is None:
+        return None
+    transition_id = clip.transition.get("id", clip.transition.get("type"))
+    registered_default = _PINNED_TRANSITION_DEFAULTS.get(transition_id)
+    return resolve_transition_duration_frames(
+        clip.transition,
+        clip.frames.duration_frames,
+        successor.frames.duration_frames,
+        registered_default,
+        fps=model.fps,
+    )
+
+
+def _ignored_transition_reason(model: TimelineInspectionModel, clip: Any) -> str:
+    if _track_kind(model, clip.track_id) != "visual":
+        return "transition applies only to visual tracks"
+    same_track = [c for c in model.clips if c.track_id == clip.track_id]
+    index = same_track.index(clip)
+    successor = same_track[index + 1] if index + 1 < len(same_track) else None
+    if successor is None:
+        return "no same-track successor clip; transition cannot be scheduled"
+    if (
+        successor.frames.start_frame < clip.frames.start_frame
+        or successor.frames.start_frame > clip.frames.end_frame
+    ):
+        return "same-track successor does not overlap the clip window"
+    if clip.kind == "effect-layer" or successor.kind == "effect-layer":
+        return "effect-layer clips exclude transitions"
+    return "resolved transition duration is non-positive or exceeds a clip duration"
+
+
+def _transition(model: TimelineInspectionModel, clip: Any) -> dict[str, Any] | None:
+    raw = clip.transition
+    if raw is None:
+        return None
+    transition_id = raw.get("id", raw.get("type"))
+    if not isinstance(transition_id, str) or not transition_id:
+        raise ValueError(f"clip {clip.clip_id!r} transition id must be a non-empty string")
+    accepted = clip.effective != clip.frames.as_seconds()
+    if not accepted:
+        return {
+            "id": transition_id,
+            "state": "ignored",
+            "ignored_reason": _ignored_transition_reason(model, clip),
+            "requested_duration_frames": _int_or_none(raw.get("durationFrames")),
+            "requested_duration_seconds": _number_or_none(raw.get("duration")),
+            "resolution_source": None,
+            "resolved_duration_frames": None,
+            "effective_interval": None,
+        }
+    resolved = _resolved_transition_frames(model, clip)
+    if resolved is None:
+        return {
+            "id": transition_id,
+            "state": "ignored",
+            "ignored_reason": _ignored_transition_reason(model, clip),
+            "requested_duration_frames": _int_or_none(raw.get("durationFrames")),
+            "requested_duration_seconds": _number_or_none(raw.get("duration")),
+            "resolution_source": None,
+            "resolved_duration_frames": None,
+            "effective_interval": None,
+        }
+    if raw.get("durationFrames") is not None:
+        resolution_source = "explicit_frames"
+    elif raw.get("duration") is not None:
+        resolution_source = "explicit_seconds"
+    else:
+        resolution_source = "registry_default"
+    effective = clip.effective
+    return {
+        "id": transition_id,
+        "state": "accepted",
+        "ignored_reason": None,
+        "requested_duration_frames": _int_or_none(raw.get("durationFrames")),
+        "requested_duration_seconds": _number_or_none(raw.get("duration")),
+        "resolution_source": resolution_source,
+        "resolved_duration_frames": resolved,
+        "effective_interval": {
+            "start_frame": _frame_round(effective.start, model.fps),
+            "end_frame": _frame_round(effective.end, model.fps),
+            "start_seconds": effective.start,
+            "end_seconds": effective.end,
+        },
+    }
+
+
+def _clips(
+    model: TimelineInspectionModel,
+    identity_map: Any,
+    snapshot: TimelineSnapshot,
+    scope: Scope | None = None,
+) -> list[dict[str, Any]]:
+    raw_by_id: dict[str, Mapping[str, Any]] = {}
+    raw_clips = snapshot.assembly.get("clips", [])
+    if isinstance(raw_clips, list):
+        for raw in raw_clips:
+            if isinstance(raw, Mapping):
+                clip_id = raw.get("id")
+                if isinstance(clip_id, str):
+                    raw_by_id[clip_id] = raw
+    clip_ids = set(scope.clip_ids) if scope is not None else None
+    # Emphasis is serialized exactly when the scope declares a non-empty
+    # active-stack set (timestamp/clip/asset/shot scopes).  Full timeline and
+    # empty-emphasis scopes omit the field so unscoped emission stays stable.
+    emphasized = (
+        set(scope.emphasized_clip_ids)
+        if scope is not None and scope.emphasized_clip_ids
+        else None
+    )
+    result: list[dict[str, Any]] = []
+    for clip in model.clips:
+        if clip_ids is not None and clip.clip_id not in clip_ids:
+            continue
+        ref = _lookup_semantic(identity_map, "clip", clip.clip_id)
+        if ref is None:
+            raise ValueError(f"clip {clip.clip_id!r} has no display id in the identity map")
+        parsed = parse_qualified_ref(ref)
+        raw = raw_by_id.get(clip.clip_id, {})
+        asset_refs = [
+            asset_ref
+            for asset_key in clip.asset_refs
+            if (asset_ref := _lookup_semantic(identity_map, "asset", asset_key)) is not None
+        ]
+        entry: dict[str, Any] = {
+            "stable_id": parsed.stable_id,
+            "qualified_ref": ref,
+            "canonical_ref": _canonical_ref(identity_map, ref),
+            "track_authored_id": clip.track_id,
+            "clip_type": clip.kind,
+            "at_seconds": clip.authored.start,
+            "start_frame": clip.frames.start_frame,
+            "end_frame": clip.frames.end_frame,
+            "source_bounds": _source_bounds(clip, raw),
+            "speed": clip.speed,
+            "transition": _transition(model, clip),
+            "asset_refs": asset_refs,
+        }
+        if emphasized is not None:
+            entry["emphasized"] = clip.clip_id in emphasized
+        result.append(entry)
+    return result
+
+
+def _schema_role(role: str) -> str:
+    return role if role in _ASSET_ROLES else "timeline_media"
+
+
+def _assets(
+    model: TimelineInspectionModel,
+    identity_map: Any,
+    scope: Scope | None = None,
+) -> list[dict[str, Any]]:
+    wanted: set[str] | None = None
+    if scope is not None:
+        wanted = set()
+        clip_ids = set(scope.clip_ids)
+        for clip in model.clips:
+            if clip.clip_id in clip_ids:
+                wanted.update(clip.asset_refs)
+    result: list[dict[str, Any]] = []
+    for key in sorted(model.registry_keys):
+        if wanted is not None and key not in wanted:
+            continue
+        ref = _lookup_semantic(identity_map, "asset", key)
+        if ref is None:
+            raise ValueError(f"asset {key!r} has no display id in the identity map")
+        integrity = model.media_integrity[key]
+        parsed = parse_qualified_ref(ref)
+        result.append(
+            {
+                "stable_id": parsed.stable_id,
+                "qualified_ref": ref,
+                "canonical_ref": _canonical_ref(identity_map, ref),
+                "role": _schema_role(integrity.role),
+                "integrity_state": integrity.state,
+            }
+        )
+    return result
+
+
+def _objects(
+    model: TimelineInspectionModel,
+    identity_map: Any,
+    scope: Scope | None = None,
+) -> list[dict[str, Any]]:
+    in_scope = _in_scope_refs(model, identity_map, scope)
+    return [
+        {
+            "stable_id": parse_qualified_ref(ref).stable_id,
+            "qualified_ref": ref,
+            "canonical_ref": _canonical_ref(identity_map, ref),
+        }
+        for ref in _ordered_object_refs(model, identity_map)
+        if ref in in_scope
+    ]
+
+
+def _timeline_entry(
+    model: TimelineInspectionModel,
+    identity_map: Any,
+    snapshot: TimelineSnapshot,
+    scope: Scope | None = None,
+) -> dict[str, Any]:
+    return {
+        "timeline_ref": _TIMELINE_REF,
+        "durations": _durations(model),
+        "tracks": _tracks(model, snapshot),
+        "clips": _clips(model, identity_map, snapshot, scope),
+        "assets": _assets(model, identity_map, scope),
+    }
+
+
+def emit_ground_truth(
+    model: TimelineInspectionModel,
+    identity_map: Any,
+    snapshot: TimelineSnapshot,
+    scope: Scope | None = None,
+) -> dict[str, Any]:
+    """Return the ``ground-truth.json`` content for one root visualization.
+
+    ``scope=None`` emits the full timeline exactly as before.  With a scope,
+    the ``scope`` block narrows to the selected kind/ref/bounds, and ``objects``
+    plus the timeline entry's ``clips``/``assets`` are filtered to the scoped
+    set (clips from ``Scope.clip_ids`` and the assets they reference); the
+    timeline entry itself always stays ``[0, composition)``.
+
+    Emphasis: when the scope declares a non-empty ``emphasized_clip_ids`` set
+    (timestamp/clip/asset/shot scopes), every emitted clip carries an
+    ``emphasized`` boolean — true for the active stack / focused object, false
+    for context clips.  Full timeline and empty-emphasis scopes omit the field.
+    """
+    if not isinstance(model, TimelineInspectionModel):
+        raise TypeError("model must be a TimelineInspectionModel")
+    if not isinstance(snapshot, TimelineSnapshot):
+        raise TypeError("snapshot must be a TimelineSnapshot")
+    effective, scope = _scope_effective(model, identity_map, scope)
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "snapshots": _snapshot_block(model, snapshot),
+        "project_slug": snapshot.project_slug,
+        "scope": _scope_block(model, effective, scope),
+        "objects": _objects(model, effective, scope),
+        "timelines": [_timeline_entry(model, effective, snapshot, scope)],
+        "timestamps": {"frozen_at": FROZEN_AT_SENTINEL},
+    }
+
+
+# ---------------------------------------------------------------------------
+# Action index.
+# ---------------------------------------------------------------------------
+
+
+def _clip_with_ref(
+    model: TimelineInspectionModel, identity_map: Any, ref: str
+) -> Any:
+    for clip in model.clips:
+        if _lookup_semantic(identity_map, "clip", clip.clip_id) == ref:
+            return clip
+    raise ValueError(f"clip ref {ref!r} is not present in the model")
+
+
+def _relations(
+    model: TimelineInspectionModel,
+    identity_map: Any,
+    ref: str,
+    in_scope: set[str] | None = None,
+) -> dict[str, Any]:
+    parsed = parse_qualified_ref(ref)
+    all_refs = _ordered_object_refs(model, identity_map)
+    if parsed.kind == "TL":
+        children = all_refs[1:]
+        if in_scope is not None:
+            children = [child for child in children if child in in_scope]
+        return {
+            "parent": None,
+            "previous": None,
+            "next": None,
+            "children": children,
+        }
+    previous: str | None = None
+    next_ref: str | None = None
+    if parsed.kind == "CL":
+        clip = _clip_with_ref(model, identity_map, ref)
+        same_track = [c for c in model.clips if c.track_id == clip.track_id]
+        index = same_track.index(clip)
+        if index > 0:
+            previous = _lookup_semantic(identity_map, "clip", same_track[index - 1].clip_id)
+        if index + 1 < len(same_track):
+            next_ref = _lookup_semantic(identity_map, "clip", same_track[index + 1].clip_id)
+    if in_scope is not None:
+        if previous is not None and previous not in in_scope:
+            previous = None
+        if next_ref is not None and next_ref not in in_scope:
+            next_ref = None
+    return {
+        "parent": _TIMELINE_REF,
+        "previous": previous,
+        "next": next_ref,
+        "children": [],
+    }
+
+
+def _focus_context_action(manifest_path: str, ref: str, scope_kind: str) -> dict[str, Any]:
+    return {
+        "kind": "visualize",
+        "argv": [
+            "python3",
+            "-m",
+            "astrid",
+            "timelines",
+            "visualize",
+            "--from-view",
+            manifest_path,
+            "--focus",
+            ref,
+            "--context",
+            FOCUS_CONTEXT_SECONDS,
+        ],
+        "focus": ref,
+        "result_scope": scope_kind,
+        "available": True,
+        "unavailable_reason": None,
+        "reads": "snapshot",
+    }
+
+
+def _timestamp_locator(seconds: float, timeline_ref: str) -> str:
+    total_ms = int(round(seconds * 1000))
+    hours, remainder = divmod(total_ms, 3_600_000)
+    minutes, remainder = divmod(remainder, 60_000)
+    secs, millis = divmod(remainder, 1_000)
+    return f"{timeline_ref}@{hours:02d}:{minutes:02d}:{secs:02d}.{millis:03d}"
+
+
+def _focus_timestamp_action(
+    model: TimelineInspectionModel, manifest_path: str, ref: str
+) -> dict[str, Any]:
+    locator = _timestamp_locator(model.extents.composition_seconds / 2.0, ref)
+    return {
+        "kind": "visualize",
+        "argv": [
+            "python3",
+            "-m",
+            "astrid",
+            "timelines",
+            "visualize",
+            "--from-view",
+            manifest_path,
+            "--focus",
+            locator,
+            "--context",
+            TIMESTAMP_CONTEXT_SECONDS,
+        ],
+        "focus": locator,
+        "result_scope": "timestamp",
+        "available": True,
+        "unavailable_reason": None,
+        "reads": "snapshot",
+    }
+
+
+def _refresh_root_action(snapshot: TimelineSnapshot) -> dict[str, Any]:
+    return {
+        "kind": "visualize",
+        "argv": [
+            "python3",
+            "-m",
+            "astrid",
+            "timelines",
+            "visualize",
+            "--project",
+            snapshot.project_slug,
+            "--input",
+            "scope=timeline",
+        ],
+        "focus": None,
+        "result_scope": "timeline",
+        "available": True,
+        "unavailable_reason": None,
+        "reads": "current",
+    }
+
+
+def _inspect_unavailable_reason(state: str) -> str:
+    reasons = {
+        "missing": (
+            "missing — asset file is missing from the frozen project sources; "
+            "restore or re-verify the source, then refresh the root"
+        ),
+        "hash_unrecorded": (
+            "hash_unrecorded — no expected sha256 is recorded for this asset; "
+            "original inspection is refused until a hash is recorded and the "
+            "root is refreshed"
+        ),
+        "hash_mismatch": (
+            "hash_mismatch — observed content hash differs from the recorded "
+            "hash; original inspection is refused"
+        ),
+        "remote": "remote — asset is a remote reference; offline inspection never fetches",
+        "thumbnail_only": (
+            "thumbnail_only — asset is thumbnail-only; there is no original to inspect"
+        ),
+        "unsupported": (
+            "unsupported — asset path is unsupported (escapes or lies outside "
+            "the frozen project sources root)"
+        ),
+    }
+    return reasons.get(state, f"unavailable — asset integrity state {state!r} blocks original inspection")
+
+
+def _inspect_original_action(
+    model: TimelineInspectionModel,
+    identity_map: Any,
+    manifest_path: str,
+    ref: str,
+) -> dict[str, Any]:
+    identity = _lookup_display(identity_map, ref)
+    if identity is None:
+        raise ValueError(f"asset ref {ref!r} has no semantic identity")
+    integrity = model.media_integrity[identity[2]]
+    available = integrity.state == "verified_original"
+    return {
+        "kind": "inspect_media",
+        "argv": [
+            "python3",
+            "-m",
+            "astrid",
+            "timelines",
+            "visualize",
+            "--from-view",
+            manifest_path,
+            "--focus",
+            ref,
+        ],
+        "focus": ref,
+        "result_scope": "asset",
+        "available": available,
+        "unavailable_reason": None if available else _inspect_unavailable_reason(integrity.state),
+        "reads": "snapshot",
+    }
+
+
+def _actions(
+    model: TimelineInspectionModel,
+    identity_map: Any,
+    snapshot: TimelineSnapshot,
+    manifest_path: str,
+    ref: str,
+) -> dict[str, dict[str, Any]]:
+    parsed = parse_qualified_ref(ref)
+    actions: dict[str, dict[str, Any]] = {}
+    if parsed.kind == "TL":
+        actions["focus_timestamp"] = _focus_timestamp_action(model, manifest_path, ref)
+        actions["refresh_root"] = _refresh_root_action(snapshot)
+    elif parsed.kind == "CL":
+        actions["focus_context"] = _focus_context_action(manifest_path, ref, "clip")
+    elif parsed.kind == "SH":
+        actions["focus_context"] = _focus_context_action(manifest_path, ref, "shot")
+    elif parsed.kind == "RG":
+        actions["focus_context"] = _focus_context_action(manifest_path, ref, "range")
+    elif parsed.kind == "AS":
+        actions["focus_context"] = _focus_context_action(manifest_path, ref, "asset")
+        actions["inspect_original"] = _inspect_original_action(model, identity_map, manifest_path, ref)
+    return actions
+
+
+def emit_action_index(
+    model: TimelineInspectionModel,
+    identity_map: Any,
+    snapshot: TimelineSnapshot,
+    manifest_path: str | Path,
+    scope: Scope | None = None,
+) -> dict[str, Any]:
+    """Return the ``action-index.json`` content for one root visualization.
+
+    ``scope=None`` indexes every object.  With a scope only the scoped objects
+    are indexed (the timeline, in-scope clips, their assets, and the scope's
+    own object), while parent/previous/next relations still resolve — targets
+    outside the scope are reported as ``None`` so no relation dangles.
+    ``refresh_root`` on ``TL01`` always remains.
+    """
+    manifest = str(Path(manifest_path))
+    effective, scope = _scope_effective(model, identity_map, scope)
+    in_scope = _in_scope_refs(model, effective, scope) if scope is not None else None
+    entries: dict[str, dict[str, Any]] = {}
+    for ref in _ordered_object_refs(model, effective):
+        if in_scope is not None and ref not in in_scope:
+            continue
+        entries[ref] = {
+            "canonical_ref": _canonical_ref(effective, ref),
+            "relations": _relations(model, effective, ref, in_scope),
+            "actions": _actions(model, effective, snapshot, manifest, ref),
+        }
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "snapshots": _snapshot_block(model, snapshot),
+        "entries": entries,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Asset index.
+# ---------------------------------------------------------------------------
+
+
+def emit_asset_index(
+    model: TimelineInspectionModel,
+    identity_map: Any,
+    snapshot: TimelineSnapshot,
+) -> dict[str, Any]:
+    """Return the ``asset-index.json`` content for one root visualization."""
+    assets: list[dict[str, Any]] = []
+    for key in sorted(model.registry_keys):
+        ref = _lookup_semantic(identity_map, "asset", key)
+        if ref is None:
+            raise ValueError(f"asset {key!r} has no display id in the identity map")
+        integrity = model.media_integrity[key]
+        parsed = parse_qualified_ref(ref)
+        assets.append(
+            {
+                "stable_id": parsed.stable_id,
+                "qualified_ref": ref,
+                "canonical_ref": _canonical_ref(identity_map, ref),
+                "source_id": integrity.source_id,
+                "source_version": integrity.source_version,
+                "role": _schema_role(integrity.role),
+                "integrity_state": integrity.state,
+                "expected_sha256": integrity.expected_sha256,
+                "observed_sha256": integrity.observed_sha256,
+                "contained_path": integrity.path,
+            }
+        )
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "snapshots": _snapshot_block(model, snapshot),
+        "assets": assets,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Transcript index (empty-valid M1).
+# ---------------------------------------------------------------------------
+
+
+def emit_transcript_index(
+    model: TimelineInspectionModel,
+    identity_map: Any,
+    snapshot: TimelineSnapshot,
+) -> dict[str, Any]:
+    """Return the empty-valid ``transcript-index.json`` (TS/SP declared)."""
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "snapshots": _snapshot_block(model, snapshot),
+        "sources": [],
+        "speech_occurrences": [],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Diagnostics.
+# ---------------------------------------------------------------------------
+
+
+def _split_diagnostic(raw: str) -> tuple[str, str]:
+    match = _DIAGNOSTIC_CODE_RE.match(raw)
+    if match is not None:
+        return match.group(1), match.group(2)
+    return "SNAPSHOT_DIAGNOSTIC", raw
+
+
+def emit_diagnostics(
+    model: TimelineInspectionModel,
+    identity_map: Any,
+    snapshot: TimelineSnapshot,
+    scope: Scope | None = None,
+) -> dict[str, Any]:
+    """Return ``diagnostics.json``: every model/snapshot warning.
+
+    ``scope=None`` reports every warning.  With a scope, clip/shot/asset
+    diagnostics are narrowed to the scoped objects (so every ``object_ref``
+    still resolves through the scoped ground truth) and the scope's own
+    warnings are appended with deterministic codes (e.g. ``CLIP_RANGE_CLIPPED``
+    for a range clipped to the composition bounds).
+    """
+    effective, scope = _scope_effective(model, identity_map, scope)
+    in_scope = _in_scope_refs(model, effective, scope) if scope is not None else None
+    diagnostics: list[dict[str, Any]] = []
+
+    for raw in snapshot.diagnostics:
+        code, message = _split_diagnostic(raw)
+        if not message:
+            message = raw
+        diagnostics.append(
+            {
+                "severity": "warning",
+                "code": code,
+                "message": message,
+                "object_ref": _TIMELINE_REF,
+            }
+        )
+
+    for key in sorted(model.registry_keys):
+        integrity = model.media_integrity[key]
+        code = _ASSET_STATE_CODES.get(integrity.state)
+        if code is None:
+            continue
+        asset_ref = _lookup_semantic(effective, "asset", key)
+        if in_scope is not None and asset_ref not in in_scope:
+            continue
+        diagnostics.append(
+            {
+                "severity": "warning",
+                "code": code,
+                "message": integrity.reason,
+                "object_ref": asset_ref,
+            }
+        )
+
+    for shot in model.shots:
+        shot_ref = _lookup_semantic(effective, "shot", shot.shot_id)
+        if in_scope is not None and shot_ref not in in_scope:
+            continue
+        for warning in shot.warnings:
+            diagnostics.append(
+                {
+                    "severity": "warning",
+                    "code": "SHOT_MISSING_CLIP",
+                    "message": warning,
+                    "object_ref": shot_ref,
+                }
+            )
+
+    if not isinstance(snapshot.assembly.get("pinnedShotGroups"), list):
+        diagnostics.append(
+            {
+                "severity": "warning",
+                "code": "SHOT_GROUPS_ABSENT",
+                "message": "timeline has no pinnedShotGroups; shot scope is unavailable",
+                "object_ref": _TIMELINE_REF,
+            }
+        )
+
+    for clip in model.clips:
+        clip_ref = _lookup_semantic(effective, "clip", clip.clip_id)
+        if in_scope is not None and clip_ref not in in_scope:
+            continue
+        for asset_key in clip.asset_refs:
+            if asset_key not in model.registry_keys:
+                diagnostics.append(
+                    {
+                        "severity": "warning",
+                        "code": "CLIP_ASSET_UNRESOLVED",
+                        "message": (
+                            f"clip references asset {asset_key!r} that is absent "
+                            "from the frozen registry"
+                        ),
+                        "object_ref": clip_ref,
+                    }
+                )
+        if clip.transition is not None and clip.effective == clip.frames.as_seconds():
+            transition_id = clip.transition.get("id", clip.transition.get("type"))
+            diagnostics.append(
+                {
+                    "severity": "warning",
+                    "code": "TRANSITION_IGNORED",
+                    "message": (
+                        f"transition {transition_id!r} on clip {clip.clip_id!r} "
+                        "was not scheduled"
+                    ),
+                    "object_ref": clip_ref,
+                }
+            )
+
+    if scope is not None:
+        for warning in scope.warnings:
+            diagnostics.append(
+                {
+                    "severity": "warning",
+                    "code": _scope_warning_code(warning),
+                    "message": warning,
+                    "object_ref": _scope_warning_ref(model, effective, scope),
+                }
+            )
+
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "snapshots": _snapshot_block(model, snapshot),
+        "diagnostics": diagnostics,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Markdown companions.
+# ---------------------------------------------------------------------------
+
+_READING_GUIDE = """# Reading this evidence pack
+
+This pack explains one frozen timeline snapshot. Every object in it — the
+timeline itself, shots, clips, and assets — carries a *qualified id* such as
+`TL01` or `TL01.CL03`: a timeline ordinal, then a kind code and a stable
+ordinal.
+
+## The one rule
+
+Read a qualified id, then open `action-index.json` and use its entry. That
+entry lists the object's canonical identity, its neighbors, and executable
+`argv` arrays that reproduce the next visualization. Run the `argv` array
+exactly as written; it is the execution contract, not a display string.
+
+## Cues in images
+
+Pages print compact cues only, never shell commands:
+
+```text
+CL03 · AS02 · 00:04–00:08
+FOCUS · SOURCE · TEXT
+```
+
+`FOCUS` is the id to look up next, `SOURCE` points at original media, and
+`TEXT` points at authored or mapped text. The same ids appear in
+`ground-truth.json` so every visual claim can be checked exactly.
+
+## Actions and scopes
+
+- `focus_context` visualizes an object with a small time context window.
+- `inspect_original` opens the verified original media file for an asset.
+- `focus_timestamp` jumps to one instant inside the frozen snapshot.
+- `refresh_root` repeats the original root query against *current* state and
+  creates a new lineage; the old lineage never changes.
+
+Each action declares `available` and, when unavailable, one deterministic
+`unavailable_reason`. Never fall back to a similarly named timeline, a newer
+clip, or a different asset: re-run the root query instead.
+
+## Snapshot safety
+
+Every artifact is bound to one source-normalized-snapshot digest (`SNS:…`)
+and one event-head version. Drill-down never silently reads a newer timeline;
+if current state differs, only `refresh_root` crosses that boundary.
+"""
+
+
+def emit_reading_guide(
+    model: TimelineInspectionModel,
+    identity_map: Any,
+    snapshot: TimelineSnapshot,
+) -> str:
+    """Return the generic ``reading-guide.md`` content (deterministic prose)."""
+    return _READING_GUIDE
+
+
+def _transition_default_fingerprint() -> str:
+    payload = canonical_json_bytes(
+        {
+            "compositor_version": COMPOSITOR_VERSION,
+            "transition_default_frames": TRANSITION_FALLBACK_FRAMES,
+            "transition_registry_defaults": dict(sorted(_PINNED_TRANSITION_DEFAULTS.items())),
+        }
+    )
+    return sha256_bytes(payload)
+
+
+def emit_structure_md(
+    model: TimelineInspectionModel,
+    identity_map: Any,
+    snapshot: TimelineSnapshot,
+) -> str:
+    """Return the factual ``structure.md`` content (breadcrumb + next actions)."""
+    lines: list[str] = [
+        "# Structure",
+        "",
+        f"SNAPSHOT · TL01 v{snapshot.head_version} · {model.snapshot_sns}",
+        "PROJECT > TL01",
+        "",
+        "## Frozen facts",
+        "",
+        f"- timeline uuid: {model.timeline_uuid}",
+        f"- timeline ulid: {model.timeline_ulid}",
+        f"- timeline slug: {model.slug if model.slug else model.timeline_ulid.lower()}",
+        f"- event head: version {snapshot.head_version}, "
+        f"last_event_id {snapshot.last_event_id}, last_hash {snapshot.last_hash}",
+        f"- fps: {model.fps}",
+        f"- composition extent: {model.extents.composition_frames} frames / "
+        f"{model.extents.composition_seconds:g} seconds",
+        f"- visual extent: {model.extents.visual_frames} frames / "
+        f"{model.extents.visual_seconds:g} seconds",
+        f"- audible extent: {model.extents.audible_frames} frames / "
+        f"{model.extents.audible_frames / model.fps:g} seconds",
+        f"- tracks: {len(model.tracks)} ({len([t for t in model.tracks if t.kind == 'visual'])} visual, "
+        f"{len([t for t in model.tracks if t.kind == 'audio'])} audio)",
+        f"- clips: {len(model.clips)}",
+        f"- assets: {len(model.registry_keys)}",
+        "",
+        "## Compositor fingerprint",
+        "",
+        f"- compositor_version: {model.compositor_version}",
+        f"- transition_default_frames: {model.transition_default_frames}",
+        "- transition_registry_defaults: "
+        + json.dumps(dict(sorted(_PINNED_TRANSITION_DEFAULTS.items())), sort_keys=True),
+        f"- transition_default_fingerprint: {_transition_default_fingerprint()}",
+        "",
+        "## Suggested next actions",
+        "",
+    ]
+    suggested = ["Refresh against current state (action-index.json: TL01 → refresh_root)"]
+    for ref in _ordered_object_refs(model, identity_map):
+        parsed = parse_qualified_ref(ref)
+        if parsed.kind == "CL":
+            suggested.append(
+                f"Focus clip {ref} (action-index.json: {ref} → focus_context)"
+            )
+        elif parsed.kind == "AS":
+            integrity = model.media_integrity[_lookup_display(identity_map, ref)[2]]
+            if integrity.state == "verified_original":
+                suggested.append(
+                    f"Inspect original media {ref} (action-index.json: {ref} → inspect_original)"
+                )
+            else:
+                suggested.append(
+                    f"Recover asset {ref} (action-index.json: {ref} → inspect_original, "
+                    f"unavailable: {integrity.state})"
+                )
+    lines.extend(f"- {item}" for item in suggested)
+    return "\n".join(lines) + "\n"
+
+
+__all__ = [
+    "FOCUS_CONTEXT_SECONDS",
+    "FROZEN_AT_SENTINEL",
+    "SCHEMA_VERSION",
+    "TIMESTAMP_CONTEXT_SECONDS",
+    "emit_action_index",
+    "emit_asset_index",
+    "emit_diagnostics",
+    "emit_ground_truth",
+    "emit_reading_guide",
+    "emit_structure_md",
+    "emit_transcript_index",
+]

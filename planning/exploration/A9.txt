@@ -1,0 +1,108 @@
+Now I have all the evidence. Let me compile the findings.
+
+## Findings
+
+### 1. CI Setup (workflows, scripts)
+
+**Workflow file:** `.github/workflows/ci.yml` — single job, single trigger set (push/PR/workflow_dispatch). **NOT FOUND:** any `schedule` or `release` event trigger for nightly/release gates. No separate hermetic vs. live job split (ci.yml:14–19, 75–97).
+
+**ffmpeg:** Installed explicitly via `apt-get install -y ffmpeg` (ci.yml:33–35). Present and credential-free.
+
+**VLM credentials:** **NOT FOUND.** The workflow has zero API key references — no `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or any cloud LLM secrets. The only env override is `ASTRID_CI_SKIP_COVERAGE: "1"` (ci.yml:73). No VLM credential exists in CI at all.
+
+**Structural-mode guard (via Sisypy):** The Sisypy runner strips `RUNPOD_`, `AWS_`, `GCLOUD_`, `AZURE_`, `MODEL_PATH`, `COMFY_MODEL` prefixes in structural mode (sisypy/runner.py:75–77). This would automatically block any VLM API key prefix like `ANTHROPIC_` or `OPENAI_` from leaking in structural runs.
+
+**Artifact retention:** Only `upload-artifact@v4` for `coverage.xml` with `if-no-files-found: ignore` (ci.yml:92–97). No evidence-pack retention, no VLM result storage.
+
+**Local CI mirror:** `scripts/reshape/run_ci_checks.sh` creates hermetic temp `ASTRID_HOME` + `ASTRID_PROJECTS_ROOT`, pre-seeds identity, and runs the full lane matrix (baselines, docs, reshape, blocking, broad, remotion_typecheck, quarantine) — but all of this is structural/hermetic only (run_ci_checks.sh:1–17, 43–86).
+
+### 2. Agentic Test Machinery (Sisypy / tests/agentic)
+
+**Sisypy:** Installed as dev dependency from git at `sisypy @ git+https://github.com/peteromallet/sisypy.git@dfb3fa3` (pyproject.toml:45–47). Editable install at `/Users/peteromalley/Documents/reigh-workspace/sisypy`. It provides:
+
+- `AgenticProjectAdapter` ABC (sisypy/adapters.py:32–174) with `capture()` method (line 86) that receives `evidence_dir: Path` for project-specific capture.
+- `capture_evidence()` (sisypy/evidence.py:378–640) captures a fixed catalog: `brief.md`, `report.md`, `stdout.log`, `stderr.log`, `command_log.jsonl`, `actions.jsonl`, `commands/`, `tree_before.txt`, `tree_after.txt`, `git_status_before.txt`, `git_status_after.txt`, `git_diff.patch`, `capture.notes`, `manifest.json`.
+- **Evidence capture is non-recursive.** It captures only the listed artifacts under `evidence_dir/`. It does NOT recursively walk and preserve an entire agent-produced directory tree (e.g., an `agent-view/` bundle with PNGs, SVGs, JSON files). This is the "Sisypy non-recursive evidence capture" gap identified in the tasklist's A9 exploration note (tasklist.md:61).
+
+**No Astrid adapter exists.** **NOT FOUND:** There is no Astrid-specific `AgenticProjectAdapter` implementation anywhere in the Astrid repo or Sisypy repo. Only `FakeProjectAdapter` exists (sisypy/adapters.py:180–254).
+
+**Existing agentic tests:** Only `tests/agentic/test_agentic_ux_example.py` exists — tests the example `agentic_ux` app, marked `pytest.mark.opt_in` + `pytest.mark.integration` (test:30–32). No timeline-visualization agentic scenarios.
+
+### 3. Test Markers, Skips, Nightly/Release Triggers
+
+**Pytest markers** (pyproject.toml:154–165):
+```
+slow, performance_smoke, renderer_parity, pack_recoverability_exhaustive,
+timeout, standalone, hype_cut_invariants, integration, opt_in, real_arnold
+```
+**NOT FOUND:** No `live`, `vlm`, `nightly`, `hermetic`, or `release` marker.
+
+**Default lane:** `-m "not integration and not opt_in"` — excludes all integration and opt-in tests (run_ci_checks.sh:85). No VLM tests exist so there's nothing to split.
+
+**Quarantine:** Four tests in quarantine lane (run_ci_checks.sh:50–55), all `author-test` related, allowed-to-fail.
+
+**Nightly/release triggers:** **NOT FOUND.** No `schedule:` in ci.yml, no `release:` event, no `workflow_dispatch` input for live VLM gate.
+
+### 4. Hashing/Evidence-Verification Utilities (Reusable)
+
+| Utility | Location | Reuse value |
+|---|---|---|
+| `compute_sha256(path)` | `astrid/core/timeline/integrity.py:12–22` | **Direct reuse** — streaming 1 MiB chunk SHA-256 |
+| `file_size(path)` | `astrid/core/timeline/integrity.py:25–27` | **Direct reuse** |
+| `verify(output)` | `astrid/core/timeline/integrity.py:30–69` | Reusable pattern — verifies SHA-256 + size for FinalOutput records |
+| `hash_file(path)` | `astrid/core/io/cas.py:60–65` | **Direct reuse** — 64 KiB chunk SHA-256 (in CAS context) |
+| `canonical_json_digest(obj)` | `astrid/core/io/cas.py:93–101` | **Direct reuse** — deterministic JSON → SHA-256 (no file read) |
+| `identity_digest(input_digest, producer_id, producer_version)` | `astrid/core/io/cas.py:135–149` | Pattern for artifact identity keys without byte hashing |
+| `validate_evidence_integrity()` | `astrid/core/experiments/evidence.py:26–167` | Different domain (epistemic claims), not file hashing — limited reuse |
+| `xxhash` (dependency) | `pyproject.toml:17` | Available but not used in core hashing; could be used for fast non-crypto hashes |
+
+The `integrity.py` and `cas.py` modules are the reusable foundation for snapshot hashing, verified-original checks, and evidence integrity. The plan's "root snapshot hashes" can be implemented by composing `compute_sha256` for files + `canonical_json_digest` for structured data.
+
+---
+
+## Tasklist Implications
+
+The tasklist (T1–T36 in `planning/phase1a-codex-tasklist.md`) needs these changes for the CI/evidence area:
+
+| Task | Change | Reason |
+|---|---|---|
+| **T31** (VLM evaluation model contract) | **Split** into T31a (model contract) + T31b (Sisypy adapter) | No Astrid adapter exists; T31b must implement `AgenticProjectAdapter.capture()` to recursively preserve evidence bundles |
+| **T32** (Exact VLM scorer + evidence harness) | **Expand** scope to include recursive evidence capture | Sisypy `capture_evidence()` is non-recursive; must add `shutil.copytree` or equivalent under `adapter.capture()` for the agent-view directory |
+| **T34** (Image-only M2 gate) | **Add** prerequisite T34a: `live` + `vlm` pytest markers in `pyproject.toml` | No marker exists to segregate live VLM tests from hermetic CI |
+| **T35** (Fresh-agent stdout-discovery) | **Depend on** T31b (adapter exists) + T34a (markers exist) | Cannot write scenarios without adapter or markers |
+| **T36** (CI, docs, release evidence) | **Split** into T36a (hermetic CI pipeline), T36b (nightly/live VLM gate workflow), T36c (artifact retention + evidence GC) | Current CI has zero of these; need separate workflows for safety |
+
+**New tasks needed:**
+
+- **T-CI-1** — Create Astrid `SisypyProjectAdapter` implementing `AgenticProjectAdapter`, with recursive `capture()` that preserves the full `agent-view/` bundle. `build_env()` strips VLM creds in structural mode; `live_prerequisites()` checks for `ASTRID_VLM_API_KEY`.
+- **T-CI-2** — Add `live` + `vlm` pytest markers and a new CI lane that explicitly excludes them (`-m "not live and not vlm"`), with `ASTRID_CI_SKIP_LIVE=1` guard.
+- **T-CI-3** — Add `.github/workflows/nightly-vlm-gate.yml` with `schedule: cron(0 6 * * *)` + `workflow_dispatch`, running `--mode live` against locked fixtures, requiring three consecutive fresh-session passes.
+- **T-CI-4** — Evidence-to-fixture rule: every VLM comprehension failure auto-generates a `tests/fixtures/timeline_visualize/<failure-id>/` with the exact image bundle, question set, model identity, and expected answers, so failures become regression invariants.
+
+---
+
+## Risks & Conflicts
+
+1. **Sisypy adapter void is the single biggest risk.** The plan (tasklist.md line 61) already notes "Sisypy non-recursive evidence capture." Without an Astrid adapter that recursively preserves the `agent-view/` bundle, the stdout-discovery gate (T35) and image-only gate (T34) cannot mechanically capture what the agent produced. This is a **blocker for M2**.
+
+2. **No VLM credentials in CI mean live gates can never run on push.** The plan wants "every VLM failure converted into a durable fixture" (plan:912), but without CI credentials, failures can only be captured on a developer machine. The nightly gate must be designed as a separate workflow with repository secrets — this is a **security boundary that must not be blurred** with the credential-free CI.
+
+3. **Single monolithic CI job** (ci.yml:15 — `timeout-minutes: 55`) will not accommodate live VLM evaluation (which could take 10–30 minutes per fixture × 3 sessions). The live gate must be a separate job or workflow to avoid pushing the hermetic CI past its timeout.
+
+4. **The `xxhash` dependency is unused** in the current codebase for hashing. If the plan intends to use it for fast file hashing, that's fine — but if it expects it to already be wired in, that's a gap. The existing `compute_sha256` and `hash_file` use `hashlib.sha256()` directly.
+
+5. **The plan's tasklist (T36) bundles CI, docs, and release evidence into one task.** These are three separate concerns: credential-free CI (already exists but needs a marker lane), nightly VLM gate (doesn't exist), and evidence retention (currently only coverage.xml). They should be three distinct implementation units.
+
+---
+
+## Elegant Simplifications
+
+1. **Recursive evidence capture is a one-liner in the adapter.** Instead of redesigning Sisypy's `capture_evidence()`, implement `AstridProjectAdapter.capture()` to do `shutil.copytree(agent_view_dir, evidence_dir / "agent-view")` after verifying the manifest exists. The plan requires "recursive capture of the whole bundle" (A9) — the adapter's `capture()` hook already receives the `evidence_dir` and can recursively copy. No Sisypy changes needed.
+
+2. **Reuse `integrity.py` + `cas.py` for all snapshot hashing.** The plan needs root snapshot hashes, media hashes, and verified-original checks. `compute_sha256()` (integrity.py:12) does streaming file hashing; `canonical_json_digest()` (cas.py:93) does deterministic JSON hashing. Compose these — don't build new hashing. The `verify()` pattern (integrity.py:30) already compares hash+size and returns `"ok"|"missing"|"mismatch"` — directly reusable for verified-original checks.
+
+3. **Three-session independence = three Sisypy runs with different `--tag` values and fresh `ActorRun` records.** Sisypy already supports this: each `run_scenario()` call creates a distinct `ActorRun` with its own `evidence_dir`. The "fresh session" requirement is satisfied by running the same scenario three times with different tags and asserting that each independently meets the ≥95% threshold. No new harness code needed — just a wrapper script.
+
+4. **Split hermetic vs. live with existing marker infrastructure.** Add `live` + `vlm` markers to `pyproject.toml` `markers` list. The existing `-m "not integration and not opt_in"` pattern scales trivially to `-m "not integration and not opt_in and not live and not vlm"`. The nightly gate workflow overrides this filter. No new lane machinery needed.
+
+5. **The failure→fixture rule can use `shutil.copytree` of the evidence directory.** When a VLM run scores below 95%, the Sisypy evidence pack already contains everything: the exact image bundle (if captured recursively), the questions, the model identity, the answers, and the ground truth. "Convert to fixture" = copy the evidence dir to `tests/fixtures/timeline_visualize/<failure-id>/` plus a README.md with the expected score. This is a post-run script, not a harness change.
