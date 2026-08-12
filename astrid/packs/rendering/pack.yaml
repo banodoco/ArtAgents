@@ -39,6 +39,13 @@ agent:
 content:
   executors: executors
   elements: elements
+extensions:
+  rendering:
+    renderers:
+      - backends/remotion/renderer.yaml
+      - backends/ffmpeg/renderer.yaml
+    finalizers:
+      - finalizers/ffmpeg/finalizer.yaml
 aliases:
 - kind: executor
   alias: builtin.render

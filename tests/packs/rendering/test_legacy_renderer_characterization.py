@@ -221,8 +221,8 @@ def test_engine_remotion_complex_timeline_reaches_remotion_path(tmp_path: Path) 
         patch.object(render_run, "_render_audio_reactive_colour_if_supported", return_value=None),
         patch.object(render_run, "_can_render_with_ffmpeg_media", return_value=False),
         patch.object(
-            render_run,
-            "_validate_project_dir",
+            render_run.remotion_backend,
+            "render",
             side_effect=AssertionError("reached remotion path"),
         ),
     ):

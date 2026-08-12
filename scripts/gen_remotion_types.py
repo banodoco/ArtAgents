@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Generate Remotion TypeScript types from banodoco_schema.py."""
 
+import argparse
 import sys
 import types
 from pathlib import Path
@@ -228,11 +229,38 @@ def generate() -> str:
     return "\n".join(blocks)
 
 
-def main() -> int:
-    output_path = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else DEFAULT_OUTPUT
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("output", nargs="?", type=Path, default=DEFAULT_OUTPUT)
+    parser.add_argument(
+        "--include-element-registries",
+        action="store_true",
+        help="also refresh the element registries under the same outer lock",
+    )
+    return parser
+
+
+def _main_unlocked(argv: list[str] | None = None) -> int:
+    """Write generated artifacts while the caller owns the Remotion lock."""
+
+    args = build_parser().parse_args(argv)
+    output_path = args.output.resolve()
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(generate(), encoding="utf-8")
+    if args.include_element_registries:
+        from scripts import gen_effect_registry
+
+        return gen_effect_registry._main_unlocked([])
     return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    from astrid.packs.rendering.backends.remotion import lock as remotion_lock
+
+    if remotion_lock.remotion_render_lock_held():
+        return _main_unlocked(argv)
+    with remotion_lock.remotion_render_lock():
+        return _main_unlocked(argv)
 
 
 if __name__ == "__main__":

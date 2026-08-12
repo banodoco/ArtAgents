@@ -8,41 +8,66 @@ guard_canonical_entrypoint('rendering.render')
 
 
 import argparse
-import hashlib
 import json
-import os
-import shutil
-import subprocess
 import sys
-from contextlib import ExitStack
 from contextvars import ContextVar
+from fractions import Fraction
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, Sequence
 
 from astrid.core import timeline
 from astrid.core.audit import AuditContext
-from astrid.core.element.registry import load_default_registry
-from astrid.core.element.schema import ElementDefinition
-from astrid.core.foundation.atomic_io import write_json_atomic
-from astrid.core.foundation.paths import REPO_ROOT, WORKSPACE_ROOT
-from astrid.core.pack.discovery import discover_pack_metadata
-from astrid.core.rendering.assets import (
-    AssetMaterializer,
-    InvocationAssetServer,
-    RangeHTTPRequestHandler as _RangeHTTPRequestHandler,
-)
+from astrid.core.foundation.paths import REPO_ROOT
+from astrid.core.rendering.contracts import AudioOwnership, RenderProfile
+from astrid.core.rendering.profile import resolve_render_profile
 from astrid.core.rendering.publication import publish_render_result
-from astrid.core.subprocess_env import build_child_subprocess_env
-from astrid.core.theme import load_theme
+from astrid.packs.rendering.backends.ffmpeg import command as ffmpeg_command
+from astrid.packs.rendering.backends.ffmpeg import run as ffmpeg_backend
+from astrid.packs.rendering.backends.remotion import run as remotion_backend
 from astrid.packs.rendering.executors.render import audio_reactive_colour
-from scripts import gen_effect_registry
+from astrid.packs.rendering.finalizers.ffmpeg import run as ffmpeg_finalizer
 
 
-_REGISTRY_STATE_PATH = ".astrid-registry-state.json"
+# Compatibility exports for callers that historically imported these private
+# helpers from the facade.  Their implementation now lives with the backend.
+_RangeHTTPRequestHandler = remotion_backend._RangeHTTPRequestHandler
+_validate_project_dir = remotion_backend._validate_project_dir
+_serialize_timeline = remotion_backend._serialize_timeline
+_resolve_theme_path = remotion_backend._resolve_theme_path
+_theme_for_props = remotion_backend._theme_for_props
+_theme_slug_for_render_default = remotion_backend._theme_slug_for_render_default
+_resolved_theme_for_render = remotion_backend._resolved_theme_for_render
+_timeline_composition_src = remotion_backend._timeline_composition_src
+_registry_output_paths = remotion_backend._registry_output_paths
+_registry_outputs_exist = remotion_backend._registry_outputs_exist
+_active_theme_pointer_current = remotion_backend._active_theme_pointer_current
+_effective_registry_state = remotion_backend._effective_registry_state
+_read_registry_state = remotion_backend._read_registry_state
+_write_registry_state = remotion_backend._write_registry_state
+_regenerate_element_registries = remotion_backend._regenerate_element_registries
+_render_asset_stage_hash = remotion_backend._render_asset_stage_hash
+_effect_registry_for_assets = remotion_backend._effect_registry_for_assets
+_effect_id_for_clip = remotion_backend._effect_id_for_clip
+_source_pack_id = remotion_backend._source_pack_id
+_inject_clip_asset_params = remotion_backend._inject_clip_asset_params
+_stage_effect_assets_for_timeline = remotion_backend._stage_effect_assets_for_timeline
+_render_provenance_sidecar_path = remotion_backend._render_provenance_sidecar_path
+_active_pack_order_for_provenance = remotion_backend._active_pack_order_for_provenance
+_active_theme_for_provenance = remotion_backend._active_theme_for_provenance
+_render_provenance_payload = remotion_backend._render_provenance_payload
+_write_render_provenance = remotion_backend._write_render_provenance
+_timeline_canvas = ffmpeg_command.timeline_canvas
+_clip_duration_seconds = ffmpeg_command.clip_duration_seconds
+
+
 _PUBLICATION_PREVIOUS_OUTPUTS: ContextVar[tuple[Path, ...]] = ContextVar(
     "render_publication_previous_outputs",
     default=(),
+)
+_HYBRID_FINALIZER_PROFILE: ContextVar[RenderProfile | None] = ContextVar(
+    "hybrid_finalizer_profile",
+    default=None,
 )
 
 
@@ -56,133 +81,6 @@ def _swap_from_dump(clip: dict) -> dict:
 def _write_empty_asset_registry(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     timeline.save_registry({"assets": {}}, path)
-
-
-def _validate_project_dir(project_dir: Path) -> None:
-    if not project_dir.exists():
-        raise FileNotFoundError(f"Remotion project directory not found: {project_dir}")
-    package_json = project_dir / "package.json"
-    if not package_json.exists():
-        raise FileNotFoundError(f"Remotion project is missing package.json: {package_json}")
-    node_modules = project_dir / "node_modules"
-    if not node_modules.exists():
-        raise FileNotFoundError(
-            "Run `npm install` in tools/remotion/ first; "
-            "see docs/reference/render-adapter.md for @banodoco adapter package install instructions"
-        )
-
-    # Fail closed if any required @banodoco adapter package is missing.
-    # These packages are adapter-installed (GitHub tarball), not published
-    # to a public npm registry.  See docs/reference/render-adapter.md (SD2).
-    banodoco_root = node_modules / "@banodoco"
-    _BANODOCO_REQUIRED = (
-        "timeline-composition",
-        "timeline-schema",
-        "timeline-theme-2rp",
-    )
-    missing: list[str] = []
-    for pkg in _BANODOCO_REQUIRED:
-        pkg_dir = banodoco_root / pkg
-        if not pkg_dir.is_dir():
-            missing.append(f"@banodoco/{pkg}")
-    if missing:
-        raise FileNotFoundError(
-            f"Missing @banodoco render package(s): {', '.join(missing)}. "
-            f"These packages are adapter-required and not published to a public npm registry. "
-            f"See docs/reference/render-adapter.md for adapter install instructions."
-        )
-
-
-def _serialize_timeline(timeline_path: Path, *, default_theme: str = "banodoco-default") -> dict:
-    return timeline.Timeline.load(timeline_path).for_render(default_theme=default_theme).to_json_data()
-
-
-def _resolve_theme_path(theme_path: Path) -> Path:
-    if theme_path.name == "theme.json":
-        return theme_path
-    if theme_path.exists() and theme_path.is_dir():
-        return theme_path / "theme.json"
-    if theme_path.exists():
-        return theme_path
-    return WORKSPACE_ROOT / "themes" / str(theme_path) / "theme.json"
-
-
-def _theme_for_props(theme_path: Path) -> dict:
-    resolved = _resolve_theme_path(theme_path)
-    if not resolved.exists():
-        return {
-            "id": "banodoco-default",
-            "visual": {
-                "color": {
-                    "fg": "#ffffff",
-                    "bg": "#000000",
-                    "accent": "#ffffff",
-                },
-                "type": {
-                    "families": {"heading": "Georgia, serif", "body": "Georgia, serif"},
-                    "size": {"base": 64, "small": 36, "large": 96},
-                    "weight": {"normal": 400, "bold": 700},
-                    "lineHeight": 1.1,
-                },
-                "motion": {"fadeMs": 250},
-                "canvas": {
-                    "width": 1920,
-                    "height": 1080,
-                    "fps": 30,
-                },
-            },
-        }
-    theme = load_theme(resolved)
-    return {"id": theme["id"], "visual": theme["visual"]}
-
-
-def _theme_slug_for_render_default(theme_path: Path) -> str:
-    resolved = _resolve_theme_path(theme_path)
-    if resolved.name == "theme.json":
-        return resolved.parent.name
-    return resolved.stem or "banodoco-default"
-
-
-def _resolved_theme_for_render(timeline_path: Path, fallback_theme_path: Path) -> dict:
-    """Resolve the timeline's theme + theme_overrides into the props-shaped dict.
-
-    The timeline references a theme by slug; per-run overrides live in
-    timeline.theme_overrides. We merge them and trim to {id, visual} for Remotion
-    props.
-    """
-    loaded = timeline.Timeline.load(timeline_path)
-    render_view = loaded.for_render(default_theme=_theme_slug_for_render_default(fallback_theme_path))
-    timeline_config = loaded.to_config()
-    timeline_config.setdefault("theme", render_view.theme)
-    repo_themes_root = REPO_ROOT / "themes"
-    themes_root = repo_themes_root if repo_themes_root.exists() else WORKSPACE_ROOT / "themes"
-    try:
-        merged = timeline.resolve_timeline_theme(timeline_config, themes_root)
-    except (FileNotFoundError, ValueError):
-        merged = None
-    if not isinstance(merged, dict) or "visual" not in merged:
-        # Caller-supplied --theme path is the fallback when the timeline can't be
-        # resolved (e.g. running against a stripped fixture).
-        return _theme_for_props(fallback_theme_path)
-    return {"id": merged.get("id") or merged.get("visual", {}).get("id") or "theme", "visual": merged["visual"]}
-
-
-def _timeline_canvas(timeline_data: dict) -> tuple[int, int, int]:
-    canvas = timeline_data.get("theme_overrides", {}).get("visual", {}).get("canvas", {})
-    return (
-        int(canvas.get("width", 1920)),
-        int(canvas.get("height", 1080)),
-        int(canvas.get("fps", 30)),
-    )
-
-
-def _clip_duration_seconds(clip: dict) -> float:
-    start = float(clip.get("from", 0) or 0)
-    end = float(clip.get("to", start) or start)
-    speed = float(clip.get("speed", 1) or 1)
-    if speed <= 0:
-        raise ValueError(f"Clip {clip.get('id')!r} has non-positive speed {speed}")
-    return max(0.0, end - start) / speed
 
 
 def _clip_timeline_end_seconds(clip: dict) -> float:
@@ -207,15 +105,21 @@ def _timeline_duration_seconds(timeline_data: dict) -> float:
     return max((_clip_timeline_end_seconds(clip) for clip in timeline_data.get("clips", [])), default=0.0)
 
 
-def _round_frame_time(seconds: float, fps: int, *, mode: str) -> float:
-    frames = seconds * fps
+def _round_frame_time(seconds: float, fps: int | Fraction, *, mode: str) -> float:
+    rate = fps if isinstance(fps, Fraction) else Fraction(fps, 1)
+    instant = (
+        seconds
+        if isinstance(seconds, Fraction)
+        else Fraction(seconds).limit_denominator(1_000_000)
+    )
+    frames = instant * rate
     if mode == "floor":
-        frame = int(frames // 1)
+        frame = frames.numerator // frames.denominator
     elif mode == "ceil":
-        frame = int(-(-frames // 1))
+        frame = -(-frames.numerator // frames.denominator)
     else:
         frame = round(frames)
-    return frame / fps
+    return float(Fraction(frame, 1) / rate)
 
 
 def _clip_overlaps(clip: dict, start: float, end: float) -> bool:
@@ -268,170 +172,21 @@ def _window_timeline_data(timeline_data: dict, start: float, end: float, *, medi
     return out
 
 
-def _validate_ffmpeg_media_timeline(timeline_data: dict) -> None:
-    tracks = {track.get("id"): track for track in timeline_data.get("tracks", [])}
-    visual_tracks = [track for track in tracks.values() if track.get("kind") == "visual"]
-    audio_tracks = [track for track in tracks.values() if track.get("kind") == "audio"]
-    if len(visual_tracks) != 1:
-        raise ValueError("ffmpeg engine supports exactly one visual track")
-    for clip in timeline_data.get("clips", []):
-        if clip.get("clipType") != "media":
-            raise ValueError(f"ffmpeg engine only supports media clips, got {clip.get('clipType')!r}")
-        if float(clip.get("speed", 1) or 1) != 1.0:
-            raise ValueError("ffmpeg engine does not support speed changes yet")
-        track = tracks.get(clip.get("track"), {})
-        if track.get("kind") == "visual" and float(clip.get("volume", 0) or 0) != 0:
-            raise ValueError("ffmpeg engine expects visual clips to have muted embedded audio")
-    audio_track_ids = {track["id"] for track in audio_tracks}
-    audio_clips = sorted(
-        [clip for clip in timeline_data.get("clips", []) if clip.get("track") in audio_track_ids],
-        key=lambda clip: float(clip.get("at", 0) or 0),
+_validate_ffmpeg_media_timeline = (
+    ffmpeg_command.validate_ffmpeg_media_timeline
+)
+
+
+def _render_ffmpeg_media_to_path(
+    timeline_path: Path,
+    assets_path: Path,
+    out_path: Path,
+) -> Path:
+    return ffmpeg_backend._render_ffmpeg_media_to_path(
+        timeline_path,
+        assets_path,
+        out_path,
     )
-    cursor = 0.0
-    for clip in audio_clips:
-        at = float(clip.get("at", 0) or 0)
-        if at < cursor - 0.001:
-            raise ValueError("ffmpeg engine supports multiple audio tracks only when audio clips do not overlap")
-        cursor = max(cursor, at + _clip_duration_seconds(clip))
-
-
-def _render_ffmpeg_media_to_path(timeline_path: Path, assets_path: Path, out_path: Path) -> Path:
-    if not timeline_path.exists():
-        raise FileNotFoundError(f"Timeline missing: {timeline_path}")
-    if not assets_path.exists():
-        raise FileNotFoundError(f"Asset registry missing: {assets_path}")
-    timeline_data = json.loads(timeline_path.read_text(encoding="utf-8"))
-    registry = timeline.load_registry(assets_path)
-    _validate_ffmpeg_media_timeline(timeline_data)
-    width, height, fps = _timeline_canvas(timeline_data)
-    tracks = {track.get("id"): track for track in timeline_data.get("tracks", [])}
-    visual_track_ids = {track["id"] for track in tracks.values() if track.get("kind") == "visual"}
-    audio_track_ids = {track["id"] for track in tracks.values() if track.get("kind") == "audio"}
-    video_clips = sorted(
-        [clip for clip in timeline_data.get("clips", []) if clip.get("track") in visual_track_ids],
-        key=lambda clip: float(clip.get("at", 0) or 0),
-    )
-    audio_clips = sorted(
-        [clip for clip in timeline_data.get("clips", []) if clip.get("track") in audio_track_ids],
-        key=lambda clip: float(clip.get("at", 0) or 0),
-    )
-    if not video_clips:
-        raise ValueError("ffmpeg engine needs at least one visual media clip")
-
-    asset_keys: list[str] = []
-    for clip in [*video_clips, *audio_clips]:
-        asset_key = str(clip.get("asset") or "")
-        if not asset_key:
-            raise ValueError(f"Clip {clip.get('id')!r} has no asset")
-        if asset_key not in registry["assets"]:
-            raise ValueError(f"Clip {clip.get('id')!r} references unknown asset {asset_key!r}")
-        if asset_key not in asset_keys:
-            asset_keys.append(asset_key)
-
-    inputs: list[str] = []
-    for asset_key in asset_keys:
-        entry = registry["assets"][asset_key]
-        file_value = entry.get("file")
-        if not isinstance(file_value, str) or not file_value:
-            raise ValueError(f"ffmpeg engine requires local file assets; {asset_key!r} has no file")
-        asset_path = Path(file_value)
-        if not asset_path.is_absolute():
-            asset_path = (assets_path.parent / asset_path).resolve()
-        inputs.extend(["-i", str(asset_path)])
-    asset_index = {asset_key: index for index, asset_key in enumerate(asset_keys)}
-
-    filters: list[str] = []
-    video_labels: list[str] = []
-    copy_video_input: int | None = None
-    if len(video_clips) == 1:
-        clip = video_clips[0]
-        asset_key = str(clip["asset"])
-        entry = registry["assets"][asset_key]
-        source_duration = entry.get("duration")
-        source_resolution = entry.get("resolution")
-        start = float(clip.get("from", 0) or 0)
-        end = float(clip.get("to", start) or start)
-        at = float(clip.get("at", 0) or 0)
-        full_duration = isinstance(source_duration, (int, float)) and abs((end - start) - float(source_duration)) < 0.05
-        same_resolution = source_resolution == f"{width}x{height}"
-        no_visual_adjustments = not any(
-            key in clip
-            for key in ("x", "y", "width", "height", "cropTop", "cropBottom", "cropLeft", "cropRight", "effects", "transition")
-        )
-        if at == 0 and start == 0 and full_duration and same_resolution and no_visual_adjustments:
-            copy_video_input = asset_index[asset_key]
-    if copy_video_input is None:
-        for index, clip in enumerate(video_clips):
-            inp = asset_index[str(clip["asset"])]
-            start = float(clip.get("from", 0) or 0)
-            end = float(clip.get("to", start) or start)
-            label = f"v{index}"
-            filters.append(
-                f"[{inp}:v]trim=start={start:.6f}:end={end:.6f},setpts=PTS-STARTPTS,"
-                f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
-                f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,"
-                f"fps={fps},format=yuv420p[{label}]"
-            )
-            video_labels.append(f"[{label}]")
-        filters.append("".join(video_labels) + f"concat=n={len(video_labels)}:v=1:a=0[vout]")
-
-    audio_labels: list[str] = []
-    cursor = 0.0
-    audio_index = 0
-    for clip in audio_clips:
-        at = float(clip.get("at", 0) or 0)
-        if at > cursor + 0.001:
-            duration = at - cursor
-            label = f"a{audio_index}"
-            filters.append(f"anullsrc=r=44100:cl=stereo,atrim=duration={duration:.6f}[{label}]")
-            audio_labels.append(f"[{label}]")
-            audio_index += 1
-        inp = asset_index[str(clip["asset"])]
-        start = float(clip.get("from", 0) or 0)
-        end = float(clip.get("to", start) or start)
-        volume = float(clip.get("volume", 1) or 0)
-        label = f"a{audio_index}"
-        filters.append(
-            f"[{inp}:a]atrim=start={start:.6f}:end={end:.6f},"
-            f"asetpts=PTS-STARTPTS,aformat=sample_rates=44100:channel_layouts=stereo,"
-            f"volume={volume:.6f}[{label}]"
-        )
-        audio_labels.append(f"[{label}]")
-        cursor = at + _clip_duration_seconds(clip)
-        audio_index += 1
-    if not audio_labels:
-        duration = sum(_clip_duration_seconds(clip) for clip in video_clips)
-        filters.append(f"anullsrc=r=44100:cl=stereo,atrim=duration={duration:.6f}[a0]")
-        audio_labels.append("[a0]")
-    filters.append("".join(audio_labels) + f"concat=n={len(audio_labels)}:v=0:a=1[aout]")
-
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    subprocess.run(
-        [
-            "ffmpeg",
-            "-hide_banner",
-            "-y",
-            *inputs,
-            "-filter_complex",
-            ";".join(filters),
-            "-map",
-            f"{copy_video_input}:v:0" if copy_video_input is not None else "[vout]",
-            "-map",
-            "[aout]",
-            "-c:v",
-            "copy" if copy_video_input is not None else "libx264",
-            *(["-preset", "veryfast", "-crf", "20"] if copy_video_input is None else []),
-            "-c:a",
-            "aac",
-            "-b:a",
-            "192k",
-            "-movflags",
-            "+faststart",
-            str(out_path),
-        ],
-        check=True,
-    )
-    return out_path
 
 
 def _render_ffmpeg_media(
@@ -441,80 +196,30 @@ def _render_ffmpeg_media(
     *,
     _previous_outputs: Sequence[Path] | None = None,
 ) -> Path:
-    """Render FFmpeg output privately, then publish the committed pair."""
-
-    publication_out = out_path  # unresolved: publication symlink-guards it
-    resolved_out = out_path.resolve()
-    resolved_out.parent.mkdir(parents=True, exist_ok=True)
-    with TemporaryDirectory(
-        prefix=f".{resolved_out.name}.publication-",
-        dir=str(resolved_out.parent),
-    ) as publication_tmp:
-        staged_video = Path(publication_tmp) / resolved_out.name
-        _render_ffmpeg_media_to_path(timeline_path, assets_path, staged_video)
-        provenance = _render_provenance_payload(
-            out_path,
-            engine="ffmpeg",
-            timeline_path=timeline_path,
-            assets_path=assets_path,
-            project_dir=REPO_ROOT / "remotion",
-            composition_id="TimelineComposition",
-            theme_path=None,
-            active_theme=None,
-            registry_state=_effective_registry_state(None),
-            stage_summary={"root": None, "effects": []},
-        )
-        output = publish_render_result(
-            staged_video,
-            provenance,
-            out_path=out_path,
-            sidecar_path=_render_provenance_sidecar_path(out_path),
-            previous_outputs=(
-                _PUBLICATION_PREVIOUS_OUTPUTS.get()
-                if _previous_outputs is None
-                else _previous_outputs
-            ),
-        )
-
-    audit = AuditContext.from_env()
-    if audit is not None:
-        timeline_id = audit.register_asset(kind="timeline", path=timeline_path, label="Render timeline", stage="render_ffmpeg")
-        assets_id = audit.register_asset(kind="assets_registry", path=assets_path, label="Render asset registry", stage="render_ffmpeg")
-        render_id = audit.register_asset(
-            kind="render",
-            path=output,
-            label="Rendered video",
-            parents=[timeline_id, assets_id],
-            stage="render_ffmpeg",
-            metadata={"engine": "ffmpeg"},
-        )
-        audit.register_node(
-            stage="render_ffmpeg",
-            label="Render media-only timeline with ffmpeg",
-            parents=[timeline_id, assets_id],
-            outputs=[render_id],
-            metadata={"engine": "ffmpeg"},
-        )
-    return output
+    return ffmpeg_backend.render(
+        timeline_path,
+        assets_path,
+        out_path,
+        previous_outputs=(
+            _PUBLICATION_PREVIOUS_OUTPUTS.get()
+            if _previous_outputs is None
+            else _previous_outputs
+        ),
+        _render_to_path=_render_ffmpeg_media_to_path,
+    )
 
 
-def _can_render_with_ffmpeg_media(timeline_path: Path, assets_path: Path) -> bool:
-    try:
-        timeline_data = json.loads(timeline_path.read_text(encoding="utf-8"))
-        timeline.load_registry(assets_path)
-        _validate_ffmpeg_media_timeline(timeline_data)
-        tracks = {track.get("id"): track for track in timeline_data.get("tracks", [])}
-        has_visual_media_clip = any(
-            clip.get("clipType") == "media"
-            and tracks.get(clip.get("track"), {}).get("kind") == "visual"
-            for clip in timeline_data.get("clips", [])
-        )
-    except Exception:
-        return False
-    return has_visual_media_clip
+def _can_render_with_ffmpeg_media(
+    timeline_path: Path,
+    assets_path: Path,
+) -> bool:
+    return ffmpeg_backend.can_render_with_ffmpeg_media(
+        timeline_path,
+        assets_path,
+    )
 
 
-def _complex_clip_windows(timeline_data: dict, fps: int, *, handle_seconds: float = 0.25) -> list[tuple[float, float]]:
+def _complex_clip_windows(timeline_data: dict, fps: int | Fraction, *, handle_seconds: float = 0.25) -> list[tuple[float, float]]:
     duration = _timeline_duration_seconds(timeline_data)
     tracks = {track.get("id"): track for track in timeline_data.get("tracks", [])}
     visual_track_ids = {track.get("id") for track in timeline_data.get("tracks", []) if track.get("kind") == "visual"}
@@ -588,8 +293,28 @@ def _complex_clip_windows(timeline_data: dict, fps: int, *, handle_seconds: floa
     return merged
 
 
-def _hybrid_segments(timeline_data: dict) -> list[dict[str, float | str]]:
-    _width, _height, fps = _timeline_canvas(timeline_data)
+def _hybrid_segments(
+    timeline_data: dict,
+    *,
+    fps: Fraction | None = None,
+) -> list[dict[str, float | str]]:
+    if fps is None:
+        raw_fps = (
+            timeline_data.get("theme_overrides", {})
+            .get("visual", {})
+            .get("canvas", {})
+            .get("fps", 30)
+        )
+        if (
+            isinstance(raw_fps, Sequence)
+            and not isinstance(raw_fps, (str, bytes))
+            and len(raw_fps) == 2
+        ):
+            fps = Fraction(raw_fps[0], raw_fps[1])
+        else:
+            fps = Fraction(str(raw_fps))
+        if fps <= 0:
+            raise ValueError("canvas fps must be positive")
     duration = _round_frame_time(_timeline_duration_seconds(timeline_data), fps, mode="ceil")
     complex_windows = _complex_clip_windows(timeline_data, fps)
     if not complex_windows:
@@ -610,42 +335,19 @@ def _hybrid_segments(timeline_data: dict) -> list[dict[str, float | str]]:
 
 
 def _concat_segments(segment_paths: list[Path], out_path: Path) -> None:
-    inputs: list[str] = []
-    filters: list[str] = []
-    concat_inputs: list[str] = []
-    for index, path in enumerate(segment_paths):
-        inputs.extend(["-i", str(path)])
-        filters.append(f"[{index}:v]setpts=PTS-STARTPTS,fps=30,format=yuv420p[v{index}]")
-        filters.append(f"[{index}:a]asetpts=PTS-STARTPTS,aformat=sample_rates=44100:channel_layouts=stereo[a{index}]")
-        concat_inputs.append(f"[v{index}][a{index}]")
-    filters.append("".join(concat_inputs) + f"concat=n={len(segment_paths)}:v=1:a=1[vout][aout]")
-    subprocess.run(
-        [
-            "ffmpeg",
-            "-hide_banner",
-            "-y",
-            *inputs,
-            "-filter_complex",
-            ";".join(filters),
-            "-map",
-            "[vout]",
-            "-map",
-            "[aout]",
-            "-c:v",
-            "libx264",
-            "-preset",
-            "veryfast",
-            "-crf",
-            "20",
-            "-c:a",
-            "aac",
-            "-b:a",
-            "192k",
-            "-movflags",
-            "+faststart",
-            str(out_path),
-        ],
-        check=True,
+    profile = _HYBRID_FINALIZER_PROFILE.get()
+    audio = None
+    if profile is not None:
+        audio = (
+            AudioOwnership.RENDERED
+            if profile.has_audio
+            else AudioOwnership.NONE
+        )
+    ffmpeg_finalizer.concat_segment_files(
+        segment_paths,
+        out_path,
+        profile=profile,
+        audio=audio,
     )
 
 
@@ -655,7 +357,16 @@ def _render_hybrid(timeline_path: Path, assets_path: Path, out_path: Path, **rem
     if not assets_path.exists():
         raise FileNotFoundError(f"Asset registry missing: {assets_path}")
     timeline_data = json.loads(timeline_path.read_text(encoding="utf-8"))
-    segments = _hybrid_segments(timeline_data)
+    canonical_profile = resolve_render_profile(
+        timeline_data,
+        timeline.load_registry(assets_path),
+        theme=remotion_kwargs.get("theme_path"),
+        themes_root=REPO_ROOT / "themes",
+    )
+    segments = _hybrid_segments(
+        timeline_data,
+        fps=Fraction(*canonical_profile.fps_rational),
+    )
     if len(segments) == 1 and segments[0]["engine"] == "ffmpeg":
         return _render_ffmpeg_media(timeline_path, assets_path, out_path)
 
@@ -697,7 +408,11 @@ def _render_hybrid(timeline_path: Path, assets_path: Path, out_path: Path, **rem
             segment_paths.append(segment_out_path)
         staged_video = tmp_dir / "final" / out_path.name
         staged_video.parent.mkdir(parents=True, exist_ok=True)
-        _concat_segments(segment_paths, staged_video)
+        profile_token = _HYBRID_FINALIZER_PROFILE.set(canonical_profile)
+        try:
+            _concat_segments(segment_paths, staged_video)
+        finally:
+            _HYBRID_FINALIZER_PROFILE.reset(profile_token)
         provenance = _render_provenance_payload(
             out_path,
             engine="hybrid",
@@ -742,228 +457,6 @@ def _render_hybrid(timeline_path: Path, assets_path: Path, out_path: Path, **rem
     return output
 
 
-def _timeline_composition_src(project_dir: Path) -> Path | None:
-    composition_src = project_dir / "node_modules" / "@banodoco" / "timeline-composition" / "typescript" / "src"
-    return composition_src if composition_src.is_dir() else None
-
-
-def _registry_output_paths(project_dir: Path) -> list[Path]:
-    composition_src = _timeline_composition_src(project_dir)
-    package_src = composition_src or (WORKSPACE_ROOT / "packages" / "timeline-composition" / "typescript" / "src")
-    paths = [
-        package_src / f"{kind}.generated.ts"
-        for kind in ("effects", "animations", "transitions")
-    ]
-    remotion_src = REPO_ROOT / "remotion" / "src"
-    for kind in ("effects", "animations", "transitions"):
-        base = remotion_src / f"{kind}.generated"
-        paths.extend(Path(f"{base}{extension}") for extension in gen_effect_registry.SHIM_EXTENSIONS)
-    return paths
-
-
-def _registry_outputs_exist(project_dir: Path) -> bool:
-    return all(path.exists() for path in _registry_output_paths(project_dir))
-
-
-def _active_theme_pointer_current(theme_path: Path | None) -> bool:
-    link = gen_effect_registry.ACTIVE_THEME_LINK
-    pointer = gen_effect_registry.ACTIVE_THEME_POINTER
-    if theme_path is None:
-        return not link.exists() and not pointer.exists()
-
-    theme_dir = _resolve_theme_path(theme_path).parent.resolve()
-    if os.name == "nt":
-        try:
-            return pointer.read_text(encoding="utf-8").strip() == str(theme_dir)
-        except OSError:
-            return False
-    if not link.is_symlink():
-        return False
-    try:
-        return link.resolve() == theme_dir
-    except OSError:
-        return False
-
-
-def _effective_registry_state(theme_path: Path | None) -> dict[str, Any]:
-    theme_dir = _resolve_theme_path(theme_path) if theme_path is not None else None
-    return gen_effect_registry.compute_generated_registry_state(theme_dir=theme_dir)
-
-
-def _read_registry_state(project_dir: Path) -> dict[str, Any] | None:
-    state_path = project_dir / _REGISTRY_STATE_PATH
-    try:
-        payload = json.loads(state_path.read_text(encoding="utf-8"))
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
-        return None
-    return payload if isinstance(payload, dict) else None
-
-
-def _write_registry_state(project_dir: Path, state: dict[str, Any]) -> None:
-    state_path = project_dir / _REGISTRY_STATE_PATH
-    state_path.write_text(json.dumps(state, sort_keys=True, indent=2) + "\n", encoding="utf-8")
-
-
-def _regenerate_element_registries(project_dir: Path, theme_path: Path | None) -> None:
-    state = _effective_registry_state(theme_path)
-    cached_state = _read_registry_state(project_dir)
-    if (
-        cached_state is not None
-        and cached_state.get("hash") == state.get("hash")
-        and _registry_outputs_exist(project_dir)
-        and _active_theme_pointer_current(theme_path)
-    ):
-        return
-
-    generator = REPO_ROOT / "scripts" / "gen_effect_registry.py"
-    cmd = [sys.executable, str(generator)]
-    if theme_path is not None:
-        cmd.extend(["--theme", str(_resolve_theme_path(theme_path))])
-    env: dict[str, str] = {}
-    composition_src = _timeline_composition_src(project_dir)
-    if composition_src is not None:
-        env["ASTRID_TIMELINE_COMPOSITION_SRC"] = str(composition_src)
-    subprocess.run(
-        cmd,
-        cwd=str(REPO_ROOT),
-        env=build_child_subprocess_env(explicit_env=env),
-        capture_output=True,
-        check=True,
-        text=True,
-    )
-    _write_registry_state(project_dir, state)
-
-
-def _render_asset_stage_hash(timeline_path: Path, assets_path: Path, out_path: Path) -> str:
-    digest = hashlib.sha256()
-    for path in (timeline_path, assets_path):
-        resolved = path.resolve()
-        digest.update(str(resolved).encode("utf-8"))
-        digest.update(b"\0")
-        if resolved.exists():
-            digest.update(resolved.read_bytes())
-        digest.update(b"\0")
-    digest.update(str(out_path.resolve()).encode("utf-8"))
-    return digest.hexdigest()[:16]
-
-
-def _effect_registry_for_assets(theme_path: Path | None) -> tuple[dict[str, ElementDefinition], dict[str, str]]:
-    active_theme: Path | None = None
-    if theme_path is not None:
-        active_theme = _resolve_theme_path(theme_path)
-    registry = load_default_registry(active_theme=active_theme, project_root=REPO_ROOT)
-    effects = {element.id: element for element in registry.list(kind="effects")}
-    aliases: dict[str, str] = {}
-    if "text-card" in effects:
-        aliases["text"] = "text-card"
-    for effect_id, element in effects.items():
-        raw_aliases = element.metadata.get("clipTypeAliases")
-        if not isinstance(raw_aliases, list):
-            continue
-        for alias in raw_aliases:
-            if isinstance(alias, str) and alias:
-                aliases[alias] = effect_id
-    return effects, aliases
-
-
-def _effect_id_for_clip(clip: dict[str, Any], effects: dict[str, ElementDefinition], aliases: dict[str, str]) -> str | None:
-    clip_type = clip.get("clipType")
-    if not isinstance(clip_type, str) or clip_type == "effect-layer":
-        return None
-    if clip_type in effects:
-        return clip_type
-    return aliases.get(clip_type)
-
-
-def _source_pack_id(element: ElementDefinition) -> str:
-    pack_id = element.metadata.get("pack_id")
-    if isinstance(pack_id, str) and pack_id:
-        return pack_id
-    if element.source.startswith("pack:"):
-        return element.source.split(":", 1)[1]
-    return element.source
-
-
-def _inject_clip_asset_params(clip: dict[str, Any], staged_assets: dict[str, str]) -> None:
-    params = clip.get("params")
-    if isinstance(params, dict):
-        next_params = dict(params)
-    else:
-        next_params = {}
-    next_params["__astridAssets"] = staged_assets
-    clip["params"] = next_params
-
-
-def _stage_effect_assets_for_timeline(
-    timeline_data: dict[str, Any],
-    *,
-    project_dir: Path,
-    theme_path: Path | None,
-    render_hash: str,
-) -> dict[str, Any]:
-    effects, aliases = _effect_registry_for_assets(theme_path)
-    clips = timeline_data.get("clips")
-    if not isinstance(clips, list):
-        return {"root": None, "effects": []}
-
-    used_effect_ids: set[str] = set()
-    clip_effect_ids: dict[int, str] = {}
-    clip_ids_by_effect: dict[str, list[str]] = {}
-    for index, clip in enumerate(clips):
-        if not isinstance(clip, dict):
-            continue
-        effect_id = _effect_id_for_clip(clip, effects, aliases)
-        if effect_id is None:
-            continue
-        element = effects[effect_id]
-        used_effect_ids.add(effect_id)
-        clip_effect_ids[index] = effect_id
-        clip_id = clip.get("id")
-        if isinstance(clip_id, str) and clip_id:
-            clip_ids_by_effect.setdefault(effect_id, []).append(clip_id)
-
-    if not used_effect_ids:
-        return {"root": None, "effects": []}
-
-    public_root = project_dir / "public" / "astrid-effects" / render_hash
-    staged_by_effect: dict[str, dict[str, str]] = {}
-    for effect_id in sorted(used_effect_ids):
-        element = effects[effect_id]
-        staged_assets: dict[str, str] = {}
-        for asset in element.assets:
-            source = (element.root / asset.path).resolve()
-            relative_target = Path(effect_id) / asset.path
-            target = public_root / relative_target
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source, target)
-            staged_assets[asset.name] = f"astrid-effects/{render_hash}/{relative_target.as_posix()}"
-        staged_by_effect[effect_id] = staged_assets
-
-    for index, effect_id in clip_effect_ids.items():
-        clip = clips[index]
-        if isinstance(clip, dict) and staged_by_effect[effect_id]:
-            _inject_clip_asset_params(clip, staged_by_effect[effect_id])
-    return {
-        "root": str(public_root),
-        "effects": [
-            {
-                "effect_id": effect_id,
-                "source_pack_id": _source_pack_id(effects[effect_id]),
-                "source": effects[effect_id].source,
-                "element_root": str(effects[effect_id].root),
-                "clip_ids": sorted(clip_ids_by_effect.get(effect_id, ())),
-                "staged_asset_ids": sorted(staged_by_effect[effect_id]),
-                "staged_assets": dict(sorted(staged_by_effect[effect_id].items())),
-            }
-            for effect_id in sorted(used_effect_ids)
-        ],
-    }
-
-
-def _render_provenance_sidecar_path(out_path: Path) -> Path:
-    return Path(f"{out_path}.provenance.json")
-
-
 def _previous_render_outputs_for_timeline(
     out_path: Path,
     timeline_path: Path,
@@ -990,141 +483,6 @@ def _previous_render_outputs_for_timeline(
     return tuple(candidates)
 
 
-def _active_pack_order_for_provenance() -> list[dict[str, Any]]:
-    return [
-        {
-            "id": discovered.id,
-            "source_kind": discovered.source_kind,
-            "priority_index": discovered.priority_index,
-            "root": str(discovered.pack_dir),
-        }
-        for discovered in discover_pack_metadata(project_root=REPO_ROOT)
-    ]
-
-
-def _active_theme_for_provenance(theme_path: Path | None, active_theme: dict[str, Any] | None) -> dict[str, Any] | None:
-    theme_id = active_theme.get("id") if isinstance(active_theme, dict) else None
-    if theme_path is None:
-        return {"id": theme_id or "banodoco-default", "path": None}
-    resolved = _resolve_theme_path(theme_path)
-    return {"id": theme_id or resolved.parent.name, "path": str(resolved)}
-
-
-def _render_provenance_payload(
-    out_path: Path,
-    *,
-    engine: str,
-    timeline_path: Path,
-    assets_path: Path,
-    project_dir: Path,
-    composition_id: str,
-    theme_path: Path | None,
-    active_theme: dict[str, Any] | None,
-    registry_state: dict[str, Any],
-    stage_summary: dict[str, Any],
-    segments: list[dict[str, float | str]] | None = None,
-    segment_provenance: list[dict[str, Any]] | None = None,
-) -> dict[str, Any]:
-    effects = list(stage_summary.get("effects") or [])
-    payload: dict[str, Any] = {
-        "schema_version": 1,
-        "engine": engine,
-        "output": str(out_path.resolve()),
-        "timeline": str(timeline_path.resolve()),
-        "assets_registry": str(assets_path.resolve()),
-        "project_dir": str(project_dir.resolve()),
-        "composition_id": composition_id,
-        "active_pack_order": _active_pack_order_for_provenance(),
-        "active_theme": _active_theme_for_provenance(theme_path, active_theme),
-        "registry_hash": registry_state.get("hash"),
-        "registry_state": registry_state,
-        "resolved_effect_ids": [str(effect["effect_id"]) for effect in effects if "effect_id" in effect],
-        "resolved_effects": effects,
-        "source_pack_ids": sorted(
-            {
-                str(effect["source_pack_id"])
-                for effect in effects
-                if isinstance(effect, dict) and effect.get("source_pack_id")
-            }
-        ),
-        "element_roots": sorted(
-            {
-                str(effect["element_root"])
-                for effect in effects
-                if isinstance(effect, dict) and effect.get("element_root")
-            }
-        ),
-        "staged_asset_ids": sorted(
-            {
-                str(asset_id)
-                for effect in effects
-                if isinstance(effect, dict)
-                for asset_id in effect.get("staged_asset_ids", ())
-            }
-        ),
-        "staged_asset_root": stage_summary.get("root"),
-    }
-    if segments is not None:
-        payload["segments"] = segments
-    if segment_provenance is not None:
-        payload["segment_provenance"] = segment_provenance
-    return payload
-
-
-def _write_render_provenance(
-    out_path: Path,
-    *,
-    engine: str,
-    timeline_path: Path,
-    assets_path: Path,
-    project_dir: Path,
-    composition_id: str,
-    theme_path: Path | None,
-    active_theme: dict[str, Any] | None,
-    registry_state: dict[str, Any],
-    stage_summary: dict[str, Any],
-    segments: list[dict[str, float | str]] | None = None,
-    segment_provenance: list[dict[str, Any]] | None = None,
-) -> Path:
-    payload = _render_provenance_payload(
-        out_path,
-        engine=engine,
-        timeline_path=timeline_path,
-        assets_path=assets_path,
-        project_dir=project_dir,
-        composition_id=composition_id,
-        theme_path=theme_path,
-        active_theme=active_theme,
-        registry_state=registry_state,
-        stage_summary=stage_summary,
-        segments=segments,
-        segment_provenance=segment_provenance,
-    )
-    sidecar_path = _render_provenance_sidecar_path(out_path)
-    write_json_atomic(sidecar_path, payload)
-    return sidecar_path
-
-
-def _stderr_tail(stderr: str) -> str:
-    lines = stderr.splitlines()
-    tail = lines[-40:] if len(lines) > 40 else lines
-    return "\n".join(tail).strip()
-
-
-def _require_free_space(path: Path, min_free_gb: float | None) -> None:
-    if min_free_gb is None or min_free_gb <= 0:
-        return
-    target = path if path.exists() else path.parent
-    usage = shutil.disk_usage(target)
-    min_free = int(min_free_gb * 1024 * 1024 * 1024)
-    if usage.free < min_free:
-        free_gb = usage.free / (1024 * 1024 * 1024)
-        raise RuntimeError(
-            f"Remotion render needs at least {min_free_gb:.1f} GiB free at {target}; "
-            f"only {free_gb:.1f} GiB is available"
-        )
-
-
 def _parse_bool_arg(value: str | bool | None) -> bool:
     if value is None:
         return True
@@ -1140,16 +498,8 @@ def _parse_bool_arg(value: str | bool | None) -> bool:
 
 def _audio_reactive_ffmpeg_element(
     theme_path: Path | None,
-) -> ElementDefinition | None:
-    effects, _aliases = _effect_registry_for_assets(theme_path)
-    element = effects.get(audio_reactive_colour.EFFECT_ID)
-    if (
-        element is None
-        or element.metadata.get("ffmpegAdapter")
-        != audio_reactive_colour.ADAPTER_ID
-    ):
-        return None
-    return element
+) -> Any | None:
+    return ffmpeg_backend._audio_reactive_ffmpeg_element(theme_path)
 
 
 def _render_audio_reactive_colour_if_supported(
@@ -1161,122 +511,16 @@ def _render_audio_reactive_colour_if_supported(
     composition_id: str,
     theme_path: Path | None,
 ) -> Path | None:
-    timeline_data = json.loads(timeline_path.read_text(encoding="utf-8"))
-    clips = timeline_data.get("clips")
-    if (
-        not isinstance(clips, list)
-        or len(clips) != 2
-        or sum(
-            isinstance(clip, dict)
-            and clip.get("clipType") == audio_reactive_colour.EFFECT_ID
-            for clip in clips
-        )
-        != 1
-    ):
-        return None
-    element = _audio_reactive_ffmpeg_element(theme_path)
-    if element is None:
-        return None
-    registry = timeline.load_registry(assets_path)
-    spec = audio_reactive_colour.match_and_validate(
-        timeline_data, registry, assets_path
+    return ffmpeg_backend.render_audio_reactive_colour_if_supported(
+        timeline_path,
+        assets_path,
+        out_path,
+        project_dir=project_dir,
+        composition_id=composition_id,
+        theme_path=theme_path,
+        previous_outputs=_PUBLICATION_PREVIOUS_OUTPUTS.get(),
+        element_resolver=_audio_reactive_ffmpeg_element,
     )
-    if spec is None:
-        return None
-
-    publication_out = out_path  # unresolved: publication symlink-guards it
-    resolved_out = out_path.resolve()
-    resolved_out.parent.mkdir(parents=True, exist_ok=True)
-    stage_summary = {
-        "root": None,
-        "effects": [
-            {
-                "effect_id": element.id,
-                "source_pack_id": _source_pack_id(element),
-                "source": element.source,
-                "element_root": str(element.root),
-                "clip_ids": [
-                    str(clip.get("id"))
-                    for clip in timeline_data.get("clips", [])
-                    if isinstance(clip, dict)
-                    and clip.get("clipType") == element.id
-                ],
-                "staged_asset_ids": [],
-                "staged_assets": {},
-            }
-        ],
-    }
-    with TemporaryDirectory(
-        prefix=f".{resolved_out.name}.publication-",
-        dir=str(resolved_out.parent),
-    ) as publication_tmp:
-        staged_video = Path(publication_tmp) / resolved_out.name
-        rendered_video = audio_reactive_colour.render(spec, staged_video)
-        provenance = _render_provenance_payload(
-            out_path,
-            engine="ffmpeg",
-            timeline_path=timeline_path,
-            assets_path=assets_path,
-            project_dir=project_dir or (REPO_ROOT / "remotion"),
-            composition_id=composition_id,
-            theme_path=theme_path,
-            active_theme=None,
-            registry_state=_effective_registry_state(theme_path),
-            stage_summary=stage_summary,
-        )
-        provenance["ffmpeg_specialization"] = audio_reactive_colour.ADAPTER_ID
-        provenance["audio_reactive_colour"] = {
-            "event_count": len(spec.events),
-            "fps": spec.fps,
-            "frame_count": spec.total_frames,
-            "marker_sha256": spec.marker_sha256,
-        }
-        output = publish_render_result(
-            rendered_video,
-            provenance,
-            out_path=out_path,
-            sidecar_path=_render_provenance_sidecar_path(out_path),
-            previous_outputs=_PUBLICATION_PREVIOUS_OUTPUTS.get(),
-        )
-
-    audit = AuditContext.from_env()
-    if audit is not None:
-        timeline_id = audit.register_asset(
-            kind="timeline",
-            path=timeline_path,
-            label="Audio-reactive render timeline",
-            stage="render_ffmpeg_audio_reactive_colour",
-        )
-        assets_id = audit.register_asset(
-            kind="assets_registry",
-            path=assets_path,
-            label="Audio-reactive asset registry",
-            stage="render_ffmpeg_audio_reactive_colour",
-        )
-        render_id = audit.register_asset(
-            kind="render",
-            path=output,
-            label="Rendered audio-reactive colour video",
-            parents=[timeline_id, assets_id],
-            stage="render_ffmpeg_audio_reactive_colour",
-            metadata={
-                "engine": "ffmpeg",
-                "specialization": audio_reactive_colour.ADAPTER_ID,
-                "event_count": len(spec.events),
-                "marker_sha256": spec.marker_sha256,
-            },
-        )
-        audit.register_node(
-            stage="render_ffmpeg_audio_reactive_colour",
-            label="Render audio-reactive colour timeline with FFmpeg",
-            parents=[timeline_id, assets_id],
-            outputs=[render_id],
-            metadata={
-                "engine": "ffmpeg",
-                "specialization": audio_reactive_colour.ADAPTER_ID,
-            },
-        )
-    return output
 
 
 def _render_with_publication_context(
@@ -1317,132 +561,16 @@ def _render_with_publication_context(
         raise ValueError(f"Unsupported render engine: {engine}")
     if _can_render_with_ffmpeg_media(timeline_path, assets_path):
         return _render_ffmpeg_media(timeline_path, assets_path, out_path)
-    project_dir = project_dir or (REPO_ROOT / "remotion")
-    _validate_project_dir(project_dir)
-    _regenerate_element_registries(project_dir, theme_path)
-    registry_state = _effective_registry_state(theme_path)
-    _require_free_space(out_path.parent, min_free_gb)
-    props_path = (out_path.parent / ".remotion-props.json").resolve()
-    render_hash = _render_asset_stage_hash(timeline_path, assets_path, out_path)
-    staged_public_root = project_dir / "public" / "astrid-effects" / render_hash
-    with ExitStack() as asset_lifecycle:
-        try:
-            materializer = asset_lifecycle.enter_context(AssetMaterializer(assets_path))
-            asset_server = None
-            if materializer.needs_server:
-                try:
-                    asset_server = asset_lifecycle.enter_context(
-                        InvocationAssetServer(materializer.staging_dir)
-                    )
-                except OSError as exc:
-                    raise RuntimeError(
-                        f"Permission denied (1100): local HTTP asset server blocked: {exc}"
-                    ) from exc
-            resolved_registry = materializer.resolved_registry(asset_server)
-            resolved_theme = theme_path or (WORKSPACE_ROOT / "themes" / "banodoco-default" / "theme.json")
-            theme_for_props = _resolved_theme_for_render(timeline_path, resolved_theme)
-            # The timeline references a theme by slug + optional theme_overrides;
-            # theme.visual.canvas is the source of truth for Remotion calculateMetadata.
-            merged_props = {
-                "timeline": _serialize_timeline(
-                    timeline_path,
-                    default_theme=str(theme_for_props.get("id") or "banodoco-default"),
-                ),
-                "assets": resolved_registry,
-                "theme": theme_for_props,
-            }
-            stage_summary = _stage_effect_assets_for_timeline(
-                merged_props["timeline"],
-                project_dir=project_dir,
-                theme_path=theme_path,
-                render_hash=render_hash,
-            )
-            out_path.parent.mkdir(parents=True, exist_ok=True)
-            publication_tmp = asset_lifecycle.enter_context(
-                TemporaryDirectory(
-                    prefix=f".{out_path.name}.publication-",
-                    dir=str(out_path.parent),
-                )
-            )
-            staged_video = Path(publication_tmp) / out_path.name
-            props_path.write_text(json.dumps(merged_props), encoding="utf-8")
-            # Build the Remotion launch env from the canonical safe base plus the
-            # Astrid runtime markers it propagates. We do NOT spread os.environ:
-            # the only Node/Remotion additions are the safe-base PATH/HOME/TMPDIR
-            # that npx + the headless renderer need, and any caller-provided
-            # composition source override declared as a build-tool variable.
-            remotion_env_additions: dict[str, str] = {}
-            composition_src = (
-                project_dir / "node_modules" / "@banodoco" / "timeline-composition" / "typescript" / "src"
-            )
-            if composition_src.is_dir():
-                remotion_env_additions["ASTRID_TIMELINE_COMPOSITION_SRC"] = str(composition_src)
-            result = subprocess.run(
-                [
-                    "npx",
-                    "remotion",
-                    "render",
-                    composition_id,
-                    "--props",
-                    str(props_path),
-                    "--output",
-                    str(staged_video),
-                    "--allow-html-in-canvas",
-                ],
-                cwd=str(project_dir),
-                env=build_child_subprocess_env(explicit_env=remotion_env_additions),
-                capture_output=True,
-                check=False,
-                text=True,
-            )
-            if result.returncode != 0:
-                stderr_tail = _stderr_tail(result.stderr)
-                message = f"Remotion render failed with exit code {result.returncode}"
-                if stderr_tail:
-                    message = f"{message}\n{stderr_tail}"
-                raise RuntimeError(message)
-            provenance = _render_provenance_payload(
-                out_path,
-                engine="remotion",
-                timeline_path=timeline_path,
-                assets_path=assets_path,
-                project_dir=project_dir,
-                composition_id=composition_id,
-                theme_path=theme_path,
-                active_theme=theme_for_props,
-                registry_state=registry_state,
-                stage_summary=stage_summary,
-            )
-            output = publish_render_result(
-                staged_video,
-                provenance,
-                out_path=out_path,
-                sidecar_path=_render_provenance_sidecar_path(out_path),
-                previous_outputs=_PUBLICATION_PREVIOUS_OUTPUTS.get(),
-            )
-        finally:
-            props_path.unlink(missing_ok=True)
-            shutil.rmtree(staged_public_root, ignore_errors=True)
-    audit = AuditContext.from_env()
-    if audit is not None:
-        timeline_id = audit.register_asset(kind="timeline", path=timeline_path, label="Render timeline", stage="render_remotion")
-        assets_id = audit.register_asset(kind="assets_registry", path=assets_path, label="Render asset registry", stage="render_remotion")
-        render_id = audit.register_asset(
-            kind="render",
-            path=output,
-            label="Rendered video",
-            parents=[timeline_id, assets_id],
-            stage="render_remotion",
-            metadata={"composition": composition_id},
-        )
-        audit.register_node(
-            stage="render_remotion",
-            label="Render Remotion timeline",
-            parents=[timeline_id, assets_id],
-            outputs=[render_id],
-            metadata={"composition": composition_id, "project_dir": str(project_dir)},
-        )
-    return output
+    return remotion_backend.render(
+        timeline_path,
+        assets_path,
+        out_path,
+        project_dir=project_dir,
+        composition_id=composition_id,
+        theme_path=theme_path,
+        min_free_gb=min_free_gb,
+        previous_outputs=_PUBLICATION_PREVIOUS_OUTPUTS.get(),
+    )
 
 
 def render(

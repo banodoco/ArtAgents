@@ -283,16 +283,27 @@ def _same_profile_value(field: str, actual: Any, expected: Any) -> bool:
             return False
     if field == "video_level":
         return _level(actual) == _level(expected)
+    if field == "pixel_format":
+        # ffmpeg's deprecated yuvj* names are full-range variants of the
+        # standard yuv* formats (e.g. yuvj420p == yuv420p); treat them as
+        # equivalent so strict validation accepts real encoder output.
+        return _pixel_format_canonical(actual) == _pixel_format_canonical(expected)
     if field in {
         "container",
         "video_codec",
         "video_profile",
-        "pixel_format",
         "audio_codec",
         "audio_channel_layout",
     }:
         return _text(actual) == _text(expected)
     return actual == expected
+
+
+def _pixel_format_canonical(value: Any) -> str:
+    text = _text(value) or ""
+    if text.startswith("yuvj"):
+        return "yuv" + text[4:]
+    return text
 
 
 def _compare_declared_to_expected(

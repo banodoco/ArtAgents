@@ -1,0 +1,618 @@
+from __future__ import annotations
+
+import copy
+import importlib
+import json
+import subprocess
+from pathlib import Path
+from unittest import mock
+
+import pytest
+
+from astrid.core.media import MediaProbe
+from astrid.core.rendering.contracts import (
+    AudioOwnership,
+    FrameWindow,
+    RenderRequest,
+    RenderResult,
+    SCHEMA_VERSION,
+)
+from astrid.packs.rendering.backends.ffmpeg import audio_reactive_colour
+from astrid.packs.rendering.backends.ffmpeg import command
+from astrid.packs.rendering.backends.ffmpeg import run as ffmpeg
+from astrid.packs.rendering.backends.ffmpeg.support import support as evaluate_support
+
+
+support_module = importlib.import_module(
+    "astrid.packs.rendering.backends.ffmpeg.support"
+)
+
+
+def _timeline(*, include_audio: bool = True, duration: float = 4.0) -> dict:
+    tracks = [{"id": "v", "kind": "visual", "label": "Video"}]
+    clips = [
+        {
+            "id": "video",
+            "at": 0,
+            "track": "v",
+            "clipType": "media",
+            "asset": "video",
+            "from": 0,
+            "to": duration,
+            "speed": 1,
+            "volume": 0,
+        }
+    ]
+    if include_audio:
+        tracks.append(
+            {
+                "id": "a",
+                "kind": "audio",
+                "label": "Audio",
+                "volume": 0.5,
+            }
+        )
+        clips.append(
+            {
+                "id": "audio",
+                "at": 0,
+                "track": "a",
+                "clipType": "media",
+                "asset": "audio",
+                "from": 0,
+                "to": duration,
+                "speed": 1,
+                "volume": 0.4,
+            }
+        )
+    return {
+        "theme": "banodoco-default",
+        "theme_overrides": {
+            "visual": {"canvas": {"width": 640, "height": 360, "fps": 30}}
+        },
+        "tracks": tracks,
+        "clips": clips,
+    }
+
+
+def _assets(tmp_path: Path, *, duration: float = 4.0) -> dict:
+    return {
+        "assets": {
+            "video": {
+                "file": "video.mp4",
+                "type": "video/mp4",
+                "duration": duration,
+                "resolution": "640x360",
+                "fps": 30,
+            },
+            "audio": {
+                "file": "audio.wav",
+                "type": "audio/wav",
+                "duration": duration,
+            },
+        }
+    }
+
+
+def _video_probe(*, audio: bool = False, duration: float = 4.0) -> MediaProbe:
+    return MediaProbe(
+        duration_seconds=duration,
+        width=640,
+        height=360,
+        fps=30,
+        resolution="640x360",
+        video_codec="h264",
+        audio_codec="aac" if audio else None,
+        video_stream_present=True,
+        audio_stream_present=audio,
+    )
+
+
+def _audio_probe(*, duration: float = 4.0, present: bool = True) -> MediaProbe:
+    return MediaProbe(
+        duration_seconds=duration,
+        audio_codec="pcm_s16le" if present else None,
+        video_stream_present=False,
+        audio_stream_present=present,
+    )
+
+
+def _request(
+    tmp_path: Path,
+    *,
+    audio: AudioOwnership | None = None,
+    window: FrameWindow | None = None,
+) -> RenderRequest:
+    return RenderRequest(
+        schema_version=SCHEMA_VERSION,
+        timeline_path=str(tmp_path / "timeline.json"),
+        assets_registry_path=str(tmp_path / "assets.json"),
+        output_name="result.mp4",
+        window=window,
+        audio=audio,
+        backend_config={ffmpeg.BACKEND_ID: {}},
+    )
+
+
+def _evaluate(
+    tmp_path: Path,
+    timeline_data: dict,
+    assets: dict,
+    *,
+    probes: dict[str, MediaProbe] | None = None,
+    missing_files: set[str] | None = None,
+    which=None,
+    request: RenderRequest | None = None,
+):
+    missing = missing_files or set()
+    for entry in assets.get("assets", {}).values():
+        file_value = entry.get("file")
+        if isinstance(file_value, str) and file_value not in missing:
+            (tmp_path / file_value).write_bytes(b"source")
+    (tmp_path / "timeline.json").write_text(
+        json.dumps(timeline_data),
+        encoding="utf-8",
+    )
+    (tmp_path / "assets.json").write_text(json.dumps(assets), encoding="utf-8")
+    probe_map = probes or {
+        "video.mp4": _video_probe(),
+        "audio.wav": _audio_probe(),
+    }
+
+    return evaluate_support(
+        request or _request(tmp_path),
+        timeline_data,
+        assets,
+        probe=lambda path: probe_map[Path(path).name],
+        which=which or (lambda binary: f"/usr/bin/{binary}"),
+    )
+
+
+def _build_command(tmp_path: Path, timeline_data: dict, assets: dict) -> list[str]:
+    _evaluate(tmp_path, timeline_data, assets)
+    return command.build_render_command(_request(tmp_path), tmp_path)
+
+
+def test_supported_report_exposes_request_specific_evidence(tmp_path: Path) -> None:
+    report = _evaluate(tmp_path, _timeline(), _assets(tmp_path))
+
+    assert report.supported is True
+    assert report.reasons == []
+    assert report.alternatives == []
+    assert report.features["whole_media"] is True
+    assert report.features["stream_copy"] is True
+    assert report.features["audio_reactive_colour"] is False
+    assert report.features["audio_ownership"] == "rendered"
+
+
+@pytest.mark.parametrize(
+    ("case", "reason"),
+    [
+        ("unknown_track_kind", "unsupported kind"),
+        ("unknown_clip_kind", "unsupported clip kind"),
+        ("unknown_track", "unknown track"),
+        ("invalid_bounds", "positive source bounds"),
+        ("source_bound", "exceeds"),
+        ("visual_gap", "Visual gap"),
+        ("visual_overlap", "Visual overlap"),
+        ("speed", "unsupported speed"),
+        ("transform", "unsupported transforms"),
+        ("track_transform", "transform semantics"),
+        ("crop", "unsupported crop"),
+        ("effects", "unsupported effects"),
+        ("transition", "unsupported transition"),
+        ("opacity", "non-default opacity"),
+        ("discarded_visual_audio", "embedded audio"),
+        ("overlapping_audio", "Overlapping audio"),
+        ("fade", "audio fades"),
+        ("missing_source", "source is missing"),
+        ("missing_video_stream", "no video stream"),
+        ("missing_audio_stream", "no audio stream"),
+        ("missing_binary", "required binary is unavailable"),
+        ("window", "frame windows"),
+    ],
+)
+def test_support_fails_closed_for_every_unsupported_semantic(
+    tmp_path: Path,
+    case: str,
+    reason: str,
+) -> None:
+    timeline_data = _timeline()
+    assets = _assets(tmp_path)
+    probes = {
+        "video.mp4": _video_probe(),
+        "audio.wav": _audio_probe(),
+    }
+    missing_files: set[str] = set()
+    which = lambda binary: f"/usr/bin/{binary}"
+    request = _request(tmp_path)
+
+    if case == "unknown_track_kind":
+        timeline_data["tracks"][1]["kind"] = "captions"
+    elif case == "unknown_clip_kind":
+        timeline_data["clips"][0]["clipType"] = "text"
+    elif case == "unknown_track":
+        timeline_data["clips"][0]["track"] = "missing"
+    elif case == "invalid_bounds":
+        timeline_data["clips"][0]["to"] = 0
+    elif case == "source_bound":
+        timeline_data["clips"][0]["to"] = 5
+    elif case == "visual_gap":
+        timeline_data["clips"][0]["at"] = 0.25
+    elif case == "visual_overlap":
+        timeline_data["clips"][0]["to"] = 2
+        timeline_data["clips"].append(
+            {
+                **copy.deepcopy(timeline_data["clips"][0]),
+                "id": "video_2",
+                "at": 1.5,
+                "from": 2,
+                "to": 4,
+            }
+        )
+    elif case == "speed":
+        timeline_data["clips"][0]["speed"] = 1.25
+    elif case == "transform":
+        timeline_data["clips"][0]["x"] = 10
+    elif case == "track_transform":
+        timeline_data["tracks"][0]["scale"] = 1.2
+    elif case == "crop":
+        timeline_data["clips"][0]["cropTop"] = 10
+    elif case == "effects":
+        timeline_data["clips"][0]["effects"] = {"fade_in": 0.2}
+    elif case == "transition":
+        timeline_data["clips"][0]["transition"] = {"type": "fade"}
+    elif case == "opacity":
+        timeline_data["clips"][0]["opacity"] = 0.5
+    elif case == "discarded_visual_audio":
+        timeline_data["clips"][0]["volume"] = 1
+        probes["video.mp4"] = _video_probe(audio=True)
+    elif case == "overlapping_audio":
+        timeline_data["clips"][1]["to"] = 2
+        timeline_data["clips"].append(
+            {
+                **copy.deepcopy(timeline_data["clips"][1]),
+                "id": "audio_2",
+                "at": 1.5,
+                "from": 2,
+                "to": 4,
+            }
+        )
+    elif case == "fade":
+        timeline_data["clips"][1]["params"] = {"fadeIn": 0.2}
+    elif case == "missing_source":
+        missing_files.add("video.mp4")
+    elif case == "missing_video_stream":
+        probes["video.mp4"] = _audio_probe()
+    elif case == "missing_audio_stream":
+        probes["audio.wav"] = _audio_probe(present=False)
+    elif case == "missing_binary":
+        which = lambda binary: None if binary == "ffmpeg" else "/usr/bin/ffprobe"
+    elif case == "window":
+        request = _request(
+            tmp_path,
+            window=FrameWindow(
+                start_frame=0,
+                end_frame=30,
+                fps_rational=(30, 1),
+            ),
+        )
+
+    report = _evaluate(
+        tmp_path,
+        timeline_data,
+        assets,
+        probes=probes,
+        missing_files=missing_files,
+        which=which,
+        request=request,
+    )
+
+    assert report.supported is False
+    assert any(reason in item for item in report.reasons)
+    assert report.alternatives == ["rendering.remotion"]
+    assert all("." in backend for backend in report.alternatives)
+
+
+@pytest.mark.parametrize(
+    ("target", "value"),
+    [
+        ("track", -0.1),
+        ("track", 1.1),
+        ("clip", -0.1),
+        ("clip", 1.1),
+    ],
+)
+def test_support_rejects_malformed_gains(
+    tmp_path: Path,
+    target: str,
+    value: float,
+) -> None:
+    timeline_data = _timeline()
+    if target == "track":
+        timeline_data["tracks"][1]["volume"] = value
+    else:
+        timeline_data["clips"][1]["volume"] = value
+
+    report = _evaluate(tmp_path, timeline_data, _assets(tmp_path))
+
+    assert report.supported is False
+    assert any("between 0 and 1" in reason for reason in report.reasons)
+
+
+def test_track_and_clip_gain_multiply_into_filter(tmp_path: Path) -> None:
+    argv = _build_command(tmp_path, _timeline(), _assets(tmp_path))
+    filters = argv[argv.index("-filter_complex") + 1]
+
+    assert "volume=0.200000" in filters
+
+
+@pytest.mark.parametrize(("muted", "clip_volume"), [(True, 0.9), (False, 0.0)])
+def test_track_mute_and_clip_zero_force_silence(
+    tmp_path: Path,
+    muted: bool,
+    clip_volume: float,
+) -> None:
+    timeline_data = _timeline()
+    timeline_data["tracks"][1]["muted"] = muted
+    timeline_data["clips"][1]["volume"] = clip_volume
+
+    argv = _build_command(tmp_path, timeline_data, _assets(tmp_path))
+    filters = argv[argv.index("-filter_complex") + 1]
+
+    assert "volume=0.000000" in filters
+
+
+def test_non_overlapping_audio_clips_concat_with_positional_silence(
+    tmp_path: Path,
+) -> None:
+    timeline_data = _timeline()
+    timeline_data["clips"][1]["to"] = 1
+    timeline_data["clips"].append(
+        {
+            **copy.deepcopy(timeline_data["clips"][1]),
+            "id": "audio_2",
+            "at": 2,
+            "from": 1,
+            "to": 3,
+        }
+    )
+
+    report = _evaluate(tmp_path, timeline_data, _assets(tmp_path))
+    argv = command.build_render_command(_request(tmp_path), tmp_path)
+    filters = argv[argv.index("-filter_complex") + 1]
+
+    assert report.supported is True
+    assert "anullsrc=r=44100:cl=stereo,atrim=duration=1.000000" in filters
+    assert filters.count("volume=0.200000") == 2
+    assert "concat=n=3:v=0:a=1[aout]" in filters
+
+
+def test_visual_only_command_has_no_synthesized_audio_and_reports_none(
+    tmp_path: Path,
+) -> None:
+    timeline_data = _timeline(include_audio=False)
+    assets = _assets(tmp_path)
+    del assets["assets"]["audio"]
+
+    report = _evaluate(
+        tmp_path,
+        timeline_data,
+        assets,
+        probes={"video.mp4": _video_probe()},
+    )
+    argv = command.build_render_command(_request(tmp_path), tmp_path)
+
+    assert report.supported is True
+    assert report.features["audio_ownership"] == "none"
+    assert "-filter_complex" not in argv
+    assert "-c:a" not in argv
+    assert "-an" in argv
+    assert argv[argv.index("-c:v") + 1] == "copy"
+
+
+def test_visual_only_request_can_delegate_audio_as_passthrough(tmp_path: Path) -> None:
+    timeline_data = _timeline(include_audio=False)
+    assets = _assets(tmp_path)
+    del assets["assets"]["audio"]
+
+    report = _evaluate(
+        tmp_path,
+        timeline_data,
+        assets,
+        probes={"video.mp4": _video_probe()},
+        request=_request(tmp_path, audio=AudioOwnership.PASSTHROUGH),
+    )
+
+    assert report.supported is True
+    assert report.features["audio_ownership"] == "passthrough"
+
+
+def test_visual_only_protocol_result_declares_none(tmp_path: Path) -> None:
+    timeline_data = _timeline(include_audio=False)
+    assets = _assets(tmp_path)
+    del assets["assets"]["audio"]
+    _evaluate(
+        tmp_path,
+        timeline_data,
+        assets,
+        probes={"video.mp4": _video_probe()},
+    )
+    probe = MediaProbe(
+        duration_seconds=4,
+        width=640,
+        height=360,
+        fps=30,
+        fps_rational=(30, 1),
+        time_base=(1, 15360),
+        resolution="640x360",
+        video_codec="h264",
+        video_profile="High",
+        video_level="40",
+        pixel_format="yuv420p",
+        container="mp4",
+        duration_rational=(4, 1),
+        video_stream_present=True,
+        audio_stream_present=False,
+    )
+    seen: dict[str, list[str]] = {}
+
+    def fake_run(argv: list[str], **_kwargs) -> subprocess.CompletedProcess[str]:
+        seen["argv"] = argv
+        output = Path(argv[-1])
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(b"video")
+        return subprocess.CompletedProcess(argv, 0)
+
+    with (
+        mock.patch.object(support_module.shutil, "which", return_value="/usr/bin/tool"),
+        mock.patch.object(ffmpeg, "ffprobe_metadata_strict", return_value=probe),
+        mock.patch.object(ffmpeg.subprocess, "run", side_effect=fake_run),
+        mock.patch.object(
+            ffmpeg.remotion_backend,
+            "_render_provenance_payload",
+            return_value={"engine": "ffmpeg"},
+        ),
+        mock.patch.object(ffmpeg, "validate_render_result"),
+    ):
+        result = ffmpeg._protocol_render(_request(tmp_path), workspace=tmp_path)
+
+    assert result.audio_ownership is AudioOwnership.NONE
+    assert result.video.audio is AudioOwnership.NONE
+    assert result.video.profile.has_audio is False
+    assert "-an" in seen["argv"]
+    assert "-c:a" not in seen["argv"]
+
+
+def _reactive_timeline() -> dict:
+    return {
+        "theme": "banodoco-default",
+        "theme_overrides": {
+            "visual": {"canvas": {"width": 640, "height": 360, "fps": 30}}
+        },
+        "tracks": [
+            {"id": "v", "kind": "visual", "label": "Colour"},
+            {
+                "id": "a",
+                "kind": "audio",
+                "label": "Audio",
+                "volume": 0.5,
+            },
+        ],
+        "clips": [
+            {
+                "id": "colour",
+                "at": 0,
+                "track": "v",
+                "clipType": "audio-reactive-colour",
+                "hold": 1,
+                "params": {
+                    "schemaVersion": 1,
+                    "initialColor": "#102030",
+                    "events": [
+                        {"id": "one", "frame": 3, "color": "#D47795"},
+                        {"id": "two", "frame": 8, "color": "#26A7D0"},
+                    ],
+                },
+            },
+            {
+                "id": "audio",
+                "at": 0,
+                "track": "a",
+                "clipType": "media",
+                "asset": "audio",
+                "from": 0,
+                "to": 1,
+                "volume": 0.4,
+            },
+        ],
+    }
+
+
+def test_audio_reactive_support_gain_and_protocol_provenance_fragments(
+    tmp_path: Path,
+) -> None:
+    timeline_data = _reactive_timeline()
+    assets = {
+        "assets": {
+            "audio": {
+                "file": "audio.wav",
+                "type": "audio/wav",
+                "duration": 1,
+            }
+        }
+    }
+    report = _evaluate(
+        tmp_path,
+        timeline_data,
+        assets,
+        probes={"audio.wav": _audio_probe(duration=1)},
+    )
+    spec = audio_reactive_colour.match_and_validate(
+        timeline_data,
+        assets,
+        tmp_path / "assets.json",
+    )
+
+    assert report.supported is True
+    assert report.features["audio_reactive_colour"] is True
+    assert report.features["specialization"] == "audio-reactive-colour/v1"
+    assert spec is not None
+    assert spec.audio_volume == pytest.approx(0.2)
+
+    output_probe = MediaProbe(
+        width=640,
+        height=360,
+        fps_rational=(30, 1),
+        time_base=(1, 15360),
+        video_codec="h264",
+        video_profile="High",
+        video_level="40",
+        pixel_format="yuv420p",
+        audio_codec="aac",
+        audio_sample_rate=44100,
+        audio_channel_layout="stereo",
+        audio_channels=2,
+        container="mp4",
+        duration_rational=(1, 1),
+        video_stream_present=True,
+        audio_stream_present=True,
+    )
+
+    def fake_render(
+        _spec: audio_reactive_colour.AudioReactiveColourSpec,
+        output: Path,
+    ) -> Path:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(b"video")
+        return output
+
+    def probe(path: Path) -> MediaProbe:
+        return (
+            _audio_probe(duration=1)
+            if Path(path).name == "audio.wav"
+            else output_probe
+        )
+
+    with (
+        mock.patch.object(support_module.shutil, "which", return_value="/usr/bin/tool"),
+        mock.patch.object(ffmpeg, "ffprobe_metadata_strict", side_effect=probe),
+        mock.patch.object(audio_reactive_colour, "render", side_effect=fake_render),
+        mock.patch.object(
+            ffmpeg.remotion_backend,
+            "_render_provenance_payload",
+            return_value={"engine": "ffmpeg"},
+        ),
+        mock.patch.object(ffmpeg, "validate_render_result"),
+    ):
+        result = ffmpeg._protocol_render(_request(tmp_path), workspace=tmp_path)
+
+    assert isinstance(result, RenderResult)
+    assert result.audio_ownership is AudioOwnership.RENDERED
+    fragment = result.backend_fragments[ffmpeg.BACKEND_ID]["specialization"]
+    assert fragment["id"] == "audio-reactive-colour/v1"
+    assert [marker["frame"] for marker in fragment["markers"]] == [3, 8]
+    assert fragment["event_count"] == 2
+    assert fragment["frame_count"] == 30
+    assert fragment["fps"] == 30
+    assert len(fragment["marker_sha256"]) == 64
