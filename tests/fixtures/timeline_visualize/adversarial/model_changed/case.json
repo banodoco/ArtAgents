@@ -1,0 +1,20 @@
+{
+  "id": "model_changed",
+  "kind": "vlm_provenance_divergence",
+  "transport": "understanding.visual_understand OrderedImageEvidence (R21)",
+  "fixture": {
+    "requested_model": "gpt-5.6-sol",
+    "returned_model": "gpt-5.6-sol-2026-08-01",
+    "answers": {
+      "fixture_id": "model-changed",
+      "answers": [
+        {"question_id": "q1", "frames": 332}
+      ]
+    }
+  },
+  "expected": {
+    "divergence_flagged": "evidence.to_dict() records BOTH requested model and returned_model; a helper flags returned_model != requested",
+    "never_coalesced": "the returned revision is never silently rewritten onto the requested model",
+    "surface": ["R21 evidence provenance fields", "evidence.to_json() round-trip preserves both values"]
+  }
+}

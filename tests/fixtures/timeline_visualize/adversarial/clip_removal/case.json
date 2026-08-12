@@ -1,0 +1,16 @@
+{
+  "id": "clip_removal",
+  "kind": "speech_occurrence_dangling_clip",
+  "timeline": "desert_slice (ULID 01KYPVKMW5STB4W6FE05ED8242) + sources.json transcript",
+  "mutation": {
+    "description": "A root view freezes SP01 with clip_ref TL01.CL01. The clip is then removed from the timeline; the frozen transcript-index is re-pointed at a clip that no longer exists (TL01.CL99).",
+    "removed_clip_ref": "TL01.CL01",
+    "dangling_clip_ref": "TL01.CL99",
+    "affected_speech_ref": "TL01.SP01"
+  },
+  "expected": {
+    "control": "load_frozen_view succeeds while SP01 clip_ref still resolves (TL01.CL01)",
+    "dangles_with_diagnostic": "load_frozen_view raises FrozenIntegrityError matching 'speech occurrence ref does not resolve' and naming TL01.SP01",
+    "surface": ["frozen.py transcript-index preflight (clip_ref -> identity map)"]
+  }
+}

@@ -38,6 +38,153 @@ _M2_CHECK_SPECS: tuple[tuple[str, str, str], ...] = (
 _CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
 _StartWithPlanRunner = Callable[[str, dict[str, Any], dict[str, str]], None]
 
+_AGENT_VIEW_MAX_FILES = 2_000
+_AGENT_VIEW_MAX_BYTES = 256 * 1024 * 1024
+
+
+class EvidenceCaptureLimitError(ValueError):
+    """Raised before copying when a recursive evidence pack exceeds its cap."""
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _append_capture_diagnostics(out_root: Path, diagnostics: list[str]) -> None:
+    if not diagnostics:
+        return
+    notes_path = out_root / "capture.notes"
+    existing: list[str] = []
+    if notes_path.is_file():
+        existing = [line for line in notes_path.read_text(encoding="utf-8").splitlines() if line]
+    notes_path.write_text(
+        "\n".join(sorted(set(existing + diagnostics))) + "\n",
+        encoding="utf-8",
+    )
+
+
+def capture_evidence_dir(
+    evidence_dir: Path,
+    *,
+    out_root: Path,
+    max_files: int,
+    max_bytes: int,
+) -> Path:
+    """Recursively copy one evidence directory after a contained-tree preflight.
+
+    External symlinks and directory symlinks are not followed. Safe in-root file
+    symlinks are materialized as ordinary files so the captured pack cannot gain
+    a new escape when moved.
+    """
+
+    if isinstance(max_files, bool) or not isinstance(max_files, int) or max_files < 0:
+        raise ValueError("max_files must be a non-negative integer")
+    if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or max_bytes < 0:
+        raise ValueError("max_bytes must be a non-negative integer")
+
+    source_arg = Path(evidence_dir)
+    if source_arg.is_symlink():
+        raise ValueError("evidence_dir must not be a symlink")
+    try:
+        source_root = source_arg.resolve(strict=True)
+    except OSError as exc:
+        raise FileNotFoundError(f"evidence directory not found: {source_arg}") from exc
+    if not source_root.is_dir():
+        raise NotADirectoryError(f"evidence directory is not a directory: {source_arg}")
+
+    out_root = Path(out_root)
+    out_root.mkdir(parents=True, exist_ok=True)
+    resolved_out = out_root.resolve()
+    if resolved_out == source_root or resolved_out.is_relative_to(source_root):
+        raise ValueError("out_root must not be inside evidence_dir")
+
+    destination = out_root / source_arg.name
+    if destination.exists() or destination.is_symlink():
+        raise FileExistsError(f"evidence capture destination already exists: {destination}")
+
+    directories: list[Path] = [Path(".")]
+    files: list[tuple[Path, Path, int, str]] = []
+    diagnostics: list[str] = []
+    total_bytes = 0
+
+    for current, dirnames, filenames in os.walk(source_root, followlinks=False):
+        current_path = Path(current)
+        relative_dir = current_path.relative_to(source_root)
+        retained_dirs: list[str] = []
+        for name in sorted(dirnames):
+            candidate = current_path / name
+            relative = relative_dir / name
+            if candidate.is_symlink():
+                try:
+                    target = candidate.resolve(strict=True)
+                except OSError:
+                    diagnostics.append(f"skip {relative}: broken directory symlink")
+                    continue
+                if not target.is_relative_to(source_root):
+                    diagnostics.append(f"skip {relative}: symlink target escapes evidence root")
+                else:
+                    diagnostics.append(f"skip {relative}: directory symlink not followed")
+                continue
+            try:
+                resolved = candidate.resolve(strict=True)
+            except OSError:
+                diagnostics.append(f"skip {relative}: directory disappeared during preflight")
+                continue
+            if not resolved.is_relative_to(source_root):
+                diagnostics.append(f"skip {relative}: directory escapes evidence root")
+                continue
+            retained_dirs.append(name)
+            directories.append(relative)
+        dirnames[:] = retained_dirs
+
+        for name in sorted(filenames):
+            candidate = current_path / name
+            relative = relative_dir / name
+            try:
+                resolved = candidate.resolve(strict=True)
+            except OSError:
+                diagnostics.append(f"skip {relative}: broken or missing file")
+                continue
+            if not resolved.is_relative_to(source_root):
+                diagnostics.append(f"skip {relative}: symlink target escapes evidence root")
+                continue
+            if not resolved.is_file():
+                diagnostics.append(f"skip {relative}: source is not a regular file")
+                continue
+            size = resolved.stat().st_size
+            file_count = len(files) + 1
+            total_bytes += size
+            if file_count > max_files:
+                raise EvidenceCaptureLimitError(
+                    f"evidence capture exceeds max_files: {file_count} > {max_files}"
+                )
+            if total_bytes > max_bytes:
+                raise EvidenceCaptureLimitError(
+                    f"evidence capture exceeds max_bytes: {total_bytes} > {max_bytes}"
+                )
+            digest = _sha256_file(resolved)
+            files.append((relative, resolved, size, digest))
+
+    destination.mkdir()
+    for relative in sorted(directories):
+        if relative != Path("."):
+            (destination / relative).mkdir(parents=True, exist_ok=True)
+    for relative, source, expected_size, expected_hash in files:
+        target = destination / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
+        if target.stat().st_size != expected_size:
+            raise RuntimeError(f"captured evidence size changed during copy: {relative}")
+        if _sha256_file(target) != expected_hash:
+            raise RuntimeError(f"captured evidence hash changed during copy: {relative}")
+
+    _append_capture_diagnostics(out_root, diagnostics)
+    return destination
+
 
 def _with_env(overrides: dict[str, str], fn: Callable[[], Any]) -> Any:
     old: dict[str, str | None] = {key: os.environ.get(key) for key in overrides}
@@ -1572,6 +1719,32 @@ class AstridProjectAdapter(FakeProjectAdapter):
                 lease_label,
                 captured_files,
             )
+
+            agent_view = run_dir / "agent-view"
+            if agent_view.is_symlink():
+                notes.append(
+                    f"skip runs/{run_dir.name}/agent-view: evidence root must not be a symlink"
+                )
+            elif agent_view.is_dir():
+                if not (agent_view / "manifest.json").is_file():
+                    notes.append(
+                        f"skip runs/{run_dir.name}/agent-view: manifest.json is missing"
+                    )
+                    continue
+                capture_root = evidence_dir / "runs" / run_dir.name
+                captured_root = capture_evidence_dir(
+                    agent_view,
+                    out_root=capture_root,
+                    max_files=_AGENT_VIEW_MAX_FILES,
+                    max_bytes=_AGENT_VIEW_MAX_BYTES,
+                )
+                for captured_path in sorted(captured_root.rglob("*")):
+                    if captured_path.is_file():
+                        label = captured_path.relative_to(evidence_dir).as_posix()
+                        captured_files[label] = label
+                notes.extend(_read_capture_notes(capture_root))
+            else:
+                notes.append(f"skip runs/{run_dir.name}/agent-view: source not present")
 
         if not events_copied:
             notes.append("note: no events.jsonl found under any run dir")

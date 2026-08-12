@@ -1,0 +1,22 @@
+{
+  "id": "changed_transcript",
+  "kind": "transcript_attachment_tamper",
+  "timeline": "desert_slice (ULID 01KYPVKMW5STB4W6FE05ED8242) + run-declared hype metadata (B8 plumbing)",
+  "mutation": {
+    "description": "The run-declared transcript declaration records the sha256 of transcript.declared.json, but transcript.actual.json is what exists on disk.",
+    "declared_file": "changed_transcript/transcript.declared.json",
+    "actual_file": "changed_transcript/transcript.actual.json",
+    "declared_path": "runs/pipeline-transcript/artifacts/transcript.json",
+    "producer": "editorial.transcribe",
+    "model": "whisper-1"
+  },
+  "expected": {
+    "attachment_integrity": "hash_mismatch",
+    "transcript_consumed": false,
+    "surface": [
+      "ground-truth.json timelines[0].transcript_attachment.integrity == hash_mismatch",
+      "transcript_sha256 == declared hash, observed_transcript_sha256 == actual bytes hash",
+      "transcript-index.json sources == [] and speech_occurrences == [] (no TS/SP ids minted)"
+    ]
+  }
+}

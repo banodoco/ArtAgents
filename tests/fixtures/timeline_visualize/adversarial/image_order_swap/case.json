@@ -1,0 +1,27 @@
+{
+  "id": "image_order_swap",
+  "kind": "ordered_vlm_transport",
+  "transport": "understanding.visual_understand OrderedImageEvidence (R21)",
+  "fixture": {
+    "pack_image_hashes": [
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    ],
+    "gate_image_hashes": [
+      "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    ],
+    "answers": {
+      "fixture_id": "image-order-swap",
+      "answers": [
+        {"question_id": "first", "frames": 1},
+        {"question_id": "second", "frames": 2}
+      ]
+    }
+  },
+  "expected": {
+    "order_recorded": "evidence.to_dict()['image_hashes'] equals the ordered transport order",
+    "session_identity_differs": "session_identity(pack) != session_identity(gate); a swapped order is never a silent duplicate session",
+    "surface": ["R21 evidence.image_hashes order", "R22 scorer session_identity"]
+  }
+}

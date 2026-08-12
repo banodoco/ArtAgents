@@ -1,0 +1,16 @@
+{
+  "id": "resegmentation",
+  "kind": "transcript_re_segmentation",
+  "timeline": "synthetic single-clip model (UUID 11111111-1111-4111-8111-111111111111)",
+  "mutation": {
+    "description": "The same source audio is transcribed twice with identical words but different segment boundaries; the transcript bytes differ so the transcript sha256 differs.",
+    "segmentation_a": "resegmentation/transcript.segmentation_a.json (2 segments)",
+    "segmentation_b": "resegmentation/transcript.segmentation_b.json (3 segments)",
+    "source_audio_sha256": "5555555555555555555555555555555555555555555555555555555555555555"
+  },
+  "expected": {
+    "ts_ids_re_scope": "transcript_segment_authored_id(hashA, seg) never equals transcript_segment_authored_id(hashB, seg)",
+    "old_refs_invalid": "an authored TS/SP id minted under hashA does not resolve in the lineage built under hashB (lookup_semantic returns None)",
+    "surface": ["R20 transcripts.transcript_segment_authored_id / speech_occurrence_authored_id", "R19 transcript-hash-scoped TS ids"]
+  }
+}

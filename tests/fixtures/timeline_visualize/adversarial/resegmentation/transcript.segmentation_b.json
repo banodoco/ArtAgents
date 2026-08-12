@@ -1,0 +1,7 @@
+{
+  "segments": [
+    {"id": "a", "start": 0.0, "end": 2.5, "text": "the desert plant"},
+    {"id": "b", "start": 2.5, "end": 5.5, "text": "grows slowly toward"},
+    {"id": "c", "start": 5.5, "end": 8.0, "text": "the warm light"}
+  ]
+}

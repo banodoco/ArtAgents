@@ -169,4 +169,6 @@ markers = [
     "integration: tests that require external dependencies, heavyweight fixtures, or env prerequisites",
     "opt_in: tests that are explicitly opt-in and should never run in the default lane",
     "real_arnold: conformance tests that require a real Arnold installation and are skipped otherwise",
+    "live: opt-in VLM live-gate tests that require real provider credentials and never run in default CI",
+    "hermetic: deterministic credential-free tests that run in the default CI selection",
 ]
