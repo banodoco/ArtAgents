@@ -409,6 +409,9 @@ def _copy_filmstrip_frames(
         frames = filmstrips[display_id]
         if not frames:
             continue
+        # Composite keys are "{page_id}::{asset_ref}" (per-page strips);
+        # derive a filesystem-safe stem: page_ref form (dots -> underscores).
+        stem = display_id.replace("::", "_").replace(".", "_")
         for index, frame in enumerate(frames):
             source = Path(frame)
             if not source.is_file():
@@ -422,7 +425,7 @@ def _copy_filmstrip_frames(
                 if rel not in written:
                     written.append(rel)
                 continue
-            target = filmstrip_dir / f"{display_id}_film_{index:02d}.png"
+            target = filmstrip_dir / f"{stem}_film_{index:02d}.png"
             target.write_bytes(source.read_bytes())
             written.append(target.relative_to(out_root).as_posix())
     return tuple(written)

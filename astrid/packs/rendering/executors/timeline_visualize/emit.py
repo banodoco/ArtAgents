@@ -118,7 +118,7 @@ _DIAGNOSTIC_CODE_RE = re.compile(r"^([A-Z][A-Z0-9_]*): (.*)$", flags=re.DOTALL)
 #: Used only to scrub *defensive* path leaks out of diagnostics; a lookbehind
 #: excludes scheme separators (``https://…``) so URLs survive.
 _ABS_PATH_TOKEN_RE = re.compile(
-    r"(?<!\w)(?:/(?:[\w.\-]+/)+[\w.\-]+|[A-Za-z]:[\\/](?:[\w.\-]+[\\/])*[\w.\-]+)"
+    r"(?<!\w)(?:/(?:[\w.\- ]+/)+[\w.\- ]+|[A-Za-z]:[\\/](?:[\w.\- ]+[\\/])*[\w.\- ]+)"
 )
 
 

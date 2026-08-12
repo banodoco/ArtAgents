@@ -545,10 +545,15 @@ def test_multi_asset_scope_respects_per_page_frame_budget(tmp_projects_root: Pat
     asset_refs = {asset["qualified_ref"] for asset in asset_index["assets"]}
     filmstrip_dir = pack_root / "filmstrip"
     assert filmstrip_dir.is_dir()
-    # Filmstrips are keyed per page (sample page_id = "{page.page_id}_{ref}"),
+    # Filmstrips are keyed per page (copied stem = "{page_id}_{asset_ref}"),
     # so a page's total frames are the files whose name starts with the page id.
+    total_frames = 0
     for page in view_map["pages"]:
         frame_count = len(
             list(filmstrip_dir.glob(f"{page['page_id']}_*_film_*.png"))
         )
         assert frame_count <= 12, f"{page['page_id']} exceeds the per-page frame budget"
+        total_frames += frame_count
+    # The desert slice has four verified image assets on the visual page —
+    # the assertion must be non-vacuous.
+    assert total_frames > 0

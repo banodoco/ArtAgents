@@ -669,3 +669,21 @@ def test_missing_asset_pack_emits_no_absolute_project_paths(tmp_path: Path) -> N
                 f"asset {asset['qualified_ref']} contained_path escapes the project dir"
             )
             assert not Path(contained).resolve().is_relative_to(out_root.resolve())
+
+
+def test_diagnostic_sanitizer_redacts_space_and_colon_paths() -> None:
+    """R13 containment: absolute paths with spaces or colon prefixes redact."""
+    from astrid.packs.rendering.executors.timeline_visualize.emit import (
+        _sanitize_diagnostic_message,
+    )
+
+    cases = [
+        ("failed:/absolute/project/path", "failed:[redacted-path]"),
+        ("MEDIA_MISSING: file not found: /Users/me/p/x.png", "MEDIA_MISSING: file not found: [redacted-path]"),
+        ("MEDIA_MISSING:/My Project/sources/a.png", "MEDIA_MISSING:[redacted-path]"),
+        ("warning: /tmp/My Folder/sub/file.txt gone", "warning: [redacted-path]"),
+        ("missing", "missing"),
+        ("", ""),
+    ]
+    for raw, expected in cases:
+        assert _sanitize_diagnostic_message(raw) == expected, (raw, _sanitize_diagnostic_message(raw))

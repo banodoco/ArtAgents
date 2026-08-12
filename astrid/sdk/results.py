@@ -127,6 +127,10 @@ class InvocationResult:
     error: Mapping[str, Any] | None = None
     manifest_path: str | None = None
     raw_result: Mapping[str, Any] = field(default_factory=dict)
+    run_id: str | None = None
+    run_root: str | None = None
+    outputs: Mapping[str, Any] = field(default_factory=dict)
+    executor_version: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return _json_safe_mapping(
@@ -137,6 +141,10 @@ class InvocationResult:
                 "ok": self.ok,
                 "error": self.error,
                 "manifest_path": self.manifest_path,
+                "run_id": self.run_id,
+                "run_root": self.run_root,
+                "outputs": self.outputs,
+                "executor_version": self.executor_version,
                 "raw_result": self.raw_result,
             }
         )
