@@ -988,8 +988,21 @@ def test_provenance_rejects_spoofed_artifact_lineage() -> None:
                 VideoArtifact(path="outputs/a.mp4", profile=_profile(audio=False), sha256=SHA_C, duration_frames=48),
             ],
         )
-    # A mutated RenderPlan instance is reconstructed at the boundary, so
-    # clearing its segments cannot bypass the positive-plan invariant.
+    # A mutated VideoArtifact instance is reconstructed at the boundary, so a
+    # smuggled escaped path cannot pass validation.
+    with pytest.raises(ValueError, match="workspace path"):
+        mutated = VideoArtifact(
+            path="outputs/a.mp4",
+            profile=_profile(audio=False),
+            sha256=SHA_B,
+            duration_frames=48,
+        )
+        object.__setattr__(mutated, "path", "../escape.mp4")
+        assemble_provenance_v2(
+            **base,
+            plan=_plan(),
+            artifact_profiles=[mutated],
+        )
     with pytest.raises(RendererProtocolError, match="positive-frame plan"):
         positive = _plan()
         object.__setattr__(positive, "segments", [])

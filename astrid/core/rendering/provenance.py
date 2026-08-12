@@ -124,6 +124,9 @@ def _normalize_artifact_profiles(value: Any, *, segments: Sequence[Any]) -> Any:
                         f"artifact_profiles key {path!r} must equal VideoArtifact.path "
                         f"{profile.path!r}"
                     )
+                profile = VideoArtifact.from_dict(
+                    _json_safe_mapping(profile.to_dict(), label="artifact")
+                )
                 lineage = _artifact_lineage(profile)
             elif isinstance(profile, Mapping):
                 lineage = _artifact_lineage_from_mapping(profile, key=path)
@@ -147,12 +150,17 @@ def _normalize_artifact_profiles(value: Any, *, segments: Sequence[Any]) -> Any:
         lineage: list[dict[str, Any]] = []
         seen_paths: set[str] = set()
         seen_attachment_names: set[str] = set()
-        for profile in value:
-            if not isinstance(profile, VideoArtifact):
+        for raw_profile in value:
+            if not isinstance(raw_profile, VideoArtifact):
                 raise TypeError(
                     "sequence artifact_profiles entries must be VideoArtifacts "
                     "so lineage records stay path-keyed"
                 )
+            # Reconstruct through the DTO so mutation cannot smuggle invalid
+            # paths, profiles, or attachments past validation.
+            profile = VideoArtifact.from_dict(
+                _json_safe_mapping(raw_profile.to_dict(), label="artifact")
+            )
             if profile.path in seen_paths:
                 raise ValueError(
                     f"artifact_profiles sequence contains duplicate path "
@@ -238,7 +246,7 @@ def _artifact_lineage_from_mapping(raw: Mapping[str, Any], *, key: str) -> dict[
             "sha256": validated.sha256,
         }
     return {
-        "path": raw["path"] if "path" in raw else key,
+        "path": key,
         "profile": RenderProfile.from_dict(
             _json_safe_mapping(profile, label="artifact profile")
         ).to_dict(),
