@@ -44,7 +44,7 @@ AUDIO_BITS = 16
 CONTAINER = "mp4"
 VIDEO_CODEC = "h264"
 PIXEL_FORMAT = "yuv420p"
-AUDIO_CODEC = "sowt"
+AUDIO_CODEC = "pcm_s16le"
 AUDIO_CHANNEL_LAYOUT = "stereo"
 
 _MB_COLS = WIDTH // 16          # 120
@@ -136,7 +136,7 @@ def _sps_nal() -> bytes:
     _ue(w, 0)               # frame_crop_left_offset
     _ue(w, 0)               # frame_crop_right_offset
     _ue(w, 0)               # frame_crop_top_offset
-    _ue(w, 1)               # frame_crop_bottom_offset (1088 -> 1080)
+    _ue(w, 4)               # frame_crop_bottom_offset (1088 - 8 = 1080)
     w.put(0, 1)             # vui_parameters_present_flag
     w.finish()
     return bytes([0x67]) + _escape_rbsp(bytes(w.data))
@@ -545,6 +545,16 @@ def main(argv: list[str]) -> int:
         return 0
 
     if args.verb == "support":
+        try:
+            _validate_request(request)
+        except ValueError as exc:
+            _write_error(
+                result_path,
+                "protocol",
+                f"invalid support request: {exc}",
+                {"error_type": type(exc).__name__},
+            )
+            return 0
         return _support(result_path)
     if args.verb in ("plan", "finalize"):
         _write_error(

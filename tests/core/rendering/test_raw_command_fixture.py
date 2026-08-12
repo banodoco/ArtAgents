@@ -176,7 +176,7 @@ def _assert_clean_render(result: RenderResult, workspace: Path) -> None:
     assert profile.container == "mp4"
     assert profile.video_codec == "h264"
     assert profile.pixel_format == "yuv420p"
-    assert profile.audio_codec == "sowt"
+    assert profile.audio_codec == "pcm_s16le"
     assert profile.audio_sample_rate == 48000
     assert profile.audio_channel_layout == "stereo"
 

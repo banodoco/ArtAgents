@@ -202,11 +202,11 @@ def test_sigint_kills_process_group_reaps_and_reraises(tmp_path: Path) -> None:
     _assert_pid_disappears(child_pid)
 
 
-def test_absent_result_file_is_invalid_artifact(tmp_path: Path) -> None:
-    with pytest.raises(RendererInvalidArtifactError) as caught:
+def test_absent_result_file_is_protocol_failure(tmp_path: Path) -> None:
+    with pytest.raises(RendererProtocolError) as caught:
         _run(tmp_path, {"action": "absent"})
 
-    assert caught.value.error.kind == "invalid_artifact"
+    assert caught.value.error.kind == "protocol"
     assert caught.value.error.backend == RENDERER_ID
 
 

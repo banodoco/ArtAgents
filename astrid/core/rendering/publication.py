@@ -139,6 +139,10 @@ def read_committed_provenance(
     video = _resolved(video_path)
     sidecar = _resolved(sidecar_path or _default_sidecar_path(video))
     try:
+        video_unresolved = Path(video_path).expanduser()
+        sidecar_unresolved = Path(sidecar_path or _default_sidecar_path(video_unresolved)).expanduser()
+        if video_unresolved.is_symlink() or sidecar_unresolved.is_symlink():
+            return None
         if video.is_symlink() or sidecar.is_symlink():
             return None
         if not video.is_file() or video.stat().st_size <= 0 or not sidecar.is_file():
@@ -212,6 +216,15 @@ def _delete_previous_outputs(
         if pair is None:
             continue
         video, sidecar = pair
+        # Never delete through a symlink: the raw candidate path must not be
+        # a link (the resolved pair may point elsewhere entirely).
+        raw_candidate = candidate.get("out_path", candidate.get("output")) if isinstance(candidate, Mapping) else (candidate[0] if isinstance(candidate, (list, tuple)) and candidate else candidate)
+        try:
+            raw_path = Path(raw_candidate).expanduser()
+            if raw_path.is_symlink():
+                continue
+        except (OSError, TypeError):
+            continue
         if video == live_output or video in seen:
             continue
         seen.add(video)
@@ -266,6 +279,15 @@ def publish_render_result(
     source = _resolved(video_path)
     output = _resolved(out_path)
     sidecar = _resolved(sidecar_path)
+    source_unresolved = Path(video_path).expanduser()
+    output_unresolved = Path(out_path).expanduser()
+    sidecar_unresolved = Path(sidecar_path).expanduser()
+    if source_unresolved.is_symlink() or output_unresolved.is_symlink() or sidecar_unresolved.is_symlink():
+        raise_invalid_artifact_error(
+            backend=_BACKEND,
+            message="publication paths must not be symbolic links",
+            recovery_command=_RECOVERY,
+        )
     _validate_source_video(source)
 
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -275,11 +297,11 @@ def publish_render_result(
         # staging artifact can never be reported as successfully published.
         _validate_source_video(source)
 
-        os.replace(source, output)
-        # The video rename is the first destination mutation.  Invalidate the
-        # old marker immediately afterward so a crash can leave an orphan but
-        # can never leave a marker for hash-mismatched bytes.
+        # Invalidate the previous marker BEFORE the first destination
+        # mutation: a crash can then leave an orphan video (recoverable) but
+        # can never leave a stale marker claiming the new bytes are committed.
         sidecar.unlink(missing_ok=True)
+        os.replace(source, output)
         digest = sha256_file(output)
         committed_payload = dict(provenance_payload)
         committed_payload["output"] = str(output)

@@ -234,6 +234,15 @@ class CommandTransport:
             exc.renderer_error = error  # type: ignore[attr-defined]
             exc.error = error  # type: ignore[attr-defined]
             raise
+        except Exception as exc:
+            # Any other post-spawn failure (including a defect in result
+            # parsing) must still terminate and reap the process group so no
+            # orphan is left behind.
+            try:
+                _terminate_process_group(process, grace=self.termination_grace)
+            except Exception:
+                pass
+            raise
 
         logs = _redacted_logs(stdout, stderr, secret_values=secret_values)
         self.last_logs = logs
@@ -460,7 +469,13 @@ def _terminate_process_group(
     try:
         captured = process.communicate(timeout=grace)
     except (subprocess.TimeoutExpired, KeyboardInterrupt):
-        pass
+        captured = None
+        # Interruption during the grace window must not abandon the group:
+        # escalate to SIGKILL right away and reap in the loop below.
+        try:
+            _signal_process_group(process, signal.SIGKILL)
+        except OSError:
+            pass
 
     while _process_group_exists(process) and time.monotonic() < deadline:
         time.sleep(min(0.01, max(0.0, deadline - time.monotonic())))
@@ -566,7 +581,7 @@ def _read_result_file(
     try:
         result_stat = result_path.lstat()
     except FileNotFoundError:
-        raise_invalid_artifact_error(
+        raise_protocol_error(
             backend=backend,
             message=f"renderer did not write its authoritative result file: {result_path}",
             details={"result_path": str(result_path), **logs},

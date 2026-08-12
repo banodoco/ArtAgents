@@ -154,6 +154,12 @@ def _validate_relative_path(raw: Any, *, label: str) -> str:
 def _contained_regular_file(raw: Any, *, root: Path, label: str) -> Path:
     relative = _validate_relative_path(raw, label=label)
     candidate = root.joinpath(*relative.split("/"))
+    if candidate.is_symlink():
+        _invalid(
+            "escaped_path",
+            f"{label} must not be a symbolic link: {relative}",
+            path=relative,
+        )
     try:
         resolved = candidate.resolve(strict=True)
     except (OSError, RuntimeError) as exc:
