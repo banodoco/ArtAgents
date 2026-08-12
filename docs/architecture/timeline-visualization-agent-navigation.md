@@ -78,7 +78,7 @@ Location: `astrid/packs/rendering/executors/timeline_visualize/schemas/`.
   (`navigation.build_identity_map`): `TL01` always the timeline; `CL` in
   compositor clip order; `AS` in sorted registry-key order; `SH` in
   `pinnedShotGroups` order; `RG` minted by `assign_range_ids` in start-time
-  order; `TS`/`SP` await M2 (R20).
+  order; `TS`/`SP` emitted by M2 transcript attachment (R20).
 - **Children never renumber**: scoped emissions filter entries; ordinals are
   never re-allocated (verified by the frozen child copying `frozen_objects`
   byte-for-byte).

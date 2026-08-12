@@ -70,6 +70,10 @@ media.
   NEXT/PARENT question alignment, robust prose-prefixed JSON parse.
 - Discovery gate: fresh agent from CLI stdout → root → clip → original via
   generated actions; sessionless gateway legs.
+  **RESULT: 1.0 × 3 fresh journeys (root/clip/asset legs), strict 3-session
+  rule.** Fix that got there: the gold focus ring around the FOCUS clip on
+  every page (PNG + SVG), so the root leg reads CL01 — not the wide audio
+  bar — as the subject.
 
 _Results recorded in run evidence under `tests/packs/rendering/.r24-evidence/`
 (gitignored) at gate execution time._
@@ -79,7 +83,21 @@ _Results recorded in run evidence under `tests/packs/rendering/.r24-evidence/`
 `pytest tests/packs/rendering/test_timeline_visualize_*.py
 tests/core/timeline/test_timeline_*.py tests/packs/understanding/
 tests/core/cli/test_timeline_visualize_cli.py -m "not live and not grok_iter"`
-→ **494+ passed** (grok-UX geometry + background-probe fix applied).
+→ **495 passed, 5 deselected** (final post-gate run, 2026-08-11).
+
+## B10 oracle verdict (Grok 4.6, 2026-08-11)
+
+- R24: **PASS** — hermetic 495 green; image-only 66/66 exact-match (9/9
+  files, accuracy 1.0); discovery 9/9 legs accuracy 1.0; failure→fixture
+  loop demonstrated (cue split, NEXT token, prose JSON parse, focus ring).
+- R25: **PASS after fixes** — initial FAIL on two CI leaks, both closed:
+  1. `grok_iter` UX-iteration test (can mutate sources) was collectable by
+     default CI → now `opt_in` AND excluded by the broad filter
+     (`not grok_iter`).
+  2. Live lane hardcoded `/Users/peteromalley/.grok/bin/grok` while the
+     runner guards on `which grok` → transport + test now resolve grok via
+     `GROK_BIN` env → `PATH` → fallback.
+- Stale doc line (`TS/SP await M2`) corrected to reflect shipped M2.
 
 ## Commit trail (worktree `timeline-vlm-plan`)
 
@@ -92,3 +110,7 @@ tests/core/cli/test_timeline_visualize_cli.py -m "not live and not grok_iter"`
 - `6046c4e0` grok UX iteration + VLM gate transport
 - `a1c74c4d` grok-driven zoom UX (real frames, tall lanes)
 - `a9e9fbfa` background-probe fix
+- `b75511de` image-only gate PASSES with grok (cue split + alignment)
+- `92ed3ecf` BOTH VLM gates PASS with grok (focus ring anchors navigation)
+- `f1949aea` focus ring outline-only (never paint over the clip)
+- `9234247c` R25 oracle findings — grok_iter never in default CI, grok via PATH
