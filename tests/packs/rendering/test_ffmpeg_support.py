@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import dataclasses
 import importlib
 import json
 import subprocess
@@ -621,3 +622,37 @@ def test_audio_reactive_support_gain_and_protocol_provenance_fragments(
     assert fragment["frame_count"] == 30
     assert fragment["fps"] == 30
     assert len(fragment["marker_sha256"]) == 64
+
+
+def test_pinned_video_profile_and_level_are_rejected_as_unguaranteed(
+    tmp_path: Path,
+) -> None:
+    """A request pinning video_profile/video_level cannot be guaranteed by
+    the FFmpeg command (encoder default or stream-copy preserves source
+    values), so support must fail closed instead of failing strict
+    post-render validation."""
+    request = _request(tmp_path)
+    from astrid.core.rendering.contracts import RenderProfile
+
+    base_profile = RenderProfile(
+        width=640,
+        height=360,
+        fps_rational=(30, 1),
+        time_base=(1, 15360),
+        container="mp4",
+        video_codec="h264",
+        video_profile=None,
+        video_level=None,
+        pixel_format="yuv420p",
+    )
+    request = dataclasses.replace(
+        request,
+        profile=dataclasses.replace(
+            base_profile,
+            video_profile="High",
+            video_level="40",
+        ),
+    )
+    report = _evaluate(tmp_path, _timeline(), _assets(tmp_path), request=request)
+    assert report.supported is False
+    assert any("video_profile" in reason or "video_level" in reason for reason in report.reasons)

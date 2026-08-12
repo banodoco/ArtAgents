@@ -546,6 +546,21 @@ def _profile_support_reasons(
                 f"requested profile {field}={requested!r} is not produced by "
                 f"rendering.ffmpeg (produces {produced!r})"
             )
+    # The command does NOT pin video_profile/video_level (libx264 picks the
+    # encoder default; stream-copy preserves whatever the source has). A
+    # request pinning them cannot be guaranteed at support time, so fail
+    # closed rather than report success and fail strict post-render
+    # validation.
+    for field, requested in (
+        ("video_profile", profile.video_profile),
+        ("video_level", profile.video_level),
+    ):
+        if requested is not None:
+            reasons.append(
+                f"requested profile {field}={requested!r} cannot be guaranteed "
+                f"by rendering.ffmpeg (encoder default or stream-copy preserves "
+                f"source values; omit {field} to use defaults)"
+            )
     if profile.has_audio:
         for field, requested, produced in (
             ("audio_sample_rate", profile.audio_sample_rate, 48000),
