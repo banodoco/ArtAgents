@@ -209,8 +209,8 @@ def test_full_pack_all_files_exist_and_validate(pack_inputs, tmp_path) -> None:
         "PG002.png",
         "PG001.svg",
         "PG002.svg",
-        "filmstrip/TL01.AS01_film_00.png",
-        "filmstrip/TL01.AS01_film_01.png",
+        "filmstrip/TL01_AS01_film_00.png",
+        "filmstrip/TL01_AS01_film_01.png",
         PACK_HASHES_NAME,
     }
     on_disk = {path.relative_to(out_root).as_posix() for path in out_root.rglob("*") if path.is_file()}
