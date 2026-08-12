@@ -95,7 +95,7 @@ def _support(backend: str = "acme.example") -> SupportReport:
 
 def _planner() -> PlannerResolution:
     return PlannerResolution(
-        id="rendering.legacy-hybrid",
+        id="rendering.legacy_hybrid",
         source_pack={"id": "rendering"},
         manifest_digest=SHA_C,
         trust_eligibility={"eligible": True, "method": "source-tree"},
@@ -565,19 +565,23 @@ def test_provenance_v2_preserves_lineage_and_derives_legacy_segments(tmp_path: P
     assert payload["request_digest"] == SHA_D
     assert payload["requested_policy"] == "hybrid"
     assert payload["planner"] == _planner().to_dict()
-    assert [segment["renderer"]["id"] for segment in payload["segments"]] == [
+    assert [segment["renderer"]["id"] for segment in payload["segments_v2"]] == [
         "acme.first",
         "other.second",
     ]
-    assert payload["segments"] == [segment.to_dict() for segment in plan.segments]
-    assert [set(segment) for segment in payload["segments"]] == [
+    assert payload["segments_v2"] == [segment.to_dict() for segment in plan.segments]
+    assert [set(segment) for segment in payload["segments_v2"]] == [
         {"window", "renderer", "input_hashes"},
         {"window", "renderer", "input_hashes"},
     ]
-    assert payload["segment_provenance"] == [
+    # V1-compatible projections are preserved unchanged.
+    assert payload["segments"] == [
         {"engine": "first", "from": 0.0, "to": 1.0},
         {"engine": "second", "from": 1.0, "to": 2.0},
     ]
+    # segment_provenance passes through from the v1 compatibility projection
+    # verbatim — the host never rewrites it.
+    assert payload["segment_provenance"] == compatibility["segment_provenance"]
     assert payload["finalizer"] == _finalizer().to_dict()
     assert payload["composition_id"] == "TimelineComposition"
 
@@ -598,6 +602,19 @@ def test_provenance_rejects_spoofed_segment_projection_in_plan_mapping() -> None
             plan=plan,
             v1_compatibility=_compatibility(),
         )
+
+
+def test_compute_request_digest_is_canonical_and_stable() -> None:
+    from astrid.core.rendering.contracts import compute_request_digest
+
+    a = {"backend_config": {"acme.visual": {"quality": "preview"}}, "schema_version": 1}
+    b = {"schema_version": 1, "backend_config": {"acme.visual": {"quality": "preview"}}}
+    assert compute_request_digest(a) == compute_request_digest(b)
+    digest = compute_request_digest(a)
+    assert isinstance(digest, str)
+    assert len(digest) == 64
+    assert compute_request_digest({**a, "metadata": {"x": "y"}}) != digest
+    assert compute_request_digest({"schema_version": 1, "backend_config": {"acme.visual": {"quality": "preview"}, "other.key": {}}}) != digest
 
 
 def test_shared_sha256_helper_is_used_for_input_hashes(tmp_path: Path) -> None:
@@ -655,11 +672,12 @@ def test_zero_frame_plan_semantics_and_no_finalization() -> None:
         _finalize(plan=empty, artifacts=[])
 
 
-def test_qualified_id_grammar_allows_hyphens_and_rejects_underscores() -> None:
+def test_qualified_id_grammar_allows_hyphens_and_underscores() -> None:
     assert _finalizer().id == "rendering.ffmpeg-finalizer"
     assert replace(_finalizer(), id="1render.2-finalizer").id == "1render.2-finalizer"
+    assert replace(_finalizer(), id="rendering.legacy_hybrid").id == "rendering.legacy_hybrid"
+    assert replace(_finalizer(), id="acme.bad_id").id == "acme.bad_id"
     for invalid in (
-        "rendering.ffmpeg_finalizer",
         "Rendering.Ffmpeg",
         "rendering.-finalizer",
         "unqualified",

@@ -42,38 +42,6 @@ EXTRA_ROOT = FIXTURES / "extra"
 INSTALLED_FIXTURES = FIXTURES / "installed"
 
 
-def _canonical_fixture_root(source_root: Path, project_root: Path) -> Path:
-    """Stage shared fixtures using IDs valid at both pack and wire layers."""
-
-    try:
-        relative = source_root.resolve().relative_to(FIXTURES.resolve())
-    except ValueError:
-        return source_root
-
-    destination = project_root / ".canonical-renderer-fixtures" / relative
-    if destination.exists():
-        return destination
-    shutil.copytree(source_root, destination)
-    replacement = "-" if relative.parts[0] == "source" else ""
-    for manifest_path in destination.rglob("*.yaml"):
-        rewritten: list[str] = []
-        for line in manifest_path.read_text(encoding="utf-8").splitlines(keepends=True):
-            stripped = line.lstrip()
-            if stripped.startswith(("id: ", "alias: ", "canonical_id: ")):
-                key, value = line.split(":", 1)
-                line = f"{key}:{value.replace('_', replacement)}"
-            rewritten.append(line)
-        manifest_path.write_text("".join(rewritten), encoding="utf-8")
-    for pack_manifest in list(destination.rglob("pack.yaml")):
-        pack_id = next(
-            line.removeprefix("id: ")
-            for line in pack_manifest.read_text(encoding="utf-8").splitlines()
-            if line.startswith("id: ")
-        )
-        if pack_manifest.parent.name != pack_id:
-            pack_manifest.parent.rename(pack_manifest.parent.with_name(pack_id))
-    return destination
-
 
 def _scanner(source_root: Path):
     def scan(root: str | Path | None = None):
@@ -90,11 +58,6 @@ def _load_with_source(
     extra_pack_roots: tuple[str, ...] = (),
     include_installed: bool = False,
 ):
-    source_root = _canonical_fixture_root(source_root, project_root)
-    extra_pack_roots = tuple(
-        str(_canonical_fixture_root(Path(root), project_root))
-        for root in extra_pack_roots
-    )
     with (
         mock.patch.object(
             rendering_registry_module,
@@ -177,21 +140,12 @@ def _stage_installed_fixture(
     *,
     accepted_permissions: list[dict] | None = None,
 ) -> Path:
-    fixture_name = {"installedrender": "installed_render"}.get(pack_id, pack_id)
+    fixture_name = pack_id
     fixture = INSTALLED_FIXTURES / fixture_name
     install_root = astrid_home / "packs" / pack_id
     revision = install_root / "revisions" / pack_id
     revision.parent.mkdir(parents=True)
     shutil.copytree(fixture, revision)
-    for manifest_path in revision.rglob("*.yaml"):
-        rewritten: list[str] = []
-        for line in manifest_path.read_text(encoding="utf-8").splitlines(keepends=True):
-            stripped = line.lstrip()
-            if stripped.startswith(("id: ", "alias: ", "canonical_id: ")):
-                key, value = line.split(":", 1)
-                line = f"{key}:{value.replace('_', '')}"
-            rewritten.append(line)
-        manifest_path.write_text("".join(rewritten), encoding="utf-8")
     (install_root / "active").symlink_to(Path("revisions") / pack_id)
 
     summary = extract_trust_summary(revision)
@@ -225,11 +179,7 @@ def _stage_installed_fixture(
 def _load_env_registries(project_root: Path, *, extra_pack_roots: tuple[str, ...] = ()):
     empty_source = project_root / "empty-source"
     empty_source.mkdir(parents=True, exist_ok=True)
-    env_root = _canonical_fixture_root(ENV_ROOT, project_root)
-    extra_pack_roots = tuple(
-        str(_canonical_fixture_root(Path(root), project_root))
-        for root in extra_pack_roots
-    )
+    env_root = ENV_ROOT
     with (
         mock.patch.object(
             rendering_registry_module,
@@ -307,18 +257,18 @@ def test_inspection_of_env_layer_never_imports_or_executes_backend_code(
     ):
         renderers, _, _ = _load_env_registries(tmp_path / "project")
 
-        inspected = renderers.inspect("envrender.renderer")
+        inspected = renderers.inspect("env_render.renderer")
         assert len(inspected) == 1
         assert inspected[0].source_kind == "env"
         assert inspected[0].execution_eligible is False
         assert len(renderers.candidates()) == 1
         assert len(renderers.list()) == 0
         assert renderers.conflicts() == ()
-        evidence = renderers.resolve_evidence("envrender.renderer")
+        evidence = renderers.resolve_evidence("env_render.renderer")
         assert evidence["eligible"] is False
         assert evidence["resolution_error"]["code"] == "execution_ineligible"
         with pytest.raises(RendererRegistryError) as caught:
-            renderers.get("envrender.renderer")
+            renderers.get("env_render.renderer")
         assert caught.value.code == "execution_ineligible"
 
     assert "backend_should_not_import" not in sys.modules
@@ -489,17 +439,17 @@ def test_env_pack_alias_is_inspectable_but_not_executable(tmp_path: Path) -> Non
     """
     renderers, _, _ = _load_env_registries(tmp_path / "project")
 
-    inspected = renderers.inspect("envrender.legacy")
+    inspected = renderers.inspect("env_render.legacy")
     assert len(inspected) == 1
     assert inspected[0].manifest.name == "Environment Fixture Renderer"
     assert inspected[0].source_kind == "env"
 
-    assert renderers.candidates("envrender.legacy", eligible=True) == ()
+    assert renderers.candidates("env_render.legacy", eligible=True) == ()
     with pytest.raises(RendererRegistryError) as caught:
-        renderers.get("envrender.legacy")
+        renderers.get("env_render.legacy")
     assert caught.value.code == "unknown_capability"
     with pytest.raises(RendererRegistryError) as evidence_caught:
-        renderers.resolve_evidence("envrender.legacy")
+        renderers.resolve_evidence("env_render.legacy")
     assert evidence_caught.value.code == "unknown_capability"
 
 
@@ -516,7 +466,7 @@ def test_override_to_discovered_ineligible_target_fails_closed(tmp_path: Path) -
     caused the redirect.
     """
     store = OverrideStore(tmp_path / "project")
-    store.set_override("renderer", "rendering.remotion", "envrender.renderer")
+    store.set_override("renderer", "rendering.remotion", "env_render.renderer")
 
     renderers, _, _ = _load_env_registries(tmp_path / "project")
 
@@ -527,10 +477,50 @@ def test_override_to_discovered_ineligible_target_fails_closed(tmp_path: Path) -
     details = caught.value.to_dict()["details"]
     assert details["override"] == {
         "from": "rendering.remotion",
-        "to": "envrender.renderer",
+        "to": "env_render.renderer",
     }
-    assert details["target_id"] == "envrender.renderer"
+    assert details["target_id"] == "env_render.renderer"
     assert details["canonical_id"] == "rendering.remotion"
+
+
+def test_trusted_pack_alias_to_absent_canonical_routes_through_override(
+    tmp_path: Path,
+) -> None:
+    """A pack-declared alias whose canonical is absent still routes through
+    an override to an executable implementation.
+
+    The frozen ordering is alias -> canonical -> override: a missing canonical
+    must not silently drop a trusted pack alias when an override supplies the
+    implementation.
+    """
+    store = OverrideStore(tmp_path / "project")
+    store.set_override("renderer", "rendering.absent", "rendering.ffmpeg")
+
+    with _load_with_source(tmp_path / "project") as (renderers, _, _):
+        candidate = renderers.get("rendering.missing")
+        assert candidate.id == "rendering.ffmpeg"
+
+        evidence = renderers.resolve_evidence("rendering.missing")
+        assert evidence["canonical_id"] == "rendering.absent"
+        assert evidence["resolved_id"] == "rendering.ffmpeg"
+        assert evidence["override"] == {
+            "from": "rendering.absent",
+            "to": "rendering.ffmpeg",
+        }
+
+
+def test_trusted_pack_alias_to_absent_canonical_without_override_fails_closed(
+    tmp_path: Path,
+) -> None:
+    """Without an override, a pack alias to an absent canonical is dropped
+    and resolution reports the missing target."""
+    with _load_with_source(tmp_path / "project") as (renderers, _, _):
+        with pytest.raises(RendererRegistryError) as caught:
+            renderers.get("rendering.missing")
+        assert caught.value.code == "unknown_capability"
+        with pytest.raises(RendererRegistryError) as evidence_caught:
+            renderers.resolve_evidence("rendering.missing")
+        assert evidence_caught.value.code == "unknown_capability"
 
 
 # ---------------------------------------------------------------------------
@@ -594,7 +584,7 @@ def test_installed_pack_with_unaccepted_permissions_fails_closed(
     astrid_home = tmp_path / "astrid-home"
     empty_source = tmp_path / "empty-source"
     empty_source.mkdir(exist_ok=True)
-    _stage_installed_fixture(astrid_home, "installedrender", accepted_permissions=[])
+    _stage_installed_fixture(astrid_home, "installed_render", accepted_permissions=[])
 
     with (
         mock.patch.dict(
@@ -609,12 +599,12 @@ def test_installed_pack_with_unaccepted_permissions_fails_closed(
     ):
         renderers, _, _ = load_default_registries(tmp_path / "project", include_installed=True)
 
-    candidate = renderers.inspect("installedrender.renderer")[0]
+    candidate = renderers.inspect("installed_render.renderer")[0]
     assert candidate.execution_eligible is False
     assert "accepted permissions" in candidate.eligibility.reason
     assert candidate.eligibility.accepted_permissions == ()
     with pytest.raises(RendererRegistryError) as caught:
-        renderers.get("installedrender.renderer")
+        renderers.get("installed_render.renderer")
     assert caught.value.code == "execution_ineligible"
 
 
@@ -666,7 +656,7 @@ def test_hybrid_absent_from_every_renderer_surface(tmp_path: Path) -> None:
         assert caught.value.code == "unknown_capability"
 
         # The planner registry keeps its own hybrid translation capability.
-        assert planners.get("rendering.legacy-hybrid").id == "rendering.legacy-hybrid"
+        assert planners.get("rendering.legacy_hybrid").id == "rendering.legacy_hybrid"
 
 
 # ---------------------------------------------------------------------------

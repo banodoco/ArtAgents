@@ -4,70 +4,139 @@
   "title": "Astrid render request v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "timeline_path", "output_name"],
+  "required": [
+    "schema_version",
+    "timeline_path",
+    "output_name"
+  ],
   "properties": {
-    "schema_version": {"type": "integer", "const": 1},
-    "timeline_path": {"type": "string", "minLength": 1},
-    "assets_registry_path": {"type": ["string", "null"], "minLength": 1},
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "timeline_path": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "\\S"
+    },
+    "assets_registry_path": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1
+    },
     "output_name": {
       "type": "string",
       "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
-      "not": {"enum": [".", ".."]}
+      "not": {
+        "enum": [
+          ".",
+          ".."
+        ]
+      }
     },
     "window": {
       "anyOf": [
-        {"$ref": "#/definitions/frameWindow"},
-        {"type": "null"}
+        {
+          "$ref": "#/definitions/frameWindow"
+        },
+        {
+          "type": "null"
+        }
       ]
     },
     "audio": {
       "anyOf": [
-        {"$ref": "#/definitions/audioOwnership"},
-        {"type": "null"}
+        {
+          "$ref": "#/definitions/audioOwnership"
+        },
+        {
+          "type": "null"
+        }
       ]
     },
     "profile": {
       "anyOf": [
-        {"$ref": "#/definitions/renderProfile"},
-        {"type": "null"}
+        {
+          "$ref": "#/definitions/renderProfile"
+        },
+        {
+          "type": "null"
+        }
       ]
     },
-    "backend_config": {"$ref": "#/definitions/backendConfig"},
-    "metadata": {"$ref": "#/definitions/stringMap"}
+    "backend_config": {
+      "$ref": "#/definitions/backendConfig"
+    },
+    "metadata": {
+      "$ref": "#/definitions/stringMap"
+    }
   },
   "allOf": [
     {
       "if": {
-        "required": ["audio", "profile"],
+        "required": [
+          "audio",
+          "profile"
+        ],
         "properties": {
-          "audio": {"const": "rendered"},
-          "profile": {"type": "object"}
+          "audio": {
+            "const": "rendered"
+          },
+          "profile": {
+            "type": "object"
+          }
         }
       },
       "then": {
         "properties": {
           "profile": {
-            "required": ["audio_codec", "audio_sample_rate", "audio_channel_layout"],
-            "properties": {"audio_codec": {"type": "string"}}
+            "required": [
+              "audio_codec",
+              "audio_sample_rate",
+              "audio_channel_layout"
+            ],
+            "properties": {
+              "audio_codec": {
+                "type": "string"
+              }
+            }
           }
         }
       }
     },
     {
       "if": {
-        "required": ["audio", "profile"],
+        "required": [
+          "audio",
+          "profile"
+        ],
         "properties": {
-          "audio": {"enum": ["passthrough", "none"]},
-          "profile": {"type": "object"}
+          "audio": {
+            "enum": [
+              "passthrough",
+              "none"
+            ]
+          },
+          "profile": {
+            "type": "object"
+          }
         }
       },
       "then": {
         "properties": {
           "profile": {
             "properties": {
-              "audio_codec": {"type": "null"},
-              "audio_sample_rate": {"type": "null"},
-              "audio_channel_layout": {"type": "null"}
+              "audio_codec": {
+                "type": "null"
+              },
+              "audio_sample_rate": {
+                "type": "null"
+              },
+              "audio_channel_layout": {
+                "type": "null"
+              }
             }
           }
         }
@@ -77,94 +146,222 @@
   "definitions": {
     "qualifiedId": {
       "type": "string",
-      "pattern": "^[a-z0-9][a-z0-9-]*(?:\\.[a-z0-9][a-z0-9-]*)+$"
+      "pattern": "^[a-z0-9][a-z0-9_-]*(?:\\.[a-z0-9][a-z0-9_-]*)+$"
     },
     "audioOwnership": {
       "type": "string",
-      "enum": ["rendered", "passthrough", "none"]
+      "enum": [
+        "rendered",
+        "passthrough",
+        "none"
+      ]
     },
     "positiveRational": {
       "type": "array",
       "minItems": 2,
       "maxItems": 2,
-      "items": {"type": "integer", "minimum": 1}
+      "items": {
+        "type": "integer",
+        "minimum": 1
+      }
     },
     "frameRange": {
       "type": "array",
       "minItems": 2,
       "maxItems": 2,
       "items": [
-        {"type": "integer", "minimum": 0},
-        {"type": "integer", "minimum": 1}
+        {
+          "type": "integer",
+          "minimum": 0
+        },
+        {
+          "type": "integer",
+          "minimum": 1
+        }
       ],
       "additionalItems": false
     },
     "frameWindow": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["start_frame", "end_frame", "fps_rational"],
+      "required": [
+        "start_frame",
+        "end_frame",
+        "fps_rational"
+      ],
       "properties": {
-        "start_frame": {"type": "integer", "minimum": 0},
-        "end_frame": {"type": "integer", "minimum": 1},
-        "fps_rational": {"$ref": "#/definitions/positiveRational"},
+        "start_frame": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "end_frame": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "fps_rational": {
+          "$ref": "#/definitions/positiveRational"
+        },
         "source_range": {
           "anyOf": [
-            {"$ref": "#/definitions/frameRange"},
-            {"type": "null"}
+            {
+              "$ref": "#/definitions/frameRange"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
-        "speed": {"type": ["number", "null"], "exclusiveMinimum": 0}
+        "speed": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "exclusiveMinimum": 0
+        }
       }
     },
     "renderProfile": {
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "width", "height", "fps_rational", "time_base", "container",
-        "video_codec", "video_profile", "video_level", "pixel_format",
+        "width",
+        "height",
+        "fps_rational",
+        "time_base",
+        "container",
+        "video_codec",
+        "video_profile",
+        "video_level",
+        "pixel_format",
         "duration_tolerance"
       ],
       "properties": {
-        "width": {"type": "integer", "minimum": 1},
-        "height": {"type": "integer", "minimum": 1},
-        "fps_rational": {"$ref": "#/definitions/positiveRational"},
-        "time_base": {"$ref": "#/definitions/positiveRational"},
-        "container": {"type": "string", "minLength": 1},
-        "video_codec": {"type": "string", "minLength": 1},
-        "video_profile": {"type": ["string", "null"], "minLength": 1},
-        "video_level": {"type": ["string", "null"], "minLength": 1},
-        "pixel_format": {"type": "string", "minLength": 1},
-        "audio_codec": {"type": ["string", "null"], "minLength": 1},
-        "audio_sample_rate": {"type": ["integer", "null"], "minimum": 1},
-        "audio_channel_layout": {"type": ["string", "null"], "minLength": 1},
-        "duration_tolerance": {"type": "integer", "minimum": 0}
+        "width": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "fps_rational": {
+          "$ref": "#/definitions/positiveRational"
+        },
+        "time_base": {
+          "$ref": "#/definitions/positiveRational"
+        },
+        "container": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        "video_codec": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        "video_profile": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "video_level": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "pixel_format": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        "audio_codec": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "audio_sample_rate": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "audio_channel_layout": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "duration_tolerance": {
+          "type": "integer",
+          "minimum": 0
+        }
       },
       "oneOf": [
         {
           "properties": {
-            "audio_codec": {"type": "null"},
-            "audio_sample_rate": {"type": "null"},
-            "audio_channel_layout": {"type": "null"}
+            "audio_codec": {
+              "type": "null"
+            },
+            "audio_sample_rate": {
+              "type": "null"
+            },
+            "audio_channel_layout": {
+              "type": "null"
+            }
           }
         },
         {
-          "required": ["audio_codec", "audio_sample_rate", "audio_channel_layout"],
+          "required": [
+            "audio_codec",
+            "audio_sample_rate",
+            "audio_channel_layout"
+          ],
           "properties": {
-            "audio_codec": {"type": "string", "minLength": 1},
-            "audio_sample_rate": {"type": "integer", "minimum": 1},
-            "audio_channel_layout": {"type": "string", "minLength": 1}
+            "audio_codec": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "\\S"
+            },
+            "audio_sample_rate": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "audio_channel_layout": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "\\S"
+            }
           }
         }
       ]
     },
     "backendConfig": {
       "type": "object",
-      "propertyNames": {"$ref": "#/definitions/qualifiedId"},
-      "additionalProperties": {"type": "object"}
+      "propertyNames": {
+        "$ref": "#/definitions/qualifiedId"
+      },
+      "additionalProperties": {
+        "type": "object"
+      }
     },
     "stringMap": {
       "type": "object",
-      "additionalProperties": {"type": "string"}
+      "propertyNames": {
+        "pattern": "\\S"
+      },
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "\\S"
+      }
     }
   },
   "examples": [
@@ -176,16 +373,28 @@
       "window": {
         "start_frame": 0,
         "end_frame": 48,
-        "fps_rational": [24, 1],
-        "source_range": [10, 58],
+        "fps_rational": [
+          24,
+          1
+        ],
+        "source_range": [
+          10,
+          58
+        ],
         "speed": 1.0
       },
       "audio": "rendered",
       "profile": {
         "width": 1920,
         "height": 1080,
-        "fps_rational": [24, 1],
-        "time_base": [1, 12288],
+        "fps_rational": [
+          24,
+          1
+        ],
+        "time_base": [
+          1,
+          12288
+        ],
         "container": "mp4",
         "video_codec": "h264",
         "video_profile": "high",
@@ -196,8 +405,14 @@
         "audio_channel_layout": "stereo",
         "duration_tolerance": 1
       },
-      "backend_config": {"acme.example": {"quality": "preview"}},
-      "metadata": {"project_id": "demo"}
+      "backend_config": {
+        "acme.example": {
+          "quality": "preview"
+        }
+      },
+      "metadata": {
+        "project_id": "demo"
+      }
     }
   ]
 }

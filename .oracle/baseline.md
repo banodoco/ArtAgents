@@ -14,6 +14,17 @@ performed on `run.py`; this document only records today's behavior.
   map, C0/C1 suite evidence, and corrected Sprint 08 record (issue 2). HEAD at
   rework: `f8af4b2` ("batch1: renderer contracts, schemas, pack extension,
   trusted registries, baseline characterization").
+- **Reworked (T1.1R2): 2026-08-12** — oracle batch-1 re-review issue 1: the
+  T1.1R "C0 evidence" block actually ran at `f8af4b2` (C1) and inferred the
+  before state, which is invalid because C1 changed shared pack/executor code.
+  Replaced with genuine before/after evidence: the named suite matrix run at
+  C0 `efbfcaa` (clean `git worktree` checkout under /tmp) and at the current
+  head `b357de3` in the same environment, with exact deltas (issue 1a); and
+  corrected the section-11 coverage map — the "generated-source" row now
+  points at `tests/packs/rendering/test_remotion_element_generation.py`
+  instead of unrelated URL/Hype tests, with provenance and secret non-leak
+  coverage made explicit (issue 1b). HEAD at rework: `b357de3` (with the
+  in-flight contract/registry rework present in the working tree).
 
 ## 1. Dirty-tree snapshot origin
 
@@ -48,11 +59,39 @@ Skip reasons (verbatim, as reported by `pytest -ra`):
 
 **186 passed, 0 failed, 0 skipped**
 
-### C0 evidence (T1.1R): general pack/executor suites
+### C0 evidence (T1.1R2): named suite matrix at C0 `efbfcaa`
 
-Run on 2026-08-12 at HEAD `f8af4b2` (C1); the C0 snapshot (`6b2ff1a`) predates
-any rendering characterization work and none of these failures are touched by
-the C1 diff (verified via `git diff efbfcaa..f8af4b2`).
+Method: clean checkout via `git worktree add --detach /tmp/astrid-c0 efbfcaa`
+(a detached worktree of the same repo; the checkout supplies its own `astrid/`
+package because the repo root — not an editable install — is what resolves
+`import astrid`), with the same `PYENV_VERSION=3.11.11`, then the identical
+command as the recorded baseline runs:
+
+- **`python -m pytest -q tests/packs/rendering tests/packs/test_audio_render.py
+  tests/packs/hype tests/packs/iteration tests/packs/editorial`** →
+  **2 failed, 226 passed, 3 skipped** (44.27s).
+- Failures — the SAME two env-dependent rendering failures recorded in section
+  2 (and the same two at head):
+  1. `tests/packs/rendering/test_render_remotion_registry.py::RenderRemotionRegistryGenerationTest::test_registry_generation_skips_when_state_and_outputs_are_current`
+     — `AssertionError: Expected 'run' to not have been called. Called 1 times.`
+  2. `tests/packs/rendering/test_render_remotion_registry.py::RenderRemotionRegistryGenerationTest::test_render_discovers_fixture_local_effect_assets_without_real_local_pack`
+     — `AssertionError: False is not true : test assumes the developer checkout has real local effects`
+- Skips: 3, the same verbatim reasons as section 2. All three skipped
+  artifacts (`remotion/src/types.augmentations.ts`, `remotion/node_modules`,
+  ffmpeg/ffprobe) are gitignored, so a clean C0 checkout lacks them exactly as
+  the working tree does.
+- Per-suite breakdown: `git diff --name-only efbfcaa..HEAD` shows no changes
+  under `tests/packs/hype|iteration|editorial`, so those suites contribute
+  their full 186/0/0 at C0 too; the rendering + audio_render part is therefore
+  **40 passed, 2 failed, 3 skipped** — byte-identical to the section-2 numbers
+  recorded at C1.
+
+### C1 evidence (T1.1R): general pack/executor suites (relabeled — actually ran at `f8af4b2`)
+
+The former "C0 evidence (T1.1R)" block below is NOT C0 evidence: it ran on
+2026-08-12 at HEAD `f8af4b2` (C1), and C1 changed shared pack/executor code,
+so the "before" inference from it was invalid. It is retained here, relabeled,
+as C1 evidence with its original results:
 
 - **`pytest -q tests/packs`** → **25 failed, 1460 passed, 37 skipped, 181
   subtests passed** (288.45s). Failure breakdown (all pre-existing / outside
@@ -94,15 +133,43 @@ the C1 diff (verified via `git diff efbfcaa..f8af4b2`).
   failures being the in-flight contract/registry items) and is NOT part of
   this characterization.
 
-### C1 evidence (T1.1R): Hype/iteration/editorial re-run
+### C1 evidence (T1.1R): Hype/iteration/editorial re-run at `f8af4b2`
 
 - **`pytest -q tests/packs/hype tests/packs/iteration tests/packs/editorial`**
-  → **186 passed, 0 failed, 0 skipped** (46.42s) — byte-identical to the
-  recorded C0 count (186/0/0): **no new failures**.
+  → **186 passed, 0 failed, 0 skipped** (46.42s) — identical to the genuine
+  C0 count (186/0/0): **no new failures**.
 - New characterization suites (T1.1R):
   `pytest -q tests/packs/rendering/test_legacy_renderer_characterization.py
   tests/packs/rendering/test_render_facade_run_ownership.py` → **37 passed,
   0 failed** (5.74s).
+
+### Current-head evidence (T1.1R2): named suite matrix at HEAD `b357de3`
+
+- Same command, same environment, in this worktree (HEAD `b357de3`; the tree
+  also carries the in-flight contract/registry rework being fixed in parallel
+  — `astrid/core/rendering/`, `tests/core/rendering/`, `docs/contracts/`,
+  `tests/fixtures/renderer_packs/...` — none of which is imported by these
+  suites, verified by grep):
+  **`python -m pytest -q tests/packs/rendering tests/packs/test_audio_render.py
+  tests/packs/hype tests/packs/iteration tests/packs/editorial`** →
+  **2 failed, 263 passed, 3 skipped** (45.18s); the same 2 failures and the
+  same 3 skip reasons as C0.
+
+### Before/after delta (C0 `efbfcaa` → current head `b357de3`)
+
+| | C0 (`efbfcaa`) | head (`b357de3`) | delta |
+|---|---|---|---|
+| passed | 226 | 263 | **+37** |
+| failed | 2 | 2 | 0 — same 2 env-dependent failures, same names |
+| skipped | 3 | 3 | 0 — same 3 reasons |
+
+The +37 passed are exactly the two T1.1R characterization test files added
+between C0 and C1 (`test_legacy_renderer_characterization.py` — 31 tests,
+`test_render_facade_run_ownership.py` — 5 tests; 37 collected, one
+parametrized). `git diff --name-only efbfcaa..HEAD` shows NO production-code
+changes in the suite paths — the only suite-path changes are those two added
+test files. Genuine before/after: no new failures, no new skips, no behavior
+change in the named matrix.
 
 ## 3. Production callsite inventory of concrete render usage
 
@@ -401,18 +468,46 @@ directly (in-process `render()`), not the facade.
 ## 11. Props / theme / registry / staging / environment / generated-source map
 
 Every behavior required by the T1.1 brief is either covered by existing tests
-or newly added; all listed tests exercise the real `run.py` render path with
-heavy dependencies (npx remotion / ffmpeg / asset server) mocked out — no real
-render. No additional characterization tests were needed beyond the facade and
-transition additions in T1.1R.
+or newly added; all listed tests exercise the real `run.py` render path (or
+the `scripts/gen_effect_registry.py` generator that `run.py` invokes for
+registry regen) with heavy dependencies (npx remotion / ffmpeg / asset server)
+mocked out — no real render. No additional characterization tests were needed
+beyond the facade and transition additions in T1.1R. Coverage map corrected in
+T1.1R2 (oracle re-review issue 1b): the "generated-source" row now points at
+`test_remotion_element_generation.py`, the Environment row states the secret
+non-leak explicitly, and a provenance row was added; each reference below was
+verified by reading the test.
 
 | Behavior | Coverage (file:line) | What it locks |
 |---|---|---|
-| **Props** (`.remotion-props.json` payload + removal) | `tests/packs/rendering/test_render_remotion_registry.py:301` (`test_render_regenerates_registries_before_remotion_and_writes_props`); golden `tests/golden/hype/merged_render_props.json` via `tests/packs/hype/test_hype_e2e.py:1040` (`test_hype_registry_and_merged_render_props_match_golden`) | props payload carries `timeline`/`assets`/`theme`; temp props file removed after render; merged render props match the committed golden |
-| **Theme** (theme/composition env, `--theme` forwarding, active theme) | `tests/packs/rendering/test_render_remotion_registry.py:102` (`test_registry_generation_sets_theme_and_composition_env`); `tests/core/test_executor_runner_errors.py:215` (`test_builtin_render_omits_optional_theme_when_not_supplied_and_forwards_when_supplied`); golden `tests/golden/fixture_theme.json` | registry regen sets theme + composition env for the subprocess; executor argv omits `--theme` unless supplied and forwards it verbatim when supplied |
+| **Props** (`.remotion-props.json` payload + removal) | `tests/packs/rendering/test_render_remotion_registry.py:301` (`test_render_regenerates_registries_before_remotion_and_writes_props`); golden `tests/golden/hype/merged_render_props.json` via `tests/packs/hype/test_hype_e2e.py:1040` (`test_hype_registry_and_merged_render_props_match_golden`) | props payload carries `timeline`/`assets`/`theme`; temp props file removed after render (asserted `not exists()` at :379); merged render props match the committed golden |
+| **Theme** (theme/composition env, `--theme` forwarding, active theme) | `tests/packs/rendering/test_render_remotion_registry.py:102` (`test_registry_generation_sets_theme_and_composition_env` — registry regen argv `--theme <path>` + `ASTRID_TIMELINE_COMPOSITION_SRC` env, undeclared host env excluded); `tests/core/test_executor_runner_errors.py:215` (`test_builtin_render_omits_optional_theme_when_not_supplied_and_forwards_when_supplied` — executor argv omits `--theme` unless supplied, forwards verbatim when supplied); `tests/packs/hype/test_hype_e2e.py:1040` (merged props golden carries the `theme` key via `_resolved_theme_for_render` fallback); `tests/packs/rendering/test_legacy_renderer_characterization.py:181/:192` (`theme_path` forwarded through `render()` into engine dispatch) | registry regen sets theme + composition env for the subprocess; `--theme` is omitted from the executor argv unless supplied and forwarded verbatim when supplied; the resolved/fallback theme lands in the merged render props |
 | **Registry** (generation skip/regen/cache/empty-assets synthesis) | `tests/packs/rendering/test_render_remotion_registry.py:134` (skip when current), `:150` (regen on state-hash diff), `:174` (regen on missing output), `:201` (cache tracks element edits + missing outputs), `:739` (`test_main_synthesizes_empty_asset_registry_when_assets_are_absent`); golden `tests/golden/hype/hype.assets.json` via `test_hype_e2e.py:1040` | registry regeneration triggers, cache invalidation, and synthesized empty asset registry behavior |
 | **Staging** (effect-asset staging + cleanup) | `tests/packs/rendering/test_render_remotion_registry.py:385` (`test_render_stages_only_used_effect_assets_and_removes_them_after_success`), `:485` (`test_render_removes_staged_assets_and_props_after_remotion_failure`) | only used effect assets are staged; staged assets + props are removed after success and after failure |
-| **Environment** (explicit render env, project-run marker) | `tests/packs/rendering/test_render_remotion_registry.py:770` (`test_remotion_render_env_is_explicit_not_host_inherited` — host secrets/`RENDER_HOST_ONLY` never reach remotion), `:102` (theme/composition env); facade env marker: `tests/packs/rendering/test_render_facade_run_ownership.py` (subprocess env carries `ASTRID_PROJECT_RUN=1` + `ASTRID_PROJECT_SLUG`) | render subprocess env is explicit, not host-inherited; facade runs are project-marked |
-| **Generated-source** (URL assets, generated render argv, goldens) | `tests/test_url_pipeline_smoke.py:128` (`test_cut_main_writes_url_registry_with_prefetched_sha` — URL inputs prefetched into the registry); `tests/packs/hype/test_hype_e2e.py:494` (`test_generated_hype_render_command_parses_to_required_downstream_render_argv`), `:600` (repeat source grouped string scene items), `:630` (dictionary scene output rejected as for-each source); `tests/golden/hype/` fixtures | URL→registry pipeline, generated render command shape, and golden registry/props outputs |
+| **Environment** (explicit render env, secret non-leak, project-run marker) | `tests/packs/rendering/test_render_remotion_registry.py:770` (`test_remotion_render_env_is_explicit_not_host_inherited` — synthetic secrets `OPENAI_API_KEY`/`AWS_SECRET_ACCESS_KEY`, `RENDER_HOST_ONLY`, and `ASTRID_ACTOR` never reach remotion; required `PATH`, `ASTRID_SESSION_ID`, `ASTRID_TASK_RUN_ID`, `ASTRID_TIMELINE_COMPOSITION_SRC` preserved), `:102` (theme/composition env); facade env marker: `tests/packs/rendering/test_render_facade_run_ownership.py` (subprocess env carries `ASTRID_PROJECT_RUN=1` + `ASTRID_PROJECT_SLUG`) | render subprocess env is explicit, not host-inherited; host secrets never leak; facade runs are project-marked |
+| **Provenance sidecar** (v1 keys, hybrid segments) | `tests/packs/rendering/test_render_remotion_registry.py:634` (`test_render_provenance_matches_registry_and_local_overlay_discovery` — sidecar `active_pack_order`, `resolved_effect_ids`, `source_pack_ids`, `element_roots`, `resolved_effects[].staged_asset_ids`/`staged_assets` match the registry + local overlay discovery), `:689` (`test_hybrid_render_writes_final_sidecar_with_remotion_segment_provenance` — hybrid sidecar carries `segments` + `segment_provenance`) | provenance sidecar content is derived from the resolved registry, not hardcoded; the hybrid final sidecar preserves remotion segment provenance |
+| **Generated-source** (generated Remotion element registries: element-scope aliases, manifest component hashing) | `tests/packs/rendering/test_remotion_element_generation.py:22` (`test_generated_registries_use_element_scope_aliases` — generated effects/animations/transitions registries use `@(pack-*|managed)-elements-*` aliases and never `@workspace-*`/`primitive-root`), `:31` (`test_remotion_alias_files_do_not_reference_workspace_element_aliases` — generator + `remotion/tsconfig.json` never reference `@workspace-*`), `:50` (`test_generated_effect_registry_hashes_manifest_component_support_and_assets` — `EFFECT_FINGERPRINTS` + `?astrid=<12-hex>` import query change on component/support/asset/manifest edit and revert to the same hash) | generated registries use element-scope aliases; component/support/asset/manifest content is hashed into the generated import query and fingerprint map |
 | **Audio-reactive specialization** | `tests/packs/rendering/test_audio_reactive_colour.py:82` (element schema + fast spec), `:119` (ambiguous markers rejected), `:133` (`test_render_dispatches_compact_effect_to_ffmpeg_specialization` — engine-parametrized, mocked render), `:165` (real-ffmpeg render, skipped when ffmpeg/ffprobe absent) | the strict 2-clip contract, marker validation, and the engine-independent early dispatch |
 | **Facade run ownership / out rewrite** (NEW, T1.1R) | `tests/packs/rendering/test_render_facade_run_ownership.py` | see section 10(b) — standalone run.json creation + out rewrite, task-attached reuse, `project=None` error, retained out under attachment, `run_root` replacement |
+
+Coverage corrections (T1.1R2) and remaining gaps:
+
+- The previously cited `tests/test_url_pipeline_smoke.py:128`
+  (`test_cut_main_writes_url_registry_with_prefetched_sha`), and
+  `tests/packs/hype/test_hype_e2e.py:494` (`test_generated_hype_render_command_parses_to_required_downstream_render_argv`),
+  `:600`, `:630` are **NOT** generated-source coverage (URL→registry prefetch
+  in the cut pipeline and hype `plan_template` render-command/for-each-source
+  shape respectively) and were removed from the map; they remain covered by
+  their own suites but are outside this render-characterization map.
+- The Theme row's former `tests/golden/fixture_theme.json` reference was
+  dropped: that golden is exercised by `tests/timeline/test_projection.py`,
+  not by the render theme tests; the render theme behavior is locked by
+  `:102`, `:215`, `:1040`, and the characterization `theme_path` forwarding.
+- Gap check: after reading each mapped test, no behavior in the six mapped
+  rows (props/theme/registry/staging/environment/generated-source) plus
+  provenance is left without coverage. The render-path `--theme` forwarding
+  through `render()` into the remotion subprocess argv (as opposed to the
+  executor-argv layer at `:215` and the registry-regen layer at `:102`) is
+  only indirectly pinned (characterization `theme_path` pass-through + props
+  golden `theme` key); a direct argv assertion for a themed remotion render is
+  a minor gap.

@@ -14,6 +14,9 @@ aliases:
   - kind: renderer
     alias: rendering.compat
     canonical_id: rendering.remotion
+  - kind: renderer
+    alias: rendering.missing
+    canonical_id: rendering.absent
 extensions:
   rendering:
     renderers:

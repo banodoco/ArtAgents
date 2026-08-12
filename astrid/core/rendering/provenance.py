@@ -180,7 +180,11 @@ def assemble_provenance_v2(
         "request_digest": normalized_plan.request_digest,
         "requested_policy": normalized_plan.requested_policy,
         "planner": normalized_plan.planner.to_dict(),
-        "segments": normalized_segments,
+        # V1-compatible segment projection: flat {engine, from, to} entries,
+        # exactly the shape legacy consumers read from `segments`.
+        "segments": legacy_segments,
+        # Additive normalized v2 segment records; never overwrite v1 fields.
+        "segments_v2": normalized_segments,
         "artifact_profiles": _normalize_artifact_profiles(artifact_profiles),
         "audio_ownership": _normalize_audio_ownership(audio_ownership),
         "normalization": normalized_normalization,
@@ -189,8 +193,6 @@ def assemble_provenance_v2(
         "backend_fragments": validate_backend_fragments(backend_fragments),
     }
     compatibility = _normalize_v1_compatibility(v1_compatibility)
-    if "segment_provenance" in compatibility:
-        compatibility["segment_provenance"] = legacy_segments
     payload.update(compatibility)
     return _json_safe_mapping(payload, label="provenance")
 

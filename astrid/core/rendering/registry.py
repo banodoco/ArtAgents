@@ -1021,8 +1021,7 @@ def _populate_executable_alias_resolver(
             if target in selected or target in registry._entries:
                 continue
             if (
-                source_pack_id == "astrid.core"
-                and registry._resolve_override_key(kind, target) is not None
+                registry._resolve_override_key(kind, target) is not None
             ):
                 override_routing_aliases.add(alias_name)
                 continue
@@ -1081,7 +1080,12 @@ def _alias_target_can_participate(
         target = aliases[target][1].get("canonical_id")
         if not isinstance(target, str):
             return False
-    return target in registry._entries
+    if target in registry._entries:
+        return True
+    # A missing canonical terminal is still reachable when an override
+    # routes it to an executable implementation (alias -> canonical ->
+    # override ordering is frozen).
+    return registry._resolve_override_key(registry.capability_kind, target) is not None
 
 
 __all__ = [

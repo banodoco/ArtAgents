@@ -36,39 +36,6 @@ INSTALLED_FIXTURES = FIXTURES / "installed"
 CYCLE_ROOT = FIXTURES / "cycle"
 
 
-def _canonical_fixture_root(source_root: Path, project_root: Path) -> Path:
-    """Stage shared fixtures using IDs valid at both pack and wire layers."""
-
-    try:
-        relative = source_root.resolve().relative_to(FIXTURES.resolve())
-    except ValueError:
-        return source_root
-
-    destination = project_root / ".canonical-renderer-fixtures" / relative
-    if destination.exists():
-        return destination
-    shutil.copytree(source_root, destination)
-    replacement = "-" if relative.parts[0] == "source" else ""
-    for manifest_path in destination.rglob("*.yaml"):
-        rewritten: list[str] = []
-        for line in manifest_path.read_text(encoding="utf-8").splitlines(keepends=True):
-            stripped = line.lstrip()
-            if stripped.startswith(("id: ", "alias: ", "canonical_id: ")):
-                key, value = line.split(":", 1)
-                line = f"{key}:{value.replace('_', replacement)}"
-            rewritten.append(line)
-        manifest_path.write_text("".join(rewritten), encoding="utf-8")
-    for pack_manifest in list(destination.rglob("pack.yaml")):
-        pack_id = next(
-            line.removeprefix("id: ")
-            for line in pack_manifest.read_text(encoding="utf-8").splitlines()
-            if line.startswith("id: ")
-        )
-        if pack_manifest.parent.name != pack_id:
-            pack_manifest.parent.rename(pack_manifest.parent.with_name(pack_id))
-    return destination
-
-
 def _scanner(source_root: Path):
     def scan(root: str | Path | None = None):
         return discover_packs(source_root if root is None else root)
@@ -85,11 +52,6 @@ def _load_with_source(
     env_pack_roots: tuple[str, ...] = (),
     include_installed: bool = False,
 ):
-    source_root = _canonical_fixture_root(source_root, project_root)
-    extra_pack_roots = tuple(
-        str(_canonical_fixture_root(Path(root), project_root))
-        for root in extra_pack_roots
-    )
     with (
         mock.patch.object(
             rendering_registry_module,
@@ -197,25 +159,11 @@ def _stage_installed_fixture(
     record_mode: str = "valid",
     active: bool = True,
 ) -> Path:
-    fixture_name = {
-        "installedrender": "installed_render",
-        "corruptrender": "corrupt_render",
-        "inactiverender": "inactive_render",
-    }.get(pack_id, pack_id)
-    fixture = INSTALLED_FIXTURES / fixture_name
+    fixture = INSTALLED_FIXTURES / pack_id
     install_root = astrid_home / "packs" / pack_id
     revision = install_root / "revisions" / pack_id
     revision.parent.mkdir(parents=True)
     shutil.copytree(fixture, revision)
-    for manifest_path in revision.rglob("*.yaml"):
-        rewritten: list[str] = []
-        for line in manifest_path.read_text(encoding="utf-8").splitlines(keepends=True):
-            stripped = line.lstrip()
-            if stripped.startswith(("id: ", "alias: ", "canonical_id: ")):
-                key, value = line.split(":", 1)
-                line = f"{key}:{value.replace('_', '')}"
-            rewritten.append(line)
-        manifest_path.write_text("".join(rewritten), encoding="utf-8")
 
     if active:
         (install_root / "active").symlink_to(Path("revisions") / pack_id)
@@ -262,7 +210,7 @@ def test_default_loader_returns_all_three_registry_types(tmp_path: Path) -> None
     assert isinstance(renderers, RendererRegistry)
     assert isinstance(planners, PlannerRegistry)
     assert isinstance(finalizers, FinalizerRegistry)
-    assert planners.get("rendering.legacy-hybrid").manifest.name == "Fixture Hybrid Planner"
+    assert planners.get("rendering.legacy_hybrid").manifest.name == "Fixture Hybrid Planner"
     assert finalizers.get("rendering.ffmpeg-finalizer").manifest.name == "Fixture FFmpeg Finalizer"
 
 
@@ -344,7 +292,7 @@ def test_alias_chain_and_programmatic_compatibility_aliases(tmp_path: Path) -> N
 
 
 def test_alias_cycle_is_rejected_as_structured_registry_error(tmp_path: Path) -> None:
-    cycle_root = _canonical_fixture_root(CYCLE_ROOT, tmp_path)
+    cycle_root = CYCLE_ROOT
     with (
         mock.patch(
             "astrid.core.rendering.registry.discover_packs",
@@ -607,7 +555,7 @@ def test_source_and_project_local_candidates_are_executable(tmp_path: Path) -> N
 def test_environment_candidate_is_inspectable_but_not_executable(tmp_path: Path) -> None:
     empty_source = tmp_path / "empty-source"
     empty_source.mkdir()
-    env_root = _canonical_fixture_root(ENV_ROOT, tmp_path)
+    env_root = ENV_ROOT
     with (
         mock.patch(
             "astrid.core.rendering.registry.discover_packs",
@@ -617,14 +565,14 @@ def test_environment_candidate_is_inspectable_but_not_executable(tmp_path: Path)
     ):
         renderers, _, _ = load_default_registries(tmp_path, include_installed=False)
 
-    inspected = renderers.inspect("envrender.legacy")
+    inspected = renderers.inspect("env_render.legacy")
     assert len(inspected) == 1
     assert inspected[0].source_kind == "env"
     assert inspected[0].execution_eligible is False
     with pytest.raises(RendererRegistryError) as caught:
-        renderers.get("envrender.renderer")
+        renderers.get("env_render.renderer")
     assert caught.value.code == "execution_ineligible"
-    evidence = renderers.resolve_evidence("envrender.renderer")
+    evidence = renderers.resolve_evidence("env_render.renderer")
     assert evidence["eligible"] is False
     assert evidence["resolution_error"]["code"] == "execution_ineligible"
 
@@ -637,8 +585,8 @@ def test_explicit_extra_root_is_executable_and_records_trust_method(tmp_path: Pa
         empty_source,
         extra_pack_roots=(str(EXTRA_ROOT),),
     ) as (renderers, _, _):
-        candidate = renderers.get("extrarender.renderer")
-        evidence = renderers.resolve_evidence("extrarender.renderer")
+        candidate = renderers.get("extra_render.renderer")
+        evidence = renderers.resolve_evidence("extra_render.renderer")
 
     assert candidate.source_kind == "extra"
     assert candidate.execution_eligible is True
@@ -649,7 +597,7 @@ def test_installed_active_revision_with_valid_audit_is_executable(tmp_path: Path
     astrid_home = tmp_path / "astrid-home"
     empty_source = tmp_path / "empty-source"
     empty_source.mkdir()
-    _stage_installed_fixture(astrid_home, "installedrender")
+    _stage_installed_fixture(astrid_home, "installed_render")
 
     with (
         mock.patch.dict(
@@ -664,7 +612,7 @@ def test_installed_active_revision_with_valid_audit_is_executable(tmp_path: Path
     ):
         renderers, _, _ = load_default_registries(tmp_path, include_installed=True)
 
-    candidate = renderers.get("installedrender.renderer")
+    candidate = renderers.get("installed_render.renderer")
     assert candidate.source_kind == "installed"
     assert candidate.execution_eligible is True
     assert candidate.eligibility.trust_method == "test"
@@ -681,7 +629,7 @@ def test_installed_missing_or_corrupt_record_fails_closed(
     empty_source.mkdir()
     _stage_installed_fixture(
         astrid_home,
-        "corruptrender",
+        "corrupt_render",
         record_mode=record_mode,
     )
 
@@ -698,10 +646,10 @@ def test_installed_missing_or_corrupt_record_fails_closed(
     ):
         renderers, _, _ = load_default_registries(tmp_path, include_installed=True)
 
-    candidate = renderers.inspect("corruptrender.renderer")[0]
+    candidate = renderers.inspect("corrupt_render.renderer")[0]
     assert candidate.execution_eligible is False
     with pytest.raises(RendererRegistryError) as caught:
-        renderers.get("corruptrender.renderer")
+        renderers.get("corrupt_render.renderer")
     assert caught.value.code == "execution_ineligible"
 
 
@@ -713,7 +661,7 @@ def test_installed_type_corrupt_audit_remains_inspectable_and_fails_closed(
     astrid_home = tmp_path / "astrid-home"
     empty_source = tmp_path / "empty-source"
     empty_source.mkdir()
-    revision = _stage_installed_fixture(astrid_home, "corruptrender")
+    revision = _stage_installed_fixture(astrid_home, "corrupt_render")
     record_path = revision / ".astrid" / "install.json"
     record = json.loads(record_path.read_text(encoding="utf-8"))
     record["install_root"] = bad_install_root
@@ -732,7 +680,7 @@ def test_installed_type_corrupt_audit_remains_inspectable_and_fails_closed(
     ):
         renderers, _, _ = load_default_registries(tmp_path, include_installed=True)
 
-    candidate = renderers.inspect("corruptrender.renderer")[0]
+    candidate = renderers.inspect("corrupt_render.renderer")[0]
     assert candidate.execution_eligible is False
     assert "install" in candidate.eligibility.reason
 
@@ -743,7 +691,7 @@ def test_inactive_installed_revision_is_not_discovered(tmp_path: Path) -> None:
     empty_source.mkdir()
     _stage_installed_fixture(
         astrid_home,
-        "inactiverender",
+        "inactive_render",
         active=False,
     )
 
@@ -760,7 +708,7 @@ def test_inactive_installed_revision_is_not_discovered(tmp_path: Path) -> None:
     ):
         renderers, _, _ = load_default_registries(tmp_path, include_installed=True)
 
-    assert renderers.inspect("inactiverender.renderer") == ()
+    assert renderers.inspect("inactive_render.renderer") == ()
 
 
 def test_ineligible_higher_precedence_candidate_cannot_shadow_trusted_lower(
@@ -811,7 +759,7 @@ def test_manifest_permission_not_declared_by_pack_is_ineligible(tmp_path: Path) 
 
 def test_hybrid_is_never_a_renderer_alias(tmp_path: Path) -> None:
     with _load_with_source(tmp_path) as (renderers, planners, _):
-        assert planners.get("rendering.legacy-hybrid").id == "rendering.legacy-hybrid"
+        assert planners.get("rendering.legacy_hybrid").id == "rendering.legacy_hybrid"
         with pytest.raises(RendererRegistryError) as caught:
             renderers.get("hybrid")
 

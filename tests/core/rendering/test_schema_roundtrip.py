@@ -147,10 +147,13 @@ def _request_cases() -> list[tuple[str, dict[str, Any]]]:
         ("missing required", _delete(base, ("timeline_path",))),
         ("unknown field", {**base, "remotion_composition": "TimelineComposition"}),
         ("wrong path type", _set(base, ("timeline_path",), 7)),
-        ("underscore backend id", _set(base, ("backend_config",), {"acme.bad_id": {}})),
+        ("valid underscore backend id", _set(base, ("backend_config",), {"acme.bad_id": {}})),
         ("partial populated audio", _set(base, ("profile",), partial_audio)),
         ("rendered with visual profile", rendered_visual),
         ("none with audio profile", none_with_audio),
+        ("whitespace metadata value", _set(base, ("metadata",), {"project_id": "   "})),
+        ("whitespace metadata key", _set(base, ("metadata",), {"   ": "demo"})),
+        ("empty metadata value", _set(base, ("metadata",), {"project_id": ""})),
     ]
     return _with_version_adversaries(base, cases)
 
@@ -160,8 +163,9 @@ def _support_cases() -> list[tuple[str, dict[str, Any]]]:
     cases = [
         ("valid canonical", base),
         ("valid string feature", _set(base, ("features",), {"mode": "visual"})),
+        ("whitespace reason", _set(base, ("reasons",), ["   "])),
         ("missing backend", _delete(base, ("backend",))),
-        ("underscore backend", _set(base, ("backend",), "acme.bad_id")),
+        ("valid underscore backend", _set(base, ("backend",), "acme.bad_id")),
         ("duplicate alternatives", _set(base, ("alternatives",), ["acme.other", "acme.other"])),
         ("invalid feature value", _set(base, ("features",), {"count": 2})),
         ("unknown field", {**base, "priority": 1}),
@@ -182,7 +186,11 @@ def _plan_cases() -> list[tuple[str, dict[str, Any]]]:
         ("missing total", _delete(base, ("total_frames",))),
         ("unknown field", {**base, "backend": "acme.visual"}),
         ("uppercase renderer", _set(base, ("segments", 0, "renderer", "id"), "Acme.Visual")),
-        ("underscore renderer", _set(base, ("segments", 0, "renderer", "id"), "acme.bad_id")),
+        ("valid underscore renderer", _set(
+            _set(base, ("segments", 0, "renderer", "id"), "acme.bad_id"),
+            ("segments", 0, "renderer", "support_decision", "backend"),
+            "acme.bad_id",
+        )),
         ("malformed request hash", _set(base, ("request_digest",), "bad")),
         ("malformed input hash", _set(base, ("segments", 0, "input_hashes", "timeline"), "bad")),
         ("partial populated audio", partial),
@@ -203,6 +211,8 @@ def _result_cases() -> list[tuple[str, dict[str, Any]]]:
         ("valid canonical error", error),
         ("missing video", _delete(base, ("video",))),
         ("unknown top-level attachment surface", {**base, "attachments": {}}),
+        ("whitespace metadata value", _set(base, ("metadata",), {"project_id": "   "})),
+        ("whitespace log", _set(base, ("logs",), ["   "])),
         ("drive-relative video", _set(base, ("video", "path"), "C:escape.mp4")),
         ("drive-relative attachment", _set(_set(base, ("video", "attachments"), {"x.dat": {"name": "x.dat", "path": "C:escape.dat", "kind": "project", "sha256": "a" * 64}}), ("video", "path"), "outputs/visual.mp4")),
         (
@@ -222,7 +232,7 @@ def _result_cases() -> list[tuple[str, dict[str, Any]]]:
         ),
         ("partial populated audio", partial),
         ("contradictory ownership", _set(base, ("audio_ownership",), "passthrough")),
-        ("underscore fragment namespace", _set(base, ("backend_fragments",), {"acme.bad_id": {}})),
+        ("valid underscore fragment namespace", _set(base, ("backend_fragments",), {"acme.bad_id": {}})),
         ("core fragment key", _set(base, ("backend_fragments",), {"acme.visual": {"planner": {}}})),
         ("error missing version", _delete(error, ("schema_version",))),
         ("error boolean version", _set(error, ("schema_version",), True)),
@@ -242,6 +252,7 @@ def _finalize_cases() -> list[tuple[str, dict[str, Any]]]:
         ("valid canonical", base),
         ("missing artifacts", _delete(base, ("artifacts",))),
         ("unknown field", {**base, "faststart": True}),
+        ("whitespace metadata value", _set(base, ("metadata",), {"project_id": "   "})),
         ("empty artifacts", _set(base, ("artifacts",), [])),
         ("drive-relative artifact", _set(base, ("artifacts", 0, "path"), "C:segment.mp4")),
         (
@@ -260,8 +271,7 @@ def _finalize_cases() -> list[tuple[str, dict[str, Any]]]:
             ),
         ),
         ("uppercase config id", _set(base, ("backend_config",), {"Rendering.FfmpegFinalizer": {}})),
-        ("underscore config id", _set(base, ("backend_config",), {"rendering.ffmpeg_finalizer": {}})),
-        ("partial populated audio", partial),
+                ("partial populated audio", partial),
         ("contradictory artifact audio", _set(base, ("artifacts", 0, "audio"), "rendered")),
         ("nested plan version", _set(base, ("plan", "schema_version"), 2)),
         ("zero-frame plan", zero_plan),
@@ -277,7 +287,7 @@ def _manifest_cases(
     return [
         ("valid canonical", base),
         ("missing id", _delete(base, ("id",))),
-        ("underscore id", _set(base, ("id",), "acme.bad_id")),
+        ("valid underscore id", _set(base, ("id",), "acme.bad_id")),
         ("unknown field", {**base, "priority": 1}),
         ("boolean version", _set(base, ("schema_version",), True)),
         ("unknown version", _set(base, ("schema_version",), 2)),

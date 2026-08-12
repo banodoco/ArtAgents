@@ -5,29 +5,61 @@
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "schema_version", "supported", "reasons", "features", "alternatives",
-    "backend", "backend_version"
+    "schema_version",
+    "supported",
+    "reasons",
+    "features",
+    "alternatives",
+    "backend",
+    "backend_version"
   ],
   "properties": {
-    "schema_version": {"type": "integer", "const": 1},
-    "supported": {"type": "boolean"},
-    "reasons": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "supported": {
+      "type": "boolean"
+    },
+    "reasons": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "\\S"
+      }
+    },
     "features": {
       "type": "object",
-      "additionalProperties": {"type": ["boolean", "string"]}
+      "additionalProperties": {
+        "type": [
+          "boolean",
+          "string"
+        ]
+      }
     },
     "alternatives": {
       "type": "array",
       "uniqueItems": true,
-      "items": {"$ref": "#/definitions/qualifiedId"}
+      "items": {
+        "$ref": "#/definitions/qualifiedId"
+      }
     },
-    "backend": {"$ref": "#/definitions/qualifiedId"},
-    "backend_version": {"type": ["string", "null"], "minLength": 1}
+    "backend": {
+      "$ref": "#/definitions/qualifiedId"
+    },
+    "backend_version": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1
+    }
   },
   "definitions": {
     "qualifiedId": {
       "type": "string",
-      "pattern": "^[a-z0-9][a-z0-9-]*(?:\\.[a-z0-9][a-z0-9-]*)+$"
+      "pattern": "^[a-z0-9][a-z0-9_-]*(?:\\.[a-z0-9][a-z0-9_-]*)+$"
     }
   },
   "examples": [
@@ -35,7 +67,10 @@
       "schema_version": 1,
       "supported": true,
       "reasons": [],
-      "features": {"media": true, "audio_mode": "rendered"},
+      "features": {
+        "media": true,
+        "audio_mode": "rendered"
+      },
       "alternatives": [],
       "backend": "acme.example",
       "backend_version": "1.0.0"

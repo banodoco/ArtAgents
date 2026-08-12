@@ -4,27 +4,67 @@
   "title": "Astrid renderer manifest v1",
   "type": "object",
   "required": [
-    "schema_version", "id", "name", "version", "protocol_version",
-    "command", "operations"
+    "schema_version",
+    "id",
+    "name",
+    "version",
+    "protocol_version",
+    "command",
+    "operations"
   ],
   "properties": {
-    "schema_version": {"type": "integer", "const": 1},
-    "id": {"$ref": "#/definitions/qualifiedId"},
-    "name": {"type": "string", "minLength": 1},
-    "version": {"type": "string", "minLength": 1},
-    "protocol_version": {"type": "integer", "const": 1},
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "id": {
+      "$ref": "#/definitions/qualifiedId"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "\\S"
+    },
+    "version": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "\\S"
+    },
+    "protocol_version": {
+      "type": "integer",
+      "const": 1
+    },
     "command": {
       "type": "array",
-      "items": {"type": "string", "minLength": 1},
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "\\S"
+      },
       "minItems": 1
     },
     "operations": {
       "type": "array",
-      "items": {"type": "string", "enum": ["render", "support"]},
-      "contains": {"const": "render"},
+      "items": {
+        "type": "string",
+        "enum": [
+          "render",
+          "support"
+        ]
+      },
+      "contains": {
+        "const": "render"
+      },
       "uniqueItems": true
     },
-    "description": {"type": ["string", "null"], "minLength": 1, "default": null},
+    "description": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1,
+      "default": null
+    },
     "capabilities": {
       "$ref": "#/definitions/rendererCapabilities",
       "default": {}
@@ -35,15 +75,32 @@
     },
     "required_binaries": {
       "type": "array",
-      "items": {"type": "string", "minLength": 1},
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "\\S"
+      },
       "uniqueItems": true,
       "default": []
     },
-    "timeout_seconds": {"type": ["integer", "null"], "minimum": 1, "default": null},
+    "timeout_seconds": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1,
+      "default": null
+    },
     "metadata": {
       "type": "object",
-      "propertyNames": {"minLength": 1},
-      "additionalProperties": {"type": "string", "minLength": 1},
+      "propertyNames": {
+        "minLength": 1
+      },
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "\\S"
+      },
       "default": {}
     }
   },
@@ -51,15 +108,19 @@
   "definitions": {
     "qualifiedId": {
       "type": "string",
-      "pattern": "^[a-z0-9][a-z0-9-]*(?:\\.[a-z0-9][a-z0-9-]*)+$"
+      "pattern": "^[a-z0-9][a-z0-9_-]*(?:\\.[a-z0-9][a-z0-9_-]*)+$"
     },
     "permissions": {
       "type": "array",
       "items": {
         "type": "string",
         "enum": [
-          "project_files", "network", "subprocess", "environment",
-          "accelerator", "external_services"
+          "project_files",
+          "network",
+          "subprocess",
+          "environment",
+          "accelerator",
+          "external_services"
         ]
       },
       "uniqueItems": true
@@ -69,30 +130,60 @@
       "properties": {
         "clip_types": {
           "type": "array",
-          "items": {"type": "string", "minLength": 1},
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
           "uniqueItems": true
         },
         "track_types": {
           "type": "array",
-          "items": {"type": "string", "minLength": 1},
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
           "uniqueItems": true
         },
         "features": {
           "type": "object",
           "additionalProperties": {
-            "oneOf": [{"type": "boolean"}, {"type": "string"}]
+            "oneOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "string"
+              }
+            ]
           }
         },
-        "supports_full_timeline": {"type": "boolean"},
-        "supports_windows": {"type": "boolean"},
+        "supports_full_timeline": {
+          "type": "boolean"
+        },
+        "supports_windows": {
+          "type": "boolean"
+        },
         "output_profiles": {
           "type": "array",
-          "items": {"type": "string", "minLength": 1},
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
           "uniqueItems": true
         },
         "audio_ownership": {
           "type": "array",
-          "items": {"type": "string", "enum": ["rendered", "passthrough", "none"]},
+          "items": {
+            "type": "string",
+            "enum": [
+              "rendered",
+              "passthrough",
+              "none"
+            ]
+          },
           "uniqueItems": true
         }
       },
@@ -106,22 +197,46 @@
       "name": "Acme Example Renderer",
       "version": "1.0.0",
       "protocol_version": 1,
-      "command": ["python3", "render.py"],
-      "operations": ["render", "support"],
+      "command": [
+        "python3",
+        "render.py"
+      ],
+      "operations": [
+        "render",
+        "support"
+      ],
       "description": "Deterministic example renderer",
       "capabilities": {
-        "clip_types": ["media"],
-        "track_types": ["visual"],
-        "features": {"transitions": false},
+        "clip_types": [
+          "media"
+        ],
+        "track_types": [
+          "visual"
+        ],
+        "features": {
+          "transitions": false
+        },
         "supports_full_timeline": true,
         "supports_windows": true,
-        "output_profiles": ["video/mp4"],
-        "audio_ownership": ["passthrough", "none"]
+        "output_profiles": [
+          "video/mp4"
+        ],
+        "audio_ownership": [
+          "passthrough",
+          "none"
+        ]
       },
-      "required_permissions": ["project_files", "subprocess"],
-      "required_binaries": ["ffmpeg"],
+      "required_permissions": [
+        "project_files",
+        "subprocess"
+      ],
+      "required_binaries": [
+        "ffmpeg"
+      ],
       "timeout_seconds": 300,
-      "metadata": {"vendor": "Acme"}
+      "metadata": {
+        "vendor": "Acme"
+      }
     }
   ]
 }

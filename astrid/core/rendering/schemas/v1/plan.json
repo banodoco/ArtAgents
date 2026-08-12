@@ -6,132 +6,313 @@
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "schema_version", "request_digest", "requested_policy", "planner", "segments",
-    "finalizer", "profile", "total_frames", "reasons", "window"
+    "schema_version",
+    "request_digest",
+    "requested_policy",
+    "planner",
+    "segments",
+    "finalizer",
+    "profile",
+    "total_frames",
+    "reasons",
+    "window"
   ],
   "properties": {
-    "schema_version": {"type": "integer", "const": 1},
-    "request_digest": {"$ref": "#/definitions/sha256"},
-    "requested_policy": {"$ref": "#/definitions/requestedPolicy"},
-    "planner": {"$ref": "#/definitions/plannerResolution"},
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "request_digest": {
+      "$ref": "#/definitions/sha256"
+    },
+    "requested_policy": {
+      "$ref": "#/definitions/requestedPolicy"
+    },
+    "planner": {
+      "$ref": "#/definitions/plannerResolution"
+    },
     "segments": {
       "type": "array",
-      "items": {"$ref": "#/definitions/renderSegment"}
+      "items": {
+        "$ref": "#/definitions/renderSegment"
+      }
     },
-    "finalizer": {"$ref": "#/definitions/finalizerResolution"},
-    "profile": {"$ref": "#/definitions/renderProfile"},
-    "total_frames": {"type": "integer", "minimum": 0},
+    "finalizer": {
+      "$ref": "#/definitions/finalizerResolution"
+    },
+    "profile": {
+      "$ref": "#/definitions/renderProfile"
+    },
+    "total_frames": {
+      "type": "integer",
+      "minimum": 0
+    },
     "reasons": {
       "type": "object",
-      "propertyNames": {"pattern": "^(0|[1-9][0-9]*)$"},
-      "additionalProperties": {"type": "string", "minLength": 1}
+      "propertyNames": {
+        "pattern": "^(0|[1-9][0-9]*)$"
+      },
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "\\S"
+      }
     },
     "window": {
       "anyOf": [
-        {"$ref": "#/definitions/frameWindow"},
-        {"type": "null"}
+        {
+          "$ref": "#/definitions/frameWindow"
+        },
+        {
+          "type": "null"
+        }
       ]
     }
   },
   "allOf": [
     {
-      "if": {"properties": {"total_frames": {"const": 0}}},
-      "then": {
+      "if": {
         "properties": {
-          "segments": {"maxItems": 0},
-          "reasons": {"maxProperties": 0},
-          "window": {"type": "null"}
+          "total_frames": {
+            "const": 0
+          }
         }
       },
-      "else": {"properties": {"segments": {"minItems": 1}}}
+      "then": {
+        "properties": {
+          "segments": {
+            "maxItems": 0
+          },
+          "reasons": {
+            "maxProperties": 0
+          },
+          "window": {
+            "type": "null"
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "segments": {
+            "minItems": 1
+          }
+        }
+      }
     }
   ],
   "definitions": {
     "qualifiedId": {
       "type": "string",
-      "pattern": "^[a-z0-9][a-z0-9-]*(?:\\.[a-z0-9][a-z0-9-]*)+$"
+      "pattern": "^[a-z0-9][a-z0-9_-]*(?:\\.[a-z0-9][a-z0-9_-]*)+$"
     },
-    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
     "requestedPolicy": {
       "oneOf": [
-        {"type": "string", "minLength": 1},
-        {"type": "object"}
+        {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        {
+          "type": "object"
+        }
       ]
     },
     "audioOwnership": {
       "type": "string",
-      "enum": ["rendered", "passthrough", "none"]
+      "enum": [
+        "rendered",
+        "passthrough",
+        "none"
+      ]
     },
     "positiveRational": {
       "type": "array",
       "minItems": 2,
       "maxItems": 2,
-      "items": {"type": "integer", "minimum": 1}
+      "items": {
+        "type": "integer",
+        "minimum": 1
+      }
     },
     "frameRange": {
       "type": "array",
       "minItems": 2,
       "maxItems": 2,
       "items": [
-        {"type": "integer", "minimum": 0},
-        {"type": "integer", "minimum": 1}
+        {
+          "type": "integer",
+          "minimum": 0
+        },
+        {
+          "type": "integer",
+          "minimum": 1
+        }
       ],
       "additionalItems": false
     },
     "frameWindow": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["start_frame", "end_frame", "fps_rational"],
+      "required": [
+        "start_frame",
+        "end_frame",
+        "fps_rational"
+      ],
       "properties": {
-        "start_frame": {"type": "integer", "minimum": 0},
-        "end_frame": {"type": "integer", "minimum": 1},
-        "fps_rational": {"$ref": "#/definitions/positiveRational"},
+        "start_frame": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "end_frame": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "fps_rational": {
+          "$ref": "#/definitions/positiveRational"
+        },
         "source_range": {
           "anyOf": [
-            {"$ref": "#/definitions/frameRange"},
-            {"type": "null"}
+            {
+              "$ref": "#/definitions/frameRange"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
-        "speed": {"type": ["number", "null"], "exclusiveMinimum": 0}
+        "speed": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "exclusiveMinimum": 0
+        }
       }
     },
     "renderProfile": {
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "width", "height", "fps_rational", "time_base", "container",
-        "video_codec", "video_profile", "video_level", "pixel_format",
+        "width",
+        "height",
+        "fps_rational",
+        "time_base",
+        "container",
+        "video_codec",
+        "video_profile",
+        "video_level",
+        "pixel_format",
         "duration_tolerance"
       ],
       "properties": {
-        "width": {"type": "integer", "minimum": 1},
-        "height": {"type": "integer", "minimum": 1},
-        "fps_rational": {"$ref": "#/definitions/positiveRational"},
-        "time_base": {"$ref": "#/definitions/positiveRational"},
-        "container": {"type": "string", "minLength": 1},
-        "video_codec": {"type": "string", "minLength": 1},
-        "video_profile": {"type": ["string", "null"], "minLength": 1},
-        "video_level": {"type": ["string", "null"], "minLength": 1},
-        "pixel_format": {"type": "string", "minLength": 1},
-        "audio_codec": {"type": ["string", "null"], "minLength": 1},
-        "audio_sample_rate": {"type": ["integer", "null"], "minimum": 1},
-        "audio_channel_layout": {"type": ["string", "null"], "minLength": 1},
-        "duration_tolerance": {"type": "integer", "minimum": 0}
+        "width": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "fps_rational": {
+          "$ref": "#/definitions/positiveRational"
+        },
+        "time_base": {
+          "$ref": "#/definitions/positiveRational"
+        },
+        "container": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        "video_codec": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        "video_profile": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "video_level": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "pixel_format": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        "audio_codec": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "audio_sample_rate": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "audio_channel_layout": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "duration_tolerance": {
+          "type": "integer",
+          "minimum": 0
+        }
       },
       "oneOf": [
         {
           "properties": {
-            "audio_codec": {"type": "null"},
-            "audio_sample_rate": {"type": "null"},
-            "audio_channel_layout": {"type": "null"}
+            "audio_codec": {
+              "type": "null"
+            },
+            "audio_sample_rate": {
+              "type": "null"
+            },
+            "audio_channel_layout": {
+              "type": "null"
+            }
           }
         },
         {
-          "required": ["audio_codec", "audio_sample_rate", "audio_channel_layout"],
+          "required": [
+            "audio_codec",
+            "audio_sample_rate",
+            "audio_channel_layout"
+          ],
           "properties": {
-            "audio_codec": {"type": "string", "minLength": 1},
-            "audio_sample_rate": {"type": "integer", "minimum": 1},
-            "audio_channel_layout": {"type": "string", "minLength": 1}
+            "audio_codec": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "\\S"
+            },
+            "audio_sample_rate": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "audio_channel_layout": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "\\S"
+            }
           }
         }
       ]
@@ -140,79 +321,199 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "schema_version", "supported", "reasons", "features", "alternatives",
-        "backend", "backend_version"
+        "schema_version",
+        "supported",
+        "reasons",
+        "features",
+        "alternatives",
+        "backend",
+        "backend_version"
       ],
       "properties": {
-        "schema_version": {"type": "integer", "const": 1},
-        "supported": {"type": "boolean"},
-        "reasons": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "schema_version": {
+          "type": "integer",
+          "const": 1
+        },
+        "supported": {
+          "type": "boolean"
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          }
+        },
         "features": {
           "type": "object",
-          "additionalProperties": {"type": ["boolean", "string"]}
+          "additionalProperties": {
+            "type": [
+              "boolean",
+              "string"
+            ]
+          }
         },
         "alternatives": {
           "type": "array",
           "uniqueItems": true,
-          "items": {"$ref": "#/definitions/qualifiedId"}
+          "items": {
+            "$ref": "#/definitions/qualifiedId"
+          }
         },
-        "backend": {"$ref": "#/definitions/qualifiedId"},
-        "backend_version": {"type": ["string", "null"], "minLength": 1}
+        "backend": {
+          "$ref": "#/definitions/qualifiedId"
+        },
+        "backend_version": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        }
       }
     },
     "plannerResolution": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "source_pack", "manifest_digest", "trust_eligibility"],
+      "required": [
+        "id",
+        "source_pack",
+        "manifest_digest",
+        "trust_eligibility"
+      ],
       "properties": {
-        "id": {"$ref": "#/definitions/qualifiedId"},
-        "source_pack": {"type": "object"},
-        "manifest_digest": {"$ref": "#/definitions/sha256"},
-        "trust_eligibility": {"type": "object"}
+        "id": {
+          "$ref": "#/definitions/qualifiedId"
+        },
+        "source_pack": {
+          "type": "object"
+        },
+        "manifest_digest": {
+          "$ref": "#/definitions/sha256"
+        },
+        "trust_eligibility": {
+          "type": "object"
+        },
+        "alias_chain": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "override": {
+          "anyOf": [
+            {
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
       }
     },
     "rendererResolution": {
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "id", "source_pack", "manifest_digest", "alias_chain", "override",
+        "id",
+        "source_pack",
+        "manifest_digest",
+        "alias_chain",
+        "override",
         "support_decision"
       ],
       "properties": {
-        "id": {"$ref": "#/definitions/qualifiedId"},
-        "source_pack": {"type": "object"},
-        "manifest_digest": {"$ref": "#/definitions/sha256"},
+        "id": {
+          "$ref": "#/definitions/qualifiedId"
+        },
+        "source_pack": {
+          "type": "object"
+        },
+        "manifest_digest": {
+          "$ref": "#/definitions/sha256"
+        },
         "alias_chain": {
           "type": "array",
           "uniqueItems": true,
-          "items": {"type": "string", "minLength": 1}
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          }
         },
-        "override": {"type": ["object", "null"]},
-        "support_decision": {"$ref": "#/definitions/supportReport"}
+        "override": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "support_decision": {
+          "$ref": "#/definitions/supportReport"
+        }
       }
     },
     "finalizerResolution": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "source_pack", "manifest_digest"],
+      "required": [
+        "id",
+        "source_pack",
+        "manifest_digest"
+      ],
       "properties": {
-        "id": {"$ref": "#/definitions/qualifiedId"},
-        "source_pack": {"type": "object"},
-        "manifest_digest": {"$ref": "#/definitions/sha256"}
+        "id": {
+          "$ref": "#/definitions/qualifiedId"
+        },
+        "source_pack": {
+          "type": "object"
+        },
+        "manifest_digest": {
+          "$ref": "#/definitions/sha256"
+        },
+        "alias_chain": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "override": {
+          "anyOf": [
+            {
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
       }
     },
     "hashMap": {
       "type": "object",
-      "additionalProperties": {"$ref": "#/definitions/sha256"}
+      "additionalProperties": {
+        "$ref": "#/definitions/sha256"
+      }
     },
     "renderSegment": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["window", "renderer", "input_hashes"],
+      "required": [
+        "window",
+        "renderer",
+        "input_hashes"
+      ],
       "properties": {
-        "window": {"$ref": "#/definitions/frameWindow"},
-        "renderer": {"$ref": "#/definitions/rendererResolution"},
-        "input_hashes": {"$ref": "#/definitions/hashMap"}
+        "window": {
+          "$ref": "#/definitions/frameWindow"
+        },
+        "renderer": {
+          "$ref": "#/definitions/rendererResolution"
+        },
+        "input_hashes": {
+          "$ref": "#/definitions/hashMap"
+        }
       }
     }
   },
@@ -222,31 +523,49 @@
       "request_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
       "requested_policy": "hybrid",
       "planner": {
-        "id": "rendering.legacy-hybrid",
-        "source_pack": {"id": "rendering"},
+        "id": "rendering.legacy_hybrid",
+        "source_pack": {
+          "id": "rendering"
+        },
         "manifest_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-        "trust_eligibility": {"eligible": true}
+        "trust_eligibility": {
+          "eligible": true
+        }
       },
       "segments": [
         {
           "window": {
             "start_frame": 0,
             "end_frame": 48,
-            "fps_rational": [24, 1],
-            "source_range": [10, 58],
+            "fps_rational": [
+              24,
+              1
+            ],
+            "source_range": [
+              10,
+              58
+            ],
             "speed": 1.0
           },
           "renderer": {
             "id": "acme.example",
-            "source_pack": {"id": "acme"},
+            "source_pack": {
+              "id": "acme"
+            },
             "manifest_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-            "alias_chain": ["example", "acme.example"],
+            "alias_chain": [
+              "example",
+              "acme.example"
+            ],
             "override": null,
             "support_decision": {
               "schema_version": 1,
               "supported": true,
               "reasons": [],
-              "features": {"media": true, "audio_mode": "rendered"},
+              "features": {
+                "media": true,
+                "audio_mode": "rendered"
+              },
               "alternatives": [],
               "backend": "acme.example",
               "backend_version": "1.0.0"
@@ -259,14 +578,24 @@
       ],
       "finalizer": {
         "id": "rendering.ffmpeg-finalizer",
-        "source_pack": {"id": "rendering"},
-        "manifest_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        "source_pack": {
+          "id": "rendering"
+        },
+        "manifest_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "alias_chain": [],
+        "override": null
       },
       "profile": {
         "width": 1920,
         "height": 1080,
-        "fps_rational": [24, 1],
-        "time_base": [1, 12288],
+        "fps_rational": [
+          24,
+          1
+        ],
+        "time_base": [
+          1,
+          12288
+        ],
         "container": "mp4",
         "video_codec": "h264",
         "video_profile": "high",
@@ -278,7 +607,9 @@
         "duration_tolerance": 1
       },
       "total_frames": 48,
-      "reasons": {"0": "the request is supported"},
+      "reasons": {
+        "0": "the request is supported"
+      },
       "window": null
     },
     {
@@ -286,22 +617,36 @@
       "request_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
       "requested_policy": "hybrid",
       "planner": {
-        "id": "rendering.legacy-hybrid",
-        "source_pack": {"id": "rendering"},
+        "id": "rendering.legacy_hybrid",
+        "source_pack": {
+          "id": "rendering"
+        },
         "manifest_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-        "trust_eligibility": {"eligible": true}
+        "trust_eligibility": {
+          "eligible": true
+        }
       },
       "segments": [],
       "finalizer": {
         "id": "rendering.ffmpeg-finalizer",
-        "source_pack": {"id": "rendering"},
-        "manifest_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        "source_pack": {
+          "id": "rendering"
+        },
+        "manifest_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "alias_chain": [],
+        "override": null
       },
       "profile": {
         "width": 1920,
         "height": 1080,
-        "fps_rational": [24, 1],
-        "time_base": [1, 12288],
+        "fps_rational": [
+          24,
+          1
+        ],
+        "time_base": [
+          1,
+          12288
+        ],
         "container": "mp4",
         "video_codec": "h264",
         "video_profile": null,

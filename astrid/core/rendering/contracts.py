@@ -17,6 +17,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, ClassVar, Literal, NoReturn, TypeAlias
 
 from astrid.core.foundation.hash import sha256_file
+from astrid.core.io.cas import canonical_json_digest
 
 
 SCHEMA_VERSION = 1
@@ -32,7 +33,7 @@ RendererErrorKind: TypeAlias = Literal[
     "internal",
 ]
 
-_QUALIFIED_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*(?:\.[a-z0-9][a-z0-9-]*)+$")
+_QUALIFIED_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*(?:\.[a-z0-9][a-z0-9_-]*)+$")
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _OUTPUT_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _KIND_RE = re.compile(r"^[a-z][a-z0-9-]*$")
@@ -60,6 +61,7 @@ PROVENANCE_V2_CORE_KEYS = frozenset(
         "requested_policy",
         "planner",
         "segments",
+        "segments_v2",
         "artifact_profiles",
         "audio_ownership",
         "normalization",
@@ -200,6 +202,16 @@ def _require_number(value: Any, label: str, *, exclusive_minimum: float | None =
     if exclusive_minimum is not None and number <= exclusive_minimum:
         raise ValueError(f"{label} must be > {exclusive_minimum:g}")
     return number
+
+
+def compute_request_digest(request: Mapping[str, Any]) -> str:
+    """Deterministic SHA-256 of a canonical, JSON-normalized render request.
+
+    Uses sorted keys and compact separators so the digest is stable across
+    Python versions and dict insertion orders; replay verifies the request
+    against this digest.
+    """
+    return canonical_json_digest(_json_safe_mapping(request, label="render request"))
 
 
 def _require_string(value: Any, label: str, *, allow_empty: bool = False) -> str:
@@ -966,6 +978,8 @@ class PlannerResolution:
     source_pack: dict[str, Any]
     manifest_digest: str
     trust_eligibility: dict[str, Any]
+    alias_chain: list[str] = field(default_factory=list)
+    override: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "id", _require_qualified_id(self.id, "planner id"))
@@ -987,6 +1001,20 @@ class PlannerResolution:
                 label="planner trust_eligibility",
             ),
         )
+        object.__setattr__(
+            self,
+            "alias_chain",
+            [
+                _require_string(item, f"planner alias_chain[{index}]")
+                for index, item in enumerate(self.alias_chain)
+            ],
+        )
+        if self.override is not None:
+            object.__setattr__(
+                self,
+                "override",
+                _json_safe_mapping(self.override, label="planner override"),
+            )
 
     def to_dict(self) -> dict[str, Any]:
         return _json_safe_mapping(
@@ -1002,12 +1030,15 @@ class PlannerResolution:
     def from_dict(cls, payload: Mapping[str, Any]) -> PlannerResolution:
         data = _require_mapping(payload, "planner resolution")
         required = {"id", "source_pack", "manifest_digest", "trust_eligibility"}
-        _validate_object_keys(data, required=required, allowed=required, label="planner resolution")
+        allowed = required | {"alias_chain", "override"}
+        _validate_object_keys(data, required=required, allowed=allowed, label="planner resolution")
         return cls(
             id=data["id"],
             source_pack=data["source_pack"],
             manifest_digest=data["manifest_digest"],
             trust_eligibility=data["trust_eligibility"],
+            alias_chain=data.get("alias_chain", []),
+            override=data.get("override"),
         )
 
 
@@ -1101,6 +1132,8 @@ class FinalizerResolution:
     id: str
     source_pack: dict[str, Any]
     manifest_digest: str
+    alias_chain: list[str] = field(default_factory=list)
+    override: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "id", _require_qualified_id(self.id, "finalizer id"))
@@ -1114,6 +1147,20 @@ class FinalizerResolution:
             "manifest_digest",
             _require_sha256(self.manifest_digest, "finalizer manifest_digest"),
         )
+        object.__setattr__(
+            self,
+            "alias_chain",
+            [
+                _require_string(item, f"finalizer alias_chain[{index}]")
+                for index, item in enumerate(self.alias_chain)
+            ],
+        )
+        if self.override is not None:
+            object.__setattr__(
+                self,
+                "override",
+                _json_safe_mapping(self.override, label="finalizer override"),
+            )
 
     def to_dict(self) -> dict[str, Any]:
         return _json_safe_mapping(
@@ -1121,6 +1168,8 @@ class FinalizerResolution:
                 "id": self.id,
                 "source_pack": self.source_pack,
                 "manifest_digest": self.manifest_digest,
+                "alias_chain": list(self.alias_chain),
+                "override": self.override,
             }
         )
 
@@ -1128,11 +1177,14 @@ class FinalizerResolution:
     def from_dict(cls, payload: Mapping[str, Any]) -> FinalizerResolution:
         data = _require_mapping(payload, "finalizer resolution")
         required = {"id", "source_pack", "manifest_digest"}
-        _validate_object_keys(data, required=required, allowed=required, label="finalizer resolution")
+        allowed = required | {"alias_chain", "override"}
+        _validate_object_keys(data, required=required, allowed=allowed, label="finalizer resolution")
         return cls(
             id=data["id"],
             source_pack=data["source_pack"],
             manifest_digest=data["manifest_digest"],
+            alias_chain=data.get("alias_chain", []),
+            override=data.get("override"),
         )
 
 
@@ -2022,6 +2074,7 @@ __all__ = [
     "Attachment",
     "AudioOwnership",
     "BackendConfig",
+    "compute_request_digest",
     "FinalizeRequest",
     "FinalizerResolution",
     "FinalizerManifest",
