@@ -18,6 +18,8 @@ import os
 import subprocess
 from pathlib import Path
 
+import pytest
+
 _STABLE_LANE_KEYS = frozenset(
     {
         "baselines",
@@ -31,6 +33,7 @@ _STABLE_LANE_KEYS = frozenset(
 )
 
 
+@pytest.mark.timeout(1500)
 def test_ci_json_stdout_is_pure_json_and_contract_matches() -> None:
     """Run run_ci_checks.sh --json, capture stdout/stderr separately,
     and assert the JSON contract (keys, per-lane shape, exit/ok invariant)."""
