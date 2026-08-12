@@ -38,7 +38,7 @@
     },
     "output_name": {
       "type": "string",
-      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*\\Z",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*(?![\\s\\S])",
       "not": {
         "enum": [
           ".",
@@ -56,20 +56,20 @@
   "definitions": {
     "qualifiedId": {
       "type": "string",
-      "pattern": "^[a-z0-9][a-z0-9_-]*(?:\\.[a-z0-9][a-z0-9_-]*)+\\Z"
+      "pattern": "^[a-z0-9][a-z0-9_-]*(?:\\.[a-z0-9][a-z0-9_-]*)+(?![\\s\\S])"
     },
     "sha256": {
       "type": "string",
-      "pattern": "^[0-9a-f]{64}\\Z"
+      "pattern": "^[0-9a-f]{64}(?![\\s\\S])"
     },
     "workspacePath": {
       "type": "string",
       "minLength": 1,
-      "pattern": "^(?![A-Za-z]:)(?!/)(?!\\.{1,2}(?:/|$))(?![\\s\\S]*?/\\.{1,2}(?:/|$))(?![\\s\\S]*//)(?![\\s\\S]*\\\\)(?![\\s\\S]*\\u0000)(?![\\s\\S]*/$)[\\s\\S]*\\S[\\s\\S]*\\Z"
+      "pattern": "^(?![A-Za-z]:)(?!/)(?![\\s\\S]*//)(?![\\.]{1,2}(?:/|(?![\\s\\S])))(?![\\s\\S]*/[\\.]{1,2}(?:/|(?![\\s\\S])))(?![\\s\\S]*/[ \\t\\r\\n]*(?:/|(?![\\s\\S])))(?![\\s\\S]*\\\\)(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*(?![\\s\\S])"
     },
     "portableName": {
       "type": "string",
-      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*\\Z",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*(?![\\s\\S])",
       "not": {
         "enum": [
           ".",
@@ -82,7 +82,7 @@
         {
           "type": "string",
           "minLength": 1,
-          "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*\\Z"
+          "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*(?![\\s\\S])"
         },
         {
           "type": "object"
@@ -194,12 +194,12 @@
         "container": {
           "type": "string",
           "minLength": 1,
-          "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*\\Z"
+          "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*(?![\\s\\S])"
         },
         "video_codec": {
           "type": "string",
           "minLength": 1,
-          "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*\\Z"
+          "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*(?![\\s\\S])"
         },
         "video_profile": {
           "type": [
@@ -207,7 +207,7 @@
             "null"
           ],
           "minLength": 1,
-          "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*\\Z"
+          "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*(?![\\s\\S])"
         },
         "video_level": {
           "type": [
@@ -215,12 +215,12 @@
             "null"
           ],
           "minLength": 1,
-          "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*\\Z"
+          "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*(?![\\s\\S])"
         },
         "pixel_format": {
           "type": "string",
           "minLength": 1,
-          "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*\\Z"
+          "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*(?![\\s\\S])"
         },
         "audio_codec": {
           "type": [
@@ -228,7 +228,7 @@
             "null"
           ],
           "minLength": 1,
-          "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*\\Z"
+          "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*(?![\\s\\S])"
         },
         "audio_sample_rate": {
           "type": [
@@ -243,7 +243,7 @@
             "null"
           ],
           "minLength": 1,
-          "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*\\Z"
+          "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*(?![\\s\\S])"
         },
         "duration_tolerance": {
           "type": "integer",
@@ -274,7 +274,7 @@
             "audio_codec": {
               "type": "string",
               "minLength": 1,
-              "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*\\Z"
+              "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*(?![\\s\\S])"
             },
             "audio_sample_rate": {
               "type": "integer",
@@ -283,7 +283,7 @@
             "audio_channel_layout": {
               "type": "string",
               "minLength": 1,
-              "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*\\Z"
+              "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*(?![\\s\\S])"
             }
           }
         }
@@ -314,7 +314,7 @@
           "items": {
             "type": "string",
             "minLength": 1,
-            "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*\\Z"
+            "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*(?![\\s\\S])"
           }
         },
         "features": {
@@ -326,7 +326,7 @@
             ]
           },
           "propertyNames": {
-            "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*\\Z"
+            "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*(?![\\s\\S])"
           }
         },
         "alternatives": {
@@ -345,7 +345,7 @@
             "null"
           ],
           "minLength": 1,
-          "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*\\Z"
+          "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*(?![\\s\\S])"
         }
       }
     },
@@ -378,7 +378,7 @@
           "type": "array",
           "items": {
             "type": "string",
-            "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*\\Z"
+            "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*(?![\\s\\S])"
           }
         },
         "override": {
@@ -431,7 +431,7 @@
           "items": {
             "type": "string",
             "minLength": 1,
-            "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*\\Z"
+            "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*(?![\\s\\S])"
           }
         },
         "override": {
@@ -478,7 +478,7 @@
           "type": "array",
           "items": {
             "type": "string",
-            "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*\\Z"
+            "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*(?![\\s\\S])"
           }
         },
         "override": {
@@ -512,7 +512,7 @@
         "$ref": "#/definitions/sha256"
       },
       "propertyNames": {
-        "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*\\Z"
+        "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*(?![\\s\\S])"
       }
     },
     "renderSegment": {
@@ -583,12 +583,12 @@
         "reasons": {
           "type": "object",
           "propertyNames": {
-            "pattern": "^(0|[1-9][0-9]*)\\Z"
+            "pattern": "^(0|[1-9][0-9]*)(?![\\s\\S])"
           },
           "additionalProperties": {
             "type": "string",
             "minLength": 1,
-            "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*\\Z"
+            "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*(?![\\s\\S])"
           }
         },
         "window": {
@@ -652,7 +652,7 @@
         },
         "kind": {
           "type": "string",
-          "pattern": "^[a-z][a-z0-9-]*\\Z"
+          "pattern": "^[a-z][a-z0-9-]*(?![\\s\\S])"
         },
         "sha256": {
           "$ref": "#/definitions/sha256"
@@ -716,7 +716,7 @@
                 "properties": {
                   "audio_codec": {
                     "type": "string",
-                    "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*\\Z"
+                    "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*(?![\\s\\S])"
                   }
                 }
               }
@@ -758,11 +758,11 @@
     "stringMap": {
       "type": "object",
       "propertyNames": {
-        "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*\\Z"
+        "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*(?![\\s\\S])"
       },
       "additionalProperties": {
         "type": "string",
-        "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*\\Z"
+        "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*(?![\\s\\S])"
       }
     },
     "overrideRecord": {

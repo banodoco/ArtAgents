@@ -564,18 +564,22 @@ def test_provenance_v2_preserves_lineage_and_derives_legacy_segments(tmp_path: P
         "timeline": "/workspace/timeline.json",
         "assets_registry": "/workspace/assets.json",
         "plan": plan,
-        "artifact_profiles": {
-            "outputs/video.mp4": {
-                "profile": _profile(),
-                "sha256": SHA_B,
-                "attachments": {},
-            },
-            "outputs/segment2.mp4": {
-                "profile": _profile(),
-                "sha256": SHA_C,
-                "attachments": {},
-            },
-        },
+        "artifact_profiles": [
+            VideoArtifact(
+                path="outputs/video.mp4",
+                profile=_profile(),
+                sha256=SHA_B,
+                duration_frames=24,
+                audio=AudioOwnership.RENDERED,
+            ),
+            VideoArtifact(
+                path="outputs/segment2.mp4",
+                profile=_profile(),
+                sha256=SHA_C,
+                duration_frames=24,
+                audio=AudioOwnership.RENDERED,
+            ),
+        ],
         "audio_ownership": AudioOwnership.RENDERED,
         "normalization": [],
         "attachments": {},
@@ -694,18 +698,22 @@ def test_resolution_evidence_survives_plan_round_trip_and_provenance() -> None:
         timeline="/workspace/timeline.json",
         assets_registry=None,
         plan=plan,
-        artifact_profiles={
-            "outputs/visual.mp4": {
-                "profile": _profile(),
-                "sha256": SHA_B,
-                "attachments": {},
-            },
-            "outputs/segment2.mp4": {
-                "profile": _profile(),
-                "sha256": SHA_C,
-                "attachments": {},
-            }
-        },
+        artifact_profiles=[
+            VideoArtifact(
+                path="outputs/visual.mp4",
+                profile=_profile(),
+                sha256=SHA_B,
+                duration_frames=24,
+                audio=AudioOwnership.RENDERED,
+            ),
+            VideoArtifact(
+                path="outputs/segment2.mp4",
+                profile=_profile(),
+                sha256=SHA_C,
+                duration_frames=24,
+                audio=AudioOwnership.RENDERED,
+            ),
+        ],
         audio_ownership="rendered",
         normalization=[],
         attachments={},
@@ -865,13 +873,15 @@ def test_provenance_rejects_spoofed_artifact_lineage() -> None:
             plan=_plan(
                 segments=[_segment(0, 24), _segment(24, 48)]
             ),
-            artifact_profiles={
-                "out/v.mp4": {
-                    "profile": _profile(),
-                    "sha256": SHA_B,
-                    "attachments": {},
-                }
-            },
+            artifact_profiles=[
+                VideoArtifact(
+                    path="outputs/v.mp4",
+                    profile=_profile(),
+                    sha256=SHA_B,
+                    duration_frames=24,
+                    audio=AudioOwnership.RENDERED,
+                )
+            ],
         )
     with pytest.raises(ValueError, match="attachment path"):
         assemble_provenance_v2(
@@ -928,22 +938,38 @@ def test_provenance_rejects_spoofed_artifact_lineage() -> None:
             plan=_plan(
                 segments=[_segment(0, 24), _segment(24, 48)]
             ),
-            artifact_profiles={
-                "out/v1.mp4": {
-                    "profile": _profile(),
-                    "sha256": SHA_B,
-                    "attachments": {
-                        "alpha": {"path": "outputs/a.mp4", "kind": "alpha", "sha256": SHA_C}
+            artifact_profiles=[
+                VideoArtifact(
+                    path="outputs/v1.mp4",
+                    profile=_profile(),
+                    sha256=SHA_B,
+                    duration_frames=24,
+                    audio=AudioOwnership.RENDERED,
+                    attachments={
+                        "alpha": Attachment(
+                            name="alpha",
+                            path="outputs/a.mp4",
+                            kind="alpha",
+                            sha256=SHA_C,
+                        )
                     },
-                },
-                "out/v2.mp4": {
-                    "profile": _profile(),
-                    "sha256": SHA_D,
-                    "attachments": {
-                        "alpha": {"path": "outputs/a2.mp4", "kind": "alpha", "sha256": SHA_C}
+                ),
+                VideoArtifact(
+                    path="outputs/v2.mp4",
+                    profile=_profile(),
+                    sha256=SHA_D,
+                    duration_frames=24,
+                    audio=AudioOwnership.RENDERED,
+                    attachments={
+                        "alpha": Attachment(
+                            name="alpha",
+                            path="outputs/a2.mp4",
+                            kind="alpha",
+                            sha256=SHA_C,
+                        )
                     },
-                },
-            },
+                ),
+            ],
         )
     with pytest.raises(ValueError, match="workspace path"):
         assemble_provenance_v2(
@@ -961,6 +987,16 @@ def test_provenance_rejects_spoofed_artifact_lineage() -> None:
                 VideoArtifact(path="outputs/a.mp4", profile=_profile(audio=False), sha256=SHA_B, duration_frames=48),
                 VideoArtifact(path="outputs/a.mp4", profile=_profile(audio=False), sha256=SHA_C, duration_frames=48),
             ],
+        )
+    # A mutated RenderPlan instance is reconstructed at the boundary, so
+    # clearing its segments cannot bypass the positive-plan invariant.
+    with pytest.raises(RendererProtocolError, match="positive-frame plan"):
+        positive = _plan()
+        object.__setattr__(positive, "segments", [])
+        assemble_provenance_v2(
+            **base,
+            plan=positive,
+            artifact_profiles=[],
         )
 
 

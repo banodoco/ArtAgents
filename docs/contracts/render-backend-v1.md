@@ -476,19 +476,19 @@ distinct source pack, manifest, alias/override, support, and input-hash evidence
 for every renderer invocation. Planner and finalizer records carry the same
 alias/override/trust/support evidence as renderer records. Rendered artifacts
 are REQUIRED in `artifact_profiles` for any positive render plan: exactly one
-hashed lineage entry PER SEGMENT, each keyed by a workspace-relative output
-path with exactly `{profile, sha256, attachments}` and a validated 64-hex
-string `sha256` on the artifact and every attachment `{path, kind, sha256}`.
-Sequence form preserves segment order (a path-keyed list) and rejects
-duplicate paths; mapping form requires path keys to equal the artifact's own
-path. Attachment paths must be workspace-relative, kinds must match
-`[a-z][a-z0-9-]*`, attachment map keys must equal the attachment's own name,
-and attachment names must be unique ACROSS all segment artifacts. Profile-only
-entries, null/malformed hashes, unknown or missing fields, path escapes,
-invalid kinds, duplicate paths, duplicate attachment names, and cardinality
-mismatches are all rejected; all Attachment and RenderProfile values are
-reconstructed through their DTO validators. Replay can verify rendered outputs
-byte-for-byte. `input_hashes` describe inputs only, never rendered outputs.
+hashed lineage entry PER SEGMENT. Multi-segment plans MUST use the ordered
+sequence form (one VideoArtifact per segment); single-segment plans may use a
+path-keyed mapping. Every record carries its `path`, `profile`, a validated
+64-hex string `sha256`, and `attachments` — each attachment `{path, kind,
+sha256}` with a workspace-relative path, kind matching `[a-z][a-z0-9-]*`, and
+globally unique names across all segment artifacts. All plan, artifact, and
+attachment values are reconstructed through their DTO validators at the
+provenance boundary (mutated frozen instances cannot bypass validation);
+duplicate paths, duplicate attachment names, path escapes, invalid kinds,
+profile-only entries, null/malformed hashes, and cardinality mismatches are
+rejected. All JSON Schema patterns are language-neutral (ECMAScript-valid;
+no Python-only anchors). Replay can verify rendered outputs byte-for-byte.
+`input_hashes` describe inputs only, never rendered outputs.
 
 `engine` is only the legacy request projection. The `segments` key keeps the
 V1-compatible flat projection: one `{engine, from, to}` entry per segment,

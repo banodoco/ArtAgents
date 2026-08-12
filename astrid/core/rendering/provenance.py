@@ -108,6 +108,11 @@ def _normalize_artifact_profiles(value: Any, *, segments: Sequence[Any]) -> Any:
     if value is None:
         value = {}
     if isinstance(value, Mapping):
+        if segments and len(segments) > 1:
+            raise TypeError(
+                "mapping-form artifact_profiles is unordered; use sequence form "
+                "(ordered VideoArtifacts, one per segment) for multi-segment plans"
+            )
         result: dict[str, Any] = {}
         seen_attachment_names: set[str] = set()
         for key, profile in value.items():
@@ -169,11 +174,11 @@ def _normalize_artifact_profiles(value: Any, *, segments: Sequence[Any]) -> Any:
 
 def _artifact_lineage_from_mapping(raw: Mapping[str, Any], *, key: str) -> dict[str, Any]:
     raw_keys = set(raw)
-    allowed = {"profile", "sha256", "attachments"}
+    allowed = {"profile", "sha256", "attachments", "path"}
     unknown = sorted(raw_keys - allowed)
     if unknown:
         raise ValueError(f"artifact lineage has unknown fields: {', '.join(unknown)}")
-    missing = sorted(allowed - raw_keys)
+    missing = sorted({"profile", "sha256", "attachments"} - raw_keys)
     if missing:
         raise ValueError(
             f"artifact lineage is missing required fields: {', '.join(missing)}"
@@ -182,6 +187,12 @@ def _artifact_lineage_from_mapping(raw: Mapping[str, Any], *, key: str) -> dict[
         raise ValueError("artifact lineage sha256 is required and must not be null")
     if not isinstance(raw["sha256"], str):
         raise TypeError("artifact lineage sha256 must be a string")
+    if "path" in raw:
+        embedded = _require_workspace_relative_path(str(raw["path"]), "artifact path")
+        if embedded != key:
+            raise ValueError(
+                f"artifact lineage path {embedded!r} must equal its map key {key!r}"
+            )
     profile = raw["profile"]
     attachments: dict[str, Any] = {}
     raw_attachments = raw["attachments"]
@@ -227,6 +238,7 @@ def _artifact_lineage_from_mapping(raw: Mapping[str, Any], *, key: str) -> dict[
             "sha256": validated.sha256,
         }
     return {
+        "path": raw["path"] if "path" in raw else key,
         "profile": RenderProfile.from_dict(
             _json_safe_mapping(profile, label="artifact profile")
         ).to_dict(),
@@ -300,7 +312,7 @@ def assemble_provenance_v2(
         str(assets_registry), "assets_registry"
     )
     normalized_plan = (
-        plan
+        RenderPlan.from_dict(_json_safe_mapping(plan.to_dict(), label="render plan"))
         if isinstance(plan, RenderPlan)
         else RenderPlan.from_dict(_json_safe_mapping(plan, label="render plan"))
     )
