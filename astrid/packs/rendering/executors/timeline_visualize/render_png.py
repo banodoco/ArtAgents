@@ -24,6 +24,7 @@ from astrid.packs.rendering.executors.timeline_visualize.layout import (
 # two adapters remain independent consumers of the layout model.
 _BG = (20, 20, 25)  # #141419
 _LANE = (38, 38, 46)  # #26262E
+_FOCUS_RING = (255, 214, 100)  # #FFD664 — bright gold focus outline
 _LANE_EDGE = (58, 58, 68)  # #3A3A44
 _CLIP = (183, 156, 228)  # #B79CE4
 _CLIP_EDGE = (143, 111, 208)  # #8F6FD0
@@ -109,6 +110,7 @@ def _rect(
     *,
     scale: int,
     outline: tuple[int, int, int] | None = None,
+    width: int = 1,
 ) -> None:
     draw.rectangle(
         [
@@ -119,6 +121,7 @@ def _rect(
         ],
         fill=fill,
         outline=outline,
+        width=width,
     )
 
 
@@ -188,6 +191,20 @@ def render_page_png(page: LayoutPage, *, scale: int = 1) -> bytes:
             scale=scale,
             outline=_CLIP_EDGE if item.kind == "clip" else None,
         )
+
+    # Focus rings: a bright outline around the focused clip so a VLM reading
+    # the page never mistakes a wide neighbor (e.g. the audio bar) for the
+    # subject. Grok UX: the root FOCUS clip needs visual emphasis.
+    for item in page.objects:
+        if item.kind == "focus_ring":
+            _rect(
+                draw,
+                item.box,
+                _LANE,  # fill (mostly hidden behind the clip)
+                scale=scale,
+                outline=_FOCUS_RING,
+                width=4,
+            )
 
     # Paste the verified original frame into each clip card (cover-fit inside
     # the box, leaving the bottom strip for the label). This is the "real

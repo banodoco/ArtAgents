@@ -122,6 +122,8 @@ def _json(path: Path) -> dict:
 
 
 def _run_gateway(argv: list[str]) -> tuple[int, str, str]:
+    os.environ.pop(ASTRID_SESSION_ID_ENV, None)
+    os.environ.setdefault("ASTRID_NO_NUDGE", "1")
     stdout, stderr = StringIO(), StringIO()
     with redirect_stdout(stdout), redirect_stderr(stderr):
         try:
@@ -160,8 +162,9 @@ def _leg_focus(pack_root: Path, fixture_id: str, expected: str) -> dict:
         questions=[
             {
                 "text": (
-                    "What is the FOCUS id printed in the page's cue line — the qualified "
-                    "id to look up next? (field: ref)"
+                    "What is the NEXT id printed in the page's cue line — the "
+                    "qualified action target to look up next (the ref after "
+                    "NEXT)? If NEXT is absent, give the FOCUS id. (field: ref)"
                 )
             }
         ],

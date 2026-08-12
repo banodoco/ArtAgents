@@ -24,6 +24,7 @@ _LANE = "#26262E"
 _LANE_EDGE = "#3A3A44"
 _CLIP = "#B79CE4"
 _CLIP_EDGE = "#8F6FD0"
+_FOCUS_RING = "#FFD664"
 _CONTINUATION = "#5FA8A0"
 _GAP_MARKER = "#E0A458"
 _SPEECH = "#46B7C8"
@@ -152,6 +153,13 @@ def render_page_svg(page: LayoutPage) -> str:
                 stroke=_CLIP_EDGE if item.kind == "clip" else None,
             )
         )
+
+    # Focus rings: bright gold outline around the focused clip (Grok UX).
+    for item in page.objects:
+        if item.kind == "focus_ring":
+            parts.append(
+                _rect(item.box, "transparent", stroke=_FOCUS_RING, sw=4.0)
+            )
 
     # Ruler ticks (the tick itself; its text is a separate ``label`` object).
     for item in page.objects:

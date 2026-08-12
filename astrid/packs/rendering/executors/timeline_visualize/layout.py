@@ -1294,7 +1294,10 @@ def _layout_time_scaled(
                     thumbnail_path,
                 )
             )
-            if kind == "clip" and clip.clip_id in emphasized and box.w >= _MIN_VISUAL_CARD_W:
+            if kind == "clip" and (
+                clip.clip_id in emphasized
+                or (not emphasized and spec.clip_ids and clip.clip_id == spec.clip_ids[0])
+            ):
                 objects.append(
                     LayoutObject(
                         ref,

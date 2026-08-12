@@ -65,8 +65,11 @@ media.
   batch model).
 - Image-only gate: 3 critical fixtures (journey, transcript, derived media),
   3 fresh sessions each, exact critical answers, ≥95% threshold.
+  **RESULT: 1.0 × 3 sessions on all three fixtures (100%).** Fixes that got
+  there: cue split into nav + facts lines (SP timing no longer buried),
+  NEXT/PARENT question alignment, robust prose-prefixed JSON parse.
 - Discovery gate: fresh agent from CLI stdout → root → clip → original via
-  generated actions.
+  generated actions; sessionless gateway legs.
 
 _Results recorded in run evidence under `tests/packs/rendering/.r24-evidence/`
 (gitignored) at gate execution time._
