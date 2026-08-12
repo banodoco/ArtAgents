@@ -184,9 +184,10 @@ class TestFfprobeMetadataHappy:
         assert probe.has_audio_stream is True
         assert probe._raw  # raw JSON preserved
 
-    def test_layout_derived_from_unambiguous_channel_count(self) -> None:
-        """Containers that report channels without channel_layout (e.g.
-        QuickTime sowt) derive mono/stereo only — never ambiguous 5.1/7.1."""
+    def test_channels_reported_without_inferred_layout(self) -> None:
+        """Probes that report channel COUNT without channel_layout (e.g.
+        QuickTime sowt) must stay honest: layout stays None, channels is
+        reported, and validation compares counts (never guessed layouts)."""
         import json as _json
 
         payload = json.loads(HAPPY_FFPROBE_JSON)
@@ -201,19 +202,8 @@ class TestFfprobeMetadataHappy:
             ),
         ):
             probe = ffprobe_metadata("video.mp4")
-        assert probe.audio_channel_layout == "stereo"
-
-        for stream in payload["streams"]:
-            if stream.get("codec_type") == "audio":
-                stream["channels"] = 6
-        with patch(
-            "astrid.core.media.subprocess.run",
-            return_value=subprocess.CompletedProcess(
-                [], 0, stdout=_json.dumps(payload), stderr=""
-            ),
-        ):
-            probe = ffprobe_metadata("video.mp4")
-        assert probe.audio_channel_layout is None  # 5.1 variants ambiguous
+        assert probe.audio_channel_layout is None
+        assert probe.audio_channels == 2
 
     def test_accepts_path_object(self, tmp_path: Path) -> None:
         vid = tmp_path / "clip.mp4"

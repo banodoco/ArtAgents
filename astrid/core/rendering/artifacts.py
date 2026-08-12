@@ -447,6 +447,21 @@ def _compare_probe_to_profile(
             ("audio_channel_layout", probe.audio_channel_layout),
         ):
             expected = _profile_value(profile, field)
+            if field == "audio_channel_layout" and actual is None:
+                # Some containers (QuickTime sowt) expose channel COUNT but
+                # not a named layout. Compare channel count against the
+                # declared layout's canonical count instead of failing.
+                expected_channels = _layout_channel_count(expected)
+                if expected_channels is None or probe.audio_channels != expected_channels:
+                    _invalid(
+                        "audio_profile_mismatch",
+                        f"probed audio channel layout/count does not match {label}",
+                        field=field,
+                        expected=expected,
+                        actual=actual,
+                        probed_channels=probe.audio_channels,
+                    )
+                continue
             if not _same_profile_value(field, actual, expected):
                 _invalid(
                     "audio_profile_mismatch",
@@ -455,6 +470,17 @@ def _compare_probe_to_profile(
                     expected=expected,
                     actual=actual,
                 )
+
+
+def _layout_channel_count(layout: str | None) -> int | None:
+    return {
+        "mono": 1,
+        "stereo": 2,
+        "5.1": 6,
+        "5.1(side)": 6,
+        "7.1": 8,
+        "7.1(wide)": 8,
+    }.get(layout or "")
 
 
 def _validate_audio(
@@ -468,9 +494,11 @@ def _validate_audio(
     if has_audio:
         missing = [
             field
-            for field in ("audio_codec", "audio_sample_rate", "audio_channel_layout")
+            for field in ("audio_codec", "audio_sample_rate")
             if getattr(probe, field) is None
         ]
+        if probe.audio_channel_layout is None and probe.audio_channels is None:
+            missing.append("audio_channel_layout/audio_channels")
         if missing:
             _invalid(
                 "incomplete_probe",

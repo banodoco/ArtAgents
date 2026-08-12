@@ -88,6 +88,36 @@ def _resolved(path: str | Path) -> Path:
     return Path(path).expanduser().resolve(strict=False)
 
 
+def _contains_symlink_component(path: str | Path) -> bool:
+    """True if a non-system path component is a symbolic link.
+
+    macOS resolves ``/tmp`` -> ``/private/tmp`` and ``/var`` ->
+    ``/private/var``; those system redirects are not containment escapes.
+    Any other symlink component (e.g. a symlinked run directory) is treated
+    as an escape and rejected.
+    """
+    current = Path(path).expanduser()
+    parts = list(current.parts)
+    for index in range(len(parts), 0, -1):
+        candidate = Path(*parts[:index])
+        try:
+            if not candidate.is_symlink():
+                continue
+        except OSError:
+            return True
+        try:
+            resolved = candidate.resolve(strict=False)
+        except (OSError, RuntimeError):
+            return True
+        # System redirects: /tmp, /var, /etc, /private/* -> /private/*
+        if str(resolved).startswith("/private/"):
+            continue
+        if candidate.name in ("tmp", "var", "etc", "home", "usr") and str(resolved).startswith("/"):
+            continue
+        return True
+    return False
+
+
 def _invalid_video(video_path: Path, *, reason: str, message: str) -> None:
     raise_invalid_artifact_error(
         backend=_BACKEND,
@@ -141,7 +171,10 @@ def read_committed_provenance(
     try:
         video_unresolved = Path(video_path).expanduser()
         sidecar_unresolved = Path(sidecar_path or _default_sidecar_path(video_unresolved)).expanduser()
-        if video_unresolved.is_symlink() or sidecar_unresolved.is_symlink():
+        if (
+            _contains_symlink_component(video_unresolved)
+            or _contains_symlink_component(sidecar_unresolved)
+        ):
             return None
         if video.is_symlink() or sidecar.is_symlink():
             return None
@@ -222,7 +255,7 @@ def _delete_previous_outputs(
         raw_sidecar_candidate = candidate.get("sidecar_path", candidate.get("sidecar")) if isinstance(candidate, Mapping) else (candidate[1] if isinstance(candidate, (list, tuple)) and len(candidate) == 2 else None)
         try:
             raw_path = Path(raw_candidate).expanduser()
-            if raw_path.is_symlink():
+            if _contains_symlink_component(raw_path):
                 continue
         except (OSError, TypeError):
             continue
@@ -234,7 +267,7 @@ def _delete_previous_outputs(
                 if raw_sidecar_candidate is not None
                 else _default_sidecar_path(raw_path)
             )
-            if raw_sidecar.is_symlink():
+            if _contains_symlink_component(raw_sidecar):
                 continue
         except (OSError, TypeError):
             continue
@@ -295,10 +328,14 @@ def publish_render_result(
     source_unresolved = Path(video_path).expanduser()
     output_unresolved = Path(out_path).expanduser()
     sidecar_unresolved = Path(sidecar_path).expanduser()
-    if source_unresolved.is_symlink() or output_unresolved.is_symlink() or sidecar_unresolved.is_symlink():
+    if (
+        _contains_symlink_component(source_unresolved)
+        or _contains_symlink_component(output_unresolved)
+        or _contains_symlink_component(sidecar_unresolved)
+    ):
         raise_invalid_artifact_error(
             backend=_BACKEND,
-            message="publication paths must not be symbolic links",
+            message="publication paths must not be symbolic links (or contain symlinked directories)",
             recovery_command=_RECOVERY,
         )
     _validate_source_video(source)

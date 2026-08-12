@@ -286,16 +286,22 @@ def _avc1_entry(sps: bytes, pps: bytes) -> bytes:
 
 
 def _sowt_entry() -> bytes:
+    # Canonical QuickTime channel layout atom (FFmpeg movenc format):
+    # version(2) + revision(2) + layout_tag(4) + bitmap(4) +
+    # num_descriptions(4). Stereo layout tag = 0x00650002.
+    chan = _box(
+        b"chan",
+        struct.pack(">H", 0)   # version
+        + struct.pack(">H", 0)  # revision
+        + struct.pack(">I", 0x00650002 if AUDIO_CHANNELS == 2 else 0x00650000)
+        + struct.pack(">I", 0)  # bitmap (kAudioChannelBit_None)
+        + struct.pack(">I", 0),  # num channel descriptions
+    )
     wave = _box(
         b"wave",
         _box(b"frma", b"sowt")
         + _box(b"enda", struct.pack(">H", 1))
-        + _box(
-            b"chan",
-            struct.pack(">I", 0)  # version/flags
-            + struct.pack(">I", 3 if AUDIO_CHANNELS == 2 else 1)  # layout tag
-            + struct.pack(">I", 0),  # bitmap
-        ),
+        + chan,
     )
     audio = (
         b"\x00" * 6
@@ -437,22 +443,36 @@ def _validate_request(request: dict) -> None:
 def _support(request: dict, result_path: Path) -> int:
     profile = request.get("profile")
     if isinstance(profile, dict):
-        # The renderer can only produce its own exact codec set; a request
-        # for a different codec is unsupported (fail closed).
-        if (
-            profile.get("audio_codec") not in (None, AUDIO_CODEC)
-            or profile.get("video_codec") not in (None, VIDEO_CODEC)
-            or profile.get("width") not in (None, WIDTH)
-            or profile.get("height") not in (None, HEIGHT)
-        ):
+        # The renderer emits a fixed profile; ANY deviation is unsupported
+        # (fail closed on every field, not just codecs/dimensions).
+        mismatches: list[str] = []
+        expected = {
+            "width": WIDTH,
+            "height": HEIGHT,
+            "fps_rational": list(FPS_RATIONAL),
+            "time_base": list(TIME_BASE),
+            "container": CONTAINER,
+            "video_codec": VIDEO_CODEC,
+            "video_profile": None,
+            "video_level": None,
+            "pixel_format": PIXEL_FORMAT,
+            "audio_codec": AUDIO_CODEC,
+            "audio_sample_rate": AUDIO_SAMPLE_RATE,
+            "audio_channel_layout": AUDIO_CHANNEL_LAYOUT,
+        }
+        for field, fixed in expected.items():
+            requested = profile.get(field)
+            if requested is not None and requested != fixed:
+                mismatches.append(f"{field}={requested!r} (fixed {fixed!r})")
+        if mismatches:
             _write_json(
                 result_path,
                 {
                     "schema_version": 1,
                     "supported": False,
                     "reasons": [
-                        f"requested profile {profile.get('audio_codec')}/"
-                        f"{profile.get('video_codec')} is not produced by {BACKEND_ID}"
+                        "profile not produced by " + BACKEND_ID + ": "
+                        + "; ".join(mismatches)
                     ],
                     "features": {"media": False, "audio_mode": "none"},
                     "alternatives": [],

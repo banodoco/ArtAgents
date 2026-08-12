@@ -443,13 +443,14 @@ def _render_ffmpeg_media(
 ) -> Path:
     """Render FFmpeg output privately, then publish the committed pair."""
 
-    out_path = out_path.resolve()
-    out_path.parent.mkdir(parents=True, exist_ok=True)
+    publication_out = out_path  # unresolved: publication symlink-guards it
+    resolved_out = out_path.resolve()
+    resolved_out.parent.mkdir(parents=True, exist_ok=True)
     with TemporaryDirectory(
-        prefix=f".{out_path.name}.publication-",
-        dir=str(out_path.parent),
+        prefix=f".{resolved_out.name}.publication-",
+        dir=str(resolved_out.parent),
     ) as publication_tmp:
-        staged_video = Path(publication_tmp) / out_path.name
+        staged_video = Path(publication_tmp) / resolved_out.name
         _render_ffmpeg_media_to_path(timeline_path, assets_path, staged_video)
         provenance = _render_provenance_payload(
             out_path,
@@ -658,9 +659,10 @@ def _render_hybrid(timeline_path: Path, assets_path: Path, out_path: Path, **rem
     if len(segments) == 1 and segments[0]["engine"] == "ffmpeg":
         return _render_ffmpeg_media(timeline_path, assets_path, out_path)
 
-    out_path = out_path.resolve()
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    with TemporaryDirectory(prefix="astrid-hybrid-", dir=str(out_path.parent)) as tmp:
+    publication_out = out_path  # unresolved: publication symlink-guards it
+    resolved_out = out_path.resolve()
+    resolved_out.parent.mkdir(parents=True, exist_ok=True)
+    with TemporaryDirectory(prefix="astrid-hybrid-", dir=str(resolved_out.parent)) as tmp:
         tmp_dir = Path(tmp)
         segment_paths: list[Path] = []
         segment_provenance: list[dict[str, Any]] = []
@@ -1182,8 +1184,9 @@ def _render_audio_reactive_colour_if_supported(
     if spec is None:
         return None
 
-    out_path = out_path.resolve()
-    out_path.parent.mkdir(parents=True, exist_ok=True)
+    publication_out = out_path  # unresolved: publication symlink-guards it
+    resolved_out = out_path.resolve()
+    resolved_out.parent.mkdir(parents=True, exist_ok=True)
     stage_summary = {
         "root": None,
         "effects": [
@@ -1204,10 +1207,10 @@ def _render_audio_reactive_colour_if_supported(
         ],
     }
     with TemporaryDirectory(
-        prefix=f".{out_path.name}.publication-",
-        dir=str(out_path.parent),
+        prefix=f".{resolved_out.name}.publication-",
+        dir=str(resolved_out.parent),
     ) as publication_tmp:
-        staged_video = Path(publication_tmp) / out_path.name
+        staged_video = Path(publication_tmp) / resolved_out.name
         rendered_video = audio_reactive_colour.render(spec, staged_video)
         provenance = _render_provenance_payload(
             out_path,

@@ -51,6 +51,7 @@ class MediaProbe:
     audio_codec: str | None = None
     audio_sample_rate: int | None = None
     audio_channel_layout: str | None = None
+    audio_channels: int | None = None
     container: str | None = None
     format_name: str | None = None
     duration_rational: tuple[int, int] | None = None
@@ -221,16 +222,7 @@ def _parse_ffprobe_payload(data: dict[str, Any], file_path: str | Path) -> Media
         probe.audio_channel_layout = _nonempty_string(
             audio_stream.get("channel_layout")
         )
-        # Some containers (e.g. QuickTime sowt) report channel counts without
-        # a channel_layout; derive the standard layout only for unambiguous
-        # channel counts (mono/stereo). 5.1/7.1 have multiple speaker
-        # variants, so those stay unprobed rather than guessed.
-        if probe.audio_channel_layout is None:
-            channels = _int_or_none(audio_stream.get("channels"), minimum=1)
-            probe.audio_channel_layout = {
-                1: "mono",
-                2: "stereo",
-            }.get(channels or 0)
+        probe.audio_channels = _int_or_none(audio_stream.get("channels"), minimum=1)
         if probe.duration_rational is None:
             probe.duration_rational = _duration_rational(audio_stream.get("duration"))
             if probe.duration_rational is not None:

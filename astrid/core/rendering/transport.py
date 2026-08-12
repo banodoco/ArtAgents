@@ -496,22 +496,36 @@ def _terminate_process_group(
         drain_deadline = time.monotonic() + max(grace, 2.0)
         while True:
             try:
-                captured = process.communicate()
+                captured = process.communicate(timeout=max(grace, 2.0))
                 break
+            except subprocess.TimeoutExpired:
+                try:
+                    _signal_process_group(process, signal.SIGKILL)
+                except (OSError, PermissionError):
+                    pass
+                if time.monotonic() > drain_deadline:
+                    break
+                continue
             except KeyboardInterrupt:
                 try:
                     _signal_process_group(process, signal.SIGKILL)
                 except (OSError, PermissionError):
                     pass
                 if time.monotonic() > drain_deadline:
-                    process.kill()
-                    captured = process.communicate()
                     break
                 continue
     elif captured is None:
         # ``poll`` may have reaped the child while checking the fallback path.
-        # Its pipes still need to be drained, and communicate is safe here.
-        captured = process.communicate()
+        # Its pipes still need to be drained; bound the drain so cleanup can
+        # never block forever on a stuck pipe.
+        try:
+            captured = process.communicate(timeout=max(grace, 2.0))
+        except (subprocess.TimeoutExpired, KeyboardInterrupt, OSError):
+            try:
+                _signal_process_group(process, signal.SIGKILL)
+            except (OSError, PermissionError):
+                pass
+            captured = ("", "")
 
     if killed_group:
         _wait_for_group_exit(process, timeout=grace)
