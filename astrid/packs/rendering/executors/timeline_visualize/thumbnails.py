@@ -107,7 +107,11 @@ def _validate_limits(
         raise ValueError("n_candidates must be a positive integer")
     if isinstance(n_frames, bool) or not isinstance(n_frames, int):
         raise ValueError("n_frames must be a positive integer")
-    assert 1 <= n_frames <= n_candidates, "n_frames must be between 1 and n_candidates"
+    if not (1 <= n_frames <= n_candidates):
+        raise ValueError(
+            "n_frames must be between 1 and n_candidates "
+            f"(got n_frames={n_frames}, n_candidates={n_candidates})"
+        )
     # HARD bounds (R13): these are caps, not defaults — callers cannot exceed
     # them in either sampler.
     if n_candidates > MAX_N_CANDIDATES:

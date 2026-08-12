@@ -545,13 +545,10 @@ def test_multi_asset_scope_respects_per_page_frame_budget(tmp_projects_root: Pat
     asset_refs = {asset["qualified_ref"] for asset in asset_index["assets"]}
     filmstrip_dir = pack_root / "filmstrip"
     assert filmstrip_dir.is_dir()
+    # Filmstrips are keyed per page (sample page_id = "{page.page_id}_{ref}"),
+    # so a page's total frames are the files whose name starts with the page id.
     for page in view_map["pages"]:
-        refs = [
-            obj["object_ref"]
-            for obj in page["object_boxes"]
-            if obj["object_ref"] in asset_refs
-        ]
-        frame_count = sum(
-            len(list(filmstrip_dir.glob(f"{ref}_film_*.png"))) for ref in refs
+        frame_count = len(
+            list(filmstrip_dir.glob(f"{page['page_id']}_*_film_*.png"))
         )
         assert frame_count <= 12, f"{page['page_id']} exceeds the per-page frame budget"

@@ -361,23 +361,18 @@ def _asset_filmstrips(
             )
         return filmstrips
     classified = classify_registry(snapshot.registry, project_root=project_root)
-    filmstrips = {}
-    sampled_assets: set[str] = set()
+    filmstrips: dict[str, list[Path]] = {}
     for page in pages:
         refs = _page_asset_refs(page, model, identity_map)
         if not refs:
             continue
-        # Deterministic per-page budget: assets are ordered by display
-        # ordinal; the first min(k, MAX_FRAMES_PER_PAGE) assets are sampled,
-        # each with per_page_frame_budget(k) frames, so the page never carries
-        # more than 12 filmstrip frames.  An asset already sampled on an
-        # earlier page is not re-sampled (its frames satisfy every page it
-        # appears on).
+        # Deterministic per-page budget (R13 hard cap): the PAGE never carries
+        # more than MAX_FRAMES_PER_PAGE filmstrip frames, so budgets are
+        # derived from THIS page's ref count and frames are keyed per page —
+        # an asset that appears on two pages is sampled once per page, so a
+        # dense page can never inherit a strip that overflows its budget.
         budget = per_page_frame_budget(len(refs))
         for ref in refs[:MAX_FRAMES_PER_PAGE]:
-            if ref in sampled_assets:
-                continue
-            sampled_assets.add(ref)
             identity = identity_map.lookup_display(ref)
             asset_key = identity[2] if identity is not None else None
             integrity = classified.get(asset_key) if asset_key is not None else None
@@ -391,12 +386,13 @@ def _asset_filmstrips(
             source = verified_source_path(fresh)
             if source is None:
                 continue
-            filmstrips[ref] = sample_filmstrip(
+            key = f"{page.page_id}::{ref}"
+            filmstrips[key] = sample_filmstrip(
                 source,
                 n_candidates=budget,
                 n_frames=budget,
                 out_dir=sample_root,
-                page_id=ref.replace(".", "_"),
+                page_id=f"{page.page_id}_{ref.replace('.', '_')}",
                 integrity=fresh,
                 project_root=project_root,
             )

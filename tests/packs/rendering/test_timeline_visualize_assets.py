@@ -408,7 +408,7 @@ def test_sample_filmstrip_video_requires_ffmpeg(tmp_path: Path, monkeypatch: pyt
 def test_sample_filmstrip_enforces_caps(tmp_path: Path) -> None:
     image_path = tmp_path / "still.png"
     Image.new("RGB", (2, 2), (1, 2, 3)).save(image_path)
-    with pytest.raises(AssertionError):
+    with pytest.raises(ValueError, match="between 1 and n_candidates"):
         sample_filmstrip(
             image_path,
             n_candidates=2,
@@ -426,11 +426,29 @@ def test_sample_filmstrip_enforces_caps(tmp_path: Path) -> None:
             page_id="PG001",
             media_type="image",
         )
-    with pytest.raises(AssertionError):
+    with pytest.raises(ValueError, match="between 1 and n_candidates"):
         sample_filmstrip(
             image_path,
             n_candidates=36,
             n_frames=0,
+            out_dir=tmp_path / "film",
+            page_id="PG001",
+            media_type="image",
+        )
+    with pytest.raises(ValueError, match="must not exceed 36"):
+        sample_filmstrip(
+            image_path,
+            n_candidates=37,
+            n_frames=1,
+            out_dir=tmp_path / "film",
+            page_id="PG001",
+            media_type="image",
+        )
+    with pytest.raises(ValueError, match="must not exceed 12"):
+        sample_filmstrip(
+            image_path,
+            n_candidates=36,
+            n_frames=13,
             out_dir=tmp_path / "film",
             page_id="PG001",
             media_type="image",
