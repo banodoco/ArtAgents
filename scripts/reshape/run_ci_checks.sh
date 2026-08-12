@@ -83,13 +83,14 @@ run_quarantine_lane() {
 # RENDERER_PARITY_TESTS    — marked semantic parity suite, explicitly selected below.
 # QUARANTINE_TESTS         — opt_in-marked, allowed-to-fail lane (below).
 # BROAD_PYTEST_ARGS        — broad default run; opt_in/integration excluded by
-#                            marker (-m "not integration and not opt_in") so no
-#                            --ignore= entries are needed for quarantine files.
+#                            marker (-m "not integration and not opt_in and not live")
+#                            so no --ignore= entries are needed for quarantine files,
+#                            and R23 live/VLM gate tests can never be selected.
 BROAD_PYTEST_ARGS=(
   --tb=no
   -q
   --no-header
-  -m "not integration and not opt_in"
+  -m "not integration and not opt_in and not live"
 )
 
 # ============================================================================
