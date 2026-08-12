@@ -674,6 +674,12 @@ def _clips(
             "at_seconds": clip.authored.start,
             "start_frame": clip.frames.start_frame,
             "end_frame": clip.frames.end_frame,
+            "mounted_interval": {
+                "start_frame": clip.mounted.start_frame,
+                "end_frame": clip.mounted.end_frame,
+                "start_seconds": clip.mounted.start_frame / model.fps,
+                "end_seconds": clip.mounted.end_frame / model.fps,
+            },
             "source_bounds": _source_bounds(clip, raw),
             "speed": clip.speed,
             "transition": _transition(model, clip),
@@ -683,6 +689,87 @@ def _clips(
             entry["emphasized"] = clip.clip_id in emphasized
         result.append(entry)
     return result
+
+
+def _frozen_shots(
+    model: TimelineInspectionModel,
+    identity_map: Any,
+) -> list[dict[str, Any]]:
+    """Lossless pinned-shot facts needed by snapshot-only descendants."""
+
+    result: list[dict[str, Any]] = []
+    for shot in model.shots:
+        ref = _lookup_semantic(identity_map, "shot", shot.shot_id)
+        if ref is None:
+            raise ValueError(f"shot {shot.shot_id!r} has no display id in the identity map")
+        result.append(
+            {
+                "stable_id": parse_qualified_ref(ref).stable_id,
+                "qualified_ref": ref,
+                "canonical_ref": _canonical_ref(identity_map, ref),
+                "member_clip_ids": list(shot.member_clip_ids),
+                "authored_interval": (
+                    {
+                        "start_seconds": shot.authored.start,
+                        "end_seconds": shot.authored.end,
+                    }
+                    if shot.authored is not None
+                    else None
+                ),
+                "frame_interval": (
+                    {
+                        "start_frame": shot.frames.start_frame,
+                        "end_frame": shot.frames.end_frame,
+                    }
+                    if shot.frames is not None
+                    else None
+                ),
+                "warnings": list(shot.warnings),
+            }
+        )
+    return result
+
+
+def _frozen_ranges(
+    model: TimelineInspectionModel,
+    identity_map: Any,
+    scope: Scope | None,
+) -> list[dict[str, Any]]:
+    """Serialize navigation ranges whose bounds are known in this lineage.
+
+    M1 allocates an RG identity only for an explicit range scope.  Descendants
+    preserve this list byte-for-byte, so the one allocation remains usable
+    after navigating from that range into a clip or asset.
+    """
+
+    if (
+        scope is None
+        or scope.kind != "range"
+        or not scope.ref
+        or scope.start_frame is None
+        or scope.end_frame is None
+    ):
+        return []
+    ref = _lookup_semantic(identity_map, "range", scope.ref)
+    if ref is None:
+        identity = _lookup_display(identity_map, scope.ref)
+        ref = scope.ref if identity is not None and identity[1] == "range" else None
+    if ref is None:
+        raise ValueError(f"range {scope.ref!r} has no display id in the identity map")
+    identity = _lookup_display(identity_map, ref)
+    if identity is None:
+        raise ValueError(f"range ref {ref!r} has no semantic identity")
+    return [
+        {
+            "stable_id": parse_qualified_ref(ref).stable_id,
+            "qualified_ref": ref,
+            "canonical_ref": _canonical_ref(identity_map, ref),
+            "start_frame": scope.start_frame,
+            "end_frame": scope.end_frame,
+            "start_seconds": scope.start_frame / model.fps,
+            "end_seconds": scope.end_frame / model.fps,
+        }
+    ]
 
 
 def _schema_role(role: str) -> str:
@@ -785,6 +872,14 @@ def emit_ground_truth(
         "scope": _scope_block(model, effective, scope),
         "objects": _objects(model, effective, scope),
         "timelines": [_timeline_entry(model, effective, snapshot, scope)],
+        # These three fields are the frozen-lineage substrate.  The ordinary
+        # objects/timelines fields remain scope-filtered for consumers, while
+        # descendants reconstruct the complete root map and normalized model
+        # exclusively from these hashed facts.  A child copies them verbatim.
+        "frozen_objects": _objects(model, effective, None),
+        "frozen_timeline": _timeline_entry(model, effective, snapshot, None),
+        "frozen_shots": _frozen_shots(model, effective),
+        "frozen_ranges": _frozen_ranges(model, effective, scope),
         "timestamps": {"frozen_at": FROZEN_AT_SENTINEL},
     }
 
@@ -1123,7 +1218,7 @@ def _focus_timestamp_action(
     }
 
 
-def _refresh_root_action(snapshot: TimelineSnapshot) -> dict[str, Any]:
+def _refresh_root_action(manifest_path: str) -> dict[str, Any]:
     return {
         "kind": "visualize",
         "argv": [
@@ -1132,12 +1227,13 @@ def _refresh_root_action(snapshot: TimelineSnapshot) -> dict[str, Any]:
             "astrid",
             "timelines",
             "visualize",
-            "--project",
-            snapshot.project_slug,
-            "--input",
-            "scope=timeline",
+            "--from-view",
+            manifest_path,
+            "--focus",
+            _TIMELINE_REF,
+            "--refresh-root",
         ],
-        "focus": None,
+        "focus": _TIMELINE_REF,
         "result_scope": "timeline",
         "available": True,
         "unavailable_reason": None,
@@ -1215,7 +1311,7 @@ def _actions(
     actions: dict[str, dict[str, Any]] = {}
     if parsed.kind == "TL":
         actions["focus_timestamp"] = _focus_timestamp_action(model, manifest_path, ref)
-        actions["refresh_root"] = _refresh_root_action(snapshot)
+        actions["refresh_root"] = _refresh_root_action(manifest_path)
     elif parsed.kind == "CL":
         actions["focus_context"] = _focus_context_action(manifest_path, ref, "clip")
     elif parsed.kind == "SH":

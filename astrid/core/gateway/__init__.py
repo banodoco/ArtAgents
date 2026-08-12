@@ -96,6 +96,7 @@ from astrid.core.gateway.project import (
     _invocation_is_auto_bindable_run,
     _raise_on_ambiguous_run_path_projects,
     _resolved_request_project_slug,
+    _validated_timeline_visualize_view_context,
 )
 from astrid.core.gateway.wait import (
     _make_run_ctx_for_poll,
@@ -226,6 +227,7 @@ def _main_impl(raw: list[str]) -> int:
     # Session gate. Verbs outside the unbound allowlist require a resolvable
     # session record; print the documented hint and exit 2 otherwise.
     session = None
+    sessionless_view = None
     if not _verb_is_unbound_allowlisted(raw):
         from astrid.core.session.binding import (
             SessionBindingError,
@@ -264,6 +266,8 @@ def _main_impl(raw: list[str]) -> int:
                 state_snapshot={"argv": raw},
             ) from exc
         if session is None:
+            sessionless_view = _validated_timeline_visualize_view_context(raw)
+        if session is None and sessionless_view is None:
             project_hint = _extract_project_slug(raw)
             needs_project_guidance = _is_request_scoped_run(raw) or tuple(raw[:2]) == (
                 "timelines",
@@ -279,9 +283,13 @@ def _main_impl(raw: list[str]) -> int:
                         "scratch run"
                         if tuple(raw[:2]) == ("scratch", "run")
                         else (
-                            "timeline"
-                            if tuple(raw[:2]) == ("timelines", "create")
-                            else "orchestrator run"
+                            "timeline visualization"
+                            if tuple(raw[:2]) == ("timelines", "visualize")
+                            else (
+                                "timeline"
+                                if tuple(raw[:2]) == ("timelines", "create")
+                                else "orchestrator run"
+                            )
                         )
                     )
                 )
@@ -303,19 +311,38 @@ def _main_impl(raw: list[str]) -> int:
                 state_snapshot={"argv": raw, "project": project_hint},
             )
 
-    request_project = _resolved_request_project_slug(raw, session)
+    request_project = (
+        sessionless_view.project_slug
+        if sessionless_view is not None
+        else _resolved_request_project_slug(raw, session)
+    )
     if _is_request_scoped_run(raw):
         explicit_project = _extract_project_slug(raw)
         effective_project = explicit_project or request_project
         if effective_project:
-            source = "explicit --project" if explicit_project else "attached session"
+            source = (
+                "explicit --project"
+                if explicit_project
+                else (
+                    "validated --from-view"
+                    if sessionless_view is not None
+                    else "attached session"
+                )
+            )
             print(
                 f"project: {effective_project} ({source})",
                 file=sys.__stderr__,
             )
+    if sessionless_view is not None:
+        # A verified prior evidence pack is the sole no-session/no-task-gate
+        # timeline-visualization path. The focused handler repeats the
+        # ownership preflight before SDK invocation.
+        return _dispatch_with_resolved_project(raw, request_project)
     if _verb_bypasses_task_gate(raw):
         return _dispatch_with_resolved_project(raw, request_project)
     project_slug = _extract_project_slug(raw)
+    if project_slug is None and tuple(raw[:2]) == ("timelines", "visualize"):
+        project_slug = request_project
     if project_slug is None:
         return _dispatch_with_resolved_project(raw, request_project)
 
@@ -329,7 +356,7 @@ def _main_impl(raw: list[str]) -> int:
             state_snapshot={"argv": raw, "project": project_slug, "gate": "task-mode"},
         ) from exc
     if not decision.active:
-        return _dispatch(raw)
+        return _dispatch_with_resolved_project(raw, request_project)
 
     returncode = -1
     try:
@@ -405,7 +432,7 @@ def _verb_is_unbound_allowlisted(raw: list[str]) -> bool:
         # clip, track, effect, transition, theme, audio, arrangement, pool, registry
         if raw[0] == "timelines" and len(raw) >= 2 and raw[1] in {
             "clip", "track", "effect", "transition", "theme", "audio",
-            "arrangement", "pool", "registry",
+            "arrangement", "pool", "registry", "visualize",
         }:
             return True
 

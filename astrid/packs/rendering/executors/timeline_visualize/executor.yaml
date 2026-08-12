@@ -106,6 +106,13 @@
       "description": "Qualified object or timestamp reference resolved through from_view."
     },
     {
+      "name": "refresh_root",
+      "type": "boolean",
+      "required": false,
+      "default": false,
+      "description": "Explicitly cross from a verified frozen view to a fresh current-state root."
+    },
+    {
       "name": "layout",
       "type": "string",
       "required": false,

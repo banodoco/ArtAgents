@@ -185,8 +185,13 @@ def _rewrite_action_index_argv(
         actions = entry.get("actions", {})
         if not isinstance(actions, Mapping):
             continue
-        for action in actions.values():
+        for action_name, action in actions.items():
             if not isinstance(action, Mapping):
+                continue
+            # A child view's parent action deliberately names the exact prior
+            # manifest.  Rewriting it to this pack would turn "up" into a
+            # self-loop and destroy the lineage proof.
+            if action_name == "parent_view":
                 continue
             argv = action.get("argv")
             if not isinstance(argv, list):
@@ -218,6 +223,8 @@ def _build_manifest(
     structure_present: bool,
     frozen_at: str | None,
     file_records: list[dict[str, Any]],
+    from_view: str | None,
+    focus: str | None,
 ) -> dict[str, Any]:
     snapshots = gt["snapshots"]
     if not snapshots:
@@ -283,8 +290,8 @@ def _build_manifest(
         "kind": "timeline_visualize",
         "inputs": {
             "timeline_source": [project_slug],
-            "from_view": None,
-            "focus": None,
+            "from_view": from_view,
+            "focus": focus,
             "scope": scope_kind,
             "layout": input_layout,
             "formats": input_formats,
@@ -453,6 +460,8 @@ def write_evidence_pack(
     metric_definitions: dict | None = None,  # versioned metric-definitions.json content (R13)
     manifest: dict | None = None,  # prebuilt manifest if R14 supplies one
     frozen_at: str | None = None,  # deterministic timestamp; never wall-clock
+    from_view: str | None = None,  # project-relative exact parent manifest
+    focus: str | None = None,  # qualified parent-resolved focus
 ) -> PackLayout:
     """Assemble the complete self-contained evidence pack on disk."""
 
@@ -585,6 +594,8 @@ def write_evidence_pack(
             structure_present=structure_md is not None,
             frozen_at=frozen_at,
             file_records=file_records,
+            from_view=from_view,
+            focus=focus,
         )
     else:
         manifest = deepcopy(dict(manifest))

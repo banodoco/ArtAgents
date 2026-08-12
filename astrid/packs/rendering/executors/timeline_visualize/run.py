@@ -8,6 +8,7 @@ from astrid.core.pack.entrypoint import guard_canonical_entrypoint
 guard_canonical_entrypoint("rendering.timeline_visualize")
 
 import argparse
+from copy import deepcopy
 import hashlib
 import os
 import sys
@@ -42,6 +43,14 @@ from astrid.packs.rendering.executors.timeline_visualize.evidence_pack import (
     PackLayout,
     write_evidence_pack,
 )
+from astrid.packs.rendering.executors.timeline_visualize.frozen import (
+    FrozenView,
+    load_frozen_view,
+    model_from_frozen,
+    resolve_focus,
+    snapshot_from_frozen,
+)
+from astrid.packs.rendering.executors.timeline_visualize.ids import parse_qualified_ref
 from astrid.packs.rendering.executors.timeline_visualize.layout import (
     LayoutPage,
     layout_timeline,
@@ -97,6 +106,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--neighbors", type=int, default=0)
     parser.add_argument("--from-view", type=Path)
     parser.add_argument("--focus")
+    parser.add_argument("--refresh-root", action="store_true")
     parser.add_argument("--layout", choices=(*_LAYOUTS, "both"), default="both")
     parser.add_argument("--format", action="append", choices=(*sorted(_FORMATS), "all"))
     parser.add_argument(
@@ -161,11 +171,29 @@ def _validate_selectors(args: argparse.Namespace) -> None:
         )
     if (args.from_view is None) != (args.focus is None):
         raise ValueError("--from-view and --focus must be supplied together")
+    if args.refresh_root and args.from_view is None:
+        raise ValueError("--refresh-root requires --from-view and --focus")
     if args.from_view is not None:
-        raise ValueError(
-            "snapshot-safe --from-view/--focus execution is introduced by R16; "
-            "use a cold selector for this executor version"
-        )
+        conflicts = [
+            name
+            for name, value in (
+                ("--timeline-source", bool(args.timeline_source)),
+                ("--timeline-slug", args.timeline_slug),
+                ("--all", args.select_all),
+                ("--shot", args.shot),
+                ("--range", args.range_value),
+                ("--at", args.at),
+                ("--clip", args.clip),
+                ("--asset", args.asset),
+            )
+            if value not in (None, False, "")
+        ]
+        if conflicts:
+            raise ValueError(
+                "--from-view/--focus cannot be combined with " + ", ".join(conflicts)
+            )
+        if args.refresh_root and parse_qualified_ref(args.focus).kind != "TL":
+            raise ValueError("--refresh-root focus must be the frozen timeline reference")
     if args.rendered_video is not None and args.filmstrip not in {"auto", "rendered"}:
         raise ValueError("--rendered-video requires --filmstrip auto or rendered")
     if args.filmstrip == "rendered" and args.rendered_video is None:
@@ -399,29 +427,68 @@ def _asset_filmstrips(
     return filmstrips
 
 
-def _render_one(
+def _parent_action_index(
+    action_index: dict[str, Any],
+    frozen: FrozenView,
+) -> dict[str, Any]:
+    """Attach one exact-parent action without mutating the emitted graph."""
+
+    result = deepcopy(action_index)
+    timeline_ref = frozen.manifest["snapshots"][0]["timeline"]["qualified_ref"]
+    scope = frozen.manifest.get("scope", {})
+    parent_ref = scope.get("ref") if isinstance(scope, Mapping) else None
+    if not isinstance(parent_ref, str) or not parent_ref:
+        parent_ref = timeline_ref
+    parent_kind = scope.get("kind") if isinstance(scope, Mapping) else None
+    if parent_kind not in {
+        "project",
+        "timeline",
+        "shot",
+        "range",
+        "clip",
+        "asset",
+        "timestamp",
+        "text",
+        "speech",
+    }:
+        parent_kind = "timeline"
+    entry = result.get("entries", {}).get(timeline_ref)
+    if not isinstance(entry, dict) or not isinstance(entry.get("actions"), dict):
+        raise ValueError("child action index has no timeline navigation entry")
+    entry["actions"]["parent_view"] = {
+        "kind": "visualize",
+        "argv": [
+            "python3",
+            "-m",
+            "astrid",
+            "timelines",
+            "visualize",
+            "--from-view",
+            str(frozen.pack_root / "manifest.json"),
+            "--focus",
+            parent_ref,
+        ],
+        "focus": parent_ref,
+        "result_scope": parent_kind,
+        "available": True,
+        "unavailable_reason": None,
+        "reads": "snapshot",
+    }
+    return result
+
+
+def _materialize_view(
     *,
     args: argparse.Namespace,
-    selected: ManagedTimeline,
     project_root: Path,
     pack_root: Path,
+    snapshot: Any,
+    model: Any,
+    identity_map: Any,
+    scope: Any,
+    pack_snapshot: Any | None = None,
+    frozen_parent: FrozenView | None = None,
 ) -> PackLayout:
-    if selected.timeline_dir is None:
-        raise ValueError("cold visualization requires a managed timeline directory")
-    snapshot = acquire_snapshot(
-        selected.timeline_dir,
-        project_slug=args.project_slug,
-        project_root=project_root,
-        retries=2,
-    )
-    model = build_model(snapshot, project_root=project_root)
-    identity_map = build_identity_map(
-        model,
-        root_sns=model.snapshot_sns,
-        timeline_uuid=model.timeline_uuid,
-        timeline_ulid=model.timeline_ulid,
-    )
-    scope = _scope_for(args, model)
     pages = _pages_for(args, model, identity_map, scope)
     formats = _normalized_formats(args.format)
     png_bytes = (
@@ -448,19 +515,50 @@ def _render_one(
             sample_root=Path(raw_sample_root),
             pages=pages,
         )
+        ground_truth = emit_ground_truth(model, identity_map, snapshot, scope)
+        action_index = emit_action_index(
+            model, identity_map, snapshot, pack_root / "manifest.json", scope
+        )
+        from_view: str | None = None
+        focus: str | None = None
+        if frozen_parent is not None:
+            # Complete lineage facts are copied exactly; scoped presentation
+            # facts above remain specific to this child.
+            for key in (
+                "frozen_objects",
+                "frozen_timeline",
+                "frozen_shots",
+                "frozen_ranges",
+            ):
+                if key in frozen_parent.ground_truth:
+                    ground_truth[key] = deepcopy(frozen_parent.ground_truth[key])
+            action_index = _parent_action_index(action_index, frozen_parent)
+            from_view = (
+                frozen_parent.pack_root / "manifest.json"
+            ).relative_to(project_root).as_posix()
+            focus = args.focus
         return write_evidence_pack(
             out_root=pack_root,
             page_id_prefix="PG",
             model=model,
             identity_map=identity_map,
-            snapshot=snapshot,
+            # serialize_view_map accepts a verified snapshot block directly.
+            # Frozen children therefore never recompute the SNS from the
+            # synthetic emitter adapter's placeholder component hashes.
+            snapshot=(pack_snapshot if pack_snapshot is not None else snapshot),
             scope=scope,
-            ground_truth=emit_ground_truth(model, identity_map, snapshot, scope),
-            action_index=emit_action_index(
-                model, identity_map, snapshot, pack_root / "manifest.json", scope
+            ground_truth=ground_truth,
+            action_index=action_index,
+            asset_index=(
+                deepcopy(frozen_parent.asset_index)
+                if frozen_parent is not None
+                else emit_asset_index(model, identity_map, snapshot)
             ),
-            asset_index=emit_asset_index(model, identity_map, snapshot),
-            transcript_index=emit_transcript_index(model, identity_map, snapshot),
+            transcript_index=(
+                deepcopy(frozen_parent.transcript_index)
+                if frozen_parent is not None
+                else emit_transcript_index(model, identity_map, snapshot)
+            ),
             diagnostics=emit_diagnostics(model, identity_map, snapshot, scope),
             reading_guide=emit_reading_guide(model, identity_map, snapshot),
             structure_md=(
@@ -473,7 +571,81 @@ def _render_one(
             svg_bytes=svg_bytes,
             png_bytes=png_bytes,
             filmstrips=filmstrips,
+            from_view=from_view,
+            focus=focus,
         )
+
+
+def _render_one(
+    *,
+    args: argparse.Namespace,
+    selected: ManagedTimeline,
+    project_root: Path,
+    pack_root: Path,
+) -> PackLayout:
+    if selected.timeline_dir is None:
+        raise ValueError("cold visualization requires a managed timeline directory")
+    snapshot = acquire_snapshot(
+        selected.timeline_dir,
+        project_slug=args.project_slug,
+        project_root=project_root,
+        retries=2,
+    )
+    model = build_model(snapshot, project_root=project_root)
+    identity_map = build_identity_map(
+        model,
+        root_sns=model.snapshot_sns,
+        timeline_uuid=model.timeline_uuid,
+        timeline_ulid=model.timeline_ulid,
+    )
+    return _materialize_view(
+        args=args,
+        project_root=project_root,
+        pack_root=pack_root,
+        snapshot=snapshot,
+        model=model,
+        identity_map=identity_map,
+        scope=_scope_for(args, model),
+    )
+
+
+def refresh_root(
+    *,
+    args: argparse.Namespace,
+    frozen: FrozenView,
+    project_root: Path,
+    pack_root: Path,
+) -> PackLayout:
+    """The sole frozen-lineage transition to current managed timeline state."""
+
+    timelines_root = (project_root / "timelines").resolve(strict=True)
+    timeline_dir = (timelines_root / frozen.timeline_ulid).resolve(strict=True)
+    if timeline_dir.parent != timelines_root or not timeline_dir.is_dir():
+        raise ValueError("the frozen timeline is no longer a contained managed timeline")
+    snapshot = acquire_snapshot(
+        timeline_dir,
+        project_slug=args.project_slug,
+        project_root=project_root,
+        retries=2,
+    )
+    if snapshot.timeline_id != frozen.timeline_uuid or snapshot.timeline_ulid != frozen.timeline_ulid:
+        raise ValueError("current managed timeline identity disagrees with the frozen lineage")
+    model = build_model(snapshot, project_root=project_root)
+    identity_map = build_identity_map(
+        model,
+        root_sns=model.snapshot_sns,
+        timeline_uuid=model.timeline_uuid,
+        timeline_ulid=model.timeline_ulid,
+    )
+    return _materialize_view(
+        args=args,
+        project_root=project_root,
+        pack_root=pack_root,
+        snapshot=snapshot,
+        model=model,
+        identity_map=identity_map,
+        scope=select_scope(model, kind="timeline"),
+    )
 
 
 def _sha256(path: Path) -> str:
@@ -551,12 +723,66 @@ def execute(argv: list[str] | None = None) -> dict[str, Any]:
     project_root = project_dir(args.project_slug).resolve()
     if not project_root.is_dir():
         raise ValueError(f"project not found: {args.project_slug}")
-    selected = _select_timelines(args, project_root)
-    timeline_ids = sorted({row.timeline_ulid for row in selected})
     out_root = args.out.expanduser().resolve()
     pack_root = out_root / "agent-view"
     if pack_root.exists() and any(pack_root.iterdir()):
         raise ValueError(f"evidence pack output is not empty: {pack_root}")
+
+    if args.from_view is not None:
+        frozen = load_frozen_view(args.from_view, project_root=project_root)
+        if frozen.ground_truth.get("project_slug") != args.project_slug:
+            raise ValueError("frozen view project does not match project_slug input")
+        timeline_ids = [frozen.timeline_ulid]
+        _mark_run_metadata(out_root, args.project_slug, timeline_ids)
+        if args.refresh_root:
+            refresh_scope = resolve_focus(frozen, args.focus)
+            if refresh_scope.kind != "timeline":
+                raise ValueError("--refresh-root focus must resolve to the frozen timeline")
+            layout = refresh_root(
+                args=args,
+                frozen=frozen,
+                project_root=project_root,
+                pack_root=pack_root,
+            )
+        else:
+            model = model_from_frozen(frozen)
+            snapshot = snapshot_from_frozen(frozen, model)
+            scope = resolve_focus(
+                frozen,
+                args.focus,
+                context_seconds=args.context,
+                neighbors=args.neighbors,
+            )
+            layout = _materialize_view(
+                args=args,
+                project_root=project_root,
+                pack_root=pack_root,
+                snapshot=snapshot,
+                model=model,
+                identity_map=frozen.identity_map.child_copy(),
+                scope=scope,
+                pack_snapshot={"snapshots": deepcopy(frozen.manifest["snapshots"])},
+                frozen_parent=frozen,
+            )
+        manifest_path = layout.manifest_path
+        pages = list(layout.pages)
+        file_hashes = dict(layout.file_hashes)
+        outputs: dict[str, Any] = {
+            "pack_root": str(pack_root),
+            "manifest_path": str(manifest_path),
+            "pages": [str(path) for path in pages],
+            "file_hashes": file_hashes,
+        }
+        return {
+            "returncode": 0,
+            "run_root": str(out_root),
+            "manifest_path": str(manifest_path),
+            "timeline_ids": timeline_ids,
+            "outputs": outputs,
+        }
+
+    selected = _select_timelines(args, project_root)
+    timeline_ids = sorted({row.timeline_ulid for row in selected})
     _mark_run_metadata(out_root, args.project_slug, timeline_ids)
 
     if len(selected) == 1:

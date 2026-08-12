@@ -233,6 +233,94 @@ _COMMANDS: list[dict[str, Any]] = [
             {"project_arg": True},
         ],
     },
+    # ── visualize ──
+    {
+        "name": "visualize",
+        "help": "Build an agent-navigable evidence pack for timeline inspection.",
+        "handler": "cmd_visualize",
+        "args": [
+            {
+                "name": "timeline_slug",
+                "nargs": "?",
+                "metavar": "timeline-slug",
+                "help": "Timeline slug (omission selects the project default).",
+            },
+            {"project_arg": True},
+            {
+                "mutex_group": [
+                    {
+                        "flags": ["--all"],
+                        "action": "store_true",
+                        "dest": "select_all",
+                        "help": "Visualize every non-tombstoned timeline.",
+                    },
+                    {"flags": ["--shot"], "help": "Pinned shot id to focus."},
+                    {
+                        "flags": ["--range"],
+                        "dest": "range_value",
+                        "metavar": "START..END",
+                        "help": "Closed-open timeline window.",
+                    },
+                    {"flags": ["--at"], "metavar": "TIME", "help": "Timestamp to inspect."},
+                    {"flags": ["--clip"], "help": "Canonical clip id to focus."},
+                    {"flags": ["--asset"], "help": "Canonical asset id to inspect."},
+                ],
+            },
+            {
+                "flags": ["--context"],
+                "type": float,
+                "default": 3.0,
+                "metavar": "SECONDS",
+                "help": "Symmetric focus context in seconds (default: 3).",
+            },
+            {
+                "flags": ["--neighbors"],
+                "type": int,
+                "default": 0,
+                "metavar": "N",
+                "help": "Previous/next clips retained for clip focus (default: 0).",
+            },
+            {
+                "flags": ["--from-view"],
+                "metavar": "MANIFEST",
+                "help": "Continue from a validated prior visualization manifest.",
+            },
+            {
+                "flags": ["--focus"],
+                "metavar": "FOCUS_REF",
+                "help": "Qualified object or timestamp reference from --from-view.",
+            },
+            {
+                "flags": ["--refresh-root"],
+                "action": "store_true",
+                "help": "Explicitly create a new root from current state after frozen preflight.",
+            },
+            {
+                "flags": ["--layout"],
+                "choices": ("time-scaled", "linear", "both"),
+                "default": "both",
+                "help": "Page geometry (default: both).",
+            },
+            {
+                "flags": ["--format"],
+                "action": "append",
+                "choices": ("png", "svg", "md", "all"),
+                "dest": "formats",
+                "help": "Presentation format; repeatable (default: all).",
+            },
+            {
+                "flags": ["--filmstrip"],
+                "choices": ("auto", "off", "assets", "rendered"),
+                "default": "auto",
+                "help": "Boundary sampling policy (default: auto).",
+            },
+            {
+                "flags": ["--rendered-video"],
+                "metavar": "PATH",
+                "help": "Contained rendered video for rendered filmstrip sampling.",
+            },
+        ],
+    },
     # ── history ──
     {
         "name": "history",
@@ -1467,6 +1555,7 @@ def build_parser() -> argparse.ArgumentParser:
         cmd_transition_remove,
         cmd_transition_set,
         cmd_undo,
+        cmd_visualize,
         cmd_who_edited,
     )
 
@@ -1483,6 +1572,7 @@ def build_parser() -> argparse.ArgumentParser:
         "cmd_set_default": cmd_set_default,
         "cmd_export": cmd_export,
         "cmd_cost": cmd_cost,
+        "cmd_visualize": cmd_visualize,
         "cmd_history": cmd_history,
         "cmd_diff": cmd_diff,
         "cmd_audit": cmd_audit,

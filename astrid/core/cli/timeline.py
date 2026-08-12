@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from typing import Any  # noqa: F401  (re-exported: preserves cli.Any symbol)
 
 from astrid.core.cli_choices import AstridArgumentError
@@ -42,7 +43,9 @@ from astrid.core.timeline.projection import ErasedPayloadProjectionError, Projec
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
-    args = parser.parse_args(argv)
+    raw = sys.argv[1:] if argv is None else list(argv)
+    args = parser.parse_args(raw)
+    args._raw_argv = tuple(raw)
     try:
         return int(args.handler(args))
     except AstridArgumentError as exc:
@@ -205,3 +208,4 @@ from .timeline_output import (  # noqa: E402, F401
 from .timeline_registry import (  # noqa: E402, F401
     cmd_registry_sync,
 )
+from .timeline_visualize import cmd_visualize  # noqa: E402, F401

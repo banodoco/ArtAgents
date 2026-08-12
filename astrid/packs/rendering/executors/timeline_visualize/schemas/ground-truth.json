@@ -116,6 +116,17 @@
                 "at_seconds": {"$ref": "_defs.json#/$defs/nonnegative_seconds"},
                 "start_frame": {"$ref": "_defs.json#/$defs/nonnegative_frame"},
                 "end_frame": {"type": "integer", "minimum": 1},
+                "mounted_interval": {
+                  "type": "object",
+                  "required": ["start_frame", "end_frame", "start_seconds", "end_seconds"],
+                  "properties": {
+                    "start_frame": {"$ref": "_defs.json#/$defs/nonnegative_frame"},
+                    "end_frame": {"$ref": "_defs.json#/$defs/nonnegative_frame"},
+                    "start_seconds": {"$ref": "_defs.json#/$defs/nonnegative_seconds"},
+                    "end_seconds": {"$ref": "_defs.json#/$defs/nonnegative_seconds"}
+                  },
+                  "additionalProperties": false
+                },
                 "source_bounds": {
                   "type": "object",
                   "required": ["from_seconds", "to_seconds", "hold_seconds", "duration_seconds"],
@@ -257,6 +268,96 @@
         },
         "additionalProperties": false
       }
+    },
+    "frozen_objects": {
+      "description": "Complete root-lineage identity allocation copied byte-for-byte into descendants.",
+      "type": "array",
+      "items": {"$ref": "_defs.json#/$defs/object_identity"},
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "frozen_timeline": {
+      "description": "Complete normalized timeline facts used for snapshot-only descendant scopes.",
+      "$ref": "#/properties/timelines/items"
+    },
+    "frozen_shots": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "stable_id", "qualified_ref", "canonical_ref", "member_clip_ids",
+          "authored_interval", "frame_interval", "warnings"
+        ],
+        "properties": {
+          "stable_id": {"type": "string", "pattern": "^SH(?:0[1-9]|[1-9][0-9]+)$"},
+          "qualified_ref": {"$ref": "_defs.json#/$defs/shot_qualified_ref"},
+          "canonical_ref": {
+            "allOf": [
+              {"$ref": "_defs.json#/$defs/canonical_ref"},
+              {"properties": {"kind": {"const": "shot"}}}
+            ]
+          },
+          "member_clip_ids": {
+            "type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true
+          },
+          "authored_interval": {
+            "oneOf": [
+              {
+                "type": "object",
+                "required": ["start_seconds", "end_seconds"],
+                "properties": {
+                  "start_seconds": {"$ref": "_defs.json#/$defs/nonnegative_seconds"},
+                  "end_seconds": {"$ref": "_defs.json#/$defs/nonnegative_seconds"}
+                },
+                "additionalProperties": false
+              },
+              {"type": "null"}
+            ]
+          },
+          "frame_interval": {
+            "oneOf": [
+              {
+                "type": "object",
+                "required": ["start_frame", "end_frame"],
+                "properties": {
+                  "start_frame": {"$ref": "_defs.json#/$defs/nonnegative_frame"},
+                  "end_frame": {"$ref": "_defs.json#/$defs/nonnegative_frame"}
+                },
+                "additionalProperties": false
+              },
+              {"type": "null"}
+            ]
+          },
+          "warnings": {"type": "array", "items": {"type": "string"}}
+        },
+        "additionalProperties": false
+      }
+    },
+    "frozen_ranges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "stable_id", "qualified_ref", "canonical_ref", "start_frame",
+          "end_frame", "start_seconds", "end_seconds"
+        ],
+        "properties": {
+          "stable_id": {"type": "string", "pattern": "^RG(?:0[1-9]|[1-9][0-9]+)$"},
+          "qualified_ref": {"$ref": "_defs.json#/$defs/range_qualified_ref"},
+          "canonical_ref": {
+            "allOf": [
+              {"$ref": "_defs.json#/$defs/canonical_ref"},
+              {"properties": {"kind": {"const": "range"}}}
+            ]
+          },
+          "start_frame": {"$ref": "_defs.json#/$defs/nonnegative_frame"},
+          "end_frame": {"$ref": "_defs.json#/$defs/nonnegative_frame"},
+          "start_seconds": {"$ref": "_defs.json#/$defs/nonnegative_seconds"},
+          "end_seconds": {"$ref": "_defs.json#/$defs/nonnegative_seconds"}
+        },
+        "additionalProperties": false
+      },
+      "uniqueItems": true
     },
     "timestamps": {
       "type": "object",
