@@ -151,23 +151,32 @@ def _normalize_artifact_profiles(value: Any, *, segments: Sequence[Any]) -> Any:
         seen_paths: set[str] = set()
         seen_attachment_names: set[str] = set()
         for raw_profile in value:
-            if not isinstance(raw_profile, VideoArtifact):
+            if isinstance(raw_profile, VideoArtifact):
+                # Reconstruct through the DTO so mutation cannot smuggle
+                # invalid paths, profiles, or attachments past validation.
+                profile = VideoArtifact.from_dict(
+                    _json_safe_mapping(raw_profile.to_dict(), label="artifact")
+                )
+                path = profile.path
+                record = _artifact_lineage(profile)
+            elif isinstance(raw_profile, Mapping):
+                # Already-emitted lineage record: re-validate and re-key by
+                # its (validated) path so emitted provenance round-trips.
+                record = _artifact_lineage_from_mapping(
+                    raw_profile, key=str(raw_profile.get("path", ""))
+                )
+                path = record["path"]
+            else:
                 raise TypeError(
                     "sequence artifact_profiles entries must be VideoArtifacts "
-                    "so lineage records stay path-keyed"
+                    "or emitted lineage records"
                 )
-            # Reconstruct through the DTO so mutation cannot smuggle invalid
-            # paths, profiles, or attachments past validation.
-            profile = VideoArtifact.from_dict(
-                _json_safe_mapping(raw_profile.to_dict(), label="artifact")
-            )
-            if profile.path in seen_paths:
+            if path in seen_paths:
                 raise ValueError(
                     f"artifact_profiles sequence contains duplicate path "
-                    f"{profile.path!r}"
+                    f"{path!r}"
                 )
-            seen_paths.add(profile.path)
-            record = _artifact_lineage(profile)
+            seen_paths.add(path)
             _reject_duplicate_attachment_names(record, seen_attachment_names)
             lineage.append(record)
         if segments:

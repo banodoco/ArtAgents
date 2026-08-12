@@ -324,7 +324,10 @@ def _require_workspace_relative_path(value: Any, label: str) -> str:
     parts = PurePosixPath(normalized).parts
     if not parts or any(part in {"", ".", ".."} for part in raw_parts):
         raise ValueError(f"{label} must be a normalized contained workspace path")
-    if any(not part.strip() for part in raw_parts):
+    # ECMAScript \s whitespace set, used so DTO and schema agree across
+    # languages (Python str.strip() would diverge on \u0085 and \uFEFF).
+    _WS = " \t\n\r\f\v\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff"
+    if any(not part.strip(_WS) for part in raw_parts):
         raise ValueError(f"{label} must not contain empty or whitespace-only path components")
     return raw
 

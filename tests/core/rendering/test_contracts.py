@@ -977,6 +977,32 @@ def test_provenance_rejects_spoofed_artifact_lineage() -> None:
             plan=_plan(),
             artifact_profiles={"../escape.mp4": {"profile": _profile(), "sha256": SHA_B, "attachments": {}}},
         )
+    # Emitted lineage records round-trip: re-passing the emitted sequence
+    # (dictionary records) validates and reproduces the same output.
+    first = assemble_provenance_v2(
+        **base,
+        plan=_plan(segments=[_segment(0, 24), _segment(24, 48)]),
+        artifact_profiles=[
+            VideoArtifact(
+                path="outputs/a.mp4",
+                profile=_profile(audio=False),
+                sha256=SHA_B,
+                duration_frames=24,
+            ),
+            VideoArtifact(
+                path="outputs/b.mp4",
+                profile=_profile(audio=False),
+                sha256=SHA_C,
+                duration_frames=24,
+            ),
+        ],
+    )
+    second = assemble_provenance_v2(
+        **base,
+        plan=_plan(segments=[_segment(0, 24), _segment(24, 48)]),
+        artifact_profiles=first["artifact_profiles"],
+    )
+    assert second["artifact_profiles"] == first["artifact_profiles"]
     with pytest.raises(ValueError, match="duplicate path"):
         assemble_provenance_v2(
             **base,
