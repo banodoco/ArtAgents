@@ -755,8 +755,20 @@ def plan(
             except Exception as exc:
                 attempts.append(f"{renderer_id}: {exc}")
                 continue
-            if candidate_report.backend != renderer_id:
-                attempts.append(f"{renderer_id}: support report named {candidate_report.backend}")
+            # The support resolver already resolved the requested id through
+            # the registry; a configured alias or override therefore names a
+            # different canonical id than the raw candidate list entry.  Match
+            # on the resolved candidate id, never the raw spelling.
+            resolved_id = renderer_id
+            if renderer_registry is not None:
+                try:
+                    resolved_id = renderer_registry.get(renderer_id).id
+                except Exception:
+                    resolved_id = renderer_id
+            if candidate_report.backend != resolved_id:
+                attempts.append(
+                    f"{renderer_id}: support report named {candidate_report.backend}"
+                )
                 continue
             if candidate_report.supported:
                 selected_id = renderer_id

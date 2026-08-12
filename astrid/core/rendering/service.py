@@ -15,7 +15,7 @@ import math
 import re
 import warnings
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from fractions import Fraction
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -94,6 +94,7 @@ class _ResolvedCapability:
     candidate: RenderingCandidate[Any]
     evidence: dict[str, Any]
     support: SupportReport
+    rejected: list[dict[str, Any]] = field(default_factory=list)
 
 
 def _translate_legacy_selector(selector: str | None) -> _SelectionPolicy:
@@ -563,7 +564,12 @@ class RenderService:
                     LegacyRenderRoutingWarning,
                     stacklevel=4,
                 )
-            return _ResolvedCapability(candidate, evidence, report)
+            return _ResolvedCapability(
+                candidate,
+                evidence,
+                report,
+                rejected=list(rejected),
+            )
 
         alternatives = self._alternatives(registry)
         raise_unsupported_error(
@@ -1172,6 +1178,12 @@ class RenderService:
                 segment.renderer.id,
                 kind="renderer",
             )
+            # The planner already resolved aliases/overrides itself and
+            # recorded that lineage on the segment.  Re-resolving the emitted
+            # id from scratch would discard the alias chain, so merge: the
+            # service's resolution is authoritative for identity/trust while
+            # the planner's recorded lineage survives when present.
+            planner_renderer = segment.renderer
             native_request = replace(
                 request,
                 window=segment.window,
@@ -1193,9 +1205,22 @@ class RenderService:
             if not report.supported:
                 self._unsupported_report(report, registry=self.renderers)
             resolved = _ResolvedCapability(candidate, evidence, report)
+            merged_renderer = replace(
+                planner_renderer,
+                id=candidate.id,
+                source_pack=self._source_pack(candidate, evidence),
+                manifest_digest=candidate.manifest_digest,
+                trust_eligibility=candidate.eligibility.to_dict(),
+                alias_chain=(
+                    planner_renderer.alias_chain
+                    or list(evidence.get("alias_chain") or [])
+                ),
+                override=planner_renderer.override or evidence.get("override"),
+                support_decision=report,
+            )
             normalized_segment = replace(
                 segment,
-                renderer=self._renderer_resolution(resolved),
+                renderer=merged_renderer,
                 input_hashes={
                     **segment.input_hashes,
                     **input_hashes,
@@ -1222,7 +1247,11 @@ class RenderService:
                 plan=response,
                 workspace=workspace,
                 backend=candidate.id,
-                defer_to_finalizer=len(response.segments) > 1,
+                # The plan pins an explicit finalizer; segment audio is
+                # deferred to it (single- and multi-segment alike) so a
+                # normalizable profile/audio mismatch cannot fail the segment
+                # before the finalizer can normalize it.
+                defer_to_finalizer=response.finalizer.id != _DIRECT_FINALIZER_ID,
             )
             self._validate_segment_duration(
                 completed,
@@ -1238,10 +1267,21 @@ class RenderService:
             kind="finalizer",
             observe=False,
         )
-        finalizer_resolution = self._finalizer_resolution(
-            finalizer,
-            finalizer_evidence,
-            support=None,
+        finalizer_resolution = replace(
+            response.finalizer,
+            id=finalizer.id,
+            source_pack=self._source_pack(finalizer, finalizer_evidence),
+            manifest_digest=finalizer.manifest_digest,
+            trust_eligibility=finalizer.eligibility.to_dict(),
+            alias_chain=(
+                response.finalizer.alias_chain
+                or list(finalizer_evidence.get("alias_chain") or [])
+            ),
+            override=response.finalizer.override or finalizer_evidence.get("override"),
+            # The planner's finalizer support_decision names its pre-alias
+            # identity; _finish_plan re-evaluates support for the resolved
+            # finalizer and records the authoritative decision.
+            support_decision=None,
         )
         plan = replace(
             response,
@@ -1262,7 +1302,17 @@ class RenderService:
         pinned_finalizer: tuple[RenderingCandidate[Any], dict[str, Any]],
         workspace: Path,
     ) -> tuple[RenderResult, RenderPlan]:
-        if len(segment_results) == 1:
+        candidate, evidence = pinned_finalizer
+        if candidate.id == _DIRECT_FINALIZER_ID:
+            # No executable finalizer pinned: the segment must already match
+            # the canonical plan profile exactly.
+            if len(segment_results) != 1:
+                raise_internal_error(
+                    backend=_CORE_BACKEND_ID,
+                    message="direct finalizer received multiple segments",
+                    recovery_command="select a planner that pins an executable finalizer",
+                    details={"segment_count": len(segment_results)},
+                )
             result = self._validator(
                 segment_results[0],
                 expected_profile=plan.profile,
@@ -1270,7 +1320,6 @@ class RenderService:
             )
             return result, plan
 
-        candidate, evidence = pinned_finalizer
         ownerships = {item.audio_ownership for item in segment_results}
         if ownerships == {AudioOwnership.PASSTHROUGH}:
             requested_audio = AudioOwnership.PASSTHROUGH
@@ -1531,6 +1580,15 @@ class RenderService:
         requested_policy: str,
     ) -> RenderPlan:
         finalizer_resolution = self._direct_finalizer_resolution()
+        reasons: dict[str, str] = {"0": "direct renderer selection"}
+        if selected.rejected:
+            # A legacy auto-route selector rejects earlier candidates before
+            # the winning backend succeeds; record that rejection evidence so
+            # provenance explains why this backend rendered the timeline.
+            reasons["0"] = (
+                "direct renderer selection; rejected candidates: "
+                + json.dumps(selected.rejected, sort_keys=True)
+            )
         if request.window is not None:
             if request.window.fps_rational != result.video.profile.fps_rational:
                 raise_invalid_artifact_error(
@@ -1579,7 +1637,7 @@ class RenderService:
             finalizer=finalizer_resolution,
             profile=result.video.profile,
             total_frames=total_frames,
-            reasons={"0": "direct renderer selection"},
+            reasons=reasons,
             window=plan_window,
         )
 

@@ -10,6 +10,7 @@ from unittest import mock
 
 from astrid.core import timeline
 from astrid.packs.rendering.backends.remotion import run as render_remotion
+from astrid.packs.rendering.executors.render import legacy_engine
 from astrid.packs.rendering.executors.render import run as render_facade
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -163,7 +164,7 @@ class RenderRemotionRegistryGenerationTest(unittest.TestCase):
 
             def fake_render(timeline_arg, assets_arg, out_arg, **kwargs):
                 Path(out_arg).write_text("segment", encoding="utf-8")
-                render_facade._render_provenance_sidecar_path(Path(out_arg)).write_text(
+                legacy_engine._render_provenance_sidecar_path(Path(out_arg)).write_text(
                     json.dumps(remotion_segment_payload) + "\n",
                     encoding="utf-8",
                 )
@@ -174,15 +175,15 @@ class RenderRemotionRegistryGenerationTest(unittest.TestCase):
 
             with (
                 mock.patch.object(
-                    render_facade,
+                    legacy_engine,
                     "_hybrid_segments",
                     return_value=[{"engine": "remotion", "from": 0.0, "to": 1.0}],
                 ),
                 mock.patch.object(render_facade, "render", side_effect=fake_render),
-                mock.patch.object(render_facade, "_concat_segments", side_effect=fake_concat),
-                mock.patch.object(render_facade, "_effective_registry_state", return_value={"hash": "registry-hash"}),
+                mock.patch.object(legacy_engine, "_concat_segments", side_effect=fake_concat),
+                mock.patch.object(legacy_engine, "_effective_registry_state", return_value={"hash": "registry-hash"}),
             ):
-                result = render_facade._render_hybrid(
+                result = legacy_engine._render_hybrid(
                     timeline_path,
                     assets_path,
                     out_path,
@@ -191,7 +192,7 @@ class RenderRemotionRegistryGenerationTest(unittest.TestCase):
                     theme_path=None,
                 )
             provenance = json.loads(
-                render_facade._render_provenance_sidecar_path(out_path.resolve()).read_text(encoding="utf-8")
+                legacy_engine._render_provenance_sidecar_path(out_path.resolve()).read_text(encoding="utf-8")
             )
 
         self.assertEqual(result, out_path.resolve())

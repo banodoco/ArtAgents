@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 import subprocess
 import sys
 from dataclasses import replace
@@ -45,6 +46,7 @@ from astrid.core.rendering.registry import (
     PlannerRegistry,
     RendererRegistry,
     RenderingCandidate,
+    load_default_registries,
 )
 from astrid.core.rendering.publication import publish_render_result
 from astrid.core.rendering.service import (
@@ -551,6 +553,11 @@ def test_legacy_remotion_falls_back_when_ffmpeg_declines_support(
         ("support", "rendering.remotion"),
         ("render", "rendering.remotion"),
     ]
+    payload = _sidecar(tmp_path / "legacy-remotion-fallback.mp4")
+    routing = payload["routing"]
+    reason = routing["segment_reasons"]["0"]
+    assert "rendering.ffmpeg" in reason
+    assert "rejected" in reason
 
 
 def test_legacy_ffmpeg_is_strict(tmp_path: Path) -> None:
@@ -590,7 +597,9 @@ def test_hybrid_selects_planner_and_executes_its_segment(tmp_path: Path) -> None
         ("plan", "rendering.legacy_hybrid"),
     ]
     assert ("render", "fixture.window") in transport.calls
-    assert ("finalize", "rendering.ffmpeg-finalizer") not in transport.calls
+    # The plan pins the ffmpeg finalizer; even a single-segment hybrid plan
+    # runs it (profile/audio normalization is the finalizer's contract).
+    assert ("finalize", "rendering.ffmpeg-finalizer") in transport.calls
 
 
 def test_planned_window_is_materialized_for_full_timeline_renderer(
@@ -1021,8 +1030,10 @@ def _hybrid_request(
     config: dict[str, Any] | None = None,
     audio: AudioOwnership | None = None,
 ) -> RenderRequest:
-    timeline_path = tmp_path / "timeline.json"
-    assets_path = tmp_path / "assets.json"
+    root = tmp_path / "media"
+    root.mkdir(exist_ok=True)
+    timeline_path = root / "timeline.json"
+    assets_path = root / "assets.json"
     timeline_path.write_text(json.dumps(timeline), encoding="utf-8")
     assets_path.write_text(json.dumps({"assets": {}}), encoding="utf-8")
     return RenderRequest(
@@ -1232,6 +1243,8 @@ class _RawFixtureTransport(FakeTransport):
                 ("plan", "rendering.legacy_hybrid"),
                 ("support", "fixture.window"),
                 ("render", "fixture.window"),
+                ("support", "rendering.ffmpeg-finalizer"),
+                ("finalize", "rendering.ffmpeg-finalizer"),
             ],
             "hybrid",
             "fixture.window",
@@ -1282,7 +1295,8 @@ def test_selector_routing_matrix(
         )
 
     assert transport.calls == expected_calls
-    assert not any(verb == "finalize" for verb, _backend in transport.calls)
+    if selector != "hybrid":
+        assert not any(verb == "finalize" for verb, _backend in transport.calls)
     payload = _sidecar(output)
     routing = payload["routing"]
     assert routing["requested_engine"] == expected_engine
@@ -1484,7 +1498,7 @@ def test_hype_mp4_default_output_name_is_preserved(tmp_path: Path) -> None:
             False,
             "rendering.ffmpeg",
         ),
-        ("hybrid", (10,), {}, False, "hybrid"),
+        ("hybrid", (10,), {}, True, "hybrid"),
         ("hybrid", (5, 5), {}, True, "hybrid"),
     ],
     ids=[
@@ -1684,6 +1698,9 @@ def test_audio_ownership_matrix_across_backends(
             planner_ids=("rendering.legacy_hybrid",),
             audio_completer=audio_completer if completer else None,
         )
+        # A pinned planner finalizer completes audio for hybrid plans; the
+        # fixture finalizer must honor the ownership the request asked for.
+        transport.finalize_ownership = ownership
     else:
         service = _service(
             tmp_path,
@@ -1838,3 +1855,214 @@ def test_audio_completer_dropping_attachments_is_rejected(tmp_path: Path) -> Non
     assert not output.exists()
     assert not list(tmp_path.glob("*.provenance.json"))
     assert not list(tmp_path.glob(".*.render-service-*"))
+
+
+# ---------------------------------------------------------------------------
+# Real-backend integration through the generic service (issue-8 coverage)
+# ---------------------------------------------------------------------------
+
+
+def _require_ffmpeg() -> None:
+    if shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None:
+        pytest.skip("real FFmpeg smoke dependency is unavailable")
+
+
+def _real_service(tmp_path: Path) -> RenderService:
+    renderers, planners, finalizers = load_default_registries(
+        tmp_path, include_installed=False
+    )
+    return RenderService(registries=(renderers, planners, finalizers))
+
+
+def _real_media_inputs(tmp_path: Path) -> tuple[Path, Path]:
+    root = tmp_path / "media"
+    root.mkdir(exist_ok=True)
+    source = root / "source.mp4"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=blue:s=160x90:r=10:d=0.5",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-an",
+            str(source),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    timeline_path = root / "timeline.json"
+    assets_path = root / "assets.json"
+    timeline_path.write_text(
+        json.dumps(
+            {
+                "theme": "banodoco-default",
+                "theme_overrides": {
+                    "visual": {"canvas": {"width": 160, "height": 90, "fps": 10}}
+                },
+                "tracks": [{"id": "v", "kind": "visual", "label": "Video"}],
+                "clips": [
+                    {
+                        "id": "source",
+                        "at": 0,
+                        "track": "v",
+                        "clipType": "media",
+                        "asset": "source",
+                        "from": 0,
+                        "to": 0.5,
+                        "speed": 1,
+                        "volume": 0,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    assets_path.write_text(
+        json.dumps(
+            {
+                "assets": {
+                    "source": {
+                        "file": source.name,
+                        "type": "video/mp4",
+                        "duration": 0.5,
+                        "resolution": "160x90",
+                        "fps": 10,
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    return timeline_path, assets_path
+
+
+def _add_audio_track(timeline_path: Path) -> None:
+    """Mux an AAC track into the media source so the whole-media path with
+    audio (the canonical 48 kHz contract) is exercised end to end."""
+    source = timeline_path.parent / "source.mp4"
+    audio_path = source.with_suffix(".aac")
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:sample_rate=48000:duration=0.5",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "128k",
+            str(audio_path),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    muxed = timeline_path.parent / "muxed.mp4"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-i",
+            str(source),
+            "-i",
+            str(audio_path),
+            "-c:v",
+            "copy",
+            "-c:a",
+            "aac",
+            "-shortest",
+            str(muxed),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    muxed.replace(source)
+
+
+@pytest.mark.parametrize(
+    "media_kind",
+    ["plain", "audio"],
+    ids=["nominal", "with-audio"],
+)
+def test_real_ffmpeg_renders_through_generic_service(
+    tmp_path: Path,
+    media_kind: str,
+) -> None:
+    """The service drives the real FFmpeg backend end to end: one video and
+    one committed sidecar through the real CommandTransport (no fake
+    transport), including the whole-media optimized path when the source
+    probe supports it."""
+    _require_ffmpeg()
+    timeline_path, assets_path = _real_media_inputs(tmp_path)
+    if media_kind == "audio":
+        _add_audio_track(timeline_path)
+    service = _real_service(tmp_path)
+    output = tmp_path / "real-ffmpeg.mp4"
+
+    service.render_request(
+        replace(
+            _request(tmp_path),
+            timeline_path=str(timeline_path),
+            assets_registry_path=str(assets_path),
+        ),
+        selector="rendering.ffmpeg",
+        out_path=output,
+    )
+
+    assert output.is_file()
+    assert output.stat().st_size > 0
+    sidecars = list(tmp_path.glob("*.provenance.json"))
+    assert sidecars == [Path(f"{output}.provenance.json")]
+    payload = json.loads(sidecars[0].read_text(encoding="utf-8"))
+    assert payload["output"] == str(output.resolve())
+    assert payload["routing"]["requested_engine"] == "rendering.ffmpeg"
+
+
+def test_real_hybrid_plans_assigns_ffmpeg_and_finalizes_through_service(
+    tmp_path: Path,
+) -> None:
+    """Real hybrid planning: the media-only timeline routes every window to
+    the real FFmpeg backend and the real ffmpeg finalizer concatenates."""
+    _require_ffmpeg()
+    timeline_path, assets_path = _real_media_inputs(tmp_path)
+    service = _real_service(tmp_path)
+    output = tmp_path / "real-hybrid.mp4"
+
+    service.render_request(
+        replace(
+            _request(tmp_path),
+            timeline_path=str(timeline_path),
+            assets_registry_path=str(assets_path),
+        ),
+        selector="hybrid",
+        out_path=output,
+    )
+
+    assert output.is_file()
+    assert output.stat().st_size > 0
+    sidecars = list(tmp_path.glob("*.provenance.json"))
+    assert sidecars == [Path(f"{output}.provenance.json")]
+    payload = json.loads(sidecars[0].read_text(encoding="utf-8"))
+    assert payload["routing"]["requested_engine"] == "hybrid"
+    resolved = payload["routing"]["resolved_policy"]
+    assert resolved["planner"] == "rendering.legacy_hybrid"
+    assert resolved["finalizer"] == "rendering.ffmpeg-finalizer"

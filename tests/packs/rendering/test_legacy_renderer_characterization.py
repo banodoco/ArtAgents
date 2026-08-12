@@ -19,6 +19,7 @@ from unittest.mock import patch
 import pytest
 
 from astrid.packs.rendering.executors.render import audio_reactive_colour
+from astrid.packs.rendering.executors.render import legacy_engine
 from astrid.packs.rendering.executors.render import run as render_run
 
 
@@ -294,14 +295,14 @@ def test_can_render_with_ffmpeg_media_accepts_media_only_timeline(tmp_path: Path
     timeline_path = _write_timeline(tmp_path, _media_only_timeline())
     assets_path = _write_assets(tmp_path)
 
-    assert render_run._can_render_with_ffmpeg_media(timeline_path, assets_path) is True
+    assert legacy_engine._can_render_with_ffmpeg_media(timeline_path, assets_path) is True
 
 
 def test_can_render_with_ffmpeg_media_rejects_text_card_timeline(tmp_path: Path) -> None:
     timeline_path = _write_timeline(tmp_path, _text_card_timeline())
     assets_path = _write_assets(tmp_path)
 
-    assert render_run._can_render_with_ffmpeg_media(timeline_path, assets_path) is False
+    assert legacy_engine._can_render_with_ffmpeg_media(timeline_path, assets_path) is False
 
 
 # ---------------------------------------------------------------------------
@@ -345,8 +346,8 @@ def test_audio_reactive_selection_precedes_engine_dispatch(tmp_path: Path, monke
     sentinel = tmp_path / "audio_reactive.mp4"
     fake = _patch_service(monkeypatch, sentinel)
     with patch.object(
-        render_run, "_render_audio_reactive_colour_if_supported", return_value=sentinel
-    ) as specialized, patch.object(render_run, "_render_hybrid") as hybrid:
+        legacy_engine, "_render_audio_reactive_colour_if_supported", return_value=sentinel
+    ) as specialized, patch.object(legacy_engine, "_render_hybrid") as hybrid:
         result = render_run.render(timeline_path, assets_path, out_path, engine="hybrid")
 
     # The facade forwards to the service; the specialization helper is not
@@ -365,8 +366,8 @@ def test_audio_reactive_shape_gate_rejects_non_two_clip_timeline(tmp_path: Path)
     assets_path = _write_assets(tmp_path)
     out_path = tmp_path / "out" / "hype.mp4"
 
-    with patch.object(render_run, "_audio_reactive_ffmpeg_element") as element:
-        result = render_run._render_audio_reactive_colour_if_supported(
+    with patch.object(legacy_engine, "_audio_reactive_ffmpeg_element") as element:
+        result = legacy_engine._render_audio_reactive_colour_if_supported(
             timeline_path,
             assets_path,
             out_path,
@@ -391,8 +392,8 @@ def test_render_provenance_v1_key_set(tmp_path: Path) -> None:
     timeline_path.write_text("{}", encoding="utf-8")
     assets_path.write_text("{}", encoding="utf-8")
 
-    with patch.object(render_run, "_active_pack_order_for_provenance", return_value=[]):
-        sidecar = render_run._write_render_provenance(
+    with patch.object(legacy_engine, "_active_pack_order_for_provenance", return_value=[]):
+        sidecar = legacy_engine._write_render_provenance(
             out_path,
             engine="remotion",
             timeline_path=timeline_path,
@@ -440,8 +441,8 @@ def test_render_provenance_hybrid_adds_segment_keys(tmp_path: Path) -> None:
     segments = [{"engine": "ffmpeg", "from": 0.0, "to": 1.0}]
     segment_provenance = [{"engine": "remotion", "output": "/tmp/seg.mp4"}]
 
-    with patch.object(render_run, "_active_pack_order_for_provenance", return_value=[]):
-        sidecar = render_run._write_render_provenance(
+    with patch.object(legacy_engine, "_active_pack_order_for_provenance", return_value=[]):
+        sidecar = legacy_engine._write_render_provenance(
             out_path,
             engine="hybrid",
             timeline_path=timeline_path,
@@ -469,47 +470,47 @@ def test_render_provenance_hybrid_adds_segment_keys(tmp_path: Path) -> None:
 def test_timeline_duration_prefers_explicit_metadata() -> None:
     data = _media_only_timeline()
     data["metadata"] = {"duration_seconds": 12.5}
-    assert render_run._timeline_duration_seconds(data) == 12.5
+    assert legacy_engine._timeline_duration_seconds(data) == 12.5
 
 
 def test_timeline_duration_falls_back_to_expected_duration_seconds() -> None:
     data = _media_only_timeline()
     data["metadata"] = {"expected_duration_seconds": 7.25}
-    assert render_run._timeline_duration_seconds(data) == 7.25
+    assert legacy_engine._timeline_duration_seconds(data) == 7.25
 
 
 def test_timeline_duration_computed_from_clips_when_no_metadata() -> None:
-    assert render_run._timeline_duration_seconds(_media_only_timeline()) == 2.0
+    assert legacy_engine._timeline_duration_seconds(_media_only_timeline()) == 2.0
 
 
 def test_clip_duration_and_timeline_end_math() -> None:
     media_clip = {"at": 1.0, "from": 10.0, "to": 16.0, "speed": 2.0, "clipType": "media"}
-    assert render_run._clip_duration_seconds(media_clip) == 3.0
-    assert render_run._clip_timeline_end_seconds(media_clip) == 4.0
+    assert legacy_engine._clip_duration_seconds(media_clip) == 3.0
+    assert legacy_engine._clip_timeline_end_seconds(media_clip) == 4.0
 
     hold_clip = {"at": 2.0, "clipType": "text-card", "hold": 1.5}
-    assert render_run._clip_timeline_end_seconds(hold_clip) == 3.5
+    assert legacy_engine._clip_timeline_end_seconds(hold_clip) == 3.5
 
     to_clip = {"at": 0.0, "clipType": "text-card", "to": 5.0}
-    assert render_run._clip_timeline_end_seconds(to_clip) == 5.0
+    assert legacy_engine._clip_timeline_end_seconds(to_clip) == 5.0
 
 
 def test_round_frame_time_modes() -> None:
     fps = 30
-    assert render_run._round_frame_time(0.0167, fps, mode="floor") == 0.0
-    assert render_run._round_frame_time(0.0167, fps, mode="ceil") == pytest.approx(1 / fps)
-    assert render_run._round_frame_time(0.0167, fps, mode="round") == pytest.approx(1 / fps)
-    assert render_run._round_frame_time(1 / fps, fps, mode="floor") == pytest.approx(1 / fps)
-    assert render_run._round_frame_time(1 / fps, fps, mode="ceil") == pytest.approx(1 / fps)
+    assert legacy_engine._round_frame_time(0.0167, fps, mode="floor") == 0.0
+    assert legacy_engine._round_frame_time(0.0167, fps, mode="ceil") == pytest.approx(1 / fps)
+    assert legacy_engine._round_frame_time(0.0167, fps, mode="round") == pytest.approx(1 / fps)
+    assert legacy_engine._round_frame_time(1 / fps, fps, mode="floor") == pytest.approx(1 / fps)
+    assert legacy_engine._round_frame_time(1 / fps, fps, mode="ceil") == pytest.approx(1 / fps)
 
 
 def test_hybrid_segments_media_only_is_single_ffmpeg_segment() -> None:
-    segments = render_run._hybrid_segments(_media_only_timeline())
+    segments = legacy_engine._hybrid_segments(_media_only_timeline())
     assert segments == [{"engine": "ffmpeg", "from": 0.0, "to": 2.0}]
 
 
 def test_hybrid_segments_effect_clip_marks_remotion_window() -> None:
-    segments = render_run._hybrid_segments(_effect_clip_timeline())
+    segments = legacy_engine._hybrid_segments(_effect_clip_timeline())
     assert segments == [{"engine": "remotion", "from": 0.0, "to": 2.0}]
 
 
@@ -565,35 +566,35 @@ def test_transition_default_duration_is_8_frames() -> None:
     For clip_a ending at 2.0 with the next clip at 2.0: window is
     (2.0 - 8/30 - 0.25, 2.0 + 8/30 + 0.25) floor/ceil-rounded to frames.
     """
-    windows = render_run._complex_clip_windows(_two_media_clips_timeline({"type": "crossfade"}), 30)
+    windows = legacy_engine._complex_clip_windows(_two_media_clips_timeline({"type": "crossfade"}), 30)
     assert windows == [
         (pytest.approx(44 / 30), pytest.approx(76 / 30)),
     ]
 
 
 def test_transition_default_duration_scales_with_fps() -> None:
-    windows = render_run._complex_clip_windows(_two_media_clips_timeline({"type": "crossfade"}), 24)
+    windows = legacy_engine._complex_clip_windows(_two_media_clips_timeline({"type": "crossfade"}), 24)
     assert windows == [
         (pytest.approx(34 / 24), pytest.approx(62 / 24)),
     ]
 
 
 def test_transition_duration_seconds_overrides_default() -> None:
-    windows = render_run._complex_clip_windows(_two_media_clips_timeline({"duration": 0.5}), 30)
+    windows = legacy_engine._complex_clip_windows(_two_media_clips_timeline({"duration": 0.5}), 30)
     assert windows == [
         (pytest.approx(37 / 30), pytest.approx(83 / 30)),
     ]
 
 
 def test_transition_duration_frames_divide_by_fps() -> None:
-    windows = render_run._complex_clip_windows(_two_media_clips_timeline({"durationFrames": 12}), 30)
+    windows = legacy_engine._complex_clip_windows(_two_media_clips_timeline({"durationFrames": 12}), 30)
     assert windows == [
         (pytest.approx(40 / 30), pytest.approx(80 / 30)),
     ]
 
 
 def test_transition_duration_seconds_take_precedence_over_duration_frames() -> None:
-    windows = render_run._complex_clip_windows(
+    windows = legacy_engine._complex_clip_windows(
         _two_media_clips_timeline({"duration": 0.5, "durationFrames": 12}), 30
     )
     assert windows == [
@@ -606,7 +607,7 @@ def test_transition_handle_padding_and_frame_rounding_without_transition() -> No
     window is frame-rounded (floor start, ceil end)."""
     data = _two_media_clips_timeline(None)
     data["clips"][0]["effects"] = [{"id": "zoom"}]
-    windows = render_run._complex_clip_windows(data, 30)
+    windows = legacy_engine._complex_clip_windows(data, 30)
     # clip_a [0, 2] padded -> (max(0, 0-0.25), min(4, 2+0.25)) = (0, 2.25)
     # rounded -> frames 0 and ceil(2.25*30)=68.
     assert windows == [(0.0, pytest.approx(68 / 30))]
@@ -624,7 +625,7 @@ def test_transition_handle_padding_rounds_off_frame_boundaries() -> None:
             {"id": "media", "at": 0, "track": "v", "clipType": "media", "asset": "main", "from": 0, "to": 4, "speed": 1, "volume": 0},
         ],
     }
-    windows = render_run._complex_clip_windows(data, 30)
+    windows = legacy_engine._complex_clip_windows(data, 30)
     assert windows == [(pytest.approx(7 / 30), pytest.approx(53 / 30))]
 
 
@@ -633,7 +634,7 @@ def test_transition_takes_precedence_over_effect_window() -> None:
     window (centered on the boundary), not the effect's padded clip window."""
     data = _two_media_clips_timeline({"duration": 0.5})
     data["clips"][0]["effects"] = [{"id": "zoom"}]
-    windows = render_run._complex_clip_windows(data, 30)
+    windows = legacy_engine._complex_clip_windows(data, 30)
     assert windows == [
         (pytest.approx(37 / 30), pytest.approx(83 / 30)),
     ]
@@ -651,14 +652,14 @@ def test_transition_ignored_for_non_media_clip() -> None:
             {"id": "media", "at": 0, "track": "v", "clipType": "media", "asset": "main", "from": 0, "to": 4, "speed": 1, "volume": 0},
         ],
     }
-    windows = render_run._complex_clip_windows(data, 30)
+    windows = legacy_engine._complex_clip_windows(data, 30)
     assert windows == [(pytest.approx(7 / 30), pytest.approx(53 / 30))]
 
 
 def test_transition_longer_than_clip_clamps_to_timeline_bounds() -> None:
     """A transition longer than the clip's lead-in clamps the window start to
     0 and the end to the timeline duration (with rounding)."""
-    windows = render_run._complex_clip_windows(_two_media_clips_timeline({"duration": 3.0}), 30)
+    windows = legacy_engine._complex_clip_windows(_two_media_clips_timeline({"duration": 3.0}), 30)
     assert windows == [(0.0, pytest.approx(4.0))]
 
 
