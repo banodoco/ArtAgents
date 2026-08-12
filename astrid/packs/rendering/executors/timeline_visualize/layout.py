@@ -506,6 +506,20 @@ def _chrome(
         ),
     ]
     if cue_text:
+        # The cue is split into two lines so timing facts are never buried:
+        # line 1 = navigation (FOCUS · PARENT · SOURCE · NEXT), line 2 = facts
+        # (FOCUS CLIP window · SP @ window). Grok UX: a single long cue line
+        # made the SP token unreadable at the tail.
+        nav_part = cue_text
+        facts_part = ""
+        split_at = len(cue_text)
+        for token in (" · FOCUS CLIP ", " · SP @ "):
+            idx = cue_text.find(token)
+            if idx != -1:
+                split_at = min(split_at, idx)
+        if split_at < len(cue_text):
+            nav_part = cue_text[:split_at]
+            facts_part = cue_text[split_at:]
         objects.append(
             LayoutObject(
                 scope_ref,
@@ -513,10 +527,22 @@ def _chrome(
                 Box(40.0, 134.0, 1840.0, 54.0),
                 None,
                 _Z_CHROME,
-                cue_text,
+                nav_part,
                 None,
             )
         )
+        if facts_part:
+            objects.append(
+                LayoutObject(
+                    scope_ref,
+                    "cue",
+                    Box(40.0, 192.0, 1840.0, 48.0),
+                    None,
+                    _Z_CHROME,
+                    facts_part,
+                    None,
+                )
+            )
     return objects
 
 

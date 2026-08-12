@@ -303,8 +303,8 @@ def _journey_specs(gt: dict) -> list[AnswerSpec]:
 
 
 _JOURNEY_QUESTIONS = [
-    {"text": "What is the FOCUS id printed in the page's cue line? (field: ref)"},
-    {"text": "What is the parent display id in the breadcrumb 'TL01 > X'? (field: ref)"},
+    {"text": "What is the NEXT id printed in the cue line — the action target for this page (the qualified ref after NEXT)? (field: ref)"},
+    {"text": "What is the PARENT id printed in the cue line (the breadcrumb parent)? (field: ref)"},
     {"text": "What is the focused clip's display id? (field: ref)"},
     {"text": "What is the SOURCE asset id in the cue line? (field: ref)"},
     {"text": "What role does the cue line report for the SOURCE card? (field: answer)"},
@@ -317,7 +317,7 @@ _JOURNEY_QUESTIONS = [
 
 def _transcript_questions() -> list[dict]:
     return [
-        {"text": "What is the FOCUS id printed in the page's cue line? (field: ref)"},
+        {"text": "What is the NEXT id printed in the cue line — the action target for this page (the qualified ref after NEXT)? (field: ref)"},
         {"text": "Which clip does the mapped speech occurrence belong to? (field: ref)"},
         {"text": "What is the speech occurrence's timeline start in seconds? (field: time_seconds)"},
         {"text": "What is the speech occurrence's timeline end in seconds? (field: time_seconds)"},
@@ -428,7 +428,7 @@ def _derived_pack(projects_root: Path, slug: str):
 
 
 _DERIVED_QUESTIONS = [
-    {"text": "What is the FOCUS id printed in the page's cue line? (field: ref)"},
+    {"text": "What is the NEXT id printed in the cue line — the action target for this page (the qualified ref after NEXT)? (field: ref)"},
     {"text": "What is the SOURCE asset id in the cue line? (field: ref)"},
     {"text": "What role does the cue line report for the SOURCE card? (field: answer)"},
     {"text": "What integrity state does the cue line report for the SOURCE card? (field: answer)"},

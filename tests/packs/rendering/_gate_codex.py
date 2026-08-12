@@ -68,16 +68,22 @@ def parse_answers(raw: str) -> dict:
             tail = tail[index + len(marker):]
     candidates.append(tail.strip())
     for candidate in candidates:
-        for start in range(len(candidate) - 1, -1, -1):
-            if candidate[start] != "}":
+        # The model may append the JSON directly after prose with no fence.
+        # Scan every '{' as a possible object start and parse forward to the
+        # matching '}' — robust to prose prefixes and control characters.
+        for start in range(len(candidate)):
+            if candidate[start] != "{":
                 continue
-            chunk = candidate[: start + 1]
-            try:
-                parsed = json.loads(chunk)
-            except (json.JSONDecodeError, TypeError, ValueError):
-                continue
-            if isinstance(parsed, dict) and isinstance(parsed.get("answers"), list):
-                return parsed
+            for end in range(len(candidate) - 1, start - 1, -1):
+                if candidate[end] != "}":
+                    continue
+                chunk = candidate[start: end + 1]
+                try:
+                    parsed = json.loads(chunk)
+                except (json.JSONDecodeError, TypeError, ValueError):
+                    continue
+                if isinstance(parsed, dict) and isinstance(parsed.get("answers"), list):
+                    return parsed
     raise ValueError(f"no schema-shaped answers found in codex output: {raw[-1200:]}")
 
 
