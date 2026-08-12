@@ -288,7 +288,14 @@ def _avc1_entry(sps: bytes, pps: bytes) -> bytes:
 def _sowt_entry() -> bytes:
     wave = _box(
         b"wave",
-        _box(b"frma", b"sowt") + _box(b"enda", struct.pack(">H", 1)),
+        _box(b"frma", b"sowt")
+        + _box(b"enda", struct.pack(">H", 1))
+        + _box(
+            b"chan",
+            struct.pack(">I", 0)  # version/flags
+            + struct.pack(">I", 3 if AUDIO_CHANNELS == 2 else 1)  # layout tag
+            + struct.pack(">I", 0),  # bitmap
+        ),
     )
     audio = (
         b"\x00" * 6
@@ -299,15 +306,7 @@ def _sowt_entry() -> bytes:
         + struct.pack(">HH", 0, 0)         # compressionid, packetsize
         + struct.pack(">I", AUDIO_SAMPLE_RATE << 16)
     )
-    # QuickTime channel layout atom so ffprobe reports a concrete
-    # channel_layout (stereo = layout tag 3) instead of None.
-    chan = _box(
-        b"chan",
-        struct.pack(">I", 0)   # version/flags
-        + struct.pack(">I", 3 if AUDIO_CHANNELS == 2 else 1)
-        + struct.pack(">I", 0),  # bitmap
-    )
-    return _box(b"sowt", audio + wave + chan)
+    return _box(b"sowt", audio + wave)
 
 
 def _sample_tables(
@@ -435,7 +434,33 @@ def _validate_request(request: dict) -> None:
             raise ValueError("window must satisfy 0 <= start_frame < end_frame")
 
 
-def _support(result_path: Path) -> int:
+def _support(request: dict, result_path: Path) -> int:
+    profile = request.get("profile")
+    if isinstance(profile, dict):
+        # The renderer can only produce its own exact codec set; a request
+        # for a different codec is unsupported (fail closed).
+        if (
+            profile.get("audio_codec") not in (None, AUDIO_CODEC)
+            or profile.get("video_codec") not in (None, VIDEO_CODEC)
+            or profile.get("width") not in (None, WIDTH)
+            or profile.get("height") not in (None, HEIGHT)
+        ):
+            _write_json(
+                result_path,
+                {
+                    "schema_version": 1,
+                    "supported": False,
+                    "reasons": [
+                        f"requested profile {profile.get('audio_codec')}/"
+                        f"{profile.get('video_codec')} is not produced by {BACKEND_ID}"
+                    ],
+                    "features": {"media": False, "audio_mode": "none"},
+                    "alternatives": [],
+                    "backend": BACKEND_ID,
+                    "backend_version": "1.0.0",
+                },
+            )
+            return 0
     _write_json(
         result_path,
         {
@@ -568,7 +593,7 @@ def main(argv: list[str]) -> int:
                 {"error_type": type(exc).__name__},
             )
             return 0
-        return _support(result_path)
+        return _support(request, result_path)
     if args.verb in ("plan", "finalize"):
         _write_error(
             result_path,

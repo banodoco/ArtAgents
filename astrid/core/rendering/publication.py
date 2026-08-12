@@ -226,12 +226,18 @@ def _delete_previous_outputs(
                 continue
         except (OSError, TypeError):
             continue
-        if raw_sidecar_candidate is not None:
-            try:
-                if Path(raw_sidecar_candidate).expanduser().is_symlink():
-                    continue
-            except (OSError, TypeError):
+        try:
+            # For bare paths the default sidecar is derived from the raw
+            # video path; it must be checked unresolved like an explicit one.
+            raw_sidecar = (
+                Path(raw_sidecar_candidate).expanduser()
+                if raw_sidecar_candidate is not None
+                else _default_sidecar_path(raw_path)
+            )
+            if raw_sidecar.is_symlink():
                 continue
+        except (OSError, TypeError):
+            continue
         if video == live_output or video in seen:
             continue
         seen.add(video)

@@ -1287,7 +1287,7 @@ def _render_with_publication_context(
     theme_path: Path | None = None,
     min_free_gb: float | None = None,
 ) -> Path:
-    out_path = out_path.resolve()
+    out_path = Path(out_path)
     audio_reactive_output = _render_audio_reactive_colour_if_supported(
         timeline_path,
         assets_path,

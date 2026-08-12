@@ -277,6 +277,23 @@ def test_render_verb_via_command_transport(tmp_path: Path) -> None:
     _assert_clean_render(result, workspace)
     assert transport.last_logs == {"stdout": "", "stderr": ""}
 
+    # The fixture output must pass STRICT artifact validation against the
+    # request profile (dimensions, FPS, codecs, pixel format, audio).
+    from astrid.core.rendering.artifacts import validate_render_result
+    from astrid.core.rendering.contracts import RenderRequest
+
+    request = json.loads(
+        (PACK_ROOT / "requests" / "render.json").read_text(encoding="utf-8")
+    )
+    parsed_request = RenderRequest.from_dict(request)
+    video_abs = workspace / result.video.path
+    validate_render_result(
+        result,
+        expected_profile=parsed_request.profile,
+        workspace_root=workspace,
+    )
+    assert video_abs.is_file()
+
     # Determinism: a second invocation produces byte-identical media.
     second_workspace = tmp_path / "workspace-2"
     _, second_result, _ = _run_transport(second_workspace, PACK_ROOT, verb="render")

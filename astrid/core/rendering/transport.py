@@ -468,17 +468,25 @@ def _terminate_process_group(
     captured: tuple[str, str] | None = None
     try:
         captured = process.communicate(timeout=grace)
-    except (subprocess.TimeoutExpired, KeyboardInterrupt):
+    except (subprocess.TimeoutExpired, KeyboardInterrupt, OSError):
         captured = None
-        # Interruption during the grace window must not abandon the group:
-        # escalate to SIGKILL right away and reap in the loop below.
+        # Interruption or a communicate failure during the grace window must
+        # not abandon the group: escalate to SIGKILL right away and reap in
+        # the loop below.
         try:
             _signal_process_group(process, signal.SIGKILL)
         except OSError:
             pass
 
     while _process_group_exists(process) and time.monotonic() < deadline:
-        time.sleep(min(0.01, max(0.0, deadline - time.monotonic())))
+        try:
+            time.sleep(min(0.01, max(0.0, deadline - time.monotonic())))
+        except KeyboardInterrupt:
+            try:
+                _signal_process_group(process, signal.SIGKILL)
+            except OSError:
+                pass
+            break
 
     killed_group = _process_group_exists(process)
     if killed_group:
@@ -522,7 +530,14 @@ def _terminate_leftover_group(
     _signal_process_group(process, signal.SIGTERM)
     deadline = time.monotonic() + grace
     while _process_group_exists(process) and time.monotonic() < deadline:
-        time.sleep(min(0.01, max(0.0, deadline - time.monotonic())))
+        try:
+            time.sleep(min(0.01, max(0.0, deadline - time.monotonic())))
+        except KeyboardInterrupt:
+            try:
+                _signal_process_group(process, signal.SIGKILL)
+            except OSError:
+                pass
+            break
     if _process_group_exists(process):
         _signal_process_group(process, signal.SIGKILL)
         _wait_for_group_exit(process, timeout=grace)
@@ -533,16 +548,26 @@ def _wait_for_group_exit(
 ) -> None:
     deadline = time.monotonic() + timeout
     while _process_group_exists(process) and time.monotonic() < deadline:
-        time.sleep(min(0.01, max(0.0, deadline - time.monotonic())))
-    # A group that ignores SIGKILL cannot exist on POSIX; if it somehow
-    # survives the grace window, keep SIGKILLing until it is gone so cleanup
-    # never returns with a live orphan.
-    while _process_group_exists(process):
+        try:
+            time.sleep(min(0.01, max(0.0, deadline - time.monotonic())))
+        except KeyboardInterrupt:
+            try:
+                _signal_process_group(process, signal.SIGKILL)
+            except OSError:
+                pass
+            break
+    # Escalate to SIGKILL for the remaining grace window (bounded) so a
+    # SIGTERM-ignoring group cannot survive cleanup.
+    kill_deadline = time.monotonic() + max(timeout, 1.0)
+    while _process_group_exists(process) and time.monotonic() < kill_deadline:
         try:
             _signal_process_group(process, signal.SIGKILL)
         except (OSError, PermissionError):
             break
-        time.sleep(0.01)
+        try:
+            time.sleep(0.01)
+        except KeyboardInterrupt:
+            break
 
 
 def _secret_environment_values(

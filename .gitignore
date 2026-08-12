@@ -62,6 +62,7 @@ out/
 !tests/**/fixtures/**
 !tests/fixtures/**
 tests/fixtures/__pycache__/
+tests/fixtures/**/__pycache__/
 
 # Agentic test artifacts (regenerated per-run, not source)
 tests/agentic/reports/
