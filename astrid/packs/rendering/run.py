@@ -93,9 +93,19 @@ def _selects_ffmpeg(argv: Sequence[str]) -> bool:
     return False
 
 
+def _selects_planner() -> bool:
+    """Route the transport-selected hybrid planner without shape guessing."""
+
+    return _transport_selected_backend() == "rendering.legacy_hybrid"
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
-    if _selects_finalizer(args):
+    if _selects_planner():
+        from astrid.packs.rendering.planners.legacy_hybrid.run import (
+            main as backend_main,
+        )
+    elif _selects_finalizer(args):
         from astrid.packs.rendering.finalizers.ffmpeg.run import (
             main as backend_main,
         )

@@ -339,19 +339,10 @@ def test_facade_delegates_complex_legacy_remotion_without_policy_drift(
     output_path = tmp_path / "hype.mp4"
     sentinel = tmp_path / "delegated.mp4"
 
-    with (
-        mock.patch.object(
-            facade,
-            "_render_audio_reactive_colour_if_supported",
-            return_value=None,
-        ),
-        mock.patch.object(facade, "_can_render_with_ffmpeg_media", return_value=False),
-        mock.patch.object(
-            facade.remotion_backend,
-            "render",
-            return_value=sentinel,
-        ) as delegated,
-    ):
+    fake_service = mock.Mock()
+    fake_service.render.return_value = sentinel
+
+    with mock.patch.object(facade, "_default_service", return_value=fake_service):
         result = facade.render(
             timeline_path,
             assets_path,
@@ -360,16 +351,9 @@ def test_facade_delegates_complex_legacy_remotion_without_policy_drift(
         )
 
     assert result == sentinel
-    delegated.assert_called_once_with(
-        timeline_path,
-        assets_path,
-        output_path.resolve(),
-        project_dir=None,
-        composition_id="TimelineComposition",
-        theme_path=None,
-        min_free_gb=None,
-        previous_outputs=(),
-    )
+    fake_service.render.assert_called_once()
+    kwargs = fake_service.render.call_args.kwargs
+    assert kwargs["selector"] == "remotion"
 
 
 def test_audio_ownership_enum_remains_protocol_value() -> None:

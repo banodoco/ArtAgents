@@ -24,13 +24,14 @@
       "--timeline",
       "{timeline}",
       "--out",
-      "{out}/hype.mp4"
+      "{out}/{output_name}"
     ],
     "input_args": [
       {
         "input": "assets_registry",
         "flag": "--assets",
-        "optional": true
+        "optional": true,
+        "before": "--out"
       },
       {
         "input": "theme",
@@ -43,13 +44,28 @@
         "optional": true
       },
       {
+        "input": "backend",
+        "flag": "--backend",
+        "optional": true
+      },
+      {
+        "input": "backend_config",
+        "flag": "--backend-config",
+        "optional": true
+      },
+      {
+        "input": "output_name",
+        "flag": "--output-name",
+        "optional": true
+      },
+      {
         "input": "keep_previous_renders",
         "flag": "--keep-previous-renders",
         "optional": true
       }
     ]
   },
-  "description": "Render the brief timeline to hype.mp4 through a selected backend.",
+  "description": "Render the brief timeline to an .mp4 output through the selected backend.",
   "graph": {
     "consumes": [],
     "depends_on": [
@@ -94,11 +110,33 @@
       "artifact_type": null
     },
     {
-      "description": "Render backend. Defaults to remotion; use ffmpeg for media-only timelines or hybrid to render complex windows with Remotion.",
+      "description": "Render selector. Legacy values (remotion, ffmpeg, hybrid) or a qualified backend id (e.g. rendering.remotion, rendering.ffmpeg).",
       "name": "engine",
       "required": false,
       "type": "string",
       "artifact_type": null
+    },
+    {
+      "description": "Neutral alias for engine: legacy selector or qualified backend id.",
+      "name": "backend",
+      "required": false,
+      "type": "string",
+      "artifact_type": null
+    },
+    {
+      "description": "JSON object keyed by qualified backend id with per-backend configuration (e.g. {\"rendering.remotion\": {\"theme_path\": \"/path/theme.json\"}}).",
+      "name": "backend_config",
+      "required": false,
+      "type": "json",
+      "artifact_type": null
+    },
+    {
+      "description": "Output file name. Plain .mp4 file name only: no path separators, no traversal, .mp4 extension required. Defaults to hype.mp4.",
+      "name": "output_name",
+      "required": false,
+      "type": "string",
+      "artifact_type": null,
+      "default": "hype.mp4"
     },
     {
       "description": "Preserve previous provenance-linked hype.mp4 outputs for the same timeline.",
@@ -139,7 +177,7 @@
       "description": "",
       "mode": "create_or_replace",
       "name": "video",
-      "path_template": "{out}/hype.mp4",
+      "path_template": "{out}/{output_name}",
       "type": "file",
       "artifact_type": "clip/visual"
     },
@@ -147,7 +185,7 @@
       "description": "Render provenance sidecar for the video output.",
       "mode": "create_or_replace",
       "name": "provenance",
-      "path_template": "{out}/hype.mp4.provenance.json",
+      "path_template": "{out}/{output_name}.provenance.json",
       "type": "file",
       "artifact_type": "metadata/provenance"
     }
@@ -157,6 +195,6 @@
     "assets",
     "theme"
   ],
-  "short_description": "Render a hype timeline to hype.mp4 through Remotion, ffmpeg, or hybrid rendering.",
+  "short_description": "Render a hype timeline to an .mp4 output through the selected backend.",
   "version": "1.0"
 }

@@ -29,7 +29,12 @@ from .contracts import (
 
 
 PROVENANCE_SCHEMA_VERSION = 2
-CORE_OWNED_KEYS = frozenset(PROVENANCE_V2_CORE_KEYS | PROVENANCE_V1_COMPATIBILITY_KEYS)
+ADDITIVE_PROVENANCE_V2_CORE_KEYS = frozenset({"resolved_policy", "routing"})
+CORE_OWNED_KEYS = frozenset(
+    PROVENANCE_V2_CORE_KEYS
+    | PROVENANCE_V1_COMPATIBILITY_KEYS
+    | ADDITIVE_PROVENANCE_V2_CORE_KEYS
+)
 
 
 def validate_backend_fragments(
@@ -37,7 +42,15 @@ def validate_backend_fragments(
 ) -> dict[str, dict[str, Any]]:
     """Validate namespaces and reject top-level core-key collisions."""
 
-    return _validate_backend_fragments(fragments or {})
+    normalized = _validate_backend_fragments(fragments or {})
+    for namespace, fragment in normalized.items():
+        conflicts = sorted(set(fragment) & ADDITIVE_PROVENANCE_V2_CORE_KEYS)
+        if conflicts:
+            raise ValueError(
+                f"backend fragment {namespace!r} attempts to overwrite core-owned "
+                f"keys: {', '.join(conflicts)}"
+            )
+    return normalized
 
 
 def _normalize_audio_ownership(value: AudioOwnership | str | None) -> str | None:
@@ -89,6 +102,77 @@ def _legacy_segment_projection(segment: RenderSegment) -> dict[str, Any]:
         "engine": segment.renderer.id.rsplit(".", 1)[-1],
         "from": segment.window.start_frame * denominator / numerator,
         "to": segment.window.end_frame * denominator / numerator,
+    }
+
+
+def _resolution_request_id(segment: RenderSegment) -> str:
+    """Recover the registry id that selected one validated renderer.
+
+    Alias chains retain their requested id first.  An override without an
+    alias retains its source in ``override.from``.  Otherwise the resolved id
+    was also the requested id.  This is enough to distinguish the legacy
+    ``remotion`` policy's FFmpeg-first route without accepting parallel,
+    caller-authored routing evidence.
+    """
+
+    renderer = segment.renderer
+    if renderer.alias_chain:
+        return renderer.alias_chain[0]
+    if renderer.override is not None:
+        return renderer.override["from"]
+    return renderer.id
+
+
+def _resolved_policy(plan: RenderPlan) -> dict[str, Any]:
+    """Return the complete set of capability ids selected by one plan."""
+
+    renderer_ids = list(
+        dict.fromkeys(segment.renderer.id for segment in plan.segments)
+    )
+    return {
+        "planner": plan.planner.id,
+        "renderers": renderer_ids,
+        "finalizer": plan.finalizer.id,
+    }
+
+
+def _routing_record(
+    legacy_engine: str,
+    plan: RenderPlan,
+    resolved_policy: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Derive selected-policy lineage and visible legacy translation.
+
+    The service's legacy ``remotion`` policy tries the qualified FFmpeg route
+    first and emits a warning when that supported route wins.  The plan pins
+    the selected renderer but cannot by itself explain why its legacy
+    ``engine`` projection still says ``remotion``.  Record that explanation
+    additively while leaving the frozen nested resolution records authoritative
+    for aliases, overrides, trust, manifests, and support decisions.
+    """
+
+    renderer_ids = list(resolved_policy["renderers"])
+    resolved_backend = renderer_ids[0] if len(renderer_ids) == 1 else None
+    auto_routed = (
+        legacy_engine == "remotion"
+        and len(plan.segments) == 1
+        and _resolution_request_id(plan.segments[0]) == "rendering.ffmpeg"
+    )
+    auto_route_reason = None
+    if auto_routed:
+        auto_route_reason = (
+            "legacy selector 'remotion' auto-routed the supported request to "
+            f"{plan.segments[0].renderer.id}"
+        )
+    return {
+        "requested_engine": legacy_engine,
+        "requested_policy": plan.requested_policy,
+        "resolved_policy": dict(resolved_policy),
+        "resolved_backend": resolved_backend,
+        "resolved_backends": renderer_ids,
+        "auto_route": auto_routed,
+        "auto_route_reason": auto_route_reason,
+        "segment_reasons": dict(plan.reasons),
     }
 
 
@@ -353,6 +437,7 @@ def assemble_provenance_v2(
         for index, item in enumerate(normalization)
     ]
     compatibility = _normalize_v1_compatibility(v1_compatibility)
+    resolved_policy = _resolved_policy(normalized_plan)
 
     payload: dict[str, Any] = {
         "schema_version": PROVENANCE_SCHEMA_VERSION,
@@ -362,6 +447,12 @@ def assemble_provenance_v2(
         "assets_registry": assets_path,
         "request_digest": normalized_plan.request_digest,
         "requested_policy": normalized_plan.requested_policy,
+        "resolved_policy": resolved_policy,
+        "routing": _routing_record(
+            legacy_engine,
+            normalized_plan,
+            resolved_policy,
+        ),
         "planner": normalized_plan.planner.to_dict(),
         # V1-compatible segment projection: flat {engine, from, to} entries,
         # exactly the shape legacy consumers read from `segments`.
@@ -412,6 +503,7 @@ def digest_manifest(path: str | Path) -> str:
 
 
 __all__ = [
+    "ADDITIVE_PROVENANCE_V2_CORE_KEYS",
     "CORE_OWNED_KEYS",
     "PROVENANCE_SCHEMA_VERSION",
     "assemble_provenance",

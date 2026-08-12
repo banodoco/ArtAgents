@@ -8,13 +8,15 @@ guard_canonical_entrypoint('rendering.render')
 
 
 import argparse
+import ast
 import json
+import os
 import sys
 from contextvars import ContextVar
 from fractions import Fraction
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 from astrid.core import timeline
 from astrid.core.audit import AuditContext
@@ -22,11 +24,16 @@ from astrid.core.foundation.paths import REPO_ROOT
 from astrid.core.rendering.contracts import AudioOwnership, RenderProfile
 from astrid.core.rendering.profile import resolve_render_profile
 from astrid.core.rendering.publication import publish_render_result
+from astrid.core.rendering.service import RenderService
 from astrid.packs.rendering.backends.ffmpeg import command as ffmpeg_command
 from astrid.packs.rendering.backends.ffmpeg import run as ffmpeg_backend
 from astrid.packs.rendering.backends.remotion import run as remotion_backend
 from astrid.packs.rendering.executors.render import audio_reactive_colour
 from astrid.packs.rendering.finalizers.ffmpeg import run as ffmpeg_finalizer
+from astrid.packs.rendering.planners.legacy_hybrid.run import (
+    _complex_clip_windows,
+    _hybrid_segments,
+)
 
 
 # Compatibility exports for callers that historically imported these private
@@ -61,6 +68,12 @@ _timeline_canvas = ffmpeg_command.timeline_canvas
 _clip_duration_seconds = ffmpeg_command.clip_duration_seconds
 
 
+# The Hype pipeline's default output file name.  The executor manifest exposes
+# an ``output_name`` input defaulting to this sentinel; non-default names are
+# validated (plain file name, ``.mp4`` extension) and flow through the same
+# placeholder expansion and declared-output resolution as the default.
+DEFAULT_OUTPUT_NAME = "hype.mp4"
+
 _PUBLICATION_PREVIOUS_OUTPUTS: ContextVar[tuple[Path, ...]] = ContextVar(
     "render_publication_previous_outputs",
     default=(),
@@ -69,6 +82,109 @@ _HYBRID_FINALIZER_PROFILE: ContextVar[RenderProfile | None] = ContextVar(
     "hybrid_finalizer_profile",
     default=None,
 )
+
+_SERVICE: RenderService | None = None
+
+
+def _default_service() -> RenderService:
+    """Build (once) the backend-neutral service the facade delegates to.
+
+    Legacy engine translation, renderer/planner selection, invocation,
+    validation, audio completion, finalization, and publication all happen
+    inside :class:`RenderService`.  The facade is a thin adapter: it maps the
+    legacy argument surface onto the service call and returns the published
+    output path.
+    """
+    global _SERVICE
+    if _SERVICE is None:
+        _SERVICE = RenderService()
+    return _SERVICE
+
+
+def validate_output_name(name: str) -> str:
+    """Validate an ``output_name``: a plain ``.mp4`` file name.
+
+    Rejects empty names, path separators (``/`` and ``\\``), directory
+    traversal (``.``, ``..``, or any ``..``-prefixed component), absolute
+    paths, and anything that does not end in ``.mp4``.  The Hype default
+    ``hype.mp4`` validates unchanged.
+    """
+    text = str(name)
+    if text == "":
+        raise ValueError("output_name must not be empty")
+    if text in {".", ".."} or text.startswith(".."):
+        raise ValueError(
+            f"output_name must not traverse directories, got {name!r}"
+        )
+    if "/" in text or "\\" in text or text.startswith(os.sep):
+        raise ValueError(
+            f"output_name must be a plain file name without path separators, got {name!r}"
+        )
+    if Path(text).name != text:
+        raise ValueError(
+            f"output_name must be a plain file name, got {name!r}"
+        )
+    if not text.endswith(".mp4"):
+        raise ValueError(
+            f"output_name must end with .mp4, got {name!r}"
+        )
+    return text
+
+
+def _legacy_backend_config(
+    *,
+    project_dir: Path | None,
+    composition_id: str,
+    theme_path: Path | None,
+    min_free_gb: float | None,
+) -> dict[str, dict[str, Any]]:
+    """Map the legacy render kwargs onto namespaced backend configuration.
+
+    The facade remains backend-neutral: it only knows the qualified ids that
+    correspond to the historical selector spellings and scopes each legacy
+    value under the backend that understands it.  The service forwards each
+    candidate only its own namespace.
+    """
+    config: dict[str, dict[str, Any]] = {}
+    remotion: dict[str, Any] = {}
+    if project_dir is not None:
+        remotion["project_dir"] = str(project_dir)
+    if composition_id is not None:
+        remotion["composition_id"] = composition_id
+    if theme_path is not None:
+        remotion["theme_path"] = str(theme_path)
+    if min_free_gb is not None:
+        remotion["min_free_gb"] = min_free_gb
+    if remotion:
+        config["rendering.remotion"] = remotion
+    hybrid: dict[str, Any] = {}
+    if theme_path is not None:
+        hybrid["theme_path"] = str(theme_path)
+    if hybrid:
+        config["rendering.legacy_hybrid"] = hybrid
+    return config
+
+
+def _parse_backend_config(value: str | None) -> dict[str, dict[str, Any]]:
+    """Parse the ``--backend-config`` CLI payload (JSON or Python literal)."""
+    if value is None or value == "":
+        return {}
+    text = str(value).strip()
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        try:
+            parsed = ast.literal_eval(text)
+        except (ValueError, SyntaxError) as exc:
+            raise ValueError(
+                f"--backend-config must be a JSON object keyed by qualified "
+                f"backend id, got {value!r}"
+            ) from exc
+    if not isinstance(parsed, dict):
+        raise ValueError(
+            f"--backend-config must be a JSON object keyed by qualified backend id"
+        )
+    return {str(key): dict(item) for key, item in parsed.items() if item is not None}
 
 
 def _swap_from_dump(clip: dict) -> dict:
@@ -217,121 +333,6 @@ def _can_render_with_ffmpeg_media(
         timeline_path,
         assets_path,
     )
-
-
-def _complex_clip_windows(timeline_data: dict, fps: int | Fraction, *, handle_seconds: float = 0.25) -> list[tuple[float, float]]:
-    duration = _timeline_duration_seconds(timeline_data)
-    tracks = {track.get("id"): track for track in timeline_data.get("tracks", [])}
-    visual_track_ids = {track.get("id") for track in timeline_data.get("tracks", []) if track.get("kind") == "visual"}
-    visual_media_coverage: dict[str, float] = {}
-    for candidate in timeline_data.get("clips", []):
-        if candidate.get("clipType") != "media" or candidate.get("track") not in visual_track_ids:
-            continue
-        track_id = str(candidate.get("track"))
-        visual_media_coverage[track_id] = visual_media_coverage.get(track_id, 0.0) + _clip_duration_seconds(candidate)
-    base_visual_track_id = max(visual_media_coverage, key=visual_media_coverage.get) if visual_media_coverage else None
-    windows: list[tuple[float, float]] = []
-    clips = timeline_data.get("clips", [])
-    for index, clip in enumerate(clips):
-        media_clip = clip.get("clipType") == "media"
-        if media_clip:
-            track = tracks.get(clip.get("track"), {})
-            params = clip.get("params") if isinstance(clip.get("params"), dict) else {}
-            effects = clip.get("effects")
-            has_effects = bool(effects)
-            has_transition = bool(clip.get("transition"))
-            has_overlay_track = track.get("kind") == "visual" and clip.get("track") != base_visual_track_id
-            has_opacity = isinstance(clip.get("opacity"), (int, float)) and float(clip.get("opacity") or 0) != 1.0
-            has_audio_fade = track.get("kind") == "audio" and (
-                isinstance(params.get("fadeIn"), (int, float)) or isinstance(params.get("fadeOut"), (int, float))
-            )
-            if not (has_effects or has_transition or has_overlay_track or has_opacity or has_audio_fade):
-                continue
-            next_same_track = next(
-                (candidate for candidate in clips[index + 1 :] if candidate.get("track") == clip.get("track")),
-                None,
-            )
-            if has_transition and next_same_track is not None:
-                transition = clip.get("transition")
-                transition_seconds = 8 / fps
-                if isinstance(transition, dict):
-                    if isinstance(transition.get("duration"), (int, float)):
-                        transition_seconds = float(transition["duration"])
-                    elif isinstance(transition.get("durationFrames"), (int, float)):
-                        transition_seconds = float(transition["durationFrames"]) / fps
-                clip_end = _clip_timeline_end_seconds(clip)
-                next_start = float(next_same_track.get("at", clip_end) or clip_end)
-                start = max(0.0, min(clip_end - transition_seconds, next_start) - handle_seconds)
-                end = min(duration, max(clip_end, next_start + transition_seconds) + handle_seconds)
-                if end > start:
-                    windows.append(
-                        (
-                            _round_frame_time(start, fps, mode="floor"),
-                            _round_frame_time(end, fps, mode="ceil"),
-                        )
-                    )
-                continue
-        start = max(0.0, float(clip.get("at", 0) or 0) - handle_seconds)
-        end = min(duration, _clip_timeline_end_seconds(clip) + handle_seconds)
-        if end <= start:
-            continue
-        windows.append(
-            (
-                _round_frame_time(start, fps, mode="floor"),
-                _round_frame_time(end, fps, mode="ceil"),
-            )
-        )
-    if not windows:
-        return []
-    windows.sort()
-    merged: list[tuple[float, float]] = []
-    for start, end in windows:
-        if not merged or start > merged[-1][1]:
-            merged.append((start, end))
-        else:
-            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
-    return merged
-
-
-def _hybrid_segments(
-    timeline_data: dict,
-    *,
-    fps: Fraction | None = None,
-) -> list[dict[str, float | str]]:
-    if fps is None:
-        raw_fps = (
-            timeline_data.get("theme_overrides", {})
-            .get("visual", {})
-            .get("canvas", {})
-            .get("fps", 30)
-        )
-        if (
-            isinstance(raw_fps, Sequence)
-            and not isinstance(raw_fps, (str, bytes))
-            and len(raw_fps) == 2
-        ):
-            fps = Fraction(raw_fps[0], raw_fps[1])
-        else:
-            fps = Fraction(str(raw_fps))
-        if fps <= 0:
-            raise ValueError("canvas fps must be positive")
-    duration = _round_frame_time(_timeline_duration_seconds(timeline_data), fps, mode="ceil")
-    complex_windows = _complex_clip_windows(timeline_data, fps)
-    if not complex_windows:
-        return [{"engine": "ffmpeg", "from": 0.0, "to": duration}]
-    segments: list[dict[str, float | str]] = []
-    cursor = 0.0
-    for start, end in complex_windows:
-        start = max(0.0, min(start, duration))
-        end = max(start, min(end, duration))
-        if start > cursor:
-            segments.append({"engine": "ffmpeg", "from": cursor, "to": start})
-        if end > start:
-            segments.append({"engine": "remotion", "from": start, "to": end})
-        cursor = max(cursor, end)
-    if cursor < duration:
-        segments.append({"engine": "ffmpeg", "from": cursor, "to": duration})
-    return [segment for segment in segments if float(segment["to"]) > float(segment["from"])]
 
 
 def _concat_segments(segment_paths: list[Path], out_path: Path) -> None:
@@ -542,56 +543,6 @@ def _render_audio_reactive_colour_if_supported(
     )
 
 
-def _render_with_publication_context(
-    timeline_path: Path,
-    assets_path: Path,
-    out_path: Path,
-    *,
-    engine: str = "remotion",
-    project_dir: Path | None = None,
-    composition_id: str = "TimelineComposition",
-    theme_path: Path | None = None,
-    min_free_gb: float | None = None,
-) -> Path:
-    out_path = Path(out_path)
-    audio_reactive_output = _render_audio_reactive_colour_if_supported(
-        timeline_path,
-        assets_path,
-        out_path,
-        project_dir=project_dir,
-        composition_id=composition_id,
-        theme_path=theme_path,
-    )
-    if audio_reactive_output is not None:
-        return audio_reactive_output
-    if engine == "hybrid":
-        return _render_hybrid(
-            timeline_path,
-            assets_path,
-            out_path,
-            project_dir=project_dir,
-            composition_id=composition_id,
-            theme_path=theme_path,
-            min_free_gb=min_free_gb,
-        )
-    if engine == "ffmpeg":
-        return _render_ffmpeg_media(timeline_path, assets_path, out_path)
-    if engine != "remotion":
-        raise ValueError(f"Unsupported render engine: {engine}")
-    if _can_render_with_ffmpeg_media(timeline_path, assets_path):
-        return _render_ffmpeg_media(timeline_path, assets_path, out_path)
-    return remotion_backend.render(
-        timeline_path,
-        assets_path,
-        out_path,
-        project_dir=project_dir,
-        composition_id=composition_id,
-        theme_path=theme_path,
-        min_free_gb=min_free_gb,
-        previous_outputs=_PUBLICATION_PREVIOUS_OUTPUTS.get(),
-    )
-
-
 def render(
     timeline_path: Path,
     assets_path: Path,
@@ -603,29 +554,40 @@ def render(
     theme_path: Path | None = None,
     min_free_gb: float | None = None,
     keep_previous_renders: bool = False,
+    backend_config: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> Path:
-    """Render privately and publish one locked video-plus-sidecar pair."""
+    """Render through :class:`RenderService` and publish one locked pair.
 
+    The facade keeps the historical public signature and capability id.  All
+    dispatch (legacy engine translation, renderer/planner selection, support,
+    invocation, validation, audio completion, finalization, publication)
+    happens in the service; the facade only adapts the legacy argument surface
+    and the caller-selected output name.
+    """
     out_path = Path(out_path)
+    validate_output_name(out_path.name)
     previous_outputs = (
         ()
         if keep_previous_renders
         else _previous_render_outputs_for_timeline(out_path, timeline_path)
     )
-    publication_token = _PUBLICATION_PREVIOUS_OUTPUTS.set(previous_outputs)
-    try:
-        return _render_with_publication_context(
-            timeline_path,
-            assets_path,
-            out_path,
-            engine=engine,
-            project_dir=project_dir,
-            composition_id=composition_id,
-            theme_path=theme_path,
-            min_free_gb=min_free_gb,
-        )
-    finally:
-        _PUBLICATION_PREVIOUS_OUTPUTS.reset(publication_token)
+    config = _legacy_backend_config(
+        project_dir=project_dir,
+        composition_id=composition_id,
+        theme_path=theme_path,
+        min_free_gb=min_free_gb,
+    )
+    for key, value in (backend_config or {}).items():
+        if value is not None:
+            config[str(key)] = dict(value)
+    return _default_service().render(
+        timeline_path,
+        assets_path,
+        out_path,
+        selector=engine,
+        backend_config=config,
+        previous_outputs=previous_outputs,
+    )
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -633,7 +595,26 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--timeline", type=Path, required=True)
     parser.add_argument("--assets", type=Path)
     parser.add_argument("--out", type=Path, required=True)
-    parser.add_argument("--engine", choices=("remotion", "ffmpeg", "hybrid"), default="remotion")
+    parser.add_argument(
+        "--engine",
+        default="remotion",
+        help="Legacy selector (remotion, ffmpeg, hybrid) or a qualified renderer id.",
+    )
+    parser.add_argument(
+        "--backend",
+        default=None,
+        help="Neutral alias for --engine: legacy selector or qualified backend id.",
+    )
+    parser.add_argument(
+        "--backend-config",
+        default=None,
+        help="JSON object keyed by qualified backend id with per-backend configuration.",
+    )
+    parser.add_argument(
+        "--output-name",
+        default=None,
+        help="Output file name (default hype.mp4); plain .mp4 file name only.",
+    )
     parser.add_argument("--project-dir", type=Path, default=REPO_ROOT / "remotion")
     parser.add_argument("--composition", default="TimelineComposition")
     parser.add_argument("--min-free-gb", type=float, default=None, help="Abort before rendering unless this much free disk is available near --out.")
@@ -652,6 +633,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
     try:
+        if args.output_name is not None:
+            validate_output_name(args.output_name)
+            if Path(args.out).name != args.output_name:
+                raise ValueError(
+                    f"--out basename {Path(args.out).name!r} does not match "
+                    f"--output-name {args.output_name!r}"
+                )
+        else:
+            validate_output_name(Path(args.out).name)
+        selector = args.backend if args.backend is not None else args.engine
+        config = _parse_backend_config(args.backend_config)
         if args.assets is None:
             with TemporaryDirectory(prefix="astrid-render-assets-") as tmp_text:
                 assets_path = Path(tmp_text) / "hype.assets.json"
@@ -660,24 +652,26 @@ def main(argv: Sequence[str] | None = None) -> int:
                     args.timeline,
                     assets_path,
                     args.out,
-                    engine=args.engine,
+                    engine=selector,
                     project_dir=args.project_dir,
                     composition_id=args.composition,
                     theme_path=args.theme,
                     min_free_gb=args.min_free_gb,
                     keep_previous_renders=args.keep_previous_renders,
+                    backend_config=config,
                 )
         else:
             output = render(
                 args.timeline,
                 args.assets,
                 args.out,
-                engine=args.engine,
+                engine=selector,
                 project_dir=args.project_dir,
                 composition_id=args.composition,
                 theme_path=args.theme,
                 min_free_gb=args.min_free_gb,
                 keep_previous_renders=args.keep_previous_renders,
+                backend_config=config,
             )
     except Exception as exc:  # pragma: no cover - CLI path
         print(str(exc), file=sys.stderr)

@@ -436,19 +436,10 @@ def test_facade_engine_ffmpeg_delegates_to_backend_seam(tmp_path: Path) -> None:
     timeline_path, assets_path = _write_inputs(tmp_path)
     out_path = tmp_path / "render" / "hype.mp4"
     sentinel = tmp_path / "sentinel.mp4"
+    fake_service = mock.Mock()
+    fake_service.render.return_value = sentinel
 
-    with (
-        mock.patch.object(
-            facade,
-            "_render_audio_reactive_colour_if_supported",
-            return_value=None,
-        ),
-        mock.patch.object(
-            facade,
-            "_render_ffmpeg_media",
-            return_value=sentinel,
-        ) as render_media,
-    ):
+    with mock.patch.object(facade, "_default_service", return_value=fake_service):
         output = facade.render(
             timeline_path,
             assets_path,
@@ -457,35 +448,22 @@ def test_facade_engine_ffmpeg_delegates_to_backend_seam(tmp_path: Path) -> None:
         )
 
     assert output == sentinel
-    render_media.assert_called_once_with(
-        timeline_path,
-        assets_path,
-        out_path.resolve(),
-    )
+    fake_service.render.assert_called_once()
+    kwargs = fake_service.render.call_args.kwargs
+    assert kwargs["selector"] == "ffmpeg"
 
 
 def test_facade_nominal_remotion_keeps_auto_ffmpeg_policy(tmp_path: Path) -> None:
     timeline_path, assets_path = _write_inputs(tmp_path)
     out_path = tmp_path / "render" / "hype.mp4"
     sentinel = tmp_path / "sentinel.mp4"
+    fake_service = mock.Mock()
+    fake_service.render.return_value = sentinel
 
-    with (
-        mock.patch.object(
-            facade,
-            "_render_audio_reactive_colour_if_supported",
-            return_value=None,
-        ),
-        mock.patch.object(
-            facade,
-            "_can_render_with_ffmpeg_media",
-            return_value=True,
-        ),
-        mock.patch.object(
-            facade,
-            "_render_ffmpeg_media",
-            return_value=sentinel,
-        ) as render_media,
-    ):
+    # The legacy nominal-remotion auto-FFmpeg policy lives inside the
+    # service now; the facade must pass the legacy selector through so the
+    # service can apply it.
+    with mock.patch.object(facade, "_default_service", return_value=fake_service):
         output = facade.render(
             timeline_path,
             assets_path,
@@ -494,11 +472,8 @@ def test_facade_nominal_remotion_keeps_auto_ffmpeg_policy(tmp_path: Path) -> Non
         )
 
     assert output == sentinel
-    render_media.assert_called_once_with(
-        timeline_path,
-        assets_path,
-        out_path.resolve(),
-    )
+    kwargs = fake_service.render.call_args.kwargs
+    assert kwargs["selector"] == "remotion"
 
 
 def test_audio_reactive_compatibility_path_is_same_module() -> None:

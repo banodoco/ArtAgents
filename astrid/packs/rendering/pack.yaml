@@ -44,6 +44,8 @@ extensions:
     renderers:
       - backends/remotion/renderer.yaml
       - backends/ffmpeg/renderer.yaml
+    planners:
+      - planners/legacy_hybrid/planner.yaml
     finalizers:
       - finalizers/ffmpeg/finalizer.yaml
 aliases:
