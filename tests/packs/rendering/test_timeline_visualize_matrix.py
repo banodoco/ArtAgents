@@ -1981,7 +1981,7 @@ class TestImmutabilityFence:
         epic_first = "29b648e"  # first epic commit (B1-B4)
         for rel, _path in _frozen_paths():
             out = subprocess.run(
-                ["git", "log", "--oneline", f"{epic_first}..HEAD", "--", rel],
+                ["git", "log", "--oneline", f"{epic_first}^..HEAD", "--", rel],
                 capture_output=True,
                 text=True,
                 cwd=REPO_ROOT,

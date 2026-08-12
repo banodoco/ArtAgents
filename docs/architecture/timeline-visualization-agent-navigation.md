@@ -242,7 +242,7 @@ transition grouping mounts source `[F, F+Df)`, destination
    e.g. text/speech focus actions while keeping v1 shape).
 4. `reads: "current"` remains reserved for `refresh_root`; all M2 navigation
    stays snapshot-read-only.
-5. Known M1 gap (oracle decision): cold `--range` roots emit `scope.ref:
-   null` (no RG id minted on the cold path) and are rejected by the frozen
-   preflight — the RANGE-focus journey option requires minting RG ids on
-   cold range scopes.
+5. Cold `--range` scopes mint RG ids at root creation (e.g. `TL01.RG01`,
+   ordered by start time, deterministic per bounds) so RANGE focus is
+   navigable through the frozen preflight; see the implemented
+   `assign_range_ids` integration in the executor path.
