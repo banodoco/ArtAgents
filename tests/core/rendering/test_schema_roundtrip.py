@@ -280,6 +280,8 @@ def _finalize_cases() -> list[tuple[str, dict[str, Any]]]:
                 ("partial populated audio", partial),
         ("contradictory artifact audio", _set(base, ("artifacts", 0, "audio"), "rendered")),
         ("nested plan version", _set(base, ("plan", "schema_version"), 2)),
+        ("trailing lf digest", _set(base, ("request_digest",), "a" * 64 + "\n")),
+        ("trailing lf reason key", _set(base, ("reasons",), {"0\n": "why"})),
         ("zero-frame plan", zero_plan),
     ]
     return _with_version_adversaries(base, cases)

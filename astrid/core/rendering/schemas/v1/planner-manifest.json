@@ -23,12 +23,12 @@
     "name": {
       "type": "string",
       "minLength": 1,
-      "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
+      "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*\\Z"
     },
     "version": {
       "type": "string",
       "minLength": 1,
-      "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
+      "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*\\Z"
     },
     "protocol_version": {
       "type": "integer",
@@ -39,7 +39,7 @@
       "items": {
         "type": "string",
         "minLength": 1,
-        "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
+        "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*\\Z"
       },
       "minItems": 1
     },
@@ -64,7 +64,7 @@
       ],
       "minLength": 1,
       "default": null,
-      "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
+      "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*\\Z"
     },
     "capabilities": {
       "$ref": "#/definitions/plannerCapabilities",
@@ -79,7 +79,7 @@
       "items": {
         "type": "string",
         "minLength": 1,
-        "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
+        "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*\\Z"
       },
       "uniqueItems": true,
       "default": []
@@ -96,12 +96,12 @@
       "type": "object",
       "propertyNames": {
         "minLength": 1,
-        "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
+        "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*\\Z"
       },
       "additionalProperties": {
         "type": "string",
         "minLength": 1,
-        "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
+        "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*\\Z"
       },
       "default": {}
     }
@@ -110,7 +110,7 @@
   "definitions": {
     "qualifiedId": {
       "type": "string",
-      "pattern": "^[a-z0-9][a-z0-9_-]*(?:\\.[a-z0-9][a-z0-9_-]*)+$"
+      "pattern": "^[a-z0-9][a-z0-9_-]*(?:\\.[a-z0-9][a-z0-9_-]*)+\\Z"
     },
     "permissions": {
       "type": "array",
@@ -135,7 +135,7 @@
           "items": {
             "type": "string",
             "minLength": 1,
-            "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
+            "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*\\Z"
           },
           "uniqueItems": true
         },
@@ -151,12 +151,12 @@
               },
               {
                 "type": "string",
-                "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
+                "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*\\Z"
               }
             ]
           },
           "propertyNames": {
-            "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
+            "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*\\Z"
           }
         }
       },

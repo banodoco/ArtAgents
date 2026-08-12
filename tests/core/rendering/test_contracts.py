@@ -922,6 +922,46 @@ def test_provenance_rejects_spoofed_artifact_lineage() -> None:
                 }
             },
         )
+    with pytest.raises(ValueError, match="duplicate attachment name"):
+        assemble_provenance_v2(
+            **base,
+            plan=_plan(
+                segments=[_segment(0, 24), _segment(24, 48)]
+            ),
+            artifact_profiles={
+                "out/v1.mp4": {
+                    "profile": _profile(),
+                    "sha256": SHA_B,
+                    "attachments": {
+                        "alpha": {"path": "outputs/a.mp4", "kind": "alpha", "sha256": SHA_C}
+                    },
+                },
+                "out/v2.mp4": {
+                    "profile": _profile(),
+                    "sha256": SHA_D,
+                    "attachments": {
+                        "alpha": {"path": "outputs/a2.mp4", "kind": "alpha", "sha256": SHA_C}
+                    },
+                },
+            },
+        )
+    with pytest.raises(ValueError, match="workspace path"):
+        assemble_provenance_v2(
+            **base,
+            plan=_plan(),
+            artifact_profiles={"../escape.mp4": {"profile": _profile(), "sha256": SHA_B, "attachments": {}}},
+        )
+    with pytest.raises(ValueError, match="duplicate path"):
+        assemble_provenance_v2(
+            **base,
+            plan=_plan(
+                segments=[_segment(0, 24), _segment(24, 48)]
+            ),
+            artifact_profiles=[
+                VideoArtifact(path="outputs/a.mp4", profile=_profile(audio=False), sha256=SHA_B, duration_frames=48),
+                VideoArtifact(path="outputs/a.mp4", profile=_profile(audio=False), sha256=SHA_C, duration_frames=48),
+            ],
+        )
 
 
 def test_plan_accepts_adjacent_segments_and_exact_window_coverage() -> None:

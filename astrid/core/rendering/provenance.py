@@ -22,6 +22,7 @@ from .contracts import (
     _json_safe_mapping,
     _require_sha256,
     _require_string,
+    _require_workspace_relative_path,
     _validate_backend_fragments,
 )
 
@@ -58,7 +59,14 @@ def _normalize_attachments(
     for raw_name, raw_attachment in (attachments or {}).items():
         name = _require_string(raw_name, "attachment key")
         attachment = (
-            raw_attachment
+            Attachment.from_dict(
+                {
+                    "name": raw_attachment.name,
+                    "path": raw_attachment.path,
+                    "kind": raw_attachment.kind,
+                    "sha256": raw_attachment.sha256,
+                }
+            )
             if isinstance(raw_attachment, Attachment)
             else Attachment.from_dict(raw_attachment)
         )
@@ -83,28 +91,45 @@ def _legacy_segment_projection(segment: RenderSegment) -> dict[str, Any]:
     }
 
 
+def _reject_duplicate_attachment_names(
+    lineage: Mapping[str, Any],
+    seen: set[str],
+) -> None:
+    """Reject attachment names repeated across segment artifacts."""
+    for name in (lineage.get("attachments") or {}):
+        if name in seen:
+            raise ValueError(
+                f"duplicate attachment name {name!r} across segment artifacts"
+            )
+        seen.add(name)
+
+
 def _normalize_artifact_profiles(value: Any, *, segments: Sequence[Any]) -> Any:
     if value is None:
         value = {}
     if isinstance(value, Mapping):
         result: dict[str, Any] = {}
+        seen_attachment_names: set[str] = set()
         for key, profile in value.items():
             path = _require_string(str(key), "artifact key")
+            path = _require_workspace_relative_path(path, "artifact key")
             if isinstance(profile, VideoArtifact):
                 if path != profile.path:
                     raise ValueError(
                         f"artifact_profiles key {path!r} must equal VideoArtifact.path "
                         f"{profile.path!r}"
                     )
-                result[path] = _artifact_lineage(profile)
+                lineage = _artifact_lineage(profile)
             elif isinstance(profile, Mapping):
-                result[path] = _artifact_lineage_from_mapping(profile, key=path)
+                lineage = _artifact_lineage_from_mapping(profile, key=path)
             else:
                 raise TypeError(
                     f"artifact_profiles[{path!r}] must be a VideoArtifact or a "
                     "hashed lineage record {profile, sha256, attachments}; "
                     "profile-only entries carry no output hash"
                 )
+            _reject_duplicate_attachment_names(lineage, seen_attachment_names)
+            result[path] = lineage
         # A positive plan must record exactly one hashed artifact per segment.
         if segments:
             if len(result) != len(segments):
@@ -114,14 +139,24 @@ def _normalize_artifact_profiles(value: Any, *, segments: Sequence[Any]) -> Any:
                 )
         return result
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
-        lineage: dict[str, Any] = {}
+        lineage: list[dict[str, Any]] = []
+        seen_paths: set[str] = set()
+        seen_attachment_names: set[str] = set()
         for profile in value:
             if not isinstance(profile, VideoArtifact):
                 raise TypeError(
                     "sequence artifact_profiles entries must be VideoArtifacts "
                     "so lineage records stay path-keyed"
                 )
-            lineage[profile.path] = _artifact_lineage(profile)
+            if profile.path in seen_paths:
+                raise ValueError(
+                    f"artifact_profiles sequence contains duplicate path "
+                    f"{profile.path!r}"
+                )
+            seen_paths.add(profile.path)
+            record = _artifact_lineage(profile)
+            _reject_duplicate_attachment_names(record, seen_attachment_names)
+            lineage.append(record)
         if segments:
             if len(lineage) != len(segments):
                 raise ValueError(
@@ -192,10 +227,8 @@ def _artifact_lineage_from_mapping(raw: Mapping[str, Any], *, key: str) -> dict[
             "sha256": validated.sha256,
         }
     return {
-        "profile": (
-            profile
-            if isinstance(profile, RenderProfile)
-            else RenderProfile.from_dict(_json_safe_mapping(profile, label="artifact profile"))
+        "profile": RenderProfile.from_dict(
+            _json_safe_mapping(profile, label="artifact profile")
         ).to_dict(),
         "sha256": _require_sha256(raw["sha256"], "artifact sha256"),
         "attachments": attachments,

@@ -26,7 +26,7 @@
       "items": {
         "type": "string",
         "minLength": 1,
-        "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
+        "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*\\Z"
       }
     },
     "features": {
@@ -38,7 +38,7 @@
         ]
       },
       "propertyNames": {
-        "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
+        "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*\\Z"
       }
     },
     "alternatives": {
@@ -57,13 +57,13 @@
         "null"
       ],
       "minLength": 1,
-      "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
+      "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*\\Z"
     }
   },
   "definitions": {
     "qualifiedId": {
       "type": "string",
-      "pattern": "^[a-z0-9][a-z0-9_-]*(?:\\.[a-z0-9][a-z0-9_-]*)+$"
+      "pattern": "^[a-z0-9][a-z0-9_-]*(?:\\.[a-z0-9][a-z0-9_-]*)+\\Z"
     }
   },
   "examples": [

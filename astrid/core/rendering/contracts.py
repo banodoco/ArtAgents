@@ -324,6 +324,8 @@ def _require_workspace_relative_path(value: Any, label: str) -> str:
     parts = PurePosixPath(normalized).parts
     if not parts or any(part in {"", ".", ".."} for part in raw_parts):
         raise ValueError(f"{label} must be a normalized contained workspace path")
+    if any(not part.strip() for part in raw_parts):
+        raise ValueError(f"{label} must not contain empty or whitespace-only path components")
     return raw
 
 

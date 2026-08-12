@@ -17,7 +17,7 @@
     "timeline_path": {
       "type": "string",
       "minLength": 1,
-      "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
+      "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*\\Z"
     },
     "assets_registry_path": {
       "type": [
@@ -25,11 +25,11 @@
         "null"
       ],
       "minLength": 1,
-      "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
+      "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*\\Z"
     },
     "output_name": {
       "type": "string",
-      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*\\Z",
       "not": {
         "enum": [
           ".",
@@ -101,7 +101,7 @@
             "properties": {
               "audio_codec": {
                 "type": "string",
-                "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
+                "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*\\Z"
               }
             }
           }
@@ -148,7 +148,7 @@
   "definitions": {
     "qualifiedId": {
       "type": "string",
-      "pattern": "^[a-z0-9][a-z0-9_-]*(?:\\.[a-z0-9][a-z0-9_-]*)+$"
+      "pattern": "^[a-z0-9][a-z0-9_-]*(?:\\.[a-z0-9][a-z0-9_-]*)+\\Z"
     },
     "audioOwnership": {
       "type": "string",
@@ -255,12 +255,12 @@
         "container": {
           "type": "string",
           "minLength": 1,
-          "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
+          "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*\\Z"
         },
         "video_codec": {
           "type": "string",
           "minLength": 1,
-          "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
+          "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*\\Z"
         },
         "video_profile": {
           "type": [
@@ -268,7 +268,7 @@
             "null"
           ],
           "minLength": 1,
-          "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
+          "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*\\Z"
         },
         "video_level": {
           "type": [
@@ -276,12 +276,12 @@
             "null"
           ],
           "minLength": 1,
-          "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
+          "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*\\Z"
         },
         "pixel_format": {
           "type": "string",
           "minLength": 1,
-          "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
+          "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*\\Z"
         },
         "audio_codec": {
           "type": [
@@ -289,7 +289,7 @@
             "null"
           ],
           "minLength": 1,
-          "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
+          "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*\\Z"
         },
         "audio_sample_rate": {
           "type": [
@@ -304,7 +304,7 @@
             "null"
           ],
           "minLength": 1,
-          "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
+          "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*\\Z"
         },
         "duration_tolerance": {
           "type": "integer",
@@ -335,7 +335,7 @@
             "audio_codec": {
               "type": "string",
               "minLength": 1,
-              "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
+              "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*\\Z"
             },
             "audio_sample_rate": {
               "type": "integer",
@@ -344,7 +344,7 @@
             "audio_channel_layout": {
               "type": "string",
               "minLength": 1,
-              "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
+              "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*\\Z"
             }
           }
         }
@@ -362,11 +362,11 @@
     "stringMap": {
       "type": "object",
       "propertyNames": {
-        "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
+        "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*\\Z"
       },
       "additionalProperties": {
         "type": "string",
-        "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*$"
+        "pattern": "^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*\\Z"
       }
     }
   },

@@ -476,16 +476,19 @@ distinct source pack, manifest, alias/override, support, and input-hash evidence
 for every renderer invocation. Planner and finalizer records carry the same
 alias/override/trust/support evidence as renderer records. Rendered artifacts
 are REQUIRED in `artifact_profiles` for any positive render plan: exactly one
-hashed lineage record PER SEGMENT, each mapping a unique output path to
-exactly `{profile, sha256, attachments}` with a validated 64-hex string
-`sha256` on the artifact and every attachment `{path, kind, sha256}`.
-Attachment paths must be workspace-relative, kinds must match
-`[a-z][a-z0-9-]*`, and attachment map keys must equal the attachment's own
-name. Profile-only entries, null/malformed hashes, unknown or missing fields,
-path escapes, invalid kinds, and cardinality mismatches are all rejected.
-Sequence-form lineage requires VideoArtifacts so records stay path-keyed.
-Replay can verify rendered outputs byte-for-byte. `input_hashes` describe
-inputs only, never rendered outputs.
+hashed lineage entry PER SEGMENT, each keyed by a workspace-relative output
+path with exactly `{profile, sha256, attachments}` and a validated 64-hex
+string `sha256` on the artifact and every attachment `{path, kind, sha256}`.
+Sequence form preserves segment order (a path-keyed list) and rejects
+duplicate paths; mapping form requires path keys to equal the artifact's own
+path. Attachment paths must be workspace-relative, kinds must match
+`[a-z][a-z0-9-]*`, attachment map keys must equal the attachment's own name,
+and attachment names must be unique ACROSS all segment artifacts. Profile-only
+entries, null/malformed hashes, unknown or missing fields, path escapes,
+invalid kinds, duplicate paths, duplicate attachment names, and cardinality
+mismatches are all rejected; all Attachment and RenderProfile values are
+reconstructed through their DTO validators. Replay can verify rendered outputs
+byte-for-byte. `input_hashes` describe inputs only, never rendered outputs.
 
 `engine` is only the legacy request projection. The `segments` key keeps the
 V1-compatible flat projection: one `{engine, from, to}` entry per segment,
