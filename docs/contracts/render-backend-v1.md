@@ -346,7 +346,8 @@ It is computed once by the planner/service and carried unchanged into
 provenance, replay bundles, and finalize requests so a replayed request can be
 verified byte-for-byte against the one that was planned.
 
-Resolution evidence has one canonical representation:
+Resolution evidence has one canonical representation; ALL of the following
+keys are REQUIRED on every capability resolution record:
 
 - `planner` is `{id, source_pack, manifest_digest, trust_eligibility,
   alias_chain, override, support_decision}`;
@@ -356,16 +357,15 @@ Resolution evidence has one canonical representation:
 - `finalizer` is `{id, source_pack, manifest_digest, alias_chain,
   override, trust_eligibility, support_decision}`.
 
-`alias_chain` defaults to `[]` and `override` to `null` when a capability was
-selected directly; `trust_eligibility` records the derived source/install
-trust decision; `support_decision` is the request-sensitive support report
-(or `null` when no probe ran, e.g. for a finalizer). All are recorded whenever
-alias, override, trust, or support evidence participated in the selection.
-Manifest, request, and input-hash values are lowercase SHA-256 digests. Every
-non-null `support_decision` is a versioned `SupportReport` whose backend
-equals the capability ID. There is no parallel `segment.backend`,
-`segment.support`, or string-only finalizer field that could disagree with
-these records.
+`alias_chain` is an array of strings and defaults to `[]`; `override` is an
+object or `null`; `trust_eligibility` records the derived source/install trust
+decision; `support_decision` is a versioned `SupportReport` or `null` (when no
+request-sensitive probe ran, e.g. for a finalizer). Every non-null
+`support_decision.backend` MUST equal the capability ID — the DTO rejects a
+mismatch for planner, renderer, and finalizer alike. Manifest, request, and
+input-hash values are lowercase SHA-256 digests. There is no parallel
+`segment.backend`, `segment.support`, or string-only finalizer field that
+could disagree with these records.
 
 `total_frames` is the complete timeline frame count. A zero-frame plan has
 `window: null`, no segments, and an empty reasons map; it is not finalized and
@@ -472,8 +472,11 @@ assembler accepts no parallel singular renderer identity. The nested records
 have exactly the resolution shapes defined in Planning, so a hybrid plan keeps
 distinct source pack, manifest, alias/override, support, and input-hash evidence
 for every renderer invocation. Planner and finalizer records carry the same
-alias/override evidence as renderer records; artifact hashes are recorded per
-segment in the plan's `input_hashes` and in `artifact_profiles`.
+alias/override/trust/support evidence as renderer records. Rendered artifacts
+are recorded in `artifact_profiles` as hashed lineage records: each maps an
+output path to `{profile, sha256, attachments: {name: {path, kind, sha256}}}`
+so replay can verify rendered outputs and attachments byte-for-byte.
+`input_hashes` describe inputs only, never rendered outputs.
 
 `engine` is only the legacy request projection. The `segments` key keeps the
 V1-compatible flat projection: one `{engine, from, to}` entry per segment,

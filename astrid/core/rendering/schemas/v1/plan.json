@@ -55,7 +55,7 @@
       "additionalProperties": {
         "type": "string",
         "minLength": 1,
-        "pattern": "\\S"
+        "pattern": "^(?!.*\\u0000).*\\S.*$"
       }
     },
     "window": {
@@ -114,7 +114,7 @@
         {
           "type": "string",
           "minLength": 1,
-          "pattern": "\\S"
+          "pattern": "^(?!.*\\u0000).*\\S.*$"
         },
         {
           "type": "object"
@@ -226,12 +226,12 @@
         "container": {
           "type": "string",
           "minLength": 1,
-          "pattern": "\\S"
+          "pattern": "^(?!.*\\u0000).*\\S.*$"
         },
         "video_codec": {
           "type": "string",
           "minLength": 1,
-          "pattern": "\\S"
+          "pattern": "^(?!.*\\u0000).*\\S.*$"
         },
         "video_profile": {
           "type": [
@@ -239,7 +239,7 @@
             "null"
           ],
           "minLength": 1,
-          "pattern": "\\S"
+          "pattern": "^(?!.*\\u0000).*\\S.*$"
         },
         "video_level": {
           "type": [
@@ -247,12 +247,12 @@
             "null"
           ],
           "minLength": 1,
-          "pattern": "\\S"
+          "pattern": "^(?!.*\\u0000).*\\S.*$"
         },
         "pixel_format": {
           "type": "string",
           "minLength": 1,
-          "pattern": "\\S"
+          "pattern": "^(?!.*\\u0000).*\\S.*$"
         },
         "audio_codec": {
           "type": [
@@ -260,7 +260,7 @@
             "null"
           ],
           "minLength": 1,
-          "pattern": "\\S"
+          "pattern": "^(?!.*\\u0000).*\\S.*$"
         },
         "audio_sample_rate": {
           "type": [
@@ -275,7 +275,7 @@
             "null"
           ],
           "minLength": 1,
-          "pattern": "\\S"
+          "pattern": "^(?!.*\\u0000).*\\S.*$"
         },
         "duration_tolerance": {
           "type": "integer",
@@ -306,7 +306,7 @@
             "audio_codec": {
               "type": "string",
               "minLength": 1,
-              "pattern": "\\S"
+              "pattern": "^(?!.*\\u0000).*\\S.*$"
             },
             "audio_sample_rate": {
               "type": "integer",
@@ -315,7 +315,7 @@
             "audio_channel_layout": {
               "type": "string",
               "minLength": 1,
-              "pattern": "\\S"
+              "pattern": "^(?!.*\\u0000).*\\S.*$"
             }
           }
         }
@@ -346,7 +346,7 @@
           "items": {
             "type": "string",
             "minLength": 1,
-            "pattern": "\\S"
+            "pattern": "^(?!.*\\u0000).*\\S.*$"
           }
         },
         "features": {
@@ -374,7 +374,7 @@
             "null"
           ],
           "minLength": 1,
-          "pattern": "\\S"
+          "pattern": "^(?!.*\\u0000).*\\S.*$"
         }
       }
     },
@@ -385,7 +385,10 @@
         "id",
         "source_pack",
         "manifest_digest",
-        "trust_eligibility"
+        "alias_chain",
+        "override",
+        "trust_eligibility",
+        "support_decision"
       ],
       "properties": {
         "id": {
@@ -403,7 +406,8 @@
         "alias_chain": {
           "type": "array",
           "items": {
-            "type": "string"
+            "type": "string",
+            "pattern": "^(?!.*\\u0000).*\\S.*$"
           }
         },
         "override": {
@@ -437,6 +441,7 @@
         "manifest_digest",
         "alias_chain",
         "override",
+        "trust_eligibility",
         "support_decision"
       ],
       "properties": {
@@ -455,7 +460,7 @@
           "items": {
             "type": "string",
             "minLength": 1,
-            "pattern": "\\S"
+            "pattern": "^(?!.*\\u0000).*\\S.*$"
           }
         },
         "override": {
@@ -478,7 +483,11 @@
       "required": [
         "id",
         "source_pack",
-        "manifest_digest"
+        "manifest_digest",
+        "alias_chain",
+        "override",
+        "trust_eligibility",
+        "support_decision"
       ],
       "properties": {
         "id": {
@@ -493,7 +502,8 @@
         "alias_chain": {
           "type": "array",
           "items": {
-            "type": "string"
+            "type": "string",
+            "pattern": "^(?!.*\\u0000).*\\S.*$"
           }
         },
         "override": {

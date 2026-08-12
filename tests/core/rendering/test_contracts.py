@@ -99,6 +99,9 @@ def _planner() -> PlannerResolution:
         source_pack={"id": "rendering"},
         manifest_digest=SHA_C,
         trust_eligibility={"eligible": True, "method": "source-tree"},
+        alias_chain=["legacy-hybrid", "rendering.legacy_hybrid"],
+        override=None,
+        support_decision=_support("rendering.legacy_hybrid"),
     )
 
 
@@ -110,6 +113,7 @@ def _renderer(backend: str = "acme.example", *, digest: str = SHA_B) -> Renderer
         alias_chain=[backend],
         override=None,
         support_decision=_support(backend),
+        trust_eligibility={"eligible": True, "method": "source-tree"},
     )
 
 
@@ -118,6 +122,10 @@ def _finalizer() -> FinalizerResolution:
         id="rendering.ffmpeg-finalizer",
         source_pack={"id": "rendering"},
         manifest_digest=SHA_E,
+        alias_chain=["ffmpeg-finalizer", "rendering.ffmpeg-finalizer"],
+        override=None,
+        trust_eligibility={"eligible": True, "method": "source-tree"},
+        support_decision=_support("rendering.ffmpeg-finalizer"),
     )
 
 
@@ -690,6 +698,77 @@ def test_resolution_evidence_survives_plan_round_trip_and_provenance() -> None:
     assert payload["finalizer"]["trust_eligibility"] == finalizer.trust_eligibility
 
 
+def test_resolution_records_require_all_seven_evidence_keys() -> None:
+    """Every capability resolution requires the complete evidence set;
+    a missing key is a structural protocol failure."""
+def test_resolution_records_require_all_seven_evidence_keys() -> None:
+    """Every capability resolution requires the complete evidence set;
+    a missing key is a structural protocol failure."""
+    cases = (
+        (_planner(), PlannerResolution.from_dict),
+        (_finalizer(), FinalizerResolution.from_dict),
+        (_renderer(), RendererResolution.from_dict),
+    )
+    for obj, parser in cases:
+        for missing in ("alias_chain", "override", "trust_eligibility", "support_decision"):
+            broken = obj.to_dict()
+            del broken[missing]
+            with pytest.raises(ValueError, match="missing required fields"):
+                parser(broken)
+
+
+def test_provenance_emits_hashed_artifact_lineage() -> None:
+    """Provenance records per-artifact sha256 and attachment hashes, not
+    just profiles — so replay can verify rendered outputs byte-for-byte."""
+    artifact = VideoArtifact(
+        path="outputs/visual.mp4",
+        profile=_profile(),
+        sha256=SHA_B,
+        duration_frames=48,
+        audio=AudioOwnership.RENDERED,
+        attachments={
+            "alpha": Attachment(
+                name="alpha",
+                path="outputs/alpha.mp4",
+                kind="alpha",
+                sha256=SHA_C,
+            )
+        },
+    )
+    payload = assemble_provenance_v2(
+        engine="hybrid",
+        output="/workspace/out/video.mp4",
+        timeline="/workspace/timeline.json",
+        assets_registry=None,
+        plan=_plan(),
+        artifact_profiles={"outputs/visual.mp4": artifact},
+        audio_ownership="rendered",
+        normalization=[],
+        attachments={},
+        backend_fragments={},
+        v1_compatibility=_compatibility(),
+    )
+    lineage = payload["artifact_profiles"]["outputs/visual.mp4"]
+    assert lineage["sha256"] == SHA_B
+    assert lineage["attachments"]["alpha"]["sha256"] == SHA_C
+    assert lineage["attachments"]["alpha"]["kind"] == "alpha"
+
+
+def test_planner_and_finalizer_reject_mismatched_support_backend() -> None:
+    """support_decision.backend must equal the resolution id for planner and
+    finalizer, exactly as it does for renderer."""
+    cases = (
+        (_planner, "planner"),
+        (_finalizer, "finalizer"),
+        (_renderer, "renderer"),
+    )
+    for factory, label in cases:
+        payload = factory().to_dict()
+        payload["support_decision"] = _support("other.backend").to_dict()
+        with pytest.raises(ValueError, match=f"{label} support_decision.backend"):
+            type(factory()).from_dict(payload)
+
+
 def test_plan_accepts_adjacent_segments_and_exact_window_coverage() -> None:
     plan = _plan(
         segments=[_segment(12, 24), _segment(24, 36)],
@@ -740,16 +819,19 @@ def test_zero_frame_plan_semantics_and_no_finalization() -> None:
 
 def test_qualified_id_grammar_allows_hyphens_and_underscores() -> None:
     assert _finalizer().id == "rendering.ffmpeg-finalizer"
-    assert replace(_finalizer(), id="1render.2-finalizer").id == "1render.2-finalizer"
-    assert replace(_finalizer(), id="rendering.legacy_hybrid").id == "rendering.legacy_hybrid"
-    assert replace(_finalizer(), id="acme.bad_id").id == "acme.bad_id"
+    assert replace(_finalizer(), id="1render.2-finalizer",
+                   support_decision=_support("1render.2-finalizer")).id == "1render.2-finalizer"
+    assert replace(_finalizer(), id="rendering.legacy_hybrid",
+                   support_decision=_support("rendering.legacy_hybrid")).id == "rendering.legacy_hybrid"
+    assert replace(_finalizer(), id="acme.bad_id",
+                   support_decision=_support("acme.bad_id")).id == "acme.bad_id"
     for invalid in (
         "Rendering.Ffmpeg",
         "rendering.-finalizer",
         "unqualified",
     ):
         with pytest.raises(ValueError, match="qualified id"):
-            replace(_finalizer(), id=invalid)
+            replace(_finalizer(), id=invalid, support_decision=_support(invalid))
 
 
 def test_contracts_are_frozen() -> None:

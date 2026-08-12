@@ -17,7 +17,7 @@
     "timeline_path": {
       "type": "string",
       "minLength": 1,
-      "pattern": "\\S"
+      "pattern": "^(?!.*\\u0000).*\\S.*$"
     },
     "assets_registry_path": {
       "type": [
@@ -25,7 +25,7 @@
         "null"
       ],
       "minLength": 1,
-      "pattern": "\\S"
+      "pattern": "^(?!.*\\u0000).*\\S.*$"
     },
     "output_name": {
       "type": "string",
@@ -100,7 +100,8 @@
             ],
             "properties": {
               "audio_codec": {
-                "type": "string"
+                "type": "string",
+                "pattern": "^(?!.*\\u0000).*\\S.*$"
               }
             }
           }
@@ -254,12 +255,12 @@
         "container": {
           "type": "string",
           "minLength": 1,
-          "pattern": "\\S"
+          "pattern": "^(?!.*\\u0000).*\\S.*$"
         },
         "video_codec": {
           "type": "string",
           "minLength": 1,
-          "pattern": "\\S"
+          "pattern": "^(?!.*\\u0000).*\\S.*$"
         },
         "video_profile": {
           "type": [
@@ -267,7 +268,7 @@
             "null"
           ],
           "minLength": 1,
-          "pattern": "\\S"
+          "pattern": "^(?!.*\\u0000).*\\S.*$"
         },
         "video_level": {
           "type": [
@@ -275,12 +276,12 @@
             "null"
           ],
           "minLength": 1,
-          "pattern": "\\S"
+          "pattern": "^(?!.*\\u0000).*\\S.*$"
         },
         "pixel_format": {
           "type": "string",
           "minLength": 1,
-          "pattern": "\\S"
+          "pattern": "^(?!.*\\u0000).*\\S.*$"
         },
         "audio_codec": {
           "type": [
@@ -288,7 +289,7 @@
             "null"
           ],
           "minLength": 1,
-          "pattern": "\\S"
+          "pattern": "^(?!.*\\u0000).*\\S.*$"
         },
         "audio_sample_rate": {
           "type": [
@@ -303,7 +304,7 @@
             "null"
           ],
           "minLength": 1,
-          "pattern": "\\S"
+          "pattern": "^(?!.*\\u0000).*\\S.*$"
         },
         "duration_tolerance": {
           "type": "integer",
@@ -334,7 +335,7 @@
             "audio_codec": {
               "type": "string",
               "minLength": 1,
-              "pattern": "\\S"
+              "pattern": "^(?!.*\\u0000).*\\S.*$"
             },
             "audio_sample_rate": {
               "type": "integer",
@@ -343,7 +344,7 @@
             "audio_channel_layout": {
               "type": "string",
               "minLength": 1,
-              "pattern": "\\S"
+              "pattern": "^(?!.*\\u0000).*\\S.*$"
             }
           }
         }
@@ -361,11 +362,11 @@
     "stringMap": {
       "type": "object",
       "propertyNames": {
-        "pattern": "\\S"
+        "pattern": "^(?!.*\\u0000).*\\S.*$"
       },
       "additionalProperties": {
         "type": "string",
-        "pattern": "\\S"
+        "pattern": "^(?!.*\\u0000).*\\S.*$"
       }
     }
   },

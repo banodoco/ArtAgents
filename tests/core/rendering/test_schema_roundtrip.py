@@ -156,6 +156,7 @@ def _request_cases() -> list[tuple[str, dict[str, Any]]]:
         ("empty metadata value", _set(base, ("metadata",), {"project_id": ""})),
         ("whitespace assets path", _set(base, ("assets_registry_path",), "   ")),
         ("empty assets path", _set(base, ("assets_registry_path",), "")),
+        ("nul in metadata value", _set(base, ("metadata",), {"project_id": "a\u0000b"})),
     ]
     return _with_version_adversaries(base, cases)
 
@@ -216,6 +217,8 @@ def _result_cases() -> list[tuple[str, dict[str, Any]]]:
         ("unknown top-level attachment surface", {**base, "attachments": {}}),
         ("whitespace metadata value", _set(base, ("metadata",), {"project_id": "   "})),
         ("whitespace log", _set(base, ("logs",), ["   "])),
+        ("nul in log", _set(base, ("logs",), ["bad\u0000log"])),
+        ("whitespace video path", _set(base, ("video", "path"), "   ")),
         ("drive-relative video", _set(base, ("video", "path"), "C:escape.mp4")),
         ("drive-relative attachment", _set(_set(base, ("video", "attachments"), {"x.dat": {"name": "x.dat", "path": "C:escape.dat", "kind": "project", "sha256": "a" * 64}}), ("video", "path"), "outputs/visual.mp4")),
         (

@@ -1007,7 +1007,7 @@ class PlannerResolution:
             "alias_chain",
             [
                 _require_string(item, f"planner alias_chain[{index}]")
-                for index, item in enumerate(self.alias_chain)
+                for index, item in enumerate(_require_string_list(self.alias_chain, "planner alias_chain"))
             ],
         )
         if self.override is not None:
@@ -1017,19 +1017,18 @@ class PlannerResolution:
                 _json_safe_mapping(self.override, label="planner override"),
             )
         if self.support_decision is not None:
-            object.__setattr__(
-                self,
-                "support_decision",
-                (
-                    self.support_decision
-                    if isinstance(self.support_decision, SupportReport)
-                    else SupportReport.from_dict(
-                        _require_mapping(
-                            self.support_decision, "planner support_decision"
-                        )
+            support = (
+                self.support_decision
+                if isinstance(self.support_decision, SupportReport)
+                else SupportReport.from_dict(
+                    _require_mapping(
+                        self.support_decision, "planner support_decision"
                     )
-                ),
+                )
             )
+            if support.backend != self.id:
+                raise ValueError("planner support_decision.backend must match planner id")
+            object.__setattr__(self, "support_decision", support)
 
     def to_dict(self) -> dict[str, Any]:
         return _json_safe_mapping(
@@ -1047,17 +1046,24 @@ class PlannerResolution:
     @classmethod
     def from_dict(cls, payload: Mapping[str, Any]) -> PlannerResolution:
         data = _require_mapping(payload, "planner resolution")
-        required = {"id", "source_pack", "manifest_digest", "trust_eligibility"}
-        allowed = required | {"alias_chain", "override", "support_decision"}
-        _validate_object_keys(data, required=required, allowed=allowed, label="planner resolution")
+        required = {
+            "id",
+            "source_pack",
+            "manifest_digest",
+            "trust_eligibility",
+            "alias_chain",
+            "override",
+            "support_decision",
+        }
+        _validate_object_keys(data, required=required, allowed=required, label="planner resolution")
         return cls(
             id=data["id"],
             source_pack=data["source_pack"],
             manifest_digest=data["manifest_digest"],
             trust_eligibility=data["trust_eligibility"],
-            alias_chain=data.get("alias_chain", []),
-            override=data.get("override"),
-            support_decision=data.get("support_decision"),
+            alias_chain=data["alias_chain"],
+            override=data["override"],
+            support_decision=data["support_decision"],
         )
 
 
@@ -1142,9 +1148,9 @@ class RendererResolution:
             "alias_chain",
             "override",
             "support_decision",
+            "trust_eligibility",
         }
-        allowed = required | {"trust_eligibility"}
-        _validate_object_keys(data, required=required, allowed=allowed, label="renderer resolution")
+        _validate_object_keys(data, required=required, allowed=required, label="renderer resolution")
         return cls(
             id=data["id"],
             source_pack=data["source_pack"],
@@ -1152,7 +1158,7 @@ class RendererResolution:
             alias_chain=data["alias_chain"],
             override=data["override"],
             support_decision=SupportReport.from_dict(data["support_decision"]),
-            trust_eligibility=data.get("trust_eligibility", {}),
+            trust_eligibility=data["trust_eligibility"],
         )
 
 
@@ -1193,7 +1199,7 @@ class FinalizerResolution:
             "alias_chain",
             [
                 _require_string(item, f"finalizer alias_chain[{index}]")
-                for index, item in enumerate(self.alias_chain)
+                for index, item in enumerate(_require_string_list(self.alias_chain, "finalizer alias_chain"))
             ],
         )
         if self.override is not None:
@@ -1203,19 +1209,18 @@ class FinalizerResolution:
                 _json_safe_mapping(self.override, label="finalizer override"),
             )
         if self.support_decision is not None:
-            object.__setattr__(
-                self,
-                "support_decision",
-                (
-                    self.support_decision
-                    if isinstance(self.support_decision, SupportReport)
-                    else SupportReport.from_dict(
-                        _require_mapping(
-                            self.support_decision, "finalizer support_decision"
-                        )
+            support = (
+                self.support_decision
+                if isinstance(self.support_decision, SupportReport)
+                else SupportReport.from_dict(
+                    _require_mapping(
+                        self.support_decision, "finalizer support_decision"
                     )
-                ),
+                )
             )
+            if support.backend != self.id:
+                raise ValueError("finalizer support_decision.backend must match finalizer id")
+            object.__setattr__(self, "support_decision", support)
 
     def to_dict(self) -> dict[str, Any]:
         return _json_safe_mapping(
@@ -1233,17 +1238,24 @@ class FinalizerResolution:
     @classmethod
     def from_dict(cls, payload: Mapping[str, Any]) -> FinalizerResolution:
         data = _require_mapping(payload, "finalizer resolution")
-        required = {"id", "source_pack", "manifest_digest"}
-        allowed = required | {"alias_chain", "override", "trust_eligibility", "support_decision"}
-        _validate_object_keys(data, required=required, allowed=allowed, label="finalizer resolution")
+        required = {
+            "id",
+            "source_pack",
+            "manifest_digest",
+            "alias_chain",
+            "override",
+            "trust_eligibility",
+            "support_decision",
+        }
+        _validate_object_keys(data, required=required, allowed=required, label="finalizer resolution")
         return cls(
             id=data["id"],
             source_pack=data["source_pack"],
             manifest_digest=data["manifest_digest"],
-            alias_chain=data.get("alias_chain", []),
-            override=data.get("override"),
-            trust_eligibility=data.get("trust_eligibility", {}),
-            support_decision=data.get("support_decision"),
+            alias_chain=data["alias_chain"],
+            override=data["override"],
+            trust_eligibility=data["trust_eligibility"],
+            support_decision=data["support_decision"],
         )
 
 

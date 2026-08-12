@@ -18,6 +18,7 @@ from .contracts import (
     RenderPlan,
     RenderProfile,
     RenderSegment,
+    VideoArtifact,
     _json_safe_mapping,
     _require_string,
     _validate_backend_fragments,
@@ -85,14 +86,39 @@ def _normalize_artifact_profiles(value: Any) -> Any:
     if value is None:
         return []
     if isinstance(value, Mapping):
-        return {
-            str(key): (
-                profile
-                if isinstance(profile, RenderProfile)
-                else RenderProfile.from_dict(_json_safe_mapping(profile, label="artifact profile"))
-            ).to_dict()
-            for key, profile in value.items()
-        }
+        result: dict[str, Any] = {}
+        for key, profile in value.items():
+            path = _require_string(str(key), "artifact key")
+            if isinstance(profile, VideoArtifact):
+                result[path] = _artifact_lineage(profile)
+            elif isinstance(profile, Mapping) and "profile" in profile and "sha256" in profile:
+                raw = _json_safe_mapping(profile, label="artifact")
+                attachments = {
+                    name: {
+                        "path": str(att.get("path")),
+                        "kind": str(att.get("kind")),
+                        "sha256": str(att.get("sha256")),
+                    }
+                    for name, att in (raw.get("attachments") or {}).items()
+                }
+                result[path] = {
+                    "profile": (
+                        raw["profile"]
+                        if isinstance(raw["profile"], RenderProfile)
+                        else RenderProfile.from_dict(
+                            _json_safe_mapping(raw["profile"], label="artifact profile")
+                        )
+                    ).to_dict(),
+                    "sha256": str(raw["sha256"]),
+                    "attachments": attachments,
+                }
+            else:
+                result[path] = (
+                    profile
+                    if isinstance(profile, RenderProfile)
+                    else RenderProfile.from_dict(_json_safe_mapping(profile, label="artifact profile"))
+                ).to_dict()
+        return result
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
         return [
             (
@@ -103,6 +129,22 @@ def _normalize_artifact_profiles(value: Any) -> Any:
             for profile in value
         ]
     raise TypeError("artifact_profiles must be an object or array")
+
+
+def _artifact_lineage(artifact: VideoArtifact) -> dict[str, Any]:
+    """One hashed artifact lineage record: profile, sha256, attachments."""
+    return {
+        "profile": artifact.profile.to_dict(),
+        "sha256": artifact.sha256,
+        "attachments": {
+            name: {
+                "path": attachment.path,
+                "kind": attachment.kind,
+                "sha256": attachment.sha256,
+            }
+            for name, attachment in artifact.attachments.items()
+        },
+    }
 
 
 def _normalize_v1_compatibility(

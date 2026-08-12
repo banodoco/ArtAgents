@@ -484,10 +484,12 @@ def test_override_to_discovered_ineligible_target_fails_closed(tmp_path: Path) -
 
 
 def _write_alias_to_absent_pack(packs_root: Path) -> Path:
-    """A source pack whose renderer alias points at a canonical that does not
-    exist anywhere in the discovery tree (statically valid in the registry
-    path; validate_pack's same-pack target rule does not apply because the
-    registry does not require static validation for discovery)."""
+    """A source pack whose renderer alias points at a canonical in ANOTHER
+    pack namespace that does not exist in the discovery tree. Cross-pack
+    alias targets are not statically checked (validate.py only validates
+    same-pack targets), so this pack passes validate_pack and can be
+    installed, while resolution still requires the override to supply the
+    implementation."""
     pack_root = _write_renderer_pack(
         packs_root,
         "alias_missing",
@@ -500,7 +502,7 @@ def _write_alias_to_absent_pack(packs_root: Path) -> Path:
         "aliases:",
         "  - kind: renderer",
         "    alias: alias_missing.legacy",
-        "    canonical_id: alias_missing.absent",
+        "    canonical_id: other.abstract.renderer",
     ]
     # insert aliases before extensions
     idx = next(i for i, line in enumerate(lines) if line.startswith("extensions:"))
@@ -522,20 +524,40 @@ def test_trusted_pack_alias_to_absent_canonical_routes_through_override(
     project_root = tmp_path / "project"
     source_root = tmp_path / "source"
     source_root.mkdir()
-    _write_alias_to_absent_pack(source_root)
+    pack_root = _write_alias_to_absent_pack(source_root)
+
+    # The cross-pack alias must pass static pack validation (the same-pack
+    # target rule does not apply) so the pack remains installable.
+    from astrid.core.pack.validate import validate_pack
+    from astrid.core.pack.install_local import install_pack
+
+    errors, warnings = validate_pack(str(pack_root))
+    assert not errors, errors
+
+    install_root = tmp_path / "astrid-home" / "packs"
+    install_root.mkdir(parents=True)
+    exit_code = install_pack(
+        pack_root,
+        dry_run=False,
+        skip_confirm=True,
+        trust_acknowledged=True,
+        trust_method="fixture-test",
+        trust_actor="test",
+    )
+    assert exit_code == 0, f"install failed with exit {exit_code}"
 
     store = OverrideStore(project_root)
-    store.set_override("renderer", "alias_missing.absent", "alias_missing.renderer")
+    store.set_override("renderer", "other.abstract.renderer", "alias_missing.renderer")
 
     with _load_with_source(project_root, source_root=source_root) as (renderers, _, _):
         candidate = renderers.get("alias_missing.legacy")
         assert candidate.id == "alias_missing.renderer"
 
         evidence = renderers.resolve_evidence("alias_missing.legacy")
-        assert evidence["canonical_id"] == "alias_missing.absent"
+        assert evidence["canonical_id"] == "other.abstract.renderer"
         assert evidence["resolved_id"] == "alias_missing.renderer"
         assert evidence["override"] == {
-            "from": "alias_missing.absent",
+            "from": "other.abstract.renderer",
             "to": "alias_missing.renderer",
         }
 

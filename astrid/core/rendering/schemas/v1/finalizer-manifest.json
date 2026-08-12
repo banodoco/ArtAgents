@@ -23,12 +23,12 @@
     "name": {
       "type": "string",
       "minLength": 1,
-      "pattern": "\\S"
+      "pattern": "^(?!.*\\u0000).*\\S.*$"
     },
     "version": {
       "type": "string",
       "minLength": 1,
-      "pattern": "\\S"
+      "pattern": "^(?!.*\\u0000).*\\S.*$"
     },
     "protocol_version": {
       "type": "integer",
@@ -39,7 +39,7 @@
       "items": {
         "type": "string",
         "minLength": 1,
-        "pattern": "\\S"
+        "pattern": "^(?!.*\\u0000).*\\S.*$"
       },
       "minItems": 1
     },
@@ -64,7 +64,7 @@
       ],
       "minLength": 1,
       "default": null,
-      "pattern": "\\S"
+      "pattern": "^(?!.*\\u0000).*\\S.*$"
     },
     "capabilities": {
       "$ref": "#/definitions/finalizerCapabilities",
@@ -79,7 +79,7 @@
       "items": {
         "type": "string",
         "minLength": 1,
-        "pattern": "\\S"
+        "pattern": "^(?!.*\\u0000).*\\S.*$"
       },
       "uniqueItems": true,
       "default": []
@@ -100,7 +100,7 @@
       "additionalProperties": {
         "type": "string",
         "minLength": 1,
-        "pattern": "\\S"
+        "pattern": "^(?!.*\\u0000).*\\S.*$"
       },
       "default": {}
     }
@@ -134,7 +134,7 @@
           "items": {
             "type": "string",
             "minLength": 1,
-            "pattern": "\\S"
+            "pattern": "^(?!.*\\u0000).*\\S.*$"
           },
           "uniqueItems": true
         },
@@ -161,7 +161,8 @@
                 "type": "boolean"
               },
               {
-                "type": "string"
+                "type": "string",
+                "pattern": "^(?!.*\\u0000).*\\S.*$"
               }
             ]
           }
