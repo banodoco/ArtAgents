@@ -155,5 +155,139 @@ assert {candidate.id for candidate in finalizers.list()} >= {
 print("installed Astrid rendering schemas, fixtures, and manifests: OK")
 PY
 
+# -------------------------------------------------------------------
+# 4. Installed-wheel scaffold golden path (T6.6)
+# -------------------------------------------------------------------
+# Uses the INSTALLED astrid.core.rendering.scaffold module and its installed
+# fixture templates: scaffold -> static validation -> install into a temp
+# ASTRID_PACKS_PATH root -> registry discovery finds rendering.wave ->
+# deterministic two-second smoke render -> generated test_renderer.py passes
+# inside this wheel venv.
+echo ""
+echo "--- Installed-wheel scaffold golden path ---"
+ASTRID_PACKS_PATH="$SMOKE_ROOT/packs-path"
+export ASTRID_PACKS_PATH
+mkdir -p "$ASTRID_PACKS_PATH"
+
+python - <<'PY'
+import json
+import os
+import shutil
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+import astrid
+
+# Prove we are running against the installed wheel, not the source checkout.
+package_root = Path(astrid.__file__).resolve().parent
+assert "site-packages" in package_root.parts, (
+    f"astrid was imported from {package_root}, not the installed wheel"
+)
+
+from astrid.core.foundation.hash import sha256_file
+from astrid.core.pack.manifest import load_manifest_mapping
+from astrid.core.pack.validate import validate_pack
+from astrid.core.rendering import RenderResult
+from astrid.core.rendering.scaffold import SCAFFOLD_FILES, create_renderer_scaffold
+from astrid.core.rendering.registry import load_default_registries
+from astrid.core.rendering.transport import CommandTransport
+
+RENDERER_ID = "rendering.wave"
+PACK_ID = "rendering"
+OUTPUT_NAME = "out.mp4"
+SMOKE_LIMIT_SECONDS = 2.0
+
+work = Path.cwd()
+dest = create_renderer_scaffold("wave", work / "scaffold-wave")
+
+# 1. Static validation of the scaffolded pack (installed templates).
+errors, _warnings = validate_pack(dest)
+assert not errors, errors
+pack = load_manifest_mapping(dest / "pack.yaml", manifest_kind="pack")
+assert pack["id"] == PACK_ID
+assert pack["extensions"]["rendering"]["renderers"] == ["renderer.yaml"]
+manifest = load_manifest_mapping(dest / "renderer.yaml", manifest_kind="renderer")
+assert manifest["id"] == RENDERER_ID
+assert manifest["command"] == ["python3", "render.py"]
+assert manifest["operations"] == ["support", "render"]
+assert sorted(path.name for path in dest.iterdir() if path.is_file()) == sorted(SCAFFOLD_FILES)
+print(f"scaffold + static validation: OK ({RENDERER_ID})")
+
+# 2. Install the pack into the temp ASTRID_PACKS_PATH root.
+packs_path = Path(os.environ["ASTRID_PACKS_PATH"])
+installed_copy = packs_path / PACK_ID
+shutil.copytree(dest, installed_copy)
+
+# 3. Registry discovery finds rendering.wave from the installed copy.
+renderers, _planners, _finalizers = load_default_registries(work, include_installed=False)
+candidates = renderers.candidates(RENDERER_ID)
+assert len(candidates) == 1, [candidate.to_dict() for candidate in candidates]
+candidate = candidates[0]
+assert candidate.id == RENDERER_ID
+assert candidate.source_kind == "env"
+assert candidate.pack_root == installed_copy.resolve()
+print(f"registry discovery: OK (source_kind={candidate.source_kind}, pack_root={candidate.pack_root})")
+
+# 4. Deterministic two-second smoke render from the discovered pack root.
+def smoke(workspace: Path) -> tuple[RenderResult, Path, float]:
+    workspace.mkdir(parents=True, exist_ok=True)
+    request_path = workspace / "request.json"
+    request_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "timeline_path": "timeline.json",
+                "output_name": OUTPUT_NAME,
+                "audio": "rendered",
+            }
+        ),
+        encoding="utf-8",
+    )
+    result_path = workspace / "result.json"
+    transport = CommandTransport(RENDERER_ID, termination_grace=0.15)
+    started = time.perf_counter()
+    result = transport.run(
+        "render",
+        [sys.executable, "render.py"],
+        request_path=request_path,
+        result_path=result_path,
+        cwd=candidate.pack_root,
+        timeout=30,
+    )
+    return result, result_path, time.perf_counter() - started
+
+result_a, result_path_a, elapsed_a = smoke(work / "smoke-workspace")
+assert elapsed_a < SMOKE_LIMIT_SECONDS, f"smoke render took {elapsed_a:.3f}s"
+assert isinstance(result_a, RenderResult)
+assert result_a.audio_ownership.value == "rendered"
+video_a = work / "smoke-workspace" / result_a.video.path
+assert video_a.is_file()
+assert len(result_a.video.sha256) == 64
+assert result_a.video.sha256 == sha256_file(video_a)
+
+result_b, result_path_b, elapsed_b = smoke(work / "smoke-workspace-2")
+assert elapsed_b < SMOKE_LIMIT_SECONDS, f"smoke render took {elapsed_b:.3f}s"
+assert (work / "smoke-workspace-2" / result_b.video.path).read_bytes() == video_a.read_bytes()
+assert result_path_a.read_bytes() == result_path_b.read_bytes()
+print(
+    f"deterministic smoke render: OK ({elapsed_a:.3f}s / {elapsed_b:.3f}s, "
+    f"sha256={result_a.video.sha256[:16]}..., byte-stable)"
+)
+
+# 5. Generated test_renderer.py passes inside this wheel venv.
+completed = subprocess.run(
+    [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", str(dest / "test_renderer.py")],
+    cwd=dest,
+    capture_output=True,
+    text=True,
+    timeout=120,
+)
+assert completed.returncode == 0, completed.stdout + completed.stderr
+print("generated test_renderer.py (wheel venv): OK")
+print("installed-wheel scaffold golden path: PASSED")
+PY
+
 echo ""
 echo "=== clean wheel-install smoke PASSED ==="

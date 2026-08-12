@@ -312,6 +312,12 @@ def _dispatch_modalities(args: list[str]) -> int:
     return modalities.main(args)
 
 
+def _dispatch_renderers(args: list[str]) -> int:
+    from astrid.core.rendering import cli as renderers_cli
+
+    return renderers_cli.main(args)
+
+
 def _dispatch_doctor(args: list[str]) -> int:
     from astrid.core import doctor
 
@@ -438,6 +444,7 @@ _TOP_LEVEL_HANDLERS = {
     "themes": _dispatch_themes,
     "timelines": _dispatch_timelines,
     "modalities": _dispatch_modalities,
+    "renderers": _dispatch_renderers,
     "runpod": lambda args: _dispatch_runpod(args),
     "scratch": _dispatch_scratch,
     "doctor": _dispatch_doctor,
