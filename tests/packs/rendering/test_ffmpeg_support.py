@@ -102,6 +102,7 @@ def _video_probe(*, audio: bool = False, duration: float = 4.0) -> MediaProbe:
         fps=30,
         resolution="640x360",
         video_codec="h264",
+        pixel_format="yuv420p",
         audio_codec="aac" if audio else None,
         video_stream_present=True,
         audio_stream_present=audio,

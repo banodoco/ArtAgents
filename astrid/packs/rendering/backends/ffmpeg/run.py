@@ -47,6 +47,7 @@ from astrid.packs.rendering.backends.ffmpeg import audio_reactive_colour
 from astrid.packs.rendering.backends.ffmpeg.command import (
     build_render_command,
     build_render_command_for_paths,
+    build_render_command_from_data,
     validate_ffmpeg_media_timeline,
 )
 from astrid.packs.rendering.backends.ffmpeg.support import (
@@ -111,10 +112,13 @@ def _render_ffmpeg_media_to_path(
         )
 
     output = Path(out_path)
-    command_argv = build_render_command_for_paths(
+    command_argv = build_render_command_from_data(
         Path(timeline_path),
         Path(assets_path),
         output,
+        timeline_data,
+        assets_data,
+        stream_copy_allowed=bool(report.features.get("stream_copy")),
     )
     output.parent.mkdir(parents=True, exist_ok=True)
     (subprocess.run if runner is None else runner)(command_argv, check=True)

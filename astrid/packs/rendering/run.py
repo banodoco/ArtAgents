@@ -30,9 +30,13 @@ def _request_path(argv: Sequence[str]) -> Path | None:
 def _selects_finalizer(argv: Sequence[str]) -> bool:
     """Route finalize and explicitly-namespaced support operations."""
 
+    selected = _transport_selected_backend()
+    if selected is not None:
+        # The transport-selected backend id is authoritative over request
+        # content: a remotion invocation must never route to the finalizer
+        # merely because the request carries a finalizer namespace.
+        return selected == "rendering.ffmpeg-finalizer"
     if argv and argv[0] == "finalize":
-        return True
-    if _transport_selected_backend() == "rendering.ffmpeg-finalizer":
         return True
     if not argv or argv[0] != "support":
         return False

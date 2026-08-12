@@ -53,6 +53,7 @@ class AudioReactiveColourSpec:
     audio_from: float
     audio_to: float
     audio_volume: float
+    audio_sample_rate: int = 48000
 
     @property
     def duration_seconds(self) -> float:
@@ -348,7 +349,7 @@ def build_mux_command(
     audio_filter = (
         f"atrim=start={spec.audio_from:.9f}:end={spec.audio_to:.9f},"
         "asetpts=PTS-STARTPTS,"
-        "aformat=sample_rates=44100:channel_layouts=stereo,"
+        f"aformat=sample_rates={spec.audio_sample_rate}:channel_layouts=stereo,"
         f"volume={spec.audio_volume:.9f}"
     )
     return [

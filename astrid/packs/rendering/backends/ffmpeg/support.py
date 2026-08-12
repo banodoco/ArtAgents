@@ -489,6 +489,8 @@ def _whole_media_optimization(
         and media_probe.height == height
         and probed_fps is not None
         and abs(probed_fps - fps) < 1e-6
+        and (media_probe.video_codec or "") == "h264"
+        and (media_probe.pixel_format or "") == "yuv420p"
     )
 
 
@@ -510,6 +512,7 @@ def _profile_support_reasons(
         ("width", profile.width, width),
         ("height", profile.height, height),
         ("fps", _fps_int(profile.fps_rational), fps),
+        ("time_base", profile.time_base, (1, fps * 512)),
         ("container", profile.container, "mp4"),
         ("video_codec", profile.video_codec, "h264"),
         ("pixel_format", profile.pixel_format, "yuv420p"),

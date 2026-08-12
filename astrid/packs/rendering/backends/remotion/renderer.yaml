@@ -30,7 +30,6 @@ capabilities:
     - video/mp4
   audio_ownership:
     - rendered
-    - none
 required_permissions:
   - project_files
   - subprocess

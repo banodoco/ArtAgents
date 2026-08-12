@@ -1014,7 +1014,13 @@ def support(request: RenderRequest, *, workspace: Path) -> SupportReport:
                     f"Remotion's always-rendered audio output"
                 )
             if request.profile is not None:
-                render_profile = replace(canonical, time_base=(1, 90000))
+                render_profile = replace(
+                    canonical,
+                    time_base=(1, 90000),
+                    audio_codec=canonical.audio_codec or "aac",
+                    audio_sample_rate=canonical.audio_sample_rate or 48000,
+                    audio_channel_layout=canonical.audio_channel_layout or "stereo",
+                )
                 mismatches = _profile_mismatches(request.profile, render_profile)
                 if mismatches:
                     reasons.append(

@@ -404,7 +404,6 @@ def _asset_input_argv(inputs: RenderCommandInputs) -> list[str]:
 
 def build_render_command_from_inputs(inputs: RenderCommandInputs) -> list[str]:
     """Return FFmpeg argv for already-resolved, strictly supported inputs."""
-
     filters, copy_video_input = build_filter_graph(inputs)
     has_audio = _has_audio_clips(inputs.timeline_data)
     return [
@@ -462,11 +461,41 @@ def build_render_command(
             inputs.timeline_data,
             inputs.registry,
         )
-        stream_copy_allowed = bool(report.features.get("stream_copy"))
+        stream_copy_allowed = (
+            report.supported and bool(report.features.get("stream_copy"))
+        )
     except Exception:
         stream_copy_allowed = False
     inputs = replace(inputs, stream_copy_allowed=stream_copy_allowed)
     return build_render_command_from_inputs(inputs)
+
+
+def build_render_command_from_data(
+    timeline_path: Path,
+    assets_path: Path,
+    output_path: Path,
+    timeline_data: Mapping[str, Any],
+    registry: Mapping[str, Any],
+    *,
+    audio_sample_rate: int = 48000,
+    stream_copy_allowed: bool = False,
+) -> list[str]:
+    """Build FFmpeg argv from ALREADY-LOADED, strictly supported data.
+
+    Used by the legacy facade path so the exact mappings it validated with
+    strict support are the ones rendered — no reload, no TOCTOU window.
+    """
+    return build_render_command_from_inputs(
+        RenderCommandInputs(
+            timeline_path=Path(timeline_path).resolve(),
+            assets_path=Path(assets_path).resolve(),
+            output_path=Path(output_path).resolve(),
+            timeline_data=dict(timeline_data),
+            registry=dict(registry),
+            audio_sample_rate=audio_sample_rate,
+            stream_copy_allowed=stream_copy_allowed,
+        )
+    )
 
 
 def build_render_command_for_paths(
