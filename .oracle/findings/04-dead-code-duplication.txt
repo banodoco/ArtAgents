@@ -1,0 +1,15 @@
+All evidence gathered. Here is the report.
+
+---
+
+## Verified findings (ranked)
+
+**1. No dead code remains in the new files — FIX: nothing to do.** Confirmed `_effective_registry_state`/`_clip_end` are gone from `backends/threejs/run.py` and `planners/threejs_hybrid/run.py` (grep: only live refs in remotion:252/291/641, legacy_engine:54, ffmpeg:158/388/588). Manual audit of all 30 imports (threejs/run.py:19-67) and 33 (threejs_hybrid/run.py:20-75): every binding is referenced or exported in `__all__` (threejs:650-657, hybrid:694-709); every def is called. Note: no shell here, so ruff couldn't run — audit is by cross-reference only; run `ruff check` before trusting fully.
+
+**2. `_profile_mismatches` is byte-identical ×2** (threejs:298-311 vs remotion:904-917), plus the 90 kHz+AAC `replace` chain ×3 (threejs:314-321; remotion:1018-1024, 1099-1109). **FIX:** threejs already aliases 7 helpers from `remotion_backend` (threejs:61-67) — add 2 more aliases, delete the local copies.
+
+**3. Settings parsing is ~60% shared but namespace-drifted.** Byte-identical: unknown-key rejection (threejs:251-253) and `min_free_gb` block (threejs:268-276 = remotion:860-868). The `"unknown {BACKEND_ID} configuration"` pattern recurs 5× (threejs:253, remotion:838, threejs_hybrid:360, legacy_hybrid:398, ffmpeg-finalizer:1003). **FIX:** extract `_reject_unknown_config()` + `_parse_min_free_gb()` into remotion/run.py (existing reuse hub). **LEAVE** a full parameterized parser — `composition_id` and `_theme_setting_path` slug logic (remotion:845-858) are legitimately backend-specific; KISS. Correctness confirmed: threejs:250 reads own namespace, rejects unknowns; can't delete — support:347 and render-validation:430 use it.
+
+**4. Test scaffolding — 4 genuine duplicates, one module to host them.** `_execution_env` ×3 (threejs:106; remotion:967; hybrid:674 — last two byte-identical); `_source_video` ×2 with drift (hyperframes:470 video-only vs hybrid:561 +anullsrc/aac); `_probe` ×2 drifted (threejs:566 vs hybrid:693 +count_frames/time_base); `_frame_md5` verbatim ×2 (threejs:587, hybrid:715). **FIX:** new `tests/packs/rendering/_helpers.py` (precedent: `tests/_lifecycle_fixtures.py`; hybrid:663 already cross-imports `_missing_environment` from test_threejs_backend — that one import updates). ~110 dup lines → ~70 shared; the real win is de-drift.
+
+**5. LEAVE:** env-skip trio (threejs:62-89 package scan vs remotion:945-963 vs hyperframes:40-68 nvm/node≥22 scan — genuinely divergent); inline ffprobe/provenance assertions (7 sites, per-backend fields differ); threejs autouse fixture:117 double-wraps render tests already using `with _execution_env()` (617/692/877) — harmless.

@@ -1,0 +1,18 @@
+## Findings (verified; no terminal available, so runtime claims are static-evidence based)
+
+**1. Root cause — upstream, not local.** `@remotion/renderer@4.0.455` depends on `extract-zip@2.0.1` (renderer/package.json:26); `BrowserFetcher.js:168` runs `extractZip(archivePath, {dir: outputPath})`. extract-zip is broken on Node ≥26 (max-mapper/extract-zip#154), aborting after the first zip entries — the mac zip's first entries are ABOUT + LICENSE.headless_shell, exactly the 1.5MB stub (remotion-dev/remotion#7409 shows the identical tree). Not EEXIST/path-length. Upstream fix: PR #7420 "replace extract-zip with OS unzip/tar"; latest `@remotion/renderer@4.0.509` has **no** extract-zip dep (registry-verified).
+
+**2. Exact skip gate.** Cache dir: `get-download-destination.js:36` → `remotion/node_modules/.remotion`. `readVersionFile` reads **`chrome-headless-shell/VERSION`** (`BrowserFetcher.js:93–96,103–111`) — *not* `mac-arm64/VERSION` (the epic misremembered; the `mac-arm64/VERSION` on disk is inert). Gate (`ensure-browser.js:39–48`): `revision.local && existsSync(executablePath)` + `readVersionFile() === "149.0.7790.0"` → skip. Binary must exist at `…/chrome-headless-shell/mac-arm64/chrome-headless-shell-mac-arm64/chrome-headless-shell` (`BrowserFetcher.js:223–228`). Mismatch → `rmSync` of the whole `mac-arm64` + re-download (`:128–135`).
+
+**3. This machine:** wart **absent** — shell complete (binary = 159,972,320 bytes; 18 files; both VERSIONs: parent 12B no-newline = remotion-written, mac-arm64 13B = manual echo). A `compositions` run would take the `local-puppeteer-browser` branch.
+
+**4. Options** (ranked for "fresh checkout renders untouched"):
+- **(c) Pin renderer to a fixed 4.0.x (≥ PR #7420; 4.0.509 verified clean)** — fixes root cause, zero repo machinery. Cost: coordinated bump of all `@remotion/*@4.0.455` deps + smoke re-validate.
+- **(a) `postinstall` repair** — auto-heals any Node; but reimplements #7420 (re-download via curl + OS `unzip` + write `chrome-headless-shell/VERSION`; the failed zip is already deleted by `:193–197`). Adds repo scripts; harmless no-op in CI.
+- **(e) `@puppeteer/browsers` script** — same burden as (a) + new dep.
+- **(b) Make target / script** — scripted but still manual.
+- **(d) Docs** — current state.
+
+**5. CI:** Node 20 (`ci.yml:74`) — unaffected by the Node-26 bug; CI runs only typecheck (`ci.yml:89`), no browser/render, so a fresh `npm ci` never stubs (and postinstall would no-op).
+
+**Recommend (c):** pin to `@remotion/renderer` (and the `@remotion/*` family) at a version containing PR #7420 — e.g. 4.0.509 — the only option that kills the root cause without reimplementing upstream's fix in this repo.

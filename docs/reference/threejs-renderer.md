@@ -48,7 +48,7 @@ The render runtime lives in the existing `remotion/` project:
 
    | Package | Version |
    |---|---|
-   | `@remotion/three` | `4.0.455` |
+   | `@remotion/three` | `4.0.509` |
    | `@react-three/fiber` | `8.18.0` |
    | `three` | `0.185.1` |
    | `@types/three` | `0.185.4` |

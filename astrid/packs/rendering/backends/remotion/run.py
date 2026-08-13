@@ -17,8 +17,7 @@ import shutil
 import subprocess
 import sys
 from contextlib import ExitStack
-from dataclasses import dataclass, replace
-from fractions import Fraction
+from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, Mapping, Sequence
@@ -37,8 +36,6 @@ from astrid.core.element.registry import load_default_registry
 from astrid.core.element.schema import ElementDefinition
 from astrid.core.foundation.atomic_io import write_json_atomic
 from astrid.core.foundation.paths import REPO_ROOT, WORKSPACE_ROOT
-from astrid.core.media import ffprobe_metadata_strict
-from astrid.core.pack.discovery import discover_pack_metadata
 from astrid.core.rendering.artifacts import validate_render_result
 from astrid.core.rendering.assets import (
     AssetMaterializer,
@@ -47,7 +44,6 @@ from astrid.core.rendering.assets import (
 )
 from astrid.core.rendering.contracts import (
     AudioOwnership,
-    RenderProfile,
     RenderRequest,
     RenderResult,
     SCHEMA_VERSION,
@@ -59,12 +55,37 @@ from astrid.core.rendering.errors import (
     make_renderer_error,
     raise_unsupported_error,
 )
-from astrid.core.rendering.profile import resolve_render_profile
 from astrid.core.rendering.publication import publish_render_result
 from astrid.core.subprocess_env import build_child_subprocess_env
-from astrid.core.theme import load_theme
+from astrid.packs.rendering.backends import _shared as _shared
+from astrid.packs.rendering.backends._shared import (
+    _canonical_profile,
+    _duration_frames,
+    _input_path,
+    _load_registry_mapping,
+    _parse_min_free_gb,
+    _profile_mismatches,
+    _reject_unknown_config,
+    _remotion_mux_profile,
+    _render_provenance_payload,
+    _resolve_theme_path,
+    _resolved_theme_for_render,
+    _serialize_timeline,
+)
 from astrid.packs.rendering.backends.remotion import lock as remotion_lock
 from scripts import gen_effect_registry
+
+# Re-export-only names: legacy_engine.py and tests alias ``remotion._X`` for
+# these provenance/theme helpers, so they stay bound on this module even
+# though remotion/run.py itself no longer calls them.
+def _active_pack_order_for_provenance() -> list[dict[str, Any]]:
+    """Pack order bound to THIS module's REPO_ROOT (patchable in tests)."""
+    return _shared._active_pack_order_for_provenance(project_root=REPO_ROOT)
+
+
+_active_theme_for_provenance = _shared._active_theme_for_provenance
+_theme_for_props = _shared._theme_for_props
+_theme_slug_for_render_default = _shared._theme_slug_for_render_default
 
 
 BACKEND_ID = "rendering.remotion"
@@ -121,78 +142,6 @@ def _validate_project_dir(project_dir: Path) -> None:
             "These packages are adapter-required and not published to a public npm registry. "
             "See docs/reference/render-adapter.md for adapter install instructions."
         )
-
-
-def _serialize_timeline(
-    timeline_path: Path,
-    *,
-    default_theme: str = "banodoco-default",
-) -> dict[str, Any]:
-    return timeline.Timeline.load(timeline_path).for_render(default_theme=default_theme).to_json_data()
-
-
-def _resolve_theme_path(theme_path: Path) -> Path:
-    if theme_path.name == "theme.json":
-        return theme_path
-    if theme_path.exists() and theme_path.is_dir():
-        return theme_path / "theme.json"
-    if theme_path.exists():
-        return theme_path
-    return WORKSPACE_ROOT / "themes" / str(theme_path) / "theme.json"
-
-
-def _theme_for_props(theme_path: Path) -> dict[str, Any]:
-    resolved = _resolve_theme_path(theme_path)
-    if not resolved.exists():
-        return {
-            "id": "banodoco-default",
-            "visual": {
-                "color": {"fg": "#ffffff", "bg": "#000000", "accent": "#ffffff"},
-                "type": {
-                    "families": {"heading": "Georgia, serif", "body": "Georgia, serif"},
-                    "size": {"base": 64, "small": 36, "large": 96},
-                    "weight": {"normal": 400, "bold": 700},
-                    "lineHeight": 1.1,
-                },
-                "motion": {"fadeMs": 250},
-                "canvas": {"width": 1920, "height": 1080, "fps": 30},
-            },
-        }
-    theme_data = load_theme(resolved)
-    return {"id": theme_data["id"], "visual": theme_data["visual"]}
-
-
-def _theme_slug_for_render_default(theme_path: Path) -> str:
-    resolved = _resolve_theme_path(theme_path)
-    if resolved.name == "theme.json":
-        return resolved.parent.name
-    return resolved.stem or "banodoco-default"
-
-
-def _resolved_theme_for_render(
-    timeline_path: Path,
-    fallback_theme_path: Path,
-) -> dict[str, Any]:
-    """Return the timeline theme with its per-run overrides merged."""
-
-    loaded = timeline.Timeline.load(timeline_path)
-    render_view = loaded.for_render(
-        default_theme=_theme_slug_for_render_default(fallback_theme_path)
-    )
-    timeline_config = loaded.to_config()
-    timeline_config.setdefault("theme", render_view.theme)
-    repo_themes_root = REPO_ROOT / "themes"
-    themes_root = repo_themes_root if repo_themes_root.exists() else WORKSPACE_ROOT / "themes"
-    try:
-        merged = timeline.resolve_timeline_theme(timeline_config, themes_root)
-    except (FileNotFoundError, ValueError):
-        merged = None
-    if not isinstance(merged, dict) or "visual" not in merged:
-        return _theme_for_props(fallback_theme_path)
-    return {
-        "id": merged.get("id") or merged.get("visual", {}).get("id") or "theme",
-        "visual": merged["visual"],
-    }
 
 
 def _timeline_composition_src(project_dir: Path) -> Path | None:
@@ -457,92 +406,6 @@ def _render_provenance_sidecar_path(out_path: Path) -> Path:
     return Path(f"{out_path}.provenance.json")
 
 
-def _active_pack_order_for_provenance() -> list[dict[str, Any]]:
-    return [
-        {
-            "id": discovered.id,
-            "source_kind": discovered.source_kind,
-            "priority_index": discovered.priority_index,
-            "root": str(discovered.pack_dir),
-        }
-        for discovered in discover_pack_metadata(project_root=REPO_ROOT)
-    ]
-
-
-def _active_theme_for_provenance(
-    theme_path: Path | None,
-    active_theme: dict[str, Any] | None,
-) -> dict[str, Any] | None:
-    theme_id = active_theme.get("id") if isinstance(active_theme, dict) else None
-    if theme_path is None:
-        return {"id": theme_id or "banodoco-default", "path": None}
-    resolved = _resolve_theme_path(theme_path)
-    return {"id": theme_id or resolved.parent.name, "path": str(resolved)}
-
-
-def _render_provenance_payload(
-    out_path: Path,
-    *,
-    engine: str,
-    timeline_path: Path,
-    assets_path: Path,
-    project_dir: Path,
-    composition_id: str,
-    theme_path: Path | None,
-    active_theme: dict[str, Any] | None,
-    registry_state: dict[str, Any],
-    stage_summary: dict[str, Any],
-    segments: list[dict[str, float | str]] | None = None,
-    segment_provenance: list[dict[str, Any]] | None = None,
-) -> dict[str, Any]:
-    effects = list(stage_summary.get("effects") or [])
-    payload: dict[str, Any] = {
-        "schema_version": 1,
-        "engine": engine,
-        "output": str(out_path.resolve()),
-        "timeline": str(timeline_path.resolve()),
-        "assets_registry": str(assets_path.resolve()),
-        "project_dir": str(project_dir.resolve()),
-        "composition_id": composition_id,
-        "active_pack_order": _active_pack_order_for_provenance(),
-        "active_theme": _active_theme_for_provenance(theme_path, active_theme),
-        "registry_hash": registry_state.get("hash"),
-        "registry_state": registry_state,
-        "resolved_effect_ids": [
-            str(effect["effect_id"]) for effect in effects if "effect_id" in effect
-        ],
-        "resolved_effects": effects,
-        "source_pack_ids": sorted(
-            {
-                str(effect["source_pack_id"])
-                for effect in effects
-                if isinstance(effect, dict) and effect.get("source_pack_id")
-            }
-        ),
-        "element_roots": sorted(
-            {
-                str(effect["element_root"])
-                for effect in effects
-                if isinstance(effect, dict) and effect.get("element_root")
-            }
-        ),
-        "staged_asset_ids": sorted(
-            {
-                str(asset_id)
-                for effect in effects
-                if isinstance(effect, dict)
-                for asset_id in effect.get("staged_asset_ids", ())
-            }
-        ),
-        "staged_asset_root": stage_summary.get("root"),
-    }
-    if segments is not None:
-        payload["segments"] = segments
-    if segment_provenance is not None:
-        payload["segment_provenance"] = segment_provenance
-    return payload
-
-
 def _write_render_provenance(
     out_path: Path,
     *,
@@ -571,6 +434,7 @@ def _write_render_provenance(
         stage_summary=stage_summary,
         segments=segments,
         segment_provenance=segment_provenance,
+        active_pack_order=_active_pack_order_for_provenance(),
     )
     sidecar_path = _render_provenance_sidecar_path(out_path)
     write_json_atomic(sidecar_path, payload)
@@ -770,6 +634,7 @@ def render(
             active_theme=details.active_theme,
             registry_state=details.registry_state,
             stage_summary=details.stage_summary,
+            active_pack_order=_active_pack_order_for_provenance(),
         )
         output = publish_render_result(
             staged_video,
@@ -814,11 +679,6 @@ def render(
     return output
 
 
-def _input_path(raw_path: str, workspace: Path) -> Path:
-    candidate = Path(raw_path).expanduser()
-    return (candidate if candidate.is_absolute() else workspace / candidate).resolve()
-
-
 def _theme_setting_path(raw_path: str, workspace: Path) -> Path:
     """Preserve legacy theme slugs while localizing actual request paths."""
 
@@ -833,9 +693,7 @@ def _theme_setting_path(raw_path: str, workspace: Path) -> Path:
 
 def _settings_from_request(request: RenderRequest, workspace: Path) -> _RenderSettings:
     config = dict(request.backend_config.get(BACKEND_ID, {}))
-    unknown = sorted(set(config) - _CONFIG_KEYS)
-    if unknown:
-        raise ValueError(f"unknown {BACKEND_ID} configuration: {', '.join(unknown)}")
+    _reject_unknown_config(config, _CONFIG_KEYS, BACKEND_ID)
 
     project_value = config.get("project_dir", REPO_ROOT / "remotion")
     if not isinstance(project_value, (str, os.PathLike)):
@@ -857,15 +715,7 @@ def _settings_from_request(request: RenderRequest, workspace: Path) -> _RenderSe
     else:
         raise TypeError("theme_path must be a path string or null")
 
-    min_free_value = config.get("min_free_gb")
-    if min_free_value is None:
-        min_free_gb = None
-    elif isinstance(min_free_value, bool) or not isinstance(min_free_value, (int, float)):
-        raise TypeError("min_free_gb must be a number or null")
-    else:
-        min_free_gb = float(min_free_value)
-        if min_free_gb < 0:
-            raise ValueError("min_free_gb must not be negative")
+    min_free_gb = _parse_min_free_gb(config.get("min_free_gb"))
 
     return _RenderSettings(
         project_dir=project_dir,
@@ -873,48 +723,6 @@ def _settings_from_request(request: RenderRequest, workspace: Path) -> _RenderSe
         theme_path=theme_path,
         min_free_gb=min_free_gb,
     )
-
-
-def _load_registry_mapping(path: Path | None) -> dict[str, Any]:
-    if path is None:
-        return {"assets": {}}
-    data = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(data, dict) or not isinstance(data.get("assets"), dict):
-        raise ValueError("assets registry must be an object containing an assets object")
-    return data
-
-
-def _canonical_profile(
-    timeline_path: Path,
-    assets_data: Mapping[str, Any],
-    settings: _RenderSettings,
-) -> RenderProfile:
-    fallback_theme = settings.theme_path or (
-        WORKSPACE_ROOT / "themes" / "banodoco-default" / "theme.json"
-    )
-    active_theme = _resolved_theme_for_render(timeline_path, fallback_theme)
-    return resolve_render_profile(
-        timeline_path,
-        assets_data,
-        theme=active_theme,
-        themes_root=REPO_ROOT / "themes",
-    )
-
-
-def _profile_mismatches(
-    requested: RenderProfile,
-    canonical: RenderProfile,
-) -> list[str]:
-    requested_data = requested.to_dict()
-    canonical_data = canonical.to_dict()
-    mismatches: list[str] = []
-    for field, expected in canonical_data.items():
-        if field == "duration_tolerance":
-            continue
-        actual = requested_data[field]
-        if actual != expected:
-            mismatches.append(f"{field}={actual!r} (requires {expected!r})")
-    return mismatches
 
 
 def support(request: RenderRequest, *, workspace: Path) -> SupportReport:
@@ -1001,7 +809,7 @@ def support(request: RenderRequest, *, workspace: Path) -> SupportReport:
                         + ", ".join(unknown_clip_types)
                     )
         try:
-            canonical = _canonical_profile(timeline_path, assets_data, settings)
+            canonical = _canonical_profile(timeline_path, assets_data, settings.theme_path)
         except Exception as exc:
             reasons.append(f"canonical Remotion profile cannot be resolved: {exc}")
         else:
@@ -1015,13 +823,7 @@ def support(request: RenderRequest, *, workspace: Path) -> SupportReport:
                     f"Remotion's always-rendered audio output"
                 )
             if request.profile is not None:
-                render_profile = replace(
-                    canonical,
-                    time_base=(1, 90000),
-                    audio_codec=canonical.audio_codec or "aac",
-                    audio_sample_rate=canonical.audio_sample_rate or 48000,
-                    audio_channel_layout=canonical.audio_channel_layout or "stereo",
-                )
+                render_profile = _remotion_mux_profile(canonical)
                 mismatches = _profile_mismatches(request.profile, render_profile)
                 if mismatches:
                     reasons.append(
@@ -1046,18 +848,6 @@ def support(request: RenderRequest, *, workspace: Path) -> SupportReport:
         backend=BACKEND_ID,
         backend_version=BACKEND_VERSION,
     )
-
-
-def _duration_frames(video_path: Path, profile: RenderProfile) -> int:
-    probe = ffprobe_metadata_strict(video_path)
-    if probe.duration_rational is not None:
-        duration = Fraction(*probe.duration_rational)
-    elif probe.duration_seconds is not None:
-        duration = Fraction(str(probe.duration_seconds))
-    else:
-        raise RuntimeError("ffprobe did not report a video duration")
-    frames = duration * Fraction(*profile.fps_rational)
-    return max(1, int(frames + Fraction(1, 2)))
 
 
 def _protocol_render(request: RenderRequest, *, workspace: Path) -> RenderResult:
@@ -1091,22 +881,11 @@ def _protocol_render(request: RenderRequest, *, workspace: Path) -> RenderResult
         else:
             assets_path = requested_assets_path
         assets_data = _load_registry_mapping(assets_path)
-        canonical = _canonical_profile(timeline_path, assets_data, settings)
-        declared_profile = request.profile or canonical
-        # Remotion always muxes MP4 at the 90 kHz timescale regardless of the
-        # input timeline's time base; the declared profile must match what the
-        # renderer actually produces or strict validation rejects the output.
-        declared_profile = replace(declared_profile, time_base=(1, 90000))
+        canonical = _canonical_profile(timeline_path, assets_data, settings.theme_path)
+        declared_profile = _remotion_mux_profile(request.profile or canonical)
         # Remotion always muxes an audio track into its MP4 (silent when the
-        # timeline has none), so ownership is effectively 'rendered' and the
-        # declared profile must carry the AAC audio fields it always emits.
+        # timeline has none), so ownership is effectively 'rendered'.
         ownership = AudioOwnership.RENDERED
-        declared_profile = replace(
-            declared_profile,
-            audio_codec=declared_profile.audio_codec or "aac",
-            audio_sample_rate=declared_profile.audio_sample_rate or 48000,
-            audio_channel_layout=declared_profile.audio_channel_layout or "stereo",
-        )
         private_tmp = lifecycle.enter_context(
             TemporaryDirectory(
                 prefix=f".{request.output_name}.remotion-",
@@ -1139,6 +918,7 @@ def _protocol_render(request: RenderRequest, *, workspace: Path) -> RenderResult
             active_theme=details.active_theme,
             registry_state=details.registry_state,
             stage_summary=details.stage_summary,
+            active_pack_order=_active_pack_order_for_provenance(),
         )
         video = VideoArtifact.from_file(
             path=output_path,

@@ -1,11 +1,11 @@
 {
-  "brief": "/Users/peteromalley/Documents/reigh-workspace/Astrid-threejs-cleanup/.oracle/briefs/01-deps-matrix.md",
-  "elapsed_s": 114.6761164580239,
+  "brief": "/Users/peteromalley/Documents/reigh-workspace/Astrid-threejs-cleanup/.oracle/briefs/04-timeline-mapping.md",
+  "elapsed_s": 120.48171875000116,
   "error": null,
   "error_class": null,
   "finish_reason": null,
-  "finished_at": "2026-08-13T21:15:45Z",
-  "meta_file": "/Users/peteromalley/Documents/reigh-workspace/Astrid-threejs-cleanup/.oracle/findings/01-deps-matrix.meta.json",
+  "finished_at": "2026-08-13T21:17:59Z",
+  "meta_file": "/Users/peteromalley/Documents/reigh-workspace/Astrid-threejs-cleanup/.oracle/findings/04-timeline-mapping.meta.json",
   "model": "deepseek:deepseek-v4-flash",
   "pid": 60436,
   "raw_result_keys": [
@@ -36,11 +36,11 @@
     "response_previewed",
     "total_tokens"
   ],
-  "response_chars": 2179,
-  "response_file": "/Users/peteromalley/Documents/reigh-workspace/Astrid-threejs-cleanup/.oracle/findings/01-deps-matrix.txt",
-  "started_at": "2026-08-13T21:13:51Z",
+  "response_chars": 2652,
+  "response_file": "/Users/peteromalley/Documents/reigh-workspace/Astrid-threejs-cleanup/.oracle/findings/04-timeline-mapping.txt",
+  "started_at": "2026-08-13T21:15:59Z",
   "status": "ok",
-  "stem": "01-deps-matrix",
+  "stem": "04-timeline-mapping",
   "task_timeout_s": 1500,
-  "tool_calls": 66
+  "tool_calls": 94
 }

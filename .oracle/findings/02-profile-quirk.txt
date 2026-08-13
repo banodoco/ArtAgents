@@ -1,0 +1,13 @@
+## Findings (verified, file:line)
+
+**1. The quirk is triplicated, not just duplicated.** remotion/run.py has it twice: support() at 1018-1024 (`replace(canonical, time_base=(1, 90000)`, `audio_codec=…or "aac"`, `audio_sample_rate=…or 48000`, `audio_channel_layout=…or "stereo"`) and render at 1099 + 1104-1109. threejs/run.py wraps it in `_render_declared_profile` (314-321: 90000 at :315, AAC at :318-320), called from support (:393) and render. Blocks are semantically identical, structurally near-verbatim. Comments even admit it: remotion/run.py:1008-1010, 1096-1098; threejs/run.py:293-294 ("same as Remotion").
+
+**2. ffmpeg backend + finalizer.** ffmpeg/run.py never hardcodes 90000 — it probes (`time_base=_required(probe.time_base…)` :487, `declared_profile = request.profile or probed_profile` :577). The finalizer doesn't trust the plan for segments: `_preflight_segments` validates against the segment's *declared* profile (:1115-1119), then **reprobes** (:1161-1166) into `segment.profile` (:1179). Target = plan canonical (:1363-1367). `_profile_differences(segment.profile, assembly_profile)` (:1396) sees 90000 ≠ 12288 → full re-encode with `-video_track_timescale`/`settb` 12288 (run.py:529; test_ffmpeg_finalizer.py:397). So yes — it papers over, and every remotion/threejs segment pays a re-encode.
+
+**3. Canonical.** profile.py:179-190 `_mp4_time_base`: double until ≥10000 (24→12288, 30→15360), applied at :281. Plan (12288) ≠ declared (90000), always.
+
+**4. Fix options.** (a) Shared `_remotion_mux_profile()` — **zero tests break**: no test asserts 90000 (grep: none); test_remotion_backend mocks `validate_render_result` (:302) and uses canonical 15360 (:272); test_threejs_backend has *no* profile assertions; finalizer tests use arbitrary bases (60000, 30000); hybrid asserts final 1/12288 (:828), unchanged. (b) Declare truth instead: **hybrid test fixtures render "remotion-parity" segments at `-video_track_timescale 12288`** (test_threejs_hybrid.py:590-591) — so 90000 may be wrong; delete the block if probed=12288. (c) Document: keeps 3 copies + forced re-encode.
+
+**5. Ground truth.** No .mp4 artifacts in repo; no node render possible here. Best evidence: hybrid fixtures say **12288**, contradicting the 90000 declaration (cf. HyperFrames bug, test_hyperframes_backend.py:493).
+
+**Recommendation: (a)** — shared helper now (safe, kills 3 copies); only then probe a real render to decide if (b) lets you delete it.

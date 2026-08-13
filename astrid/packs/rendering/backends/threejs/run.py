@@ -22,7 +22,7 @@ import os
 import shutil
 import sys
 from contextlib import ExitStack
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, Mapping, Sequence
@@ -42,7 +42,6 @@ from astrid.core.rendering.artifacts import validate_render_result
 from astrid.core.rendering.contracts import (
     SCHEMA_VERSION,
     AudioOwnership,
-    RenderProfile,
     RenderRequest,
     RenderResult,
     SupportReport,
@@ -53,18 +52,24 @@ from astrid.core.rendering.errors import (
     make_renderer_error,
     raise_unsupported_error,
 )
+from astrid.packs.rendering.backends._shared import (
+    _canonical_profile,
+    _duration_frames,
+    _input_path,
+    _load_registry_mapping,
+    _parse_min_free_gb,
+    _profile_mismatches,
+    _reject_unknown_config,
+    _remotion_mux_profile,
+    _render_provenance_payload,
+    _serialize_timeline,
+)
 from astrid.packs.rendering.backends.remotion import run as remotion_backend
 
-# Reuse seam (T3.3): only the side-effect-free execution/provenance helpers.
-# The shared Remotion render lock is acquired inside ``_execute_remotion``;
-# this backend never adds a second lock or capture stack.
+# Reuse seam (T3.3): only the side-effect-free execution helper. The shared
+# Remotion render lock is acquired inside ``_execute_remotion``; this backend
+# never adds a second lock or capture stack.
 _execute_remotion = remotion_backend._execute_remotion
-_render_provenance_payload = remotion_backend._render_provenance_payload
-_serialize_timeline = remotion_backend._serialize_timeline
-_load_registry_mapping = remotion_backend._load_registry_mapping
-_input_path = remotion_backend._input_path
-_duration_frames = remotion_backend._duration_frames
-_canonical_profile = remotion_backend._canonical_profile
 
 
 BACKEND_ID = "rendering.threejs"
@@ -248,9 +253,7 @@ def _binaries_reasons() -> list[str]:
 
 def _settings_from_request(request: RenderRequest, workspace: Path) -> _ThreeSettings:
     config = dict(request.backend_config.get(BACKEND_ID, {}))
-    unknown = sorted(set(config) - _CONFIG_KEYS)
-    if unknown:
-        raise ValueError(f"unknown {BACKEND_ID} configuration: {', '.join(unknown)}")
+    _reject_unknown_config(config, _CONFIG_KEYS, BACKEND_ID)
 
     project_value = config.get("project_dir", _DEFAULT_PROJECT_DIR)
     if not isinstance(project_value, (str, os.PathLike)):
@@ -265,15 +268,7 @@ def _settings_from_request(request: RenderRequest, workspace: Path) -> _ThreeSet
     else:
         raise TypeError("theme_path must be a path string or null")
 
-    min_free_value = config.get("min_free_gb")
-    if min_free_value is None:
-        min_free_gb = None
-    elif isinstance(min_free_value, bool) or not isinstance(min_free_value, (int, float)):
-        raise TypeError("min_free_gb must be a number or null")
-    else:
-        min_free_gb = float(min_free_value)
-        if min_free_gb < 0:
-            raise ValueError("min_free_gb must not be negative")
+    min_free_gb = _parse_min_free_gb(config.get("min_free_gb"))
 
     return _ThreeSettings(
         project_dir=project_dir,
@@ -287,37 +282,6 @@ def _default_settings() -> _ThreeSettings:
         project_dir=_DEFAULT_PROJECT_DIR,
         theme_path=None,
         min_free_gb=None,
-    )
-
-
-# ---------------------------------------------------------------------------
-# Profile contract (90 kHz timescale + always-muxed AAC, same as Remotion)
-# ---------------------------------------------------------------------------
-
-
-def _profile_mismatches(
-    requested: RenderProfile,
-    canonical: RenderProfile,
-) -> list[str]:
-    requested_data = requested.to_dict()
-    canonical_data = canonical.to_dict()
-    mismatches: list[str] = []
-    for field, expected in canonical_data.items():
-        if field == "duration_tolerance":
-            continue
-        actual = requested_data[field]
-        if actual != expected:
-            mismatches.append(f"{field}={actual!r} (requires {expected!r})")
-    return mismatches
-
-
-def _render_declared_profile(canonical: RenderProfile) -> RenderProfile:
-    declared = replace(canonical, time_base=(1, 90000))
-    return replace(
-        declared,
-        audio_codec=declared.audio_codec or "aac",
-        audio_sample_rate=declared.audio_sample_rate or 48000,
-        audio_channel_layout=declared.audio_channel_layout or "stereo",
     )
 
 
@@ -385,12 +349,12 @@ def support(request: RenderRequest, *, workspace: Path) -> SupportReport:
             )
         if request.profile is not None:
             try:
-                canonical = _canonical_profile(timeline_path, assets_data, settings)
+                canonical = _canonical_profile(timeline_path, assets_data, settings.theme_path)
             except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
                 reasons.append(f"canonical Three.js profile cannot be resolved: {exc}")
             else:
                 mismatches = _profile_mismatches(
-                    request.profile, _render_declared_profile(canonical)
+                    request.profile, _remotion_mux_profile(canonical)
                 )
                 if mismatches:
                     reasons.append(
@@ -500,8 +464,8 @@ def _protocol_render(request: RenderRequest, *, workspace: Path) -> RenderResult
         else:
             assets_path = requested_assets_path
         assets_data = _load_registry_mapping(assets_path)
-        canonical = _canonical_profile(timeline_path, assets_data, settings)
-        declared_profile = _render_declared_profile(request.profile or canonical)
+        canonical = _canonical_profile(timeline_path, assets_data, settings.theme_path)
+        declared_profile = _remotion_mux_profile(request.profile or canonical)
         ownership = AudioOwnership.RENDERED
         private_tmp = lifecycle.enter_context(
             TemporaryDirectory(

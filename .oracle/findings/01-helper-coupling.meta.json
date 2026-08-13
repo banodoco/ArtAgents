@@ -1,11 +1,11 @@
 {
-  "brief": "/Users/peteromalley/Documents/reigh-workspace/Astrid-threejs-cleanup/.oracle/briefs/01-deps-matrix.md",
-  "elapsed_s": 114.6761164580239,
+  "brief": "/Users/peteromalley/Documents/reigh-workspace/Astrid-threejs-cleanup/.oracle/briefs/01-helper-coupling.md",
+  "elapsed_s": 80.43001250000088,
   "error": null,
   "error_class": null,
   "finish_reason": null,
-  "finished_at": "2026-08-13T21:15:45Z",
-  "meta_file": "/Users/peteromalley/Documents/reigh-workspace/Astrid-threejs-cleanup/.oracle/findings/01-deps-matrix.meta.json",
+  "finished_at": "2026-08-13T21:15:11Z",
+  "meta_file": "/Users/peteromalley/Documents/reigh-workspace/Astrid-threejs-cleanup/.oracle/findings/01-helper-coupling.meta.json",
   "model": "deepseek:deepseek-v4-flash",
   "pid": 60436,
   "raw_result_keys": [
@@ -36,11 +36,11 @@
     "response_previewed",
     "total_tokens"
   ],
-  "response_chars": 2179,
-  "response_file": "/Users/peteromalley/Documents/reigh-workspace/Astrid-threejs-cleanup/.oracle/findings/01-deps-matrix.txt",
+  "response_chars": 2403,
+  "response_file": "/Users/peteromalley/Documents/reigh-workspace/Astrid-threejs-cleanup/.oracle/findings/01-helper-coupling.txt",
   "started_at": "2026-08-13T21:13:51Z",
   "status": "ok",
-  "stem": "01-deps-matrix",
+  "stem": "01-helper-coupling",
   "task_timeout_s": 1500,
-  "tool_calls": 66
+  "tool_calls": 54
 }
