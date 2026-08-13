@@ -537,7 +537,7 @@ def plan(
                 segment_request,
                 segment_timeline,
             )
-        except RendererException as exc:
+        except (RendererException, RenderingRegistryError) as exc:
             raise_unsupported_error(
                 backend=BACKEND_ID,
                 message=f"no renderer supports planned window [{start},{end})",
