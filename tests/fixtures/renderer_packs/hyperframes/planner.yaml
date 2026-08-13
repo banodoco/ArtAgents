@@ -7,13 +7,15 @@ command: [python3, plan.py]
 operations: [plan, support]
 description: >-
   Plans a mixed timeline into non-overlapping frame windows: isolated text
-  clips render through the HyperFrames backend (hyperframes.renderer), and
-  media/effect/mixed windows render through Remotion (rendering.remotion).
-  The plan pins rendering.ffmpeg-finalizer, which concatenates the segment
-  videos (and synthesizes silent audio onto visual-only HyperFrames
-  segments).  Occupancy tiling: no text handles, so text windows never bleed
-  adjacent media.  V1 forbids overlay compositing — overlapping text-on-media
-  stays on Remotion.
+  and SILENT media clips render through the HyperFrames backend
+  (hyperframes.renderer, which maps media clips to <video> elements with
+  source trimming), and audible-media/effect/transition/mixed windows render
+  through Remotion (rendering.remotion).  The plan pins
+  rendering.ffmpeg-finalizer, which concatenates the segment videos (and
+  synthesizes silent audio onto visual-only HyperFrames segments).  Occupancy
+  tiling: no text handles, so HyperFrames windows never bleed adjacent media.
+  V1 forbids overlay compositing — overlapping text-on-media stays on
+  Remotion.
 capabilities:
   policies: [hyper_remotion]
   features:

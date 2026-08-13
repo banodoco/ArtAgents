@@ -7,19 +7,27 @@ Adapts a BOUNDED subset of the Astrid timeline to a HyperFrames composition:
 
 * canvas (theme_overrides.visual.canvas) -> root ``#root`` with
   ``data-composition-id``, ``data-start="0"``, ``data-duration`` (compile-time
-  ``max(at + hold)``), ``data-width``, ``data-height``, ``data-fps``;
+  ``max(at + duration)``), ``data-width``, ``data-height``, ``data-fps``;
 * each ``text`` clip -> a direct child ``<section class="clip">`` with
   ``data-start`` / ``data-duration`` (the HyperFrames seek window), an
   inner ``<p>`` carrying the escaped text, CSS ``z-index`` from the Astrid
   visual track paint order, and a bounded CSS subset (fontSize, color,
   textAlign, fontWeight, textShadow, maxWidth, offsets/anchors);
+* each SILENT ``media`` clip -> a ``<video>`` element that IS the clip
+  (HyperFrames collects ``video[data-start]`` as a media clip): ``data-start``
+  / ``data-duration`` (composition window), ``data-mediaStart`` (source
+  offset = clip.from) and ``data-playback-rate`` (= clip.speed) so the engine
+  seeks the exact source window.  The asset file is copied into the workspace
+  ``assets/`` dir and referenced relative to the composition.  Audible media
+  (effective gain > 0) is rejected: the adapter emits visual-only MP4s
+  (``audio_ownership: none``) and would silently drop the source audio.
 * theme/canvas background -> a full-bleed child of the root (never the root
   background, which capture drops).
 
-Deliberately rejected with an explicit support reason: media clips, effect
-clips, audio clips/tracks, fades/transitions, and non-integer FPS.  The
-adapter never tweens ``.clip`` visibility — HyperFrames owns the seek
-window; visibility-only is the v1 contract.
+Deliberately rejected with an explicit support reason: audible media, effect
+clips, audio clips/tracks, fades/transitions, opacity != 1, and non-integer
+FPS.  The adapter never tweens ``.clip`` visibility — HyperFrames owns the
+seek window; visibility-only is the v1 contract.
 
 Renders via ``npx --yes hyperframes@<pin> render <workdir> -c index.html
 -o <output_name> --fps <int> --no-best-effort --strict`` and writes the
@@ -118,13 +126,55 @@ def _canvas(timeline: dict) -> tuple[int, int, int] | None:
 
 
 def _clip_duration(clip: dict) -> float:
+    if clip.get("clipType") == "media":
+        to = clip.get("to")
+        frm = clip.get("from")
+        if isinstance(to, (int, float)) and isinstance(frm, (int, float)):
+            source_span = float(to) - float(frm)
+            if source_span > 0:
+                return source_span / _clip_speed(clip)
+        return 1.0
     hold = clip.get("hold")
     if isinstance(hold, (int, float)) and hold > 0:
         return float(hold)
     return 1.0
 
 
-def _support_reasons(timeline: dict) -> list[str]:
+def _clip_speed(clip: dict) -> float:
+    speed = clip.get("speed")
+    if isinstance(speed, (int, float)) and speed > 0:
+        return float(speed)
+    return 1.0
+
+
+def _effective_gain(clip: dict, tracks: list) -> float:
+    """Exact timeline gain (track muted/volume x clip volume), 0..1."""
+    track_id = clip.get("track")
+    track = next(
+        (t for t in tracks if isinstance(t, dict) and t.get("id") == track_id),
+        None,
+    )
+    if isinstance(track, dict) and track.get("muted") is True:
+        return 0.0
+    if isinstance(track, dict):
+        track_volume = track.get("volume")
+        track_gain = 1.0 if track_volume is None else float(track_volume)
+    else:
+        track_gain = 1.0
+    clip_volume = clip.get("volume")
+    clip_gain = 1.0 if clip_volume is None else float(clip_volume)
+    return max(0.0, min(1.0, track_gain * clip_gain))
+
+
+def _support_reasons(timeline: dict, registry: dict | None = None) -> list[str]:
+    """Return reasons this timeline is unsupported.
+
+    * ``registry``: parsed assets registry (``{"assets": {id: entry}}``) or
+      ``None``.  Media clips require a registry whose ``assets`` map resolves
+      the referenced asset id to a file, and the clip's effective gain must
+      be 0 (the adapter emits visual-only MP4s and would silently drop any
+      source audio otherwise).
+    """
     reasons: list[str] = []
     tracks = timeline.get("tracks") or []
     clips = timeline.get("clips") or []
@@ -137,15 +187,18 @@ def _support_reasons(timeline: dict) -> list[str]:
         reasons.append(
             f"audio tracks are not supported by the HyperFrames adapter: {audio_tracks}"
         )
+    asset_entries = {}
+    if isinstance(registry, dict) and isinstance(registry.get("assets"), dict):
+        asset_entries = registry["assets"]
     for index, clip in enumerate(clips):
         if not isinstance(clip, dict):
             reasons.append(f"clip[{index}] is not an object")
             continue
         clip_type = clip.get("clipType", "media")
-        if clip_type != "text":
+        if clip_type not in ("text", "media"):
             reasons.append(
                 f"clip[{index}] clipType {clip_type!r} is not supported "
-                "(text-only adapter)"
+                "(text and silent-media only)"
             )
         if clip.get("track") in audio_tracks:
             reasons.append(f"clip[{index}] sits on an audio track")
@@ -155,16 +208,31 @@ def _support_reasons(timeline: dict) -> list[str]:
             reasons.append(f"clip[{index}] transitions are not supported in v1")
         if clip.get("opacity") not in (None, 1):
             reasons.append(f"clip[{index}] opacity != 1 is not supported in v1")
-        params = clip.get("params") or {}
-        if isinstance(params, dict):
-            unknown = sorted(set(params) - _SUPPORTED_TEXT_KEYS)
-            if unknown:
+        if clip_type == "media":
+            asset_id = clip.get("asset")
+            if not isinstance(asset_id, str) or not asset_id:
+                reasons.append(f"clip[{index}] media clip needs an asset id")
+            entry = asset_entries.get(asset_id) if isinstance(asset_id, str) else None
+            if not isinstance(entry, dict) or not isinstance(entry.get("file"), str):
                 reasons.append(
-                    f"clip[{index}] unsupported text params: {unknown}"
+                    f"clip[{index}] asset {asset_id!r} is not in the assets registry"
                 )
-        text_field = clip.get("text")
-        if text_field is not None and not isinstance(text_field, dict):
-            reasons.append(f"clip[{index}] text must be an object")
+            if _effective_gain(clip, tracks) > 0:
+                reasons.append(
+                    f"clip[{index}] media clip carries audio; the HyperFrames "
+                    "adapter is visual-only in v1 (set clip/track volume to 0)"
+                )
+        else:
+            params = clip.get("params") or {}
+            if isinstance(params, dict):
+                unknown = sorted(set(params) - _SUPPORTED_TEXT_KEYS)
+                if unknown:
+                    reasons.append(
+                        f"clip[{index}] unsupported text params: {unknown}"
+                    )
+            text_field = clip.get("text")
+            if text_field is not None and not isinstance(text_field, dict):
+                reasons.append(f"clip[{index}] text must be an object")
     width, height, fps = _canvas(timeline) or (None, None, None)
     if width is None:
         reasons.append("canvas width/height/fps must be positive integers")
@@ -190,6 +258,7 @@ def _compose_html(
     width: int,
     height: int,
     fps: int,
+    asset_srcs: dict | None = None,
 ) -> str:
     clips = timeline.get("clips") or []
     tracks = timeline.get("tracks") or []
@@ -200,12 +269,12 @@ def _compose_html(
     ]
     # data-track-index is a TIMING LANE (non-overlap), not paint order: give
     # each Astrid track its own lane so same-lane overlaps are impossible.
-    lane = {track_id: index for index, track_id in enumerate(visual_track_ids)}
     # Astrid visual tracks paint in reversed array order (later = on top).
     z_index = {
         track_id: len(visual_track_ids) - index
         for index, track_id in enumerate(visual_track_ids)
     }
+    asset_srcs = asset_srcs or {}
     duration = max(
         (float(clip.get("at", 0) or 0) + _clip_duration(clip) for clip in clips),
         default=1.0,
@@ -222,6 +291,9 @@ def _compose_html(
     parts.append(
         ".clip{position:absolute;top:0;left:0;width:100%;height:100%;"
         "display:flex;align-items:center;justify-content:center;}"
+    )
+    parts.append(
+        "video.clip{object-fit:cover;background:#000;}"
     )
     parts.append("</style></head><body>")
     parts.append(
@@ -240,10 +312,30 @@ def _compose_html(
     )
 
     for index, clip in enumerate(clips):
-        if not isinstance(clip, dict) or clip.get("clipType") != "text":
+        if not isinstance(clip, dict):
             continue
+        clip_type = clip.get("clipType")
         at = float(clip.get("at", 0) or 0)
-        hold = _clip_duration(clip)
+        dur = _clip_duration(clip)
+        track_id = clip.get("track")
+        zi = z_index.get(track_id, 0)
+        clip_id = f"clip-{clip.get('id', index)}"
+        if clip_type == "media":
+            src = asset_srcs.get(clip.get("asset"))
+            if not src:
+                continue
+            media_start = float(clip.get("from", 0) or 0)
+            speed = _clip_speed(clip)
+            parts.append(
+                f'<video id="{clip_id}" class="clip" src="{_esc(src)}" muted '
+                f'data-start="{at:g}" data-duration="{dur:g}" '
+                f'data-mediaStart="{media_start:g}" data-playback-rate="{speed:g}" '
+                f'data-track-index="{zi}" style="z-index:{zi};"></video>'
+            )
+            continue
+        if clip_type != "text":
+            continue
+        hold = dur
         params = clip.get("params") or {}
         content = clip.get("text")
         if not isinstance(content, dict):
@@ -278,9 +370,6 @@ def _compose_html(
             styles.append(f"margin-left:{offset_x:g}px;")
         if isinstance(offset_y, (int, float)):
             styles.append(f"margin-top:{offset_y:g}px;")
-        track_id = clip.get("track")
-        zi = z_index.get(track_id, 0)
-        clip_id = f"clip-{clip.get('id', index)}"
         parts.append(
             f'<section id="{clip_id}" class="clip" data-start="{at:g}" '
             f'data-duration="{hold:g}" data-track-index="{zi}" '
@@ -291,6 +380,65 @@ def _compose_html(
     parts.append("</div>")
     parts.append("</body></html>")
     return "\n".join(parts)
+
+
+def _load_registry(request: dict, workspace: Path) -> tuple[dict | None, Path | None]:
+    """Parse the request's assets registry (``{"assets": {id: entry}}``).
+
+    Returns ``(data, registry_path)``; the path anchors relative ``file``
+    fields.  ``(None, None)`` when the request has no usable registry.
+    """
+    raw = request.get("assets_registry_path")
+    if not raw:
+        return None, None
+    registry_path = Path(raw)
+    if not registry_path.is_absolute():
+        registry_path = workspace / registry_path
+    try:
+        data = json.loads(registry_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None, None
+    if not isinstance(data, dict) or not isinstance(data.get("assets"), dict):
+        return None, None
+    return data, registry_path
+
+
+def _stage_assets(
+    timeline: dict,
+    registry: dict | None,
+    registry_path: Path | None,
+    workspace: Path,
+) -> dict:
+    """Copy each referenced media asset into ``workspace/assets/``.
+
+    Returns ``{asset_id: relative_src}`` for every media clip whose asset
+    resolves to a real file (relative to the registry's directory).
+    """
+    if registry is None or registry_path is None:
+        return {}
+    assets_dir = workspace / "assets"
+    staged: dict[str, str] = {}
+    for clip in timeline.get("clips") or []:
+        if not isinstance(clip, dict) or clip.get("clipType") != "media":
+            continue
+        asset_id = clip.get("asset")
+        entry = registry.get("assets", {}).get(asset_id)
+        if not isinstance(entry, dict) or not isinstance(entry.get("file"), str):
+            continue
+        if asset_id in staged:
+            continue
+        file_value = entry["file"]
+        source = Path(file_value)
+        if not source.is_absolute():
+            source = registry_path.parent / source
+        if not source.is_file():
+            continue
+        assets_dir.mkdir(parents=True, exist_ok=True)
+        target = assets_dir / source.name
+        if not target.exists():
+            shutil.copyfile(source, target)
+        staged[asset_id] = f"assets/{source.name}"
+    return staged
 
 
 def _run(verb: str, request: dict, request_path: Path, result_path: Path) -> int:
@@ -312,7 +460,8 @@ def _run(verb: str, request: dict, request_path: Path, result_path: Path) -> int
         return 0
 
     if verb == "support":
-        reasons = _support_reasons(timeline)
+        registry, _registry_path = _load_registry(request, workspace)
+        reasons = _support_reasons(timeline, registry=registry)
         _write(
             result_path,
             {
@@ -320,7 +469,7 @@ def _run(verb: str, request: dict, request_path: Path, result_path: Path) -> int
                 "supported": not reasons,
                 "reasons": reasons,
                 "features": {
-                    "media": False,
+                    "media": True,
                     "audio_mode": "none",
                     "bounded_css": True,
                     "hyperframes_pin": _HYPERFRAMES_PIN,
@@ -332,13 +481,17 @@ def _run(verb: str, request: dict, request_path: Path, result_path: Path) -> int
         )
         return 0
 
-    reasons = _support_reasons(timeline)
+    registry, registry_path = _load_registry(request, workspace)
+    reasons = _support_reasons(timeline, registry=registry)
     if reasons:
         _error(
             result_path,
             "unsupported",
             "HyperFrames adapter does not support this timeline",
-            recovery_command="use a text-only timeline with integer canvas fps",
+            recovery_command=(
+                "use a text or silent-media timeline (volume 0) with integer "
+                "canvas fps and resolvable registry assets"
+            ),
             details={"reasons": reasons},
         )
         return 0
@@ -353,7 +506,14 @@ def _run(verb: str, request: dict, request_path: Path, result_path: Path) -> int
 
     width, height, fps = _canvas(timeline)
     assert width is not None and height is not None and fps is not None
-    index_html = _compose_html(timeline, width=width, height=height, fps=fps)
+    asset_srcs = _stage_assets(timeline, registry, registry_path, workspace)
+    index_html = _compose_html(
+        timeline,
+        width=width,
+        height=height,
+        fps=fps,
+        asset_srcs=asset_srcs,
+    )
     index_path = workspace / "index.html"
     index_path.write_text(index_html, encoding="utf-8")
     out_dir = workspace / "outputs"

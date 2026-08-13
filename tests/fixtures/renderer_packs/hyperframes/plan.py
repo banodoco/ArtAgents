@@ -5,14 +5,17 @@ Usage: python3 plan.py plan|support --request <abs.json> --result <abs.json>
 
 Occupancy tiling of a mixed timeline into non-overlapping frame windows:
 
-* isolated text clips -> ``hyperframes.renderer``;
-* media / effect / mixed windows -> ``rendering.remotion``;
+* isolated text and SILENT-media clips -> ``hyperframes.renderer`` (the
+  HyperFrames engine renders ``<video>`` clips natively with source
+  trimming);
+* audible media / effect / transition / mixed windows ->
+  ``rendering.remotion``;
 * the plan pins ``rendering.ffmpeg-finalizer``, which concatenates the
   segment videos (and synthesizes silent audio onto visual-only HyperFrames
   segments).
 
 Deliberately NO text handles (unlike the characterized legacy planner):
-a text window covers exactly the text clip's occupied frames, so adjacent
+a HyperFrames window covers exactly its clips' occupied frames, so adjacent
 media never bleeds into a HyperFrames window.  Overlapping text-on-media is
 not overlaid in v1 — the merged window stays on Remotion.
 
@@ -66,7 +69,10 @@ def _clip_end(clip: dict) -> float:
     if clip.get("clipType") == "media":
         to = clip.get("to")
         if isinstance(to, (int, float)):
-            return at + max(0.0, float(to) - float(clip.get("from", 0) or 0))
+            source_span = max(0.0, float(to) - float(clip.get("from", 0) or 0))
+            speed = clip.get("speed")
+            rate = float(speed) if isinstance(speed, (int, float)) and speed > 0 else 1.0
+            return at + source_span / rate
         return at + 1.0
     hold = clip.get("hold")
     if isinstance(hold, (int, float)) and hold > 0:
@@ -74,8 +80,38 @@ def _clip_end(clip: dict) -> float:
     return at + 1.0
 
 
-def _is_text_clip(clip: dict) -> bool:
-    return clip.get("clipType") == "text"
+def _effective_gain(clip: dict, tracks: list) -> float:
+    """Exact timeline gain (track muted/volume x clip volume), 0..1."""
+    track_id = clip.get("track")
+    track = next(
+        (t for t in tracks if isinstance(t, dict) and t.get("id") == track_id),
+        None,
+    )
+    if isinstance(track, dict) and track.get("muted") is True:
+        return 0.0
+    if isinstance(track, dict):
+        track_volume = track.get("volume")
+        track_gain = 1.0 if track_volume is None else float(track_volume)
+    else:
+        track_gain = 1.0
+    clip_volume = clip.get("volume")
+    clip_gain = 1.0 if clip_volume is None else float(clip_volume)
+    return max(0.0, min(1.0, track_gain * clip_gain))
+
+
+def _is_hyperframes_eligible(clip: dict, tracks: list) -> bool:
+    """A clip is HyperFrames-eligible when it is plain text or SILENT media
+    with no effects/transitions/opacity (the adapter's honest boundary)."""
+    if clip.get("effects") or clip.get("transition"):
+        return False
+    if clip.get("opacity") not in (None, 1):
+        return False
+    clip_type = clip.get("clipType")
+    if clip_type == "text":
+        return True
+    if clip_type == "media":
+        return _effective_gain(clip, tracks) == 0
+    return False
 
 
 def _support_reasons(timeline: dict) -> list[str]:
@@ -100,20 +136,25 @@ def _plan_payload(
 
     # Occupancy windows: merge overlapping clip frame ranges so windows are
     # non-overlapping, then classify each window by whether it contains any
-    # non-text clip.
+    # clip that HyperFrames cannot render (audible media, effects,
+    # transitions, opacity).
+    tracks = timeline.get("tracks") or []
     events: list[tuple[int, int, bool]] = []
     for clip in clips:
         start_frame = int(round(float(clip.get("at", 0) or 0) * fps))
         end_frame = int(round(_clip_end(clip) * fps))
         end_frame = max(end_frame, start_frame + 1)
-        events.append((start_frame, end_frame, _is_text_clip(clip)))
+        events.append(
+            (start_frame, end_frame, _is_hyperframes_eligible(clip, tracks))
+        )
     total_frames = max((end for _start, end, _text in events), default=1)
 
     # Sweep: tile the timeline into non-overlapping windows.  A window is
-    # "hyperframes" only when its ENTIRE occupied range is text-only;
-    # anything touched by a non-text clip (including a text window that a
-    # later media clip overlaps) stays on remotion.  The last window always
-    # extends to total_frames so the plan tiles exactly.
+    # "hyperframes" only when its ENTIRE occupied range is eligible (text or
+    # silent media); anything touched by an ineligible clip (including an
+    # eligible window that a later ineligible clip overlaps) stays on
+    # remotion.  The last window always extends to total_frames so the plan
+    # tiles exactly.
     occupied: list[tuple[int, int, bool]] = []
     for start, end, is_text in sorted(events, key=lambda e: (e[0], e[1])):
         start = max(start, 0)
@@ -121,8 +162,8 @@ def _plan_payload(
         if end <= start:
             continue
         if occupied and start < occupied[-1][1]:
-            # Overlap: merge into the previous window; any non-text presence
-            # makes the merged window remotion.
+            # Overlap: merge into the previous window; any ineligible
+            # presence makes the merged window remotion.
             prev_start, prev_end, prev_text = occupied[-1]
             occupied[-1] = (
                 prev_start,
@@ -133,21 +174,25 @@ def _plan_payload(
             occupied.append((start, end, is_text))
 
     # Remotion windows extend by the legacy handle (0.25 s) so transition
-    # rendering fits; text windows stay exact (HyperFrames rejects media
-    # bleed).  Windows tile in order and never exceed total_frames.
+    # rendering fits — but never past the next occupied window (a later
+    # HyperFrames window must not be swallowed).  Eligible windows stay
+    # exact.  Windows tile in order and never exceed total_frames.
     handle_frames = int(round(0.25 * fps))
     windows: list[tuple[int, int, str]] = []
     cursor = 0
-    for start, end, is_text in occupied:
+    for index, (start, end, is_text) in enumerate(occupied):
         if start > cursor:
             windows.append((cursor, start, "remotion"))  # gap -> remotion
         if is_text:
             windows.append((start, end, "hyperframes"))
             cursor = max(cursor, end)
         else:
-            end = min(end + handle_frames, total_frames)
-            windows.append((start, max(end, cursor + 1), "remotion"))
-            cursor = max(cursor, end)
+            next_start = (
+                occupied[index + 1][0] if index + 1 < len(occupied) else total_frames
+            )
+            padded = min(end + handle_frames, next_start)
+            windows.append((start, max(padded, cursor + 1), "remotion"))
+            cursor = max(cursor, padded)
     if cursor < total_frames:
         windows.append((cursor, total_frames, "remotion"))
     if not windows:

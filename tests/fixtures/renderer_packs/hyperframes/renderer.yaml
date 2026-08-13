@@ -6,14 +6,15 @@ protocol_version: 1
 command: [python3, render.py]
 operations: [support, render]
 description: >-
-  Renders a bounded text/background subset of an Astrid timeline through the
-  HyperFrames HTML-to-MP4 engine (heygen-com/hyperframes, pinned version).
+  Renders a bounded text/silent-media subset of an Astrid timeline through
+  the HyperFrames HTML-to-MP4 engine (heygen-com/hyperframes, pinned version).
   The adapter maps canvas -> composition root, text clips -> .clip windows
-  (data-start/data-duration), and rejects media/effect/audio clips and fades
-  with a clear support reason.  Output is a visual-only MP4
-  (audio_ownership: none).
+  (data-start/data-duration), silent media clips -> <video> clip elements
+  (data-mediaStart/data-playback-rate source trimming), and rejects audible
+  media, effect/audio clips and fades/transitions with a clear support
+  reason.  Output is a visual-only MP4 (audio_ownership: none).
 capabilities:
-  clip_types: [text]
+  clip_types: [text, media]
   track_types: [visual]
   output_profiles: [video/mp4]
   # Host-sliced segment renderer: the service materializes a per-window
@@ -27,7 +28,7 @@ capabilities:
     - none
     - rendered
   features:
-    media: false
+    media: true
     bounded_css: true
   # Node.js >= 22 is required to run the pinned hyperframes CLI; FFmpeg is
   # required by hyperframes for muxing.  support() fails closed when either

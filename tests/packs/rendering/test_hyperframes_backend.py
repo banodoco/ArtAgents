@@ -152,9 +152,93 @@ def test_hyperframes_support_is_honest(tmp_path: Path) -> None:
         ),
         encoding="utf-8",
     )
+    # No registry -> the referenced asset cannot resolve; honest rejection.
     report = support(HYPERFRAMES_ID, timeline_path=media, extra_pack_roots=(str(PACK_ROOT),))
     assert report.supported is False
     assert any("media" in reason for reason in report.reasons)
+
+    # Silent media WITH a resolvable registry asset -> supported.
+    source = _source_video(tmp_path)
+    registry = tmp_path / "media-assets.json"
+    registry.write_text(
+        json.dumps(
+            {
+                "assets": {
+                    "src": {
+                        "file": source.name,
+                        "type": "video/mp4",
+                        "duration": 1.0,
+                        "resolution": "320x180",
+                        "fps": 24,
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    silent = tmp_path / "silent-media.json"
+    silent.write_text(
+        json.dumps(
+            {
+                "theme_overrides": {"visual": {"canvas": {"width": 640, "height": 360, "fps": 24}}},
+                "tracks": [{"id": "v", "kind": "visual"}],
+                "clips": [
+                    {
+                        "id": "m",
+                        "at": 0,
+                        "track": "v",
+                        "clipType": "media",
+                        "asset": "src",
+                        "from": 0,
+                        "to": 0.5,
+                        "speed": 1,
+                        "volume": 0,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    report = support(
+        HYPERFRAMES_ID,
+        timeline_path=silent,
+        assets_registry_path=registry,
+        extra_pack_roots=(str(PACK_ROOT),),
+    )
+    assert report.supported is True, report.reasons
+
+    # Audible media -> honest rejection (adapter is visual-only in v1).
+    audible = tmp_path / "audible-media.json"
+    audible.write_text(
+        json.dumps(
+            {
+                "theme_overrides": {"visual": {"canvas": {"width": 640, "height": 360, "fps": 24}}},
+                "tracks": [{"id": "v", "kind": "visual"}],
+                "clips": [
+                    {
+                        "id": "m",
+                        "at": 0,
+                        "track": "v",
+                        "clipType": "media",
+                        "asset": "src",
+                        "from": 0,
+                        "to": 0.5,
+                        "speed": 1,
+                        "volume": 1,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    report = support(
+        HYPERFRAMES_ID,
+        timeline_path=audible,
+        assets_registry_path=registry,
+        extra_pack_roots=(str(PACK_ROOT),),
+    )
+    assert report.supported is False
+    assert any("audio" in reason for reason in report.reasons)
 
     fade = tmp_path / "fade.json"
     fade.write_text(
@@ -220,10 +304,107 @@ def test_hyperframes_real_render_through_public_service(tmp_path: Path) -> None:
     assert "640" in probe and "360" in probe
 
 
+@pytest.mark.timeout(600)
+def test_hyperframes_real_media_render_through_public_service(tmp_path: Path) -> None:
+    """HyperFrames renders SILENT media clips via <video> source trimming.
+
+    A media clip [0, 0.5s) of a 1s source renders as a 12-frame (0.5s) h264
+    output; the engine's data-mediaStart/data-playback-rate trim the source
+    window.  This locks the adapter's media capability end-to-end.
+    """
+    node = _require_hyperframes_environment()
+    source = _source_video(tmp_path)
+    assets = tmp_path / "media-assets.json"
+    assets.write_text(
+        json.dumps(
+            {
+                "assets": {
+                    "src": {
+                        "file": source.name,
+                        "type": "video/mp4",
+                        "duration": 1.0,
+                        "resolution": "320x180",
+                        "fps": 24,
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    timeline = tmp_path / "media-timeline.json"
+    timeline.write_text(
+        json.dumps(
+            {
+                "theme_overrides": {
+                    "visual": {"canvas": {"width": 320, "height": 180, "fps": 24}}
+                },
+                "tracks": [{"id": "v", "kind": "visual"}],
+                "clips": [
+                    {
+                        "id": "m",
+                        "at": 0,
+                        "track": "v",
+                        "clipType": "media",
+                        "asset": "src",
+                        "from": 0,
+                        "to": 0.5,
+                        "speed": 1,
+                        "volume": 0,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    output = tmp_path / "hyperframes-media.mp4"
+    try:
+        with _node_on_path(node):
+            published = render(
+                timeline_path=timeline,
+                assets_registry_path=assets,
+                out_path=output,
+                backend=HYPERFRAMES_ID,
+                extra_pack_roots=(str(PACK_ROOT),),
+            )
+    except Exception as exc:  # noqa: BLE001 - network/CLI availability
+        message = str(exc)
+        if "npx" in message or "ENOTFOUND" in message or "network" in message:
+            pytest.skip(f"hyperframes CLI unavailable: {message[:120]}")
+        raise
+
+    assert Path(published).is_file()
+    assert Path(published).stat().st_size > 0
+    probe = subprocess.run(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_entries",
+            "stream=codec_name,width,height,duration",
+            "-of",
+            "csv",
+            str(published),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert "h264" in probe
+    assert "320" in probe and "180" in probe
+    duration = float(probe.strip().split(",")[-1])
+    assert abs(duration - 0.5) < 0.1, probe
+    sidecar = Path(f"{published}.provenance.json")
+    assert sidecar.is_file()
+    payload = json.loads(sidecar.read_text(encoding="utf-8"))
+    assert payload["engine"] == HYPERFRAMES_ID
+    assert payload["audio_ownership"] == "none"
+
+
 def _combined_timeline(tmp_path: Path) -> Path:
-    """Mixed timeline: a text clip (HyperFrames) followed by two media clips
-    with a transition (Remotion).  The hyperframes.planner tiles this into
-    [0,12) -> hyperframes.renderer and [12,32) -> rendering.remotion."""
+    """Mixed timeline: text (HyperFrames), media with transition (Remotion),
+    and a trailing SILENT media clip (HyperFrames again).  The planner tiles
+    this into [0,12) + [32,44) -> hyperframes.renderer and [12,32) ->
+    rendering.remotion, proving both engines share one render."""
     payload = {
         "theme": "banodoco-default",
         "theme_overrides": {
@@ -265,6 +446,17 @@ def _combined_timeline(tmp_path: Path) -> Path:
                 "asset": "src",
                 "from": 0.5,
                 "to": 1.0,
+                "speed": 1,
+                "volume": 0,
+            },
+            {
+                "id": "clip3",
+                "at": 1.35,
+                "track": "v2",
+                "clipType": "media",
+                "asset": "src",
+                "from": 0,
+                "to": 0.5,
                 "speed": 1,
                 "volume": 0,
             },
@@ -312,12 +504,14 @@ def _source_video(tmp_path: Path) -> Path:
 def test_hyperframes_remotion_combined_render(tmp_path: Path) -> None:
     """hyperframes.planner collates HyperFrames + Remotion via FFmpeg concat.
 
-    The mixed timeline's text window renders through hyperframes.renderer and
-    the media-with-transition window through rendering.remotion; the pinned
-    rendering.ffmpeg-finalizer concatenates both and synthesizes audio.  This
-    locks the planner's occupancy tiling, the qualified-planner-id selector,
-    and the frame-count-authority duration validation (Remotion's audio-padded
-    container must not reject a correct segment).
+    The mixed timeline's text window and trailing silent-media window render
+    through hyperframes.renderer (the engine maps media clips to <video>
+    elements with source trimming), the media-with-transition window through
+    rendering.remotion; the pinned rendering.ffmpeg-finalizer concatenates
+    all three and synthesizes audio.  This locks the planner's eligibility
+    tiling, the qualified-planner-id selector, and the frame-count-authority
+    duration validation (Remotion's audio-padded container must not reject a
+    correct segment).
     """
     node = _require_hyperframes_environment()
     if not (ROOT / "remotion" / "node_modules").is_dir():
@@ -388,7 +582,11 @@ def test_hyperframes_remotion_combined_render(tmp_path: Path) -> None:
     payload = json.loads(sidecar.read_text(encoding="utf-8"))
     assert payload["routing"]["resolved_policy"]["planner"] == "hyperframes.planner"
     assert payload["routing"]["resolved_policy"]["finalizer"] == "rendering.ffmpeg-finalizer"
-    renderer_ids = [s["renderer"]["id"] for s in payload["segments_v2"]]
-    assert "hyperframes.renderer" in renderer_ids
-    assert "rendering.remotion" in renderer_ids
-    assert len(renderer_ids) == 2
+    segments = payload["segments_v2"]
+    windows = [(s["renderer"]["id"], s["window"]["start_frame"], s["window"]["end_frame"]) for s in segments]
+    # text -> HyperFrames; media-with-transition -> Remotion; silent media -> HyperFrames
+    assert windows == [
+        ("hyperframes.renderer", 0, 12),
+        ("rendering.remotion", 12, 32),
+        ("hyperframes.renderer", 32, 44),
+    ], windows
