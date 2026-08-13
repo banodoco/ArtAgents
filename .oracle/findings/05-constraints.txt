@@ -1,0 +1,20 @@
+## What NOT to fix — verified constraints
+
+**1. Discovery is explicit-path, not directory-scan.** `discover_packs` walks one level of the packs root, requires `pack.yaml`, skips dirs without it (loader.py:94-99). Renderers come only from `pack.yaml` `extensions.rendering.renderers` (pack.yaml:43-47) resolved via `pack_rendering_manifest_paths` (pack/registry.py:268-283). A python-only `backends/_shared/` is invisible to both — no false-positive renderer, no pack.yaml edit. Zero-core rule holds structurally: no `astrid/core` → `astrid.packs` import exists (only a comment, structure.py:563); all edges are packs→core. Git-diff check not runnable here (no shell) — one command for the planner.
+
+**2. Allowlist.** Backend-internal modules are auto-exempt via prefix `astrid/packs/rendering/backends/` (test_production_callers.py:68,148). `planners/threejs_hybrid/run.py` is the only rendering-pack file listed, because it imports the threejs predicate (lines 95-99). `backends/_shared/` = **no allowlist change** (predicate move keeps the planner's import matching, reason text goes stale). `rendering/_shared/` that imports `backends.*` = **new entry required**; pure-core `_shared` = none.
+
+**3. Wheel.** setuptools find `include=["astrid*"]` auto-packs any `__init__.py`-bearing `_shared` (pyproject.toml:57-58); package-data only adds yaml/schemas (60-65). Note: `packs/rendering/**/*.yaml` would also sweep `_shared` yaml into the wheel (undiscovered, harmless). Smoke asserts ffmpeg/remotion manifests but **not threejs** (smoke_wheel_install.sh:114-134,147-150).
+
+**4. DAG.** Current: remotion.lock←remotion.run←{threejs.run:56, ffmpeg.run:59}; planner→{threejs.run:62, legacy_hybrid:65}; legacy_engine→{ffmpeg, remotion, finalizer, planner}. threejs re-aliases 7 private remotion helpers (threejs/run.py:61-67). Post-extraction `_shared` importing only astrid.core is acyclic; `_shared`→remotion.run or →threejs.run **is** a cycle. `make cycles` only scans `astrid/core` (import_cycles.py:156) — pack cycles won't fail CI, but violate the discipline.
+
+**5. Parity.** `_render_provenance_payload` (remotion/run.py:483) feeds ffmpeg (ffmpeg/run.py:149-168) and the sidecar asserted at test_renderer_parity.py:227-230 (structural, not byte-golden). Re-run: test_renderer_parity.py, test_legacy_renderer_characterization.py, tests/packs/rendering/{test_remotion,test_ffmpeg,test_threejs}_backend.py, tests/core/rendering/.
+
+**6. CI.** Ruff baseline 1469 (ruff_astrid.json:15); gate fails only on **new** findings. test_schema_contract.py is blocking (run_ci_checks.sh:47) — its 10 failures are pre-existing; don't touch.
+
+**Constraints list:**
+- No `astrid/core/` edits (promise, unenforced — self-discipline).
+- `_shared/` lives under `backends/`; imports only `astrid.core`.
+- No pack.yaml, no allowlist churn; update stale reason at :95-99 if predicate moves.
+- Preserve provenance payload shape; re-run parity/characterization suites.
+- Don't add ruff findings; leave test_schema_contract.py + baseline untouched.

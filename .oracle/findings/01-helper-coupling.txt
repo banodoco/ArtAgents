@@ -1,0 +1,13 @@
+**Verified findings**
+
+**1. Coupling surface** — `threejs/run.py:61-67` aliases 7 privates from `remotion/run.py`: `_execute_remotion` (def: remotion:600; used threejs:513 — acquires `remotion_render_lock` :613, spawns `npx` :692-694; **remotion-specific**), `_render_provenance_payload` (:483; threejs:527, passes `engine="threejs"` :529; neutral core), `_serialize_timeline` (:126; threejs:366/454; neutral), `_load_registry_mapping` (:878; threejs:370/502; neutral), `_input_path` (:817; threejs:258/357/446; neutral), `_duration_frames` (:1051; threejs:543; neutral), `_canonical_profile` (:887; threejs:388/503; **fragile** — its param is remotion's private `_RenderSettings` (:80), threejs duck-types with `_ThreeSettings` (threejs:90), only `.theme_path` (:892) is read). Planner `threejs_hybrid/run.py:62-75` imports `_support_reasons` (threejs:139, pure) + 9 legacy_hybrid pure helpers; all used directly (:194/242/379/496/526).
+
+**2. ffmpeg precedent** — same pattern, module-level alias `ffmpeg/run.py:59`, 5 helpers: `_render_provenance_payload`, `_effective_registry_state`, `_render_provenance_sidecar_path`, `_effect_registry_for_assets`, `_source_pack_id` (:149-588). No shared module exists in `backends/` (only ffmpeg-internal `support.py`/`command.py`); precedent is purely "import from remotion", explicitly blessed in `test_production_callers.py:65-68`.
+
+**3. Neutral vs specific** — 6 of 7 are backend-neutral; `_execute_remotion` (+ffmpeg's 4) are remotion-CLI/project-tied.
+
+**4. Options** — (a) `backends/_shared/`: moves 6 neutrals (plus deps `_active_pack_order_for_provenance` :460, `_resolved_theme_for_render` :172; retype `_canonical_profile` to take `theme_path`, remotion passes `settings.theme_path`); remotion re-exports → zero behavior change; **no allowlist edits** (prefix :68 covers any backends/ module); no packaging changes (pack.yaml:44-47 lists only manifests); no cycles if `_shared` never imports remotion. (b) keeps silent-break risk. (c) wrapper adds ceremony, same coupling. Threshold met: a pure move, correctness trivially preserved.
+
+**5. Allowlist** — planner entry (:95-99) stays only for `_support_reasons`; backend entries need nothing.
+
+**Recommendation: (a)** — extraction is a move (no rewrite), lives under the allowlist prefix, shrinks threejs→remotion to one genuinely-remotion helper, and removes the latent `_RenderSettings` type-coupling.

@@ -1,0 +1,35 @@
+All evidence is now in hand. My direct file reads corroborate the recorded git-based oracle run (`.oracle/findings/oracle-b1-diff.txt`), which executed this exact brief with real git access.
+
+```
+VERDICT: PASS (corroborated)
+FILES: 99e6d24c = 7 files: remotion/package.json, remotion/package-lock.json,
+  remotion/remotion.config.ts, .oracle/briefs/batch-1.md,
+  .oracle/findings/{batch-1-exec,remotion-swiftshader,webgl-proof}.txt
+  (recorded run: .oracle/findings/oracle-b1-diff.txt; b1c5f53c..99e6d24c spans
+  2 commits = 145 paths, 142 .oracle + 3 remotion)
+DEPS: exact. remotion/package.json lines: "@remotion/three": "4.0.455",
+  "@react-three/fiber": "8.18.0", "three": "0.185.1", "@types/three": "0.185.4",
+  "remotion": "4.0.455" — no ^/~latest; remotion family unchanged at 4.0.455
+LOCKFILE: v3 (package-lock.json L3). Resolved: @remotion/three 4.0.455 (L1083),
+  @react-three/fiber 8.18.0 (L718), three 0.185.1 (L3051), @types/three 0.185.4 (L1437)
+CONFIG: only `Config.setChromiumOpenGlRenderer('angle');` added (L13, after
+  setOverwriteOutput); `import {Config} from '@remotion/cli/config'` already present (L1);
+  no raw Chromium flags anywhere in file
+TYPES_REACT: changed 19.x→18.x: @types/react ^19.2.14→^18.3.12 (resolved
+  19.2.14→18.3.31, lock L1402); @types/react-dom ^19.2.3→^18.3.1 (resolved
+  19.2.3→18.3.7, lock L1412); both React 18 majors; baseline confirmed by plan.md
+ASTRID_CORE: empty (recorded `git diff --name-only b1c5f53c..99e6d24c -- astrid/core/`)
+ARTIFACTS: none committed. On disk (gitignored per recorded check-ignore):
+  remotion/build/*.bundle.js+index.html+favicon.ico, __pycache__/*.pyc, node_modules/
+DRIFT: none — lockfile diff purely additive (4 deps + transitives) + types
+  downgrade; no existing package version changed
+ISSUES:
+1. This session has no terminal: git show/diff/status verified via recorded run
+   outputs (oracle-b1-diff.txt L13-28) + my direct file reads, not re-executed.
+2. Worktree HEAD is now 83b70cf4 (branch tip, later than 99e6d24c) — current
+   files corroborate but don't prove 99e6d24c content.
+3. Prior run recorded dirty tree (md/txt only) and tracked process artifacts:
+   .oracle/findings/_fan.pid, .oracle/legacy-epic/_fan.pid, .oracle/legacy-epic/_report.json.
+```
+
+All task-2/3/4/5 facts verified directly from `remotion/package.json`, `remotion/package-lock.json`, and `remotion/remotion.config.ts` (paths cited above); tasks 1/6/7 rely on the recorded git outputs at `.oracle/findings/oracle-b1-diff.txt` plus on-disk corroboration.

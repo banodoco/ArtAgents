@@ -1,0 +1,39 @@
+All checks complete. Report:
+
+```
+VERDICT: PASS
+SWIFTSHADER_FILE: exists + matches
+WEBGL_FILE: exists + matches
+MAPPING: confirmed (quote below)
+UNSAFE_SWIFTSHADER: absent
+PROOF_PNG_TRACKED: no
+PROOF_SOURCE_REMAINS: no
+PILLOW: (160,90), 4 colors, red cube (186,0,8) ×1690
+COLORS_HONEST: yes
+CHROME_UNZIP: exists; not tracked; future-batch
+ISSUES: 2
+```
+
+**Mapping quote** (`@remotion/renderer` 4.0.455, `dist/open-browser.js:32-55`, read directly — not inferred):
+```
+const getOpenGlRenderer = (option) => {
+    const renderer = option ?? gl_1.DEFAULT_OPENGL_RENDERER;
+    validateOpenGlRenderer(renderer);
+    if (renderer === 'swangle') return ['--use-gl=angle', '--use-angle=swiftshader'];
+    if (renderer === 'angle-egl') return ['--use-gl=angle', '--use-angle=gl-egl'];
+    if (renderer === 'vulkan') return ['--use-angle=vulkan','--use-vulkan=native',
+        '--disable-vulkan-fallback-to-gl-for-testing','--disable-vulkan-surface',
+        '--ignore-gpu-blocklist','--enable-gpu'];
+    if (renderer === null) return [];
+    return [`--use-gl=${renderer}`];   // 'angle' → ['--use-gl=angle']
+};
+```
+`package.json` version = 4.0.455. `unsafe-swiftshader` absent (explicit-file + repo-wide searches; evidence file's `--no-ignore` listing covers all swiftshader hits).
+
+**Verification notes:** All 3 `.oracle/findings/` files exist with claimed content. `remotion.config.ts:13` → `setChromiumOpenGlRenderer('angle')`. Proof cleanup: no `ThreeProof`/`three-proof` anywhere; `ThreeTimelineComposition.tsx` is pre-existing (ThreeCanvas, unrelated). Only 4 PNGs in tree — pre-existing allow-listed fixtures (`docs/assets/…`, `tests/**/fixtures/**`); root `.gitignore` ignores `*.png` + `node_modules/`, `remotion/.gitignore` ignores `node_modules/` → neither proof PNG nor headless-shell can be tracked.
+
+**Chrome headless shell:** `node_modules/.remotion/chrome-headless-shell/` exists with `mac-arm64/chrome-headless-shell-mac-arm64` binary; VERSION = `149.0.7790.0` ✓ (located at `chrome-headless-shell/VERSION`, one level above `mac-arm64/`). Not a Batch-1 blocker — local proof rendered and evidence recorded; CI parity belongs to Batch 6.
+
+**ISSUES:**
+1. No shell tool available, so `git ls-files` couldn't be run literally; tracked-ness established via working-tree search + `.gitignore` analysis (equivalent for these claims).
+2. Exec report has a duplicated fragment (line 28) and slightly imprecise VERSION path wording; cosmetic only.

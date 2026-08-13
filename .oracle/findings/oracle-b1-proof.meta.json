@@ -1,11 +1,11 @@
 {
-  "brief": "/Users/peteromalley/Documents/reigh-workspace/Astrid-threejs-cleanup/.oracle/briefs/01-deps-matrix.md",
-  "elapsed_s": 114.6761164580239,
+  "brief": "/Users/peteromalley/Documents/reigh-workspace/Astrid-threejs-cleanup/.oracle/briefs/oracle-b1-proof.md",
+  "elapsed_s": 66.18182516700472,
   "error": null,
   "error_class": null,
   "finish_reason": null,
-  "finished_at": "2026-08-13T21:15:45Z",
-  "meta_file": "/Users/peteromalley/Documents/reigh-workspace/Astrid-threejs-cleanup/.oracle/findings/01-deps-matrix.meta.json",
+  "finished_at": "2026-08-13T21:22:04Z",
+  "meta_file": "/Users/peteromalley/Documents/reigh-workspace/Astrid-threejs-cleanup/.oracle/findings/oracle-b1-proof.meta.json",
   "model": "deepseek:deepseek-v4-flash",
   "pid": 60436,
   "raw_result_keys": [
@@ -36,11 +36,11 @@
     "response_previewed",
     "total_tokens"
   ],
-  "response_chars": 2179,
-  "response_file": "/Users/peteromalley/Documents/reigh-workspace/Astrid-threejs-cleanup/.oracle/findings/01-deps-matrix.txt",
-  "started_at": "2026-08-13T21:13:51Z",
+  "response_chars": 2446,
+  "response_file": "/Users/peteromalley/Documents/reigh-workspace/Astrid-threejs-cleanup/.oracle/findings/oracle-b1-proof.txt",
+  "started_at": "2026-08-13T21:20:58Z",
   "status": "ok",
-  "stem": "01-deps-matrix",
+  "stem": "oracle-b1-proof",
   "task_timeout_s": 1500,
-  "tool_calls": 66
+  "tool_calls": 38
 }

@@ -1,0 +1,27 @@
+All verification complete. The batch-6 work is fully present and committed; here is the evidence-first report.
+
+---
+
+## Batch 6 report — three.js renderer epic delivery
+
+**Repo state (verified):** HEAD `83b70cf4` (checkpoint 6 PASS) on `oracle-run-threejs`; the batch-6 commit `fc0c3cee` carries the exact required message `megado: batch 6 — docs, packaging, full CI gate`. Full chain `b1c5f53c → … → 8723ca05 → fc0c3cee → 83b70cf4` (git log via `.git/worktrees/.../logs/HEAD`).
+
+**T6.1 Docs — DONE.** `docs/reference/threejs-renderer.md` (196 lines): exact 11-field text matrix (content/fontSize/color/align/bold + anchor/offsetX/offsetY/textShadow/maxWidth/weight), rejection matrix, hybrid routing (text→threejs, else→remotion, pinned `rendering.ffmpeg-finalizer`, temporal-only concat), provenance identity (engine `threejs`, fragment `rendering.threejs`, `capture_host=remotion`), v1 exclusions, ANGLE + shared Remotion lock, all four pinned deps. Matches `render-adapter.md` style. **T6.2:** no README/STAGE/changelog/skill/CLI/package-data edits (oracle-b6-diff BATCH6_FILES list confirms).
+
+**T6.3 Node 20 CI-parity — PASS (host-run).** Oracle gates record Node **20.19.4**: `npm ci` from the committed lockfile, `npm run typecheck`, `npm run bundle` all exit 0 (oracle-b6-gates; checkins/batch-6). Deps pinned in remotion/package.json: `@remotion/three@4.0.455`, `@react-three/fiber@8.18.0`, `three@0.185.1`, `@types/three@0.185.4` (lines 15/21/22/26).
+
+**T6.4 Suites — PASS.** Rendering suites: **718 passed / 2 skipped / 1 pre-existing fixture failure** (env-dependent, not threejs). Schema-contract failures are pre-existing ImportError (missing `banodoco_timeline_schema`), byte-identical on main (oracle-b6-gates NOTES).
+
+**T6.5 Wheel — evidence saved.** `.oracle/findings/wheel-manifest.txt` lists all six paths: `backends/threejs/{__init__.py,renderer.yaml,run.py}` + `planners/threejs_hybrid/{__init__.py,planner.yaml,run.py}`; smoke install PASSED.
+
+**T6.6 `make ci` — PASS (host-run).** All five gate groups green (structure/doctor/ruff/mypy/cycles/remotion-typecheck/renderer-parity; editable; wheel; ci-mirror); ruff baseline 1458→1469 justified (+11 pre-existing drift, count-only). Remaining failures are the pre-existing env-driven schema-contract set, identical on main.
+
+**Oracle-note fixes (both present, file-verified):**
+1. *Checkpoint 3* — `_effective_registry_state` + `_clip_end` removed from `backends/threejs/run.py`; repo-wide grep shows zero remaining references.
+2. *Checkpoint 5* — `test_threejs_hybrid.py:814-821` asserts `payload["backend_fragments"]["rendering.ffmpeg-finalizer"]` with the real emitted shape (`finalizer_kind="ffmpeg"`, version, `segment_count==2`, stream_copied/normalized lists, `audio_mode="rendered"`) matching the ffmpeg emitter (`finalizers/ffmpeg/run.py:1480`). Offline test restores `npm config` in `finally` and asserts restoration (`test_threejs_backend.py:876-895`).
+
+**T6.7 Zero core edits + clean diff — PASS.** Oracle-verified `git diff --name-only 8723ca05..HEAD -- astrid/core/` and `b1c5f53c..HEAD -- astrid/core/` both empty (oracle-b6-gates: CORE_DIFF_EPIC/BATCH empty). `build/`, `dist/`, `node_modules/`, `remotion/build/`, media globs all gitignored.
+
+**T6.8** — Commit exists: `fc0c3cee`.
+
+**Caveat:** this session has no shell tool, so I could not re-run npm/pytest/make live; all gate results above are from the committed `.oracle/findings/` evidence and the oracle's PASS checkin (`.oracle/checkins/batch-6.md`), which I re-verified file-by-file. Epic is complete — ready for merge.
