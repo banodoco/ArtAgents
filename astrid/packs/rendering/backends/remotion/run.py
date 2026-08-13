@@ -17,7 +17,7 @@ import shutil
 import subprocess
 import sys
 from contextlib import ExitStack
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, Mapping, Sequence
@@ -66,6 +66,7 @@ from astrid.packs.rendering.backends._shared import (
     _parse_min_free_gb,
     _profile_mismatches,
     _reject_unknown_config,
+    _remotion_mux_profile,
     _render_provenance_payload,
     _resolve_theme_path,
     _resolved_theme_for_render,
@@ -822,13 +823,7 @@ def support(request: RenderRequest, *, workspace: Path) -> SupportReport:
                     f"Remotion's always-rendered audio output"
                 )
             if request.profile is not None:
-                render_profile = replace(
-                    canonical,
-                    time_base=(1, 90000),
-                    audio_codec=canonical.audio_codec or "aac",
-                    audio_sample_rate=canonical.audio_sample_rate or 48000,
-                    audio_channel_layout=canonical.audio_channel_layout or "stereo",
-                )
+                render_profile = _remotion_mux_profile(canonical)
                 mismatches = _profile_mismatches(request.profile, render_profile)
                 if mismatches:
                     reasons.append(
@@ -887,21 +882,10 @@ def _protocol_render(request: RenderRequest, *, workspace: Path) -> RenderResult
             assets_path = requested_assets_path
         assets_data = _load_registry_mapping(assets_path)
         canonical = _canonical_profile(timeline_path, assets_data, settings.theme_path)
-        declared_profile = request.profile or canonical
-        # Remotion always muxes MP4 at the 90 kHz timescale regardless of the
-        # input timeline's time base; the declared profile must match what the
-        # renderer actually produces or strict validation rejects the output.
-        declared_profile = replace(declared_profile, time_base=(1, 90000))
+        declared_profile = _remotion_mux_profile(request.profile or canonical)
         # Remotion always muxes an audio track into its MP4 (silent when the
-        # timeline has none), so ownership is effectively 'rendered' and the
-        # declared profile must carry the AAC audio fields it always emits.
+        # timeline has none), so ownership is effectively 'rendered'.
         ownership = AudioOwnership.RENDERED
-        declared_profile = replace(
-            declared_profile,
-            audio_codec=declared_profile.audio_codec or "aac",
-            audio_sample_rate=declared_profile.audio_sample_rate or 48000,
-            audio_channel_layout=declared_profile.audio_channel_layout or "stereo",
-        )
         private_tmp = lifecycle.enter_context(
             TemporaryDirectory(
                 prefix=f".{request.output_name}.remotion-",

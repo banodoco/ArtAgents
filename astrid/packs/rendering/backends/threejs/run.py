@@ -22,7 +22,7 @@ import os
 import shutil
 import sys
 from contextlib import ExitStack
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, Mapping, Sequence
@@ -42,7 +42,6 @@ from astrid.core.rendering.artifacts import validate_render_result
 from astrid.core.rendering.contracts import (
     SCHEMA_VERSION,
     AudioOwnership,
-    RenderProfile,
     RenderRequest,
     RenderResult,
     SupportReport,
@@ -61,6 +60,7 @@ from astrid.packs.rendering.backends._shared import (
     _parse_min_free_gb,
     _profile_mismatches,
     _reject_unknown_config,
+    _remotion_mux_profile,
     _render_provenance_payload,
     _serialize_timeline,
 )
@@ -286,21 +286,6 @@ def _default_settings() -> _ThreeSettings:
 
 
 # ---------------------------------------------------------------------------
-# Profile contract (90 kHz timescale + always-muxed AAC, same as Remotion)
-# ---------------------------------------------------------------------------
-
-
-def _render_declared_profile(canonical: RenderProfile) -> RenderProfile:
-    declared = replace(canonical, time_base=(1, 90000))
-    return replace(
-        declared,
-        audio_codec=declared.audio_codec or "aac",
-        audio_sample_rate=declared.audio_sample_rate or 48000,
-        audio_channel_layout=declared.audio_channel_layout or "stereo",
-    )
-
-
-# ---------------------------------------------------------------------------
 # Protocol surface: support + render
 # ---------------------------------------------------------------------------
 
@@ -369,7 +354,7 @@ def support(request: RenderRequest, *, workspace: Path) -> SupportReport:
                 reasons.append(f"canonical Three.js profile cannot be resolved: {exc}")
             else:
                 mismatches = _profile_mismatches(
-                    request.profile, _render_declared_profile(canonical)
+                    request.profile, _remotion_mux_profile(canonical)
                 )
                 if mismatches:
                     reasons.append(
@@ -480,7 +465,7 @@ def _protocol_render(request: RenderRequest, *, workspace: Path) -> RenderResult
             assets_path = requested_assets_path
         assets_data = _load_registry_mapping(assets_path)
         canonical = _canonical_profile(timeline_path, assets_data, settings.theme_path)
-        declared_profile = _render_declared_profile(request.profile or canonical)
+        declared_profile = _remotion_mux_profile(request.profile or canonical)
         ownership = AudioOwnership.RENDERED
         private_tmp = lifecycle.enter_context(
             TemporaryDirectory(

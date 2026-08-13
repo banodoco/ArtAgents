@@ -14,6 +14,7 @@ and the ffmpeg backend's probe-form ``_duration_frames``.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
 from typing import Any, Mapping
@@ -251,6 +252,16 @@ def _duration_frames(video_path: Path, profile: RenderProfile) -> int:
         raise RuntimeError("ffprobe did not report a video duration")
     frames = duration * Fraction(*profile.fps_rational)
     return max(1, int(frames + Fraction(1, 2)))
+
+
+def _remotion_mux_profile(profile: RenderProfile) -> RenderProfile:
+    return replace(
+        profile,
+        time_base=(1, 90000),
+        audio_codec=profile.audio_codec or "aac",
+        audio_sample_rate=profile.audio_sample_rate or 48000,
+        audio_channel_layout=profile.audio_channel_layout or "stereo",
+    )
 
 
 def _reject_unknown_config(
