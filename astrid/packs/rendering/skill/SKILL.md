@@ -250,7 +250,12 @@ python3 -m astrid packs install . --trust --yes   # trusted install
 python3 -m astrid renderers list          # discovery from installed revision
 python3 -m astrid renderers inspect acme_wave.wave
 python3 -m astrid renderers smoke acme_wave.wave --out ./out/smoke.mp4  # smoke
+python3 -m astrid renderers replay <bundle-dir>   # replay a captured failure bundle
 ```
+
+V1 is synchronous local execution only; asynchronous job scheduling, remote
+render infrastructure, and layer compositing are explicitly deferred beyond V1
+and are NOT part of the V1 renderer contract.
 
 The smoke verb runs a deterministic direct-service render (fresh temp
 workspace, no ledger/project mutation) and prints the output path plus its

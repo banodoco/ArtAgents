@@ -288,11 +288,19 @@ def test_failure_captures_complete_bundle(tmp_path: Path) -> None:
 
     bundles = _bundle_dirs(replay_root)
     assert len(bundles) == 1
+    bundle_dir = bundles[0].parent
     bundle = _load_bundle(bundles[0])
 
     assert bundle["bundle_schema_version"] == 1
     assert bundle["renderer_id"] == "rendering.ffmpeg"
-    assert bundle["request_digest"] == compute_request_digest(request.to_dict())
+    # The pinned request digest is the digest of the LOCALIZED on-disk
+    # request.json (what replay verifies), not the original absolute-path
+    # request.
+    localized_request = json.loads(
+        (bundle_dir / "request.json").read_text(encoding="utf-8")
+    )
+    assert bundle["request_digest"] == compute_request_digest(localized_request)
+    assert bundle["request_digest"] != compute_request_digest(request.to_dict())
     assert bundle["manifest_digest"] == _digest("rendering.ffmpeg")
     assert bundle["argv"] == [
         "fixture-command",
@@ -312,7 +320,24 @@ def test_failure_captures_complete_bundle(tmp_path: Path) -> None:
     assert bundle["inputs"]["assets_registry"]["sha256"] == sha256_file(assets)
 
     assert bundle["logs"] == {"stdout": "renderer boom", "stderr": "traceback line"}
-    assert bundle["partial_result"] == {"partial": True, "frames": 3}
+    # The partial result is persisted as a localized hashed file and only its
+    # descriptor (never raw backend bytes) is inlined into bundle.json.
+    partial_descriptor = bundle["partial_result"]
+    assert set(partial_descriptor) == {"sha256", "path"}
+    assert partial_descriptor["path"].startswith("partial/")
+    assert bundle["result_sha256"] == partial_descriptor["sha256"]
+    assert bundle["result_path"] == partial_descriptor["path"]
+    partial_file = bundle_dir / partial_descriptor["path"]
+    assert partial_file.is_file()
+    assert json.loads(partial_file.read_text(encoding="utf-8")) == {
+        "partial": True,
+        "frames": 3,
+    }
+    # backend_config is the selected backend's configuration namespace.
+    assert bundle["backend_config"] == {}
+
+    # The support report that preceded the failing render is captured.
+    assert bundle["support_report"] == _support("rendering.ffmpeg").to_dict()
 
     metadata = bundle["metadata"]
     assert metadata["backend_version"] == "1.0.0"
@@ -321,11 +346,17 @@ def test_failure_captures_complete_bundle(tmp_path: Path) -> None:
     assert metadata["error_kind"] == "internal"
     assert metadata["error_message"] == "fixture backend crashed"
     assert metadata["recovery_command"] == "retry the fixture render"
+    # Qualified-ID discovery/trust identity rides in the metadata.
+    assert metadata["source_pack"] == "rendering"
+    assert metadata["source_kind"] == "source"
+    assert metadata["eligibility"]["eligible"] is True
+    assert metadata["eligibility"]["trust_method"] == "test"
+    assert metadata["trust_method"] == "test"
 
     # The localized input copies exist and carry the exact bytes.
     for role in ("timeline", "assets_registry"):
         descriptor = bundle["inputs"][role]
-        copied = bundles[0].parent / descriptor["path"]
+        copied = bundle_dir / descriptor["path"]
         assert copied.is_file()
         assert sha256_file(copied) == descriptor["sha256"]
 
@@ -516,7 +547,8 @@ def test_localized_inputs_copied_hashed_without_host_paths(tmp_path: Path) -> No
 
     assert set(bundle["inputs"]) == {"timeline", "assets_registry", "theme"}
     host_text = str(tmp_path)
-    assert host_text not in json.dumps(bundle)
+    bundle_text = json.dumps(bundle)
+    assert host_text not in bundle_text
     assert host_text not in (bundle_dir / "request.json").read_text(
         encoding="utf-8"
     )
@@ -530,16 +562,154 @@ def test_localized_inputs_copied_hashed_without_host_paths(tmp_path: Path) -> No
         == bundle["inputs"]["assets_registry"]["path"]
     )
 
+    # JSON inputs are rewritten so absolute host paths become bundle-relative
+    # references to captured inputs: the copied timeline points at the copied
+    # theme via its hashed name, and no host path survives anywhere.
     for role, source in (
         ("timeline", timeline),
         ("assets_registry", assets),
         ("theme", theme),
     ):
         descriptor = bundle["inputs"][role]
-        assert descriptor["sha256"] == sha256_file(source)
         copied = bundle_dir / descriptor["path"]
         assert copied.is_file()
-        assert copied.read_bytes() == source.read_bytes()
+        assert host_text not in copied.read_text(encoding="utf-8")
+        # The pinned sha256 is the sha of the on-disk (final) copy, so replay
+        # drift verification always matches.
+        assert descriptor["sha256"] == sha256_file(copied)
+
+    theme_descriptor = bundle["inputs"]["theme"]
+    assert theme_descriptor["sha256"] == sha256_file(theme)
+    # The theme itself contains no host paths, so it is copied byte-for-byte.
+    assert (bundle_dir / theme_descriptor["path"]).read_bytes() == theme.read_bytes()
+
+    timeline_copy = (bundle_dir / bundle["inputs"]["timeline"]["path"]).read_text(
+        encoding="utf-8"
+    )
+    assert f'"theme": "inputs/{theme_descriptor["sha256"]}"' in timeline_copy
+
+
+def test_copied_input_redacts_absolute_host_paths_not_an_input(tmp_path: Path) -> None:
+    """Absolute host paths under the repo/home roots that are NOT captured as
+    inputs are redacted to ``<host-path>``; non-path strings are untouched."""
+    from astrid.core.foundation.paths import REPO_ROOT
+
+    missing = REPO_ROOT / "definitely-not-a-captured-input.mp4"
+    timeline = tmp_path / "timeline.json"
+    timeline.write_text(
+        json.dumps(
+            {
+                "theme": "banodoco-default",
+                "clips": [
+                    {
+                        "id": "a",
+                        "file": str(missing),
+                        "label": "not a path value",
+                        "duration": 1.5,
+                    }
+                ],
+                "tracks": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    assets = tmp_path / "assets.json"
+    assets.write_text('{"assets": {}}', encoding="utf-8")
+    request = RenderRequest(
+        schema_version=SCHEMA_VERSION,
+        timeline_path=str(timeline),
+        assets_registry_path=str(assets),
+        output_name="video.mp4",
+    )
+    service = _service(tmp_path, FailingTransport(), replay_root=tmp_path / "replays")
+
+    with pytest.raises(RendererInternalError):
+        service.render_request(
+            request, selector="rendering.ffmpeg", out_path=tmp_path / "x.mp4"
+        )
+
+    bundle_dir = _bundle_dirs(tmp_path / "replays")[0].parent
+    bundle = _load_bundle(bundle_dir / BUNDLE_FILENAME)
+    timeline_copy = (bundle_dir / bundle["inputs"]["timeline"]["path"]).read_text(
+        encoding="utf-8"
+    )
+    assert str(missing) not in timeline_copy
+    assert "<host-path>" in timeline_copy
+    assert '"label": "not a path value"' in timeline_copy
+    assert '"duration": 1.5' in timeline_copy
+
+
+def test_partial_result_redacted_and_written_as_hashed_file(tmp_path: Path) -> None:
+    """Backend-authored partial results are redacted before being persisted."""
+    partial = {
+        "frames": 3,
+        "asset_url": "https://example.com/asset.mp4?token=abc123",
+        "auth": "Authorization: Bearer sk-test-abcdefghijklmnop",
+    }
+    transport = FailingTransport(partial_result=partial)
+    service = _service(tmp_path, transport, replay_root=tmp_path / "replays")
+
+    with pytest.raises(RendererInternalError):
+        service.render_request(
+            _request(tmp_path), selector="rendering.ffmpeg", out_path=tmp_path / "x.mp4"
+        )
+
+    bundle_dir = _bundle_dirs(tmp_path / "replays")[0].parent
+    bundle = _load_bundle(bundle_dir / BUNDLE_FILENAME)
+    partial_file = bundle_dir / bundle["partial_result"]["path"]
+    partial_text = partial_file.read_text(encoding="utf-8")
+    assert "abc123" not in partial_text
+    assert "sk-test-abcdefghijklmnop" not in partial_text
+    assert "[redacted]" in partial_text
+    # The descriptor pins the redacted content that is actually on disk.
+    assert bundle["result_sha256"] == sha256_file(partial_file)
+    assert bundle["result_path"] == bundle["partial_result"]["path"]
+
+
+def test_support_failure_captures_replay_bundle(tmp_path: Path) -> None:
+    """A support probe that fails with a backend bug produces a replay bundle."""
+
+    class FailingSupportTransport:
+        def run(
+            self,
+            verb: str,
+            command: Any,
+            *,
+            backend: str,
+            request_path: Path,
+            result_path: Path,
+            cwd: Path,
+            **kwargs: Any,
+        ) -> Any:
+            del command, request_path, result_path, cwd, kwargs
+            if verb == "support":
+                raise_internal_error(
+                    backend=backend,
+                    message="support probe crashed",
+                    recovery_command="fix the support probe",
+                )
+            raise AssertionError(f"unexpected verb {verb!r}")
+
+    replay_root = tmp_path / "replays"
+    service = _service(tmp_path, FailingSupportTransport(), replay_root=replay_root)
+
+    with pytest.raises(RendererInternalError, match="support probe crashed"):
+        service.render_request(
+            _request(tmp_path),
+            selector="rendering.ffmpeg",
+            out_path=tmp_path / "x.mp4",
+        )
+
+    bundles = _bundle_dirs(replay_root)
+    assert len(bundles) == 1
+    bundle = _load_bundle(bundles[0])
+    assert bundle["renderer_id"] == "rendering.ffmpeg"
+    assert bundle["metadata"]["verb"] == "support"
+    assert bundle["metadata"]["success"] is False
+    assert bundle["metadata"]["error_kind"] == "internal"
+    assert bundle["metadata"]["error_message"] == "support probe crashed"
+    # No support report precedes a failing support invocation.
+    assert bundle["support_report"] is None
 
 
 # ---------------------------------------------------------------------------

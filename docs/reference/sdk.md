@@ -372,6 +372,27 @@ frozen `RendererError` JSON shape (exit 0); `KeyboardInterrupt` and
 command), then from the request's `backend_config` namespace — exactly one,
 never from timeline shape.
 
+### `replay` — re-run a captured failure bundle
+
+The CLI verb `python3 -m astrid renderers replay <bundle-dir>` (top-level
+alias `python3 -m astrid replay <bundle-dir>`) re-runs a captured replay
+bundle's pinned command with its localized `request.json` and `inputs/`
+copies in a fresh temporary workspace. It verifies the pinned
+`request_digest` against the on-disk localized request, refuses manifest or
+localized-input drift unless `--acknowledge-drift` is passed, refuses an
+unresolvable pinned renderer, and persists the reproduced output plus its
+provenance sidecar under `<bundle-dir>.replay-output/`. Bundles are produced
+by `RenderService` on any failed `render`/`finalize`/`plan`/`support`
+invocation (and on success when capture is explicitly enabled); they carry
+the localized request, hashed inputs, redacted logs and partial result,
+`support_report`, `backend_config`, source-pack/trust identity, and the
+pinned digests. See the worked example in
+[render-backend-v1.md](../contracts/render-backend-v1.md#the-replay-verb).
+
+V1 is synchronous local execution only; asynchronous job scheduling, remote
+render infrastructure, and layer compositing are explicitly deferred beyond
+V1 and are NOT part of the V1 renderer contract.
+
 ### `RenderContext`
 
 `RenderContext` is the per-invocation facade a third-party `render.py` author

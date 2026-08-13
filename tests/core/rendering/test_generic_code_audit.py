@@ -1,11 +1,12 @@
 """T7.6 freeze — generic rendering code must not name concrete backends.
 
 The pluggable-renderer epic keeps concrete backend identities out of the
-generic core.  This audit scans the nine generic-code files enumerated by the
+generic core.  This audit scans the generic-code files enumerated by the
 T7.6 brief (service, provenance, registry, transport, assets, artifacts,
-publication, contracts, sdk) and asserts the concrete backend names
-``remotion``, ``ffmpeg``, ``legacy_hybrid``, and ``ffmpeg-finalizer`` appear
-NOWHERE in them except for:
+publication, contracts, profile, sdk) plus the top-level package root
+(``astrid/__init__.py`` and the whole ``astrid/sdk/`` directory) and asserts
+the concrete backend names ``remotion``, ``ffmpeg``, ``legacy_hybrid``, and
+``ffmpeg-finalizer`` appear NOWHERE in them except for:
 
 * registry/default wiring — the qualified-id defaults and the programmatic
   alias table that wire the legacy short names to qualified renderer ids
@@ -45,15 +46,15 @@ BACKEND_NAMES = ("remotion", "ffmpeg", "legacy_hybrid", "ffmpeg-finalizer")
 #: audit and stale allowlist entries are caught.
 ALLOWED: dict[tuple[str, int], str] = {
     # --- service: legacy-selector compatibility shim ---------------------
-    ("astrid/core/rendering/service.py", 128): "legacy compatibility shim (docstring)",
-    ("astrid/core/rendering/service.py", 135): "legacy compatibility shim (default selector)",
-    ("astrid/core/rendering/service.py", 136): "legacy compatibility shim (legacy ffmpeg selector)",
-    ("astrid/core/rendering/service.py", 137): "registry/default wiring (qualified id)",
-    ("astrid/core/rendering/service.py", 138): "legacy compatibility shim (legacy remotion selector)",
-    ("astrid/core/rendering/service.py", 142): "registry/default wiring (fallback pair)",
-    ("astrid/core/rendering/service.py", 149): "registry/default wiring (legacy_hybrid planner)",
-    ("astrid/core/rendering/service.py", 158): "legacy compatibility shim (recovery text)",
-    ("astrid/core/rendering/service.py", 162): "legacy compatibility shim (legacy_selectors data)",
+    ("astrid/core/rendering/service.py", 130): "legacy compatibility shim (docstring)",
+    ("astrid/core/rendering/service.py", 137): "legacy compatibility shim (default selector)",
+    ("astrid/core/rendering/service.py", 138): "legacy compatibility shim (legacy ffmpeg selector)",
+    ("astrid/core/rendering/service.py", 139): "registry/default wiring (qualified id)",
+    ("astrid/core/rendering/service.py", 140): "legacy compatibility shim (legacy remotion selector)",
+    ("astrid/core/rendering/service.py", 144): "registry/default wiring (fallback pair)",
+    ("astrid/core/rendering/service.py", 151): "registry/default wiring (legacy_hybrid planner)",
+    ("astrid/core/rendering/service.py", 160): "legacy compatibility shim (recovery text)",
+    ("astrid/core/rendering/service.py", 164): "legacy compatibility shim (legacy_selectors data)",
     # --- provenance: legacy-engine projection compatibility shim ---------
     ("astrid/core/rendering/provenance.py", 114): "legacy compatibility shim (docstring)",
     ("astrid/core/rendering/provenance.py", 146): "legacy compatibility shim (docstring)",
@@ -64,9 +65,12 @@ ALLOWED: dict[tuple[str, int], str] = {
     # --- registry: programmatic alias default wiring ---------------------
     ("astrid/core/rendering/registry.py", 45): "registry/default wiring (remotion alias)",
     ("astrid/core/rendering/registry.py", 46): "registry/default wiring (ffmpeg alias)",
+    # --- profile: legacy canvas-discovery compatibility shim -------------
+    ("astrid/core/rendering/profile.py", 113): "legacy compatibility shim (remotion canvas discovery)",
 }
 
-#: Generic-code files scanned by this audit (T7.6 brief enumeration).
+#: Generic-code files scanned by this audit (T7.6 brief enumeration plus the
+#: Batch 7 rework extension: profile.py, the package root, and the SDK root).
 GENERIC_FILES: tuple[tuple[str, Path], ...] = (
     ("astrid/core/rendering/service.py", REPO_ROOT / "astrid/core/rendering/service.py"),
     ("astrid/core/rendering/provenance.py", REPO_ROOT / "astrid/core/rendering/provenance.py"),
@@ -76,7 +80,15 @@ GENERIC_FILES: tuple[tuple[str, Path], ...] = (
     ("astrid/core/rendering/artifacts.py", REPO_ROOT / "astrid/core/rendering/artifacts.py"),
     ("astrid/core/rendering/publication.py", REPO_ROOT / "astrid/core/rendering/publication.py"),
     ("astrid/core/rendering/contracts.py", REPO_ROOT / "astrid/core/rendering/contracts.py"),
+    ("astrid/core/rendering/profile.py", REPO_ROOT / "astrid/core/rendering/profile.py"),
     ("astrid/sdk/rendering.py", REPO_ROOT / "astrid/sdk/rendering.py"),
+    # Top-level package root: the public import surface must stay backend-
+    # neutral too.
+    ("astrid/__init__.py", REPO_ROOT / "astrid/__init__.py"),
+    *(
+        (f"astrid/sdk/{path.name}", path)
+        for path in sorted((REPO_ROOT / "astrid/sdk").glob("*.py"))
+    ),
 )
 
 VALID_CATEGORIES = frozenset(

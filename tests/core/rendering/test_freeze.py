@@ -28,8 +28,20 @@ from typing import Any
 import pytest
 
 from astrid.core.rendering import attached
-from astrid.core.rendering.errors import RendererInternalError
-from astrid.core.rendering.registry import load_default_registries
+from astrid.core.rendering.contracts import RendererManifest
+from astrid.core.rendering.errors import (
+    RendererBinaryMissingError,
+    RendererInternalError,
+)
+from astrid.core.rendering.registry import (
+    ExecutionEligibility,
+    FinalizerRegistry,
+    PlannerRegistry,
+    RendererRegistry,
+    RenderingCandidate,
+    load_default_registries,
+)
+from astrid.core.rendering.service import RenderService
 from astrid.core.subprocess_env import TASK_PROJECT_ENV, TASK_RUN_ID_ENV, TASK_STEP_ID_ENV
 
 # Reuse the exact fixtures the earlier batches locked (sibling test modules;
@@ -41,7 +53,15 @@ from tests.core.rendering.test_attached_render import (
     _Service,
 )
 from tests.core.rendering.test_package_data import FIXTURES, RENDERING_MANIFESTS, SCHEMAS
-from tests.core.rendering.test_service import FakeTransport, _plan, _request, _service
+from tests.core.rendering.test_service import (
+    FakeTransport,
+    _plan,
+    _real_media_inputs,
+    _real_service,
+    _request,
+    _require_ffmpeg,
+    _service,
+)
 
 # ---------------------------------------------------------------------------
 # Every built-in path -> exactly one video + one committed sidecar
@@ -165,6 +185,110 @@ def test_freeze_failure_paths_clean_temps_and_never_commit_sidecar(
     assert not list(tmp_path.glob(".*.render-service-*"))
     assert not list(tmp_path.rglob("partial.tmp"))
     assert not list(tmp_path.rglob("outputs"))
+
+
+# ---------------------------------------------------------------------------
+# Real-service paths through the real CommandTransport (not FakeTransport)
+# ---------------------------------------------------------------------------
+
+
+def test_freeze_real_ffmpeg_transport_one_video_one_committed_sidecar(
+    tmp_path: Path,
+) -> None:
+    """The real FFmpeg backend through the real CommandTransport commits
+    exactly one video and one committed sidecar and leaves no temporary
+    invocation workspace behind."""
+    _require_ffmpeg()
+    timeline_path, assets_path = _real_media_inputs(tmp_path)
+    service = _real_service(tmp_path)
+    output = tmp_path / "freeze-real-ffmpeg.mp4"
+
+    service.render_request(
+        replace(
+            _request(tmp_path),
+            timeline_path=str(timeline_path),
+            assets_registry_path=str(assets_path),
+        ),
+        selector="rendering.ffmpeg",
+        out_path=output,
+    )
+
+    assert sorted(tmp_path.glob("*.mp4")) == [output]
+    sidecars = sorted(tmp_path.glob("*.provenance.json"))
+    assert sidecars == [Path(f"{output}.provenance.json")]
+    payload = json.loads(sidecars[0].read_text(encoding="utf-8"))
+    assert payload["sha256"] == hashlib.sha256(output.read_bytes()).hexdigest()
+    assert payload["output"] == str(output.resolve())
+    assert payload["routing"]["requested_engine"] == "rendering.ffmpeg"
+    assert not list(tmp_path.glob(".*.render-service-*"))
+    assert not list(tmp_path.rglob("outputs"))
+
+
+def _missing_binary_candidate(root: Path, capability_id: str) -> RenderingCandidate[Any]:
+    """A candidate whose manifest names an executable that does not exist."""
+    manifest = RendererManifest(
+        schema_version=1,
+        id=capability_id,
+        name=capability_id,
+        version="1.0.0",
+        protocol_version=1,
+        command=("no-such-renderer-binary",),
+        required_permissions=(),
+        required_binaries=(),
+        operations=("render", "support"),
+        capabilities={"supports_windows": True},
+    )
+    manifest_path = root / f"{capability_id}.yaml"
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text("fixture\n", encoding="utf-8")
+    return RenderingCandidate(
+        manifest=manifest,
+        source_kind="source",
+        pack_id=capability_id.split(".", 1)[0],
+        pack_root=root,
+        manifest_path=manifest_path,
+        manifest_digest=hashlib.sha256(capability_id.encode()).hexdigest(),
+        priority_index=0,
+        eligibility=ExecutionEligibility(
+            eligible=True,
+            reason="fixture trust",
+            trust_method="test",
+        ),
+    )
+
+
+def test_freeze_real_transport_missing_binary_no_sidecar_temps_cleaned(
+    tmp_path: Path,
+) -> None:
+    """A real failure path through the real CommandTransport (required binary
+    missing) never commits a sidecar, cleans every temporary artifact, and
+    still retains a replay bundle for the failed support invocation."""
+    renderers = RendererRegistry(
+        [_missing_binary_candidate(tmp_path, "fixture.missing")]
+    )
+    planners = PlannerRegistry([])
+    finalizers = FinalizerRegistry([])
+    service = RenderService(registries=(renderers, planners, finalizers))
+    output = tmp_path / "freeze-real-failed.mp4"
+
+    with pytest.raises(RendererBinaryMissingError):
+        service.render_request(
+            _request(tmp_path), selector="fixture.missing", out_path=output
+        )
+
+    assert not output.exists()
+    assert not list(tmp_path.glob("*.provenance.json"))
+    assert not list(tmp_path.glob(".*.render-service-*"))
+    assert not list(tmp_path.rglob("partial.tmp"))
+    assert not list(tmp_path.rglob("outputs"))
+    # The failing support invocation still produced a replay bundle next to
+    # the (never-committed) output.
+    replay_bundles = list(tmp_path.glob(f".{output.name}.replay/*/bundle.json"))
+    assert len(replay_bundles) == 1
+    pinned = json.loads(replay_bundles[0].read_text(encoding="utf-8"))
+    assert pinned["renderer_id"] == "fixture.missing"
+    assert pinned["metadata"]["verb"] == "support"
+    assert pinned["metadata"]["error_kind"] == "binary_missing"
 
 
 # ---------------------------------------------------------------------------

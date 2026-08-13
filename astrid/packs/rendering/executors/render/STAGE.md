@@ -152,7 +152,8 @@ qualified renderer/planner/finalizer through
 discovers and invokes it. To author one, scaffold the canonical four-file pack
 with `python3 -m astrid renderers create <name> <dest>`, implement
 `render.py`, run the generated `test_renderer.py`, then `renderers validate` →
-trusted `packs install` → `renderers smoke` → provenance sidecar (the golden
+trusted `packs install` → `renderers smoke` → `renderers replay <bundle-dir>`
+for captured failure bundles (the golden
 path in `docs/contracts/render-backend-v1.md`). `render.py` may parse the raw
 v1 file protocol or use the public rendering SDK (`astrid.renderer_main` as
 the manifest command, `astrid.RenderContext` inside the implementation — see

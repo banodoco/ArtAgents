@@ -181,6 +181,14 @@ selected qualified implementation id. A pack may use it to route a shared
 command prefix among sibling renderer, planner, and finalizer adapters; it must
 not infer its identity from timeline shape or unrelated configuration.
 
+**V1 scope.** V1 is synchronous local execution only; asynchronous job
+scheduling, remote render infrastructure, and layer compositing are explicitly
+deferred beyond V1 and are NOT part of the V1 renderer contract. The four verbs
+above are the complete V1 command surface: there is no submit/status/cancel
+queue, no remote render farm, and no multi-layer compositing service in V1.
+Submit/status/cancel/resume semantics, remote infrastructure, and compositing
+each require a future protocol version.
+
 ## Wire primitives
 
 JSON numbers must be finite. Python booleans do not count as integers. Fixed
@@ -615,6 +623,52 @@ headers, private environment values, and signed URL query strings are removed.
 Successful disposable workspaces are deleted unless the caller explicitly
 requests retention. V1 defines no cleanup daemon or TTL service.
 
+## The `replay` verb
+
+`python3 -m astrid renderers replay <bundle-dir>` (top-level alias:
+`python3 -m astrid replay <bundle-dir>`) re-runs a captured bundle's pinned
+command with its localized `request.json` and inputs in a fresh temporary
+workspace. It refuses bundle tampering and silent backend substitution:
+
+- a `request.json` whose digest no longer matches the pinned
+  `request_digest` is refused as tampering and can never be acknowledged;
+- a pinned renderer whose current manifest digest differs from the pinned
+  `manifest_digest`, or a localized input whose bytes no longer match its
+  pinned `sha256`, is drift that is refused unless `--acknowledge-drift` is
+  passed;
+- a pinned renderer that is not resolvable through the current registries is
+  refused outright.
+
+On success the replayed output and its provenance sidecar are persisted next
+to the bundle under `<bundle-dir>.replay-output/`, and the route prints the
+pinned renderer id, manifest/request digests, drift verdict, and the output
+path.
+
+Worked example (capture → replay → acknowledge drift):
+
+```bash
+# 1. A backend failure retains a self-contained bundle (default sibling of the
+#    output, or the configured replay root). It contains bundle.json,
+#    request.json, inputs/<sha256> copies, and partial/<sha256> when the
+#    backend wrote a partial result.
+python3 -m astrid executors run rendering.render \
+  --out ./out --input timeline=./out/hype.timeline.json --input backend=acme_wave.wave
+#    -> fails; bundle retained at e.g. ./.out.mp4.replay/replay-20260813T...-acme_wave.wave-<digest12>/
+
+# 2. Replay the captured bundle (bind a session first, like the other
+#    renderer-authoring verbs):
+python3 -m astrid renderers replay ./.out.mp4.replay/replay-20260813T103000-123456-acme_wave.wave-0123456789ab
+#    -> request_digest_verified: true, drift: none, output: <bundle-dir>.replay-output/<name>.mp4
+
+# 3. After a legitimate fixture correction the manifest digest drifts; the
+#    replay is refused until the drift is acknowledged:
+python3 -m astrid renderers replay <bundle-dir> --acknowledge-drift
+#    -> manifest_digest_match: false, drift: acknowledged, output persisted
+```
+
+Replay is a local, synchronous re-run of the exact captured command — the V1
+contract has no queue, no remote farm, and no compositing service.
+
 ## Worked example: a third renderer pack
 
 This hypothetical `video_tool` pack adds a renderer without changing Astrid
@@ -822,6 +876,9 @@ python3 -m astrid renderers inspect acme_wave.wave
 
 # 6. Deterministic smoke render through the public service
 python3 -m astrid renderers smoke acme_wave.wave --out ./out/smoke.mp4
+
+# 7. Debug a captured failure bundle (see "The replay verb" above)
+python3 -m astrid renderers replay <bundle-dir>
 ```
 
 The destination directory name becomes the pack id (`acme_wave`) and the
@@ -996,7 +1053,9 @@ M1 is amended and re-reviewed rather than creating an SDK-only dialect.
 14. **Developer complexity is progressive.** The minimum local synchronous
     renderer implements one render operation. Request-sensitive support and
     custom finalizers are optional layers exposed only when needed.
-    Asynchronous remote jobs are explicitly deferred beyond V1.
+    V1 is synchronous local execution only; asynchronous job scheduling,
+    remote render infrastructure, and layer compositing are explicitly
+    deferred beyond V1 and are NOT part of the V1 renderer contract.
 15. **Astrid owns plumbing.** Core services own asset resolution, temporary
     workspace allocation, output probing and normalization, audio
     passthrough/muxing, hashes, core provenance, cleanup, and replay metadata.

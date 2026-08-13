@@ -100,6 +100,30 @@ be explicitly acknowledged, and replay never silently resolves another
 backend. Credentials, authorization headers, private environment values, and
 signed URL query strings are removed.
 
+The CLI reproduces the failure for you without rerunning the editorial
+pipeline:
+
+```bash
+python3 -m astrid renderers replay <bundle-dir>                # or the alias:
+python3 -m astrid replay <bundle-dir>                          # top-level alias
+python3 -m astrid renderers replay <bundle-dir> --acknowledge-drift  # accept drift
+```
+
+`replay <bundle-dir>` re-runs the bundle's pinned command with the localized
+`request.json`/inputs in a fresh temporary workspace and persists the
+reproduced output plus its provenance sidecar next to the bundle
+(`<bundle-dir>.replay-output/`). It refuses a tampered `request.json`
+(request-digest mismatch), a drifted manifest (silent backend substitution),
+or a drifted localized input unless `--acknowledge-drift` is passed — and it
+prints the pinned ids/digests and the drift verdict. See the worked example in
+[render-backend-v1.md](../contracts/render-backend-v1.md#the-replay-verb).
+
+**V1 scope.** V1 is synchronous local execution only; asynchronous job
+scheduling, remote render infrastructure, and layer compositing are explicitly
+deferred beyond V1 and are NOT part of the V1 renderer contract. A replay is
+therefore a local, synchronous re-run of the exact captured command — there is
+no queue, no remote farm, and no compositing service in V1.
+
 ## 5. Structured error kinds
 
 Every failure is a structured `RendererError`. Map the `kind` to the fix:
@@ -142,6 +166,7 @@ python3 -m astrid renderers validate .
 python3 -m astrid packs install . --trust --yes
 python3 -m astrid renderers list
 python3 -m astrid renderers smoke acme_wave.wave --out ./out/smoke.mp4
+python3 -m astrid renderers replay <bundle-dir>   # debug a captured failure bundle
 ```
 
 The authoritative golden-path walkthrough is

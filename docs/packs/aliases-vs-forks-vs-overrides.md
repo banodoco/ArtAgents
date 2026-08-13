@@ -280,12 +280,18 @@ hosts and tests set these typed mappings through `OverrideStore` until a public
 rendering-registry CLI is added.
 
 The `renderers` CLI surface today is `python3 -m astrid renderers
-create|list|inspect|validate|smoke`: `create <name> <dest>` scaffolds the
+create|list|inspect|validate|smoke|replay`: `create <name> <dest>` scaffolds the
 four-file renderer pack, `list` prints every discovered
 renderer/planner/finalizer qualified id, `inspect <id>` shows one candidate's
 manifest fields and trust eligibility, `validate <path>` statically validates
-a pack directory, and `smoke <id>` runs a deterministic direct-service render
-against an execution-eligible candidate. A trusted install uses
+a pack directory, `smoke <id>` runs a deterministic direct-service render
+against an execution-eligible candidate, and `replay <bundle-dir>` re-runs a
+captured failure bundle with its pinned digests (refusing silent backend
+substitution and bundle tampering unless `--acknowledge-drift` is passed; the
+top-level alias `python3 -m astrid replay <bundle-dir>` routes to the same
+verb). A trusted install uses
 `packs install --trust --yes`, and a failed invocation is debugged from its
 retained replay bundle. See the golden path in
-[render-backend-v1.md](../contracts/render-backend-v1.md#renderer-author-golden-path).
+[render-backend-v1.md](../contracts/render-backend-v1.md#renderer-author-golden-path)
+and the worked `replay` example in
+[render-backend-v1.md](../contracts/render-backend-v1.md#the-replay-verb).

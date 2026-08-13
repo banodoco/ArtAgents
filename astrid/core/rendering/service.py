@@ -119,7 +119,9 @@ class _InvocationContext:
 
 
 #: Backend verbs whose failures (and opt-in successes) produce replay bundles.
-_REPLAY_VERBS = frozenset({"render", "finalize", "plan"})
+#: ``support`` is included because a support probe can itself fail with a
+#: backend bug and must be replayable like any other invocation.
+_REPLAY_VERBS = frozenset({"render", "finalize", "plan", "support"})
 
 
 def _translate_legacy_selector(selector: str | None) -> _SelectionPolicy:
@@ -240,6 +242,10 @@ class RenderService:
         self._capture_success = bool(capture_success)
         self._active_output: Path | None = None
         self._last_invocation: _InvocationContext | None = None
+        #: Most recent successful request-sensitive support report per
+        #: candidate id, captured so a later failing invocation's replay
+        #: bundle can record the support evidence that preceded it.
+        self._support_reports: dict[str, SupportReport] = {}
 
     def render(
         self,
@@ -806,6 +812,10 @@ class RenderService:
                         "manifest_version": candidate.manifest.version,
                     },
                 )
+            # Retain the evidence for replay bundles captured later in this
+            # service's lifetime (a render/finalize/plan failure records the
+            # support report that preceded it).
+            self._support_reports[candidate.id] = response
             return response
         return self._static_support(candidate, projected, registry=registry)
 
@@ -1858,8 +1868,8 @@ class RenderService:
     ) -> None:
         """Best-effort replay bundle for a failed backend invocation.
 
-        Only failures attributable to a ``render``/``finalize``/``plan``
-        invocation are captured; registry and support failures are not.
+        Only failures attributable to a ``render``/``finalize``/``plan``/
+        ``support`` invocation are captured; registry failures are not.
         Capture errors are swallowed so the original failure always
         propagates unchanged.
         """
@@ -1920,12 +1930,20 @@ class RenderService:
 
         payload = invocation.payload
         payload_dict = payload.to_dict() if hasattr(payload, "to_dict") else dict(payload)
+        eligibility = invocation.candidate.eligibility
         metadata: dict[str, Any] = {
             "bundle_schema_version": BUNDLE_SCHEMA_VERSION,
             "backend_version": invocation.candidate.manifest.version,
             "verb": invocation.verb,
             "success": success,
             "captured_at": datetime.now(timezone.utc).isoformat(),
+            # Qualified-ID discovery identity: which pack contributed the
+            # candidate, how it was discovered, and the trust/eligibility
+            # method that made it executable.
+            "source_pack": invocation.candidate.pack_id,
+            "source_kind": invocation.candidate.source_kind,
+            "eligibility": eligibility.to_dict(),
+            "trust_method": eligibility.trust_method,
         }
         if error is not None:
             metadata["error_kind"] = error.kind
@@ -1946,6 +1964,7 @@ class RenderService:
             "--result",
             str(invocation.result_path),
         ]
+        support_report = self._support_reports.get(invocation.candidate.id)
         return ReplayBundle(
             renderer_id=invocation.candidate.id,
             request_digest=compute_request_digest(request.to_dict()),
@@ -1956,6 +1975,9 @@ class RenderService:
             partial_result=self._read_partial_result(invocation.result_path),
             payload=payload_dict,
             metadata=metadata,
+            support_report=support_report.to_dict() if support_report is not None else None,
+            backend_config=dict(payload_dict.get("backend_config") or {}),
+            result_path=str(invocation.result_path),
         )
 
     def _collect_replay_inputs(
