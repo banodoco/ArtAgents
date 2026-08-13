@@ -45,13 +45,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     create_parser.add_argument(
         "name",
-        help="Renderer name; the qualified id becomes rendering.<name>.",
+        help="Renderer name; the qualified id becomes <pack>.<name> where pack "
+        "is the destination directory name.",
     )
     create_parser.add_argument(
         "dest",
         nargs="?",
         default=".",
-        help="Destination directory (default: current directory).",
+        help="Destination directory (default: current directory). Must be named "
+        "exactly like the desired pack id for installability.",
     )
     create_parser.add_argument(
         "--id",

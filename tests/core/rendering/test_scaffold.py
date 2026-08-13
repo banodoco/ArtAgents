@@ -100,14 +100,14 @@ def test_scaffold_static_validation_passes(tmp_path: Path) -> None:
     assert not errors, errors
 
     pack = load_manifest_mapping(dest / "pack.yaml", manifest_kind="pack")
-    assert pack["id"] == "rendering"
+    assert pack["id"] == "wave"
     assert pack["extensions"]["rendering"]["renderers"] == ["renderer.yaml"]
 
     manifest = load_manifest_mapping(
         dest / "renderer.yaml",
         manifest_kind="renderer",
     )
-    assert manifest["id"] == "rendering.wave"
+    assert manifest["id"] == "wave.wave"
     assert manifest["command"] == ["python3", "render.py"]
     assert manifest["operations"] == ["support", "render"]
     assert manifest["required_permissions"] == ["project_files", "subprocess"]

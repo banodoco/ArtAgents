@@ -29,6 +29,8 @@ SCAFFOLD_FILES: tuple[str, ...] = (
 _QUALIFIED_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*(?:\.[a-z0-9][a-z0-9_-]*)+$")
 _DEFAULT_PACK_ID = "rendering"
 
+_PACK_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
+
 _PACK_YAML = """\
 schema_version: 1
 id: __PACK_ID__
@@ -194,16 +196,46 @@ def _display_name(name: str) -> str:
     return name.replace("-", " ").replace("_", " ").strip().title()
 
 
-def _qualified_renderer_id(name: str, renderer_id: str | None) -> str:
+def _pack_id_from_dest(dest: Path) -> str:
+    """Derive the scaffold pack id from the destination folder name.
+
+    ``astrid packs install`` (and ``load_pack_manifest``) require
+    ``root.name == pack_id`` (see ``astrid/core/pack/loader.py`` and
+    ``install_local.py``), so a scaffold is only installable when the folder
+    it is written into is named exactly like the pack id.  The default
+    ``rendering`` pack id is deliberately rejected here: the first-party
+    ``rendering`` pack owns it and a trusted install would collide.
+    """
+    pack_id = dest.name.strip().lower()
+    if not _PACK_ID_RE.fullmatch(pack_id):
+        raise ValueError(
+            f"destination directory name {pack_id!r} is not a valid pack id; "
+            "scaffold into a directory named exactly like the pack id "
+            "(e.g. 'astrid renderers create wave acme-wave' writes "
+            "acme-wave/pack.yaml with id: acme-wave)"
+        )
+    if pack_id == _DEFAULT_PACK_ID:
+        raise ValueError(
+            f"pack id {pack_id!r} collides with the first-party rendering pack; "
+            "scaffold into a differently named directory or pass --id <pack>.<name>"
+        )
+    return pack_id
+
+
+def _qualified_renderer_id(
+    name: str,
+    renderer_id: str | None,
+    pack_id: str,
+) -> str:
     if renderer_id is not None:
         candidate = renderer_id.strip()
     else:
-        candidate = f"{_DEFAULT_PACK_ID}.{name.strip().lower()}"
+        candidate = f"{pack_id}.{name.strip().lower()}"
     if not _QUALIFIED_ID_RE.fullmatch(candidate):
         raise ValueError(
             f"invalid renderer id {candidate!r}; expected the qualified form "
             "'<pack>.<name>' with segments matching [a-z0-9][a-z0-9_-]* "
-            f"(e.g. '{_DEFAULT_PACK_ID}.wave')"
+            f"(e.g. '{pack_id}.wave')"
         )
     return candidate
 
@@ -234,11 +266,20 @@ def create_renderer_scaffold(
     """
     if not isinstance(name, str) or not name.strip():
         raise ValueError("renderer name must be a non-empty string")
-    renderer_id = _qualified_renderer_id(name, renderer_id)
-    pack_id = renderer_id.partition(".")[0]
-    display = _display_name(name)
 
     target = Path(dest).expanduser().resolve()
+    pack_id = _pack_id_from_dest(target)
+    if renderer_id is not None:
+        explicit_pack_id = renderer_id.strip().partition(".")[0]
+        if explicit_pack_id != pack_id:
+            raise ValueError(
+                f"--id {renderer_id!r} declares pack {explicit_pack_id!r} but the "
+                f"destination directory is named {pack_id!r}; installability "
+                "requires root.name == pack id — use a matching directory"
+            )
+    renderer_id = _qualified_renderer_id(name, renderer_id, pack_id)
+    display = _display_name(name)
+
     if target.exists() and not target.is_dir():
         if not force:
             raise FileExistsError(f"refusing to overwrite existing file {target}")

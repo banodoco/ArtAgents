@@ -50,7 +50,7 @@ import subprocess
 import tempfile
 import uuid
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -151,6 +151,7 @@ def renderer_main(
                 registries=registries,
                 transport=transport,
                 transport_factory=transport_factory,
+                workspace=workspace,
             )
         else:
             response = _backend_render(
@@ -289,7 +290,20 @@ def _backend_render(
         )
     expected = request.profile or response.video.profile
     validate = validator or validate_render_result
-    return validate(response, expected_profile=expected, workspace_root=workspace)
+    validated = validate(
+        response,
+        expected_profile=expected,
+        workspace_root=workspace,
+    )
+    # The command transport appends its own captured stdout/stderr onto
+    # RenderResult.logs when the child is noisy; those are transport-layer
+    # diagnostics, not backend wire fields.  Raw-command backends write
+    # ``"logs": []``, so strip the injected portion before serialization to
+    # keep the success file wire-identical to the raw backend path (the error
+    # path already strips the same injected diagnostics).
+    if isinstance(validated, RenderResult) and validated.logs:
+        validated = replace(validated, logs=[])
+    return validated
 
 
 # ---------------------------------------------------------------------------
@@ -429,6 +443,10 @@ def support(
     parsed = (
         request if isinstance(request, RenderRequest) else RenderRequest.from_dict(request)
     )
+    # The invocation workspace is the timeline's directory — the same
+    # convention raw backends use (the request file's parent).  Sibling
+    # assets resolve relative to it.
+    workspace = Path(parsed.timeline_path).expanduser().resolve().parent
     return _support_report(
         parsed,
         backend=backend,
@@ -439,6 +457,7 @@ def support(
         project_root=project_root,
         extra_pack_roots=extra_pack_roots,
         include_installed=include_installed,
+        workspace=workspace,
     )
 
 
@@ -482,14 +501,14 @@ def _support_report(
         registries=resolved_registries,
         **_service_injection(transport=transport, transport_factory=transport_factory),
     )
-    with tempfile.TemporaryDirectory(prefix="astrid-sdk-support-") as tmp_text:
-        support_workspace = workspace or Path(tmp_text)
-        return selected_service._support(
-            candidate,
-            request=request,
-            workspace=support_workspace,
-            registry=renderers,
-        )
+    if workspace is None:
+        raise ValueError("support requires an invocation workspace")
+    return selected_service._support(
+        candidate,
+        request=request,
+        workspace=workspace,
+        registry=renderers,
+    )
 
 
 def _service_injection(**overrides: Any) -> dict[str, Any]:
@@ -684,6 +703,7 @@ class RenderContext:
         self._owns_asset_server = asset_server is None
         self._interrupt_check = interrupt_check
         self._service = service
+        self._child_process: subprocess.Popen[str] | None = None
         self._audio_completer = audio_completer
         self._explicit_secret_values = tuple(str(value) for value in secret_values)
         self._temp_dirs: list[Path] = []
@@ -912,6 +932,11 @@ class RenderContext:
                 text=True,
                 encoding="utf-8",
                 errors="replace",
+                # Own process group so teardown can reach grandchildren that
+                # keep the pipes open (typical FFmpeg pattern); a bare
+                # process.kill() would leave them holding stdout/stderr and
+                # communicate() would hang forever.
+                start_new_session=True,
             )
         except OSError as exc:
             raise_internal_error(
@@ -919,6 +944,8 @@ class RenderContext:
                 message=f"failed to start renderer subprocess {command[0]!r}: {exc}",
                 details={"error_type": type(exc).__name__},
             )
+
+        self._child_process = process
 
         stdout: str = ""
         stderr: str = ""
@@ -929,8 +956,7 @@ class RenderContext:
                 stdout = exc.output
             if isinstance(exc.stderr, str):
                 stderr = exc.stderr
-            process.kill()
-            process.communicate()
+            self._kill_process_group(process)
             logs = self._bounded_logs(stdout, stderr, overlay=env)
             raise_timeout_error(
                 backend=self.backend,
@@ -942,8 +968,7 @@ class RenderContext:
                 },
             )
         except KeyboardInterrupt:
-            process.kill()
-            process.communicate()
+            self._kill_process_group(process)
             logs = self._bounded_logs(stdout, stderr, overlay=env)
             error = make_renderer_error(
                 "interrupted",
@@ -972,6 +997,35 @@ class RenderContext:
                 },
             )
         return result
+
+    @staticmethod
+    def _kill_process_group(process: subprocess.Popen[str]) -> None:
+        """SIGKILL the child's whole process group and reap it bounded.
+
+        ``start_new_session=True`` makes the child's PID its process-group
+        ID; killing the group reaches grandchildren that keep the pipes open
+        (typical FFmpeg pattern), so the subsequent bounded communicate()
+        cannot hang.  Mirrors ``astrid.core.rendering.transport``.
+        """
+        import signal
+
+        if hasattr(os, "killpg"):
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            except (PermissionError, OSError):
+                try:
+                    process.kill()
+                except OSError:
+                    pass
+        else:
+            try:
+                process.kill()
+            except OSError:
+                pass
+        with contextlib.suppress(Exception):
+            process.communicate(timeout=5)
 
     def _bounded_logs(
         self,
@@ -1173,6 +1227,16 @@ class RenderContext:
         """
         if self._closed:
             return
+        # Reap any subprocess still owned by this context so __exit__ cannot
+        # leave a zombie or a pipe-holding grandchild behind.
+        child = self._child_process
+        if child is not None and child.poll() is None:
+            try:
+                child.kill()
+            except OSError:
+                pass
+            with contextlib.suppress(Exception):
+                child.communicate(timeout=5)
         errors: list[BaseException] = []
         for directory in self._temp_dirs:
             try:

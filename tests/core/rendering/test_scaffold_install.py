@@ -43,8 +43,8 @@ from astrid.core.rendering.registry import load_default_registries
 from astrid.core.rendering.scaffold import SCAFFOLD_FILES, create_renderer_scaffold
 from astrid.core.rendering.transport import CommandTransport
 
-RENDERER_ID = "rendering.wave"
-PACK_ID = "rendering"
+RENDERER_ID = "wave.wave"
+PACK_ID = "wave"
 PACK_DIR_NAME = PACK_ID  # load_pack_manifest requires root.name == pack id
 OUTPUT_NAME = "out.mp4"
 SMOKE_TIMEOUT_SECONDS = 2.0
@@ -233,7 +233,7 @@ def test_fresh_directory_golden_path(tmp_path: Path) -> None:
     Runs the complete golden path from a fresh directory: the scaffold is
     created with ``create_renderer_scaffold``, statically validated, its
     generated test passes, the pack is installed into a temp
-    ``ASTRID_PACKS_PATH`` root, registry discovery finds ``rendering.wave``,
+    ``ASTRID_PACKS_PATH`` root, registry discovery finds ``wave.wave``,
     and a deterministic smoke render produces a valid output in under two
     seconds from the installed (discovered) copy.
     """
@@ -253,7 +253,7 @@ def test_fresh_directory_golden_path(tmp_path: Path) -> None:
     installed_copy = packs_path / PACK_DIR_NAME
     shutil.copytree(dest, installed_copy)
 
-    # 4. Registry discovery finds rendering.wave from the installed copy.
+    # 4. Registry discovery finds wave.wave from the installed copy.
     with _registries_with_empty_source(
         tmp_path / "project",
         packs_path=str(packs_path),
