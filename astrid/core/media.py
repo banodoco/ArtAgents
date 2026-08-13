@@ -56,8 +56,9 @@ class MediaProbe:
     duration_rational: tuple[int, int] | None = None
     video_stream_present: bool | None = None
     audio_stream_present: bool | None = None
-    # Appended last so existing positional construction is unaffected.
     audio_channels: int | None = None
+    # Appended last so existing positional construction is unaffected.
+    frames: int | None = None
 
     @property
     def codec(self) -> str | None:
@@ -206,6 +207,7 @@ def _parse_ffprobe_payload(data: dict[str, Any], file_path: str | Path) -> Media
         probe.time_base = _positive_rational(video_stream.get("time_base"))
         probe.video_codec = _nonempty_string(video_stream.get("codec_name"))
         probe.video_profile = _nonempty_string(video_stream.get("profile"))
+        probe.frames = _int_or_none(video_stream.get("nb_frames"), minimum=1)
         level = video_stream.get("level")
         if level is not None and str(level).strip() not in {"", "-99"}:
             probe.video_level = str(level).strip()

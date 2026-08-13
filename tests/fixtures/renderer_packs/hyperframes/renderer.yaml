@@ -16,11 +16,18 @@ capabilities:
   clip_types: [text]
   track_types: [visual]
   output_profiles: [video/mp4]
+  # Host-sliced segment renderer: the service materializes a per-window
+  # timeline and passes window=None, exactly like the built-in backends.
+  supports_windows: false
+  supports_full_timeline: false
+  # The renderer always emits a visual-only MP4; it satisfies both a
+  # visual-only request and a rendered request (the finalizer synthesizes
+  # silent audio onto the visual-only segment in the mixed case).
+  audio_ownership:
+    - none
+    - rendered
   features:
-    supports_full_timeline: true
-    supports_windows: true
     media: false
-    audio_ownership: none
     bounded_css: true
   # Node.js >= 22 is required to run the pinned hyperframes CLI; FFmpeg is
   # required by hyperframes for muxing.  support() fails closed when either

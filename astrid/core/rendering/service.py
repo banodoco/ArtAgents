@@ -27,6 +27,7 @@ from astrid.core.env_vars import ASTRID_TASK_PROJECT, ASTRID_TASK_RUN_ID
 from astrid.core.foundation.atomic_io import write_json_atomic
 from astrid.core.foundation.hash import sha256_file
 from astrid.core.foundation.project_paths import resolve_projects_root, run_dir
+from astrid.core.media import ffprobe_metadata_strict
 
 from .artifacts import validate_render_result
 from .contracts import (
@@ -124,13 +125,19 @@ class _InvocationContext:
 _REPLAY_VERBS = frozenset({"render", "finalize", "plan", "support"})
 
 
-def _translate_legacy_selector(selector: str | None) -> _SelectionPolicy:
+def _translate_legacy_selector(
+    selector: str | None,
+    registries: tuple[Any, Any, Any] | None = None,
+) -> _SelectionPolicy:
     """Translate the three historical names, and no other short names.
 
     The ordered pair for legacy ``remotion`` is its characterized compatibility
     policy: request-sensitive FFmpeg support gets the first opportunity, then
     Remotion.  Qualified selectors contain no fallback and are therefore
-    strict (normal registry aliases and overrides still apply).
+    strict (normal registry aliases and overrides still apply).  A qualified
+    id that resolves as a PLANNER (and not as a renderer) is classified as a
+    planner so third-party planner packs are publicly selectable; the renderer
+    classification wins when the id exists in both registries.
     """
 
     if selector is None:
@@ -151,6 +158,18 @@ def _translate_legacy_selector(selector: str | None) -> _SelectionPolicy:
             ("rendering.legacy_hybrid",),
         )
     if isinstance(selector, str) and _QUALIFIED_ID_RE.fullmatch(selector):
+        if registries is not None:
+            renderers, planners, _finalizers = registries
+            try:
+                renderers.get(selector)
+                return _SelectionPolicy(selector, "renderer", (selector,))
+            except Exception:
+                pass
+            try:
+                planners.get(selector)
+                return _SelectionPolicy(selector, "planner", (selector,))
+            except Exception:
+                pass
         return _SelectionPolicy(selector, "renderer", (selector,))
     raise_unsupported_error(
         backend=_CORE_BACKEND_ID,
@@ -363,7 +382,14 @@ class RenderService:
                     recovery_command="choose a distinct .provenance.json sidecar path",
                     details={"path": str(output)},
                 )
-            policy = _translate_legacy_selector(selector)
+            policy = _translate_legacy_selector(
+                selector,
+                registries=(
+                    self.renderers,
+                    self.planners,
+                    self.finalizers,
+                ),
+            )
             self._observe(
                 "legacy_translation",
                 requested=selector,
@@ -1182,13 +1208,44 @@ class RenderService:
         segment: RenderSegment,
         canonical_profile: Any,
         backend: str,
+        workspace: Path,
     ) -> None:
+        # Frame-count authority: a backend may declare a duration derived
+        # from an audio-extended container (Remotion's always-rendered audio
+        # pads past the last video frame), which inflates duration_frames.
+        # The video stream's ACTUAL frame count is authoritative; probe it
+        # and validate against the plan window with the same tolerance the
+        # finalizer uses, so a correct segment is not rejected on container
+        # padding alone.
+        actual = result.video.duration_frames
+        try:
+            video_path = Path(result.video.path)
+            if not video_path.is_absolute():
+                video_path = workspace / video_path
+            if video_path.is_file():
+                probe = ffprobe_metadata_strict(video_path)
+                if probe.frames is not None and probe.frames > 0:
+                    actual = probe.frames
+        except Exception:  # noqa: BLE001 - probe is best-effort
+            pass
         RenderService._validate_planned_duration(
-            result,
+            RenderService._with_duration_frames(result, actual),
             planned_frames=segment.window.duration_frames,
             canonical_profile=canonical_profile,
             backend=backend,
             label="renderer artifact",
+        )
+
+    @staticmethod
+    def _with_duration_frames(result: RenderResult, frames: int) -> RenderResult:
+        """Return a copy of *result* whose video duration is *frames*."""
+        if result.video.duration_frames == frames:
+            return result
+        from dataclasses import replace
+
+        return replace(
+            result,
+            video=replace(result.video, duration_frames=frames),
         )
 
     @staticmethod
@@ -1344,6 +1401,7 @@ class RenderService:
                 segment=segment,
                 canonical_profile=response.profile,
                 backend=candidate.id,
+                workspace=workspace,
             )
             segment_results.append(completed)
 

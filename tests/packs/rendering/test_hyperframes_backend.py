@@ -218,3 +218,177 @@ def test_hyperframes_real_render_through_public_service(tmp_path: Path) -> None:
     ).stdout
     assert "h264" in probe
     assert "640" in probe and "360" in probe
+
+
+def _combined_timeline(tmp_path: Path) -> Path:
+    """Mixed timeline: a text clip (HyperFrames) followed by two media clips
+    with a transition (Remotion).  The hyperframes.planner tiles this into
+    [0,12) -> hyperframes.renderer and [12,32) -> rendering.remotion."""
+    payload = {
+        "theme": "banodoco-default",
+        "theme_overrides": {
+            "visual": {
+                "canvas": {"width": 320, "height": 180, "fps": 24},
+                "background": "#1a1a2e",
+            }
+        },
+        "tracks": [
+            {"id": "v1", "kind": "visual", "label": "Title"},
+            {"id": "v2", "kind": "visual", "label": "Media"},
+        ],
+        "clips": [
+            {
+                "id": "title",
+                "at": 0.0,
+                "track": "v1",
+                "clipType": "text",
+                "hold": 0.5,
+                "text": {"content": "Astrid + HyperFrames"},
+            },
+            {
+                "id": "clip1",
+                "at": 0.5,
+                "track": "v2",
+                "clipType": "media",
+                "asset": "src",
+                "from": 0,
+                "to": 0.5,
+                "speed": 1,
+                "volume": 0,
+                "transition": {"id": "cross-fade", "duration": 0.15},
+            },
+            {
+                "id": "clip2",
+                "at": 0.85,
+                "track": "v2",
+                "clipType": "media",
+                "asset": "src",
+                "from": 0.5,
+                "to": 1.0,
+                "speed": 1,
+                "volume": 0,
+            },
+        ],
+    }
+    path = tmp_path / "combined-timeline.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return path
+
+
+def _source_video(tmp_path: Path) -> Path:
+    """A tiny real h264 source clip used by the media clips above."""
+    source_path = tmp_path / "source.mp4"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=size=320x180:rate=24",
+            "-frames:v",
+            "24",
+            "-c:v",
+            "libx264",
+            "-profile:v",
+            "main",
+            "-pix_fmt",
+            "yuv420p",
+            "-video_track_timescale",
+            "12288",
+            str(source_path),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return source_path
+
+
+@pytest.mark.timeout(900)
+def test_hyperframes_remotion_combined_render(tmp_path: Path) -> None:
+    """hyperframes.planner collates HyperFrames + Remotion via FFmpeg concat.
+
+    The mixed timeline's text window renders through hyperframes.renderer and
+    the media-with-transition window through rendering.remotion; the pinned
+    rendering.ffmpeg-finalizer concatenates both and synthesizes audio.  This
+    locks the planner's occupancy tiling, the qualified-planner-id selector,
+    and the frame-count-authority duration validation (Remotion's audio-padded
+    container must not reject a correct segment).
+    """
+    node = _require_hyperframes_environment()
+    if not (ROOT / "remotion" / "node_modules").is_dir():
+        pytest.skip("remotion/node_modules absent; combined render skipped")
+    source = _source_video(tmp_path)
+    assets = tmp_path / "real-assets.json"
+    assets.write_text(
+        json.dumps(
+            {
+                "assets": {
+                    "src": {
+                        "file": source.name,
+                        "type": "video/mp4",
+                        "duration": 1.0,
+                        "resolution": "320x180",
+                        "fps": 24,
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    timeline = _combined_timeline(tmp_path)
+    output = tmp_path / "combined.mp4"
+    try:
+        with _node_on_path(node):
+            published = render(
+                timeline_path=timeline,
+                assets_registry_path=assets,
+                out_path=output,
+                backend="hyperframes.planner",
+                audio="rendered",
+                backend_config={
+                    "hyperframes.renderer": {},
+                    "rendering.remotion": {},
+                },
+                extra_pack_roots=(str(PACK_ROOT),),
+            )
+    except Exception as exc:  # noqa: BLE001 - network/CLI availability
+        message = str(exc)
+        if "npx" in message or "ENOTFOUND" in message or "network" in message:
+            pytest.skip(f"hyperframes CLI unavailable: {message[:120]}")
+        raise
+
+    assert Path(published).is_file()
+    assert Path(published).stat().st_size > 0
+    probe = subprocess.run(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_entries",
+            "stream=codec_name,width,height",
+            "-of",
+            "csv",
+            str(published),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert "h264" in probe
+    assert "aac" in probe
+    assert "320" in probe and "180" in probe
+
+    sidecar = Path(f"{published}.provenance.json")
+    assert sidecar.is_file()
+    payload = json.loads(sidecar.read_text(encoding="utf-8"))
+    assert payload["routing"]["resolved_policy"]["planner"] == "hyperframes.planner"
+    assert payload["routing"]["resolved_policy"]["finalizer"] == "rendering.ffmpeg-finalizer"
+    renderer_ids = [s["renderer"]["id"] for s in payload["segments_v2"]]
+    assert "hyperframes.renderer" in renderer_ids
+    assert "rendering.remotion" in renderer_ids
+    assert len(renderer_ids) == 2

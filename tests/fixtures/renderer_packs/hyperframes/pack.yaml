@@ -19,3 +19,5 @@ extensions:
   rendering:
     renderers:
       - renderer.yaml
+    planners:
+      - planner.yaml

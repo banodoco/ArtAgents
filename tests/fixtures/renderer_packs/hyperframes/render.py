@@ -162,6 +162,9 @@ def _support_reasons(timeline: dict) -> list[str]:
                 reasons.append(
                     f"clip[{index}] unsupported text params: {unknown}"
                 )
+        text_field = clip.get("text")
+        if text_field is not None and not isinstance(text_field, dict):
+            reasons.append(f"clip[{index}] text must be an object")
     width, height, fps = _canvas(timeline) or (None, None, None)
     if width is None:
         reasons.append("canvas width/height/fps must be positive integers")
@@ -242,7 +245,13 @@ def _compose_html(
         at = float(clip.get("at", 0) or 0)
         hold = _clip_duration(clip)
         params = clip.get("params") or {}
-        text = _esc(str(params.get("content", "")) if params.get("content") is not None else "")
+        content = clip.get("text")
+        if not isinstance(content, dict):
+            content = {}
+        raw_text = content.get("content")
+        if raw_text is None:
+            raw_text = params.get("content")
+        text = _esc(str(raw_text) if raw_text is not None else "")
         styles: list[str] = []
         color = _css_color(params.get("color"))
         if color:

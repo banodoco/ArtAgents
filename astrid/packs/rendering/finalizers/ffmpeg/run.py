@@ -1121,6 +1121,21 @@ def _preflight_segments(
         artifact_seconds = Fraction(artifact.duration_frames, 1) / Fraction(
             *artifact.profile.fps_rational
         )
+        # Frame-count authority: a backend may declare a duration inflated by
+        # audio-extended container padding (Remotion's always-rendered audio).
+        # The video stream's ACTUAL frame count is authoritative.
+        try:
+            artifact_path = Path(artifact.path)
+            if not artifact_path.is_absolute():
+                artifact_path = workspace / artifact_path
+            if artifact_path.is_file():
+                probe = ffprobe_metadata_strict(artifact_path)
+                if probe.frames is not None and probe.frames > 0:
+                    artifact_seconds = Fraction(probe.frames, 1) / Fraction(
+                        *artifact.profile.fps_rational
+                    )
+        except Exception:  # noqa: BLE001 - probe is best-effort
+            pass
         planned_seconds = Fraction(plan_segment.window.duration_frames, 1) / canonical_fps
         delta_frames = abs(artifact_seconds - planned_seconds) * canonical_fps
         if delta_frames > tolerance:

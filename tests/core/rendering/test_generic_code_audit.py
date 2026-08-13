@@ -46,15 +46,15 @@ BACKEND_NAMES = ("remotion", "ffmpeg", "legacy_hybrid", "ffmpeg-finalizer")
 #: audit and stale allowlist entries are caught.
 ALLOWED: dict[tuple[str, int], str] = {
     # --- service: legacy-selector compatibility shim ---------------------
-    ("astrid/core/rendering/service.py", 130): "legacy compatibility shim (docstring)",
-    ("astrid/core/rendering/service.py", 137): "legacy compatibility shim (default selector)",
-    ("astrid/core/rendering/service.py", 138): "legacy compatibility shim (legacy ffmpeg selector)",
-    ("astrid/core/rendering/service.py", 139): "registry/default wiring (qualified id)",
-    ("astrid/core/rendering/service.py", 140): "legacy compatibility shim (legacy remotion selector)",
-    ("astrid/core/rendering/service.py", 144): "registry/default wiring (fallback pair)",
-    ("astrid/core/rendering/service.py", 151): "registry/default wiring (legacy_hybrid planner)",
-    ("astrid/core/rendering/service.py", 160): "legacy compatibility shim (recovery text)",
-    ("astrid/core/rendering/service.py", 164): "legacy compatibility shim (legacy_selectors data)",
+    ("astrid/core/rendering/service.py", 134): "legacy compatibility shim (docstring)",
+    ("astrid/core/rendering/service.py", 144): "legacy compatibility shim (default selector)",
+    ("astrid/core/rendering/service.py", 145): "legacy compatibility shim (legacy ffmpeg selector)",
+    ("astrid/core/rendering/service.py", 146): "registry/default wiring (qualified id)",
+    ("astrid/core/rendering/service.py", 147): "legacy compatibility shim (legacy remotion selector)",
+    ("astrid/core/rendering/service.py", 151): "registry/default wiring (fallback pair)",
+    ("astrid/core/rendering/service.py", 158): "registry/default wiring (legacy_hybrid planner)",
+    ("astrid/core/rendering/service.py", 179): "legacy compatibility shim (recovery text)",
+    ("astrid/core/rendering/service.py", 183): "legacy compatibility shim (legacy_selectors data)",
     # --- provenance: legacy-engine projection compatibility shim ---------
     ("astrid/core/rendering/provenance.py", 114): "legacy compatibility shim (docstring)",
     ("astrid/core/rendering/provenance.py", 146): "legacy compatibility shim (docstring)",
