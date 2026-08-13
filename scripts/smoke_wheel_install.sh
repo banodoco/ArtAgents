@@ -160,7 +160,7 @@ PY
 # -------------------------------------------------------------------
 # Uses the INSTALLED astrid.core.rendering.scaffold module and its installed
 # fixture templates: scaffold -> static validation -> install into a temp
-# ASTRID_PACKS_PATH root -> registry discovery finds rendering.wave ->
+# ASTRID_PACKS_PATH root -> registry discovery finds wave.wave ->
 # deterministic two-second smoke render -> generated test_renderer.py passes
 # inside this wheel venv.
 echo ""
@@ -194,13 +194,13 @@ from astrid.core.rendering.scaffold import SCAFFOLD_FILES, create_renderer_scaff
 from astrid.core.rendering.registry import load_default_registries
 from astrid.core.rendering.transport import CommandTransport
 
-RENDERER_ID = "rendering.wave"
-PACK_ID = "rendering"
+RENDERER_ID = "wave.wave"
+PACK_ID = "wave"
 OUTPUT_NAME = "out.mp4"
 SMOKE_LIMIT_SECONDS = 2.0
 
 work = Path.cwd()
-dest = create_renderer_scaffold("wave", work / "scaffold-wave")
+dest = create_renderer_scaffold("wave", work / "wave")
 
 # 1. Static validation of the scaffolded pack (installed templates).
 errors, _warnings = validate_pack(dest)
@@ -220,7 +220,7 @@ packs_path = Path(os.environ["ASTRID_PACKS_PATH"])
 installed_copy = packs_path / PACK_ID
 shutil.copytree(dest, installed_copy)
 
-# 3. Registry discovery finds rendering.wave from the installed copy.
+# 3. Registry discovery finds wave.wave from the installed copy.
 renderers, _planners, _finalizers = load_default_registries(work, include_installed=False)
 candidates = renderers.candidates(RENDERER_ID)
 assert len(candidates) == 1, [candidate.to_dict() for candidate in candidates]

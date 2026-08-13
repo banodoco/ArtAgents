@@ -35,8 +35,8 @@ from unittest import mock
 from astrid.core.foundation.hash import sha256_file
 from astrid.core.pack import discover_packs
 from astrid.core.pack.manifest import load_manifest_mapping
-from astrid.core.pack.store import InstallRecord, InstalledPackStore
-from astrid.core.pack.validate import extract_trust_summary, validate_pack
+from astrid.core.pack.store import InstalledPackStore
+from astrid.core.pack.validate import validate_pack
 from astrid.core.rendering import RenderResult
 from astrid.core.rendering import registry as rendering_registry_module
 from astrid.core.rendering.registry import load_default_registries
@@ -91,42 +91,30 @@ def _registries_with_empty_source(
 
 
 def _stage_trusted_install(astrid_home: Path, pack_root: Path, pack_id: str) -> Path:
-    """Install *pack_root* under *astrid_home* with an accepted trust audit.
+    """Install *pack_root* through the REAL trusted-install path.
 
-    Mirrors the trusted-install staging used by the raw-command fixture tests:
-    the active revision symlink plus an ``InstallRecord`` written to
-    ``<revision>/.astrid/install.json`` make the pack execution-eligible.
+    ``astrid packs install`` semantics (``astrid.core.pack.install_local.
+    install_pack``): the pack is copied into
+    ``<ASTRID_HOME>/packs/<id>/revisions/<id>``, an active symlink is
+    created, and an ``InstallRecord`` is written with the accepted trust
+    audit — making the candidate execution-eligible.  The caller sets
+    ``ASTRID_HOME`` so the store lands where the registry reads it.
     """
-    install_root = astrid_home / "packs" / pack_id
-    revision = install_root / "revisions" / pack_id
-    revision.parent.mkdir(parents=True)
-    shutil.copytree(pack_root, revision)
-    (install_root / "active").symlink_to(Path("revisions") / pack_id)
+    from astrid.core.pack.install_local import install_pack
 
-    summary = extract_trust_summary(revision)
-    record = InstallRecord(
-        pack_id=pack_id,
-        name=summary["name"],
-        version=str(summary["version"]),
-        schema_version=summary["schema_version"],
-        source_path=str(pack_root),
-        installed_at="2026-01-01T00:00:00Z",
-        revision=pack_id,
-        install_root=str(install_root),
-        active=True,
-        manifest_digest=sha256_file(revision / "pack.yaml"),
-        trust_summary=summary,
-        source_type="local",
-        trust_tier="local",
-        last_validation_time="2026-01-01T00:00:00Z",
-        trust_acknowledged_at="2026-01-01T00:00:00Z",
+    store = InstalledPackStore(astrid_home / "packs")
+    exit_code = install_pack(
+        pack_root,
+        store,
+        skip_confirm=True,
+        trust_acknowledged=True,
         trust_method="test",
-        trust_actor="test",
-        no_sandbox_warning_version=1,
-        permissions_accepted=summary["permissions"],
+        trust_actor="scaffold-golden-path",
+        source_type="local",
     )
-    InstalledPackStore(astrid_home / "packs").record_install(record)
-    return revision
+    if exit_code != 0:
+        raise AssertionError(f"install_pack failed with exit code {exit_code}")
+    return astrid_home / "packs" / pack_id / "revisions" / pack_id
 
 
 def _write_request(workspace: Path, *, output_name: str = OUTPUT_NAME) -> Path:

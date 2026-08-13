@@ -296,13 +296,21 @@ def _backend_render(
         workspace_root=workspace,
     )
     # The command transport appends its own captured stdout/stderr onto
-    # RenderResult.logs when the child is noisy; those are transport-layer
-    # diagnostics, not backend wire fields.  Raw-command backends write
-    # ``"logs": []``, so strip the injected portion before serialization to
-    # keep the success file wire-identical to the raw backend path (the error
-    # path already strips the same injected diagnostics).
+    # RenderResult.logs (prefixed "stdout:" / "stderr:") when the child is
+    # noisy.  Those are transport-layer diagnostics, not backend wire
+    # fields; the raw backend's result file carries only the backend's own
+    # authored logs.  Strip the appended suffix (trailing entries matching
+    # the transport's stream prefix) WITHOUT touching backend-authored
+    # entries, so the success file stays wire-identical to the raw path.
     if isinstance(validated, RenderResult) and validated.logs:
-        validated = replace(validated, logs=[])
+        authored = list(validated.logs)
+        while authored and (
+            authored[-1].startswith("stdout:\n")
+            or authored[-1].startswith("stderr:\n")
+        ):
+            authored.pop()
+        if len(authored) != len(validated.logs):
+            validated = replace(validated, logs=authored)
     return validated
 
 

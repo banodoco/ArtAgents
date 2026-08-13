@@ -51,15 +51,18 @@ def build_parser() -> argparse.ArgumentParser:
     create_parser.add_argument(
         "dest",
         nargs="?",
-        default=".",
-        help="Destination directory (default: current directory). Must be named "
-        "exactly like the desired pack id for installability.",
+        default=None,
+        help="Destination directory. Must be named exactly like the desired "
+        "pack id (lowercase [a-z0-9][a-z0-9_-]*), e.g. 'create wave acme-wave' "
+        "writes acme-wave/pack.yaml with id: acme-wave. Defaults to the "
+        "current directory (which must itself be a valid pack id).",
     )
     create_parser.add_argument(
         "--id",
         dest="renderer_id",
         default=None,
-        help="Override the qualified renderer id (default: rendering.<name>).",
+        help="Override the qualified renderer id (default: <destname>.<name>). "
+        "The pack prefix must match the destination directory name.",
     )
     create_parser.add_argument(
         "--force",
@@ -73,7 +76,7 @@ def build_parser() -> argparse.ArgumentParser:
 def _cmd_create(args: argparse.Namespace) -> int:
     dest = create_renderer_scaffold(
         args.name,
-        Path(args.dest),
+        Path(args.dest) if args.dest is not None else Path.cwd(),
         force=bool(args.force),
         renderer_id=args.renderer_id,
     )

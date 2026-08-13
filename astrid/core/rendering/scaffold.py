@@ -200,24 +200,28 @@ def _pack_id_from_dest(dest: Path) -> str:
     """Derive the scaffold pack id from the destination folder name.
 
     ``astrid packs install`` (and ``load_pack_manifest``) require
-    ``root.name == pack_id`` (see ``astrid/core/pack/loader.py`` and
-    ``install_local.py``), so a scaffold is only installable when the folder
-    it is written into is named exactly like the pack id.  The default
-    ``rendering`` pack id is deliberately rejected here: the first-party
-    ``rendering`` pack owns it and a trusted install would collide.
+    ``root.name == pack_id`` with a CASE-SENSITIVE comparison (see
+    ``astrid/core/pack/loader.py`` and ``install_local.py``), so a scaffold
+    is only installable when the folder it is written into is named exactly
+    like the pack id.  The name is used VERBATIM (no case-folding): a
+    destination whose name is not already a valid lowercase pack id is
+    rejected.  The default ``rendering`` pack id is also rejected: the
+    first-party ``rendering`` pack owns it and a trusted install would
+    collide.
     """
-    pack_id = dest.name.strip().lower()
+    pack_id = dest.name
     if not _PACK_ID_RE.fullmatch(pack_id):
         raise ValueError(
             f"destination directory name {pack_id!r} is not a valid pack id; "
-            "scaffold into a directory named exactly like the pack id "
-            "(e.g. 'astrid renderers create wave acme-wave' writes "
+            "pack ids must match [a-z0-9][a-z0-9_-]* and the scaffold folder "
+            "must be named exactly like the desired pack id (e.g. "
+            "'astrid renderers create wave acme-wave' writes "
             "acme-wave/pack.yaml with id: acme-wave)"
         )
     if pack_id == _DEFAULT_PACK_ID:
         raise ValueError(
             f"pack id {pack_id!r} collides with the first-party rendering pack; "
-            "scaffold into a differently named directory or pass --id <pack>.<name>"
+            "scaffold into a differently named directory"
         )
     return pack_id
 
