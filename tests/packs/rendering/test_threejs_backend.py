@@ -37,10 +37,9 @@ import pytest
 import yaml
 
 from astrid.core.rendering.contracts import (
-    FrameWindow,
-    RenderProfile,
-    RendererManifest,
     SCHEMA_VERSION,
+    FrameWindow,
+    RendererManifest,
 )
 from astrid.core.rendering.errors import RendererUnsupportedError
 from astrid.core.rendering.registry import load_default_registries

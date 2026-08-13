@@ -809,6 +809,16 @@ def test_threejs_hybrid_mixed_real_render(tmp_path: Path) -> None:
     assert threejs_fragment["renderer"] == "threejs"
     assert threejs_fragment["legacy_v1"]["engine"] == "threejs"
     assert fragments["rendering.remotion"]["renderer"] == "remotion"
+    # The pinned finalizer contributes its own backend fragment: the service
+    # merges it under the finalizer id with the ffmpeg finalizer shape.
+    finalizer_fragment = fragments["rendering.ffmpeg-finalizer"]
+    assert finalizer_fragment["finalizer_kind"] == "ffmpeg"
+    assert isinstance(finalizer_fragment["finalizer_version"], str)
+    assert finalizer_fragment["finalizer_version"]
+    assert finalizer_fragment["segment_count"] == 2
+    assert isinstance(finalizer_fragment["stream_copied_segments"], list)
+    assert isinstance(finalizer_fragment["normalized_segments"], list)
+    assert finalizer_fragment["audio_mode"] == "rendered"
 
     probe = _probe(first)
     video = next(s for s in probe["streams"] if s["codec_type"] == "video")

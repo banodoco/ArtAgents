@@ -92,6 +92,11 @@ _ALLOWED_FILES: dict[str, str] = {
         "legacy engine itself: characterized pre-facade implementation, "
         "preserved verbatim for parity fixtures"
     ),
+    "astrid/packs/rendering/planners/threejs_hybrid/run.py": (
+        "rendering.threejs-hybrid planner: reuses the Three.js backend's "
+        "pure text-eligibility predicate (and the legacy planner's pure "
+        "helpers); dispatch still goes through the registry/planner contract"
+    ),
 }
 
 # Manifests (executor / renderer declarations) are data, not code: their argv

@@ -35,12 +35,12 @@ from astrid.core.foundation.atomic_io import write_json_atomic
 from astrid.core.foundation.hash import sha256_file
 from astrid.core.foundation.paths import REPO_ROOT
 from astrid.core.rendering.contracts import (
+    SCHEMA_VERSION,
     FrameWindow,
     PlannerResolution,
     RenderPlan,
     RenderRequest,
     RenderSegment,
-    SCHEMA_VERSION,
     SupportReport,
     compute_request_digest,
 )
@@ -53,6 +53,7 @@ from astrid.core.rendering.profile import resolve_render_profile
 from astrid.core.rendering.registry import (
     FinalizerRegistry,
     RendererRegistry,
+    RenderingRegistryError,
     load_default_registries,
 )
 
@@ -62,9 +63,9 @@ from astrid.packs.rendering.backends.threejs.run import (
     _support_reasons as _three_support_reasons,
 )
 from astrid.packs.rendering.planners.legacy_hybrid.run import (
-    _CommandSupportResolver,
     _ceil,
     _clip_timeline_end,
+    _CommandSupportResolver,
     _finalizer_resolution,
     _load_inputs,
     _number,
@@ -72,7 +73,6 @@ from astrid.packs.rendering.planners.legacy_hybrid.run import (
     _timeline_duration,
     _window_timeline,
 )
-
 
 BACKEND_ID = "rendering.threejs-hybrid"
 BACKEND_VERSION = "1.0.0"
@@ -537,7 +537,7 @@ def plan(
                 segment_request,
                 segment_timeline,
             )
-        except Exception as exc:
+        except RendererException as exc:
             raise_unsupported_error(
                 backend=BACKEND_ID,
                 message=f"no renderer supports planned window [{start},{end})",
@@ -555,7 +555,7 @@ def plan(
         if renderer_registry is not None:
             try:
                 resolved_id = renderer_registry.get(renderer_id).id
-            except Exception:
+            except RenderingRegistryError:
                 resolved_id = renderer_id
         if candidate_report.backend != resolved_id:
             raise_unsupported_error(

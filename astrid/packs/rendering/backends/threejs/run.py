@@ -40,11 +40,11 @@ from astrid.core.foundation.atomic_io import write_json_atomic
 from astrid.core.foundation.paths import REPO_ROOT
 from astrid.core.rendering.artifacts import validate_render_result
 from astrid.core.rendering.contracts import (
+    SCHEMA_VERSION,
     AudioOwnership,
     RenderProfile,
     RenderRequest,
     RenderResult,
-    SCHEMA_VERSION,
     SupportReport,
     VideoArtifact,
 )
@@ -62,7 +62,6 @@ _execute_remotion = remotion_backend._execute_remotion
 _render_provenance_payload = remotion_backend._render_provenance_payload
 _serialize_timeline = remotion_backend._serialize_timeline
 _load_registry_mapping = remotion_backend._load_registry_mapping
-_effective_registry_state = remotion_backend._effective_registry_state
 _input_path = remotion_backend._input_path
 _duration_frames = remotion_backend._duration_frames
 _canonical_profile = remotion_backend._canonical_profile
@@ -111,13 +110,6 @@ def _canvas(timeline: Mapping[str, Any]) -> tuple[int, int, int] | None:
     return int(width), int(height), int(fps)
 
 
-def _clip_end(clip: Mapping[str, Any]) -> float:
-    hold = clip.get("hold")
-    if isinstance(hold, (int, float)) and hold > 0:
-        return float(hold)
-    return 1.0
-
-
 def _effective_gain(clip: Mapping[str, Any], tracks: Sequence[Any]) -> float:
     """Exact timeline gain for a text clip, 0..1.
 
@@ -164,9 +156,6 @@ def _support_reasons(
             "audio tracks are not supported by the Three.js renderer: "
             + str(audio_tracks)
         )
-    asset_entries = {}
-    if isinstance(registry, dict) and isinstance(registry.get("assets"), dict):
-        asset_entries = registry["assets"]
     for index, clip in enumerate(clips):
         if not isinstance(clip, dict):
             reasons.append(f"clip[{index}] is not an object")
@@ -375,11 +364,11 @@ def support(request: RenderRequest, *, workspace: Path) -> SupportReport:
     assets_data: dict[str, Any] | None = None
     try:
         timeline_data = _serialize_timeline(timeline_path)
-    except Exception as exc:
+    except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
         reasons.append(f"timeline is not renderable: {exc}")
     try:
         assets_data = _load_registry_mapping(assets_path)
-    except Exception as exc:
+    except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
         reasons.append(f"assets registry is not renderable: {exc}")
 
     if timeline_data is not None:
@@ -397,7 +386,7 @@ def support(request: RenderRequest, *, workspace: Path) -> SupportReport:
         if request.profile is not None:
             try:
                 canonical = _canonical_profile(timeline_path, assets_data, settings)
-            except Exception as exc:
+            except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
                 reasons.append(f"canonical Three.js profile cannot be resolved: {exc}")
             else:
                 mismatches = _profile_mismatches(
@@ -463,7 +452,7 @@ def _protocol_render(request: RenderRequest, *, workspace: Path) -> RenderResult
 
     try:
         timeline_data = _serialize_timeline(timeline_path)
-    except Exception as exc:
+    except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
         raise_unsupported_error(
             backend=BACKEND_ID,
             message="timeline is not renderable by the Three.js renderer",
