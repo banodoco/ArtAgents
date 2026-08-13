@@ -1,8 +1,7 @@
 # Epic Verification — Pluggable Timeline Renderers (M1 + M2 freeze)
 
 Worktree: `/Users/peteromalley/Documents/reigh-workspace/Astrid-oracle`.
-Recorded: 2026-08-13 (Batch 7 rework, second pass). HEAD: `b10de4fc` +
-hygiene/megaplan commits; tag `C8-batch7-done` (re-pointed to rework HEAD).
+Recorded: 2026-08-13 (Batch 7 rework, second pass). HEAD: `79ae6faa`; tag `C8-batch7-done` re-pointed to rework HEAD.
 
 ## Complete matrix (rework-HEAD evidence)
 
@@ -21,7 +20,7 @@ hygiene/megaplan commits; tag `C8-batch7-done` (re-pointed to rework HEAD).
 | Full suite (CI mirror) | `pytest -q -m "not integration and not opt_in"` | 7778 passed / 62 failed — all pre-existing at C5-batch4-done in unrelated areas (schema_contract, supabase, reigh, project_cli, timeline, packs_validate); zero epic-caused regressions after the 5 test-contract fixes |
 | Parity (real Remotion/FFmpeg) | `pytest -q -m renderer_parity tests/packs/test_renderer_parity.py` | 18 passed. NOTE: parity tests treat a chromium denial (`MachPortRendezvousServer` / headless chromium refusal) as success-with-skip; only non-skipped cases prove real media output |
 | Hygiene | `scripts/reshape/check_repo_hygiene.py` | PASS (allowlist extended for `.megaplan`/`.oracle`/`tools`/`fal-voice-upscale` pipeline+user dirs; gitignored megaplan state untracked) |
-| Tags | `git tag C8-batch7-done` | applied at rework HEAD `b10de4fc` (re-pointed after rework). Prior tags C0..C7 are historical batch markers |
+| Tags | `git tag C8-batch7-done` | applied at rework HEAD `79ae6faa`. Prior tags C0..C7 are historical batch markers |
 
 ## Freeze assertions
 

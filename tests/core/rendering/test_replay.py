@@ -403,3 +403,54 @@ def test_dispatch_routes_replay_verb(tmp_path: Path, capsys) -> None:
     text = _stdout(capsys)
     assert f"replay: {BACKEND_ID}" in text
     assert "request_digest_verified: true" in text
+
+
+def test_replay_support_bundle_reports_result_file(tmp_path: Path, capsys) -> None:
+    """A support-verb bundle replays to a SupportReport result file, not a
+    video path (the bundle's argv carries the support verb)."""
+    extra_root = _copy_pack(tmp_path)
+    candidate = _candidate(extra_root)
+    source_timeline = tmp_path / "timeline.json"
+    source_timeline.write_text('{"tracks": [], "clips": []}', encoding="utf-8")
+    digest = sha256_file(source_timeline)
+    payload = {
+        "schema_version": 1,
+        "timeline_path": f"inputs/{digest}",
+        "assets_registry_path": None,
+        "output_name": "raw_command.mp4",
+        "window": None,
+        "audio": "rendered",
+        "profile": None,
+        "backend_config": {},
+        "metadata": {},
+    }
+    bundle = ReplayBundle(
+        renderer_id=candidate.id,
+        request_digest=compute_request_digest(payload),
+        manifest_digest=candidate.manifest_digest,
+        argv=[
+            "python3",
+            "backend.py",
+            "support",
+            "--request",
+            "request.json",
+            "--result",
+            "result.json",
+        ],
+        inputs={"timeline": str(source_timeline)},
+        payload=payload,
+        metadata={"verb": "support", "success": False},
+    )
+    bundle_dir = write_replay_bundle(bundle, tmp_path / "support-bundle")
+
+    assert (
+        renderers_cli_main(
+            ["replay", str(bundle_dir), "--pack-root", str(extra_root)]
+        )
+        == 0
+    )
+    text = _stdout(capsys)
+    assert "verb: support" in text
+    output = Path(text.partition("output: ")[2].strip())
+    assert output.is_file()
+    assert output.stat().st_size > 0

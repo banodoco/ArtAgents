@@ -588,11 +588,14 @@ def _cmd_smoke(args: argparse.Namespace) -> int:
 
     from .service import RenderService
 
-    out_path = (
-        Path(args.out)
-        if args.out is not None
-        else Path.cwd() / f"smoke-{args.renderer_id}.mp4"
-    )
+    if args.out is not None:
+        out_path = Path(args.out)
+    else:
+        # Default to a temp workspace so a smoke never pollutes the caller's
+        # cwd/repo root with smoke-*.mp4 artifacts.
+        out_path = Path(
+            tempfile.mkdtemp(prefix="astrid-smoke-")
+        ) / f"smoke-{args.renderer_id}.mp4"
     service = RenderService(
         registries=(renderers, planners, finalizers),
         validator=_smoke_validator,
@@ -849,9 +852,14 @@ def _cmd_replay(args: argparse.Namespace) -> int:
 
     with _TemporaryDirectory(prefix="astrid-renderers-replay-") as tmp_text:
         workspace = Path(tmp_text)
-        for source in bundle_dir.iterdir():
-            if source.is_file():
-                _shutil.copy2(source, workspace / source.name)
+        # Copy the ENTIRE bundle (bundle.json, request.json, and the
+        # inputs/<sha> tree) so localized input references resolve during
+        # replay.
+        _shutil.copytree(
+            bundle_dir,
+            workspace,
+            dirs_exist_ok=True,
+        )
         _shutil.copy2(request_path, workspace / "request.json")
         result_path = workspace / "result.json"
         # The bundle argv is the FULL command the transport originally ran
@@ -894,7 +902,22 @@ def _cmd_replay(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
             return 1
-        output_path = workspace / response.video.path
+        output_path = None
+        if verb == "support":
+            # A support replay produces a SupportReport, not a video; the
+            # persisted artifact is the result JSON itself.
+            if result_path.is_file():
+                output_path = result_path
+        else:
+            video_path = getattr(response, "video", None)
+            if video_path is not None:
+                output_path = workspace / video_path.path
+        if output_path is None or not output_path.is_file():
+            print(
+                f"replay: {renderer_id!r} produced no replayable output for verb {verb!r}",
+                file=sys.stderr,
+            )
+            return 1
         output_name = output_path.name
         # Persist the replayed output + sidecar beside the bundle so the
         # caller can inspect the reproduced artifact after the temporary

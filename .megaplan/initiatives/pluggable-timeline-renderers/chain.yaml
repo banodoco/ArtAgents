@@ -1,0 +1,39 @@
+base_branch: main
+
+anchors:
+  north_star: NORTHSTAR.md
+
+milestones:
+  - label: m1-renderer-kernel
+    idea: .megaplan/initiatives/pluggable-timeline-renderers/briefs/m1-renderer-kernel.md
+    profile: partnered-4
+    vendor: codex
+    robustness: full
+    depth: medium
+    with_prep: false
+    with_feedback: false
+    notes: "Difficulty 4/5: public pack contract, dependency inversion, import topology, and compatibility routing."
+
+  - label: m2-renderer-developer-kit
+    idea: .megaplan/initiatives/pluggable-timeline-renderers/briefs/m2-renderer-developer-kit.md
+    profile: partnered-3
+    vendor: codex
+    robustness: full
+    depth: medium
+    with_prep: false
+    with_feedback: false
+    notes: "Difficulty 3/5: SDK and CLI ergonomics over the frozen M1 contract, with measurable conformance and replay UX."
+
+on_failure:
+  abort: stop_chain
+
+on_escalate:
+  abort: stop_chain
+
+merge_policy: auto
+
+driver:
+  robustness: full
+  auto_approve: true
+  max_iterations: 60
+  poll_sleep: 8.0
