@@ -105,7 +105,7 @@ def test_inspect_scaffolded_renderer_via_pack_root(tmp_path: Path, capsys) -> No
 
 
 def test_inspect_unknown_id_fails_with_message(capsys) -> None:
-    assert renderers_cli_main(["inspect", "no.such.renderer"]) == 1
+    assert renderers_cli_main(["inspect", "no.such.renderer"]) == 2
     message = _stderr(capsys)
     assert "unknown renderer/planner/finalizer id 'no.such.renderer'" in message
     assert "renderers list" in message
@@ -127,7 +127,7 @@ def test_validate_broken_pack_fails_nonzero(tmp_path: Path, capsys) -> None:
     broken.mkdir()
     (broken / "pack.yaml").write_text("id: [unclosed\n", encoding="utf-8")
 
-    assert renderers_cli_main(["validate", str(broken)]) == 1
+    assert renderers_cli_main(["validate", str(broken)]) == 2
     captured = capsys.readouterr()
     assert "error:" in captured.err
     assert "pack.yaml" in captured.err
@@ -135,7 +135,7 @@ def test_validate_broken_pack_fails_nonzero(tmp_path: Path, capsys) -> None:
 
 
 def test_validate_missing_directory_fails(capsys) -> None:
-    assert renderers_cli_main(["validate", "/no/such/pack/dir"]) == 1
+    assert renderers_cli_main(["validate", "/no/such/pack/dir"]) == 2
     assert "not a directory or does not exist" in _stderr(capsys)
 
 
@@ -197,12 +197,12 @@ def test_smoke_default_workspace_prints_usable_paths(tmp_path: Path, capsys) -> 
 
 
 def test_smoke_unknown_id_fails_with_message(capsys) -> None:
-    assert renderers_cli_main(["smoke", "no.such.renderer"]) == 1
+    assert renderers_cli_main(["smoke", "no.such.renderer"]) == 2
     assert "unknown renderer id 'no.such.renderer'" in _stderr(capsys)
 
 
 def test_smoke_planner_id_hints_kind_mismatch(capsys) -> None:
-    assert renderers_cli_main(["smoke", "rendering.legacy_hybrid"]) == 1
+    assert renderers_cli_main(["smoke", "rendering.legacy_hybrid"]) == 2
     message = _stderr(capsys)
     assert "unknown renderer id 'rendering.legacy_hybrid'" in message
     assert "is a planner id" in message

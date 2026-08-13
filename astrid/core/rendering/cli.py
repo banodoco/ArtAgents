@@ -19,10 +19,10 @@ sub-verb:
   renderer/request/manifest digests, refusing silent backend substitution
   and bundle tampering unless drift is explicitly acknowledged.
 
-Every verb except ``replay`` accepts ``--json`` and then emits exactly ONE
-JSON object with a stable, verb-specific shape — never a universal envelope.
-``replay`` prints a stable plain-text summary.  Failures exit non-zero;
-plain-mode failures stay human-readable text.
+Every verb (including ``replay``) accepts ``--json`` and then emits exactly
+ONE JSON object with a stable, verb-specific shape — never a universal
+envelope.  Failures exit non-zero (expected errors 2, degraded bugs 1,
+interruption 130); plain-mode failures stay human-readable text.
 """
 
 from __future__ import annotations
@@ -38,8 +38,12 @@ from astrid.core.contracts.errors import AstridError
 
 from .scaffold import SCAFFOLD_FILES, create_renderer_scaffold
 
-#: Exit code for domain failures (unknown ids, invalid packs, ...).
-_EXIT_DOMAIN = 1
+#: Exit code for expected/domain failures (unknown ids, invalid packs,
+#: drift refusals, missing dirs, ...).  Frozen contract: expected errors 2,
+#: degraded bugs 1, interruption 130.
+_EXIT_DOMAIN = 2
+_EXIT_BUG = 1
+_EXIT_INTERRUPT = 130
 
 _SMOKE_BACKEND = "astrid.core"
 _SMOKE_RECOVERY = (
@@ -249,6 +253,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Proceed when the pinned manifest/request digest drifted from the "
         "currently registered backend (explicit drift acknowledgement).",
     )
+    replay_parser.add_argument(
+        "--keep-workdir",
+        action="store_true",
+        help="Keep the disposable replay workspace instead of removing it.",
+    )
+    replay_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit one JSON object on stdout instead of plain text.",
+    )
     replay_parser.set_defaults(handler=_cmd_replay)
     return parser
 
@@ -373,6 +387,32 @@ def _resolve_inspect_candidate(
     return None
 
 
+def _resolve_inspect_evidence(
+    renderers: Any,
+    planners: Any,
+    finalizers: Any,
+    kind: str,
+    capability_id: str,
+) -> dict[str, Any] | None:
+    """Fetch the alias/override/priority resolution evidence for one id.
+
+    Returns ``None`` when the registry cannot explain the id (the candidate
+    was found via discovery only); callers fall back to candidate fields.
+    """
+    registry = {
+        "renderer": renderers,
+        "planner": planners,
+        "finalizer": finalizers,
+    }.get(kind)
+    if registry is None or not hasattr(registry, "resolve_evidence"):
+        return None
+    try:
+        evidence = registry.resolve_evidence(capability_id)
+    except Exception:  # noqa: BLE001 - evidence is best-effort
+        return None
+    return evidence if isinstance(evidence, dict) else None
+
+
 def _cmd_inspect(args: argparse.Namespace) -> int:
     renderers, planners, finalizers = _load_registries(args)
     resolved = _resolve_inspect_candidate(
@@ -404,6 +444,13 @@ def _cmd_inspect(args: argparse.Namespace) -> int:
     candidate, kind = resolved
     manifest = candidate.manifest
     capabilities = manifest.capabilities or {}
+    evidence = _resolve_inspect_evidence(
+        renderers,
+        planners,
+        finalizers,
+        kind,
+        args.renderer_id,
+    )
     if args.json:
         _emit_json(
             {
@@ -422,6 +469,26 @@ def _cmd_inspect(args: argparse.Namespace) -> int:
                 "source_pack": candidate.pack_id,
                 "source_kind": candidate.source_kind,
                 "manifest_path": str(candidate.manifest_path),
+                "precedence": (
+                    evidence.get("priority_index")
+                    if evidence is not None
+                    else candidate.priority_index
+                ),
+                "active_revision": candidate.eligibility.active_revision,
+                "alias_chain": (
+                    list(evidence.get("alias_chain") or [])
+                    if evidence is not None
+                    else []
+                ),
+                "override": (
+                    evidence.get("override") if evidence is not None else None
+                ),
+                "conflicts": [],
+                "overrides": (
+                    [evidence.get("override")]
+                    if evidence is not None and evidence.get("override")
+                    else []
+                ),
                 "eligibility": (
                     "eligible" if candidate.execution_eligible else "ineligible"
                 ),
@@ -454,6 +521,20 @@ def _cmd_inspect(args: argparse.Namespace) -> int:
     print(f"source_pack: {candidate.pack_id}")
     print(f"source_kind: {candidate.source_kind}")
     print(f"manifest_path: {candidate.manifest_path}")
+    print(
+        "precedence: "
+        + str(
+            evidence.get("priority_index")
+            if evidence is not None
+            else candidate.priority_index
+        )
+    )
+    active_revision = candidate.eligibility.active_revision
+    print(f"active_revision: {active_revision if active_revision is not None else 'none'}")
+    alias_chain = list(evidence.get("alias_chain") or []) if evidence is not None else []
+    print(f"aliases: {', '.join(alias_chain) if alias_chain else 'none'}")
+    override = evidence.get("override") if evidence is not None else None
+    print(f"override: {override if override is not None else 'none'}")
     print(f"eligibility: {'eligible' if candidate.execution_eligible else 'ineligible'}")
     print(f"eligibility_reason: {candidate.eligibility.reason}")
     print(f"trust_method: {candidate.eligibility.trust_method}")
@@ -708,7 +789,7 @@ def _cmd_support(args: argparse.Namespace) -> int:
         except RendererException as exc:
             if args.json:
                 _emit_json(exc.to_dict(), stream=sys.stderr)
-                return _EXIT_DOMAIN
+                return _EXIT_BUG
             raise
 
     if args.json:
@@ -737,11 +818,13 @@ def _handle_interrupt(exc: BaseException, *, json_mode: bool) -> int:
     payload = error.to_dict() if hasattr(error, "to_dict") else dict(error)
     if json_mode:
         _emit_json(payload, stream=sys.stderr)
-        return _EXIT_DOMAIN
     kind = payload.get("kind", "interrupted")
     message = payload.get("message", "renderer command was interrupted")
-    print(f"renderer command was interrupted ({kind}): {message}", file=sys.stderr)
-    return _EXIT_DOMAIN
+    if not json_mode:
+        print(f"renderer command was interrupted ({kind}): {message}", file=sys.stderr)
+    # Frozen contract: interruption cleans up then exits 130 (SIGINT
+    # convention), never 1.
+    return _EXIT_INTERRUPT
 
 
 # ---------------------------------------------------------------------------
@@ -774,7 +857,7 @@ def _cmd_replay(args: argparse.Namespace) -> int:
     request_path = bundle_dir / "request.json"
     if not bundle_path.is_file():
         print(f"replay: no replay bundle found at {bundle_dir}", file=sys.stderr)
-        return 1
+        return _EXIT_DOMAIN
     bundle = _json.loads(bundle_path.read_text(encoding="utf-8"))
     renderer_id = bundle.get("renderer_id")
     pinned_manifest_digest = bundle.get("manifest_digest")
@@ -795,7 +878,7 @@ def _cmd_replay(args: argparse.Namespace) -> int:
             f"replay: pinned renderer {renderer_id!r} is not resolvable: {exc}",
             file=sys.stderr,
         )
-        return 1
+        return _EXIT_DOMAIN
 
     manifest_match = candidate.manifest_digest == pinned_manifest_digest
     drift_kind = "none"
@@ -827,14 +910,14 @@ def _cmd_replay(args: argparse.Namespace) -> int:
                 "pass --acknowledge-drift to proceed"
             )
         print(message, file=sys.stderr)
-        return 1
+        return _EXIT_DOMAIN
 
     if not request_path.is_file():
         print(
             f"replay: bundle is missing the localized request.json: {bundle_dir}",
             file=sys.stderr,
         )
-        return 1
+        return _EXIT_DOMAIN
     current_request = json.loads(request_path.read_text(encoding="utf-8"))
     current_request_digest = compute_request_digest(current_request)
     request_verified = current_request_digest == pinned_request_digest
@@ -848,7 +931,7 @@ def _cmd_replay(args: argparse.Namespace) -> int:
             "refusing to replay a tampered bundle",
             file=sys.stderr,
         )
-        return 1
+        return _EXIT_DOMAIN
 
     with _TemporaryDirectory(prefix="astrid-renderers-replay-") as tmp_text:
         workspace = Path(tmp_text)
@@ -901,7 +984,7 @@ def _cmd_replay(args: argparse.Namespace) -> int:
                 f"replay: recovery: {exc.error.recovery_command}",
                 file=sys.stderr,
             )
-            return 1
+            return _EXIT_BUG
         output_path = None
         if verb == "support":
             # A support replay produces a SupportReport, not a video; the
@@ -917,7 +1000,7 @@ def _cmd_replay(args: argparse.Namespace) -> int:
                 f"replay: {renderer_id!r} produced no replayable output for verb {verb!r}",
                 file=sys.stderr,
             )
-            return 1
+            return _EXIT_BUG
         output_name = output_path.name
         # Persist the replayed output + sidecar beside the bundle so the
         # caller can inspect the reproduced artifact after the temporary
@@ -930,7 +1013,28 @@ def _cmd_replay(args: argparse.Namespace) -> int:
         if sidecar_source.is_file():
             _shutil.copy2(sidecar_source, replay_dir / f"{output_name}.provenance.json")
         output_resolved = persisted.resolve()
+        if getattr(args, "keep_workdir", False):
+            kept = bundle_dir.parent / f"{bundle_dir.name}.replay-workdir"
+            if kept.exists():
+                _shutil.rmtree(kept)
+            _shutil.copytree(workspace, kept, dirs_exist_ok=True)
 
+    if getattr(args, "json", False):
+        _emit_json(
+            {
+                "verb": "replay",
+                "renderer_id": renderer_id,
+                "manifest_digest": candidate.manifest_digest,
+                "manifest_digest_match": manifest_match,
+                "request_digest": pinned_request_digest,
+                "request_digest_verified": request_verified,
+                "replay_verb": verb,
+                "drift": "acknowledged" if drift_kind != "none" else "none",
+                "output": str(output_resolved),
+            },
+            stream=sys.stdout,
+        )
+        return 0
     print(f"replay: {renderer_id}")
     print(f"manifest_digest: {candidate.manifest_digest}")
     print(f"manifest_digest_match: {'true' if manifest_match else 'false'}")

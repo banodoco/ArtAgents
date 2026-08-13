@@ -746,3 +746,29 @@ def test_no_bundle_on_success_unless_explicitly_requested(tmp_path: Path) -> Non
     assert bundle["metadata"]["error_message"] is None
     assert bundle["metadata"]["verb"] == "render"
     assert bundle["renderer_id"] == "rendering.ffmpeg"
+
+
+def test_absolute_host_paths_including_tmp_are_redacted(tmp_path: Path) -> None:
+    """Any absolute host path (repo, home, /tmp, /var/folders, other volume)
+    must be redacted in the persisted bundle metadata — never left verbatim."""
+    from astrid.core.rendering.replay import ReplayBundle, write_replay_bundle
+
+    bundle = ReplayBundle(
+        renderer_id="rendering.ffmpeg",
+        request_digest="0" * 64,
+        manifest_digest="0" * 64,
+        argv=["python3", "run.py", "render", "--request", "/tmp/req.json", "--result", "/tmp/res.json"],
+        metadata={
+            "host_hint": "/private/var/folders/ab/cdefghijklmnopqrstuvwxyz/T/tmpXXXX/input.mp4",
+            "tmp_hint": "/tmp/scratch/theme.json",
+            "plain": "not a path",
+        },
+    )
+    dest = write_replay_bundle(bundle, tmp_path / "bundle")
+    payload = json.loads((dest / "bundle.json").read_text(encoding="utf-8"))
+    metadata = payload["metadata"]
+    assert "private/var" not in metadata["host_hint"]
+    assert "tmpXXXX" not in metadata["host_hint"]
+    assert "/tmp" not in metadata["tmp_hint"]
+    assert metadata["plain"] == "not a path"
+    assert "host-path" in metadata["host_hint"]

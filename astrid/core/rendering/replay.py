@@ -348,7 +348,9 @@ def _rewrite_path_string(
         return _HOST_PATH_PLACEHOLDER
     if _under_root(resolved, REPO_ROOT) or _under_root(resolved, Path.home()):
         return _HOST_PATH_PLACEHOLDER
-    return value
+    # Any other absolute path is a host path (repo, home, /tmp, /var/folders,
+    # a different volume, ...): the bundle must never leak it.
+    return _HOST_PATH_PLACEHOLDER
 
 
 def _safe_resolve(value: str) -> str:
@@ -447,10 +449,29 @@ def _localized_argv(argv: Sequence[str]) -> list[str]:
 
 
 def _redact_metadata(value: Any, *, secret_values: Sequence[str]) -> Any:
-    """Redact credentials/URLs from metadata, recursing into containers."""
+    """Redact credentials/URLs AND absolute host paths from metadata."""
 
     if isinstance(value, str):
-        return _redact_log(value, secret_values=secret_values)
+        redacted = _redact_log(value, secret_values=secret_values)
+        # Absolute host paths (repo, home, /tmp, /var/folders, any volume)
+        # must never leak into a bundle; replace the path component with the
+        # placeholder while keeping the surrounding text intact.
+        try:
+            import re as _re
+
+            # Absolute host paths (repo, home, /tmp, /var/folders, any
+            # volume) must never leak into a bundle.  Match a path that
+            # starts at a word/slash boundary; URLs (https://…) keep their
+            # scheme+host because the leading "/" of "//" is preceded by
+            # ":", which we exclude, and the second "/" continues the same
+            # match that the boundary rule skips.
+            return _re.sub(
+                r"(?<![A-Za-z0-9+.-:/])/[\w./~-]+(?:/[\w./~-]+)*",
+                _HOST_PATH_PLACEHOLDER,
+                redacted,
+            )
+        except Exception:  # noqa: BLE001 - defensive
+            return redacted
     if isinstance(value, list):
         return [
             _redact_metadata(item, secret_values=secret_values) for item in value

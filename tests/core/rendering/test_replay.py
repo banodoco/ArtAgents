@@ -214,7 +214,7 @@ def test_manifest_digest_drift_refused_without_acknowledgement(
         renderers_cli_main(
             ["replay", str(bundle_dir), "--pack-root", str(extra_root)]
         )
-        == 1
+        == 2
     )
     message = _stderr(capsys)
     assert "manifest digest drift" in message
@@ -284,7 +284,7 @@ def test_corrected_bundle_input_requires_acknowledgement_then_succeeds(
         renderers_cli_main(
             ["replay", str(bundle_dir), "--pack-root", str(extra_root)]
         )
-        == 1
+        == 2
     )
     message = _stderr(capsys)
     assert "localized input drift" in message
@@ -331,7 +331,7 @@ def test_request_digest_mismatch_is_refused_as_tampering(
         renderers_cli_main(
             ["replay", str(bundle_dir), "--pack-root", str(extra_root)]
         )
-        == 1
+        == 2
     )
     message = _stderr(capsys)
     assert "request digest mismatch" in message
@@ -349,7 +349,7 @@ def test_request_digest_mismatch_is_refused_as_tampering(
                 "--acknowledge-drift",
             ]
         )
-        == 1
+        == 2
     )
     assert "request digest mismatch" in _stderr(capsys)
 
@@ -372,7 +372,7 @@ def test_unknown_pinned_renderer_is_refused(tmp_path: Path, capsys) -> None:
         renderers_cli_main(
             ["replay", str(bundle_dir), "--pack-root", str(extra_root)]
         )
-        == 1
+        == 2
     )
     message = _stderr(capsys)
     assert "not resolvable" in message
@@ -380,7 +380,7 @@ def test_unknown_pinned_renderer_is_refused(tmp_path: Path, capsys) -> None:
 
 
 def test_replay_missing_bundle_dir_fails(capsys) -> None:
-    assert renderers_cli_main(["replay", "/no/such/bundle"]) == 1
+    assert renderers_cli_main(["replay", "/no/such/bundle"]) == 2
     assert "no replay bundle found" in _stderr(capsys)
 
 
