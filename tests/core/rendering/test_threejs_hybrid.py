@@ -2,11 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
-import shutil
-import subprocess
-import sys
-from contextlib import contextmanager
 from fractions import Fraction
 from pathlib import Path
 
@@ -18,6 +13,7 @@ from astrid.core.rendering.registry import load_default_registries
 from astrid.core.rendering.transport import CommandTransport
 from astrid.packs.rendering.planners.threejs_hybrid import run as hybrid
 from astrid.sdk.rendering import render
+from tests.packs.rendering._helpers import _execution_env, _frame_md5, _probe, _source_video
 
 MIXED_CANVAS = {"width": 320, "height": 180, "fps": 24}
 
@@ -558,46 +554,6 @@ def test_registered_protocol_rejects_empty_timeline(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _source_video(tmp_path: Path) -> Path:
-    """A tiny real silent h264+aac source clip used by the media clip."""
-    source_path = tmp_path / "source.mp4"
-    subprocess.run(
-        [
-            "ffmpeg",
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-y",
-            "-f",
-            "lavfi",
-            "-i",
-            "color=size=320x180:rate=24",
-            "-f",
-            "lavfi",
-            "-i",
-            "anullsrc=channel_layout=stereo:sample_rate=48000",
-            "-frames:v",
-            "24",
-            "-shortest",
-            "-c:v",
-            "libx264",
-            "-profile:v",
-            "main",
-            "-pix_fmt",
-            "yuv420p",
-            "-c:a",
-            "aac",
-            "-video_track_timescale",
-            "12288",
-            str(source_path),
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    return source_path
-
-
 def _mixed_timeline(tmp_path: Path) -> Path:
     """text [0, 0.5s) -> Three, silent media [0.5, 1.0s) -> Remotion."""
     path = tmp_path / "mixed-timeline.json"
@@ -670,71 +626,6 @@ def _require_mixed_environment() -> None:
         )
 
 
-@contextmanager
-def _execution_env():
-    """Transport-spawned children must resolve the same node and the same
-    python3 (with the banodoco timeline schema) as the test process."""
-    node_bin = (
-        str(Path(shutil.which("node")).resolve().parent)
-        if shutil.which("node")
-        else ""
-    )
-    python_bin = str(Path(sys.executable).resolve().parent)
-    old_path = os.environ.get("PATH", "")
-    os.environ["PATH"] = ":".join(
-        [d for d in (python_bin, node_bin) if d] + [old_path]
-    )
-    try:
-        yield
-    finally:
-        os.environ["PATH"] = old_path
-
-
-def _probe(path: Path) -> dict:
-    out = subprocess.run(
-        [
-            "ffprobe",
-            "-v",
-            "error",
-            "-count_frames",
-            "-show_entries",
-            "stream=codec_name,codec_type,width,height,pix_fmt,time_base,avg_frame_rate,nb_read_frames",
-            "-show_entries",
-            "format=duration",
-            "-of",
-            "json",
-            str(path),
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout
-    return json.loads(out)
-
-
-def _frame_md5(path: Path, frame: int) -> str:
-    out = subprocess.run(
-        [
-            "ffmpeg",
-            "-v",
-            "error",
-            "-i",
-            str(path),
-            "-vf",
-            f"select=eq(n\\,{frame})",
-            "-frames:v",
-            "1",
-            "-f",
-            "md5",
-            "-",
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout
-    return out.strip().split("=")[-1].strip()
-
-
 @pytest.mark.timeout(900)
 def test_threejs_hybrid_mixed_real_render(tmp_path: Path) -> None:
     """The whole pipeline end-to-end: one mixed timeline where the hybrid
@@ -748,7 +639,7 @@ def test_threejs_hybrid_mixed_real_render(tmp_path: Path) -> None:
     retained legacy_v1 engine on the Three fragment, rendered audio).
     """
     _require_mixed_environment()
-    source = _source_video(tmp_path)
+    source = _source_video(tmp_path, audio=True)
     assets = _real_assets(tmp_path, source)
     timeline = _mixed_timeline(tmp_path)
     backend_config = {"rendering.remotion": {}, "rendering.threejs": {}}

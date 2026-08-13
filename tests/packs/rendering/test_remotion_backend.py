@@ -2,13 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
-from contextlib import contextmanager
 from pathlib import Path
 from unittest import mock
 
@@ -32,6 +30,7 @@ from astrid.core.rendering.transport import CommandTransport
 from astrid.packs.rendering.backends.remotion import run as remotion
 from astrid.packs.rendering.executors.render import run as facade
 from astrid.sdk.rendering import render
+from tests.packs.rendering._helpers import _execution_env
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -963,26 +962,6 @@ def _require_remotion_environment() -> None:
         )
 
 
-@contextmanager
-def _remotion_execution_env():
-    """Transport-spawned children must resolve the same node and the same
-    python3 (with the banodoco timeline schema) as the test process."""
-    node_bin = (
-        str(Path(shutil.which("node")).resolve().parent)
-        if shutil.which("node")
-        else ""
-    )
-    python_bin = str(Path(sys.executable).resolve().parent)
-    old_path = os.environ.get("PATH", "")
-    os.environ["PATH"] = ":".join(
-        [d for d in (python_bin, node_bin) if d] + [old_path]
-    )
-    try:
-        yield
-    finally:
-        os.environ["PATH"] = old_path
-
-
 def _remotion_text_timeline(tmp_path: Path) -> Path:
     path = tmp_path / "remotion-angle.timeline.json"
     timeline.save_timeline(
@@ -1022,7 +1001,7 @@ def test_remotion_real_render_under_global_angle_keeps_identity(
     _require_remotion_environment()
     timeline_path = _remotion_text_timeline(tmp_path)
     output = tmp_path / "remotion-angle.mp4"
-    with _remotion_execution_env():
+    with _execution_env():
         published = render(
             timeline_path=timeline_path,
             assets_registry_path=None,

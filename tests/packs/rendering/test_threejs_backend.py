@@ -26,11 +26,8 @@ from __future__ import annotations
 import hashlib
 import json
 import multiprocessing
-import os
 import shutil
 import subprocess
-import sys
-from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -47,6 +44,7 @@ from astrid.packs.rendering.backends.remotion import lock as remotion_lock
 from astrid.packs.rendering.backends.remotion import run as remotion_backend
 from astrid.packs.rendering.backends.threejs import run as threejs
 from astrid.sdk.rendering import render, support
+from tests.packs.rendering._helpers import _execution_env, _frame_md5, _probe
 
 ROOT = Path(__file__).resolve().parents[3]
 RENDERING_PACK = ROOT / "astrid" / "packs" / "rendering"
@@ -87,31 +85,6 @@ def _require_threejs_environment() -> None:
             "Three.js backend real render skipped: missing optional "
             "dependencies: " + ", ".join(missing)
         )
-
-
-@contextmanager
-def _child_path_on_front(*bin_dirs: str):
-    """Prepend *bin_dirs* to PATH so transport-spawned children resolve the
-    same node (Node 24) and the same python3 (pyenv 3.11.11 with the
-    banodoco timeline schema) as the test process."""
-    old_path = os.environ.get("PATH", "")
-    os.environ["PATH"] = ":".join((*bin_dirs, old_path))
-    try:
-        yield
-    finally:
-        os.environ["PATH"] = old_path
-
-
-@contextmanager
-def _execution_env():
-    node_bin = (
-        str(Path(shutil.which("node")).resolve().parent)
-        if shutil.which("node")
-        else ""
-    )
-    python_bin = str(Path(sys.executable).resolve().parent)
-    with _child_path_on_front(*[d for d in (python_bin, node_bin) if d]):
-        yield
 
 
 @pytest.fixture(autouse=True)
@@ -561,50 +534,6 @@ def test_threejs_support_preflight_is_honest_when_environment_missing(
 # ---------------------------------------------------------------------------
 # Real renders through the public service
 # ---------------------------------------------------------------------------
-
-
-def _probe(path: Path) -> dict:
-    out = subprocess.run(
-        [
-            "ffprobe",
-            "-v",
-            "error",
-            "-show_entries",
-            "stream=codec_name,codec_type,width,height,pix_fmt,avg_frame_rate,duration",
-            "-show_entries",
-            "format=duration",
-            "-of",
-            "json",
-            str(path),
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout
-    return json.loads(out)
-
-
-def _frame_md5(path: Path, frame: int) -> str:
-    out = subprocess.run(
-        [
-            "ffmpeg",
-            "-v",
-            "error",
-            "-i",
-            str(path),
-            "-vf",
-            f"select=eq(n\\,{frame})",
-            "-frames:v",
-            "1",
-            "-f",
-            "md5",
-            "-",
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout
-    return out.strip().split("=")[-1].strip()
 
 
 @pytest.mark.timeout(600)

@@ -29,6 +29,7 @@ import pytest
 
 from astrid.core.rendering.registry import load_default_registries
 from astrid.sdk.rendering import render, support
+from tests.packs.rendering._helpers import _source_video
 
 ROOT = Path(__file__).resolve().parents[3]
 PACK_ROOT = ROOT / "tests" / "fixtures" / "renderer_packs"
@@ -465,39 +466,6 @@ def _combined_timeline(tmp_path: Path) -> Path:
     path = tmp_path / "combined-timeline.json"
     path.write_text(json.dumps(payload), encoding="utf-8")
     return path
-
-
-def _source_video(tmp_path: Path) -> Path:
-    """A tiny real h264 source clip used by the media clips above."""
-    source_path = tmp_path / "source.mp4"
-    subprocess.run(
-        [
-            "ffmpeg",
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-y",
-            "-f",
-            "lavfi",
-            "-i",
-            "color=size=320x180:rate=24",
-            "-frames:v",
-            "24",
-            "-c:v",
-            "libx264",
-            "-profile:v",
-            "main",
-            "-pix_fmt",
-            "yuv420p",
-            "-video_track_timescale",
-            "12288",
-            str(source_path),
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    return source_path
 
 
 @pytest.mark.timeout(900)
