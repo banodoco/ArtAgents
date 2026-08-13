@@ -10,6 +10,7 @@ const localPackElementsDir = path.resolve(astridDir, 'astrid/packs/local/element
 
 Config.setVideoImageFormat('jpeg');
 Config.setOverwriteOutput(true);
+Config.setChromiumOpenGlRenderer('angle');
 Config.overrideWebpackConfig((currentConfiguration) => ({
   ...currentConfiguration,
   resolve: {

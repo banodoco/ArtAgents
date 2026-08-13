@@ -1,0 +1,43 @@
+# Megado Batch 1 — Executor report (DeepSeek V4 Flash)
+
+Commit: `megado: batch 1 — pin three.js deps, prove WebGL`
+
+## T1.1/T1.2 — Deps + lockfile
+Added exact deps to `remotion/package.json`: `@remotion/three@4.0.455`, `@react-three/fiber@8.18.0`, `three@0.185.1`, `@types/three@0.185.4` (no carets). Existing remotion/react/react-dom versions untouched; no R3F v9.
+`npm install` (Node v24.17.0): 225 packages, `package-lock.json` lockfileVersion 3 committed.
+**Types conflict (as T1.2 anticipated):** R3F 8 + @types/react@19.2.14 → `Property 'mesh' does not exist on type 'JSX.IntrinsicElements'` (global JSX namespace removed in React 19 types). Aligned devDeps to React 18 majors: `@types/react@^18.3.12`, `@types/react-dom@^18.3.1` → installed 18.3.31 / 18.3.7; re-installed; typecheck then clean.
+
+## T1.3 — ANGLE
+`remotion/remotion.config.ts`: `Config.setChromiumOpenGlRenderer('angle');` (no raw flags, no system Chrome).
+
+## T1.4 — Pinned SwiftShader mapping (`dist/open-browser.js` `getOpenGlRenderer`, 4.0.455)
+```
+if (renderer === 'swangle')        return ['--use-gl=angle', '--use-angle=swiftshader'];
+if (renderer === 'angle-egl')      return ['--use-gl=angle', '--use-angle=gl-egl'];
+if (renderer === 'vulkan')         return ['--use-angle=vulkan', ...];
+if (renderer === null)             return [];
+return [`--use-gl=${renderer}`];   // 'angle' → ['--use-gl=angle']
+```
+Full evidence: `.oracle/findings/remotion-swiftshader.txt` (rg `--no-ignore`, since node_modules is gitignored).
+
+## T1.5 — WebGL proof
+`remotion/src/ThreeProof.tsx`: `<ThreeCanvas>` (160x90) with red rotating cube driven by `useCurrentFrame`; registered as `ThreeProof` in Root.tsx; both deleted after proof.
+Blockers hit: (1) Remotion's internal `extract-zip` left the Chrome Headless Shell partially extracted (only ABOUT/LICENSE) → every run re-downloaded 93.5 MB then died silently with exit 0. Fixed by manually unzipping `chrome-headless-shell-mac-arm64.zip` into `node_modules/.remotion/chrome-headless-shell/mac-arm64/` + writing `VERSION`=149.0.7790.0 (the pinned `TESTED_VERSION`). (2) None — `angle` worked first try, no `--gl` fallback needed.
+Command: `npx remotion still src/index.ts ThreeProof --frame=0 /tmp/three-proof-frame0.png` → Rendered 1/1, exit 0.
+Pillow (PYENV_VERSION=3.11.11): size (160, 90); distinct_colors 4 (top: 12464× (0,0,0), 1690× (186,0,8) red cube); `PILLOW_ASSERT_OK: 160x90 non-uniform WebGL frame` → `.oracle/findings/webgl-proof.txt`.
+
+## T1.6 — Typecheck + bundle
+`npm run typecheck` exit 0; `npm run bundle` exit 0 (build/ gitignored).
+
+## T1.7 — Cleanliness
+`git diff --name-only b1c5f53c..HEAD -- astrid/core/` → empty. `git status --short` (below) shows only intended files; node_modules/build ignored.
+
+```
+M remotion/package-lock.json
+M remotion/package.json
+M remotion/remotion.config.ts
+?? .oracle/briefs/batch-1.md
+?? .oracle/findings/batch-1-exec.txt
+?? .oracle/findings/remotion-swiftshader.txt
+?? .oracle/findings/webgl-proof.txt
+```
