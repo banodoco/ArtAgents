@@ -29,7 +29,7 @@
       "sha256": "68c1b21af85e4c8492a59a7d73f2c1d8c8188bad94c9d90ed2a69bb82472caf1"
     }
   ],
-  "assets_registry": "/private/var/folders/_w/b3tthv192m77c760dbyzvk200000gn/T/astrid-smoke-r2uq7j4_/assets.json",
+  "assets_registry": "/private/var/folders/_w/b3tthv192m77c760dbyzvk200000gn/T/astrid-smoke-hxtl_zyj/assets.json",
   "attachments": {},
   "audio_ownership": "rendered",
   "backend_fragments": {
@@ -75,7 +75,7 @@
   "project_dir": null,
   "registry_hash": null,
   "registry_state": {},
-  "request_digest": "0664f8bf1b5c7e54b7814024200bc027e1f148e55637045e4dae3a3cbc4f9a65",
+  "request_digest": "c0a782f3a2af3b6034390ca7f340682fe3b7526d41fa79182fa1b917f11d43c7",
   "requested_policy": "wave.wave",
   "resolved_effect_ids": [],
   "resolved_effects": [],
@@ -127,9 +127,9 @@
         "override": null,
         "source_pack": {
           "id": "wave",
-          "manifest_path": "/private/var/folders/_w/b3tthv192m77c760dbyzvk200000gn/T/pytest-of-peteromalley/pytest-2688/test_plain_mode_smoke_is_human0/wave/renderer.yaml",
+          "manifest_path": "/private/var/folders/_w/b3tthv192m77c760dbyzvk200000gn/T/pytest-of-peteromalley/pytest-2691/test_plain_mode_smoke_is_human0/wave/renderer.yaml",
           "priority_index": 20,
-          "root": "/private/var/folders/_w/b3tthv192m77c760dbyzvk200000gn/T/pytest-of-peteromalley/pytest-2688/test_plain_mode_smoke_is_human0/wave",
+          "root": "/private/var/folders/_w/b3tthv192m77c760dbyzvk200000gn/T/pytest-of-peteromalley/pytest-2691/test_plain_mode_smoke_is_human0/wave",
           "source_kind": "extra"
         },
         "support_decision": {
@@ -176,5 +176,5 @@
   "source_pack_ids": [],
   "staged_asset_ids": [],
   "staged_asset_root": null,
-  "timeline": "/private/var/folders/_w/b3tthv192m77c760dbyzvk200000gn/T/astrid-smoke-r2uq7j4_/timeline.json"
+  "timeline": "/private/var/folders/_w/b3tthv192m77c760dbyzvk200000gn/T/astrid-smoke-hxtl_zyj/timeline.json"
 }
