@@ -14,11 +14,15 @@ sub-verb:
   :class:`~astrid.core.rendering.service.RenderService` with a smoke-tolerant
   validator and print the published output plus provenance sidecar;
 * ``support`` — resolve one backend's support report through the public SDK
-  (``astrid.sdk.rendering.support``).
+  (``astrid.sdk.rendering.support``);
+* ``replay`` — re-run a captured failure bundle with pinned
+  renderer/request/manifest digests, refusing silent backend substitution
+  and bundle tampering unless drift is explicitly acknowledged.
 
-Every verb accepts ``--json`` and then emits exactly ONE JSON object with a
-stable, verb-specific shape — never a universal envelope.  Failures exit
-non-zero; plain-mode failures stay human-readable text.
+Every verb except ``replay`` accepts ``--json`` and then emits exactly ONE
+JSON object with a stable, verb-specific shape — never a universal envelope.
+``replay`` prints a stable plain-text summary.  Failures exit non-zero;
+plain-mode failures stay human-readable text.
 """
 
 from __future__ import annotations
