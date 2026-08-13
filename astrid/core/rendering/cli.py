@@ -53,8 +53,8 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="?",
         default=None,
         help="Destination directory. Must be named exactly like the desired "
-        "pack id (lowercase [a-z0-9][a-z0-9_-]*), e.g. 'create wave acme-wave' "
-        "writes acme-wave/pack.yaml with id: acme-wave. Defaults to the "
+        "pack id (lowercase [a-z][a-z0-9_]*), e.g. 'create wave acme_wave' "
+        "writes acme_wave/pack.yaml with id: acme_wave. Defaults to the "
         "current directory (which must itself be a valid pack id).",
     )
     create_parser.add_argument(

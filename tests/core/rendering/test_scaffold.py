@@ -179,11 +179,11 @@ def test_scaffold_generated_test_passes(tmp_path: Path) -> None:
 
 
 def test_create_cli_route_writes_to_requested_directory(tmp_path: Path) -> None:
-    dest = tmp_path / "cli-wave"
+    dest = tmp_path / "cli_wave"
     assert renderers_cli_main(["create", "wave", str(dest)]) == 0
     assert _scaffold_file_names(dest) == _EXPECTED_FILES
 
-    dispatch_dest = tmp_path / "dispatch-wave"
+    dispatch_dest = tmp_path / "dispatch_wave"
     assert _dispatch_renderers(["create", "wave", str(dispatch_dest)]) == 0
     assert _scaffold_file_names(dispatch_dest) == _EXPECTED_FILES
     assert "renderers" in _TOP_LEVEL_HANDLERS

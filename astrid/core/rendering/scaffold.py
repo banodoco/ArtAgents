@@ -18,6 +18,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from astrid.core.pack._common import _PACK_ID_RE
+
 SCAFFOLD_FILES: tuple[str, ...] = (
     "pack.yaml",
     "renderer.yaml",
@@ -28,8 +30,6 @@ SCAFFOLD_FILES: tuple[str, ...] = (
 # The same qualified-id pattern the rendering wire contract enforces.
 _QUALIFIED_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*(?:\.[a-z0-9][a-z0-9_-]*)+$")
 _DEFAULT_PACK_ID = "rendering"
-
-_PACK_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 
 _PACK_YAML = """\
 schema_version: 1
@@ -213,10 +213,10 @@ def _pack_id_from_dest(dest: Path) -> str:
     if not _PACK_ID_RE.fullmatch(pack_id):
         raise ValueError(
             f"destination directory name {pack_id!r} is not a valid pack id; "
-            "pack ids must match [a-z0-9][a-z0-9_-]* and the scaffold folder "
+            "pack ids must match [a-z][a-z0-9_]* and the scaffold folder "
             "must be named exactly like the desired pack id (e.g. "
-            "'astrid renderers create wave acme-wave' writes "
-            "acme-wave/pack.yaml with id: acme-wave)"
+            "'astrid renderers create wave acme_wave' writes "
+            "acme_wave/pack.yaml with id: acme_wave)"
         )
     if pack_id == _DEFAULT_PACK_ID:
         raise ValueError(
