@@ -512,13 +512,13 @@ def _chrome(
         nav_part = cue_text
         facts_part = ""
         split_at = len(cue_text)
-        for token in (" · FOCUS CLIP ", " · SP @ "):
+        for token in (" · FOCUS CLIP ", " · SP @ ", " · RANGE "):
             idx = cue_text.find(token)
             if idx != -1:
                 split_at = min(split_at, idx)
         if split_at < len(cue_text):
             nav_part = cue_text[:split_at]
-            facts_part = cue_text[split_at:]
+            facts_part = cue_text[split_at:].lstrip(" ·")
         objects.append(
             LayoutObject(
                 scope_ref,
@@ -767,11 +767,49 @@ def _scope_cue(
                 f"{_seconds(focused_clip.frames.end_frame / model.fps)}s"
             )
 
+    # Directional context: how many clips and how much time exist BEFORE and
+    # AFTER the current page/focus window.  Lets an agent orient spatially
+    # without scanning ("is there much more after this?") — the jump/zoom
+    # companion to the NEXT token (user: "show how many images / how much
+    # time in each direction").
+    def _directional_token() -> str:
+        if scope.kind in {"timeline", "project"}:
+            return ""  # the whole timeline is on these pages; nothing outside
+        if scope.kind == "clip":
+            anchor = focused_clip_id
+        elif scope.kind in {"timestamp", "range", "shot"}:
+            anchor = focused_clip_id
+        else:
+            return ""
+        if anchor is None:
+            return ""
+        anchor_clip = next(
+            (item for item in model.clips if item.clip_id == anchor), None
+        )
+        if anchor_clip is None:
+            return ""
+        before = [
+            item for item in model.clips
+            if item.frames.end_frame <= anchor_clip.frames.start_frame
+        ]
+        after = [
+            item for item in model.clips
+            if item.frames.start_frame >= anchor_clip.frames.end_frame
+        ]
+        before_s = _seconds(anchor_clip.frames.start_frame / model.fps)
+        after_s = _seconds(
+            (model.extents.visual_frames - anchor_clip.frames.end_frame) / model.fps
+        )
+        return (
+            f" · RANGE ◀ {len(before)} clips · {before_s}s "
+            f"▶ {len(after)} clips · {after_s}s"
+        )
+
     return (
         f"FOCUS {focus or 'none'} · {parent_token} · {source_token} · "
         f"TEXT {text or 'none'} · SPEAKER {speaker}"
         f"{(' · NEXT ' + next_target) if next_target else ''}"
-        f"{clip_window_token}{sp_token}"
+        f"{clip_window_token}{sp_token}{_directional_token()}"
     )
 
 

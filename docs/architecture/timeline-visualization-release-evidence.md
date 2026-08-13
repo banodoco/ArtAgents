@@ -197,3 +197,18 @@ Golden regen: desert pixel hash `624af363…` -> `739c7251…` (bare labels
 change the pixels).  SVG identity contract updated: cards carry stable
 ids; the cue carries qualified FOCUS/PARENT refs (audio clips outside the
 cue keep their ref in ground-truth/action-index).
+
+### Directional context token (2026-08-11, user review round 3)
+
+User: "show an indicator of how many images are in each direction, or how
+much time and frames."
+
+- New `RANGE` cue token on clip/timestamp/range/shot focus pages (absent on
+  full-timeline pages): `RANGE ◀ {n} clips · {t}s ▶ {m} clips · {t}s` —
+  how many clips and how many seconds exist before (◀) and after (▶) the
+  focused clip.  Example (park24 CL16): `RANGE ◀ 15 clips · 63.3333s
+  ▶ 8 clips · 34.0000s`.  Counts derive from the model's clip intervals
+  (fully-before / fully-after the anchor's window); seconds from the
+  anchor's start/end frame positions at the timeline fps.
+- Split onto the cue's facts line with `FOCUS CLIP`/`SP @` (leading
+  separator stripped).  Reading guide documents the token.

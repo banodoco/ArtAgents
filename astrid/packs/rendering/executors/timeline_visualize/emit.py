@@ -1906,6 +1906,10 @@ FOCUS {id|none} · PARENT {id} · SOURCE {id|none} · {role|none} · {state|none
   range/shot scopes) is the focused clip's exact frame window and seconds.
   On a full-timeline page the clip rectangle may be too narrow to carry its
   own label; this token is the authoritative window.
+- `RANGE ◀ {n} clips · {t}s ▶ {m} clips · {t}s` (present on clip/timestamp/
+  range/shot scopes, absent on full-timeline pages) is the directional
+  context: how many clips and how many seconds exist BEFORE (◀) and AFTER
+  (▶) the focused clip.  Orients spatial jumps without scanning.
 - Gap/overlap markers print both boundary clip ids, e.g.
   `1fr gap TL01.CL02→TL01.CL03`, so a join is never ambiguous.
 
