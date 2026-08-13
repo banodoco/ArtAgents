@@ -114,3 +114,28 @@ tests/core/cli/test_timeline_visualize_cli.py -m "not live and not grok_iter"`
 - `92ed3ecf` BOTH VLM gates PASS with grok (focus ring anchors navigation)
 - `f1949aea` focus ring outline-only (never paint over the clip)
 - `9234247c` R25 oracle findings — grok_iter never in default CI, grok via PATH
+
+## Complex multi-step gate (park24) — 24 clips, planted mismatches
+
+The stress test the R24 gates don't cover: **scale + multi-step navigation +
+semantic mismatch detection invisible to hashes**.
+
+- **Fixture** `tests/fixtures/timeline_visualize/park24_{slice,media}`: a
+  24-clip timeline with real rendered frames (desert-plant narrative), built
+  deterministically by `planning/build_park24_slice.py`.
+- **Planted mismatches** (both hash-verified — `verified_original` — so
+  ground truth can never flag them):
+  - `TL01.CL09` shows a byte-identical copy of `TL01.CL03`'s frame (same
+    `content_sha256`, distinct registry entry) — a frame reused out of
+    narrative order.
+  - `TL01.CL16` shows the Paris poster (foreign scene) in a nature storyboard.
+- **Gate** `test_timeline_visualize_gate_park24.py` (live): a fresh agent
+  navigates root (orient: 24 clips) → zoom CL08 → NEXT-chain walk
+  CL08→CL09→CL10 → zoom CL03 → zoom CL09 (duplicate detection) → zoom CL16
+  (foreign detection), reporting exactly `TL01.CL09` + `TL01.CL16`.  Six legs
+  per journey, three fresh journeys, exact scoring.
+- **Hermetic** `test_timeline_visualize_park24_fixture.py` (default CI):
+  slice validity, 24 verified assets, mismatch hash-invisibility, 2-page root
+  render with 24 clip cards.
+
+_RESULT: recorded under `.r24-evidence/park24/` at gate execution time._
