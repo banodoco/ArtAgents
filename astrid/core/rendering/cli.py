@@ -406,11 +406,35 @@ def _resolve_inspect_evidence(
     }.get(kind)
     if registry is None or not hasattr(registry, "resolve_evidence"):
         return None
+    evidence: dict[str, Any] = {}
     try:
         evidence = registry.resolve_evidence(capability_id)
     except Exception:  # noqa: BLE001 - evidence is best-effort
-        return None
-    return evidence if isinstance(evidence, dict) else None
+        evidence = {}
+    # Conflicts: multiple static candidates registered for the same id from
+    # different sources/priorities.
+    conflicts: list[dict[str, Any]] = []
+    try:
+        candidates = registry.candidates(capability_id)
+        for candidate in candidates:
+            conflicts.append(
+                {
+                    "id": candidate.id,
+                    "source_kind": candidate.source_kind,
+                    "pack_id": candidate.pack_id,
+                    "priority_index": candidate.priority_index,
+                    "manifest_digest": candidate.manifest_digest,
+                }
+            )
+    except Exception:  # noqa: BLE001 - best-effort
+        conflicts = []
+    if len(conflicts) > 1:
+        evidence["conflicts"] = conflicts
+    else:
+        evidence["conflicts"] = []
+    if evidence:
+        return evidence
+    return None
 
 
 def _cmd_inspect(args: argparse.Namespace) -> int:
@@ -483,7 +507,11 @@ def _cmd_inspect(args: argparse.Namespace) -> int:
                 "override": (
                     evidence.get("override") if evidence is not None else None
                 ),
-                "conflicts": [],
+                "conflicts": (
+                    list(evidence.get("conflicts") or [])
+                    if evidence is not None
+                    else []
+                ),
                 "overrides": (
                     [evidence.get("override")]
                     if evidence is not None and evidence.get("override")
@@ -535,6 +563,21 @@ def _cmd_inspect(args: argparse.Namespace) -> int:
     print(f"aliases: {', '.join(alias_chain) if alias_chain else 'none'}")
     override = evidence.get("override") if evidence is not None else None
     print(f"override: {override if override is not None else 'none'}")
+    conflicts = (
+        list(evidence.get("conflicts") or []) if evidence is not None else []
+    )
+    if conflicts:
+        print(
+            "conflicts: "
+            + ", ".join(
+                f"{item.get('id')} ({item.get('source_kind')}, priority "
+                f"{item.get('priority_index')})"
+                for item in conflicts
+            )
+        )
+    else:
+        print("conflicts: none")
+    print(f"overrides: {override if override is not None else 'none'}")
     print(f"eligibility: {'eligible' if candidate.execution_eligible else 'ineligible'}")
     print(f"eligibility_reason: {candidate.eligibility.reason}")
     print(f"trust_method: {candidate.eligibility.trust_method}")
@@ -789,8 +832,19 @@ def _cmd_support(args: argparse.Namespace) -> int:
         except RendererException as exc:
             if args.json:
                 _emit_json(exc.to_dict(), stream=sys.stderr)
-                return _EXIT_BUG
-            raise
+            else:
+                print(f"support: {args.renderer_id}", file=sys.stderr)
+                print(f"supported: false", file=sys.stderr)
+                print(f"error: {exc.error.message}", file=sys.stderr)
+                if exc.error.recovery_command:
+                    print(
+                        f"recovery: {exc.error.recovery_command}",
+                        file=sys.stderr,
+                    )
+            # Expected errors (unknown id, unsupported request) exit 2;
+            # only genuine internal/degraded bugs exit 1.
+            kind = getattr(exc.error, "kind", None)
+            return _EXIT_BUG if kind == "internal" else _EXIT_DOMAIN
 
     if args.json:
         _emit_json(report.to_dict(), stream=sys.stdout)

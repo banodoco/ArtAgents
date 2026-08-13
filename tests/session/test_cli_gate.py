@@ -44,6 +44,8 @@ EXPECTED_SPRINT1_UNBOUND_ALLOWLIST = (
     ("sessions", "ls"),
     ("sessions", "takeover"),
     ("packs",),
+    ("renderers",),
+    ("replay",),
     ("test",),
     ("doctor",),
     ("serve",),
