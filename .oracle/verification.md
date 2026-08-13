@@ -1,7 +1,7 @@
 # Epic Verification — Pluggable Timeline Renderers (M1 + M2 freeze)
 
 Worktree: `/Users/peteromalley/Documents/reigh-workspace/Astrid-oracle`.
-Recorded: 2026-08-13 (Batch 7 rework, final). HEAD: `C8-batch7-done` (see `git rev-parse C8-batch7-done`) tag (see `git rev-parse C8-batch7-done`).
+Recorded: 2026-08-13 (Batch 7 rework, final). HEAD: the `C8-batch7-done` tag (see `git rev-parse C8-batch7-done`).
 
 ## Complete matrix (rework-HEAD evidence)
 
