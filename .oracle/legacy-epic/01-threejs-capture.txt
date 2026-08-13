@@ -1,0 +1,13 @@
+**Ranked findings** (verified via files/registry; no terminal in this session, so runtime claims come from hyperframes 0.7.107's bundled code/docs + npm metadata):
+
+**1. Headless Chromium + SwiftShader is the only mature three.js path.** hyperframes@0.7.107 (`~/.npm/_npx/bce20a07dfe361c9`) proves the recipe: `dist/docs/rendering.md` — `--browser-gpu/--no-browser-gpu` "probe WebGL…fall back to software (SwiftShader)"; `dist/cli.js` has SwiftShader/llvmpipe detection (line 64006) and a `HeadlessExperimental.beginFrame` probe (64170+) for **deterministic capture**; `dist/docker/Dockerfile.render` installs via `npx --yes @puppeteer/browsers install chrome-headless-shell@stable` — "BeginFrame-based deterministic capture". Installed @puppeteer/browsers 3.2.0 maps `MAC_ARM→mac-arm64` (lib/browser-data/chrome-headless-shell.js:18-19). ✅ mac arm64 supported.
+
+**2. preserveDrawingBuffer:true is required** for `toDataURL/toBlob` (canonical: Chromium issue 40242905, gpuweb#2743, Cesium docs). In-page capture beats `page.screenshot` (compositor-timed, nondeterministic); hyperframes chose BeginFrame.
+
+**3. No chrome on this machine** — no `~/.cache/puppeteer`, `~/Library/Caches/{puppeteer,playwright,remotion}`, remotion 4.0.455 only lockfile (`remotion/package-lock.json`), hyperframes cache has fonts only. One-time `npx @puppeteer/browsers install chrome-headless-shell@stable` needed; node v24.17.0 (nvm) satisfies puppeteer-core ≥22.12.
+
+**4. Node offscreen GL: rejected.** gl@8.1.6 (Oct 2024; no arm64 prebuilds, known precision issues three.js#7085); glfw@0.0.0 (2012, dead); canvas@3.2.3 = Cairo 2D only; offscreen-canvas@0.1.1 = browser-worker polyfill; Node 24 has no WebGL global.
+
+**5. ffmpeg 7.1.1_3 installed but NOT on PATH** (`/opt/homebrew/Cellar/ffmpeg/7.1.1_3`, no `/opt/homebrew/bin/ffmpeg` link). PNG frames > raw RGBA pipe (resync-safe). Astrid convention in-code: `-video_track_timescale 12288` @24fps (`test_hyperframes_backend.py:492`).
+
+**6. VP9 alpha feasible**: libvpx 1.15.2 present (INSTALL_RECEIPT.json:540); `-c:v libvpx-vp9 -pix_fmt yuva420p`; hyperframes `--format webm` = "transparent WebM".

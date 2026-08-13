@@ -1,0 +1,19 @@
+## Findings (ranked)
+
+1. **HTTP server root = per-invocation `mkdtemp` staging dir**, not a common parent. `AssetMaterializer.__init__` makes `tempfile.mkdtemp(prefix="astrid-render-assets-")` (assets.py:200-205); `InvocationAssetServer` serves exactly that dir (assets.py:648). `_default_allowed_root` (assets.py:82-106) is only the *staging* containment boundary (project root / registry parent / `project.json` ancestor), used to reject out-of-root sources (assets.py:242-249), not the HTTP root.
+2. **Range + traversal guards are solid.** `RangeHTTPRequestHandler._resolved_file` resolves and requires `_contained(resolved, root)` + `is_file()` (assets.py:508-519); `_range_bounds` handles suffix/overflow/`end<start` → 416 (assets.py:521-543); `copyfile` honors `_range_limit` (assets.py:588-605). Staging uses O_NOFOLLOW fd-walk + inode-identity verify (assets.py:259-346).
+3. **Port: bind 127.0.0.1:0** (assets.py:616-617,649) — OS-assigned, read post-bind (`server_address[1]`, assets.py:627-631). No race. Server thread is daemon; `close()` does shutdown→server_close→join (assets.py:685-713), wired via ExitStack (remotion/run.py:650-663); `start()` failure closes socket (assets.py:659-663). Materializer failure self-cleans (assets.py:211-215).
+4. **Global serialization**: all renders + registry gen share one non-recursive cross-process flock at `remotion/.astrid-registry.lock` (lock.py:33,120-137; run.py:613; gen_effect_registry.py:553-559). So fixed props path `.remotion-props.json` (run.py:643) and `public/astrid-effects/{hash}` (run.py:419,649) can't race in practice; props/`public` cleanup in finally (run.py:724-726).
+5. **Registry writes are non-atomic**: plain `write_text` (gen_effect_registry.py:355-361), symlink swap for `_active_theme` (299-317), state file plain write (run.py:266-271). Crash mid-write leaves truncated `.generated.ts`; hash-state check (run.py:293-299) heals next run, but the shim family is written *after* failures are reported (gen_effect_registry.py:539-549).
+6. **Subprocess**: `npx remotion render` — no timeout, no process group/`start_new_session` (run.py:692-710); env sanitized (subprocess_env.py:97-135, secret-filtered). **Zero-exit-no-output is a failure**: empty/missing video raises (run.py:717-718).
+
+## Tests
+- `test_render_remotion_registry.py` — registry-skip when hash matches; effect-asset staging/cleanup; `__astridAssets` clip injection; provenance fields; hybrid segments; empty-registry temp fallback.
+- `test_url_pipeline_smoke.py` — URL kept as `url` (no `file`), sha256 recorded.
+- `test_asset_cache.py` — Range fetching, content-drift error, cache reuse, metadata probe, eviction/lock-skip.
+
+## Verified / Unknowns / Risks / Approach
+- **Verified**: containment guards; ephemeral port; exit-stack teardown; lock-serialized fixed paths; non-atomic registry writes; no subprocess timeout/process group.
+- **Unknowns**: whether kill -9 leaks props/staged `public` dirs; lock fairness across projects (one global lock = head-of-line blocking).
+- **Risks**: server leak only if daemon thread outlives close; bind race none; registry truncation window; `.remotion-props.json` fixed name if lock bypassed; silent success impossible (717-718 covers it).
+- **Suggested**: atomic registry writes (temp+rename), add subprocess timeout/process-group kill, include theme in stage hash, per-project locks.

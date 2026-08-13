@@ -1,0 +1,29 @@
+# Hybrid planner internals — findings
+
+**1. Planner lives in the pack, not the facade.** `executors/render/run.py` is a thin adapter: it only maps legacy kwargs to `rendering.legacy_hybrid`/`rendering.remotion` config (run.py:77–108) and calls `RenderService`. The hybrid logic is `planners/legacy_hybrid/run.py`.
+
+**2. Complexity triggers** (`run.py:188–207`): effects, transition, opacity≠1.0, audio fadeIn/fadeOut params, or visual clip on a non-base track (base = max-coverage visual track, `:141–156`).
+
+**3. Windows** (`_complex_frame_windows`, `:159–264`): exact `Fraction` seconds × fps; boundaries `floor(start*fps)`/`ceil(end*fps)` (`:244,253`); 0.25 s handle (`_HANDLE_SECONDS`, `:62`); transition default 8 frames (`:220`); overlapping windows merged (`:258–263`). `_segment_kinds` (`:267–288`) carves simple/complex runs between windows.
+
+**4. Canvas/FPS** (`profile.py:110–129,240–291`): mirrors `Root.tsx:36–46` — override `visual.canvas` wins, else merged-theme `visual.canvas`, else 1920×1080@30. `plan()` uses this profile (`legacy_hybrid/run.py:684–691`), so hybrid planning and Remotion share the merged-theme canvas. Divergence risk: `_hybrid_segments` (`:309–323`) resolves fps without assets/theme overrides.
+
+**5. Constraints** (`:349–364`): speed≠1.0 rejected; overlapping audio rejected; per-segment timelines re-slice source windows (`_window_timeline`, `:483–526`).
+
+**6. Concat** (`finalizers/ffmpeg/run.py:879–995`, alias `:995`): probes every segment (`:901`), stream-copies compatible inputs, normalizes only on profile differences (`:736–765`); concat demuxer `-c copy` (`:684–691`). No hardcoded 30 fps — target is the canonical profile: H.264/yuv420p, AAC **48 kHz** stereo (`profile.py:283–289`), libx264 `-preset veryfast -crf 20` (`:588`).
+
+## Verified facts
+- Canonical canvas = Remotion `getCanvas` precedence, exact.
+- Windows are integer frames from exact rational arithmetic; handles 0.25 s.
+- `_concat_segments` = probed, conditional-normalize, stream-copy; not re-encode-always.
+
+## Unknowns
+- `theme.py` has no `load_theme` at top level — it's `theme/_schema.py:199` (JSON-schema validated); `resolve_timeline_theme` deep-merges overrides (`banodoco_composer.py:299–318`). Whether CLI `--theme` path and timeline slug ever diverge in practice.
+
+## Risks
+- Complexity rules are Remotion-engine-specific (fade params, non-base track) — not generic.
+- Speed≠1/audio-overlap hard-fail couples planner to legacy constraints.
+- `_window_timeline` re-derives clip math; port must keep Fraction-exact frame math.
+
+## Suggested approach
+Extract `_complex_frame_windows`/`_segment_kinds` into a renderer-agnostic planner fed by `resolve_render_profile`, keeping `_hybrid_segments` as a compatibility shim; encode handle/transition defaults as config, not constants.

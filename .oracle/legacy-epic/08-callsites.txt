@@ -1,0 +1,44 @@
+# Runtime callsites of `rendering.render` — inventory
+
+## Inventory table
+
+| file:line | what it does | canonical / bypass |
+|---|---|---|
+| `astrid/packs/rendering/executors/render/run.py:7,27,177` | The facade itself; `guard_canonical_entrypoint('rendering.render')`, `DEFAULT_OUTPUT_NAME="hype.mp4"`, `render()` → `RenderService`; `--output-name` | target module |
+| `astrid/packs/rendering/executors/render/executor.yaml:23,171,179,187` | Manifest: `runtime_module` points at the module; outputs `{out}/{output_name}` + `{output_name}.provenance.json` | canonical (manifest) |
+| `astrid/core/rendering/attached.py:44,131` | `invoke_attached_render()` — **the single runtime seam**: bound → `ExecutorRunRequest(executor_id="rendering.render")` via override-aware registry; unbound → `RenderService.render`; sets `inputs["output_name"]` | canonical |
+| `astrid/core/rendering/registry.py:43` | `_FACADE_EXECUTOR_ID = "rendering.render"` constant | canonical |
+| `hype/steps.py:143-162` | `build_hype_render_cmd`: `python -m astrid executors run rendering.render --input timeline=… --input assets_registry=…` (dry-run/plan argv) | canonical |
+| `hype/steps.py:165-198,419-425` | `invoke_hype_render` → `invoke_attached_render`; render `Step` sentinels `hype.mp4`+provenance | canonical |
+| `iteration_video/run.py:153,459` | `planned_commands` **declarative** tuple `("rendering.render", …)` (informational only) | canonical (string) |
+| `iteration_video/run.py:158-176` | `run_builtin_render` → `invoke_attached_render(…, brief_out/"iteration.mp4", engine=renderer)` — output named directly, **no rename** | canonical |
+| `iteration_video/plan_template.py:103-128` | `_build_render_cmd`: canonical CLI + `--input output_name=iteration.mp4 --input engine=…` | canonical |
+| `cut/run.py:370-389,378` | `--render` → `invoke_attached_render(…, hype.mp4, engine=args.renderer)`; line 367 is `save_registry` — **no `..render.run` import** | canonical |
+| `cut/resume.py:167-181` | `invoke_attached_render(…, hype.mp4, engine=args.renderer, step_id="cut-resume-render")` — **no `..render.run` import** | canonical |
+| `human_notes/run.py:256-264` | `invoke_attached_render(…, hype.mp4)`; `_step_argv` only for arrange/cut/refine — **no `_step_argv("render.py")`** | canonical |
+| `tools/render_and_check.py:39-46,51` | Subprocess canonical CLI; then black-frame gate; hardcodes expected `hype.mp4`; `--bypass` skips validation | canonical CLI, tool bypass |
+| `html_canvas_effect/run.py:53,57,167`; `arnold/host/shapes.py:1428,1431,2120`; `gateway/help.py:125`; `executor/cli.py:204` | String references to the id (`final_renderer`, `command`, `child_executors`, docs) | declarative/string |
+| Tests: `test_caller_overrides.py:17,100`; `test_render_remotion_registry.py:14,182,219`; `test_render_facade.py:16,34`; `test_legacy_renderer_characterization.py:21-23,165`; `test_audio_reactive_colour.py:12-13,143`; `test_output_name.py:13`; `test_service.py:1445`; `test_ffmpeg_backend.py:26-27`; `test_remotion_backend.py:30` | Import `…executors.render.run`; patch `render_facade.render` / `_default_service` | tests (in-process) |
+| Tests: `test_cut_render_migration.py:26,87,118-127`; `test_iteration_video.py:49,144,179`; `test_human_notes_render.py:49` | Monkeypatch `invoke_attached_render`/`run_builtin_render`; assert cut sources lack `..render.run`/`executors.render` and commands are canonical CLI | tests (seam) |
+| Tests: `test_production_callers.py:198-208`; `test_cut_render_migration.py:124-125` | Grep enforcement: production must not import/spawn `executors.render.run` or backends outside allowlist | guardrail |
+| `render_executor` | **Zero references** — old alias fully removed (only a test fn name, `test_cli_gate.py:582`) | gone |
+
+## Verified facts
+- Every production render invocation goes through `invoke_attached_render` (in-process) or `python -m astrid executors run rendering.render` (subprocess/plan argv). No production module imports or `-m`-spawns the concrete module; `test_production_callers.py` enforces this.
+- The alleged `from ..render.run` (cut/run.py:367, cut/resume.py:163) **does not exist** — it was a real historical bug, already migrated; `test_cut_render_migration.py:118-127` guards regression. Same for `executor_argv("render.py")` in hype/steps.py and `_step_argv("render.py")` in human_notes/run.py — both now canonical.
+- iteration_video does **not** rename hype.mp4→iteration.mp4: it passes `output_name=iteration.mp4` into the facade; the service derives the sidecar as `{output}.provenance.json` (service.py:357, executor.yaml:187), so provenance follows the name — no stale output field. Note `_previous_render_outputs_for_timeline` (render/run.py:150) only cleans siblings when the name is `hype.mp4`.
+- `cut --renderer`: declared **not** in executor.yaml but in `cut/run.py:123-129` — `add_choice_arg(parser, "--renderer", values=("remotion",), default="remotion", help="Deprecated render selector; forwarded to rendering.render as its engine selector.")`; accepts only `"remotion"`; forwarded `engine=args.renderer` (cut/run.py:378) → attached `_one_selector` → `inputs["engine"]` → facade `--engine`. iteration's `--renderer` (run.py:404-407, 425-429) is an unconstrained string, same forwarding.
+- `executor_argv`/`_step_argv` (argv.py:10-45): qualified ids via `registry.get`, bare names via unique `metadata.pipeline_step`, returns `metadata.runtime_module` → `[python, "-m", module]`. **Deliberately uncached** — `load_default_registry` rebuilds each call and reads `OverrideStore` fresh; the "global caching claim" is false for resolution (runner.py's `lru_cache`s cache only module imports, not resolution).
+
+## Unknowns
+- Whether the provenance sidecar's internal schema records a hardcoded `output`/`video` filename that could disagree with a non-default `output_name` (assembled via `assemble_provenance_v2`, not inspected field-by-field).
+- Whether the Arnold `shapes.py` references are executed elsewhere in-process (data-only here).
+
+## Risks for migration
+- Stringly-typed id spread (planned_commands tuples, arnold shapes, html_canvas_effect metadata, docs) must all move together if `rendering.render` is renamed — only attached.py/registry.py use the constant.
+- Test patches of `render_facade.render` / `_default_service` pin facade internals, coupling refactors to tests.
+- `tools/render_and_check.py` bypasses the attached seam and hardcodes `hype.mp4` (with a `--bypass` escape hatch).
+- `_previous_render_outputs_for_timeline` behavior diverges for non-`hype.mp4` outputs.
+
+## Suggested approach
+Keep `invoke_attached_render` as the sole runtime seam; centralize the executor id in one constant (`_FACADE_EXECUTOR_ID`) and replace all string references; declare `--renderer` choices in the executor manifest; steer tests toward monkeypatching `invoke_attached_render`; extend the production-callers grep to cover `rendering.render` spawn strings (already partially done at test_iteration_video.py:179).

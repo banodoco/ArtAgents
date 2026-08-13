@@ -1,0 +1,13 @@
+## Verified findings (ranked by relevance)
+
+**1. Timeline schema / three.js text** — Clip fields (`id,at,track,clipType,hold,asset,from,to,speed,volume,opacity,params,text,transition,effects`) banned/allowed: `banodoco_schema.py:354-363`; clipTypes `:108`. Text lives in `text` (content/fontSize/color/align/bold: `text-card.timeline.json:26-32`) or `params` (anchor/offsetX/offsetY/textShadow/maxWidth/weight: `hype.timeline.json:62-66,96-101`; `SKILL.md:781`). Hyperframes converts exactly this set to CSS (`hyperframes/render.py:69-80,347-372`) → a CanvasTexture from an offscreen 2D canvas is a faithful port. Remotion reads canvas from `theme_overrides.visual.canvas` (`remotion/src/Root.tsx:36-46`); the component is external `@banodoco/timeline-composition` (`remotion/run.py:107-117`).
+
+**2. Planner conventions** — legacy_hybrid: handle ¼s (`run.py:62`); `total_frames=ceil(dur*fps)` (`:168,270`); media end=at+(to-from)/speed, text end=at+hold (`:94-115`); complex iff effects/transition/non-base visual track/opacity≠1/audio fadeIn|fadeOut (`:188-207`); floor/ceil frame windows merged (`:244-263`); cursor tiling (`:277-287`). Hyperframes: `round(at*fps)` (`plan.py:144-146`), occupancy merge (`:158-174`), gap→remotion (`:185`), handle capped at next window (`:190-195`), tail to total_frames (`:196-197`).
+
+**3. Finalizer** — `ffmpeg/run.py:1090-1184`: audio_ownership mandatory (`:1101-1107`); frame-count authority via probe.frames vs window (`:1121-1158`); strict probe profile (`:1160-1173`); normalize all segments to plan's canonical profile (`:1240-1257`). Canonical: `resolve_render_profile` (`profile.py:240-291`), time_base=doubled fps≥10000 (`:179-190`; 30→[1,15360]). Accepts rendered|passthrough|none (`contracts.py:364-369`).
+
+**4. Audit** — scans only remotion/ffmpeg/legacy_hybrid/ffmpeg-finalizer (`test_generic_code_audit.py:41`); "threejs" is invisible; exact both-direction set equality (`:119-125`). Qualified ids resolve generically (`service.py:160-173`) → zero core edits; register in `pack.yaml:42-50`. Breakage: `test_freeze.py:387-396` (exact sets), `test_builtin_registration.py:171` (planners equality). Safe: `test_package_data.py:77-82`, `test_cli.py:30-35`.
+
+**5. Test patterns** — env-skip (`test_hyperframes_backend.py:40-68`), discovery (`:120-132`), honest support (`:135-256`), real render + ffprobe h264/size + sidecar (`:259-305`), combined exact windows (`:583-591`). CLI discovery-driven (`cli.py:281-283`; `registry.py:497-586`).
+
+**6. Sidecar** — `provenance.py:442-471` (engine, routing.resolved_backend/resolved_policy, segments_v2[].renderer.id+window, backend_fragments, audio_ownership); asserts `test_provenance.py:127-209`.
