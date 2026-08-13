@@ -16,7 +16,7 @@ from uuid import uuid4 as _uuid4
 
 from astrid.core.contracts.errors import AstridError
 from astrid.core.timeline._edit_helpers import TimelineEditError
-from astrid.core.timeline._shared import _expected_version_kwargs, _timeline_actor_from_session
+from astrid.core.timeline._shared import _expected_version_kwargs
 from astrid.core.timeline.events.schema import ClipPosition
 
 # ---------------------------------------------------------------------------
@@ -126,23 +126,25 @@ def _edit_success(domain: str, event, backend_name: str) -> str:
 
 def cmd_clip_add(args: argparse.Namespace) -> int:
     from .timeline import (  # noqa: PLC0415
-        _require_session,
         _resolve_clip_backend_name,
+        _resolve_edit_context,
         clip_edits,
     )
 
-    session = _require_session(slug=getattr(args, "project", None))
-    backend_name = _resolve_clip_backend_name(session.project, args.slug)
+    actor, project_slug = _resolve_edit_context(getattr(args, "project", None), args)
+    backend_name = _resolve_clip_backend_name(project_slug, args.slug)
     pos = _parse_clip_position(args)
     extra = _expected_version_kwargs(args)
     event = clip_edits.add_clip(
-        session.project,
+        project_slug,
         args.slug,
         kind=args.kind,
         asset_id=args.asset,
         track_id=getattr(args, "track_id", None),
         position=pos,
-        actor=_timeline_actor_from_session(session),
+        actor=actor,
+        start=getattr(args, "start", 0.0),
+        duration=getattr(args, "duration", None),
         **extra,
     )
     print(_clip_success(event, backend_name))
@@ -151,19 +153,19 @@ def cmd_clip_add(args: argparse.Namespace) -> int:
 
 def cmd_clip_remove(args: argparse.Namespace) -> int:
     from .timeline import (  # noqa: PLC0415
-        _require_session,
         _resolve_clip_backend_name,
+        _resolve_edit_context,
         clip_edits,
     )
 
-    session = _require_session(slug=getattr(args, "project", None))
-    backend_name = _resolve_clip_backend_name(session.project, args.slug)
+    actor, project_slug = _resolve_edit_context(getattr(args, "project", None), args)
+    backend_name = _resolve_clip_backend_name(project_slug, args.slug)
     extra = _expected_version_kwargs(args)
     event = clip_edits.remove_clip(
-        session.project,
+        project_slug,
         args.slug,
         clip_id=args.clip_id,
-        actor=_timeline_actor_from_session(session),
+        actor=actor,
         **extra,
     )
     print(_clip_success(event, backend_name))
@@ -172,21 +174,21 @@ def cmd_clip_remove(args: argparse.Namespace) -> int:
 
 def cmd_clip_move(args: argparse.Namespace) -> int:
     from .timeline import (  # noqa: PLC0415
-        _require_session,
         _resolve_clip_backend_name,
+        _resolve_edit_context,
         clip_edits,
     )
 
-    session = _require_session(slug=getattr(args, "project", None))
-    backend_name = _resolve_clip_backend_name(session.project, args.slug)
+    actor, project_slug = _resolve_edit_context(getattr(args, "project", None), args)
+    backend_name = _resolve_clip_backend_name(project_slug, args.slug)
     pos = _parse_move_position(args.to_position)
     extra = _expected_version_kwargs(args)
     event = clip_edits.move_clip(
-        session.project,
+        project_slug,
         args.slug,
         clip_id=args.clip_id,
         position=pos,
-        actor=_timeline_actor_from_session(session),
+        actor=actor,
         **extra,
     )
     print(_clip_success(event, backend_name))
@@ -195,20 +197,20 @@ def cmd_clip_move(args: argparse.Namespace) -> int:
 
 def cmd_clip_retrack(args: argparse.Namespace) -> int:
     from .timeline import (  # noqa: PLC0415
-        _require_session,
         _resolve_clip_backend_name,
+        _resolve_edit_context,
         clip_edits,
     )
 
-    session = _require_session(slug=getattr(args, "project", None))
-    backend_name = _resolve_clip_backend_name(session.project, args.slug)
+    actor, project_slug = _resolve_edit_context(getattr(args, "project", None), args)
+    backend_name = _resolve_clip_backend_name(project_slug, args.slug)
     extra = _expected_version_kwargs(args)
     event = clip_edits.retrack_clip(
-        session.project,
+        project_slug,
         args.slug,
         clip_id=args.clip_id,
         track_id=args.track_id,
-        actor=_timeline_actor_from_session(session),
+        actor=actor,
         **extra,
     )
     print(_clip_success(event, backend_name))
@@ -217,21 +219,21 @@ def cmd_clip_retrack(args: argparse.Namespace) -> int:
 
 def cmd_clip_retime(args: argparse.Namespace) -> int:
     from .timeline import (  # noqa: PLC0415
-        _require_session,
         _resolve_clip_backend_name,
+        _resolve_edit_context,
         clip_edits,
     )
 
-    session = _require_session(slug=getattr(args, "project", None))
-    backend_name = _resolve_clip_backend_name(session.project, args.slug)
+    actor, project_slug = _resolve_edit_context(getattr(args, "project", None), args)
+    backend_name = _resolve_clip_backend_name(project_slug, args.slug)
     extra = _expected_version_kwargs(args)
     event = clip_edits.retime_clip(
-        session.project,
+        project_slug,
         args.slug,
         clip_id=args.clip_id,
         start=args.start,
         duration=args.duration,
-        actor=_timeline_actor_from_session(session),
+        actor=actor,
         **extra,
     )
     print(_clip_success(event, backend_name))
@@ -240,20 +242,20 @@ def cmd_clip_retime(args: argparse.Namespace) -> int:
 
 def cmd_clip_swap(args: argparse.Namespace) -> int:
     from .timeline import (  # noqa: PLC0415
-        _require_session,
         _resolve_clip_backend_name,
+        _resolve_edit_context,
         clip_edits,
     )
 
-    session = _require_session(slug=getattr(args, "project", None))
-    backend_name = _resolve_clip_backend_name(session.project, args.slug)
+    actor, project_slug = _resolve_edit_context(getattr(args, "project", None), args)
+    backend_name = _resolve_clip_backend_name(project_slug, args.slug)
     extra = _expected_version_kwargs(args)
     event = clip_edits.swap_clips(
-        session.project,
+        project_slug,
         args.slug,
         clip_a_id=args.clip_a,
         clip_b_id=args.clip_b,
-        actor=_timeline_actor_from_session(session),
+        actor=actor,
         **extra,
     )
     print(_clip_success(event, backend_name))
@@ -262,20 +264,20 @@ def cmd_clip_swap(args: argparse.Namespace) -> int:
 
 def cmd_clip_replace(args: argparse.Namespace) -> int:
     from .timeline import (  # noqa: PLC0415
-        _require_session,
         _resolve_clip_backend_name,
+        _resolve_edit_context,
         clip_edits,
     )
 
-    session = _require_session(slug=getattr(args, "project", None))
-    backend_name = _resolve_clip_backend_name(session.project, args.slug)
+    actor, project_slug = _resolve_edit_context(getattr(args, "project", None), args)
+    backend_name = _resolve_clip_backend_name(project_slug, args.slug)
     extra = _expected_version_kwargs(args)
     event = clip_edits.replace_clip(
-        session.project,
+        project_slug,
         args.slug,
         clip_id=args.clip_id,
         with_asset_id=args.with_asset_id,
-        actor=_timeline_actor_from_session(session),
+        actor=actor,
         **extra,
     )
     print(_clip_success(event, backend_name))
@@ -284,20 +286,20 @@ def cmd_clip_replace(args: argparse.Namespace) -> int:
 
 def cmd_clip_set_text(args: argparse.Namespace) -> int:
     from .timeline import (  # noqa: PLC0415
-        _require_session,
         _resolve_clip_backend_name,
+        _resolve_edit_context,
         clip_edits,
     )
 
-    session = _require_session(slug=getattr(args, "project", None))
-    backend_name = _resolve_clip_backend_name(session.project, args.slug)
+    actor, project_slug = _resolve_edit_context(getattr(args, "project", None), args)
+    backend_name = _resolve_clip_backend_name(project_slug, args.slug)
     extra = _expected_version_kwargs(args)
     event = clip_edits.set_clip_text(
-        session.project,
+        project_slug,
         args.slug,
         clip_id=args.clip_id,
         text=args.text,
-        actor=_timeline_actor_from_session(session),
+        actor=actor,
         **extra,
     )
     print(_clip_success(event, backend_name))
@@ -306,20 +308,20 @@ def cmd_clip_set_text(args: argparse.Namespace) -> int:
 
 def cmd_clip_annotate(args: argparse.Namespace) -> int:
     from .timeline import (  # noqa: PLC0415
-        _require_session,
         _resolve_clip_backend_name,
+        _resolve_edit_context,
         clip_edits,
     )
 
-    session = _require_session(slug=getattr(args, "project", None))
-    backend_name = _resolve_clip_backend_name(session.project, args.slug)
+    actor, project_slug = _resolve_edit_context(getattr(args, "project", None), args)
+    backend_name = _resolve_clip_backend_name(project_slug, args.slug)
     extra = _expected_version_kwargs(args)
     event = clip_edits.annotate_clip(
-        session.project,
+        project_slug,
         args.slug,
         clip_id=args.clip_id,
         note=args.note,
-        actor=_timeline_actor_from_session(session),
+        actor=actor,
         **extra,
     )
     print(_clip_success(event, backend_name))
@@ -333,23 +335,23 @@ def cmd_clip_annotate(args: argparse.Namespace) -> int:
 
 def cmd_transition_set(args: argparse.Namespace) -> int:
     from .timeline import (  # noqa: PLC0415
-        _require_session,
         _resolve_clip_backend_name,
+        _resolve_edit_context,
         transition_edits,
     )
 
-    session = _require_session(slug=getattr(args, "project", None))
+    actor, project_slug = _resolve_edit_context(getattr(args, "project", None), args)
     left, right = _parse_between(args.between)
-    backend_name = _resolve_clip_backend_name(session.project, args.slug)
+    backend_name = _resolve_clip_backend_name(project_slug, args.slug)
     extra = _expected_version_kwargs(args)
     event = transition_edits.transition_set(
-        session.project,
+        project_slug,
         args.slug,
         left_clip_id=left,
         right_clip_id=right,
         kind=args.kind,
         duration_seconds=args.duration_seconds,
-        actor=_timeline_actor_from_session(session),
+        actor=actor,
         **extra,
     )
     print(_edit_success("transition", event, backend_name))
@@ -358,21 +360,21 @@ def cmd_transition_set(args: argparse.Namespace) -> int:
 
 def cmd_transition_remove(args: argparse.Namespace) -> int:
     from .timeline import (  # noqa: PLC0415
-        _require_session,
         _resolve_clip_backend_name,
+        _resolve_edit_context,
         transition_edits,
     )
 
-    session = _require_session(slug=getattr(args, "project", None))
+    actor, project_slug = _resolve_edit_context(getattr(args, "project", None), args)
     left, right = _parse_between(args.between)
-    backend_name = _resolve_clip_backend_name(session.project, args.slug)
+    backend_name = _resolve_clip_backend_name(project_slug, args.slug)
     extra = _expected_version_kwargs(args)
     event = transition_edits.transition_remove(
-        session.project,
+        project_slug,
         args.slug,
         left_clip_id=left,
         right_clip_id=right,
-        actor=_timeline_actor_from_session(session),
+        actor=actor,
         **extra,
     )
     print(_edit_success("transition", event, backend_name))
@@ -386,22 +388,22 @@ def cmd_transition_remove(args: argparse.Namespace) -> int:
 
 def cmd_effect_add(args: argparse.Namespace) -> int:
     from .timeline import (  # noqa: PLC0415
-        _require_session,
         _resolve_clip_backend_name,
+        _resolve_edit_context,
         effect_edits,
     )
 
-    session = _require_session(slug=getattr(args, "project", None))
+    actor, project_slug = _resolve_edit_context(getattr(args, "project", None), args)
     params = _parse_params(args.params_raw)
-    backend_name = _resolve_clip_backend_name(session.project, args.slug)
+    backend_name = _resolve_clip_backend_name(project_slug, args.slug)
     extra = _expected_version_kwargs(args)
     event = effect_edits.effect_add(
-        session.project,
+        project_slug,
         args.slug,
         clip_id=args.clip_id,
         effect_id=args.effect_id,
         params=params,
-        actor=_timeline_actor_from_session(session),
+        actor=actor,
         **extra,
     )
     print(_edit_success("effect", event, backend_name))
@@ -410,20 +412,20 @@ def cmd_effect_add(args: argparse.Namespace) -> int:
 
 def cmd_effect_remove(args: argparse.Namespace) -> int:
     from .timeline import (  # noqa: PLC0415
-        _require_session,
         _resolve_clip_backend_name,
+        _resolve_edit_context,
         effect_edits,
     )
 
-    session = _require_session(slug=getattr(args, "project", None))
-    backend_name = _resolve_clip_backend_name(session.project, args.slug)
+    actor, project_slug = _resolve_edit_context(getattr(args, "project", None), args)
+    backend_name = _resolve_clip_backend_name(project_slug, args.slug)
     extra = _expected_version_kwargs(args)
     event = effect_edits.effect_remove(
-        session.project,
+        project_slug,
         args.slug,
         clip_id=args.clip_id,
         effect_id=args.effect_id,
-        actor=_timeline_actor_from_session(session),
+        actor=actor,
         **extra,
     )
     print(_edit_success("effect", event, backend_name))
@@ -432,23 +434,23 @@ def cmd_effect_remove(args: argparse.Namespace) -> int:
 
 def cmd_effect_tune(args: argparse.Namespace) -> int:
     from .timeline import (  # noqa: PLC0415
-        _require_session,
         _resolve_clip_backend_name,
+        _resolve_edit_context,
         effect_edits,
     )
 
-    session = _require_session(slug=getattr(args, "project", None))
+    actor, project_slug = _resolve_edit_context(getattr(args, "project", None), args)
     value = _parse_json_value(args.value, flag="--value")
-    backend_name = _resolve_clip_backend_name(session.project, args.slug)
+    backend_name = _resolve_clip_backend_name(project_slug, args.slug)
     extra = _expected_version_kwargs(args)
     event = effect_edits.effect_tune(
-        session.project,
+        project_slug,
         args.slug,
         clip_id=args.clip_id,
         effect_id=args.effect_id,
         param=args.param,
         value=value,
-        actor=_timeline_actor_from_session(session),
+        actor=actor,
         **extra,
     )
     print(_edit_success("effect", event, backend_name))
@@ -462,19 +464,19 @@ def cmd_effect_tune(args: argparse.Namespace) -> int:
 
 def cmd_theme_set(args: argparse.Namespace) -> int:
     from .timeline import (  # noqa: PLC0415
-        _require_session,
         _resolve_clip_backend_name,
+        _resolve_edit_context,
         theme_edits,
     )
 
-    session = _require_session(slug=getattr(args, "project", None))
-    backend_name = _resolve_clip_backend_name(session.project, args.slug)
+    actor, project_slug = _resolve_edit_context(getattr(args, "project", None), args)
+    backend_name = _resolve_clip_backend_name(project_slug, args.slug)
     extra = _expected_version_kwargs(args)
     event = theme_edits.theme_set(
-        session.project,
+        project_slug,
         args.slug,
         theme_id=args.theme_id,
-        actor=_timeline_actor_from_session(session),
+        actor=actor,
         **extra,
     )
     print(_edit_success("theme", event, backend_name))
@@ -483,21 +485,21 @@ def cmd_theme_set(args: argparse.Namespace) -> int:
 
 def cmd_theme_override(args: argparse.Namespace) -> int:
     from .timeline import (  # noqa: PLC0415
-        _require_session,
         _resolve_clip_backend_name,
+        _resolve_edit_context,
         theme_edits,
     )
 
-    session = _require_session(slug=getattr(args, "project", None))
+    actor, project_slug = _resolve_edit_context(getattr(args, "project", None), args)
     value = _parse_json_value(args.value, flag="--value")
-    backend_name = _resolve_clip_backend_name(session.project, args.slug)
+    backend_name = _resolve_clip_backend_name(project_slug, args.slug)
     extra = _expected_version_kwargs(args)
     event = theme_edits.theme_override(
-        session.project,
+        project_slug,
         args.slug,
         override_id=args.override_id,
         value=value,
-        actor=_timeline_actor_from_session(session),
+        actor=actor,
         **extra,
     )
     print(_edit_success("theme", event, backend_name))
@@ -511,22 +513,22 @@ def cmd_theme_override(args: argparse.Namespace) -> int:
 
 def cmd_track_add(args: argparse.Namespace) -> int:
     from .timeline import (  # noqa: PLC0415
-        _require_session,
         _resolve_clip_backend_name,
+        _resolve_edit_context,
         track_edits,
     )
 
-    session = _require_session(slug=getattr(args, "project", None))
-    backend_name = _resolve_clip_backend_name(session.project, args.slug)
+    actor, project_slug = _resolve_edit_context(getattr(args, "project", None), args)
+    backend_name = _resolve_clip_backend_name(project_slug, args.slug)
     track_id = args.track_id or str(_uuid4())
     extra = _expected_version_kwargs(args)
     event = track_edits.track_add(
-        session.project,
+        project_slug,
         args.slug,
         track_id=track_id,
         kind=args.kind,
         label=args.label,
-        actor=_timeline_actor_from_session(session),
+        actor=actor,
         **extra,
     )
     print(_edit_success("track", event, backend_name))
@@ -535,19 +537,19 @@ def cmd_track_add(args: argparse.Namespace) -> int:
 
 def cmd_track_remove(args: argparse.Namespace) -> int:
     from .timeline import (  # noqa: PLC0415
-        _require_session,
         _resolve_clip_backend_name,
+        _resolve_edit_context,
         track_edits,
     )
 
-    session = _require_session(slug=getattr(args, "project", None))
-    backend_name = _resolve_clip_backend_name(session.project, args.slug)
+    actor, project_slug = _resolve_edit_context(getattr(args, "project", None), args)
+    backend_name = _resolve_clip_backend_name(project_slug, args.slug)
     extra = _expected_version_kwargs(args)
     event = track_edits.track_remove(
-        session.project,
+        project_slug,
         args.slug,
         track_id=args.track_id,
-        actor=_timeline_actor_from_session(session),
+        actor=actor,
         **extra,
     )
     print(_edit_success("track", event, backend_name))
@@ -561,20 +563,20 @@ def cmd_track_remove(args: argparse.Namespace) -> int:
 
 def cmd_audio_bind(args: argparse.Namespace) -> int:
     from .timeline import (  # noqa: PLC0415
-        _require_session,
         _resolve_clip_backend_name,
+        _resolve_edit_context,
         audio_edits,
     )
 
-    session = _require_session(slug=getattr(args, "project", None))
-    backend_name = _resolve_clip_backend_name(session.project, args.slug)
+    actor, project_slug = _resolve_edit_context(getattr(args, "project", None), args)
+    backend_name = _resolve_clip_backend_name(project_slug, args.slug)
     extra = _expected_version_kwargs(args)
     event = audio_edits.audio_bind(
-        session.project,
+        project_slug,
         args.slug,
         clip_id=args.clip_id,
         asset_id=args.asset_id,
-        actor=_timeline_actor_from_session(session),
+        actor=actor,
         **extra,
     )
     print(_edit_success("audio", event, backend_name))
@@ -583,19 +585,19 @@ def cmd_audio_bind(args: argparse.Namespace) -> int:
 
 def cmd_audio_unbind(args: argparse.Namespace) -> int:
     from .timeline import (  # noqa: PLC0415
-        _require_session,
         _resolve_clip_backend_name,
+        _resolve_edit_context,
         audio_edits,
     )
 
-    session = _require_session(slug=getattr(args, "project", None))
-    backend_name = _resolve_clip_backend_name(session.project, args.slug)
+    actor, project_slug = _resolve_edit_context(getattr(args, "project", None), args)
+    backend_name = _resolve_clip_backend_name(project_slug, args.slug)
     extra = _expected_version_kwargs(args)
     event = audio_edits.audio_unbind(
-        session.project,
+        project_slug,
         args.slug,
         clip_id=args.clip_id,
-        actor=_timeline_actor_from_session(session),
+        actor=actor,
         **extra,
     )
     print(_edit_success("audio", event, backend_name))
@@ -608,9 +610,9 @@ def cmd_audio_unbind(args: argparse.Namespace) -> int:
 
 
 def cmd_arrangement_set(args: argparse.Namespace) -> int:
-    from .timeline import _require_session  # noqa: PLC0415
+    from .timeline import _resolve_edit_context  # noqa: PLC0415
 
-    _require_session(slug=getattr(args, "project", None))
+    _resolve_edit_context(getattr(args, "project", None), args)
     raise TimelineEditError(
         "arrangement set is retired: arrangement.replaced is migration-only "
         "legacy. Use timeline.config_replaced with a raw TimelineConfig for "
@@ -619,12 +621,12 @@ def cmd_arrangement_set(args: argparse.Namespace) -> int:
 
 
 def cmd_arrangement_show(args: argparse.Namespace) -> int:
-    from .timeline import _require_session, crud  # noqa: PLC0415
+    from .timeline import _resolve_edit_context, crud  # noqa: PLC0415
 
-    session = _require_session(slug=getattr(args, "project", None))
-    arrangement = crud.get_arrangement(session.project, args.slug)
+    _actor, project_slug = _resolve_edit_context(getattr(args, "project", None), args)
+    arrangement = crud.get_arrangement(project_slug, args.slug)
     if arrangement is None:
-        data = crud.show_timeline(session.project, args.slug)
+        data = crud.show_timeline(project_slug, args.slug)
         if data is None:
             raise AstridError(
                 f"timeline '{args.slug}' not found",

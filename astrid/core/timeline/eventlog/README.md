@@ -29,7 +29,10 @@ and exclude the top-level `hash` field from the hashed form.
 
 - `assembly.jsonl`: append-only canonical JSONL event stream
 - `assembly.head.json`: cached head with `last_event_id`, `last_hash`,
-  `event_count`, and `version`
+  `event_count`, `version`, plus the incremental-append offsets `log_size`
+  and `last_event_offset` (crash-reconciled byte extent of the log and the
+  byte offset where the last complete event line begins; legacy heads
+  without them fall back to a full rebuild)
 - `assembly.identity.json`: durable identity/provenance sidecar containing the
   UUID `timeline_id`, ULID `timeline_ulid`, backend marker, provenance marker,
   and creation/import metadata.  SD1: ``source_timeline_id`` is audit provenance

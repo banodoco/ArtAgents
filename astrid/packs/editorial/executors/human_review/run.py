@@ -7,24 +7,29 @@ from astrid.core.contracts.errors import AstridError, render_astrid_error
 from astrid.core.pack.entrypoint import guard_canonical_entrypoint
 
 guard_canonical_entrypoint('editorial.human_review')
-import argparse
-import json
-import mimetypes
-import os
-import re
-import secrets
-import socket
-import sys
-import threading
-import time
-import webbrowser
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
-from typing import Any, Mapping
-from urllib.parse import parse_qs, urlparse
+import argparse  # noqa: E402
+import json  # noqa: E402
+import mimetypes  # noqa: E402
+import os  # noqa: E402
+import re  # noqa: E402
+import secrets  # noqa: E402
+import socket  # noqa: E402
+import sys  # noqa: E402
+import threading  # noqa: E402
+import time  # noqa: E402
+import webbrowser  # noqa: E402
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer  # noqa: E402
+from pathlib import Path  # noqa: E402
+from typing import Any, Mapping  # noqa: E402
+from urllib.parse import parse_qs, urlparse  # noqa: E402
 
-from astrid.core.util.log_and_swallow import log_and_swallow
-from astrid.packs.training.orchestrators.dataset_build.state import (
+from astrid.core.experiments.state import (  # noqa: E402
+    StaleStateConflict,
+    apply_experiment_review_save,
+    is_experiment_review_save,
+)
+from astrid.core.util.log_and_swallow import log_and_swallow  # noqa: E402
+from astrid.packs.training.orchestrators.dataset_build.state import (  # noqa: E402
     read_review_state,
     write_review_state,
 )
@@ -34,10 +39,6 @@ _GEMINI_SCHEMA_KEYS = {
     "nullable", "format", "minimum", "maximum", "minItems", "maxItems",
     "minLength", "maxLength", "pattern", "anyOf", "oneOf", "allOf",
 }
-
-
-class StaleStateConflict(Exception):
-    """Raised when a save was based on an older review_state version."""
 
 
 def _pick_free_port() -> int:
@@ -257,6 +258,8 @@ def make_handler_class(*, html_path: Path, data_path: Path, state_path: Path | N
                        token: str, shutdown_event: threading.Event):
     """Closure-based request handler with all config baked in."""
 
+    state_lock = threading.Lock()
+
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, fmt, *args):
             # Silence default access log; keep stderr clean
@@ -376,6 +379,19 @@ def make_handler_class(*, html_path: Path, data_path: Path, state_path: Path | N
                 except Exception as exc:  # noqa: BLE001
                     self._send_json(400, {"error": "bad_json", "detail": str(exc)})
                     return
+                if is_experiment_review_save(body):
+                    try:
+                        updated = apply_experiment_review_save(
+                            state_path, body, lock=state_lock
+                        )
+                    except StaleStateConflict as exc:
+                        self._send_json(409, {"error": "stale_state", "detail": str(exc)})
+                        return
+                    except Exception as exc:  # noqa: BLE001 - return JSON instead of killing handler thread
+                        self._send_json(400, {"error": "save_failed", "detail": str(exc)})
+                        return
+                    self._send_json(200, {"state_version": updated["state_version"], "updated_at": updated["updated_at"]})
+                    return
                 if _is_dataset_diff_save(body):
                     try:
                         updated = _apply_dataset_diff_save(state_path, body)
@@ -391,7 +407,10 @@ def make_handler_class(*, html_path: Path, data_path: Path, state_path: Path | N
                     400,
                     {
                         "error": "diff_required",
-                        "detail": "/save requires a JSON object with base_state_version and revisions",
+                        "detail": (
+                            "/save requires a JSON object with base_state_version and "
+                            "either revisions (dataset diff) or draft (experiment review)"
+                        ),
                     },
                 )
                 return

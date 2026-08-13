@@ -11,11 +11,14 @@ types, transition validation, effect-id registry checks) is Banodoco-only.
 from __future__ import annotations
 
 import copy
+import functools
 import hashlib
 import json
 from collections.abc import Mapping
 from enum import Enum
 from typing import Any, List, Literal, TypedDict, Union, cast
+
+import jsonschema
 
 try:
     from banodoco_timeline_schema import (
@@ -38,6 +41,9 @@ try:
     )
     from banodoco_timeline_schema import (
         materialize_output as _materialize_output,
+    )
+    from banodoco_timeline_schema import (
+        load_schema as _shared_load_schema,
     )
     from banodoco_timeline_schema import validate_timeline as _shared_validate_timeline
 except ImportError:  # pragma: no cover
@@ -62,6 +68,14 @@ except ImportError:  # pragma: no cover
         return {"resolution": f"{width}x{height}", "fps": fps, "file": "output.mp4"}
 
     def _shared_validate_timeline(config: Any, *, strict: bool = True) -> None:
+        raise ImportError(
+            "banodoco_timeline_schema is required for timeline validation — "
+            "pip install -e packages/timeline-schema/python. Without the "
+            "canonical JSON Schema artifact, validation is refused, not "
+            "silently degraded."
+        )
+
+    def _shared_load_schema() -> dict[str, Any]:
         raise ImportError(
             "banodoco_timeline_schema is required for timeline validation — "
             "pip install -e packages/timeline-schema/python. Without the "
@@ -440,10 +454,47 @@ def _json_safe_copy(value: Any) -> Any:
     """Return a deep JSON-compatible copy using the persisted serialization contract."""
     return json.loads(json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False))
 
+
+@functools.lru_cache(maxsize=1)
+def _shared_timeline_validator() -> jsonschema.protocols.Validator:
+    """Compile the shared TimelineConfig JSON-Schema validator once per process.
+
+    ``banodoco_timeline_schema.validate_timeline`` shells out to
+    ``jsonschema.validate``, which re-runs ``check_schema`` (a full walk of the
+    schema's ``$ref`` tree) and rebuilds the validator on every call — the
+    dominant per-save cost in the HTTP save path (6–8 full-config validations
+    per save).  Compiling once keeps the exact draft-07 semantics
+    (``validator_for`` selection + ``best_match`` error raising) with no
+    per-call schema re-walk.
+    """
+    schema = _shared_load_schema()
+    validator_cls = jsonschema.validators.validator_for(schema)
+    validator_cls.check_schema(schema)
+    return validator_cls(schema)
+
+
+def _validate_shared_timeline(config: Any) -> None:
+    """Validate against the shared JSON Schema with the compiled validator.
+
+    Mirrors ``jsonschema.validate(config, schema)`` exactly (``validator_for``
+    selection, ``check_schema`` at compile time, ``best_match`` error raising)
+    but skips the per-call ``check_schema`` + validator construction that
+    ``jsonschema.validate`` performs internally.  The shared validator is
+    strict-independent in banodoco_timeline_schema 0.0.2 (both branches of its
+    ``validate_timeline`` run the same ``jsonschema.validate``), so ``strict``
+    is intentionally not threaded through here.
+    """
+    validator = _shared_timeline_validator()
+    error = jsonschema.exceptions.best_match(validator.iter_errors(config))
+    if error is not None:
+        raise error
+
+
 def canonical_empty_timeline() -> TimelineConfig:
     """Return the canonical empty raw TimelineConfig runtime container."""
     config = {"tracks": [], "clips": []}
     return validate_timeline_config_for_container(config)
+
 
 def validate_timeline_config_for_container(config: Any) -> TimelineConfig:
     """Validate and return a JSON-safe copy of a raw TimelineConfig container.

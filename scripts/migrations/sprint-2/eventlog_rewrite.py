@@ -97,6 +97,8 @@ def rewrite_local_fs_event_log_from_index(
                 pass
 
     tail = rewritten[-1]
+    log_size = events_path.stat().st_size
+    last_line_len = len(canonical_json_bytes(tail.to_json_obj())) + 1
     write_json_atomic(
         head_path,
         {
@@ -105,6 +107,8 @@ def rewrite_local_fs_event_log_from_index(
             "last_hash": tail.hash,
             "event_count": len(rewritten),
             "version": len(rewritten),
+            "log_size": log_size,
+            "last_event_offset": max(0, log_size - last_line_len),
         },
     )
 

@@ -51,28 +51,25 @@ def test_executor_project_runs_finalize_success_error_skip_and_avoid_thread_coll
     assert not (repo / ".astrid" / "threads.json").exists()
 
 
-def test_executor_legacy_out_no_longer_writes_thread_record(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_executor_out_without_project_fails_before_writing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
     projects_root = tmp_path / "projects"
     monkeypatch.setenv("ASTRID_REPO_ROOT", str(repo))
     monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(projects_root))
+    monkeypatch.delenv("ASTRID_SESSION_ID", raising=False)
     _clear_thread_env(monkeypatch)
     create_project("default")
     create_timeline("default", "main", is_default=True)
     registry = ExecutorRegistry([_writer_executor("test.writer")])
     out = repo / "runs" / "legacy"
 
-    result = run_executor(ExecutorRunRequest("test.writer", out=out), registry)
-
-    assert result.returncode == 0
+    with pytest.raises(ExecutorRunnerError, match="project required"):
+        run_executor(ExecutorRunRequest("test.writer", out=out), registry)
     assert not (out / "run.json").exists()
     assert not (repo / ".astrid" / "threads.json").exists()
     records = [_read_json(path) for path in sorted((projects_root / "default" / "runs").glob("*/run.json"))]
-    assert [record["project_slug"] for record in records] == ["default"]
-    assert records[0]["out"] == str(out)
-    assert records[0]["metadata"]["project_was_auto_resolved"] is True
-    assert (Path(records[0]["out"]) / "env.txt").read_text(encoding="utf-8") == "1"
+    assert records == []
 
 
 def test_orchestrator_project_run_injects_hype_out_and_command_runtime_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -107,7 +104,7 @@ def test_orchestrator_project_run_injects_hype_out_and_command_runtime_env(tmp_p
     assert len(_project_records(projects_root)) == 1
 
 
-def test_orchestrator_out_only_auto_resolves_default_project_and_ledgers(
+def test_orchestrator_out_without_project_fails_before_writing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     projects_root = tmp_path / "projects"
@@ -120,18 +117,11 @@ def test_orchestrator_out_only_auto_resolves_default_project_and_ledgers(
     out_dir = tmp_path / "orch-out"
     registry = OrchestratorRegistry([_writer_orchestrator("test.orch")])
 
-    result = run_orchestrator(OrchestratorRunRequest("test.orch", out=out_dir), registry)
-
-    assert result.returncode == 0
+    with pytest.raises(Exception, match="project required"):
+        run_orchestrator(OrchestratorRunRequest("test.orch", out=out_dir), registry)
     records = [_read_json(path) for path in sorted((projects_root / "default" / "runs").glob("*/run.json"))]
-    assert len(records) == 1
-    assert records[0]["project_slug"] == "default"
-    assert records[0]["out"] == str(out_dir.resolve())
-    assert records[0]["session_id"] == "S-ORCH-OUT"
-    assert records[0]["auto_bound"] is True
-    assert records[0]["invocation"] == "cli"
-    assert records[0]["metadata"]["project_was_auto_resolved"] is True
-    assert (out_dir / "orch-env.txt").read_text(encoding="utf-8") == "1"
+    assert records == []
+    assert not (out_dir / "orch-env.txt").exists()
 
 
 def test_direct_hype_project_validation_error_and_nested_artifact_mirroring(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1034,30 +1024,25 @@ def test_explicit_project_plus_out_rejected_at_runner_level(
     )
 
 
-def test_auto_resolved_project_not_rejected_with_out(
+def test_missing_project_is_not_auto_resolved_with_out(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Auto-resolved project + out= is ledgered without tripping CLI-only rejection."""
+    """Out paths never imply or auto-select project ownership."""
     from astrid.core.execution.executor.registry import ExecutorRegistry
     from astrid.core.execution.executor.runner import ExecutorRunRequest, run_executor
 
     projects_root, _ = _setup_project_env_conformance(
         tmp_path, monkeypatch, "default"
     )
+    monkeypatch.delenv("ASTRID_SESSION_ID", raising=False)
     out_dir = tmp_path / "auto-out"
     out_dir.mkdir()
 
     registry = ExecutorRegistry([_writer_executor("test.writer")])
-    result = run_executor(
-        ExecutorRunRequest("test.writer", out=str(out_dir)), registry
-    )
-
-    assert result.returncode == 0
+    with pytest.raises(ExecutorRunnerError, match="project required"):
+        run_executor(ExecutorRunRequest("test.writer", out=str(out_dir)), registry)
     records = [_read_json(path) for path in sorted((projects_root / "default" / "runs").glob("*/run.json"))]
-    assert len(records) == 1
-    assert records[0]["project_slug"] == "default"
-    assert records[0]["out"] == str(out_dir)
-    assert records[0]["metadata"]["project_was_auto_resolved"] is True
+    assert records == []
 
 
 def _setup_project_env_conformance(

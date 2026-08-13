@@ -79,3 +79,37 @@ def _timeline_actor_from_session(session: Any) -> TimelineActor:
         id=f"{agent_id}:{session_id}",
         display=agent_id,
     )
+
+
+def _resolve_edit_context(
+    project_slug: str,
+    args: argparse.Namespace,
+) -> tuple[TimelineActor, str]:
+    """Resolve an actor + project for timeline edit handlers.
+
+    When a bound session is available, the actor derives from the session.
+    Otherwise a STABLE request-scoped actor is constructed with a
+    deterministic identity based on the project slug — no session binding
+    required.  The resolved project slug is returned alongside the actor
+    so callers do not need a second lookup.
+    """
+    session = _resolve_optional_session(args)
+    if session is not None:
+        actor = _timeline_actor_from_session(session)
+        resolved_project = _resolve_project_slug(args, session)
+        return actor, resolved_project
+
+    # Sessionless: stable request-scoped actor keyed on project slug.
+    resolved_project = project_slug or getattr(args, "project", None)
+    if not resolved_project:
+        raise AstridError(
+            "no project specified; use --project <slug> or bind a session with 'astrid attach'",
+            recovery_command="astrid attach <project>",
+        )
+
+    actor = TimelineActor(
+        type="agent",
+        id=f"agent:project:{resolved_project}",
+        display=f"project:{resolved_project}",
+    )
+    return actor, resolved_project

@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import mimetypes
+import os
 import shutil
 import subprocess
 import threading
@@ -47,14 +48,16 @@ BRIDGE_CONFIG_VERSION = 1
 # atomic across head-read → CAS append → projection → registry.json sidecar,
 # otherwise a concurrent append can land between steps and the response pairs
 # a newer version with an older registry (or an older sidecar overwrites a
-# newer one).
-_SAVE_LOCKS: dict[tuple[str, str], threading.Lock] = {}
+# newer one).  Locks are keyed by the CANONICAL timeline home path so saves
+# of the same timeline through different aliases (slug / ULID / canonical
+# UUID) serialize on ONE lock.
+_SAVE_LOCKS: dict[str, threading.Lock] = {}
 _SAVE_LOCKS_GUARD = threading.Lock()
 
 
-def _bridge_save_lock(project_slug: str, timeline: str) -> threading.Lock:
+def _bridge_save_lock(timeline_home: str | Path) -> threading.Lock:
     """Return the per-timeline lock serializing bridge save/registry writes."""
-    key = (project_slug, timeline)
+    key = os.path.abspath(os.fspath(timeline_home))
     with _SAVE_LOCKS_GUARD:
         lock = _SAVE_LOCKS.get(key)
         if lock is None:
@@ -127,6 +130,77 @@ def list_bridge_project_dirs(root: str | Path | None = None) -> list[Path]:
             continue
         result.append(child)
     return result
+
+
+def list_bridge_projects(root: str | Path | None = None) -> list[dict[str, str]]:
+    """Return ``{"slug", "name"}`` rows for every readable bridge project.
+
+    Sorted by slug. Projects whose ``project.json`` is unreadable or malformed
+    are skipped (via ``list_bridge_project_dirs``); a missing/blank ``name``
+    falls back to the slug.
+    """
+    rows: list[dict[str, str]] = []
+    for project_path in list_bridge_project_dirs(root=root):
+        payload = _read_project_payload(project_path / "project.json")
+        slug = project_path.name
+        name = payload.get("name")
+        if not isinstance(name, str) or not name:
+            name = slug
+        rows.append({"slug": slug, "name": name})
+    return sorted(rows, key=lambda row: row["slug"])
+
+
+def list_bridge_timelines(
+    project_slug: str,
+    *,
+    root: str | Path | None = None,
+) -> list[BridgeTimelineRecord]:
+    """Return bridge timeline records for a project, sorted by timeline dir name.
+
+    Identity resolution mirrors ``find_bridge_timeline``/``_load_bridge_timeline_record``:
+    ``slug``/``name`` come from ``display.json``, ``timeline_id`` comes from
+    ``assembly.identity.json`` (falling back to the ULID), and ``is_default``
+    compares ``project.json``'s ``default_timeline_id`` against the ULID and the
+    canonical timeline id. Timelines with an unreadable display payload are skipped.
+    """
+    projects_root = resolve_bridge_projects_root(root=root)
+    slug = validate_project_slug(project_slug)
+    project_payload = _read_project_payload(projects_root / slug / "project.json")
+    default_timeline_id = project_payload.get("default_timeline_id")
+    timelines_root = timelines_dir(slug, root=projects_root)
+    if not timelines_root.is_dir():
+        return []
+
+    records: list[BridgeTimelineRecord] = []
+    for child in sorted(timelines_root.iterdir(), key=lambda item: item.name):
+        if not child.is_dir():
+            continue
+        timeline_ulid = child.name
+        timeline_home = timelines_root / timeline_ulid
+        try:
+            raw_display = load_display_json_with_repair(timeline_home)
+        except Exception:
+            raw_display = None
+        timeline_slug = raw_display.get("slug") if isinstance(raw_display, dict) else None
+        timeline_name = raw_display.get("name") if isinstance(raw_display, dict) else None
+        if not isinstance(timeline_slug, str) or not isinstance(timeline_name, str):
+            continue
+        timeline_id = _load_canonical_timeline_id(timeline_home, timeline_ulid)
+        records.append(
+            BridgeTimelineRecord(
+                project_slug=slug,
+                timeline_ulid=timeline_ulid,
+                timeline_id=timeline_id,
+                slug=timeline_slug,
+                name=timeline_name,
+                is_default=(
+                    default_timeline_id == timeline_ulid
+                    or default_timeline_id == timeline_id
+                ),
+                timeline_home=timeline_home,
+            )
+        )
+    return records
 
 
 
@@ -256,103 +330,114 @@ def save_bridge_timeline(
         expected_version: int | None = None,
         root: str | Path | None = None,
 ) -> dict[str, Any] | None:
-    with _bridge_save_lock(project_slug, timeline):
+    """Append one editor-save event batch and reload bridge payload.
 
-        """Append one editor-save event batch and reload bridge payload.
-
-        When *registry* is provided the config and registry events are appended
-        in a single atomic ``append_prebuilt_events`` call so that both succeed or
-        both fail together.  *expected_version* enables CAS guards across the
-        bridge save/registry endpoints; when ``None`` the current head version is
-        used (backward-compatible default).
-        """
+    When *registry* is provided the config and registry events are appended
+    in a single atomic ``append_prebuilt_events`` call so that both succeed or
+    both fail together.  *expected_version* enables CAS guards across the
+    bridge save/registry endpoints; when ``None`` the current head version is
+    used (backward-compatible default).
+    """
+    # Resolve the canonical timeline BEFORE acquiring the lock so the lock
+    # keys by canonical timeline path (not the caller's alias).  Nothing to
+    # serialize when the timeline does not exist.
     record = find_bridge_timeline(project_slug, timeline, root=root)
     if record is None:
         return None
 
-    backend = LocalFsBackend(
-        timeline_id=record.timeline_id,
-        timeline_home=record.timeline_home,
-    )
-    head = backend.head()
-
-    # NEVER substitute a caller-supplied expected_version with a fresh read.
-    cas_version: int = head.version if expected_version is None else expected_version
-
-    # The Reigh editor sends a superset config. Persist canonical editor and
-    # extension state (tracks, clips, theme, theme_overrides, app — extension
-    # project-data — plus pinnedShotGroups / generation_defaults); explicitly
-    # derived render state such as "output" is re-materialized by Astrid and
-    # must not be persisted.
-    canonical_config = {
-        key: config[key]
-        for key in _BRIDGE_CANONICAL_TOP_KEYS
-        if key in config
-    }
-
-    if registry is not None:
-        # Combined batch: config event + registry event in one atomic append.
-        current_config = _load_bridge_config(record.timeline_home)
-        batch = construct_reigh_timeline_events(
+    with _bridge_save_lock(record.timeline_home):
+        backend = LocalFsBackend(
             timeline_id=record.timeline_id,
-            tail_hash=head.last_hash,
-            next_event_version=head.version + 1,
-            actor=REIGH_LOCAL_EDITOR_ACTOR,
-            source="editor_save",
-            config=canonical_config,
-            asset_registry=registry,
-            current_config=current_config,
-            expected_version=cas_version,
-        )
-        backend.append_prebuilt_events(
-            record.timeline_id,
-            [item.event for item in batch.events],
-            expected_version=cas_version,
-        )
-        regenerated = regenerate_projection(
-            record.timeline_id,
-            backend,
             timeline_home=record.timeline_home,
         )
-        # Persist the projected registry sidecar from the combined batch.
-        write_json_atomic(
-            record.timeline_home / "registry.json",
-            batch.projected_asset_registry or {"assets": {}},
-        )
-        return _bridge_timeline_payload(
-            record,
-            config=regenerated,
-            registry=batch.projected_asset_registry or {"assets": {}},
-            config_version=backend.head().version,
-        )
-    else:
-        # Config-only batch (backward-compatible path).
-        batch = config_to_events(
-            canonical_config,
-            None,
-            record.timeline_id,
-            head.last_hash,
-            head.version + 1,
-            REIGH_LOCAL_EDITOR_ACTOR,
-            "editor_save",
-            expected_version=cas_version,
-        )
-        backend.append_prebuilt_events(
-            record.timeline_id,
-            [item.event for item in batch.events],
-            expected_version=cas_version,
-        )
-        regenerated = regenerate_projection(
-            record.timeline_id,
-            backend,
-            timeline_home=record.timeline_home,
-        )
-        return _bridge_timeline_payload(
-            record,
-            config=regenerated,
-            registry=_load_bridge_registry_for_record(record, root=root),
-            config_version=backend.head().version,
-        )
+        # ``backend.head()`` is crash-reconciled: it adopts any orphaned
+        # tail (fsynced append whose head write did not survive) and
+        # truncates torn bytes BEFORE returning, so this head is the
+        # POST-adoption state the append will actually persist from.
+        # Constructing the batch from it keeps tail_hash/version consistent
+        # with the retry append (complete-orphan recovery, MUST-FIX 3b).
+        head = backend.head()
+
+        # NEVER substitute a caller-supplied expected_version with a fresh read.
+        cas_version: int = head.version if expected_version is None else expected_version
+
+        # The Reigh editor sends a superset config. Persist canonical editor and
+        # extension state (tracks, clips, theme, theme_overrides, app — extension
+        # project-data — plus pinnedShotGroups / generation_defaults); explicitly
+        # derived render state such as "output" is re-materialized by Astrid and
+        # must not be persisted.
+        canonical_config = {
+            key: config[key]
+            for key in _BRIDGE_CANONICAL_TOP_KEYS
+            if key in config
+        }
+
+        if registry is not None:
+            # Combined batch: config event + registry event in one atomic append.
+            # ``current_config`` is only needed for registry-only construction;
+            # passing None is safe because ``config`` is supplied.
+            batch = construct_reigh_timeline_events(
+                timeline_id=record.timeline_id,
+                tail_hash=head.last_hash,
+                next_event_version=head.version + 1,
+                actor=REIGH_LOCAL_EDITOR_ACTOR,
+                source="editor_save",
+                config=canonical_config,
+                asset_registry=registry,
+                current_config=None,
+                expected_version=cas_version,
+            )
+            backend.append_prebuilt_events(
+                record.timeline_id,
+                [item.event for item in batch.events],
+                expected_version=cas_version,
+            )
+            regenerated = regenerate_projection(
+                record.timeline_id,
+                backend,
+                timeline_home=record.timeline_home,
+                batch_events=[item.event for item in batch.events],
+            )
+            # Persist the projected registry sidecar from the combined batch.
+            write_json_atomic(
+                record.timeline_home / "registry.json",
+                batch.projected_asset_registry or {"assets": {}},
+            )
+            return _bridge_timeline_payload(
+                record,
+                config=regenerated,
+                registry=batch.projected_asset_registry or {"assets": {}},
+                config_version=backend.head().version,
+            )
+        else:
+            # Config-only batch (backward-compatible path).
+            batch = config_to_events(
+                canonical_config,
+                None,
+                record.timeline_id,
+                head.last_hash,
+                head.version + 1,
+                REIGH_LOCAL_EDITOR_ACTOR,
+                "editor_save",
+                expected_version=cas_version,
+            )
+            backend.append_prebuilt_events(
+                record.timeline_id,
+                [item.event for item in batch.events],
+                expected_version=cas_version,
+            )
+            regenerated = regenerate_projection(
+                record.timeline_id,
+                backend,
+                timeline_home=record.timeline_home,
+                batch_events=[item.event for item in batch.events],
+            )
+            return _bridge_timeline_payload(
+                record,
+                config=regenerated,
+                registry=_load_bridge_registry_for_record(record, root=root),
+                config_version=backend.head().version,
+            )
 
 
 

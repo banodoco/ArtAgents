@@ -35,7 +35,7 @@ session token query param. Open it in any browser if `--no-open` is set.
 | GET    | `/data.json`           | Read-only mount of `--data`. |
 | GET    | `/state.json?token=<t>`| Returns `--state` contents (200), or 404 if absent. |
 | GET    | `/<prefix>/...`        | Static mount per `--serve PREFIX=DIR`. Supports HTTP Range for mp4 seeking. |
-| POST   | `/save`                | Applies a diff payload to `--state`: `{base_state_version, revisions}`. Returns 200 with the new state version, 409 on stale base state, or 400 for malformed/non-diff payloads. Token required. |
+| POST   | `/save`                | Applies a state payload to `--state`. Two shapes are accepted, dispatched on the body: dataset diff `{base_state_version, revisions}` and experiment-review draft `{base_state_version, draft}`. Returns 200 with the new state version, 409 on stale base state (the client must reload `/state.json` and retry), or 400 for malformed payloads. Token required. |
 | POST   | `/submit-batch`        | Applies one decision to either visible `item_ids` or `scope: "filtered"` items selected from `--data`. Requires `base_state_version`; returns 200 with new state version, 409 on stale base state, or 400 on malformed payloads. Token required. |
 | POST   | `/submit`              | Schema-validate body, atomic write to `--out`, signal shutdown. Returns 204 on success / 400 on schema fail (state/out unchanged). Token required. |
 
@@ -59,3 +59,21 @@ For dataset review state, `/save` is diff-only. Clients must first read
 Batch decisions use `/submit-batch` with the same `base_state_version` guard.
 Send either `item_ids` for the visible page or `scope: "filtered"` with an
 optional `status` or `filter.status` to select matching items from `data.json`.
+
+## Experiment-review draft state
+
+`iteration.experiment_review_session` reuses the same server for rubric drafts.
+Its state document is a small, explicit shape kept separate from dataset
+``review_decisions``::
+
+    {"schema_version": 1, "kind": "experiment_review_state",
+     "experiment_id": "...", "state_version": 0,
+     "updated_at": "...", "draft": {}}
+
+The orchestrator initializes ``review.state.json`` and passes it via
+``--state``. The client loads ``/state.json``, autosaves the working draft to
+``/save`` as ``{base_state_version, draft}``, and on a ``409 stale_state``
+reloads ``/state.json`` and retries against the new version. The whole
+read-check-increment-write is serialized under a per-server lock so concurrent
+saves cannot interleave; a stale write is rejected and the version is never
+clobbered silently.

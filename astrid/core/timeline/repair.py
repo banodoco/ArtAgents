@@ -203,7 +203,7 @@ def repair_erasure_local_fs(
         ) from exc
 
     # Rebuild head
-    head = _rebuild_head(repaired, head_path)
+    head = _rebuild_head(repaired, head_path, events_path=events_path)
 
     # Delete compatibility projections so they are regenerated from events only
     _delete_if_exists(events_path.parent / "assembly.checkpoint.json")
@@ -252,9 +252,19 @@ def _read_all_events_from_path(events_path: Path) -> list[TimelineEvent]:
 
 
 def _rebuild_head(
-    events: list[TimelineEvent], head_path: Path
+    events: list[TimelineEvent],
+    head_path: Path,
+    *,
+    events_path: Path | None = None,
 ) -> Any:
-    """Rebuild and write the head from a list of events."""
+    """Rebuild and write the head from a list of events.
+
+    When *events_path* is supplied the head also carries the incremental
+    append offsets (``log_size`` / ``last_event_offset``) so subsequent
+    ``append_prebuilt_events`` calls skip full-log parses.  The offsets are
+    derived from the canonical line encoding used by every writer in this
+    repo; the empty-log head carries ``log_size=0`` / ``last_event_offset=0``.
+    """
     from astrid.core._shared.jsonio import write_json_atomic
 
     from .eventlog.types import EventLogHead
@@ -266,15 +276,27 @@ def _rebuild_head(
             last_hash=None,
             event_count=0,
             version=0,
+            log_size=0,
+            last_event_offset=0,
         )
     else:
+        from .events.schema import canonical_json_bytes
+
         last = events[-1]
+        log_size: int | None = None
+        last_event_offset: int | None = None
+        if events_path is not None and events_path.exists():
+            log_size = events_path.stat().st_size
+            last_line_len = len(canonical_json_bytes(last.to_json_obj())) + 1
+            last_event_offset = max(0, log_size - last_line_len)
         head = EventLogHead(
             timeline_id=last.timeline_id,
             last_event_id=last.event_id,
             last_hash=last.hash,
             event_count=len(events),
             version=len(events),
+            log_size=log_size,
+            last_event_offset=last_event_offset,
         )
     write_json_atomic(
         head_path,
@@ -284,6 +306,8 @@ def _rebuild_head(
             "last_hash": head.last_hash,
             "event_count": head.event_count,
             "version": head.version,
+            "log_size": head.log_size,
+            "last_event_offset": head.last_event_offset,
         },
     )
     return head

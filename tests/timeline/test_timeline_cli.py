@@ -610,6 +610,24 @@ def test_clip_annotate_parses_note_flag(monkeypatch: pytest.MonkeyPatch) -> None
     assert seen["args"].note == "A note"
 
 
+def test_clip_add_parses_start_and_duration(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, argparse.Namespace] = {}
+
+    def fake_add(args: argparse.Namespace) -> int:
+        seen["args"] = args
+        return 0
+
+    monkeypatch.setattr(timeline_cli, "cmd_clip_add", fake_add)
+
+    rc = timeline_cli.main(
+        ["clip", "add", "my-slug", "--kind", "video", "--asset", "a1",
+         "--track", "visual", "--start", "2.5", "--duration", "10.0"]
+    )
+    assert rc == 0
+    assert seen["args"].start == 2.5
+    assert seen["args"].duration == 10.0
+
+
 def test_clip_add_missing_required_flags_errors(capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit) as excinfo:
         timeline_cli.main(["clip", "add", "my-slug"])
@@ -629,7 +647,7 @@ def test_clip_handler_calls_clip_edits_not_direct_file_writes(
     seen: dict = {}
 
     def fake_add(project_slug, slug, *, kind, asset_id, track_id=None, position=None, actor=None,
-                 expected_version=None, txn_id=None, root=None):
+                 expected_version=None, txn_id=None, root=None, start=None, duration=None):
         seen["called"] = "add_clip"
         seen["kind"] = kind
         seen["asset_id"] = asset_id
@@ -1311,7 +1329,7 @@ def test_transition_handler_delegates_to_transition_edits(
             ),
         )
 
-    monkeypatch.setattr(timeline_cli, "_require_session", lambda slug=None: _session())
+    monkeypatch.setattr(timeline_cli, "_resolve_edit_context", lambda *a, **k: (TimelineActor(type="agent", id="tester:session-1", display="tester"), "demo"))
     monkeypatch.setattr(timeline_cli, "_resolve_clip_backend_name", lambda ps, s: "local_fs")
     monkeypatch.setattr(timeline_cli.transition_edits, "transition_set", fake_transition_set)
 
@@ -1350,7 +1368,7 @@ def test_effect_add_handler_delegates_to_effect_edits(
         )
         return _event("effect.added", EffectAddedPayload(clip_id=clip_id, effect_id=effect_id, params=params))
 
-    monkeypatch.setattr(timeline_cli, "_require_session", lambda slug=None: _session())
+    monkeypatch.setattr(timeline_cli, "_resolve_edit_context", lambda *a, **k: (TimelineActor(type="agent", id="tester:session-1", display="tester"), "demo"))
     monkeypatch.setattr(timeline_cli, "_resolve_clip_backend_name", lambda ps, s: "local_fs")
     monkeypatch.setattr(timeline_cli.effect_edits, "effect_add", fake_effect_add)
 
@@ -1373,7 +1391,7 @@ def test_theme_set_handler_delegates_to_theme_edits(
         seen.update({"project_slug": project_slug, "slug": slug, "theme_id": theme_id})
         return _event("theme.set", ThemeSetPayload(theme_id=theme_id))
 
-    monkeypatch.setattr(timeline_cli, "_require_session", lambda slug=None: _session())
+    monkeypatch.setattr(timeline_cli, "_resolve_edit_context", lambda *a, **k: (TimelineActor(type="agent", id="tester:session-1", display="tester"), "demo"))
     monkeypatch.setattr(timeline_cli, "_resolve_clip_backend_name", lambda ps, s: "local_fs")
     monkeypatch.setattr(timeline_cli.theme_edits, "theme_set", fake_theme_set)
 
@@ -1385,6 +1403,36 @@ def test_theme_set_handler_delegates_to_theme_edits(
     assert "kind=theme.set" in captured.out
 
 
+def test_registry_sync_cli_parsing(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, argparse.Namespace] = {}
+
+    def fake_sync(args: argparse.Namespace) -> int:
+        seen["args"] = args
+        return 0
+
+    monkeypatch.setattr(timeline_cli, "cmd_registry_sync", fake_sync)
+
+    rc = timeline_cli.main(
+        ["registry", "sync", "my-slug", "--manifest", "/tmp/manifest.json",
+         "--expected-version", "5", "--project", "demo"]
+    )
+    assert rc == 0
+    assert seen["args"].slug == "my-slug"
+    assert seen["args"].manifest == "/tmp/manifest.json"
+    assert seen["args"].expected_version == 5
+    assert seen["args"].project == "demo"
+
+
+def test_registry_sync_requires_expected_version() -> None:
+    """The CAS-guarded sync verb must refuse to run without --expected-version."""
+    with pytest.raises(AstridError, match="requires --expected-version"):
+        timeline_cli.cmd_registry_sync(argparse.Namespace(
+            slug="my-slug",
+            manifest="/tmp/manifest.json",
+            project="demo",
+        ))
+
+
 def test_track_add_handler_delegates_to_track_edits(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -1394,7 +1442,7 @@ def test_track_add_handler_delegates_to_track_edits(
         seen.update({"project_slug": project_slug, "slug": slug, "track_id": track_id, "kind": kind, "label": label})
         return _event("track.added", TrackAddedPayload(track_id=track_id, kind=kind, label=label))
 
-    monkeypatch.setattr(timeline_cli, "_require_session", lambda slug=None: _session())
+    monkeypatch.setattr(timeline_cli, "_resolve_edit_context", lambda *a, **k: (TimelineActor(type="agent", id="tester:session-1", display="tester"), "demo"))
     monkeypatch.setattr(timeline_cli, "_resolve_clip_backend_name", lambda ps, s: "local_fs")
     monkeypatch.setattr(timeline_cli.track_edits, "track_add", fake_track_add)
 
@@ -1421,7 +1469,7 @@ def test_audio_bind_handler_delegates_to_audio_edits(
         seen.update({"project_slug": project_slug, "slug": slug, "clip_id": clip_id, "asset_id": asset_id})
         return _event("audio.bound", AudioBoundPayload(clip_id=clip_id, asset_id=asset_id))
 
-    monkeypatch.setattr(timeline_cli, "_require_session", lambda slug=None: _session())
+    monkeypatch.setattr(timeline_cli, "_resolve_edit_context", lambda *a, **k: (TimelineActor(type="agent", id="tester:session-1", display="tester"), "demo"))
     monkeypatch.setattr(timeline_cli, "_resolve_clip_backend_name", lambda ps, s: "local_fs")
     monkeypatch.setattr(timeline_cli.audio_edits, "audio_bind", fake_audio_bind)
 
@@ -1444,7 +1492,7 @@ def test_arrangement_set_handler_rejects_runtime_container_write(
     arrangement_path = tmp_path / "arrangement.json"
     arrangement_path.write_text(json.dumps({"clips": [{"uuid": "clip-1"}]}), encoding="utf-8")
 
-    monkeypatch.setattr(timeline_cli, "_require_session", lambda slug=None: _session())
+    monkeypatch.setattr(timeline_cli, "_resolve_edit_context", lambda *a, **k: (TimelineActor(type="agent", id="tester:session-1", display="tester"), "demo"))
 
     with pytest.raises(timeline_cli.TimelineEditError, match="arrangement set is retired"):
         timeline_cli.cmd_arrangement_set(argparse.Namespace(slug="primary", from_json=str(arrangement_path)))
@@ -1456,7 +1504,7 @@ def test_arrangement_show_handler_reads_arrangement_via_crud(
     seen: dict[str, object] = {}
     arrangement = {"clips": [{"uuid": "clip-1"}]}
 
-    monkeypatch.setattr(timeline_cli, "_require_session", lambda slug=None: _session())
+    monkeypatch.setattr(timeline_cli, "_resolve_edit_context", lambda *a, **k: (TimelineActor(type="agent", id="tester:session-1", display="tester"), "demo"))
 
     def fake_get_arrangement(project_slug: str, slug: str, *, root=None):
         seen["get_arrangement"] = (project_slug, slug, root)
@@ -1480,7 +1528,7 @@ def test_arrangement_show_handler_reads_arrangement_via_crud(
 def test_transition_set_bad_between_raises_astrid_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(timeline_cli, "_require_session", lambda slug=None: _session())
+    monkeypatch.setattr(timeline_cli, "_resolve_edit_context", lambda *a, **k: (TimelineActor(type="agent", id="tester:session-1", display="tester"), "demo"))
 
     with pytest.raises(AstridError, match="--between must be LEFT,RIGHT"):
         timeline_cli.main(["transition", "set", "my-slug", "--between", "a", "--kind", "cross-fade", "--duration", "0.5"])
@@ -1489,7 +1537,7 @@ def test_transition_set_bad_between_raises_astrid_error(
 def test_effect_tune_invalid_json_value_raises_astrid_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(timeline_cli, "_require_session", lambda slug=None: _session())
+    monkeypatch.setattr(timeline_cli, "_resolve_edit_context", lambda *a, **k: (TimelineActor(type="agent", id="tester:session-1", display="tester"), "demo"))
 
     with pytest.raises(AstridError, match="--value must be valid JSON"):
         timeline_cli.main(
@@ -1502,7 +1550,7 @@ def test_arrangement_set_retired_before_json_validation_raises_astrid_error(
 ) -> None:
     arrangement_path = tmp_path / "bad.json"
     arrangement_path.write_text("{bad", encoding="utf-8")
-    monkeypatch.setattr(timeline_cli, "_require_session", lambda slug=None: _session())
+    monkeypatch.setattr(timeline_cli, "_resolve_edit_context", lambda *a, **k: (TimelineActor(type="agent", id="tester:session-1", display="tester"), "demo"))
 
     with pytest.raises(AstridError, match="arrangement set is retired") as excinfo:
         timeline_cli.main(["arrangement", "set", "my-slug", "--from-json", str(arrangement_path)])

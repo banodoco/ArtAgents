@@ -36,6 +36,8 @@ EXPECTED_SPRINT1_UNBOUND_ALLOWLIST = (
     ("attach",),
     ("projects", "ls"),
     ("projects", "create"),
+    ("projects", "select"),
+    ("projects", "use"),
     ("projects", "default"),
     ("projects", "theme"),
     ("themes", "ls"),
@@ -456,6 +458,54 @@ def test_author_test_with_project_is_blocked_without_session(
     assert "no session bound" in stderr
 
 
+# ── explicit-project exemptions (P2) ──────────────────────────────────────
+
+
+@pytest.mark.parametrize("verb", [
+    "clip", "track", "effect", "transition", "theme", "audio",
+    "arrangement", "pool", "registry",
+])
+def test_timeline_edit_verb_with_project_exempt_from_session(
+    env: dict[str, Path], monkeypatch: pytest.MonkeyPatch, verb: str
+) -> None:
+    """Timeline edit verbs with --project are exempt from session requirement."""
+    monkeypatch.delenv(ASTRID_SESSION_ID_ENV, raising=False)
+    rc, _stdout, stderr = _run_pipeline(
+        ["timelines", verb, "add", "dummy-slug", "--project", "demo",
+         "--kind", "visual", "--asset", "a1", "--track", "visual"]
+    )
+    # Should NOT be rejected by the session gate (may fail downstream
+    # because demo doesn't exist, but the gate lets it through)
+    assert "no session bound" not in stderr
+
+
+def test_projects_source_with_project_exempt_from_session(
+    env: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """projects source with --project is exempt from session requirement."""
+    monkeypatch.delenv(ASTRID_SESSION_ID_ENV, raising=False)
+    rc, _stdout, stderr = _run_pipeline(
+        ["projects", "source", "add", "--project", "demo", "--name", "test-src"]
+    )
+    # Should NOT be rejected by the session gate
+    assert "no session bound" not in stderr
+
+
+@pytest.mark.parametrize("verb", [
+    "clip", "track", "effect", "transition", "theme", "audio",
+    "arrangement", "pool", "registry",
+])
+def test_timeline_edit_verb_without_project_still_gated(
+    env: dict[str, Path], monkeypatch: pytest.MonkeyPatch, verb: str
+) -> None:
+    """Timeline edit verbs WITHOUT --project are STILL gated."""
+    monkeypatch.delenv(ASTRID_SESSION_ID_ENV, raising=False)
+    rc, _stdout, stderr = _run_pipeline(
+        ["timelines", verb, "add", "dummy-slug"]
+    )
+    assert "no session bound" in stderr
+
+
 def test_bound_session_lets_gated_verb_through(
     env: dict[str, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -485,15 +535,13 @@ def test_bound_session_missing_file_errors_with_hint(
     assert "no session file" in stderr or "session:" in stderr
 
 
-# ----- onboarding ceremony: stateless run auto-binds a default project ----
+# ----- project selection: every run fails closed without project context ----
 
 
-def test_stateless_executor_run_auto_binds_default_project_without_attach(
+def test_stateless_executor_run_requires_project_without_attach(
     env: dict[str, Path], monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
 ) -> None:
-    """A stateless `executors run --out` invocation must NOT require a prior
-    `astrid attach`: the gate auto-binds a default project (creating it on
-    first use) and sets ASTRID_SESSION_ID, then the run proceeds."""
+    """A stateless executor run must explain project selection and not mutate."""
     monkeypatch.delenv(ASTRID_SESSION_ID_ENV, raising=False)
     out_dir = env["projects"].parent / "out"
 
@@ -516,23 +564,31 @@ def test_stateless_executor_run_auto_binds_default_project_without_attach(
         ]
     )
 
-    assert "no session bound" not in stderr
-    assert rc == 0
-    assert "auto-bound default project 'default'" in capfd.readouterr().err
-    # Default project was created on first use under the isolated projects root.
-    assert (env["projects"] / "default" / "project.json").is_file()
-    # A session pointer was written and the process is now bound for the run.
+    assert rc == 2
+    assert "project required: every executor run" in stderr
+    assert "astrid projects ls" in stderr
+    assert "astrid projects select <project>" in stderr
+    assert "--project <project>" in stderr
+    assert "projects create <slug>" in stderr
+    assert "auto-bound default project" not in capfd.readouterr().err
+    assert not (env["projects"] / "default").exists()
     import os
 
-    assert (env["projects"] / "default" / ".astrid-session").is_file()
-    assert os.environ.get(ASTRID_SESSION_ID_ENV)
+    assert not os.environ.get(ASTRID_SESSION_ID_ENV)
 
 
 def test_render_executor_run_accepts_asset_free_timeline_input(
     env: dict[str, Path], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.delenv(ASTRID_SESSION_ID_ENV, raising=False)
-    timeline_path = tmp_path / "asset-free.timeline.json"
+    from astrid.core.project.project import create_project
+    from astrid.core.timeline.crud import create_timeline
+
+    create_project("demo")
+    create_timeline("demo", "main", is_default=True)
+    timeline_path = next(
+        (env["projects"] / "demo" / "timelines").glob("*/assembly.json")
+    )
     timeline_path.write_text(
         json.dumps(
             {
@@ -543,31 +599,30 @@ def test_render_executor_run_accepts_asset_free_timeline_input(
         ),
         encoding="utf-8",
     )
-    out_dir = tmp_path / "render-out"
     commands: list[list[str]] = []
 
     def fake_run(cmd, **kwargs):
         commands.append([str(part) for part in cmd])
-        return subprocess.CompletedProcess(cmd, 0)
+        return 0
 
     from astrid.core.execution.executor import runner as executor_runner
 
-    monkeypatch.setattr(executor_runner.subprocess, "run", fake_run)
+    monkeypatch.setattr(executor_runner, "run_subprocess_with_capture", fake_run)
 
     rc, stdout, stderr = _run_pipeline(
         [
             "executors",
             "run",
             "rendering.render",
-            "--out",
-            str(out_dir),
+            "--project",
+            "demo",
             "--input",
             f"timeline={timeline_path}",
         ]
     )
 
     assert rc == 0
-    assert json.loads(stdout)["returncode"] == 0
+    assert json.loads(stdout.splitlines()[-1])["returncode"] == 0
     assert "no session bound" not in stderr
     assert len(commands) == 1
     command = commands[0]
@@ -577,15 +632,14 @@ def test_render_executor_run_accepts_asset_free_timeline_input(
         "astrid.packs.rendering.executors.render.run",
     ]
     assert command[command.index("--timeline") + 1] == str(timeline_path)
-    assert command[command.index("--out") + 1] == str(out_dir.resolve() / "hype.mp4")
+    assert command[command.index("--out") + 1].endswith("/hype.mp4")
     assert "--assets" not in command
 
 
-def test_auto_bind_honors_configured_workspace_default_project(
+def test_configured_default_does_not_authorize_executor_run(
     env: dict[str, Path], monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
 ) -> None:
-    """When a workspace/user default project is configured, auto-bind uses it
-    instead of the literal ``default`` slug."""
+    """A configured default is a suggestion, not live execution context."""
     monkeypatch.delenv(ASTRID_SESSION_ID_ENV, raising=False)
     from astrid.core.session.config import set_default_project
 
@@ -605,29 +659,38 @@ def test_auto_bind_honors_configured_workspace_default_project(
         ]
     )
 
-    assert "no session bound" not in stderr
-    assert "auto-bound default project 'scratch'" in capfd.readouterr().err
-    # Auto-bind created the *configured* default ("scratch"), not the literal
-    # fallback slug.
-    assert (env["projects"] / "scratch" / "project.json").is_file()
+    assert rc == 2
+    assert "Configured default: scratch (suggestion only; not selected)" in stderr
+    assert "auto-bound default project" not in capfd.readouterr().err
+    assert not (env["projects"] / "scratch").exists()
     assert not (env["projects"] / "default").exists()
 
 
 def test_gated_executors_list_still_errors_without_session(
     env: dict[str, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Auto-bind is scoped to `run` verbs only — non-run executor verbs (and
-    any `--project`-explicit run) keep the documented `no session bound`
-    error, so the feature does not silently widen the unbound allowlist."""
+    """Discovery remains session-gated; explicit run project needs no attach."""
     monkeypatch.delenv(ASTRID_SESSION_ID_ENV, raising=False)
 
     rc, _stdout, stderr = _run_pipeline(["executors", "list"])
     assert rc == 2
     assert stderr.splitlines()[0].startswith("no session bound")
 
-    # An explicit --project run is left to the dispatched command's own project
-    # resolution; the gate does not auto-bind over it.
+    from astrid.core.project.project import create_project
+    from astrid.core.timeline.crud import create_timeline
+
+    create_project("demo")
+    create_timeline("demo", "main", is_default=True)
     rc2, _stdout2, stderr2 = _run_pipeline(
-        ["executors", "run", "generation.generate_image", "--project", "demo", "--dry-run"]
+        [
+            "executors", "run", "generation.generate_image",
+            "--project", "demo",
+            "--input", "model=flux-dev",
+            "--input", "mode=t2i",
+            "--input", "execution=cloud",
+            "--input", "prompt=hello",
+            "--dry-run",
+        ]
     )
-    assert "no session bound" in stderr2
+    assert rc2 == 0
+    assert "no session bound" not in stderr2

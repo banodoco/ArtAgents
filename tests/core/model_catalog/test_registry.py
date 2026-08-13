@@ -779,6 +779,7 @@ class TestShippedRegistry:
         "z-image",
         "qwen-image-2512",
         "qwen-image-edit",
+        "seedream-v5-pro",
         "flux-dev",
         "flux-schnell",
         "flux2-klein-9b",
@@ -787,6 +788,7 @@ class TestShippedRegistry:
         "wan-2.2",
         "ltx-2.3",
         "ltx-2.3-pro",
+        "scail-2",
         "minimax-music-v2.6",
         "stable-audio-3-medium",
         "ace-step",
@@ -911,6 +913,7 @@ class TestListByModalityV2:
             "z-image",
             "qwen-image-2512",
             "qwen-image-edit",
+            "seedream-v5-pro",
             "flux-dev",
             "flux-schnell",
             "flux2-klein-9b",
@@ -921,7 +924,12 @@ class TestListByModalityV2:
     def test_video_returns_expected_entries(self) -> None:
         registry = ModelRegistry.load_default()
         video_models = registry.list_by_modality("video")
-        assert {m.id for m in video_models} == {"wan-2.2", "ltx-2.3", "ltx-2.3-pro"}
+        assert {m.id for m in video_models} == {
+            "wan-2.2",
+            "ltx-2.3",
+            "ltx-2.3-pro",
+            "scail-2",
+        }
 
     def test_audio_returns_expected_entries(self) -> None:
         registry = ModelRegistry.load_default()

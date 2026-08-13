@@ -1,0 +1,54 @@
+name: Bridge Latency Gate (Astrid PR)
+
+# GET + warm-save p95 regression gate for Astrid-side changes (incident
+# timeline-save-latency-error-20260812, T2.4 MUST-FIX 5). Runs the reigh
+# reporter (scripts/bridge-latency-report.mjs) against a disposable 2,000-event
+# fixture served by THIS PR's astrid checkout:
+#   - GET p95  <= 500ms (existing B7 warm GET SLO)
+#   - save p95 <= 500ms (NEW warm-save SLO — the incident's save was ~1s+)
+#   - 10s hard deadline (BRIDGE_REQUEST_TIMEOUT_MS) retained
+# Triggers on astrid PRs touching the timeline eventlog or the reigh bridge so
+# astrid changes that regress save latency fail CI on the astrid side. The
+# reigh-side workflow (reigh-timeline-main/.github/workflows/bridge-latency.yml)
+# cannot see astrid PRs; this one checks out both repos and runs the reporter
+# against the astrid checkout via ASTRID_PYTHON=python3 (astrid installed
+# editable from the PR checkout, never a stale install).
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/bridge-latency.yml"
+      - "astrid/core/timeline/**"
+      - "astrid/core/integrations/reigh/**"
+
+jobs:
+  bridge-latency:
+    name: GET + save p95 gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: peteromallet/Astrid
+          path: astrid
+      - uses: actions/checkout@v4
+        with:
+          repository: banodoco/reigh-app
+          path: reigh-timeline-main
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20.19.0"
+      - name: Install shared timeline schema
+        working-directory: reigh-timeline-main
+        run: pip install -e vendor/timeline-schema/python
+      - name: Install astrid (this PR's checkout)
+        working-directory: astrid
+        run: pip install -e .
+      - name: Run bridge latency gate
+        working-directory: reigh-timeline-main
+        env:
+          ASTRID_PYTHON: python3
+        run: make bridge-latency-check

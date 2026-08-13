@@ -16,6 +16,7 @@ and a backend; the executor does the rest.  **`--mode` is required** (SD-005).
 | `z-image`           | t2i, i2i          | `image/z_image`, `image/z_image_img2img` | `fal-ai/z-image/turbo`, `fal-ai/z-image/turbo/image-to-image` | yes |
 | `qwen-image-2512`   | t2i               | `image/qwen_image_2512`       | `fal-ai/qwen-image`                  | yes |
 | `qwen-image-edit`   | edit              | `edit/qwen_image_edit`        | `fal-ai/qwen-image-edit`             | yes |
+| `seedream-v5-pro`   | edit              | —                             | `bytedance/seedream/v5/pro/edit`      | no |
 | `flux-dev`          | t2i, i2i          | — (no local template per SD-001) | `fal-ai/flux/dev`, `fal-ai/flux/dev/image-to-image` | yes |
 | `flux-schnell`      | t2i               | — (no local template per SD-001) | `fal-ai/flux/schnell`                | yes |
 

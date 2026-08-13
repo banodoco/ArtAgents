@@ -35,6 +35,8 @@ from astrid.core.cli_choices import StaticChoices
 from astrid.core.cli import project as project_cli
 from astrid.core.foundation import project_paths as paths
 from astrid.core.project.project import ProjectError
+from astrid.core.session import paths as session_paths
+from astrid.core.session.identity import Identity, write_identity
 from astrid.core.integrations.reigh import data_provider as dp_mod
 from astrid.core.integrations.reigh import timeline_io as tio
 from astrid.core.integrations.reigh.errors import TimelineVersionConflictError
@@ -114,6 +116,8 @@ class CreateShowSourceCLITest(unittest.TestCase):
         self.assertTrue((project_dir / "project.json").is_file())
         self.assertTrue((project_dir / "sources").is_dir())
         self.assertTrue((project_dir / "runs").is_dir())
+        self.assertTrue((project_dir / "timelines").is_dir())
+        self.assertTrue((project_dir / "experiments").is_dir())
         self.assertFalse((project_dir / "timeline.json").exists())
 
     def test_create_with_project_id_persists_uuid(self) -> None:
@@ -123,6 +127,43 @@ class CreateShowSourceCLITest(unittest.TestCase):
         self.assertEqual(rc, 0)
         payload = json.loads((self.root.tmp / "demo2" / "project.json").read_text("utf-8"))
         self.assertEqual(payload["project_id"], "00000000-1111-2222-3333-444455556666")
+
+    def test_description_is_visible_in_list_and_updateable(self) -> None:
+        rc = project_cli.main(
+            [
+                "create",
+                "plant-study",
+                "--name",
+                "Plant Study",
+                "--description",
+                "Four-stage growth storyboard.",
+            ]
+        )
+        self.assertEqual(rc, 0)
+
+        out = StringIO()
+        with redirect_stdout(out):
+            project_cli.main(["ls"])
+        chooser = out.getvalue()
+        self.assertIn("plant-study — Plant Study", chooser)
+        self.assertIn("Four-stage growth storyboard.", chooser)
+        self.assertIn("astrid projects select plant-study", chooser)
+
+        project_cli.main(
+            [
+                "update",
+                "plant-study",
+                "--description",
+                "Storyboard, experiments, and generated runs.",
+            ]
+        )
+        payload = json.loads(
+            (self.root.tmp / "plant-study" / "project.json").read_text("utf-8")
+        )
+        self.assertEqual(
+            payload["description"],
+            "Storyboard, experiments, and generated runs.",
+        )
 
     def test_show_includes_project_id_when_set(self) -> None:
         project_cli.main(["create", "demo", "--project-id", "abc-uuid"])
@@ -143,6 +184,124 @@ class CreateShowSourceCLITest(unittest.TestCase):
 
         self.assertIsInstance(kind_action.choices, StaticChoices)
         self.assertEqual(kind_action.choices.valid_options, tuple(sorted(project_cli.SOURCE_KINDS)))
+
+    def test_source_add_file_is_copied_and_original_retained(self) -> None:
+        project_cli.main(["create", "demo"])
+        external = self.root.tmp / "outside.mp3"
+        external.write_bytes(b"audio-data")
+
+        out = StringIO()
+        with redirect_stdout(out):
+            rc = project_cli.main(
+                ["source", "add", "--project", "demo", "--file", str(external), "toccata"]
+            )
+
+        self.assertEqual(rc, 0)
+        # Canonical destination
+        dest = self.root.tmp / "demo" / "sources" / "toccata" / "toccata.mp3"
+        self.assertTrue(dest.is_file())
+        self.assertEqual(dest.read_bytes(), b"audio-data")
+        # Original external file is retained
+        self.assertTrue(external.is_file())
+        self.assertEqual(external.read_bytes(), b"audio-data")
+
+    def test_source_add_records_in_project_absolute_path(self) -> None:
+        project_cli.main(["create", "demo"])
+        external = self.root.tmp / "outside.mp3"
+        external.write_bytes(b"audio-data")
+
+        out = StringIO()
+        with redirect_stdout(out):
+            rc = project_cli.main(
+                ["source", "add", "--project", "demo", "--file", str(external), "toccata", "--json"]
+            )
+
+        self.assertEqual(rc, 0)
+        payload = json.loads(out.getvalue())
+        recorded_file = payload["source"]["asset"]["file"]
+        expected = str((self.root.tmp / "demo" / "sources" / "toccata" / "toccata.mp3").resolve())
+        self.assertEqual(recorded_file, expected)
+
+    def test_source_add_duplicate_without_force_fails(self) -> None:
+        project_cli.main(["create", "demo"])
+        external = self.root.tmp / "outside.mp3"
+        external.write_bytes(b"audio-data")
+
+        rc1 = project_cli.main(
+            ["source", "add", "--project", "demo", "--file", str(external), "toccata"]
+        )
+        self.assertEqual(rc1, 0)
+
+        with self.assertRaises(AstridError) as excinfo:
+            project_cli.main(
+                ["source", "add", "--project", "demo", "--file", str(external), "toccata"]
+            )
+        self.assertIn("already exists", str(excinfo.exception))
+
+    def test_source_add_duplicate_with_force_replaces(self) -> None:
+        project_cli.main(["create", "demo"])
+        external1 = self.root.tmp / "outside1.mp3"
+        external1.write_bytes(b"old-data")
+        external2 = self.root.tmp / "outside2.mp3"
+        external2.write_bytes(b"new-data")
+
+        rc1 = project_cli.main(
+            ["source", "add", "--project", "demo", "--file", str(external1), "toccata"]
+        )
+        self.assertEqual(rc1, 0)
+
+        rc2 = project_cli.main(
+            ["source", "add", "--project", "demo", "--file", str(external2), "toccata", "--force"]
+        )
+        self.assertEqual(rc2, 0)
+
+        dest = self.root.tmp / "demo" / "sources" / "toccata" / "toccata.mp3"
+        self.assertEqual(dest.read_bytes(), b"new-data")
+
+    def test_source_add_force_with_invalid_duration_keeps_old_media(self) -> None:
+        """A failed --force import (validation error) must not clobber the
+        existing media bytes nor leave a stale source.json behind."""
+        project_cli.main(["create", "demo"])
+        external1 = self.root.tmp / "outside1.mp3"
+        external1.write_bytes(b"old-data")
+
+        rc1 = project_cli.main(
+            ["source", "add", "--project", "demo", "--file", str(external1), "toccata"]
+        )
+        self.assertEqual(rc1, 0)
+
+        external2 = self.root.tmp / "outside2.mp3"
+        external2.write_bytes(b"new-data")
+
+        with self.assertRaises(AstridError):
+            project_cli.main(
+                ["source", "add", "--project", "demo", "--file", str(external2),
+                 "toccata", "--force", "--duration", "-3"]
+            )
+
+        dest = self.root.tmp / "demo" / "sources" / "toccata" / "toccata.mp3"
+        self.assertEqual(dest.read_bytes(), b"old-data")
+        # No backup/temp residue.
+        residue = list((self.root.tmp / "demo" / "sources" / "toccata").glob(".*"))
+        self.assertEqual(residue, [])
+
+    def test_source_add_url_performs_no_copy(self) -> None:
+        project_cli.main(["create", "demo"])
+
+        out = StringIO()
+        with redirect_stdout(out):
+            rc = project_cli.main(
+                ["source", "add", "--project", "demo", "--url", "https://example.com/a.mp3", "remote-clip", "--json"]
+            )
+
+        self.assertEqual(rc, 0)
+        payload = json.loads(out.getvalue())
+        self.assertEqual(payload["source"]["asset"]["url"], "https://example.com/a.mp3")
+        self.assertNotIn("file", payload["source"]["asset"])
+        # No media file should have been created
+        source_dir = self.root.tmp / "demo" / "sources" / "remote-clip"
+        media_files = list(source_dir.glob("remote-clip.*"))
+        self.assertEqual(media_files, [])
 
     def test_register_source_promotes_bare_file(self) -> None:
         project_cli.main(["create", "demo"])
@@ -205,6 +364,36 @@ class CreateShowSourceCLITest(unittest.TestCase):
         output = out.getvalue()
         self.assertIn("valid-theme  valid", output)
         self.assertIn("bad-theme  invalid:", output)
+
+
+def test_select_replaces_stale_project_pointer_and_is_discoverable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    projects_root = tmp_path / "projects"
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(projects_root))
+    monkeypatch.setenv(session_paths.ASTRID_HOME_ENV, str(home))
+    monkeypatch.delenv("ASTRID_SESSION_ID", raising=False)
+    write_identity(Identity(agent_id="codex-test", created_at="2026-07-29T00:00:00Z"))
+    project_cli.main(["create", "alpha"])
+    project_cli.main(["create", "beta"])
+    capsys.readouterr()
+
+    assert project_cli.main(["select", "alpha"]) == 0
+    capsys.readouterr()
+    assert project_cli.main(["select", "beta"]) == 0
+    capsys.readouterr()
+
+    assert not (projects_root / "alpha" / ".astrid-session").exists()
+    assert (projects_root / "beta" / ".astrid-session").is_file()
+
+    assert project_cli.main(["ls", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["selected_project"] == "beta"
+    assert payload["selection_source"] == "attached"
 
 
 class ListCLITest(unittest.TestCase):

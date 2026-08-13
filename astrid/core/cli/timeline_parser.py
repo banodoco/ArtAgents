@@ -345,6 +345,31 @@ _COMMANDS: list[dict[str, Any]] = [
             {"project_arg": True},
         ],
     },
+    # ── registry (group) ──
+    {
+        "name": "registry",
+        "help": "Manage the timeline asset registry.",
+        "dest": "registry_command",
+        "handler": "",  # group node — handler set on leaf subcommands
+        "subcommands": [
+            # registry sync
+            {
+                "name": "sync",
+                "help": "Sync asset registry entries from a JSON manifest.",
+                "handler": "cmd_registry_sync",
+                "args": [
+                    {"name": "slug", "help": "Timeline slug."},
+                    {
+                        "flags": ["--manifest"],
+                        "required": True,
+                        "help": "Path to the JSON manifest file.",
+                    },
+                    {"expected_version_arg": True},
+                    {"project_arg": True},
+                ],
+            },
+        ],
+    },
     # ── clip (group) ──
     {
         "name": "clip",
@@ -397,6 +422,18 @@ _COMMANDS: list[dict[str, Any]] = [
                                 "help": "Insert before clip id.",
                             },
                         ],
+                    },
+                    {
+                        "flags": ["--start"],
+                        "type": float,
+                        "default": 0.0,
+                        "help": "Start time in seconds (>= 0, default: 0.0).",
+                    },
+                    {
+                        "flags": ["--duration"],
+                        "type": float,
+                        "default": None,
+                        "help": "Duration in seconds (> 0). For audio clips without a registry entry this is required.",
                     },
                     {"expected_version_arg": True},
                     {"project_arg": True},
@@ -1417,6 +1454,7 @@ def build_parser() -> argparse.ArgumentParser:
         cmd_purge,
         cmd_push,
         cmd_recover,
+        cmd_registry_sync,
         cmd_rename,
         cmd_set_default,
         cmd_show,
@@ -1453,6 +1491,7 @@ def build_parser() -> argparse.ArgumentParser:
         "cmd_migrate_events": cmd_migrate_events,
         "cmd_push": cmd_push,
         "cmd_pull": cmd_pull,
+        "cmd_registry_sync": cmd_registry_sync,
         "cmd_sync": cmd_sync,
         "cmd_undo": cmd_undo,
         "cmd_mass_undo": cmd_mass_undo,

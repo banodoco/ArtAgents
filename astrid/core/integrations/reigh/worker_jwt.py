@@ -39,6 +39,14 @@ class JwtVerificationError(RuntimeError):
     """Raised when a user JWT fails verification."""
 
 
+class JwksConfigurationError(JwtVerificationError):
+    """The configured JWKS URL/value is malformed (e.g. a placeholder)."""
+
+
+class JwksFetchError(JwtVerificationError):
+    """The JWKS endpoint could not be reached or returned an unexpected payload."""
+
+
 @dataclass(frozen=True)
 class VerifiedJwt:
     user_id: str
@@ -54,14 +62,17 @@ def _fetch_jwks(url: str, *, timeout: float = 10.0) -> dict[str, Any]:
     cached = _jwks_cache.get(url)
     if cached and (now - cached[0]) < JWKS_CACHE_TTL_SEC:
         return cached[1]
-    request = urllib.request.Request(url, method="GET")
+    try:
+        request = urllib.request.Request(url, method="GET")
+    except (ValueError, TypeError) as exc:
+        raise JwksConfigurationError(f"Malformed JWKS URL: {url!r}") from exc
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             data = json.loads(response.read().decode("utf-8"))
     except Exception as exc:  # noqa: BLE001
-        raise JwtVerificationError(f"Failed to fetch JWKS from {url}: {exc}") from exc
+        raise JwksFetchError(f"Failed to fetch JWKS from {url}: {exc}") from exc
     if not isinstance(data, dict) or "keys" not in data:
-        raise JwtVerificationError(f"JWKS endpoint at {url} returned unexpected payload")
+        raise JwksFetchError(f"JWKS endpoint at {url} returned unexpected payload")
     _jwks_cache[url] = (now, data)
     return data
 
@@ -95,6 +106,7 @@ def verify_user_jwt(
     *,
     audience: str | None = None,
     jwks_url: str | None = None,
+    jwt_secret: str | None = None,
     timeout: float = 10.0,
 ) -> VerifiedJwt:
     """Verify a user JWT against the configured JWKS.
@@ -109,22 +121,46 @@ def verify_user_jwt(
         raise JwtVerificationError("token must be a non-empty string")
 
     expected_audience = audience or DEFAULT_AUDIENCE
-    url = jwks_url or reigh_env.resolve_jwks_url()
-    jwks = _fetch_jwks(url, timeout=timeout)
-    key = _select_signing_key(jwks, token)
-
     try:
         unverified_header = pyjwt.get_unverified_header(token)
-        algorithm = unverified_header.get("alg") or "RS256"
-        claims = pyjwt.decode(
-            token,
-            key,
-            algorithms=[algorithm],
-            audience=expected_audience,
-            options={"verify_signature": True, "verify_aud": True, "verify_exp": True},
-        )
     except InvalidTokenError as exc:
-        raise JwtVerificationError(f"JWT signature/claims verification failed: {exc}") from exc
+        raise JwtVerificationError(f"Malformed JWT header: {exc}") from exc
+    algorithm = unverified_header.get("alg") or "RS256"
+
+    # Supabase GoTrue access tokens are HS256, signed with the project JWT
+    # secret; the project JWKS endpoint often serves an EMPTY key set for such
+    # projects, so JWKS verification can never succeed. Verify HS256 tokens
+    # with the configured JWT secret instead.
+    if algorithm == "HS256":
+        if not jwt_secret:
+            raise JwksConfigurationError(
+                "HS256 user token requires the project JWT secret "
+                "(REIGH_SUPABASE_JWT_SECRET / SUPABASE_JWT_SECRET)"
+            )
+        try:
+            claims = pyjwt.decode(
+                token,
+                jwt_secret,
+                algorithms=["HS256"],
+                audience=expected_audience,
+                options={"verify_signature": True, "verify_aud": True, "verify_exp": True},
+            )
+        except InvalidTokenError as exc:
+            raise JwtVerificationError(f"JWT signature/claims verification failed: {exc}") from exc
+    else:
+        url = jwks_url or reigh_env.resolve_jwks_url()
+        jwks = _fetch_jwks(url, timeout=timeout)
+        key = _select_signing_key(jwks, token)
+        try:
+            claims = pyjwt.decode(
+                token,
+                key,
+                algorithms=[algorithm],
+                audience=expected_audience,
+                options={"verify_signature": True, "verify_aud": True, "verify_exp": True},
+            )
+        except InvalidTokenError as exc:
+            raise JwtVerificationError(f"JWT signature/claims verification failed: {exc}") from exc
 
     if not isinstance(claims, dict):
         raise JwtVerificationError("Decoded JWT did not yield a claims object")

@@ -42,7 +42,8 @@ Usage:
 Start here:
   python3 -m astrid next
   python3 -m astrid status
-  python3 -m astrid attach [<project>]  # only when next/status tells you to bind
+  python3 -m astrid projects ls
+  python3 -m astrid projects select <project>
 
     # orchestrators — multi-step pipelines
   python3 -m astrid orchestrators {{list,inspect,validate,fork,run}} ...
@@ -80,7 +81,7 @@ Start here:
     # elements — reusable building blocks
   python3 -m astrid elements {{list,inspect,fork,install}} ...
     # projects — project CRUD
-  python3 -m astrid projects {{ls,default,create,show,theme,source}} ...
+  python3 -m astrid projects {{ls,select,use,default,create,update,show,theme,source}} ...
   python3 -m astrid themes ls
     # timelines -- timeline management
   python3 -m astrid timelines {{ls,create,show,rename,finalize,tombstone,purge,set-default}} ...
@@ -124,8 +125,8 @@ Inspect before running:
   python3 -m astrid modalities inspect generic_card --json
 
 Run any tool through this gateway:
-  python3 -m astrid orchestrators run ORCHESTRATOR_ID ...
-  python3 -m astrid executors run EXECUTOR_ID ...
+  python3 -m astrid orchestrators run ORCHESTRATOR_ID --project PROJECT ...
+  python3 -m astrid executors run EXECUTOR_ID --project PROJECT ...
 
 Notes:
   python3 -m astrid is the package entry point.

@@ -6,6 +6,7 @@ Migration to UUID entity_id/external_id is deferred to a later milestone.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -27,6 +28,8 @@ class ClipAddedPayload:
     asset_id: str
     track_id: str
     position: ClipPosition | dict[str, Any] | None = None
+    start: float = 0.0
+    duration: float | None = None
 
     def __post_init__(self) -> None:
         _require_nonempty_str(self.clip_id, "payload.clip_id")
@@ -40,6 +43,19 @@ class ClipAddedPayload:
         coerced = _coerce_clip_position(self.position, "payload.position")
         if coerced is not self.position:
             object.__setattr__(self, "position", coerced)
+        # Validate start
+        if not isinstance(self.start, (int, float)) or isinstance(self.start, bool):
+            raise TimelineEventSchemaError("payload.start must be a number")
+        if self.start < 0 or not math.isfinite(float(self.start)):
+            raise TimelineEventSchemaError("payload.start must be a finite number >= 0")
+        object.__setattr__(self, "start", float(self.start))
+        # Validate duration when present
+        if self.duration is not None:
+            if not isinstance(self.duration, (int, float)) or isinstance(self.duration, bool):
+                raise TimelineEventSchemaError("payload.duration must be a number")
+            if self.duration <= 0 or not math.isfinite(float(self.duration)):
+                raise TimelineEventSchemaError("payload.duration must be a finite number > 0 when set")
+            object.__setattr__(self, "duration", float(self.duration))
 
     def to_json_obj(self) -> dict[str, Any]:
         result: dict[str, Any] = {
@@ -50,6 +66,10 @@ class ClipAddedPayload:
         }
         if self.position is not None:
             result["position"] = self.position.to_json_obj()
+        if self.start != 0.0:
+            result["start"] = self.start
+        if self.duration is not None:
+            result["duration"] = self.duration
         return result
 
 

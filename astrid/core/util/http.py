@@ -257,6 +257,101 @@ def fal_upload(
     return f"data:{mime};base64,{b64encode(data).decode('ascii')}"
 
 
+def fal_storage_upload(
+    client: HttpClient,
+    file_path: Path,
+    api_key: str,
+) -> str:
+    """Upload *file_path* to fal CDN storage and return a public ``https://v3.fal.media`` URL.
+
+    This is the recommended path for video/audio inputs and for any file larger
+    than a few KB (fal docs discourage base64 data URIs for large files).
+
+    Flow:
+      1. Mint a signed upload token via ``POST /storage/auth/token``.
+      2. Upload raw bytes to the returned base URL.
+      3. Return the ``access_url`` (or ``url``) from the upload response.
+    """
+    data = file_path.read_bytes()
+    suffix = file_path.suffix.lower().lstrip(".")
+    mime_map = {
+        "png": "image/png",
+        "jpg": "image/jpeg",
+        "jpeg": "image/jpeg",
+        "webp": "image/webp",
+        "gif": "image/gif",
+        "mp4": "video/mp4",
+        "mov": "video/quicktime",
+        "webm": "video/webm",
+        "m4v": "video/mp4",
+        "mp3": "audio/mpeg",
+        "wav": "audio/wav",
+        "flac": "audio/flac",
+        "m4a": "audio/mp4",
+    }
+    mime = mime_map.get(suffix, "application/octet-stream")
+    file_name = file_path.name
+
+    # 1. Request upload token
+    token_url = "https://rest.alpha.fal.ai/storage/auth/token?storage_type=fal-cdn-v3"
+    token_headers = {
+        "authorization": f"Key {api_key}",
+        "accept": "application/json",
+        "content-type": "application/json",
+    }
+    token_resp = client.post_json(token_url, {}, headers=token_headers)
+    token = token_resp.get("token")
+    base_url = token_resp.get("base_upload_url") or token_resp.get("base_url")
+    if not token or not base_url:
+        raise AstridError(
+            client.scrub_secret(
+                f"fal storage token response missing token/base_url: "
+                f"{json.dumps(token_resp)}"
+            ),
+            recovery_command="retry; the fal storage token response was malformed",
+        )
+
+    # 2. Upload file bytes
+    upload_url = f"{base_url.rstrip('/')}/files/upload"
+    upload_headers = {
+        "authorization": f"Bearer {token}",
+        "content-type": mime,
+        "x-fal-file-name": file_name,
+    }
+    request = Request(upload_url, data=data, method="POST")
+    for key, value in upload_headers.items():
+        request.add_header(key, value)
+    try:
+        _status, body = client._transport(request)
+    except HTTPError as exc:
+        detail = (
+            exc.read().decode("utf-8", errors="replace") if exc.fp else ""
+        )
+        raise AstridError(
+            client.scrub_secret(
+                f"HTTP {exc.code} POST {upload_url}: {detail}"
+            ),
+            recovery_command="check the file and credentials, then retry",
+        ) from exc
+    except URLError as exc:
+        raise AstridError(
+            client.scrub_secret(f"Network error POST {upload_url}: {exc}"),
+            recovery_command="check network connectivity, then retry",
+        ) from exc
+
+    upload_resp = json.loads(body.decode("utf-8")) if body else {}
+    access_url = upload_resp.get("access_url") or upload_resp.get("url")
+    if not access_url:
+        raise AstridError(
+            client.scrub_secret(
+                f"fal storage upload response missing access_url: "
+                f"{json.dumps(upload_resp)}"
+            ),
+            recovery_command="retry; the fal upload response was malformed",
+        )
+    return access_url
+
+
 def fal_submit_and_poll(
     client: HttpClient,
     model_id: str,

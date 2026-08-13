@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import threading
 from contextlib import contextmanager
 from pathlib import Path
@@ -115,8 +116,7 @@ def running_server(projects_root: Path) -> Generator[str, None, None]:
 
 
 def test_health_and_timeline_endpoints(seed_bridge_project, tmp_bridge_root: Path) -> None:
-    """B5: the bridge surface is exactly three routes plus health. Project and
-    timeline *lists* are gone — discovery is explicit (URL params + FSA)."""
+    """Health, timeline detail, and the discovery list routes."""
     timeline_id = "11111111-1111-1111-1111-111111111111"
     timeline_ulid = "01JM4K5N7P0000000000000099"
     project_dir = seed_bridge_project(
@@ -139,9 +139,8 @@ def test_health_and_timeline_endpoints(seed_bridge_project, tmp_bridge_root: Pat
         timeline_status, timeline = _get_json(
             f"{base_url}/projects/ados-talks/timelines/{timeline_id}",
         )
-        # The list routes are gone: they must 404, not auto-discover.
-        projects_status, projects_error = _get_error(f"{base_url}/projects")
-        timelines_status, timelines_error = _get_error(f"{base_url}/projects/ados-talks/timelines")
+        projects_status, projects = _get_json(f"{base_url}/projects")
+        timelines_status, timelines = _get_json(f"{base_url}/projects/ados-talks/timelines")
 
     assert health_status == 200
     assert health == {"ok": True, "projects_root": str(tmp_bridge_root.resolve())}
@@ -152,10 +151,97 @@ def test_health_and_timeline_endpoints(seed_bridge_project, tmp_bridge_root: Pat
     assert timeline["slug"] == "intro-cut"
     assert timeline["config_version"] == 0  # event head version for empty event log
 
-    assert projects_status == 404
-    assert projects_error["error"] == "not_found"
-    assert timelines_status == 404
-    assert timelines_error["error"] == "not_found"
+    assert projects_status == 200
+    assert projects == {"projects": [{"slug": "ados-talks", "name": "ados-talks"}]}
+
+    assert timelines_status == 200
+    assert timelines == {
+        "timelines": [{
+            "timeline_id": timeline_id,
+            "timeline_ulid": timeline_ulid,
+            "slug": "intro-cut",
+            "name": "Intro Cut",
+            "is_default": True,
+        }],
+    }
+
+
+def test_projects_list_route_empty_root_returns_empty_envelope(tmp_bridge_root: Path) -> None:
+    with running_server(tmp_bridge_root) as base_url:
+        status, body = _get_json(f"{base_url}/projects")
+
+    assert status == 200
+    assert body == {"projects": []}
+
+
+def test_projects_list_route_returns_sorted_rows(seed_bridge_project, tmp_bridge_root: Path) -> None:
+    seed_bridge_project(slug="z-last")
+    seed_bridge_project(slug="a-first")
+
+    with running_server(tmp_bridge_root) as base_url:
+        status, body = _get_json(f"{base_url}/projects")
+
+    assert status == 200
+    assert body == {
+        "projects": [
+            {"slug": "a-first", "name": "a-first"},
+            {"slug": "z-last", "name": "z-last"},
+        ],
+    }
+
+
+def test_projects_timelines_list_route_envelope(seed_bridge_project, tmp_bridge_root: Path) -> None:
+    timeline_id = "44444444-4444-4444-4444-444444444444"
+    timeline_ulid = "01JM4K5N7P00000000000000AA"
+    seed_bridge_project(
+        slug="listed-proj",
+        timeline_ulid=timeline_ulid,
+        timeline_id=timeline_id,
+    )
+
+    with running_server(tmp_bridge_root) as base_url:
+        status, body = _get_json(f"{base_url}/projects/listed-proj/timelines")
+
+    assert status == 200
+    assert body == {
+        "timelines": [{
+            "timeline_id": timeline_id,
+            "timeline_ulid": timeline_ulid,
+            "slug": "primary",
+            "name": "Primary",
+            "is_default": True,
+        }],
+    }
+
+
+def test_projects_timelines_list_route_empty_for_project_without_timelines(
+    seed_bridge_project, tmp_bridge_root: Path,
+) -> None:
+    seed_bridge_project(slug="empty-proj", timeline_ulid="01JM4K5N7P00000000000000AB")
+    # Remove the seeded timeline so the project has no timeline directories.
+    shutil.rmtree(tmp_bridge_root / "empty-proj" / "timelines")
+
+    with running_server(tmp_bridge_root) as base_url:
+        status, body = _get_json(f"{base_url}/projects/empty-proj/timelines")
+
+    assert status == 200
+    assert body == {"timelines": []}
+
+
+def test_projects_timelines_list_route_unknown_project_returns_404(tmp_bridge_root: Path) -> None:
+    with running_server(tmp_bridge_root) as base_url:
+        status, error = _get_error(f"{base_url}/projects/no-such-project/timelines")
+
+    assert status == 404
+    assert error["error"] == "project_not_found"
+
+
+def test_projects_timelines_list_route_invalid_slug_returns_400(tmp_bridge_root: Path) -> None:
+    with running_server(tmp_bridge_root) as base_url:
+        status, error = _get_error(f"{base_url}/projects/%2E%2E/timelines")
+
+    assert status == 400
+    assert error["error"] == "invalid_project"
 
 
 
@@ -190,9 +276,10 @@ def test_server_returns_normal_http_errors_for_unknown_or_invalid_resources(
     assert unknown_route_status == 404
     assert unknown_route["error"] == "not_found"
 
-    # The timelines-list route no longer exists; any path under it is not_found.
+    # The timelines-list route validates the project first; a missing project
+    # is a project_not_found 404.
     assert removed_list_status == 404
-    assert removed_list["error"] == "not_found"
+    assert removed_list["error"] == "project_not_found"
 
 
 # ---------------------------------------------------------------------------

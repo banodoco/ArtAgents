@@ -9,6 +9,8 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 from uuid import uuid4
 
+import pytest
+
 from astrid.core.integrations.reigh.append_service import (
     AppendServiceConfig,
     create_append_service_server,
@@ -62,13 +64,50 @@ def _post_json(url: str, body: dict[str, Any], token: str | None = None) -> tupl
         return error.code, json.loads(error.read().decode("utf-8"))
 
 
-def _config() -> AppendServiceConfig:
+def _options(url: str, origin: str | None) -> tuple[int, dict[str, str]]:
+    req = Request(url, method="OPTIONS")
+    if origin is not None:
+        req.add_header("Origin", origin)
+    req.add_header("Access-Control-Request-Method", "POST")
+    try:
+        with urlopen(req) as response:  # noqa: S310 - localhost test server only
+            return response.status, {k.lower(): v for k, v in response.headers.items()}
+    except HTTPError as error:
+        return error.code, {k.lower(): v for k, v in error.headers.items()}
+
+
+def _post_json_headers(
+    url: str,
+    body: dict[str, Any],
+    origin: str | None = None,
+) -> tuple[int, dict[str, str], dict[str, Any]]:
+    req = Request(url, data=json.dumps(body).encode("utf-8"), method="POST")
+    req.add_header("Content-Type", "application/json")
+    if origin is not None:
+        req.add_header("Origin", origin)
+    try:
+        with urlopen(req) as response:  # noqa: S310 - localhost test server only
+            return (
+                response.status,
+                {k.lower(): v for k, v in response.headers.items()},
+                json.loads(response.read().decode("utf-8")),
+            )
+    except HTTPError as error:
+        return (
+            error.code,
+            {k.lower(): v for k, v in error.headers.items()},
+            json.loads(error.read().decode("utf-8")),
+        )
+
+
+def _config(*, allowed_origins: tuple[str, ...] = ()) -> AppendServiceConfig:
     return AppendServiceConfig(
         supabase_url="https://example.supabase.co",
         service_role_key="service-role-key",
         internal_token="internal-token",
         jwks_url="https://example.supabase.co/auth/v1/.well-known/jwks.json",
         timeout=5.0,
+        allowed_origins=allowed_origins,
     )
 
 
@@ -1421,3 +1460,200 @@ def test_config_replaced_head_bearing_fields_complete(monkeypatch) -> None:
     assert set(head.keys()) == {"version", "hash", "event_id"}, (
         f"db_head must contain exactly version, hash, event_id; got {set(head.keys())}"
     )
+
+
+def test_options_preflight_echoes_localhost_2222_origin() -> None:
+    with running_server(_config()) as base_url:
+        status, headers = _options(
+            f"{base_url}/v1/timelines/{uuid4()}/config-replaced",
+            origin="http://localhost:2222",
+        )
+    assert status == 204
+    assert headers.get("access-control-allow-origin") == "http://localhost:2222"
+    assert headers.get("vary") == "Origin"
+    assert headers.get("access-control-max-age") == "86400"
+    assert "access-control-allow-credentials" not in headers
+    assert headers.get("access-control-allow-origin") == "http://localhost:2222"
+    assert headers.get("vary") == "Origin"
+
+
+def test_options_preflight_echoes_127_0_0_1_2222_origin() -> None:
+    with running_server(_config()) as base_url:
+        status, headers = _options(
+            f"{base_url}/v1/timelines/{uuid4()}/config-replaced",
+            origin="http://127.0.0.1:2222",
+        )
+    assert status == 204
+    assert headers.get("access-control-allow-origin") == "http://127.0.0.1:2222"
+    assert headers.get("vary") == "Origin"
+
+
+def test_options_preflight_omits_acao_for_unknown_origin() -> None:
+    with running_server(_config()) as base_url:
+        status, headers = _options(
+            f"{base_url}/v1/timelines/{uuid4()}/config-replaced",
+            origin="https://evil.example",
+        )
+    assert status == 204
+    assert "access-control-allow-origin" not in headers
+    # Vary must still be declared on denied responses, and no credentials /
+    # wildcard may ever be emitted.
+    assert headers.get("vary") == "Origin"
+    assert "access-control-allow-credentials" not in headers
+    assert headers.get("access-control-allow-origin") != "*"
+
+
+def test_options_preflight_without_origin_omits_acao() -> None:
+    with running_server(_config()) as base_url:
+        status, headers = _options(
+            f"{base_url}/v1/timelines/{uuid4()}/config-replaced",
+            origin=None,
+        )
+    assert status == 204
+    assert "access-control-allow-origin" not in headers
+    assert headers.get("vary") == "Origin"
+    assert "access-control-allow-origin" not in headers
+
+
+def test_options_preflight_respects_configured_allowed_origins() -> None:
+    config = AppendServiceConfig(
+        supabase_url="https://example.supabase.co",
+        service_role_key="service-role-key",
+        jwks_url="https://example.supabase.co/auth/v1/.well-known/jwks.json",
+        timeout=5.0,
+        allowed_origins=("https://editor.example",),
+    )
+    with running_server(config) as base_url:
+        _, listed = _options(
+            f"{base_url}/v1/timelines/{uuid4()}/config-replaced",
+            origin="https://editor.example",
+        )
+        _, unlisted = _options(
+            f"{base_url}/v1/timelines/{uuid4()}/config-replaced",
+            origin="https://evil.example",
+        )
+        # An explicit allowlist replaces the dev-localhost default.
+        _, dev_default = _options(
+            f"{base_url}/v1/timelines/{uuid4()}/config-replaced",
+            origin="http://localhost:2222",
+        )
+    assert listed.get("access-control-allow-origin") == "https://editor.example"
+    assert listed.get("vary") == "Origin"
+    assert "access-control-allow-origin" not in unlisted
+    assert "access-control-allow-origin" not in dev_default
+
+
+def test_post_error_response_echoes_origin_for_allowed_origin() -> None:
+    with running_server(_config()) as base_url:
+        status, headers, payload = _post_json_headers(
+            f"{base_url}/v1/timelines/{uuid4()}/config-replaced",
+            {"config": {"tracks": [], "clips": []}},
+            origin="http://localhost:2222",
+        )
+    assert status == 401
+    assert payload["error"] == "unauthorized"
+    assert headers.get("access-control-allow-origin") == "http://localhost:2222"
+    assert headers.get("vary") == "Origin"
+
+
+def test_post_error_response_omits_acao_for_unknown_origin() -> None:
+    with running_server(_config()) as base_url:
+        status, headers, _payload = _post_json_headers(
+            f"{base_url}/v1/timelines/{uuid4()}/config-replaced",
+            {"config": {"tracks": [], "clips": []}},
+            origin="https://evil.example",
+        )
+    assert status == 401
+    assert "access-control-allow-origin" not in headers
+
+
+def test_config_from_env_parses_allowed_origins(monkeypatch) -> None:
+    monkeypatch.setenv("REIGH_SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setenv("REIGH_SUPABASE_SERVICE_ROLE_KEY", "service-role-key")
+    monkeypatch.setenv(
+        "REIGH_APPEND_SERVICE_ALLOWED_ORIGINS",
+        "https://editor.example, http://localhost:2222,",
+    )
+    config = AppendServiceConfig.from_env()
+    assert config.allowed_origins == ("https://editor.example", "http://localhost:2222")
+
+
+def test_config_from_env_defaults_allowed_origins_to_empty(monkeypatch) -> None:
+    monkeypatch.setenv("REIGH_SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setenv("REIGH_SUPABASE_SERVICE_ROLE_KEY", "service-role-key")
+    monkeypatch.delenv("REIGH_APPEND_SERVICE_ALLOWED_ORIGINS", raising=False)
+    config = AppendServiceConfig.from_env()
+    assert config.allowed_origins == ()
+
+
+def test_config_from_env_rejects_control_characters_in_allowed_origins(monkeypatch) -> None:
+    monkeypatch.setenv("REIGH_SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setenv("REIGH_SUPABASE_SERVICE_ROLE_KEY", "service-role-key")
+    monkeypatch.setenv(
+        "REIGH_APPEND_SERVICE_ALLOWED_ORIGINS",
+        "https://editor.example\r\nInjected: yes",
+    )
+    with pytest.raises(ValueError, match="control characters"):
+        AppendServiceConfig.from_env()
+
+
+def test_options_preflight_dual_configured_origins_each_echoed_own_origin() -> None:
+    with running_server(
+        _config(
+            allowed_origins=("https://editor.example", "http://localhost:2222"),
+        )
+    ) as base_url:
+        url = f"{base_url}/v1/timelines/{uuid4()}/config-replaced"
+        _, first = _options(url, origin="https://editor.example")
+        _, second = _options(url, origin="http://localhost:2222")
+    assert first.get("access-control-allow-origin") == "https://editor.example"
+    assert second.get("access-control-allow-origin") == "http://localhost:2222"
+
+
+def test_options_preflight_control_characters_in_origin_never_echoed() -> None:
+    with running_server(_config()) as base_url:
+        status, headers = _options(
+            f"{base_url}/v1/timelines/{uuid4()}/config-replaced",
+            origin="http://localhost:2222\x01X-Evil",
+        )
+    assert status == 204
+    assert "access-control-allow-origin" not in headers
+
+
+def test_unexpected_runtime_error_returns_sanitized_500(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unexpected exception must produce a sanitized 500, not a dropped connection."""
+    from astrid.core.integrations.reigh import append_service as append_mod
+
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("secret internal detail")
+
+    monkeypatch.setattr(append_mod, "verify_user_jwt", boom)
+    with running_server(_config()) as base_url:
+        status, payload = _post_json(
+            f"{base_url}/v1/timelines/{uuid4()}/config-replaced",
+            {"config": {"clips": [], "tracks": []}},
+            token="any-token",
+        )
+    assert status == 500
+    assert payload["error"] == "internal_error"
+    assert "secret internal detail" not in payload.get("detail", "")
+
+
+def test_jwks_fetch_failure_maps_to_502(monkeypatch: pytest.MonkeyPatch) -> None:
+    from astrid.core.integrations.reigh import append_service as append_mod
+    from astrid.core.integrations.reigh.worker_jwt import JwksFetchError
+
+    def jwks_down(*_args, **_kwargs):
+        raise JwksFetchError("upstream down")
+
+    monkeypatch.setattr(append_mod, "verify_user_jwt", jwks_down)
+    with running_server(_config()) as base_url:
+        status, payload = _post_json(
+            f"{base_url}/v1/timelines/{uuid4()}/config-replaced",
+            {"config": {"clips": [], "tracks": []}},
+            token="any-token",
+        )
+    assert status == 502
+    assert payload["error"] == "jwks_unavailable"

@@ -43,6 +43,11 @@ from astrid.core.project.run import (
     project_run_env,
     reject_project_with_out,
 )
+from astrid.core.project.ownership import require_project_owned_artifact
+from astrid.core.project.guidance import (
+    format_project_required_guidance,
+    selected_project,
+)
 from astrid.core.runtime import (
     InProcessExecutionPreconditionError,
     InProcessInvocationError,
@@ -52,7 +57,6 @@ from astrid.core.runtime.log_capture import (
     open_run_log_capture,
     run_subprocess_with_capture,
 )
-from astrid.core.session.config import resolve_default_project_for_sdk
 from astrid.core.subprocess_env import build_child_subprocess_env
 from astrid.core.task import env as task_env
 from astrid.core.task import gate as task_gate
@@ -912,6 +916,7 @@ def _prepare_project_request(
 ) -> tuple[ProjectRunContext | None, ExecutorRunRequest]:
     if not request.project:
         return None, request
+    _validate_project_owned_inputs(request, executor)
     if not request.project_was_auto_resolved:
         reject_project_with_out(request.project, request.out)
     record_out = request.out if request.out not in (None, "") else None
@@ -935,14 +940,49 @@ def _prepare_project_request(
         argv=_project_argv(request),
         metadata={
             "dry_run": bool(request.dry_run),
-            "project_was_auto_resolved": bool(request.project_was_auto_resolved),
+            "project_resolution": (
+                "attached" if request.project_was_auto_resolved else "explicit"
+            ),
         },
+        auto_bound=False,
         record_out=record_out,
         requires_timeline=requires_timeline,
         invocation=request.invocation,
     )
     effective_out = request.out if record_out is not None else context.run_root
     return context, replace(request, out=effective_out, run_root=context.run_root)
+
+
+def _validate_project_owned_inputs(
+    request: ExecutorRunRequest,
+    executor: ExecutorDefinition,
+) -> None:
+    """Fail closed for declared timeline/experiment inputs outside the project."""
+
+    if not request.project:
+        return
+    for port in getattr(executor, "inputs", ()):
+        artifact_type = port.artifact_type
+        if not isinstance(artifact_type, str):
+            continue
+        normalized = artifact_type.strip().lower().replace("-", "_")
+        if not (
+            normalized == "timeline"
+            or normalized.startswith("timeline/")
+            or normalized == "experiment"
+            or normalized.startswith("experiment/")
+            or normalized in {"project_runs", "experiment_runs"}
+        ):
+            continue
+        value = request.inputs.get(port.name)
+        if not _has_value(value):
+            continue
+        for item in _iter_input_values(value):
+            require_project_owned_artifact(
+                request.project,
+                normalized,
+                _stringify_value(item),
+            )
 
 
 def _project_argv(request: ExecutorRunRequest) -> list[str]:
@@ -984,7 +1024,9 @@ def _finalize_project_executor(
     artifact_roots = [request.out, context.run_root] if request.out not in (None, "") else [context.run_root]
     metadata = {
         "dry_run": bool(request.dry_run),
-        "project_was_auto_resolved": bool(request.project_was_auto_resolved),
+        "project_resolution": (
+            "attached" if request.project_was_auto_resolved else "explicit"
+        ),
     }
     finalize_project_run(
         context,
@@ -997,13 +1039,16 @@ def _finalize_project_executor(
 
 
 def _resolve_project_request(request: ExecutorRunRequest) -> ExecutorRunRequest:
-    if request.project:
+    project, source = selected_project(request.project)
+    if source == "explicit":
         return request
-    return replace(
-        request,
-        project=resolve_default_project_for_sdk(),
-        project_was_auto_resolved=True,
-    )
+    if project is not None:
+        return replace(
+            request,
+            project=project,
+            project_was_auto_resolved=True,
+        )
+    raise ExecutorRunnerError(format_project_required_guidance(operation="executor run"))
 
 
 def _prepare_dry_run_request(request: ExecutorRunRequest) -> ExecutorRunRequest:

@@ -124,14 +124,18 @@ def _resolve_invoke_destination(
     project: str | None,
     project_root: str | Path | None,
 ) -> tuple[Path | str | None, str | None]:
-    if out is not None:
-        return out, project
-    if project is not None:
-        return None, project
+    del project_root  # project roots discover packs; they never select ownership.
+    from astrid.core.project.guidance import (
+        format_project_required_guidance,
+        selected_project,
+    )
 
-    from astrid.core.session.config import resolve_default_project_for_sdk
-
-    return None, resolve_default_project_for_sdk(projects_root=project_root)
+    selected, _source = selected_project(project)
+    if selected is None:
+        raise CapabilityPreconditionError(
+            format_project_required_guidance(operation="generation")
+        )
+    return out, selected
 
 
 @dataclass(frozen=True)

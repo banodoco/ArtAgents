@@ -40,6 +40,7 @@ def build_project(
     slug: str,
     *,
     name: str | None = None,
+    description: str | None = None,
     project_id: str | None = None,
     theme: str | None = None,
     created_at: str | None = None,
@@ -60,6 +61,8 @@ def build_project(
     }
     if project_id is not None:
         payload["project_id"] = _require_string(project_id, "project.project_id")
+    if description is not None:
+        payload["description"] = _require_string(description, "project.description")
     if theme is not None:
         payload["theme"] = validate_project_slug(theme)
     return payload
@@ -157,6 +160,13 @@ def validate_project(raw: Any) -> dict[str, Any]:
     updated_at = _require_string(data.get("updated_at"), "project.updated_at")
     payload = dict(data)
     payload.update({"created_at": created_at, "name": name, "slug": slug, "updated_at": updated_at})
+    if "description" in payload:
+        if payload["description"] is None:
+            payload.pop("description")
+        else:
+            payload["description"] = _require_string(
+                payload["description"], "project.description"
+            )
     if "project_id" in payload:
         if payload["project_id"] is None:
             payload.pop("project_id")
@@ -297,6 +307,17 @@ def _normalize_asset(raw: Any, *, path: str) -> dict[str, Any]:
     else:
         payload["url"] = payload["url"]
         payload.pop("file", None)
+    if "duration" in payload:
+        dur = payload["duration"]
+        if not isinstance(dur, (int, float)) or isinstance(dur, bool):
+            raise ProjectValidationError(
+                f"{path}.duration must be a finite positive number, got {dur!r}"
+            )
+        import math
+        if not (math.isfinite(dur) and dur > 0):
+            raise ProjectValidationError(
+                f"{path}.duration must be a finite positive number, got {dur!r}"
+            )
     return payload
 
 

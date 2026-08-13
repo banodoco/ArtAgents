@@ -16,6 +16,8 @@ from urllib.parse import unquote, urlparse
 from astrid.core.foundation.project_paths import validate_project_slug
 from astrid.core.integrations.reigh.local_bridge import (
     BridgeTimelineRecord,
+    list_bridge_projects,
+    list_bridge_timelines,
     load_bridge_timeline,
     resolve_bridge_asset,
     resolve_bridge_projects_root,
@@ -526,6 +528,21 @@ def make_local_bridge_handler(*, projects_root: Path):
                     "ok": True,
                     "projects_root": str(projects_root),
                 })
+                return
+
+            if parts == ["projects"]:
+                self._send_json(200, {"projects": list_bridge_projects(root=projects_root)})
+                return
+
+            if len(parts) == 3 and parts[0] == "projects" and parts[2] == "timelines":
+                project_slug = self._validate_project(parts[1])
+                if project_slug is None:
+                    return
+                rows = [
+                    _serialize_timeline_row(row)
+                    for row in list_bridge_timelines(project_slug, root=projects_root)
+                ]
+                self._send_json(200, {"timelines": rows})
                 return
 
             if len(parts) == 4 and parts[0] == "projects" and parts[2] == "timelines":

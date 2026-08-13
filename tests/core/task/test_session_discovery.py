@@ -56,7 +56,7 @@ def test_single_candidate_resolves_without_stderr(
 # ---------------------------------------------------------------------------
 
 
-def test_multiple_candidates_default_present_resolves_to_default(
+def test_multiple_candidates_default_present_still_refuses(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv(session_paths.ASTRID_HOME_ENV, str(tmp_path / "home"))
@@ -73,12 +73,12 @@ def test_multiple_candidates_default_present_resolves_to_default(
     monkeypatch.chdir(str(ws))
 
     result, stderr = _stderr_of(_most_recent_session_slug, projects_root)
-    assert result == "default-project"
+    assert result is None
     assert "3 projects have a bound session on disk" in stderr
-    assert "preferring configured default project 'default-project'" in stderr
+    assert "refusing to guess" in stderr
 
 
-def test_multiple_candidates_default_present_via_user_config(
+def test_multiple_candidates_user_default_still_refuses(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv(session_paths.ASTRID_HOME_ENV, str(tmp_path / "home"))
@@ -93,12 +93,12 @@ def test_multiple_candidates_default_present_via_user_config(
     _make_project(projects_root, "zulu", "S-ZULU")
 
     result, stderr = _stderr_of(_most_recent_session_slug, projects_root)
-    assert result == "beta"
+    assert result is None
     assert "3 projects have a bound session on disk" in stderr
-    assert "preferring configured default project 'beta'" in stderr
+    assert "refusing to guess" in stderr
 
 
-def test_multiple_candidates_only_two_default_among_them(
+def test_two_candidates_with_default_still_refuses(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv(session_paths.ASTRID_HOME_ENV, str(tmp_path / "home"))
@@ -113,9 +113,9 @@ def test_multiple_candidates_only_two_default_among_them(
     monkeypatch.chdir(str(ws))
 
     result, stderr = _stderr_of(_most_recent_session_slug, projects_root)
-    assert result == "beta"
+    assert result is None
     assert "2 projects have a bound session on disk" in stderr
-    assert "preferring configured default project 'beta'" in stderr
+    assert "refusing to guess" in stderr
 
 
 # ---------------------------------------------------------------------------

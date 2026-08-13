@@ -19,6 +19,36 @@
       "required": false,
       "type": "file",
       "artifact_type": "video/clip"
+    },
+    {
+      "description": "Question or evaluation rubric for the video-understanding model.",
+      "name": "query",
+      "required": false,
+      "type": "string"
+    },
+    {
+      "description": "Model preset: fast or best.",
+      "name": "mode",
+      "required": false,
+      "type": "string"
+    },
+    {
+      "description": "Optional JSON response schema used to constrain the model output.",
+      "name": "response_schema",
+      "required": false,
+      "type": "file"
+    },
+    {
+      "description": "Directory for extracted video windows and the result manifest.",
+      "name": "out_dir",
+      "required": false,
+      "type": "directory"
+    },
+    {
+      "description": "Optional JSON result file.",
+      "name": "out",
+      "required": false,
+      "type": "file"
     }
   ],
   "isolation": {

@@ -1,0 +1,96 @@
+{
+  "schema_version": 1,
+  "cache": {
+    "mode": "none"
+  },
+  "command": {
+    "argv": [
+      "{python_exec}",
+      "-m",
+      "astrid.packs.iteration.executors.experiment_prepare.run",
+      "--experiment",
+      "{experiment}",
+      "--runs-dir",
+      "{runs_dir}",
+      "--out",
+      "{out}"
+    ]
+  },
+  "conditions": [
+    {
+      "input": "experiment",
+      "kind": "requires_input"
+    }
+  ],
+  "description": "Resolve experiment cases, validate source manifests, normalize provider data, and emit review.json + diagnostics.json + manifest.json.",
+  "graph": {
+    "consumes": [
+      "experiment_definition",
+      "run_manifests"
+    ],
+    "provides": [
+      "normalized_review",
+      "experiment_diagnostics"
+    ]
+  },
+  "id": "iteration.experiment_prepare",
+  "inputs": [
+    {
+      "description": "Path to experiment.json definition file.",
+      "name": "experiment",
+      "required": true,
+      "type": "file",
+      "artifact_type": "experiment"
+    },
+    {
+      "description": "Directory containing project runs (for resolving run/manifest paths).",
+      "name": "runs_dir",
+      "required": true,
+      "type": "directory",
+      "artifact_type": "experiment_runs"
+    }
+  ],
+  "isolation": {
+    "mode": "subprocess",
+    "network": false,
+    "env_passthrough": [
+      "ASTRID_REPO_ROOT"
+    ]
+  },
+  "keywords": [
+    "experiment",
+    "review",
+    "prepare",
+    "normalize",
+    "provider-independent",
+    "manifest",
+    "diagnostics"
+  ],
+  "kind": "built_in",
+  "metadata": {
+    "output_result_manifest": true,
+    "requires_timeline": false,
+    "runtime_entrypoint": "main",
+    "runtime_file": "run.py",
+    "runtime_module": "astrid.packs.iteration.executors.experiment_prepare.run"
+  },
+  "name": "Experiment Prepare",
+  "outputs": [
+    {
+      "description": "Provider-independent normalized review with case cards.",
+      "mode": "create_or_replace",
+      "name": "review",
+      "path_template": "{out}/review.json",
+      "type": "file"
+    },
+    {
+      "description": "Experiment diagnostics: status counts, duplicates, input-echo, capture gaps.",
+      "mode": "create_or_replace",
+      "name": "diagnostics",
+      "path_template": "{out}/diagnostics.json",
+      "type": "file"
+    }
+  ],
+  "short_description": "Normalize an experiment's provider manifests into a provider-independent review model with diagnostics.",
+  "version": "1.0"
+}

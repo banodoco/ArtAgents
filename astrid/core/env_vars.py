@@ -44,6 +44,11 @@ ASTRID_PROJECT_RUN = "ASTRID_PROJECT_RUN"
 """Set to ``1`` inside a project-run subprocess to signal that the process was
 launched by Astrid's run machinery (not a bare CLI invocation)."""
 
+ASTRID_PROJECT_SLUG = "ASTRID_PROJECT_SLUG"
+"""Owning project slug for a project-run subprocess. Project-aware pack
+entrypoints use this to enforce that managed timeline and experiment inputs
+live inside the same project."""
+
 ASTRID_THEMES_ROOT = "ASTRID_THEMES_ROOT"
 """Override for the repository/theme asset root. Read by theme resolution helpers."""
 
@@ -190,6 +195,7 @@ __all__ = [
     "ASTRID_NO_NUDGE",
     "ASTRID_PACKS_PATH",
     "ASTRID_PROJECT_RUN",
+    "ASTRID_PROJECT_SLUG",
     "ASTRID_PROJECTS_ROOT",
     "ASTRID_REPO_ROOT",
     "ASTRID_SESSION_ID",

@@ -486,3 +486,81 @@ Each anti-scope boundary was checked mechanically via `git diff` and `git grep` 
 ### 13.5 Audit Conclusion
 
 The S3 sprint diff is **clean** against all anti-scope boundaries. No vendor timeline schema files were edited in either repo. No dedup, refcount, or blob-store primitives were introduced. No database sync, event-log, or ledger changes were made. No production network bridge exposure was added — the Astrid bridge connects to localhost only and the descoped render path ensures no SSE/render endpoint was wired. All changed files are either additive asset-graph code, focused tests, schema/validation alignment, or documentation.
+
+## 14. Local Bridge Save Contract — Version-Guarded CAS (2026-08-11)
+
+Added to close the stale-client clobbering and missing-CLI-surface gaps found while
+adding an audio asset to `desert-plant-growth` (Toccata & Fugue, Saycet rework).
+Authoritative implementation: `astrid/core/integrations/reigh/local_bridge.py`,
+`local_bridge_server.py`, `astrid/core/timeline/asset_registry_edits.py`,
+`astrid/core/cli/timeline_registry.py`.
+
+### 14.1 HTTP Save Endpoints (CAS)
+
+Both endpoints require an integer `expected_version` (the client's cached event-log
+head). On mismatch the server returns `409` with:
+
+```json
+{"error": "timeline_version_conflict", "detail": "<message>", "config_version": <current head>}
+```
+
+| Endpoint | Required body | Success | Errors |
+|---|---|---|---|
+| `POST /projects/:p/timelines/:t/save` | `{config, registry, expected_version}` | `200` bridge payload | `400` malformed body; `409` stale; `404` unknown timeline |
+| `PUT /projects/:p/timelines/:t/registry` | `{registry, expected_version}` | `200` registry payload | `400` malformed; `409` stale; `404` unknown timeline |
+
+The config and registry events are appended in ONE atomic
+`append_prebuilt_events` batch (both succeed or both fail); the projection and
+`registry.json` sidecar are written only after the guarded append succeeds.
+A stale version changes neither the event log nor any sidecar.
+
+The editor (`reigh-timeline-main/src/tools/video-editor/data/AstridBridgeDataProvider.ts`)
+sends ONE combined POST on save; `registerAsset` uses the guarded PUT. A `409`
+is mapped to `TimelineVersionConflictError` → reload-and-retry with the fresh
+`config_version`.
+
+### 14.2 `astrid projects source add --file` Imports
+
+`--file` copies the source atomically into `sources/<source_id>/<source_id><ext>`
+(copy2 → `.importing` sibling → `os.replace` → atomic `source.json`), recording the
+in-project absolute path. Outside-root files are therefore servable by the bridge.
+Collisions fail unless `--force` (maps to `exist_ok`). `--url` never copies.
+`asset.duration` is validated as finite and positive.
+
+### 14.3 `astrid timelines registry sync`
+
+```bash
+astrid timelines registry sync <slug> --manifest manifest.json --expected-version N --project <slug>
+```
+
+Manifest: `{"assets": {"<asset-key>": {"source_id": "<id>"} | {"file": "<path-under-sources/>"}}}`
+— exactly one of `source_id` / `file` per entry; unresolved or outside-root refs
+fail with an import hint. The verb merges into the RAW registry (unrelated and
+temporarily-missing entries are never pruned), appends
+`timeline.asset_registry_replaced(source="other")` under `--expected-version` CAS,
+updates the `registry.json` sidecar, and skips no-op writes. The served registry
+still filters entries whose media file is unresolvable.
+
+### 14.4 Clip Timing Invariant
+
+`clip.added` carries optional validated `start` (≥ 0) and `duration` (> 0),
+projected to `at`/`hold`. `clip add --kind audio` without `--duration` uses the
+registry asset `duration` if present, else FAILS ("probe or pass --duration") —
+no silent zero-length clips, no automatic ffprobe.
+
+### 14.5 Sessionless Project-Scoped Edits
+
+All project-scoped mutation verbs (clip/track/effect/transition/theme/audio/
+arrangement/pool/registry, `projects source`) work with an explicit `--project`
+and no bound session; the actor is the stable request-scoped
+`agent:project:<slug>`. Unconditional allowlist and `.astrid-session` behavior
+are unchanged.
+
+### 14.6 Invariants Preserved (Do Not Regress)
+
+- Doubled source layout `sources/<name>.<ext>/<name>.<ext>` is intentional and tested.
+- Outside-root file rejection is deliberate (traversal guard).
+- `registry.json` is a recoverable sidecar of the event stream; when missing it is
+  rebuilt from the latest `timeline.asset_registry_replaced` event, then legacy
+  `assets.json`, then a dotfile-excluding source scan.
+- Registry writes are append-only events; implicit pruning is forbidden.

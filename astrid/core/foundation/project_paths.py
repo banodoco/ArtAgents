@@ -22,6 +22,7 @@ DEFAULT_PROJECTS_ROOT = _default_projects_root()
 
 _SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,62}$")
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
+_EXPERIMENT_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 
 
 class ProjectPathError(ValueError):
@@ -58,6 +59,18 @@ def validate_run_id(run_id: object) -> str:
     return run_id
 
 
+def validate_experiment_id(experiment_id: object) -> str:
+    if (
+        not isinstance(experiment_id, str)
+        or _EXPERIMENT_ID_RE.fullmatch(experiment_id) is None
+    ):
+        raise ProjectPathError(
+            "experiment id must start with a lowercase letter or digit and "
+            "contain only lowercase letters, digits, '.', '_' or '-'"
+        )
+    return experiment_id
+
+
 def project_dir(slug: str, *, root: str | Path | None = None) -> Path:
     return resolve_projects_root(root) / validate_project_slug(slug)
 
@@ -84,6 +97,28 @@ def source_analysis_dir(slug: str, source_id: str, *, root: str | Path | None = 
 
 def runs_dir(slug: str, *, root: str | Path | None = None) -> Path:
     return project_dir(slug, root=root) / "runs"
+
+
+def experiments_dir(slug: str, *, root: str | Path | None = None) -> Path:
+    return project_dir(slug, root=root) / "experiments"
+
+
+def experiment_dir(
+    slug: str,
+    experiment_id: str,
+    *,
+    root: str | Path | None = None,
+) -> Path:
+    return experiments_dir(slug, root=root) / validate_experiment_id(experiment_id)
+
+
+def experiment_json_path(
+    slug: str,
+    experiment_id: str,
+    *,
+    root: str | Path | None = None,
+) -> Path:
+    return experiment_dir(slug, experiment_id, root=root) / "experiment.json"
 
 
 def run_dir(slug: str, run_id: str, *, root: str | Path | None = None) -> Path:

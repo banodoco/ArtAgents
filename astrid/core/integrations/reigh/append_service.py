@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -18,6 +19,8 @@ from astrid.core.integrations.reigh.supabase_client import (
     rpc,
 )
 from astrid.core.integrations.reigh.worker_jwt import (
+    JwksConfigurationError,
+    JwksFetchError,
     JwtVerificationError,
     verify_user_jwt,
 )
@@ -33,7 +36,12 @@ from astrid.core.timeline.sync_state import (
 )
 from astrid.core.util.time import utc_now_seconds
 
+DEFAULT_ALLOWED_ORIGINS_ENV = "REIGH_APPEND_SERVICE_ALLOWED_ORIGINS"
+DEV_LOCAL_ORIGINS = ("http://localhost:2222", "http://127.0.0.1:2222")
+
 DEFAULT_INTERNAL_TOKEN_ENV = "REIGH_APPEND_SERVICE_INTERNAL_TOKEN"
+
+logger = logging.getLogger(__name__)
 
 
 class AppendServiceError(RuntimeError):
@@ -60,7 +68,9 @@ class AppendServiceConfig:
     service_role_key: str
     internal_token: str | None = None
     jwks_url: str | None = None
+    jwt_secret: str | None = None
     timeout: float = 60.0
+    allowed_origins: tuple[str, ...] = ()
 
     @classmethod
     def from_env(cls, *, timeout: float = 60.0) -> "AppendServiceConfig":
@@ -70,7 +80,9 @@ class AppendServiceConfig:
             service_role_key=reigh_env.resolve_service_role_key(),
             internal_token=internal_token,
             jwks_url=_optional(lambda: reigh_env.resolve_jwks_url()),
+            jwt_secret=reigh_env.resolve_jwt_secret(),
             timeout=timeout,
+            allowed_origins=_parse_allowed_origins(os.environ.get(DEFAULT_ALLOWED_ORIGINS_ENV, "")),
         )
 
 
@@ -345,8 +357,13 @@ class AppendService:
             verified = verify_user_jwt(
                 token,
                 jwks_url=self.config.jwks_url,
+                jwt_secret=self.config.jwt_secret,
                 timeout=min(self.config.timeout, 10.0),
             )
+        except JwksConfigurationError as exc:
+            raise AppendServiceError(500, "internal_error", "server JWKS configuration is invalid") from exc
+        except JwksFetchError as exc:
+            raise AppendServiceError(502, "jwks_unavailable", "could not reach the JWKS endpoint") from exc
         except JwtVerificationError as exc:
             raise AppendServiceError(401, "unauthorized", f"invalid user JWT: {exc}") from exc
         return AuthorizedCaller(scheme="user_jwt", user_id=verified.user_id)
@@ -584,6 +601,14 @@ def make_append_service_handler(*, service: AppendService):
                 raise AppendServiceError(404, "not_found", f"unknown POST route: {path}")
             except AppendServiceError as exc:
                 self._send_json(exc.status, {"error": exc.code, "detail": exc.detail})
+            except Exception:  # noqa: BLE001
+                # Never drop the connection or leak internals: log the
+                # traceback server-side and return a sanitized 500.
+                logger.exception("unhandled append-service error")
+                self._send_json(
+                    500,
+                    {"error": "internal_error", "detail": "internal server error"},
+                )
 
         def _read_request_body(self) -> dict[str, Any]:
             content_length = int(self.headers.get("Content-Length", "0") or "0")
@@ -610,6 +635,21 @@ def make_append_service_handler(*, service: AppendService):
             self.send_header("Access-Control-Allow-Methods", self._ALLOWED_METHODS)
             self.send_header("Access-Control-Allow-Headers", self._ALLOWED_HEADERS)
             self.send_header("Access-Control-Max-Age", "86400")
+            # Declare the Origin variant on every response (allowed, denied, or
+            # absent) so caches never serve a cross-origin response to the
+            # wrong client.
+            self.send_header("Vary", "Origin")
+            origin = self.headers.get("Origin")
+            if origin and self._is_origin_allowed(origin):
+                self.send_header("Access-Control-Allow-Origin", origin)
+
+        def _is_origin_allowed(self, origin: str) -> bool:
+            if any(ord(ch) < 32 or ord(ch) == 127 for ch in origin):
+                return False
+            allowed = service.config.allowed_origins
+            if allowed:
+                return origin in allowed
+            return origin in DEV_LOCAL_ORIGINS
 
     return Handler
 
@@ -651,6 +691,16 @@ def _optional(callback: Any) -> Any:
         return callback()
     except Exception:
         return None
+
+
+def _parse_allowed_origins(raw: str) -> tuple[str, ...]:
+    parts = tuple(part.strip() for part in raw.split(",") if part.strip())
+    for part in parts:
+        if any(ord(ch) < 32 or ord(ch) == 127 for ch in part):
+            raise ValueError(
+                f"{DEFAULT_ALLOWED_ORIGINS_ENV} entry contains control characters: {part!r}"
+            )
+    return parts
 
 
 def _require_object(value: object, field: str) -> dict[str, Any]:

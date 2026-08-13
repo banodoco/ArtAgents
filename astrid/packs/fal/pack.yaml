@@ -11,20 +11,20 @@ support: core
 visibility: visible
 permissions:
   - id: subprocess
-    reason: Runs fal.ai Foley generation executor.
+    reason: Runs fal.ai media generation executors.
   - id: network
-    reason: Calls fal.ai hunyuan-video-foley API for audio generation.
+    reason: Calls fal.ai Foley and MiniMax H3 APIs.
   - id: project_files
     reason: Reads input video clips and writes generated audio files.
   - id: environment
     reason: Reads FAL_KEY for fal.ai API authentication.
-description: fal.ai integration — generates Foley audio for short video clips via fal.ai's hunyuan-video-foley model.
-keywords: [fal, foley, audio, hunyuan, video, api, integration]
-capabilities: [generate_clip_foley]
+description: fal.ai integration for clip Foley and MiniMax H3 video generation.
+keywords: [fal, foley, audio, hunyuan, minimax, h3, video, api, integration]
+capabilities: [generate_clip_foley, generate_h3_video]
 agent:
-  purpose: "Use to call fal.ai's hunyuan-video-foley model to synthesize a Foley audio track for a single short video clip (requires FAL_KEY)."
-  do_not_use_for: "Orchestrating a full spatial-Foley pass over a whole video (use the foley pack's foley_map, which calls this executor per tile) or image/video frame generation (use the generation pack)."
-  normal_entrypoints: [fal.fal_foley]
+  purpose: "Use for fal.ai Hunyuan Foley or MiniMax H3 text/reference video generation (requires FAL_KEY)."
+  do_not_use_for: "Full spatial-Foley orchestration (use foley.foley_map) or general image/video generation already covered by the generation pack."
+  normal_entrypoints: [fal.fal_foley, fal.h3_video]
 content:
   executors: executors
 aliases:

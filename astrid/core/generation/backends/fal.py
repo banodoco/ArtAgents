@@ -25,6 +25,7 @@ from astrid.core.util.credentials_scope import CredentialsScope
 from astrid.core.util.http import (
     HttpClient,
     default_client,
+    fal_storage_upload,
     fal_submit_and_poll,
     fal_upload,
 )
@@ -149,6 +150,19 @@ class FalBackend(BackendAdapter):
             "enable_safety_checker": "enable_safety_checker",
             "enable_prompt_expansion": "enable_prompt_expansion",
             "acceleration": "acceleration",
+        },
+        "v2v": {
+            "prompt": "prompt",
+            "seed": "seed",
+            "image_ref": "image_url",
+            "video_ref": "video_url",
+            "mode": "mode",
+            "driving_type": "driving_type",
+            "subject_type": "subject_type",
+            "resolution": "resolution",
+            "guidance_scale": "guidance_scale",
+            "steps": "num_inference_steps",
+            "shift": "shift",
         },
         # ── Audio modes ────────────────────────────────────────────────
         "music": {
@@ -300,9 +314,28 @@ class FalBackend(BackendAdapter):
 
             # Special handling for image_ref / image_end_ref — upload if local path
             if canon in ("image_ref", "image_end_ref"):
-                payload[remote_param] = _upload_ref_if_local(
+                uploaded_ref = _upload_ref_if_local(
                     str(value), remote_param, self._client, api_key
                 )
+                # Multi-reference edit endpoints such as Seedream expose a
+                # plural ``image_urls`` input even when Astrid's basic image
+                # contract supplies one canonical ``image_ref``.
+                payload[remote_param] = (
+                    [uploaded_ref] if remote_param == "image_urls" else uploaded_ref
+                )
+                continue
+
+            # Special handling for video_ref — upload to fal CDN (videos are too
+            # large for base64 data URIs and the API prefers CDN URLs).
+            if canon == "video_ref":
+                ref_path = Path(str(value))
+                if ref_path.is_file():
+                    logger.info("Uploading %s to fal CDN: %s", remote_param, ref_path)
+                    payload[remote_param] = fal_storage_upload(
+                        self._client, ref_path, api_key
+                    )
+                else:
+                    payload[remote_param] = str(value)
                 continue
 
             # Special handling for resolution — parse WxH, split into
@@ -432,10 +465,19 @@ def _upload_ref_if_local(
     client: HttpClient,
     api_key: str,
 ) -> str:
-    """Upload *ref_str* to fal if it is a local path; otherwise return as-is."""
+    """Upload *ref_str* to fal if it is a local path; otherwise return as-is.
+
+    Small images are inlined as base64 data URIs (legacy behaviour). Files
+    larger than 500 KB, and any non-image media, are uploaded to fal CDN
+    because fal docs discourage base64 for large payloads.
+    """
     ref_path = Path(ref_str)
     if ref_path.is_file():
-        logger.info("Uploading %s to fal: %s", feature_name, ref_path)
+        size = ref_path.stat().st_size
+        if size > 512_000:
+            logger.info("Uploading %s to fal CDN: %s (%d bytes)", feature_name, ref_path, size)
+            return fal_storage_upload(client, ref_path, api_key)
+        logger.info("Uploading %s to fal as data URI: %s", feature_name, ref_path)
         return fal_upload(client, ref_path, api_key)
     # Assume it's already a URL
     return ref_str

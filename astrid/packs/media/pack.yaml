@@ -14,10 +14,10 @@ permissions:
   - id: project_files
     reason: Reads source video files and writes output clips.
   - id: network
-    reason: Optional speech repair executor calls fal.ai LavaSR.
+    reason: Optional speech repair executor calls fal.ai LavaSR; GIF search calls remote media APIs.
   - id: environment
-    reason: Reads FAL_KEY for fal.ai speech repair.
-description: Media processing tools, including clip extraction and weak-mic speech repair.
+    reason: Reads FAL_KEY for fal.ai speech repair and GIPHY_API_KEY for GIF search.
+description: Media processing tools, including clip extraction, weak-mic speech repair, and remote GIF search.
 keywords:
   - video
   - clip
@@ -29,15 +29,21 @@ keywords:
   - audio
   - speech
   - lavasr
+  - gif
+  - sticker
+  - giphy
 capabilities:
   - extract_clip
   - trim_video
   - repair_speech
+  - search_gifs
+  - download_remote_media
 content:
   executors: executors
 agent:
-  purpose: "Use when you need to trim media segments or repair weak-mic speech in a video clip."
+  purpose: "Use when you need to trim media segments, repair weak-mic speech in a video clip, or search/download GIF and sticker assets."
   do_not_use_for: "Not for building iteration videos from run history (use the iteration pack) or final timeline rendering (use the rendering pack)."
   normal_entrypoints:
     - media.clip_extract
     - media.speech_repair_lavasr
+    - media.gif_search

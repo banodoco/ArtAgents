@@ -141,6 +141,10 @@ _PROJECTED_TOP_ALLOWED = frozenset({
     "clips",
     "theme",
     "theme_overrides",
+    "generation_defaults",
+    "pinnedShotGroups",
+    "output",
+    "app",
 })
 _PROJECTED_FORBIDDEN_CLIP_KEYS = frozenset({"kind", "asset_id", "start", "duration"})
 
@@ -315,12 +319,14 @@ def _make_clip_entry(payload: ClipAddedPayload) -> dict[str, Any]:
     clip_type = "text" if payload.kind == "text" else "media"
     entry: dict[str, Any] = {
         "id": payload.clip_id,
-        "at": 0.0,
+        "at": payload.start,
         "track": payload.track_id,
         "clipType": clip_type,
     }
     if payload.asset_id:
         entry["asset"] = payload.asset_id
+    if payload.duration is not None:
+        entry["hold"] = payload.duration
     if clip_type == "text":
         entry["text"] = {"content": ""}
     return entry
@@ -925,6 +931,7 @@ def regenerate_projection(
     backend: Any,
     *,
     timeline_home: Any,
+    batch_events: Sequence[TimelineEvent] | None = None,
 ) -> dict[str, Any]:
     """Regenerate ``assembly.json`` from the canonical event stream.
 
@@ -940,10 +947,17 @@ def regenerate_projection(
     2. Verify checkpoint metadata against the current *backend* head.
     3. **Checkpoint hit**: seed ``project_to_assembly`` with the cached
        assembly and replay only suffix events (``after=last_event_id``).
-    4. **Checkpoint miss / corruption / version mismatch**: fall back to
-       full replay via ``replay_projection()`` (the pure read-only path).
+    4. **Checkpoint miss / corruption / version mismatch**: try the bounded
+       cold bootstrap (project only the post-reset tail when the tail's
+       oldest event resets the assembly); otherwise fall back to full replay
+       via ``replay_projection()``.
     5. Atomically write the projected raw TimelineConfig to ``assembly.json``.
     6. Atomically write / refresh ``assembly.checkpoint.json``.
+
+    ``batch_events`` supplies the just-appended event batch when the caller
+    already holds it in memory (the incremental save path): when the
+    checkpoint is behind by exactly that batch, the suffix is projected from
+    memory instead of a ``read_events()`` full-log scan.
 
     Returns
     -------
@@ -988,30 +1002,62 @@ def regenerate_projection(
         cp_event_count = checkpoint.get("event_count")
         cp_assembly = checkpoint.get("assembly")
 
-        if (
+        # Ancestry guardrails (MUST-FIX 3c): a checkpoint may only be
+        # trusted when it is a true ancestor of the current log.  The
+        # schema/timeline must match and the covered event count must lie
+        # in ``[0, head.event_count]`` (a count ABOVE the head is corrupt
+        # and forces full replay below); the covered id/hash are verified
+        # against the log when a suffix is replayed.
+        cp_plausible = (
             cp_schema == _CHECKPOINT_SCHEMA_VERSION
             and cp_timeline_id == head.timeline_id
-            and cp_last_event_id == head.last_event_id
-            and cp_last_hash == head.last_hash
-            and cp_event_count == head.event_count
+            and isinstance(cp_event_count, int)
+            and not isinstance(cp_event_count, bool)
+            and 0 <= cp_event_count <= head.event_count
             and isinstance(cp_assembly, dict)
-        ):
-            # Checkpoint is current — no suffix events to replay.
-            # M9: Verify that no recovery/erasure events are in the stream
-            # that would invalidate the checkpoint.  Checkpoint is only valid
-            # when it was regenerated from events, not from stale blobs.
-            assembly = dict(cp_assembly)
-            events_applied = cp_event_count
-            checkpoint_valid = True
-        elif (
-            cp_schema == _CHECKPOINT_SCHEMA_VERSION
-            and cp_timeline_id == head.timeline_id
-            and cp_event_count is not None
-            and cp_event_count < head.event_count
-            and isinstance(cp_assembly, dict)
-        ):
-            # Checkpoint is behind — replay suffix events.
-            suffix_events = backend.read_events(after=cp_last_event_id)
+        )
+
+        if cp_plausible and cp_event_count == head.event_count:
+            if (
+                cp_last_event_id == head.last_event_id
+                and cp_last_hash == head.last_hash
+            ):
+                # Checkpoint is current — no suffix events to replay.
+                # M9: Verify that no recovery/erasure events are in the stream
+                # that would invalidate the checkpoint.  Checkpoint is only valid
+                # when it was regenerated from events, not from stale blobs.
+                assembly = dict(cp_assembly)
+                events_applied = cp_event_count
+                checkpoint_valid = True
+        elif cp_plausible and cp_event_count < head.event_count:
+            # Checkpoint is behind — replay suffix events, but only after
+            # proving the checkpoint is an ancestor of the current log.
+            # Prefer the in-memory batch (incremental save path, no
+            # full-log read) when it accounts for exactly the missing suffix.
+            expected_suffix = head.event_count - cp_event_count
+            if batch_events is not None and len(batch_events) == expected_suffix:
+                suffix_events = list(batch_events)
+            else:
+                suffix_events = backend.read_events(after=cp_last_event_id)
+            # Ancestry checks — a checkpoint that is NOT an ancestor of the
+            # current log (unknown last_event_id, hash mismatch, or a suffix
+            # that does not chain) must never silently replay a wrong suffix:
+            #  - the suffix must contain exactly the missing events (an
+            #    unknown cp_last_event_id makes read_events() return []),
+            #  - the first suffix event must chain from the checkpoint's
+            #    last_hash,
+            #  - the suffix must chain internally and terminate at the head.
+            suffix_chains = (
+                len(suffix_events) == expected_suffix
+                and expected_suffix > 0
+                and suffix_events[0].prev_hash == cp_last_hash
+                and suffix_events[-1].event_id == head.last_event_id
+                and suffix_events[-1].hash == head.last_hash
+                and all(
+                    event.prev_hash == prev.hash
+                    for event, prev in zip(suffix_events[1:], suffix_events[:-1])
+                )
+            )
             # M9: If any suffix event is a recovery or erasure, invalidate
             # the checkpoint and force full replay.  Recovery replaces the
             # assembly; erasure may have removed payloads the checkpoint
@@ -1020,9 +1066,7 @@ def regenerate_projection(
                 e.kind in ("timeline.recovered", "timeline.erased")
                 for e in suffix_events
             )
-            if suffix_has_recovery_or_erasure:
-                checkpoint_valid = False
-            else:
+            if suffix_chains and not suffix_has_recovery_or_erasure:
                 assembly = project_to_assembly(
                     suffix_events,
                     initial_assembly=cp_assembly,
@@ -1032,7 +1076,9 @@ def regenerate_projection(
 
     # --- Fall back to full replay (via pure replay_projection) ---
     if not checkpoint_valid:
-        assembly = replay_projection(backend)
+        assembly = _cold_bootstrap_projection(backend)
+        if assembly is None:
+            assembly = replay_projection(backend)
         events_applied = head.event_count
 
     # --- Write assembly.json atomically ---
@@ -1053,3 +1099,46 @@ def regenerate_projection(
     write_json_atomic(checkpoint_file, checkpoint_payload)
 
     return assembly
+
+
+def _cold_bootstrap_projection(backend: Any) -> dict[str, Any] | None:
+    """Bounded cold-start projection from the log tail.
+
+    When the tail window contains the stream's LAST resetting event
+    (``timeline.config_replaced``, or ``timeline.recovered`` with a projected
+    state summary), the projected state of the FULL stream equals the
+    projection of the suffix starting at that event — everything before the
+    last reset is discarded by the reset.  This bounds the checkpoint-cold
+    cost to O(tail) instead of an unbounded full replay (which re-validates
+    every historical config event).
+
+    Returns ``None`` when the backend cannot read a bounded tail or no
+    resetting event is found within it, so the caller falls back to the
+    full replay.
+    """
+    read_tail = getattr(backend, "read_tail_events", None)
+    if read_tail is None:
+        return None
+    try:
+        suffix = read_tail(limit=256)
+    except Exception:
+        return None
+    if not suffix:
+        return None
+    reset_index: int | None = None
+    for index in range(len(suffix) - 1, -1, -1):
+        event = suffix[index]
+        if event.kind == "timeline.config_replaced":
+            reset_index = index
+            break
+        if event.kind == "timeline.recovered":
+            payload = event.payload
+            if (
+                isinstance(payload, TimelineRecoveredPayload)
+                and payload.projected_state_summary is not None
+            ):
+                reset_index = index
+                break
+    if reset_index is None:
+        return None
+    return project_to_assembly(suffix[reset_index:])

@@ -73,8 +73,11 @@ def test_project_helpers_resolve_env_root_and_write_deterministic_json(tmp_path:
     assert project["slug"] == "demo"
     assert json.loads(project_json.read_text(encoding="utf-8"))["name"] == "Demo"
     assert project_json.read_text(encoding="utf-8").endswith("\n")
-    assert source["asset"]["file"] == str(media.resolve())
+    # P1a: file is imported into the project; asset.file is the in-project path.
+    assert source["asset"]["file"] == str((projects_root / "demo" / "sources" / "intro" / "intro.mp4").resolve())
     assert source["kind"] == "video"
+    # Original external file is retained.
+    assert media.read_bytes() == b"stub"
     assert show_project("demo")["sources"] == [
         {
             "kind": "registered",
@@ -511,6 +514,57 @@ def test_managed_binding_event_stream_id_must_be_valid_uuid() -> None:
     record["metadata"]["timeline_binding_mode"] = "managed"
     with pytest.raises(ProjectValidationError, match="timeline_event_stream_id"):
         validate_run_record(record)
+
+
+# ── P1a: duration validation in _normalize_asset ──────────────────────────
+
+
+def test_asset_duration_valid_finite_positive(tmp_path: Path) -> None:
+    from astrid.core.project.schema import build_source
+
+    media = tmp_path / "test.mp3"
+    media.write_bytes(b"audio")
+    source = build_source("demo", "clip", asset={"file": str(media), "type": "audio/mpeg", "duration": 3.5})
+    assert source["asset"]["duration"] == 3.5
+
+
+def test_asset_duration_missing_is_allowed(tmp_path: Path) -> None:
+    from astrid.core.project.schema import build_source
+
+    media = tmp_path / "test.mp3"
+    media.write_bytes(b"audio")
+    source = build_source("demo", "clip", asset={"file": str(media), "type": "audio/mpeg"})
+    assert "duration" not in source["asset"]
+
+
+def test_asset_duration_non_positive_raises(tmp_path: Path) -> None:
+    from astrid.core.project.schema import build_source
+
+    media = tmp_path / "test.mp3"
+    media.write_bytes(b"audio")
+    for bad in (0, 0.0, -1, -0.5):
+        with pytest.raises(ProjectValidationError, match="duration"):
+            build_source("demo", "clip", asset={"file": str(media), "type": "audio/mpeg", "duration": bad})
+
+
+def test_asset_duration_non_finite_raises(tmp_path: Path) -> None:
+    from astrid.core.project.schema import build_source
+
+    media = tmp_path / "test.mp3"
+    media.write_bytes(b"audio")
+    for bad in (float("inf"), float("-inf"), float("nan")):
+        with pytest.raises(ProjectValidationError, match="duration"):
+            build_source("demo", "clip", asset={"file": str(media), "type": "audio/mpeg", "duration": bad})
+
+
+def test_asset_duration_non_number_raises(tmp_path: Path) -> None:
+    from astrid.core.project.schema import build_source
+
+    media = tmp_path / "test.mp3"
+    media.write_bytes(b"audio")
+    for bad in ("3.5", True, None, [], {}):
+        with pytest.raises(ProjectValidationError, match="duration"):
+            build_source("demo", "clip", asset={"file": str(media), "type": "audio/mpeg", "duration": bad})
 
 
 def test_managed_binding_slug_must_be_valid() -> None:

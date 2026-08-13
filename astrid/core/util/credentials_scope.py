@@ -14,6 +14,7 @@ anthropic  → ``ANTHROPIC_API_KEY``
 deepseek   → ``DEEPSEEK_API_KEY``
 fireworks  → ``FIREWORKS_API_KEY``
 gemini     → ``GEMINI_API_KEY``
+giphy      → ``GIPHY_API_KEY``
 """
 
 from __future__ import annotations
@@ -41,6 +42,7 @@ _PROVIDER_ENV: dict[str, str] = {
     "deepseek": "DEEPSEEK_API_KEY",
     "fireworks": "FIREWORKS_API_KEY",
     "gemini": "GEMINI_API_KEY",
+    "giphy": "GIPHY_API_KEY",
 }
 
 # ---------------------------------------------------------------------------
@@ -87,7 +89,7 @@ class CredentialsScope(ScopedConfig):
             valid = ", ".join(sorted(_PROVIDER_ENV))
             raise AstridError(
                 f"Unknown credentials provider: {provider!r} (valid: {valid})",
-                recovery_command="use a canonical provider name (fal, openai, anthropic, deepseek, fireworks, gemini)",
+                recovery_command="use a canonical provider name (fal, openai, anthropic, deepseek, fireworks, gemini, giphy)",
             )
         return load_api_key(env_var, env_file=env_file)
 

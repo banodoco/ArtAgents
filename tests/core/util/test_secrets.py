@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
+from astrid.core.contracts.errors import AstridError
 from astrid.core.integrations.reigh.env import _candidate_env_files as reigh_candidate_env_files
 from astrid.core.integrations.reigh.env import read_env_value as reigh_read_env_value
 from astrid.core.util.secrets import (
@@ -85,3 +88,13 @@ def test_load_api_key_falls_back_to_environment(monkeypatch, tmp_path: Path) -> 
     monkeypatch.setenv(name, "from-environment")
 
     assert load_api_key(name) == "from-environment"
+
+
+def test_missing_giphy_key_recovery_links_dashboard(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("GIPHY_API_KEY", raising=False)
+
+    with pytest.raises(AstridError) as exc_info:
+        load_api_key("GIPHY_API_KEY", env_file=tmp_path / "missing.env")
+
+    assert "https://developers.giphy.com/dashboard/" in exc_info.value.recovery_command

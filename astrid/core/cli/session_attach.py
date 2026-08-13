@@ -277,7 +277,8 @@ def cmd_attach(args: argparse.Namespace, *, out: Any = None) -> int:
                     _emit_notice(
                         f"attach: no timelines exist for project '{slug}' yet; "
                         "session bound without a timeline. "
-                        "Run `astrid timelines create <slug>` to make one.",
+                        f"Run `astrid timelines create <timeline> --project {slug} --default` "
+                        "to make one.",
                         json_mode=json_mode,
                         out=out,
                     )

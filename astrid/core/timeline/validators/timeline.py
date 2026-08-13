@@ -10,7 +10,7 @@ from astrid.core.timeline.banodoco_schema import (
     _known_timeline_payload,
     _normalize_clip_for_validation,
     _raise_unknown_keys,
-    _shared_validate_timeline,
+    _validate_shared_timeline,
 )
 from astrid.core.timeline.kinds import normalize_track_kind
 
@@ -204,15 +204,17 @@ def validate_timeline(config: Any, *, strict: bool = True) -> None:
     theme = config.get("theme")
     if theme is not None and (not isinstance(theme, str) or not theme):
         raise ValueError("Timeline.theme must be a non-empty slug")
-    # Shape-check against the shared JSON Schema first; then run the
-    # Banodoco-only semantic checks (effect-id registry, transition durations).
+    # Shape-check against the shared JSON Schema first (via the compiled,
+    # process-cached validator — no per-call check_schema / $ref re-walk);
+    # then run the Banodoco-only semantic checks (effect-id registry,
+    # transition durations).
     normalized_for_shared = _known_timeline_payload(config)
     if isinstance(normalized_for_shared.get("clips"), list):
         normalized_for_shared["clips"] = [
             _normalize_clip_for_validation(c) if isinstance(c, dict) else c
             for c in normalized_for_shared["clips"]
         ]
-    _shared_validate_timeline(normalized_for_shared, strict=strict)
+    _validate_shared_timeline(normalized_for_shared)
     fps = _timeline_fps(config)
     tracks = config.get("tracks")
     if tracks is not None:

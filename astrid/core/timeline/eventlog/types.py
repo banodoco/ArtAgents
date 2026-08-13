@@ -78,6 +78,12 @@ class EventLogHead:
     last_hash: str | None
     event_count: int
     version: int
+    # Incremental-append offsets (T2.1): crash-reconciled byte extent of the
+    # log (``log_size``) and the byte offset where the last complete event
+    # line begins (``last_event_offset``).  ``None`` on legacy heads that
+    # predate the fields; the backend then rebuilds from a full parse.
+    log_size: int | None = None
+    last_event_offset: int | None = None
 
 
 @dataclass(frozen=True)

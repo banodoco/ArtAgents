@@ -30,6 +30,7 @@ from astrid.core.timeline.eventlog import LocalFsBackend
 from astrid.core.timeline.events.schema import (
     TimelineActor,
     TimelineEvent,
+    with_event_hash,
 )
 from astrid.core.timeline.events.schema.types import _PAYLOAD_TYPES
 from astrid.core.timeline.paths import assembly_identity_path
@@ -673,6 +674,46 @@ class TestTimelineConfigReplacedProjection:
         assert event.payload.config["tracks"][0]["label"] == "Video"  # type: ignore[attr-defined]
         timeline_contract.validate_timeline_config_for_container(result)
 
+    def test_config_replaced_preserves_storyboard_top_level_fields(self):
+        config = {
+            "tracks": [
+                {"id": "storyboard", "kind": "visual", "label": "Storyboard", "fit": "cover"}
+            ],
+            "clips": [
+                {
+                    "id": "plant-frame-1",
+                    "at": 0,
+                    "track": "storyboard",
+                    "clipType": "media",
+                    "asset": "plant-frame-1",
+                    "hold": 1.5,
+                }
+            ],
+            "generation_defaults": {"model": "storyboard-default"},
+            "pinnedShotGroups": [
+                {
+                    "shotId": "desert-plant-growth",
+                    "trackId": "storyboard",
+                    "clipIds": ["plant-frame-1"],
+                    "mode": "images",
+                }
+            ],
+            "output": {
+                "resolution": "1280x720",
+                "fps": 24,
+                "file": "storyboard-preview.mp4",
+            },
+        }
+        event = _make_event(
+            "timeline.config_replaced",
+            {"config": config, "source": "standalone-import"},
+        )
+
+        result = project_to_assembly([event])
+
+        assert result == config
+        timeline_contract.validate_timeline_config_for_container(result)
+
     def test_config_replaced_projects_editor_save_payload_and_preserves_source_on_round_trip(self):
         event = _make_event(
             "timeline.config_replaced",
@@ -999,6 +1040,322 @@ class TestCheckpointParity:
         assert regen["clips"][0]["id"] == "a"
 
 
+class TestCheckpointAncestry:
+    """MUST-FIX 3c: a checkpoint must be a true ancestor of the log.
+
+    A checkpoint with a wrong hash, an unknown last_event_id, or a count
+    above the head must fall back to full replay — never silently replay a
+    wrong suffix from a non-ancestor checkpoint.
+    """
+
+    def _seed(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, slug: str):
+        monkeypatch.setenv(project_paths.PROJECTS_ROOT_ENV, str(tmp_path))
+        create_project(slug)
+        result = create_timeline(slug, "tl")
+        ulid = result["ulid"]
+        tdir = tmp_path / slug / "timelines" / ulid
+        identity = read_json(assembly_identity_path(slug, ulid, root=tmp_path))
+        backend = LocalFsBackend(timeline_id=identity["timeline_id"], timeline_home=tdir)
+        return backend, identity, tdir
+
+    def _append_clip(self, backend, identity, clip_id: str) -> None:
+        backend.append_event(
+            identity["timeline_id"],
+            "clip.added",
+            {
+                "clip_id": clip_id,
+                "kind": "visual",
+                "track_id": "visual",
+                "asset_id": clip_id,
+                "position": None,
+            },
+            actor=_actor(),
+        )
+
+    def _spy_replay_projection(self, monkeypatch: pytest.MonkeyPatch) -> dict[str, int]:
+        import astrid.core.timeline.projection as projection_mod
+
+        calls: dict[str, int] = {"count": 0}
+        original = projection_mod.replay_projection
+
+        def spy(backend, **kwargs):
+            calls["count"] += 1
+            return original(backend, **kwargs)
+
+        monkeypatch.setattr(projection_mod, "replay_projection", spy)
+        return calls
+
+    def _corrupt_checkpoint(
+        self,
+        tdir: Path,
+        *,
+        last_event_id: str | None = None,
+        last_hash: str | None = None,
+        event_count: int | None = None,
+        stale_assembly: bool = False,
+    ) -> None:
+        cp_file = tdir / "assembly.checkpoint.json"
+        cp = read_json(cp_file)
+        if last_event_id is not None:
+            cp["last_event_id"] = last_event_id
+        if last_hash is not None:
+            cp["last_hash"] = last_hash
+        if event_count is not None:
+            cp["event_count"] = event_count
+        if stale_assembly:
+            cp["assembly"] = {"clips": [], "tracks": []}
+        write_json_atomic(cp_file, cp)
+
+    def test_checkpoint_with_wrong_hash_forces_full_replay(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        backend, identity, tdir = self._seed(tmp_path, monkeypatch, "wrong-hash-cp")
+        for clip_id in ("a", "b", "c"):
+            self._append_clip(backend, identity, clip_id)
+        regenerate_projection(identity["timeline_id"], backend, timeline_home=tdir)
+        # Append two more events; checkpoint (count 3) is now behind.
+        self._append_clip(backend, identity, "d")
+        self._append_clip(backend, identity, "e")
+
+        # Corrupt the checkpoint: wrong hash + stale assembly content.
+        self._corrupt_checkpoint(tdir, last_hash="0" * 64, stale_assembly=True)
+
+        calls = self._spy_replay_projection(monkeypatch)
+        regen = regenerate_projection(identity["timeline_id"], backend, timeline_home=tdir)
+        assert calls["count"] >= 1, "non-ancestor checkpoint must fall back to full replay"
+        assert regen == project_to_assembly(backend.read_events())
+        assert len(regen["clips"]) == 5
+
+    def test_checkpoint_with_unknown_last_event_id_forces_full_replay(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        backend, identity, tdir = self._seed(tmp_path, monkeypatch, "unknown-id-cp")
+        for clip_id in ("a", "b", "c"):
+            self._append_clip(backend, identity, clip_id)
+        regenerate_projection(identity["timeline_id"], backend, timeline_home=tdir)
+        self._append_clip(backend, identity, "d")
+        self._append_clip(backend, identity, "e")
+
+        # Corrupt the checkpoint: last_event_id is not in the log at all.
+        self._corrupt_checkpoint(tdir, last_event_id="01NOTINTHELOG000000000000", stale_assembly=True)
+
+        calls = self._spy_replay_projection(monkeypatch)
+        regen = regenerate_projection(identity["timeline_id"], backend, timeline_home=tdir)
+        assert calls["count"] >= 1, "non-ancestor checkpoint must fall back to full replay"
+        assert regen == project_to_assembly(backend.read_events())
+        assert len(regen["clips"]) == 5
+
+    def test_checkpoint_count_above_head_forces_full_replay(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        backend, identity, tdir = self._seed(tmp_path, monkeypatch, "count-over-cp")
+        for clip_id in ("a", "b", "c"):
+            self._append_clip(backend, identity, clip_id)
+        regenerate_projection(identity["timeline_id"], backend, timeline_home=tdir)
+
+        # Corrupt the checkpoint: count claims more events than the head.
+        self._corrupt_checkpoint(tdir, event_count=10)
+
+        calls = self._spy_replay_projection(monkeypatch)
+        regen = regenerate_projection(identity["timeline_id"], backend, timeline_home=tdir)
+        assert calls["count"] >= 1, "checkpoint count above head must fall back to full replay"
+        assert regen == project_to_assembly(backend.read_events())
+        assert len(regen["clips"]) == 3
+
+    def test_valid_checkpoint_behind_replays_suffix_only(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        backend, identity, tdir = self._seed(tmp_path, monkeypatch, "valid-suffix-cp")
+        for clip_id in ("a", "b", "c"):
+            self._append_clip(backend, identity, clip_id)
+        regenerate_projection(identity["timeline_id"], backend, timeline_home=tdir)
+        self._append_clip(backend, identity, "d")
+        self._append_clip(backend, identity, "e")
+
+        # Valid (untampered) checkpoint behind by 2 → suffix replay only.
+        calls = self._spy_replay_projection(monkeypatch)
+        regen = regenerate_projection(identity["timeline_id"], backend, timeline_home=tdir)
+        assert calls["count"] == 0, "valid behind checkpoint must not full-replay"
+        assert regen == project_to_assembly(backend.read_events())
+        assert len(regen["clips"]) == 5
+
+
+class TestColdBootstrap:
+    """T2.1: bounded cold-start projection from a resetting log tail."""
+
+    def _seed_backend(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, slug: str = "cb-proj", tl: str = "cb-tl"):
+        monkeypatch.setenv(project_paths.PROJECTS_ROOT_ENV, str(tmp_path))
+        create_project(slug)
+        result = create_timeline(slug, tl)
+        ulid = result["ulid"]
+        tdir = tmp_path / slug / "timelines" / ulid
+        identity = read_json(assembly_identity_path(slug, ulid, root=tmp_path))
+        backend = LocalFsBackend(timeline_id=identity["timeline_id"], timeline_home=tdir)
+        return backend, identity, tdir
+
+    @staticmethod
+    def _seed_renamed(backend: LocalFsBackend, timeline_id: str, count: int) -> None:
+        """Append *count* chained timeline.renamed events (cheap no-ops)."""
+        head = backend.head()
+        prev = head.last_hash
+        version = head.version
+        batch: list[TimelineEvent] = []
+        for index in range(count):
+            event = TimelineEvent.new(
+                timeline_id=timeline_id,
+                ts="2026-08-12T00:00:00Z",
+                actor=_actor("seed"),
+                kind="timeline.renamed",
+                payload={"old_slug": f"s{index}", "new_slug": f"s{index + 1}"},
+                prev_hash=prev,
+                expected_version=version + 1,
+            )
+            event = with_event_hash(event, prev_hash=prev)
+            batch.append(event)
+            prev = event.hash
+            version += 1
+        backend.append_prebuilt_events(timeline_id, batch)
+
+    def test_cold_bootstrap_skips_full_replay_for_config_tail(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """No checkpoint + config_replaced in the tail → project only the suffix."""
+        backend, identity, tdir = self._seed_backend(tmp_path, monkeypatch)
+        timeline_id = identity["timeline_id"]
+        self._seed_renamed(backend, timeline_id, 2000)
+
+        from astrid.core.timeline.eventlog.reigh_events import construct_reigh_timeline_events
+
+        head = backend.head()
+        config = {
+            "clips": [{"id": "c1", "at": 0, "track": "V1", "clipType": "media", "asset": "a1"}],
+            "tracks": [{"id": "V1", "kind": "visual", "label": "Video"}],
+        }
+        batch = construct_reigh_timeline_events(
+            timeline_id=timeline_id,
+            tail_hash=head.last_hash,
+            next_event_version=head.version + 1,
+            actor=_actor("save"),
+            source="editor_save",
+            config=config,
+        )
+        backend.append_prebuilt_events(timeline_id, [e.event for e in batch.events])
+
+        assert not (tdir / "assembly.checkpoint.json").exists()
+
+        all_events = backend.read_events()
+        expected = project_to_assembly(all_events)
+
+        calls = {"read_events": 0}
+        orig = LocalFsBackend.read_events
+
+        def spy(self, *args, **kwargs):
+            calls["read_events"] += 1
+            return orig(self, *args, **kwargs)
+
+        monkeypatch.setattr(LocalFsBackend, "read_events", spy)
+
+        regen = regenerate_projection(timeline_id, backend, timeline_home=tdir)
+
+        assert calls["read_events"] == 0, "cold bootstrap must not full-replay"
+        assert regen == expected
+        assert regen["clips"][0]["id"] == "c1"
+        assert (tdir / "assembly.checkpoint.json").is_file()
+
+    def test_cold_bootstrap_falls_back_to_full_replay_for_granular_tail(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A tail with no resetting event still full-replays (fallback unchanged)."""
+        backend, identity, tdir = self._seed_backend(tmp_path, monkeypatch)
+        timeline_id = identity["timeline_id"]
+        for index in range(3):
+            backend.append_event(
+                timeline_id,
+                "clip.added",
+                {"clip_id": f"c{index}", "kind": "visual", "track_id": "visual", "asset_id": "a1", "position": None},
+                actor=_actor("clip"),
+            )
+
+        assert not (tdir / "assembly.checkpoint.json").exists()
+
+        calls = {"read_events": 0}
+        orig = LocalFsBackend.read_events
+
+        def spy(self, *args, **kwargs):
+            calls["read_events"] += 1
+            return orig(self, *args, **kwargs)
+
+        monkeypatch.setattr(LocalFsBackend, "read_events", spy)
+
+        regen = regenerate_projection(timeline_id, backend, timeline_home=tdir)
+
+        assert calls["read_events"] == 1, "granular-only cold path must full-replay"
+        assert len(regen["clips"]) == 3
+
+    def test_cold_bootstrap_matches_full_replay_with_polluted_window(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Non-resetting events between the last reset and the tail are handled."""
+        backend, identity, tdir = self._seed_backend(tmp_path, monkeypatch)
+        timeline_id = identity["timeline_id"]
+        self._seed_renamed(backend, timeline_id, 2000)
+
+        from astrid.core.timeline.eventlog.reigh_events import construct_reigh_timeline_events
+
+        head = backend.head()
+        config = {
+            "clips": [{"id": "c9", "at": 0, "track": "V1", "clipType": "media", "asset": "a1"}],
+            "tracks": [{"id": "V1", "kind": "visual", "label": "Video"}],
+        }
+        batch = construct_reigh_timeline_events(
+            timeline_id=timeline_id,
+            tail_hash=head.last_hash,
+            next_event_version=head.version + 1,
+            actor=_actor("save"),
+            source="editor_save",
+            config=config,
+        )
+        backend.append_prebuilt_events(timeline_id, [e.event for e in batch.events])
+
+        # A few granular events AFTER the last config (still within the window).
+        prev = batch.tail_hash
+        version = batch.next_event_version
+        for index in range(10):
+            event = TimelineEvent.new(
+                timeline_id=timeline_id,
+                ts="2026-08-12T00:00:00Z",
+                actor=_actor("granular"),
+                kind="clip.added",
+                payload={"clip_id": f"g{index}", "kind": "visual", "track_id": "visual", "asset_id": "a1", "position": None},
+                prev_hash=prev,
+                expected_version=version + 1,
+            )
+            event = with_event_hash(event, prev_hash=prev)
+            backend.append_prebuilt_events(timeline_id, [event])
+            prev = event.hash
+            version += 1
+
+        assert not (tdir / "assembly.checkpoint.json").exists()
+
+        all_events = backend.read_events()
+        expected = project_to_assembly(all_events)
+
+        calls = {"read_events": 0}
+        orig = LocalFsBackend.read_events
+
+        def spy(self, *args, **kwargs):
+            calls["read_events"] += 1
+            return orig(self, *args, **kwargs)
+
+        monkeypatch.setattr(LocalFsBackend, "read_events", spy)
+
+        regen = regenerate_projection(timeline_id, backend, timeline_home=tdir)
+
+        assert calls["read_events"] == 0
+        assert regen == expected
+        assert len(regen["clips"]) == 11  # 10 granular + 1 from config
+
+
 # ── bootstrap behavior (created vs legacy) ────────────────────────────────────
 
 
@@ -1225,6 +1582,46 @@ class TestEdgeCases:
         })
         result = apply_event_to_assembly(state, event)
         assert result["clips"] == []
+
+    # ── at / hold projection (P1c) ─────────────────────────────────────
+
+    def test_clip_added_with_start_projects_at(self):
+        state = {"clips": []}
+        event = _make_event("clip.added", {
+            "clip_id": "c1", "kind": "visual", "track_id": "visual",
+            "asset_id": "a1", "position": None, "start": 3.5,
+        })
+        result = apply_event_to_assembly(state, event)
+        assert len(result["clips"]) == 1
+        assert result["clips"][0]["at"] == 3.5
+
+    def test_clip_added_with_duration_projects_hold(self):
+        state = {"clips": []}
+        event = _make_event("clip.added", {
+            "clip_id": "c1", "kind": "visual", "track_id": "visual",
+            "asset_id": "a1", "position": None, "duration": 10.0,
+        })
+        result = apply_event_to_assembly(state, event)
+        assert len(result["clips"]) == 1
+        assert result["clips"][0]["hold"] == 10.0
+
+    def test_clip_added_without_duration_omits_hold(self):
+        state = {"clips": []}
+        event = _make_event("clip.added", {
+            "clip_id": "c1", "kind": "visual", "track_id": "visual",
+            "asset_id": "a1", "position": None,
+        })
+        result = apply_event_to_assembly(state, event)
+        assert "hold" not in result["clips"][0]
+
+    def test_clip_added_default_start_is_zero(self):
+        state = {"clips": []}
+        event = _make_event("clip.added", {
+            "clip_id": "c1", "kind": "visual", "track_id": "visual",
+            "asset_id": "a1", "position": None,
+        })
+        result = apply_event_to_assembly(state, event)
+        assert result["clips"][0]["at"] == 0.0
 
 
 # ============================================================================

@@ -301,11 +301,11 @@ def run(args: argparse.Namespace) -> int:
     for window in extracted:
         window_path = Path(window["path"])
         if window_path.exists():
-            manifest_outputs.append({"path": str(window_path), "type": "file"})
+            manifest_outputs.append({"path": str(window_path.resolve()), "type": "file"})
     if args.out:
-        manifest_outputs.append({"path": str(args.out), "type": "file"})
+        manifest_outputs.append({"path": str(args.out.resolve()), "type": "file"})
 
-    manifest_path = (args.out.parent / "manifest.json") if args.out else (out_dir / "manifest.json")
+    manifest_path = ((args.out.parent / "manifest.json") if args.out else (out_dir / "manifest.json")).resolve()
     output["schema_version"] = 1
     output["kind"] = "understanding.video_understand"
     output["manifest_path"] = str(manifest_path)

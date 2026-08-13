@@ -1,0 +1,150 @@
+"""Human-facing project discovery and selection guidance."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+from astrid.core._shared.jsonio import read_json
+from astrid.core.foundation.project_paths import resolve_projects_root
+from astrid.core.session.config import resolve_default_project
+from astrid.core.session.discovery import discover_projects
+
+
+def project_summaries(
+    *,
+    root: str | Path | None = None,
+    include_test_projects: bool = False,
+    limit: int | None = None,
+) -> list[dict[str, Any]]:
+    """Return recent projects with enough context to choose one safely."""
+
+    projects_root = resolve_projects_root(root)
+    default = resolve_default_project()
+    rows: list[dict[str, Any]] = []
+    for slug in discover_projects(root=projects_root):
+        if not include_test_projects and slug.startswith("agentic-"):
+            continue
+        project_root = projects_root / slug
+        try:
+            payload = read_json(project_root / "project.json")
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        rows.append(
+            {
+                "slug": slug,
+                "name": str(payload.get("name") or slug),
+                "description": str(payload.get("description") or ""),
+                "theme": str(payload.get("theme") or ""),
+                "updated_at": str(payload.get("updated_at") or ""),
+                "is_default": slug == default,
+                "runs": _count_children(project_root / "runs", marker="run.json"),
+                "timelines": _count_children(project_root / "timelines"),
+                "experiments": _count_children(project_root / "experiments"),
+            }
+        )
+        if limit is not None and len(rows) >= limit:
+            break
+    return rows
+
+
+def format_project_required_guidance(*, operation: str) -> str:
+    """Render a compact, actionable missing-project screen."""
+
+    default = resolve_default_project()
+    rows = project_summaries(limit=5)
+    lines = [
+        f"project required: every {operation} belongs to exactly one project.",
+        "No project is attached, and this command did not include --project.",
+        "",
+        "Choose how to continue:",
+        "  astrid projects ls",
+        "  astrid projects select <project>         # select for this session",
+        "  re-run this command with --project <project>  # select for this run",
+        '  astrid projects create <slug> --description "…" --attach',
+        "",
+        "Check the current selection at any time:",
+        "  astrid status",
+    ]
+    if default:
+        lines.extend(
+            [
+                "",
+                f"Configured default: {default} (suggestion only; not selected)",
+                f"  astrid projects select {default}",
+            ]
+        )
+    if rows:
+        lines.extend(["", "Recent projects:"])
+        for row in rows:
+            label = row["slug"]
+            if row["name"] != row["slug"]:
+                label += f" — {row['name']}"
+            if row["is_default"]:
+                label += " [configured default]"
+            lines.append(f"  {label}")
+            if row["description"]:
+                lines.append(f"    {row['description']}")
+            lines.append(
+                "    "
+                f"{row['runs']} runs · {row['timelines']} timelines · "
+                f"{row['experiments']} experiments"
+            )
+            lines.append(f"    select: astrid projects select {row['slug']}")
+    else:
+        lines.extend(
+            [
+                "",
+                "No projects exist yet.",
+                '  astrid projects create <slug> --description "…" --attach',
+            ]
+        )
+    return "\n".join(lines)
+
+
+def selected_project(explicit_project: str | None) -> tuple[str | None, str]:
+    """Resolve only explicit or genuinely attached project context.
+
+    Configured defaults and path inference are intentionally excluded.
+    """
+
+    if explicit_project:
+        return explicit_project, "explicit"
+    try:
+        from astrid.core.session.binding import (
+            resolve_current_session,
+            resolve_current_session_with_fs_fallback,
+        )
+
+        session = resolve_current_session()
+        if session is None:
+            session = resolve_current_session_with_fs_fallback(
+                projects_root=resolve_projects_root(),
+            )
+    except Exception:
+        session = None
+    if session is not None and getattr(session, "project", None):
+        return str(session.project), "attached"
+    return None, "missing"
+
+
+def _count_children(path: Path, *, marker: str | None = None) -> int:
+    if not path.is_dir():
+        return 0
+    try:
+        return sum(
+            1
+            for child in path.iterdir()
+            if child.is_dir() and (marker is None or (child / marker).is_file())
+        )
+    except OSError:
+        return 0
+
+
+__all__ = [
+    "format_project_required_guidance",
+    "project_summaries",
+    "selected_project",
+]

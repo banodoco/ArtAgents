@@ -12,7 +12,7 @@ from typing import Any, Iterable, Mapping
 from astrid.core._shared.jsonio import read_json, write_json_atomic
 from astrid.core.contracts.errors import AstridError
 from astrid.core.contracts.run_status import RunStatus
-from astrid.core.env_vars import ASTRID_SESSION_ID
+from astrid.core.env_vars import ASTRID_PROJECT_SLUG, ASTRID_SESSION_ID
 from astrid.core.foundation import project_paths as paths
 from astrid.core.task import env as task_env
 from astrid.core.task.plan import step_dir_for
@@ -91,6 +91,7 @@ def reject_project_with_out(project: str | None, out: str | Path | None) -> None
 def project_run_env(project_slug: str | None = None) -> dict[str, str]:
     env = {PROJECT_RUN_ENV: "1"}
     if project_slug:
+        env[ASTRID_PROJECT_SLUG] = project_slug
         from astrid.core.element.catalog import resolve_active_theme
         from astrid.core.theme import ACTIVE_THEME_ENV
 

@@ -29,6 +29,29 @@ from astrid.core.execution.orchestrator.schema import OrchestratorDefinition, Ru
 from astrid.core.timeline.crud import create_timeline
 
 
+@pytest.fixture(autouse=True)
+def _isolate_non_project_runner_error_paths(
+    monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest,
+) -> None:
+    """Keep this module focused on non-project runner branches.
+
+    Project enforcement has dedicated conformance tests. The legacy tests in
+    this module intentionally construct minimal projectless requests to reach
+    lower-level runtime validation branches.
+    """
+
+    if request.node.name == "test_orchestrator_out_only_requires_project":
+        return
+    from astrid.core.execution.orchestrator import runner as runner_module
+
+    monkeypatch.setattr(
+        runner_module,
+        "_resolve_project_request",
+        lambda run_request, _definition: run_request,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Factory helpers — keep orchestrators in-memory so tests stay hermetic.
 # ---------------------------------------------------------------------------
@@ -586,23 +609,32 @@ def test_command_orchestrator_rejects_unknown_placeholder(tmp_path: Path) -> Non
 # ---------------------------------------------------------------------------
 
 
-def test_project_orchestrator_must_be_command_runtime(
+def test_project_python_orchestrator_is_ledgered(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from astrid.core.foundation import project_paths
     from astrid.core.project.project import create_project
+    import astrid.core.execution.orchestrator.runner as runner_mod
 
     monkeypatch.setenv(project_paths.PROJECTS_ROOT_ENV, str(tmp_path / "projects"))
     create_project("demo")
+    create_timeline("demo", "main", is_default=True)
 
-    orch = _python_orchestrator()
+    def _returns_zero(request, orchestrator):  # noqa: ANN001
+        return 0
+
+    monkeypatch.setattr(runner_mod, "_test_python_target", _returns_zero, raising=False)
+    orch = _python_orchestrator(function="_test_python_target")
     registry = _registry(orch)
 
-    with pytest.raises(
-        OrchestratorRunnerError,
-        match="--project is currently supported only for command-runtime orchestrators",
-    ):
-        run_orchestrator(OrchestratorRunRequest(orchestrator_id=orch.id, project="demo"), registry)
+    result = run_orchestrator(
+        OrchestratorRunRequest(orchestrator_id=orch.id, project="demo"),
+        registry,
+    )
+
+    assert result.ok is True
+    records = list((tmp_path / "projects" / "demo" / "runs").glob("*/run.json"))
+    assert len(records) == 1
 
 
 def test_project_orchestrator_rejects_passthrough_out(
@@ -682,7 +714,7 @@ def test_command_orchestrator_dry_run_uses_placeholder_out_without_ledger(
     assert list((tmp_path / "projects" / "demo" / "runs").glob("*")) == []
 
 
-def test_orchestrator_out_only_auto_resolves_default_project(
+def test_orchestrator_out_only_requires_project(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     projects_root = tmp_path / "projects"
@@ -697,17 +729,16 @@ def test_orchestrator_out_only_auto_resolves_default_project(
         metadata={"requires_output_path": True},
     )
     registry = _registry(orch)
+    monkeypatch.delenv("ASTRID_SESSION_ID", raising=False)
 
-    result = run_orchestrator(
-        OrchestratorRunRequest(orchestrator_id=orch.id, out=out_dir),
-        registry,
-    )
+    with pytest.raises(OrchestratorRunnerError, match="project required"):
+        run_orchestrator(
+            OrchestratorRunRequest(orchestrator_id=orch.id, out=out_dir),
+            registry,
+        )
 
     records = sorted((projects_root / "default" / "runs").glob("*/run.json"))
-
-    assert result.returncode == 0
-    assert result.command[-2:] == ("--out", str(out_dir.resolve()))
-    assert len(records) == 1
+    assert records == []
 
 # ---------------------------------------------------------------------------
 # _output_value — dry-run placeholder out covers derived outputs

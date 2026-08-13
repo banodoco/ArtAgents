@@ -14,6 +14,8 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 
 from astrid.core.integrations.reigh import worker_jwt
 from astrid.core.integrations.reigh.worker_jwt import (
+    JwksConfigurationError,
+    JwksFetchError,
     DEFAULT_AUDIENCE,
     JwtVerificationError,
     verify_user_jwt,
@@ -117,6 +119,63 @@ class WorkerJwtTest(unittest.TestCase):
     def test_empty_token_rejected(self) -> None:
         with self.assertRaises(JwtVerificationError):
             verify_user_jwt("", jwks_url="https://example/jwks")
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+
+class Hs256AndSentinelTest(unittest.TestCase):
+    """HS256 (Supabase GoTrue) verification and the PLACEHOLDER_ sentinel."""
+
+    def _hs256_token(self, secret: str, *, audience: str = "authenticated", sub: str = "user-1") -> str:
+        return pyjwt.encode(
+            {"sub": sub, "aud": audience, "exp": int(time.time()) + 60, "iat": int(time.time())},
+            secret,
+            algorithm="HS256",
+        )
+
+    def test_hs256_token_verified_with_jwt_secret(self) -> None:
+        token = self._hs256_token("super-secret")
+        result = verify_user_jwt(token, jwt_secret="super-secret", jwks_url="https://unused/jwks")
+        self.assertEqual(result.user_id, "user-1")
+
+    def test_hs256_token_wrong_secret_rejected(self) -> None:
+        token = self._hs256_token("super-secret")
+        with self.assertRaises(JwtVerificationError):
+            verify_user_jwt(token, jwt_secret="wrong-secret", jwks_url="https://unused/jwks")
+
+    def test_hs256_token_without_secret_raises_configuration_error(self) -> None:
+        token = self._hs256_token("super-secret")
+        with self.assertRaises(JwksConfigurationError):
+            verify_user_jwt(token, jwks_url="https://unused/jwks")
+
+    def test_fetch_jwks_placeholder_url_raises_configuration_error(self) -> None:
+        with self.assertRaises(JwksConfigurationError):
+            worker_jwt._fetch_jwks("PLACEHOLDER_SET_BY_HUMAN_BEFORE_T9")
+
+    def test_fetch_jwks_unreachable_url_raises_fetch_error(self) -> None:
+        with self.assertRaises(JwksFetchError):
+            worker_jwt._fetch_jwks("http://127.0.0.1:1/definitely-not-listening/jwks")
+
+    def test_env_first_skips_placeholder_values(self) -> None:
+        from astrid.core.integrations.reigh import env as reigh_env
+
+        with patch.dict("os.environ", {"REIGH_SUPABASE_URL": "PLACEHOLDER_SET_BY_HUMAN_BEFORE_T9"}, clear=False):
+            self.assertEqual(reigh_env._env_first(("REIGH_SUPABASE_URL",)), "")
+
+    def test_env_first_skips_placeholder_then_uses_valid(self) -> None:
+        from astrid.core.integrations.reigh import env as reigh_env
+
+        with patch.dict(
+            "os.environ",
+            {
+                "REIGH_SUPABASE_URL": "PLACEHOLDER_SET_BY_HUMAN_BEFORE_T9",
+                "SUPABASE_URL": "https://real.supabase.co",
+            },
+            clear=False,
+        ):
+            self.assertEqual(reigh_env._env_first(("REIGH_SUPABASE_URL", "SUPABASE_URL")), "https://real.supabase.co")
 
 
 if __name__ == "__main__":

@@ -199,12 +199,7 @@ class TestGenerationFacadeBuiltins:
 
 
 class TestGatewayRunPrefixes:
-    """Meta-test: ledgeable gateway run prefixes must be present.
-
-    The ``_AUTO_BIND_RUN_VERBS`` tuple defines which CLI verb prefixes trigger
-    automatic default-project binding for stateless runs.  If a required
-    prefix is removed, runs through that path become invisible to the ledger.
-    """
+    """Meta-test: project-scoped gateway run prefixes must be present."""
 
     # Canonical ledgeable run prefixes per the invocation surfaces table.
     REQUIRED_PREFIXES: tuple[tuple[str, ...], ...] = (
@@ -213,21 +208,25 @@ class TestGatewayRunPrefixes:
         ("scratch", "run"),
     )
 
-    def test_auto_bind_prefixes_present(self) -> None:
-        from astrid.core.gateway import _AUTO_BIND_RUN_VERBS
+    def test_project_scoped_prefixes_present(self) -> None:
+        from astrid.core.gateway import (
+            _AUTO_BIND_RUN_VERBS,
+            _REQUEST_SCOPED_PROJECT_RUN_VERBS,
+        )
 
-        observed = frozenset(_AUTO_BIND_RUN_VERBS)
+        observed = frozenset(_REQUEST_SCOPED_PROJECT_RUN_VERBS)
         required = frozenset(self.REQUIRED_PREFIXES)
 
         missing = required - observed
         assert not missing, (
-            f"_AUTO_BIND_RUN_VERBS is missing required prefix(es): {sorted(missing)}. "
+            f"project-scoped run verbs are missing prefix(es): {sorted(missing)}. "
             f"If a run path was intentionally removed, update the ledger contract "
             f"and this registry."
         )
+        assert _AUTO_BIND_RUN_VERBS == ()
 
-    def test_auto_bind_dispatch_registered(self) -> None:
-        """Every auto-bind prefix must map to a dispatch handler."""
+    def test_project_scoped_dispatch_registered(self) -> None:
+        """Every project-scoped prefix must map to a dispatch handler."""
         from astrid.core.gateway import _TOP_LEVEL_HANDLERS
 
         for prefix in self.REQUIRED_PREFIXES:
@@ -410,30 +409,23 @@ class TestExecutorCLIProject:
 
 
 class TestExecutorCLIOut:
-    """executors run --out <dir> (no --project) → ledgered via auto-resolved project."""
+    """Out paths do not imply project ownership."""
 
-    def test_out_without_project_ledgers(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """When --out is supplied without --project, auto-ledger into the default project."""
+    def test_out_without_project_fails_closed(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         from astrid.core.execution.executor.registry import ExecutorRegistry
         from astrid.core.execution.executor.runner import ExecutorRunRequest, run_executor
 
         projects_root, _ = _setup_project_env(tmp_path, monkeypatch, "default")
+        monkeypatch.delenv("ASTRID_SESSION_ID", raising=False)
         out_dir = tmp_path / "my-output"
         out_dir.mkdir()
 
         registry = ExecutorRegistry([_make_minimal_executor("test.writer")])
-        result = run_executor(
-            ExecutorRunRequest("test.writer", out=str(out_dir)), registry
-        )
-        # Pre-fix: out-only runs create no project record
-        # Post-fix (T6): out-only runs auto-resolve default project
-        assert result.returncode == 0
+        with pytest.raises(Exception, match="project required"):
+            run_executor(ExecutorRunRequest("test.writer", out=str(out_dir)), registry)
 
         records = _project_run_records(projects_root)
-        assert len(records) == 1
-        assert records[0].get("project_slug") == "default"
-        assert records[0].get("out") == str(out_dir)
-        assert records[0].get("metadata", {}).get("project_was_auto_resolved") is True
+        assert records == []
 
 
 class TestOrchestratorCLIProject:
@@ -461,28 +453,23 @@ class TestOrchestratorCLIProject:
 
 
 class TestOrchestratorCLIOut:
-    """orchestrators run --out <dir> (no --project) → ledgered."""
+    """Orchestrator output paths do not imply project ownership."""
 
-    def test_out_without_project_ledgers(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_out_without_project_fails_closed(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         from astrid.core.execution.orchestrator.registry import OrchestratorRegistry
         from astrid.core.execution.orchestrator.runner import OrchestratorRunRequest, run_orchestrator
 
         projects_root, _ = _setup_project_env(tmp_path, monkeypatch, "default")
+        monkeypatch.delenv("ASTRID_SESSION_ID", raising=False)
         out_dir = tmp_path / "orch-output"
         out_dir.mkdir()
 
         registry = OrchestratorRegistry([_make_minimal_orchestrator("test.orch")])
-        result = run_orchestrator(
-            OrchestratorRunRequest("test.orch", out=str(out_dir)), registry
-        )
-        assert result.returncode == 0
+        with pytest.raises(Exception, match="project required"):
+            run_orchestrator(OrchestratorRunRequest("test.orch", out=str(out_dir)), registry)
 
         records = _project_run_records(projects_root)
-        assert len(records) == 1
-        assert records[0].get("project_slug") == "default"
-        assert records[0].get("tool_id") == "test.orch"
-        assert records[0].get("out") == str(out_dir.resolve())
-        assert records[0].get("metadata", {}).get("project_was_auto_resolved") is True
+        assert records == []
 
 
 class TestScratchRun:
@@ -525,7 +512,16 @@ class TestScratchRun:
         _worktree_root = str(Path(__file__).resolve().parent.parent)
 
         result = subprocess.run(
-            [sys.executable, "-m", "astrid", "scratch", "run", str(script)],
+            [
+                sys.executable,
+                "-m",
+                "astrid",
+                "scratch",
+                "run",
+                "--project",
+                "default",
+                str(script),
+            ],
             capture_output=True,
             text=True,
             timeout=30,
@@ -560,7 +556,7 @@ class TestScratchRun:
             f"Expected status='completed', got {record.get('status')!r}"
         )
         assert record.get("session_id") == "S-SCRATCH-OK"
-        assert record.get("auto_bound") is True
+        assert record.get("auto_bound") is False
         assert record.get("invocation") == "scratch"
 
         # No timeline requirement
@@ -572,6 +568,7 @@ class TestScratchRun:
         # Environment markers from prepare metadata
         meta = record.get("metadata", {})
         assert isinstance(meta, dict), f"Expected metadata dict, got {type(meta)}"
+        assert meta.get("project_resolution") == "explicit"
         assert "pid" in meta, (
             f"Expected metadata.pid (environment marker), got keys: {sorted(meta.keys())}"
         )
@@ -607,7 +604,16 @@ class TestScratchRun:
         _worktree_root = str(Path(__file__).resolve().parent.parent)
 
         result = subprocess.run(
-            [sys.executable, "-m", "astrid", "scratch", "run", str(script)],
+            [
+                sys.executable,
+                "-m",
+                "astrid",
+                "scratch",
+                "run",
+                "--project",
+                "default",
+                str(script),
+            ],
             capture_output=True,
             text=True,
             timeout=30,
@@ -640,7 +646,7 @@ class TestScratchRun:
         assert record.get("status") == "failed", (
             f"Expected status='failed', got {record.get('status')!r}"
         )
-        assert record.get("auto_bound") is True
+        assert record.get("auto_bound") is False
         assert record.get("invocation") == "scratch"
 
         # No timeline requirement
@@ -652,6 +658,7 @@ class TestScratchRun:
         # Environment markers from prepare metadata
         meta = record.get("metadata", {})
         assert isinstance(meta, dict), f"Expected metadata dict, got {type(meta)}"
+        assert meta.get("project_resolution") == "explicit"
         assert "pid" in meta, (
             f"Expected metadata.pid (environment marker), got keys: {sorted(meta.keys())}"
         )
@@ -686,49 +693,47 @@ class TestSDKImageProject:
 
 
 class TestSDKImageOut:
-    """astrid.generate.image(..., out=...) → ledgered with run.json.out."""
+    """SDK image output still requires an explicit or attached project."""
 
-    def test_image_out_ledgers(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_image_out_without_project_fails(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         from astrid.core.execution.executor.registry import ExecutorRegistry
         from astrid.core.execution.executor.runner import ExecutorRunRequest, run_executor
 
         projects_root, _ = _setup_project_env(tmp_path, monkeypatch, "default")
+        monkeypatch.delenv("ASTRID_SESSION_ID", raising=False)
         out_dir = tmp_path / "gen-output"
         out_dir.mkdir()
 
         registry = ExecutorRegistry([_make_minimal_executor("generation.generate_image")])
-        result = run_executor(
-            ExecutorRunRequest("generation.generate_image", out=str(out_dir)), registry
-        )
+        with pytest.raises(Exception, match="project required"):
+            run_executor(
+                ExecutorRunRequest("generation.generate_image", out=str(out_dir)), registry
+            )
 
         records = _project_run_records(projects_root)
-        if not records:
-            pytest.skip(
-                "Pre-fix: SDK image out-without-project is unledgered (T10 will fix)"
-            )
+        assert records == []
 
 
 class TestSDKVideoOut:
-    """astrid.generate.video(..., out=...) → ledgered with run.json.out."""
+    """SDK video output still requires an explicit or attached project."""
 
-    def test_video_out_ledgers(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_video_out_without_project_fails(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         from astrid.core.execution.executor.registry import ExecutorRegistry
         from astrid.core.execution.executor.runner import ExecutorRunRequest, run_executor
 
         projects_root, _ = _setup_project_env(tmp_path, monkeypatch, "default")
+        monkeypatch.delenv("ASTRID_SESSION_ID", raising=False)
         out_dir = tmp_path / "video-output"
         out_dir.mkdir()
 
         registry = ExecutorRegistry([_make_minimal_executor("generation.generate_video")])
-        result = run_executor(
-            ExecutorRunRequest("generation.generate_video", out=str(out_dir)), registry
-        )
+        with pytest.raises(Exception, match="project required"):
+            run_executor(
+                ExecutorRunRequest("generation.generate_video", out=str(out_dir)), registry
+            )
 
         records = _project_run_records(projects_root)
-        if not records:
-            pytest.skip(
-                "Pre-fix: SDK video out-without-project is unledgered (T10 will fix)"
-            )
+        assert records == []
 
 
 # ---------------------------------------------------------------------------

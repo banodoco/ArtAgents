@@ -46,6 +46,7 @@ VIDEO_FEATURES: tuple[Feature, ...] = (
     "size",
     "image_ref",
     "image_end_ref",
+    "video_ref",
     "strength",
     "guidance_scale",
     "steps",
@@ -58,6 +59,8 @@ VIDEO_FEATURES: tuple[Feature, ...] = (
     "enable_safety_checker",
     "enable_prompt_expansion",
     "acceleration",
+    "driving_type",
+    "subject_type",
 )
 
 AUDIO_FEATURES: tuple[Feature, ...] = (

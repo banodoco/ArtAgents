@@ -81,8 +81,8 @@ def test_status_with_default_project_does_not_auto_attach(
     rc = cli.cmd_status(argparse.Namespace(), out=buf)
 
     assert rc == 0
-    assert "default project: demo" in buf.getvalue()
-    assert "astrid attach              # attach default project" in buf.getvalue()
+    assert "configured default: demo (suggestion only; not selected)" in buf.getvalue()
+    assert "astrid projects select demo" in buf.getvalue()
     assert not (env["projects"] / "demo" / cli.SESSION_FILE_NAME).exists()
     assert not (env["home"] / "sessions").exists()
 

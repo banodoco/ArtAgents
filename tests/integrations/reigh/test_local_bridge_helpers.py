@@ -34,6 +34,8 @@ from astrid.core.integrations.reigh.local_bridge import (
     bridge_registry_path,
     find_bridge_timeline,
     list_bridge_project_dirs,
+    list_bridge_projects,
+    list_bridge_timelines,
     load_bridge_registry,
     load_bridge_timeline,
     resolve_bridge_asset,
@@ -41,8 +43,10 @@ from astrid.core.integrations.reigh.local_bridge import (
     save_bridge_timeline,
 )
 from astrid.core.timeline.eventlog import LocalFsBackend
+from astrid.core.timeline.eventlog.reigh_events import construct_reigh_timeline_events
 from astrid.core.timeline.eventlog.selector import resolve_event_log_target
 from astrid.core.timeline.eventlog.types import EventLogStaleVersionError
+from astrid.core.timeline.events.schema import canonical_json_bytes
 from astrid.core.timeline.observability import resolve_timeline_target
 from astrid.core.timeline.paths import load_assembly_json_with_repair
 from tests.integrations.reigh.conftest import (  # type: ignore[import-not-found]
@@ -296,6 +300,110 @@ class TestLocalBridgeHelpers:
 
         assert [path.name for path in project_dirs] == ["a-first", "z-last"]
 
+    def test_list_bridge_projects_returns_sorted_slug_name_rows(self, tmp_bridge_root, seed_bridge_project) -> None:
+        seed_bridge_project(slug="z-last")
+        seed_bridge_project(slug="a-first")
+
+        rows = list_bridge_projects(tmp_bridge_root)
+
+        assert rows == [
+            {"slug": "a-first", "name": "a-first"},
+            {"slug": "z-last", "name": "z-last"},
+        ]
+
+    def test_list_bridge_projects_skips_malformed_and_falls_back_to_slug(self, tmp_bridge_root, seed_bridge_project) -> None:
+        seed_bridge_project(slug="good-proj")
+        (tmp_bridge_root / "good-proj" / "project.json").write_text(
+            json.dumps({"slug": "good-proj", "name": "Good Project", "schema_version": 1}),
+            encoding="utf-8",
+        )
+
+        # project.json is malformed JSON -> the whole dir must be skipped
+        bad_dir = tmp_bridge_root / "bad-proj"
+        bad_dir.mkdir()
+        (bad_dir / "project.json").write_text("{not json", encoding="utf-8")
+
+        # project.json without a name -> falls back to the slug
+        noname_dir = tmp_bridge_root / "noname-proj"
+        noname_dir.mkdir()
+        (noname_dir / "project.json").write_text(
+            json.dumps({"slug": "noname-proj", "schema_version": 1}),
+            encoding="utf-8",
+        )
+
+        assert list_bridge_projects(tmp_bridge_root) == [
+            {"slug": "good-proj", "name": "Good Project"},
+            {"slug": "noname-proj", "name": "noname-proj"},
+        ]
+
+    def test_list_bridge_projects_empty_root(self, tmp_bridge_root) -> None:
+        assert list_bridge_projects(tmp_bridge_root) == []
+
+    def test_list_bridge_timelines_returns_records_with_identity_and_default(
+        self, tmp_bridge_root, seed_bridge_project,
+    ) -> None:
+        timeline_id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        default_ulid = "01JM4K5N7P0000000000000101"
+        other_ulid = "01JM4K5N7P0000000000000102"
+        project_dir = seed_bridge_project(
+            slug="timelines-list",
+            timeline_ulid=default_ulid,
+            timeline_id=timeline_id,  # fixture also writes this as project.json default_timeline_id
+        )
+
+        # Second timeline: valid identity/display but NOT the project default.
+        other_tdir = project_dir / "timelines" / other_ulid
+        other_tdir.mkdir()
+        (other_tdir / "assembly.json").write_text(json.dumps(make_assembly_json()), encoding="utf-8")
+        (other_tdir / "assembly.identity.json").write_text(
+            json.dumps(make_identity_json(timeline_id="bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")),
+            encoding="utf-8",
+        )
+        (other_tdir / "display.json").write_text(
+            json.dumps({
+                "schema_version": 1,
+                "slug": "secondary",
+                "name": "Secondary",
+                "is_default": False,
+            }),
+            encoding="utf-8",
+        )
+        (other_tdir / "manifest.json").write_text(
+            json.dumps({
+                "schema_version": 1,
+                "contributing_runs": [],
+                "final_outputs": [],
+                "tombstoned_at": None,
+            }),
+            encoding="utf-8",
+        )
+
+        rows = list_bridge_timelines("timelines-list", root=tmp_bridge_root)
+
+        # Sorted by timeline directory name (ULID).
+        assert [row.timeline_ulid for row in rows] == [default_ulid, other_ulid]
+        assert rows[0].timeline_id == timeline_id
+        assert rows[0].slug == "primary"
+        assert rows[0].name == "Primary"
+        assert rows[0].is_default is True
+        assert rows[1].timeline_id == "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+        assert rows[1].slug == "secondary"
+        assert rows[1].name == "Secondary"
+        assert rows[1].is_default is False
+
+    def test_list_bridge_timelines_skips_unreadable_display(self, tmp_bridge_root, seed_bridge_project) -> None:
+        project_dir = seed_bridge_project(slug="timelines-skip", timeline_ulid="01JM4K5N7P0000000000000103")
+        broken_tdir = project_dir / "timelines" / "01JM4K5N7P0000000000000104"
+        broken_tdir.mkdir()
+        (broken_tdir / "display.json").write_text("{not json", encoding="utf-8")
+
+        rows = list_bridge_timelines("timelines-skip", root=tmp_bridge_root)
+
+        assert [row.timeline_ulid for row in rows] == ["01JM4K5N7P0000000000000103"]
+
+    def test_list_bridge_timelines_missing_project_returns_empty(self, tmp_bridge_root) -> None:
+        assert list_bridge_timelines("no-such-project", root=tmp_bridge_root) == []
+
 
 
     def test_find_bridge_timeline_accepts_slug(self, tmp_bridge_root, seed_bridge_project) -> None:
@@ -529,6 +637,91 @@ class TestLocalBridgeHelpers:
         assert reloaded is not None
         assert reloaded["config"] == saved_config
         assert reloaded["config_version"] == head.version
+
+    def test_save_bridge_timeline_recovers_orphaned_tail_after_crash(
+        self,
+        tmp_bridge_root,
+        seed_bridge_project,
+    ) -> None:
+        """MUST-FIX 3b: a save after a crash (append fsynced, head write lost)
+        adopts the orphaned tail before constructing the retry batch, so the
+        saved log stays consistent — head matches the jsonl, no events are
+        lost, and the next save works.
+        """
+        ulid = "01JM4K5N7P00000000000000EE"
+        timeline_id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        project_dir = seed_bridge_project(
+            slug="orphan-save",
+            timeline_ulid=ulid,
+            timeline_id=timeline_id,
+        )
+        timeline_home = project_dir / "timelines" / ulid
+        backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=timeline_home)
+        backend.append_event(
+            timeline_id,
+            "timeline.created",
+            {"timeline_id": timeline_id, "slug": "primary", "name": "Primary"},
+            actor=REIGH_LOCAL_EDITOR_ACTOR,
+        )
+        head_before = backend.head()
+        assert head_before.version == 1
+
+        # Simulate a crash between the fsync'd append and the head write:
+        # write a complete chained config event to the jsonl WITHOUT updating
+        # assembly.head.json.
+        orphan = construct_reigh_timeline_events(
+            timeline_id=timeline_id,
+            tail_hash=head_before.last_hash,
+            next_event_version=head_before.version + 1,
+            actor=REIGH_LOCAL_EDITOR_ACTOR,
+            source="editor_save",
+            config={"clips": [], "tracks": []},
+        )
+        with (timeline_home / "assembly.jsonl").open("ab") as handle:
+            handle.write(canonical_json_bytes(orphan.events[0].event.to_json_obj()) + b"\n")
+
+        saved_config = {
+            "clips": [
+                {
+                    "id": "clip-1",
+                    "at": 0,
+                    "track": "V1",
+                    "clipType": "media",
+                    "asset": "asset-1",
+                }
+            ],
+            "tracks": [{"id": "V1", "kind": "visual", "label": "Video"}],
+        }
+        payload = save_bridge_timeline("orphan-save", ulid, saved_config, root=tmp_bridge_root)
+        assert payload is not None
+        assert payload["config"] == saved_config
+
+        # No lost events: created + orphan + save are all present and chained.
+        events = backend.read_events()
+        assert [event.kind for event in events] == [
+            "timeline.created",
+            "timeline.config_replaced",
+            "timeline.config_replaced",
+        ]
+        assert backend.verify_chain().ok is True
+        head = backend.head()
+        assert head.version == len(events) == 3
+        assert head.last_event_id == events[-1].event_id
+        assert head.log_size == (timeline_home / "assembly.jsonl").stat().st_size
+        # Head sidecar on disk matches the jsonl.
+        head_json = json.loads((timeline_home / "assembly.head.json").read_text(encoding="utf-8"))
+        assert head_json["version"] == head.version
+        assert head_json["event_count"] == head.event_count
+        assert head_json["last_event_id"] == head.last_event_id
+        assert head_json["last_hash"] == head.last_hash
+        assert load_assembly_json_with_repair(timeline_home) == saved_config
+
+        # A further save still works and keeps the log consistent.
+        payload2 = save_bridge_timeline("orphan-save", ulid, saved_config, root=tmp_bridge_root)
+        assert payload2 is not None
+        assert payload2["config_version"] == 4
+        assert backend.verify_chain().ok is True
+        assert backend.head().version == 4
 
     def test_save_bridge_timeline_returns_none_for_unknown_timeline(
         self,
@@ -1108,4 +1301,316 @@ class TestBridgeAtomicSave:
 
         registry_after = load_bridge_registry("stale-save", ulid, root=tmp_bridge_root)
         assert registry_after == registry_before
+
+
+class TestBridgeIncrementalSave:
+    """T2.1: warm bridge saves do no full-log reads; crash recovery; aliases."""
+
+    _CONFIG = {
+        "clips": [{"id": "c1", "at": 0, "track": "V1", "clipType": "media", "asset": "a1"}],
+        "tracks": [{"id": "V1", "kind": "visual", "label": "Video"}],
+    }
+    _REGISTRY = {"assets": {"a1": {"file": "a1.mp4", "type": "video/mp4"}}}
+
+    def _seed(self, seed_bridge_project, slug: str, ulid: str, timeline_id: str, tmp_bridge_root):
+        project_dir = seed_bridge_project(slug=slug, timeline_ulid=ulid, timeline_id=timeline_id)
+        timeline_home = project_dir / "timelines" / ulid
+        # Production identities carry a "display" block (crud.create_timeline);
+        # mirror that so find_bridge_timeline's display fast-path is taken and
+        # no bridge-save step ever replays the event log.
+        display = json.loads((timeline_home / "display.json").read_text(encoding="utf-8"))
+        identity_path = timeline_home / "assembly.identity.json"
+        identity = json.loads(identity_path.read_text(encoding="utf-8"))
+        identity["display"] = display
+        identity_path.write_text(json.dumps(identity), encoding="utf-8")
+
+        backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=timeline_home)
+        backend.append_event(
+            timeline_id,
+            "timeline.created",
+            {"timeline_id": timeline_id, "slug": "primary", "name": "Primary"},
+            actor=REIGH_LOCAL_EDITOR_ACTOR,
+        )
+        return timeline_home, backend
+
+    @staticmethod
+    def _seed_events(backend: LocalFsBackend, timeline_id: str, count: int) -> int:
+        """Append *count* chained prebuilt events cheaply (no per-event schema).
+
+        Uses the canonical event shape (TimelineEvent.new + with_event_hash)
+        with a lightweight kind so a 2,000+ event log seeds in well under a
+        second instead of paying jsonschema validation per event.
+        """
+        from astrid.core.timeline.events.schema import TimelineEvent, with_event_hash
+
+        head = backend.head()
+        prev_hash = head.last_hash
+        version = head.version
+        batch: list[TimelineEvent] = []
+        for index in range(count):
+            event = TimelineEvent.new(
+                timeline_id=timeline_id,
+                ts="2026-08-12T00:00:00Z",
+                actor=REIGH_LOCAL_EDITOR_ACTOR,
+                kind="timeline.renamed",
+                payload={"old_slug": f"seed-{index}", "new_slug": f"seed-{index + 1}"},
+                prev_hash=prev_hash,
+                expected_version=version + 1,
+            )
+            event = with_event_hash(event, prev_hash=prev_hash)
+            batch.append(event)
+            prev_hash = event.hash
+            version += 1
+            if len(batch) >= 300:
+                backend.append_prebuilt_events(timeline_id, batch)
+                batch = []
+        if batch:
+            backend.append_prebuilt_events(timeline_id, batch)
+        return version
+
+    def test_warm_save_does_no_full_log_read(
+        self,
+        tmp_bridge_root,
+        seed_bridge_project,
+        monkeypatch,
+    ) -> None:
+        """Warm save_bridge_timeline performs zero full-log parses (head path)."""
+        ulid = "01JM4K5N7P00000000000000C1"
+        timeline_id = "aaaaaaaa-bbbb-cccc-dddd-c0ab1def00c1"
+        timeline_home, backend = self._seed(seed_bridge_project, "warm-incremental", ulid, timeline_id, tmp_bridge_root)
+
+        # Pre-warm the projection checkpoint so every measured save is warm.
+        from astrid.core.timeline.projection import regenerate_projection
+        regenerate_projection(timeline_id, backend, timeline_home=timeline_home)
+
+        from astrid.core.timeline.eventlog.local_fs import LocalFsBackend as LocalFsCls
+
+        calls = {"full": 0, "offset": 0}
+        orig_full = LocalFsCls._read_all_events
+        orig_offset = LocalFsCls._read_all_events_with_offsets
+
+        def spy_full(self, *args, **kwargs):
+            calls["full"] += 1
+            return orig_full(self, *args, **kwargs)
+
+        def spy_offset(self, *args, **kwargs):
+            calls["offset"] += 1
+            return orig_offset(self, *args, **kwargs)
+
+        monkeypatch.setattr(LocalFsCls, "_read_all_events", spy_full)
+        monkeypatch.setattr(LocalFsCls, "_read_all_events_with_offsets", spy_offset)
+
+        for _ in range(3):
+            payload = save_bridge_timeline(
+                "warm-incremental",
+                ulid,
+                self._CONFIG,
+                registry=self._REGISTRY,
+                root=tmp_bridge_root,
+            )
+            assert payload is not None
+
+        assert calls == {"full": 0, "offset": 0}, f"warm saves performed full-log reads: {calls}"
+        head = json.loads((timeline_home / "assembly.head.json").read_text(encoding="utf-8"))
+        assert head["log_size"] == (timeline_home / "assembly.jsonl").stat().st_size
+        assert head["last_event_offset"] is not None
+
+    def test_save_remains_fast_on_2000_plus_event_timeline(
+        self,
+        tmp_bridge_root,
+        seed_bridge_project,
+    ) -> None:
+        """A warm save on a 2,000+ event timeline stays fast (no full-log scan)."""
+        ulid = "01JM4K5N7P00000000000000C2"
+        timeline_id = "aaaaaaaa-bbbb-cccc-dddd-c0ab1def00c2"
+        timeline_home, backend = self._seed(seed_bridge_project, "fast-incremental", ulid, timeline_id, tmp_bridge_root)
+
+        # Seed ~2,100 chained events (realistic canonical shape, cheap build).
+        version = self._seed_events(backend, timeline_id, 2100)
+        assert backend.head().event_count == 1 + 2100
+        assert version == 2101
+
+        # Pre-warm the projection checkpoint so the measured save is warm.
+        from astrid.core.timeline.projection import regenerate_projection
+        regenerate_projection(timeline_id, backend, timeline_home=timeline_home)
+
+        start = time.perf_counter()
+        payload = save_bridge_timeline(
+            "fast-incremental",
+            ulid,
+            self._CONFIG,
+            registry=self._REGISTRY,
+            root=tmp_bridge_root,
+        )
+        elapsed = time.perf_counter() - start
+        assert payload is not None
+        assert backend.verify_chain().ok is True
+        assert backend.head().event_count == 1 + 2100 + 2
+        assert elapsed < 0.5, f"warm save on 2,102-event log took {elapsed:.3f}s (SLO p95 <= 500ms)"
+
+    def test_save_recovers_when_head_missing(
+        self,
+        tmp_bridge_root,
+        seed_bridge_project,
+    ) -> None:
+        """Head-missing after a crash: the save falls back to a full parse and rewrites the head."""
+        ulid = "01JM4K5N7P00000000000000C3"
+        timeline_id = "aaaaaaaa-bbbb-cccc-dddd-c0ab1def00c3"
+        timeline_home, backend = self._seed(seed_bridge_project, "crash-head", ulid, timeline_id, tmp_bridge_root)
+
+        (timeline_home / "assembly.head.json").unlink()
+
+        payload = save_bridge_timeline(
+            "crash-head",
+            ulid,
+            self._CONFIG,
+            registry=self._REGISTRY,
+            root=tmp_bridge_root,
+        )
+        assert payload is not None
+        assert payload["config_version"] == 3
+        head = json.loads((timeline_home / "assembly.head.json").read_text(encoding="utf-8"))
+        assert head["version"] == 3
+        assert head["log_size"] == (timeline_home / "assembly.jsonl").stat().st_size
+        assert head["last_event_offset"] is not None
+        assert LocalFsBackend(timeline_id=timeline_id, timeline_home=timeline_home).verify_chain().ok is True
+
+    def test_save_recovers_from_torn_tail_after_crash(
+        self,
+        tmp_bridge_root,
+        seed_bridge_project,
+    ) -> None:
+        """Torn bytes beyond the head (crash mid-append) are truncated, then the save succeeds."""
+        ulid = "01JM4K5N7P00000000000000C4"
+        timeline_id = "aaaaaaaa-bbbb-cccc-dddd-c0ab1def00c4"
+        timeline_home, backend = self._seed(seed_bridge_project, "crash-torn", ulid, timeline_id, tmp_bridge_root)
+
+        with (timeline_home / "assembly.jsonl").open("ab") as handle:
+            handle.write(b'{"kind": "timeline.config_replaced", "paTORN')
+
+        payload = save_bridge_timeline(
+            "crash-torn",
+            ulid,
+            self._CONFIG,
+            registry=self._REGISTRY,
+            root=tmp_bridge_root,
+        )
+        assert payload is not None
+        log = (timeline_home / "assembly.jsonl").read_bytes()
+        assert b"paTORN" not in log
+        assert backend.verify_chain().ok is True
+        assert backend.head().log_size == len(log)
+
+    def test_first_save_after_cold_start_stays_fast(
+        self,
+        tmp_bridge_root,
+        seed_bridge_project,
+        monkeypatch,
+    ) -> None:
+        """First save on a fresh 2k-event log (no checkpoint) does not full-replay."""
+        ulid = "01JM4K5N7P00000000000000C6"
+        timeline_id = "aaaaaaaa-bbbb-cccc-dddd-c0ab1def00c6"
+        timeline_home, backend = self._seed(seed_bridge_project, "cold-first", ulid, timeline_id, tmp_bridge_root)
+
+        # Seed a bridge-shaped log: 2,100 chained events ending with a realistic
+        # config_replaced tail (the last editor save), no checkpoint/assembly.
+        self._seed_events(backend, timeline_id, 2100)
+        from astrid.core.timeline.eventlog.reigh_events import construct_reigh_timeline_events
+        from astrid.core.timeline.events.schema import TimelineActor
+
+        head = backend.head()
+        batch = construct_reigh_timeline_events(
+            timeline_id=timeline_id,
+            tail_hash=head.last_hash,
+            next_event_version=head.version + 1,
+            actor=TimelineActor(type="human", id="reigh-app:local-editor"),
+            source="editor_save",
+            config=self._CONFIG,
+        )
+        backend.append_prebuilt_events(timeline_id, [e.event for e in batch.events])
+        assert backend.head().event_count == 1 + 2100 + 1
+        assert not (timeline_home / "assembly.checkpoint.json").exists()
+
+        from astrid.core.timeline.eventlog.local_fs import LocalFsBackend as LocalFsCls
+
+        calls = {"read_events": 0}
+        orig = LocalFsCls.read_events
+
+        def spy(self, *args, **kwargs):
+            calls["read_events"] += 1
+            return orig(self, *args, **kwargs)
+
+        monkeypatch.setattr(LocalFsCls, "read_events", spy)
+
+        start = time.perf_counter()
+        payload = save_bridge_timeline(
+            "cold-first",
+            ulid,
+            self._CONFIG,
+            registry=self._REGISTRY,
+            root=tmp_bridge_root,
+        )
+        elapsed = time.perf_counter() - start
+        assert payload is not None
+        assert calls["read_events"] == 0, f"first (cold) save full-replayed: {calls}"
+        assert elapsed < 0.5, f"first save on 2,102-event cold log took {elapsed:.3f}s"
+        assert backend.verify_chain().ok is True
+        assert backend.head().event_count == 1 + 2100 + 1 + 2
+
+    def test_mixed_alias_concurrent_saves_serialize_on_one_lock(
+        self,
+        tmp_bridge_root,
+        seed_bridge_project,
+    ) -> None:
+        """Saves via slug / ULID / UUID aliases share ONE canonical-path lock."""
+        from astrid.core.integrations.reigh.local_bridge import _bridge_save_lock, find_bridge_timeline
+
+        ulid = "01JM4K5N7P00000000000000C5"
+        timeline_id = "aaaaaaaa-bbbb-cccc-dddd-c0ab1def00c5"
+        timeline_home, backend = self._seed(seed_bridge_project, "alias-lock", ulid, timeline_id, tmp_bridge_root)
+
+        record_ulid = find_bridge_timeline("alias-lock", ulid, root=tmp_bridge_root)
+        record_uuid = find_bridge_timeline("alias-lock", timeline_id, root=tmp_bridge_root)
+        record_slug = find_bridge_timeline("alias-lock", "primary", root=tmp_bridge_root)
+        assert record_ulid is not None and record_uuid is not None and record_slug is not None
+        assert record_ulid.timeline_home == record_uuid.timeline_home == record_slug.timeline_home
+        assert _bridge_save_lock(record_ulid.timeline_home) is _bridge_save_lock(record_uuid.timeline_home)
+        assert _bridge_save_lock(record_ulid.timeline_home) is _bridge_save_lock(record_slug.timeline_home)
+
+        # Functional proof: concurrent saves through different aliases all
+        # succeed and serialize (no interleaving → no chain breaks / lost
+        # updates). Without the shared lock the two aliases would race and
+        # produce prev_hash chain failures. Each save appends 2 events
+        # (config + registry), so 10 saves add 20 events.
+        errors: list[Exception] = []
+        barrier = threading.Barrier(2)
+
+        def worker(alias: str, saves: int) -> None:
+            try:
+                barrier.wait()
+                for _ in range(saves):
+                    save_bridge_timeline(
+                        "alias-lock",
+                        alias,
+                        self._CONFIG,
+                        registry=self._REGISTRY,
+                        root=tmp_bridge_root,
+                    )
+            except Exception as exc:  # noqa: BLE001
+                errors.append(exc)
+
+        threads = [
+            threading.Thread(target=worker, args=(ulid, 5)),
+            threading.Thread(target=worker, args=(timeline_id, 5)),
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(60)
+        assert all(not thread.is_alive() for thread in threads), "worker threads hung"
+        assert errors == [], f"concurrent alias saves failed: {errors}"
+
+        final = LocalFsBackend(timeline_id=timeline_id, timeline_home=timeline_home)
+        assert final.verify_chain().ok is True
+        assert final.head().event_count == 1 + 10 * 2
 

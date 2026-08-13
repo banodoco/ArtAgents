@@ -14,15 +14,22 @@ def _candidate_env_files(env_file: Path | None = None) -> list[Path]:
     return candidate_env_files(env_file, profile="reigh")
 
 
+# Reserved sentinel prefix: values beginning with this are treated as UNSET by
+# Reigh env resolution, so placeholder files (e.g. a "fill before release"
+# .env.local) can never poison downstream consumers. A real value cannot
+# legitimately start with this prefix.
+PLACEHOLDER_SENTINEL = "PLACEHOLDER_"
+
+
 def _env_first(keys: tuple[str, ...], env_file: Path | None = None) -> str:
     for key in keys:
         value = os.environ.get(key, "").strip()
-        if value:
+        if value and not value.startswith(PLACEHOLDER_SENTINEL):
             return value
     for candidate in _candidate_env_files(env_file):
         for key in keys:
             value = read_env_value(candidate, key)
-            if value:
+            if value and not value.startswith(PLACEHOLDER_SENTINEL):
                 return value
     return ""
 
@@ -136,6 +143,17 @@ def resolve_service_role_key(
     raise RuntimeError(
         "Reigh Supabase service-role key not found. Set REIGH_SUPABASE_SERVICE_ROLE_KEY."
     )
+
+
+def resolve_jwt_secret(env_file: Path | None = None) -> str | None:
+    """Project JWT secret for verifying HS256 Supabase access tokens.
+
+    Optional: only needed when the append service must validate user JWTs and
+    the project JWKS endpoint serves no keys (the default for GoTrue HS256
+    projects). Placeholder values are treated as unset.
+    """
+    value = _env_first(("REIGH_SUPABASE_JWT_SECRET", "SUPABASE_JWT_SECRET"), env_file)
+    return value.strip() or None
 
 
 def resolve_jwks_url(jwks_url: str | None = None, env_file: Path | None = None) -> str:
