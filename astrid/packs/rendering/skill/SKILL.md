@@ -120,7 +120,8 @@ declared assets for elements used by the timeline are staged under
 `remotion/public/astrid-effects/<render-hash>/<effect-id>/`, exposed to the
 component as `params.__astridAssets`, and cleaned up after Remotion exits.
 
-Requires Remotion ≥ 4.0.455.
+Requires Remotion ≥ 4.0.509 (pinned; 4.0.509+ replaces the extract-zip
+dependency that broke Chrome Headless Shell extraction on Node ≥ 26).
 
 ### `rendering.sprite_sheet`
 
