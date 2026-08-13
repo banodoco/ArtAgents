@@ -28,6 +28,8 @@ import json
 import shutil
 from pathlib import Path
 
+from PIL import Image
+
 from astrid.core.timeline.events.schema.serialize import with_event_hash
 from astrid.core.timeline.events.schema.types import TimelineActor, TimelineEvent
 
@@ -91,26 +93,33 @@ def main() -> int:
     SLICE_OUT.mkdir(parents=True, exist_ok=True)
 
     # 1. Copy the 24 real frames into media/ (park-frame-01..24.png) and
-    #    compute their content hashes.  The duplicate CL09 is a byte copy of
-    #    CL03's file under its own name; the foreign CL16 is the poster.
+    #    compute their content hashes + real pixel resolutions.  The
+    #    duplicate CL09 is a byte copy of CL03's file under its own name;
+    #    the foreign CL16 is the poster.
     media_hashes: dict[str, str] = {}
+    media_resolutions: dict[str, str] = {}
     for index, name in enumerate(FRAME_NAMES, start=1):
         dest = MEDIA_OUT / f"park-frame-{index:02d}.png"
         if not dest.exists():
             shutil.copyfile(_find_frame(name), dest)
         media_hashes[f"park-frame-{index:02d}"] = hashlib.sha256(dest.read_bytes()).hexdigest()
+        with Image.open(dest) as image:
+            media_resolutions[f"park-frame-{index:02d}"] = f"{image.width}x{image.height}"
 
     # CL09 duplicate: byte-identical to CL03's file (own registry key).
     # Unconditional — the duplicate must win over any earlier real frame.
     dup_bytes = (MEDIA_OUT / "park-frame-03.png").read_bytes()
     (MEDIA_OUT / "park-frame-09.png").write_bytes(dup_bytes)
     media_hashes["park-frame-09"] = hashlib.sha256(dup_bytes).hexdigest()
+    media_resolutions["park-frame-09"] = media_resolutions["park-frame-03"]
 
     # CL16 foreign: the Paris poster (always overwrite — the foreign frame
     # must be the poster even if an earlier run left the real frame there).
     poster_dest = MEDIA_OUT / "park-frame-16.png"
     shutil.copyfile(POSTER, poster_dest)
     media_hashes["park-frame-16"] = hashlib.sha256(poster_dest.read_bytes()).hexdigest()
+    with Image.open(poster_dest) as image:
+        media_resolutions["park-frame-16"] = f"{image.width}x{image.height}"
 
     # 2. Build the assembly event chain.
     clip_configs: list[dict] = []
@@ -148,7 +157,7 @@ def main() -> int:
         assets[key] = {
             "content_sha256": media_hashes[key],
             "file": f"park24/{key}.png",
-            "resolution": "1536x1024",
+            "resolution": media_resolutions[key],
             "type": "image/png",
         }
 

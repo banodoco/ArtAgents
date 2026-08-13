@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import math
 from copy import deepcopy
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from numbers import Real
 from pathlib import Path
 from typing import Any, Mapping
@@ -214,6 +214,10 @@ class TimelineInspectionModel:
     # ``select_scope`` receives only the model.  Keeping normalized shot data is
     # therefore necessary for a pure, cold shot selector.
     shots: tuple[ShotModel, ...] = ()
+    #: Width/height aspect per asset key (from registry ``resolution``), for
+    #: aspect-aware card geometry.  Defaulted so callers that construct the
+    #: model directly (frozen packs, tests) are unaffected.
+    asset_aspects: dict[str, float] = field(default_factory=dict)
 
     @property
     def pinned_shot_groups(self) -> tuple[ShotModel, ...]:
@@ -379,6 +383,33 @@ def _media_integrity(
         return _rootless_integrity(registry)
     classified = classify_registry(dict(registry), project_root=Path(project_root))
     return {key: classified[key] for key in sorted(classified)}
+
+
+def _asset_aspects(registry: Mapping[str, Any]) -> dict[str, float]:
+    """Width/height aspect per asset key from the registry ``resolution``
+    field ("WxH").  Unknown/unparseable entries are omitted — callers fall
+    back to the default 16:9 filmstrip aspect.  This drives aspect-aware
+    card geometry: a portrait frame (e.g. a poster) gets a portrait card
+    instead of letterboxing inside a landscape one.
+    """
+    raw_assets = registry.get("assets") if isinstance(registry, Mapping) else None
+    if not isinstance(raw_assets, Mapping):
+        return {}
+    aspects: dict[str, float] = {}
+    for key, entry in raw_assets.items():
+        if not isinstance(key, str) or not isinstance(entry, Mapping):
+            continue
+        resolution = entry.get("resolution")
+        if not isinstance(resolution, str) or "x" not in resolution:
+            continue
+        width_raw, _, height_raw = resolution.partition("x")
+        try:
+            width, height = float(width_raw), float(height_raw)
+        except (TypeError, ValueError):
+            continue
+        if width > 0 and height > 0:
+            aspects[key] = width / height
+    return aspects
 
 
 def _seconds_to_frame(seconds: float, fps: int) -> int:
@@ -594,6 +625,7 @@ def build_model(
         transition_default_frames=TRANSITION_FALLBACK_FRAMES,
         registry_keys=frozenset(registry_entries),
         media_integrity=_media_integrity(snapshot.registry, project_root=project_root),
+        asset_aspects=_asset_aspects(snapshot.registry),
         snapshot_sns=snapshot.sns(),
         shots=(),
     )

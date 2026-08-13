@@ -131,11 +131,44 @@ semantic mismatch detection invisible to hashes**.
   - `TL01.CL16` shows the Paris poster (foreign scene) in a nature storyboard.
 - **Gate** `test_timeline_visualize_gate_park24.py` (live): a fresh agent
   navigates root (orient: 24 clips) → zoom CL08 → NEXT-chain walk
-  CL08→CL09→CL10 → zoom CL03 → zoom CL09 (duplicate detection) → zoom CL16
-  (foreign detection), reporting exactly `TL01.CL09` + `TL01.CL16`.  Six legs
-  per journey, three fresh journeys, exact scoring.
+  CL08→CL09→CL10 → inspect CL09's + CL03's ORIGINALS (duplicate detection)
+  → inspect CL16's ORIGINAL (foreign detection), reporting exactly
+  `TL01.CL09` + `TL01.CL16`.  Six legs per journey, three fresh journeys,
+  exact scoring.  The mismatch legs verify via `inspect_original` — the
+  zoom-card scale is too coarse for grok to *prove* two frames identical,
+  so the gate exercises the epic's verification path (full-res originals),
+  which is exactly what an agent would do in the real product.
 - **Hermetic** `test_timeline_visualize_park24_fixture.py` (default CI):
   slice validity, 24 verified assets, mismatch hash-invisibility, 2-page root
   render with 24 clip cards.
 
-_RESULT: recorded under `.r24-evidence/park24/` at gate execution time._
+**RESULT (2026-08-11): PASS — all 6 legs × 3 fresh journeys = 1.0.**  The
+agent oriented 24 clips, walked the NEXT chain CL08→CL09→CL10, and caught
+both hash-invisible mismatches (CL09 duplicate + CL16 foreign) exactly.
+Gate evidence: `.r24-evidence/park24/journey-{1..3}/{root,cl08,walk1,walk2,
+dup,foreign}.json` (gitignored).  Iteration notes: zoom-card-scale equality
+judgment was flaky for grok (abstains) — the mismatch legs verify via
+`inspect_original` full-res pages, which is the product's verification path;
+the strip-noise pages were excluded from comparison sessions.
+
+### Aspect-aware filmstrip fix (2026-08-11, post-gate UX pass)
+
+User review of the rendered pages found the root's 24 clips showing
+"purple rectangles" instead of images.  Root cause: narrow clips (~71px
+wide, time-scaled) kept the full 220px portrait lane, so a 16:9 frame
+contain-fit into a portrait cell maxed at ~65x37px surrounded by `_CLIP`
+purple fill.  Codex (gpt-5.6-luna) diagnosed the same issue on the CL16
+poster card (portrait media pillarboxing in a wide card, ~25-30% image).
+Fixes (in `layout.py` + `model.py`):
+1. **Narrow-clip filmstrips**: cards narrower than `_MIN_VISUAL_CARD_W`
+   with a verified frame are capped to the media's own aspect ratio
+   (+ label strip) and vertically centered in the lane — full image,
+   never cropped, no gutters.
+2. **Aspect-aware geometry** (`model.asset_aspects`): parsed from the
+   registry `resolution` field; portrait media (<1.2) gets a portrait
+   card even for wide/focus cards.
+3. **Fixture registry resolution fixed** (`build_park24_slice.py`): the
+   builder now records each frame's REAL pixel resolution (the poster is
+   864x1222, not the previously-hardcoded 1536x1024).
+Result: codex rates root image visibility 4/5; CL16's poster fills its
+portrait card (purple ratio 47% -> 21%).

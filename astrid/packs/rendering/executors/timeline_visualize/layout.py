@@ -86,6 +86,12 @@ _VISUAL_CLIP_H_FOCUS = 420.0
 _VISUAL_LANE_H_FOCUS = _VISUAL_CLIP_H_FOCUS + 2.0 * _CLIP_PAD
 _MIN_CLIP_W = 4.0
 _MIN_VISUAL_CARD_W = 320.0
+#: Landscape filmstrip geometry for narrow clips with verified frames: the
+#: card height is capped to the frame's 16:9 aspect plus a label strip, so
+#: contain-fit fills the cell instead of floating in a portrait gutter.
+_FILMSTRIP_ASPECT = 16.0 / 9.0
+_FILMSTRIP_MIN_H = 40.0
+_FILMSTRIP_LABEL_H = 20.0
 _MIN_VISUAL_CARD_H = 180.0
 _INSET_GAP = 16.0
 _INSET_Y_OFFSET = 48.0
@@ -1247,18 +1253,53 @@ def _layout_time_scaled(
                 y,
                 height,
             )
-            if track.kind == "visual" and box.w < _MIN_VISUAL_CARD_W:
+            if track.kind == "visual" and box.w >= _MIN_VISUAL_CARD_W:
+                # Wide/focus card.  Portrait media (e.g. a poster, aspect
+                # < ~1.2) would pillarbox inside the wide card — cap the card
+                # height to the media's own aspect so the full frame fills the
+                # cell (codex UX: CL16's poster occupied ~25-30% of its card).
+                portrait_aspect = next(
+                    (
+                        model.asset_aspects[ak]
+                        for ak in clip.asset_keys
+                        if 0 < model.asset_aspects.get(ak, 0) < 1.2
+                    ),
+                    None,
+                )
+                if portrait_aspect is not None:
+                    capped = box.w / portrait_aspect + _FILMSTRIP_LABEL_H
+                    if capped < height:
+                        box = Box(box.x, y + (height - capped) / 2.0, box.w, capped)
+            elif track.kind == "visual" and box.w < _MIN_VISUAL_CARD_W:
                 # A narrow visual clip collapses to a duration bar ONLY when
                 # it has no verified thumbnail (Grok: bare chips read as dead
-                # space). With a frame available, keep the full lane height
-                # so the renderer contain-fits the whole image into a tall,
-                # readable strip — no gutter.
+                # space).  With a frame available, the card becomes an
+                # ASPECT-AWARE filmstrip: its height is capped to the media's
+                # own aspect ratio (+ label strip) instead of the full
+                # portrait lane.  A landscape frame gets a landscape cell, a
+                # portrait frame (e.g. a poster) gets a portrait cell — no
+                # gutters, no letterbox, full image always visible, never
+                # cropped (user: "why do these just show purple rectangles").
                 has_thumb = any(
                     model.media_integrity.get(ak) is not None
                     and model.media_integrity[ak].state == "verified_original"
                     for ak in clip.asset_keys
                 )
-                if not has_thumb:
+                if has_thumb:
+                    aspect = next(
+                        (
+                            model.asset_aspects[ak]
+                            for ak in clip.asset_keys
+                            if model.asset_aspects.get(ak, 0) > 0
+                        ),
+                        _FILMSTRIP_ASPECT,
+                    )
+                    filmstrip_h = max(_FILMSTRIP_MIN_H, box.w / aspect + _FILMSTRIP_LABEL_H)
+                    filmstrip_h = min(height, filmstrip_h)
+                    # Center the cell vertically in the lane so the lane fill
+                    # reads as a band around it, not a gutter below.
+                    box = Box(box.x, y + (height - filmstrip_h) / 2.0, box.w, filmstrip_h)
+                else:
                     box = Box(box.x, y, box.w, _DURATION_BAR_H)
             ref = _clip_ref(identity_map, clip)
             if clip.clip_id in primary_ids:
