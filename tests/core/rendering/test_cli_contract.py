@@ -19,9 +19,8 @@ Locks the ``astrid renderers`` ``--json`` output shapes and error behavior:
 * exit codes are 0 on success and non-zero on failure — no independent
   exit-code taxonomy beyond that.
 
-The ``replay`` verb is added by T7.4 (after this batch) and freezes its own
-JSON contract there; it does not exist yet, so it is intentionally absent
-here.
+The ``replay`` verb exists and freezes its own JSON contract here
+(``test_replay_json_shape_is_stable``).
 """
 
 from __future__ import annotations
@@ -719,3 +718,76 @@ def test_exit_code_contract_is_only_zero_vs_nonzero(tmp_path: Path) -> None:
         assert result.exit_code == 0
     for result in failures:
         assert result.exit_code != 0
+
+
+def test_smoke_interrupted_exits_130(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Interruption exits 130 (SIGINT convention), never 1."""
+    create_renderer_scaffold("wave", tmp_path / "wave")
+    monkeypatch.setattr(
+        "astrid.core.rendering.service.RenderService.render",
+        _interrupting_render,
+    )
+
+    result = run_cli(
+        renderers_cli_main,
+        ["smoke", "wave.wave", "--pack-root", str(tmp_path)],
+    )
+
+    assert result.exit_code == 130
+
+
+def test_replay_json_shape_is_stable(tmp_path: Path) -> None:
+    """The replay verb emits one frozen JSON object under --json (no
+    universal envelope)."""
+    from astrid.core.foundation.hash import sha256_file as _sha256
+    from astrid.core.rendering.replay import ReplayBundle, write_replay_bundle
+    from astrid.core.rendering.registry import load_default_registries
+    from astrid.core.rendering.contracts import compute_request_digest as _digest
+    from tests.core.rendering.test_replay import _copy_pack, _candidate
+
+    extra_root = _copy_pack(tmp_path)
+    candidate = _candidate(extra_root)
+    source_timeline = tmp_path / "timeline.json"
+    source_timeline.write_text('{"tracks": [], "clips": []}', encoding="utf-8")
+    digest = _sha256(source_timeline)
+    payload = {
+        "schema_version": 1,
+        "timeline_path": f"inputs/{digest}",
+        "assets_registry_path": None,
+        "output_name": "raw_command.mp4",
+        "window": None,
+        "audio": "rendered",
+        "profile": None,
+        "backend_config": {},
+        "metadata": {},
+    }
+    bundle = ReplayBundle(
+        renderer_id=candidate.id,
+        request_digest=_digest(payload),
+        manifest_digest=candidate.manifest_digest,
+        argv=["python3", "backend.py", "render", "--request", "request.json", "--result", "result.json"],
+        inputs={"timeline": str(source_timeline)},
+        payload=payload,
+        metadata={"verb": "render", "success": False},
+    )
+    bundle_dir = write_replay_bundle(bundle, tmp_path / "bundle")
+
+    result = run_cli(
+        renderers_cli_main,
+        ["replay", str(bundle_dir), "--pack-root", str(extra_root), "--json"],
+    )
+
+    assert result.exit_code == 0
+    payload = _load_json(result.stdout)
+    assert set(payload.keys()) == {
+        "verb",
+        "renderer_id",
+        "manifest_digest",
+        "manifest_digest_match",
+        "request_digest",
+        "request_digest_verified",
+        "replay_verb",
+        "drift",
+        "output",
+    }
+    _assert_no_envelope(payload)
