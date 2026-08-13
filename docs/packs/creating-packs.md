@@ -1,8 +1,8 @@
 # Creating Astrid Packs
 
 This guide walks you through creating a pack — a reusable bundle of
-executors, orchestrators, and elements that Astrid agents can discover
-and run.
+executors, orchestrators, elements, and optional rendering implementations
+that Astrid agents can discover and run.
 
 Terminology note: for pack identity, capability identity, default-enabled versus
 optional placement, aliases, forks, overrides, and in-place edits, use the
@@ -52,6 +52,9 @@ my_video_tools/
       STAGE.md          # Component staging notes
   elements/
     ...                # Optional element components
+  rendering/           # Optional protocol-v1 implementations
+    renderer.yaml
+    run.py
 ```
 
 The exact layout is declared by `pack.yaml`, not guessed by scanning
@@ -110,6 +113,9 @@ as JSON Schema documents in the repository:
 | `executor.yaml` | `astrid/core/pack/schemas/v1/executor.json` |
 | `orchestrator.yaml` | `astrid/core/pack/schemas/v1/orchestrator.json` |
 | `element.yaml` | `astrid/core/pack/schemas/v1/element.json` |
+| renderer manifest | `astrid/core/rendering/schemas/v1/renderer-manifest.json` |
+| planner manifest | `astrid/core/rendering/schemas/v1/planner-manifest.json` |
+| finalizer manifest | `astrid/core/rendering/schemas/v1/finalizer-manifest.json` |
 
 Shared constraints (id patterns, version format, runtime shape, etc.)
 are defined in `astrid/core/pack/schemas/v1/_defs.json`.
@@ -132,9 +138,11 @@ The pack manifest declares:
   `do_not_use_for`, `required_context`.
 - **Documentation references**: paths to `README.md`, `skill/SKILL.md`, etc.
 - **Aliases**: alternate public ids that route to executor or orchestrator
-  capabilities in this pack. See
+  capabilities or rendering implementations in this pack. See
   [aliases-vs-forks-vs-overrides.md](aliases-vs-forks-vs-overrides.md) for
   the full alias vocabulary and schema.
+- **Extensions**: optional pack-owned registries, including timeline renderers,
+  planners, and finalizers under `extensions.rendering`.
 
 Refer to `pack.json` for the full field list and constraints.
 
@@ -264,13 +272,85 @@ Key rules:
 
 - Aliases are declared on the pack that owns the **canonical** capability, not on
   the alias source pack.
-- `kind` must be `executor` or `orchestrator` — element aliases are deferred.
+- `kind` may be `executor`, `orchestrator`, `renderer`, `planner`, or
+  `finalizer` — element aliases are deferred.
 - Both `alias` and `canonical_id` must be qualified ids (`pack.slug`).
 - `deprecated` and `deprecation_message` are optional; they surface
   informational metadata in `inspect` and `search` without blocking resolution.
 - Component-level `metadata.aliases` on individual executor/orchestrator
   manifests is legacy validation-only — new aliases must use the pack-level
   `aliases` field.
+
+### Rendering Extensions
+
+A pack can add timeline rendering implementations without adding an executor
+and without editing the built-in rendering pack. Declare pack-relative
+manifest paths under the strict rendering extension:
+
+```yaml
+schema_version: 1
+id: video_tool
+name: Video Tool Pack
+version: 1.0.0
+permissions:
+  - id: project_files
+    reason: Reads localized timeline assets and writes invocation artifacts
+  - id: subprocess
+    reason: Runs the video-tool renderer
+extensions:
+  rendering:
+    renderers:
+      - rendering/renderer.yaml
+    planners:
+      - rendering/planner.yaml
+    finalizers:
+      - rendering/finalizer.yaml
+```
+
+All three arrays are optional. Unknown keys under `extensions.rendering` are
+rejected. Each path is resolved relative to the pack root and must remain
+inside it after symlink resolution. Static pack validation parses these
+manifests against the rendering v1 schemas but never imports or executes their
+commands.
+
+Rendering implementation ids are qualified and pack-owned: their first
+segment must equal the pack `id` (`video_tool.renderer`, not
+`rendering.video-tool`). A renderer manifest must declare `render`, a planner
+must declare `plan`, and a finalizer must declare `finalize`; any of them may
+also declare `support`. A manifest's `required_permissions` must be a subset
+of the permissions disclosed by its pack. The command is an argv prefix,
+never a shell string, and runs with the pack root as its working directory.
+
+Pack-level aliases use the rendering kinds directly:
+
+```yaml
+aliases:
+  - kind: renderer
+    alias: video_tool.legacy
+    canonical_id: video_tool.renderer
+  - kind: planner
+    alias: video_tool.old-policy
+    canonical_id: video_tool.planner
+  - kind: finalizer
+    alias: video_tool.old-finalizer
+    canonical_id: video_tool.finalizer
+```
+
+The public executor remains `rendering.render`. A backend pack contributes an
+implementation behind that facade; it must not register a renderer with the
+facade id or ask callers to import its Python module. See the complete wire,
+artifact, profile, audio, finalization, and provenance contract in
+[render-backend-v1.md](../contracts/render-backend-v1.md).
+
+To author a renderer without hand-writing the pack layout, scaffold the
+canonical four-file pack (`pack.yaml`, `renderer.yaml`, `render.py`,
+`test_renderer.py`) with `python3 -m astrid renderers create <name> <dest>`,
+then follow the golden path — generated test → `renderers validate` → trusted
+`packs install` → `renderers list`/`inspect` → `renderers smoke` → provenance
+sidecar — in
+[render-backend-v1.md](../contracts/render-backend-v1.md#renderer-author-golden-path).
+The scaffold destination directory name becomes the pack id (and must match
+it for `packs install`), and the renderer id becomes `<dest>.<name>`.
 
 ### Executor Manifest (`executor.yaml`)
 
@@ -318,7 +398,16 @@ The recommended workflow for creating a pack:
 4. **`packs validate <path>`** — Validates the entire pack statically:
    checks that all manifests parse, conform to their JSON Schemas,
    have known `schema_version` values, and that declared content
-   roots, docs, and runtime entrypoint files exist on disk.
+   roots, docs, runtime entrypoint files, and rendering extension manifests
+   exist on disk.
+
+For a pack that contributes a timeline renderer (rather than an executor),
+use `python3 -m astrid renderers create <name> <dest>` instead of
+`executors new`; the scaffold writes the four-file renderer pack and is
+installable as-is. Validate with `renderers validate <path>`, discover with
+`renderers list`/`renderers inspect <id>`, and smoke with
+`renderers smoke <id>`. See the golden path in
+[render-backend-v1.md](../contracts/render-backend-v1.md#renderer-author-golden-path).
 
 All scaffold commands validate their output. A round-trip of
 `packs new` → `executors new` → `orchestrators new` →
@@ -334,6 +423,8 @@ Validation is **static**. It checks:
 - Declared content roots and doc references point to existing paths.
 - Runtime entrypoint files (`run.py`) exist on disk.
 - Component `STAGE.md` files exist (warning, not error).
+- Rendering extension paths stay inside the pack and each renderer, planner,
+  or finalizer manifest satisfies its protocol-v1 schema.
 
 Validation does **not**:
 

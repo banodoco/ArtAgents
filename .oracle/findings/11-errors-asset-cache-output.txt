@@ -1,0 +1,31 @@
+## Findings (ranked)
+
+**1. Exit-code mapping is a single choke point.** `render_astrid_error` returns `1 if error.degraded else 2` (`core/contracts/errors.py:262`); `gateway/__init__.py:182-189` routes `AstridError`→render, bare `Exception`→`wrap_degraded_error`→render. So 2=expected failure, 1=bug. **130 is never decided in code** — only `gateway/wait.py:64-67` forwards SIGINT to children; 130 is CPython's default for unhandled `KeyboardInterrupt`.
+
+**2. ExecError codes are sparse.** `exec_error.py`: frozen `ExecError` dataclass (:23), `ExecAstridError` (:90), `error_from_returncode`→`code="nonzero_exit", type="process"` (:126-139), `error_from_missing_binaries`→`code="missing_binaries", type="precondition"` (:142-151). `ExecutorRunResult.__post_init__` derives `error` only from these two (`runner.py:167-173`); `ok` = `error is None` (:176-177).
+
+**3. Missing declared outputs are silently ignored — plan claim verified.** `_resolve_declared_outputs` "return only those that exist on disk" (`runner.py:371`); `if output_path_str and Path(output_path_str).exists():` (:395). Missing ⇒ omitted, no error; non-zero exit suppresses outputs entirely (:660). `resolve_declared_outputs` (:400-431) is the non-filtering companion.
+
+**4. Subprocess wrapping.** `runtime/subprocess.py:run_subprocess` (:17-48): `capture_output=True, text=True`, raises `AstridError` embedding stdout/stderr in `state_snapshot`; missing binary (FileNotFoundError) is **not** caught. `runtime/log_capture.py:run_subprocess_with_capture` (:127) returns returncode, writes rotating logs. Runner pre-checks binaries (`runner.py:486-487`).
+
+**5. Asset cache is a self-contained training-pack module.** `asset_cache/run.py` owns: cache dir `${HYPE_CACHE_DIR:-~/.cache/banodoco-hype}/assets` (:166-170), sha1(url)[:16]+sanitized-basename keys (:173-181), HEAD/Range-resume fetch with `.partial`/`.lock`/`.meta.json`, drift modes strict/warn/refetch (:231-248), `fetch`/`resolve`/`resolve_input`/`prune` (:285, 410, 432, 457). Render imports it (`rendering/executors/render/run.py:37`, fetch at :165) and adds its own classification: `_classify_assets` url-direct vs url-fetched vs local (:147-175); common-root via `os.path.commonpath` in `_server_root_for` (:178-194).
+
+**6. Foundation helpers:** `atomic_io.py` — `write_text_atomic` (:84), `write_bytes_atomic` (:96), `write_json_atomic` (:108), `read_json` (:132), `AtomicWriteError` (:17); `hash.py` — `sha256_file` (:9, 1MB chunks).
+
+## Verified facts
+- Exit 2/1 decided solely in `render_astrid_error`; 130 is implicit interpreter behavior.
+- Runner ignores missing declared outputs after successful runs.
+- Render path depends on the training asset_cache (cross-pack import).
+- Asset cache uses hand-rolled tmp+`os.replace`, not `foundation.atomic_io`.
+
+## Unknowns
+- Where backend maps `ExecError` → HTTP/exit codes (not found in `core/execution`).
+- Whether `url_expires_at`-expired entries get refetched or error in render (:156-157 raises).
+
+## Risks
+- Cross-pack import (`rendering`→`training`) breaks pack isolation on rehoming; `metadata()` shells out to ffprobe with `check=True` (unwrapped `CalledProcessError`); drift `warn` mode returns drift bytes silently; silent output omission hides backend contract violations.
+
+## Suggested approach
+- Extract cache primitives (fetch/prune/keys) into `core/foundation` reusing `sha256_file`/atomic_io; make render import the shared module.
+- Add `code="missing_declared_output"` to `ExecError` derivation in `runner.py` post-run instead of silent omission.
+- Route all subprocess failures through `run_subprocess`-style wrapping (catch FileNotFoundError); keep 2/1 mapping, add explicit 130 handling.

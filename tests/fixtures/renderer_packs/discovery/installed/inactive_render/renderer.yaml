@@ -1,0 +1,8 @@
+schema_version: 1
+id: inactive_render.renderer
+name: Inactive Fixture Renderer
+version: 1.0.0
+protocol_version: 1
+command: [python3, backend_should_not_import.py]
+operations: [render]
+required_permissions: [subprocess]

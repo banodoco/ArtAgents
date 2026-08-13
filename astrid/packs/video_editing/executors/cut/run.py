@@ -16,6 +16,7 @@ from astrid.core.pack.entrypoint import guard_canonical_entrypoint
 guard_canonical_entrypoint('video_editing.cut')
 import argparse
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
@@ -25,6 +26,8 @@ from astrid.core.contracts.errors import AstridError
 from astrid.core.foundation.hash import sha256_file
 from astrid.core.foundation.paths import REPO_ROOT, WORKSPACE_ROOT
 from astrid.core.managed_binding import is_managed_mode
+from astrid.core.rendering.attached import invoke_attached_render
+from astrid.core.subprocess_env import TASK_PROJECT_ENV, TASK_RUN_ID_ENV
 from astrid.core.theme import load_theme, theme_root
 from astrid.core.timeline import (
     canonical_timeline_config,
@@ -122,7 +125,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--renderer",
         values=("remotion",),
         default="remotion",
-        help="Render backend. remotion (default) uses tools/remotion/.",
+        help="Deprecated render selector; forwarded to rendering.render as its engine selector.",
     )
     parser.add_argument("--render", action="store_true", help="Render clips and concat them into hype.mp4.")
     # Managed binding seam (m3.5): when both --project and --timeline-slug are
@@ -365,13 +368,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     save_metadata(meta, metadata_path)
     rendered_path = None
     if args.render:
-        from ..render.run import render as render_remotion
-
-        hype_path = render_remotion(
+        render_kwargs: dict[str, Any] = {}
+        if os.environ.get(TASK_PROJECT_ENV) and os.environ.get(TASK_RUN_ID_ENV):
+            render_kwargs["step_id"] = "cut-render"
+        hype_path = invoke_attached_render(
             timeline_path,
             assets_path,
             out_dir / "hype.mp4",
-            project_dir=REPO_ROOT / "remotion",
+            engine=args.renderer,
+            backend_config={
+                "rendering.remotion": {"project_dir": str(REPO_ROOT / "remotion")}
+            },
+            project_root=REPO_ROOT,
+            **render_kwargs,
         )
         rendered_path = hype_path
         print(
@@ -395,6 +404,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     ]
     if rendered_path is not None:
         manifest_outputs.append({"path": rendered_path.name, "type": "file"})
+        manifest_outputs.append(
+            {"path": f"{rendered_path.name}.provenance.json", "type": "file"}
+        )
     manifest_inputs: dict[str, Any] = {
         "arrangement": str(arrangement_path),
         "pool": str(pool_path),

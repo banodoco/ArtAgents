@@ -6,16 +6,17 @@ builds the argv tokens that invoke a pipeline executor's module entrypoint.
 
 from __future__ import annotations
 
-from functools import lru_cache
 
-
-@lru_cache(maxsize=None)
 def resolve_executor_runtime_module(script_name: str) -> str:
     """Resolve an executor id or legacy pipeline step name to its runtime module.
 
     Qualified ids resolve through the registry so aliases land on the canonical
     executor definition. Bare names remain supported only for legacy pipeline
     step dispatch via ``metadata.pipeline_step``.
+
+    Deliberately uncached: registry overrides (override store, local pack
+    edits, capability re-registration) must be observable by callers, and a
+    stale in-process resolution must not outlive them.
     """
     stem = script_name[:-3] if script_name.endswith(".py") else script_name
     from astrid.core.execution.executor.registry import load_default_registry

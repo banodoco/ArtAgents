@@ -45,6 +45,12 @@ TARGETED_BLOCKING_TESTS=(
   tests/packs/test_composition_elements.py
   tests/test_for_each_autoclose.py
   tests/test_schema_contract.py
+  tests/core/rendering
+  tests/packs/rendering/test_builtin_registration.py
+)
+
+RENDERER_PARITY_TESTS=(
+  tests/packs/test_renderer_parity.py
 )
 
 QUARANTINE_TESTS=(
@@ -73,7 +79,8 @@ run_quarantine_lane() {
 
 # SD-CI-LANES: three distinct mechanisms, kept separate.
 #
-# TARGETED_BLOCKING_TESTS  — by-path blocking pre-checks (lines 6-11 above).
+# TARGETED_BLOCKING_TESTS  — by-path blocking pre-checks, including rendering contracts.
+# RENDERER_PARITY_TESTS    — marked semantic parity suite, explicitly selected below.
 # QUARANTINE_TESTS         — opt_in-marked, allowed-to-fail lane (below).
 # BROAD_PYTEST_ARGS        — broad default run; opt_in/integration excluded by
 #                            marker (-m "not integration and not opt_in") so no
@@ -251,13 +258,14 @@ if ! $JSON_MODE; then
   "$PYTHON_BIN" -m pytest tests/reshape/test_hype_regression_fixture.py -q
   "$PYTHON_BIN" -m pytest tests/concurrency/test_two_tab_harness_smoke.py -q
   "$PYTHON_BIN" -m pytest "${TARGETED_BLOCKING_TESTS[@]}" -q
+  "$PYTHON_BIN" -m pytest -q -m renderer_parity "${RENDERER_PARITY_TESTS[@]}"
   "$PYTHON_BIN" -m pytest "${BROAD_PYTEST_ARGS[@]}" $COV_ARGS
 
   # Named Remotion typecheck lane.
   if [ ! -d remotion/node_modules ]; then
     echo "LANE remotion-typecheck: SKIP (remotion/node_modules absent; run 'cd remotion && npm ci' to enable)"
-  elif [ ! -f remotion/src/types.augmentations.ts ]; then
-    echo "LANE remotion-typecheck: SKIP (remotion/src/types.augmentations.ts absent; generated augmentation surface not provisioned)"
+  elif [ ! -f remotion/src/types.augmentations.d.ts ]; then
+    echo "LANE remotion-typecheck: SKIP (remotion/src/types.augmentations.d.ts absent; generated augmentation surface not provisioned)"
   else
     echo "LANE remotion-typecheck: running (remotion/node_modules + generated surface present)"
     (cd remotion && npm run typecheck)
@@ -355,6 +363,7 @@ _run_pytest reshape tests/concurrency/test_two_tab_harness_smoke.py -q
 
 echo "--- blocking ---" >&2
 _run_pytest blocking "${TARGETED_BLOCKING_TESTS[@]}" -q
+_run_pytest blocking -q -m renderer_parity "${RENDERER_PARITY_TESTS[@]}"
 
 echo "--- broad ---" >&2
 if [ "${ASTRID_CI_SKIP_BROAD:-}" = "1" ]; then
@@ -368,8 +377,8 @@ echo "--- remotion_typecheck ---" >&2
 if [ ! -d remotion/node_modules ]; then
   echo "LANE remotion-typecheck: SKIP (remotion/node_modules absent; run 'cd remotion && npm ci' to enable)" >&2
   _accum remotion_typecheck 0 0 1
-elif [ ! -f remotion/src/types.augmentations.ts ]; then
-  echo "LANE remotion-typecheck: SKIP (remotion/src/types.augmentations.ts absent; generated augmentation surface not provisioned)" >&2
+elif [ ! -f remotion/src/types.augmentations.d.ts ]; then
+  echo "LANE remotion-typecheck: SKIP (remotion/src/types.augmentations.d.ts absent; generated augmentation surface not provisioned)" >&2
   _accum remotion_typecheck 0 0 1
 else
   echo "LANE remotion-typecheck: running (remotion/node_modules + generated surface present)" >&2

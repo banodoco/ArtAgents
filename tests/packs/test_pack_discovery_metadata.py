@@ -2,9 +2,9 @@
 
 These exercise the shared ``astrid.core.pack.discovery`` module that the
 executor, orchestrator, and element registries now delegate to. The focus is
-the four-layer walk (source / local / extra / installed) and that every
-registry observes identical ordering, plus that skills discovery can consume
-the same metadata.
+the five-layer walk (source / local / explicit-extra / environment /
+installed), identical ordering across registry consumers, and that skills
+discovery can consume the same metadata.
 """
 
 from __future__ import annotations
@@ -409,6 +409,37 @@ class PackDiscoveryMetadataTest(unittest.TestCase):
             ordered = discover_packs_ordered(discover_packs_fn=scan, include_installed=False)
 
         self.assertEqual([p.id for p in ordered], ["alpha"])
+
+    def test_rendering_consumers_receive_source_kind_and_priority_metadata(self) -> None:
+        """Rendering registries consume metadata, not the compatibility wrapper
+        that drops source/priority context."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_pack = _make_pack(root / "source", "source_pack")
+            extra_root = root / "extra"
+            extra_pack = _make_pack(extra_root, "extra_pack")
+
+            def scan(arg=None):
+                if arg is None:
+                    return (source_pack,)
+                if Path(arg).resolve() == extra_root.resolve():
+                    return (extra_pack,)
+                return ()
+
+            discovered = discover_pack_metadata(
+                project_root=root / "project",
+                extra_pack_roots=(str(extra_root),),
+                include_installed=False,
+                discover_packs_fn=scan,
+            )
+
+        self.assertEqual(
+            [(item.id, item.source_kind, item.priority_index) for item in discovered],
+            [
+                ("source_pack", "source", 0),
+                ("extra_pack", "extra", 1),
+            ],
+        )
 
 
 if __name__ == "__main__":

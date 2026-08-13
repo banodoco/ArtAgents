@@ -1,0 +1,39 @@
+# Render callsite inventory — `astrid.packs.rendering.executors.render.run`
+
+**Grep sweep** (`executors.render`, `render_executor|render\.run|render\.py`, `rendering.render`): 26 + 29 + 60 hits. All runtime call sites are below; the rest are tests or string/id references (`rendering.render` executor id, `pipeline_step: render`).
+
+| file:line | what it does | canonical or bypass |
+|---|---|---|
+| `rendering/executors/render/run.py:7,36` | `guard_canonical_entrypoint('rendering.render')`; intra-package `audio_reactive_colour` import | canonical definition / internal |
+| `video_editing/orchestrators/iteration_video/run.py:25,148` | `import run as render_executor`; in-process `render_executor.render(timeline, assets, hype.mp4)` | **bypass** (in-process import, no registry/CLI) |
+| `iteration_video/run.py:122-125` | `shutil.move(hype.mp4 → iteration.mp4)`; sidecar **not** renamed | bypass artifact (stale) |
+| `iteration_video/plan_template.py:103` | plan cmd `python -m astrid.packs.rendering.executors.render.run --timeline … --out iteration.mp4` | **bypass** (module spawn, but canonical module) |
+| `video_editing/executors/cut/run.py:368` | `from ..render.run import render as render_remotion` (guarded by `--render`) | **bypass — real bug** (sibling dir absent) |
+| `video_editing/executors/cut/resume.py:165` | same `from ..render.run import render` | **bypass — real bug** (same) |
+| `hype/steps.py:48-50,362` | `step_argv("render.py")` → `executor_argv` → subprocess module spawn | registry-mediated (semi-canonical) |
+| `editorial/human_notes/run.py:88-89,251` | `_step_argv("render.py")` → `executor_argv` → subprocess `render_cmd` | registry-mediated (semi-canonical) |
+| `tools/render_and_check.py:40` | `py -m astrid executors run rendering.render --input timeline=… assets_registry=…` | **canonical** (CLI id) |
+| `hype/plan_template.py:212,448` | `_executor_cmd("rendering.render", …)` → `astrid executors run`; docstring: "Render stays local and calls rendering.render" | **canonical** (CLI id) |
+| `cut/run.py:120-126` | `--renderer` via `add_choice_arg(values=("remotion",), default="remotion")` — not in `executor.yaml`; recorded in metadata only (:386, timeline_build.py:458, resume.py:92,159,176); **never passed to render** | dead/bypass |
+| `core/execution/executor/argv.py:12-44` | `resolve_executor_runtime_module` (`@lru_cache(maxsize=None)`), `executor_argv = [py, "-m", module]` | resolver |
+| Tests: `test_cli_gate.py:580-636`, `test_human_notes.py:418`, `test_hype_e2e.py:553,1084-1096`, `test_executor_runner_errors.py:423-434`, `test_pipeline_caching.py:267,490`, `test_canonical_cli.py:147` | assert module-path argv; monkeypatch `render.run.WORKSPACE_ROOT`; import private helpers | canonical assertions / direct-module coupling |
+| Tests: `test_text_card_render.py:9,39`, `test_audio_render.py:7,125`, `test_render_remotion_registry.py:16,115-240` | in-process `run.render(...)`; monkeypatch module internals | bypass (in-process) |
+| Tests: `test_default_registry_scopes.py:62`, `test_pack_resolver.py:169-213`, `test_asset_cache.py:19`, `test_url_pipeline_smoke.py:17` | `runtime_module` metadata; `_RangeHTTPRequestHandler` import | metadata/import coupling |
+
+## Verified facts
+- `cut/run.py:368` & `resume.py:165` are **real bugs**: `astrid/packs/video_editing/executors/` contains only `cut/`; `from ..render.run import render` raises `ModuleNotFoundError` whenever `--render` is passed.
+- `--renderer` accepts only `remotion`; declared in argparse, **not** in `executor.yaml`, and never reaches `render()` (which has `engine=`, not `renderer=`). Metadata-only.
+- Provenance sidecar (`{out}.provenance.json`, payload `"output": out_path`) is written by render; `iteration_video` moves `hype.mp4` but leaves `hype.mp4.provenance.json` — **stale `output` field, missing `iteration.mp4.provenance.json`**; not in `OUTPUT_FILES`.
+- `executor_argv` resolves `.py` stems by `metadata.pipeline_step`, qualified ids by registry; result cached process-wide, keyed only by name — `load_default_registry()` is *not* cached, so a mid-process fork/override yields a **stale module** from `lru_cache`.
+
+## Unknowns
+- Whether `cut --render` is exercised anywhere in prod (if not, the bug is latent); whether `iteration.mp4.provenance.json` is consumed downstream.
+
+## Risks
+- Four live bypasses escape the registry/CLI abstraction: iteration_video in-process import, iteration plan module spawn, cut/human_notes `executor_argv` module spawns, tests' in-process imports.
+- Stale provenance after `hype.mp4→iteration.mp4` rename silently breaks provenance chaining.
+
+## Suggested approach
+1. Fix cut/resume to call `rendering.executors.render.run.render` (correct dotted import) or drop `--render`.
+2. Route iteration_video through `astrid executors run rendering.render` (or `executor_argv("rendering.render", …)`), and rename/rewrite the provenance sidecar alongside the mp4.
+3. Make `resolve_executor_runtime_module` cache-aware of registry changes (bust on override/fork) or key by registry generation.

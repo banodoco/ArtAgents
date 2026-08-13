@@ -7,7 +7,7 @@ import shutil
 from dataclasses import replace
 from pathlib import Path
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, Iterable
+from typing import Any, Iterable
 
 from astrid.core.dirty import detect_local_edits, read_fork_state, write_fork_state
 from astrid.core.foundation.paths import REPO_ROOT
@@ -29,15 +29,13 @@ from astrid.core.pack.manifest import (
     dump_manifest_payload,
     load_manifest_mapping,
 )
+from astrid.core.pack.override import OverrideStore
 from astrid.core.pack.resolver import PackResolver
 from astrid.core.registry import CapabilityRegistry
 
 from .banodoco_catalog import BanodocoCatalogConfig, load_banodoco_catalog_executors
 from .folder import load_folder_executors
 from .schema import ExecutorDefinition, ExecutorValidationError, validate_executor_definition
-
-if TYPE_CHECKING:
-    from astrid.core.pack.override import OverrideStore
 
 BUILTIN_STEP_ORDER: tuple[str, ...] = (
     "transcribe",
@@ -261,7 +259,10 @@ def load_default_registry(
     )
     resolver = create_shared_alias_resolver()
     _register_pack_aliases(resolver, extract_pack_aliases(packs, kind="executor"))
-    registry = ExecutorRegistry(alias_resolver=resolver)
+    registry = ExecutorRegistry(
+        alias_resolver=resolver,
+        override_store=OverrideStore(project_root),
+    )
     for executor in _load_pack_executors_from_packs(packs):
         registry.register(executor)
     if banodoco_config is not None and banodoco_config.enabled:

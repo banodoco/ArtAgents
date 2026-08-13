@@ -1,0 +1,27 @@
+## Ranked findings
+
+1. **`extensions:` already exists — schema, normalizer, and PackDefinition field, but zero packs use it.** `pack.json:108-239` defines top-level `extensions` (generation/elements/timeline/schemas/artifact_types) with `additionalProperties: false` at both levels. `permissions.py:123-158` (`_optional_pack_extensions`) validates/denormalizes it, rejecting unknown keys (`permissions.py:127-130`). `definition.py:47` stores it on `PackDefinition`; `definition.py:84-88` serializes it. Grep of `extensions:` across all `astrid/packs/*/pack.yaml`: **0 matches** — the mechanism is fully wired but unused, so `extensions.rendering` is currently *rejected* by both schema and normalizer until added to both.
+
+2. **rendering pack.yaml permissions are pack-wide** (pack.yaml:12-18): `subprocess`, `project_files`, `network` — the network grant's stated reason is only the sprite-sheet executor ("calls OpenAI GPT Image API", line 17-18), yet it applies to the whole pack including render. Permissions enum: `_common.py:42-49`; schema `pack.json:80-87`.
+
+3. **Manifest-name mapping is `_common.py:16-25`**: `PACK/EXECUTOR/ORCHESTRATOR/ELEMENT_MANIFEST_NAMES` plus `_COMPONENT_MANIFEST_NAMES` dict (`executor|orchestrator|element`) used by `find_component_manifest` (`_common.py:28-39`). A `renderer.yaml` kind needs a new entry here, plus `walkers.py:26-34` (content-root discovery) and `agent_index.py:85-94` (agent index) — and folder-level `_MANIFEST_FILENAMES` redefinitions in `execution/executor/folder.py:28` and `orchestrator/folder.py:22` would need matching updates (they duplicate, not import).
+
+4. **Discovery**: `discovery.py:79-164` (`discover_pack_metadata`) layers source→local→extra→env→installed via `scan()` per root; `loader.py:186` finds `pack.yaml` via `PACK_MANIFEST_NAMES`; manifests parsed by `manifest.py:58-65` (`load_manifest_mapping`).
+
+5. **Executor→registry**: `ExecutorRegistry(CapabilityRegistry[str, ExecutorDefinition])` (`execution/executor/registry.py:65`); executor.yaml's own `id: rendering.render` (executor.yaml:73) is the qualified id, validated to match pack via `_common.py:72-77` (`validate_content_id_in_pack`). `folder.py:28,127-132` locates manifests; executor.yaml:74-110 inputs: timeline (file, required), assets_registry (file, optional, artifact `timeline/assets`), theme (file, optional), engine (string, optional — no enum in manifest; constraints only in prose at executor.yaml:97 and runtime), keep_previous_renders (boolean, optional).
+
+## Verified facts
+- pack.yaml:12-18 permissions (subprocess, project_files, network) — pack-wide.
+- executor.yaml:74-110 inputs as above; `isolation.network: false` (line 114) contradicts pack-level network grant.
+- extensions key exists but unused; unknown sub-keys rejected.
+
+## Unknowns
+- Where engine flag values are constrained (run.py, not manifest).
+- Whether `renderer.yaml` should be a 4th component kind or an executor alias.
+
+## Risks
+- `additionalProperties: false` at `extensions` (pack.json:238) and normalizer key-allowlist (permissions.py:127) both hard-reject `rendering` — must touch both.
+- Duplicated filename tuples (folder.py:28, registry.py:350) drift easily.
+
+## Suggested approach
+Add `rendering` to `allowed_keys` in `permissions.py:127` + schema `pack.json:238` sub-properties; add `renderer.yaml` to `_common.py:21-25` and mirror in folder/agent-index tuples; scope network to sprite_sheet via executor-level isolation rather than pack-wide grant.

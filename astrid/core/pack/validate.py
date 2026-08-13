@@ -24,7 +24,9 @@ import jsonschema
 from referencing import Registry, Resource
 
 from astrid.core.pack import (
+    PACK_ALIAS_KINDS,
     PackDefinition,
+    PackValidationError,
     _normalize_pack_permissions,
     _optional_pack_aliases,
     _optional_pack_extensions,
@@ -34,6 +36,7 @@ from astrid.core.pack import (
     iter_executor_roots,
     iter_orchestrator_roots,
     pack_manifest_path,
+    pack_rendering_manifest_paths,
     pack_taxonomy_from_manifest,
     validate_content_id_in_pack,
     validate_element_pack_id,
@@ -65,7 +68,9 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _SCHEMAS_ROOT = Path(__file__).resolve().parent / "schemas"
+_RENDERING_SCHEMAS_ROOT = _SCHEMAS_ROOT.parent.parent / "rendering" / "schemas"
 _REPO_ROOT = Path(__file__).resolve().parents[3]
+_RENDERING_MANIFEST_KINDS = ("renderer", "planner", "finalizer")
 
 _PACK_TAXONOMY_ENUMS: dict[str, tuple[str, ...]] = {
     "origin": ("unknown", "builtin", "external"),
@@ -91,6 +96,9 @@ KNOWN_SCHEMA_VERSIONS: dict[int, dict[str, Path]] = {
         "executor": _SCHEMAS_ROOT / "v1" / "executor.json",
         "orchestrator": _SCHEMAS_ROOT / "v1" / "orchestrator.json",
         "element": _SCHEMAS_ROOT / "v1" / "element.json",
+        "renderer": _RENDERING_SCHEMAS_ROOT / "v1" / "renderer-manifest.json",
+        "planner": _RENDERING_SCHEMAS_ROOT / "v1" / "planner-manifest.json",
+        "finalizer": _RENDERING_SCHEMAS_ROOT / "v1" / "finalizer-manifest.json",
     }
 }
 
@@ -235,13 +243,11 @@ class PackValidator:
         self._layout_exceptions = []
         self._capability_locations: dict[str, str] = {}
         self._pack_capability_locations: dict[str, dict[str, str]] = {
-            "executor": {},
-            "orchestrator": {},
+            kind: {} for kind in PACK_ALIAS_KINDS
         }
         self._alias_targets: list[tuple[str, str, str]] = []
         self._pack_alias_resolvers: dict[str, AliasResolver] = {
-            "executor": AliasResolver(),
-            "orchestrator": AliasResolver(),
+            kind: AliasResolver() for kind in PACK_ALIAS_KINDS
         }
         self._pack_alias_targets: list[tuple[str, str, str, str]] = []
 
@@ -307,11 +313,16 @@ class PackValidator:
         self._validate_manifest(data, manifest_kind, self._rel(path))
         return data
 
-    def _load_yaml(self, path: Path) -> Optional[dict[str, Any]]:
+    def _load_yaml(
+        self,
+        path: Path,
+        *,
+        manifest_kind: str = "pack",
+    ) -> Optional[dict[str, Any]]:
         """Load a YAML file with safe_load. Returns None on error."""
         rel = self._rel(path)
         try:
-            data = load_manifest_mapping(path, manifest_kind="pack")
+            data = load_manifest_mapping(path, manifest_kind=manifest_kind)
         except ManifestParseError as e:
             self.errors.append(f"{rel}: {e}")
             return None
@@ -545,6 +556,49 @@ class PackValidator:
             manifest_path = find_component_manifest(elem_dir, "element")
             if manifest_path is not None:
                 self._validate_element_manifest_file(pack, kind, manifest_path)
+        try:
+            rendering_manifest_paths = pack_rendering_manifest_paths(pack)
+        except PackValidationError as exc:
+            self.errors.append(f"pack.yaml: {exc}")
+            return
+        for manifest_kind, manifest_paths in zip(
+            _RENDERING_MANIFEST_KINDS,
+            rendering_manifest_paths,
+        ):
+            for manifest_path in manifest_paths:
+                self._validate_rendering_manifest_file(
+                    pack,
+                    manifest_path,
+                    manifest_kind,
+                )
+
+    def _validate_rendering_manifest_file(
+        self,
+        pack: PackDefinition,
+        manifest_path: Path,
+        manifest_kind: str,
+    ) -> None:
+        data = self._load_yaml(manifest_path, manifest_kind=manifest_kind)
+        if data is None:
+            return
+
+        rel = self._rel(manifest_path)
+        version = self._validate_manifest(data, manifest_kind, rel)
+        if version is None:
+            return
+        capability_id = data.get("id")
+        if not isinstance(capability_id, str):
+            return
+        self._register_capability_id(capability_id, rel)
+        self._pack_capability_locations[manifest_kind][capability_id] = rel
+        try:
+            validate_content_id_in_pack(
+                capability_id,
+                pack,
+                content_type=manifest_kind,
+            )
+        except ValueError as exc:
+            self.errors.append(f"{rel}: {exc}")
 
     def _validate_component_manifest_file(
         self,
@@ -852,12 +906,13 @@ class PackValidator:
             )
 
         for relpath, alias_path, kind, target in self._pack_alias_targets:
-            pack_id = target.split(".", 1)[0]
+            resolved_target = self._pack_alias_resolvers[kind].resolve(target)
+            pack_id = resolved_target.split(".", 1)[0]
             if pack_id != self._pack_id():
                 continue
-            if target not in self._pack_capability_locations[kind]:
+            if resolved_target not in self._pack_capability_locations[kind]:
                 self.errors.append(
-                    f"{relpath}: {alias_path} points to unknown {kind} id {target!r}"
+                    f"{relpath}: {alias_path} points to unknown {kind} id {resolved_target!r}"
                 )
 
     def _validate_alias_targets(self) -> None:

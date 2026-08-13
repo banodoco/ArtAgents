@@ -208,6 +208,7 @@ def main(argv: list[str] | None = None) -> int:
             raise
         if project_context is not None:
             args.project = project_context.project_slug
+            args.render_parent_run_id = project_context.run_id
             # Propagate managed timeline slug and event-stream id from run
             # metadata so subprocess callers (cut, refine, etc.) can pass
             # --project + --timeline-slug, and hype-owned managed mutations

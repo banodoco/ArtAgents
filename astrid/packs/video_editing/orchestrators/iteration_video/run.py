@@ -9,23 +9,25 @@ from astrid.core.pack.entrypoint import guard_canonical_entrypoint
 guard_canonical_entrypoint('video_editing.iteration_video')
 import argparse
 import json
-import shutil
+import os
 import sys
 from pathlib import Path
 from typing import Any, Mapping
 
 from astrid.core import modalities
 from astrid.core.foundation.paths import REPO_ROOT
+from astrid.core.rendering.attached import invoke_attached_render
+from astrid.core.subprocess_env import TASK_PROJECT_ENV, TASK_RUN_ID_ENV
 from astrid.core.threads.ids import is_ulid
 from astrid.core.threads.index import ThreadIndexStore
 from astrid.core.threads.schema import SCHEMA_VERSION
 from astrid.core.threads.variants import update_groups_for_run, write_sidecar
 from astrid.packs.iteration.executors.assemble import run as assemble
 from astrid.packs.iteration.executors.prepare import run as prepare
-from astrid.packs.rendering.executors.render import run as render_executor
 
 OUTPUT_FILES = (
     ("iteration.mp4", "video"),
+    ("iteration.mp4.provenance.json", "metadata"),
     ("iteration.timeline.json", "metadata"),
     ("iteration.manifest.json", "metadata"),
     ("iteration.report.html", "text"),
@@ -54,12 +56,14 @@ def run_orchestrator(request: Any, orchestrator: Any) -> dict[str, Any]:
             target_run_id=str(target_run_id) if target_run_id else None,
             max_iterations=args.max_iterations,
             renderers=args.renderers,
+            renderer=args.renderer,
             clip_mode=args.clip_mode,
             direction=args.direction,
             mode=args.mode,
             audio_bed=args.audio_bed,
             force=args.force,
             no_content=args.no_content,
+            **_attached_render_binding(request),
         )
     except (IterationVideoError, prepare.PrepareError, assemble.AssembleError, OSError, RuntimeError) as exc:
         return {
@@ -87,12 +91,16 @@ def run_iteration_video(
     target_run_id: str | None = None,
     max_iterations: int | None = None,
     renderers: str | None = None,
+    renderer: str = "remotion",
     clip_mode: str | None = None,
     direction: str | None = None,
     mode: str = "chaptered",
     audio_bed: str = "auto",
     force: bool = False,
     no_content: bool = False,
+    project_slug: str | None = None,
+    parent_run_id: str | None = None,
+    render_step_id: str | None = None,
 ) -> dict[str, Any]:
     repo_root = repo_root.expanduser().resolve()
     out_path = out_path.expanduser().resolve()
@@ -119,10 +127,14 @@ def run_iteration_video(
         clip_mode=clip_mode,
         no_content=no_content,
     )
-    hype_mp4 = run_builtin_render(out_path)
-    iteration_mp4 = out_path / "iteration.mp4"
-    if hype_mp4.resolve() != iteration_mp4.resolve():
-        shutil.move(str(hype_mp4), str(iteration_mp4))
+    iteration_mp4 = run_builtin_render(
+        out_path,
+        repo_root=repo_root,
+        renderer=renderer,
+        project_slug=project_slug,
+        parent_run_id=parent_run_id,
+        step_id=render_step_id,
+    )
     write_iteration_group_sidecar(
         out_path=out_path,
         repo_root=repo_root,
@@ -139,17 +151,59 @@ def run_iteration_video(
             ("iteration.prepare", target["target_run_id"]),
             ("iteration.assemble", str(prepare_dir), str(out_path)),
             ("rendering.render", str(out_path / "hype.timeline.json"), str(out_path / "hype.assets.json")),
-            ("finalize", str(iteration_mp4)),
         ),
     }
 
 
-def run_builtin_render(brief_out: Path) -> Path:
-    return render_executor.render(
+def run_builtin_render(
+    brief_out: Path,
+    *,
+    repo_root: Path,
+    renderer: str,
+    project_slug: str | None = None,
+    parent_run_id: str | None = None,
+    step_id: str | None = None,
+) -> Path:
+    return invoke_attached_render(
         brief_out / "hype.timeline.json",
         brief_out / "hype.assets.json",
-        brief_out / "hype.mp4",
+        brief_out / "iteration.mp4",
+        project_slug=project_slug,
+        parent_run_id=parent_run_id,
+        step_id=step_id,
+        engine=renderer,
+        project_root=repo_root,
     )
+
+
+def _attached_render_binding(request: Any) -> dict[str, str | None]:
+    """Return the existing parent ledger binding without creating another run."""
+
+    env_project = os.environ.get(TASK_PROJECT_ENV)
+    env_run = os.environ.get(TASK_RUN_ID_ENV)
+    if env_project is not None or env_run is not None:
+        return {
+            "project_slug": None,
+            "parent_run_id": None,
+            "render_step_id": "iteration-render",
+        }
+    project_slug = getattr(request, "project", None)
+    run_root = getattr(request, "run_root", None)
+    if bool(project_slug) != bool(run_root):
+        raise IterationVideoError(
+            "iteration render requires both the parent project and run context"
+        )
+    if project_slug and run_root:
+        return {
+            "project_slug": str(project_slug),
+            "parent_run_id": Path(run_root).name,
+            "render_step_id": "iteration-render",
+        }
+    return {
+        "project_slug": None,
+        "parent_run_id": None,
+        "render_step_id": None,
+    }
 
 
 def inspect_iteration_thread(
@@ -325,6 +379,7 @@ def main(argv: list[str] | None = None) -> int:
             target_run_id=args.target_run_id,
             max_iterations=args.max_iterations,
             renderers=args.renderers,
+            renderer=args.renderer,
             clip_mode=args.clip_mode,
             direction=args.direction,
             mode=args.mode,
@@ -345,6 +400,11 @@ def _parse_passthrough(argv: tuple[str, ...]) -> argparse.Namespace:
     parser.add_argument("--target-run-id", default=None)
     parser.add_argument("--max-iterations", type=int, default=None)
     parser.add_argument("--renderers", default=None)
+    parser.add_argument(
+        "--renderer",
+        default="remotion",
+        help="Deprecated render selector; forwarded to rendering.render as its engine selector.",
+    )
     parser.add_argument("--clip-mode", default=None)
     parser.add_argument("--direction", default=None)
     parser.add_argument("--mode", default="chaptered")
@@ -362,6 +422,11 @@ def _run_parser() -> argparse.ArgumentParser:
     parser.add_argument("--repo-root", default=str(REPO_ROOT))
     parser.add_argument("--max-iterations", type=int, default=None)
     parser.add_argument("--renderers", default=None)
+    parser.add_argument(
+        "--renderer",
+        default="remotion",
+        help="Deprecated render selector; forwarded to rendering.render as its engine selector.",
+    )
     parser.add_argument("--clip-mode", default=None)
     parser.add_argument("--direction", default=None)
     parser.add_argument("--mode", default="chaptered")
@@ -392,7 +457,6 @@ def _dry_run_result(orchestrator_id: str, *, out_path: Path) -> dict[str, Any]:
             ("iteration.prepare", str(out_path / "_prepare")),
             ("iteration.assemble", str(out_path)),
             ("rendering.render", str(out_path / "hype.timeline.json"), str(out_path / "hype.assets.json")),
-            ("finalize", str(out_path / "iteration.mp4")),
         ),
     }
 

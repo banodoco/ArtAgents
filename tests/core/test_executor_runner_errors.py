@@ -164,10 +164,10 @@ def test_builtin_render_expands_semantic_timeline_assets_and_out_argv(tmp_path: 
         "astrid.packs.rendering.executors.render.run",
         "--timeline",
         str(tmp_path / "hype.timeline.json"),
-        "--out",
-        str((tmp_path / "render").resolve() / "hype.mp4"),
         "--assets",
         str(tmp_path / "hype.assets.json"),
+        "--out",
+        str((tmp_path / "render").resolve() / "hype.mp4"),
     )
 
 

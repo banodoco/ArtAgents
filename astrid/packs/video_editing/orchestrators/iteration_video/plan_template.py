@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+import shlex
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,7 @@ def build_plan_v2(
     target_run_id: str,
     repo_root: str | Path | None = None,
     run_id: str | None = None,
+    renderer: str = "remotion",
 ) -> dict[str, Any]:
     """Build a task plan for prepare → assemble → render iteration-video work."""
 
@@ -29,7 +31,7 @@ def build_plan_v2(
     plan_id = f"iteration-video-{run_id or uuid.uuid4().hex[:12]}"
     cmd_prepare = _build_prepare_cmd(python_exec, run_root, target_run_id, repo_root)
     cmd_assemble = _build_assemble_cmd(python_exec, run_root, repo_root)
-    cmd_render = _build_render_cmd(python_exec, run_root)
+    cmd_render = _build_render_cmd(python_exec, run_root, renderer=renderer)
     local_zero = cost_entry(0, source="local")
 
     return build_plan_template(
@@ -60,7 +62,10 @@ def build_plan_v2(
             build_leaf_template(
                 "render",
                 command=cmd_render,
-                produces=[file_output("video", "iteration.mp4")],
+                produces=[
+                    file_output("video", "iteration.mp4"),
+                    file_output("provenance", "iteration.mp4.provenance.json"),
+                ],
                 cost=local_zero,
             ),
         ],
@@ -95,14 +100,32 @@ def _build_assemble_cmd(
     )
 
 
-def _build_render_cmd(python_exec: str, run_root: Path) -> str:
-    out = run_root / "steps" / "render" / "v1" / "produces"
+def _build_render_cmd(
+    python_exec: str,
+    run_root: Path,
+    *,
+    renderer: str = "remotion",
+) -> str:
     timeline = run_root / "steps" / "assemble" / "v1" / "produces" / "hype.timeline.json"
     assets = run_root / "steps" / "assemble" / "v1" / "produces" / "hype.assets.json"
-    return (
-        f"{python_exec} -m astrid.packs.rendering.executors.render.run "
-        f"--timeline {timeline} --assets {assets} --out {out / 'iteration.mp4'}"
-    )
+    parts = [
+        shlex.quote(str(python_exec)),
+        "-m",
+        "astrid",
+        "executors",
+        "run",
+        "rendering.render",
+        "--out",
+        "{produces_root}",
+    ]
+    for name, value in (
+        ("timeline", timeline),
+        ("assets_registry", assets),
+        ("output_name", "iteration.mp4"),
+        ("engine", renderer),
+    ):
+        parts.extend(["--input", shlex.quote(f"{name}={value}")])
+    return " ".join(parts)
 
 
 __all__ = ["build_plan_v2", "emit_plan_json"]

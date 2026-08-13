@@ -2,7 +2,7 @@
 
 Chains `iteration.prepare`, `iteration.assemble`, and `rendering.render` to create an iteration recap from a thread.
 
-The render handoff is explicit: assemble writes `hype.timeline.json` and `hype.assets.json`, `rendering.render` consumes those exact files and emits `hype.mp4`, then this orchestrator records `iteration.mp4` alongside the canonical iteration metadata.
+The render handoff is explicit: assemble writes `hype.timeline.json` and `hype.assets.json`, then `rendering.render` consumes those exact files and publishes `iteration.mp4` plus `iteration.mp4.provenance.json` directly alongside the canonical iteration metadata.
 
 Inspect first when provenance quality is uncertain:
 

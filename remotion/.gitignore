@@ -4,3 +4,4 @@ out/
 _active_theme
 _active_theme.txt
 .astrid-registry-state.json
+.astrid-registry.lock

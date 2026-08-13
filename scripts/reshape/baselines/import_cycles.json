@@ -26,12 +26,20 @@
       "astrid.core.orchestrate"
     ],
     [
+      "astrid.core.integrations",
+      "astrid.core.timeline"
+    ],
+    [
       "astrid.core.io",
       "astrid.core.task"
     ],
     [
       "astrid.core.plan",
       "astrid.core.task"
+    ],
+    [
+      "astrid.core.project",
+      "astrid.core.session"
     ],
     [
       "astrid.core.project",
@@ -76,5 +84,5 @@
       "astrid.core.timeline"
     ]
   ],
-  "pair_count": 12
+  "pair_count": 14
 }

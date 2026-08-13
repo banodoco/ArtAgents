@@ -5,7 +5,7 @@
     "scripts/reshape"
   ],
   "command": [
-    "/Users/peteromalley/.pyenv/versions/3.11.11/bin/python3",
+    "/Users/peteromalley/.pyenv/versions/3.11.11/bin/python",
     "-m",
     "mypy",
     "astrid",
@@ -14,14 +14,6 @@
     "--no-color-output",
     "--show-error-codes"
   ],
-  "finding_count": 1,
-  "findings": [
-    {
-      "path": "astrid/core/timeline/inverses.py",
-      "line": 114,
-      "column": 0,
-      "message": "Invalid syntax",
-      "code": "syntax"
-    }
-  ]
+  "finding_count": 0,
+  "findings": []
 }

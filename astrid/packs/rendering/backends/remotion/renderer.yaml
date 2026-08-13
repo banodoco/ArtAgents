@@ -1,0 +1,39 @@
+schema_version: 1
+id: rendering.remotion
+name: Remotion Timeline Renderer
+version: 1.0.0
+protocol_version: 1
+command:
+  - python3
+  - run.py
+operations:
+  - render
+  - support
+description: Render complete Astrid timelines with TimelineComposition and Remotion.
+capabilities:
+  clip_types:
+    - media
+    - text
+  track_types:
+    - visual
+    - audio
+  features:
+    timeline_composition: true
+    merged_themes: true
+    effects: true
+    animations: true
+    transitions: true
+    html_in_canvas: true
+  supports_full_timeline: true
+  supports_windows: false
+  output_profiles:
+    - video/mp4
+  audio_ownership:
+    - rendered
+required_permissions:
+  - project_files
+  - subprocess
+required_binaries:
+  - node
+  - npx
+  - ffprobe

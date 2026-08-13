@@ -207,6 +207,14 @@ class ExecutorCapabilityRunner(CapabilityRunner[ExecutorRunRequest, ExecutorRunR
         return _expand_external_command(executor, request, values)[0]
 
     def maybe_gate(self, request: ExecutorRunRequest) -> None:
+        # Attached-child helpers validate the owning project/run and allocate a
+        # unique synthetic child step before entering the executor lifecycle.
+        # Such a child is deliberately outside the parent task plan's cursor,
+        # so running the normal command gate here would reject the invocation
+        # even though it is attached to a valid ledger.  All ordinary executor
+        # requests retain the existing gate behavior.
+        if request.invocation == "attached-child":
+            return
         task_project = task_env.task_project_env()
         task_run_id = task_env.task_run_id_env()
         task_step_id = task_env.task_step_id_env()
@@ -799,7 +807,6 @@ def _expand_external_command(
     consumed = _consumed_input_names(executor)
     argv = _insert_input_arg_mappings(argv, executor, values)
     argv = (*argv, *_auto_forward_untemplated_inputs(executor, values, consumed))
-    argv = _normalize_render_command_compat(executor, values, argv)
     cwd = (
         _expand_placeholders(executor.command.cwd, placeholders, error_cls=ExecutorRunnerError)
         if executor.command.cwd
@@ -1234,30 +1241,6 @@ def _insert_input_arg_mappings(
             continue
         result[index:index] = expanded
     result.extend(appended)
-    return tuple(result)
-
-
-def _normalize_render_command_compat(
-    executor: ExecutorDefinition,
-    values: Mapping[str, Any],
-    argv: tuple[str, ...],
-) -> tuple[str, ...]:
-    if executor.id != "rendering.render" or not _has_value(values.get("theme")):
-        return argv
-    try:
-        assets_index = argv.index("--assets")
-        out_index = argv.index("--out")
-    except ValueError:
-        return argv
-    if assets_index < out_index or assets_index + 1 >= len(argv):
-        return argv
-    assets_pair = list(argv[assets_index : assets_index + 2])
-    result = list(argv[:assets_index] + argv[assets_index + 2 :])
-    try:
-        out_index = result.index("--out")
-    except ValueError:
-        return argv
-    result[out_index:out_index] = assets_pair
     return tuple(result)
 
 

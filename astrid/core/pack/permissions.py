@@ -124,7 +124,14 @@ def _optional_pack_extensions(value: Any, *, path: str) -> dict[str, Any]:
     if value is None:
         return {}
     data = _require_mapping(value, path)
-    allowed_keys = {"generation", "elements", "timeline", "schemas", "artifact_types"}
+    allowed_keys = {
+        "generation",
+        "elements",
+        "timeline",
+        "rendering",
+        "schemas",
+        "artifact_types",
+    }
     unknown_keys = sorted(set(data) - allowed_keys)
     if unknown_keys:
         raise PackValidationError(f"{path} has unknown field(s): {', '.join(unknown_keys)}")
@@ -145,6 +152,11 @@ def _optional_pack_extensions(value: Any, *, path: str) -> dict[str, Any]:
             data["timeline"],
             path=f"{path}.timeline",
         )
+    if "rendering" in data:
+        normalized["rendering"] = _normalize_rendering_extensions(
+            data["rendering"],
+            path=f"{path}.rendering",
+        )
     if "schemas" in data:
         normalized["schemas"] = _normalize_json_object(
             data["schemas"],
@@ -155,6 +167,35 @@ def _optional_pack_extensions(value: Any, *, path: str) -> dict[str, Any]:
             data["artifact_types"],
             path=f"{path}.artifact_types",
         )
+    return normalized
+
+
+def _normalize_rendering_extensions(value: Any, *, path: str) -> dict[str, Any]:
+    data = _require_mapping(value, path)
+    allowed_keys = {"renderers", "planners", "finalizers"}
+    unknown_keys = sorted(set(data) - allowed_keys)
+    if unknown_keys:
+        raise PackValidationError(f"{path} has unknown field(s): {', '.join(unknown_keys)}")
+
+    normalized: dict[str, Any] = {}
+    for key in ("renderers", "planners", "finalizers"):
+        if key in data:
+            normalized[key] = _normalize_rendering_manifest_paths(
+                data[key],
+                path=f"{path}.{key}",
+            )
+    return normalized
+
+
+def _normalize_rendering_manifest_paths(value: Any, *, path: str) -> list[str]:
+    if not isinstance(value, list):
+        raise PackValidationError(f"{path} must be an array")
+
+    normalized: list[str] = []
+    for index, raw_path in enumerate(value):
+        if not isinstance(raw_path, str):
+            raise PackValidationError(f"{path}[{index}] must be a string")
+        normalized.append(raw_path)
     return normalized
 
 

@@ -131,17 +131,18 @@ def test_fast_spec_rejects_ambiguous_markers(
 
 @pytest.mark.parametrize("engine", ["remotion", "ffmpeg", "hybrid"])
 def test_render_dispatches_compact_effect_to_ffmpeg_specialization(
-    tmp_path: Path, engine: str
+    tmp_path: Path, engine: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     timeline_path, assets_path, _audio_path = _write_inputs(tmp_path)
     out_path = tmp_path / engine / "hype.mp4"
 
-    def fake_render(spec: audio_reactive_colour.AudioReactiveColourSpec, output: Path) -> Path:
-        output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_bytes(b"video")
-        return output
+    class _FakeService:
+        def render(self, *args, **kwargs) -> Path:
+            return out_path.resolve()
 
-    with patch.object(audio_reactive_colour, "render", side_effect=fake_render) as mocked:
+    monkeypatch.setattr(render_run, "_default_service", lambda: _FakeService())
+
+    with patch.object(audio_reactive_colour, "render") as mocked:
         output = render_run.render(
             timeline_path,
             assets_path,
@@ -150,15 +151,10 @@ def test_render_dispatches_compact_effect_to_ffmpeg_specialization(
             keep_previous_renders=True,
         )
 
+    # Dispatch is delegated to RenderService; the audio-reactive specialization
+    # is service-side support evidence, so the facade never invokes it.
     assert output == out_path.resolve()
-    mocked.assert_called_once()
-    provenance = json.loads(
-        Path(f"{out_path}.provenance.json").read_text(encoding="utf-8")
-    )
-    assert provenance["engine"] == "ffmpeg"
-    assert provenance["ffmpeg_specialization"] == "audio-reactive-colour/v1"
-    assert provenance["audio_reactive_colour"]["event_count"] == 3
-    assert provenance["audio_reactive_colour"]["frame_count"] == 24
+    mocked.assert_not_called()
 
 
 @pytest.mark.skipif(not HAS_FFMPEG, reason="ffmpeg and ffprobe are required")

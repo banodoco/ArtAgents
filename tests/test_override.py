@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import tempfile
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
@@ -241,3 +242,102 @@ class TestOverrideStoreRegistryIntegration:
             result = registry.get("editorial.shots")
             assert result.id == "editorial.shots"
             assert result.name == "Shots"
+
+
+class TestDefaultRegistryOverrideStoreWiring:
+    """Default factories load project-persisted overrides themselves."""
+
+    def test_executor_default_factory_uses_project_override_store(self):
+        from astrid.core.execution.executor import registry as executor_registry_module
+        from astrid.core.execution.executor.schema import ExecutorDefinition
+
+        with tempfile.TemporaryDirectory() as tmp:
+            store = OverrideStore(tmp)
+            store.set_override("executor", "fixture.original", "fixture.replacement")
+            definitions = (
+                ExecutorDefinition(
+                    id="fixture.original",
+                    name="Original",
+                    kind="built_in",
+                    version="1.0.0",
+                ),
+                ExecutorDefinition(
+                    id="fixture.replacement",
+                    name="Replacement",
+                    kind="built_in",
+                    version="1.0.0",
+                ),
+            )
+
+            with (
+                mock.patch.object(
+                    executor_registry_module,
+                    "_discover_executor_packs",
+                    return_value=(),
+                ),
+                mock.patch.object(
+                    executor_registry_module,
+                    "_load_pack_executors_from_packs",
+                    return_value=definitions,
+                ),
+            ):
+                registry = executor_registry_module.load_default_registry(
+                    project_root=tmp,
+                    include_installed=False,
+                )
+
+            assert registry.override_store is not None
+            assert registry.get("fixture.original").id == "fixture.replacement"
+
+    def test_orchestrator_default_factory_uses_project_override_store(self):
+        from astrid.core.execution.executor.registry import ExecutorRegistry
+        from astrid.core.execution.orchestrator import registry as orchestrator_registry_module
+        from astrid.core.execution.orchestrator.schema import (
+            OrchestratorDefinition,
+            RuntimeSpec,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            store = OverrideStore(tmp)
+            store.set_override(
+                "orchestrator",
+                "fixture.original",
+                "fixture.replacement",
+            )
+            definitions = (
+                OrchestratorDefinition(
+                    id="fixture.original",
+                    name="Original",
+                    kind="built_in",
+                    version="1.0.0",
+                    runtime=RuntimeSpec(kind="python", function="run"),
+                ),
+                OrchestratorDefinition(
+                    id="fixture.replacement",
+                    name="Replacement",
+                    kind="built_in",
+                    version="1.0.0",
+                    runtime=RuntimeSpec(kind="python", function="run"),
+                ),
+            )
+
+            with (
+                mock.patch.object(
+                    orchestrator_registry_module,
+                    "_discover_orchestrator_packs",
+                    return_value=(),
+                ),
+                mock.patch.object(
+                    orchestrator_registry_module,
+                    "_load_pack_orchestrators_from_packs",
+                    return_value=definitions,
+                ),
+            ):
+                registry = orchestrator_registry_module.load_default_registry(
+                    executor_registry=ExecutorRegistry(),
+                    project_root=tmp,
+                    include_installed=False,
+                )
+
+            assert registry.override_store is not None
+            assert registry.get("fixture.original").id == "fixture.replacement"

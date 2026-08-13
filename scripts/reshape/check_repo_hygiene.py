@@ -20,6 +20,7 @@ ROOT_FILE_ALLOWLIST = {
     "AGENTS.md",
     "SECURITY.md",
     ".env.example",
+    ".gitattributes",
     ".gitignore",
     "LICENSE",
     "Makefile",
@@ -31,12 +32,16 @@ ROOT_FILE_ALLOWLIST = {
 # Approved top-level directories.
 ROOT_DIR_ALLOWLIST = {
     ".github",
+    ".megaplan",
+    ".oracle",
     "astrid",
     "docs",
     "examples",
+    "fal-voice-upscale",
     "remotion",
     "scripts",
     "tests",
+    "tools",
 }
 
 ROOT_GENERATED_PATTERNS = (

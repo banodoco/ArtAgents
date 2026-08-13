@@ -1,63 +1,70 @@
 ---
 name: rendering
 description: >
-  Rendering pack: the Remotion compositor that turns a timeline, and
-  optional assets registry, into hype.mp4 plus provenance; also includes
-  escape-hatch element scaffolding for custom
-  visual effects (html_canvas_effect, sprite_sheet).  Auto-starts an
-  HTTP server with Range request support for Remotion media streaming.
+  Rendering pack: the stable rendering.render facade, protocol-v1 Remotion
+  and FFmpeg renderers, the legacy hybrid planner, the FFmpeg finalizer, and
+  element escape hatches for custom visual effects.
 ---
 
 # Rendering
 
-The rendering pack turns assembled timelines, and optional media asset
-registries, into finished video files through Remotion, FFmpeg, or the hybrid
-renderer. It also provides element-system escape hatches for custom visual
-effects and sprite sheet generation.
+The rendering pack turns assembled timelines and optional media asset
+registries into finished video files. `rendering.render` is a stable neutral
+facade over `RenderService`: the service resolves a renderer or planner from
+pack manifests, probes support, invokes protocol-v1 commands, validates media,
+completes audio/finalization when required, and publishes the video plus
+provenance. `hybrid` is a legacy planning policy, not a renderer.
 
 ## Render flow
 
 The core rendering path is:
 
 ```
-timeline.json + optional assets.json  →  Remotion compositor  →  hype.mp4 + provenance
+timeline.json + optional assets.json
+  → rendering.render facade
+  → RenderService
+  → renderer or planner → segment renderer(s) → finalizer
+  → hype.mp4 + provenance
 ```
 
 1. **Input**: `hype.timeline.json` (clip sequence, effects, animations,
    transitions) and, when the timeline references media files,
    `hype.assets.json` (asset registry with file paths).
-2. **HTTP server start**: Before launching Remotion, the executor starts a
-   local `ThreadingHTTPServer` on a randomly-chosen free port bound to
-   `127.0.0.1`. Media asset paths are rewritten to
-   `http://localhost:<port>/...` URLs so Remotion can stream them directly.
-3. **Composition**: Remotion renders the timeline using the resolved theme
-   and composition entry point (default: `HypeComposition`).
-4. **Output**: `hype.mp4` and `hype.mp4.provenance.json`.
+2. **Selection**: The service resolves a qualified renderer/planner through
+   trust-aware registries. Legacy `remotion`, `ffmpeg`, and `hybrid` selectors
+   are translated only at the compatibility boundary.
+3. **Invocation**: The selected protocol command receives one request file
+   and writes one authoritative result file in an isolated workspace.
+4. **Validation/publication**: Astrid probes the media, validates profile,
+   duration, audio, paths, and hashes, then atomically publishes `hype.mp4`
+   and `hype.mp4.provenance.json`.
 
-For the built-in `audio-reactive-colour` effect, the same normal render command
-has a strict fast path: one full-duration frame-aligned effect plus one
-coextensive local audio clip is compiled to FFmpeg `sendcmd`. The effect
-parameters remain the single editable source of truth, and unsupported shapes
-fall through to ordinary rendering.
+For the built-in `audio-reactive-colour` effect, the FFmpeg renderer exposes a
+strict request-sensitive specialization: one full-duration frame-aligned
+effect plus one coextensive local audio clip is compiled to FFmpeg `sendcmd`.
+The effect parameters remain the editable source of truth; normal service
+selection and support evidence decide whether this renderer is used.
 
-## Auto-started HTTP server
+## Remotion asset materialization
 
-The executor spins up a local HTTP server automatically before Remotion
-renders. Key details:
+The shared render-host asset layer materializes an invocation before the
+Remotion backend renders:
 
-- **Handler**: `_RangeHTTPRequestHandler` (extends `SimpleHTTPRequestHandler`)
+- Local registry paths resolve relative to the registry file and are staged
+  into an invocation-owned directory with project containment checks.
+- Remote URLs that advertise byte ranges stream directly. Other URLs are
+  fetched through the shared cache, optionally verified by `content_sha256`,
+  and staged.
 - **Range request support**: Implements HTTP `Range` (byte-range) headers
   with proper `206 Partial Content` responses, `Content-Range`, and
   `Accept-Ranges: bytes` headers. This is essential — Remotion's media
   components seek into long source videos via byte-range requests. Without
   Range support, every seek would fully download the source video, causing
   timeouts or black/silent frames.
-- **CORS**: Responds with `Access-Control-Allow-Origin: *` and allows
-  `Range` and `Content-Type` headers.
-- **Lifecycle**: Started as a daemon thread before Remotion and shut down
-  in a `finally` block after Remotion exits.
-- **Port**: Auto-picked via `_pick_free_port()` (binds to `127.0.0.1:0`
-  and reads the assigned port).
+- **Lifecycle**: `AssetMaterializer` and `InvocationAssetServer` are owned by
+  the Remotion backend invocation and cleaned on success or failure.
+- **Exposure**: Only the staging directory is served on `127.0.0.1` using an
+  operating-system-assigned port; arbitrary source directories are not served.
 
 When `assets_registry` is omitted, the runner supplies an empty media registry.
 This is the normal path for timelines that contain only text, effects,
@@ -65,7 +72,7 @@ generated visuals, or other clips that do not reference media entries.
 
 ## Theme support
 
-The executor resolves the timeline's theme slug against the workspace
+The Remotion backend resolves the timeline's theme slug against the workspace
 themes directory (`themes/`), merges any per-run `theme_overrides` from
 the timeline, and passes the merged `{id, visual}` dict to Remotion as
 props. A fallback `banodoco-default` theme is used when no theme is
@@ -75,7 +82,7 @@ specified.
 
 | Executor | What it does |
 |---|---|
-| `rendering.render` | Render a hype timeline, with optional media assets, into `hype.mp4` and a provenance sidecar through Remotion, ffmpeg, or hybrid rendering. Pipeline step 12 — the terminal step before optional YouTube upload or Reigh publish. |
+| `rendering.render` | Stable facade that renders a hype timeline through a qualified renderer or planner and writes an MP4 plus provenance. Pipeline step 12 — the terminal step before optional YouTube upload or Reigh publish. |
 | `rendering.sprite_sheet` | Generate, slice, and preview GPT Image sprite sheets for batch image work. Produces a sprite atlas (`sprite_sheet.png`), alpha-processed variant, manifest, and MP4 preview. |
 | `rendering.html_canvas_effect` | Scaffold a local Remotion HTML-in-canvas effect element. Creates a user-editable effect under `astrid/packs/local/elements/effects/<effect_id>/` with DOM content wrapped in Remotion's `HtmlInCanvas` for optional canvas/WebGL post-processing. |
 
@@ -134,7 +141,7 @@ Requires `OPENAI_API_KEY` and `ffmpeg` on the system path.
   only when needed, an asset registry. This is the standard rendering path.
 - Use the `audio-reactive-colour` effect for frozen integer-frame colour
   markers. Keep one effect clip rather than expanding each state into a clip;
-  `rendering.render` selects the fast final-export adapter automatically.
+  the service selects the supporting renderer from request-sensitive evidence.
 - Use `rendering.sprite_sheet` when you need to generate a batch of
   related images as a sprite atlas for animation.
 - Use `rendering.html_canvas_effect` when you need a custom visual effect
@@ -161,18 +168,28 @@ python3 -m astrid executors run rendering.render \
   --input timeline=./out/hype.timeline.json \
   --input assets_registry=./out/hype.assets.json
 
-# Render with custom theme and backend
+# Render with a custom theme and strict qualified renderer
 python3 -m astrid executors run rendering.render \
   --out ./out \
   --input timeline=./out/hype.timeline.json \
   --input assets_registry=./out/hype.assets.json \
   --input theme=./themes/my-theme \
-  --input engine=hybrid
+  --input backend=rendering.remotion
 ```
 
+Use `--input engine=hybrid` only when compatibility with the legacy hybrid
+planning policy is required. Legacy `engine=remotion` preserves its historical
+support-based FFmpeg auto-route; `backend=rendering.remotion` is strict.
+
 The normal executor CLI writes `./out/hype.mp4` and
-`./out/hype.mp4.provenance.json`. Direct `run.py` execution is reserved for
-debugging the executor itself:
+`./out/hype.mp4.provenance.json`. The sidecar records the resolved plan,
+renderer/planner/finalizer identities, aliases and overrides, manifest and input
+hashes, trust/support evidence, artifact profiles, audio ownership,
+normalization, attachments, and namespaced backend fragments.
+
+Direct facade-module execution is reserved for debugging executor input
+mapping. It still delegates to `RenderService`; it is not a concrete renderer
+entry point:
 
 ```bash
 python3 -m astrid.packs.rendering.executors.render.run \
@@ -206,4 +223,64 @@ python3 -m astrid executors run rendering.html_canvas_effect -- \
 
 - **Remotion** (`npx remotion render`) — must be installed in the `remotion/` project directory
 - **Node.js / npm** — `npm install` must have been run in the Remotion project
-- **ffmpeg/ffprobe** — required by Remotion's render pipeline and `sprite_sheet` frame extraction
+- **ffmpeg/ffprobe** — required by the FFmpeg renderer/finalizer and media probing
+
+## Adding another renderer
+
+Do not add code to the facade or service. A pack advertises protocol commands
+through `extensions.rendering.renderers`, `.planners`, or `.finalizers` and
+uses a qualified implementation id owned by that pack. The public contract,
+manifest schemas, transport verbs, artifact/audio rules, and worked
+third-backend example are in
+`docs/contracts/render-backend-v1.md`.
+
+### Scaffold → golden path
+
+For a self-contained starting point, scaffold the canonical four-file pack
+(`pack.yaml`, `renderer.yaml`, `render.py`, `test_renderer.py`) and walk the
+golden path — the destination directory name becomes the pack id and the
+renderer id becomes `<dest>.<name>`:
+
+```bash
+python3 -m astrid renderers create wave acme_wave
+cd acme_wave
+python3 -m pytest -q test_renderer.py     # generated deterministic test
+python3 -m astrid renderers validate .    # static validation
+python3 -m astrid packs install . --trust --yes   # trusted install
+python3 -m astrid renderers list          # discovery from installed revision
+python3 -m astrid renderers inspect acme_wave.wave
+python3 -m astrid renderers smoke acme_wave.wave --out ./out/smoke.mp4  # smoke
+python3 -m astrid renderers replay <bundle-dir>   # replay a captured failure bundle
+```
+
+V1 is synchronous local execution only; asynchronous job scheduling, remote
+render infrastructure, and layer compositing are explicitly deferred beyond V1
+and are NOT part of the V1 renderer contract.
+
+The smoke verb runs a deterministic direct-service render (fresh temp
+workspace, no ledger/project mutation) and prints the output path plus its
+provenance sidecar path. A real-timeline render goes through the facade:
+`python3 -m astrid executors run rendering.render --out ./out --input
+timeline=./out/hype.timeline.json --input backend=acme_wave.wave`, which
+writes `./out/hype.mp4` plus `./out/hype.mp4.provenance.json`; the sidecar
+records resolution/trust/support evidence, artifact hashes and profiles, audio
+ownership, normalization, attachments, and your namespaced
+`backend_fragments`. Failed invocations retain a self-contained replay bundle
+(resolved request, localized inputs, configuration, redacted logs, partial
+result, exact replay command) instead of publishing a sidecar. The full
+walkthrough is the golden-path section of
+`docs/contracts/render-backend-v1.md`.
+
+### SDK renderers
+
+A `render.py` may also be written against the public rendering SDK instead of
+parsing the raw file protocol: `astrid.render`/`astrid.support` drive the
+shared `RenderService`, `astrid.renderer_main` is a protocol-v1 command
+entrypoint that a manifest `command` can point at directly
+(`command: [python3, -m, astrid.sdk.rendering]`), and `astrid.RenderContext`
+provides workspace-validated paths, sanitized subprocesses, redacted logs,
+probing/hashing, audio completion, and attachments for the duration of one
+invocation. See `docs/reference/sdk.md` (Rendering SDK) for the worked
+example. Wire equivalence is a hard contract: the SDK writes the same frozen
+DTO JSON as the raw path, so both kinds of renderer pass the same conformance
+fixtures.

@@ -164,6 +164,8 @@ SPRINT1_UNBOUND_ALLOWLIST_CONTRACT: tuple[tuple[str, ...], ...] = (
     ("sessions", "ls"),
     ("sessions", "takeover"),
     ("packs",),
+    ("renderers",),
+    ("replay",),
     ("test",),
     ("doctor",),
     ("serve",),

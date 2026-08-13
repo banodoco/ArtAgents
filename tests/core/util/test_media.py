@@ -9,9 +9,11 @@ from unittest.mock import patch
 import pytest
 
 from astrid.core.media import (
+    MediaProbeError,
     MediaProbe,
     ffprobe_duration_seconds,
     ffprobe_metadata,
+    ffprobe_metadata_strict,
 )
 from astrid.packs.editorial.executors.editor_review.run import (
     _probe_duration as editor_probe_duration,
@@ -85,14 +87,30 @@ def test_verify_uses_canonical_media_helper() -> None:
 
 HAPPY_FFPROBE_JSON = json.dumps(
     {
-        "format": {"duration": "12.5"},
+        "format": {
+            "duration": "12.5",
+            "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+        },
         "streams": [
             {
                 "codec_type": "video",
+                "codec_name": "h264",
+                "profile": "High",
+                "level": 41,
+                "pix_fmt": "yuv420p",
                 "width": 1920,
                 "height": 1080,
+                "avg_frame_rate": "30000/1001",
                 "r_frame_rate": "30000/1001",
-            }
+                "time_base": "1/30000",
+                "disposition": {"attached_pic": 0},
+            },
+            {
+                "codec_type": "audio",
+                "codec_name": "aac",
+                "sample_rate": "48000",
+                "channel_layout": "stereo",
+            },
         ],
     }
 )
@@ -109,6 +127,15 @@ class TestMediaProbeDefaults:
         assert probe.width is None
         assert probe.height is None
         assert probe._raw == {}
+        assert probe.fps_rational is None
+        assert probe.time_base is None
+        assert probe.video_codec is None
+        assert probe.pixel_format is None
+        assert probe.audio_codec is None
+        assert probe.audio_sample_rate is None
+        assert probe.audio_channel_layout is None
+        assert probe.has_video_stream is False
+        assert probe.has_audio_stream is False
 
     def test_partial_construction(self) -> None:
         probe = MediaProbe(
@@ -141,7 +168,42 @@ class TestFfprobeMetadataHappy:
         assert probe.resolution == "1920x1080"
         assert probe.width == 1920
         assert probe.height == 1080
+        assert probe.fps_rational == (30000, 1001)
+        assert probe.time_base == (1, 30000)
+        assert probe.video_codec == "h264"
+        assert probe.codec == "h264"
+        assert probe.video_profile == "High"
+        assert probe.video_level == "41"
+        assert probe.pixel_format == "yuv420p"
+        assert probe.audio_codec == "aac"
+        assert probe.audio_sample_rate == 48000
+        assert probe.audio_channel_layout == "stereo"
+        assert probe.container == "mp4"
+        assert probe.duration_rational == (25, 2)
+        assert probe.has_video_stream is True
+        assert probe.has_audio_stream is True
         assert probe._raw  # raw JSON preserved
+
+    def test_channels_reported_without_inferred_layout(self) -> None:
+        """Probes that report channel COUNT without channel_layout (e.g.
+        QuickTime sowt) must stay honest: layout stays None, channels is
+        reported, and validation compares counts (never guessed layouts)."""
+        import json as _json
+
+        payload = json.loads(HAPPY_FFPROBE_JSON)
+        for stream in payload["streams"]:
+            if stream.get("codec_type") == "audio":
+                del stream["channel_layout"]
+                stream["channels"] = 2
+        with patch(
+            "astrid.core.media.subprocess.run",
+            return_value=subprocess.CompletedProcess(
+                [], 0, stdout=_json.dumps(payload), stderr=""
+            ),
+        ):
+            probe = ffprobe_metadata("video.mp4")
+        assert probe.audio_channel_layout is None
+        assert probe.audio_channels == 2
 
     def test_accepts_path_object(self, tmp_path: Path) -> None:
         vid = tmp_path / "clip.mp4"
@@ -155,6 +217,67 @@ class TestFfprobeMetadataHappy:
             probe = ffprobe_metadata(vid)
 
         assert probe.duration_seconds == pytest.approx(12.5)
+
+    def test_prefers_average_frame_rate_and_skips_attached_picture(self) -> None:
+        payload = json.dumps(
+            {
+                "format": {"duration": "2", "format_name": "matroska,webm"},
+                "streams": [
+                    {
+                        "codec_type": "video",
+                        "codec_name": "mjpeg",
+                        "disposition": {"attached_pic": 1},
+                    },
+                    {
+                        "codec_type": "video",
+                        "codec_name": "vp9",
+                        "pix_fmt": "yuv420p",
+                        "width": 1280,
+                        "height": 720,
+                        "avg_frame_rate": "24/1",
+                        "r_frame_rate": "30/1",
+                        "time_base": "1/1000",
+                    },
+                ],
+            }
+        )
+        with patch("subprocess.run") as mock_run, patch(
+            "shutil.which", return_value="/usr/bin/ffprobe"
+        ):
+            mock_run.return_value = subprocess.CompletedProcess(
+                [], 0, stdout=payload, stderr=""
+            )
+            probe = ffprobe_metadata("video.webm")
+
+        assert probe.video_codec == "vp9"
+        assert probe.fps_rational == (24, 1)
+        assert probe.container == "webm"
+
+    def test_uses_r_frame_rate_when_average_is_unusable(self) -> None:
+        payload = json.dumps(
+            {
+                "format": {"duration": "1"},
+                "streams": [
+                    {
+                        "codec_type": "video",
+                        "width": 320,
+                        "height": 240,
+                        "avg_frame_rate": "0/0",
+                        "r_frame_rate": "25/1",
+                    }
+                ],
+            }
+        )
+        with patch("subprocess.run") as mock_run, patch(
+            "shutil.which", return_value="/usr/bin/ffprobe"
+        ):
+            mock_run.return_value = subprocess.CompletedProcess(
+                [], 0, stdout=payload, stderr=""
+            )
+            probe = ffprobe_metadata("video.mp4")
+
+        assert probe.fps_rational == (25, 1)
+        assert probe.fps == 25.0
 
 
 class TestFfprobeMetadataDegraded:
@@ -177,6 +300,16 @@ class TestFfprobeMetadataDegraded:
             )
             probe = ffprobe_metadata("video.mp4")
         assert probe.duration_seconds is None
+
+    def test_strict_probe_raises_on_nonzero_returncode(self) -> None:
+        with patch("subprocess.run") as mock_run, patch(
+            "shutil.which", return_value="/usr/bin/ffprobe"
+        ):
+            mock_run.return_value = subprocess.CompletedProcess(
+                [], 1, stdout="", stderr="bad input"
+            )
+            with pytest.raises(MediaProbeError, match="ffprobe failed"):
+                ffprobe_metadata_strict("video.mp4")
 
     def test_invalid_json(self) -> None:
         with patch("subprocess.run") as mock_run, patch(

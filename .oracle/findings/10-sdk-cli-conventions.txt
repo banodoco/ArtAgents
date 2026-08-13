@@ -1,0 +1,25 @@
+## Ranked findings
+
+1. **Lazy SDK export via module `__getattr__`** — `astrid/__init__.py:41-47` imports `astrid.sdk` only on attribute access; `__all__` (line 38) lists curated names. `tests/test_sdk_public_surface.py:99-109` pins `tuple(astrid.__all__) == EXPECTED_PUBLIC_NAMES` (exact order, `tests/_sdk_contract.py:3`), asserts `astrid.sdk` NOT loaded and executor/orchestrator registries not imported; `test_generate_facade_is_lazy_public_surface` (:120-136) asserts `astrid.generate` is a `GenerationFacade` and loads `astrid.sdk` on first touch. Adding a name requires editing `_SDK_EXPORTS`, `sdk/__init__.py`, `_sdk_contract.py` in lockstep.
+
+2. **SDK module pattern** — `sdk/generation.py`: plain functions + one frozen `@dataclass` facade (`GenerationFacade`, :141) with `__getattr__` plugin-verb resolution (:151-169); heavy imports (registries, runners) deferred inside call sites (:30, :153). `sdk/dto.py:9-29` re-exports frozen dataclasses (not pydantic) with `to_dict()` via `_json_safe` (`results.py:27-49`). Facade methods call `sdk_module.invoke(...)` (generation.py:147-149).
+
+3. **CLI insertion** — `gateway/dispatch.py:410-451` `_TOP_LEVEL_HANDLERS` dict: name → `_dispatch_*` function; add `"renderers": _dispatch_renderers` + a lazy `from astrid.core.renderers import cli; return cli.main(args)` handler (pattern at :246-249). Help text: `gateway/help.py:30-100` (`_print_entrypoint_help` f-string). Unknown verbs raise `AstridError` with `valid_options` (:33-39).
+
+4. **`--engine` lifecycle flag** — parsed ONLY in `dispatch.py:107-145` `_extract_lifecycle_engine` (`_LIFECYCLE_ENGINES = {"task","arnold"}`, :17), called by status/lifecycle/claim handlers — not in `core/cli/` (no matches). Renderer `--engine` values won't collide unless routed through that helper; note `astrid/packs/blender/deploy.py:690` already uses `--engine` (cycles/eevee) pack-side.
+
+5. **JSON envelope** — `executor/cli_handlers.py:182-194`: `{"executors": [{'_capability': handle.to_dict(), 'source_pack': ..., **item.to_dict()}]}`, `indent=2, sort_keys=True`; errors via `AstridError` with `state_snapshot`/`recovery_command` (cli.py:97-98; dispatch.py:34-38).
+
+6. **Unbound operation** — `modalities` (dispatch.py:309-312, `core/modalities/__init__.py:57-67`) is already an unbound `list/inspect` verb with `--json` — the template for `renderers`. Project gating pattern: `selected_project()` → `CapabilityPreconditionError` (generation.py:127-138; `project/guidance.py:107`). `core/modalities` is the *modality renderer registry* (image_grid/audio_waveform/generic_card, `__init__.py:12`), and iteration_video has `--renderers`/`requested_renderers` hints (`packs/video_editing/orchestrators/iteration_video/run.py:347,404`).
+
+## Verified facts
+- Lazy exports; exact-name test pinning; dict-based dispatch; help in `help.py`; `--engine` only in dispatch.py; modalities unbound precedent exists; "renderer" terminology already used by modalities.
+
+## Unknowns
+- Whether `astrid.core.renderers` exists yet (no directory found); test count for gateway help snapshot.
+
+## Risks
+- `renderers` collides semantically with modality renderers and iteration_video `--renderers` flags; `--engine` ambiguity if lifecycle helper is reused; SDK test requires coordinated 3-file name additions.
+
+## Suggested approach
+- Add `"renderers"` to `_TOP_LEVEL_HANDLERS` → new `astrid/core/renderers/cli.py` (mirror `modalities.main`); don't touch `_extract_lifecycle_engine`; expose SDK via a `renderers` facade in `sdk/` + `_SDK_EXPORTS` + `_sdk_contract.py` together; reuse `_json_safe` DTOs.

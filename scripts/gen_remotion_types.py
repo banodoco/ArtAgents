@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Generate Remotion TypeScript types from banodoco_schema.py."""
 
+import argparse
 import sys
 import types
 from pathlib import Path
@@ -87,6 +88,30 @@ def _build_typeddict_registry() -> (
     for name, value in members:
         by_id.setdefault(id(value), []).append(name)
         value_by_id[id(value)] = value
+
+    # Exported TypedDicts can refer to private implementation-detail
+    # TypedDicts (for example SharedAssetEntry -> DerivedFrom).  Walk those
+    # annotations so every name emitted in a field type also gets an interface.
+    queue = list(value_by_id.values())
+    visited: set[int] = set()
+    while queue:
+        typed_dict = queue.pop()
+        if id(typed_dict) in visited:
+            continue
+        visited.add(id(typed_dict))
+        for annotation in get_type_hints(typed_dict, include_extras=True).values():
+            pending = [annotation]
+            while pending:
+                candidate = pending.pop()
+                origin = get_origin(candidate)
+                if isinstance(candidate, type) and is_typeddict(candidate):
+                    if id(candidate) not in value_by_id:
+                        value_by_id[id(candidate)] = candidate
+                        by_id[id(candidate)] = [candidate.__name__]
+                        queue.append(candidate)
+                    continue
+                if origin is not None:
+                    pending.extend(get_args(candidate))
 
     canonical_by_id: dict[int, str] = {}
     aliases_by_id: dict[int, list[str]] = {}
@@ -228,11 +253,38 @@ def generate() -> str:
     return "\n".join(blocks)
 
 
-def main() -> int:
-    output_path = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else DEFAULT_OUTPUT
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("output", nargs="?", type=Path, default=DEFAULT_OUTPUT)
+    parser.add_argument(
+        "--include-element-registries",
+        action="store_true",
+        help="also refresh the element registries under the same outer lock",
+    )
+    return parser
+
+
+def _main_unlocked(argv: list[str] | None = None) -> int:
+    """Write generated artifacts while the caller owns the Remotion lock."""
+
+    args = build_parser().parse_args(argv)
+    output_path = args.output.resolve()
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(generate(), encoding="utf-8")
+    if args.include_element_registries:
+        from scripts import gen_effect_registry
+
+        return gen_effect_registry._main_unlocked([])
     return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    from astrid.packs.rendering.backends.remotion import lock as remotion_lock
+
+    if remotion_lock.remotion_render_lock_held():
+        return _main_unlocked(argv)
+    with remotion_lock.remotion_render_lock():
+        return _main_unlocked(argv)
 
 
 if __name__ == "__main__":

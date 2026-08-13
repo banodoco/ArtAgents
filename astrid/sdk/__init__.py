@@ -123,6 +123,16 @@ from .generation import (
 )
 
 # ---------------------------------------------------------------------------
+# Rendering
+# ---------------------------------------------------------------------------
+from .rendering import (
+    RenderContext,
+    render,
+    renderer_main,
+    support,
+)
+
+# ---------------------------------------------------------------------------
 # Invocation
 # ---------------------------------------------------------------------------
 from .invocation import (
@@ -159,6 +169,7 @@ __all__ = [
     "Output",
     "Port",
     "Provenance",
+    "RenderContext",
     "SafetyDeclaration",
     "UnsupportedCapabilityError",
     "discover",
@@ -166,7 +177,10 @@ __all__ = [
     "get_capability",
     "invoke",
     "read_events",
+    "render",
+    "renderer_main",
     "run_executor",
     "run_orchestrator",
     "subscribe_events",
+    "support",
 ]

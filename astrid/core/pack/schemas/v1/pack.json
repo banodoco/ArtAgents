@@ -53,15 +53,15 @@
         "properties": {
           "kind": {
             "type": "string",
-            "enum": ["executor", "orchestrator"]
+            "enum": ["executor", "orchestrator", "renderer", "planner", "finalizer"]
           },
           "alias": {
             "type": "string",
-            "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$"
+            "pattern": "^[a-z][a-z0-9_]*(\\.[a-z0-9][a-z0-9_-]*)+$"
           },
           "canonical_id": {
             "type": "string",
-            "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$"
+            "pattern": "^[a-z][a-z0-9_]*(\\.[a-z0-9][a-z0-9_-]*)+$"
           },
           "deprecated": {"type": "boolean"},
           "deprecation_message": {"type": "string"}
@@ -208,6 +208,24 @@
                 },
                 "additionalProperties": false
               }
+            }
+          },
+          "additionalProperties": false
+        },
+        "rendering": {
+          "type": "object",
+          "properties": {
+            "renderers": {
+              "type": "array",
+              "items": {"type": "string"}
+            },
+            "planners": {
+              "type": "array",
+              "items": {"type": "string"}
+            },
+            "finalizers": {
+              "type": "array",
+              "items": {"type": "string"}
             }
           },
           "additionalProperties": false

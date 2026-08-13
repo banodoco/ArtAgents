@@ -1,13 +1,17 @@
-# Sprint-08 renderer-parity fixtures
+# Retired Sprint-08 fixture staging notes
 
-This directory holds JSON snapshots of the sprint-08 timeline-fixture helpers
+This directory was reserved for JSON snapshots of the sprint-08 timeline-fixture helpers
 from reigh-app: `createAgentWorkflowTimelineFixture` and
 `createEmbedDemoTimelineFixture` (originally exported from
 `reigh-app/src/tools/video-editor/testing.ts`).
 
-`tests/test_renderer_parity.py` skips itself when this directory has no
-fixtures committed, or when `golden/<name>.sha256` is missing for an existing
-fixture. To populate:
+It is no longer the renderer parity gate. The blocking, repository-owned
+semantic fixtures live in
+`astrid/core/rendering/fixtures/renderer_parity/` and are exercised by
+`tests/packs/test_renderer_parity.py` without an environment opt-in. Keeping
+them under `astrid/` makes the same fixtures available from an installed wheel.
+
+For historical reference, the old population recipe was:
 
 1. Run `npx tsx ../reigh-app/src/tools/video-editor/testing.ts` (or wire up the
    helper export of your choice) and write the resulting timeline JSON as

@@ -1,6 +1,6 @@
 # Astrid local gate — run before pushing to catch CI/deploy failures locally.
 #
-#   make check   fast pre-deploy gates (structure, doctor, ruff, mypy, cycles) — seconds
+#   make check   blocking pre-deploy gates, including renderer parity + Remotion typecheck
 #   make ci      full mirror of the CI deploy job (adds wheel-install + pytest+coverage) — minutes
 #
 # `make check` green ≈ the CI "Python quality gates" deploy job will pass its fast gates.
@@ -8,16 +8,16 @@
 
 PY ?= python3
 
-.PHONY: help check ci structure doctor ruff mypy cycles wheel ci-mirror editable
+.PHONY: help check ci structure doctor ruff mypy cycles remotion-typecheck renderer-parity wheel ci-mirror editable
 
 help:
-	@echo "make check   - fast pre-deploy gates: structure, doctor, ruff, mypy, cycles (seconds)"
+	@echo "make check   - blocking gates: structure, doctor, ruff, mypy, cycles, Remotion, renderer parity"
 	@echo "make ci      - full CI deploy mirror: check + editable + wheel-install + pytest/coverage (minutes)"
-	@echo "make <gate>  - run one gate: structure | doctor | ruff | mypy | cycles | wheel | ci-mirror | editable"
+	@echo "make <gate>  - run one gate: structure | doctor | ruff | mypy | cycles | remotion-typecheck | renderer-parity | wheel | ci-mirror | editable"
 
 # --- Fast gates: catch the common deploy blockers in seconds. Run before every push. ---
-check: structure doctor ruff mypy cycles
-	@echo "✅ make check: fast pre-deploy gates passed"
+check: structure doctor ruff mypy cycles remotion-typecheck renderer-parity
+	@echo "✅ make check: blocking pre-deploy gates passed"
 
 structure:
 	@$(PY) -c "import sys; from astrid.core.structure import validate_repo_structure as v; r=v(); [print('STRUCTURE ERROR:', e) for e in r.errors]; sys.exit(1 if r.errors else 0)"
@@ -38,6 +38,17 @@ mypy:
 cycles:
 	@$(PY) -m scripts.reshape.import_cycles --baseline scripts/reshape/baselines/import_cycles.json
 	@echo "✓ import cycles (no new cross-package cycle)"
+
+remotion-typecheck:
+	@if [ -d remotion/node_modules ]; then \
+		$(PY) scripts/gen_remotion_types.py && \
+		cd remotion && npm run typecheck; \
+	else \
+		echo "LANE remotion-typecheck: SKIP (remotion/node_modules absent; run 'cd remotion && npm ci' to enable)"; \
+	fi
+
+renderer-parity:
+	@$(PY) -m pytest -q -m renderer_parity tests/packs/test_renderer_parity.py
 
 # --- Full mirror of the CI deploy job (slow). Run before a release / when in doubt. ---
 ci: check editable wheel ci-mirror

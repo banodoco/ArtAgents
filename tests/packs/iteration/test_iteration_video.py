@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from astrid.packs.video_editing.orchestrators.iteration_video import run as iteration_video
+from astrid.packs.video_editing.orchestrators.iteration_video import plan_template
 from astrid.core.execution.orchestrator.runner import OrchestratorRunRequest, run_orchestrator
 from astrid.core.project.project import create_project
 from astrid.core.threads.index import ThreadIndexStore
@@ -27,20 +28,25 @@ def test_iteration_video_renders_hype_adapter_and_records_five_output_variant_gr
         _write_prepare_outputs(kwargs["out_path"])
         return {"manifest_path": str(kwargs["out_path"] / "iteration.manifest.json")}
 
-    def fake_render(brief_out: Path) -> Path:
-        forwarded["render_timeline"] = brief_out / "hype.timeline.json"
-        forwarded["render_assets"] = brief_out / "hype.assets.json"
-        assert (brief_out / "hype.timeline.json").is_file()
-        assert (brief_out / "hype.assets.json").is_file()
-        hype_mp4 = brief_out / "hype.mp4"
-        hype_mp4.write_bytes(b"rendered-mp4")
-        return hype_mp4
+    def fake_render(timeline: Path, assets: Path, output: Path, **kwargs) -> Path:
+        forwarded["render_timeline"] = timeline
+        forwarded["render_assets"] = assets
+        forwarded["render_output"] = output
+        forwarded["render_kwargs"] = kwargs
+        assert timeline.is_file()
+        assert assets.is_file()
+        output.write_bytes(b"rendered-mp4")
+        Path(f"{output}.provenance.json").write_text(
+            json.dumps({"output": str(output)}) + "\n",
+            encoding="utf-8",
+        )
+        return output
 
     monkeypatch.setenv("ASTRID_REPO_ROOT", str(repo))
     monkeypatch.setenv("ASTRID_PROJECTS_ROOT", str(projects_root))
     create_project("demo", root=projects_root)
     monkeypatch.setattr(iteration_video.prepare, "prepare_iteration", fake_prepare_iteration)
-    monkeypatch.setattr(iteration_video, "run_builtin_render", fake_render)
+    monkeypatch.setattr(iteration_video, "invoke_attached_render", fake_render)
 
     stdout = io.StringIO()
     with contextlib.redirect_stdout(stdout):
@@ -51,7 +57,16 @@ def test_iteration_video_renders_hype_adapter_and_records_five_output_variant_gr
                 project="demo",
                 project_was_auto_resolved=True,
                 inputs={"thread": THREAD_ID, "target_run_id": TARGET_RUN_ID, "repo_root": str(repo)},
-                orchestrator_args=("--max-iterations", "7", "--direction", "label only", "--clip-mode", "hold"),
+                orchestrator_args=(
+                    "--max-iterations",
+                    "7",
+                    "--direction",
+                    "label only",
+                    "--clip-mode",
+                    "hold",
+                    "--renderer",
+                    "rendering.fixture",
+                ),
             )
         )
 
@@ -59,16 +74,29 @@ def test_iteration_video_renders_hype_adapter_and_records_five_output_variant_gr
     assert forwarded["max_iterations"] == 7
     assert Path(forwarded["render_timeline"]).name == "hype.timeline.json"
     assert Path(forwarded["render_assets"]).name == "hype.assets.json"
+    assert Path(forwarded["render_output"]).name == "iteration.mp4"
+    render_kwargs = forwarded["render_kwargs"]
+    assert render_kwargs["engine"] == "rendering.fixture"
+    assert render_kwargs["project_slug"] == "demo"
+    assert render_kwargs["step_id"] == "iteration-render"
     assert (out_dir / "iteration.mp4").read_bytes() == b"rendered-mp4"
+    assert _read_json(out_dir / "iteration.mp4.provenance.json")["output"] == str(
+        out_dir / "iteration.mp4"
+    )
     assert not (out_dir / "hype.mp4").exists()
+    assert not (out_dir / "hype.mp4.provenance.json").exists()
     assert not (out_dir / "_prepare").exists()
 
     assert not (out_dir / "run.json").exists()
+    run_records = sorted((projects_root / "demo" / "runs").glob("*/run.json"))
+    assert len(run_records) == 1
+    assert _read_json(run_records[0])["tool_id"] == "video_editing.iteration_video"
     sidecar = _read_json(out_dir / ".astrid.variants.json")
     variant_artifacts = [artifact for artifact in sidecar["artifacts"] if artifact.get("role") == "variant"]
     assert sorted(Path(item["path"]).name for item in variant_artifacts) == [
         "iteration.manifest.json",
         "iteration.mp4",
+        "iteration.mp4.provenance.json",
         "iteration.quality.json",
         "iteration.report.html",
         "iteration.timeline.json",
@@ -78,7 +106,7 @@ def test_iteration_video_renders_hype_adapter_and_records_five_output_variant_gr
 
     groups = _read_json(repo / ".astrid" / "threads" / THREAD_ID / "groups.json")
     group = groups["groups"][f"iteration-video:{TARGET_RUN_ID}"]
-    assert len(group["artifacts"]) == 5
+    assert len(group["artifacts"]) == 6
     assert {item["run_id"] for item in group["artifacts"]} == {TARGET_RUN_ID}
 
 
@@ -130,6 +158,29 @@ def test_iteration_video_orchestrator_declares_no_cut_child() -> None:
     manifest = _read_json(Path("astrid/packs/video_editing/orchestrators/iteration_video/orchestrator.yaml"))
     assert manifest["child_executors"] == ["iteration.prepare", "iteration.assemble", "rendering.render"]
     assert "video_editing.cut" not in manifest["child_executors"]
+    assert {item["name"] for item in manifest["outputs"]} == {
+        "iteration.mp4",
+        "iteration.mp4.provenance.json",
+    }
+
+
+def test_iteration_plan_uses_qualified_facade_and_declares_provenance(tmp_path: Path) -> None:
+    plan = plan_template.build_plan_v2(
+        python_exec="python3",
+        run_root=tmp_path / "run",
+        target_run_id=TARGET_RUN_ID,
+        renderer="rendering.fixture",
+    )
+
+    render = plan["steps"][2]
+    assert "-m astrid executors run rendering.render" in render["command"]
+    assert "output_name=iteration.mp4" in render["command"]
+    assert "engine=rendering.fixture" in render["command"]
+    assert "astrid.packs.rendering.executors.render.run" not in render["command"]
+    assert {item["path"] for item in render["produces"].values()} == {
+        "iteration.mp4",
+        "iteration.mp4.provenance.json",
+    }
 
 
 def _write_thread(repo: Path) -> None:

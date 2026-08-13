@@ -7,11 +7,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
 from astrid.core.execution.executor.argv import executor_argv
+from astrid.core.rendering.attached import invoke_attached_render
+from astrid.core.subprocess_env import TASK_PROJECT_ENV, TASK_RUN_ID_ENV
 
 from .config import STEP_ORDER
 
@@ -32,6 +36,7 @@ PER_BRIEF_SENTINELS = (
     "hype.metadata.json",
     "refine.json",
     "hype.mp4",
+    "hype.mp4.provenance.json",
     "editor_review.json",
     "validation.json",
 )
@@ -44,6 +49,7 @@ class Step:
     build_cmd: Callable[[argparse.Namespace], list[str]]
     per_brief: bool = False
     always_run: bool = False
+    invoke: Callable[[argparse.Namespace], Path] | None = None
 
 def step_argv(name: str, python_exec: str) -> list[str]:
     """Argv tokens that invoke a pipeline step's executor module."""
@@ -132,6 +138,64 @@ def build_pool_cut_cmd(args: argparse.Namespace) -> list[str]:
     if getattr(args, "theme_explicit", False) and getattr(args, "theme", None):
         cmd.extend(["--theme", str(args.theme)])
     return cmd
+
+
+def build_hype_render_cmd(args: argparse.Namespace) -> list[str]:
+    """Build the canonical task-mode facade invocation for Hype renders."""
+
+    cmd = [
+        str(args.python_exec),
+        "-m",
+        "astrid",
+        "executors",
+        "run",
+        "rendering.render",
+        "--out",
+        str(args.brief_out),
+        "--input",
+        f"timeline={args.brief_out / 'hype.timeline.json'}",
+        "--input",
+        f"assets_registry={args.brief_out / 'hype.assets.json'}",
+    ]
+    if getattr(args, "theme", None):
+        cmd.extend(["--input", f"theme={args.theme}"])
+    return add_extra_args(args, "render", cmd)
+
+
+def invoke_hype_render(args: argparse.Namespace) -> Path:
+    """Render Hype through the attached facade, or the public service unbound."""
+
+    project_slug = getattr(args, "project", None)
+    parent_run_id = getattr(args, "render_parent_run_id", None)
+    theme = getattr(args, "theme", None)
+    explicit_binding = bool(project_slug and parent_run_id)
+    env_binding = bool(
+        os.environ.get(TASK_PROJECT_ENV) and os.environ.get(TASK_RUN_ID_ENV)
+    )
+    attached_kwargs: dict[str, Any] = {}
+    if explicit_binding:
+        attached_kwargs.update(
+            project_slug=str(project_slug),
+            parent_run_id=str(parent_run_id),
+        )
+    if explicit_binding or env_binding:
+        attached_kwargs["step_id"] = (
+            f"hype-render-{int(getattr(args, 'editor_iteration', 1))}-"
+            f"{uuid.uuid4().hex[:8]}"
+        )
+    if theme is not None:
+        attached_kwargs["backend_config"] = {
+            "rendering.remotion": {"theme_path": str(theme)},
+            "rendering.legacy_hybrid": {"theme_path": str(theme)},
+        }
+
+    return invoke_attached_render(
+        args.brief_out / "hype.timeline.json",
+        args.brief_out / "hype.assets.json",
+        args.brief_out / "hype.mp4",
+        theme_path=theme,
+        **attached_kwargs,
+    )
 
 def _verdict_build_cmd(args: argparse.Namespace) -> list[str]:
     raise NotImplementedError(
@@ -354,23 +418,10 @@ def build_pool_steps() -> list[Step]:
         ),
         Step(
             "render",
-            ("hype.mp4",),
-            lambda args: add_extra_args(
-                args,
-                "render",
-                [
-                    *step_argv("render.py", args.python_exec),
-                    "--timeline",
-                    str(args.brief_out / "hype.timeline.json"),
-                    "--assets",
-                    str(args.brief_out / "hype.assets.json"),
-                    "--out",
-                    str(args.brief_out / "hype.mp4"),
-                    # extends prior plan Step 14
-                    *(["--theme", str(args.theme)] if getattr(args, "theme", None) else []),
-                ],
-            ),
+            ("hype.mp4", "hype.mp4.provenance.json"),
+            build_hype_render_cmd,
             per_brief=True,
+            invoke=invoke_hype_render,
         ),
         Step(
             "editor_review",
@@ -535,4 +586,3 @@ def _write_dry_run_plan(args: argparse.Namespace) -> int:
     if excluded_by_capability:
         print(f"  excluded by capability/facts: {excluded_by_capability}")
     return 0
-

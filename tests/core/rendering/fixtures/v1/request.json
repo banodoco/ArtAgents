@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "timeline_path": "timeline.json",
+  "assets_registry_path": null,
+  "output_name": "video.mp4",
+  "window": null,
+  "audio": null,
+  "profile": null,
+  "backend_config": {},
+  "metadata": {}
+}

@@ -81,16 +81,16 @@ def test_dogfood_fixture_render_handoff_outputs_sidecar_report_and_no_cut(tmp_pa
     out_dir = repo / "runs" / "astrid_logo_v3_iteration"
     render_inputs: dict[str, Path] = {}
 
-    def fake_render(brief_out: Path) -> Path:
-        render_inputs["timeline"] = brief_out / "hype.timeline.json"
-        render_inputs["assets"] = brief_out / "hype.assets.json"
+    def fake_render(timeline: Path, assets: Path, output: Path, **_kwargs) -> Path:
+        render_inputs["timeline"] = timeline
+        render_inputs["assets"] = assets
         assert render_inputs["timeline"].is_file()
         assert render_inputs["assets"].is_file()
-        hype_mp4 = brief_out / "hype.mp4"
-        hype_mp4.write_bytes(b"fixture-render")
-        return hype_mp4
+        output.write_bytes(b"fixture-render")
+        Path(f"{output}.provenance.json").write_text("{}\n", encoding="utf-8")
+        return output
 
-    monkeypatch.setattr(iteration_video, "run_builtin_render", fake_render)
+    monkeypatch.setattr(iteration_video, "invoke_attached_render", fake_render)
 
     result = iteration_video.run_iteration_video(
         repo_root=repo,
@@ -109,7 +109,14 @@ def test_dogfood_fixture_render_handoff_outputs_sidecar_report_and_no_cut(tmp_pa
     assert render_inputs["timeline"].name == "hype.timeline.json"
     assert render_inputs["assets"].name == "hype.assets.json"
 
-    expected = {"iteration.mp4", "iteration.timeline.json", "iteration.manifest.json", "iteration.report.html", "iteration.quality.json"}
+    expected = {
+        "iteration.mp4",
+        "iteration.mp4.provenance.json",
+        "iteration.timeline.json",
+        "iteration.manifest.json",
+        "iteration.report.html",
+        "iteration.quality.json",
+    }
     assert expected == {path.name for path in map(Path, result["outputs"].values())}
     assert expected <= {path.name for path in out_dir.iterdir()}
 
@@ -120,7 +127,7 @@ def test_dogfood_fixture_render_handoff_outputs_sidecar_report_and_no_cut(tmp_pa
 
     sidecar = _read_json(out_dir / ".astrid.variants.json")
     artifacts = sidecar["artifacts"]
-    assert len(artifacts) == 5
+    assert len(artifacts) == 6
     assert {item["group"] for item in artifacts} == {f"iteration-video:{TARGET_RUN_ID}"}
     assert {item["variant_meta"]["target_run_id"] for item in artifacts} == {TARGET_RUN_ID}
     assert all(item["variant_meta"]["fallback_diagnostics"] for item in artifacts)

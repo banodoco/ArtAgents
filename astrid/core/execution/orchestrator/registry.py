@@ -9,7 +9,7 @@ import shutil
 from dataclasses import replace
 from pathlib import Path
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, Iterable
+from typing import Any, Iterable
 
 from astrid.core.dirty import detect_local_edits, read_fork_state, write_fork_state
 from astrid.core.execution.executor.registry import ExecutorRegistry
@@ -35,6 +35,7 @@ from astrid.core.pack.manifest import (
     dump_manifest_payload,
     load_manifest_mapping,
 )
+from astrid.core.pack.override import OverrideStore
 from astrid.core.registry import CapabilityRegistry
 
 from .folder import load_folder_orchestrators
@@ -43,9 +44,6 @@ from .schema import (
     OrchestratorValidationError,
     validate_orchestrator_definition,
 )
-
-if TYPE_CHECKING:
-    from astrid.core.pack.override import OverrideStore
 
 logger = logging.getLogger(__name__)
 
@@ -437,6 +435,7 @@ def load_default_registry(
     registry = OrchestratorRegistry(
         executor_registry=active_executor_registry,
         alias_resolver=resolver,
+        override_store=OverrideStore(project_root),
     )
     for orchestrator in _load_pack_orchestrators_from_packs(packs):
         registry.register(orchestrator)

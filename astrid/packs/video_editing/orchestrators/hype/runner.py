@@ -13,6 +13,7 @@ import logging
 import os
 import subprocess
 import sys
+import traceback
 from pathlib import Path
 from typing import Any
 
@@ -245,29 +246,38 @@ def run_step(step: Step, cmd: list[str], args: argparse.Namespace) -> int:
     logs_dir.mkdir(parents=True, exist_ok=True)
     log_path = logs_dir / f"{step.name}.log"
     with log_path.open("w", encoding="utf-8") as log_handle:
-        env = os.environ.copy()
-        if getattr(args, "audit", None) is not None:
-            env["ASTRID_AUDIT_RUN_DIR"] = str(args.out)
-            parent_ids = getattr(args, "audit_parent_ids", [])
-            if parent_ids:
-                env[PARENT_IDS_ENV] = ",".join(parent_ids)
-        if getattr(args, "no_audit", False):
-            env["ASTRID_AUDIT_DISABLED"] = "1"
-        process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            bufsize=1,
-            text=True,
-            env=env,
-        )
-        assert process.stdout is not None
-        for line in process.stdout:
-            log_handle.write(line)
-            if args.verbose:
-                sys.stdout.write(line)
-                sys.stdout.flush()
-        returncode = process.wait()
+        if step.invoke is not None:
+            try:
+                output = step.invoke(args)
+                log_handle.write(f"{output}\n")
+                returncode = 0
+            except Exception:  # preserve the legacy step-loop return-code contract
+                traceback.print_exc(file=log_handle)
+                returncode = 1
+        else:
+            env = os.environ.copy()
+            if getattr(args, "audit", None) is not None:
+                env["ASTRID_AUDIT_RUN_DIR"] = str(args.out)
+                parent_ids = getattr(args, "audit_parent_ids", [])
+                if parent_ids:
+                    env[PARENT_IDS_ENV] = ",".join(parent_ids)
+            if getattr(args, "no_audit", False):
+                env["ASTRID_AUDIT_DISABLED"] = "1"
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                bufsize=1,
+                text=True,
+                env=env,
+            )
+            assert process.stdout is not None
+            for line in process.stdout:
+                log_handle.write(line)
+                if args.verbose:
+                    sys.stdout.write(line)
+                    sys.stdout.flush()
+            returncode = process.wait()
     if returncode != 0:
         print_log_tail(step.name, log_path)
     elif getattr(args, "audit", None) is not None:
@@ -442,6 +452,7 @@ def _invalidate_downstream_sentinels(brief_out: Path) -> None:
         "hype.metadata.json",
         "refine.json",
         "hype.mp4",
+        "hype.mp4.provenance.json",
         "editor_review.json",
     ):
         (brief_out / name).unlink(missing_ok=True)

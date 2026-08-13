@@ -218,7 +218,10 @@ Derived blobs (thumbnails, proxy/low-res versions, render outputs) are represent
 
 ### 6.4 Render-Output Writeback
 
-When local render bridge work is re-enabled, the local Astrid bridge (not `render/run.py`) owns the render-output registry writeback:
+When a local bridge render endpoint is enabled, the bridge owns render-output
+registry writeback. `rendering.render`, `RenderService`, renderer commands, and
+finalizers publish the video/provenance pair but never mutate the editor's
+asset registry:
 
 1. After render returns an output file path, the bridge creates or updates an `output.*` registry entry.
 2. The entry carries `origin: "opaque-foreign"`, `derivedFrom.role: "render-output"`, and links to the source timeline's clip asset IDs.
@@ -292,43 +295,52 @@ When the reigh-app bridge passes registry data to Astrid:
 2. The bridge writes `hype.timeline.json` and `hype.assets.json` into `projectRoot` so Astrid's `assets_path.parent` resolves correctly.
 3. If temp files are required for staging, the bridge copies/materializes assets beside the temp registry or rewrites registry paths so resolution remains correct — paths are never relative to a random temp directory.
 
-### 8.3 Astrid-Side Resolution
+### 8.3 Astrid-Side Resolution and Staging
 
-Astrid cut/resume executors resolve `file` paths relative to the `hype.assets.json` parent directory. The construction:
+The shared render-host `AssetMaterializer` resolves each relative `file` from
+the directory containing `hype.assets.json`. In a managed project it enforces
+project-root containment, opens contained paths without following symlinks,
+and hardlinks or copies them into a unique invocation stage. HTTP(S) entries
+that advertise Range support remain remote; other URLs use the shared cache
+and optional `content_sha256` verification before staging.
 
-```python
-assets_dir = assets_path.parent
-for asset_key, entry in assets_data["assets"].items():
-    file_path = entry.get("file")
-    if file_path:
-        full_path = assets_dir / file_path
-```
-
-No random temp directory is ever used as the implicit resolution base.
+The Remotion backend exposes only that stage through an invocation-owned
+loopback Range server. The FFmpeg renderer also resolves relative references
+from the registry parent. The random invocation workspace is never the
+implicit source-path base, and neither backend serves an arbitrary common
+ancestor of source files.
 
 ### 8.4 No Absolute Paths in Registries
 
 Registry entries stored in sidecar files MUST use relative paths. Absolute paths leak machine-specific information and break portability. Both sides strip or reject absolute paths from persisted registries.
 
-### 8.5 S3 Render Bridge Readiness Decision
+### 8.5 Render Bridge Readiness
 
-The dev-only Astrid localhost render bridge is **descoped for S3**. T1 verified the actual checkout and found that `astrid/packs/video_editing/executors/cut/run.py` and `cut/resume.py` both route `--render` through:
+The current localhost bridge provides project/timeline load and guarded save,
+registry synchronization, asset serving, and proxy endpoints. It does not
+expose a render endpoint or render-progress SSE contract, so the editor must
+not advertise local rendering through this bridge yet.
 
-```python
-from ..render.run import render as render_remotion
-```
-
-No `astrid/packs/video_editing/executors/render/` module exists in this checkout, so the cut executor can write `hype.timeline.json`, `hype.assets.json`, and `hype.metadata.json`, but cannot execute the render path it imports. The separate `astrid/packs/rendering/executors/render/` executor does not satisfy that relative import boundary.
-
-Per the S3 execution gate, no `astrid/packs/reigh/executors/*render*` localhost bridge source is added, no SSE endpoint is exposed, and no UI render wiring should advertise a local Astrid render path in this sprint. Future bridge work must preserve the path-base rules in §8.1-§8.3 and the writeback ownership in §6.4.
+Production and pack callers render through the stable `rendering.render`
+capability facade or the public `astrid.core.rendering.service.RenderService`.
+The service discovers protocol-v1 renderers/planners/finalizers, validates and
+publishes their outputs, and writes core provenance. Any future bridge render
+endpoint must call that public boundary, preserve §8.1-§8.3 path semantics,
+and retain the registry writeback ownership in §6.4. It must not import a
+concrete backend or recreate engine routing.
 
 ### 8.6 Bridge Startup Convention (Dev-Only)
 
-The local Astrid bridge is a **manually started** localhost process. reigh-app running in a browser cannot spawn Python processes. The dev workflow for local render (when re-enabled) requires:
+The local Astrid bridge is a **manually started** localhost process. reigh-app
+running in a browser cannot spawn Python processes. The dev workflow for
+bridge-backed editor operations is:
 
-1. Operator starts the Astrid bridge manually: `python -m astrid.packs.reigh.executors.bridge --port 9101`.
+1. Operator starts the Astrid bridge manually:
+   `python3 -m astrid serve --host 127.0.0.1 --port 9101`.
 2. reigh-app in local mode connects to `http://localhost:9101`.
-3. If the bridge is not running, the local data provider falls back to filesystem-only operations (load/save/materialize) and surfaces a "bridge unavailable" diagnostic for render operations.
+3. If the bridge is not running, bridge-backed load/save/asset operations
+   surface a `bridge-unavailable` diagnostic. Rendering is not part of the
+   current bridge API.
 
 This is a dev-mode convention, not a production feature. The browser security model prohibits spawning local processes; no workaround is implemented or planned for this sprint.
 
@@ -419,12 +431,19 @@ Local mode (filesystem-based load/save/materialization) depends on the [File Sys
 
 ### 12.2 Astrid Bridge (Localhost)
 
-Render operations (when re-enabled) depend on a running Astrid bridge process on `localhost`. The bridge is a Python process that must be started manually before render is invoked. There is no auto-start mechanism, no process supervision, and no cross-platform launcher in this sprint. If the bridge is unreachable, render operations fail with a `bridge-unavailable` diagnostic.
+Bridge-backed editor operations depend on a running Astrid process on
+`localhost`. Start it manually with `python3 -m astrid serve`; there is no
+browser auto-start or process supervision. The current bridge has no render
+endpoint. Normal CLI and programmatic rendering use `rendering.render` or
+`RenderService` directly and do not depend on the editor bridge.
 
 ### 12.3 Node.js / Python Versions
 
 - **reigh-app** is tested on Node.js 20 LTS. TypeScript compilation targets ES2022 with bundler module resolution.
-- **Astrid** requires Python ≥ 3.11. The cut/resume executors import `remotion` (optional; render-only) and `supabase` (for app-mode; not required by local bridge path).
+- **Astrid** requires Python ≥ 3.11. Remotion/Node dependencies are loaded only
+  when the selected `rendering.remotion` backend runs; FFmpeg and other
+  protocol renderers declare their own required binaries. The local bridge
+  itself does not import a concrete renderer.
 
 ---
 

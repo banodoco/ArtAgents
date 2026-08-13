@@ -7,7 +7,7 @@
     "bundle": "remotion bundle src/index.ts",
     "render": "remotion render",
     "smoke": "node __smoke__/bundle.mjs",
-    "gen-types": "python3 ../scripts/gen_remotion_types.py && python3 ../scripts/gen_effect_registry.py"
+    "gen-types": "python3 ../scripts/gen_remotion_types.py --include-element-registries"
   },
   "dependencies": {
     "@banodoco/timeline-composition": "https://github.com/banodoco/timeline-composition/archive/refs/tags/v0.0.6.tar.gz",

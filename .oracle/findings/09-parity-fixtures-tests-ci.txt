@@ -1,0 +1,27 @@
+## Ranked findings
+
+**1. Parity gate exists but is a hash-of-input, not a render** — `tests/packs/test_renderer_parity.py` is opt-in via `ASTRID_RENDERER_PARITY=1` (:24, :58–59). When enabled it runs `scripts/node/export_fixtures.mjs --json` (:34–42), asserts fixtures exist (:63–67), asserts no pending goldens (:69–74), then SHA-256s the **input JSON** canonically (:49–51, :79–85). Nothing renders. Golden hashes come from `tests/fixtures/sprint08/golden/<name>.sha256` read by the mjs (:50–54). The brief is confirmed: it hashes input JSON and renders nothing. `tests/fixtures/sprint08/` contains **only README.md** — zero fixtures, zero goldens.
+
+**2. Hype goldens exercise private helpers with fake media** — `tests/golden/hype/merged_render_props.json` + `hype.assets.json` are compared (sorted-JSON string equality) in `tests/packs/hype/test_hype_e2e.py:1040–1138`, which writes `b"fake-mp4"` placeholders (:1064–1065) and imports `_resolved_theme_for_render`/`_serialize_timeline` (:1093–1096) under `ASTRID_INTERNAL_INVOCATION=1`. `tests/fixtures/reshape/hype_regression/` mp4s are declared `omitted_from_git` with null sha256 (`media_manifest.json:22–39`); `test_hype_regression_fixture.py:34–39` regenerates them via ffmpeg or skips. **No committed real media exists.**
+
+**3. Private-symbol coupling** — `_RangeHTTPRequestHandler` (render.run) in `test_url_pipeline_smoke.py:17`, `test_asset_cache.py:19`; `run`/`audio_reactive_colour` modules in `test_text_card_render.py:9`, `test_render_remotion_registry.py:16`, `test_audio_reactive_colour.py:12–13`, `test_audio_render.py:7`; asset_cache privates `_read_meta/_write_meta/_meta_path/_lock_for` in `test_asset_cache.py:103,137,182–197,235`. `test_audio_reactive_colour.py` is the only real render test (ffmpeg pixel/stream asserts, :164–237).
+
+**4. CI lanes** — `ci.yml`: ffmpeg installed (:32–35); real render only inside pytest; Remotion typecheck blocking (:83–89); advisory `continue-on-error` steps (:49–51, :59–61). No job sets `ASTRID_RENDERER_PARITY`. `Makefile` `check` (:19), `ci` (:43) — no parity target. Markers registered in `pyproject.toml:154–165`.
+
+**5. Skip convention** — `pytest.importorskip("jsonschema")` (`test_audit.py:68`), module `skipif` (`test_platform_contract.py:17–20`), `pytest.skip("...opt-in; set ASTRID_RENDERER_PARITY=1")` (`test_renderer_parity.py:59`).
+
+## Verified facts
+- Parity test never invokes ffmpeg/remotion; asserts only JSON hashes.
+- sprint08 has README only; `export_fixtures.mjs` exists and reads `golden/*.sha256`.
+- Hype e2e golden test uses fake bytes, not media.
+
+## Unknowns
+- Whether the local mp4s are git-tracked (manifest says omit; `.gitignore:54,61–63` would track them).
+- Where reigh-app's `testing.ts` lives.
+
+## Risks
+- A "parity" gate that exercises nothing: helper-regenerated fixtures + goldens stay green while rendering breaks.
+- Default lane silently skips (no env var set anywhere).
+
+## Suggested approach
+Commit real sprint08 JSON + `golden/*.sha256`; extend parity to render headlessly (remotion) and hash output frames (ffmpeg `framemd5`); add `ASTRID_RENDERER_PARITY=1` to a new CI job after Remotion typecheck; add a `make parity` target; keep skip messages matching the existing opt-in wording.

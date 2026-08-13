@@ -394,7 +394,14 @@ class HumanNotesTest(unittest.TestCase):
         def fake_run(cmd, **kwargs):
             calls.append((cmd, kwargs))
 
-        with mock.patch("subprocess.run", side_effect=fake_run):
+        with (
+            mock.patch("subprocess.run", side_effect=fake_run),
+            mock.patch.object(
+                human_notes,
+                "invoke_attached_render",
+                return_value=apply_paths["brief_dir"] / "hype.mp4",
+            ) as render_call,
+        ):
             human_notes.main(
                 self.apply_args(
                     apply_paths,
@@ -408,14 +415,13 @@ class HumanNotesTest(unittest.TestCase):
                 client=fake,
             )
 
-        self.assertEqual(len(calls), 4)
+        self.assertEqual(len(calls), 3)
         self.assertEqual(
             [call[0][2] for call in calls],
             [
                 "astrid.packs.editorial.executors.arrange.run",
                 "astrid.packs.video_editing.executors.cut.run",
                 "astrid.packs.editorial.executors.refine.run",
-                "astrid.packs.rendering.executors.render.run",
             ],
         )
         for _, kwargs in calls:
@@ -428,6 +434,12 @@ class HumanNotesTest(unittest.TestCase):
         refine_cmd = calls[2][0]
         for flag in ("--timeline", "--assets", "--metadata"):
             self.assertIn(flag, refine_cmd)
+        brief_dir = apply_paths["brief_dir"].resolve()
+        render_call.assert_called_once_with(
+            brief_dir / "hype.timeline.json",
+            brief_dir / "hype.assets.json",
+            brief_dir / "hype.mp4",
+        )
 
 
 if __name__ == "__main__":

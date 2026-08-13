@@ -521,7 +521,9 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: list[str] | None = None) -> int:
+def _main_unlocked(argv: list[str] | None = None) -> int:
+    """Write registry artifacts while the caller owns the Remotion lock."""
+
     args = build_parser().parse_args(argv)
     theme_dir = _resolve_theme_dir(args.theme)
     _write_active_theme_pointer(theme_dir)
@@ -546,6 +548,15 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
     return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    from astrid.packs.rendering.backends.remotion import lock as remotion_lock
+
+    if remotion_lock.remotion_render_lock_held():
+        return _main_unlocked(argv)
+    with remotion_lock.remotion_render_lock():
+        return _main_unlocked(argv)
 
 
 if __name__ == "__main__":

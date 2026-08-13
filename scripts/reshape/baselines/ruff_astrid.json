@@ -4,7 +4,7 @@
     "pyproject.toml [tool.ruff].include"
   ],
   "command": [
-    "/Users/peteromalley/.pyenv/versions/3.11.11/bin/python",
+    "/Users/peteromalley/.pyenv/versions/3.11.11/bin/python3",
     "-m",
     "ruff",
     "check",
@@ -12,15 +12,17 @@
     "--output-format",
     "json"
   ],
-  "finding_count": 1383,
+  "finding_count": 1458,
   "code_counts": {
-    "I001": 95,
-    "BLE001": 145,
-    "F401": 430,
-    "F841": 14,
-    "E402": 644,
-    "F821": 24,
-    "F541": 2,
-    "F811": 29
+    "F401": 388,
+    "I001": 73,
+    "BLE001": 211,
+    "E402": 717,
+    "F841": 21,
+    "F821": 32,
+    "E702": 8,
+    "F402": 1,
+    "F541": 6,
+    "F601": 1
   }
 }

@@ -197,6 +197,9 @@ def extract_pack_aliases(
 ) -> dict[str, list[dict[str, object]]]:
     """Collect pack-level aliases for a specific capability *kind*.
 
+    The supported kinds include renderer, planner, and finalizer aliases in
+    addition to the established executor and orchestrator aliases.
+
     Returned values preserve deprecation metadata and annotate each alias entry
     with its source pack id so the resolver record retains provenance.
     """
