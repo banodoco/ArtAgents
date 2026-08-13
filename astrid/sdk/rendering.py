@@ -36,6 +36,50 @@ Those are loaded function-locally, on first use.
 Wire equivalence is a hard contract: every JSON payload this module writes is
 the ``to_dict()`` of a frozen core DTO.  There are no SDK-only wire fields and
 no semantics drift from the raw fixture/backend path.
+
+Worked example (scaffold → SDK renderer):
+
+1. Scaffold the four-file pack, then point the manifest command at this
+   module's entrypoint instead of the generated ``render.py``::
+
+       python3 -m astrid renderers create wave acme_wave
+       # acme_wave/renderer.yaml: command: [python3, -m, astrid.sdk.rendering]
+
+2. From Python, render through the shared service — the SDK builds a frozen
+   :class:`RenderRequest`, dispatches through :class:`RenderService`, and
+   returns the published output path::
+
+       import astrid
+       out = astrid.render(
+           "out/hype.timeline.json",
+           assets_registry_path="out/hype.assets.json",
+           backend="acme_wave.wave",
+           backend_config={"acme_wave.wave": {"quality": "preview"}},
+           out_path="out/hype.mp4",
+       )
+       # out/hype.mp4 + out/hype.mp4.provenance.json
+
+3. Ask a qualified backend whether it supports a specific request::
+
+       report = astrid.support("acme_wave.wave", timeline_path="out/hype.timeline.json")
+       assert report.supported
+
+4. Inside ``render.py``, use :class:`RenderContext` for workspace-validated
+   paths, sanitized subprocesses, redacted logs, probing/hashing, audio
+   completion, and attachments (see ``docs/reference/sdk.md`` for the full
+   worked example)::
+
+       from astrid import RenderContext
+       from astrid.core.rendering.contracts import RenderRequest, RenderResult
+
+       def render(workspace, request: RenderRequest) -> RenderResult:
+           with RenderContext(workspace, backend="acme_wave.wave") as ctx:
+               out = ctx.output_path(request.output_name)
+               ctx.run(["vendor-tool", "--out", out])
+               return RenderResult(...)  # frozen DTO, validated by the host
+
+The user-facing walkthrough lives in ``docs/reference/sdk.md``; the wire
+contract is ``docs/contracts/render-backend-v1.md``.
 """
 
 from __future__ import annotations

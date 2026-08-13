@@ -233,3 +233,49 @@ uses a qualified implementation id owned by that pack. The public contract,
 manifest schemas, transport verbs, artifact/audio rules, and worked
 third-backend example are in
 `docs/contracts/render-backend-v1.md`.
+
+### Scaffold → golden path
+
+For a self-contained starting point, scaffold the canonical four-file pack
+(`pack.yaml`, `renderer.yaml`, `render.py`, `test_renderer.py`) and walk the
+golden path — the destination directory name becomes the pack id and the
+renderer id becomes `<dest>.<name>`:
+
+```bash
+python3 -m astrid renderers create wave acme_wave
+cd acme_wave
+python3 -m pytest -q test_renderer.py     # generated deterministic test
+python3 -m astrid renderers validate .    # static validation
+python3 -m astrid packs install . --trust --yes   # trusted install
+python3 -m astrid renderers list          # discovery from installed revision
+python3 -m astrid renderers inspect acme_wave.wave
+python3 -m astrid renderers smoke acme_wave.wave --out ./out/smoke.mp4  # smoke
+```
+
+The smoke verb runs a deterministic direct-service render (fresh temp
+workspace, no ledger/project mutation) and prints the output path plus its
+provenance sidecar path. A real-timeline render goes through the facade:
+`python3 -m astrid executors run rendering.render --out ./out --input
+timeline=./out/hype.timeline.json --input backend=acme_wave.wave`, which
+writes `./out/hype.mp4` plus `./out/hype.mp4.provenance.json`; the sidecar
+records resolution/trust/support evidence, artifact hashes and profiles, audio
+ownership, normalization, attachments, and your namespaced
+`backend_fragments`. Failed invocations retain a self-contained replay bundle
+(resolved request, localized inputs, configuration, redacted logs, partial
+result, exact replay command) instead of publishing a sidecar. The full
+walkthrough is the golden-path section of
+`docs/contracts/render-backend-v1.md`.
+
+### SDK renderers
+
+A `render.py` may also be written against the public rendering SDK instead of
+parsing the raw file protocol: `astrid.render`/`astrid.support` drive the
+shared `RenderService`, `astrid.renderer_main` is a protocol-v1 command
+entrypoint that a manifest `command` can point at directly
+(`command: [python3, -m, astrid.sdk.rendering]`), and `astrid.RenderContext`
+provides workspace-validated paths, sanitized subprocesses, redacted logs,
+probing/hashing, audio completion, and attachments for the duration of one
+invocation. See `docs/reference/sdk.md` (Rendering SDK) for the worked
+example. Wire equivalence is a hard contract: the SDK writes the same frozen
+DTO JSON as the raw path, so both kinds of renderer pass the same conformance
+fixtures.

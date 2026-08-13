@@ -1,0 +1,180 @@
+{
+  "active_pack_order": [],
+  "active_theme": null,
+  "artifact_profiles": [
+    {
+      "attachments": {},
+      "path": "outputs/smoke-wave.wave.mp4",
+      "profile": {
+        "audio_channel_layout": "stereo",
+        "audio_codec": "pcm_s16le",
+        "audio_sample_rate": 48000,
+        "container": "mp4",
+        "duration_tolerance": 1,
+        "fps_rational": [
+          24,
+          1
+        ],
+        "height": 64,
+        "pixel_format": "yuv420p",
+        "time_base": [
+          1,
+          12288
+        ],
+        "video_codec": "h264",
+        "video_level": null,
+        "video_profile": null,
+        "width": 64
+      },
+      "sha256": "68c1b21af85e4c8492a59a7d73f2c1d8c8188bad94c9d90ed2a69bb82472caf1"
+    }
+  ],
+  "assets_registry": "/private/var/folders/_w/b3tthv192m77c760dbyzvk200000gn/T/astrid-smoke-3dayjm73/assets.json",
+  "attachments": {},
+  "audio_ownership": "rendered",
+  "backend_fragments": {
+    "wave.wave": {
+      "renderer": "scaffold"
+    }
+  },
+  "composition_id": "TimelineComposition",
+  "element_roots": [],
+  "engine": "wave.wave",
+  "finalizer": {
+    "alias_chain": [],
+    "id": "astrid.direct-finalizer",
+    "manifest_digest": "8fcdc3a4dc35b3f488f7c7c4f8efce91e25b094ffeca7cab989a9caf9b31a10e",
+    "override": null,
+    "source_pack": {
+      "id": "astrid.core",
+      "source_kind": "core"
+    },
+    "support_decision": null,
+    "trust_eligibility": {
+      "eligible": true,
+      "reason": "core direct pass-through"
+    }
+  },
+  "normalization": [],
+  "output": "/Users/peteromalley/Documents/reigh-workspace/Astrid-oracle/smoke-wave.wave.mp4",
+  "planner": {
+    "alias_chain": [],
+    "id": "astrid.direct",
+    "manifest_digest": "e9b867a369eeda8d9b5e0ffe87082a08fc746ca4b4668bfeb305023068c3cfa5",
+    "override": null,
+    "source_pack": {
+      "id": "astrid.core",
+      "source_kind": "core"
+    },
+    "support_decision": null,
+    "trust_eligibility": {
+      "eligible": true,
+      "reason": "core direct plan"
+    }
+  },
+  "project_dir": null,
+  "registry_hash": null,
+  "registry_state": {},
+  "request_digest": "53b2340ae0235d16e7f8b5eef81cfae310350c634392e5dfad4d7d1920357275",
+  "requested_policy": "wave.wave",
+  "resolved_effect_ids": [],
+  "resolved_effects": [],
+  "resolved_policy": {
+    "finalizer": "astrid.direct-finalizer",
+    "planner": "astrid.direct",
+    "renderers": [
+      "wave.wave"
+    ]
+  },
+  "routing": {
+    "auto_route": false,
+    "auto_route_reason": null,
+    "requested_engine": "wave.wave",
+    "requested_policy": "wave.wave",
+    "resolved_backend": "wave.wave",
+    "resolved_backends": [
+      "wave.wave"
+    ],
+    "resolved_policy": {
+      "finalizer": "astrid.direct-finalizer",
+      "planner": "astrid.direct",
+      "renderers": [
+        "wave.wave"
+      ]
+    },
+    "segment_reasons": {
+      "0": "direct renderer selection"
+    }
+  },
+  "schema_version": 2,
+  "segments": [
+    {
+      "engine": "wave",
+      "from": 0.0,
+      "to": 0.08333333333333333
+    }
+  ],
+  "segments_v2": [
+    {
+      "input_hashes": {
+        "assets_registry": "3cc70b0396c581fdd60bc2fb004f003edbee21e728189a7ecb2e3f10f0586c62",
+        "timeline": "e384fda7eedd080677356613afed1e41c59ae82f9f1bd15a13936de5b7c4785e"
+      },
+      "renderer": {
+        "alias_chain": [],
+        "id": "wave.wave",
+        "manifest_digest": "3f87676c657886cdb0b0f47cfc27ee1c3202fe40842452d584f66c01a3aaac57",
+        "override": null,
+        "source_pack": {
+          "id": "wave",
+          "manifest_path": "/private/var/folders/_w/b3tthv192m77c760dbyzvk200000gn/T/pytest-of-peteromalley/pytest-2665/test_plain_mode_smoke_is_human0/wave/renderer.yaml",
+          "priority_index": 20,
+          "root": "/private/var/folders/_w/b3tthv192m77c760dbyzvk200000gn/T/pytest-of-peteromalley/pytest-2665/test_plain_mode_smoke_is_human0/wave",
+          "source_kind": "extra"
+        },
+        "support_decision": {
+          "alternatives": [],
+          "backend": "wave.wave",
+          "backend_version": "1.0.0",
+          "features": {
+            "audio_mode": "rendered",
+            "media": true
+          },
+          "reasons": [],
+          "schema_version": 1,
+          "supported": true
+        },
+        "trust_eligibility": {
+          "accepted_permissions": [],
+          "active_revision": null,
+          "declared_permissions": [
+            "subprocess",
+            "project_files"
+          ],
+          "eligible": true,
+          "reason": "pack root was explicitly supplied by the operator",
+          "required_permissions": [
+            "project_files",
+            "subprocess"
+          ],
+          "trust_method": "explicit_extra_pack_root"
+        }
+      },
+      "window": {
+        "end_frame": 2,
+        "fps_rational": [
+          24,
+          1
+        ],
+        "source_range": null,
+        "speed": null,
+        "start_frame": 0
+      }
+    }
+  ],
+  "sha256": "68c1b21af85e4c8492a59a7d73f2c1d8c8188bad94c9d90ed2a69bb82472caf1",
+  "source_pack_ids": [],
+  "staged_asset_ids": [],
+  "staged_asset_root": null,
+  "timeline": "/private/var/folders/_w/b3tthv192m77c760dbyzvk200000gn/T/astrid-smoke-3dayjm73/timeline.json"
+}

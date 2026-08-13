@@ -127,7 +127,12 @@ they are not public executor kinds. A renderer produces one validated primary
 video, a planner assigns exact frame windows to renderers, and a finalizer
 normalizes/assembles planned artifacts. Keep `rendering.render` as the public
 facade and follow `docs/contracts/render-backend-v1.md`; do not import a
-concrete backend or add engine branches to the facade.
+concrete backend or add engine branches to the facade. To start, scaffold the
+canonical four-file renderer pack with
+`python3 -m astrid renderers create <name> <dest>`, then walk the golden path
+(implement `render.py` → generated test → `renderers validate` → trusted
+`packs install` → `renderers smoke` → provenance sidecar) described in
+[render-backend-v1.md](../contracts/render-backend-v1.md#renderer-author-golden-path).
 
 For a one-off experiment, keep outputs and scratch files under `runs/`. Do not
 create a public executor, orchestrator, or element unless the behavior should be
@@ -285,6 +290,8 @@ command that matches the thing you created.
 
 - [discovery-for-agents.md](discovery-for-agents.md) — How agents discover
   capabilities via `skills list`, search, and `inspect --json`.
+- [debugging.md](debugging.md) — Debugging renderers: static validation, smoke
+  tests, the failure replay bundle, and SDK-level moves.
 - [aliases-vs-forks-vs-overrides.md](../packs/aliases-vs-forks-vs-overrides.md) —
   Decision table for choosing between alias, fork, and override.
 - [fork-and-update.md](../packs/fork-and-update.md) — Scaffolding personal packs

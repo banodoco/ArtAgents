@@ -789,6 +789,158 @@ manifest digest, alias chain, override, trust eligibility, support decision,
 input hashes, artifact hash/profile, audio ownership, and the namespaced vendor
 fragment. No registry or service edit is needed.
 
+## Renderer author golden path
+
+The fastest way to add a renderer is the four-file scaffold. It produces a
+complete, self-contained, pure-stdlib pack that implements the v1 wire
+protocol deterministically — no ffmpeg, Remotion, GPU, or SDK import — so the
+whole path can be exercised end to end before you replace `render.py` with a
+real implementation.
+
+```bash
+# 0. Bind a session first — renderer-authoring verbs are session-gated like
+#    other tool-creation verbs (packs ... itself is unbound-legal):
+#    python3 -m astrid next   # or: status / attach <project>
+
+# 1. Create the four-file scaffold: pack.yaml renderer.yaml render.py test_renderer.py
+python3 -m astrid renderers create wave acme_wave
+cd acme_wave
+
+# 2. Run the generated test (deterministic render + hash + result-shape checks)
+python3 -m pytest -q test_renderer.py
+
+# 3. Statically validate the pack (manifest schemas, content roots, rendering extensions)
+python3 -m astrid renderers validate .
+
+# 4. Preview the trust summary, then trusted-install the pack
+python3 -m astrid packs install . --dry-run
+python3 -m astrid packs install . --trust --yes
+
+# 5. Confirm discovery and inspect the installed revision
+python3 -m astrid renderers list
+python3 -m astrid renderers inspect acme_wave.wave
+
+# 6. Deterministic smoke render through the public service
+python3 -m astrid renderers smoke acme_wave.wave --out ./out/smoke.mp4
+```
+
+The destination directory name becomes the pack id (`acme_wave`) and the
+qualified renderer id becomes `<dest>.<name>` (`acme_wave.wave`) unless
+`--id` overrides it; the pack prefix must match the directory name because
+`packs install` requires `root.name == pack id`. `astrid renderers create`
+refuses to overwrite existing files unless `--force` is passed, and refuses
+the first-party `rendering` pack id to avoid colliding with the built-in
+pack. `renderers list` prints every discovered renderer/planner/finalizer
+qualified id, `renderers inspect <id>` shows one candidate's manifest fields,
+source pack, and trust eligibility, and both accept `--pack-root PATH`
+(repeatable) to discover an extra pack root such as the parent of a
+scaffolded-but-not-installed pack.
+
+`renderer.yaml` declares `command: [python3, render.py]`, `operations:
+[support, render]`, and the `project_files` + `subprocess` permissions
+(subset of the pack's declared set). `render.py` parses exactly one verb plus
+`--request`/`--result`, validates `schema_version` and `output_name`, and
+writes one authoritative JSON result; `test_renderer.py` drives it through a
+real subprocess and checks the artifact hash and result shape.
+
+`renderers smoke <id>` runs a deterministic direct-service render through the
+public rendering service in a fresh temporary workspace (no ledger, no project
+mutation) and prints the output video path plus provenance sidecar path; it
+requires the candidate to be execution-eligible. The scaffold renderer is
+deterministic and ignores timeline content, so the smoke never needs a real
+timeline. To render a real timeline through the stable facade instead (the
+pipeline path), use:
+
+```bash
+python3 -m astrid executors run rendering.render \
+  --out ./out \
+  --input timeline=./out/hype.timeline.json \
+  --input backend=acme_wave.wave
+```
+
+Astrid resolves `acme_wave.wave`, checks trust/permissions/binaries/protocol
+version, invokes the command, validates the artifact and profile, and
+atomically publishes `./out/hype.mp4` plus its core-owned provenance sidecar
+`./out/hype.mp4.provenance.json`. Read the sidecar to confirm the resolution
+evidence: the source pack, manifest digest, alias chain, override, trust
+eligibility, support decision, input hashes, artifact hash/profile, audio
+ownership, normalization, attachments, and your namespaced
+`backend_fragments["acme_wave.wave"]` fragment. If you later edit `render.py`
+to return real media, keep the result shape identical: exactly one primary
+`VideoArtifact`, workspace-relative paths, a matching `audio_ownership`, and
+backend-private data only under your fragment namespace.
+
+A failed invocation never publishes a sidecar; instead the host retains (or
+emits) a self-contained replay bundle — resolved request, localized inputs and
+hashes, your configuration namespace, resolution/trust evidence, support
+report/plan when present, redacted logs, any partial result, and the exact
+replay command — so you can reproduce the failure without rerunning the
+editorial pipeline. See [Replay inputs and redaction](#replay-inputs-and-redaction).
+For the troubleshooting companion (structured error kinds, replay-bundle
+debugging, SDK-level moves), see [docs/guides/debugging.md](../guides/debugging.md).
+
+## Advanced support
+
+The scaffold's `support` verb answers `true` unconditionally. Real renderers
+make support **request-sensitive**: read the `RenderRequest` and return a
+`SupportReport` whose `supported` verdict, ordered `reasons`, `features`
+evidence, and `alternatives` reflect the actual request. Static manifest
+`capabilities` are only coarse discovery hints; they never override a probe,
+and an unsupported report should carry at least one actionable reason plus
+qualified `alternatives` the host may offer to an explicit planner or
+fallback policy. Astrid never routes to an alternative on its own: with a
+qualified selector it fails closed. `support` is optional in the manifest, but
+declaring it lets planners and the facade make informed decisions.
+
+Three request features are worth probing explicitly:
+
+- **Windows.** A `null` `window` means the complete timeline. A non-null
+  `FrameWindow` is half-open `[start_frame, end_frame)` at the canonical
+  rational FPS; a renderer that cannot render a sub-range must report
+  `supported: false` with a reason. Declare `supports_windows` only as a hint;
+  the probe is authoritative.
+- **Attachments.** Your `VideoArtifact.attachments` map is the one
+  authoritative attachment surface — `RenderResult` has no second map. Names
+  are globally unique, kinds are lowercase-hyphenated, and paths are
+  workspace-relative. Planners/finalizers preserve every input attachment
+  unchanged; you may add attachments, and a custom finalizer may interpret a
+  kind only when its contract explicitly says so.
+- **Audio modes.** `rendered` requires the complete populated audio trio in
+  the probed profile because your artifact contains audio; `passthrough` and
+  `none` require a visual-only profile (all three audio fields `null`) —
+  passthrough asks the host/finalizer to supply canonical audio later, and
+  none declares no audio is intended. The successful
+  `RenderResult.audio_ownership` must exactly match the artifact's `audio`.
+  Visual-only renderers are valid and never synthesize silence.
+
+## Planner & finalizer
+
+A renderer owns every pixel of its assigned temporal window. When one
+renderer cannot cover a whole request, add a **planner** that returns a
+`RenderPlan`: one canonical output `profile`, `total_frames`, an explicit
+`finalizer`, and an ordered `segments` list that tiles the target window
+without leading, internal, or trailing gaps, overlap, or reordering. The plan
+fixes the FPS for every segment window; the first segment starts at the
+target, each subsequent start equals the preceding end, and the last end
+equals the target end. A zero-frame plan has `window: null`, no segments, and
+is never finalized. The service computes `request_digest` once and carries it
+into provenance and finalize requests so replay verifies byte-for-byte.
+Planners declare `plan` (and optionally `support`) and may name a fallback
+policy; support evidence, not static hints, decides routing.
+
+The **finalizer** is the last stage: it receives the complete plan plus one
+artifact per segment, probes every input, and compares each with the plan
+profile. Compatible segments may stream-copy; otherwise it normalizes
+dimensions, rational FPS/time base, container, video codec/profile/level,
+pixel format, audio codec/sample rate/channel layout, and audio presence —
+appending every performed normalization to `normalization`. It preserves
+attachments it does not understand and returns the same `RenderResult` shape
+as a renderer. The built-in `rendering.ffmpeg-finalizer` uses FFmpeg; FFmpeg
+is not part of the generic contract, so a custom finalizer is how a pack
+normalizes with its own tooling. Empty plans are never sent to finalizers, and
+the host rejects attachment names reused across segment artifacts before
+invocation.
+
 ## Versioning
 
 Schema paths and `schema_version` are independent of an implementation's

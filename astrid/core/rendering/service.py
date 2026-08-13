@@ -12,17 +12,21 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 import re
 import warnings
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
+from datetime import datetime, timezone
 from fractions import Fraction
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, Literal
 
+from astrid.core.env_vars import ASTRID_TASK_PROJECT, ASTRID_TASK_RUN_ID
 from astrid.core.foundation.atomic_io import write_json_atomic
 from astrid.core.foundation.hash import sha256_file
+from astrid.core.foundation.project_paths import resolve_projects_root, run_dir
 
 from .artifacts import validate_render_result
 from .contracts import (
@@ -57,6 +61,11 @@ from .registry import (
     RenderingCandidate,
     RenderingRegistryError,
     load_default_registries,
+)
+from .replay import (
+    BUNDLE_SCHEMA_VERSION,
+    ReplayBundle,
+    write_replay_bundle,
 )
 from .transport import CommandTransport
 
@@ -95,6 +104,22 @@ class _ResolvedCapability:
     evidence: dict[str, Any]
     support: SupportReport
     rejected: list[dict[str, Any]] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class _InvocationContext:
+    """The most recent backend command issued by :class:`RenderService`."""
+
+    candidate: RenderingCandidate[Any]
+    verb: str
+    payload: Any
+    request_path: Path
+    result_path: Path
+    workspace: Path
+
+
+#: Backend verbs whose failures (and opt-in successes) produce replay bundles.
+_REPLAY_VERBS = frozenset({"render", "finalize", "plan"})
 
 
 def _translate_legacy_selector(selector: str | None) -> _SelectionPolicy:
@@ -168,6 +193,8 @@ class RenderService:
         audio_completer: AudioCompleter | None = None,
         stage_observer: StageObserver | None = None,
         finalizer_id: str | None = None,
+        replay_root: str | Path | None = None,
+        capture_success: bool = False,
     ) -> None:
         supplied = (
             renderer_registry,
@@ -205,6 +232,14 @@ class RenderService:
         # provenance; otherwise a core no-op resolution is recorded.  Planned
         # renders always use the finalizer pinned by their RenderPlan.
         self.finalizer_id = finalizer_id
+        # Replay-bundle capture hooks (additive).  Backend failures always
+        # attempt a best-effort bundle; success capture is opt-in.
+        self._replay_root = (
+            Path(replay_root).expanduser() if replay_root is not None else None
+        )
+        self._capture_success = bool(capture_success)
+        self._active_output: Path | None = None
+        self._last_invocation: _InvocationContext | None = None
 
     def render(
         self,
@@ -299,6 +334,7 @@ class RenderService:
     ) -> Path:
         """Execute the frozen selection lifecycle for one protocol request."""
 
+        self._last_invocation = None
         try:
             parsed = (
                 request
@@ -331,19 +367,28 @@ class RenderService:
             )
             workspace_parent = output.resolve(strict=False).parent
             workspace_parent.mkdir(parents=True, exist_ok=True)
+            self._active_output = output
             with TemporaryDirectory(
                 prefix=f".{output.name}.render-service-",
                 dir=str(workspace_parent),
             ) as workspace_text:
-                return self._render_in_workspace(
-                    localized,
-                    policy=policy,
-                    workspace=Path(workspace_text),
-                    out_path=output,
-                    sidecar_path=sidecar,
-                    previous_outputs=tuple(previous_outputs),
-                    v1_compatibility=v1_compatibility,
-                )
+                workspace = Path(workspace_text)
+                try:
+                    published = self._render_in_workspace(
+                        localized,
+                        policy=policy,
+                        workspace=workspace,
+                        out_path=output,
+                        sidecar_path=sidecar,
+                        previous_outputs=tuple(previous_outputs),
+                        v1_compatibility=v1_compatibility,
+                    )
+                except RendererException as exc:
+                    self._capture_failure_bundle(exc, request=localized)
+                    raise
+                if self._capture_success:
+                    self._capture_success_bundle(request=localized)
+                return published
         except RendererException as exc:
             if exc.error.recovery_command is None:
                 raise_renderer_error(
@@ -1780,6 +1825,14 @@ class RenderService:
             if self._transport is not None
             else self._transport_factory(candidate.id)
         )
+        self._last_invocation = _InvocationContext(
+            candidate=candidate,
+            verb=verb,
+            payload=payload,
+            request_path=request_path,
+            result_path=result_path,
+            workspace=workspace,
+        )
         return transport.run(
             verb,
             candidate.manifest.command,
@@ -1794,6 +1847,240 @@ class RenderService:
                 else required_binaries
             ),
         )
+
+    # -- Replay-bundle capture hooks (additive) -------------------------------
+
+    def _capture_failure_bundle(
+        self,
+        exc: RendererException,
+        *,
+        request: RenderRequest,
+    ) -> None:
+        """Best-effort replay bundle for a failed backend invocation.
+
+        Only failures attributable to a ``render``/``finalize``/``plan``
+        invocation are captured; registry and support failures are not.
+        Capture errors are swallowed so the original failure always
+        propagates unchanged.
+        """
+
+        invocation = self._last_invocation
+        if invocation is None or invocation.verb not in _REPLAY_VERBS:
+            return
+        try:
+            bundle = self._build_replay_bundle(
+                invocation=invocation,
+                request=request,
+                error=exc.error,
+                success=False,
+            )
+            dest = self._replay_destination(
+                renderer_id=bundle.renderer_id,
+                request_digest=bundle.request_digest,
+            )
+            write_replay_bundle(bundle, dest)
+        except Exception:
+            # Diagnostics must never mask the render failure they describe.
+            pass
+
+    def _capture_success_bundle(
+        self,
+        *,
+        request: RenderRequest,
+    ) -> None:
+        """Capture a bundle for a completed render when explicitly requested."""
+
+        invocation = self._last_invocation
+        if invocation is None or invocation.verb not in _REPLAY_VERBS:
+            return
+        try:
+            bundle = self._build_replay_bundle(
+                invocation=invocation,
+                request=request,
+                error=None,
+                success=True,
+            )
+            dest = self._replay_destination(
+                renderer_id=bundle.renderer_id,
+                request_digest=bundle.request_digest,
+            )
+            write_replay_bundle(bundle, dest)
+        except Exception:
+            pass
+
+    def _build_replay_bundle(
+        self,
+        *,
+        invocation: _InvocationContext,
+        request: RenderRequest,
+        error: Any,
+        success: bool,
+    ) -> ReplayBundle:
+        """Assemble the bundle record for the most recent backend invocation."""
+
+        payload = invocation.payload
+        payload_dict = payload.to_dict() if hasattr(payload, "to_dict") else dict(payload)
+        metadata: dict[str, Any] = {
+            "bundle_schema_version": BUNDLE_SCHEMA_VERSION,
+            "backend_version": invocation.candidate.manifest.version,
+            "verb": invocation.verb,
+            "success": success,
+            "captured_at": datetime.now(timezone.utc).isoformat(),
+        }
+        if error is not None:
+            metadata["error_kind"] = error.kind
+            metadata["error_message"] = error.message
+            metadata["recovery_command"] = (
+                error.recovery_command
+                or self._default_error_recovery(error.kind)
+            )
+        else:
+            metadata["error_kind"] = None
+            metadata["error_message"] = None
+            metadata["recovery_command"] = None
+        argv = [
+            *invocation.candidate.manifest.command,
+            invocation.verb,
+            "--request",
+            str(invocation.request_path),
+            "--result",
+            str(invocation.result_path),
+        ]
+        return ReplayBundle(
+            renderer_id=invocation.candidate.id,
+            request_digest=compute_request_digest(request.to_dict()),
+            manifest_digest=invocation.candidate.manifest_digest,
+            argv=argv,
+            inputs=self._collect_replay_inputs(invocation, request),
+            logs=self._replay_logs(error),
+            partial_result=self._read_partial_result(invocation.result_path),
+            payload=payload_dict,
+            metadata=metadata,
+        )
+
+    def _collect_replay_inputs(
+        self,
+        invocation: _InvocationContext,
+        request: RenderRequest,
+    ) -> dict[str, str]:
+        """Locate the exact input files the failing backend was given.
+
+        Payload paths (the backend-visible request) win over the top-level
+        request so planned segment renders capture their materialized
+        timelines; a theme file referenced by the timeline is included when
+        it resolves to a real file.
+        """
+
+        payload = invocation.payload
+        payload_dict = (
+            payload.to_dict() if hasattr(payload, "to_dict") else dict(payload)
+        )
+        timeline_source = payload_dict.get("timeline_path") or request.timeline_path
+        assets_source = payload_dict.get("assets_registry_path") or (
+            request.assets_registry_path
+        )
+        inputs: dict[str, str] = {}
+        if timeline_source and Path(timeline_source).is_file():
+            inputs["timeline"] = str(Path(timeline_source))
+        if assets_source and Path(assets_source).is_file():
+            inputs["assets_registry"] = str(Path(assets_source))
+        theme = self._theme_file(timeline_source)
+        if theme is not None:
+            inputs["theme"] = theme
+        return inputs
+
+    @staticmethod
+    def _theme_file(timeline_source: str | None) -> str | None:
+        """Resolve a timeline's ``theme`` reference when it names a file."""
+
+        if not timeline_source:
+            return None
+        try:
+            data = json.loads(Path(timeline_source).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        if not isinstance(data, Mapping):
+            return None
+        theme = data.get("theme")
+        if isinstance(theme, str) and theme and Path(theme).is_file():
+            return str(Path(theme))
+        return None
+
+    def _replay_logs(self, error: Any) -> dict[str, str]:
+        """Collect the failing invocation's stdout/stderr diagnostics."""
+
+        logs: dict[str, str] = {}
+        if error is not None:
+            details = error.details or {}
+            for stream in ("stdout", "stderr"):
+                value = details.get(stream)
+                if isinstance(value, str) and value:
+                    logs[stream] = value
+        if not logs:
+            transport = self._transport
+            last_logs = getattr(transport, "last_logs", None)
+            if isinstance(last_logs, Mapping):
+                for stream, value in last_logs.items():
+                    if isinstance(value, str) and value:
+                        logs.setdefault(str(stream), value)
+        return logs
+
+    @staticmethod
+    def _read_partial_result(result_path: Path) -> Any:
+        """Read the backend's authoritative result file if it wrote one."""
+
+        try:
+            if not result_path.is_file():
+                return None
+            raw = result_path.read_text(encoding="utf-8")
+        except OSError:
+            return None
+        if not raw.strip():
+            return None
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            return raw
+
+    def _replay_destination(
+        self,
+        *,
+        renderer_id: str,
+        request_digest: str,
+    ) -> Path:
+        """Resolve the bundle directory for the current failure.
+
+        Ownership precedence: an attached project run (``ASTRID_TASK_*``
+        environment) owns bundles under the run's ``logs/replays`` directory;
+        otherwise an explicit ``replay_root`` is used; otherwise a default
+        sibling of the render output.
+        """
+
+        project_slug = os.environ.get(ASTRID_TASK_PROJECT)
+        run_id = os.environ.get(ASTRID_TASK_RUN_ID)
+        if project_slug and run_id:
+            base = (
+                run_dir(project_slug, run_id, root=resolve_projects_root())
+                / "logs"
+                / "replays"
+            )
+        elif self._replay_root is not None:
+            base = self._replay_root
+        else:
+            output = self._active_output
+            base = (
+                output.parent / f".{output.name}.replay"
+                if output is not None
+                else Path(".astrid-replays")
+            )
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f")
+        name = f"replay-{stamp}-{renderer_id}-{request_digest[:12]}"
+        candidate = base / name
+        suffix = 2
+        while candidate.exists():
+            candidate = base / f"{name}-{suffix}"
+            suffix += 1
+        return candidate
 
     @staticmethod
     def _artifact_path(result: RenderResult, workspace: Path) -> Path:

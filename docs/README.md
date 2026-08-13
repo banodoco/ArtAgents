@@ -48,6 +48,10 @@ Contributor-facing architecture docs live under
   envelopes.
 - **[Environment Variables](reference/env-vars.md)** — Canonical `ASTRID_*` reference.
 - **[Creating Tools](guides/creating-tools.md)** — Adding new capabilities.
+- **[Debugging Renderers](guides/debugging.md)** — Validating, smoking, and
+  debugging pluggable timeline renderers; the failure replay bundle.
+- **[Render Backend v1](contracts/render-backend-v1.md)** — The protocol-v1
+  pluggable renderer contract and the renderer-author golden path.
 - **[Skills Install](guides/skills-install.md)** — Installing Astrid prompt content as
   skills into Claude Code, Codex, and Hermes.
 - **[HOOKS](guides/hooks.md)** — Claude Code stop hook for re-injecting task-mode rules.

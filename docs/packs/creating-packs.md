@@ -342,6 +342,16 @@ facade id or ask callers to import its Python module. See the complete wire,
 artifact, profile, audio, finalization, and provenance contract in
 [render-backend-v1.md](../contracts/render-backend-v1.md).
 
+To author a renderer without hand-writing the pack layout, scaffold the
+canonical four-file pack (`pack.yaml`, `renderer.yaml`, `render.py`,
+`test_renderer.py`) with `python3 -m astrid renderers create <name> <dest>`,
+then follow the golden path — generated test → `renderers validate` → trusted
+`packs install` → `renderers list`/`inspect` → `renderers smoke` → provenance
+sidecar — in
+[render-backend-v1.md](../contracts/render-backend-v1.md#renderer-author-golden-path).
+The scaffold destination directory name becomes the pack id (and must match
+it for `packs install`), and the renderer id becomes `<dest>.<name>`.
+
 ### Executor Manifest (`executor.yaml`)
 
 An executor is a concrete unit of work an agent can run. Each
@@ -390,6 +400,14 @@ The recommended workflow for creating a pack:
    have known `schema_version` values, and that declared content
    roots, docs, runtime entrypoint files, and rendering extension manifests
    exist on disk.
+
+For a pack that contributes a timeline renderer (rather than an executor),
+use `python3 -m astrid renderers create <name> <dest>` instead of
+`executors new`; the scaffold writes the four-file renderer pack and is
+installable as-is. Validate with `renderers validate <path>`, discover with
+`renderers list`/`renderers inspect <id>`, and smoke with
+`renderers smoke <id>`. See the golden path in
+[render-backend-v1.md](../contracts/render-backend-v1.md#renderer-author-golden-path).
 
 All scaffold commands validate their output. A round-trip of
 `packs new` → `executors new` → `orchestrators new` →

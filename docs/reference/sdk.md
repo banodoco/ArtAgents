@@ -305,6 +305,114 @@ if result.manifest_path:
     print(f"kind={manifest['kind']}, outputs={len(manifest['outputs'])}")
 ```
 
+## Rendering SDK
+
+The public rendering surface (`astrid.render`, `astrid.support`,
+`astrid.renderer_main`, `astrid.RenderContext`) wraps the frozen
+protocol-v1 rendering boundary described in
+[render-backend-v1.md](../contracts/render-backend-v1.md). Every JSON payload
+it writes is the `to_dict()` of a frozen core DTO — there are no SDK-only wire
+fields and no semantics drift from the raw command/JSON backend path.
+
+### `render(timeline_path, ...) -> Path`
+
+Builds a `RenderRequest` from friendly arguments and dispatches through the
+shared `RenderService`, returning the published output path (and writing the
+provenance sidecar next to it):
+
+```python
+import astrid
+
+out = astrid.render(
+    "out/hype.timeline.json",
+    assets_registry_path="out/hype.assets.json",
+    backend="rendering.remotion",        # strict qualified selector
+    backend_config={"rendering.remotion": {"quality": "preview"}},
+    out_path="out/hype.mp4",
+)
+print(out)          # out/hype.mp4
+# sidecar: out/hype.mp4.provenance.json
+```
+
+`selector`/`engine`/`backend` are the service's three spellings of the same
+renderer selector and must not disagree. `window` accepts a `FrameWindow` or a
+wire mapping, `audio` accepts `AudioOwnership` or its string value, and
+`profile` accepts a `RenderProfile` or a wire mapping. `out_path` selects the
+published destination; when `output_name` is omitted its basename is used.
+
+### `support(backend, ...) -> SupportReport`
+
+Resolves the qualified backend and returns its request-sensitive
+`SupportReport` — exactly what the public backend path produces. Pass a frozen
+`RenderRequest`/wire mapping or friendly path/audio/profile arguments:
+
+```python
+import astrid
+
+report = astrid.support("acme_wave.wave", timeline_path="out/hype.timeline.json")
+print(report.supported, report.features, report.alternatives)
+```
+
+### `renderer_main([...]) -> int`
+
+The protocol-v1 command entrypoint, mirroring the raw-command backend's file
+protocol exactly — this is what a manifest `command` can point at instead of a
+hand-written `render.py`:
+
+```
+python -m astrid.sdk.rendering render|support --request <abs.json> --result <abs.json>
+```
+
+It reads the request JSON, dispatches through the rendering registries and the
+command transport, validates the result with the core artifact validator, and
+writes the frozen result shape to `--result`. Failures are written as the
+frozen `RendererError` JSON shape (exit 0); `KeyboardInterrupt` and
+`SystemExit` are re-raised. The selected backend is resolved from
+`ASTRID_RENDER_BACKEND` (set by the transport when this runs as a manifest
+command), then from the request's `backend_config` namespace — exactly one,
+never from timeline shape.
+
+### `RenderContext`
+
+`RenderContext` is the per-invocation facade a third-party `render.py` author
+gets for the duration of one render: workspace-validated path allocation
+(`output_path`, `workspace_path`, `temp_dir`), asset descriptor resolution
+(`asset_path`, `asset_url`, `resolved_registry`), a sanitized subprocess
+runner (`run` with scrubbed env, bounded redacted output, hard timeout,
+process-group teardown), redacted logs (`log`, `progress`), a cooperative
+interruption flag (`interrupt_requested`, `raise_if_interrupted`), media
+probing and hashing (`probe_media`, `sha256`), audio completion
+(`complete_audio`), and named attachments (`add_attachment`, `attachments`).
+It is not an OS sandbox — it enforces workspace conventions, not process
+isolation — and it cleans up its temp artifacts on exit.
+
+```python
+from astrid import RenderContext
+from astrid.core.rendering.contracts import RenderRequest, RenderResult
+
+def render(workspace, request: RenderRequest) -> RenderResult:
+    with RenderContext(workspace, backend="acme_wave.wave") as ctx:
+        ctx.log("rendering %s" % request.output_name)
+        out = ctx.output_path(request.output_name)          # workspace/outputs/<name>
+        ctx.run(["vendor-tool", "--input", ctx.asset_path("hero"), "--out", out])
+        media = out.read_bytes()
+        ctx.add_attachment("project", media, kind="project")
+        return RenderResult(
+            schema_version=1,
+            video={"path": "outputs/%s" % request.output_name,
+                   "profile": _probe(ctx, out),
+                   "sha256": ctx.sha256(out),
+                   "duration_frames": 240,
+                   "audio": "rendered",
+                   "attachments": {a.name: a for a in ctx.attachments.values()}},
+            backend_fragments={"acme_wave.wave": {"vendor_version": "7.2"}},
+            audio_ownership="rendered",
+            normalization=[],
+            logs=list(ctx.logs),
+            metadata={},
+        )
+```
+
 ## Stability Tiers
 
 See [platform-contract.md](../contracts/platform-contract.md).

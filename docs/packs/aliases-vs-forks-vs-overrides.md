@@ -278,3 +278,14 @@ The current CLI exposes override management for executors, orchestrators, and
 elements only; do not invent `astrid renderers override ...` commands. Rendering
 hosts and tests set these typed mappings through `OverrideStore` until a public
 rendering-registry CLI is added.
+
+The `renderers` CLI surface today is `python3 -m astrid renderers
+create|list|inspect|validate|smoke`: `create <name> <dest>` scaffolds the
+four-file renderer pack, `list` prints every discovered
+renderer/planner/finalizer qualified id, `inspect <id>` shows one candidate's
+manifest fields and trust eligibility, `validate <path>` statically validates
+a pack directory, and `smoke <id>` runs a deterministic direct-service render
+against an execution-eligible candidate. A trusted install uses
+`packs install --trust --yes`, and a failed invocation is debugged from its
+retained replay bundle. See the golden path in
+[render-backend-v1.md](../contracts/render-backend-v1.md#renderer-author-golden-path).

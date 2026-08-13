@@ -392,6 +392,16 @@ python3 -m astrid elements inspect <kind> <id> --json
 | **Orchestrator** | A workflow that coordinates executors or child orchestrators |
 | **Element** | A reusable render building block: effect, animation, or transition |
 
+Timeline **renderers, planners, and finalizers** are a fourth surface but not
+executor kinds: they are protocol commands registered by a pack through
+`extensions.rendering.{renderers,planners,finalizers}` behind the stable
+`rendering.render` facade. Scaffold a renderer with
+`python3 -m astrid renderers create <name> <dest>`, then follow the golden
+path in `docs/contracts/render-backend-v1.md` (generated test → `renderers
+validate` → trusted `packs install` → `renderers smoke` → provenance sidecar).
+SDK authors use `astrid.render`/`astrid.support`/`astrid.renderer_main`/
+`astrid.RenderContext` (see `docs/reference/sdk.md`).
+
 ### Aliases, Forks, and Overrides
 
 Three mechanisms let you customize without editing originals:
@@ -418,6 +428,11 @@ Full details:
 - [docs/contract.md](../../../../docs/packs/contract.md) — Formal pack-system definitions
 - [docs/fork-and-update.md](../../../../docs/packs/fork-and-update.md) — Personal forks,
   dirty detection, and update management
+- [docs/render-backend-v1.md](../../../../docs/contracts/render-backend-v1.md) — Protocol-v1
+  renderer contract and the renderer-author golden path (`astrid renderers create` → test →
+  validate → trusted install → smoke → provenance)
+- [docs/sdk.md](../../../../docs/reference/sdk.md) — Python SDK, including the rendering SDK
+  (`render`, `support`, `renderer_main`, `RenderContext`)
 
 The capability index below is **auto-generated** by
 `scripts/gen_capability_index.py`. Re-run it after editing executor,

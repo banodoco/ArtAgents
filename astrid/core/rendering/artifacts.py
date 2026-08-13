@@ -284,7 +284,7 @@ def _same_profile_value(field: str, actual: Any, expected: Any) -> bool:
     if field == "video_level":
         return _level(actual) == _level(expected)
     if field == "pixel_format":
-        # ffmpeg's deprecated yuvj* names are full-range variants of the
+        # the encoder's deprecated yuvj* names are full-range variants of the
         # standard yuv* formats (e.g. yuvj420p == yuv420p); treat them as
         # equivalent so strict validation accepts real encoder output.
         return _pixel_format_canonical(actual) == _pixel_format_canonical(expected)

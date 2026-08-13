@@ -144,6 +144,23 @@ under `backend_fragments[qualified-id]`. The sidecar also retains the existing
 v1 projections for active packs/theme, element resolution, staging, and
 specialized render metadata when applicable.
 
+## Authoring a renderer behind this facade
+
+The facade never changes when a new backend appears: a pack contributes a
+qualified renderer/planner/finalizer through
+`extensions.rendering.{renderers,planners,finalizers}` and `RenderService`
+discovers and invokes it. To author one, scaffold the canonical four-file pack
+with `python3 -m astrid renderers create <name> <dest>`, implement
+`render.py`, run the generated `test_renderer.py`, then `renderers validate` →
+trusted `packs install` → `renderers smoke` → provenance sidecar (the golden
+path in `docs/contracts/render-backend-v1.md`). `render.py` may parse the raw
+v1 file protocol or use the public rendering SDK (`astrid.renderer_main` as
+the manifest command, `astrid.RenderContext` inside the implementation — see
+`docs/reference/sdk.md`). A failed invocation retains a self-contained replay
+bundle — resolved request, localized inputs, configuration, redacted logs,
+partial result, and the exact replay command — so backend authors can
+reproduce failures without rerunning the editorial pipeline.
+
 ## Lower-level debug commands
 
 Use direct module execution only when debugging the facade itself. It bypasses

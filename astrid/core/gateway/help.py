@@ -89,8 +89,8 @@ Start here:
   python3 -m astrid models {{list,show}} ...
     # modalities -- output modality discovery
   python3 -m astrid modalities {{list,inspect}} ...
-    # renderers -- pluggable timeline renderer scaffolding
-  python3 -m astrid renderers {{create}} ...  # scaffold a new four-file renderer pack
+    # renderers -- pluggable timeline renderer scaffolding, discovery, smoke
+  python3 -m astrid renderers {{create,list,inspect,validate,smoke}} ...  # scaffold, discover, inspect, validate, and smoke renderer packs
   python3 -m astrid reigh-data --project-id PROJECT_ID [--out PATH]
   python3 -m astrid worker --pool banodoco [--worker-id ID] [--max-iterations N]
     # run-audit — inspect completed runs
