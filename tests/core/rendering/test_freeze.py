@@ -387,9 +387,11 @@ def test_freeze_package_data_and_exact_builtin_registry_surface() -> None:
     assert {candidate.id for candidate in renderers.list()} == {
         "rendering.remotion",
         "rendering.ffmpeg",
+        "rendering.threejs",
     }
     assert {candidate.id for candidate in planners.list()} == {
-        "rendering.legacy_hybrid"
+        "rendering.legacy_hybrid",
+        "rendering.threejs-hybrid",
     }
     assert {candidate.id for candidate in finalizers.list()} == {
         "rendering.ffmpeg-finalizer"

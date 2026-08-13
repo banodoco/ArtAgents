@@ -1,0 +1,23 @@
+## Ranked findings
+
+1. **The whole V1 render is already under one non-recursive lock.** `_execute_remotion` acquires `remotion_render_lock()` (remotion/run.py:613) → `_execute_remotion_locked` (626) contains *every* shared-state mutation: registry regen (640), props write `.remotion-props.json` (643, 685), asset staging `remotion/public/astrid-effects/<hash>` (649, 678–683, cleaned 726), the asset HTTP server (657), and `npx remotion render` (692). Lock path: `remotion/.astrid-registry.lock` (lock.py:33).
+
+2. **Check-then-act is race-free.** `_regenerate_element_registries` (274–282) routes to `_locked` when held, else acquires (281). `_locked` (285–318) compares `.astrid-registry-state.json` hash (read 257–263) vs `_effective_registry_state` (252–254; compute fn gen_effect_registry.py:364–389), checks outputs exist (228) and `_active_theme_pointer_current` (232), then runs the generator subprocess (301–317) and writes state (318) — all under the lock.
+
+3. **Mutation inventory** (`_main_unlocked`, gen_effect_registry.py:524–550): 3 package `*.generated.ts` (39–43), 3×5 shim families (46–51, 344–352), `_active_theme` symlink + `.txt` (52–53, 299–317). No node_modules caches, no `.astrid-registry-state.json` (only run.py:318 writes it, under lock). OUTPUTS may land inside `node_modules/@banodoco/timeline-composition/typescript/src` (run.py:198–207) — env-directed target, same lock.
+
+4. **All other writers share the lock:** `npm run gen-types` (remotion/package.json:10) → gen_remotion_types.main (281–287) → `_main_unlocked` also calls `gen_effect_registry._main_unlocked` (277); Makefile:44; legacy_engine.py:57 reuses the same function.
+
+5. **Defect:** lock.py:130 reads `token=_LOCAL...th))` — the `_LOCAL_LOCK_PATH.set(...)` is malformed; in-process held-lock tracking (108, 114) is broken, and if it's a syntax error the module won't import. Asset-cache pattern to mirror: asset_cache.py:156–160, 290–296.
+
+## Verified facts
+Lock spans regen, props, staging, HTTP server, and Remotion subprocess; state json written only under lock; all generator entrypoints lock-guarded.
+
+## Unknowns
+Whether lock.py:130 is real corruption or planted; in-process vs subprocess RenderService dispatch.
+
+## Risks
+lock.py:130 breaks `remotion_render_lock_held()` → re-acquire of non-recursive lock deadlocks/crashes every render.
+
+## Suggested approach
+Keep the single lock at run.py:613; fix lock.py:130; keep `.astrid-registry-state.json` sole state file under lock; no extra lock scope needed for V1.

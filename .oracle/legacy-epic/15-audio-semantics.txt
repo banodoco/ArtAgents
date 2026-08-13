@@ -1,0 +1,26 @@
+All evidence gathered. Here's the report.
+
+---
+
+## Timeline audio semantics — findings
+
+**1. Schema fields (TS `schemas.ts`, mirrored in `banodoco_schema.py`)**
+- Track: `kind: "audio"` (schemas.ts:4), `volume?: number` (:95), `muted?: boolean` (:96); Python mirror at banodoco_schema.py:167-168.
+- Clip: `volume?: number` (schemas.ts:66), `from`/`to` trimming (:62-63), `effects?: TimelineEffect[]|Record` where `TimelineEffect = {fade_in?, fade_out?}` (:11-14,81), open `params` record (:82). **No clip-level `muted`** — `_CLIP_ALLOWED` (banodoco_schema.py:340-348) confirms; clip mute idiom is `volume: 0`.
+- Precedence (AudioTrack.tsx:43-45): `track.muted ? 0 : track.volume ?? 1 × clip.volume ?? 1`. Track mute wins; gains multiply.
+
+**2. Remotion** (AudioTrack.tsx:43-70): per-frame `baseVolume × multiplier`; fades read from **`params.fadeIn/fadeOut`** (seconds→frames, linear), not `effects[].fade_*`; `getSanitizedVolume` clamps only ≥0 — **amplification >1 allowed** (duration.ts:24-28).
+
+**3. Python FFmpeg path** (backends/ffmpeg/, not executors/render/run.py which is a dispatcher):
+- Honored: track mute, track×clip volume, from/to trim, sequential audio with `anullsrc` silence fill + `concat` (command.py:285-333).
+- Rejected by validator: clip-level `muted` (support.py:163-166), `params.fadeIn/fadeOut` (:213-221), `effects` incl. fade keys (:190-196), speed≠1 (:167-172), overlapping audio (:358-370), audio past visual end (:366-369), embedded audio on visual clips unless gain 0 (:707-715). Gains clamped to **[0,1]** (:71-75).
+
+**4. Tests** (test_ffmpeg_support.py): fails-closed matrix incl. overlapping audio/fades/effects (:191-217), malformed gains (:320-343), gain multiply→`volume=0.200000` (:346-350), mute/zero→`volume=0.000000` (:353-366), silence-fill concat (:369-391). test_legacy_hybrid.py:254-268 asserts overlap+speed rejection. No test for clip-level `muted` rejection.
+
+**Verified facts**: field inventory above; precedence = track.muted ⊃ track.volume × clip.volume; fades only via params/effects, both rejected.
+
+**Unknowns**: whether >1 volume (Remotion-supported) should be rejected vs implemented; `effects[].fade_*` rejection message is generic ("unsupported effects") while params fades are specific.
+
+**Risks**: gains >1 silently diverge from Remotion; two fade syntaxes need both rejections.
+
+**Suggested validator rules**: muted(bool)→0; each gain finite ∈[0,1]; reject clip `muted`; reject non-empty fadeIn/fadeOut params and effects fade_in/fade_out; require to>from, sequential non-overlapping audio within visual bounds; reject embedded visual audio unless gain 0; ownership RENDERED iff audio clips exist.

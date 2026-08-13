@@ -1,0 +1,32 @@
+## Findings (ranked)
+
+1. **Discovery precedence** — `SOURCE_KINDS = ("source","local","extra","env","installed")` (`discovery.py:31`); `discover_pack_metadata()` walks layers in exactly that order (`discovery.py:79-164`), assigning `priority_index = len(discovered)` (`:111`, lower = higher priority). Layers: `scan()` over `REPO_ROOT/astrid/packs` (`:115`), project-scoped `local` (`:120-123`), `extra_pack_roots` (`:133-139`), `ASTRID_PACKS_PATH` env roots (`:32,131,140-149`), installed via `installed_pack_roots()` (`:150-162`). Every layer skips pack id `"local"`.
+
+2. **Active revisions** — `InstalledPackStore.active_pack_roots()` resolves the `<home>/<pack_id>/active` symlink (`store.py:195-216`, `:113-133`); discovery sees only symlink-resolved dirs. `InstallRecord.active: bool = True` (`store.py:56`) is the active/inactive flag; `mark_inactive`/`_mark_revision_active` flip it (`:231-237,318-351`).
+
+3. **Trust is implicit, not a field** — no `trusted` on `PackDefinition` (`definition.py:32-46`). Runtime trust is derived: `_derive_pack_trust` (`rendering/registry.py:687-714`) trusts source/local/extra, **rejects env** ("inspectable but not executable", `:707-711`), and validates installed packs via `_installed_pack_trust` (`:717-780`): active symlink, revision path, install-record audit (timestamps, `trust_method/actor`, manifest digest, `no_sandbox_warning_version`, `V1_TRUST_BLOCK`), plus `permissions_accepted` must exactly equal manifest permissions (`:852-871`). Install-time trust = typing `trust <pack_id>` (`install_trust.py:202-214`); `trust_tier = source_type` (`install_local.py:293`).
+
+4. **Downloaded-but-not-installed is inert** — git clones land in temp dirs (`install_git.py:155`); install stages at `<home>/<pack_id>/staging` (`store.py:135`) which `active_pack_roots()` never resolves → not discoverable, not executable.
+
+5. **Permissions are disclosure-only** — vocabulary `PACK_PERMISSION_IDS = ("project_files","network","subprocess","environment","accelerator","external_services")` (`_common.py:48-55`); declared in `pack.yaml` `permissions: [{id,reason,access,services}]` (`permissions.py:70-105`, `loader.py:132`). `V1_TRUST_BLOCK = {sandbox:"none", permission_enforcement:"disclosure_only"}` (`validate.py:106-110`); "runs with your user's process permissions" (`install_trust.py:166-169`).
+
+6. **`discover_pack_metadata()` shape** — `tuple[DiscoveredPack,...]` (`discovery.py:35-76`): `pack`, `source_kind`, `priority_index`; props `id`, `pack_dir`, roots. No `active` field; activeness only meaningful for `installed` and verified downstream. Callers: `rendering/registry.py:506`, `backends/registry.py:159`, `element/registry.py:207,303`, `skills/discovery.py:143`, `sdk/discovery.py:140`.
+
+## Verified facts
+- Priority order source→local→extra→env→installed (`discovery.py:31,79-164`).
+- Active flag = `InstallRecord.active` + `active` symlink (`store.py:56,113-133,231`).
+- No `trusted` field; trust = install audit (`registry.py:717-780`).
+- Permissions unenforced; `V1_TRUST_BLOCK` disclosure-only (`validate.py:106-110`).
+
+## Unknowns
+- Whether `PackDefinition.status`/`visibility` filter execution anywhere (only discovery filtering of `hidden` in `loader.py:101`).
+- Enforcement beyond rendering registry (generation/executor paths use `_PackTrust` too, `backends/registry.py:159` — unverified depth).
+
+## Risks
+- Env/extra packs shadow higher-precedence installed declarations (mitigated only by dual resolvers, `registry.py:883-908`).
+- Manifest-digest audit doesn't cover pack code — post-install mutation passes.
+- Trust is one-shot; no re-validation at load.
+- Staging dirs inside install_root could be walked by naive scans.
+
+## Suggested approach
+Introduce an explicit `trusted`/`trust_tier` field on `DiscoveredPack`/`PackDefinition` derived from the install audit, gate plugin registration on it, and never execute packs lacking a valid install record. Treat env/extra roots as inspect-only, mirroring `_derive_pack_trust`, and enforce declared permissions at the entrypoint boundary rather than relying on disclosure.

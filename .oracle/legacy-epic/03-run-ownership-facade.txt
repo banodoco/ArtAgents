@@ -1,0 +1,23 @@
+## Ranked findings
+
+1. **Run creation is exclusively in the shared skeleton, not the subprocess.** `CapabilityRunner.run` (capability_runner.py:106-154) → `prepare_project` → `_prepare_project_request` (executor/runner.py:920-960) → `prepare_project_run` (project/run.py:145-288): run_id = `paths.validate_run_id(run_id or generate_run_id())` (:252), run_root = `paths.run_dir(...)` (:253-257), `run.json` written RUNNING (:279-280). Subprocess spawn is `subprocess.run` at runner.py:645-651 with env from `_command_subprocess_env` (:1125-1141), which sets `ASTRID_INTERNAL_INVOCATION=1` (:1137) and `ASTRID_PROJECT_RUN=1` via `_project_subprocess_env` (run.py:104-110). A bare `subprocess.run([...])` inside an executor creates **no** ledger entry — nothing in that path calls `prepare_project_run`.
+
+2. **`rendering.render` runs as subprocess `python -m astrid.packs.rendering.executors.render.run`** (executor.yaml:19-28). It is `kind: built_in` with a command, so `_run_builtin_executor` falls through to `_run_explicit_command_executor` (runner.py:575-577). At `render()` time the run dir + `run.json` already exist; artifacts (video + `.provenance.json`, executor.yaml:174-191) are resolved only if on disk (runner.py:375-405) and mirrored at finalize (project/run.py:405-419).
+
+3. **`_normalize_render_command_compat` does not exist** (grep across repo: 0 hits). The theme-arg shim is `_insert_input_arg_mappings` (runner.py:1221-1244): `--assets` is pinned `before: "--out"` (executor.yaml:34); theme/engine/backend/backend-config/output-name/keep-previous-renders (executor.yaml:36-65) have no `before` → appended after `--out` (:1234-1243). Argparse tolerates the order (run.py:234-275).
+
+4. **Engine validation** is `_translate_legacy_selector` (rendering/service.py:127-166): allowed = `remotion` (auto-routes ffmpeg→remotion, :140-146), `ffmpeg` (:138-139), `hybrid` (:147-152), or qualified ids matching `_QUALIFIED_ID_RE` (:153-154); else error listing `["remotion","ffmpeg","hybrid"]` (:155-166). CLI also rejects `--engine`+`--backend` (render/run.py:286-290).
+
+5. **Guard**: `guard_canonical_entrypoint` (pack/entrypoint.py:37-56) exits 2 unless `ASTRID_INTERNAL_INVOCATION` is set (:42-43) or the contextvar matches (:44-45). Direct `python -m ...render.run` trips it — render/run.py:7 runs the guard at import, pre-argparse.
+
+### Verified facts
+Skeleton-owned runs; subprocess env carries both markers; guard blocks direct-module invocation; selector validation lives in `RenderService`.
+
+### Unknowns
+Whether any historical `_normalize_render_command_compat` existed in another branch; exact ordering guarantees for appended flags beyond insertion order.
+
+### Risks
+Nested runs if a child re-invokes `executors run` (auto-resolve, runner.py:1048-1058); argv ordering drift if input_args metadata diverges from run.py argparse; direct-module bypass is blocked but only via env marker (spoofable).
+
+### Suggested approach
+Treat runner.py:1221-1244 + executor.yaml input_args as the canonical shim; add `before` pins for theme/engine to stabilize argv; add a test asserting subprocess.run creates no run record.

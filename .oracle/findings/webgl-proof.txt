@@ -1,0 +1,4 @@
+size: (160, 90)
+distinct_colors: 4
+top_colors: [(12464, (0, 0, 0)), (1690, (186, 0, 8)), (242, (186, 0, 9)), (4, (185, 0, 10))]
+PILLOW_ASSERT_OK: 160x90 non-uniform WebGL frame

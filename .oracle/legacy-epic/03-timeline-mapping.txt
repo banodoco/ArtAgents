@@ -1,0 +1,15 @@
+**Verified findings** (all paths repo-relative):
+
+**1. Timeline schema** — `astrid/core/timeline/banodoco_schema.py:108-109` defines `BUILTIN_CLIP_TYPES = ("media","hold","text","effect-layer")`; clip keys `id,at,track,clipType,asset,from,to,speed,hold,volume,opacity,params,text,entrance,exit,transition,effects` (354-362); tracks `id,kind,label` (+scale/fit/volume/muted/blendMode, 363); `from`/`from_` swap at JSON boundary (`banodoco_composer.py:35-45`); canvas `theme_overrides.visual.canvas{width,height,fps}` (schema fallback 63-68); background as `theme_overrides.visual.background:"#1a1a2e"` (`test_hyperframes_backend.py:89,413`) or theme `visual.color.bg` (`backends/remotion/run.py:150`). Text ecosystem keys `content,fontSize,color,align,weight,textShadow,maxWidth,anchor,offsetX,offsetY` (`fixtures/renderer_packs/hyperframes/render.py:69-80`); `TextClipData` adds `fontFamily,bold,italic` (schema 213-220). Tracks paint reversed-order (render.py:272-276).
+
+**2. Assets** — `{"assets":{id:{file,type,duration,resolution,fps}}}` (schema 228-229; test 520-536); `file` resolves relative to registry dir (`assets.py:230`; render.py:431-433). `AssetMaterializer(registry_path,allowed_root,staging_parent)` (`assets.py:166-215`), `needs_server` (217), `resolved_registry(server)` rewrites `file`→staged URL (450-472); remotion stages via `InvocationAssetServer` (`run.py:652-663`), hyperframes via `_stage_assets`→`workspace/assets/` (render.py:406-441).
+
+**3. Text→three.js** — Remotion passes props `{timeline,assets,theme}` (`test_remotion_backend.py:246`) to `TimelineComposition` (`Root.tsx:6,50`); command `npx remotion render TimelineComposition --props … --allow-html-in-canvas` (`run.py:692-704`). Canvas texture can carry identical params — hyperframes already maps them 1:1 to CSS (render.py:348-372); `text-card` component reads the same (`component.tsx:10-17`).
+
+**4. Tests** — skip helper `_require_hyperframes_environment` (node≥22 PATH+nvm scan, ffmpeg; test:40-68), `_node_on_path` (71-80), timeout markers (259,307,503), ffprobe codec/size/duration asserts (288-304,377-395), sidecar asserts (281-287). Remotion tests mock `subprocess.run` (217-227) + golden props (315-332); real renders via combined test (504-592, skips without `remotion/node_modules`). Audit allowlist (`test_generic_code_audit.py:41,47-70`) scans only `remotion/ffmpeg/legacy_hybrid/ffmpeg-finalizer`; a distinct `threejs` name needs no entry.
+
+**5. Provenance** — `engine` (provenance.py:444), `routing.resolved_backend/resolved_policy{planner,renderers,finalizer}` (126-176), `audio_ownership`, `backend_fragments` namespaced per backend id, core keys protected (40-53), `segments_v2` (461; `contracts.py:1306-1310`). Fragment shape: `{renderer,composition,…}` (render.py:579-586).
+
+**6. CLI** — verbs create/list/inspect/validate/smoke/support/replay (`cli.py:83-889`); new backends appear via `--pack-root` (284,925) with zero core edits (test:120-133).
+
+**Ranking:** 1 schema → 2 assets/staging → 4 test pattern → 5 provenance → 3 text params → 6 CLI/audit.

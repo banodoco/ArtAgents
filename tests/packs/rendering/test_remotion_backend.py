@@ -2,14 +2,17 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 from unittest import mock
 
+import pytest
 import yaml
 
 from astrid.core import timeline
@@ -28,6 +31,7 @@ from astrid.core.rendering.contracts import (
 from astrid.core.rendering.transport import CommandTransport
 from astrid.packs.rendering.backends.remotion import run as remotion
 from astrid.packs.rendering.executors.render import run as facade
+from astrid.sdk.rendering import render
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -927,3 +931,144 @@ class RemotionBackendRegistryGenerationTest(unittest.TestCase):
         self.assertEqual(env["ASTRID_TASK_RUN_ID"], "task-run-9")
         # The Remotion-specific build-tool addition is the composition source.
         self.assertEqual(env["ASTRID_TIMELINE_COMPOSITION_SRC"], str(composition_src))
+
+
+# ---------------------------------------------------------------------------
+# Regression: ordinary rendering.remotion still renders under the global
+# remotion.config.ts ANGLE (Chromium OpenGL renderer) setting.  The global
+# ANGLE change (batch 2, needed by Three.js WebGL) must not break the
+# ordinary Remotion path or its identity.  Skips ONLY for genuinely missing
+# environment; a render failure is never turned into a skip.
+# ---------------------------------------------------------------------------
+
+
+def _remotion_missing_environment() -> list[str]:
+    missing = [
+        f"{binary} executable"
+        for binary in ("node", "npx", "ffprobe")
+        if shutil.which(binary) is None
+    ]
+    node_modules = ROOT / "remotion" / "node_modules"
+    if not node_modules.is_dir():
+        missing.append("remotion/node_modules")
+    return missing
+
+
+def _require_remotion_environment() -> None:
+    missing = _remotion_missing_environment()
+    if missing:
+        pytest.skip(
+            "Remotion real render skipped: missing optional dependencies: "
+            + ", ".join(missing)
+        )
+
+
+@contextmanager
+def _remotion_execution_env():
+    """Transport-spawned children must resolve the same node and the same
+    python3 (with the banodoco timeline schema) as the test process."""
+    node_bin = (
+        str(Path(shutil.which("node")).resolve().parent)
+        if shutil.which("node")
+        else ""
+    )
+    python_bin = str(Path(sys.executable).resolve().parent)
+    old_path = os.environ.get("PATH", "")
+    os.environ["PATH"] = ":".join(
+        [d for d in (python_bin, node_bin) if d] + [old_path]
+    )
+    try:
+        yield
+    finally:
+        os.environ["PATH"] = old_path
+
+
+def _remotion_text_timeline(tmp_path: Path) -> Path:
+    path = tmp_path / "remotion-angle.timeline.json"
+    timeline.save_timeline(
+        {
+            "theme": "banodoco-default",
+            "theme_overrides": {
+                "visual": {
+                    "canvas": {"width": 320, "height": 180, "fps": 24},
+                    "background": "#1a1a2e",
+                }
+            },
+            "tracks": [{"id": "v1", "kind": "visual", "label": "Title"}],
+            "clips": [
+                {
+                    "id": "title",
+                    "at": 0.0,
+                    "track": "v1",
+                    "clipType": "text",
+                    "hold": 0.5,
+                    "text": {"content": "Remotion ANGLE", "fontSize": 64, "color": "#ffffff"},
+                    "params": {"weight": 700},
+                }
+            ],
+        },
+        path,
+    )
+    return path
+
+
+@pytest.mark.timeout(600)
+def test_remotion_real_render_under_global_angle_keeps_identity(
+    tmp_path: Path,
+) -> None:
+    """A real rendering.remotion render (full timeline, no planner) succeeds
+    with the global ANGLE Chromium renderer on and its provenance says
+    rendering.remotion — never rendering.threejs."""
+    _require_remotion_environment()
+    timeline_path = _remotion_text_timeline(tmp_path)
+    output = tmp_path / "remotion-angle.mp4"
+    with _remotion_execution_env():
+        published = render(
+            timeline_path=timeline_path,
+            assets_registry_path=None,
+            out_path=output,
+            backend="rendering.remotion",
+        )
+
+    video_path = Path(published)
+    assert video_path.is_file()
+    assert video_path.stat().st_size > 0
+    sidecar = Path(f"{video_path}.provenance.json")
+    assert sidecar.is_file()
+    payload = json.loads(sidecar.read_text(encoding="utf-8"))
+    assert payload["sha256"] == hashlib.sha256(video_path.read_bytes()).hexdigest()
+    assert payload["engine"] == "rendering.remotion"
+    assert payload["routing"]["resolved_backend"] == "rendering.remotion"
+    serialized = json.dumps(payload)
+    assert "rendering.threejs" not in serialized
+    fragment = payload["backend_fragments"]["rendering.remotion"]
+    assert fragment["renderer"] == "remotion"
+    assert fragment["legacy_v1"]["engine"] == "remotion"
+
+    probe = subprocess.run(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-count_frames",
+            "-show_entries",
+            "stream=codec_name,codec_type,width,height,pix_fmt,avg_frame_rate,nb_read_frames",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "json",
+            str(video_path),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    streams = json.loads(probe)["streams"]
+    video = next(s for s in streams if s["codec_type"] == "video")
+    assert video["codec_name"] == "h264"
+    assert "420p" in video["pix_fmt"], video
+    assert video["width"] == 320 and video["height"] == 180
+    assert int(video["nb_read_frames"]) == 12, video
+    numerator, denominator = (int(part) for part in video["avg_frame_rate"].split("/"))
+    assert abs(numerator / denominator - 24.0) <= 0.5, video
+    assert any(s["codec_type"] == "audio" and s["codec_name"] == "aac" for s in streams)
