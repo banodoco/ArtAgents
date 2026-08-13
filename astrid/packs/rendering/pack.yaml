@@ -47,6 +47,7 @@ extensions:
       - backends/threejs/renderer.yaml
     planners:
       - planners/legacy_hybrid/planner.yaml
+      - planners/threejs_hybrid/planner.yaml
     finalizers:
       - finalizers/ffmpeg/finalizer.yaml
 aliases:
