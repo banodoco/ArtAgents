@@ -65,6 +65,10 @@ _FONT_SIZE_BY_KIND = {
     "text_lane": 16,
 }
 
+#: Bottom strip inside clip-family cards reserved for the object label; the
+#: thumbnail is pasted above it (with a small top buffer).
+_LABEL_STRIP_H = 20.0
+
 # Bundled TrueType font: repo-owned, license-safe (already tracked in the
 # repository), identical on every host.  Never falls back to a system font.
 _FONT_DIR = Path(__file__).resolve().parent / "fonts"
@@ -89,18 +93,80 @@ def _px(value: float, scale: int) -> int:
     return int(round(value * scale))
 
 
+_CUT_EDGE = (20, 20, 25)  # background color for the torn notches
+
+#: Page chrome gutters (matches layout.py's page margins) used to detect which
+#: side of an in-lane continuation card is cut by the page boundary.
+_PAGE_LEFT_X = 40.0
+_PAGE_RIGHT_X = 1840.0
+
+
+def _torn_edge(draw: ImageDraw.ImageDraw, box: Box, *, scale: int) -> None:
+    """Draw a zigzag 'torn paper' edge + ellipsis on the cut side of an
+    in-lane continuation card so a page-break clip is explicit, not a
+    mysterious truncated rectangle (user: 'say this is cut off')."""
+    x0 = _px(box.x, scale)
+    x1 = _px(box.x + box.w, scale) - 1
+    y0 = _px(box.y, scale)
+    y1 = _px(box.y + box.h, scale) - 1
+    # Cut side: the card edge nearest a page boundary.
+    near_left = (box.x - _PAGE_LEFT_X) < (box.x + box.w - _PAGE_RIGHT_X)
+    edge_x = x0 if near_left else x1
+    # Zigzag notches into the fill along the cut edge.
+    step = max(4, (y1 - y0) // 8)
+    teeth = 4
+    depth = max(3, int((y1 - y0) / 12))
+    for i in range(teeth):
+        ty = y0 + int((i + 0.5) * (y1 - y0) / teeth)
+        direction = 1 if i % 2 == 0 else -1
+        draw.line(
+            [(edge_x, ty - step // 2), (edge_x + direction * depth, ty), (edge_x, ty + step // 2)],
+            fill=_CUT_EDGE,
+            width=max(1, scale),
+        )
+    # "…" ellipsis badge just inside the cut edge, centered vertically.
+    font = _bundled_font(20 * scale)
+    dot = "…"
+    dot_w = draw.textlength(dot, font=font)
+    dx = edge_x + depth + 2 * scale if near_left else edge_x - depth - dot_w - 2 * scale
+    draw.text((dx, y0 + (y1 - y0) // 2 - 10 * scale), dot, font=font, fill=_TEXT)
+
+
 def _contain_fit(image: Image.Image, target_w: int, target_h: int) -> Image.Image:
     """Resize an image to FIT INSIDE (target_w, target_h) without cropping.
 
-    The full image is always visible (letterboxed on the surrounding fill) —
-    the user's "show the full image" requirement; cover-cropping hid content.
-    Deterministic for the pinned Pillow runtime.
+    The full frame is always visible; empty space is letterboxed (lane fill).
     """
-    src_w, src_h = image.size
-    scale_ratio = min(target_w / src_w, target_h / src_h)
-    new_w = max(1, round(src_w * scale_ratio))
-    new_h = max(1, round(src_h * scale_ratio))
+
+    img_w, img_h = image.size
+    if img_w <= 0 or img_h <= 0 or target_w <= 0 or target_h <= 0:
+        return image.copy()
+    scale = min(target_w / img_w, target_h / img_h)
+    new_w = max(1, int(round(img_w * scale)))
+    new_h = max(1, int(round(img_h * scale)))
     return image.resize((new_w, new_h), Image.LANCZOS)
+
+
+def _cover_fit(image: Image.Image, target_w: int, target_h: int, *, anchor_left: bool) -> Image.Image:
+    """Resize an image to FILL (target_w, target_h), cropping overflow.
+
+    Used for page-break continuation cards: the visible portion of a clip
+    that spans a page boundary is shown cropped to the card, anchored at the
+    cut side so the revealed part aligns with the page (user: "show the
+    partially revealed image, cropped off in the side with the delineation").
+    """
+
+    img_w, img_h = image.size
+    if img_w <= 0 or img_h <= 0 or target_w <= 0 or target_h <= 0:
+        return image.copy()
+    scale = max(target_w / img_w, target_h / img_h)
+    new_w = max(1, int(round(img_w * scale)))
+    new_h = max(1, int(round(img_h * scale)))
+    resized = image.resize((new_w, new_h), Image.LANCZOS)
+    # Crop the overflow: keep the anchor side, drop the far side.
+    left = 0 if anchor_left else new_w - target_w
+    top = max(0, (new_h - target_h) // 2)
+    return resized.crop((left, top, left + target_w, top + target_h))
 
 
 def _rect(
@@ -192,6 +258,16 @@ def render_page_png(page: LayoutPage, *, scale: int = 1) -> bytes:
             outline=_CLIP_EDGE if item.kind == "clip" else None,
         )
 
+    # Torn-edge overlay on in-lane continuation cards: a clip segment cut off
+    # by a page break reads as a clipped rectangle.  A zigzag edge on the cut
+    # side + a "..." badge makes the cut explicit (user: "show part of it and
+    # say this is cut off").  The cut side is the one abutting the page
+    # boundary: page 1 cards are cut on the right, later pages on the left.
+    for item in clip_family:
+        if item.kind != "continuation":
+            continue
+        _torn_edge(draw, item.box, scale=scale)
+
     # Focus rings: a bright outline around the focused clip so a VLM reading
     # the page never mistakes a wide neighbor (e.g. the audio bar) for the
     # subject. Grok UX: the root FOCUS clip needs visual emphasis. The ring
@@ -213,8 +289,10 @@ def render_page_png(page: LayoutPage, *, scale: int = 1) -> bytes:
     # the box, leaving the bottom strip for the label). This is the "real
     # images in the pages" surface: an agent sees the actual storyboard
     # frame, not an abstract block. Only verified_original local images.
+    # Continuation cards (page-break tails) paste the VISIBLE portion of the
+    # frame, cover-cropped to the card and anchored at the cut side.
     for item in clip_family:
-        if item.kind != "clip" or not item.thumbnail_path:
+        if item.kind not in ("clip", "continuation") or not item.thumbnail_path:
             continue
         try:
             thumb = Image.open(item.thumbnail_path)
@@ -223,16 +301,29 @@ def render_page_png(page: LayoutPage, *, scale: int = 1) -> bytes:
             continue
         box = item.box
         pad = 3
-        label_strip = 20 if item.label else 4
+        label_strip = int(_LABEL_STRIP_H) if item.label else 4
+        # Buffer above the image so the frame doesn't hug the card top (user:
+        # "give them a little bit of buffer for aesthetics").  The label strip
+        # is reserved at the bottom; the image is centered in the remaining
+        # space.
+        top_buffer = 6 if item.label else 2
         target_w = max(2, int(box.w * scale) - pad * 2)
-        target_h = max(2, int(box.h * scale) - pad * 2 - label_strip)
+        target_h = max(2, int(box.h * scale) - top_buffer - label_strip - pad)
         if target_w < 8 or target_h < 8:
             continue
-        # Contain-fit: the FULL frame is always visible, centered in the box
-        # (letterboxed on the lane fill — never cropped).
-        thumb = _contain_fit(thumb, target_w, target_h)
-        x = int(box.x * scale) + pad + (target_w - thumb.width) // 2
-        y = int(box.y * scale) + pad + (target_h - thumb.height) // 2
+        if item.kind == "continuation":
+            # The cut side: page-1 tails are cut on the right (show the head,
+            # anchor left); later-page continuations are cut on the left
+            # (show the tail, anchor right).
+            near_left = (box.x - _PAGE_LEFT_X) < (box.x + box.w - _PAGE_RIGHT_X)
+            thumb = _cover_fit(thumb, target_w, target_h, anchor_left=near_left)
+            x = int(box.x * scale) + pad
+        else:
+            # Contain-fit: the FULL frame is always visible, centered in the
+            # box (letterboxed on the lane fill — never cropped).
+            thumb = _contain_fit(thumb, target_w, target_h)
+            x = int(box.x * scale) + pad + (target_w - thumb.width) // 2
+        y = int(box.y * scale) + top_buffer + (target_h - thumb.height) // 2
         image.paste(thumb, (x, y))
 
     # Ruler ticks (the tick itself; its text is a separate ``label`` object).
@@ -268,18 +359,25 @@ def render_page_png(page: LayoutPage, *, scale: int = 1) -> bytes:
                     fill=_TEXT,
                 )
 
-    # Object labels (clip-family only; omitted labels stay out).
+    # Object labels (clip-family only; omitted labels stay out).  The label
+    # sits in the card's bottom strip (below the image) so it never overlaps
+    # the frame (user: images should have buffer, not clip to the top).
     for item in page.objects:
         if item.kind not in _FILL_BY_KIND or item.lane_index is None:
             continue
         if item.label is None or item.omitted_reason is not None:
             continue
+        size = _FONT_SIZE_BY_KIND[item.kind]
+        label_box = item.box
+        if item.kind in ("clip", "continuation") and item.box.h >= 40:
+            # Narrow cards: bottom-aligned label inside the card.
+            label_box = Box(item.box.x, item.box.y + item.box.h - _LABEL_STRIP_H, item.box.w, _LABEL_STRIP_H)
         _label(
             draw,
-            item.box,
+            label_box,
             item.label,
             scale=scale,
-            size=_FONT_SIZE_BY_KIND[item.kind],
+            size=size,
             fill=_TEXT,
         )
 

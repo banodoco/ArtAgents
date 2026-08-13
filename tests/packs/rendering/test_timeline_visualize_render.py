@@ -60,7 +60,7 @@ GOLDEN_DIR = FIXTURE_ROOT / "golden"
 # Pillow 12.3.0 vs Python 3.14 + Pillow 12.2.0) may produce different PNG
 # bytes but must decode to exactly these pixels.
 _PIXEL_SHA256 = (
-    "624af363a0e6b7de2466907811ef96eba38b81b6f0d6b6b36b748d6af1e52901"
+    "739c72515e364950682cd046b5a2de5145005f8b39d59e76d34c29e4c2db741b"
 )
 
 # Subprocess probe run under the alternate interpreter (python3.11): rebuilds
@@ -214,14 +214,30 @@ def test_svg_is_valid_xml_contains_labels_and_is_byte_stable(
         for label in _printed_labels(page):
             assert label in text
 
-        # Identity-bearing clip/continuation labels embed their qualified ref.
+        # Identity-bearing clips are addressable: every card shows its stable
+        # ordinal (CL03), and the page's cue line carries the qualified FOCUS
+        # ref (TL01.CL01).  Clips outside the cue (e.g. audio) keep their
+        # qualified ref in ground-truth/action-index, not the page.
         identity_bearing = [
             item
             for item in page.objects
             if item.kind in ("clip", "continuation") and item.omitted_reason is None
         ]
         assert identity_bearing
-        assert all(item.display_id in text for item in identity_bearing)
+        stable_ids = {item.display_id.rsplit(".", 1)[-1] for item in identity_bearing}
+        assert all(stable_id in text for stable_id in stable_ids), [
+            stable_id for stable_id in stable_ids if stable_id not in text
+        ]
+        cues = [item.label for item in page.objects if item.kind == "cue"]
+        assert cues
+        for focus_token in ("FOCUS", "PARENT"):
+            for cue in cues:
+                assert focus_token in cue
+        # Every clip the cue references by qualified ref appears in the text.
+        import re as _re
+        cue_refs = set(_re.findall(r"TL01\.(?:CL|SH|RG|AS)\d+", " ".join(cues)))
+        assert cue_refs
+        assert all(ref in text for ref in cue_refs), [ref for ref in cue_refs if ref not in text]
 
         # Byte-stable: two calls produce identical strings and bytes.
         assert render_page_svg(page) == svg

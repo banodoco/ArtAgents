@@ -394,13 +394,6 @@ def _linear_clip_label(ref: str, clip: ClipModel, fps: int) -> str:
     )
 
 
-def _time_clip_label(ref: str, clip: ClipModel) -> str:
-    return (
-        f"{ref} · frames=[{clip.frames.start_frame},{clip.frames.end_frame}) · "
-        f"duration={clip.frames.duration_frames}fr"
-    )
-
-
 def _interval_box(
     start_frame: int,
     end_frame: int,
@@ -1303,26 +1296,26 @@ def _layout_time_scaled(
                     box = Box(box.x, y, box.w, _DURATION_BAR_H)
             ref = _clip_ref(identity_map, clip)
             if clip.clip_id in primary_ids:
-                label = _time_clip_label(ref, clip)
-                full_width = max(96.0, len(label) * 10.0)
-                if box.w >= full_width:
-                    omitted = None
-                elif box.w >= 44.0:
-                    # Narrow but visible: print the bare ordinal (the timeline
-                    # is constant on the page, so CL01 is unambiguous) — the
-                    # qualified ref + frame window live in ground-truth and
-                    # the reading guide. Grok UX feedback: unlabeled cells
-                    # are the #1 readability failure; collisions are #2.
-                    label = ref.rsplit(".", 1)[-1]
-                    omitted = None
-                else:
-                    omitted = "time-scaled box is too narrow for its complete frame label"
+                # Card labels are ALWAYS the bare ordinal (CL23) — the root
+                # and zoom pages must read consistently (user: "zoomed out
+                # says CL, zoomed in says TL01.CL03 — confusing for
+                # navigating").  The qualified ref (TL01.CL23) + frame window
+                # live in the cue line, ground-truth, and the reading guide,
+                # which is where navigation happens.
+                label = ref.rsplit(".", 1)[-1]
+                omitted = None if box.w >= 44.0 else (
+                    "time-scaled box is too narrow for its complete frame label"
+                )
                 kind = "clip"
             else:
                 label = f"{ref} · continued"
                 omitted = None if box.w >= 96.0 else "continuation segment is too narrow"
                 kind = "continuation"
-            thumbnail_path = _clip_thumbnail(model, clip) if kind == "clip" else None
+            thumbnail_path = (
+                _clip_thumbnail(model, clip)
+                if kind in ("clip", "continuation")
+                else None
+            )
             objects.append(
                 LayoutObject(
                     ref,

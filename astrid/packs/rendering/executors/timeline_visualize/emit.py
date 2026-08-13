@@ -1859,6 +1859,10 @@ timeline itself, shots, clips, and assets — carries a *qualified id* such as
 `TL01` or `TL01.CL03`: a timeline ordinal, then a kind code and a stable
 ordinal.
 
+Card labels print the **stable ordinal only** (`CL03`) so every page reads
+consistently; the qualified id (`TL01.CL03`) is always available in the cue
+line, `ground-truth.json`, and `action-index.json`.
+
 ## The one rule
 
 Read a qualified id, then open `action-index.json` and use its entry. That

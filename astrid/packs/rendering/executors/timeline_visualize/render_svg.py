@@ -50,8 +50,7 @@ _FILL_BY_KIND = {
 
 _BADGE_KINDS = frozenset({"breadcrumb", "snapshot_badge", "scope_badge", "cue"})
 
-_FONT_SIZE_BY_KIND = {
-    "breadcrumb": 26,
+_FONT_SIZE_BY_KIND = {    "breadcrumb": 26,
     "snapshot_badge": 26,
     "scope_badge": 24,
     "cue": 22,
@@ -66,6 +65,44 @@ _FONT_SIZE_BY_KIND = {
     "pixel_text": 16,
     "text_lane": 16,
 }
+
+
+#: Bottom strip inside clip-family cards reserved for the object label
+#: (PNG parity); the thumbnail is pasted above it with a small top buffer.
+_LABEL_STRIP_H = 20.0
+
+#: Page chrome gutters (matches layout.py margins) for cut-side detection.
+_PAGE_LEFT_X = 40.0
+_PAGE_RIGHT_X = 1840.0
+
+
+def _torn_edge_svg(box: Box) -> str:
+    """Zigzag 'torn paper' edge + ellipsis on the cut side of an in-lane
+    continuation card so a page-break clip is explicit (PNG parity)."""
+    near_left = (box.x - _PAGE_LEFT_X) < (box.x + box.w - _PAGE_RIGHT_X)
+    edge_x = box.x if near_left else box.x + box.w
+    y0, y1 = box.y, box.y + box.h
+    teeth = 4
+    depth = max(3.0, (box.h / 12.0))
+    points: list[str] = []
+    for i in range(teeth):
+        ty = y0 + (i + 0.5) * (y1 - y0) / teeth
+        direction = 1.0 if i % 2 == 0 else -1.0
+        points.append(
+            f"{_num(edge_x)},{_num(ty - box.h / 8)} "
+            f"{_num(edge_x + direction * depth)},{_num(ty)} "
+            f"{_num(edge_x)},{_num(ty + box.h / 8)}"
+        )
+    polylines = "".join(
+        f'<polyline points="{pts}" fill="none" stroke="{_BG}" stroke-width="1.5"/>'
+        for pts in points
+    )
+    dot_x = edge_x + depth + 3 if near_left else edge_x - depth - 16
+    ellipsis = (
+        f'<text x="{_num(dot_x)}" y="{_num(y0 + (y1 - y0) / 2 + 6)}" '
+        f'font-size="18" fill="{_TEXT}">…</text>'
+    )
+    return polylines + ellipsis
 
 
 def _num(value: float) -> str:
@@ -154,6 +191,13 @@ def render_page_svg(page: LayoutPage) -> str:
             )
         )
 
+    # Torn-edge overlay on in-lane continuation cards (PNG parity): zigzag
+    # + ellipsis on the cut side so a page-break clip is explicit.
+    for item in clip_family:
+        if item.kind != "continuation":
+            continue
+        parts.append(_torn_edge_svg(item.box))
+
     # Focus rings: bright gold outline around the focused clip (Grok UX).
     for item in page.objects:
         if item.kind == "focus_ring":
@@ -196,14 +240,20 @@ def render_page_svg(page: LayoutPage) -> str:
                 )
 
     # Object labels (clip-family objects only, omitted labels stay out).
+    # Narrow clip/continuation cards: label sits in the card's bottom strip
+    # (below the image) so it never overlaps the frame (PNG parity).
     for item in page.objects:
         if item.kind not in _FILL_BY_KIND or item.lane_index is None:
             continue
         if item.label is None or item.omitted_reason is not None:
             continue
+        bottom_strip_box = item.box
+        if item.kind in ("clip", "continuation") and item.box.h >= 40:
+            bottom_strip_box = Box(item.box.x, item.box.y + item.box.h - _LABEL_STRIP_H,
+                                   item.box.w, _LABEL_STRIP_H)
         parts.append(
             _text(
-                item.box,
+                bottom_strip_box,
                 item.label,
                 size=_FONT_SIZE_BY_KIND[item.kind],
                 fill=_TEXT,

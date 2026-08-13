@@ -172,3 +172,28 @@ Fixes (in `layout.py` + `model.py`):
    864x1222, not the previously-hardcoded 1536x1024).
 Result: codex rates root image visibility 4/5; CL16's poster fills its
 portrait card (purple ratio 47% -> 21%).
+
+### Navigation polish (2026-08-11, user review round 2)
+
+User: "why does it say TL01 when zoomed in but CL on the root — confusing",
+"show the partially revealed image cropped off at the side with a
+delineation", "give the images a little buffer".
+
+1. **Bare ordinals on ALL clip cards** (`layout.py`): cards print `CL23`
+   at every zoom level; the qualified ref (`TL01.CL23`) lives in the cue
+   line, `ground-truth.json`, and `action-index.json` (reading guide
+   updated).  Removed the now-dead `_time_clip_label`; linear layout keeps
+   its richer `_linear_clip_label` (start/end/duration/authored).
+2. **Torn-edge cut delineation** (`render_png.py` + `render_svg.py`):
+   in-lane page-break continuation cards get a zigzag torn edge + ellipsis
+   on the cut side, so a clipped clip reads as cut off, not truncated.
+3. **Cropped continuation image**: page-break tails now paste the VISIBLE
+   portion of the frame (cover-crop anchored at the cut side) instead of a
+   solid teal block (`_cover_fit`).
+4. **Top buffer**: thumbnails get 6px breathing room above the frame
+   (label sits in a bottom strip, never overlapping the image).
+
+Golden regen: desert pixel hash `624af363…` -> `739c7251…` (bare labels
+change the pixels).  SVG identity contract updated: cards carry stable
+ids; the cue carries qualified FOCUS/PARENT refs (audio clips outside the
+cue keep their ref in ground-truth/action-index).

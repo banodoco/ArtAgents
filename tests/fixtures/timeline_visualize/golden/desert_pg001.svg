@@ -55,7 +55,7 @@
 <text x="259.8519" y="248.88" font-family="ui-monospace, monospace" font-size="18" fill="#FAFAFA">CL01</text>
 <text x="311.7037" y="248.88" font-family="ui-monospace, monospace" font-size="18" fill="#FAFAFA">CL02</text>
 <text x="400.5926" y="248.88" font-family="ui-monospace, monospace" font-size="18" fill="#FAFAFA">CL03</text>
-<text x="256.8889" y="509.76" font-family="ui-monospace, monospace" font-size="18" fill="#FAFAFA">TL01.CL05 · frames=[12,2352) · duration=2340fr</text>
+<text x="256.8889" y="520.4" font-family="ui-monospace, monospace" font-size="18" fill="#FAFAFA">CL05</text>
 <text x="399.8519" y="450.68" font-family="ui-monospace, monospace" font-size="16" fill="#FAFAFA">1fr gap TL01.CL02→TL01.CL03</text>
 <text x="450.963" y="450.68" font-family="ui-monospace, monospace" font-size="16" fill="#FAFAFA">1fr overlap TL01.CL03→TL01.CL04</text>
 <text x="311.7037" y="856.04" font-family="ui-monospace, monospace" font-size="16" fill="#FAFAFA">TL01.CL02 · OTHER TEXT · not_inspected</text>
