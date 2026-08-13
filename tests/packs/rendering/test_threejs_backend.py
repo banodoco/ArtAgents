@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import multiprocessing
 import os
 import shutil
 import subprocess
@@ -43,6 +44,7 @@ from astrid.core.rendering.contracts import (
 )
 from astrid.core.rendering.errors import RendererUnsupportedError
 from astrid.core.rendering.registry import load_default_registries
+from astrid.packs.rendering.backends.remotion import lock as remotion_lock
 from astrid.packs.rendering.backends.remotion import run as remotion_backend
 from astrid.packs.rendering.backends.threejs import run as threejs
 from astrid.sdk.rendering import render, support
@@ -725,3 +727,179 @@ def test_threejs_real_render_text_timeline_through_public_service(
         payload["backend_fragments"][THREEJS_ID]["legacy_v1"]["composition_id"]
         == "ThreeTimelineComposition"
     )
+
+
+# ---------------------------------------------------------------------------
+# Shared-lock concurrency: simultaneous threejs + remotion renders serialize
+# through the ONE remotion lock (no second lock).  The Three.js backend
+# deliberately routes through the shared remotion execution helper, so both
+# routes acquire the same non-recursive remotion_render_lock; a concurrent
+# render blocks until the first releases.  Deterministic and fast: the real
+# lock is exercised while the remotion CLI step is stubbed, exactly like
+# test_remotion_locking.py.
+# ---------------------------------------------------------------------------
+
+
+def _mixed_lock_render_probe(
+    lock_path: Path,
+    route: str,
+    name: str,
+    ready: multiprocessing.synchronize.Event,
+    entered: multiprocessing.synchronize.Event,
+    release: multiprocessing.synchronize.Event | None,
+) -> None:
+    """Simulate one backend's render step while holding the real lock."""
+    remotion_lock.REMOTION_LOCK_PATH = lock_path
+
+    def fake_locked(*args: object, **kwargs: object) -> remotion_backend._ExecutionDetails:
+        # The render (registry generation + remotion CLI) runs under the lock.
+        assert remotion_lock.remotion_render_lock_held()
+        entered.set()
+        if release is not None and not release.wait(60):
+            raise RuntimeError("timed out waiting to release first render")
+        return remotion_backend._ExecutionDetails({}, {}, {})
+
+    remotion_backend._execute_remotion_locked = fake_locked
+    # The Three.js backend aliases the shared helper at import time
+    # (threejs._execute_remotion is remotion_backend._execute_remotion); route
+    # through the module each backend actually calls.
+    executor = (
+        threejs._execute_remotion
+        if route == "threejs"
+        else remotion_backend._execute_remotion
+    )
+    ready.set()
+    executor(
+        Path("timeline.json"),
+        Path("assets.json"),
+        Path(f"{name}.mp4"),
+        provenance_out_path=Path(f"{name}.published"),
+        project_dir=Path("remotion-project"),
+        composition_id=(
+            "ThreeTimelineComposition" if route == "threejs" else "TimelineComposition"
+        ),
+        theme_path=None,
+        min_free_gb=None,
+    )
+
+
+def test_threejs_and_remotion_renders_serialize_through_one_lock(
+    tmp_path: Path,
+) -> None:
+    # Identity: the Three.js backend uses the shared execution helper, so
+    # there is exactly ONE lock acquisition point for both routes.
+    assert threejs._execute_remotion is remotion_backend._execute_remotion
+
+    context = multiprocessing.get_context("spawn")
+    lock_path = tmp_path / "remotion" / ".astrid-registry.lock"
+    first_ready = context.Event()
+    first_entered = context.Event()
+    release_first = context.Event()
+    second_ready = context.Event()
+    second_entered = context.Event()
+    first = context.Process(
+        target=_mixed_lock_render_probe,
+        args=(lock_path, "threejs", "first.mp4", first_ready, first_entered, release_first),
+    )
+    second = context.Process(
+        target=_mixed_lock_render_probe,
+        args=(lock_path, "remotion", "second.mp4", second_ready, second_entered, None),
+    )
+
+    second_started = False
+    first.start()
+    try:
+        assert first_ready.wait(60)
+        assert first_entered.wait(60), "threejs render never entered the lock"
+        second.start()
+        second_started = True
+        assert second_ready.wait(60)
+        assert not second_entered.wait(0.3), (
+            "remotion render entered while the threejs render held the lock"
+        )
+    finally:
+        release_first.set()
+    first.join(timeout=60)
+    if second_started:
+        second.join(timeout=60)
+    lingering = [p for p in (first, second) if p.pid and p.is_alive()]
+    for process in lingering:
+        process.terminate()
+        process.join(timeout=2)
+
+    assert second_started
+    assert not lingering
+    assert second_entered.is_set(), "remotion render never ran after release"
+    assert first.exitcode == 0
+    assert second.exitcode == 0
+    # No second lock: the only lock file is the one shared REMOTION_LOCK_PATH.
+    assert sorted(tmp_path.rglob("*.lock")) == [lock_path]
+
+
+# ---------------------------------------------------------------------------
+# Offline runtime render: a real direct threejs render succeeds with npm in
+# offline mode, proving no package download occurs.  npm offline mode refuses
+# any fetch (ENOTCACHED/ENOTFOUND/EAI_AGAIN), so success is the proof.  The
+# npm config is restored afterwards.
+# ---------------------------------------------------------------------------
+
+
+def _npm_offline_value() -> str:
+    out = subprocess.run(
+        ["npm", "config", "get", "offline"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    return out
+
+
+def _set_npm_offline(value: str) -> None:
+    subprocess.run(
+        ["npm", "config", "set", "offline", value],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+@pytest.mark.timeout(600)
+def test_threejs_real_render_works_with_npm_offline(tmp_path: Path) -> None:
+    """A real direct threejs render with `npm config set offline true` proves
+    the runtime needs no package downloads.  The config is restored even on
+    failure."""
+    _require_threejs_environment()
+    timeline_path = _text_timeline(tmp_path)
+    output = tmp_path / "threejs-offline.mp4"
+
+    before = _npm_offline_value()
+    _set_npm_offline("true")
+    try:
+        with _execution_env():
+            published = render(
+                timeline_path=timeline_path,
+                assets_registry_path=None,
+                out_path=output,
+                backend=THREEJS_ID,
+            )
+    finally:
+        if before in ("null", "undefined"):
+            subprocess.run(
+                ["npm", "config", "delete", "offline"],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        else:
+            _set_npm_offline(before)
+
+    assert _npm_offline_value() == before, "npm offline config was not restored"
+    video_path = Path(published)
+    assert video_path.is_file()
+    assert video_path.stat().st_size > 0
+    sidecar = Path(f"{video_path}.provenance.json")
+    assert sidecar.is_file()
+    payload = json.loads(sidecar.read_text(encoding="utf-8"))
+    assert payload["engine"] == THREEJS_ID
+    assert payload["audio_ownership"] == "rendered"
+    assert payload["backend_fragments"][THREEJS_ID]["legacy_v1"]["engine"] == "threejs"

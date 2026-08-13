@@ -1,6 +1,12 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import os
+import shutil
+import subprocess
+import sys
+from contextlib import contextmanager
 from fractions import Fraction
 from pathlib import Path
 
@@ -11,6 +17,9 @@ from astrid.core.rendering.errors import RendererUnsupportedError
 from astrid.core.rendering.registry import load_default_registries
 from astrid.core.rendering.transport import CommandTransport
 from astrid.packs.rendering.planners.threejs_hybrid import run as hybrid
+from astrid.sdk.rendering import render
+
+MIXED_CANVAS = {"width": 320, "height": 180, "fps": 24}
 
 
 def _timeline(
@@ -538,3 +547,283 @@ def test_registered_protocol_rejects_empty_timeline(tmp_path: Path) -> None:
     assert isinstance(report, SupportReport)
     assert report.supported is False
     assert any("empty timeline" in reason for reason in report.reasons)
+
+
+# ---------------------------------------------------------------------------
+# Mixed real render: text -> Three, media -> Remotion, ONE mp4 via the
+# pinned rendering.ffmpeg-finalizer.  Follows the hyperframes combined
+# render's asset setup (ffmpeg lavfi source + real-assets.json registry).
+# Skips ONLY for genuinely missing environment; a render failure is never
+# turned into a skip.
+# ---------------------------------------------------------------------------
+
+
+def _source_video(tmp_path: Path) -> Path:
+    """A tiny real silent h264+aac source clip used by the media clip."""
+    source_path = tmp_path / "source.mp4"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=size=320x180:rate=24",
+            "-f",
+            "lavfi",
+            "-i",
+            "anullsrc=channel_layout=stereo:sample_rate=48000",
+            "-frames:v",
+            "24",
+            "-shortest",
+            "-c:v",
+            "libx264",
+            "-profile:v",
+            "main",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "aac",
+            "-video_track_timescale",
+            "12288",
+            str(source_path),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return source_path
+
+
+def _mixed_timeline(tmp_path: Path) -> Path:
+    """text [0, 0.5s) -> Three, silent media [0.5, 1.0s) -> Remotion."""
+    path = tmp_path / "mixed-timeline.json"
+    path.write_text(
+        json.dumps(
+            {
+                "theme": "banodoco-default",
+                "theme_overrides": {
+                    "visual": {"canvas": dict(MIXED_CANVAS), "background": "#1a1a2e"}
+                },
+                "tracks": [{"id": "v1", "kind": "visual", "label": "Mixed"}],
+                "clips": [
+                    {
+                        "id": "title",
+                        "at": 0.0,
+                        "track": "v1",
+                        "clipType": "text",
+                        "hold": 0.5,
+                        "text": {"content": "MIXED", "fontSize": 64, "color": "#ffffff"},
+                        "params": {"weight": 700},
+                    },
+                    {
+                        "id": "media",
+                        "at": 0.5,
+                        "track": "v1",
+                        "clipType": "media",
+                        "asset": "src",
+                        "from": 0,
+                        "to": 0.5,
+                        "speed": 1,
+                        "volume": 0,
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+def _real_assets(tmp_path: Path, source: Path) -> Path:
+    assets = tmp_path / "real-assets.json"
+    assets.write_text(
+        json.dumps(
+            {
+                "assets": {
+                    "src": {
+                        "file": source.name,
+                        "type": "video/mp4",
+                        "duration": 1.0,
+                        "resolution": "320x180",
+                        "fps": 24,
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    return assets
+
+
+def _require_mixed_environment() -> None:
+    from tests.packs.rendering.test_threejs_backend import _missing_environment
+
+    missing = _missing_environment()
+    if missing:
+        pytest.skip(
+            "mixed Three/Remotion render skipped: missing optional "
+            "dependencies: " + ", ".join(missing)
+        )
+
+
+@contextmanager
+def _execution_env():
+    """Transport-spawned children must resolve the same node and the same
+    python3 (with the banodoco timeline schema) as the test process."""
+    node_bin = (
+        str(Path(shutil.which("node")).resolve().parent)
+        if shutil.which("node")
+        else ""
+    )
+    python_bin = str(Path(sys.executable).resolve().parent)
+    old_path = os.environ.get("PATH", "")
+    os.environ["PATH"] = ":".join(
+        [d for d in (python_bin, node_bin) if d] + [old_path]
+    )
+    try:
+        yield
+    finally:
+        os.environ["PATH"] = old_path
+
+
+def _probe(path: Path) -> dict:
+    out = subprocess.run(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-count_frames",
+            "-show_entries",
+            "stream=codec_name,codec_type,width,height,pix_fmt,time_base,avg_frame_rate,nb_read_frames",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "json",
+            str(path),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    return json.loads(out)
+
+
+def _frame_md5(path: Path, frame: int) -> str:
+    out = subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-i",
+            str(path),
+            "-vf",
+            f"select=eq(n\\,{frame})",
+            "-frames:v",
+            "1",
+            "-f",
+            "md5",
+            "-",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    return out.strip().split("=")[-1].strip()
+
+
+@pytest.mark.timeout(900)
+def test_threejs_hybrid_mixed_real_render(tmp_path: Path) -> None:
+    """The whole pipeline end-to-end: one mixed timeline where the hybrid
+    planner routes text -> rendering.threejs and media -> rendering.remotion,
+    finalized by the pinned rendering.ffmpeg-finalizer into ONE mp4.
+
+    Locks: the exact planned windows (0,12)/(12,24) at 24fps, deterministic
+    output bytes, the non-uniform content boundary (frame 0 = text, frame 12
+    = media), and every provenance identity field (planner, finalizer,
+    segment renderer ids + support decisions, both backend fragments, the
+    retained legacy_v1 engine on the Three fragment, rendered audio).
+    """
+    _require_mixed_environment()
+    source = _source_video(tmp_path)
+    assets = _real_assets(tmp_path, source)
+    timeline = _mixed_timeline(tmp_path)
+    backend_config = {"rendering.remotion": {}, "rendering.threejs": {}}
+
+    output = tmp_path / "mixed.mp4"
+    with _execution_env():
+        published = render(
+            timeline_path=timeline,
+            assets_registry_path=assets,
+            out_path=output,
+            backend="rendering.threejs-hybrid",
+            audio="rendered",
+            backend_config=backend_config,
+        )
+        # Determinism: the same timeline renders byte-identical bytes.
+        output2 = tmp_path / "mixed-2.mp4"
+        published2 = render(
+            timeline_path=timeline,
+            assets_registry_path=assets,
+            out_path=output2,
+            backend="rendering.threejs-hybrid",
+            audio="rendered",
+            backend_config=backend_config,
+        )
+
+    first = Path(published)
+    second = Path(published2)
+    assert first.is_file() and first.stat().st_size > 0
+    assert second.is_file() and second.stat().st_size > 0
+
+    first_hash = hashlib.sha256(first.read_bytes()).hexdigest()
+    second_hash = hashlib.sha256(second.read_bytes()).hexdigest()
+    assert first_hash == second_hash, "mixed render is not deterministic"
+
+    sidecar = Path(f"{first}.provenance.json")
+    assert sidecar.is_file()
+    payload = json.loads(sidecar.read_text(encoding="utf-8"))
+    assert payload["sha256"] == first_hash
+    assert payload["engine"] == "rendering.threejs-hybrid"
+    assert payload["audio_ownership"] == "rendered"
+    routing = payload["routing"]
+    assert routing["resolved_policy"]["planner"] == "rendering.threejs-hybrid"
+    assert routing["resolved_policy"]["finalizer"] == "rendering.ffmpeg-finalizer"
+    segments = payload["segments_v2"]
+    assert [
+        (s["renderer"]["id"], s["window"]["start_frame"], s["window"]["end_frame"])
+        for s in segments
+    ] == [
+        ("rendering.threejs", 0, 12),
+        ("rendering.remotion", 12, 24),
+    ], segments
+    for segment in segments:
+        assert segment["renderer"]["support_decision"]["backend"] == segment["renderer"]["id"]
+    fragments = payload["backend_fragments"]
+    assert "rendering.threejs" in fragments
+    assert "rendering.remotion" in fragments
+    threejs_fragment = fragments["rendering.threejs"]
+    assert threejs_fragment["renderer"] == "threejs"
+    assert threejs_fragment["legacy_v1"]["engine"] == "threejs"
+    assert fragments["rendering.remotion"]["renderer"] == "remotion"
+
+    probe = _probe(first)
+    video = next(s for s in probe["streams"] if s["codec_type"] == "video")
+    assert video["codec_name"] == "h264"
+    assert "420p" in video["pix_fmt"], video
+    assert video["width"] == 320 and video["height"] == 180
+    assert video["time_base"] == "1/12288", video
+    assert int(video["nb_read_frames"]) == 24, video
+    numerator, denominator = (int(part) for part in video["avg_frame_rate"].split("/"))
+    assert abs(numerator / denominator - 24.0) <= 1.0, video
+    assert any(
+        s["codec_type"] == "audio" and s["codec_name"] == "aac"
+        for s in probe["streams"]
+    )
+    assert abs(float(probe["format"]["duration"]) - 1.0) < 0.1, probe
+
+    # Non-uniform content: frame 0 shows the Three text, frame 12 the media.
+    assert _frame_md5(first, 0) != _frame_md5(first, 12)
