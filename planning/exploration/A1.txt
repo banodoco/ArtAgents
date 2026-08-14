@@ -1,0 +1,122 @@
+Now I have all the evidence needed. Let me compile the comprehensive findings.
+
+---
+
+## Findings
+
+### 1. Write-on-read paths (the critical finding)
+
+**`show_timeline()` — the primary read surface — mutates disk.** In `astrid/core/timeline/crud.py:221-272`, the default `verify=False` path calls:
+
+- **`load_assembly_json_with_repair(tdir)`** (line 250) → which at `paths.py:314` calls `regenerate_projection()` → which at `projection.py:1044-1059` **writes `assembly.json`** (line 1047, via `write_timeline_config_json`) and **writes `assembly.checkpoint.json`** (line 1059, via `write_json_atomic`).
+
+- **`load_display_json_with_repair(tdir)`** (line 259) → which at `paths.py:258-259` **writes `display.json`** when the projected display differs from the on-disk copy. Also called eagerly by `find_timeline_by_slug` at `paths.py:106` during every slug lookup.
+
+- **`_ensure_bridge_registry()`** in `local_bridge.py:443` **writes `registry.json`** when recovered from the event stream, which is a transitive read-side effect whenever the bridge serves assets.
+
+**`LocalFsBackend.head()` trusts a sidecar that can be stale.** At `local_fs.py:357-373`:
+- Line 359: reads `assembly.head.json` directly — no verification against the event log.
+- Lines 361-363: on `FileNotFoundError`, rebuilds from events and **writes the head back**. This is a write-on-read.
+- Lines 367-373: parses the sidecar blindly. If the sidecar exists but is stale (e.g., crash between event append and head write at line 123), it returns stale data. No chain verification is performed.
+
+**The `verify=True` path in `show_timeline()`** (crud.py:247-249) is genuinely read-only — it calls `read_timeline_config_json()` and `read_json()` directly, then `_verify_timeline_read_only()` which only calls `verify_chain()` (no writes). But this path is opt-in.
+
+### 2. Pure read-only replay — file-by-file
+
+The genuinely pure read path exists in **`replay_projection()`** at `projection.py:788-837`:
+
+| Step | File read | Function | Line |
+|------|-----------|----------|------|
+| 1 | `assembly.identity.json` | (caller must provide `timeline_id`) | — |
+| 2 | `assembly.jsonl` | `backend.read_events()` → `_read_all_events()` | `local_fs.py:479-496` |
+| 3 | (in-memory only) | `project_to_assembly(all_events)` → `apply_event_to_assembly` fold | `projection.py:740-780` |
+
+**Concurrent append race:** `_read_all_events()` at `local_fs.py:479-496` opens the file with `"r"` mode — **no `flock`**. A concurrent `append_event()` holds `LOCK_EX` (line 79) during write+fsync+head update, but the read path doesn't block. The reader gets whatever bytes are on disk at open time. The `after=` parameter (line 348) filters by `event_id` within the already-read snapshot, so it's internally consistent but doesn't detect that more events arrived after the read began.
+
+**Hash verification per event:** `verify_chain()` at `local_fs.py:375-409` recomputes each event's hash from `to_json_obj()` with `hash=None`, then checks `prev_hash` (chaining) and `hash` (content). This catches tampering and corruption but runs as a separate pass after reading.
+
+### 3. Projected registry — location and derivability
+
+**Location:** `registry.json` in the timeline home directory (e.g., `timelines/<ULID>/registry.json`). Also a legacy `assets.json` sidecar.
+
+**Derivation from events:** `_registry_from_event_stream()` at `local_bridge.py:381-409` scans `assembly.jsonl` in reverse for the last `timeline.asset_registry_replaced` event and extracts its `payload.registry.assets`. **It is fully reconstructible from the event log** — no external state needed.
+
+**Recovery chain** (local_bridge.py:430-445): `registry.json` → event stream → legacy `assets.json` → defensive source-file derivation.
+
+**Write-on-read:** `_ensure_bridge_registry()` at line 443 writes `registry.json` when recovered from events or legacy. The sync path (`sync_asset_registry` at `asset_registry_edits.py:280-281`) also writes it after appending the event.
+
+**Classification in projection:** `timeline.asset_registry_replaced` is classified as `"non_container_read_model"` in `PROJECTOR_EVENT_CLASSIFICATION` at `projection.py:251` — meaning the assembly projector ignores it (returns state unchanged at line 660-661).
+
+### 4. Frozen root — what to hash for a deterministic snapshot ID
+
+The plan at `docs/architecture/timeline-visualization-plan.md:272-279` specifies the root locks:
+- project slug + timeline ULID/slug
+- event-log head version, event id, event hash
+- projected assembly and asset-registry hashes
+- transcript hashes
+- every unique local source-asset content hash
+
+**Concrete bytes to hash (in canonical order):**
+
+| Field | Source | Bytes |
+|-------|--------|-------|
+| `project_slug` | caller-supplied | UTF-8 string |
+| `timeline_ulid` | `assembly.identity.json` → `timeline_id` | UTF-8 string |
+| `head.version` | `EventLogHead.version` (= event count) | decimal ASCII |
+| `head.last_event_id` | `EventLogHead.last_event_id` | UTF-8 ULID |
+| `head.last_hash` | `EventLogHead.last_hash` | UTF-8 hex |
+| `assembly_sha256` | SHA-256 of canonical `assembly.json` bytes (`canonical_json_bytes` via `json.dumps(sort_keys=True, separators=(",",":"))`) | 64-char hex |
+| `registry_sha256` | SHA-256 of canonical `registry.json` bytes | 64-char hex |
+| `transcript_sha256` (when present) | SHA-256 of transcript file | 64-char hex |
+| `media_sha256` (sorted by asset key) | Each unique source asset's content SHA-256 | 64-char hex each |
+
+**Canonicalization:** `projection.py:200` already demonstrates the pattern: `json.dumps(state, sort_keys=True, separators=(",",":"), allow_nan=False)`. The same approach applies to assembly and registry. `canonical_json_bytes` is imported at `local_fs.py:16` from the events schema.
+
+**NOT FOUND in the locked plan:** The exact byte concatenation order for the composite snapshot ID (SNS: prefix). The plan shows `SNS:a83f…` as a badge format but does not specify whether it's `SHA-256(concatenated_fields)` or a structured hash. This is a specification gap.
+
+---
+
+## Tasklist implications
+
+The plan references "T1–T36 in planning/phase1a-codex-tasklist.md" but **that file does not exist** in either checkout. Based on the M1 brief and the code evidence:
+
+**Tasks that change or split:**
+
+- **T_read_repair (any task invoking `show_timeline()` or `load_assembly_json_with_repair`)**: Must be split into (a) a pure read-only cold-start path using `replay_projection()` + `verify_chain()` without writing any files, and (b) the existing repair path for write-permitted contexts. The visualize command must use (a) exclusively.
+
+- **T_registry_read**: Any task reading the registry must use a pure path that reads the last `timeline.asset_registry_replaced` event from the event log rather than calling `_ensure_bridge_registry()` which writes `registry.json`.
+
+- **T_snapshot_hash**: New task needed — define the exact canonical byte concatenation order for the root snapshot ID (SNS: prefix). Currently unspecified in the locked plan.
+
+- **T_head_authority**: `LocalFsBackend.head()` at `local_fs.py:357-373` must gain an option to verify against the event log. The frozen root should call `verify_chain()` after reading, not trust the stale sidecar. Alternatively, a new `head_verified()` method that reads the tail event directly.
+
+**New tasks that appear:**
+
+- **T_snapshot_bytes_spec**: Pin down the exact canonical byte order for the deterministic root snapshot ID.
+- **T_pure_read_backend**: Create a `ReadOnlyLocalFsBackend` or a `read_only=True` flag that suppresses all `write_json_atomic`, `_write_head_atomic`, and `_rebuild_head` writes.
+- **T_registry_from_events_pure**: Expose `_registry_from_event_stream` as a public, pure function (no sidecar write).
+- **T_concurrent_append_detection**: Add a version-based guard or `flock(LOCK_SH)` on reads to detect concurrent appends during snapshot creation.
+
+---
+
+## Risks & conflicts
+
+1. **`show_timeline()` is the universal read entry point and it always repairs.** The visualize command must NOT call it. Any existing code path that calls `show_timeline()` will mutate disk. The visualize command needs its own pure read path. This is a direct conflict with the plan's invariant: "never mutates the timeline, event log, asset registry, or final-output manifest."
+
+2. **`find_timeline_by_slug()` calls `load_display_json_with_repair()`** at `paths.py:106`, which can write `display.json`. Even finding the timeline mutates disk today. The snapshot authority must use a repair-free slug lookup.
+
+3. **Sidecar staleness in `head()` is real but bounded.** The `append_event()` path holds `LOCK_EX`, writes the event line + fsyncs, then writes the head atomically. The window between event write and head write is under the same lock, but a kill -9 mid-lock leaves the lock released. A next `head()` call with missing head file would rebuild correctly. The real risk is a head file that exists but was written before the last event — this requires a process to have appended an event, written the head, crashed, and then a second process appended another event and updated the head. Since all appends hold `LOCK_EX`, this can only happen if the first process's head write was delayed. Mitigation: always `verify_chain()` as part of snapshot creation.
+
+4. **No `flock` on read means silent partial reads.** `_read_all_events()` at `local_fs.py:479` opens without any lock. An append happening concurrently could produce a partial last line or a file that ends mid-write. The `endswith(b"\n")` check at line 484 catches some but not all races. A version check after read (compare `head().version` to `len(events)`) would detect this.
+
+---
+
+## Elegant simplifications
+
+1. **Pure replay + verify is sufficient; no lock needed for snapshot creation.** The `replay_projection()` at `projection.py:788` + `verify_chain()` at `local_fs.py:375` already provide a pure read path. The only missing piece is a post-read version sanity check: after reading N events, check that `head().version == N`. If not, retry. This avoids the complexity of `flock` on reads.
+
+2. **Registry is fully derivable from events — skip the sidecar entirely.** `_registry_from_event_stream()` at `local_bridge.py:381-409` scans the log in reverse for the last `timeline.asset_registry_replaced` event. This is O(lines) in the worst case but O(1) in practice (it scans in reverse). The frozen snapshot can compute the registry hash directly from this event's payload without ever touching `registry.json` or `assets.json`.
+
+3. **The "projected registry" is a misnomer — it's not projected, it's a full-replacement event.** `timeline.asset_registry_replaced` carries the entire registry in its payload. The projector classifies it as `non_container_read_model` and ignores it. The snapshot authority just needs the last such event's payload, hashed canonically.
+
+4. **`head()` stale-trust can be eliminated by always reading the tail event directly.** Instead of trusting `assembly.head.json`, the snapshot authority can call `read_events()` and take `events[-1].event_id`, `events[-1].hash`, and `len(events)` as the authoritative head. The `_rebuild_head_locked()` at line 445 already does exactly this — it's just not exposed as the primary `head()` path due to performance (it reads the full log). For snapshot creation, reading all events is required anyway for hash verification, so there's zero extra cost.

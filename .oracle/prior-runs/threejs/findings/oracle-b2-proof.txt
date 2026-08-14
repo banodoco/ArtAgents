@@ -1,0 +1,34 @@
+[0m[33mWarning[0m[2m:[0m [1mThe 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.[0m
+[0m      [2mat [0m[0m[1m[3mwarnOnDeactivatedColors[0m[2m ([0m[0m[36minternal:tty[0m[2m:[0m[33m33[0m[2m:[33m24[0m[2m)[0m
+[0m      [2mat [0m[0m[1m[3mgetColorDepth[0m[2m ([0m[0m[36minternal:tty[0m[2m:[0m[33m42[0m[2m:[33m39[0m[2m)[0m
+[0m      [2mat [0m[0m[1m[3mshouldColorize[0m[2m ([0m[0m[36minternal:util/colors[0m[2m:[0m[33m14[0m[2m:[33m109[0m[2m)[0m
+[0m      [2mat [0m[0m[1m[3mrefresh[0m[2m ([0m[0m[36minternal:util/colors[0m[2m:[0m[33m18[0m[2m:[33m31[0m[2m)[0m
+[0m      [2mat [0m[0m[1m[3minternal:util/colors[0m[2m ([0m[0m[36minternal:util/colors[0m[2m:[0m[33m24[0m[2m:[33m16[0m[2m)[0m
+[0m      [2mat [0m[0m[1m[3minternal:assert/assertion_error[0m[2m ([0m[0m[36minternal:assert/assertion_error[0m[2m:[0m[33m2[0m[2m:[33m187[0m[2m)[0m
+[0m      [2mat [0m[0m[1m[3mloadAssertionError[0m[2m ([0m[0m[36mnode:assert[0m[2m:[0m[33m28[0m[2m:[33m96[0m[2m)[0m
+
+Working...
+All verification complete. Evidence below, then the verdict.
+
+**Verified facts** (all in `remotion/src/ThreeTimelineComposition.tsx`, 416 lines read in full):
+
+- **Camera** (:397–406): `<ThreeCanvas width={width} height={height} orthographic camera={{left: -width/2, right: width/2, top: height/2, bottom: -height/2, near: 1, far: 2000, position: [0,0,10]}}>`. No `<OrthographicCamera>` child (R3F 9 API, correctly absent — grep confirmed zero occurrences).
+- **1:1 pixel mapping**: centered frustum matches top-left-origin layout math (`x = width/2 + offsetX`, `yTop = height/2 + offsetY - blockHeight/2`, :219–232); full-canvas plane at world (0,0) with flipY=true maps canvas top row to screen top (:347–351). Origin consistent — no half-canvas offset.
+- **Background** (:408): `<color attach="background" args={[background]} />`; `resolveBackground` never null (:102–118) → shows with zero clips.
+- **Visibility** (:323, :337): `time = frame / fps`; skip iff `time < at || time >= at + hold` — half-open [at, at+hold). Driven by `useCurrentFrame()`/`useVideoConfig()` fps (:385–386). Grep: no `useFrame`/rAF/`Date.now`/`performance.now`/`Math.random`/Drei/`OrthographicCamera` — only doc-comment mentions.
+- **Z order** (:361–363): `paintIndex = visualTracks.length - 1 - trackIndex; mesh.position.set(0, 0, -paintIndex)` → z = trackIndex − (N−1); later track → larger z → nearer camera (at +10). Plus `renderOrder = trackIndex` (:363).
+- **Disposal** (:372–378): `useEffect` cleanup disposes `texture`/`geometry`/`material`; deps `[data]` → runs per-frame replacement and unmount.
+- **R3F 8**: `events-*.esm.js:1875` (`orthographic ? new THREE.OrthographicCamera(...)`), `:1882–1885` (frustum fields → `manual=true`), `:789–798` (auto-normalize only when `!manual`, same values). `@remotion/three` forwards `orthographic`/`camera` via `...rest` to Canvas (ThreeCanvas.js:72).
+
+```
+VERDICT: PASS
+CAMERA: orthographic pixel-space + consistent origin
+BACKGROUND_ZERO_CLIPS: yes
+VISIBILITY: [at, at+hold) from frame/fps
+Z_ORDER: reversed tracks, later nearer
+DISPOSAL: yes (ThreeTimelineComposition.tsx:372-378)
+PROOF_FILE: matches host numbers
+R3F8_CAMERA: sound
+FORBIDDEN_RUNTIME: none
+ISSUES: none
+```

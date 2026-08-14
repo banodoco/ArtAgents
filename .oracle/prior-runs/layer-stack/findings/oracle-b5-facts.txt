@@ -1,0 +1,38 @@
+All facts gathered. Here is the report.
+
+---
+
+## Oracle batch 5 — `rendering.layer-stack` (f9f8c120)
+
+**SCOPE: clean.** 7 paths, all allowed: `planners/layer_stack/{__init__.py, planner.yaml, run.py}`, `pack.yaml` (+1 extension id, line 51), `rendering/run.py` (registration only: `_selects_layer_stack()` dispatch branch, 13±2 lines), `test_layer_stack.py`, `test_freeze.py` (+1 id). Hybrids, backends, core, finalizers untouched.
+
+**FAST: real-support.** `_first_supporting` (run.py:259-267) iterates `_candidate_ids` in order, calling `_probe_support` → real resolver (injected, or `_CommandSupportResolver` running backend `support` command, legacy_hybrid/run.py:636-668). `profile=None` (run.py:295). Window = `dummy_window`, full 0..total_frames (run.py:577). Winner emits `RenderSegment(window=dummy_window, renderer=…, input_hashes=…)` — no `layer=` → layer None — finalizer `CONCAT_FINALIZER_ID` (run.py:594-604).
+
+**CLAIM:** `_project_tracks` (run.py:144-154) → `_component_timeline` (threejs_hybrid/run.py:158) keeping only the track's clips/tracks. First-supporting on that projection (run.py:348-350); same `probe_request` (profile=None). No-claimant: structured `raise_unsupported_error` → `RendererUnsupportedError`, message `"visual track {track_id!r} is not supported by any eligible renderer"`, `details={"track": track_id, "attempts": …}` (run.py:351-362). Not a crash.
+
+**MERGE:** predicate `claims[-1].renderer_id == renderer_id and claims[-1].opacity == opacity` (run.py:365-368) — same renderer AND same opacity. Re-support: `_probe_support(renderer_id, support_request, merged_timeline, …)` (run.py:369-377), commit only if `merged_report is not None` (378). ffmpeg rejects ≥2 visual tracks: `if len(visual_track_ids) != 1: reasons.append("rendering.ffmpeg requires exactly one visual track")` (backends/ffmpeg/support.py:282-283) — two adjacent media tracks fail merged re-support, stay split. Path exists; **untested**.
+
+**FAIL:** all three → `raise_unsupported_error` (`RendererUnsupportedError`), track id in message:
+- blend≠normal: run.py:321-333, `"visual track {track_id!r} uses blendMode {blend!r}"` + `details`.
+- opacity: `_track_opacity` raises (run.py:195-198, `"opacity {opacity} is outside (0, 1]"`), caught → unsupported (run.py:337-343), message carries track id.
+- no-claimant: run.py:351-362 (above).
+
+**PROFILE:** every support call uses `probe_request` (`_support_request`, run.py:289-296): `output_name="segment-0000.mp4"`, `window=…`, `profile=None` — no h264/yuv420p/mp4 anywhere. Plan `profile=resolve_render_profile(…)` → canonical (test asserts h264/yuv420p/mp4, fps 30,1).
+
+**RESOLVER:** profile=None + dummy full window; `_CommandSupportResolver` (legacy_hybrid/run.py:614-668): for `supports_windows: false` backends (all three) writes timeline to `planner-support/NNNN-timeline.json` and `replace(projected, window=None)` (624-631); real `support` command (636-668), capability fallback only if manifest lacks `support` op (632-634).
+
+**RECURSION:** `_PLANNER_IDS = {rendering.layer-stack, legacy_hybrid, threejs-hybrid}` (run.py:80-85); filtered `if candidate.id not in _PLANNER_IDS` (run.py:208). Planners forbidden. Untested.
+
+**TESTS** (test_layer_stack.py):
+- 238 `…one_unlayered_concat_segment` → remotion full-stack: 1 segment, layer None, window (0,60), remotion + real support_decision, concat finalizer.
+- 261 `…splits_into_two_full_window_layers` → threejs+ffmpeg-only registry (forced split): compositor, z0=source/ffmpeg, z1=overlay/threejs, full window, blend normal, opacity 1.0, all support profiles None.
+- 293 `…real_threejs_and_ffmpeg_support` → real backend support() (no fixture): two layers, window (0,24).
+- 343 `…merge_into_one_layer` → captions+brand text merge → one threejs layer z1; source ffmpeg z0.
+- 377 `…fails_closed` → effect-layer clip, no claimant → `RendererUnsupportedError`, "overlay" in message.
+- 399 `…blend_mode_fails_closed` → multiply → error names "multiply"+"overlay".
+- 425 `…escaped_by_full_stack_fast_path` → multiply + remotion → 1 layer-None concat segment.
+- 447 `…empty_timeline_is_unsupported` → support false ("empty timeline"), plan raises.
+- 461 `…strips_canonical_profile_from_support` → all support profiles None; plan h264/yuv420p/mp4; RenderPlan round-trip preserves z/tracks; full-window segments.
+- 493 `…full_plan_window` → 36 frames @24fps; every segment 0..total_frames; reasons keys = segment indices.
+
+**GAPS:** ① opacity fail-closed untested; ② ffmpeg merge-reject split (two adjacent media tracks) untested; ③ fast-path support-call profile=None unasserted (recorder discarded at 238-241); ④ planner-id exclusion (run.py:208) untested; ⑤ `request.window` branch untested; ⑥ `len(claims) < 2` failure (run.py:623-639) untested.

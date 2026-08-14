@@ -1,0 +1,17 @@
+Report follows.
+
+---
+
+**VERDICT-LEAN:** lean — 772 lines is in line with peers (legacy_hybrid 903, threejs_hybrid 709), the novel algorithm is ~220 lines, and the rest is the command-adapter scaffolding every planner duplicates by repo convention.
+
+**CUT:**
+1. `run.py:103` — `_LayerClaim.timeline` field (writes at 385, 396; never read anywhere). Drop field + both writes, and `_assign_layers` no longer needs `merged_timeline`/`projected` in claims.
+2. Optional: `plan()` re-derives inputs/config/profile/duration that its own `support()` call (run.py:557-568) just computed. A shared loader would save ~15 lines — but peer planners do the same, so it's convention, not layer-stack debt.
+
+**KEEP:** probing/projection helpers, `profile=None` on `_support_request` (honest), fail-closed blend/unsupported/empty, fast-path, `_CommandSupportResolver` reuse. No over-abstraction: the one dataclass is justified; `plan`/`_assign_layers`/`_first_supporting`/`_probe_support` split is proportionate, and one flat function would be ~400 lines of nested control flow.
+
+**MERGE-CHECK:** re-support is right. An id-special-case hardcodes "ffmpeg = one visual track" into the planner — duplicating the exact contract `support()` already owns, and it silently breaks when a contract evolves or a new one-track renderer appears. Re-support asks the actual question; the opacity-equality pre-filter is the cheap gate. Cost is one probe per adjacent same-renderer pair — acceptable.
+
+**TEST-WEIGHT:** proportional — 10 tests, ~200 lines of fixtures, all behavioral (fast path, split, real-backend, merge, fail-closed ×3, profile honesty + round-trip, exact tiling), zero white-box. One gap: no test exercising the merge-rejection path (adjacent same-renderer whose merged projection `support()` refuses) — the very branch the merge check exists for.
+
+**BLOCKER?:** none.

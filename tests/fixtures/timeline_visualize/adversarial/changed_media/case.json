@@ -1,0 +1,24 @@
+{
+  "id": "changed_media",
+  "kind": "timeline_media_tamper",
+  "timeline": "desert_slice (ULID 01KYPVKMW5STB4W6FE05ED8242)",
+  "mutation": {
+    "description": "Registry records content_sha256 for plant-frame-1 that does NOT match the bytes on disk; plant-frame-2 is recorded correctly.",
+    "tampered_asset": "plant-frame-1",
+    "tampered_file": "20260727-161653-reference-frame-1-of-4-start-wide-cinema.png/20260727-161653-reference-frame-1-of-4-start-wide-cinema.png",
+    "control_asset": "plant-frame-2",
+    "control_file": "20260727-182043-create-revised-storyboard-frame-2-by-edi.png/20260727-182043-create-revised-storyboard-frame-2-by-edi.png",
+    "tampered_bytes": "changed_media/tampered.png",
+    "tampered_sha256": "de5b7a4d5c37220cd69719b794110a147643447d17a24dcab38d119f5794634b",
+    "recorded_expected_sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+  },
+  "expected": {
+    "integrity_state": "hash_mismatch",
+    "sampling": "refused",
+    "surface": [
+      "ground-truth.json frozen_timeline.assets[].integrity_state",
+      "asset-index.json integrity_state",
+      "filmstrip/ absent for the tampered asset's page while the control asset is sampled"
+    ]
+  }
+}

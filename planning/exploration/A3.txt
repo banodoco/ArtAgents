@@ -1,0 +1,113 @@
+Now I have all the evidence. Let me compile my report.
+
+---
+
+## Findings
+
+### 1. Registry, events, manifests, and sources — relationships and authoritative hash
+
+**registry.json** (the sidecar) lives at `<timeline_home>/registry.json` and is a recoverable cache of the last `timeline.asset_registry_replaced` event. Recovery order: `registry.json` → event stream (`assembly.jsonl`) → legacy `assets.json` → defensive source-file derivation (`local_bridge.py:422-445`). The registry carries `{"assets": {asset_key: {file, type, duration?, resolution?, content_sha256?, sourceId, sourceVersion, thumbnailUrl?, url?}}}`. Example: `desert-plant-growth` registry at `projects/desert-plant-growth/timelines/01KYPVKMW5STB4W6FE05ED8242/registry.json:2-42`.
+
+**asset_registry_replaced events** use `AssetRegistryReplacedPayload` carrying `registry: dict[str, Any]` (entire asset map) and `source: "legacy_local"|"supabase_config"|"editor_save"|"other"` (`asset_registry.py:16-49`). The payload is validated for JSON-serialisability but intentionally NOT validated against the Banodoco container schema.
+
+**sources.json** (`project_dir/sources.json`) is a bridge-synced flat index written by `_sync_bridge_sources` (`local_bridge.py:735-832`). It carries `sourceId`, `sourceVersion`, `origin`, `file`, `assetIds`, `sizeBytes`, `mtimeNs`, `content_sha256`, and proxy profile versions.
+
+**Timeline manifest.json** (`timeline_home/manifest.json`) carries `contributing_runs` (array of run ULIDs — GC protection) and `final_outputs` (array with `sha256` as raw hex, `kind`, `path`, `from_run`, `size`, `ulid`). Example: `manifest.json:12-36` shows kinds `storyboard-png`, `animatic-mp4`, `timing-filmstrip-png`.
+
+**Authoritative hash**: In the registry, `content_sha256` is the raw hex SHA-256 digest computed by `sha256_file()` (`foundation/hash.py:9-16` — 1MB chunked reads). In the result manifest, `content_hash` uses the `sha256:` prefix format (`result_manifest.py:46-56`). These are the SAME content hash but different string representations. The registry's `content_sha256` is the ground truth for a source asset's bytes.
+
+**Schema drift — sourceId/sourceVersion**: The locked plan's `asset-index.json` spec (plan lines 315-341) defines roles, consuming clips, resolved state, local path, type, dimensions, duration, content hash, and inspection actions — but nowhere mentions `sourceId` or `sourceVersion`. However, `BridgeResolvedAsset` explicitly extracts `source_id` and `source_version` from registry entries (`local_bridge.py:560-561, 580-581`), and every real registry entry carries both (`registry.json:7-8, 15-16, 23-24, 31-32, 38-39`). The `_sync_bridge_sources` normalizer also writes `sourceId`/`sourceVersion` back into registry entries (`local_bridge.py:786-787`). The plan's asset-index schema has a gap: `sourceId` and `sourceVersion` exist in the source of truth but are absent from the planned output contract.
+
+**Schema drift — unhashed MP3**: The `toccata-fugue` asset in the desert-plant-growth registry has `duration`, `file`, `sourceId`, `sourceVersion`, and `type: "audio/mpeg"` but NO `content_sha256` field (`registry.json:35-41`). Every other entry carries `content_sha256`. The code does not require hashes — `_derive_local_source_version` treats `content_sha256` as optional (`local_bridge.py:942-959`: `content_sha256 or ""`). The visualization plan requires "every unique local source-asset content hash" in snapshots (plan line 278) — this MP3 would produce a null hash, breaking that invariant.
+
+### 2. Base-path/resolution rules — where resolvers disagree
+
+**Bridge resolver** (`_normalize_bridge_local_asset_reference`, `local_bridge.py:921-935`): Relative `file` values resolve against `sources_dir(project_slug)` = `<projects_root>/<slug>/sources/`. Absolute paths are also constrained to be within `sources_root`. Returns `(resolved_absolute, normalized_relative_to_sources)`.
+
+**Storyboard resolver** (`_resolved_asset`, `timeline_storyboard/run.py:165-168`): Relative `file` values resolve against `registry_dir` = the timeline home directory (parent of the registry file). Absolute paths are used directly via `expanduser().resolve()`.
+
+**Conflict**: These disagree about the base directory for relative paths. The bridge normalizes relative to `sources/`; the storyboard normalizes relative to the timeline's home. A registry entry like `"file": "toccata-fugue/toccata-fugue.mp3"` would resolve to `<sources>/toccata-fugue/toccata-fugue.mp3` in the bridge but `<timeline_home>/toccata-fugue/toccata-fugue.mp3` in the storyboard. Both paths could exist, point to different files, or one could be absent.
+
+**Thumbnail fallback**: The storyboard's `_resolved_asset` has a chain: file → URL → thumbnail (`storyboard/run.py:171-176`). If the file is missing and a `thumbnailUrl` exists, the storyboard silently uses the thumbnail as the `src`. The plan explicitly prohibits this — "never silently substitute a lower-quality asset" and "never call a thumbnail ... the original."
+
+### 3. Media content hash computation and "verified original"
+
+**Computation**: `sha256_file()` at `foundation/hash.py:9-16` — reads 1MB chunks, returns raw hex digest. Used by `result_manifest._resolve_hash` (which accepts `content_hash: "sha256:..."` or raw `sha256` and falls back to computing).
+
+**Storage**: Registry entries carry `content_sha256` as raw hex (optional — missing for the MP3). The bridge sync synthesizes `sourceVersion` as `local-v1:sha256(fingerprint)` where fingerprint = `normalized_file|size_bytes|mtime_ns|content_sha256|audio_proxy_profile|video_proxy_profile` (`local_bridge.py:942-959`). The per-source `sources.json` entry may also carry `content_sha256`.
+
+**"Verified original" operationally**: A source asset is "verified original" when: (a) its registry `file` resolves to a path within `sources/`, (b) the file exists on disk, (c) `sha256_file(path) == registry_entry["content_sha256"]`. There is NO explicit `integrity: "verified"` marker in the registry — this is a computed classification the visualizer must derive. The plan describes five integrity states: verified, missing, hash-mismatch, remote-unfetched, thumbnail-only (brief line 13, plan line 326-353). The `BridgeResolvedAsset` dataclass only has `source_kind: "local" | "http"` — it does not carry hash or integrity state.
+
+### 4. Retention/GC — what survives and how visualization is treated
+
+**GC mechanism**: `select_runs_for_gc()` at `task/run/gc.py:45-98`. Deletes run directories under `runs/` older than `--older-than-days` (default 30), keeping newest `--keep-last` runs, and protecting runs referenced by `contributing_runs` in any timeline's `manifest.json` (`gc.py:101-119`).
+
+**What survives**: (a) Protected runs (in `contributing_runs`), (b) runs within `keep_last`, (c) runs younger than the age threshold. The visualization run writes to `project_dir/runs/<run_id>/`, which is the standard GC-eligible location.
+
+**Visualization treatment**: A visualization run is NOT inherently "final output." It would follow the same pattern as `timeline_storyboard` which creates a run under `runs/` with a `manifest.json` (result manifest) plus its outputs (`storyboard/run.py:722-737`). The timeline's `manifest.json.final_outputs` is a separate, explicitly curated list of finished artifacts (storyboard PNG, animatic MP4, etc.) — NOT automatically populated from run outputs. Without explicit registration in `final_outputs` or `contributing_runs`, the visualization evidence pack is GC-vulnerable after 30 days.
+
+**Key gap**: The plan says "project-owned run behavior" and "normal managed runs create new immutable outputs" (brief, locked decision #17), but never specifies whether visualization runs should be added to `contributing_runs` or `final_outputs` for GC protection. The plan's output structure (`agent-view/` with numbered PNGs, JSON, etc.) has no provision for registering itself in the timeline's manifest.
+
+### 5. Remote/derived roles — marking and URL/credential leakage risks
+
+**Asset roles in registry/banodoco**: The Banodoco schema defines `DerivedFrom` with `role: "thumbnail" | "proxy" | "render-output"` (`banodoco_schema.py:100-103`). The plan defines five asset roles: `timeline_media`, `generation_reference`, `generation_output`, `thumbnail_only`, `rendered_sample` (brief M1, line 66-68). These are fundamentally different taxonomies — a translation layer is needed.
+
+**URL/credential leakage paths**: 
+- `render/run.py _classify_assets` (line 153-174): copies registry URLs directly into classified entries, including any `url_expires_at` fields that may contain signed query strings.
+- `timeline_storyboard _is_remote_source` (line 145-146): detects `http://`, `https://`, `data:`, `file:` schemes. When a remote source is detected, the HTML renderer serves the URL directly in `<img src>` (`storyboard/run.py:576-579`).
+- `local_bridge _is_http_url` (line 985-986): only matches `http://` and `https://`. The storyboard's broader `urlparse` check catches `data:` URIs too.
+- The bridge server's `resolve_bridge_asset` returns `BridgeResolvedAsset` with `url` directly from the registry entry (`local_bridge.py:554-562`) — no stripping of query strings.
+
+**The plan's prohibition**: "credential-bearing URL query strings are not copied into visual/text outputs" (plan line 353) and "never fetch remote media" (plan line 352). Current code has no URL-sanitization logic anywhere. The visualizer must strip query strings from any URL recorded in `asset-index.json` and must never embed URLs in PNG images.
+
+---
+
+## Tasklist implications
+
+No `planning/phase1a-codex-tasklist.md` exists yet, so I reason from the locked plan's Phase structure:
+
+**New tasks needed (not covered by existing phases)**:
+- **T-asset-schema**: Define the `asset-index.json` schema to include `sourceId`, `sourceVersion`, and explicit integrity classification (verified/missing/hash-mismatch/remote-unfetched/thumbnail-only). Resolve the `content_sha256` vs. `content_hash` prefix convention.
+- **T-registry-normalizer**: Build the single asset resolver that unifies the bridge path (relative-to-`sources/`) and storyboard path (relative-to-timeline-home) ambiguities. The plan says "one base-path rule" — pick `sources/` as canonical (the bridge is authoritative for managed projects). Deprecate storyboard-style timeline-relative resolution in the new code.
+- **T-hash-verify**: Add `sha256_file()` verification for every registry asset, producing the five integrity states. Handle the missing-hash case (MP3s, future audio) by computing hash on-the-fly and warning when `content_sha256` is absent.
+- **T-url-sanitize**: Strip credential-bearing query strings from all URLs before they reach any output artifact. The plan bans URL leakage entirely.
+- **T-gc-protection**: Decide whether visualization evidence packs register in `contributing_runs` (GC-protected) or `final_outputs` (curated deliverables), or need a new `evidence_runs` field. Without this, evidence is GC-vulnerable.
+- **T-role-mapping**: Define the mapping from Banodoco `DerivedFrom.role` (`thumbnail`/`proxy`/`render-output`) to the plan's five role types (`timeline_media`/`generation_reference`/`generation_output`/`thumbnail_only`/`rendered_sample`). `generation_reference` and `generation_output` have no Banodoco equivalent — they must be inferred from generation metadata in clips.
+
+**Tasks that split or change**:
+- Phase 1's "normalize assets" step (plan line 832-834) must split into: (a) resolve paths, (b) compute/verify hashes, (c) classify integrity, (d) classify roles, (e) strip URLs.
+- The `output_result_exemptions.json` update step needs `rendering.timeline_visualize` added — it follows the `timeline_storyboard` pattern (non-exempt, writes proper manifest).
+
+---
+
+## Risks & conflicts
+
+1. **Path resolution divergence is a correctness risk**: The bridge and storyboard disagree about relative path resolution. Any code that reads the registry without going through the bridge's `_normalize_bridge_local_asset_reference` will resolve paths differently. The visualizer must pick one rule and enforce it. Using bridge paths (relative to `sources/`) is the correct choice because that's where `astrid projects source import` places files and where the authoritative bridge serves from.
+
+2. **MP3 without hash breaks snapshot integrity**: The plan requires "every unique local source-asset content hash" in the root snapshot. The desert-plant-growth MP3 lacks `content_sha256`. The visualizer must either compute it on-the-fly (which changes the hash if the file changes) or mark it as "hash-unavailable" with a warning. Computing on-the-fly is the safer option.
+
+3. **Thumbnail fallback silently violates the "no substitution" rule**: The existing storyboard has a thumbnail fallback chain (file → URL → thumbnail). The plan explicitly prohibits this. The visualizer's asset resolver must NOT fall through to `thumbnailUrl` when the primary file is missing — it must classify the asset as "thumbnail-only" or "missing" instead.
+
+4. **GC will eat visualization evidence**: Visualization runs are ordinary `runs/` directories. After 30 days (default), GC deletes them unless they're in `contributing_runs`. The brief says "normal managed runs create new immutable outputs" but doesn't address retention. This is a silent data-loss risk for agent evidence packs that may be needed for audits or re-inspection.
+
+5. **URL leakage is not a future risk — it's present in the baseline code**: Both the storyboard HTML renderer and the bridge asset server pass registry URLs directly to output surfaces. The visualizer's asset-index and any source-card renderers must strip query strings.
+
+6. **sourceId/sourceVersion are in the registry but absent from the plan's asset-index spec**: If these fields aren't included in `asset-index.json`, the visualizer loses the ability to track which registered source an asset came from — useful for provenance across projects.
+
+7. **The plan's filmstrip "rendered" mode uses ffmpeg**: The plan says `--filmstrip rendered --rendered-video PATH` uses ffmpeg (plan line 698). This requires ffmpeg at runtime, which isn't a declared dependency anywhere in the plan constraints.
+
+---
+
+## Elegant simplifications
+
+1. **Single path rule: always `sources/`-relative**: The bridge resolver (`_normalize_bridge_local_asset_reference`) is the correct canonical resolver. Make the visualizer's `assets.py` use it directly. Don't replicate the storyboard's timeline-relative logic. This eliminates an entire class of resolution bugs.
+
+2. **Drop the `sha256:` prefix in registry-adjacent code**: The registry uses raw hex; the result manifest uses `sha256:`. Pick raw hex as the internal representation and add the prefix only at the result-manifest boundary. This eliminates a string-munging layer.
+
+3. **Make `content_sha256` mandatory in the visualizer's normalization step**: If absent, compute it with `sha256_file()` and emit a diagnostic warning. This closes the MP3 gap and makes the snapshot hash invariant achievable without schema migration.
+
+4. **Classify integrity once, at normalization time**: Instead of checking path existence and hash at multiple points (render time, manifest time, asset-index time), compute the five-state classification during model normalization and store it immutably. The layout/render/output layers only read the classification.
+
+5. **Add visualization runs to `contributing_runs` automatically**: The CLI handler, after `astrid.sdk.invoke`, could append the run ULID to the timeline's `manifest.json.contributing_runs`. This protects evidence from GC without requiring a new schema field or user action. The plan says "never mutates the timeline" — but `contributing_runs` is a run-level manifest field, not an event log entry, so adding a run ID there is consistent with how other executors (storyboard, render) already register.
+
+6. **Strip query strings at the registry boundary**: Rather than sanitizing URLs in every output path, strip query strings once when loading the registry into the normalized inspection model. Store the bare URL + a flag `had_query_params: true`. This is a one-line `url.split("?")[0]` in the asset normalizer.

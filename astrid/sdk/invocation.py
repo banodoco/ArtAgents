@@ -5,7 +5,11 @@ This module keeps invocation orchestration behind the SDK package boundary.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Mapping
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
 from typing import Any
 
@@ -174,6 +178,10 @@ def _normalize_executor_result(result: Any) -> dict[str, Any]:
         "missing_binaries": result.missing_binaries,
         "error": result.error,
         "ok": result.ok,
+        "run_id": getattr(result, "run_id", None),
+        "run_root": getattr(result, "run_root", None),
+        "outputs": getattr(result, "outputs", {}),
+        "executor_version": getattr(result, "executor_version", None),
     }
     return _json_safe_mapping(payload)
 
@@ -204,10 +212,67 @@ def _discover_invocation_manifest_path(
     manifest_path = _payload_manifest_path(raw_result)
     if manifest_path is not None:
         return manifest_path
-    if out in (None, ""):
-        return None
-    candidate = Path(out).expanduser().resolve() / "manifest.json"
-    return str(candidate) if candidate.is_file() else None
+    outputs = raw_result.get("outputs")
+    if isinstance(outputs, Mapping):
+        output_manifest = outputs.get("manifest_path")
+        if isinstance(output_manifest, str):
+            candidate = Path(output_manifest).expanduser().resolve()
+            if candidate.name == "manifest.json" and candidate.is_file():
+                return str(candidate)
+    roots: list[Path] = []
+    for raw in (raw_result.get("run_root"), out):
+        if raw in (None, ""):
+            continue
+        root = Path(str(raw)).expanduser().resolve()
+        if root not in roots:
+            roots.append(root)
+    for root in roots:
+        for candidate in (root / "manifest.json", root / "agent-view" / "manifest.json"):
+            if candidate.is_file():
+                return str(candidate)
+    return None
+
+
+def _invocation_outputs(
+    raw_result: Mapping[str, Any],
+    *,
+    manifest_path: str | None,
+) -> dict[str, Any]:
+    outputs: dict[str, Any] = {}
+    declared = raw_result.get("outputs")
+    if isinstance(declared, Mapping):
+        outputs.update(declared)
+    payload = raw_result.get("payload")
+    if isinstance(payload, Mapping) and isinstance(payload.get("outputs"), Mapping):
+        outputs.update(payload["outputs"])
+    if manifest_path is not None:
+        manifest = Path(manifest_path)
+        try:
+            document = json.loads(manifest.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            document = None
+        if isinstance(document, dict) and document.get("kind") in {
+            "timeline_visualize",
+            "timeline_visualize_project",
+        }:
+            pack_root = manifest.parent
+            outputs.setdefault("pack_root", str(pack_root))
+            outputs.setdefault("manifest_path", str(manifest))
+            outputs.setdefault(
+                "pages",
+                [str(path) for path in sorted(pack_root.rglob("PG*.png"))],
+            )
+            outputs.setdefault(
+                "file_hashes",
+                {
+                    path.relative_to(pack_root).as_posix(): hashlib.sha256(
+                        path.read_bytes()
+                    ).hexdigest()
+                    for path in sorted(pack_root.rglob("*"))
+                    if path.is_file()
+                },
+            )
+    return _json_safe_mapping(outputs)
 
 
 def invoke(
@@ -278,7 +343,10 @@ def invoke(
                 argv=tuple(argv),
                 invocation="sdk",
             )
-            result = sdk_module.run_executor(request, executor_registry)
+            # SDK callers own stdout (the timeline CLI emits one JSON object).
+            # Executor stdout remains available in managed run logs.
+            with redirect_stdout(StringIO()):
+                result = sdk_module.run_executor(request, executor_registry)
             raw_result = _normalize_executor_result(result)
         else:
             from astrid.core.execution.orchestrator.runner import OrchestratorRunRequest
@@ -298,7 +366,8 @@ def invoke(
                 execution_mode=execution_mode,
                 invocation="sdk",
             )
-            result = sdk_module.run_orchestrator(request, orchestrator_registry)
+            with redirect_stdout(StringIO()):
+                result = sdk_module.run_orchestrator(request, orchestrator_registry)
             raw_result = _normalize_orchestrator_result(result)
     except AstridSDKError:
         raise
@@ -317,6 +386,9 @@ def invoke(
         else None
     )
     manifest_path = _discover_invocation_manifest_path(raw_result, out=out)
+    run_id_raw = raw_result.get("run_id")
+    run_root_raw = raw_result.get("run_root")
+    executor_version_raw = raw_result.get("executor_version")
     return InvocationResult(
         capability_id=capability.id,
         capability_type=capability.capability_type,
@@ -325,4 +397,16 @@ def invoke(
         error=error,
         manifest_path=manifest_path,
         raw_result=raw_result,
+        run_id=run_id_raw if isinstance(run_id_raw, str) and run_id_raw else None,
+        run_root=(
+            str(Path(run_root_raw).expanduser().resolve())
+            if isinstance(run_root_raw, str) and run_root_raw
+            else None
+        ),
+        outputs=_invocation_outputs(raw_result, manifest_path=manifest_path),
+        executor_version=(
+            executor_version_raw
+            if isinstance(executor_version_raw, str) and executor_version_raw
+            else None
+        ),
     )

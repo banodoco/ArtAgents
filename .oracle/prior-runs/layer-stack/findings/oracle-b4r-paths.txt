@@ -1,0 +1,19 @@
+## Answer: **YES** — with one gate: the remap only fires when the alpha stamp is present, and every downstream reader uses the artifact's declared path, never the request's `.mp4` name.
+
+**1. Service writes `.mp4`, but never compares names.**
+- `astrid/core/rendering/service.py:1362`: `output_name=f"segment-{index:04d}.mp4"`.
+- `_invoke_renderer` (service.py:1019–1030) copies `output_name` into `backend_request` and runs it; nothing after `response` compares `result.video.path` basename to `output_name`.
+- The validator (`astrid/core/rendering/artifacts.py:669–758` `validate_render_result`) checks containment, hash, strict probe, profile, audio, duration — **no name/basename check**. A `.mov` basename is accepted as-is. Segment renders pass `expected_profile=None` (service.py:1417), so validation uses the backend's own declared profile.
+
+**2. Backends remap locally; `request.output_name` is never mutated.**
+- `remotion/run.py:920–922` and `threejs/run.py:464–466`: `output_name = _alpha_output_name(request.output_name) if alpha else request.output_name`.
+- `_alpha_output_name` (`_shared/__init__.py:285–295`): `str(path.with_suffix(".mov"))` — a **local variable only**; the frozen request is untouched.
+- Artifact: `VideoArtifact.from_file(path=output_path, …)` (remotion run.py:981–986; threejs run.py:522–528) — the declared `video.path` is the real `.mov`. Stamped alpha profiles are ProRes 4444/`yuva444p12le`/`mov` (`_remotion_mux_profile`, `_shared:296–313`).
+
+**3. Plan/layer record:** stores `layer.z/alpha/blend` metadata, no paths. Paths flow only via `FinalizeRequest(artifacts=[item.video for item in segment_results], …)` (service.py:1544).
+
+**4. Compositor:** `path = _input_path(artifact.path, workspace)` (`compositor/run.py:541`) — from the artifact record. No extension allowlist anywhere (grep: none; `_probe_layer` is ffprobe-based). `_safe_protocol_output_path` (run.py:89–139) guards only the output side. `_layer_has_alpha` (run.py:337–346): `pixel_format.startswith(("yuva", "rgba", "gbrap"))` → `yuva444p12le` **counts as alpha**.
+
+**5. Concat:** `Path(artifact.path)` / `_input_path(artifact.path, workspace)` (`ffmpeg/run.py:1128–1131, 1161, 1178`) — same artifact-record lookup.
+
+**Gate:** remap triggers only when `_timeline_alpha` sees `metadata.astrid_layer.alpha is True` (`_shared:270–283`), stamped only for z>0 full-timeline segments (service.py:1104–1107). Unstamped/opaque segments keep the frozen `.mp4` — no remap, no mismatch.

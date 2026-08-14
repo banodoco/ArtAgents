@@ -1,0 +1,123 @@
+Now I have all the evidence. Let me compile the complete analysis.
+
+---
+
+## Findings
+
+### 1. How `visual_understand` sends images — contact sheet vs. individual PNGs
+
+**Evidence:** `astrid/packs/understanding/executors/visual_understand/run.py:295-321` (`_call_responses_api`) sends a **single image** — one `input_image` content block with one base64-encoded `image_url`. When multiple source images/video frames are collected by `_collect_inputs` (lines 355-402), they are **always composited into a single contact sheet** via `_build_contact_sheet` (lines 150-187), unless exactly one image is passed with no `--contact-sheet` flag (line 393).
+
+```python
+# line 306-320: only ONE image_path, ONE input_image in the content array
+payload = {
+    "input": [{"role": "user", "content": [
+        {"type": "input_text", "text": query},
+        {"type": "input_image", "image_url": f"data:{media_type};base64,{data}", "detail": detail},
+    ]}],
+}
+```
+
+**Implication for the plan:** The plan requires "ordered original PNGs (not a contact sheet)" sent to the VLM evaluator (M2 brief line 62: "Every fixture declares an exact ordered image bundle"). The current `_call_responses_api` **cannot send multiple separate images in one call**. Extending it to send multiple `input_image` blocks would be a non-trivial API change. Wrapping the evaluator in a new narrow tool that sends multiple images would also be a divergence from the canonical surface.
+
+### 2. Model presets — hardcoded, undocumented, and generation-only
+
+**Evidence:** `visual_understand/run.py:32-35`:
+
+```python
+MODEL_PRESETS = {
+    "fast": "gpt-4o-mini",
+    "best": "gpt-5.4",
+}
+```
+
+**Discrepancy:** The SKILL.md (`astrid/packs/understanding/skill/SKILL.md:41`) documents `best` as `gpt-4o`, but the code uses `gpt-5.4`. The STAGE.md (`visual_understand/STAGE.md:49`) matches the code (`gpt-5.4`). The SKILL.md is stale.
+
+**Model catalog** (`astrid/core/model_catalog/models.yaml`) is **entirely generation-only**: all 13 entries are image/video/audio generation models (z-image, qwen-image-2512, flux-dev, wan-2.2, ltx-2.3, etc.). The taxonomy (`taxonomy.py`) defines modalities `image`, `video`, `audio` only. There is no "evaluation", "vision", or "understanding" modality. The `ModelRegistry` (`registry.py:40-68`) keyed by `(model_id, mode)` assumes generation modes (`t2i`, `i2i`, `edit`, etc.), not evaluation.
+
+**No evaluation-profile registry exists** anywhere in `astrid/core/model_catalog/` or the broader codebase.
+
+### 3. Structured-output validation, retry, session isolation, cost ceilings
+
+**Schema-constrained output exists but is not validated client-side:** `_call_responses_api` (lines 324-332) passes `response_schema` to the OpenAI Responses API as `text.format = json_schema` with `strict: true`. However, the response text is extracted raw via `_response_text()` (lines 283-292) and **never validated against the schema on the Astrid side**. If the API returns valid JSON that doesn't match the schema, or returns free text, Astrid accepts it silently.
+
+**No retry logic:** `_call_responses_api` (lines 339-352) makes one call and raises `AstridError` on `HTTPError` or `URLError`. No retry loop, no backoff.
+
+**No session isolation:** Each call to `_call_responses_api` is a stateless POST with no conversation context. The plan requires "three consecutive fresh-session passes per critical fixture" (M2 brief line 71). The executor has no mechanism to guarantee a fresh session — the OpenAI Responses API is inherently stateless per request, so this is satisfied by default, but there's no explicit session-id tracking or isolation assertion.
+
+**No cost ceilings:** The understanding pack has no cost/budget/rate-limit mechanism. The `max_output_tokens` defaults to 700 (line 532) but there is no per-run or per-fixture cost cap.
+
+### 4. Evidence recording gaps
+
+The `run()` function result dict (`run.py:444-451`) records:
+
+| Field | Recorded? | Plan requires? |
+|---|---|---|
+| `model` (e.g. "gpt-5.4") | ✅ | ✅ |
+| `response_id` | ✅ | Not explicit |
+| `usage` (token counts) | ✅ | Not explicit |
+| Model **revision** | ❌ NOT RECORDED | ✅ "model revision when available" (decisions:991) |
+| Prompt **hash** | ❌ NOT RECORDED | ✅ "prompt hash" (decisions:991) |
+| Image **content hash** | ❌ NOT RECORDED | ✅ "image hashes" (decisions:992) |
+| Inference settings (temperature, top_p) | ❌ NOT RECORDED | ✅ "inference settings" (decisions:991) |
+| API call timestamp | ❌ NOT RECORDED | Not explicit but useful |
+
+The manifest records input image *paths* but not content hashes (`run.py:482-494`). The manifest's `complete_output_metadata` (`result_manifest.py:88-134`) computes `sha256` hashes for **output files** but does not hash input images.
+
+### 5. Canonical image-understanding surface
+
+Per the plan (decisions:989-990) and the SKILL.md (`astrid/packs/understanding/skill/SKILL.md:19-20`), the canonical surface is `understanding.visual_understand`. The pack also has `understanding.understand` (legacy dispatcher, SKILL.md:27-28), `understanding.video_understand`, `understanding.audio_understand`, and `understanding.scene_describe`. Only `visual_understand` handles pure image input.
+
+---
+
+## Tasklist implications
+
+Since no `phase1a-codex-tasklist.md` exists in either checkout (NOT FOUND), I infer from the plan structure:
+
+**Tasks that change:**
+
+- **Any T task proposing to use `visual_understand` as-is for multi-image VLM evaluation must be split**: The executor sends a single image (contact sheet), not ordered individual PNGs. Must either extend `_call_responses_api` to accept multiple `input_image` blocks, or build a narrow evaluator wrapper.
+
+- **Any T task for "record model identity" must expand**: The current result dict is missing model revision, prompt hash, image content hash, and inference settings. These need to be added either to the executor or the evaluator wrapper.
+
+- **Model preset tasks need a correction**: The SKILL.md says `best` = `gpt-4o` but code uses `gpt-5.4`. Whichever model is locked for evaluation must be reconciled.
+
+**New tasks that appear:**
+
+- **T-NEW-1**: Add image content hash recording to input tracking (possibly via `result_manifest.sha256_file` on input images before API call).
+- **T-NEW-2**: Add prompt hash computation (`sha256(query + schema)` before API call).
+- **T-NEW-3**: Record model revision from the API response (if the Responses API returns it — check the `model` field).
+- **T-NEW-4**: Build or configure an evaluation-profile registry (model identity, revision pin, cost limits) — the model catalog has no evaluation modality.
+- **T-NEW-5**: Add client-side JSON schema validation of VLM answers (compare returned JSON against the fixture answer schema; reject/retry on parse failure).
+- **T-NEW-6**: Add per-fixture cost ceiling and/or max-token budget check before firing API calls.
+- **T-NEW-7**: Decide whether to extend `_call_responses_api` for multi-image input (breaking the single-image assumption) or wrap a narrow evaluator that calls `visual_understand` per-image and aggregates.
+
+---
+
+## Risks & conflicts
+
+1. **Contact sheet vs. ordered PNGs is a hard architectural conflict.** The plan says "ordered original PNGs (not a contact sheet)" (M2 brief line 62). The executor always produces contact sheets for multi-image scenarios. If the evaluator sends 6–12 pages as a contact sheet, VLM comprehension degrades (lossy compositing, reduced resolution per frame). The plan's exit criteria require the VLM to distinguish individual PNG pages — a contact sheet defeats this.
+
+2. **`gpt-5.4` may not exist or may not match `gpt-4o` capability.** The SKILL.md docs `best` as `gpt-4o` but code hardcodes `gpt-5.4`. If `gpt-5.4` is a typo or unavailable model, the evaluation pipeline fails silently.
+
+3. **No schema validation on returned JSON means scoring is fragile.** The plan requires `{fixture_id, answers:[{question_id, answer_ids, time_seconds, state, confidence, abstain}]}` (decisions:997-998). If the VLM returns slightly malformed JSON, the mechanical scorer will crash without retry — and there's no client-side validation to catch this before comparison.
+
+4. **Model revision is required by the plan but may not be available from the API.** The OpenAI Responses API response includes `model` (string) but not necessarily a revision hash. If revision isn't available, the plan's requirement ("model revision when available") is vacuously satisfied but the evidence trail is weakened.
+
+5. **The generation-only model catalog means evaluation models live outside the registry.** If an evaluation model list is needed (for pinning, cost tracking, or `astrid models list`), it has no home in the current taxonomy.
+
+---
+
+## Elegant simplifications
+
+1. **Skip multi-image API calls entirely — send pages one at a time.** Instead of extending `_call_responses_api` for multi-image, have the evaluator call `visual_understand` once per page (per question), then aggregate answers. This uses the existing single-image surface without modifying it, keeps the contact-sheet path untouched, and makes per-image hashes trivial to record. The cost is more API calls, but each is simpler and individually verifiable.
+
+2. **Reuse `result_manifest.sha256_file` for input image hashing.** The manifest already computes content hashes for outputs. Call the same `sha256_file` on each input PNG before the API call and store it in the result. No new hashing infrastructure needed.
+
+3. **Compute prompt hash as `sha256(query + json.dumps(schema, sort_keys=True))`.** No new dependency — just hash the canonical JSON form before sending.
+
+4. **Drop the evaluation-profile registry for M2.** The plan only needs one pinned model (likely `gpt-4o` or `gpt-4o-mini`). Hardcode it in the evaluator fixture config rather than building a taxonomy extension. Defer the registry to post-M2 if multiple evaluation models become a real need.
+
+5. **Client-side schema validation can be `jsonschema.validate(answer, fixture_answer_schema)`** — a single call after `json.loads` on the response text. If it fails, log a warning and score zero rather than crashing. This is ~5 lines and prevents the scorer from crashing on malformed VLM output.
+
+6. **Fresh-session isolation is free with the Responses API** — each POST is stateless. Just document this rather than building session-tracking infrastructure.

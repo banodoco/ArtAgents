@@ -1,0 +1,22 @@
+# Oracle Batch 2 — elegance + semantics critique
+
+**Verdict: Batch 2 passes. One low-severity MUST-FIX.** 151 passed (test_service + test_contracts).
+
+**A: right-layer** — Pre-filter makes the slice hermetic: `_window_clip` raises on malformed media clips (missing `to`, bad bounds/speed, service.py:1172-1186), so post-rewrite filtering would let another layer's corrupt clip crash this layer's materialization. Rewrite is per-copy and reads nothing shared, so post-filter changes no times and leaks nothing; fail isolation is the deciding property, not efficiency.
+
+**B: correct — with one real gap.** Empty-window survival is right: checkpoint-1 requires B3 to pad short layers, and the renderer can only emit the span if its track survives. But no phantom track materializes — `tracks_out` filters `raw_tracks` (service.py:1147-1151), so an unknown id silently yields `tracks: [], clips: []`. LayerRef can't catch it (contracts.py:1320-1330, timeline-agnostic). That's a Batch-2 seam defect, not LayerRef's: the plan's risk row "materialized track ids == layer.tracks" is unenforced. Fix is ~5 lines: after `_window_timeline` in `_segment_request`, `raise_protocol_error` when allowlist ids ∉ materialized ids.
+
+**C: reasonable.** `astrid_layer` is namespaced; collision requires a user key with that exact name, and then direct assignment overwriting it is *correct* — the stamp is authoritative; a setdefault-skip would let stale z/alpha lie to the renderer. z=0 stamped with `alpha: false` is right: unconditional stamp = one renderer code path ("stamp present → layer mode"). Minor: the comment "never clobber existing keys" is imprecise — `astrid_layer` is deliberately clobbered.
+
+**D: minimal.** One optional kwarg, two sites, no new types; `_window_timeline` stays the single slicing method — a parallel layered variant would be the overbuild. Six tests, no tautologies; 4↔6 overlap in assertions but 6 guards the dispatch path (renderer actually receives the slice), a distinct failure mode.
+
+**E: no-conflict.** Empty-window survival + unconditional stamp is exactly the known-layer, stamped request B3 needs to pad; `alpha: false` says "opaque content", not "full span", so B3 must still pad per checkpoint-1.
+
+```
+MUST-FIX-NOW: 1 — phantom allowlist id → silent `tracks: []` (service.py:1144-1151);
+               fail closed in _segment_request via raise_protocol_error. Fold the
+               imprecise "never clobber" comment into the same edit.
+DEFER: B3 compositor pad (incl. z=0) + support() rejections; B4 stamp honoring;
+       B5 planner fail-closed track claim; two-segment disjoint test (covered
+       transitively by tests 1+6 — not worth a 7th test now).
+```

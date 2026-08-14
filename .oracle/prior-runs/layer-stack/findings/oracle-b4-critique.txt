@@ -1,0 +1,50 @@
+`.oracle` is read-only in this session (EPERM on write) — consistent with the brief's "Read-only." Report delivered here:
+
+```
+PATH: a — B4 fails its own checkpoint: Remotion 4.0.509 muxes yuv420p despite --codec=vp9
+(corner probed opaque; transparency test xfailed), and Remotion rejects .mp4 output for vp9
+and prores alike — the stamped path is broken end-to-end; prores is the only engine-native
+alpha and the compositor already accepts it free.
+
+COMPOSITOR: zero-change — prores/mov accepted today: yuva* probe -> alpha (run.py:345),
+no libvpx forcing for non-vp9, format=yuva420p prepend fine; composite output stays opaque
+mp4. Keep the vp9 fallback — still correct for third-party vp9-alpha webm; rejecting it
+would add support() code, not remove any.
+
+KEEP-STAMP: keep — _timeline_alpha + threejs bg-skip are correct and REQUIRED under (a);
+without bg-skip even prores corners stay opaque. Only flags/codec are wrong.
+
+NAMING: service-ext-change — compositor is path-agnostic (probe-based), but Remotion
+rejects .mp4 for prores, so service.py:1362 must emit .mov for z>0 segments;
+_OUTPUT_NAME_RE already allows .mov; legacy validate_output_name never sees segment names.
+
+CONSTRAINT: revise-output_name — justified: the freeze assumed VP9-in-.mp4, dead twice
+(no yuva plane; .mp4 rejected for both codecs). One conditional in _execute_planner;
+final output_name/dispatch/provenance untouched.
+
+BATCH5-ASSUME: stamped tops emit ProRes 4444/mov/yuva444p12le with real alpha; threejs
+tops transparent (bg-skip). Remotion tops NOT yet transparent — banodoco TimelineComposition
+paints opaque theme color.bg; B4 only bg-skipped threejs. bg-neutralization must land with
+the rework, or B5 routes stacked text tops to threejs only.
+
+MUST-FIX-NOW:
+1. _shared/__init__.py mux_profile alpha branch -> mov/prores/4444/yuva444p12le; pin
+   time_base + audio codec from a real probe (1/1000, opus are webm values).
+2. remotion/run.py alpha args -> --image-format=png --pixel-format=yuva444p12le --codec=prores.
+3. remotion/run.py: neutralize opaque theme bg for stamped tops (transparent visual.color.bg
+   in merged_props); no node_modules edit.
+4. service.py:1362 .mov iff layer.z>0.
+5. Tests: remotion B4 section -> prores flags, .mov, probed prores + corner alpha 0;
+   threejs B4 section -> dict->RenderRequest fix, .mov, un-xfail corner[3]==0.
+6. plan.md: replace "VP9/yuva at segment-NNNN.mp4" with prores/mov; close "remotion paints
+   theme bg" risk.
+
+YAGNI-CUT: vp9/yuva420p flags, (1,1000) webm constant, broken vp9/webm test asserts.
+Keep: _timeline_alpha, bg-skip, alpha_output features, compositor vp9 fallback.
+```
+
+Evidence grounding:
+- **B4 broken, not just suboptimal**: `batch-4-exec.txt` documents the real renders — `vp9`/`yuv420p` (no alpha plane), corner `(0,0,0,255)`, audio `opus` not `aac`; 3 test failures + the corner-transparency test xfailed. Declared `yuva420p`/`aac` ≠ probed truth → strict validation fails.
+- **Compositor truly zero-change**: `_layer_has_alpha` probes `yuva*` (catches prores `yuva444p12le`); `libvpx-vp9` forcing is gated on `alpha AND vp9` so never touches prores; `format=yuva420p` prepend converts 12-bit 444 to 420 fine; `-f mp4` output untouched. `.mov` extension is never inspected — confirmed by `oracle-b4-facts.txt` ("ACCEPTED ALREADY. Lines to change: 0").
+- **Remotion-top opacity is a real second bug**: `@banodoco/timeline-composition`'s `TimelineComposition.tsx:272` fills opaque `backgroundColor: props.theme?.visual.color.bg ?? 'black'`; B4's bg-skip exists only in `ThreeTimelineComposition.tsx`. Even with prores, remotion stamped tops would probe corner alpha 255.
+- **Naming check**: `_OUTPUT_NAME_RE` (`contracts.py:38`) accepts `.mov`; legacy `validate_output_name` is facade/CLI-only, never sees `segment-NNNN` names — one-line change at `service.py:1362` suffices.

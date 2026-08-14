@@ -1,0 +1,213 @@
+{
+  "schema_version": 1,
+  "id": "rendering.timeline_visualize",
+  "name": "Timeline Visualize",
+  "kind": "built_in",
+  "version": "1.0",
+  "short_description": "Build a deterministic, agent-navigable evidence pack from managed timeline event logs.",
+  "description": "Read one or more managed timeline event logs without repair or mutation, freeze source-normalized snapshots, and emit deterministic JSON, Markdown, PNG, and SVG evidence under the owning project run.",
+  "keywords": [
+    "timeline",
+    "visualize",
+    "evidence",
+    "agent",
+    "png",
+    "svg"
+  ],
+  "inputs": [
+    {
+      "name": "project_slug",
+      "type": "string",
+      "required": true,
+      "description": "Owning Astrid project slug. Must match the managed invocation project."
+    },
+    {
+      "name": "timeline_source",
+      "type": "directory",
+      "required": false,
+      "artifact_type": null,
+      "description": "Optional repeatable contained managed-timeline directory; otherwise timeline_slug, all, or the project default selects the source."
+    },
+    {
+      "name": "timeline_slug",
+      "type": "string",
+      "required": false,
+      "description": "Named managed timeline; omission selects the project default."
+    },
+    {
+      "name": "all",
+      "type": "boolean",
+      "required": false,
+      "default": false,
+      "description": "Select every non-tombstoned managed timeline in canonical ULID order."
+    },
+    {
+      "name": "scope",
+      "type": "string",
+      "required": false,
+      "default": "timeline",
+      "description": "Explicit cold scope: project, timeline, shot, range, clip, asset, or timestamp."
+    },
+    {
+      "name": "shot",
+      "type": "string",
+      "required": false,
+      "description": "Authored pinnedShotGroups[].shotId to focus."
+    },
+    {
+      "name": "range",
+      "type": "string",
+      "required": false,
+      "description": "Closed-open START..END window; times are seconds or [HH:]MM:SS[.fff]."
+    },
+    {
+      "name": "at",
+      "type": "string",
+      "required": false,
+      "description": "Timestamp to inspect, in seconds or [HH:]MM:SS[.fff]."
+    },
+    {
+      "name": "clip",
+      "type": "string",
+      "required": false,
+      "description": "Authored clip id to focus."
+    },
+    {
+      "name": "asset",
+      "type": "string",
+      "required": false,
+      "description": "Canonical asset key to inspect with every timeline use."
+    },
+    {
+      "name": "context",
+      "type": "number",
+      "required": false,
+      "default": 3.0,
+      "description": "Symmetric context seconds for clip or timestamp focus."
+    },
+    {
+      "name": "neighbors",
+      "type": "integer",
+      "required": false,
+      "default": 0,
+      "description": "Previous and next clips retained on a focused clip's track."
+    },
+    {
+      "name": "from_view",
+      "type": "file",
+      "required": false,
+      "artifact_type": null,
+      "description": "Contained prior visualization manifest used by snapshot-safe navigation."
+    },
+    {
+      "name": "focus",
+      "type": "string",
+      "required": false,
+      "description": "Qualified object or timestamp reference resolved through from_view."
+    },
+    {
+      "name": "refresh_root",
+      "type": "boolean",
+      "required": false,
+      "default": false,
+      "description": "Explicitly cross from a verified frozen view to a fresh current-state root."
+    },
+    {
+      "name": "layout",
+      "type": "string",
+      "required": false,
+      "default": "both",
+      "description": "Page geometry: time-scaled, linear, or both."
+    },
+    {
+      "name": "formats",
+      "type": "string",
+      "required": false,
+      "description": "Repeatable presentation format list from --format: png, svg, md, or all (default all). Core machine artifacts are always written."
+    },
+    {
+      "name": "filmstrip",
+      "type": "string",
+      "required": false,
+      "default": "auto",
+      "description": "Boundary sampling policy: auto, off, assets, or rendered."
+    },
+    {
+      "name": "rendered_video",
+      "type": "file",
+      "required": false,
+      "artifact_type": null,
+      "description": "Contained rendered-video source used only with rendered filmstrip mode."
+    }
+  ],
+  "outputs": [
+    {
+      "name": "pack_root",
+      "type": "directory",
+      "mode": "create_or_replace",
+      "path_template": "{out}/agent-view",
+      "artifact_type": "evidence/timeline-visualization",
+      "description": "Run-owned deterministic evidence-pack directory."
+    },
+    {
+      "name": "manifest_path",
+      "type": "file",
+      "mode": "create_or_replace",
+      "path_template": "{out}/agent-view/manifest.json",
+      "artifact_type": "metadata/result-manifest",
+      "description": "Universal result manifest and agent navigation root."
+    }
+  ],
+  "command": {
+    "argv": [
+      "{python_exec}",
+      "-m",
+      "astrid.packs.rendering.executors.timeline_visualize.run",
+      "--out",
+      "{out}"
+    ],
+    "input_args": [
+      {
+        "input": "timeline_source",
+        "flag": "--timeline-source",
+        "repeatable": true,
+        "optional": true
+      },
+      {
+        "input": "formats",
+        "flag": "--format",
+        "repeatable": true,
+        "optional": true
+      }
+    ]
+  },
+  "cache": {
+    "mode": "none"
+  },
+  "conditions": [],
+  "graph": {
+    "consumes": [
+      "timeline_event_logs"
+    ],
+    "depends_on": [],
+    "provides": [
+      "timeline_visualization_evidence"
+    ]
+  },
+  "isolation": {
+    "mode": "subprocess",
+    "network": false,
+    "binaries": [],
+    "requirements": []
+  },
+  "metadata": {
+    "runtime_entrypoint": "run_sdk",
+    "runtime_file": "run.py",
+    "runtime_module": "astrid.packs.rendering.executors.timeline_visualize.run",
+    "output_result_manifest": true,
+    "requires_timeline": false,
+    "run_metadata": {
+      "evidence": true
+    }
+  }
+}

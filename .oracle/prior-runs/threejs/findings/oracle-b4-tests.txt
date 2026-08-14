@@ -1,0 +1,45 @@
+[0m[33mWarning[0m[2m:[0m [1mThe 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.[0m
+[0m      [2mat [0m[0m[1m[3mwarnOnDeactivatedColors[0m[2m ([0m[0m[36minternal:tty[0m[2m:[0m[33m33[0m[2m:[33m24[0m[2m)[0m
+[0m      [2mat [0m[0m[1m[3mgetColorDepth[0m[2m ([0m[0m[36minternal:tty[0m[2m:[0m[33m42[0m[2m:[33m39[0m[2m)[0m
+[0m      [2mat [0m[0m[1m[3mshouldColorize[0m[2m ([0m[0m[36minternal:util/colors[0m[2m:[0m[33m14[0m[2m:[33m109[0m[2m)[0m
+[0m      [2mat [0m[0m[1m[3mrefresh[0m[2m ([0m[0m[36minternal:util/colors[0m[2m:[0m[33m18[0m[2m:[33m31[0m[2m)[0m
+[0m      [2mat [0m[0m[1m[3minternal:util/colors[0m[2m ([0m[0m[36minternal:util/colors[0m[2m:[0m[33m24[0m[2m:[33m16[0m[2m)[0m
+[0m      [2mat [0m[0m[1m[3minternal:assert/assertion_error[0m[2m ([0m[0m[36minternal:assert/assertion_error[0m[2m:[0m[33m2[0m[2m:[33m187[0m[2m)[0m
+[0m      [2mat [0m[0m[1m[3mloadAssertionError[0m[2m ([0m[0m[36mnode:assert[0m[2m:[0m[33m28[0m[2m:[33m96[0m[2m)[0m
+
+Working...
+```
+VERDICT: PASS
+TESTS: 18 functions (24 items w/ parametrize) in tests/core/rendering/test_threejs_hybrid.py:
+  test_text_only_timeline_is_one_three_segment, test_media_anywhere_falls_back_to_remotion,
+  test_text_media_text_tiles_three_remotion_three, test_text_overlapping_media_merges_into_one_remotion_component,
+  test_fallback_classes_route_to_remotion (×5: effects/transition/non-base-visual-track/opacity/audio-fades),
+  test_gaps_are_remotion_and_tail_extends_to_total_frames, test_non_integer_clip_times_round_to_frames,
+  test_quarter_second_handle_is_capped_at_next_occupied_region, test_quarter_second_handle_is_capped_at_timeline_boundary,
+  test_adjacent_same_renderer_windows_coalesce, test_empty_timeline_support_rejects,
+  test_canonical_mp4_time_base (×3: 24/30/ntsc), test_real_support_evidence_and_identity,
+  test_support_resolver_rejection_is_structured, test_merged_components_only_merge_strict_overlaps,
+  test_clip_frame_range_rounds_and_keeps_minimum_one_frame, test_registered_protocol_and_registry_identity,
+  test_registered_protocol_rejects_empty_timeline
+COVERAGE_GAPS: none — every characterized case has an exact-window assertion:
+  text-only [(0,60,THREE)]:181; all-Remotion media [(0,60,REM)]:193; fallback classes [(0,60,REM)]:256;
+  text→media→text [(0,60),(60,135),(135,165)]:203; overlap→whole-REM [(0,75)]:225; gaps+tail [(0,30),(30,60),(60,90),(90,120)]:274;
+  rounding [(0,15),(15,60)]:297; handles capped [(0,60),(60,123),(123,153)]:308, [(0,60),(60,240)]:334;
+  coalesce [(0,60)]:356; min 1 frame:481
+EMPTY_DISTINCTION: planner-rejects + renderer-accepts — hybrid:375 (:378 supported False, "empty timeline" reason; plan raises) + hybrid:521 (protocol path);
+  backend accepts: test_threejs_backend.py:234 test_threejs_support_accepts_empty_and_exact_text_fields (clips:[] → supported True; :154 _empty_timeline). Distinction present.
+TILING: asserted — _assert_exact_tiling (hybrid:149) checks start=0, end=total_frames, adjacency (no gap/overlap), end>start, renderer ∈ {THREE,REM} (no recursive planner ids); called by every plan test
+SUPPORT_IDENTITY: asserted — hybrid:149 (support_decision.backend == renderer.id, supported True on every segment) + :410 real-registry evidence (manifest_digest, source_pack id, trust_eligibility)
+TIMESCALES: asserted 24/30 — :398 (24→(1,12288), 30→(1,15360), ntsc→(1,30000)); profile.fps_rational + time_base per param
+FINALIZER: pinned ffmpeg-finalizer asserted — hybrid:149 (finalizer.id == FINALIZER_ID) + :410 (:425 digest/source_pack) + :494 registry identity
+FREEZE_REG: planner-surface-only — `git show af907878` touches only tests/core/rendering/test_freeze.py (+"rendering.threejs-hybrid" to expected ids, :390) and tests/packs/rendering/test_builtin_registration.py (planners.list() now ["rendering.legacy_hybrid","rendering.threejs-hybrid"], :168). No other test changes; no production test files altered.
+PYTEST: 7 failed, 87 passed, 2 skipped
+  command=PYENV_VERSION=3.11.11 python -m pytest -q tests/core/rendering/test_threejs_hybrid.py tests/packs/rendering/test_threejs_backend.py tests/packs/rendering/test_builtin_registration.py tests/core/rendering/test_freeze.py tests/core/rendering/test_legacy_hybrid.py tests/packs/rendering/test_ffmpeg_finalizer.py
+  Per-file: hybrid 24 passed; backend 6 failed/4 passed/2 skipped; builtin 1 failed/3 passed; freeze 14 passed; legacy 22 passed; ffmpeg 20 passed. Full suite incl. backend real-render file ran (env-gated renders skip fast, no long renders).
+  Host's 96 passed NOT reproduced here.
+WINDOW_PROBES: match-host — all four _window_plan (run.py:231) probes returned identical frame windows: text-only 24fps [(0,24)]; text-media-text [(0,12),(12,24),(24,36)]; overlap [(0,24)]; gap [(0,7),(7,19),(19,26),(26,27)], totals 24/36/24/27. Only id string differs: full ids rendering.threejs/rendering.remotion (host shorthand THREE/REM).
+ISSUES:
+  1. 7 failures are environmental, not regressions from af907878: test_threejs_backend.py (6) all fail on "banodoco_timeline_schema is required for timeline validation — pip install -e packages/timeline-schema/python" (packages/timeline-schema absent from this workspace; file untouched by af907878, last changed fdf6dfae). test_builtin_registration.py::test_real_remotion_render_through_registered_backend fails with the same schema reason first (verified via support probe).
+  2. 2 skips = backend real-render tests gated by _require_threejs_environment().
+  3. Consequence: renderer-accepts-empty is asserted at test_threejs_backend.py:234 but that test does not pass in this env — cite as written, not as executed-green here.
+```

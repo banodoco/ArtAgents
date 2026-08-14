@@ -1,0 +1,122 @@
+Now I have complete evidence. Here is the comprehensive findings report.
+
+---
+
+## Findings
+
+### 1. `editorial.transcribe` — what it writes, where, and what identity/version it records
+
+**Output files**: Three files in `out_dir` (defaults to `<audio_parent>/<audio_stem>/`):
+- `transcript.json` — `{"segments": [{"start", "end", "text", "speaker?"}]}` 
+- `transcript.srt` 
+- `transcript.txt`
+
+**Transcript identity**: **NONE**. The `transcript.json` itself carries zero provenance fields. No `transcript_id`, no `source_audio_hash`, no `model_version`, no `schema_version`. Evidence: `transcribe/run.py:214` — `json.dumps({"segments": segments}, indent=2)` is the entire payload.
+
+**What does carry identity**: The executor emits a `manifest.json` via `build_manifest`/`write_manifest` (`transcribe/run.py:285-303`). This records `kind: "transcript"`, `inputs: {audio, model, language}`, and output file paths with content hashes. But this manifest lives in the output directory — it is NOT carried downstream into cut or into managed timelines.
+
+**Word timing**: **Explicitly absent by design.** The Whisper API call uses `timestamp_granularities=["segment"]` only (`transcribe/run.py:196`). No word-level timestamps survive anywhere. The `normalize_segment` function (`transcribe/run.py:190-191`) strips each segment to exactly `{start, end, text, speaker}`.
+
+**Segment identity**: Positional — segments are identified by their index in the `segments` array. No explicit `segment_id` field exists.
+
+### 2. `video_editing.cut` and `hype.metadata.json` — transcript reference storage
+
+**How transcript is referenced**:
+- CLI arg `--transcript` (`cut/run.py:104`)
+- Loaded via `load_transcript_segments()` (`cut/run.py:193-200`) → reads `data["segments"]`
+- Used in EDL caption generation and metadata construction
+
+**Storage in `hype.metadata.json`**: `timeline_build.py:432-433`:
+```python
+if args.transcript is not None:
+    primary_source["transcript_ref"] = _ref_path_for_metadata(args.transcript, out_dir)
+```
+
+**Path resolution**: `_ref_path_for_metadata()` (`timeline_build.py:141-151`) stores:
+- **Relative** when the transcript lives inside `out_dir` (e.g., shared run directory)
+- **Absolute** otherwise
+
+This means: (a) moving the run directory breaks relative references, (b) absolute references are machine-specific, (c) there is no content hash that would survive either scenario.
+
+**`source_ids.segment_ids`**: Pool entries store `source_ids.segment_ids` as an array of integer indices into the transcript segments array — purely positional (`timeline_build.py:378-380`). This is how `source_transcript_text` is resolved via `_joined_segment_text()` (`timeline_build.py:110-119`).
+
+**Manifest also records transcript path**: The cut `manifest.json` records `inputs.transcript` as the resolved absolute path (`cut/run.py:409-410`).
+
+**What is missing**: No transcript content hash, no transcript version, no source audio hash, no model provenance anywhere in `hype.metadata.json` or the cut manifest.
+
+### 3. Project sources (`core/project/source.py`) — no transcript support
+
+- `SOURCE_KINDS = {"audio", "image", "other", "video"}` (`schema.py:30`) — no `"transcript"` kind
+- `build_source()` produces: `asset`, `created_at`, `kind`, `metadata`, `project_slug`, `schema_version`, `source_id`, `updated_at` — no transcript field (`schema.py:71-91`)
+- `_normalize_asset()` validates `file` or `url` plus optional `duration` — nothing transcript-related (`schema.py:297-321`)
+- **No schema field for transcript assets whatsoever.** Transcripts are not tracked as project sources.
+
+### 4. Managed timeline metadata — no transcript attachment
+
+- `PipelineMetadata` TypedDict: `version`, `generated_at`, `pipeline`, `clips`, `sources` (`banodoco_schema.py:326-331`). The `sources` dict is `dict[str, dict[str, Any]]` — typed as unconstrained dict.
+- `transcript_ref` is stored ad-hoc under `sources.<primary_asset>.transcript_ref` — not a typed field
+- The managed event `timeline.config_replaced` (`_emit_cut_managed_events`, `timeline_build.py:566-609`) carries only `config` in its payload — zero transcript identity
+- No managed timeline event kind exists for transcript attachment (see `TimelineEventKind` union, `types.py:74-112`)
+
+### 5. Word timing / speaker / segment identity — what survives
+
+| Data | Status | Evidence |
+|------|--------|----------|
+| **Word timing** | **ABSENT** | `timestamp_granularities=["segment"]` at `transcribe/run.py:196` |
+| **Speaker** | **OPTIONAL** (only with `--diarize pyannote`) | `attach_speakers()` at `transcribe/run.py:188-189`; `speaker_for_segment()` at `transcribe/run.py:180-187` |
+| **Segment identity** | **POSITIONAL** (array index only) | `transcript.json` has `{"segments": [...]}`; `source_ids.segment_ids` uses integer indices |
+| **Transcript hash** | **NONE** | Not in transcript.json, not in hype.metadata.json, not in managed events |
+| **Source audio hash** | **NONE** in transcript | `manifest.json` records input audio path but NOT its hash |
+| **Model provenance** | **In manifest only** | `manifest.json` records `model` and `language` inputs, but this is not carried downstream |
+
+---
+
+## Tasklist implications
+
+**T28 (Durable transcript attachment contract)** — scope expands significantly:
+- Must add `transcript` as a valid source kind in `SOURCE_KINDS` (or add a parallel `transcript_ref` schema field to source records)
+- Must add `transcript_sha256` and `source_audio_sha256` to the transcript output contract
+- Must normalize the `transcript_ref` in `hype.metadata.json` to be run-relative with a content hash, not just a raw path
+- The "transcript provenance is missing" state (M2 brief §7) must be detectable: absence of `transcript_ref`, broken path, hash mismatch
+
+**T29 (Transcript occurrence mapping)** — stable segment identity prerequisite:
+- Without explicit segment IDs, `TS` stability relies on positional indices and content hashing. Consider: index + content hash as compound identity, or add explicit `segment_id` in a transcript schema v2 with `schema_version` field
+
+**New task needed**: **T28a — Transcript asset schema + source registration** (M, before T28). Add `transcript` to `SOURCE_KINDS`, add `transcript_ref` + `transcript_sha256` to source schema, ensure `astrid projects source add` accepts transcript files.
+
+**New task needed**: **T28b — Backfill transcript hash into cut metadata** (S, with T28). Add `transcript_sha256` to `hype.metadata.json` pipeline provenance alongside existing `pool_sha256`/`arrangement_sha256`/`brief_sha256`. Compute and store it in `build_metadata_from_arrangement()`.
+
+**T30 (Authored-text + speech inspection pages)** — must handle three states for each segment:
+- `speaker: "SPEAKER_00"` (present, diarization ran)
+- `speaker: null` (no diarization)
+- `speaker` key absent (pre-diarization transcript)
+
+**No tasks need to merge or disappear** — the tasklist correctly anticipated the gaps.
+
+---
+
+## Risks & conflicts
+
+1. **Transcript path fragility vs. locked plan**: The plan forbids filename/CWD guessing (NORTHSTAR.md:40, decisions §"Never infer a transcript by filename proximity"). But `_ref_path_for_metadata()` at `timeline_build.py:141-151` already stores run-relative or absolute paths that break when the run directory moves. During visualization, the `transcript_ref` may be unresolvable even in a legitimate scenario. The visualization must fail with an explicit recovery command, not silently skip transcript evidence.
+
+2. **Segment identity depends on positional stability**: The `source_ids.segment_ids` integer-index scheme (`timeline_build.py:378-380`) breaks if the transcript is re-transcribed (segments renumbered). The plan says "stable IDs" connect everything — but segment IDs are not stable today. Resolution: either (a) assign deterministic `segment_id`s at transcribe time (hash of `{start, end, text}`), or (b) accept that `TS` IDs are scoped to a specific transcript version hash and become invalid on re-transcription.
+
+3. **No word timing ever**: The Whisper API call hardcodes `timestamp_granularities=["segment"]` (`transcribe/run.py:196`). If a future requirement demands word-level timing, the transcribe executor must change its API call AND the transcript schema. The visualizer must not promise word timing — the decisions document already says "Word-level timing is emitted only when the actual transcript data preserves words" (decisions:591-592), which is correct but means the visualizer must detect the absence and emit `word_timing: "unavailable"` rather than silently omitting it.
+
+4. **Managed timeline has zero transcript attachment surface**: The `TimelineEventKind` union (`types.py:74-112`) has no transcript-related event. If the plan later expects managed timelines to carry transcript provenance through the event stream, a new event kind (e.g., `timeline.transcript_attached`) is needed. This is out of scope for the visualization epic but worth flagging.
+
+5. **Diarization is optional and external**: Speaker labels come from pyannote, require `HF_TOKEN`, and are not part of the core Whisper output. Visualizations must not assume speaker labels exist.
+
+---
+
+## Elegant simplifications
+
+1. **Single durable attachment point: `hype.metadata.json` `sources.<asset>.transcript_ref` + new `transcript_sha256`**: Rather than threading transcript identity through project sources, managed timeline events, AND cut metadata, add exactly one new field — `transcript_sha256` — to the existing `hype.metadata.json` provenance block. The visualizer reads `transcript_ref` (for path) + `transcript_sha256` (for integrity). If either is missing, that's the "missing transcript provenance" diagnostic state. This requires zero new event kinds, zero source schema changes, and one new field in `build_metadata_from_arrangement()`.
+
+2. **Segment identity = 0-based index + content hash of segment**: Assign stable `TS` ids as `TS<N>` where N = position in transcript, but also record `segment_sha256` (hash of `{start, end, text}`) so re-transcription mismatch is detectable. The `source_ids.segment_ids` already provides the positional link — just add content verification. This avoids back-incompatible transcript schema changes.
+
+3. **Three-value speaker state**: `"SPEAKER_00"` (present), `null` (no diarization), absent key (legacy pre-diarization transcript). The visualizer renders each distinctly without needing to guess.
+
+4. **Missing word timing = explicit property**: Emit `word_timing: "unavailable"` in the `transcript-index.json`. Never fabricate. The decisions document already agrees (decisions:591-592). The simplification is: don't try to support word timing at all in M2 — just document its absence correctly.
+
+5. **Don't change the transcribe executor**: Adding `timestamp_granularities=["word"]` would change the transcript format, require segment ID changes, and blow scope. Defer. M2 only needs to correctly represent what exists today.

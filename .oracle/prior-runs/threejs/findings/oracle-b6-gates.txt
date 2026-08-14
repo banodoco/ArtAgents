@@ -1,0 +1,35 @@
+All evidence collected. Final verdict:
+
+```
+CORE_DIFF_EPIC: empty
+CORE_DIFF_BATCH: empty
+GENERATED_TRACKED: none
+RUFF_BASELINE: justified, does not hide our regressions
+  oracle finding_count: 1469  main committed: 1458  (JSON is count-only, no per-file rows)
+  delta +11 = F401 +6, I001 +1, BLE001 +4, F541 +1, F402 -1; BLE001 up despite our
+  narrowing = drift in other files, not ours
+  direct ruff on backends/threejs/run.py + planners/threejs_hybrid/run.py: "All checks passed!"
+HYGIENE: correct
+  history_rewrite: no (b768588e add commit identical on both branches; fc0c3cee = D-only, working copies still on disk)
+  merge_effect: untracks on main when merged
+SCHEMA: pre-existing-identical
+  oracle: 16 failed / 4 passed (6 subtests)
+  main: 16 failed / 4 passed (6 subtests)
+  epic diff on tests/test_schema_contract.py + astrid/core/ + astrid/core/timeline/: empty
+WHEEL: present (manifest), wheel not on disk
+  manifest lists astrid/packs/rendering/backends/threejs/{__init__.py,renderer.yaml,run.py}
+  + planners/threejs_hybrid/{__init__.py,planner.yaml,run.py} — matches brief's six paths
+ISSUES: none
+NOTES:
+  - baseline.md is at .oracle/baseline.md, not .oracle/legacy-epic/baseline.md; the 10
+    schema-contract failures are documented in .oracle/verification.md: "FAILS at
+    ci-mirror (blocking lane) — 10 failures, ALL pre-existing ... epic touched ZERO
+    timeline-schema files ... identical failures reproduced at C5-batch4-done."
+  - doc count says 10; live run shows 16 failed, all ImportError (banodoco_timeline_schema
+    not installed) — env-driven, byte-identical on main. Doc should be updated to 16.
+  - baseline command path changed python3→python (regen side effect, harmless).
+  - "main also scans 1469" rests on commit-message + verification record, not an
+    independent full rerun (bounded; per brief, scoped ruff substituted).
+```
+
+All five gates pass. No epic-caused failures anywhere; the only failing tests are environment-driven (missing `banodoco_timeline_schema` package) and byte-identical on main.

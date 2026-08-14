@@ -1,0 +1,231 @@
+I now have all evidence. Here is the complete analysis:
+
+---
+
+## Findings
+
+### 0. Package provenance
+
+**Pin:** `@banodoco/timeline-composition` v0.0.6, fetched as GitHub tarball (`remotion/package.json:13`). Installed at `remotion/node_modules/@banodoco/timeline-composition/typescript/src/`. No lockfile wraps it — `package-lock.json:9` repeats the same URL. The package is small: 17 `.ts`/`.tsx` files plus 2 test files. No vendored copy exists elsewhere; Astrid reads it directly from `node_modules`.
+
+---
+
+### 1. Duration semantics (`lib/duration.ts`)
+
+**Clip source duration** (`getClipSourceDuration`, line 7–13):
+```
+hold (if number) → return hold
+otherwise        → (to ?? 0) - (from ?? 0)
+```
+`hold` **unconditionally overrides** `from`/`to`. There is no conditional logic for clip type — this applies to media, audio, effect-layer, and text clips identically.
+
+**Clip timeline duration** (`getClipTimelineDuration`, line 15–18):
+```
+getClipSourceDuration(clip) / (speed ?? 1)
+```
+If both `hold` and `speed` are set: **`hold / speed`**. Speed defaults to 1. Speed is sanitized to ≥1 if non-finite or ≤0 (`getSanitizedPlaybackRate`, line 20–22).
+
+**Composition duration** (`getTimelineDurationInFrames`, line 34–41):
+```
+max(1, ...all clips: round(clip.at * fps) + clipDurationInFrames)
+```
+All `timeline.clips` are iterated with **no filtering by track kind, no muted-track exclusion, no audio exclusion**. Audio clips extend composition duration exactly as visual clips do. There is no metadata `duration_seconds` override — this is a pure max-of-clip-ends.
+
+---
+
+### 2. Frame rounding (`lib/duration.ts`, `TimelineComposition.tsx`)
+
+- `secondsToFrames` (line 3–5): **`Math.round(seconds * fps)`** — round to nearest integer.
+- `getClipDurationInFrames` (line 30–32): `Math.max(1, round(...))` — **enforces one-frame minimum**.
+- Sequence `from` (`TimelineComposition.tsx:176`): `Math.round(clip.at * fps)` — round start to nearest frame.
+- **FPS source** (`TimelineComposition.tsx:313`): `useVideoConfig().fps` → `theme_overrides.visual.canvas.fps` (default 30; `Root.tsx:23`, `Root.tsx:34`).
+
+**Implication for `[start, end)` semantics:** The compositor rounds both `at` and duration to nearest frame with a floor of 1. Two adjacent clips A (end = `round(at_A + dur_A)`) and B (start = `round(at_B)`) can have a 1-frame gap or overlap due to rounding. The visualization plan's `[start, end)` interval semantics must compute clip bounds as `[round(at * fps) / fps, (round(at * fps) + max(1, round(dur * fps))) / fps)` to match compositor truth.
+
+The Python `_round_frame_time` (`render/run.py:430–438`) supports floor/ceil/round modes; the compositor uses only **round**, and always enforces the 1-frame minimum.
+
+---
+
+### 3. Track painting order (`TimelineComposition.tsx:314`)
+
+```typescript
+const visualTracks = [...getVisualTracks(timeline)].reverse();
+```
+
+`getVisualTracks` (`lib/tracks.ts:9–13`) returns tracks in config order, filtered by `kind === 'visual'`. The `.reverse()` means:
+
+- **First visual track in config** → painted **last** → **topmost z-order**
+- **Last visual track in config** → painted **first** → **bottommost z-order**
+
+Audio tracks (`:315`) are **NOT reversed**. They paint in config order.
+
+Track-level opacity and blend mode are applied per-track (`:281–284`), and `track.muted` zeroes volume for both audio (`AudioTrack.tsx:43–45`) and visual embedded audio (`VisualClip.tsx:54–56`).
+
+**The plan's track-order assumption** must account for this reversal. If the visualization reads tracks in config order, it will show the opposite z-order from what the compositor actually paints.
+
+---
+
+### 4. Transitions (`lib/transitions.tsx`, `TimelineComposition.tsx:184–275`)
+
+Transition grouping (`renderVisualTrack`, line 264–275):
+1. Clips on a track are sorted by `at` (ascending).
+2. For each clip, if a `nextClip` exists AND `clipsCanTransition(clip, nextClip, fps)`:
+   - BOTH clips must not be `effect-layer` (`:242–244`)
+   - `toStart >= fromStart && toStart <= fromEnd` — next clip must start within the current clip's frame span (`:245–249`)
+   - `fromClip.transition` must be truthy
+3. If conditions pass, the pair is rendered as one `TransitionSeries` Sequence.
+
+**Transition duration resolution** (`resolveTransitionReference`, `transitions.tsx:27–51`):
+- Priority: `ref.durationFrames` → `ref.duration` (converted: `round(duration * fps)`) → transition defaults `durationFrames` → **12 frames hard default**.
+- Rejected if `durationFrames <= 0 || durationFrames > fromDuration || durationFrames > toDuration` (`TimelineComposition.tsx:198–200`).
+
+**First/last clip:** A transition on the first clip is checked against the second clip. A transition on the last clip has no `nextClip`, so it is ignored — the clip renders as a plain Sequence.
+
+**Same-track only:** Transitions are per-track; cross-track transitions simply don't exist in this model.
+
+---
+
+### 5. Effects and layers
+
+- `effect-layer` clips (`clipType === 'effect-layer'`): render as `PromptCard` (title card) if they have a `generation.prompt` string (`TimelineComposition.tsx:103–110`). Prompt-less effect layers render `null` (invisible).
+- Regular clips with a `clipType` in `EFFECT_REGISTRY` or `CLIP_TYPE_ALIASES`: dispatch through `EFFECT_REGISTRY[effectId]` with resolved params (`:116–133`).
+- Default (no matching effect): falls through to `VisualClip` (image or video, `:135–160`).
+- Effect layers are **not excluded** from transition checks on the from-clip side (`:242–244` — both `fromClip` and `toClip` must not be `effect-layer`).
+
+Ordering: effects are per-clip, not a separate track. They replace the clip's visual content; the clip's `Sequence` timing still applies.
+
+---
+
+### 6. Parity with Python render planner
+
+| Concern | Compositor (truth) | Python `render/run.py` | Python `validators/timeline.py` | Python `storyboard/run.py` |
+|---|---|---|---|---|
+| `hold` precedence | **Yes** — `hold` overrides `from`/`to` unconditionally (`duration.ts:7–10`) | **No** — `_clip_duration_seconds` ignores `hold`, uses `(to-from)/speed` (`:399–405`) | **Yes** — checks `hold` first (`:128–131`) | **Yes** — checks `hold` first (`:118–121`) |
+| Speed on `hold` | `hold / speed` (`:15–18`) | N/A (ignores hold) | N/A (no speed division) | N/A (`hold` returned as-is, no speed division `:119–121`) |
+| Audio extends duration | **Yes** — all clips iterated (`:34–41`) | **Yes** — `_timeline_duration_seconds` uses all clips (`:420–427`) | N/A | N/A |
+| Muted tracks excluded | **No** — no filtering | **No** — no filtering | N/A | N/A |
+| 1-frame minimum | **Yes** — `Math.max(1, …)` (`:30–32`) | No explicit minimum | No | No |
+| Rounding | `Math.round` only | floor/ceil/round via `_round_frame_time` | N/A | N/A |
+
+**Desert-plant-growth numbers:** The compositor computes `getTimelineDurationInFrames` as max clip end across all clips. If an audio track clip has `hold: 98` and `at: 0`, the composition duration = `round(0) + max(1, round(98 / 1))` = 98s × 30fps = 2940 frames. Visual-only clips (no `hold`, using `to - from`) end at ~13.8667s. The compositor sees **98s** — audio always extends it. The `13.8667s` "authored visual" figure exists only when you manually exclude audio tracks.
+
+**Truth designation:** The compositor is canonical for rendering. The Python `_clip_duration_seconds` in `render/run.py` is **wrong** for clips with `hold` — it will compute `(to-from)/speed` instead of `hold/speed`. The storyboard helper is closest to correct but misses speed division on hold. The validator is structurally right (hold first) but also omits speed.
+
+---
+
+### 7. Deliverable fixtures (R2 contract)
+
+All fixtures go in `tests/fixtures/timeline_visualize/compositor_parity/`. Each is a minimal `assembly.json` with expected facts. The compositor code is `remotion/node_modules/@banodoco/timeline-composition/typescript/src/lib/duration.ts` + `TimelineComposition.tsx`.
+
+#### F1 — `hold-only`
+```json
+{"clips":[{"id":"c1","at":0,"hold":3.5,"track":"v1"}],
+ "tracks":[{"id":"v1","kind":"visual","label":"V1"}]}
+```
+- **Expected:** `getClipSourceDuration` = 3.5, `getClipTimelineDuration` = 3.5, `getClipDurationInFrames` @30fps = `max(1, round(105))` = 105fr, timeline duration = 105fr
+- **Tests:** hold overrides missing `from`/`to`; compositor doesn't need `from`/`to` when `hold` present
+
+#### F2 — `from-to-speed`
+```json
+{"clips":[{"id":"c1","at":2,"from":1,"to":5,"speed":2,"track":"v1"}],
+ "tracks":[{"id":"v1","kind":"visual","label":"V1"}]}
+```
+- **Expected:** source = 4, timeline = 4/2 = 2s, `from` = `round(2*30)` = 60fr, duration = `max(1, round(2*30))` = 60fr, clip end = 120fr
+- **Tests:** `(to-from)/speed` without hold
+
+#### F3 — `hold-speed-interaction`
+```json
+{"clips":[{"id":"c1","at":0,"from":1,"to":5,"hold":8,"speed":2,"track":"v1"}],
+ "tracks":[{"id":"v1","kind":"visual","label":"V1"}]}
+```
+- **Expected:** `hold` wins over `from`/`to`; source = 8, timeline = 8/2 = 4s, duration = `max(1, round(4*30))` = 120fr
+- **Tests:** Python `render/run.py` would compute `(5-1)/2 = 2s` — **this is the core parity bug**
+
+#### F4 — `audio-extends-duration`
+```json
+{"clips":[
+  {"id":"img","at":0,"hold":5,"track":"v1"},
+  {"id":"snd","at":0,"hold":20,"track":"a1"}
+],
+ "tracks":[
+  {"id":"v1","kind":"visual","label":"V1"},
+  {"id":"a1","kind":"audio","label":"A1"}
+]}
+```
+- **Expected:** timeline duration = max(`round(5*30)` = 150fr, `round(20*30)` = 600fr) = 600fr (20s)
+- **Tests:** audio extends composition; no muted-track exclusion
+
+#### F5 — `muted-track-not-excluded`
+```json
+{"clips":[
+  {"id":"img","at":0,"hold":5,"track":"v1"},
+  {"id":"snd","at":0,"hold":20,"track":"a1"}
+],
+ "tracks":[
+  {"id":"v1","kind":"visual","label":"V1"},
+  {"id":"a1","kind":"audio","label":"A1","muted":true}
+]}
+```
+- **Expected:** timeline duration still = 600fr — muted flag affects volume only, not duration
+- **Tests:** muted tracks are NOT excluded from `getTimelineDurationInFrames`
+
+#### F6 — `frame-rounding-edge`
+```json
+{"clips":[
+  {"id":"c1","at":0.016,"hold":0.016,"track":"v1"}
+],
+ "tracks":[{"id":"v1","kind":"visual","label":"V1"}]}
+```
+- **Expected @30fps:** `round(0.016*30)` = `round(0.48)` = 0fr start; duration = `max(1, round(0.48))` = 1fr (minimum enforced); end = 1fr
+- **Tests:** one-frame minimum; sub-frame values round down to 0 for start
+
+#### F7 — `transition-bounds`
+```json
+{"clips":[
+  {"id":"c1","at":0,"hold":3,"transition":{"id":"crossfade","durationFrames":15},"track":"v1"},
+  {"id":"c2","at":2,"hold":3,"track":"v1"}
+],
+ "tracks":[{"id":"v1","kind":"visual","label":"V1"}]}
+```
+- **Expected:** `c1` duration = 90fr, `c2` duration = 90fr. `toStart` = `round(2*30)` = 60fr, `fromStart` = 0, `fromEnd` = 90fr. 60 ∈ [0,90] → transition valid. 15fr ≤ 90fr and ≤ 90fr → accepted. Transition group `from` = 0, duration = `(90-15) + 90` = 165fr.
+- **Tests:** transition bounds calculation; group span
+
+#### F8 — `z-order-reversal`
+```json
+{"clips":[
+  {"id":"bottom","at":0,"hold":10,"track":"v2"},
+  {"id":"top","at":0,"hold":10,"track":"v1"}
+],
+ "tracks":[
+  {"id":"v1","kind":"visual","label":"Top"},
+  {"id":"v2","kind":"visual","label":"Bottom"}
+]}
+```
+- **Expected painting order (bottom→top):** v2 painted first, v1 painted last (topmost). `getVisualTracks` returns [v1, v2]; after `.reverse()` → [v2, v1]
+- **Tests:** `TimelineComposition.tsx:314` reversal; first config track is topmost
+
+---
+
+## Risks & conflicts
+
+1. **Track reversal (`TimelineComposition.tsx:314`)** is the highest-risk finding. The plan (`docs/architecture/timeline-visualization-plan.md:59`) says "track lanes and actual compositor order" — but if the visualization iterates tracks in config order, it paints the **opposite** z-order. The visualization must either reverse visual tracks before painting lanes, or document that "lane 1" (topmost) = first config track.
+
+2. **`hold` precedence** confirms the A2 finding: `render/run.py:_clip_duration_seconds` ignores `hold` for media clips. The compositor's `hold`-first semantics are canonical. The shared `timeline_inspection.py` helper must use `hold` or `(to-from)` as source duration, then divide by speed, then enforce 1-frame minimum with round.
+
+3. **`getTimelineDurationInFrames` includes audio** — no filtering. The plan's duration computation for the visualization must match: use max clip end across ALL tracks. Metadata `duration_seconds` is NOT a compositor concept (it's Python-only in `render/run.py:421–426`).
+
+4. **Round vs. floor/ceil:** The compositor uses `Math.round` uniformly. Python's `_round_frame_time` has three modes. The visualization must use round (not floor/ceil) for clip bounds to match compositor-observed `[start, end)` intervals, with the 1-frame minimum.
+
+5. **Transition default 12 frames** (`transitions.tsx:47`) is not documented in the plan. The visualization should surface this as the "no explicit duration" default.
+
+---
+
+## Elegant simplifications
+
+1. **Extract one canonical `duration.py` helper** that mirrors `duration.ts` exactly: `source = hold if hold else (to - from)`, `timeline = source / speed`, `frames = max(1, round(timeline * fps))`. Both `timeline_storyboard` and `timeline_visualize` import it. This removes three divergent implementations.
+
+2. **Track reversal is a one-liner in layout.py:** `visual_tracks = list(reversed([t for t in tracks if t.kind == 'visual']))`. Document the reason inline with a `TimelineComposition.tsx:314` citation.
+
+3. **Snapshot the compositor source at the pinned version** as a read-only reference in `docs/reference/timeline-composition-v0.0.6/` (key files: `lib/duration.ts`, `TimelineComposition.tsx`, `lib/tracks.ts`, `lib/transitions.tsx`). This pins the contract even if the npm package is updated later.
+
+4. **The 8 fixtures above** can be a single `tests/fixtures/timeline_visualize/compositor_parity/` directory, each with `assembly.json` and `expected.json`. The test imports `duration.ts` logic directly (or reimplements the 4 functions in ~20 lines of Python) and asserts exact frame counts — no Remotion render needed.

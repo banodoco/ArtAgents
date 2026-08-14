@@ -1,0 +1,23 @@
+[0m[33mWarning[0m[2m:[0m [1mThe 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.[0m
+[0m      [2mat [0m[0m[1m[3mwarnOnDeactivatedColors[0m[2m ([0m[0m[36minternal:tty[0m[2m:[0m[33m33[0m[2m:[33m24[0m[2m)[0m
+[0m      [2mat [0m[0m[1m[3mgetColorDepth[0m[2m ([0m[0m[36minternal:tty[0m[2m:[0m[33m42[0m[2m:[33m39[0m[2m)[0m
+[0m      [2mat [0m[0m[1m[3mshouldColorize[0m[2m ([0m[0m[36minternal:util/colors[0m[2m:[0m[33m14[0m[2m:[33m109[0m[2m)[0m
+[0m      [2mat [0m[0m[1m[3mrefresh[0m[2m ([0m[0m[36minternal:util/colors[0m[2m:[0m[33m18[0m[2m:[33m31[0m[2m)[0m
+[0m      [2mat [0m[0m[1m[3minternal:util/colors[0m[2m ([0m[0m[36minternal:util/colors[0m[2m:[0m[33m24[0m[2m:[33m16[0m[2m)[0m
+[0m      [2mat [0m[0m[1m[3minternal:assert/assertion_error[0m[2m ([0m[0m[36minternal:assert/assertion_error[0m[2m:[0m[33m2[0m[2m:[33m187[0m[2m)[0m
+[0m      [2mat [0m[0m[1m[3mloadAssertionError[0m[2m ([0m[0m[36mnode:assert[0m[2m:[0m[33m28[0m[2m:[33m96[0m[2m)[0m
+
+Working...
+```
+VERDICT: PASS
+FILES: .oracle/briefs/batch-2.md +53/-0 | .oracle/findings/batch-2-exec.txt +20/-0 | .oracle/findings/threejs-composition-proof.txt +4/-0 | remotion/src/Root.tsx +41/-16 | remotion/src/ThreeTimelineComposition.tsx +415/-0
+ASTRID_CORE: empty (`git diff --name-only 99e6d24c..963060ee -- astrid/core/` → no output)
+ARTIFACTS: none — full 54-path diff is 52 .oracle/* (briefs/findings/checkins/legacy-epic) + the 2 allowed production files; no PNG/still/video/fixture/node_modules/chrome cache/remotion out|build
+FIELDS: exact-11 — text.content:215, text.fontSize:220, text.color:221, text.align:222, text.bold:227, params.weight:228, params.anchor:230, params.offsetX:231, params.offsetY:232, params.maxWidth:233, params.textShadow:234. extra=none (only structural reads: clip.clipType/at/hold/id/track, tracks.kind/id, theme background) missing=none
+FORBIDDEN: none — no useFrame/requestAnimationFrame/Date.now/performance.now/Math.random (only comment mentions, :12,48), no Drei/useGLTF/FontLoader, no lights/shaders/post-processing (MeshBasicMaterial unlit), no models/network fonts (fixed sans-serif stack :41), no clip.x/y/width/height. Ortho camera frustum+position (:401-413) is the required T2.1 pixel-space camera
+ROOT: registered — id "ThreeTimelineComposition" :85, component :86; clamp >=1 — `Math.max(1, getTimelineDurationInFrames(...))` :68-71; single `getMetadata` + `DEFAULT_PROPS` shared by both Compositions (:75-89), one canvas authority — no second metadata path
+WORKING_TREE: clean-enough — `git status --short` shows only untracked .oracle batch-2 artifacts (oracle-b2-* briefs/findings, checkins/batch-2.md), allowed. `git ls-files` PNGs (docs/assets/astrid-orchestration.png, tests/fixtures/reshape/hype_regression/poster.png, tests/packs/builtin/generate_image/fixtures/{input,tiny}.png) are pre-existing, absent from the 963060ee diff; no remotion/out|build tracked
+ISSUES: none
+```
+
+All six tasks verified by direct execution; no files edited.

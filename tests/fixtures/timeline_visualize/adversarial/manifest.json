@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "corpus": "timeline_visualize/adversarial",
+  "purpose": "Hermetic adversarial fixtures for the timeline_visualize evidence pipeline (R23). Each case carries a small timeline/answer payload plus the expected detection so a test can exercise the real pipeline and assert the adversarial behavior is surfaced, never silently accepted.",
+  "cases": [
+    {
+      "id": "changed_media",
+      "expected_detection": "integrity_state=hash_mismatch; sampling refused for the tampered asset; verified sibling still sampled"
+    },
+    {
+      "id": "changed_transcript",
+      "expected_detection": "attachment integrity=hash_mismatch; transcript never normalized (no TS ids); observed hash recorded"
+    },
+    {
+      "id": "image_order_swap",
+      "expected_detection": "evidence.image_hashes preserves ordered transport order; session_identity differs when order is swapped"
+    },
+    {
+      "id": "model_changed",
+      "expected_detection": "evidence records requested model and returned_model; divergence flagged by provenance"
+    },
+    {
+      "id": "resegmentation",
+      "expected_detection": "TS ids are transcript-hash-scoped; old TS/SP authored ids do not re-resolve in the new lineage"
+    },
+    {
+      "id": "clip_removal",
+      "expected_detection": "SP clip_ref dangles after clip removal; frozen load raises FrozenIntegrityError naming the SP"
+    },
+    {
+      "id": "tombstone",
+      "expected_detection": "frozen lineage still resolves after tombstone; any fresh render surfaces the tombstone state"
+    },
+    {
+      "id": "malformed_answers",
+      "expected_detection": "score_answers returns 0.0 with schema-failure/parse-failure detail per question"
+    },
+    {
+      "id": "snapshot_drift",
+      "expected_detection": "drill-down stays frozen on root v159 after live v160 append; refresh-root produces a new SNS"
+    }
+  ]
+}

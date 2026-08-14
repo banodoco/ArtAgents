@@ -45,6 +45,8 @@ effect plus one coextensive local audio clip is compiled to FFmpeg `sendcmd`.
 The effect parameters remain the editable source of truth; normal service
 selection and support evidence decide whether this renderer is used.
 
+## Auto-started HTTP server
+
 ## Remotion asset materialization
 
 The shared render-host asset layer materializes an invocation before the
@@ -83,6 +85,7 @@ specified.
 | Executor | What it does |
 |---|---|
 | `rendering.render` | Stable facade that renders a hype timeline through a qualified renderer or planner and writes an MP4 plus provenance. Pipeline step 12 — the terminal step before optional YouTube upload or Reigh publish. |
+| `rendering.timeline_visualize` | Read managed timeline event logs without mutation and emit a deterministic, run-owned agent evidence pack with JSON, Markdown, PNG, SVG, and navigation actions. |
 | `rendering.sprite_sheet` | Generate, slice, and preview GPT Image sprite sheets for batch image work. Produces a sprite atlas (`sprite_sheet.png`), alpha-processed variant, manifest, and MP4 preview. |
 | `rendering.html_canvas_effect` | Scaffold a local Remotion HTML-in-canvas effect element. Creates a user-editable effect under `astrid/packs/local/elements/effects/<effect_id>/` with DOM content wrapped in Remotion's `HtmlInCanvas` for optional canvas/WebGL post-processing. |
 
@@ -143,6 +146,9 @@ Requires `OPENAI_API_KEY` and `ffmpeg` on the system path.
 - Use the `audio-reactive-colour` effect for frozen integer-frame colour
   markers. Keep one effect clip rather than expanding each state into a clip;
   the service selects the supporting renderer from request-sensitive evidence.
+- Use `rendering.timeline_visualize` to inspect one or all managed timelines
+  through a deterministic evidence pack. It reads event logs without repair,
+  owns retention through run metadata, and never mutates timeline manifests.
 - Use `rendering.sprite_sheet` when you need to generate a batch of
   related images as a sprite atlas for animation.
 - Use `rendering.html_canvas_effect` when you need a custom visual effect

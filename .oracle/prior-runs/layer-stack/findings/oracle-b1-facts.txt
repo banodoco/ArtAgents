@@ -1,0 +1,48 @@
+All checks done; 100 tests pass. Report:
+
+```
+PATHS: d5b960d7 — contracts.py (+128/-14), plan.json (+27), test_layer_contract.py (+358).
+fe7622c7 — contracts.py (+14/-…), test_layer_contract.py (+21/-…). Both commits: only contracts.py, plan.json, test_layer_contract.py.
+
+LAYERREF: dataclass(frozen) fields z:int, tracks:tuple[str,...], blend:str="normal", opacity:float=1.0 (contracts.py:1318-1319).
+Validation (1320-1340): z int >=0 ("layer z"); tracks must be Sequence of non-empty strings, >=1 ("layer tracks must contain at least one track id"); blend must be exactly "normal" ("v1 accepts only 'normal'"); opacity number, finite, >0 ("must be > 0"), <=1 ("layer opacity must be <= 1"). NaN rejected via _require_number math.isfinite (206-211). from_dict: required {z,tracks}, allowed {z,tracks,blend,opacity}, unknown keys → "unknown fields" (1353-1360).
+
+TO_DICT: RenderSegment.to_dict builds {window, renderer, input_hashes}, appends "layer" only if layer is not None (1416-1424). LayerRef.to_dict always emits z,tracks,blend,opacity (1342-1349).
+
+CURSOR: RenderPlan.__post_init__ (1455-1547); segments:list[RenderSegment], layer default None (1381).
+cursors: dict[int|None,int] = {} — layer.z -> expected_start, None -> default layer (1520).
+All-or-none: every segment must have layer set or None, matching segments[0] (1511-1519).
+First-segment: cursor.setdefault(layer_key, target_start); actual < expected → "overlaps or is out of order", > → "leaves a gap"; error names z for explicit layers (1526-1535). Per-segment end_frame > target_end → "extends beyond the plan target window" (1536-1537), any layer.
+
+TRAILING: only layer_key is None must reach target_end ("plan segments leave a trailing gap", 1546-1547). Explicit z layers may end early (comment 1539-1545).
+
+SCHEMA: plan.json renderSegment (550-567): additionalProperties:false; required = [window, renderer, input_hashes] — layer OPTIONAL, in properties only (568-589): type object, additionalProperties:false, required [z, tracks]; z min 0; tracks minItems 1; blend: string only; opacity: number only. No enum/range on blend/opacity — wire schema looser than dataclass.
+
+SCOPE: clean — git diff 4c00b2a0..fe7622c7 touches only the 3 files above. No service/pack/finalizer edits.
+
+TESTS (test_layer_contract.py, all pass):
+- test_default_layer_still_rejects_overlap_gap_and_out_of_order: parametrized 5 cases; with pytest.raises(ValueError, match="gap"|"trailing gap"|"overlaps").
+- test_distinct_z_segments_may_overlap_in_time: assert plan.total_frames == 48; assert [s.layer.z for s in plan.segments] == [0, 1].
+- test_distinct_z_layers_may_end_early: assert [s.layer.z...] == [0, 1]; assert plan.total_frames == 48.
+- test_same_z_overlapping_segments_rejected: raises match "layer z=1.*overlaps or is out of order".
+- test_same_z_gap_rejected_with_z_named_in_error: raises match r"segments\[1\] layer z=1 leaves a gap at frame 24".
+- test_same_z_adjacent_segments_parse: assert [s.window.start_frame...] == [0, 24].
+- test_mixed_default_and_explicit_layer_segments_rejected (2 cases): raises match "all carry an explicit layer".
+- test_blend_other_than_normal_rejected_at_construction: 3 raises match "only 'normal'" (ctor, from_dict, segment.from_dict).
+- test_layer_round_trips_through_to_dict_and_from_dict: assert payload["layer"] == {z:2, tracks:[...], blend:"normal", opacity:0.75}; from_dict == segment/layer; RenderPlan.from_dict(plan.to_dict()) == plan.
+- test_layer_none_omits_key_and_fast_path_key_set_is_unchanged: assert set(segment.to_dict()) == {"window","renderer","input_hashes"}; from_dict round-trip.
+- test_invalid_layer_refs_rejected (7 cases): raises with match (z<0, empty tracks, "" track, str tracks, opacity 0.0/-0.5/1.5).
+- test_layer_from_dict_rejects_unknown_keys: raises "unknown fields".
+- test_plan_schema_accepts_segment_layer: validator.validate(example); assert RenderPlan.from_dict(example).to_dict() == example.
+- test_plan_schema_rejects_unknown_layer_keys: raises jsonschema.ValidationError.
+Weak: 2/3/6 assert only no-raise + input echoes (z list, start frames, total_frames); capability property is "parses". No assert X==X tautologies found.
+
+FROZEN: still holds — test_contracts.py:600-603 key-set asserts [set(seg) for seg in payload["segments_v2"]] == [{window,renderer,input_hashes} ×2] (layer-less segments; would include "layer" if set); 1084-1102 matrix (5 default-layer cases) intact, no layer param. Both files green (100 passed).
+
+HOLES:
+1. plan.json doesn't constrain blend to "normal" or opacity to (0,1] — schema-valid plan can fail dataclass parse; no test pins either side.
+2. Explicit-z segment extending past target_end (1536 branch) untested.
+3. Same-z out-of-order (distinct from overlap) untested — "overlaps or is out of order" branch only exercised via overlap case.
+4. z-layer gap at window start (single explicit layer starting > target_start) untested (same code path, but uncovered).
+5. Duplicate-z (same z, disjoint ranges → gap) semantics untested; z uniqueness deliberately not required.
+```

@@ -1,0 +1,24 @@
+**Batch 4 status: partially complete — committed with 3 test failures to fix.**
+
+## What shipped (commit `2a2ba6b8`)
+
+**Remotion backend** (`remotion/run.py`): reads `metadata.astrid_layer.alpha` from the serialized timeline (`_timeline_alpha` helper in `_shared/__init__.py`); when `alpha==true` appends `--image-format=png --pixel-format=yuva420p --codec=vp9` to the CLI; declared profile switches to webm/vp9/yuva420p/time_base 1/1000. `renderer.yaml`: `alpha_output: true`.
+
+**Three.js backend** (`threejs/run.py` + `ThreeTimelineComposition.tsx`): same alpha flag threading through the shared `_execute_remotion`; composition now conditionally omits `<color attach="background">` when `metadata.astrid_layer.alpha === true` (R3F canvas defaults alpha:true/clear-alpha 0). `renderer.yaml`: `alpha_output: true`. Typecheck passes.
+
+## PROBED alpha artifact truth (two real renders, 160×90 + 320×180)
+
+- Container: **matroska,webm**
+- Video: **vp9**, pix_fmt **yuv420p** (NOT yuva420p — Remotion 4.0.509 muxes no yuva plane despite the flag), time_base **1/1000**
+- Audio: **opus**, time_base 1/1000 — not AAC
+- Corner pixel after stamped render: black opaque (0,0,0,255) — **no alpha reachable via this encoder path**
+
+The brief's assumption (`--codec=vp9` → yuva420p) is empirically false in this worktree; declared profiles must say yuv420p or strict validation fails.
+
+## Known failures to fix in a follow-up iteration
+
+1. `test_alpha_stamped_..._declared_profile_matches`: Remotion rejects `.mp4` output name with `--codec=vp9` ("out name implies h264/h265/av1"); test must use `.webm`. (The actual B4 backend passes `--output` from `request.output_name`, so real stacked segments naming `segment-0000.mp4` would hit the same error — needs `.webm` extension handling too.)
+2. `test_threejs_*` real-render tests: caller passes dict, `_protocol_render` needs `RenderRequest`.
+3. `_shared/__init__.py` profile helper still declares `pixel_format="yuva420p"` — the probe anchor patch didn't apply; must be `yuv420p` (and audio `opus`).
+
+**Verification so far:** 59 passed / 3 failed / 1 xfailed across the 4 target files; ruff at baseline 1469 (no regression). Frozen unstamped path tests pass. Commit message as specified; worktree is clean of tracked changes (untracked `.oracle/` briefs/findings remain).
