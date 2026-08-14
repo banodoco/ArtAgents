@@ -277,7 +277,7 @@ def _finalize_cases() -> list[tuple[str, dict[str, Any]]]:
             ),
         ),
         ("uppercase config id", _set(base, ("backend_config",), {"Rendering.FfmpegFinalizer": {}})),
-                ("partial populated audio", partial),
+        ("partial populated audio", partial),
         ("contradictory artifact audio", _set(base, ("artifacts", 0, "audio"), "rendered")),
         ("nested plan version", _set(base, ("plan", "schema_version"), 2)),
         ("trailing lf digest", _set(base, ("request_digest",), "a" * 64 + "\n")),

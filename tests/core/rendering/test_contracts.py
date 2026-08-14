@@ -732,9 +732,6 @@ def test_resolution_evidence_survives_plan_round_trip_and_provenance() -> None:
 def test_resolution_records_require_all_seven_evidence_keys() -> None:
     """Every capability resolution requires the complete evidence set;
     a missing key is a structural protocol failure."""
-def test_resolution_records_require_all_seven_evidence_keys() -> None:
-    """Every capability resolution requires the complete evidence set;
-    a missing key is a structural protocol failure."""
     cases = (
         (_planner(), PlannerResolution.from_dict),
         (_finalizer(), FinalizerResolution.from_dict),
