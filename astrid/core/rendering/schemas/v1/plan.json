@@ -564,6 +564,33 @@
         },
         "input_hashes": {
           "$ref": "#/definitions/hashMap"
+        },
+        "layer": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "z",
+            "tracks"
+          ],
+          "properties": {
+            "z": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "tracks": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1
+            },
+            "blend": {
+              "type": "string"
+            },
+            "opacity": {
+              "type": "number"
+            }
+          }
         }
       }
     },
