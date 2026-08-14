@@ -14,7 +14,7 @@ megaplan:
   ref: main
   codex_auth: chatgpt
   repo: https://github.com/peteromallet/Arnold.git
-  src_path: /workspace/arnold
+  src_path: /workspace/arnold-ref
 resources:
   volume: agent-volume
   port: 8080
