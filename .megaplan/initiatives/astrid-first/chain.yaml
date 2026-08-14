@@ -74,6 +74,19 @@ milestones:
   merge_policy: review
   phase_model:
   - execute=codex
+  - finalize=codex
+  - critique=codex
+  - review=codex
+  - gate=codex
+  - plan=codex
+  - prep=codex
+  - critique_evaluator=codex
+  - revise=codex
+  - feedback=codex
+  - loop_plan=codex
+  - loop_execute=codex
+  - tiebreaker_researcher=codex
+  - tiebreaker_challenger=codex
   depends_on:
   - m8
 reconciliation:
