@@ -1,26 +1,30 @@
-# Batch 6 oracle checkpoint
+# Checkpoint 6 — Batch 6 (Layer Stack FINALE) — PASS
 
-**Verdict:** PASS
-**Commit:** fc0c3cee vs previous 8723ca05 (epic base b1c5f53c)
-**Flash:** `.oracle/findings/oracle-b6-{docs,notes,gates,critique,diff}.txt`
+Oracle: Grok 4.6. Delegated Flash facts + proof + critique
+(`.oracle/findings/oracle-b6-{facts,proof,critique}.txt`). Host
+re-checked cited lines. Scope diffs independently empty.
 
-```
-PASS
-- Docs `docs/reference/threejs-renderer.md` (196 lines): 11 text fields, rejection matrix, v1 exclusions, ANGLE + shared Remotion lock, engine/fragment/capture_host identity, hybrid + pinned ffmpeg-finalizer. Style matches `docs/reference/render-adapter.md`. T6.2: no README/STAGE/changelog/skill/CLI edits; only gate-driven allowlist + ruff baseline + hygiene.
-- Checkpoint-3: `_effective_registry_state` + `_clip_end` removed (`git show fc0c3cee`); zero remaining refs. Checkpoint-5: mixed test asserts `backend_fragments["rendering.ffmpeg-finalizer"]` (`test_threejs_hybrid.py:814-821`) matching ffmpeg emitter; offline npm restore still in `finally`.
-- BLE001: six sites narrowed to OSError/ValueError/TypeError/json/RendererException/RenderingRegistryError. Our two run.py files: ruff clean. Lost `RenderingRegistryError` on hybrid `support_resolver` (`run.py:540`) degrades missing-pack envelope unsupported→internal; both packs ship in checkout + wheel — not acceptance-failing.
-- Ruff baseline 1458→1469 justified: count-only snapshot, +11 pre-existing (F401+6/I001+1/BLE001+4/F541+1/F402-1), not our files. Hygiene: `git rm --cached` `.codex/` `.vscode/` mp3 (added on main in b768588e); no history rewrite; merge will untrack them on main.
-- Schema: `tests/test_schema_contract.py` + `astrid/core/` untouched by epic. Host ma```
-PASS
-- Docs `docs/reference/threejs-renderer.md` (196 lines) match shipped manifests: exact 11 text fields, rejection matrix, v1 exclusions, ANGLE + shared Remotion lock, `engine=threejs` / fragment `rendering.threejs` / `capture_host=remotion`, hybrid + pinned `rendering.ffmpeg-finalizer`. Style matches `docs/reference/render-adapter.md`. T6.2 clean (no README/STAGE/changelog/skill/CLI edits).
-- `git show fc0c3cee`: `_effective_registry_state` + `_clip_end` gone, zero remaining refs. Mixed test asserts `backend_fragments["rendering.ffmpeg-finalizer"]` (`test_threejs_hybrid.py:814-821`) against the ffmpeg emitter; offline npm restore still in `finally`.
-- BLE001: our two `run.py` files ruff-clean. Hybrid `support_resolver` (`planners/threejs_hybrid/run.py:540`) no longer remaps `RenderingRegistryError` → unsupported (now `internal` via `BaseException`); both packs ship in checkout + wheel — not acceptance-failing. Flash notes overstated a `_serialize_timeline` ImportError loss (schema import is module-level on remotion).
-- Ruff baseline 1458→1469 justified: count-only snapshot; +11 pre-existing; our files 0 findings. Hygiene: `git rm --cached` `.codex/` `.vscode/` / mp3 (main `b768588e`); no history rewrite; merge will untrack them on main.
-- Schema: epic does not touch `tests/test_schema_contract.py` or `astrid/core/`. Host `make ci` 10/10 failed/passed, identical on main. Flash bare pytest 16/4 ImportError on both checkouts (env) — not ours.
-- Wheel manifest lists `backends/threejs/{__init__,renderer.yaml,run.py}` + `planners/threejs_hybrid/{__init__,planner.yaml,run.py}`. Host: Node 20.19.4 `npm ci` + typecheck + bundle; rendering 718 passed / 2 skipped / 1 pre-existing fixture.
-- `git diff --name-only b1c5f53c..HEAD -- astrid/core/` empty. No second lock/Node project/`model.py`/tracked media.
+**Epic COMPLETE. Merge to main may proceed.**
 
-Flash: `.oracle/findings/oracle-b6-{docs,notes,gates,critique,diff}.txt` (all PASS except notes BLE001, overridden above).
-```
+## Delegated evidence
 
-Epic is **COMPLETE**. Phase 6 (merge/commit/push/open) may proceed.
+- Facts: `.oracle/findings/oracle-b6-facts.txt` (scope, dispatcher, deferred, docs, manifests, revert)
+- Proof: `.oracle/findings/oracle-b6-proof.txt` (HONESTY: PARTIAL — real pipeline, planner verb injected)
+- Critique: `.oracle/findings/oracle-b6-critique.txt` (lean; no blocker)
+
+## Acceptance
+
+**Real stack.** `test_real_stacked_render_constructed_plan_threejs_over_remotion`:
+real threejs ProRes + real remotion + real composi**PASS** — epic COMPLETE. Merge to main may proceed.
+
+Delegated Flash: `.oracle/findings/oracle-b6-{facts,proof,critique}.txt`. Host re-checked cited lines.
+
+**Real stack is real, plan verb is injected.** `test_real_stacked_render_constructed_plan_threejs_over_remotion` runs live threejs ProRes, remotion, and ffmpeg-compositor through `RenderService`/`sdk_render`. `_InjectPlanTransport` intercepts only `verb=="plan"` + `rendering.layer-stack`; everything else is `CommandTransport`. The plan is a real `layer_stack.plan` (threejs+ffmpeg) with ffmpeg relabeled remotion — `__post_init__` re-runs; stamp `alpha: z>0` and track slice still fire. Pixel proof (frame 0): corner (4,4) media-red + ≥1 non-red in the text band. 24f h264/420p + aac. Flash: HONESTY PARTIAL — planner would never emit this assignment with remotion registered (fast path). Disclosed; tasklist asked for a real 2-layer render, not planner-driven remotion-bottom.
+
+**Dispatcher.** Exact `rendering.ffmpeg-compositor` before finalizer/ffmpeg/remotion-else. Pre-fix fallthrough was remotion (real gap). Distinct-id equality; finalizer unbroken.
+
+**Deferred.** Short-bottom: 5f red under 10f green; f8 (50,50)==black (`eof_action=pass`). Merge-reject: two ffmpeg media tracks stay two segments. Opacity 0.4 → `LayerRef`. `_LayerClaim.timeline` gone.
+
+**Docs / scope / gate.** `layer-stack.md` matches z, ProRes-for-`z>0`, blend deferred, concat fast path, perf. `46af2451..c87cc49f`: 8 paths. `astrid/core` empty. `test_schema_contract.py` empty. `gen_remotion_types.py` absent (revert correct). Host: 782 passed / 1 pre-existing env fixture; ruff ≤1469; remotion-typecheck; renderer-parity 18.
+
+**Elegance.** Lean. Dead `top_opacity` knob and duplicate `_frame_rgb` are nits, not defects.
