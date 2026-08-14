@@ -63,6 +63,7 @@ from astrid.packs.rendering.backends._shared import (
     _remotion_mux_profile,
     _render_provenance_payload,
     _serialize_timeline,
+    _timeline_alpha,
 )
 from astrid.packs.rendering.backends.remotion import run as remotion_backend
 
@@ -305,6 +306,7 @@ def support(request: RenderRequest, *, workspace: Path) -> SupportReport:
         "transitions": False,
         "full_timeline": True,
         "windows": False,
+        "alpha_output": True,
     }
 
     try:
@@ -353,8 +355,11 @@ def support(request: RenderRequest, *, workspace: Path) -> SupportReport:
             except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
                 reasons.append(f"canonical Three.js profile cannot be resolved: {exc}")
             else:
+                # The capture host muxes VP9/yuva420p/WebM for alpha-stamped
+                # layer timelines and the frozen H.264/yuv420p/MP4 otherwise.
+                alpha = _timeline_alpha(timeline_data)
                 mismatches = _profile_mismatches(
-                    request.profile, _remotion_mux_profile(canonical)
+                    request.profile, _remotion_mux_profile(canonical, alpha=alpha)
                 )
                 if mismatches:
                     reasons.append(
@@ -465,7 +470,14 @@ def _protocol_render(request: RenderRequest, *, workspace: Path) -> RenderResult
             assets_path = requested_assets_path
         assets_data = _load_registry_mapping(assets_path)
         canonical = _canonical_profile(timeline_path, assets_data, settings.theme_path)
-        declared_profile = _remotion_mux_profile(request.profile or canonical)
+        # Alpha-stamped timelines render VP9/yuva420p in WebM through the
+        # shared Remotion capture host; everything else keeps the frozen
+        # H.264/yuv420p MP4 contract.  The declared profile must match the
+        # probed artifact exactly (strict validation).
+        alpha = _timeline_alpha(timeline_data)
+        declared_profile = _remotion_mux_profile(
+            request.profile or canonical, alpha=alpha
+        )
         ownership = AudioOwnership.RENDERED
         private_tmp = lifecycle.enter_context(
             TemporaryDirectory(

@@ -30,7 +30,7 @@ from astrid.core.rendering.transport import CommandTransport
 from astrid.packs.rendering.backends.remotion import run as remotion
 from astrid.packs.rendering.executors.render import run as facade
 from astrid.sdk.rendering import render
-from tests.packs.rendering._helpers import _execution_env
+from tests.packs.rendering._helpers import _execution_env, _probe
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -1051,3 +1051,121 @@ def test_remotion_real_render_under_global_angle_keeps_identity(
     numerator, denominator = (int(part) for part in video["avg_frame_rate"].split("/"))
     assert abs(numerator / denominator - 24.0) <= 0.5, video
     assert any(s["codec_type"] == "audio" and s["codec_name"] == "aac" for s in streams)
+
+# ---------------------------------------------------------------------------
+# Batch 4 - alpha output (consumes the astrid_layer.alpha stamp)
+# ---------------------------------------------------------------------------
+
+
+def _stamped_text_timeline(tmp_path: Path, *, alpha: bool = True) -> Path:
+    path = tmp_path / "stamped-alpha.timeline.json"
+    timeline.save_timeline(
+        {
+            "theme": "banodoco-default",
+            "theme_overrides": {
+                "visual": {
+                    "canvas": {"width": 320, "height": 180, "fps": 24},
+                    "background": "#1a1a2e",
+                }
+            },
+            "tracks": [{"id": "v1", "kind": "visual", "label": "Title"}],
+            "clips": [
+                {
+                    "id": "title",
+                    "at": 0.0,
+                    "track": "v1",
+                    "clipType": "text",
+                    "hold": 0.5,
+                    "text": {"content": "ALPHA", "fontSize": 64, "color": "#ffffff"},
+                    "params": {"weight": 700},
+                }
+            ],
+            "metadata": {"astrid_layer": {"z": 1 if alpha else 0, "alpha": alpha}},
+        },
+        path,
+    )
+    return path
+
+
+def test_alpha_stamp_appends_transparent_flags_to_remotion_cli(
+    tmp_path: Path,
+) -> None:
+    """Stamped timeline -> --image-format=png --pixel-format=yuva420p
+    --codec=vp9 appended to the remotion CLI.  Unstamped (today's frozen
+    path) -> no alpha flags at all."""
+    seen: dict[str, list[str]] = {"commands": []}
+
+    def fake_run(command, **kwargs):
+        normalized = [str(part) for part in command]
+        if normalized[:3] == ["npx", "remotion", "render"]:
+            seen["commands"].append(normalized)
+            Path(normalized[normalized.index("--output") + 1]).write_bytes(
+                b"fake-remotion-video"
+            )
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    opaque_timeline, assets_path = _write_inputs(tmp_path)
+    alpha_timeline = _stamped_text_timeline(tmp_path, alpha=True)
+    project = _write_project(tmp_path)
+
+    for timeline_path in (opaque_timeline, alpha_timeline):
+        output_path = tmp_path / f"{Path(timeline_path).stem}.mp4"
+        with (
+            mock.patch.object(remotion, "_regenerate_element_registries"),
+            mock.patch.object(
+                remotion,
+                "_effective_registry_state",
+                return_value={"version": 1, "hash": "registry-hash"},
+            ),
+            mock.patch.object(remotion.subprocess, "run", side_effect=fake_run),
+        ):
+            remotion.render(
+                timeline_path, assets_path, output_path, project_dir=project
+            )
+
+    opaque_cmd, alpha_cmd = seen["commands"]
+    for flag in ("--image-format=png", "--pixel-format=yuva420p", "--codec=vp9"):
+        assert flag not in opaque_cmd
+        assert flag in alpha_cmd
+
+
+@pytest.mark.timeout(600)
+def test_alpha_stamped_real_render_is_webm_vp9_and_declared_profile_matches(
+    tmp_path: Path,
+) -> None:
+    """A REAL alpha render through _protocol_render: strict validation
+    passes and the probed artifact is the recorded batch-4 truth --
+    webm/vp9/yuv420p/time_base 1/1000/opus.  (remotion 4.0.509 muxes no
+    yuva plane; see .oracle/findings/batch-4-exec.txt.)"""
+    _require_remotion_environment()
+    timeline_path = _stamped_text_timeline(tmp_path, alpha=True)
+    assets_path = tmp_path / "assets.json"
+    timeline.save_registry({"assets": {}}, assets_path)
+    request = RenderRequest(
+        schema_version=SCHEMA_VERSION,
+        timeline_path=str(timeline_path),
+        assets_registry_path=str(assets_path),
+        output_name="segment-0000.mp4",
+        backend_config={
+            remotion.BACKEND_ID: {"project_dir": str(ROOT / "remotion")},
+        },
+    )
+    with _execution_env():
+        result = remotion._protocol_render(request, workspace=tmp_path)
+
+    video_path = tmp_path / "outputs" / "segment-0000.mp4"
+    assert video_path.is_file() and video_path.stat().st_size > 0
+    profile = result.video.profile
+    assert profile.container == "webm"
+    assert profile.video_codec == "vp9"
+    assert profile.pixel_format == "yuv420p"
+    assert profile.time_base == (1, 1000)
+    probe = _probe(video_path)
+    video = next(s for s in probe["streams"] if s["codec_type"] == "video")
+    assert video["codec_name"] == "vp9"
+    assert video["pix_fmt"] == "yuv420p"
+    assert video["time_base"] == "1/1000"
+    assert any(
+        s["codec_type"] == "audio" and s["codec_name"] == "opus"
+        for s in probe["streams"]
+    )

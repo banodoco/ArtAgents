@@ -254,7 +254,45 @@ def _duration_frames(video_path: Path, profile: RenderProfile) -> int:
     return max(1, int(frames + Fraction(1, 2)))
 
 
-def _remotion_mux_profile(profile: RenderProfile) -> RenderProfile:
+def _timeline_alpha(timeline_data: Mapping[str, Any]) -> bool:
+    """True when a serialized timeline's metadata stamps ``astrid_layer.alpha``.
+
+    The service stamps ``metadata.astrid_layer = {z, alpha: z > 0}`` onto the
+    materialized timeline of every z-layer segment (batch 2).  Backends read
+    THIS dict to decide whether the segment must emit transparent output; an
+    unstamped timeline (or ``alpha`` false/absent) keeps today's opaque path.
+    """
+    metadata = timeline_data.get("metadata")
+    if not isinstance(metadata, Mapping):
+        return False
+    layer = metadata.get("astrid_layer")
+    if not isinstance(layer, Mapping):
+        return False
+    return layer.get("alpha") is True
+
+
+def _remotion_mux_profile(profile: RenderProfile, *, alpha: bool = False) -> RenderProfile:
+    """The profile Remotion's muxer actually produces for this timeline.
+
+    Opaque renders (unstamped / ``alpha=False``) are the frozen contract:
+    H.264/yuv420p in an MP4 at the 90 kHz timescale with an always-muxed AAC
+    track.  Alpha renders (``alpha=True``) switch the encoder to
+    VP9/yuva420p in a WebM container (``--codec=vp9`` implies webm) while
+    keeping the always-muxed audio track.
+    """
+    if alpha:
+        return replace(
+            profile,
+            time_base=(1, 1000),
+            container="webm",
+            video_codec="vp9",
+            video_profile=None,
+            video_level=None,
+            pixel_format="yuva420p",
+            audio_codec=profile.audio_codec or "aac",
+            audio_sample_rate=profile.audio_sample_rate or 48000,
+            audio_channel_layout=profile.audio_channel_layout or "stereo",
+        )
     return replace(
         profile,
         time_base=(1, 90000),

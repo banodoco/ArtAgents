@@ -71,6 +71,7 @@ from astrid.packs.rendering.backends._shared import (
     _resolve_theme_path,
     _resolved_theme_for_render,
     _serialize_timeline,
+    _timeline_alpha,
 )
 from astrid.packs.rendering.backends.remotion import lock as remotion_lock
 from scripts import gen_effect_registry
@@ -539,6 +540,12 @@ def _execute_remotion_locked(
                 "assets": resolved_registry,
                 "theme": theme_for_props,
             }
+            # Batch 4 (layer stack): the service stamps
+            # ``metadata.astrid_layer.alpha = z > 0`` onto the materialized
+            # timeline of z-layer segments.  When the stamp says alpha, emit
+            # TRANSPARENT output (PNG frames -> VP9/yuva420p in WebM); the
+            # unstamped path keeps today's jpeg/h264/MP4 contract exactly.
+            alpha = _timeline_alpha(merged_props["timeline"])
             stage_summary = _stage_effect_assets_for_timeline(
                 merged_props["timeline"],
                 project_dir=project_dir,
@@ -553,19 +560,26 @@ def _execute_remotion_locked(
                 remotion_env_additions["ASTRID_TIMELINE_COMPOSITION_SRC"] = str(
                     composition_src
                 )
+            remotion_args = [
+                "npx",
+                "remotion",
+                "render",
+                composition_id,
+                "--props",
+                str(props_path),
+                "--output",
+                str(staged_video),
+                "--allow-html-in-canvas",
+                "--enforce-audio-track",
+            ]
+            if alpha:
+                remotion_args += [
+                    "--image-format=png",
+                    "--pixel-format=yuva420p",
+                    "--codec=vp9",
+                ]
             completed = subprocess.run(
-                [
-                    "npx",
-                    "remotion",
-                    "render",
-                    composition_id,
-                    "--props",
-                    str(props_path),
-                    "--output",
-                    str(staged_video),
-                    "--allow-html-in-canvas",
-                    "--enforce-audio-track",
-                ],
+                remotion_args,
                 cwd=str(project_dir),
                 env=build_child_subprocess_env(explicit_env=remotion_env_additions),
                 capture_output=True,
@@ -735,6 +749,7 @@ def support(request: RenderRequest, *, workspace: Path) -> SupportReport:
         "windows": False,
         "effects": True,
         "asset_serving": "invocation-scoped",
+        "alpha_output": True,
     }
     try:
         settings = _settings_from_request(request, workspace)
@@ -823,7 +838,11 @@ def support(request: RenderRequest, *, workspace: Path) -> SupportReport:
                     f"Remotion's always-rendered audio output"
                 )
             if request.profile is not None:
-                render_profile = _remotion_mux_profile(canonical)
+                # The profile Remotion produces depends on the alpha stamp:
+                # z>0 layer timelines render VP9/yuva420p/WebM, everything
+                # else the frozen H.264/yuv420p/MP4 contract.
+                alpha = _timeline_alpha(timeline_data)
+                render_profile = _remotion_mux_profile(canonical, alpha=alpha)
                 mismatches = _profile_mismatches(request.profile, render_profile)
                 if mismatches:
                     reasons.append(
@@ -882,9 +901,14 @@ def _protocol_render(request: RenderRequest, *, workspace: Path) -> RenderResult
             assets_path = requested_assets_path
         assets_data = _load_registry_mapping(assets_path)
         canonical = _canonical_profile(timeline_path, assets_data, settings.theme_path)
-        declared_profile = _remotion_mux_profile(request.profile or canonical)
-        # Remotion always muxes an audio track into its MP4 (silent when the
-        # timeline has none), so ownership is effectively 'rendered'.
+        # The declared profile must match what ffprobe sees on the real
+        # artifact: alpha-stamped timelines render VP9/yuva420p in WebM,
+        # everything else stays H.264/yuv420p in MP4 (strict validation
+        # compares every field against the probed file).
+        alpha = _timeline_alpha(_serialize_timeline(timeline_path))
+        declared_profile = _remotion_mux_profile(request.profile or canonical, alpha=alpha)
+        # Remotion always muxes an audio track into its output (silent when
+        # the timeline has none), so ownership is effectively 'rendered'.
         ownership = AudioOwnership.RENDERED
         private_tmp = lifecycle.enter_context(
             TemporaryDirectory(
