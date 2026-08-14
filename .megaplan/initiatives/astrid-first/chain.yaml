@@ -84,6 +84,9 @@ on_escalate:
   abort: stop_chain
 merge_policy: auto
 driver:
+  execution_binding: required
+  intended_initiative_revision: 7168b8582b7211ede3b4343e3193138135e15318
+  initiative_path: .megaplan/initiatives/astrid-first
   robustness: full
   phase_timeout: 10800
   auto_approve: true
