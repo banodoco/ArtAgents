@@ -198,14 +198,19 @@ def test_distinct_z_segments_may_overlap_in_time() -> None:
     assert [segment.layer.z for segment in plan.segments] == [0, 1]
 
 
-def test_distinct_z_layers_must_each_tile_exactly_to_target_end() -> None:
-    with pytest.raises(ValueError, match="trailing gap in layer z=1"):
-        _plan(
-            segments=[
-                _segment(0, 48, layer=_layer(z=0)),
-                _segment(0, 24, layer=_layer(z=1)),
-            ]
-        )
+def test_distinct_z_layers_may_end_early() -> None:
+    """A top layer tiles contiguously but may cover only part of the timeline
+    (e.g. a text overlay [0, 24) over a full-length video); the compositor's
+    background fill handles the uncovered tail.  Only the default (layer=None)
+    layer must reach target_end."""
+    plan = _plan(
+        segments=[
+            _segment(0, 48, layer=_layer(z=0)),
+            _segment(0, 24, layer=_layer(z=1, tracks=("visual-2",))),
+        ]
+    )
+    assert [segment.layer.z for segment in plan.segments] == [0, 1]
+    assert plan.total_frames == 48
 
 
 # --- 3/4. per-z tiling: same-z overlap rejected, adjacency parses -----------

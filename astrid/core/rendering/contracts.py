@@ -1537,12 +1537,14 @@ class RenderPlan:
                     raise ValueError(f"segments[{index}] extends beyond the plan target window")
                 cursors[layer_key] = segment.window.end_frame
             for layer_key, expected_start in cursors.items():
-                if expected_start != target_end:
-                    if layer_key is None:
-                        raise ValueError("plan segments leave a trailing gap")
-                    raise ValueError(
-                        f"plan segments leave a trailing gap in layer z={layer_key}"
-                    )
+                # The default (layer=None) layer must cover the whole target
+                # window — today's exact behavior, unchanged.  Explicit z
+                # layers tile CONTIGUOUSLY (enforced by the cursor loop above)
+                # but may legitimately end early: a top overlay (e.g. text)
+                # only covers part of the timeline, and the compositor's
+                # background fill handles the rest.
+                if layer_key is None and expected_start != target_end:
+                    raise ValueError("plan segments leave a trailing gap")
         reasons = _require_string_mapping(self.reasons, "reasons")
         expected_reason_keys = {str(index) for index in range(len(segments))}
         if set(reasons) != expected_reason_keys:
