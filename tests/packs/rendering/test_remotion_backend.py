@@ -1057,6 +1057,29 @@ def test_remotion_real_render_under_global_angle_keeps_identity(
 # ---------------------------------------------------------------------------
 
 
+def _rgba_corner(video_path: Path) -> bytes:
+    """Top-left RGBA pixel of frame 0 (ffmpeg raw rgba decode)."""
+    raw = subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-i",
+            str(video_path),
+            "-frames:v",
+            "1",
+            "-pix_fmt",
+            "rgba",
+            "-f",
+            "rawvideo",
+            "-",
+        ],
+        check=True,
+        capture_output=True,
+    ).stdout
+    return raw[0:4]
+
+
 def _stamped_text_timeline(tmp_path: Path, *, alpha: bool = True) -> Path:
     path = tmp_path / "stamped-alpha.timeline.json"
     timeline.save_timeline(
@@ -1090,15 +1113,20 @@ def _stamped_text_timeline(tmp_path: Path, *, alpha: bool = True) -> Path:
 def test_alpha_stamp_appends_transparent_flags_to_remotion_cli(
     tmp_path: Path,
 ) -> None:
-    """Stamped timeline -> --image-format=png --pixel-format=yuva420p
-    --codec=vp9 appended to the remotion CLI.  Unstamped (today's frozen
-    path) -> no alpha flags at all."""
+    """Stamped timeline -> --image-format=png --pixel-format=yuva444p10le
+    --codec=prores --prores-profile=4444 appended to the remotion CLI, the
+    rendered output is remapped to .mov, and the serialized theme's
+    visual.color.bg is transparent.  Unstamped (today's frozen path) -> no
+    alpha flags at all, .mp4 output, opaque theme bg kept."""
     seen: dict[str, list[str]] = {"commands": []}
+    props_seen: list[dict[str, object]] = []
 
     def fake_run(command, **kwargs):
         normalized = [str(part) for part in command]
         if normalized[:3] == ["npx", "remotion", "render"]:
             seen["commands"].append(normalized)
+            props_path = Path(normalized[normalized.index("--props") + 1])
+            props_seen.append(json.loads(props_path.read_text(encoding="utf-8")))
             Path(normalized[normalized.index("--output") + 1]).write_bytes(
                 b"fake-remotion-video"
             )
@@ -1124,19 +1152,37 @@ def test_alpha_stamp_appends_transparent_flags_to_remotion_cli(
             )
 
     opaque_cmd, alpha_cmd = seen["commands"]
-    for flag in ("--image-format=png", "--pixel-format=yuva420p", "--codec=vp9"):
+    for flag in (
+        "--image-format=png",
+        "--pixel-format=yuva444p10le",
+        "--codec=prores",
+        "--prores-profile=4444",
+    ):
         assert flag not in opaque_cmd
         assert flag in alpha_cmd
+    for dead_flag in ("--codec=vp9", "--pixel-format=yuva420p"):
+        assert dead_flag not in alpha_cmd
+        assert dead_flag not in opaque_cmd
+    # Stamped renders are remapped to the ProRes .mov container name.
+    alpha_output = Path(alpha_cmd[alpha_cmd.index("--output") + 1])
+    assert alpha_output.suffix == ".mov"
+    opaque_output = Path(opaque_cmd[opaque_cmd.index("--output") + 1])
+    assert opaque_output.suffix == ".mp4"
+    # Theme background neutralization: stamped props carry a transparent bg,
+    # the unstamped path keeps the opaque theme bg.
+    opaque_props, alpha_props = props_seen
+    assert alpha_props["theme"]["visual"]["color"]["bg"] == "transparent"
+    assert opaque_props["theme"]["visual"]["color"]["bg"] != "transparent"
 
 
 @pytest.mark.timeout(600)
-def test_alpha_stamped_real_render_is_webm_vp9_and_declared_profile_matches(
+def test_alpha_stamped_real_render_is_mov_prores_and_declared_profile_matches(
     tmp_path: Path,
 ) -> None:
     """A REAL alpha render through _protocol_render: strict validation
-    passes and the probed artifact is the recorded batch-4 truth --
-    webm/vp9/yuv420p/time_base 1/1000/opus.  (remotion 4.0.509 muxes no
-    yuva plane; see .oracle/findings/batch-4-exec.txt.)"""
+    passes and the probed artifact is the recorded batch-4-rework truth --
+    mov/prores/yuva444p12le/time_base 1/90000/pcm_s16le, output remapped to
+    .mov, and the corner pixel is fully transparent (alpha == 0)."""
     _require_remotion_environment()
     timeline_path = _stamped_text_timeline(tmp_path, alpha=True)
     assets_path = tmp_path / "assets.json"
@@ -1153,19 +1199,70 @@ def test_alpha_stamped_real_render_is_webm_vp9_and_declared_profile_matches(
     with _execution_env():
         result = remotion._protocol_render(request, workspace=tmp_path)
 
-    video_path = tmp_path / "outputs" / "segment-0000.mp4"
+    # The artifact is remapped to .mov and the declared path points at it.
+    video_path = tmp_path / "outputs" / "segment-0000.mov"
     assert video_path.is_file() and video_path.stat().st_size > 0
+    assert result.video.path == "outputs/segment-0000.mov"
     profile = result.video.profile
-    assert profile.container == "webm"
-    assert profile.video_codec == "vp9"
-    assert profile.pixel_format == "yuv420p"
-    assert profile.time_base == (1, 1000)
+    assert profile.container == "mov"
+    assert profile.video_codec == "prores"
+    assert profile.pixel_format == "yuva444p12le"
+    assert profile.time_base == (1, 90000)
     probe = _probe(video_path)
     video = next(s for s in probe["streams"] if s["codec_type"] == "video")
-    assert video["codec_name"] == "vp9"
-    assert video["pix_fmt"] == "yuv420p"
-    assert video["time_base"] == "1/1000"
+    assert video["codec_name"] == "prores"
+    assert video["pix_fmt"] == "yuva444p12le"
+    assert video["time_base"] == "1/90000"
     assert any(
-        s["codec_type"] == "audio" and s["codec_name"] == "opus"
+        s["codec_type"] == "audio" and s["codec_name"] == "pcm_s16le"
         for s in probe["streams"]
     )
+
+
+@pytest.mark.timeout(600)
+def test_stamped_top_layer_via_real_service_is_mov_prores_with_alpha(
+    tmp_path: Path,
+) -> None:
+    """Stamped top layer via the REAL service path -> .mov/prores with alpha;
+    unstamped via the same path -> .mp4/h264 opaque (frozen no-regression)."""
+    _require_remotion_environment()
+    for alpha in (True, False):
+        timeline_path = _stamped_text_timeline(tmp_path, alpha=alpha)
+        assets_path = tmp_path / "assets.json"
+        timeline.save_registry({"assets": {}}, assets_path)
+        # The service publishes to the caller's destination name; the
+        # stamped case asks for the ProRes .mov container (the backend
+        # remap is exercised separately via _protocol_render with the
+        # service's hardcoded segment-NNNN.mp4 name).
+        output = (
+            tmp_path / f"layer-{alpha}.mov"
+            if alpha
+            else tmp_path / f"layer-{alpha}.mp4"
+        )
+        with _execution_env():
+            published = render(
+                timeline_path=timeline_path,
+                assets_registry_path=str(assets_path),
+                out_path=output,
+                backend="rendering.remotion",
+            )
+        video_path = Path(published)
+        assert video_path.is_file() and video_path.stat().st_size > 0
+        probe = _probe(video_path)
+        video = next(s for s in probe["streams"] if s["codec_type"] == "video")
+        if alpha:
+            assert video_path.suffix == ".mov", video_path
+            assert video["codec_name"] == "prores"
+            assert video["pix_fmt"] == "yuva444p12le"
+            corner = _rgba_corner(video_path)
+            assert corner[3] == 0, corner
+        else:
+            assert video_path.suffix == ".mp4", video_path
+            assert video["codec_name"] == "h264"
+            assert "420p" in video["pix_fmt"], video
+            corner = _rgba_corner(video_path)
+            # Frozen opaque path: the DOM composition paints the resolved
+            # theme bg (this worktree resolves the black banodoco-default
+            # fallback) and the corner is fully opaque.
+            assert corner[3] == 255, corner
+            assert corner[:3] == bytes([0, 0, 0]), corner

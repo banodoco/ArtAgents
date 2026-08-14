@@ -53,6 +53,7 @@ from astrid.core.rendering.errors import (
     raise_unsupported_error,
 )
 from astrid.packs.rendering.backends._shared import (
+    _alpha_output_name,
     _canonical_profile,
     _duration_frames,
     _input_path,
@@ -355,8 +356,9 @@ def support(request: RenderRequest, *, workspace: Path) -> SupportReport:
             except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
                 reasons.append(f"canonical Three.js profile cannot be resolved: {exc}")
             else:
-                # The capture host muxes VP9/yuva420p/WebM for alpha-stamped
-                # layer timelines and the frozen H.264/yuv420p/MP4 otherwise.
+                # The capture host muxes ProRes 4444/yuva444p12le/MOV for
+                # alpha-stamped layer timelines and the frozen
+                # H.264/yuv420p/MP4 otherwise.
                 alpha = _timeline_alpha(timeline_data)
                 mismatches = _profile_mismatches(
                     request.profile, _remotion_mux_profile(canonical, alpha=alpha)
@@ -455,7 +457,13 @@ def _protocol_render(request: RenderRequest, *, workspace: Path) -> RenderResult
 
     outputs_dir = workspace / "outputs"
     outputs_dir.mkdir(parents=True, exist_ok=True)
-    output_path = outputs_dir / request.output_name
+    # The service hardcodes ``segment-NNNN.mp4`` (service.py:1362) but
+    # Remotion rejects .mp4 output names for --codec=prores; remap the actual
+    # artifact to .mov when the alpha stamp is present so the declared
+    # artifact path points at the real ProRes file.
+    alpha = _timeline_alpha(timeline_data)
+    output_name = _alpha_output_name(request.output_name) if alpha else request.output_name
+    output_path = outputs_dir / output_name
 
     with ExitStack() as lifecycle:
         if requested_assets_path is None:
@@ -470,22 +478,21 @@ def _protocol_render(request: RenderRequest, *, workspace: Path) -> RenderResult
             assets_path = requested_assets_path
         assets_data = _load_registry_mapping(assets_path)
         canonical = _canonical_profile(timeline_path, assets_data, settings.theme_path)
-        # Alpha-stamped timelines render VP9/yuva420p in WebM through the
-        # shared Remotion capture host; everything else keeps the frozen
-        # H.264/yuv420p MP4 contract.  The declared profile must match the
-        # probed artifact exactly (strict validation).
-        alpha = _timeline_alpha(timeline_data)
+        # Alpha-stamped timelines render ProRes 4444/yuva444p12le in MOV
+        # through the shared Remotion capture host; everything else keeps the
+        # frozen H.264/yuv420p MP4 contract.  The declared profile must match
+        # the probed artifact exactly (strict validation).
         declared_profile = _remotion_mux_profile(
             request.profile or canonical, alpha=alpha
         )
         ownership = AudioOwnership.RENDERED
         private_tmp = lifecycle.enter_context(
             TemporaryDirectory(
-                prefix=f".{request.output_name}.threejs-",
+                prefix=f".{output_name}.threejs-",
                 dir=str(outputs_dir),
             )
         )
-        staged_video = Path(private_tmp) / request.output_name
+        staged_video = Path(private_tmp) / output_name
         details = _execute_remotion(
             timeline_path,
             assets_path,
