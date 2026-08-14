@@ -1,23 +1,29 @@
-# Batch 1 oracle checkpoint
+# Checkpoint 1 — Batch 1 (Layer Stack) — PASS
 
-**Verdict:** PASS
-**Commit:** 99e6d24c vs base b1c5f53c
-**Flash:** `.oracle/findings/oracle-b1-{diff,proof,critique}.txt`
+Oracle: Grok 4.6. Delegated Flash facts + critique (`.oracle/findings/oracle-b1-facts.txt`, `oracle-b1-critique.txt`). Validated cited lines.
 
 ## PASS
-- `99e6d24c` is 7 files, +487/−15. Exact pins: `@remotion/three@4.0.455`, `@react-three/fiber@8.18.0`, `three@0.185.1`, `@types/three@0.185.4` (no `^`/`~`/`latest`). Existing Remotion 4.0.455 unchanged. Lockfile v3; those four resolve exactly.
-- `remotion.config.ts` adds only `Config.setChromiumOpenGlRenderer('angle');`. No raw flags.
-- `@types/react` `^19.2.14`→`^18.3.12` (18.3.31) and `@types/react-dom` `^19.2.3`→`^18.3.1` (18.3.7) is the documented R3F-8 / React-19 JSX fix. No other version drift.
-- `.oracle/findings/remotion-swiftshader.txt` and `webgl-proof.txt` exist. Pinned `open-browser.js` 4.0.455: `'angle'` → `--use-gl=angle`; no `unsafe-swiftshader`. Pillow: 160×90, 4 colors, 1690× (186,0,8). Proof source/PNG untracked. 4 colors = black + red + AA edges.
-- `git diff --name-only b1c5f53c..99e6d24c -- astrid/core/` empty. No PNG/video/`node_```
-PASS
-- Commit 99e6d24c is 7 files, +487/−15. Exact pins: `@remotion/three@4.0.455`, `@react-three/fiber@8.18.0`, `three@0.185.1`, `@types/three@0.185.4` (no `^`/`~`/`latest`). Existing Remotion 4.0.455 unchanged. Lockfile v3; those four resolve exactly.
-- `remotion.config.ts` adds only `Config.setChromiumOpenGlRenderer('angle');`. No raw Chromium flags.
-- `@types/react` `^19.2.14`→`^18.3.12` (18.3.31) and `@types/react-dom` `^19.2.3`→`^18.3.1` (18.3.7) is the documented R3F-8 / React-19 JSX fix. No other version drift.
-- Evidence files exist: `.oracle/findings/remotion-swiftshader.txt`, `webgl-proof.txt`. Pinned `open-browser.js` 4.0.455: `'angle'` → `--use-gl=angle`; no `unsafe-swiftshader` string. Pillow: 160×90, 4 colors, 1690× (186,0,8). Proof source/PNG untracked. 4 colors = black + red + AA edges.
-- `git diff --name-only b1c5f53c..99e6d24c -- astrid/core/` is empty. No PNG/video/`node_modules`/Chrome cache/bundle in the commit.
-- Chrome Headless Shell was manually unzipped into gitignored `node_modules/.remotion/` (VERSION `149.0.7790.0`). Acceptable for this local-proof batch; `npm ci` extract-zip is Batch 6, not a Batch 1 blocker.
-- Flash (OMP deepseek-v4-flash) diff + proof + elegance all PASS. Types alignment justified; lockfile churn proportional; no Batch 2+ leakage.
-```
 
-Batch 2 may start.
+- Scope clean: `d5b960d7` + `fe7622c7` touch only `contracts.py`, `plan.json`, `test_layer_contract.py`. No service/pack/finalizer edits.
+- `LayerRef` (`contracts.py:1316–1366`): z≥0, non-empty string tracks, blend=="normal" only, opacity in (0,1]. Minimal; `blend` is the documented fail-closed seam.
+- `RenderSegment.to_dict` (`1416–1424`) omits `layer` when None. Frozen key-set `test_contracts.py:600–603` still `{window,renderer,input_hashes}`.
+- Per-z cursor (`1520–1547`) is the old exact-tile check keyed by `z|None`. All-or-none at `1511–1519`.
+- `plan.json` `renderSegment.laye```
+PASS
+- Scope: d5b960d7 + fe7622c7 touch only contracts.py, plan.json, test_layer_contract.py.
+- LayerRef (contracts.py:1316–1340): z≥0, non-empty tracks, blend=="normal", opacity (0,1]. to_dict omits layer when None (1416–1424). Frozen key-set test_contracts.py:600–603 unchanged.
+- Cursor (1520–1547) is the old exact-tile check keyed by z|None. All-or-none at 1511–1519. plan.json layer optional, additionalProperties:false, required [z,tracks].
+- Host pytest 123 passed. Flash facts+critique: .oracle/findings/oracle-b1-{facts,critique}.txt.
+
+Semantics
+- All-or-none is correct. layer=None is the full-stack fast path; mixing would double-paint overlay tracks (a second tiling axis).
+- Early-end for explicit z is correct. Composition length = plan window; uncovered = compositor background. No layer (incl. z=0) must span. None-layer must still reach target_end. fe7622c7 is the right fix.
+- Late-start stays illegal. A 1.0s text overlay is a CLIP on a full-window layer, not a layer starting at frame 24. v1 planner emits one full-window segment per z; z>0 paints transparent head (B4). setdefault(..., target_start) at 1527 is right. Same path already pinned for None (`test_layer_contract.py:171` [1,48) → "gap").
+
+LayerRef is minimal. Cursor is not over-engineered. Tests pin properties, not tautologies.
+
+Batch 2 may start. B3 compositor must pad short layers (incl. z=0).
+```
+; key-set). Parse-only stacking tests are the capability. Schema looser than dataclass on blend/opacity is the existing wire/runtime split — dataclass is the gate.
+
+Batch 2 may start. Compositor must pad short layers (incl. z=0); do not assume an opaque full-span bottom.
