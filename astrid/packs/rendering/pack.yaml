@@ -50,6 +50,7 @@ extensions:
       - planners/threejs_hybrid/planner.yaml
     finalizers:
       - finalizers/ffmpeg/finalizer.yaml
+      - finalizers/compositor/finalizer.yaml
 aliases:
 - kind: executor
   alias: builtin.render
