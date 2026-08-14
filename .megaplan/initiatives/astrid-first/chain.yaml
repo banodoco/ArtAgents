@@ -1,0 +1,92 @@
+base_branch: main
+anchors:
+  north_star: NORTHSTAR.md
+milestones:
+- label: m1
+  idea: .megaplan/initiatives/astrid-first/briefs/m1.md
+  branch: megaplan/astrid-first/m1
+  profile: partnered-5
+  vendor: codex
+  robustness: thorough
+  depth: high
+  with_prep: true
+- label: m2
+  idea: .megaplan/initiatives/astrid-first/briefs/m2.md
+  branch: megaplan/astrid-first/m2
+  profile: partnered-5
+  vendor: codex
+  robustness: thorough
+  depth: high
+  with_prep: true
+- label: m3
+  idea: .megaplan/initiatives/astrid-first/briefs/m3.md
+  branch: megaplan/astrid-first/m3
+  profile: partnered-4
+  vendor: codex
+  robustness: full
+  depth: medium
+  with_prep: false
+- label: m4
+  idea: .megaplan/initiatives/astrid-first/briefs/m4.md
+  branch: megaplan/astrid-first/m4
+  profile: partnered-4
+  vendor: codex
+  robustness: full
+  depth: high
+  with_prep: true
+- label: m5
+  idea: .megaplan/initiatives/astrid-first/briefs/m5.md
+  branch: megaplan/astrid-first/m5
+  profile: partnered-3
+  vendor: codex
+  robustness: full
+  depth: low
+  with_prep: false
+- label: m6
+  idea: .megaplan/initiatives/astrid-first/briefs/m6.md
+  branch: megaplan/astrid-first/m6
+  profile: partnered-4
+  vendor: codex
+  robustness: full
+  depth: medium
+  with_prep: false
+- label: m7
+  idea: .megaplan/initiatives/astrid-first/briefs/m7.md
+  branch: megaplan/astrid-first/m7
+  profile: partnered-4
+  vendor: codex
+  robustness: full
+  depth: medium
+  with_prep: false
+- label: m8
+  idea: .megaplan/initiatives/astrid-first/briefs/m8.md
+  branch: megaplan/astrid-first/m8
+  profile: partnered-3
+  vendor: codex
+  robustness: light
+  depth: low
+  with_prep: false
+- label: reconcile
+  kind: reconcile
+  idea: .megaplan/initiatives/astrid-first/briefs/reconcile.md
+  branch: reconcile/astrid-first-20260813
+  target_branch: main
+  merge_policy: review
+  phase_model:
+  - execute=codex
+  depends_on:
+  - m8
+reconciliation:
+  enabled: true
+on_failure:
+  abort: stop_chain
+on_escalate:
+  abort: stop_chain
+merge_policy: auto
+driver:
+  robustness: full
+  phase_timeout: 10800
+  auto_approve: true
+  on_escalate: abort
+  max_iterations: 60
+  poll_sleep: 8.0

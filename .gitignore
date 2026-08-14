@@ -139,3 +139,5 @@ dist/
 
 # Separate Next.js project (Ideogram x Banodoco competition page); not part of Astrid
 /ideogram-competition/
+!.megaplan/initiatives/astrid-first/
+!.megaplan/initiatives/astrid-first/**
