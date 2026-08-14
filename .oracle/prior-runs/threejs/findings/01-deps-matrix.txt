@@ -1,0 +1,17 @@
+# VERDICT: Yes — add today, pinned to the project's exact remotion line (4.0.455)
+
+**1. Exact compatible set (remotion/package.json, `remotion`/`@remotion/cli`/`@remotion/renderer` = `4.0.455`, react `^18.3.1`):**
+- `@remotion/three@4.0.455` — exists (registry.npmjs.org/@remotion/three/4.0.455); **version-locked**: `peerDependencies.remotion: "4.0.455"` exact, `three: ">=0.137.0"`, `@react-three/fiber: ">=8.0.0"`, `react/react-dom: ">=16.8.0"`. Latest 4.0.509 would force bumping all remotion packages; don't.
+- `three@0.185.1` (latest; 0.178.0 = Remotion's own devDependency if conservative)
+- `@types/three@0.185.4` (matches r185)
+- `@react-three/fiber@8.18.0` (latest 8.x; **v9 requires react ≥19** — incompatible with react 18.3.1; 8.18.0 peers: `react >=18 <19`, `three >=0.133` ✓). MIT.
+
+**2. R3F is mandatory**, not optional — `<ThreeCanvas>` wraps R3F's Canvas (peer `@react-three/fiber >=8.0.0`); raw three.js alone won't drive it.
+
+**3. WebGLRenderer API:** `alpha`, `antialias`, `preserveDrawingBuffer` remain valid constructor options in r185 (threejs.org/docs r185 `WebGLRenderer.antialias` page; params interface unchanged post-r163 WebGL2 migration).
+
+**4. Node:** no `engines` field in any remotion 4.0.455 package (registry JSON) or project package.json; no `.nvmrc`. CI pins Node 20 (`.github/workflows/ci.yml:74`); local `node_modules/` absent (read_file: not found; `.gitignore` excludes it). Node ≥18 fine.
+
+**5. Install:** add deps to `remotion/package.json`, run `npm install` there (CI: `npm ci`, ci.yml:80). Root `package.json` is a marker only (no workspaces); `pyproject.toml` references node_modules only as package exclusions. Lockfile (line 2524) confirms nothing three-related installed today. Webpack bundler picks deps up automatically.
+
+**6. Licenses:** three/R3F/@types/three/@remotion/three all MIT. `remotion` itself: `SEE LICENSE IN LICENSE.md` — free only for individuals, ≤3-employee for-profits, non-profits (raw LICENSE.md verified); company license otherwise. Repo already ships it (root LICENSE = OSNL, separate). ⚠️ pre-existing quirk: `@types/react ^19.2.14` vs react 18.3.1 runtime — type friction only, non-blocking.

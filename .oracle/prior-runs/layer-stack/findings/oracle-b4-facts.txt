@@ -1,0 +1,74 @@
+All facts gathered. Report follows.
+
+```
+SCOPE: clean — 8 paths, all inside allowed set (backends/{remotion,threejs}/{run.py,renderer.yaml},
+  backends/_shared/__init__.py, remotion/src/ThreeTimelineComposition.tsx, the two test files).
+  Nothing outside.
+
+STAMP: _shared/__init__.py:257-271 `_timeline_alpha`: metadata = timeline_data.get("metadata");
+  layer = metadata.get("astrid_layer"); `return layer.get("alpha") is True` (strict identity).
+  Read at remotion/run.py:548 (render) and :908 (protocol), threejs/run.py:360,477.
+
+FLAGS: remotion/run.py:575-580 — when alpha: `--image-format=png --pixel-format=yuva420p --codec=vp9`
+  appended to npx remotion render argv; unstamped path unchanged.
+
+PROFILE: _shared/__init__.py:283-296 (alpha branch of _remotion_mux_profile): time_base=(1,1000),
+  container="webm", video_codec="vp9", video_profile=None, video_level=None,
+  pixel_format="yuva420p" (BROKEN — probed truth is yuv420p), audio_codec="aac" (BROKEN — probed opus),
+  audio_sample_rate=48000, audio_channel_layout="stereo". Unstamped: time_base=(1,90000), h264/mp4.
+
+OUTPUT_NAME: passed through verbatim, never rewritten. remotion/run.py:891 `output_path =
+  outputs_dir / request.output_name`; :919 staged_video same name; os.replace :940. No
+  .mp4→.webm/.mov logic anywhere → `segment-0000.mp4` + vp9 = Remotion rejection (probed).
+
+BG-SKIP: ThreeTimelineComposition.tsx:156-162 isAlphaLayer = `layer?.alpha === true` (metadata only);
+  :432 `{alpha ? null : <color attach="background" args={[background]} />}`. Unstamped → alpha false →
+  background painted (opaque). Gated on nothing else.
+
+COMPOSITOR-ALPHA: compositor/run.py:337-349 `_layer_has_alpha`: pixel_format.startswith(("yuva",
+  "rgba", "gbrap")) → True; else `z > 0 and codec == "vp9"` → True; else False. Stored :580,
+  vp9 flag :581.
+
+COMPOSITOR-DECODER: libvpx-vp9 forced only at :649-651 `if layer.alpha and layer.vp9:` (alpha AND
+  vp9). Per-layer `format=yuva420p,` prepend :675 `if layer.alpha` — alpha only, no codec check.
+
+COMPOSITOR-MOV: Inputs: no extension/container check — probe-based; layer.path fed straight to
+  `-i` (:652). `_safe_protocol_output_path` (:89-128) checks symlinks/containment only. Output:
+  `_validate_target_profile` :289-293 rejects non-mp4 ("supports canonical MP4 output"). ProRes
+  yuva444p12le .mov: `_layer_has_alpha` :345 startswith("yuva") → alpha True; vp9 False → no
+  libvpx (:651) → native decoder. ACCEPTED ALREADY. Lines to change: 0 for input/decoder side
+  (already exactly the probe-based rule); 1-10 for .mov composite OUTPUT (relax :289-293).
+
+NAMING: service.py:1362 `output_name=f"segment-{index:04d}.mp4"` (hardcoded). Backend no rewrite.
+  `_OUTPUT_NAME_RE` contracts.py:38 `^[A-Za-z0-9][A-Za-z0-9._-]*$` — .mov/.webm pass. Legacy
+  `validate_output_name` (executors/render/run.py:70-73) demands `.mp4` but is facade/CLI-only
+  (:199,:278,:285) and never sees segment names. One-line service.py:1362 change (.mov for alpha
+  segments) works without touching the validator — segment names validate only against
+  `_OUTPUT_NAME_RE` (contracts.py:804).
+
+PATH-BIND: N — no basename-equality check anywhere. validate_render_result (artifacts.py:690) checks
+  workspace containment only; service `_artifact_path` (service.py:2195-2206) containment-only;
+  publisher moves whatever video.path is to out_path via os.replace (publication.py:354).
+  Writing outputs/<output_name> is backend convention (remotion/run.py:891), not enforced.
+
+TESTS:
+  remotion:1090 test_alpha_stamp_appends_transparent_flags_to_remotion_cli — flags absent from
+    opaque cmd, present in alpha cmd (:1127-1129).
+  remotion:1133 test_alpha_stamped_real_render_is_webm_vp9_and_declared_profile_matches — file
+    non-empty (:1156); profile webm/vp9/yuv420p/tb(1,1000) (:1159-1162); probe codec_name vp9,
+    pix_fmt yuv420p, tb 1/1000, opus audio (:1166-1171).
+  threejs:898 test_threejs_unstamped_real_render_corner_is_background_color — corner ==
+    bytes([0x1A,0x1A,0x2E,0xFF]) (:912).
+  threejs:916 test_threejs_alpha_stamped_real_render_declared_profile_matches_probe — same
+    profile/probe asserts (:926-943).
+  threejs:956 test_threejs_alpha_stamped_corner_pixel_is_fully_transparent — corner[3]==0 (:968).
+
+FAILURE-MAP (3 fails + 1 xfail):
+  1. remotion:1133 — output_name="segment-0000.mp4" (:1148) → Remotion rejects .mp4+vp9; plus
+     declared pixel_format yuva420p (_shared:291) vs asserted yuv420p (:1161). Findings #1+#3.
+  2. threejs:898 — passes dict _threejs_direct_request (:905) to _protocol_render which requires
+     RenderRequest (threejs/run.py:384, `request.window` :387). Findings #2.
+  3. threejs:916 — same dict bug (:923) + declared-vs-probed profile mismatch (:930). Findings #2+#3.
+  xfail threejs:947-955 strict, reason: Remotion 4.0.509 muxes yuv420p (no yuva plane) → corner
+    opaque; asserted at :968.
+```

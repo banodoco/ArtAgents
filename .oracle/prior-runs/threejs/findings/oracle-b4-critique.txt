@@ -1,0 +1,27 @@
+[0m[33mWarning[0m[2m:[0m [1mThe 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.[0m
+[0m      [2mat [0m[0m[1m[3mwarnOnDeactivatedColors[0m[2m ([0m[0m[36minternal:tty[0m[2m:[0m[33m33[0m[2m:[33m24[0m[2m)[0m
+[0m      [2mat [0m[0m[1m[3mgetColorDepth[0m[2m ([0m[0m[36minternal:tty[0m[2m:[0m[33m42[0m[2m:[33m39[0m[2m)[0m
+[0m      [2mat [0m[0m[1m[3mshouldColorize[0m[2m ([0m[0m[36minternal:util/colors[0m[2m:[0m[33m14[0m[2m:[33m109[0m[2m)[0m
+[0m      [2mat [0m[0m[1m[3mrefresh[0m[2m ([0m[0m[36minternal:util/colors[0m[2m:[0m[33m18[0m[2m:[33m31[0m[2m)[0m
+[0m      [2mat [0m[0m[1m[3minternal:util/colors[0m[2m ([0m[0m[36minternal:util/colors[0m[2m:[0m[33m24[0m[2m:[33m16[0m[2m)[0m
+[0m      [2mat [0m[0m[1m[3minternal:assert/assertion_error[0m[2m ([0m[0m[36minternal:assert/assertion_error[0m[2m:[0m[33m2[0m[2m:[33m187[0m[2m)[0m
+[0m      [2mat [0m[0m[1m[3mloadAssertionError[0m[2m ([0m[0m[36mnode:assert[0m[2m:[0m[33m28[0m[2m:[33m96[0m[2m)[0m
+
+Working...
+All inspection complete. Verdict below — grounded statically (the harness sandbox is read-only — `EPERM` on all writes, so pytest could not be executed; claims are from direct source reading and the commit diff).
+
+```
+ELEGANCE: PASS
+SCOPE_CREEP: none — commit touches exactly the frozen file list (+2 forced registration-test line updates)
+OVERENGINEERING: `_mp4_time_base` re-implemented verbatim though astrid/core/rendering/profile.py:179 defines it identically; plan()'s `_mp4_time_base(fps) != profile.time_base` cross-check is tautological proof of the copy. `_floor` re-declared while `_ceil` is imported from legacy — inconsistent seam
+KISS_YAGNI: ok — legacy candidate-list machinery (`_candidate_lists`, `_string_list`, simple/complex dispatch) dropped, not copied
+ELIGIBILITY: imports-backend — `_three_support_reasons` imported from backends/threejs/run.py:136; `_component_eligible` is `not _three_support_reasons(projected component)`. No duplicate predicate
+DUPLICATION_VS_LEGACY: justified-planner-pattern — 46% of lines byte-match legacy, but all of it is protocol scaffolding (main/_load_request/_write_failure/registry bootstrap) shareable only via core edits, which are frozen; ~260 lines of component-tiling logic are genuinely new; 10 helpers imported instead
+CONFIG_SURFACE: required-only (theme, theme_path, themes_root, extra_pack_roots)
+RUN_PY_SIZE: justified — 709 < legacy's 903
+TEST_SIZE: justified — 21 tests, exact-window tuples ARE the acceptance contract; `_assert_exact_tiling` reused by 14
+SPATIAL_COMPOSITOR: none
+CORE_EDITS: none
+ISSUES: none
+NOTES: empty-timeline reject lives only in support(); plan() gates on it before any segment, renderer unreachable. `asset_entries` dead in backend predicate (pre-existing). Tests never run plan() through the real `_CommandSupportResolver` (fixture resolver used); real-support path only round-tripped via CommandTransport support. "empty/background-only" message is wrong for background-only-with-duration (routes to Remotion, not rejected).
+```

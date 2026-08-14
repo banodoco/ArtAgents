@@ -1,0 +1,45 @@
+All reads complete. Findings grounded in the cited lines.
+
+```
+BACKENDS: real — threejs= real (remotion/run.py:549-573 `npx remotion render`; alpha stamped
+  → png/yuva444p10le/prores 4444, threejs/run.py:487-495, remotion/run.py:562-571)
+  remotion= real (same `_execute_remotion` via CommandTransport subprocess)
+  compositor= real — build_composite_command builds `overlay=0:0:format=auto:eof_action=pass`
+  chain, `format=yuva420p` prepend on alpha layers, real ffmpeg, probe validation
+  (finalizers/compositor/run.py:585-615, 668-700)
+  patches= none. No @patch/MagicMock in file; imports are json/subprocess/dataclasses/pytest/
+  contracts/registry/service/transport/layer_stack/sdk_render. Layer artifacts are live renders;
+  only fixture is `_red_source` (test_layer_stack.py:612-633, real ffmpeg lavfi red 320x180).
+INJECT: skips= exactly one verb/backend pair: `_InjectPlanTransport.run` returns `self._plan`
+  when `verb=="plan" and backend==layer_stack.BACKEND_ID` (test:730-732); every other verb
+  (planner support, per-segment render+support, finalize) delegates to real
+  `CommandTransport(backend).run` (test:733-741). Planner support verb IS real (service.py:383-407).
+  post_init= yes — plan built by real `layer_stack.plan` then `dataclasses.replace`, which
+  re-runs `RenderPlan.__post_init__` tiling/z/gap/FPS/reasons rules (contracts.py:1455-1568);
+  service re-checks nothing beyond isinstance (service.py:798-802).
+  stamp= yes: both backends declare `supports_windows:false` (renderer.yaml:24,29,12) →
+  `_segment_request` slices to `layer.tracks` and stamps `astrid_layer {z, alpha:z>0}`
+  (service.py:1009-1026). slice= yes. 
+  planner-would-emit? NO. With remotion registered, layer_stack emits ONE unlayered remotion
+  concat segment (test:165-175). This z=1-threejs/z=0-remotion plan is the planner's real
+  threejs+ffmpeg output (test:120-155) with ffmpeg relabeled remotion (test:888-910). The
+  docstring admits it (test:869-875): remotion fast-path is why the plan is constructed.
+PROOF: samples= frame 0 only; corner (4,4) must be media red (test:831-840); ≥1 non-red pixel
+  in x∈[80,240),y∈[40,140) stride 4 (test:834-843). top-painted= yes (text_hits non-empty).
+  bottom-visible-around= weak: corner lies OUTSIDE the scan region; no red-count assert inside
+  the text region — bottom proven visible in the transparent zone, not strictly around glyphs.
+  false-pass? No vacuous pass: solid/opaque top → corner not red; remotion-only concat → no
+  text hits; transparent top → no text hits; dead bottom → corner not red. Weaker than
+  compositor synthetic tests, which assert exact RGB at two coords and frames 0+8
+  (test_ffmpeg_compositor.py:434-446, 449-478, 481-507) vs threshold classifier, one frame.
+SIDECAR: ffprobe= h264, "420p", 24 frames, 320x180, aac, duration≈1.0±0.15 (test:797-811).
+  planner= sidecar `routing.resolved_policy.planner == "rendering.layer-stack"` (test:951) —
+  but that's the SELECTED planner's resolution, not evidence it emitted the plan.
+  finalizer= COMPOSITOR_FINALIZER_ID (test:809-810); segments_v2 = {threejs z=1/overlay,
+  remotion z=0/source}, windows 0-24 (test:811-830).
+HONESTY: PARTIAL — real service pipeline, real threejs alpha ProRes, real remotion, real
+  compositor overlay, can-fail pixel proof, real 24-frame h264/aac container; but the plan
+  verb is bypassed for a hand-relabeled assignment the real planner would never emit with
+  remotion registered.
+BLOCKER?: none — proves a real 2-layer render; the planner-bypass is disclosed, not hidden.
+```

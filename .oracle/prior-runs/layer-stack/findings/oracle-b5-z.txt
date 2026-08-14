@@ -1,0 +1,21 @@
+All evidence gathered. Report follows.
+
+---
+
+**Z-ASSIGN: first-visual = HIGHEST** — `_visual_tracks_bottom_to_top` (planners/layer_stack/run.py:130-136): "Paint order is reversed array order: first visual track is TOP. Returns `(z, track)` with `z=0` at the bottom (last visual track)." `stacked = list(reversed(visual))`, z = enumerate index. `_assign_layers` (run.py:189, 236-238) claims each `(z, track)` in this order.
+
+**TRACKS:** `layer.tracks` = tuple of track ids merged into the claim (run.py:76-84); greedy-merge merges adjacent same-renderer, same-opacity tracks after re-probe (run.py:214-231). Per segment, `LayerRef(tracks=claim.tracks, ...)` (run.py:640-646).
+
+**BLEND/OPACITY:** `LayerRef(z=claim.z, tracks=claim.tracks, blend="normal", opacity=claim.opacity)` (run.py:640-646). blend is always "normal" — non-normal raises (run.py:313-324); opacity = track opacity (run.py:199-207), written to LayerRef.
+
+**STAMP:** service.py:1096-1100 — `if segment.layer is not None:` stamps `materialized["metadata"]["astrid_layer"] = {"z": segment.layer.z, "alpha": segment.layer.z > 0}`. Nuance: z=0 IS stamped, but with `alpha: False` → backends' `_timeline_alpha` (backends/_shared/__init__.py:257-271) returns False → opaque h264 path. z>0 → alpha=True → ProRes 4444/yuva444p12le MOV (remotion run.py:570-583, 460-465; threejs run.py:359-362, 481-487).
+
+**COMPOSITOR:** Y — `prepared.sort(key=lambda layer: layer.z)` (compositor run.py:559); `build_composite_command` chains bottom→top, highest z lands in the final `overlay=0:0:format=auto:eof_action=pass,...format=yuv420p[vout]` (run.py:690-710). Opacity via `colorchannelmixer=aa={opacity}` (run.py:679-681).
+
+**CONTRACT: OK** — planner gives the first visual track (Remotion TOP) the highest z, which is z>0 → stamped alpha; overlay-on-top is correct.
+
+**FAST-NONE: Y** — `test_remotion_capable_timeline_is_one_unlayered_concat_segment` (test_layer_stack.py:214-235) asserts `segment.layer is None`, REMOTION_ID, CONCAT_FINALIZER_ID, `"layer" not in segment.to_dict()`. plan() fast path returns `RenderSegment` without `layer=` (run.py:522-546).
+
+**TEST-Z: Y** — test_layer_stack.py:273-283: `by_z = {0, 1}`; `by_z[0]` = ("source", FFMPEG), `by_z[1]` = ("overlay", THREE); :330-331: FFMPEG `layer.z == 0`, THREE `layer.z == 1`; merge test :363-369: `by_z[1].tracks == ("captions", "brand")`, `z == 1`.
+
+**SPLIT-CASE:** overlay-track = z=1 → THREE renderer → stamped alpha=True → ProRes. source-track = z=0 → FFMPEG renderer → alpha=False → opaque h264. Same in both mocked and real-support tests (:276-283, :329-331).

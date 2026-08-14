@@ -1,0 +1,14 @@
+All verification complete. HEAD is fc0c3cee, tracked tree clean — reads match the reviewed commit.
+
+```
+DOCS: PASS
+STYLE: match — same em-dash title + Status/Scope block + ## sections + markdown tables + Related Documents footer; declarative tone, ~196 lines vs render-adapter's ~150; no changelog dump.
+FIELDS_11: present+accurate — accepted table (threejs-renderer.md "Accepted") lists 5 text + 6 params keys; matches _TEXT_TEXT_KEYS/_TEXT_PARAM_KEYS (threejs/run.py:49-56) and TSX field map (ThreeTimelineComposition.tsx:62-66).
+REJECTION_MATRIX: complete — media/any-non-text clipType, audio tracks + audible clips (_effective_gain), effects, transitions, animation, opacity≠1, unknown text/params, unknown or any non-empty own config (_protocol_render), native windows, audio≠rendered, non-canonical profile — each present and code-verified (threejs/run.py:91-156, 320-353).
+V1_EXCLUSIONS: complete — media textures, GLTF/meshes/shaders/lights/cameras/fonts (MeshBasicMaterial + fixed sans-serif, TSX:69-70), no scene DSL, opaque h264/yuv420p mp4 (profile.py:283-286), fixed composition id, effects/transitions/opacity/audio → hybrid routes to remotion.
+IDENTITY: accurate — engine="threejs" via _render_provenance_payload (threejs/run.py:561; payload remotion/run.py:501), fragment renderer/capture_host="remotion"/composition=ThreeTimelineComposition (threejs/run.py:586-593); hybrid finalizer fragment fields verified (ffmpeg/run.py:1479-1494).
+HYBRID: accurate — direct vs opt-in yamls; FINALIZER_ID pinned (planner run.py:57); temporal-only concat (docstring 7-11); integer frames, conservative tiling, non-recursive assert; empty timeline rejected (support ~line 375); manifest_digest/source_pack/trust_eligibility per segment (legacy_hybrid:537-563).
+T6.2_SCOPE: clean — no skill/README/changelog/STAGE.md/CLI-test in diff; only gate change is test_production_callers.py allowlist entry for the planner, proving the new planner passed the production-callers gate. Peripheral: ruff baseline regen, .vscode/settings.json deletion, mp3 fixture — none doc/skill.
+ISSUES: none
+NOTES: (1) "non-base visual tracks" routes only *media* on them to Remotion; a text clip on a non-base visual track is Three-eligible (no base-track check in predicate) — mirrors test fixture id test_threejs_hybrid.py:259, minor wording looseness. (2) Brief's path tests/packs/... is actually tests/core/... (doc never mentions callers). (3) Install section's "four exact npm dependencies" = the four new pinned deps; package.json carries more.
+```

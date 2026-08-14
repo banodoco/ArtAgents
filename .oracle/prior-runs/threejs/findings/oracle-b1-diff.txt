@@ -1,0 +1,28 @@
+[0m[33mWarning[0m[2m:[0m [1mThe 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.[0m
+[0m      [2mat [0m[0m[1m[3mwarnOnDeactivatedColors[0m[2m ([0m[0m[36minternal:tty[0m[2m:[0m[33m33[0m[2m:[33m24[0m[2m)[0m
+[0m      [2mat [0m[0m[1m[3mgetColorDepth[0m[2m ([0m[0m[36minternal:tty[0m[2m:[0m[33m42[0m[2m:[33m39[0m[2m)[0m
+[0m      [2mat [0m[0m[1m[3mshouldColorize[0m[2m ([0m[0m[36minternal:util/colors[0m[2m:[0m[33m14[0m[2m:[33m109[0m[2m)[0m
+[0m      [2mat [0m[0m[1m[3mrefresh[0m[2m ([0m[0m[36minternal:util/colors[0m[2m:[0m[33m18[0m[2m:[33m31[0m[2m)[0m
+[0m      [2mat [0m[0m[1m[3minternal:util/colors[0m[2m ([0m[0m[36minternal:util/colors[0m[2m:[0m[33m24[0m[2m:[33m16[0m[2m)[0m
+[0m      [2mat [0m[0m[1m[3minternal:assert/assertion_error[0m[2m ([0m[0m[36minternal:assert/assertion_error[0m[2m:[0m[33m2[0m[2m:[33m187[0m[2m)[0m
+[0m      [2mat [0m[0m[1m[3mloadAssertionError[0m[2m ([0m[0m[36mnode:assert[0m[2m:[0m[33m28[0m[2m:[33m96[0m[2m)[0m
+
+Working...
+All checks complete. Report below.
+
+```
+VERDICT: PASS
+FILES: 99e6d24c touches 7 files: .oracle/briefs/batch-1.md, .oracle/findings/batch-1-exec.txt, .oracle/findings/remotion-swiftshader.txt, .oracle/findings/webgl-proof.txt, remotion/package.json, remotion/package-lock.json, remotion/remotion.config.ts
+DEPS: exact. "remotion": "4.0.455", "@remotion/three": "4.0.455", "@react-three/fiber": "8.18.0", "three": "0.185.1", "@types/three": "0.185.4" — no ^/~/latest. Existing remotion packages unchanged (remotion line only reordered to end).
+LOCKFILE: v3. Resolved: @remotion/three 4.0.455, @react-three/fiber 8.18.0, three 0.185.1, @types/three 0.185.4 — all exact matches.
+CONFIG: only `Config.setChromiumOpenGlRenderer('angle');` added (1 line, after setOverwriteOutput). Import `import {Config} from '@remotion/cli/config';` already present. No raw Chromium flags.
+TYPES_REACT: changed 19.x→18.x: @types/react ^19.2.14→^18.3.12 (resolved 19.2.14→18.3.31); @types/react-dom ^19.2.3→^18.3.1 (resolved 19.2.3→18.3.7). Both React 18 majors. Peer dep updated ^19.2.0→^18.0.0 accordingly.
+ASTRID_CORE: empty (`git diff --name-only b1c5f53c..99e6d24c -- astrid/core/` → no output)
+ARTIFACTS: none in batch-1 commit. Full b1c5f53c..99e6d24c range = 145 paths: 142 .oracle/* docs/findings + 3 remotion files; no PNG/video/node_modules/chrome cache/bundle. Note: range spans 2 commits — parent ed24a2f6 (plan commit) added the .oracle corpus. Tracked process artifacts: .oracle/findings/_fan.pid, .oracle/legacy-epic/_fan.pid, .oracle/legacy-epic/_report.json (see ISSUES).
+DRIFT: none. Lockfile diff = 4 new deps + their transitives (zustand, react-reconciler, scheduler, its-fine, buffer, base64-js, @babel/runtime, @dimforge/rapier3d-compat, @tweenjs/tween.js, @types/react-reconciler, @types/webxr, fflate, meshoptimizer, react-use-measure, suspend-react, etc.) + types downgrade. csstype only lost `"dev": true` flag; no existing version changed.
+ISSUES:
+1. Minor: .oracle/legacy-epic/_fan.pid, .oracle/findings/_fan.pid, _report.json are process artifacts tracked in git.
+2. Working tree NOT clean: M .oracle/checkins/batch-1.md, M .oracle/findings/batch-1-exec.txt; untracked oracle-b1-*.md/txt briefs/findings (this review's own files). All md/txt — no artifacts. remotion/node_modules exists on disk but is gitignored (check-ignore confirms).
+```
+
+Evidence: `git show --stat 99e6d24c`, `git show 99e6d24c --name-only`, `git show 99e6d24c -- remotion/package.json remotion/remotion.config.ts`, `git show 99e6d24c:remotion/package-lock.json` (header), `git diff b1c5f53c 99e6d24c -- remotion/package-lock.json` (full), `git diff --name-only b1c5f53c..99e6d24c`, `git diff --name-only b1c5f53c..99e6d24c -- astrid/core/` (empty), `git status --short`, `git log --oneline --reverse b1c5f53c..99e6d24c` (2 commits: ed24a2f6 plan, 99e6d24c batch 1), `git check-ignore remotion/node_modules`.

@@ -1,0 +1,16 @@
+All evidence gathered. Compiling the verdict.
+
+**Verification summary:** diff `2a2ba6b8..70c5cdee` = 6 files (2 backends, `_shared`, 2 test files, `.oracle/checkins/batch-4.md`). Frozen paths — service.py:1362, `validate_output_name` (executors/render/run.py:47), compositor/run.py, ffmpeg finalizer, `ThreeTimelineComposition.tsx` — all zero-diff. Theme dict provenance traced: `resolve_timeline_theme` does per-call `json.loads` (banodoco_composer.py:307), no cache → mutation contained. Compositor resolves layers via `_input_path(artifact.path, workspace)` (compositor/run.py:541); concat via `segment.path` — both from backend-declared remapped `.mov`. `_OUTPUT_NAME_RE` (contracts.py:38) allows `.mov`; validator enforces containment only (artifacts.py:690). DOM composition uses `bg` as raw React `backgroundColor` (node_modules @banodoco/typescript/src/TimelineComposition.tsx:272) — `transparent` is valid CSS, no parser. Corner tests decode real pixels (`_rgba_corner` ffmpeg raw rgba, frame 0).
+
+---
+
+```
+VERDICT-LEAN: pass — all four mandates landed; real-render tests prove mov/prores/yuva444p12le/1:90000/pcm_s16le + real-pixel corner alpha 0; unstamped no-regression pinned (h264/420p, corner 255 black).
+THEME: ok — theme_color["bg"]="transparent" (remotion/run.py:561-562) mutates the per-run props copy only; _resolved_theme_for_render builds it fresh via uncached json.loads (banodoco_composer.py:307) and the line is alpha-gated, so unstamped/error paths never see it. DOM TimelineComposition.tsx:272 consumes the string directly as backgroundColor — "transparent" is valid CSS, no parser to reject it. Threejs bg-skip unchanged (:145-149). Caveat: provenance active_theme records the mutated bg — honest (that's what the composition saw) but differs from on-disk theme; not a defect.
+NAMING: ok — _alpha_output_name remaps .mp4→.mov at all three entry points (remotion render():643, remotion _protocol_render:921, threejs _protocol_render:465); .mov passthrough guard handles pre-remapped names. service.py:1362 still writes segment-NNNN.mp4, but no consumer compares artifact basename to request.output_name — validator checks containment only (artifacts.py:690). Compositor resolves via artifact.path (:541), concat via segment.path (:545) — both the backend-declared .mov. No binding risk.
+SHARED: clean — _alpha_output_name is 14 lines used 3×; _timeline_alpha pre-dates this delta. No new core import: _shared already imported astrid.core (timeline/RenderProfile/load_theme) before 70c5cdee.
+SCOPE: clean — no frozen product file touched. The .oracle/checkins/batch-4.md rewrite is oracle ledger bookkeeping (the ISSUES brief itself mandates "Full check-in: .oracle/checkins/batch-4.md"); it does overwrite the prior PASS record (af907878) — ledger history loss, not product creep.
+YAGNI-CUT: none. The render() remap branch (run.py:643) and its real-service test cover a distinct code path the protocol tests don't; the threejs dict→RenderRequest fix is a real type bug (typed on RenderRequest).
+MUST-FIX-NOW: none.
+BATCH5-NOTE: remotion/threejs emit ProRes 4444 .mov with real alpha; vp9 is not alpha.
+```

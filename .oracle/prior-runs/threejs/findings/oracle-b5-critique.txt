@@ -1,0 +1,15 @@
+All evidence gathered. Verdict:
+
+```
+ELEGANCE: PASS
+SCOPE_CREEP: none (only .oracle/checkins/batch-4.md harness bookkeeping tracked alongside the 3 test files)
+OVERENGINEERING: npm-offline test mutates GLOBAL user npm config (`npm config set offline`) with restore-in-finally; a killed run leaves the user's npm permanently offline. `npm_config_offline=true` env var through the existing execution-env helper would do it with zero global side effects. Non-blocking.
+KISS_YAGNI: ok
+HELPER_DUP: duplicated (blocking? no). `_frame_md5` copied byte-identical from test_threejs_backend.py; `_probe` re-copied with a wider field set instead of extended; execution-env logic now in 3 copies (hybrid + `_remotion_execution_env` bypass the existing `_child_path_on_front`); `_remotion_missing_environment` is a weaker re-copy of `_missing_environment` while the hybrid correctly imports it — inconsistent; `_remotion_text_timeline` ≈ `_text_timeline`, `MIXED_CANVAS` == `CANVAS`; `_mixed_lock_render_probe` re-implements test_remotion_locking.py's `_render_process_probe` protocol, but adds the real T5.5 teeth (identity assert + single-lock-file scan). Nothing hides a vacuous assertion or second lock/preflight policy.
+TEST_BLOAT: justified — each assertion maps to a T5 item; the determinism double-render is T5.2-mandated ("deterministic checksum").
+VACUOUS_OR_FAKE: none — lock test genuinely contends (spawn, hold, 0.3s negative window, release, re-entry, exitcode 0); offline npm genuinely hits npx (remotion/run.py:694 via the shared helper); mixed timeline is text→Three + real media→Remotion with content-boundary md5 proof, not two text clips.
+PRODUCTION_TOUCHED: none
+CORE_EDITS: none
+ISSUES: none
+NOTES: duplicated helpers belong in a shared conftest; cross-file import of `_missing_environment` proves reuse works and the rest should follow it.
+```

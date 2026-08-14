@@ -1,0 +1,65 @@
+[0m[33mWarning[0m[2m:[0m [1mThe 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.[0m
+[0m      [2mat [0m[0m[1m[3mwarnOnDeactivatedColors[0m[2m ([0m[0m[36minternal:tty[0m[2m:[0m[33m33[0m[2m:[33m24[0m[2m)[0m
+[0m      [2mat [0m[0m[1m[3mgetColorDepth[0m[2m ([0m[0m[36minternal:tty[0m[2m:[0m[33m42[0m[2m:[33m39[0m[2m)[0m
+[0m      [2mat [0m[0m[1m[3mshouldColorize[0m[2m ([0m[0m[36minternal:util/colors[0m[2m:[0m[33m14[0m[2m:[33m109[0m[2m)[0m
+[0m      [2mat [0m[0m[1m[3mrefresh[0m[2m ([0m[0m[36minternal:util/colors[0m[2m:[0m[33m18[0m[2m:[33m31[0m[2m)[0m
+[0m      [2mat [0m[0m[1m[3minternal:util/colors[0m[2m ([0m[0m[36minternal:util/colors[0m[2m:[0m[33m24[0m[2m:[33m16[0m[2m)[0m
+[0m      [2mat [0m[0m[1m[3minternal:assert/assertion_error[0m[2m ([0m[0m[36minternal:assert/assertion_error[0m[2m:[0m[33m2[0m[2m:[33m187[0m[2m)[0m
+[0m      [2mat [0m[0m[1m[3mloadAssertionError[0m[2m ([0m[0m[36mnode:assert[0m[2m:[0m[33m28[0m[2m:[33m96[0m[2m)[0m
+
+Working...
+Verified. Report:
+
+```
+VERDICT: PASS
+TESTS: 12: test_threejs_manifest_registers_static_raw_command_backend,
+test_threejs_is_discovered_and_inspected,
+test_threejs_support_accepts_empty_and_exact_text_fields,
+test_threejs_support_rejects_unsupported_timelines_with_clip_reasons,
+test_threejs_support_rejects_non_rendered_audio_ownership,
+test_threejs_support_and_render_reject_native_window,
+test_threejs_identity_invariants_never_claim_remotion,
+test_threejs_own_namespace_config_is_strict,
+test_threejs_protocol_failure_results_are_valid,
+test_threejs_support_preflight_is_honest_when_environment_missing,
+test_threejs_real_render_empty_timeline_through_public_service,
+test_threejs_real_render_text_timeline_through_public_service
+
+COVERAGE_GAPS: lock reuse — no unit test in this file; exercised via
+_execute_remotion reuse (run.py:61,524), covered by test_remotion_locking.py.
+Fixed composition asserted only via real-render sidecar, not standalone.
+
+SKIPS: exactly one, test file:84-88 — _require_threejs_environment() skip,
+gated on _missing_environment() (:66-81): node/npx/ffprobe executables,
+remotion/node_modules dir, three/@remotion/three/@react-three/fiber
+packages, banodoco_timeline_schema import for active python3. No
+skipif/xfail anywhere.
+
+SKIP_POLICY: honest. Skip fires pre-render, only on missing
+binaries/packages. Post-env render failure → test failure, never skip.
+
+REAL_EMPTY: ffprobe (:578-590) asserts h264, 320x180, 24/1, one frame via
+duration≈1/24 (:639-644), AAC (:646), sidecar sha256==bytes (:626-628),
+sidecar fields (:631-638). No frame-pixel extraction in empty test.
+
+REAL_TEXT: ffprobe asserts h264, "420p" in pix_fmt, 320x180, 24/1,
+duration≈0.5, AAC (:670-676); _frame_md5(2)!=_frame_md5(8) (:679) — frame
+inequality, not explicit non-background; sidecar incl. composition_id
+(:686-696).
+
+SIDECAR: all present in both renders: engine, audio_ownership=rendered,
+routing.resolved_backend, segments_v2[0].renderer.id,
+backend_fragments.rendering.threejs.renderer=="threejs",
+legacy_v1.engine=="threejs".
+
+BUILTIN_REG: no-edit-needed. Inspects by explicit id
+(renderers.inspect("rendering.remotion"/"ffmpeg"/"ffmpeg-finalizer"),
+:155-157), asserts exact id lists not including threejs (:162-171) — never
+enumerates all backends. Not in fdf6dfae diff (only test_freeze.py +1).
+
+ISSUES: none blocking. Notes: (a) frame count inferred from duration, no
+frames= probe; (b) text test proves non-uniform frames, not background
+pixels; (c) verified locally: 10 passed/2 deselected on 3.11.11 (schema
+present); my first run failed only because this shell resolved python3 to
+3.12.1 without the schema.
+```

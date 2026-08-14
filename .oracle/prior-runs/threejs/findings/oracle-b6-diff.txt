@@ -1,0 +1,16 @@
+All evidence gathered. Audit complete.
+
+```
+EPIC_CORE: empty
+BATCH_CORE: empty
+EPIC_FILE_COUNT: 223 (≈200 .oracle bookkeeping + quarantine renames; 20 prod/test paths)
+BATCH6_FILES: D .codex/viz/*.html; A .oracle/briefs/batch-6.md, checkins/batch-5.md, findings/{batch-6-exec,wheel-manifest}.txt; D .vscode/settings.json, "Up Beat (Married Life).mp3"; M backends/threejs/run.py, planners/threejs_hybrid/run.py, scripts/reshape/baselines/ruff_astrid.json, tests/{test_production_callers,test_threejs_hybrid,test_threejs_backend}.(py); A docs/reference/threejs-renderer.md
+FORBIDDEN: none (mp3 + codex html are `D` = removed from index, untracked on disk — expected)
+LOCKFILE_PRESENT: yes — remotion/package-lock.json committed (M), required
+SECOND_STACK: none — single Node project (remotion/package.json only), single lock, no model.py, no capture stack ("capture" hits are .oracle docs only)
+T6.2_BROAD_DOCS: docs/reference/threejs-renderer.md only (new reference doc, batch-6 deliverable). ruff baseline 1458→1469 is the CI gate artifact; commit documents +11 as pre-existing main drift, reproduced pre-epic. pack.yaml registers the two new renderer/planner manifests (feature discovery, not convention edit). No README/CHANGELOG/STAGE/AGENTS/tests_cli/tests_package/_core.
+WORKTREE: clean-enough — only untracked .codex/, .vscode/, mp3, .oracle briefs/findings leftovers; zero modified tracked files; remotion/node_modules + build gitignored
+COMMITS: ed24a2f6 plan+findings; 99e6d24c b1 deps+WebGL; 0c642e04 ckpt1; cb60d2f0 quarantine legacy; 963060ee b2 composition; 80a21f55 ckpt2; fdf6dfae b3 backend; f66fd8ab ckpt3; af907878 b4 hybrid; d4077678 ckpt4; 8723ca05 b5 mixed-render; 97029050 ckpt5; fc0c3cee b6 docs+packaging+CI gate
+ISSUES: none — T6.7/T6.8 (zero astrid/core edits, no generated artifacts) and T6.2 (no broad convention edits) both proven
+NOTES: batch-6 prod edits are gate-driven: checkpoint-3/5 fixes (dead binding, missing ffmpeg assert), BLE001 narrowing, ruff baseline regen, docs, tests
+```

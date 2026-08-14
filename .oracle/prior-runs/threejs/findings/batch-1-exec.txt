@@ -1,0 +1,38 @@
+## Batch 1 — Executor report
+
+**Commit:** `99e6d24c megado: batch 1 — pin three.js deps, prove WebGL` (7 files, +487/−15)
+
+**T1.1/T1.2 — Deps.** Added exact (no carets): `@remotion/three@4.0.455`, `@react-three/fiber@8.18.0`, `three@0.185.1`, `@types/three@0.185.4`. Existing remotion/react versions untouched, no R3F v9. `npm install` (Node 24.17.0): 225 pkgs, lockfile **v3** committed. **Conflict found as anticipated:** R3F 8 + `@types/react@19.2.14` → `Property 'mesh' does not exist on type 'JSX.IntrinsicElements'` (global JSX removed in React 19 types). Aligned devDeps to React 18 majors (`@types/react@^18.3.12` → 18.3.31, `@types/react-dom@^18.3.1` → 18.3.7), re-installed, typecheck clean.
+
+**T1.3 — ANGLE.** `remotion.config.ts`: `Config.setChromiumOpenGlRenderer('angle');` — no raw flags, no system Chrome.
+
+**T1.4 — Pinned SwiftShader mapping** (`@remotion/renderer/dist/open-browser.js`, 4.0.455):
+```
+swangle   → ['--use-gl=angle', '--use-angle=swiftshader']
+angle-egl → ['--use-gl=angle', '--use-angle=gl-egl']
+vulkan    → ['--use-angle=vulkan', ...]
+null      → []
+else      → [`--use-gl=${renderer}`]   // 'angle' → ['--use-gl=angle']
+```
+Evidence in `.oracle/findings/remotion-swiftshader.txt` (note: rg needs `--no-ignore` — node_modules is gitignored; no `unsafe-swiftshader` string exists in this pinned build).
+
+**T1.5 — WebGL proof (XHARD).** One real blocker: Remotion's internal `extract-zip` left Chrome Headless Shell partially extracted (only ABOUT/LICENSE) → every run re-downloaded 93.5 MB, then exited 0 silently with no output. Fixed by manually unzipping into `node_modules/.remotion/chrome-headless-shell/mac-arm64/` + writing `VERSION`=`149.0.7790.0` (the pinned `TESTED_VERSION`).
+`npx remotion still src/index.ts ThreeProof --frame=0 /tmp/three-proof-frame0.png` → **Rendered 1/1, exit 0, `angle` worked first try** (no `--gl` fallback needed).
+Pillow (3.11.11): `size: (160, 90)`, `distinct_colors: 4` — top: 12464× (0,0,0), 1690× **(186,0,8) red cube** → `PILLOW_ASSERT_OK` in `.oracle/findings/webgl-proof.txt`. Proof source/registration/PNG removed.
+
+**T1.6 — Typecheck + bundle.** `npm run typecheck` exit **0**; `npm run bundle` exit **0** (build/ gitignored).
+
+**T1.7 — Cleanliness.** `git diff --name-only b1c5f53c..HEAD -- astrid/core/` → **empty**. Final `git status --short` → **empty**. node_modules/build already ignored; no artifacts committed.
+
+**Versions installed:** @remotion/three 4.0.455 · @react-three/fiber 8.18.0 · three 0.185.1 · @types/three 0.185.4 · @types/react 18.3.31 · @types/react-dom 18.3.7.
+ diff --name-only b1c5f53c..HEAD -- astrid/core/` → empty. `git status --short` (below) shows only intended files; node_modules/build ignored.
+
+```
+M remotion/package-lock.json
+M remotion/package.json
+M remotion/remotion.config.ts
+?? .oracle/briefs/batch-1.md
+?? .oracle/findings/batch-1-exec.txt
+?? .oracle/findings/remotion-swiftshader.txt
+?? .oracle/findings/webgl-proof.txt
+```
