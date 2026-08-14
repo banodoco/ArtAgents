@@ -59,3 +59,12 @@ KEEP: main checkout, astrid-first epic, oracle-packification worktree (execution
 ## Provenance
 
 DeepSeek V4 Pro fan-out (3 agents, /tmp/loose-branches-results/): 01-timeline-vlm.txt (LAND verdict), 02-experiments.txt (DELETE verdict), 03-oracle-run-dirty.txt (cherry-pick-parts verdict). Survey: read-only git commands, this session.
+
+## Completion (2026-08-14)
+
+- timeline-vlm-plan LANDED: PR #87 squash-merged to main (ca8c9cd2) after rebase + conflict resolution; branch/worktree removed; dirty payload snapshotted at .oracle/prior-runs/timeline-vlm-dirty-20260814/ (committed).
+- oracle-run cleanups LANDED: cbf2f45c (dup-stub removal + indent fix); grammar tightening discarded (doc-vs-code contradiction, collides with legacy_hybrid rename).
+- layer-plan 61 oracle artifacts archived: 46e2b756. Threejs artifacts verified identical to existing .oracle/prior-runs/ top-level archive.
+- Deleted: agent/provider-independent-experiments, layer-plan, oracle-run, oracle-run-threejs, timeline-vlm-plan, tlv-land, astrid-c5 worktree.
+- KEPT: main checkout, oracle-packification worktree (execution venue), astrid-first epic, tags, orphans.
+- Remaining: full timeline_visualize suite re-run from main checkout (live grok lanes excluded) — one unidentified failure in the pre-push partial run.
