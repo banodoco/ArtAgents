@@ -20,6 +20,7 @@ from astrid.core.rendering.contracts import (
     FinalizerManifest,
     FinalizerResolution,
     FrameWindow,
+    LayerRef,
     PlannerManifest,
     PlannerResolution,
     RenderPlan,
@@ -2211,6 +2212,282 @@ def test_single_segment_plan_records_finalizer_fragment(
     # finalizer's artifact is represented by the finalizer fragment.
     assert len(payload["artifact_profiles"]) == 1
     assert payload["artifact_profiles"][0]["path"].endswith("segment-0000.mp4")
+
+
+# ---------------------------------------------------------------------------
+# Layer Stack Batch 2 — track-filtered host slice + alpha metadata stamp.
+# _window_timeline slices the host timeline to one z-layer's tracks; the
+# layer=None path is unchanged.  _segment_request passes layer.tracks and
+# stamps metadata.astrid_layer (alpha = z > 0) into the materialized copy.
+# ---------------------------------------------------------------------------
+
+
+def _layered_timeline(tmp_path: Path) -> Path:
+    """Two visual tracks + one audio track, both visuals in window 0..1s.
+
+    v1 and v2 each carry one clip spanning the whole window; ``a1`` exists
+    only as a track (no clips), mirroring the existing pruning fixture shape.
+    """
+    timeline = tmp_path / "layered-timeline.json"
+    timeline.write_text(
+        json.dumps(
+            {
+                "tracks": [
+                    {"id": "v1", "name": "bottom"},
+                    {"id": "v2", "name": "top"},
+                    {"id": "a1", "name": "audio"},
+                ],
+                "clips": [
+                    {
+                        "id": "c1",
+                        "track": "v1",
+                        "at": 0.0,
+                        "from": 0.0,
+                        "to": 10.0,
+                    },
+                    {
+                        "id": "c2",
+                        "track": "v2",
+                        "at": 0.0,
+                        "from": 0.0,
+                        "to": 10.0,
+                    },
+                ],
+                "metadata": {"project": "layer-slice", "custom": {"keep": 1}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    return timeline
+
+
+def _window(*, start: int = 0, end: int = 10) -> FrameWindow:
+    return FrameWindow(start_frame=start, end_frame=end, fps_rational=(10, 1))
+
+
+def _layered_segment(*, z: int, tracks: tuple[str, ...]) -> RenderSegment:
+    return RenderSegment(
+        window=_window(),
+        renderer=_renderer_resolution("fixture.full"),
+        input_hashes={},
+        layer=LayerRef(z=z, tracks=tracks),
+    )
+
+
+def _layered_plan(*, z: int, tracks: tuple[str, ...]) -> RenderPlan:
+    return RenderPlan(
+        schema_version=SCHEMA_VERSION,
+        request_digest="0" * 64,
+        requested_policy="hybrid",
+        planner=_planner_resolution(),
+        segments=[_layered_segment(z=z, tracks=tracks)],
+        finalizer=_finalizer_resolution(),
+        profile=_profile(),
+        total_frames=10,
+        reasons={"0": "fixture"},
+    )
+
+
+def test_window_timeline_allowlist_slices_to_layer_tracks(tmp_path: Path) -> None:
+    """A segment on layer z=1 owning only v2 must see ONLY track v2 and its
+    clips — never v1's material, even though both overlap the window."""
+    timeline = json.loads(_layered_timeline(tmp_path).read_text(encoding="utf-8"))
+
+    materialized = RenderService._window_timeline(
+        timeline, _window(), tracks=("v2",)
+    )
+
+    assert [track["id"] for track in materialized["tracks"]] == ["v2"]
+    assert [clip["id"] for clip in materialized["clips"]] == ["c2_0_10"]
+
+
+def test_window_timeline_without_allowlist_keeps_existing_pruning(
+    tmp_path: Path,
+) -> None:
+    """layer=None segments keep today's behavior byte-for-byte: tracks with
+    in-window clips are kept, track-less-in-window a1 is pruned."""
+    timeline = json.loads(_layered_timeline(tmp_path).read_text(encoding="utf-8"))
+
+    materialized = RenderService._window_timeline(timeline, _window())
+
+    assert [track["id"] for track in materialized["tracks"]] == ["v1", "v2"]
+    assert {clip["id"] for clip in materialized["clips"]} == {"c1_0_10", "c2_0_10"}
+
+
+def test_window_timeline_allowlist_track_without_window_clips_stays_present(
+    tmp_path: Path,
+) -> None:
+    """An allowlisted track whose clips all fall outside the window must
+    survive pruning: the renderer needs to know its layer exists so it can
+    emit background/transparent output for the span."""
+    timeline = json.loads(_layered_timeline(tmp_path).read_text(encoding="utf-8"))
+    timeline["clips"] = [
+        {
+            "id": "c2-late",
+            "track": "v2",
+            "at": 5.0,
+            "from": 0.0,
+            "to": 10.0,
+        }
+    ]
+
+    materialized = RenderService._window_timeline(
+        timeline, _window(), tracks=("v2",)
+    )
+
+    assert [track["id"] for track in materialized["tracks"]] == ["v2"]
+    assert materialized["clips"] == []
+
+
+def test_segment_request_stamps_astrid_layer_metadata_merged(
+    tmp_path: Path,
+) -> None:
+    """The materialized timeline's metadata gains astrid_layer (alpha = z > 0)
+    merged alongside the timeline's own keys, never clobbering them."""
+    timeline_path = _layered_timeline(tmp_path)
+    candidate = _candidate(
+        tmp_path,
+        "fixture.full",
+        "renderer",
+        capabilities={"supports_full_timeline": True, "supports_windows": False},
+    )
+    request = replace(_request(tmp_path), timeline_path=str(timeline_path))
+    service = _service(tmp_path, FakeTransport())
+
+    adapted, sidecar = service._segment_request(
+        request,
+        candidate=candidate,
+        segment=_layered_segment(z=1, tracks=("v2",)),
+        index=0,
+        workspace=tmp_path,
+    )
+    materialized = json.loads(
+        (tmp_path / "segment-inputs" / "0000-timeline.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert sidecar["materialized_timeline"]
+    assert adapted.window is None
+    assert materialized["metadata"]["astrid_layer"] == {"z": 1, "alpha": True}
+    # Existing keys survive the merge; the stamp is additive.
+    assert materialized["metadata"]["project"] == "layer-slice"
+    assert materialized["metadata"]["custom"] == {"keep": 1}
+    assert materialized["metadata"]["source_window_start_seconds"] == 0.0
+    assert materialized["metadata"]["source_window_end_seconds"] == 1.0
+    assert [track["id"] for track in materialized["tracks"]] == ["v2"]
+    assert [clip["id"] for clip in materialized["clips"]] == ["c2_0_10"]
+
+
+def test_segment_request_z0_stamps_alpha_false(tmp_path: Path) -> None:
+    """The bottom layer (z=0) is opaque: alpha must be False, not True."""
+    timeline_path = _layered_timeline(tmp_path)
+    candidate = _candidate(
+        tmp_path,
+        "fixture.full",
+        "renderer",
+        capabilities={"supports_full_timeline": True, "supports_windows": False},
+    )
+    request = replace(_request(tmp_path), timeline_path=str(timeline_path))
+    service = _service(tmp_path, FakeTransport())
+
+    service._segment_request(
+        request,
+        candidate=candidate,
+        segment=_layered_segment(z=0, tracks=("v1",)),
+        index=1,
+        workspace=tmp_path,
+    )
+    materialized = json.loads(
+        (tmp_path / "segment-inputs" / "0001-timeline.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert materialized["metadata"]["astrid_layer"] == {"z": 0, "alpha": False}
+    assert [track["id"] for track in materialized["tracks"]] == ["v1"]
+
+
+class _TimelineCaptureTransport(FakeTransport):
+    """Records the timeline JSON a full-timeline renderer actually receives."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.received_timelines: list[dict[str, Any]] = []
+
+    def run(
+        self,
+        verb: str,
+        command: Any,
+        *,
+        backend: str,
+        request_path: Path,
+        result_path: Path,
+        cwd: Path,
+        **kwargs: Any,
+    ) -> Any:
+        if verb == "render":
+            payload = json.loads(Path(request_path).read_text(encoding="utf-8"))
+            timeline_path = payload.get("timeline_path")
+            if timeline_path:
+                self.received_timelines.append(
+                    json.loads(Path(timeline_path).read_text(encoding="utf-8"))
+                )
+        return super().run(
+            verb,
+            command,
+            backend=backend,
+            request_path=request_path,
+            result_path=result_path,
+            cwd=cwd,
+            **kwargs,
+        )
+
+
+def test_layer_plan_end_to_end_materializes_track_slice_and_stamp(
+    tmp_path: Path,
+) -> None:
+    """Full service path: a planned layered segment rendered by a
+    supports_windows: false renderer receives a materialized timeline with
+    ONLY its layer's track/clips and the astrid_layer stamp."""
+    timeline_path = _layered_timeline(tmp_path)
+    transport = _TimelineCaptureTransport()
+    transport.plan = _layered_plan(z=1, tracks=("v2",))
+    renderers = RendererRegistry(
+        [
+            _candidate(
+                tmp_path,
+                "fixture.full",
+                "renderer",
+                capabilities={
+                    "supports_full_timeline": True,
+                    "supports_windows": False,
+                },
+            )
+        ]
+    )
+    planners = PlannerRegistry(
+        [_candidate(tmp_path, "rendering.legacy_hybrid", "planner")]
+    )
+    finalizers = FinalizerRegistry(
+        [_candidate(tmp_path, "rendering.ffmpeg-finalizer", "finalizer")]
+    )
+    service = RenderService(
+        registries=(renderers, planners, finalizers),
+        transport=transport,
+        validator=lambda result, **_kwargs: result,
+    )
+    output = tmp_path / "layer-slice.mp4"
+    request = replace(_request(tmp_path), timeline_path=str(timeline_path))
+
+    service.render_request(request, selector="hybrid", out_path=output)
+
+    assert len(transport.received_timelines) == 1
+    materialized = transport.received_timelines[0]
+    assert [track["id"] for track in materialized["tracks"]] == ["v2"]
+    assert [clip["id"] for clip in materialized["clips"]] == ["c2_0_10"]
+    assert materialized["metadata"]["astrid_layer"] == {"z": 1, "alpha": True}
+    assert materialized["metadata"]["project"] == "layer-slice"
 
 
 def test_direct_render_with_pinned_finalizer_records_both_fragments(
