@@ -1,0 +1,22 @@
+## CORE-CHANGE SURFACE: Layering Blast Radius
+
+**1. The overlap rejector (contracts.py:1432–1445).** `RenderPlan.__post_init__` walks segments with a single cursor: `expected_start = target_start` (1429); per segment `if actual_start != expected_start: relation = "overlaps or is out of order" if actual_start < expected_start ... raise ValueError(...)` (1438–1440); trailing-gap check 1444–1445. Relaxation: replace the scalar cursor with `dict[layer→cursor]` (default layer `None`), enforcing tiling **per layer**; keep FPS (1433) and beyond-window (1441) checks global.
+
+**2. RenderSegment (contracts.py:1305–1357).** `to_dict` emits only `window/renderer/input_hashes` (1339–1346); `from_dict` uses `_validate_object_keys(required=allowed={...})` (1351–1352) which rejects unknowns ("has unknown fields", 192–194). A `layer` field needs: dataclass field, to_dict, from_dict `allowed` + optional parse. Wire schema `plan.json` `renderSegment` is `additionalProperties: false` (schemas/v1/plan.json:552) — must add `layer`. **Not runtime-enforced**: only manifests are jsonschema-validated (pack/validate.py:93–103); plans are validated by dataclasses via `RenderPlan.from_dict` at transport parse (transport.py:731).
+
+**3. Service handles segments independently — no change needed.** One shared workspace (service.py:403–407); loop at 1318; per-segment request `output_name=f"segment-{index:04d}.mp4"` (1330–1334); window materialization per segment (1086–1094); no dedup/sort anywhere. Today, an overlapping plan dies **before any render**: `RenderPlan.from_dict` at transport.py:731 → `__post_init__` raises → `_protocol_failure("malformed render plan...")` (1507–1509). (Also fires inside planner subprocess, threejs_hybrid/run.py:610.)
+
+**4. Finalizer.** `_preflight_segments` zips strict=True (run.py:1098–1099), duration-matches each artifact to its window (1139–1141); `_assemble_prepared_segments` concats in plan order, stream-copy concat demuxer (735–784) — no overlap/merge. Compositor = **new finalizer id** (`finalizer.yaml:2` pattern; planners pin `rendering.ffmpeg-finalizer` at threejs_hybrid/run.py:81, legacy_hybrid/run.py:58). Manifest `features` is an open dict (renderer-manifest.json:151–167; contracts.py:1916–1917) — `alpha_output: true` passes **unchanged**.
+
+**5. Tests.** Break: test_contracts.py:1084–1100 (gap/overlap matrix — rework per-layer), :600–603 (exact segment key set — add `layer`), test_freeze.py:396–398 (exact finalizer surface — add compositor id). Auto-adapt (to_dict comparisons): test_provenance.py:130, test_service.py:653/716/1583/1626, parity tests. Unaffected: test_threejs_hybrid.py:154–178, test_ffmpeg_finalizer.py:102–120, test_freeze.py:100–140.
+
+**6. Zero-core-edit?** No. `backend_config` reaches only the finalizer's own id (service.py:1517–1521), not per-segment; planner-side compositing can't emit overlapping segments past `__post_init__`. **Minimal change is contracts-only + pack**: service.py untouched.
+
+**7. Provenance.** `segments_v2 = [segment.to_dict()]` (provenance.py:431,461) — layer flows automatically; v1 `segments` stays flat (97–105). Backward compatible.
+
+### core blast radius
+- **contracts.py**: RenderSegment `layer` field (1305–1357); per-layer cursor in `__post_init__` (1432–1445).
+- **schemas/v1/plan.json**: `renderSegment.layer` (552–568).
+- **New pack**: `rendering.ffmpeg-compositor` (finalizer.yaml + run.py); renderer.yaml `features.alpha_output`.
+- **Tests**: test_contracts.py:1084–1100, :600–603; test_freeze.py:396–398.
+- **service.py, provenance.py, manifest schemas: no change.**
