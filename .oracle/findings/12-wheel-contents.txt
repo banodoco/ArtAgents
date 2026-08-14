@@ -1,0 +1,36 @@
+# Wheel contents: verified findings
+
+**1. Current coverage (pyproject.toml:60-65):** `[tool.setuptools.package-data] astrid = ["core/rendering/schemas/v1/*.json", "core/rendering/fixtures/renderer_parity/*", "packs/rendering/**/*.yaml"]`. No `include-package-data` key. Built wheel (fresh `SOURCES.txt`) confirms only 21 non-`.py` pack files ship — all rendering `*.yaml`. Coverage vs tree: pack.yaml 1/20, executor.yaml 4/63, orchestrator.yaml 0/14, element.yaml 10/10 (rendering-only), SKILL.md 0/20, STAGE.md 0/76, models.yaml/loras.yaml 0/1 each.
+
+**2. Discovery topology:** the `installed` layer reads **only** `~/.astrid/packs` — discovery.py:150-162 `for installed_root in installed_pack_roots()` → store.py:455-462 → session/paths.py:56-58 (`astrid_home()/PACKS_DIRNAME`, honors `ASTRID_HOME`). The wheel's own tree is reachable **only** via the `source` layer: loader.py:28-29 `packs_root() = Path(__file__).resolve().parents[2]/"packs"` (site-packages/astrid/packs). So bundled-pack discovery works *if* manifests ship — today only `rendering` is discoverable; the other 19 packs have no pack.yaml, hence invisible.
+
+**3. Worst breakage:** `model_catalog/registry.py:114-119` reads `Path(__file__).parent/"models.yaml"` and **raises AstridError** when absent — every `ModelRegistry.load_default()` call dies in a wheel install. `skills/discovery.py:28` (`PACKS_DIR = REPO_ROOT/astrid/packs`) finds zero SKILL.md.
+
+**4. Smoke gaps (smoke_wheel_install.sh):** checks only rendering manifests (lines 114-142); `load_default_registries(include_installed=False)` (lines 146, 224) never exercises the `installed` layer or non-rendering packs; never calls ModelRegistry/skills.
+
+## Corrected package-data (explicit)
+
+```toml
+[tool.setuptools.package-data]
+astrid = [
+  "core/model_catalog/*.yaml",
+  "core/rendering/schemas/v1/*.json",
+  "core/rendering/fixtures/renderer_parity/*",
+  "packs/*/pack.yaml",
+  "packs/*/executors/*/executor.yaml",
+  "packs/*/orchestrators/*/orchestrator.yaml",
+  "packs/rendering/elements/*/*/element.yaml",
+  "packs/rendering/**/*.yaml",               # extension roots: backends/planners/finalizers
+  "packs/*/skill/SKILL.md",
+  "packs/*/executors/*/skill/SKILL.md",      # nested skills (generation/generate_image)
+  "packs/*/executors/*/STAGE.md",
+  "packs/*/orchestrators/*/STAGE.md",
+]
+```
+
+## Smoke extensions
+
+- Assert counts: ≥20 pack.yaml, ≥63 executor.yaml, ≥14 orchestrator.yaml.
+- `ModelRegistry.load_default()` + `LoraRegistry.load_default()` (fails today — must pass).
+- Skills discovery ≥1 SKILL.md; per-pack STAGE.md presence.
+- Discovery with `include_installed=True` + empty ASTRID_HOME (documents the ~/.astrid no-op).

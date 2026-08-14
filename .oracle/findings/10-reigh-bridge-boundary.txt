@@ -1,0 +1,13 @@
+## Reigh bridge boundary — verified facts
+
+**1. The "read latest registry" logic is generic in intent but lives in Reigh.** `sync_asset_registry` (core/timeline/asset_registry_edits.py:218-226) calls `find_bridge_timeline`/`_ensure_bridge_registry` via **lazy import** of `integrations.reigh.local_bridge` (213-216, "would otherwise create an import cycle"). The recovery core is local_bridge.py:485-513 (`_registry_from_event_stream`: "for line in reversed(lines): … if event.get("kind") != REGISTRY_REPLACED_EVENT_KIND: continue … return {"assets": dict(registry["assets"])}") and 526-549 (`_ensure_bridge_registry`: sidecar → event stream → legacy `assets.json` → derivation, with sidecar write-back at 547).
+
+**2. Reigh transport adds:** HTTP + CORS (local_bridge_server.py:128-135 localhost:2222/3000/5173), Range/ETag media serving (343-509), per-timeline save locks (local_bridge.py:54-66,348), JWT/JWKS auth (worker_jwt.py; append_service.py:347-369), auth schemes user_jwt/pat/service_role (eventlog/supabase_client.py:10-38), remote fetch/RPC (timeline_io.py:97-147,256-268), Reigh-flavored constants (_BRIDGE_CANONICAL_TOP_KEYS, REIGH_LOCAL_EDITOR_ACTOR, proxy profiles, local: sourceId/sourceVersion, local_bridge.py:71-84,1042-1063), sources.json write-back (929-935).
+
+**3. Core/timeline already owns:** LocalFsBackend CAS + crash-reconciled head (local_fs.py:58-134,466-530), `append_prebuilt_events` (136), SupabaseBackend/`LiveSupabaseAppendTransport` (supabase.py:91-196), selector `preferred_backend="supabase"` (selector.py:45-52,155), event construction (reigh_events.py:60-187), transfer.py (clean per test_transfer.py:611-612). **Buried in reigh:** registry recovery, sidecar repair, sources write-back, record resolution, bridge save loop.
+
+**4. test_asset_registry_sync.py pins** `sync_asset_registry`, `_entry_from_source_ref`, `_resolve_file_under_sources` (13-17); no-pruning (284,326); no-op (328-359); stale CAS (361-393); sidecar merge (251,281-282). Recovery/sidecar-repair lives in tests/integrations/reigh/test_local_bridge_helpers.py:1038,1082,1108,1076-1078; crash recovery pins `LocalFsBackend.head` + `save_bridge_timeline` (641,1451,1478; SLO 1449).
+
+**5. Cross-project server:** one resolved root per server (local_bridge_server.py:49-54,732); root resolution is generic (foundation `resolve_projects_root` via local_bridge.py:110-112); `--projects-root` is just the generic root flag (dispatch.py:394). Multi-project is generic; HTTP surface is transport.
+
+**Suggestion:** new `core/timeline/asset_registry_state.py` owns recovery + record resolution + `sync_asset_registry`; move to `packs/reigh/integration/`: server, env, JWT, task_client, data_provider, timeline_io, append_service, Reigh constants.

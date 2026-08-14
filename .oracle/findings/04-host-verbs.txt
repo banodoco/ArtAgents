@@ -1,0 +1,17 @@
+# Gateway verb inventory — verified findings
+
+**(1) `_TOP_LEVEL_HANDLERS` table** (dispatch.py:423–466): lifecycle `start/next/ack/skip/abort` → `_dispatch_lifecycle` (:426–430); `status` (:91); `runs/run/step/hook/plan/claim/unclaim/events` → task CLIs (:519–624); module-CLI verbs `skills/packs/executors/orchestrators/orchestrate/models/elements/projects/themes/timelines/modalities/renderers/replay/doctor/setup/audit/test` (:234–343); `attach/sessions` → session CLI (:86, :469). Capability-shaped: **runpod** → `_dispatch_runpod` (:626) → gateway/runpod.py; **reigh-data** → executor (:346); **worker** → banodoco_worker (:359); **publish-youtube/upload-youtube** → executor (:230). `publish` also executor-backed (:226) — a 6th delegate.
+
+**(2)** Delegating via `_dispatch_executor_main` (:350): `reigh.publish` (:227), `youtube.upload` (:231, :441), `reigh.reigh_data` (:347). **Bespoke:** runpod.py and worker.
+
+**(3) runpod.py callers:** only dispatch.py:626–651 (+ re-exports __init__.py:61–64; tests tests/packs/runpod/test_ensure_storage.py:231,260,275). `astrid runpod` maps **directly** to core/integrations/runpod — sweep→sweeper.sweep (runpod.py:32), volumes→storage.list_volumes (:59), ensure-storage→storage.ensure_storage (:88). No executor. The runpod *pack* (provision/exec/pull/teardown/session, pack.yaml:48–68) is a disjoint surface.
+
+**(4)** scratch/serve: only gateway entrypoints (dispatch.py:373–420); no pack callers. serve referenced in docs/contracts/asset-resolution-generation-bridge-contract.md:339,435. **Not load-bearing for packs.**
+
+**(5) Session gate:** allowlist __init__.py:149–172 (help/version, status, next, attach, projects·ls/create/select/use/default/theme, themes·ls, sessions·ls/takeover, packs, renderers, replay, test, doctor, serve) + `--project` exemption (:395–410: executors·run, orchestrators·run, scratch·run, timelines·create/source/edit, projects·source). **runpod/reigh-data/worker/publish-youtube/upload-youtube do NOT bypass** — they require a bound session.
+
+**Retire plan (ranked):**
+1. **publish-youtube/upload-youtube/reigh-data/publish** — pure alias removal; `executors run {youtube.upload,reigh.reigh_data,reigh.publish}` already canonical (runner.py:339, cli_handlers.py:520). Breaks: help.py:94,104–107; tests/test_pipeline_dispatch_aliases.py:101–104.
+2. **worker** — no executor counterpart; long-running claim loop. Needs new executor or stays bespoke. Breaks: help.py:95.
+3. **runpod** — no executor for sweep/volumes/ensure-storage; needs new `runpod.sweep/storage` executors. Breaks: help.py:101–103, runpod tests.
+4. scratch/serve — safe to keep; serve is documented contract.

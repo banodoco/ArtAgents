@@ -1,0 +1,17 @@
+Verified against runtime (`packs list --json`) and source. Findings ranked by severity:
+
+**Contradictions (doc → code)**
+1. **builtin not hidden.** pack-taxonomy.md:317-318 & :264-265, repo-shape.md:198-200: "hidden compatibility shell (`visibility: hidden`…)" vs builtin/pack.yaml:1-15 (no `visibility`), loader.py:129 defaults `"visible"`; CLI prints `builtin visibility: visible`.
+2. **install_tier all core.** pack-taxonomy.md:43-45 "core (Currently: builtin, iteration, media)" and :350-352 `stream_content`/`comfy_wrap`/`text_analysis` tier=`default` vs all 20 pack.yaml files declare `install_tier: core`.
+3. **blender undocumented + breaks validation.** pack-taxonomy.md:67-74,260-267; repo-shape.md:190-193 omit it; blender/pack.yaml:1-8 (origin builtin, tier core, domain media), runtime-listed, but absent from `_FIRST_PARTY_PACK_IDS` (validate_first_party.py:20-40) → `packs validate` errors "unexpected top-level directory: blender".
+4. **executor/orchestrator dirs moved.** repo-shape.md:69,73; import-tiers.md:11 claim `core/executor/`, `core/orchestrator/`; actual: `astrid/core/execution/{executor,orchestrator}`.
+5. **_core claims stale.** pack-taxonomy.md:301-302 "discovery.py explicitly skips _core" vs skills/discovery.py:133-134 (walk *covers* manifest-less `_core`; loader.py:97-99 skips it); :309-310 "validate.py INTERNAL_PACK_DIRS" vs validate_first_party.py:41 `_FIRST_PARTY_INTERNAL_DIRS`.
+6. **SDK surface.** platform-contract.md:33, repo-shape.md:27 "exactly 28 names" vs `astrid.__all__` = 32 (`render`, `renderer_main`, `support`, `RenderContext` unlisted).
+7. **Gateway modules.** repo-shape.md:38 lists dispatch/help/project/wait; `gateway/` also has `runpod.py`, `scratch.py`, `setup.py`.
+8. **fal table.** adapter-packs.md:24 lists only `fal.fal_foley`; `fal/executors/` also has `h3_video`.
+9. **Alias carriers.** pack-taxonomy.md:326-329 includes fal/vibecomfy/runpod/moirae; their pack.yaml declare only `external.*` (0 `builtin.*`) aliases.
+10. **repo-shape §2 omissions:** foundation, `_shared`, rendering, experiments, gateway, events, gate, registry, io, cli.
+
+**Kernel table** (contract.md "Locked Decisions"): gateway→core/gateway; session→core/session; project→core/project; task engine→core/task; pack system→core/pack; registries→core/registry+execution/element/rendering/registry.py; SDK→astrid/sdk; skills installer→astrid/skills; structure/doctor→core/structure.py+doctor.py; foundation/contracts→core/foundation+contracts; timeline store→core/timeline; render protocol→core/rendering; generation protocol→core/generation.
+
+**Triggered edits:** `_core`→pack: pack-taxonomy.md:44-45,73,266-267,290-313; repo-shape.md:202-205. legacy_workspace dies: contract.md:260-269 (precedence vs catalog.py:93,115). Allowlist refresh: add blender → pack-taxonomy.md:67-74,260-267; repo-shape.md:190-193; validate_first_party.py:20-40.

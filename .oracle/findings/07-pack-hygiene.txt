@@ -1,0 +1,13 @@
+All facts verified against this checkout (main @ dc296c3e).
+
+## Ranked findings
+
+**1. `packs validate` FAILS on main (1 error).** `astrid packs validate astrid/packs` → RC=2: `[internal-schema] unexpected top-level directory: blender`. Blender is missing from `_FIRST_PARTY_PACK_IDS` (validate_first_party.py:20-40) → flagged at :119-126. `tests/packs/test_pack_layout_contract.py::test_no_unexpected_pack_ids_ship` also fails (:320-333; `_SHIPPED_PACK_IDS` :49-69 lacks blender); other 17 contract tests pass. **Fix (zero risk):** add `blender` to both lists.
+
+**2. Unenforced contract gaps (declared canonical, never walked).** `validate_layout.is_canonical_pack_path` (:146-177) is only used to parse exceptions (:241) — nothing walks the tree. Violators: `blender/` root (`render_core.py`, `deploy.py`, `mesh_fetch.py`, `server/`, `renders/`, `__init__.py`, `README.md`), `editorial/hype/` (no `metadata.layout.exceptions` in editorial/pack.yaml; imported by video_editing timeline_build.py:28, cut/run.py:44, hype/runner.py:364-369, tests — sanctioned in repo-shape.md:143,160), and `generation/executors/*/golden/` (executors branch :158-170 rejects `golden`; pack-root golden/fixtures are fine per :156 — builtin/text_analysis tracked, git ls-files). **Fix:** declare `IMPORTABLE_COMPONENT_CODE` exceptions or extend allowlist.
+
+**3. Foreign root dirs.** `runs/` (:44), `mgt-*` (:85), `ideogram-competition/` (:141) gitignored; absent here. `fal-voice-upscale/` is **tracked with .mp3 binaries** — unregulated (structure.py debris scan covers only astrid/tests/scripts, :178,270). `avatars/`, `pipeline-tests-_nahkzb4`: absent, **no ignore rule** if recreated. **Fix:** delete/gitignore fal-voice-upscale; add patterns.
+
+**4. `local/`, `external/`, `__pycache__`.** `local/` absent on disk, gitignored (:100), created by `ensure_local_pack*` (loader.py:35-72) only when `local/elements/*/*/element.yaml` exists (:75-81) or fork/overrides write (registry.py:202, override.py:81). **Not tied to legacy_workspace** — that source is read-only in-memory (catalog.py:93-98); its death doesn't affect local pack. `external/` doesn't exist on main (untracked, deleted). `__pycache__` gitignored (:13); contract tests check tracked paths only (test file :96-110) — clean.
+
+**5. examples/packs:** no exclusion exists — `discover_packs` only skips dot-dirs/`__pycache__` (loader.py:95) and hidden visibility (:101); examples/packs is never scanned (roots are explicit, loader.py:28-29,89-94). Tests validate it directly (test_packs_cli.py:142-152).
