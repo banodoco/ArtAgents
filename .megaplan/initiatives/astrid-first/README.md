@@ -1,6 +1,6 @@
 # Astrid First
 
-TODO_INITIATIVE_DESCRIPTION: Describe the outcome for Astrid First, why it matters, and the boundary of the work.
+Outcome: land the Astrid-first milestone chain (m1-m8 + reconcile) on the hardened Arnold main lineage — unified data model, pluggable timeline renderers, and shot-first composition — with the babysitter fixer loop active on the epic.
 
 ## Current truth and index
 
