@@ -48,6 +48,7 @@ extensions:
     planners:
       - planners/legacy_hybrid/planner.yaml
       - planners/threejs_hybrid/planner.yaml
+      - planners/layer_stack/planner.yaml
     finalizers:
       - finalizers/ffmpeg/finalizer.yaml
       - finalizers/compositor/finalizer.yaml

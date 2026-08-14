@@ -14,7 +14,6 @@ import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
-
 _CHECKOUT_ROOT = Path(__file__).resolve().parents[3]
 if str(_CHECKOUT_ROOT) not in sys.path:
     sys.path.insert(0, str(_CHECKOUT_ROOT))
@@ -99,9 +98,19 @@ def _selects_planner() -> bool:
     return _transport_selected_backend() == "rendering.legacy_hybrid"
 
 
+def _selects_layer_stack() -> bool:
+    """Route the transport-selected layer-stack planner without shape guessing."""
+
+    return _transport_selected_backend() == "rendering.layer-stack"
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
-    if _selects_planner():
+    if _selects_layer_stack():
+        from astrid.packs.rendering.planners.layer_stack.run import (
+            main as backend_main,
+        )
+    elif _selects_planner():
         from astrid.packs.rendering.planners.legacy_hybrid.run import (
             main as backend_main,
         )
