@@ -1,25 +1,33 @@
-"""Batch 5: ``rendering.layer-stack`` planner.
+"""Batch 5+6: ``rendering.layer-stack`` planner and the real stacked render.
 
 Covers fast-path concat, per-track registry routing, greedy merge, fail-closed
 blend/unsupported tracks, profile honesty (no canonical H.264 profile on
-stamped-layer support() calls), and exact full-window tiling.
+stamped-layer support() calls), exact full-window tiling, merge-reject /
+opacity insurance, and one real two-layer render through the public service.
 """
 
 from __future__ import annotations
 
 import json
+import subprocess
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 from astrid.core.rendering.contracts import (
+    LayerRef,
     RenderPlan,
     RenderRequest,
     SupportReport,
 )
 from astrid.core.rendering.errors import RendererUnsupportedError
 from astrid.core.rendering.registry import RendererRegistry, load_default_registries
+from astrid.core.rendering.service import RenderService
+from astrid.core.rendering.transport import CommandTransport
 from astrid.packs.rendering.planners.layer_stack import run as layer_stack
+from astrid.sdk.rendering import render as sdk_render
+from tests.packs.rendering._helpers import _execution_env, _probe
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -28,13 +36,15 @@ def _timeline(
     *,
     clips: list[dict] | None = None,
     fps: int = 30,
+    width: int = 1920,
+    height: int = 1080,
     tracks: list[dict] | None = None,
     metadata: dict | None = None,
 ) -> dict:
     result: dict = {
         "theme": "banodoco-default",
         "theme_overrides": {
-            "visual": {"canvas": {"width": 1920, "height": 1080, "fps": fps}}
+            "visual": {"canvas": {"width": width, "height": height, "fps": fps}}
         },
         "tracks": tracks
         or [
@@ -54,6 +64,9 @@ def _text(
     at: float = 0,
     hold: float = 2,
     track: str = "overlay",
+    content: str = "Hello",
+    font_size: int = 48,
+    color: str = "#ffffff",
     **extra: object,
 ) -> dict:
     return {
@@ -62,9 +75,9 @@ def _text(
         "track": track,
         "clipType": "text",
         "text": {
-            "content": "Hello",
-            "fontSize": 48,
-            "color": "#ffffff",
+            "content": content,
+            "fontSize": font_size,
+            "color": color,
             "align": "center",
             "bold": False,
         },
@@ -109,6 +122,7 @@ def _request(
     *,
     assets: dict | None = None,
     profile: object = None,
+    audio: str | None = None,
 ) -> RenderRequest:
     timeline_path = tmp_path / "timeline.json"
     assets_path = tmp_path / "assets.json"
@@ -120,6 +134,7 @@ def _request(
         assets_registry_path=str(assets_path),
         output_name="video.mp4",
         profile=profile,
+        audio=audio,
     )
 
 
@@ -205,6 +220,7 @@ def _plan(
     renderer_ids: tuple[str, ...] | None = None,
     assets: dict | None = None,
     profile: object = None,
+    audio: str | None = None,
 ) -> tuple[RenderPlan, _RecordingResolver]:
     if renderer_ids is None:
         renderers, finalizers = _registries()
@@ -212,7 +228,9 @@ def _plan(
         renderers, finalizers = _registries(*renderer_ids)
     resolver = _RecordingResolver(_resolver(allowed))
     result = layer_stack.plan(
-        _request(tmp_path, timeline, assets=assets, profile=profile),
+        _request(
+            tmp_path, timeline, assets=assets, profile=profile, audio=audio
+        ),
         workspace=tmp_path,
         support_resolver=resolver,
         registries=(renderers, finalizers),
@@ -504,3 +522,430 @@ def test_each_layer_covers_the_full_plan_window(tmp_path: Path) -> None:
         assert segment.window.end_frame == result.total_frames
         assert segment.window.fps_rational == result.profile.fps_rational
     assert set(result.reasons) == {str(index) for index in range(len(result.segments))}
+
+
+# ---------------------------------------------------------------------------
+# Insurance (Batch 5 deferrals)
+# ---------------------------------------------------------------------------
+
+
+def test_ffmpeg_rejects_merge_of_two_adjacent_media_tracks(tmp_path: Path) -> None:
+    """Two adjacent media tracks stay split: ffmpeg cannot claim both."""
+
+    timeline = _timeline(
+        tracks=[
+            {"id": "a", "kind": "visual", "label": "A"},
+            {"id": "b", "kind": "visual", "label": "B"},
+        ],
+        clips=[
+            _media("media-a", duration=2, track="a"),
+            _media("media-b", duration=2, track="b"),
+        ],
+    )
+    result, _recorder = _plan(
+        tmp_path,
+        timeline,
+        renderer_ids=(layer_stack.FFMPEG_ID,),
+    )
+
+    assert result.finalizer.id == layer_stack.COMPOSITOR_FINALIZER_ID
+    assert len(result.segments) == 2
+    by_z = {segment.layer.z: segment for segment in result.segments}
+    assert by_z[0].layer.tracks == ("b",)
+    assert by_z[1].layer.tracks == ("a",)
+    assert by_z[0].renderer.id == layer_stack.FFMPEG_ID
+    assert by_z[1].renderer.id == layer_stack.FFMPEG_ID
+    assert by_z[0].layer.z == 0
+    assert by_z[1].layer.z == 1
+
+
+def test_track_opacity_below_one_is_copied_onto_layer_ref(tmp_path: Path) -> None:
+    """A visual track with opacity < 1 lands on LayerRef.opacity."""
+
+    timeline = _timeline(
+        tracks=[
+            {
+                "id": "overlay",
+                "kind": "visual",
+                "label": "Overlay",
+                "opacity": 0.4,
+            },
+            {"id": "source", "kind": "visual", "label": "Source"},
+        ],
+        clips=[
+            _text(hold=2, track="overlay"),
+            _media(duration=2, track="source"),
+        ],
+    )
+    result, _recorder = _plan(
+        tmp_path,
+        timeline,
+        renderer_ids=(layer_stack.THREE_ID, layer_stack.FFMPEG_ID),
+    )
+
+    by_z = {segment.layer.z: segment for segment in result.segments}
+    assert by_z[1].layer.tracks == ("overlay",)
+    assert by_z[1].layer.opacity == 0.4
+    assert by_z[0].layer.opacity == 1.0
+    assert by_z[1].layer.blend == "normal"
+
+
+# ---------------------------------------------------------------------------
+# Batch 6 — real stacked render
+# ---------------------------------------------------------------------------
+
+
+STACKED_PROOF = REPO_ROOT / ".oracle" / "findings" / "stacked-render-proof.txt"
+
+
+def _require_stacked_environment() -> None:
+    from tests.packs.rendering.test_threejs_backend import _missing_environment
+
+    missing = _missing_environment()
+    if missing:
+        pytest.skip(
+            "stacked render skipped: missing optional dependencies: "
+            + ", ".join(missing)
+        )
+
+
+def _red_source(tmp_path: Path, *, frames: int = 24, audio: bool = True) -> Path:
+    source_path = tmp_path / "source.mp4"
+    command = [
+        "ffmpeg",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-f",
+        "lavfi",
+        "-i",
+        f"color=c=red:s=320x180:rate=24:d={frames / 24}",
+    ]
+    if audio:
+        command += [
+            "-f",
+            "lavfi",
+            "-i",
+            "anullsrc=channel_layout=stereo:sample_rate=48000",
+        ]
+    command += ["-frames:v", str(frames)]
+    if audio:
+        command += ["-shortest"]
+    command += [
+        "-c:v",
+        "libx264",
+        "-profile:v",
+        "main",
+        "-pix_fmt",
+        "yuv420p",
+    ]
+    if audio:
+        command += ["-c:a", "aac"]
+    else:
+        command.append("-an")
+    command += ["-video_track_timescale", "12288", str(source_path)]
+    subprocess.run(command, check=True, capture_output=True, text=True)
+    return source_path
+
+
+def _stacked_timeline(*, duration: float = 1.0) -> dict:
+    return _timeline(
+        fps=24,
+        width=320,
+        height=180,
+        tracks=[
+            {"id": "overlay", "kind": "visual", "label": "Overlay"},
+            {"id": "source", "kind": "visual", "label": "Source"},
+        ],
+        clips=[
+            _text(
+                hold=duration,
+                track="overlay",
+                content="HI",
+                font_size=72,
+                color="#00ffff",
+            ),
+            _media(duration=duration, track="source"),
+        ],
+    )
+
+
+def _stacked_assets(source: Path) -> dict:
+    return {
+        "assets": {
+            "source": {
+                "file": str(source),
+                "type": "video/mp4",
+            }
+        }
+    }
+
+
+def _frame_rgb(path: Path, frame: int, tmp_path: Path):
+    from PIL import Image
+
+    png = tmp_path / f"stacked-frame-{frame}.png"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-i",
+            str(path),
+            "-vf",
+            f"select=eq(n\\,{frame})",
+            "-vsync",
+            "vfr",
+            str(png),
+        ],
+        check=True,
+    )
+    return Image.open(png).convert("RGB")
+
+
+def _is_media_red(rgb: tuple[int, int, int]) -> bool:
+    red, green, blue = rgb
+    return red >= 180 and green <= 80 and blue <= 80
+
+
+def _is_not_media(rgb: tuple[int, int, int]) -> bool:
+    return not _is_media_red(rgb)
+
+
+class _InjectPlanTransport:
+    """Return a constructed RenderPlan for the planner's plan verb.
+
+    Every other verb (planner support, segment render, finalize) is a real
+    CommandTransport call.  This is how a constructed LayerRef plan is
+    executed through the public service without remotion claiming the
+    full stack on the fast path.
+    """
+
+    def __init__(self, plan: RenderPlan) -> None:
+        self._plan = plan
+
+    def run(self, verb, command, *, backend, request_path, result_path, cwd, **kwargs):
+        if verb == "plan" and backend == layer_stack.BACKEND_ID:
+            return self._plan
+        return CommandTransport(backend).run(
+            verb,
+            command,
+            backend=backend,
+            request_path=request_path,
+            result_path=result_path,
+            cwd=cwd,
+            **kwargs,
+        )
+
+
+def _write_stacked_proof(
+    *,
+    output: Path,
+    probe: dict,
+    sidecar: dict,
+    corner: tuple[int, int, int],
+    text_pixel: tuple[int, int, int],
+    planner: str,
+    segments: list[dict],
+) -> None:
+    video = next(stream for stream in probe["streams"] if stream["codec_type"] == "video")
+    audio = next(
+        (stream for stream in probe["streams"] if stream["codec_type"] == "audio"),
+        None,
+    )
+    STACKED_PROOF.parent.mkdir(parents=True, exist_ok=True)
+    STACKED_PROOF.write_text(
+        "\n".join(
+            [
+                "Layer Stack — real stacked render proof",
+                "test: tests/core/rendering/test_layer_stack.py::"
+                "test_real_stacked_render_constructed_plan_threejs_over_remotion",
+                f"video.codec={video.get('codec_name')} pix_fmt={video.get('pix_fmt')} "
+                f"frames={video.get('nb_read_frames')} "
+                f"size={video.get('width')}x{video.get('height')}",
+                f"audio.codec={None if audio is None else audio.get('codec_name')}",
+                f"format.duration={probe.get('format', {}).get('duration')}",
+                f"planner={planner}",
+                "finalizer="
+                + str(
+                    sidecar.get("routing", {})
+                    .get("resolved_policy", {})
+                    .get("finalizer")
+                ),
+                f"segments={json.dumps(segments, sort_keys=True)}",
+                f"corner_rgb={corner}  — media red showing through transparent threejs",
+                f"text_rgb={text_pixel} — NOT media red (top composited)",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def _assert_stacked_output(
+    output: Path,
+    sidecar_path: Path,
+    tmp_path: Path,
+    *,
+    expected_frames: int,
+    expected_renderers: set[str],
+    proof: bool,
+) -> None:
+    assert output.is_file() and output.stat().st_size > 0
+    probe = _probe(output)
+    video = next(stream for stream in probe["streams"] if stream["codec_type"] == "video")
+    assert video["codec_name"] == "h264"
+    assert "420p" in video["pix_fmt"], video
+    assert int(video["nb_read_frames"]) == expected_frames, video
+    assert video["width"] == 320 and video["height"] == 180
+    assert any(
+        stream["codec_type"] == "audio" and stream["codec_name"] == "aac"
+        for stream in probe["streams"]
+    ), probe
+    duration = float(probe["format"]["duration"])
+    assert abs(duration - expected_frames / 24.0) < 0.15, probe
+
+    sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    routing = sidecar["routing"]["resolved_policy"]
+    assert routing["finalizer"] == layer_stack.COMPOSITOR_FINALIZER_ID
+    segments = sidecar["segments_v2"]
+    assert {segment["renderer"]["id"] for segment in segments} == expected_renderers
+    by_renderer = {segment["renderer"]["id"]: segment for segment in segments}
+    for renderer_id, segment in by_renderer.items():
+        layer = segment["layer"]
+        assert layer["blend"] == "normal"
+        assert (segment["window"]["start_frame"], segment["window"]["end_frame"]) == (
+            0,
+            expected_frames,
+        )
+        if renderer_id == layer_stack.THREE_ID:
+            assert layer["z"] == 1
+            assert layer["tracks"] == ["overlay"]
+        else:
+            assert layer["z"] == 0
+            assert layer["tracks"] == ["source"]
+
+    image = _frame_rgb(output, 0, tmp_path)
+    corner = image.getpixel((4, 4))
+    center = image.getpixel((160, 90))
+    text_hits = [
+        image.getpixel((x, y))
+        for x in range(80, 240, 4)
+        for y in range(40, 140, 4)
+        if _is_not_media(image.getpixel((x, y)))
+    ]
+    assert _is_media_red(corner), corner
+    assert text_hits, f"no non-media pixels in the text region; center={center}"
+    text_pixel = text_hits[0]
+    assert _is_not_media(text_pixel), text_pixel
+
+    if proof:
+        _write_stacked_proof(
+            output=output,
+            probe=probe,
+            sidecar=sidecar,
+            corner=corner,
+            text_pixel=text_pixel,
+            planner=routing.get("planner", ""),
+            segments=[
+                {
+                    "renderer": segment["renderer"]["id"],
+                    "z": segment["layer"]["z"],
+                    "tracks": segment["layer"]["tracks"],
+                    "alpha_expected": segment["layer"]["z"] > 0,
+                }
+                for segment in segments
+            ],
+        )
+
+
+@pytest.mark.timeout(900)
+def test_real_stacked_render_constructed_plan_threejs_over_remotion(
+    tmp_path: Path,
+) -> None:
+    """Direct RenderPlan: threejs z=1 (alpha text) over remotion z=0 (media).
+
+    Remotion would take the full-stack fast path, so the plan is constructed
+    and executed through the public service (planner support is real; the
+    plan verb returns the constructed LayerRef plan; segment renders and
+    the compositor are real).
+    """
+
+    _require_stacked_environment()
+    source = _red_source(tmp_path)
+    timeline = _stacked_timeline()
+    assets = _stacked_assets(source)
+    constructed, _recorder = _plan(
+        tmp_path,
+        timeline,
+        renderer_ids=(layer_stack.THREE_ID, layer_stack.FFMPEG_ID),
+        assets=assets,
+        audio="rendered",
+    )
+    swapped: list = []
+    for segment in constructed.segments:
+        if segment.renderer.id != layer_stack.FFMPEG_ID:
+            swapped.append(segment)
+            continue
+        decision = segment.renderer.support_decision
+        swapped.append(
+            replace(
+                segment,
+                renderer=replace(
+                    segment.renderer,
+                    id=layer_stack.REMOTION_ID,
+                    support_decision=replace(decision, backend=layer_stack.REMOTION_ID),
+                ),
+            )
+        )
+    injected = replace(
+        constructed,
+        segments=swapped,
+        finalizer=replace(
+            constructed.finalizer, id=layer_stack.COMPOSITOR_FINALIZER_ID
+        ),
+    )
+    assert {segment.renderer.id for segment in injected.segments} == {
+        layer_stack.THREE_ID,
+        layer_stack.REMOTION_ID,
+    }
+    assert all(isinstance(segment.layer, LayerRef) for segment in injected.segments)
+
+    request = _request(tmp_path, timeline, assets=assets, audio="rendered")
+    assert injected.profile.has_audio
+    renderers, planners, finalizers = load_default_registries(
+        REPO_ROOT, include_installed=False
+    )
+    service = RenderService(
+        registries=(renderers, planners, finalizers),
+        transport=_InjectPlanTransport(injected),
+    )
+    output = tmp_path / "stacked-direct.mp4"
+    with _execution_env():
+        published = sdk_render(
+            timeline_path=request.timeline_path,
+            assets_registry_path=request.assets_registry_path,
+            out_path=output,
+            backend=layer_stack.BACKEND_ID,
+            audio="rendered",
+            service=service,
+            backend_config={
+                "rendering.threejs": {},
+                "rendering.remotion": {},
+                "rendering.ffmpeg-compositor": {"faststart": True},
+            },
+        )
+
+    _assert_stacked_output(
+        Path(published),
+        Path(f"{published}.provenance.json"),
+        tmp_path,
+        expected_frames=24,
+        expected_renderers={layer_stack.THREE_ID, layer_stack.REMOTION_ID},
+        proof=True,
+    )
+    sidecar = json.loads(Path(f"{published}.provenance.json").read_text(encoding="utf-8"))
+    assert sidecar["routing"]["resolved_policy"]["planner"] == layer_stack.BACKEND_ID

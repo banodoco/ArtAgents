@@ -101,7 +101,6 @@ class _LayerClaim:
     renderer_id: str
     opacity: float
     report: SupportReport
-    timeline: Mapping[str, Any]
 
 
 def _planner_config(request: RenderRequest) -> dict[str, Any]:
@@ -382,7 +381,6 @@ def _assign_layers(
                     renderer_id=renderer_id,
                     opacity=opacity,
                     report=merged_report,
-                    timeline=merged_timeline,
                 )
                 merged = True
         if not merged:
@@ -393,7 +391,6 @@ def _assign_layers(
                     renderer_id=renderer_id,
                     opacity=opacity,
                     report=report,
-                    timeline=projected,
                 )
             )
     return claims

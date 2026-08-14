@@ -26,6 +26,12 @@ def _request_path(argv: Sequence[str]) -> Path | None:
         return None
 
 
+def _selects_compositor() -> bool:
+    """Route the transport-selected layer compositor without shape guessing."""
+
+    return _transport_selected_backend() == "rendering.ffmpeg-compositor"
+
+
 def _selects_finalizer(argv: Sequence[str]) -> bool:
     """Route finalize and explicitly-namespaced support operations."""
 
@@ -112,6 +118,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
     elif _selects_planner():
         from astrid.packs.rendering.planners.legacy_hybrid.run import (
+            main as backend_main,
+        )
+    elif _selects_compositor():
+        from astrid.packs.rendering.finalizers.compositor.run import (
             main as backend_main,
         )
     elif _selects_finalizer(args):

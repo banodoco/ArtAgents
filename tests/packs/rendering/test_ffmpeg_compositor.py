@@ -151,6 +151,22 @@ def _support_request(tmp_path: Path, plan: RenderPlan) -> FinalizeRequest:
     )
 
 
+def test_pack_launcher_routes_compositor_by_transport_backend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The pack-root run.py must dispatch compositor, not fall through to remotion."""
+
+    from astrid.packs.rendering import run as pack_run
+
+    monkeypatch.setenv("ASTRID_RENDER_BACKEND", "rendering.ffmpeg-compositor")
+    assert pack_run._selects_compositor() is True
+    assert pack_run._selects_finalizer(["support"]) is False
+    assert pack_run._selects_finalizer(["finalize"]) is False
+    monkeypatch.setenv("ASTRID_RENDER_BACKEND", "rendering.ffmpeg-finalizer")
+    assert pack_run._selects_compositor() is False
+    assert pack_run._selects_finalizer(["support"]) is True
+
+
 def test_manifest_registers_compositor_finalizer() -> None:
     manifest_path = (
         ROOT
@@ -368,20 +384,24 @@ def _synthetic_request(
     top_frames: int,
     top_alpha_zero: bool = False,
     bottom_audio: bool = False,
+    plan_frames: int | None = None,
+    top_opacity: float = 1.0,
 ) -> FinalizeRequest:
     bottom = tmp_path / "segments" / "bottom.mp4"
     top = tmp_path / "segments" / "top.webm"
     bottom.parent.mkdir(parents=True, exist_ok=True)
     _make_bottom(bottom, frames=bottom_frames, audio=bottom_audio)
     _make_top(top, frames=top_frames, alpha_zero=top_alpha_zero)
-    total_frames = bottom_frames
+    total_frames = plan_frames if plan_frames is not None else max(
+        bottom_frames, top_frames
+    )
     profile = _profile(audio=True)
     plan = _plan(
         profile,
         total_frames=total_frames,
         layers=[
             (0, 0, bottom_frames, 1.0),
-            (1, 0, top_frames, 1.0),
+            (1, 0, top_frames, top_opacity),
         ],
     )
     return FinalizeRequest(
@@ -456,6 +476,72 @@ def test_synthetic_composite_pixel_proof(tmp_path: Path) -> None:
     # the box shows the opaque bottom layer through.
     assert _frame_pixel(output, 0, tmp_path, 5, 5) == (0, 254, 0)
     assert _frame_pixel(output, 0, tmp_path, 50, 50) == (252, 0, 0)
+
+
+def test_short_bottom_layer_reveals_base_after_eof(tmp_path: Path) -> None:
+    """B3 deferral: a short z=0 layer ends; the rest is top over the black base."""
+
+    if not _ffmpeg_available():
+        pytest.skip("real FFmpeg compositor smoke requires ffmpeg and ffprobe")
+
+    request = _synthetic_request(
+        tmp_path,
+        bottom_frames=5,
+        top_frames=10,
+        plan_frames=10,
+    )
+
+    result = compositor.finalize(request, workspace=tmp_path)
+
+    output = tmp_path / result.video.path
+    probe = ffprobe_metadata_strict(output)
+    assert probe.frames == 10
+    assert result.video.duration_frames == 10
+    # First half: green box over red bottom. After the bottom EOF, the same
+    # box sits on the black color base (eof_action=pass, not freeze).
+    assert _frame_pixel(output, 0, tmp_path, 5, 5) == (0, 254, 0)
+    assert _frame_pixel(output, 0, tmp_path, 50, 50) == (252, 0, 0)
+    assert _frame_pixel(output, 8, tmp_path, 5, 5) == (0, 254, 0)
+    assert _frame_pixel(output, 8, tmp_path, 50, 50) == (0, 0, 0)
+
+
+def test_opacity_below_one_emits_colorchannelmixer() -> None:
+    """B5 deferral: compositor applies track opacity via colorchannelmixer."""
+
+    profile = _profile(audio=False)
+    layers = [
+        compositor._PreparedLayer(
+            index=1,
+            z=0,
+            path=Path("bottom.mp4"),
+            opacity=1.0,
+            alpha=False,
+            vp9=False,
+            audio=AudioOwnership.NONE,
+            duration_frames=10,
+        ),
+        compositor._PreparedLayer(
+            index=2,
+            z=1,
+            path=Path("top.webm"),
+            opacity=0.4,
+            alpha=True,
+            vp9=True,
+            audio=AudioOwnership.NONE,
+            duration_frames=10,
+        ),
+    ]
+    argv = compositor.build_composite_command(
+        layers,
+        Path("out.mp4"),
+        target_profile=profile,
+        total_frames=10,
+        ownership=AudioOwnership.NONE,
+        faststart=True,
+    )
+    graph = argv[argv.index("-filter_complex") + 1]
+    assert "colorchannelmixer=aa=0.4" in graph
+    assert "libvpx-vp9" in argv
 
 
 def test_short_top_layer_pads_to_plan_length(tmp_path: Path) -> None:

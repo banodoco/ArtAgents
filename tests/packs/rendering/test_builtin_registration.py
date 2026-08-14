@@ -169,6 +169,7 @@ def test_builtin_registration_and_inspection_are_static(
         )
 
     assert [candidate.id for candidate in planners.list()] == [
+        "rendering.layer-stack",
         "rendering.legacy_hybrid",
         "rendering.threejs-hybrid",
     ]
