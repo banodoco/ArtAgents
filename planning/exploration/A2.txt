@@ -1,0 +1,160 @@
+Now I have all the evidence needed. Let me compile the comprehensive findings.
+
+---
+
+## Findings
+
+### 1. Three divergent duration helpers — zero sharing
+
+**Helper A — `render/run.py:_clip_duration_seconds`** (line 399–405):
+```python
+return max(0.0, end - start) / speed
+```
+Checks only `from`/`to`/`speed`. **Does NOT check `hold`.** Used for media clips in the Remotion/ffmpeg render path.
+
+**Helper B — `render/run.py:_clip_timeline_end_seconds`** (line 408–417):
+For media clips: `at + _clip_duration_seconds(clip)`. For non-media: `at + hold` if hold exists, else `to`, else `at`. **Uses `hold` only for non-media clips.** For media clips it delegates to Helper A which ignores hold.
+
+**Helper C — `render/run.py:_timeline_duration_seconds`** (line 420–427):
+Checks `metadata.duration_seconds`/`expected_duration_seconds` first; falls back to `max(_clip_timeline_end_seconds(clip) for clip in clips)`. **Includes audio clips in the max.** No track-kind filtering.
+
+**Helper D — `timeline_storyboard/run.py:_clip_duration`** (line 118–131):
+Checks `hold` FIRST → returns `max(0, hold)`. Falls back to `(to - from) / speed`. **Hold takes precedence over from/to/speed** — opposite priority from Helper A.
+
+**Helper E — `validators/timeline.py:_clip_duration_seconds`** (line 128–136):
+Checks `hold` first, falls back to `end - start`. **No speed division.** Returns `None` if neither hold nor valid from/to present. Imported by `banodoco_schema.py` (line 514) for use in `_validate_clip_transitions`.
+
+**Summary table:**
+
+| Helper | Location | Hold checked? | Speed divided? | Used by |
+|--------|----------|--------------|---------------|---------|
+| A | render/run.py:399 | **NO** — ignores hold | YES | Media clip duration in render |
+| B | render/run.py:408 | Only for non-media | Yes (via A) | Clip end time in render |
+| C | render/run.py:420 | Via B | Via B | Total timeline duration |
+| D | storyboard/run.py:118 | **YES** — first | YES | Shot bounds, storyboard |
+| E | validators/timeline.py:128 | **YES** — first | **NO** | Transition validation |
+
+### 2. Desert fixture exact numbers
+
+From `projects/desert-plant-growth/timelines/01KYPVKMW5STB4W6FE05ED8242/assembly.json` (lines 10–67):
+
+| Clip | Track | `at` | `hold` | End (`at+hold`) |
+|------|-------|------|--------|-----------------|
+| plant-frame-1 | storyboard (visual) | 0.6667 | 2.9333 | 3.6000 |
+| plant-frame-2 | storyboard (visual) | 3.6000 | 4.9667 | 8.5667 |
+| plant-frame-3 | storyboard (visual) | 8.5667 | 2.8666 | 11.4333 |
+| plant-frame-4 | storyboard (visual) | 11.4333 | 2.4334 | **13.8667** |
+| toccata-fugue | 4a47c8fd… (audio) | 0.5000 | 97.5000 | **98.0000** |
+
+- **Images end: 13.8667s** (last visual frame 4: at=11.4333 + hold=2.4334)
+- **Audio extends to: 98.0s** (toccata-fugue: at=0.5 + hold=97.5)
+- **Total computed duration** (Helper C, max across all clips): **98.0s**
+- Audio source `source.json` confirms asset duration: 97.5s (`sources/toccata-fugue/source.json` line 3). Audio track is NOT muted (no `muted` key in assembly.json track definition lines 89–95).
+- Asset registry `registry.json` contains the `toccata-fugue` asset (line 35–41) with `"duration": 97.5`. The render-specific `assets.json` only has the 4 image assets.
+
+The locked plan example shows `"duration": 16.0` (plan line 530, decisions line 530) — this is an approximate/aspirational placeholder, not the computed value. The M1 brief calls it "the 16-second desert-plant-growth/plant-growth-storyboard" (brief line 78), which is incorrect for the actual fixture.
+
+### 3. Audio extends the timeline — no track-kind filtering
+
+`_timeline_duration_seconds` (render/run.py:427) computes `max(_clip_timeline_end_seconds(clip) for clip in clips)` with **no track-kind filtering**. Audio clips on audio tracks contribute to the total timeline duration. There is no `muted`-track skip, no visual-only mode.
+
+For visualization, this is a decision point: should "total duration" mean visual span (13.87s), audible span (98s), or both? The render path makes it 98s because Remotion renders the full composition including audio. The plan's Section "Time-scaled layout" (line 669) declares this mode "the truth for duration" — so the visualization must be explicit about which truth it shows.
+
+### 4. Transition/speed/trim interactions
+
+- **Speed**: Only used by Helpers A and D. Helper E (validators) ignores speed. The desert fixture has no speed≠1 clips.
+- **Transitions**: Validated in `_validate_clip_transitions` (validators/timeline.py:139–169) using Helper E (no speed division). Transition duration (from `durationFrames/fps` or `duration`) must fit both adjacent same-track clips. The desert fixture has no transitions.
+- **Trim**: `from`/`to` fields in the Banodoco schema (`_CLIP_ALLOWED`, banodoco_schema.py:340–348) support source trimming. Not used in the desert fixture (uses `hold` instead).
+- **Track `muted`**: Valid track field (`_TRACK_ALLOWED`, banodoco_schema.py:349) but not checked by any duration helper. Muted audio tracks still extend the timeline.
+
+### 5. Canonical internal representation
+
+`_apply_clip_retimed` (projection.py:365–370) sets `clip["hold"] = payload.duration`. `_make_clip_entry` (projection.py:328–329) sets `entry["hold"] = payload.duration` when duration is provided. The canonical internal representation uses `at` + `hold` for timing; `from`/`to`/`speed` are source-trim/speed fields that only matter for media clips with non-trivial source windows.
+
+### 6. Where helpers live — no unified module
+
+| Location | Helpers |
+|----------|---------|
+| `astrid/packs/rendering/executors/render/run.py` | `_clip_duration_seconds`, `_clip_timeline_end_seconds`, `_timeline_duration_seconds` |
+| `astrid/packs/rendering/executors/timeline_storyboard/run.py` | `_clip_duration` |
+| `astrid/core/timeline/validators/timeline.py` | `_clip_duration_seconds` (re-exported via `banodoco_schema.py`) |
+
+None are extracted as a shared utility. The locked plan (line 455) explicitly calls for extraction: "Shared duration and asset-resolution helpers should be extracted rather than copied."
+
+---
+
+## Tasklist implications
+
+The tasklist `planning/phase1a-codex-tasklist.md` does not exist yet in the repository (no file matching that name anywhere in the tree). Based on the plan's Phase 1 outline (plan lines 829–843):
+
+**New tasks that must appear:**
+
+- **T-pre-N: Extract unified duration helper** — Before any visualization model work, extract ONE canonical `clip_duration_seconds(clip) -> float` and `clip_end_seconds(clip) -> float` into a shared location (`astrid/core/timeline/duration.py` or `astrid/packs/rendering/executors/timeline_visualize/src/model.py`). This replaces 3 divergent implementations.
+- **T-pre-N+1: Define track-kind-aware timeline duration** — Decide whether `timeline_duration_seconds` means max(all clips), max(visual only), or both. Provide both modes if needed. The visualization needs at minimum: `visual_duration` (for time-scaled layout bounds) and `total_duration` (for truth).
+- **T-pre-N+2: Fix hold precedence** — Resolve the discrepancy: does `hold` override `(to-from)/speed`, or vice versa? The projection layer uses `hold` exclusively; the storyboard checks hold first; the render path ignores hold for media clips. The unified helper must pick one rule and document it.
+- **T-pre-N+3: Add speed to validators** — Helper E omits speed division. Transition validation using it may compute wrong durations for speed≠1 clips. Fix or document the limitation.
+
+**Existing plan tasks that change:**
+
+- **Phase 1 step 1** ("Extract shared clip-duration and asset-resolution behavior from `timeline_storyboard`", plan line 831–832): This must extract from ALL three sources (render, storyboard, validators), not just storyboard. The extraction must produce the unified helper.
+- **"duration semantics for `hold` and `(to - from) / speed`"** test (plan line 923): Must now also test the unified helper's behavior with audio tracks, muted tracks, and the combined at+hold+duration formula.
+
+---
+
+## Risks & conflicts
+
+1. **The 16-second assumption is wrong.** Both the plan example JSON (`"duration": 16.0`) and the M1 brief ("16-second desert-plant-growth") are incorrect for the real fixture. The visual span is ~13.87s; total with audio is 98s. All test expectations, fixture descriptions, and VLM evaluation prompts must use the correct numbers.
+
+2. **Audio-dominant timeline breaks time-scaled layout.** A 98s timeline with 13.87s of visual content means 85% of the time-scaled layout is empty space (visual silence after frame 4 ends). The time-scaled layout at `pixels_per_second` for 1920px would give only ~270px to the visual action and ~1650px to empty space. This needs explicit design: either (a) use visual-only duration for time-scaled layout, (b) show both spans with a visual-span inset, or (c) add a "visual end" marker at 13.87s with the audio tail compressed or annotated.
+
+3. **Helper extraction creates a coupling point.** The three current consumers (render, storyboard, validators) must all switch to the extracted helper. The render path is particularly sensitive — it's the production rendering pipeline and any duration change could alter render output length.
+
+4. **Speed-in-validators gap.** The validator's `_clip_duration_seconds` (Helper E) omits speed division. This is used for transition validation (line 158–159). If a clip has speed=2, the validator computes the wrong duration and may allow transitions that are too long for the actual rendered duration. This is a latent bug, not just a visualization concern.
+
+5. **Asset registry mismatch.** The render's `assets.json` does not include `toccata-fugue` while `registry.json` does. The visualization must decide which registry to trust for asset lookups. The plan says "verified original media" — the visualization should use the full `registry.json` (timeline-scoped) for asset resolution, not the render-specific `assets.json`.
+
+---
+
+## Elegant simplifications
+
+### One canonical formula set
+
+The unified helper should live in a single location (proposed: `astrid/core/timeline/duration.py`) and export exactly:
+
+```python
+def clip_duration_seconds(clip: dict) -> float:
+    """Canonical clip duration. hold takes precedence over from/to/speed."""
+    hold = clip.get("hold")
+    if isinstance(hold, (int, float)) and float(hold) >= 0:
+        return float(hold)
+    start = float(clip.get("from", 0) or 0)
+    end = float(clip.get("to", start) or start)
+    speed = float(clip.get("speed", 1) or 1)
+    if speed <= 0:
+        return 0.0
+    return max(0.0, end - start) / speed
+
+def clip_end_seconds(clip: dict) -> float:
+    return float(clip.get("at", 0) or 0) + clip_duration_seconds(clip)
+
+def timeline_duration_seconds(timeline: dict, *, track_kinds: set[str] | None = None) -> float:
+    explicit = (timeline.get("metadata", {}) or {}).get("duration_seconds")
+    if isinstance(explicit, (int, float)):
+        return float(explicit)
+    tracks = {t["id"]: t for t in timeline.get("tracks", []) if isinstance(t, dict)}
+    clips = timeline.get("clips", [])
+    if track_kinds is not None:
+        track_ids = {tid for tid, t in tracks.items() if t.get("kind") in track_kinds}
+        clips = [c for c in clips if c.get("track") in track_ids]
+    return max((clip_end_seconds(c) for c in clips), default=0.0)
+```
+
+This replaces 3 divergent implementations and handles the audio-vs-visual split via `track_kinds={"visual"}` vs default (all).
+
+### Time-scaled layout uses visual-only duration
+
+For visualization, `time-scaled` mode should default to `track_kinds={"visual"}` for its horizontal span. The total duration (98s) appears as an annotation. This avoids the empty-space problem and matches what a human would consider "the timeline's visual extent."
+
+### Desert fixture truth is simple
+
+The fixture uses `hold` exclusively (no `from`/`to`/`speed` on any clip). The unified formula reduces to `at + hold` for all clips. The only complexity is the audio track extending the total — which the `track_kinds` parameter cleanly separates.

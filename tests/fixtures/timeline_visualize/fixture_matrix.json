@@ -1,0 +1,162 @@
+{
+  "schema_version": 1,
+  "frozen_at": "2026-08-11",
+  "purpose": "Acceptance spine for the timeline-visualization epic. Every milestone fixture the epic must answer image-only VLM questions against (see docs/architecture/timeline-visualization-plan.md, Phase 0). status=baseline entries are frozen now; status=planned entries are synthesized in later milestones.",
+  "fixtures": [
+    {
+      "id": "desert-overview",
+      "name": "Desert plant-growth storyboard (real fixture)",
+      "scope": "timeline",
+      "purpose": "Real event-sourced timeline: 5 clips (4 visual + 1 audio), 2 tracks, fps 24, head v159. Baseline for total-duration, active-clip-at-timestamp, and track-lane questions.",
+      "status": "baseline",
+      "frozen_facts": "desert_truth.json"
+    },
+    {
+      "id": "multi-track-captions-effects-audio",
+      "name": "Multi-track captions/effects/audio overlaps",
+      "scope": "timeline",
+      "purpose": "Visual + caption/text + effect layers + audio overlapping the same window; top-layer and overlap questions.",
+      "status": "planned"
+    },
+    {
+      "id": "pinned-shot-contextual-layers",
+      "name": "Pinned shot with contextual layers",
+      "scope": "shot",
+      "purpose": "Authored pinned-shot bounds plus every intersecting track; what-belongs-to-this-shot and exact-next-focus-id questions.",
+      "status": "planned"
+    },
+    {
+      "id": "tiny-clips",
+      "name": "Tiny clips",
+      "scope": "range",
+      "purpose": "Sub-second and sub-frame clips; frame-quantized duration floor (min 1 frame) and label/geometry density at page scale.",
+      "status": "planned"
+    },
+    {
+      "id": "long-gaps",
+      "name": "Long gaps",
+      "scope": "range",
+      "purpose": "Large empty stretches between clips; continuation markers, mini-map position, and page-boundary behavior.",
+      "status": "planned"
+    },
+    {
+      "id": "dense-500-clips",
+      "name": "500-clip dense timeline",
+      "scope": "timeline",
+      "purpose": "Pagination split before crowding; stable ids across pages, continued-clip marks, lane-band splitting.",
+      "status": "planned"
+    },
+    {
+      "id": "multi-timeline-colliding-ids",
+      "name": "Multiple timelines with colliding local ids",
+      "scope": "project",
+      "purpose": "Project index + per-timeline sub-views; identical local clip ids must never renumber or collide across TL ids.",
+      "status": "planned"
+    },
+    {
+      "id": "sources-verified-fullres",
+      "name": "Verified full-resolution sources",
+      "scope": "asset",
+      "purpose": "Content hash verified, local file present; original file (not a copy) becomes primary media.",
+      "status": "planned"
+    },
+    {
+      "id": "sources-changed",
+      "name": "Changed source",
+      "scope": "asset",
+      "purpose": "Recorded hash mismatches current file; explicit unavailable/`changed` state, never a fabricated success.",
+      "status": "planned"
+    },
+    {
+      "id": "sources-missing",
+      "name": "Missing source",
+      "scope": "asset",
+      "purpose": "Registry entry with no file on disk; navigable `missing` state with warning evidence pack.",
+      "status": "planned"
+    },
+    {
+      "id": "sources-remote",
+      "name": "Remote / uncached source",
+      "scope": "asset",
+      "purpose": "Remote URL not locally cached; redacted remote identity, offline command never fetches fallback.",
+      "status": "planned"
+    },
+    {
+      "id": "sources-thumbnail-only",
+      "name": "Thumbnail-only source",
+      "scope": "asset",
+      "purpose": "Only thumbnailUrl present; never called the original, explicit `thumbnail_only` role.",
+      "status": "planned"
+    },
+    {
+      "id": "version7-root-vs-version8-current",
+      "name": "Version-7 root vs version-8 current",
+      "scope": "timeline",
+      "purpose": "Snapshot lineage: root locks v7 head/hashes; current state is v8; drill-down stays snapshot-bound, refresh_root offered.",
+      "status": "planned"
+    },
+    {
+      "id": "empty-timeline",
+      "name": "Empty timeline",
+      "scope": "timeline",
+      "purpose": "No clips/tracks; valid zero-length view with diagnostics, no crash.",
+      "status": "planned"
+    },
+    {
+      "id": "tombstoned-timeline",
+      "name": "Tombstoned timeline",
+      "scope": "project",
+      "purpose": "manifest.json tombstoned_at set; excluded from --all project index.",
+      "status": "planned"
+    },
+    {
+      "id": "transcript-clipping",
+      "name": "Transcript clipping",
+      "scope": "text",
+      "purpose": "Mapped speech occurrence cut at clip bounds; exact/clipped/unavailable mapping states, TS+SP id split.",
+      "status": "planned"
+    },
+    {
+      "id": "speed-changes",
+      "name": "Speed changes",
+      "scope": "clip",
+      "purpose": "Clips with speed != 1 (duration = (to-from)/speed) and effect of speed on timeline bounds.",
+      "status": "planned"
+    },
+    {
+      "id": "source-reuse",
+      "name": "Repeated source use",
+      "scope": "asset",
+      "purpose": "One TS source segment reused by multiple clips; one TS, multiple SP occurrences, each retaining origin ids.",
+      "status": "planned"
+    },
+    {
+      "id": "speakers-captions",
+      "name": "Speakers + authored captions",
+      "scope": "text",
+      "purpose": "Speaker labels and segment timestamps from linked transcript; authored caption clips distinct from mapped speech.",
+      "status": "planned"
+    },
+    {
+      "id": "missing-provenance",
+      "name": "Missing transcript provenance",
+      "scope": "text",
+      "purpose": "No transcript_ref / no segment ids; warning pack, never inferred by filename proximity.",
+      "status": "planned"
+    },
+    {
+      "id": "baked-text",
+      "name": "Baked-in text",
+      "scope": "asset",
+      "purpose": "Text visibly baked into pixels; `not_inspected` unless a recorded OCR result exists.",
+      "status": "planned"
+    },
+    {
+      "id": "snapshot-drift",
+      "name": "Snapshot drift",
+      "scope": "timeline",
+      "purpose": "Child view vs newer current state; old lineage stays valid and clearly snapshot-bound, refresh_root surfaces difference.",
+      "status": "planned"
+    }
+  ]
+}

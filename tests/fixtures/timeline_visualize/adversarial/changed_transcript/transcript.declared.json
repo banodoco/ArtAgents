@@ -1,0 +1,10 @@
+{
+  "segments": [
+    {
+      "id": "declared",
+      "start": 0,
+      "end": 2,
+      "text": "declared bytes never on disk"
+    }
+  ]
+}

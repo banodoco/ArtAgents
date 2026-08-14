@@ -1,0 +1,45 @@
+{
+  "id": "malformed_answers",
+  "kind": "vlm_garbage_answers",
+  "transport": "understanding.visual_understand OrderedImageEvidence answers + R22 scorer",
+  "fixture": {
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "answers": {
+          "items": {
+            "additionalProperties": true,
+            "properties": {"question_id": {"type": "string"}},
+            "required": ["question_id"],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "fixture_id": {"type": "string"}
+      },
+      "required": ["fixture_id", "answers"],
+      "type": "object"
+    },
+    "answers": {
+      "unparseable": "this is not json at all",
+      "wrong_schema": {"fixture_id": "bad", "answers": "not-a-list"},
+      "wrong_types": {
+        "fixture_id": "bad",
+        "answers": [{"question_id": "frames", "frames": "three-hundred"}]
+      }
+    },
+    "specs": [
+      {"question_id": "frames", "kind": "frames", "tolerance_seconds": null, "expected": 332}
+    ]
+  },
+  "expected": {
+    "all_zero": "score_answers returns 0.0 for every malformed payload",
+    "detail": [
+      "unparseable -> schema-failure (json.dumps cannot round-trip a non-JSON answer envelope)",
+      "wrong_schema -> schema-failure for every question",
+      "wrong_types -> parse-failure for the frames question",
+      "aggregate_sessions(3 x 0.0) -> passed False"
+    ],
+    "surface": ["R22 scorer score_answers / aggregate_sessions"]
+  }
+}

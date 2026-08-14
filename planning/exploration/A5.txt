@@ -1,0 +1,101 @@
+I now have all the evidence. Here is the comprehensive analysis:
+
+---
+
+## Findings
+
+### 1. Full route: gateway dispatch → run finalization
+
+**Gateway entry** (`astrid/__main__.py:9` → `astrid/core/gateway/__init__.py:178-189`):
+`main()` catches `AstridError` and top-level exceptions, delegating to `_main_impl(raw)`.
+
+**Session gate** (`gateway/__init__.py:227-302`): If the verb is not in `SPRINT1_UNBOUND_ALLOWLIST_CONTRACT` (lines 149-170), a session must resolve via `ASTRID_SESSION_ID` or `.astrid-session` file. Timeline verbs with explicit `--project` bypass the session gate: `--project` plus `("timelines", "clip"/"track"/"effect"/"transition"/"theme"/"audio"/"arrangement"/"pool"/"registry")` (lines 393-408). But **`visualize` is not in this bypass list**, and `--from-view` excludes `--project` by design, so `--from-view` cannot currently work without a bound session.
+
+**Dispatch** (`gateway/__init__.py:314-318` → `gateway/dispatch.py:23-43`): `_dispatch()` resolves the top-level verb. `_dispatch_timelines` (line 303-306) calls `timelines_cli.main(args)`.
+
+**CLI handler** (`astrid/core/cli/timeline.py:43-55`): `main()` calls `build_parser()` (from `timeline_parser.py:1406`) then `args.handler(args)`. The `_COMMANDS` table (line 66) drives declarative parser construction; a new `visualize` entry must be added there.
+
+**SDK invoke** (`astrid/sdk/invocation.py:213-328`): `invoke()` loads registries, builds `ExecutorRunRequest` or `OrchestratorRunRequest` (with `invocation="sdk"`), then calls `run_executor()` / `run_orchestrator()`. The design doc (plan.md:508-510) mandates this path.
+
+**Executor runner** (`astrid/core/execution/executor/runner.py:280-281` → `CapabilityRunner.run()` at `capability_runner.py:106-154`): The shared control flow: gate → resolve definition → `prepare_project()` → `run_inner()` → `finalize_project()`.
+
+**Project run prep** (`executor/runner.py:913-953` → `project/run.py:145-288`): `_prepare_project_request()` resolves `requires_timeline` from executor metadata (defaults `True`, line 933), then calls `prepare_project_run()`. If `requires_timeline=True`, `resolve_required_project_timeline()` (lines 291-326) demands exactly one non-tombstoned timeline.
+
+**Finalization** (`executor/runner.py:1016-1038` → `project/run.py:363-428`): `finalize_project_run()` writes `run.json`, discovers `manifest_path`, records contributing runs on completed status.
+
+### 2. Managed run record contents and `--all` fit
+
+`build_run_record()` at `project/schema.py:94-151` produces: `run_id`, `project_slug`, `tool_id`, `kind`, `status`, `out`, `argv`, `artifacts`, `metadata`, `session_id`, `auto_bound`, `invocation`, `timeline_id` (single ULID or None), `created_at`, `updated_at`, `schema_version`. At finalize time, `manifest_path` is added (`project/run.py:391-397`). `executor_version` exists only on `ExecutorRunResult.runner.py:165` — NOT persisted in `run.json`. `RUN_SCHEMA_VERSION = 1` (schema.py:29). Valid invocations: `{"cli", "sdk", "scratch", "task"}` (line 31).
+
+**`--all` run-record problem**: `timeline_id` is a single `str | None` (schema.py:148-150). A multi-timeline `--all` invocation produces one run record but spans N timelines. The current schema cannot represent this. Options: (a) set `timeline_id=None` and record timeline set in metadata, (b) bump `RUN_SCHEMA_VERSION` and accept `list[str]`, or (c) emit one parent run + N child runs. The design doc is silent on this — it only says "Project scope repeats the `TLxx-*` family for every selected timeline" (plan.md:741) and that one executor invocation handles all timelines at once.
+
+### 3. `--from-view` sessionless — what breaks
+
+`--from-view` is mutually exclusive with `--project` and `--timeline-slug` per the design (plan.md:143-144, decisions:143-144). However, the session gate at `gateway/__init__.py:378-413` requires either: (a) being on `SPRINT1_UNBOUND_ALLOWLIST_CONTRACT`, or (b) having a bound session, or (c) having explicit `--project` with certain timeline verbs (lines 393-408).
+
+`--from-view` satisfies none of these. It has no `--project`, is not on the allowlist, and may not have a session bound. **It will fail at the session gate with "no session bound."**
+
+The fix: add `("timelines", "visualize")` to the `--project` bypass at line 393-408 when `--from-view` is present, OR add it to `SPRINT1_UNBOUND_ALLOWLIST_CONTRACT` (which currently lists `("timelines", "create")` but NOT `("timelines", "visualize")` at all). The simplest correct approach: **add `("timelines", "visualize")` to the explicit-`--project` bypass set at lines 394-400 AND separately allow `--from-view` (which has no `--project`) by adding `("timelines", "visualize")` to `SPRINT1_UNBOUND_ALLOWLIST_CONTRACT` or creating a new `--from-view`-aware gate path**.
+
+Existing sessionless pattern: `_resolve_optional_session()` at `_shared.py:34-42` catches exceptions and returns `None`. `_resolve_edit_context()` at `_shared.py:84-115` builds a stable request-scoped actor without session when `--project` is provided. `cmd_ls` at `timeline_crud.py:25-57` uses `resolve_current_session(slug=...)` and falls back to `args.project`. None of these handle fully sessionless-without-project like `--from-view` requires.
+
+### 4. Stdout cleanliness today
+
+Current patterns:
+- **Human-readable output** → `print()` to stdout: `cmd_ls` (table, crud.py:47-55), `cmd_show` (structured text, crud.py:145-190), `cmd_cost` (cost rollup, output.py:205-214), `cmd_create` (confirmation, crud.py:78-81), `cmd_export` (confirmation, output.py:136)
+- **Machine-readable JSON** → `print(json.dumps(...))` to stdout: `cmd_show --json` (crud.py:142), `cmd_cost --json` (output.py:202)
+- **Project resolution** → `print(..., file=sys.__stderr__)`: gateway at `gateway/__init__.py:311` prints `"project: {slug} ({source})"` to stderr; `cmd_create` at crud.py:78 prints to stdout (inconsistency)
+- **Errors/warnings** → raise `AstridError` (rendered by gateway `render_astrid_error`)
+
+Design doc states (plan.md:161-167): "The command prints the managed run id, manifest path, mandatory core entrypoints, and available primary image and factual-Markdown entrypoints in a compact machine-readable summary." The visualize summary should go to **stdout** as a compact structured block (likely JSON or key-value), while project resolution noise belongs on **stderr**.
+
+### 5. Direct interchange inputs (standalone timeline file) — precedent?
+
+**NOT FOUND.** There is no existing precedent in the codebase for operating on an arbitrary standalone timeline file outside project ownership. All timeline CRUD commands (`cmd_show`, `cmd_ls`, `cmd_create`, etc.) resolve through `_require_session()` or `resolve_current_session()`, which bind to a project. The `--from-view` design path is novel — it reads a JSON manifest file at an absolute path, deserializes the frozen snapshot's root hashes, and operates without a managed project context. This is a **new ownership model** that the design treats as read-only and snapshot-consistent. The existing `project/ownership.py` (`require_project_owned_artifact`) has no mechanism for this.
+
+---
+
+## Tasklist implications
+
+The design doc does not contain a T-task list in the repository. No `phase1a-codex-tasklist.md` file exists. Based on the 1128-line locked plan's Phase 4 ("durable CLI façade and project scope", lines 871-886), these tasks are implied. The following adjustments are needed:
+
+**Tasks that must be added or split:**
+
+- **T-new-1**: Add `visualize` to the `_COMMANDS` table in `timeline_parser.py` with all arguments from the command contract (slug, `--all`, `--shot`, `--range`, `--at`, `--clip`, `--asset`, `--from-view`, `--focus`, `--context`, `--neighbors`, `--layout`, `--format`, `--filmstrip`, `--rendered-video`, `--project`)
+- **T-new-2**: Add `cmd_visualize` handler in a new file (`timeline_visualize.py` or in `timeline_output.py`) that resolves project/session, selects timeline(s), repairs projection, invokes `rendering.timeline_visualize` through the SDK, and prints the compact result summary
+- **T-new-3**: Fix the session gate — add `("timelines", "visualize")` with explicit `--project` to the bypass at `gateway/__init__.py:393-408`, AND add `("timelines", "visualize")` to `SPRINT1_UNBOUND_ALLOWLIST_CONTRACT` when `--from-view` is present (requires a new gate path or allowlist entry)
+- **T-new-4**: Extend the run schema — either allow `timeline_id: list[str]` (bump `RUN_SCHEMA_VERSION` to 2) or add a `timeline_ids` metadata field for `--all` runs; also persist `executor_version` in the run record
+- **T-new-5**: Implement `--from-view` sessionless path: read manifest JSON, validate hashes, construct frozen-snapshot inputs, bypass project resolution entirely
+
+**Tasks that change:**
+- Phase 4's "Resolve default/named/all managed timelines" (plan.md:873) now requires multi-timeline resolution that `resolve_required_project_timeline()` cannot handle — it currently demands exactly one
+- "Invoke through SDK as a managed project run" (plan.md:876) must handle `--all` producing a single run record with multi-timeline metadata
+- "Implement snapshot-consistent `--from-view` plus `--focus`" (plan.md:878) must operate without a session or project
+
+---
+
+## Risks & conflicts
+
+1. **`--from-view` vs. session gate**: The locked design says `--from-view` is mutually exclusive with `--project`, but the gateway requires either a session or `--project` for timeline verbs not on the allowlist. The design and gateway contract conflict directly. Resolution: either relax the gateway allowlist for `visualize --from-view` specifically, or make `--from-view` carry its own authentication (e.g., manifest hash verification as authorization).
+
+2. **`--all` vs. single `timeline_id`**: `build_run_record()` accepts one `timeline_id`. A single executor invocation for `--all` processing N timelines cannot record N timeline_ids in the current schema. A `RUN_SCHEMA_VERSION` bump to 2 is the cleanest fix, but impacts all run-record consumers (cost rollup, export, audit).
+
+3. **`prepare_project_run()` demands exactly one timeline**: `resolve_required_project_timeline()` at `project/run.py:291-326` raises an error for zero or multiple timelines. For `--all`, the executor's `requires_timeline` metadata must be `False`, or the project preparation path must be bypassed entirely.
+
+4. **No `executor_version` in run.json**: The `ExecutorRunResult` carries `executor_version` (runner.py:165) but it is never persisted. For reproducibility and snapshot-verification, the run record should capture the executor's content digest.
+
+5. **Stdout inconsistency**: `cmd_create` prints project resolution to stdout (crud.py:78) while the gateway prints it to stderr (gateway/__init__.py:311). The visualize handler must be explicit about stdout vs. stderr.
+
+---
+
+## Elegant simplifications
+
+1. **One run record for `--all`, `timeline_id=None`**: Rather than extending the schema to accept `list[str]`, set `timeline_id=None` and record the full timeline set in `metadata.timeline_ids`. This preserves backward compatibility and avoids a schema version bump. The executor's `requires_timeline` metadata should be `False` for `--all` so `prepare_project_run()` skips single-timeline resolution.
+
+2. **`--from-view` as an allowlisted unbound verb**: Add `("timelines", "visualize")` to `SPRINT1_UNBOUND_ALLOWLIST_CONTRACT`. The manifest file at the absolute path is self-authenticating (it carries root hashes). No session or project is needed for a read-only snapshot drill-down. The gateway already supports this pattern — it's just a one-line addition.
+
+3. **Single `cmd_visualize` handler**: Use the existing `_resolve_edit_context()` pattern from `_shared.py:84-115` for sessionless `--project` mode, and a separate code path for `--from-view` that reads the manifest directly. Both paths converge on `astrid.sdk.invoke()` with different `inputs`.
+
+4. **Compact stdout summary as JSON**: The design says "compact machine-readable summary." A single JSON object printed to stdout with keys `run_id`, `manifest_path`, `ground_truth_path`, `primary_image`, `structure_md`, and `error` (when applicable) is simpler than a custom format and parseable by agents. Project noise stays on stderr.
+
+5. **No standalone file interchange surface in v1**: The design already scopes `--from-view` to continuing from an existing visualization manifest — not from an arbitrary timeline JSON file. This avoids the ownership problem entirely: the manifest was already produced by a managed run, so provenance is chained. No new ownership model needed.

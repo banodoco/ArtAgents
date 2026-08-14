@@ -1,0 +1,15 @@
+{
+  "id": "tombstone",
+  "kind": "timeline_tombstone_after_root",
+  "timeline": "desert_slice (ULID 01KYPVKMW5STB4W6FE05ED8242, slug plant-growth-storyboard)",
+  "mutation": {
+    "description": "A root view freezes the timeline at v159. The timeline is then tombstoned by stamping a non-null tombstoned_at into timelines/<ULID>/manifest.json (the repo's only tombstone mechanism).",
+    "tombstone_marker": "manifest.json tombstoned_at",
+    "slug": "plant-growth-storyboard"
+  },
+  "expected": {
+    "frozen_lineage_resolves": "drill-down from the frozen root still succeeds and is byte-identical to the pre-tombstone drill-down",
+    "refresh_surfaces_tombstone": "any fresh render of the live timeline (slug selection) fails with a diagnostic naming the tombstone ('timeline '<slug>' is tombstoned')",
+    "surface": ["R16 frozen drill-down independence", "R6 select_timeline tombstone exclusion"]
+  }
+}

@@ -1,10 +1,10 @@
 """Run-retention selection for ``astrid runs gc``.
 
 This module owns the destructive-selection contract: age-based selection,
-optional newest-N retention, and protection of any run referenced by timeline
-``contributing_runs`` manifests.  The CLI handler renders stable output and
-defaults to dry-run so users always see what *would* happen before any
-destructive action.
+optional newest-N retention, protection of any run referenced by timeline
+``contributing_runs`` manifests, and run-owned evidence retention. The CLI
+handler renders stable output and defaults to dry-run so users always see what
+*would* happen before any destructive action.
 """
 
 from __future__ import annotations
@@ -30,6 +30,7 @@ class RunGcEntry:
     timestamp_source: str
     selected_by_age: bool
     protected: bool
+    evidence: bool = False
 
 
 @dataclass(frozen=True)
@@ -40,6 +41,8 @@ class RunGcSelection:
     protected_run_ids: frozenset[str]
     runs: tuple[RunGcEntry, ...]
     deletion_candidates: tuple[RunGcEntry, ...]
+    evidence_run_ids: frozenset[str] = frozenset()
+    include_evidence: bool = False
 
 
 def select_runs_for_gc(
@@ -47,6 +50,7 @@ def select_runs_for_gc(
     *,
     older_than_days: int = 30,
     keep_last: int | None = None,
+    include_evidence: bool = False,
     root: str | Path | None = None,
     now: datetime | None = None,
 ) -> RunGcSelection:
@@ -57,6 +61,8 @@ def select_runs_for_gc(
       otherwise filesystem mtime fallback
     - not inside the newest ``keep_last`` runs when that retention floor is set
     - not referenced by any timeline manifest ``contributing_runs``
+    - not marked ``run.metadata.evidence: true`` unless ``include_evidence``
+      was explicitly requested
     """
 
     slug = validate_project_slug(project_slug)
@@ -68,7 +74,13 @@ def select_runs_for_gc(
 
     protected_run_ids = _protected_contributing_runs(proj_root)
     entries = [
-        _run_gc_entry(run_root, protected_run_ids=protected_run_ids, now=current, older_than_days=older_than_days)
+        _run_gc_entry(
+            run_root,
+            protected_run_ids=protected_run_ids,
+            include_evidence=include_evidence,
+            now=current,
+            older_than_days=older_than_days,
+        )
         for run_root in sorted((p for p in runs_root.iterdir() if p.is_dir()), key=lambda p: p.name)
     ] if runs_root.is_dir() else []
 
@@ -95,6 +107,8 @@ def select_runs_for_gc(
         protected_run_ids=frozenset(protected_run_ids),
         runs=all_runs,
         deletion_candidates=deletion_candidates,
+        evidence_run_ids=frozenset(entry.run_id for entry in entries if entry.evidence),
+        include_evidence=include_evidence,
     )
 
 
@@ -123,11 +137,13 @@ def _run_gc_entry(
     run_root: Path,
     *,
     protected_run_ids: set[str],
+    include_evidence: bool,
     now: datetime,
     older_than_days: int,
 ) -> RunGcEntry:
     sort_epoch, source = _run_timestamp_or_mtime(run_root)
     age_days = max(0.0, (now.timestamp() - sort_epoch) / 86400.0)
+    evidence = _run_is_evidence(run_root)
     return RunGcEntry(
         run_id=run_root.name,
         run_root=run_root,
@@ -135,8 +151,24 @@ def _run_gc_entry(
         sort_epoch=sort_epoch,
         timestamp_source=source,
         selected_by_age=age_days > float(older_than_days),
-        protected=run_root.name in protected_run_ids,
+        protected=(
+            run_root.name in protected_run_ids
+            or (evidence and not include_evidence)
+        ),
+        evidence=evidence,
     )
+
+
+def _run_is_evidence(run_root: Path) -> bool:
+    run_json_path = run_root / "run.json"
+    if not run_json_path.is_file():
+        return False
+    try:
+        raw = json.loads(run_json_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    metadata = raw.get("metadata") if isinstance(raw, dict) else None
+    return isinstance(metadata, dict) and metadata.get("evidence") is True
 
 
 def _run_timestamp_or_mtime(run_root: Path) -> tuple[float, str]:
@@ -213,6 +245,15 @@ def cmd_runs_gc(
         default=False,
         help="Actually delete the listed run directories (default: dry-run).",
     )
+    parser.add_argument(
+        "--include-evidence",
+        action="store_true",
+        default=False,
+        help=(
+            "Include evidence-marked runs in age-based selection. Actual deletion "
+            "still requires --apply; timeline contributing runs remain protected."
+        ),
+    )
     try:
         args = parser.parse_args(list(argv))
     except SystemExit as exc:
@@ -230,6 +271,7 @@ def cmd_runs_gc(
         slug,
         older_than_days=args.older_than_days,
         keep_last=args.keep_last,
+        include_evidence=args.include_evidence,
         root=projects_root,
     )
 
@@ -240,7 +282,7 @@ def cmd_runs_gc(
     dry_run = not args.apply
     header = "[DRY RUN] " if dry_run else ""
 
-    n_protected = len(selection.protected_run_ids)
+    n_protected = len({entry.run_id for entry in selection.runs if entry.protected})
     n_candidates = len(selection.deletion_candidates)
 
     if n_candidates == 0 and n_protected == 0:
@@ -276,8 +318,13 @@ def cmd_runs_gc(
             c.run_id for c in selection.deletion_candidates
         }:
             age_str = f"{entry.age_days:.1f}d"
+            reason = (
+                "protected"
+                if entry.run_id in selection.protected_run_ids
+                else "evidence"
+            )
             print(
-                f"  (protected) {entry.run_id}  "
+                f"  ({reason}) {entry.run_id}  "
                 f"project={slug}  "
                 f"age={age_str}  "
                 f"path={entry.run_root}",

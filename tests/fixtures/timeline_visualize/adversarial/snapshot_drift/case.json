@@ -1,0 +1,15 @@
+{
+  "id": "snapshot_drift",
+  "kind": "live_append_after_frozen_root",
+  "timeline": "desert_slice (ULID 01KYPVKMW5STB4W6FE05ED8242, UUID ed70ef66-43da-4182-9f14-69361c6c5e10)",
+  "mutation": {
+    "description": "A root view freezes the timeline at event head v159. The live timeline then grows to v160 (timeline.renamed append).",
+    "root_version": 159,
+    "live_version": 160
+  },
+  "expected": {
+    "drill_down_frozen": "drill-down from the frozen root still resolves with the OLD snapshot SNS and byte-identical pack",
+    "refresh_root_new_sns": "refresh-root produces a NEW snapshot SNS (v160) while the frozen root pack is never mutated",
+    "surface": ["R16 refresh_root is the sole transition", "snapshot_digest SNS"]
+  }
+}

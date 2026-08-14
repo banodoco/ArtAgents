@@ -1,0 +1,97 @@
+Now I have all the evidence. Here's the report:
+
+---
+
+## Findings
+
+### 1. Existing rendering stack
+
+**`rendering.render`** (`astrid/packs/rendering/executors/render/run.py`): Uses Remotion (Node.js/TypeScript), not Python. It serializes timeline data to JSON, launches an HTTP server for assets, then shell-executes `npx remotion render`. Not relevant for the Pillow/SVG path — it's the final video renderer.
+
+**`rendering.timeline_storyboard`** (`astrid/packs/rendering/executors/timeline_storyboard/run.py`): The only existing Pillow-based image rendering. Uses `from PIL import Image, ImageDraw, ImageFont, ImageOps` (line 364). Saves PNG via `sheet.save(temporary, format="PNG", compress_level=9)` (line 554). No SVG output at all — HTML is produced as a string, not rendered.
+
+**Font selection** is environment-dependent with no bundling:
+- Storyboard: tries `ImageFont.truetype("DejaVuSans-Bold.ttf", 24)`, falls back to `ImageFont.load_default()` (lines 386–391). This is a **system font lookup** — fails on macOS without DejaVu installed.
+- `visual_understand/run.py:128-136`: Better pattern — iterates through `/System/Library/Fonts/Supplemental/Arial Bold.ttf`, `/Library/Fonts/Arial Bold.ttf`, `/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf`, falls back to `load_default()`.
+- Several video-editing orchestrators use hardcoded macOS paths like `/System/Library/Fonts/Supplemental/Arial Bold.ttf` (lines in `logo_ideas/run.py:270`, `animate_image/run.py:306`, etc.) — these are macOS-only and would fail on Linux CI.
+
+**No SVG rasterization exists anywhere** in the codebase. Searches for `cairosvg`, `resvg`, `inkscape`, `svg2png` return zero results. The plan mandates deterministic SVG geometry + PNG from the same layout model, but no SVG→PNG rasterization tool is declared or available.
+
+**Existing determinism test** in `tests/packs/rendering/test_timeline_storyboard.py:314-316`:
+```python
+second_preview = tmp_path / "second-preview.png"
+storyboard.render_contact_sheet(result["view_model"], second_preview)
+assert second_preview.read_bytes() == result["preview_png"].read_bytes()
+```
+This proves the byte-identical re-render pattern works with the current Pillow + same-input approach. The test also uses `preview.getpixel((x, y))` assertions (line 305) — pixel-level verification is established practice.
+
+### 2. Pillow pinning and platform support
+
+**`pyproject.toml:15`**: `"pillow>=10.0"` — only a minimum bound, **not pinned**. No `uv.lock`, `poetry.lock`, or `requirements.txt` with pinned Pillow. Current installed version (from `python3 -c "import PIL; print(PIL.__version__)"`): **10.2.0**.
+
+**CI** (`.github/workflows/ci.yml:17,102`): Only `ubuntu-latest`. No macOS arm64 runner. The plan's "across supported platforms/Pillow versions" pixel-buffer comparison (plan:954) has no CI infrastructure to exercise it.
+
+**No SVG rasterization dependency** exists. To produce PNG from SVG geometry (the plan's design: layout model → SVG + PNG), one of `cairosvg`, `resvg` (via `resvg-py`), or a subprocess call to `inkscape`/`rsvg-convert` would need to be added. None are in `pyproject.toml` or discussed in the plan.
+
+### 3. Desert-plant-growth fixture density
+
+**The fixture does not exist in the repository.** Searches for `desert-plant`, `plant-growth-storyboard` across all files return only planning document references — no timeline JSON, no assets, no project directory. The `projects/` directory contains 9 other projects (`ados-talks`, `smoke`, `demo`, `agentic-*` DS fixtures) but no `desert-plant-growth`.
+
+The plan describes it as a **16-second** timeline (plan:530, m1-brief:78), but without the actual fixture, clip count, track count, and page density at 1920×1080 cannot be measured. The plan's pagination constants (80px min track height, 24px min body text, 60px min tick spacing, 4px min clip width, 96px min thumbnail width — plan:778-783) give us the **theoretical** density: at 1080px height, ~13 tracks max (ignoring header/footer/lane gaps); at 1920px width, a 16-second timeline at ~100px/s would fit in ~1 page. A 98-second timeline at ~19px/s would need 2-3 pages time-scaled. But these are speculative without the real fixture.
+
+### 4. Existing deterministic-output machinery
+
+**JSON**: `astrid/core/foundation/atomic_io.py:108-129` — `write_json_atomic` uses `json.dump(payload, handle, indent=2, sort_keys=True)` plus atomic `os.replace()`. This is the canonical pattern, used pervasively (50+ call sites with `sort_keys=True`). All JSON machine contracts for the evidence pack can reuse this directly.
+
+**Hashing**: Two complementary facilities:
+- `astrid/core/foundation/hash.py:9-16` — `sha256_file(path)` for files
+- `astrid/core/timeline/integrity.py:12-22,30-69` — `compute_sha256(path)` + `verify(output)` returning `"ok"|"missing"|"mismatch"`. The verify function already handles both dict and dataclass inputs and checks both sha256 and size.
+
+**xxhash**: `astrid/core/threads/record.py:167` uses `xxhash.xxh64_hexdigest(payload)` for fast content hashing. Available as `xxhash>=3.4` in pyproject.toml:17. Could be used for the root snapshot hash or inline content digests where SHA-256 is overkill.
+
+**PNG metadata**: `astrid/core/util/png_metadata.py` — atomic PNG save with tEXt chunk preservation. Not directly needed for visualization output but proves the atomic-pattern for PNG is established.
+
+**Deterministic re-render proof**: `test_timeline_storyboard.py:316` — `assert second_preview.read_bytes() == result["preview_png"].read_bytes()` confirms byte-identical PNG from same inputs is achievable with Pillow.
+
+---
+
+## Tasklist implications
+
+No `phase1a-codex-tasklist.md` exists in the repository — the tasklist file referenced in the prompt was not found. The plan defines phases 0–5 (plan:796-913) but not numbered T-tasks. Assuming T-tasks would be derived from those phases:
+
+**New tasks needed:**
+- **Font bundling task**: Bundle a deterministic open-source font (e.g., DejaVuSans or Inter) inside the pack, with `ImageFont.truetype()` pointing at the bundled path. The current system-font approach is non-deterministic across platforms.
+- **Pillow pinning task**: Pin `pillow==10.2.0` (or current stable) in `pyproject.toml` and document the pinned runtime contract. Without this, byte-identical PNG is not guaranteed.
+- **SVG rasterization dependency task**: Add and evaluate `cairosvg` vs `resvg-py` for SVG→PNG rasterization. The plan says "deterministic SVG" + PNG from the same layout model, but the current stack has no way to turn SVG into PNG without adding a dependency.
+- **Cross-platform pixel-buffer test**: The plan (plan:954-955) calls for "across supported platforms/Pillow versions, compare decoded pixel buffers and dimensions rather than compressed PNG bytes." This requires a CI matrix with at least ubuntu + macOS arm64, which doesn't exist today.
+- **Fixture creation task**: The `desert-plant-growth` fixture and all 11 validation fixtures (brief:293-306) must be created before any rendering code can be tested.
+
+**Tasks that merge/split:**
+- Phase 2 "layout engine and SVG" and Phase 3 "PNG and agent evidence pack" are tightly coupled around the shared layout model. The SVG rasterization decision (cairosvg vs resvg) must happen before either renderer is complete.
+- The "deterministic SVG" task and "byte-identical PNG" task share the font-bundling prerequisite — these should be a single "rendering determinism" task group.
+
+---
+
+## Risks & conflicts
+
+1. **Font non-determinism is the biggest risk.** The plan says "byte-identical PNG in a pinned runtime" but every existing Pillow user in Astrid depends on system fonts. System font rendering varies by OS, font version, and even fontconfig cache state. The storyboard's fallback to `load_default()` produces a tiny bitmap font that would violate the 24px minimum body-text rule.
+
+2. **No SVG rasterization path exists.** The plan assumes SVG + PNG from one layout model, but offers no concrete SVG→PNG bridge. `cairosvg` depends on Cairo (system library), making it non-trivial across platforms. `resvg-py` is pure Rust with wheels — more deterministic but less common.
+
+3. **Pillow is unpinned.** `pillow>=10.0` means CI could resolve 10.2, 10.4, or 11.0 on different days. PNG compression output is not guaranteed byte-identical across Pillow versions even with the same `compress_level`. The plan explicitly acknowledges this (plan:954-955: "compare decoded pixel buffers") but the storyboard test at line 316 asserts raw byte equality — an inconsistency to resolve.
+
+4. **No macOS CI.** The plan mentions "supported platforms" plural, but only ubuntu-latest exists in CI. darwin arm64 (the development platform) has no automated verification.
+
+5. **Fixture doesn't exist.** Density/pagination rules cannot be validated without the `desert-plant-growth` fixture. The 16-second claim in the plan may be stale — the plan also mentions an "expected" 98-second multi-track timeline for density testing.
+
+---
+
+## Elegant simplifications
+
+1. **Bundle one font, skip the font-fallback ladder.** Ship a single open-source font file (e.g., `Inter-Regular.ttf` + `Inter-Bold.ttf`) inside `astrid/packs/rendering/executors/timeline_visualize/fonts/`. Use `ImageFont.truetype(str(bundled_path), size)` with no fallback. This makes font rendering deterministic across all platforms with zero environment dependencies.
+
+2. **Skip SVG rasterization for M1 — render SVG+PNG independently from the layout model.** The layout model already knows every box position, label, and color. Pillow can draw the same geometry directly without needing to rasterize SVG. The SVG renderer writes `<rect>`, `<text>`, `<line>` primitives; the PNG renderer calls `draw.rectangle()`, `draw.text()`, `draw.line()`. Both consume the same `LayoutPage` objects. This eliminates the need for cairosvg/resvg entirely — at the cost of needing careful parity testing, but that's already required by the plan's exit gate (plan:854-856).
+
+3. **Use the existing `compute_sha256` + `verify()` machinery unchanged.** The integrity module (`astrid/core/timeline/integrity.py`) already handles the exact ok/missing/mismatch states the evidence pack needs for source asset verification and snapshot hashing. No new hashing code required.
+
+4. **Pagination rule of thumb (grounded in plan constants, not fixture):** At 1920×1080 with 80px min track height, 60px ruler, and 40px header/footer = ~960px usable for tracks = **12 tracks per vertical page**. At 100 px/s (comfortable density for 16s timeline), 1920px fits ~17s per page with gutters. At 20 px/s (minimum for 98s timeline), ~90s per page. So: **ceil(tracks/12) vertical pages × ceil(duration_s × px_per_s / 1800) horizontal pages**. The plan's 98-second multi-track case would paginate to roughly 2×2=4 pages time-scaled or 1 linear page. This should be configurable but the defaults are sound.

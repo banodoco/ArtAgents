@@ -1,0 +1,200 @@
+Now I have a comprehensive picture. Let me compile the findings.
+
+## Findings
+
+### 1. Dirty/untracked file classification
+
+**139 dirty/untracked paths.** Classification:
+
+#### A. `timeline_storyboard` baseline (new executor, fully untracked)
+- `astrid/packs/rendering/executors/timeline_storyboard/` (5 files: `run.py`, `executor.yaml`, `STAGE.md`, `__init__.py`, `__pycache__/`)
+- `tests/packs/rendering/test_timeline_storyboard.py`
+
+#### B. Asset-registry sync plumbing (timeline CLI extension, untracked+modified)
+- `astrid/core/timeline/asset_registry_edits.py` (untracked) — `sync_asset_registry()` core logic
+- `astrid/core/cli/timeline_registry.py` (untracked) — `cmd_registry_sync` CLI handler
+- `astrid/core/timeline/__init__.py` (modified) — adds `sync_asset_registry` to public API (`__init__.py:22-24`, `:109`)
+- `astrid/core/cli/timeline.py` (modified) — imports `cmd_registry_sync` from new module (`timeline.py:205-207`)
+- `tests/timeline/test_asset_registry_sync.py` (untracked)
+
+#### C. Clip start/duration enhancement (timeline event schema + projection, modified)
+- `astrid/core/timeline/events/schema/payloads/clip.py` (modified) — adds `start: float` and `duration: float | None` to `ClipAddedPayload` (`clip.py:30-31`, `:43-50`)
+- `astrid/core/timeline/clip_edits.py` (modified) — `add_clip()` accepts `start`/`duration`, resolves duration from registry for audio (`clip_edits.py:148-149`, `:184-215`)
+- `astrid/core/timeline/projection.py` (modified) — `_PROJECTED_TOP_ALLOWED` gains `generation_defaults`, `pinnedShotGroups`, `output`, `app`; `_make_clip_entry` uses `payload.start` instead of hardcoded `0.0` and sets `hold` from `payload.duration` (`projection.py:141-146`, `:319-326`)
+- `astrid/core/timeline/_shared.py` (modified) — adds `_resolve_edit_context()` for sessionless actor resolution (`_shared.py:84-115`)
+
+#### D. Provider-independent experiments (new `core/experiments/` package, untracked)
+- `astrid/core/experiments/` (8 files: `schema.py`, `normalize.py`, `evidence.py`, `media.py`, `capture.py`, `evaluation.py`, `ids.py`, `state.py`)
+- `docs/architecture/provider-independent-generation-experiments-plan.md` (untracked)
+- `docs/contracts/experiment-contract.md` (untracked)
+- `astrid/packs/iteration/executors/experiment_import/`, `experiment_prepare/`, `experiment_review/` (untracked)
+- `astrid/packs/iteration/orchestrators/` (untracked)
+- `tests/core/experiments/`, `tests/fixtures/experiments/`, tests for experiment executors (untracked)
+
+#### E. Project infrastructure (ownership, guidance, project creation)
+- `astrid/core/project/ownership.py` (untracked) — `require_project_owned_artifact()`
+- `astrid/core/project/guidance.py` (untracked)
+- `astrid/core/project/project.py` (modified) — adds `description` param, auto-creates `timelines/` and `experiments/` dirs, calls `require_project` in `create_timeline` (`project.py:82`, `:101-102`, `:88`)
+- `astrid/core/timeline/crud.py` (modified) — imports `require_project`, calls it in `create_timeline` (`crud.py:19`, `:88`)
+- `tests/core/test_project_ownership.py` (untracked)
+
+#### F. Model catalog additions
+- `astrid/core/model_catalog/models.yaml` (modified) — adds `seedream-v5-pro` (image edit) and `scail-2` (video v2v) model entries (+76 lines)
+- `astrid/core/model_catalog/taxonomy.py` (modified) — minor additions (+3 lines)
+
+#### G. FAL/H3 video executor
+- `astrid/packs/fal/executors/h3_video/` (untracked)
+- `tests/core/generation/backends/test_fal_seedream_edit.py` (untracked)
+- `astrid/packs/fal/tests/` (untracked)
+
+#### H. 2RP launch scripts (one-shot project scripts)
+- `scripts/build_2rp_catalog.py`, `build_2rp_launch_timeline.py`, `build_2rp_launch_timeline_v2.py`, `build_2rp_launch_timeline_v3.py`, `enrich_2rp_creators.py`, `fetch_2rp_assets.mjs`, `render_2rp_launch_ffmpeg.py` (untracked)
+
+#### I. Asset-library architecture proposals (docs only)
+- `docs/architecture/asset-library-architecture.md`, `docs/architecture/asset-library-design.md` (untracked)
+- `docs/architecture/hivemind-hybrid-search-plan.md` (untracked)
+
+#### J. Rendering enhancements
+- `astrid/packs/rendering/executors/render/audio_reactive_colour.py` (untracked)
+- `astrid/packs/rendering/elements/effects/audio-reactive-colour/` (untracked)
+- `tests/packs/rendering/test_audio_reactive_colour.py` (untracked)
+
+#### K. Other modified files (miscellaneous)
+- `astrid/packs/rendering/executors/render/run.py`, `STAGE.md`, `executor.yaml` (modified)
+- `astrid/packs/rendering/pack.yaml` (modified)
+- `astrid/packs/generation/executors/generate_video/run.py`, `executor.yaml` (modified)
+- `astrid/packs/fal/pack.yaml`, `astrid/packs/media/pack.yaml`, `astrid/packs/iteration/pack.yaml` (modified)
+- Various test files modified
+
+#### Overlap with visualization target files
+
+| Visualization target file | Dirty? | Owning initiative |
+|---|---|---|
+| `astrid/core/cli/timeline_parser.py` | **Yes** (modified) | Asset-registry sync (adds `registry sync` subcommand + args) |
+| `astrid/core/cli/timeline.py` | **Yes** (modified) | Asset-registry sync (imports `cmd_registry_sync`) |
+| `astrid/core/cli/timeline_output.py` | No (not in diff) | Clean |
+| `astrid/packs/rendering/executors/timeline_storyboard/run.py` | **Yes** (untracked, new) | Storyboard baseline |
+| `astrid/packs/rendering/pack.yaml` | **Yes** (modified) | Storyboard + render enhancements |
+| `astrid/packs/rendering/skill/SKILL.md` | **Yes** (modified) | Storyboard |
+| `astrid/packs/_core/skill/SKILL.md` | **Yes** (modified) | Regenerated capability index |
+| `astrid/core/contracts/output_result_exemptions.json` | **Yes** (modified) | Unknown |
+
+### 2. `timeline_storyboard`: remote fallback, timestamps, and positional-ID policies
+
+**Remote fallback** (`run.py:145-146`, `:171-176`, `:357-359`, `:452`):
+- `_is_remote_source()` treats `http`, `https`, `data`, and `file` URIs as remote (`run.py:146`).
+- Asset resolution falls back URL → thumbnail URL if local file is missing (`run.py:171-176`). This means the storyboard **will render remote images in HTML** (`_html_source` passes them through as `src` attributes, `run.py:357-359`).
+- The contact sheet (PNG) **refuses** remote sources — `_paste_contact_sheet_image` skips missing and remote (`run.py:452`).
+- **Why visualization must not inherit this**: The visualization epic requires "verified original media" with "no remote fetch" (North Star invariants). Remote URL fallback would silently accept unverified sources. The storyboard's leniency is appropriate for an editing preview but violates the visualization's evidence contract.
+
+**Timestamps** (`run.py:16`, `:735`):
+- `datetime.now(timezone.utc).isoformat()` used for manifest `created` field only (`run.py:735`). This is a manifest metadata field, not a content timestamp.
+- **Why visualization must not inherit**: The visualization epic requires "snapshot-safe" determinism. The manifest timestamp is metadata, not content, but any `datetime.now()` in the rendering path creates non-deterministic outputs. The storyboard already has this correctly scoped (manifest only), but visualization's evidence pack must be fully reproducible from frozen inputs.
+
+**Positional-ID policies**: 
+- The storyboard **inherits** shot IDs from `pinnedShotGroups[].shotId` and falls back to `shot-{index+1}` (`run.py:295`). Shot ordering is determined by `pinnedShotGroups` array index (`run.py:292`).
+- Asset IDs are read from the registry (`run.py:68-74`), normalized by stripping `asset:` prefix.
+- **Why visualization must not inherit**: The visualization plan mandates **deterministic stable display IDs** (`TL01`, `CL01`, etc.) derived from canonical object identity and ordering, not from array-position fallback. The storyboard's `shot-{index+1}` positional fallback is fragile — reordering `pinnedShotGroups` changes IDs, breaking the stable-ID invariant.
+
+### 3. Pluggable-timeline-renderers proposal and asset-library association model
+
+**Pluggable-timeline-renderers**: NOT FOUND as a separate document or code. The term appears only in the asset-library architecture doc as a coordination entry (`asset-library-architecture.md:69`): "storyboard proof consumes bindings; resolution stays renderer-agnostic; `timeline_storyboard` is the sole permitted consumer-adapter change." There is **no separate pluggable-renderers initiative** in the dirty files — this is a placeholder reference, not active work.
+
+**Asset-library association model** (`docs/architecture/asset-library-architecture.md`, `docs/architecture/asset-library-design.md`):
+- Status: **proposed**, not implemented.
+- Would touch: `core/project/source.py` (promotion), `core/timeline/banodoco_schema.py` (envelope validation), `core/cli/timeline_edits.py` (binding writes), `core/project/run.py` (provenance), `core/project/ownership.py` (recognize `library/*` + `sources/*`), `core/_shared/result_manifest.py` (hashing reuse).
+- The simplification round (`asset-library-design.md:350-389`) **superseded** much of the original plan: no WAL history, no persisted `pinnedShotGroups`, one atomic `catalog.json`, derive-on-read grouping.
+- **Expected merge order**: Asset-library is purely proposed docs. Storyboard is the only code-level implementation. The visualization epic is an **independent consumer** — the design doc explicitly states "Timeline Visualization ... consumer of the association model (`--shot`, `--asset`) ... none — benefits from shared shotId" (`asset-library-architecture.md:68`). **No merge-order dependency exists.** Visualization reads the timeline status quo; asset-library would add semantic layers later.
+
+### 4. Shared helpers: extraction vs. duplication
+
+**Asset resolution**: The storyboard's `_resolved_asset()` (`run.py:149-193`), `_normalized_asset_id()` (`run.py:64-74`), and `_reference_asset_ids()` (`run.py:77-98`) are candidates for extraction. The visualization plan explicitly calls for "shared duration and asset-resolution helpers should be extracted rather than copied" (`timeline-visualization-plan.md:455-456`).
+
+**Duration calculation**: `_clip_duration()` (`run.py:118-131`) and `_shot_bounds()` (`run.py:134-142`) would be needed by visualization for time-scaled layout.
+
+**What's worth extracting vs. duplicating**:
+- **Extract** (after semantic correction): asset ID normalization (strip `asset:` prefix, bare-ID acceptance), registry asset resolution (file→absolute path, URL passthrough), clip duration calculation. These are pure functions with no side effects.
+- **Duplicate initially, extract later**: The storyboard's HTML/PNG rendering (`render_html`, `render_contact_sheet`) — visualization produces SVG/PNG with different geometry requirements.
+- **Do NOT extract**: The storyboard's remote fallback logic (`_is_remote_source`, URL→thumbnail fallback) — this is the exact behavior visualization must reject. The storyboard's positional shot ID fallback (`shot-{index+1}`) is also incompatible with stable IDs.
+
+**Semantic corrections needed before extraction**:
+1. Asset resolution must not silently accept URLs as verified sources.
+2. ID normalization must be deterministic (not position-based).
+3. Duration helpers must handle the new `ClipAddedPayload.start`/`duration` fields (currently only storyboard reads `at`/`hold`/`from_`/`to` from legacy clip dicts).
+
+## Tasklist implications
+
+The tasklist `planning/phase1a-codex-tasklist.md` does not exist in either checkout. Based on the visualization plan's "Likely files" section (`plan.md:458-511`) and the dirty-state analysis:
+
+**T tasks that change**:
+- Any task touching `astrid/core/cli/timeline_parser.py` or `astrid/core/cli/timeline.py` must account for the in-progress `cmd_registry_sync` addition and `_resolve_edit_context` import. The visualization CLI handler (`cmd_visualize`) must be added alongside, not conflicting with, the registry sync handler.
+- Any task reading clip positions must handle the new `ClipAddedPayload.start`/`duration` fields (currently dirty in clip payload schema + projection). The legacy `at: 0.0` hardcode is being replaced with `payload.start`.
+
+**New tasks needed**:
+- **T-EXTRACT**: Extract shared asset-resolution and duration helpers from `timeline_storyboard/run.py` into `core/timeline/` (or a new `core/timeline/resolution.py`) **before** visualization model code is written. This prevents copy-paste drift.
+- **T-FREEZE**: Tag the files visualization must treat as frozen (see conflict map below).
+
+**Tasks that split**:
+- Any "modify `astrid/core/cli/timeline.py`" task splits into: (a) ensure registry-sync handler is merged first, (b) add visualize handler.
+
+## Risks & conflicts
+
+### Conflict/ownership map
+
+| File | Owning initiative | Risk to visualization | Action |
+|---|---|---|---|
+| `astrid/core/cli/timeline_parser.py` | Asset-registry sync (dirty) | Both add subcommands/args to same parser | Merge registry sync first; visualize handler appends after |
+| `astrid/core/cli/timeline.py` | Asset-registry sync (dirty) | Both add handler imports | Merge registry sync first; visualize import added after |
+| `astrid/core/timeline/__init__.py` | Asset-registry sync (dirty) | Adds `sync_asset_registry` to public API | Visualize reads only; no conflict |
+| `astrid/core/timeline/_shared.py` | Asset-registry sync (dirty) | Adds `_resolve_edit_context` | Visualize may reuse for sessionless actor resolution |
+| `astrid/core/timeline/events/schema/payloads/clip.py` | Clip start/duration (dirty) | Schema change: `start` and `duration` fields | Visualize **must** read these new fields; if merged after storyboard but before visualize, model code reads both legacy and new shapes |
+| `astrid/core/timeline/projection.py` | Clip start/duration (dirty) | `_make_clip_entry` now uses `payload.start`, `payload.duration`; `_PROJECTED_TOP_ALLOWED` expanded | Visualization reads assembly output — must handle new top-level keys |
+| `astrid/packs/rendering/executors/timeline_storyboard/` | Storyboard baseline (untracked) | Shared helpers to extract | **Freeze** storyboard code; extract helpers, don't refactor storyboard |
+| `astrid/packs/rendering/pack.yaml` | Storyboard (dirty) | Both add capabilities | Coordinate capability list additions |
+| `astrid/core/project/project.py` | Project infra (dirty) | Adds `timelines/` + `experiments/` dirs, `description` | No direct conflict; visualization reads project dirs |
+| `astrid/core/model_catalog/models.yaml` | Model catalog (dirty) | Seedream-v5-pro, scail-2 additions | No conflict; visualization doesn't touch model catalog |
+| `docs/architecture/asset-library-*.md` | Asset library (proposed, untracked) | Proposed semantic layer | No merge dependency; visualization is an independent consumer |
+
+### Specific risks
+
+1. **`_PROJECTED_TOP_ALLOWED` expansion** (`projection.py:141-146`): The dirty projection now allows `generation_defaults`, `pinnedShotGroups`, `output`, and `app` as top-level assembly keys. If visualization's model code validates against a strict top-keys whitelist, it will reject valid assemblies. **Must read the actual assembly shape, not whitelist.**
+
+2. **`ClipAddedPayload.start` defaulting to `0.0`**: The new `start` field defaults to `0.0` (not `None`), meaning every clip event now carries an explicit start. The legacy `at: 0.0` in projection was replaced — but only for new events. Historical events replayed through the projector will use the old hardcoded `0.0`. **Visualization must handle both legacy (no start/duration in payload) and new shapes.**
+
+3. **Storyboard's remote-fallback as a trap**: The most likely implementation mistake is calling `_resolved_asset()` from the storyboard for visualization's source verification, inheriting the URL→thumbnail fallback chain. **Visualization must have its own asset-resolution path** that rejects remote sources and requires verified local originals.
+
+4. **`pinnedShotGroups` in assembly**: The projection now passes through `pinnedShotGroups` as a top-level key. The storyboard reads `pinnedShotGroups` directly from timeline config. The visualization epic's plan says it reads `assembly.json` — if `pinnedShotGroups` is now in assembly, that's fine, but the plan must acknowledge this change.
+
+5. **Concurrent dirty `timeline_parser.py`**: The registry sync adds a `registry sync` subcommand. Visualization adds `visualize`. These are additive to the same argparse subparser — whoever merges second will have a trivial conflict. **Order: merge registry sync → then add visualize.**
+
+## Elegant simplifications
+
+1. **Don't extract asset-resolution helpers from storyboard — build clean ones in `core/timeline/resolution.py`.** The storyboard's `_resolved_asset()` carries remote-fallback and the `asset:` prefix normalization that visualization needs but must not inherit the URL/thumbnail chain. A clean `resolve_asset_path(asset_id, registry, registry_dir) -> Path | None` that **only** returns absolute local paths (or `None` for missing/remote) is ~30 lines and unambiguous.
+
+2. **Reuse `_clip_duration()` logic but not code.** The storyboard's duration calculation reads from legacy clip dict shapes (`at`, `hold`, `from_`, `to`, `speed`). The new event schema carries `start` and `duration` directly. Visualization should compute duration from the authoritative event payload (when available) and fall back to the legacy dict shape — a ~15-line function, not worth the coupling of importing from storyboard.
+
+3. **Ignore the asset-library proposal entirely for M1/M2.** It's purely proposed docs with no code. The design doc lists visualization as "a future consumer ... benefits from shared shotId" (`asset-library-architecture.md:68`). No merge-order dependency. Visualization reads the timeline as-is.
+
+4. **Treat `timeline_storyboard/` as frozen.** The visualization plan says "shared duration and asset-resolution helpers should be extracted rather than copied." Extract by building clean new functions in `core/timeline/`, not by refactoring the storyboard. The storyboard is a working baseline that should remain stable during visualization development.
+
+5. **The dirty `_shared.py:_resolve_edit_context()` is directly reusable.** Visualization's CLI handler needs sessionless actor resolution — this helper already does exactly that (`_shared.py:84-115`). Import it; don't duplicate.
+
+### Files visualization must treat as frozen (not to refactor)
+
+- `astrid/packs/rendering/executors/timeline_storyboard/` (all files) — working baseline
+- `astrid/core/timeline/events/schema/payloads/clip.py` — schema authority; read-only
+- `astrid/core/timeline/projection.py` — projection authority; read-only
+- `astrid/core/timeline/banodoco_schema.py` — schema authority; read-only
+- `astrid/core/timeline/_shared.py` — import helpers; don't modify
+- `astrid/core/timeline/asset_registry_edits.py` — registry sync authority; read-only
+
+### Files visualization owns
+
+- `astrid/packs/rendering/executors/timeline_visualize/` (new, all files)
+- `astrid/packs/rendering/timeline_inspection.py` (new)
+- `astrid/core/cli/timeline_parser.py` (additive: `visualize` subcommand)
+- `astrid/core/cli/timeline.py` (additive: `cmd_visualize` import)
+- `astrid/core/timeline/resolution.py` (new: clean asset-resolution helpers)
+- `tests/packs/rendering/test_timeline_visualize_*.py` (new)
+- `tests/core/cli/test_timeline_visualize.py` (new)
+- `tests/fixtures/timeline_visualize/` (new)

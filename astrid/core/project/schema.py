@@ -259,6 +259,25 @@ def validate_run_record(raw: Any) -> dict[str, Any]:
                 raise ProjectValidationError(
                     f"run.metadata.timeline_binding_mode must be 'managed' or 'unmanaged', got {mode!r}"
                 )
+        if "timeline_ids" in meta:
+            raw_timeline_ids = meta["timeline_ids"]
+            if not isinstance(raw_timeline_ids, list):
+                raise ProjectValidationError("run.metadata.timeline_ids must be a list")
+            from astrid.core.timeline.paths import validate_timeline_ulid
+
+            timeline_ids = [validate_timeline_ulid(item) for item in raw_timeline_ids]
+            canonical = sorted(set(timeline_ids))
+            if timeline_ids != canonical:
+                raise ProjectValidationError(
+                    "run.metadata.timeline_ids must be sorted canonical unique ULIDs"
+                )
+            meta["timeline_ids"] = timeline_ids
+        if "evidence" in meta:
+            meta["evidence"] = _require_bool(meta["evidence"], "run.metadata.evidence")
+        if "executor_version" in meta:
+            meta["executor_version"] = _require_string(
+                meta["executor_version"], "run.metadata.executor_version"
+            )
         payload["metadata"] = meta
     payload.setdefault("created_at", utc_now_seconds())
     payload.setdefault("updated_at", payload["created_at"])
