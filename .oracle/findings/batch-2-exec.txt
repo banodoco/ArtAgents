@@ -1,0 +1,24 @@
+## Batch 2 Report
+
+**Commit:** `dce60b9f` — `megado: batch 2 — track-filtered host slice + layer alpha metadata` (branch `layer-plan`). Working tree clean except pre-existing untracked `.oracle/` artifacts (untouched).
+
+**Evidence (frozen gate):**
+```
+PYENV_VERSION=3.11.11 python -m pytest -q tests/core/rendering/test_service.py tests/core/rendering/test_contracts.py
+→ 151 passed in 108.93s
+```
+New tests isolated: 6 passed. No packs/finalizers/planners/manifests touched; only `service.py` + `test_service.py` changed.
+
+**service.py changes (exactly two):**
+1. `_window_timeline` (~line 1111): added keyword-only `tracks: Sequence[str] | None = None`. When `None` (layer=None path): byte-for-byte today's prune-to-used-tracks behavior. When provided: clips are pre-filtered to `track in allowlist` (other layers' clips never materialize) and the track list is filtered to the allowlist — which also keeps an allowlisted track alive even with zero in-window clips (renderer must know its layer exists).
+2. `_segment_request` (~line 1086): passes `tracks=segment.layer.tracks` (None for layer=None, unchanged behavior). When `segment.layer is not None`, stamps `metadata["astrid_layer"] = {"z": z, "alpha": z > 0}` into the materialized timeline via `setdefault` merge — existing metadata keys preserved. Dispatch loop, `output_name`, provenance, `supports_windows: false` non-layer path: untouched.
+
+**New tests (6, appended to test_service.py under a Batch 2 section):**
+- `test_window_timeline_allowlist_slices_to_layer_tracks` — v2-only slice
+- `test_window_timeline_without_allowlist_keeps_existing_pruning` — layer=None unchanged
+- `test_window_timeline_allowlist_track_without_window_clips_stays_present` — empty-window layer track survives
+- `test_segment_request_stamps_astrid_layer_metadata_merged` — z=1 → `alpha: True`, keys merged
+- `test_segment_request_z0_stamps_alpha_false` — z=0 → `alpha: False`
+- `test_layer_plan_end_to_end_materializes_track_slice_and_stamp` — full service path via capture transport
+
+**Checkpoint met:** same-window segments receive disjoint track slices; `layer=None` prune unchanged; z>0 alpha hint stamped, z=0 opaque.

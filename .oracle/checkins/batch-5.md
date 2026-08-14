@@ -1,21 +1,38 @@
-# Batch 5 oracle checkpoint
+# Checkpoint 5 — Batch 5 (Layer Stack planner) — PASS
 
-**Verdict:** PASS
-**Commit:** 8723ca05 vs previous af907878
-**Flash:** `.oracle/findings/oracle-b5-{tests,diff,critique}.txt`
+Oracle: Grok 4.6. Delegated Flash facts + z-contract + critique
+(`.oracle/findings/oracle-b5-{facts,z,critique}.txt`). Host
+re-checked cited lines. Host pytest (tasklist verify) → **71 passed**.
 
-```
-PASS
-- Commit `8723ca05` is 3 test files, +612: `test_threejs_hybrid.py` +289, `test_remotion_backend.py` +145, `test_threejs_backend.py` +178. `git diff --name-only af907878..8723ca05 -- astrid/core/` empty. No PNG/mp4/`node_modules`/out/build committed. Range also contains `.oracle/checkins/batch-4.md` (checkpoint-4 bookkeeping, not this commit).
-- Mixed: genuine text `[0,0.5)` + lavfi media `[0.5,1.0)` through public `render(backend="rendering.threejs-hybrid")`. Exact `segments_v2` `[(rendering.threejs,0,12),(rendering.remotion,12,24)]`; planner + `rendering.ffmpeg-finalizer`; `support_decision.backend == renderer.id` both; fragments threejs+remotion; `legacy_v1.engine=threejs`; `audio_ownership=rendered`. ffprobe: h264, `"420p" in pix_fmt`, 320×180, `time_base=1/12288`, `nb_read_frames=24`, AAC```
-PASS
-- Commit `8723ca05` is 3 test files, +612: `test_threejs_hybrid.py` +289, `test_remotion_backend.py` +145, `test_threejs_backend.py` +178. `git diff --name-only af907878..8723ca05 -- astrid/core/` empty. No media/caches committed.
-- Mixed: genuine text `[0,0.5)` + lavfi media `[0.5,1.0)` via public `render(backend="rendering.threejs-hybrid")`. Exact `segments_v2` `[(rendering.threejs,0,12),(rendering.remotion,12,24)]`; planner + `rendering.ffmpeg-finalizer`; `support_decision.backend == renderer.id` both; fragments threejs+remotion; `legacy_v1.engine=threejs`; ownership `rendered`. ffprobe: h264, `"420p" in pix_fmt`, 320×180, `time_base=1/12288`, `nb_read_frames=24`, AAC, duration `1.0±0.1`; two-render sha256; frame0≠frame12 md5.
-- Remotion: public `render(backend="rendering.remotion")` (not mocked); engine/fragment remotion; `rendering.threejs` absent; real 12-frame h264 320×180 AAC.
-- Lock: `threejs._execute_remotion is remotion_backend._execute_remotion`; spawn; real lock around stubbed CLI (`remotion/run.py:613`); remotion blocked 0.3s; one `*.lock`.
-- Offline: `npm config set offline true` around a real threejs render; restored in `finally`.
-- Skips only `_missing_environment` before render. Host T5.7: 98 passed, 2 pre-existing skips.
-- Flash (`omp` deepseek-v4-flash): `.oracle/findings/oracle-b5-{tests,diff,critique}.txt` all PASS. Finalizer fragment not asserted (T5.3 asks Three+Remotion fragments + routing.finalizer). Helper dup + global npm-offline mutation noted, not blocking.
-```
+**Batch 6 may start.**
 
-Batch 6 may start.
+## Delegated evidence
+
+- Facts: `.oracle/findings/oracle-b5-facts.txt` (scope, fast path, claim, merge, fail-closed, profile, recursion, tests)
+- Z-contract: `.oracle/findings/oracle-b5-z.txt` (paint order, stamp, compositor)
+- Critique: `.oracle/findings/oracle-b5-critique.txt` (KISS/YAGNI; no blocker)
+
+## Acceptance
+
+**Scope** (`f9f8c120` vs `954d9664`): 7 paths. Planner dir + `pack.yaml` +1 + pack `run.py` dispatch branch + `test_layer_stack.py` + freeze id only. Hybrids / core / backends / finalizers byte-untouched.
+
+**Fast path** (`run.py:250–270`, `573–614`): first eligible candidate whose real `support()` accepts the FULL timeline (`_first_supporting` → `_probe_support` → injected resolver or `_CommandSupportResolver`). Not a heuristic. Winner emits one `RenderSegment` with no `layer=` (`layer is None`) + `rendering.ffmpeg-finalizer`.
+
+**Layer path** (`299–399`, `616–685`): per-track `_project_tracks` → `_component_timeline`; first supporting candidate; greedy merge only if same renderer AND same opacity AND winner still `support()`s the merged projection. ffmpeg `exactly one visual track` (`backends/ffmpeg/support.py:283`) therefore keeps adjacent media sp**PASS. Batch 6 may start.**
+
+Delegated Flash: `.oracle/findings/oracle-b5-{facts,z,critique}.txt`. Host re-checked cited lines. Tasklist suite: **71 passed**.
+
+**Routing.** Fast path is real `support()` on the full timeline (`run.py:250–270`), not a heuristic. Else per-track `_project_tracks` + first claimant. Merge only if same renderer, same opacity, **and** the winner still `support()`s the merged projection — ffmpeg’s one-visual-track rule therefore keeps adjacent media split.
+
+**Fail-closed.** `blendMode≠normal`, opacity outside `(0,1]`, no claimant: all `RendererUnsupportedError`, track named. Blend is layer-path only; remotion full-stack still escapes (correct, tested).
+
+**Profile.** Every probe is `profile=None` (`273–296`). `_CommandSupportResolver` materializes the projection and clears the window. Plan profile stays canonical h264/yuv420p/mp4. B5 note honored.
+
+**Z contract — OK, not inverted.** First visual track = TOP = highest z. Service stamps layered segments with `alpha: z > 0` (`service.py:1091–1100`). z=0 is stamped but opaque; z>0 is ProRes. Compositor sorts z ascending (`compositor/run.py:586`); highest z overlays last. Fast path is `layer=None` (no stamp), not `z=0`. Forced split: overlay z=1/threejs/alpha, source z=0/ffmpeg/opaque.
+
+**Scope.** 7 paths. Hybrids / core / backends / finalizers untouched. Freeze +1 planner id. Planners excluded from candidates. Opt-in via qualified id only.
+
+**Elegance.** 772 lines is peer-sized. Re-support is the right merge check. Dead `_LayerClaim.timeline` (written, never read) is YAGNI, not a defect. Missing tests (opacity, ffmpeg merge-reject) are insurance, not blockers.
+rge-reject, planner-id filter) are insurance, not blockers — same class as B3’s deferred short-bottom pixel test.
+
+**Host:** `pytest -q tests/core/rendering/test_layer_stack.py tests/core/rendering/test_threejs_hybrid.py tests/core/rendering/test_legacy_hybrid.py tests/core/rendering/test_freeze.py` → **71 passed**.

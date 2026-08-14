@@ -254,7 +254,66 @@ def _duration_frames(video_path: Path, profile: RenderProfile) -> int:
     return max(1, int(frames + Fraction(1, 2)))
 
 
-def _remotion_mux_profile(profile: RenderProfile) -> RenderProfile:
+def _timeline_alpha(timeline_data: Mapping[str, Any]) -> bool:
+    """True when a serialized timeline's metadata stamps ``astrid_layer.alpha``.
+
+    The service stamps ``metadata.astrid_layer = {z, alpha: z > 0}`` onto the
+    materialized timeline of every z-layer segment (batch 2).  Backends read
+    THIS dict to decide whether the segment must emit transparent output; an
+    unstamped timeline (or ``alpha`` false/absent) keeps today's opaque path.
+    """
+    metadata = timeline_data.get("metadata")
+    if not isinstance(metadata, Mapping):
+        return False
+    layer = metadata.get("astrid_layer")
+    if not isinstance(layer, Mapping):
+        return False
+    return layer.get("alpha") is True
+
+
+def _alpha_output_name(output_name: str) -> str:
+    """Remap a stamped segment's output name to the ProRes container name.
+
+    Remotion rejects ``.mp4`` output names for ``--codec=prores`` (it requires
+    a ``.mov`` container), while the service hardcodes ``segment-NNNN.mp4``
+    (service.py:1362).  The BACKEND therefore remaps the extension when the
+    alpha stamp is present; the resulting artifact path/provenance stays
+    consistent because every path downstream (staged video, published output,
+    declared artifact, provenance payload) is derived from the remapped name.
+    Unstamped names are returned unchanged (frozen .mp4 contract).
+    """
+    path = Path(output_name)
+    if path.suffix.lower() == ".mov":
+        return output_name
+    return str(path.with_suffix(".mov"))
+
+
+def _remotion_mux_profile(profile: RenderProfile, *, alpha: bool = False) -> RenderProfile:
+    """The profile Remotion's muxer actually produces for this timeline.
+
+    Opaque renders (unstamped / ``alpha=False``) are the frozen contract:
+    H.264/yuv420p in an MP4 at the 90 kHz timescale with an always-muxed AAC
+    track.  Alpha renders (``alpha=True``) switch the encoder to
+    ProRes 4444 in a MOV container (``--codec=prores --prores-profile=4444
+    --pixel-format=yuva444p10le --image-format=png``) which the host probed
+    emits as ``yuva444p12le`` -- a REAL alpha plane (vp9/webm in remotion
+    4.0.509 muxes plain yuv420p and is a dead path).  The audio/time_base
+    fields below are pinned from a real probed ProRes artifact (see
+    .oracle/findings/batch-4-rework-exec.txt).
+    """
+    if alpha:
+        return replace(
+            profile,
+            time_base=(1, 90000),
+            container="mov",
+            video_codec="prores",
+            video_profile=None,
+            video_level=None,
+            pixel_format="yuva444p12le",
+            audio_codec=profile.audio_codec or "pcm_s16le",
+            audio_sample_rate=profile.audio_sample_rate or 48000,
+            audio_channel_layout=profile.audio_channel_layout or "stereo",
+        )
     return replace(
         profile,
         time_base=(1, 90000),

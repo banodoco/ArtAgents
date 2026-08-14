@@ -1,24 +1,34 @@
-# Batch 3 oracle checkpoint
+# Checkpoint 3 — Batch 3 (Layer Stack) — PASS
 
-**Verdict:** PASS
-**Commit:** fdf6dfae vs previous 963060ee
-**Flash:** `.oracle/findings/oracle-b3-{diff,tests,critique}.txt`
+Oracle: Grok 4.6. Delegated Flash facts + critique
+(`.oracle/findings/oracle-b3-{facts,critique}.txt`).
+Validated cited lines. Host: `45 passed`; ruff 1469=1469.
 
-```
-PASS
-- Commit `fdf6dfae` is 6 files, +1416: backends/threejs/{__init__.py,renderer.yaml,run.py}, pack.yaml +1, test_freeze.py +1, test_threejs_backend.py +727. `git diff --name-only 963060ee..fdf6dfae -- astrid/core/` empty. No PNG/mp4/node_modules/out/build committed.
-- Identity: BACKEND_ID rendering.threejs (`run.py:71`), engine=threejs (`:538-539`), fragment key BACKEND_ID with renderer=threejs / 1.0.0 / capture_host=remotion / composition=ThreeTimelineComposition / legacy_v1 (`:562-568`). No surface claims rendering.remotion.
-- Helpers: binds `_execute_remotion`, `_serialize_timeline`, `_render_provenance_payload`, `_canonical_profile`, `_input_path`, `_duration_frames`, `_load_registry_mapping` (`:61-68`). Owns support / `_protocol_render` / `_settings_from_request`. `_execute_remotion(..., composition_id=THREE_COMPOSITION_ID)` (`:524-532`). No second lock.
-- window=None in support (`:363-365`) and render (`:429-434`). Own-namespace only (`:261`). Eligibility: empty/bg +```
-PASS
-- Commit `fdf6dfae` is 6 files, +1416: `backends/threejs/{__init__.py,renderer.yaml,run.py}`, `pack.yaml` +1, `test_freeze.py` +1, `test_threejs_backend.py` +727. `git diff --name-only 963060ee..fdf6dfae -- astrid/core/` empty. No PNG/mp4/`node_modules`/out/build committed.
-- Identity: `BACKEND_ID=rendering.threejs` (`run.py:71`), `engine="threejs"` (`:538`), fragment key `rendering.threejs` with `renderer=threejs` / `1.0.0` / `capture_host=remotion` / `composition=ThreeTimelineComposition` / `legacy_v1` (`:562-568`). No surface claims `rendering.remotion`.
-- Reuses only `_execute_remotion`, `_serialize_timeline`, `_render_provenance_payload`, `_canonical_profile`, `_input_path`, `_duration_frames`, `_load_registry_mapping` (`:61-68`). Owns `support` / `_protocol_render` / `_settings_from_request`. Calls `_execute_remotion(..., composition_id=THREE_COMPOSITION_ID)` (`:524-532`). No second lock.
-- `window=None` in support (`:363`) and render (`:429`). Own-namespace only (`:261`). Eligibility: empty/background + exact 11 text fields; clip-specific rejections (`:147-216`).
-- `renderer.yaml`: features all bool/str, command `[python3, backends/threejs/run.py]`, `audio_ownership: [rendered]`, `supports_windows: false`.
-- `test_freeze.py` adds `rendering.threejs` to the frozen renderer set. `test_builtin_registration` inspects remotion/ffmpeg by id only — no edit required.
-- Tests: 12 functions. Skip only via `_missing_environment` (`:61-88`) *before* render. Real empty: 1-frame h264+AAC+sidecar. Real text: `"420p" in pix_fmt`, frame-2≠frame-8 md5, sidecar identity. Host: 12 passed ~28s; checkpoint suite 56 passed / 2 pre-existing skips.
-- Flash (`omp` deepseek-v4-flash): `.oracle/findings/oracle-b3-{diff,tests,critique}.txt` all PASS. Dead `_clip_end` / unused `_effective_registry_state` (~35 lines) noted, not acceptance-failing.
-```
+## PASS
 
 Batch 4 may start.
+
+**Delegated:** Flash facts + critique (`.oracle/findings/oracle-b3-{facts,critique}.txt`).
+Host `pytest -q tests/packs/rendering/test_ffmpeg_compositor.py tests/packs/rendering/test_ffmpeg_finalizer.py tests/core/rendering/test_freeze.py` → **45 passed**. Ruff 1469=1469.
+
+**Scope** (`edf0859a` vs `cf947761`): compositor dir + `pack.yaml` +1 + new compositor tests + freeze id only. Concat `finalizers/ffmpeg/` byte-identical. Freeze hunk is only `rendering.ffmpeg-compositor` (`test_freeze.py:397–399`).
+
+**Filtergraph** (`run.py:615–749`): color base `[0]` `d=total_seconds` from `plan.total_frames` (646, 636–638, 882). `-## PASS
+
+Batch 4 may start.
+
+**Delegated:** Flash facts + critique — `.oracle/findings/oracle-b3-{facts,critique}.txt`. Host `pytest -q tests/packs/rendering/test_ffmpeg_compositor.py tests/packs/rendering/test_ffmpeg_finalizer.py tests/core/rendering/test_freeze.py` → **45 passed**. Ruff **1469=1469**.
+
+**Scope** (`edf0859a` vs `cf947761`): new compositor dir, `pack.yaml` +1, compositor tests, freeze id only. Concat `finalizers/ffmpeg/` is byte-identical. Freeze hunk is only `rendering.ffmpeg-compositor` (`test_freeze.py:397–399`).
+
+**Filtergraph** (`run.py:615–749`): color base `[0]` duration from `plan.total_frames` (646, 882). `-c:v libvpx-vp9` immediately before `-i` iff `alpha and vp9` (649–652). Per layer: optional `format=yuva420p`, scale/pad/setsar/fps/setpts; `colorchannelmixer` only when `opacity<1` (675–684). `overlay=0:0:format=auto:eof_action=pass` (687–693); no `alpha=`. `-t` pins length (745).
+
+**`eof_action=pass`:** correct for top-short, z=0-short, both-short, and a short middle of N>2. Secondary EOF reveals the chain below (black base if nothing remains). `repeat` would freeze the dead layer — the stale fill the B1 note forbids.
+
+**`support()`** (`388–417`): rejects `layer=None` (concat stays the only consumer), `blend≠normal`, `<2` distinct z, duplicate z. Unequal lengths are accepted and padded — right call vs the B1 note.
+
+**Proofs:** real decode (select→PNG→PIL). Green box `(0,254,0)` / outside red `(252,0,0)`; short-top frame 8 red; zero-alpha all red; windows sum 20 vs `plan.total_frames=10`. Audio is lowest-z `RENDERED` (708–711), else `anullsrc`.
+
+**Elegance:** 1083 vs concat 1620. Graph builder is one function. Helper duplication is cleanup, not B3.
+
+Flash’s extra short-bottom pixel test is insurance, not a defect — DEFER to Batch 6.

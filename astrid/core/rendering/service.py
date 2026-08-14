@@ -1083,7 +1083,21 @@ class RenderService:
                 recovery_command="write the timeline as a JSON object and retry",
                 details={"timeline_path": str(timeline_path)},
             )
-        materialized = self._window_timeline(timeline_data, segment.window)
+        materialized = self._window_timeline(
+            timeline_data,
+            segment.window,
+            tracks=segment.layer.tracks if segment.layer is not None else None,
+        )
+        if segment.layer is not None:
+            # Stamp the layer hint into the materialized timeline's metadata so
+            # the owning renderer knows it is rendering one z-layer: z > 0 must
+            # emit transparent output (batch 4 consumes the stamp).  Merge into
+            # the copied metadata dict; never clobber existing keys.
+            materialized.setdefault("metadata", {})
+            materialized["metadata"]["astrid_layer"] = {
+                "z": segment.layer.z,
+                "alpha": segment.layer.z > 0,
+            }
         materialized_path = (
             workspace / "segment-inputs" / f"{index:04d}-timeline.json"
         )
@@ -1098,6 +1112,8 @@ class RenderService:
         cls,
         timeline_data: Mapping[str, Any],
         window: FrameWindow,
+        *,
+        tracks: Sequence[str] | None = None,
     ) -> dict[str, Any]:
         fps = Fraction(*window.fps_rational)
         start = Fraction(window.start_frame, 1) / fps
@@ -1107,15 +1123,28 @@ class RenderService:
         if not isinstance(raw_clips, list) or not isinstance(raw_tracks, list):
             raise ValueError("timeline clips and tracks must be arrays")
 
+        # Optional track allowlist (one z-layer's visual tracks): the host
+        # slice keeps ONLY those tracks AND only their clips, so a layer
+        # renderer never sees other layers' material.  None preserves today's
+        # prune-to-used-tracks behavior byte-for-byte.
+        allowlist = set(tracks) if tracks is not None else None
+
         clips: list[dict[str, Any]] = []
         for raw_clip in raw_clips:
             if not isinstance(raw_clip, Mapping):
                 raise TypeError("timeline clips must contain objects")
+            if allowlist is not None and raw_clip.get("track") not in allowlist:
+                continue
             clipped = cls._window_clip(raw_clip, start=start, end=end, window=window)
             if clipped is not None:
                 clips.append(clipped)
-        used_tracks = {clip.get("track") for clip in clips}
-        tracks = [
+        # An allowlisted track survives even when it has no clips in the
+        # window: the renderer must know its layer exists (it renders the
+        # background/transparent fill for that span).
+        used_tracks = (
+            allowlist if allowlist is not None else {clip.get("track") for clip in clips}
+        )
+        tracks_out = [
             dict(track)
             for track in raw_tracks
             if isinstance(track, Mapping) and track.get("id") in used_tracks
@@ -1124,7 +1153,7 @@ class RenderService:
         if not isinstance(metadata, Mapping):
             metadata = {}
         result = dict(timeline_data)
-        result["tracks"] = tracks
+        result["tracks"] = tracks_out
         result["clips"] = clips
         result["metadata"] = {
             **dict(metadata),

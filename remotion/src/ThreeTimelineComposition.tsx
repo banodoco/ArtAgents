@@ -139,6 +139,28 @@ const resolveBackground = (props: TimelineCompositionProps): string => {
   return DEFAULT_BACKGROUND;
 };
 
+// Layer-stack alpha: the render service stamps
+// `metadata.astrid_layer = {z, alpha: z > 0}` onto the materialized
+// timeline of every z-layer segment.  When `alpha` is true this
+// composition is the TOP of a stack: the R3F canvas keeps its default
+// alpha:true + clear alpha 0 (transparent), and the background color
+// element is OMITTED so no opaque fill ever reaches the compositor.
+// Unstamped timelines (and z=0 bottoms) keep the opaque background.
+// Upstream `TimelineConfig` does not declare `metadata`; the structural
+// cast is the same narrowing pattern used for `theme_overrides`.
+type SerializedTimeline = {
+  metadata?: Record<string, unknown>;
+  [key: string]: unknown;
+};
+
+const isAlphaLayer = (props: TimelineCompositionProps): boolean => {
+  const timeline = props.timeline as SerializedTimeline;
+  const layer = timeline.metadata?.astrid_layer as
+    | Record<string, unknown>
+    | undefined;
+  return layer?.alpha === true;
+};
+
 // CSS `text-shadow` is "offsetX offsetY blur color" (color may contain
 // spaces, e.g. "rgba(0, 0, 0, 0.75)"); 3-part form omits blur. Mirrors the
 // passthrough of the established hyperframes mapping.
@@ -386,6 +408,7 @@ export const ThreeTimelineComposition = (
   const frame = useCurrentFrame();
   const {width, height, fps} = useVideoConfig();
   const background = useMemo(() => resolveBackground(props), [props]);
+  const alpha = useMemo(() => isAlphaLayer(props), [props]);
   const planes = useMemo(
     () => buildTextPlanes(props, frame, fps, width, height),
     [props, frame, fps, width, height],
@@ -406,7 +429,7 @@ export const ThreeTimelineComposition = (
         position: [0, 0, CAMERA_Z],
       }}
     >
-      <color attach="background" args={[background]} />
+      {alpha ? null : <color attach="background" args={[background]} />}
       {planes.map((data) => (
         <TextPlane key={data.clipId} data={data} />
       ))}

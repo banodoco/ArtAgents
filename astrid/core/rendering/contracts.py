@@ -1303,12 +1303,82 @@ def _normalize_requested_policy(value: Any, label: str = "requested_policy") -> 
 
 
 @dataclass(frozen=True)
+class LayerRef:
+    """One z-layer: a renderer-owned contiguous visual-track range.
+
+    ``z=0`` is the bottom layer and the per-layer tiling key; segments on
+    distinct layers may overlap in time.  v1 ships src-over + alpha only:
+    ``blend`` must be exactly ``"normal"`` and ``opacity`` must be in
+    ``(0, 1]`` (the compositor applies it as ``aa=``).
+    """
+
+    z: int
+    tracks: tuple[str, ...]
+    blend: str = "normal"
+    opacity: float = 1.0
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "z", _require_int(self.z, "layer z", minimum=0))
+        if isinstance(self.tracks, (str, bytes)) or not isinstance(self.tracks, Sequence):
+            raise TypeError("layer tracks must be an array of strings")
+        tracks = tuple(
+            _require_string(track, f"layer tracks[{index}]")
+            for index, track in enumerate(self.tracks)
+        )
+        if not tracks:
+            raise ValueError("layer tracks must contain at least one track id")
+        object.__setattr__(self, "tracks", tracks)
+        blend = _require_string(self.blend, "layer blend")
+        if blend != "normal":
+            raise ValueError(
+                f"layer blend {blend!r} is not supported; v1 accepts only 'normal'"
+            )
+        object.__setattr__(self, "blend", blend)
+        opacity = _require_number(self.opacity, "layer opacity", exclusive_minimum=0)
+        if opacity > 1:
+            raise ValueError("layer opacity must be <= 1")
+        object.__setattr__(self, "opacity", opacity)
+
+    def to_dict(self) -> dict[str, Any]:
+        return _json_safe_mapping(
+            {
+                "z": self.z,
+                "tracks": self.tracks,
+                "blend": self.blend,
+                "opacity": self.opacity,
+            }
+        )
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any]) -> LayerRef:
+        data = _require_mapping(payload, "layer")
+        _validate_object_keys(
+            data,
+            required={"z", "tracks"},
+            allowed={"z", "tracks", "blend", "opacity"},
+            label="layer",
+        )
+        return cls(
+            z=data["z"],
+            tracks=data["tracks"],
+            blend=data.get("blend", "normal"),
+            opacity=data.get("opacity", 1.0),
+        )
+
+
+@dataclass(frozen=True)
 class RenderSegment:
-    """One complete temporal window assigned to one qualified backend."""
+    """One complete temporal window assigned to one qualified backend.
+
+    ``layer`` optionally pins the segment to a z-layer; segments on distinct
+    layers may overlap in time (stacking), while segments on the same layer
+    (or the default layer, ``None``) must tile exactly.
+    """
 
     window: FrameWindow
     renderer: RendererResolution
     input_hashes: dict[str, str] = field(default_factory=dict)
+    layer: LayerRef | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "window", _coerce_window(self.window, "segment window", nullable=False))
@@ -1323,6 +1393,13 @@ class RenderSegment:
             "input_hashes",
             _require_hash_mapping(self.input_hashes, "segment input_hashes"),
         )
+        if self.layer is not None:
+            layer = (
+                self.layer
+                if isinstance(self.layer, LayerRef)
+                else LayerRef.from_dict(_require_mapping(self.layer, "segment layer"))
+            )
+            object.__setattr__(self, "layer", layer)
 
     @property
     def backend(self) -> str:
@@ -1337,23 +1414,26 @@ class RenderSegment:
         return self.renderer.support_decision
 
     def to_dict(self) -> dict[str, Any]:
-        return _json_safe_mapping(
-            {
-                "window": self.window,
-                "renderer": self.renderer,
-                "input_hashes": self.input_hashes,
-            }
-        )
+        payload = {
+            "window": self.window,
+            "renderer": self.renderer,
+            "input_hashes": self.input_hashes,
+        }
+        if self.layer is not None:
+            payload["layer"] = self.layer
+        return _json_safe_mapping(payload)
 
     @classmethod
     def from_dict(cls, payload: Mapping[str, Any]) -> RenderSegment:
         data = _require_mapping(payload, "render segment")
         required = {"window", "renderer", "input_hashes"}
-        _validate_object_keys(data, required=required, allowed=required, label="render segment")
+        allowed = {"window", "renderer", "input_hashes", "layer"}
+        _validate_object_keys(data, required=required, allowed=allowed, label="render segment")
         return cls(
             window=FrameWindow.from_dict(data["window"]),
             renderer=RendererResolution.from_dict(data["renderer"]),
             input_hashes=data["input_hashes"],
+            layer=LayerRef.from_dict(data["layer"]) if data.get("layer") is not None else None,
         )
 
 
@@ -1428,21 +1508,43 @@ class RenderPlan:
                 raise ValueError("a positive-frame plan must contain at least one segment")
             target_start = window.start_frame if window is not None else 0
             target_end = window.end_frame if window is not None else total_frames
-            expected_start = target_start
+            explicit_layer = segments[0].layer is not None
+            for index, segment in enumerate(segments):
+                if (segment.layer is not None) != explicit_layer:
+                    raise ValueError(
+                        "segments must either all carry an explicit layer or all use the "
+                        f"default layer: segments[0] has layer "
+                        f"{'set' if explicit_layer else 'None'} but segments[{index}] has "
+                        f"layer {'set' if segment.layer is not None else 'None'}"
+                    )
+            cursors: dict[int | None, int] = {}  # layer.z -> expected_start, None -> default layer
             for index, segment in enumerate(segments):
                 if segment.window.fps_rational != profile.fps_rational:
                     raise ValueError(
                         f"segments[{index}] FPS must exactly match the canonical profile FPS"
                     )
+                layer_key = segment.layer.z if segment.layer is not None else None
+                expected_start = cursors.setdefault(layer_key, target_start)
                 actual_start = segment.window.start_frame
                 if actual_start != expected_start:
                     relation = "overlaps or is out of order" if actual_start < expected_start else "leaves a gap"
-                    raise ValueError(f"segments[{index}] {relation} at frame {expected_start}")
+                    if segment.layer is None:
+                        raise ValueError(f"segments[{index}] {relation} at frame {expected_start}")
+                    raise ValueError(
+                        f"segments[{index}] layer z={segment.layer.z} {relation} at frame {expected_start}"
+                    )
                 if segment.window.end_frame > target_end:
                     raise ValueError(f"segments[{index}] extends beyond the plan target window")
-                expected_start = segment.window.end_frame
-            if expected_start != target_end:
-                raise ValueError("plan segments leave a trailing gap")
+                cursors[layer_key] = segment.window.end_frame
+            for layer_key, expected_start in cursors.items():
+                # The default (layer=None) layer must cover the whole target
+                # window — today's exact behavior, unchanged.  Explicit z
+                # layers tile CONTIGUOUSLY (enforced by the cursor loop above)
+                # but may legitimately end early: a top overlay (e.g. text)
+                # only covers part of the timeline, and the compositor's
+                # background fill handles the rest.
+                if layer_key is None and expected_start != target_end:
+                    raise ValueError("plan segments leave a trailing gap")
         reasons = _require_string_mapping(self.reasons, "reasons")
         expected_reason_keys = {str(index) for index in range(len(segments))}
         if set(reasons) != expected_reason_keys:

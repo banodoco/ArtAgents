@@ -1,54 +1,94 @@
-# Megado Batch 1 — Pin dependencies and prove WebGL
+# Megado Batch 1 — Per-layer plan contract (Layer Stack)
 
-You are the EXECUTOR (DeepSeek V4 Flash). Work in `/Users/peteromalley/Documents/reigh-workspace/Astrid-threejs-oracle` (git branch `oracle-run-threejs`). Execute ONLY the tasks below. Do NOT broaden scope. Do NOT edit anything under `astrid/core/`. Do NOT run the full test suite. Do NOT run formatters/linters. This is one batch of a larger pipeline; the oracle gates the result.
+You are the EXECUTOR (DeepSeek V4 Flash). Work in `/Users/peteromalley/Documents/reigh-workspace/Astrid-layer-plan` (branch `layer-plan`, HEAD 4c00b2a0). Execute ONLY this batch. Do NOT broaden scope. Do NOT edit the service, packs, or finalizers. Do NOT run the full test suite or formatters. The oracle gates the result.
 
-Environment: `PATH="$HOME/.nvm/versions/node/v24.17.0/bin:$PATH"` (Node 24) for npm work and the WebGL proof; `PYENV_VERSION=3.11.11` for Python. The `remotion/` project currently has NO node_modules.
+Environment: `PYENV_VERSION=3.11.11` for python/pytest. This batch is pure Python (contracts) — no node/remotion needed.
 
-Context: Astrid is adding a `rendering.threejs` backend where three.js renders inside the existing Remotion project via `@remotion/three`. This batch installs exact deps and proves headless WebGL works through Remotion's Chromium before any adapter code is written.
+## Context — read FIRST
 
-## Tasks
+- `.oracle/plan.md` (Grok's Layer Stack plan, sections 1 + Batch 1) and `.oracle/tasklist.md`.
+- The swarm findings at `.oracle/findings/02-contract-gap.txt` and `06-core-change-surface.txt` — the exact contract surface.
+- This is the FIRST deliberate `astrid/core/` change in the project's rendering history (the pluggable-renderer promise held for 2 epics; layering needs the contract to grow). Keep it MINIMAL and surgical.
 
-### T1.1 — Add exact dependencies
-Edit `remotion/package.json` dependencies to add EXACTLY:
-- `@remotion/three@4.0.455`
-- `@react-three/fiber@8.18.0`
-- `three@0.185.1`
-- `@types/three@0.185.4`
+## The change (from the plan)
 
-Do NOT use `latest`. Do NOT change existing remotion/react/react-dom versions. Do NOT add R3F v9.
+**Goal:** let a `RenderPlan` carry segments that overlap in TIME when they belong to DIFFERENT z-layers, while preserving exact per-layer tiling and the existing fast path.
 
-### T1.2 — npm install + commit lockfile
-Run `npm install` from `remotion/` with Node 24 on PATH. Commit `remotion/package-lock.json` (must be lockfileVersion 3). If `npm run typecheck` (T1.6) shows a React 19 types vs React 18 / R3F 8 conflict (the @types/react@19.2.14 dev-dep), align `@types/react` and `@types/react-dom` to React 18 majors and re-install. Record what you did.
+### 1. `LayerRef` — the only new type (contracts.py)
 
-### T1.3 — Global ANGLE config
-In `remotion/remotion.config.ts`, add `Config.setChromiumOpenGlRenderer('angle');`. No raw Chromium flags. No system-Chrome dependency.
+```python
+@dataclass(frozen=True)
+class LayerRef:
+    z: int                       # 0 = bottom; the tiling key
+    tracks: tuple[str, ...]      # visual track ids this layer owns
+    blend: str = "normal"        # v1: ONLY "normal" accepted
+    opacity: float = 1.0         # compositor applies aa= (batch 3)
+```
 
-### T1.4 — Inspect the pinned Remotion SwiftShader mapping
-Run `rg -n "unsafe-swiftshader|swiftshader" remotion/node_modules/@remotion/renderer/` and save the matching lines + file paths into `.oracle/findings/remotion-swiftshader.txt`. This is evidence of how Remotion 4.0.455 maps the `angle` gl option; do NOT assume main-branch behavior.
+- `z >= 0` (validate); `tracks` non-empty tuple of non-empty strings (validate); `blend` must be exactly `"normal"` in v1 (reject anything else with a clear error); `opacity` must be `0 < opacity <= 1` (validate).
+- Needs `to_dict()` / `from_dict()` (round-trip) — mirror the existing dataclass serialization patterns in contracts.py.
 
-### T1.5 — [XHARD] WebGL frame proof
-Create a DISPOSABLE proof (do not commit it):
-1. A minimal composition file under `remotion/src/` (e.g. `ThreeProof.tsx`) that renders a `<ThreeCanvas>` scene — a bright red rotating cube or a plane with a distinct color — at 160x90, driven by Remotion frame clock (useCurrentFrame for rotation, NO requestAnimationFrame).
-2. Register it in `remotion/src/Root.tsx` as `ThreeProof` (temporarily) so `npx remotion still` can find it.
-3. Run: `npx remotion still src/index.ts ThreeProof --frame=0 /tmp/three-proof-frame0.png` (or equivalent from remotion/). If WebGL context creation fails, capture the exact error and the flags to fix it; do not give up after one try — check the T1.4 mapping for the right `--gl`/flag combo. The goal: a non-uniform PNG proving WebGL rendered.
-4. With PYENV_VERSION=3.11.11, use Pillow (`python3 -c "from PIL import Image; ..."`) to assert: image size 160x90, and more than one distinct pixel color (non-uniform).
-5. Remove the disposable proof source + registration + output before checkpoint. `git status` must be clean of proof artifacts.
+### 2. `RenderSegment.layer: LayerRef | None = None` (contracts.py ~1306)
 
-### T1.6 — Typecheck + bundle
-Run `npm run typecheck` and `npm run bundle` from `remotion/` (Node 24 PATH). Both must exit 0.
+- Add the optional field AFTER `input_hashes` (default None).
+- `to_dict`: **omit `layer` entirely when None** — the fast-path key set stays exactly `{window, renderer, input_hashes}` (frozen test test_contracts.py:600-603 asserts this; `layer=None` must NOT add a key).
+- `from_dict`: accept an optional `layer` key; validate via LayerRef.from_dict when present; reject unknown keys as before (add `layer` to the allowed set).
 
-### T1.7 — Zero-core-edit + cleanliness proof
-Run `git diff --name-only <base-sha>..HEAD -- astrid/core/` — must print NOTHING. `git status --short` must show no node_modules, browser cache, proof source, PNG, bundle, or rendered-video artifacts (node_modules must be gitignored — verify; if not, add the right ignore entry, do not commit node_modules).
+### 3. Per-z cursor in `RenderPlan.__post_init__` (contracts.py ~1429-1445)
 
-## Acceptance (what the oracle will verify)
-- remotion/package.json has the 4 exact deps; lockfile v3 committed.
-- remotion.config.ts has `Config.setChromiumOpenGlRenderer('angle')`.
-- `.oracle/findings/remotion-swiftshader.txt` has the pinned mapping evidence.
-- The WebGL proof produced a non-uniform 160x90 PNG (evidence: screenshot or the Pillow assertion output saved to `.oracle/findings/webgl-proof.txt`).
-- typecheck + bundle pass.
-- No astrid/core/ changes; no artifacts committed.
+Replace the single `expected_start` cursor with a **per-layer cursor**:
 
-## Protocol
-- Commit your work as `megado: batch 1 — pin three.js deps, prove WebGL`.
-- Report: what you did, the exact versions installed, the SwiftShader mapping lines, the WebGL proof command + Pillow output, typecheck/bundle exit codes, and the final `git status --short` + `git diff --name-only <base-sha>..HEAD -- astrid/core/` output.
-- Keep the report under 400 words. Evidence-first.
+```python
+cursors: dict[int | None, int] = {}   # layer.z -> expected_start, None -> default layer
+```
+
+Rules:
+- Every segment has `layer` either ALL None or ALL set (mixing implicit/explicit z is a second tiling axis — reject with a clear error naming the violation).
+- Segments with `layer=None` tile against cursor `None` (exactly today's behavior: overlap → "overlaps or is out of order", gap → "leaves a gap", trailing → "trailing gap").
+- Segments with `layer=LayerRef(z)` tile per-z: same-z overlap/gap still illegal; **cross-z overlap is the feature (allowed)**.
+- Keep the global checks: FPS must match canonical profile FPS (all segments); `end_frame` must not exceed the plan target window.
+- The trailing-gap check: each cursor (per z AND None) must land on `target_end` when that layer was used... careful: a layer with NO segments doesn't need to reach target_end. Only layers that HAVE segments must tile exactly to target_end. (Default layer None counts as a layer.)
+- Error messages: keep the existing wording for the None layer; for explicit z use `segments[i] layer z=<z> <relation> at frame <expected>`.
+
+### 4. `schemas/v1/plan.json` — add `layer`
+
+Find the `renderSegment` schema (plan.json ~552, `additionalProperties: false`) and add an optional `layer` object property:
+```
+layer: { type: object, properties: { z: {type: integer, minimum: 0}, tracks: {type: array, items: {type: string}, minItems: 1}, blend: {type: string}, opacity: {type: number} }, required: [z, tracks], additionalProperties: false }
+```
+Not runtime-enforced (plans validate via dataclasses) but the wire schema must match.
+
+### 5. Reject `blend != "normal"` at LayerRef construction
+
+v1 ships src-over + alpha only. `LayerRef.from_dict` / `__post_init__` raises on any blend value other than `"normal"`.
+
+## Do NOT do (LEAVE)
+
+- No service.py edits (batch 2 handles `_window_timeline` track-filtering).
+- No pack/finalizer/planner edits.
+- No FrameWindow changes.
+- No RenderPlan layer-registry (a top-level layers list) — the plan explicitly says don't.
+- No structured SupportReport.features change.
+
+## Verification (run, then report the evidence)
+
+```bash
+PYENV_VERSION=3.11.11 python -m pytest -q tests/core/rendering/test_contracts.py tests/core/rendering/test_provenance.py
+```
+
+Also add focused NEW tests (in test_contracts.py or a new test_layer_contract.py — your call, but name it clearly):
+1. `layer=None` (all segments) still rejects overlap/gap/out-of-order/trailing-gap — the EXACT existing cases must still pass (they're frozen).
+2. Two segments, distinct z, SAME window → plan PARSES (the new capability).
+3. Two segments, same z, overlapping → rejected.
+4. Two segments, same z, adjacent → parses (per-z tiling works).
+5. Mixed (one layer=None, one layer=LayerRef) → rejected (the "all or none" rule).
+6. `blend != "normal"` → rejected.
+7. `layer` round-trips through to_dict/from_dict; `layer=None` omits the key (fast-path key set unchanged).
+8. `z < 0`, empty tracks, `opacity <= 0` or `> 1` → rejected.
+
+Run the plan.json schema through any existing schema-validation test (grep for how plan.json is tested; if there's a schema test file, ensure the new field passes).
+
+Commit: `megado: batch 1 — LayerStack per-layer plan contract (LayerRef, per-z cursor, plan.json)`.
+
+## Report
+<350 words: the exact contracts.py changes (types + cursor logic), plan.json field, new test names + counts, the frozen-test evidence (test_contracts + test_provenance pass), the commit sha, final git status. Evidence-first.

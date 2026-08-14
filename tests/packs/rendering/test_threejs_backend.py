@@ -36,6 +36,7 @@ import yaml
 from astrid.core.rendering.contracts import (
     SCHEMA_VERSION,
     FrameWindow,
+    RenderRequest,
     RendererManifest,
 )
 from astrid.core.rendering.errors import RendererUnsupportedError
@@ -831,3 +832,137 @@ def test_threejs_real_render_works_with_npm_offline(tmp_path: Path) -> None:
     assert payload["engine"] == THREEJS_ID
     assert payload["audio_ownership"] == "rendered"
     assert payload["backend_fragments"][THREEJS_ID]["legacy_v1"]["engine"] == "threejs"
+
+# ---------------------------------------------------------------------------
+# Batch 4 - alpha output (consumes the astrid_layer.alpha stamp)
+# ---------------------------------------------------------------------------
+
+
+def _threejs_stamped_timeline(tmp_path: Path, *, alpha: bool = True) -> Path:
+    return _write_timeline(
+        tmp_path,
+        {
+            "theme": "banodoco-default",
+            "theme_overrides": {
+                "visual": {"canvas": dict(CANVAS), "background": "#1a1a2e"}
+            },
+            "tracks": [{"id": "v1", "kind": "visual", "label": "Title"}],
+            "clips": [
+                {
+                    "id": "title",
+                    "at": 0.0,
+                    "track": "v1",
+                    "clipType": "text",
+                    "hold": 0.5,
+                    "text": {"content": "ALPHA", "fontSize": 64, "color": "#ffffff"},
+                    "params": {"weight": 700},
+                }
+            ],
+            "metadata": {"astrid_layer": {"z": 1 if alpha else 0, "alpha": alpha}},
+        },
+    )
+
+
+def _rgba_corner(video_path: Path) -> bytes:
+    raw = subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-i",
+            str(video_path),
+            "-frames:v",
+            "1",
+            "-pix_fmt",
+            "rgba",
+            "-f",
+            "rawvideo",
+            "-",
+        ],
+        check=True,
+        capture_output=True,
+    ).stdout
+    return raw[0:4]
+
+
+def _threejs_direct_request(timeline_path: Path) -> RenderRequest:
+    """A protocol-v1 request object for the Three.js backend (never a dict:
+    _protocol_render is typed on RenderRequest)."""
+    return RenderRequest.from_dict(
+        {
+            "schema_version": SCHEMA_VERSION,
+            "timeline_path": str(timeline_path),
+            "assets_registry_path": None,
+            "output_name": "segment-0000.mp4",
+            "backend_config": {},
+        }
+    ).for_backend(THREEJS_ID)
+
+
+@pytest.mark.timeout(600)
+def test_threejs_unstamped_real_render_corner_is_background_color(
+    tmp_path: Path,
+) -> None:
+    """Unstamped (no stamp) keeps the opaque path: the corner pixel is the
+    theme background #1a1a2e with alpha 255 (frozen behavior)."""
+    _require_threejs_environment()
+    timeline_path = _text_timeline(tmp_path)
+    with _execution_env():
+        threejs._protocol_render(
+            _threejs_direct_request(timeline_path), workspace=tmp_path
+        )
+    video_path = tmp_path / "outputs" / "segment-0000.mp4"
+    assert video_path.is_file() and video_path.stat().st_size > 0
+    corner = _rgba_corner(video_path)
+    # Frozen opaque path: the corner is the theme background #1a1a2e with
+    # alpha 255.  The WebGL canvas -> yuv -> rgb round trip can land one
+    # LSB off (0x19 vs 0x1A), so channels are compared with a 1-bit
+    # tolerance; opacity is exact.
+    assert corner[3] == 255, corner
+    assert all(abs(channel - expected) <= 1 for channel, expected in zip(corner[:3], (0x1A, 0x1A, 0x2E))), corner
+
+
+@pytest.mark.timeout(600)
+def test_threejs_alpha_stamped_real_render_declared_profile_matches_probe(
+    tmp_path: Path,
+) -> None:
+    """Stamped alpha through _protocol_render: strict validation passes and
+    the probed artifact is the recorded batch-4-rework truth --
+    mov/prores/yuva444p12le/time_base 1/90000/pcm_s16le, remapped to .mov."""
+    _require_threejs_environment()
+    timeline_path = _threejs_stamped_timeline(tmp_path, alpha=True)
+    with _execution_env():
+        result = threejs._protocol_render(
+            _threejs_direct_request(timeline_path), workspace=tmp_path
+        )
+    video_path = tmp_path / "outputs" / "segment-0000.mov"
+    assert video_path.is_file() and video_path.stat().st_size > 0
+    profile = result.video.profile
+    assert profile.container == "mov"
+    assert profile.video_codec == "prores"
+    assert profile.pixel_format == "yuva444p12le"
+    assert profile.time_base == (1, 90000)
+    probe = _probe(video_path)
+    video = next(s for s in probe["streams"] if s["codec_type"] == "video")
+    assert video["codec_name"] == "prores"
+    assert video["pix_fmt"] == "yuva444p12le"
+    assert video["time_base"] == "1/90000"
+    assert any(
+        s["codec_type"] == "audio" and s["codec_name"] == "pcm_s16le"
+        for s in probe["streams"]
+    )
+
+
+@pytest.mark.timeout(600)
+def test_threejs_alpha_stamped_corner_pixel_is_fully_transparent(
+    tmp_path: Path,
+) -> None:
+    _require_threejs_environment()
+    timeline_path = _threejs_stamped_timeline(tmp_path, alpha=True)
+    with _execution_env():
+        threejs._protocol_render(
+            _threejs_direct_request(timeline_path), workspace=tmp_path
+        )
+    video_path = tmp_path / "outputs" / "segment-0000.mov"
+    corner = _rgba_corner(video_path)
+    assert corner[3] == 0, corner

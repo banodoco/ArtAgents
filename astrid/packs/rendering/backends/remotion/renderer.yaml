@@ -24,6 +24,7 @@ capabilities:
     animations: true
     transitions: true
     html_in_canvas: true
+    alpha_output: true
   supports_full_timeline: true
   supports_windows: false
   output_profiles:

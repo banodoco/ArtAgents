@@ -1,0 +1,22 @@
+## Research Report: "Ray" and Video Compositing
+
+**Bottom line: there is no confident "Ray" video compositing system.** After sweeping NLEs, JS/TS libraries, GitHub, and compositing engines, no timeline/video product named "Ray" with a layer model exists. Three candidates surfaced; only two are worth reporting.
+
+### Candidates ruled in/out
+
+1. **ray.so** — code-screenshot tool; no video at all. **Ruled out.** (https://www.ray.so/)
+2. **Ray (ray.io, Anyscale)** — Python distributed-compute framework. *Best candidate by relevance to Astrid's architecture*, but it has **no layer/compositing model** — it's pure orchestration: parallel tasks/actors, `ray.data` pipelines, Serve graphs. Its media relevance is exactly that: parallel ffmpeg chunking + GPU encoders in pipeline DAGs (docs show a VideoAnalyzer→VideoEncoder→MultiDecoder graph). It says nothing about z-order, alpha, or blend modes. (https://www.ray.io/, https://docs.ray.io/en/latest/serve/tutorials/video-analysis/README.html)
+3. **Ray Dynamic Texture** (aescripts/Battle Axe) — After Effects plugin that stores textures *with* their layer settings/effects/keyframes for reuse. Texture-preset management, not compositing. (https://aescripts.com/ray-dynamic-texture/)
+
+(Also checked: OSPRay = ray-tracing renderer, no timeline; Ray 2/3 = AI video *generation* models; GitHub "RayEditor" = Vue rich-text editor.)
+
+### Generalized lessons for Astrid (from standard compositor practice — AE/Motion/Blender)
+
+1. **Z-order = array order, not explicit z-index.** Layers are an ordered stack (bottom→top); composite in one bottom-up pass. (https://helpx.adobe.com/after-effects/desktop/work-with-compositions/composition-settings/composition-basics.html)
+2. **Blend modes are pairwise functions** (top, bottom) — so flatten groups to a single RGBA *before* blending with siblings; per-layer opacity multiplies alpha first. (https://support.apple.com/guide/motion/intro-to-layer-blending-motnee66286f/mac)
+3. **Keep straight (unpremultiplied) alpha in the graph; premultiply once** at encode. Use ProRes 4444/WebM for alpha codecs; know their limits.
+4. **The compositor must be backend-agnostic**: each engine (Remotion/hyperframes/three.js) renders its layer to a shared RGBA intermediate; one shader-based merge pass composites — never CPU pixel loops. This decoupling is what makes heterogeneous engines composable.
+5. **Timeline = parallel layer stacks; nesting = composition references** — tracks map 1:1 to stack entries.
+6. **Adopt Ray-the-framework for parallelism** (per-layer/clip rendering), not for compositing semantics.
+
+**Avoid**: inventing a "Ray" for Astrid — no precedent exists to copy; use AE/Blender/Motion as the reference model instead.

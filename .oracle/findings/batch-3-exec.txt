@@ -1,0 +1,15 @@
+Batch 3 complete. Committed as `edf0859a`.
+
+## Report
+
+**Filtergraph assembly.** `build_composite_command` emits one ffmpeg invocation: input `[0]` is a full-length `color=c=black:s=WxH:r=fps:d=<total_seconds>` base; each layer is `-i`'d next, with `-c:v libvpx-vp9` forced **before** alpha inputs (verified: ffmpeg 7.1's native VP9 decoder drops the alpha plane — `top.webm` probes as `yuv420p` yet decodes RGBA only under the libvpx decoder). Per layer (z ascending): `[N:v]format=yuva420p,` (alpha only) `scale=W:H:force_original_aspect_ratio=decrease,pad=W:H:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=<num>/<den>,setpts=PTS-STARTPTS[,format=rgba,colorchannelmixer=aa=<op>]` then chained `[prev][tN]overlay=0:0:format=auto:eof_action=pass`. Output: `format=yuv420p`, libx264, AAC, `-video_track_timescale`, `-movflags +faststart`.
+
+**Short-layer padding.** The brief's default-`repeat` assumption was false: with `eof_action=repeat` a short top layer freezes its last frame for the rest of the plan. I verified empirically that `eof_action=pass` is the correct mechanism — when a layer's frames end, the accumulated result below passes through, so a 5-frame top over a 10-frame plan paints green at frames 0–4 and red at 5–9. This pads z=0 too (base color shows after a short bottom ends), satisfying the oracle note. Audio: lowest-z layer with an audio stream is mapped through `aformat=<plan sr/layout>,apad`; none found → `anullsrc` + apad; both pinned by `-t <total_seconds>` (validated at 30000/1001: exactly 30 frames).
+
+**Pixel proof** (PIL on extracted frames): synthetic composite — frame 0 box(5,5)=(0,254,0) green, outside(50,50)=(252,0,0) red (top over bottom); short top — frame 8 all red; zero-alpha top — red everywhere. ffprobe output: h264/yuv420p/aac.
+
+**Frame-count authority.** Both layers span the full window: `sum(segment.window.duration_frames)=20`, `plan.total_frames=10`, output `nb_frames=10`, `result.video.duration_frames=10` — never the sum.
+
+**Tests/freeze/ruff.** 45 passed: 11 compositor (manifest, 5 support cases incl. layer=None/single-z/blend/dup-z, pixel proof, short-layer, zero-alpha, lowest-z audio, recovery) + 26 `test_ffmpeg_finalizer.py` (unchanged) + 8 `test_freeze.py`. Freeze: added `rendering.ffmpeg-compositor` to the finalizer id set (only edit). Ruff: 1469 = 1469 (one I001 in my import block fixed).
+
+**Commit/status.** `edf0859a megado: batch 3 — rendering.ffmpeg-compositor (overlay merge, short-layer padding, frame-count authority)`; `git status` clean except pre-existing untracked `.oracle/` files (not mine to commit). No contracts/service/concat-finalizer changes.

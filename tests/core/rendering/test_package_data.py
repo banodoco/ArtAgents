@@ -48,7 +48,9 @@ RENDERING_MANIFESTS = {
     "packs/rendering/executors/sprite_sheet/executor.yaml",
     "packs/rendering/executors/timeline_storyboard/executor.yaml",
     "packs/rendering/planners/legacy_hybrid/planner.yaml",
+    "packs/rendering/planners/layer_stack/planner.yaml",
     "packs/rendering/finalizers/ffmpeg/finalizer.yaml",
+    "packs/rendering/finalizers/compositor/finalizer.yaml",
 }
 
 

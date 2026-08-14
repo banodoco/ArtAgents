@@ -1,0 +1,29 @@
+# Generic registry-driven layer planner + compositor — verified findings (ranked)
+
+**1. The routing primitive already exists — it's `_CommandSupportResolver`** (planners/legacy_hybrid/run.py:603-663): for each candidate it calls `registry.get`/`resolve_evidence` (run.py:620-621), projects the request per-backend (run.py:623), and runs the renderer's `support` command via `CommandTransport` (run.py:652-660), with a static-capability fallback (run.py:631-647). Enumeration is `RendererRegistry.candidates(eligible=True)` (registry.py:257-280); `resolve_evidence` (registry.py:300-340) returns alias/override/trust chain. `load_default_registries` returns all three registries (registry.py:497-586). This is the "ask who can render this (layer,window) cell" loop, already proven in `plan()` (run.py:748-779).
+
+**2. Blocker: the plan contract is concat-only.** `RenderPlan.__post_init__` requires ordered, gap-free, non-overlapping exact tiling (contracts.py:1429-1445); `RenderSegment` carries only window+renderer+hashes — no z_index/blend_mode/opacity (contracts.py:1306-1311); `FinalizeRequest` artifacts must be 1:1 with segments (contracts.py:1730-1731). Overlapping layers need schema v2 (or a sibling `layers` representation).
+
+**3. `support_based_assignment` is half-true.** It's a feature flag (planner.yaml:20, echoed run.py:473). The simple/complex *split* is hardcoded heuristics (`_complex_frame_windows` run.py:159-264: effects/transitions/opacity≠1/fades; `_segment_kinds` run.py:267-288); renderer *choice within kind* is genuinely support-driven (run.py:748-779). Generalizable: replace the heuristic split with the candidates() scan.
+
+**4. Per-window, per-layer requests work today.** Host-slicing materializes a windowed timeline with `window=None` for `supports_windows:false` backends (service.py:1048-1094; all 3 backends declare false — threejs/renderer.yaml:12, ffmpeg:24, remotion:28). Track projection already exists (`_component_timeline` threejs_hybrid/run.py:158-179) — extend it to "one layer's tracks only".
+
+**5. Pure predicate vs subprocess.** threejs_hybrid imports `_support_reasons` (run.py:62-64, 194; threejs/run.py:144-209) — fast, in-process, but inlined and backend-specific. Registry `support()` is renderer-agnostic, honors aliases/trust, but costs a subprocess per candidate. Generic planner: registry `support()` for routing; pure predicates as a documented fast-path.
+
+**6. Compositor.** Today's finalizer normalizes then concat-demuxer stream-copies (ffmpeg/run.py:658-695, 736-765) and validates frame count vs planned total (run.py:1296). It has zero overlay/blend machinery. ffmpeg's own renderer *rejects* multi-visual-track and non-default blendMode/opacity (ffmpeg/support.py:139-154, 282-283) — compositing must live in the finalizer. All backends emit opaque MP4; top layers need alpha (vp9/yuva420p).
+
+**7. Layer assignment.** Schema: `TrackKind=visual|audio`, `TrackBlendMode` = 8 modes, track opacity (banodoco_schema.py:102-107, 177-183); z-order = track array order (no explicit z field). (a) one layer/track is faithful but N renders; (b) capability-grouping is forced by ffmpeg's one-visual-track rule and threejs's text-only rule; (c) per-track claiming needs a protocol extension. Collapse same-renderer adjacent z-tracks (today's single-layer direct path: service.py:1450-1465, `_DIRECT_FINALIZER_ID` service.py:80).
+
+**8. v1-minimal:** 2 layers (opaque bottom + transparent top), normal blend only, opacity via alpha; defer 8 blend modes, N>2, per-window intra-layer overlaps.
+
+**Generic planner design sketch** (algorithm):
+1. `renderers = load_default_registries()[0]; candidates = renderers.candidates(eligible=True)`
+2. For each visual track (z = track index): project timeline to that track's clips+tracks
+3. For each candidate: `report = support_resolver(candidate, request, layer_timeline)` (host-sliced window)
+4. Keep reports with `supported`; sort by manifest priority (registry.py:589-594)
+5. Greedy merge: adjacent z-tracks won by the same renderer → one layer (collapse)
+6. Emit layer per (renderer, z-range, window); record z_index, blendMode, opacity from tracks
+7. Bottom layer → opaque profile; upper layers → alpha profile (vp9/webm)
+8. Pin `rendering.ffmpeg-compositor`; plan.total_frames = full timeline length
+9. Compositor: `color` base → scale each input → `[k:v][k+1:v]overlay`/`blend` chain, ordered by z
+10. Service validates each segment's support() again and renders N segments + 1 composite

@@ -59,6 +59,7 @@ from astrid.core.rendering.publication import publish_render_result
 from astrid.core.subprocess_env import build_child_subprocess_env
 from astrid.packs.rendering.backends import _shared as _shared
 from astrid.packs.rendering.backends._shared import (
+    _alpha_output_name,
     _canonical_profile,
     _duration_frames,
     _input_path,
@@ -71,6 +72,7 @@ from astrid.packs.rendering.backends._shared import (
     _resolve_theme_path,
     _resolved_theme_for_render,
     _serialize_timeline,
+    _timeline_alpha,
 )
 from astrid.packs.rendering.backends.remotion import lock as remotion_lock
 from scripts import gen_effect_registry
@@ -539,6 +541,25 @@ def _execute_remotion_locked(
                 "assets": resolved_registry,
                 "theme": theme_for_props,
             }
+            # Batch 4 (layer stack): the service stamps
+            # ``metadata.astrid_layer.alpha = z > 0`` onto the materialized
+            # timeline of z-layer segments.  When the stamp says alpha, emit
+            # TRANSPARENT output (PNG frames -> ProRes 4444/yuva444p12le in
+            # MOV -- remotion 4.0.509 muxes NO alpha plane for vp9/webm, so
+            # ProRes 4444 is the alpha path); the unstamped path keeps
+            # today's jpeg/h264/MP4 contract exactly.
+            alpha = _timeline_alpha(merged_props["timeline"])
+            if alpha:
+                # Theme background neutralization: the DOM
+                # TimelineComposition paints ``theme.visual.color.bg`` as an
+                # opaque AbsoluteFill (node_modules/@banodoco/...:272), so a
+                # stamped top layer would still emit opaque corners even with
+                # the threejs <color> skip.  Making the serialized theme's bg
+                # transparent keeps BOTH compositions from painting anything
+                # opaque.  This mutates only the per-run props copy; the
+                # resolved theme dict is built fresh for this render.
+                theme_color = merged_props["theme"].setdefault("visual", {}).setdefault("color", {})
+                theme_color["bg"] = "transparent"
             stage_summary = _stage_effect_assets_for_timeline(
                 merged_props["timeline"],
                 project_dir=project_dir,
@@ -553,19 +574,31 @@ def _execute_remotion_locked(
                 remotion_env_additions["ASTRID_TIMELINE_COMPOSITION_SRC"] = str(
                     composition_src
                 )
+            remotion_args = [
+                "npx",
+                "remotion",
+                "render",
+                composition_id,
+                "--props",
+                str(props_path),
+                "--output",
+                str(staged_video),
+                "--allow-html-in-canvas",
+                "--enforce-audio-track",
+            ]
+            if alpha:
+                # ProRes 4444 is the only engine-native alpha mux in remotion
+                # 4.0.509: vp9/webm emits plain yuv420p (probed, dead path).
+                # The CLI pixel-format is yuva444p10le; the muxed artifact is
+                # probed as yuva444p12le (see _remotion_mux_profile).
+                remotion_args += [
+                    "--image-format=png",
+                    "--pixel-format=yuva444p10le",
+                    "--codec=prores",
+                    "--prores-profile=4444",
+                ]
             completed = subprocess.run(
-                [
-                    "npx",
-                    "remotion",
-                    "render",
-                    composition_id,
-                    "--props",
-                    str(props_path),
-                    "--output",
-                    str(staged_video),
-                    "--allow-html-in-canvas",
-                    "--enforce-audio-track",
-                ],
+                remotion_args,
                 cwd=str(project_dir),
                 env=build_child_subprocess_env(explicit_env=remotion_env_additions),
                 capture_output=True,
@@ -607,6 +640,11 @@ def render(
     assets_path = Path(assets_path)
     out_path = Path(out_path)
     project_dir = Path(project_dir) if project_dir is not None else REPO_ROOT / "remotion"
+    if _timeline_alpha(_serialize_timeline(timeline_path)):
+        # Stamped segments render ProRes 4444, which Remotion only writes to
+        # a .mov container; remap the legacy publication path the same way
+        # the protocol path does so the published file keeps a truthful name.
+        out_path = Path(_alpha_output_name(str(out_path)))
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with TemporaryDirectory(
         prefix=f".{out_path.name}.publication-",
@@ -735,6 +773,7 @@ def support(request: RenderRequest, *, workspace: Path) -> SupportReport:
         "windows": False,
         "effects": True,
         "asset_serving": "invocation-scoped",
+        "alpha_output": True,
     }
     try:
         settings = _settings_from_request(request, workspace)
@@ -823,7 +862,11 @@ def support(request: RenderRequest, *, workspace: Path) -> SupportReport:
                     f"Remotion's always-rendered audio output"
                 )
             if request.profile is not None:
-                render_profile = _remotion_mux_profile(canonical)
+                # The profile Remotion produces depends on the alpha stamp:
+                # z>0 layer timelines render ProRes 4444/yuva444p12le/MOV,
+                # everything else the frozen H.264/yuv420p/MP4 contract.
+                alpha = _timeline_alpha(timeline_data)
+                render_profile = _remotion_mux_profile(canonical, alpha=alpha)
                 mismatches = _profile_mismatches(request.profile, render_profile)
                 if mismatches:
                     reasons.append(
@@ -869,7 +912,14 @@ def _protocol_render(request: RenderRequest, *, workspace: Path) -> RenderResult
     )
     outputs_dir = workspace / "outputs"
     outputs_dir.mkdir(parents=True, exist_ok=True)
-    output_path = outputs_dir / request.output_name
+    # The service hardcodes ``segment-NNNN.mp4`` (service.py:1362) but
+    # Remotion rejects .mp4 output names for --codec=prores; remap the actual
+    # artifact to .mov when the alpha stamp is present.  Every downstream
+    # path (staged video, declared artifact, provenance) derives from the
+    # remapped name so the artifact's declared path points at the real file.
+    alpha = _timeline_alpha(_serialize_timeline(timeline_path))
+    output_name = _alpha_output_name(request.output_name) if alpha else request.output_name
+    output_path = outputs_dir / output_name
 
     with ExitStack() as lifecycle:
         if requested_assets_path is None:
@@ -882,9 +932,13 @@ def _protocol_render(request: RenderRequest, *, workspace: Path) -> RenderResult
             assets_path = requested_assets_path
         assets_data = _load_registry_mapping(assets_path)
         canonical = _canonical_profile(timeline_path, assets_data, settings.theme_path)
-        declared_profile = _remotion_mux_profile(request.profile or canonical)
-        # Remotion always muxes an audio track into its MP4 (silent when the
-        # timeline has none), so ownership is effectively 'rendered'.
+        # The declared profile must match what ffprobe sees on the real
+        # artifact: alpha-stamped timelines render ProRes 4444/yuva444p12le
+        # in MOV, everything else stays H.264/yuv420p in MP4 (strict
+        # validation compares every field against the probed file).
+        declared_profile = _remotion_mux_profile(request.profile or canonical, alpha=alpha)
+        # Remotion always muxes an audio track into its output (silent when
+        # the timeline has none), so ownership is effectively 'rendered'.
         ownership = AudioOwnership.RENDERED
         private_tmp = lifecycle.enter_context(
             TemporaryDirectory(
@@ -892,7 +946,7 @@ def _protocol_render(request: RenderRequest, *, workspace: Path) -> RenderResult
                 dir=str(outputs_dir),
             )
         )
-        staged_video = Path(private_tmp) / request.output_name
+        staged_video = Path(private_tmp) / output_name
         details = _execute_remotion(
             timeline_path,
             assets_path,

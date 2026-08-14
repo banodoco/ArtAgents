@@ -182,11 +182,13 @@ command prefix among sibling renderer, planner, and finalizer adapters; it must
 not infer its identity from timeline shape or unrelated configuration.
 
 **V1 scope.** V1 is synchronous local execution only; asynchronous job
-scheduling, remote render infrastructure, and layer compositing are explicitly
-deferred beyond V1 and are NOT part of the V1 renderer contract. The four verbs
-above are the complete V1 command surface: there is no submit/status/cancel
-queue, no remote render farm, and no multi-layer compositing service in V1.
-Submit/status/cancel/resume semantics, remote infrastructure, and compositing
+scheduling and remote render infrastructure are explicitly deferred beyond V1
+and are NOT part of the V1 renderer contract. The four verbs above are the
+complete V1 command surface: there is no submit/status/cancel queue and no
+remote render farm. Spatial stacking is an opt-in pack planner/finalizer
+(`rendering.layer-stack` / `rendering.ffmpeg-compositor`) that reuses those
+verbs plus the optional `LayerRef` field; it is not a fifth verb and is not
+the default. Submit/status/cancel/resume semantics and remote infrastructure
 each require a future protocol version.
 
 ## Wire primitives
@@ -453,7 +455,29 @@ branches; the DTO enforces adjacency, bounds, and exact FPS equality.
 
 Reasons are keyed by zero-based decimal segment index (`"0"`, `"1"`, ...),
 with exactly one entry per segment. A renderer owns all pixels for its assigned
-temporal window; V1 does not combine overlapping renderer layers.
+temporal window on a given z-layer. Unlayered plans (`layer` omitted on every
+segment) still tile exactly in time: no overlap, gap, or reordering. Layered
+plans set `RenderSegment.layer` to a `LayerRef` on **every** segment (mixing
+implicit and explicit z is rejected). Same-z segments still tile; distinct-z
+segments may overlap in time — that overlap is stacking, consumed only by a
+finalizer that declares layer compositing (the built-in one is
+`rendering.ffmpeg-compositor`). See
+[layer-stack.md](../reference/layer-stack.md).
+
+### Optional LayerRef (opt-in stacking)
+
+`LayerRef` is `{z, tracks, blend?, opacity?}`. `z=0` is the bottom layer;
+`tracks` are the visual track ids that layer owns; `blend` is `"normal"`
+only; `opacity` is in `(0, 1]`. The field is omitted from the wire segment
+when `layer` is `None`, so fast-path concat plans keep the historical key
+set `{window, renderer, input_hashes}`.
+
+Paint order is unchanged: the first visual track is TOP (highest z). The
+host stamps `metadata.astrid_layer.alpha = (z > 0)` on the materialized
+per-layer timeline; stamped remotion/threejs segments emit ProRes 4444.
+Stacking is opt-in via the `rendering.layer-stack` planner. It is not the
+default, and it does not add a new protocol verb — plan, render, support,
+and finalize are unchanged.
 
 ## Finalization
 
@@ -1053,9 +1077,11 @@ M1 is amended and re-reviewed rather than creating an SDK-only dialect.
 14. **Developer complexity is progressive.** The minimum local synchronous
     renderer implements one render operation. Request-sensitive support and
     custom finalizers are optional layers exposed only when needed.
-    V1 is synchronous local execution only; asynchronous job scheduling,
-    remote render infrastructure, and layer compositing are explicitly
-    deferred beyond V1 and are NOT part of the V1 renderer contract.
+    V1 is synchronous local execution only; asynchronous job scheduling
+    and remote render infrastructure are explicitly deferred beyond V1.
+    Spatial stacking is an opt-in pack feature (`rendering.layer-stack` +
+    `rendering.ffmpeg-compositor`) that uses the optional `LayerRef` field;
+    it is not a new protocol verb and is not the default planner.
 15. **Astrid owns plumbing.** Core services own asset resolution, temporary
     workspace allocation, output probing and normalization, audio
     passthrough/muxing, hashes, core provenance, cleanup, and replay metadata.
