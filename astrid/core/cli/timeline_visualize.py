@@ -13,7 +13,7 @@ from typing import Any
 
 import astrid
 from astrid.core.contracts.errors import AstridError
-from astrid.core.gateway.project import (
+from astrid.core.contracts.timeline_visualize import (
     ASTRID_GATEWAY_RESOLVED_PROJECT_ENV,
     _validated_timeline_visualize_view_context,
 )
