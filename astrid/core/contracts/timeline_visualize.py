@@ -7,8 +7,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-from astrid.core.cli_choices import TimelineVisualizeFormat
-
 ASTRID_GATEWAY_RESOLVED_PROJECT_ENV = "ASTRID_GATEWAY_RESOLVED_PROJECT"
 
 class TimelineVisualizeViewContext:
