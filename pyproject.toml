@@ -59,7 +59,19 @@ include = ["astrid*"]
 
 [tool.setuptools.package-data]
 astrid = [
+    # m1 schema-pack resources (plan step 23): every core and in-tree pack
+    # YAML manifest and SQL migration must ship in editable installs and
+    # wheels. Patterns are scoped to the exact resource directories; this is
+    # not a broad packs/** packaging expansion.
+    "core/migrations/sql/core/*.sql",
+    "packs/timeline/*.yaml",
+    "packs/timeline/migrations/*.sql",
+    "packs/shots/*.yaml",
+    "packs/shots/migrations/*.sql",
+    "packs/references/*.yaml",
+    "packs/references/migrations/*.sql",
     "core/rendering/schemas/v1/*.json",
+    "core/pack/schemas/v1/*.json",
     "core/rendering/fixtures/renderer_parity/*",
     "packs/rendering/**/*.yaml",
 ]
