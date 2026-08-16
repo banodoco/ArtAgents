@@ -1,0 +1,39 @@
+# Astrid references schema pack (v10 section 2; decision artifact section 4).
+#
+# This is a schema-pack manifest, NOT a capability pack.yaml: it carries
+# exactly the 11 snake_case top-level fields of the frozen schema-pack
+# contract and is validated by astrid.core.schema_packs.manifest.
+#
+# The references pack owns exactly three tables (project_references,
+# media_references, reference_links) and declares the future namespaced
+# reference vocabulary. No executable repositories ship in m1 (repositories
+# is empty); the declared event/command kinds are the normative v10 examples
+# and are registry-validated before any mutation.
+id: references
+version: 1
+depends_on:
+  - core >= 1
+migrations:
+  - version: 1
+    name: initial
+    path: migrations/0001_initial.sql
+    tables:
+      - project_references
+      - media_references
+      - reference_links
+stream_types: []
+event_kinds:
+  - reference.primary_changed
+command_kinds:
+  - reference.set_primary
+repositories: []
+conformance:
+  - replay
+  - mismatch_before_mutation
+  - same_project
+  - vocabulary
+  - writer_ownership
+  - crash_atomicity
+cli_mounts:
+  references: media references
+bridge_mounts: []
