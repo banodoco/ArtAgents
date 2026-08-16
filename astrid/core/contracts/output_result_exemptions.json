@@ -2,8 +2,8 @@
   "schema_version": 1,
   "description": "Committed output-result exemption list. Every executor in the default registry either writes a universal result manifest (non-exempt) or appears here with a specific M2-approved reason. The registry conformance gate uses this list to allow non-conforming executors while making the gap visible.",
   "last_registry_snapshot": "2026-08-12T00:00:00Z",
-  "total_executors": 69,
-  "m1_adopters": 40,
+  "total_executors": 70,
+  "m1_adopters": 41,
   "exempted": 29,
   "non_exempt": [
     "editorial.arrange",
@@ -19,6 +19,7 @@
     "editorial.transcribe",
     "editorial.triage",
     "editorial.validate",
+    "fal.h3_video",
     "foley.foley_review",
     "foley.tile_video",
     "generation.generate_image",
