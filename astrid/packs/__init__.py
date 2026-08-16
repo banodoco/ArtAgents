@@ -1,5 +1,234 @@
-"""Astrid pack content (executors, orchestrators, elements)."""
+"""Astrid pack content and the explicit standard-Astrid schema-pack composition.
+
+(m1 plan step 2.) :func:`register_standard_schema_packs` is the single explicit
+composition function: it registers exactly the three in-tree schema packs
+(timeline, shots, references) through ``register_pack()``. There is no dynamic
+discovery, no install/uninstall path, and no reuse of the capability-pack
+loader or definition machinery (v10 section 2 "Boundary now, loader later";
+decision artifact section 4).
+
+Core vocabulary is registered independently by
+``astrid.core.events.registry.register_core_vocabulary``; this module registers
+only the three shipped packs. ``astrid.core.gateway.dispatch`` is the single
+application-composition boundary allowed to import this standard composition.
+
+(m1 plan step 18.) :func:`compose_standard_bridge` is the standard
+repository-backed bridge composition: standard registry + one
+``DatabaseWriter`` over ``${ASTRID_PROJECTS_ROOT}/.astrid/astrid.sqlite3`` +
+the kernel services + the project/timeline repositories + the timeline bridge
+adapter. It is invoked **only** at the gateway serve composition root
+(``astrid.core.gateway.dispatch._dispatch_serve``); constructing the database
+or the registered packs anywhere else is an architecture violation, and there
+is no legacy file/JSONL/FSA/Supabase authority fallback.
+
+(m2 plan step 3/4.) :func:`compose_standard_bridge` additionally runs the
+startup selective staging GC through the **single** already-constructed
+``DatabaseWriter``: :func:`collect_live_staging_txn_ids` reads the
+``execution_attempts`` rows that are live (``claimed``/``running``) on the
+writer's read-only connection and extracts each attempt's reserved
+``staging_txn_id`` from ``progress_json``, then
+:func:`run_startup_staging_gc` calls the pure filesystem
+``gc_unreferenced_staging`` so only staging directories unreferenced by live
+attempts are removed. No second writer, no new write authority, and the
+managed ``media/sha256`` digest tree is never touched (SD5).
+"""
 
 from __future__ import annotations
 
-__all__: list[str] = []
+import json
+import sqlite3
+from dataclasses import dataclass
+from pathlib import Path
+
+from astrid.core.events.registry import register_core_vocabulary
+from astrid.core.events.service import EventAppendService
+from astrid.core.foundation.project_paths import resolve_projects_root
+from astrid.core.integrations.reigh.bridge_service import derive_database_path
+from astrid.core.io.media_import import (
+    MediaPreparationError,
+    StagingGcResult,
+    gc_unreferenced_staging,
+    validate_txn_id,
+)
+from astrid.core.receipts import ReceiptService
+from astrid.core.repositories.projects import ProjectRepository
+from astrid.core.schema_packs.manifest import load_schema_pack_manifest
+from astrid.core.schema_packs.registry import (
+    FrozenSchemaPackRegistry,
+    SchemaPackRegistry,
+)
+from astrid.core.store.writer import DatabaseWriter
+from astrid.packs.timeline.bridge import TimelineBridgeAdapter
+from astrid.packs.timeline.repository import TimelineRepository
+
+STANDARD_SCHEMA_PACKS: tuple[str, ...] = ("timeline", "shots", "references")
+"""Exactly the in-tree schema packs the standard composition registers."""
+
+LIVE_ATTEMPT_STAGING_KEY = "staging_txn_id"
+"""Reserved ``execution_attempts.progress_json`` key holding the staging txn id.
+
+The frozen v10 DDL has no staging column, so the executor records the
+per-transaction staging id of a live attempt inside its ``progress_json``
+under this key. Startup GC reads it to distinguish live-attempt staging
+directories from orphaned ones.
+"""
+
+LIVE_ATTEMPT_STATUSES: tuple[str, ...] = ("claimed", "running")
+"""The attempt statuses that own a live staging directory (lease held)."""
+
+_PACKS_ROOT = Path(__file__).parent
+
+
+def register_standard_schema_packs(registry: SchemaPackRegistry) -> SchemaPackRegistry:
+    """Register exactly timeline, shots, and references into ``registry``.
+
+    Each manifest is loaded from its in-tree ``schema-pack.yaml`` and passed to
+    the immutable registry's ``register_pack()``. Nothing is discovered and the
+    capability-pack loader is never consulted; core vocabulary must already be
+    registered (or be registered separately) for a complete standard registry.
+    """
+    for pack_id in STANDARD_SCHEMA_PACKS:
+        manifest = load_schema_pack_manifest(_PACKS_ROOT / pack_id / "schema-pack.yaml")
+        registry.register_pack(manifest)
+    return registry
+
+
+def build_standard_registry() -> FrozenSchemaPackRegistry:
+    """Compose and freeze the standard-Astrid registry (core + three packs)."""
+    registry = SchemaPackRegistry()
+    register_core_vocabulary(registry)
+    register_standard_schema_packs(registry)
+    return registry.freeze()
+
+
+def collect_live_staging_txn_ids(writer: DatabaseWriter) -> set[str]:
+    """Return the staging transaction ids referenced by live attempts.
+
+    Reads ``execution_attempts`` rows whose status is ``claimed`` or
+    ``running`` — the lease-holding live states — through the caller's
+    **single** writer using the transaction-free read-only connection. No
+    second writer, no write transaction, and no new authority is opened
+    (m2 plan step 3/4; v10 section 2.3 single-writer rule).
+
+    For each row the reserved :data:`LIVE_ATTEMPT_STAGING_KEY` value of
+    ``progress_json`` is extracted when present. Values that are not valid
+    kernel transaction ids are skipped: startup GC is best-effort cleanup,
+    so a corrupt progress entry must never block composition.
+    """
+    live: set[str] = set()
+    with writer.read_only_connection() as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT progress_json FROM execution_attempts "
+            "WHERE status IN ('claimed', 'running')"
+        ).fetchall()
+    for row in rows:
+        try:
+            progress = json.loads(str(row["progress_json"] or "{}"))
+        except ValueError:
+            continue
+        if not isinstance(progress, dict):
+            continue
+        value = progress.get(LIVE_ATTEMPT_STAGING_KEY)
+        if not isinstance(value, str) or not value:
+            continue
+        try:
+            live.add(validate_txn_id(value))
+        except MediaPreparationError:
+            continue
+    return live
+
+
+def run_startup_staging_gc(
+    projects_root: str | Path,
+    writer: DatabaseWriter,
+) -> StagingGcResult:
+    """Run the selective startup staging GC through the standard composition.
+
+    Collects the live-attempt staging references through *writer* (the single
+    database writer, never a second authority) and removes every
+    ``.astrid/media/.staging/<txn_id>`` directory whose transaction id is not
+    referenced by a live attempt. Managed digest bytes under
+    ``media/sha256`` are never touched (SD5), and a missing staging root is a
+    no-op. Returns the typed :class:`StagingGcResult` outcome.
+    """
+    live_txn_ids = collect_live_staging_txn_ids(writer)
+    return gc_unreferenced_staging(projects_root, live_txn_ids)
+
+
+@dataclass(frozen=True, slots=True)
+class StandardBridgeComposition:
+    """Everything the gateway serve root constructed for the bridge."""
+
+    projects_root: Path
+    database_path: Path
+    registry: FrozenSchemaPackRegistry
+    writer: DatabaseWriter
+    projects: ProjectRepository
+    timelines: TimelineRepository
+    bridge: TimelineBridgeAdapter
+
+
+def compose_standard_bridge(
+    projects_root: str | Path | None = None,
+    *,
+    registry: FrozenSchemaPackRegistry | None = None,
+) -> StandardBridgeComposition:
+    """Construct the standard database and registered packs for the bridge.
+
+    Resolves the projects root (argument, ``ASTRID_PROJECTS_ROOT``, or the
+    default), derives ``${root}/.astrid/astrid.sqlite3``, creates the
+    managed-data directory, composes the standard registry (unless one is
+    injected), opens exactly one ``DatabaseWriter`` (the single write
+    authority), wires the kernel services and repositories, and returns the
+    frozen composition with the timeline bridge adapter.
+
+    Must be called only from the gateway serve composition root. The caller
+    owns the writer lifecycle (``close()`` on shutdown).
+    """
+    root = resolve_projects_root(projects_root)
+    database_path = derive_database_path(root)
+    database_path.parent.mkdir(parents=True, exist_ok=True)
+    if registry is None:
+        registry = build_standard_registry()
+    writer = DatabaseWriter(database_path, registry)
+    # Startup staging GC (m2 plan step 3/4): through the single writer just
+    # constructed, collect live-attempt staging references and remove only
+    # staging directories no live attempt references. No second writer or
+    # write authority is opened; best-effort cleanup never touches the
+    # managed digest tree.
+    run_startup_staging_gc(root, writer)
+    events = EventAppendService(registry)
+    receipts = ReceiptService()
+    projects = ProjectRepository(events=events, receipts=receipts)
+    timelines = TimelineRepository(
+        events=events, receipts=receipts, projects=projects
+    )
+    bridge = TimelineBridgeAdapter(
+        writer=writer, projects=projects, timelines=timelines
+    )
+    return StandardBridgeComposition(
+        projects_root=root,
+        database_path=database_path,
+        registry=registry,
+        writer=writer,
+        projects=projects,
+        timelines=timelines,
+        bridge=bridge,
+    )
+
+
+__all__: list[str] = [
+    "FrozenSchemaPackRegistry",
+    "LIVE_ATTEMPT_STAGING_KEY",
+    "LIVE_ATTEMPT_STATUSES",
+    "STANDARD_SCHEMA_PACKS",
+    "SchemaPackRegistry",
+    "StandardBridgeComposition",
+    "TimelineBridgeAdapter",
+    "build_standard_registry",
+    "collect_live_staging_txn_ids",
+    "compose_standard_bridge",
+    "register_standard_schema_packs",
+    "run_startup_staging_gc",
+]

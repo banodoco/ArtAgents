@@ -1,0 +1,42 @@
+# Astrid timeline schema pack (v10 section 2; decision artifact section 4).
+#
+# This is a schema-pack manifest, NOT a capability pack.yaml: it carries
+# exactly the 11 snake_case top-level fields of the frozen schema-pack
+# contract and is validated by astrid.core.schema_packs.manifest.
+#
+# The timeline pack owns exactly one table (timelines) and declares the
+# namespaced timeline vocabulary. Timeline identity (slug, lowercase ULID,
+# default) is NOT stored in convenience columns (SD1): immutable slug and ULID
+# address metadata live in timeline.created event payloads and the default
+# timeline id lives in projects.settings_json.
+id: timeline
+version: 1
+depends_on:
+  - core >= 1
+migrations:
+  - version: 1
+    name: initial
+    path: migrations/0001_initial.sql
+    tables:
+      - timelines
+stream_types:
+  - timeline.timeline
+event_kinds:
+  - timeline.created
+  - timeline.saved
+command_kinds:
+  - timeline.create
+  - timeline.save
+repositories:
+  - TimelineRepository
+conformance:
+  - replay
+  - mismatch_before_mutation
+  - same_project
+  - vocabulary
+  - writer_ownership
+  - crash_atomicity
+cli_mounts:
+  timelines: timelines
+bridge_mounts:
+  - timelines

@@ -1,12 +1,21 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
-from astrid.core._shared.result_manifest import build_manifest, complete_output_metadata, write_manifest
+from astrid.core._shared.result_manifest import (
+    ResultManifestError,
+    ValidatedResultManifest,
+    build_manifest,
+    complete_output_metadata,
+    read_result_manifest,
+    validate_result_manifest,
+    write_manifest,
+)
 from astrid.core.contracts.errors import AstridError
 from astrid.core.execution.executor.registry import load_default_registry
 
@@ -306,3 +315,376 @@ def test_output_result_registry_explicitly_covers_understanding_trio_without_dec
         assert definition.outputs == ()
         assert definition.metadata.get("output_result_manifest") is True
         assert executor_id in non_exempt_ids
+
+
+# ---------------------------------------------------------------------------
+# m2 plan step 9: strict result-manifest read/validate helpers
+# ---------------------------------------------------------------------------
+
+
+def _digest(data: bytes) -> str:
+    """Return the ``sha256:<hex>`` content hash of *data* (byte identity)."""
+    return f"sha256:{hashlib.sha256(data).hexdigest()}"
+
+
+def _base_manifest(staging: Path, outputs: list[dict]) -> dict:
+    """A minimal universal result manifest mapping for strict validation."""
+    return {
+        "schema_version": 1,
+        "kind": "analysis",
+        "inputs": {"prompt": "hello"},
+        "outputs": outputs,
+        "created": "2026-08-16T12:00:00Z",
+        "warnings": [],
+    }
+
+
+def _write_file(staging: Path, rel: str, data: bytes) -> dict:
+    """Write *data* under staging and return a validated output descriptor."""
+    path = staging / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
+    return {
+        "path": rel,
+        "content_hash": _digest(data),
+        "bytes": len(data),
+        "type": "file",
+    }
+
+
+def test_validate_result_manifest_accepts_concrete_contained_files(tmp_path: Path) -> None:
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    first = _write_file(staging, "out.png", b"\x89PNG fake bytes")
+    second = _write_file(staging, "logs/run.txt", b"done\n")
+    manifest = _base_manifest(
+        staging,
+        [
+            {**first, "ordinal": 0, "role": "result", "is_primary": True},
+            {**second, "ordinal": 1, "role": "log"},
+        ],
+    )
+
+    validated = validate_result_manifest(manifest, staging_root=staging)
+
+    assert isinstance(validated, ValidatedResultManifest)
+    assert validated.kind == "analysis"
+    assert validated.schema_version == 1
+    assert validated.inputs == {"prompt": "hello"}
+    assert [output.path for output in validated.outputs] == [
+        "out.png",
+        "logs/run.txt",
+    ]
+    assert [output.ordinal for output in validated.outputs] == [0, 1]
+    assert [output.is_primary for output in validated.outputs] == [True, False]
+    assert validated.outputs[0].content_hash == first["content_hash"]
+    assert validated.outputs[0].bytes == len(b"\x89PNG fake bytes")
+    assert validated.primary_output is validated.outputs[0]
+    assert validated.primary_output is not None and validated.primary_output.path == "out.png"
+
+
+def test_validate_result_manifest_ordinal_falls_back_to_position(tmp_path: Path) -> None:
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    first = _write_file(staging, "a.txt", b"a")
+    second = _write_file(staging, "b.txt", b"bb")
+
+    validated = validate_result_manifest(
+        _base_manifest(staging, [first, second]),
+        staging_root=staging,
+    )
+
+    assert [output.ordinal for output in validated.outputs] == [0, 1]
+
+
+def test_validate_result_manifest_rejects_missing_file(tmp_path: Path) -> None:
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    manifest = _base_manifest(
+        staging,
+        [{"path": "missing.txt", "content_hash": _digest(b"x")}],
+    )
+
+    with pytest.raises(ResultManifestError, match="missing"):
+        validate_result_manifest(manifest, staging_root=staging)
+
+
+def test_validate_result_manifest_rejects_optional_missing_file(tmp_path: Path) -> None:
+    """The optional flag never excuses a missing concrete output: the strict
+    executor contract requires every declared output to be present."""
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    manifest = _base_manifest(
+        staging,
+        [
+            {
+                "path": "optional.txt",
+                "optional": True,
+                "content_hash": _digest(b"x"),
+            }
+        ],
+    )
+
+    with pytest.raises(ResultManifestError, match="missing"):
+        validate_result_manifest(manifest, staging_root=staging)
+
+
+def test_validate_result_manifest_rejects_parent_traversal(tmp_path: Path) -> None:
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    # The escaped file exists outside staging: containment must reject it
+    # even though the bytes are present and hashable.
+    outside = tmp_path / "escape.txt"
+    outside.write_bytes(b"secret")
+    manifest = _base_manifest(
+        staging,
+        [
+            {
+                "path": "../escape.txt",
+                "content_hash": _digest(b"secret"),
+            }
+        ],
+    )
+
+    with pytest.raises(ResultManifestError, match="escapes the assigned staging"):
+        validate_result_manifest(manifest, staging_root=staging)
+
+
+def test_validate_result_manifest_rejects_absolute_path(tmp_path: Path) -> None:
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    absolute = tmp_path / "absolute.txt"
+    absolute.write_bytes(b"x")
+    manifest = _base_manifest(
+        staging,
+        [{"path": str(absolute), "content_hash": _digest(b"x")}],
+    )
+
+    with pytest.raises(ResultManifestError, match="escapes the assigned staging"):
+        validate_result_manifest(manifest, staging_root=staging)
+
+
+def test_validate_result_manifest_rejects_hash_mismatch(tmp_path: Path) -> None:
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    _write_file(staging, "out.txt", b"actual bytes")
+    manifest = _base_manifest(
+        staging,
+        [{"path": "out.txt", "content_hash": _digest(b"different bytes")}],
+    )
+
+    with pytest.raises(ResultManifestError, match="hashes to"):
+        validate_result_manifest(manifest, staging_root=staging)
+
+
+def test_validate_result_manifest_rejects_missing_content_hash(tmp_path: Path) -> None:
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    _write_file(staging, "out.txt", b"actual bytes")
+    manifest = _base_manifest(staging, [{"path": "out.txt"}])
+
+    with pytest.raises(ResultManifestError, match="must declare content_hash"):
+        validate_result_manifest(manifest, staging_root=staging)
+
+
+def test_validate_result_manifest_rejects_directory_identity(tmp_path: Path) -> None:
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    (staging / "bundle").mkdir()
+    manifest = _base_manifest(
+        staging,
+        [{"path": "bundle", "content_hash": _digest(b"x")}],
+    )
+
+    with pytest.raises(ResultManifestError, match="directory"):
+        validate_result_manifest(manifest, staging_root=staging)
+
+
+def test_validate_result_manifest_rejects_declared_directory_type(tmp_path: Path) -> None:
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    _write_file(staging, "out.txt", b"x")
+    manifest = _base_manifest(
+        staging,
+        [
+            {
+                "path": "out.txt",
+                "type": "directory",
+                "content_hash": _digest(b"x"),
+            }
+        ],
+    )
+
+    with pytest.raises(ResultManifestError, match="directory"):
+        validate_result_manifest(manifest, staging_root=staging)
+
+
+def test_validate_result_manifest_rejects_duplicate_ordinals(tmp_path: Path) -> None:
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    first = _write_file(staging, "a.txt", b"a")
+    second = _write_file(staging, "b.txt", b"bb")
+    manifest = _base_manifest(
+        staging,
+        [{**first, "ordinal": 7}, {**second, "ordinal": 7}],
+    )
+
+    with pytest.raises(ResultManifestError, match="duplicate output ordinal 7"):
+        validate_result_manifest(manifest, staging_root=staging)
+
+
+def test_validate_result_manifest_rejects_multiple_primary_outputs(tmp_path: Path) -> None:
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    first = _write_file(staging, "a.txt", b"a")
+    second = _write_file(staging, "b.txt", b"bb")
+    manifest = _base_manifest(
+        staging,
+        [
+            {**first, "role": "result", "is_primary": True},
+            {**second, "role": "result", "is_primary": True},
+        ],
+    )
+
+    with pytest.raises(ResultManifestError, match="more than one primary"):
+        validate_result_manifest(manifest, staging_root=staging)
+
+
+def test_validate_result_manifest_rejects_non_result_role_primary(tmp_path: Path) -> None:
+    """Mirrors the frozen task_outputs CHECK (role = 'result' OR is_primary = 0)."""
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    first = _write_file(staging, "a.txt", b"a")
+    manifest = _base_manifest(
+        staging,
+        [{**first, "role": "preview", "is_primary": True}],
+    )
+
+    with pytest.raises(ResultManifestError, match="cannot be primary"):
+        validate_result_manifest(manifest, staging_root=staging)
+
+
+def test_validate_result_manifest_rejects_symlink_escaping_staging(tmp_path: Path) -> None:
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    outside = tmp_path / "outside.txt"
+    outside.write_bytes(b"secret")
+    (staging / "link.txt").symlink_to(outside)
+    manifest = _base_manifest(
+        staging,
+        [{"path": "link.txt", "content_hash": _digest(b"secret")}],
+    )
+
+    with pytest.raises(ResultManifestError, match="escapes the assigned staging"):
+        validate_result_manifest(manifest, staging_root=staging)
+
+
+def test_validate_result_manifest_accepts_symlink_inside_staging(tmp_path: Path) -> None:
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    _write_file(staging, "real.txt", b"data")
+    (staging / "alias.txt").symlink_to(staging / "real.txt")
+    manifest = _base_manifest(
+        staging,
+        [{"path": "alias.txt", "content_hash": _digest(b"data")}],
+    )
+
+    validated = validate_result_manifest(manifest, staging_root=staging)
+
+    assert validated.outputs[0].path == "alias.txt"
+    assert validated.outputs[0].content_hash == _digest(b"data")
+
+
+def test_validate_result_manifest_rejects_broken_symlink(tmp_path: Path) -> None:
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    (staging / "dangling.txt").symlink_to(staging / "does-not-exist.txt")
+    manifest = _base_manifest(
+        staging,
+        [{"path": "dangling.txt", "content_hash": _digest(b"x")}],
+    )
+
+    with pytest.raises(ResultManifestError, match="missing"):
+        validate_result_manifest(manifest, staging_root=staging)
+
+
+def test_validate_result_manifest_rejects_nonexistent_staging_root(tmp_path: Path) -> None:
+    staging = tmp_path / "staging"
+    manifest = _base_manifest(staging, [{"path": "x.txt", "content_hash": _digest(b"x")}])
+
+    with pytest.raises(ResultManifestError, match="existing directory"):
+        validate_result_manifest(manifest, staging_root=staging)
+
+
+def test_validate_result_manifest_rejects_malformed_manifest(tmp_path: Path) -> None:
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    _write_file(staging, "out.txt", b"x")
+
+    missing_field = _base_manifest(staging, [{"path": "out.txt"}])
+    del missing_field["kind"]
+    with pytest.raises(ResultManifestError, match="missing required fields"):
+        validate_result_manifest(missing_field, staging_root=staging)
+
+    bad_kind = _base_manifest(staging, [{"path": "out.txt"}])
+    bad_kind["kind"] = "Not A Kind"
+    with pytest.raises(ResultManifestError, match="kind must be a lowercase"):
+        validate_result_manifest(bad_kind, staging_root=staging)
+
+    empty_outputs = _base_manifest(staging, [])
+    with pytest.raises(ResultManifestError, match="non-empty list"):
+        validate_result_manifest(empty_outputs, staging_root=staging)
+
+
+def test_validate_result_manifest_rejects_wrong_declared_bytes(tmp_path: Path) -> None:
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    _write_file(staging, "out.txt", b"12345")
+    manifest = _base_manifest(
+        staging,
+        [{"path": "out.txt", "content_hash": _digest(b"12345"), "bytes": 99}],
+    )
+
+    with pytest.raises(ResultManifestError, match="declares bytes 99"):
+        validate_result_manifest(manifest, staging_root=staging)
+
+
+def test_validate_result_manifest_accepts_nested_contained_paths(tmp_path: Path) -> None:
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    nested = _write_file(staging, "artifacts/deep/out.png", b"\x89PNG")
+    manifest = _base_manifest(
+        staging,
+        [{**nested, "is_primary": True, "role": "result"}],
+    )
+
+    validated = validate_result_manifest(manifest, staging_root=staging)
+
+    assert validated.outputs[0].path == "artifacts/deep/out.png"
+    assert validated.to_dict()["outputs"][0]["path"] == "artifacts/deep/out.png"
+
+
+def test_read_result_manifest_reads_and_validates_file(tmp_path: Path) -> None:
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    output = _write_file(staging, "out.txt", b"payload")
+    manifest_path = staging / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(_base_manifest(staging, [output])),
+        encoding="utf-8",
+    )
+
+    validated = read_result_manifest(manifest_path, staging_root=staging)
+
+    assert validated.kind == "analysis"
+    assert validated.outputs[0].path == "out.txt"
+    assert validated.outputs[0].content_hash == output["content_hash"]
+
+
+def test_read_result_manifest_rejects_unreadable_file(tmp_path: Path) -> None:
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    missing = staging / "no-manifest.json"
+
+    with pytest.raises(ResultManifestError, match="cannot read result manifest"):
+        read_result_manifest(missing, staging_root=staging)
