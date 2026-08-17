@@ -56,6 +56,7 @@ from astrid.core.io.media_import import (
     MEDIA_LOCATION_REALMS,
     PreparedMedia,
     managed_media_path,
+    media_crash_point,
     publish_prepared_media,
     validate_media_kind,
 )
@@ -1417,6 +1418,10 @@ class MediaRepository:
         if realm == MANAGED_LOCAL_REALM:
             published = publish_prepared_media(self._projects_root, txn_id, prepared)
             published_reused = published.reused
+            # Repository-visible seam (plan step 16): the verified managed
+            # digest exists (or was verified-reused) before any projection
+            # write; a crash here leaves SQL old plus a reusable orphan.
+            media_crash_point("repo.published")
 
         # 2. The media row, created only when this project+digest is new.
         media_row = uow.query_one(
@@ -1732,6 +1737,10 @@ class MediaRepository:
                 self._projects_root, txn_id, prepared
             )
             published_reused = published.reused
+            # Repository-visible seam (plan step 16): the verified managed
+            # digest exists (or was verified-reused) before any projection
+            # write; a crash here leaves SQL old plus a reusable orphan.
+            media_crash_point("repo.published")
 
         # 2. The media row, created only when this project+digest is new.
         media_row = uow.query_one(

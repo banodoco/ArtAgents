@@ -378,12 +378,27 @@ def _dispatch_scratch(args: list[str]) -> int:
 
 
 def _dispatch_serve(args: list[str]) -> int:
-    """Start the Astrid local read bridge HTTP server."""
+    """Start the repository-backed Astrid bridge HTTP server.
+
+    This command is the single application composition root for the
+    repository bridge: it resolves the projects root, constructs the
+    standard database and registered packs at
+    ``${ASTRID_PROJECTS_ROOT}/.astrid/astrid.sqlite3``, composes the
+    project/timeline repositories and the timeline bridge adapter, and
+    injects the bridge into the HTTP server. There is no legacy
+    file/JSONL/FSA/Supabase authority fallback; the repository bridge is
+    constructed only here.
+    """
     import argparse
 
-    from astrid.core.integrations.reigh.local_bridge_server import create_local_bridge_server
+    from astrid.core.integrations.reigh.local_bridge_server import (
+        create_local_bridge_server,
+    )
+    from astrid.packs import compose_standard_bridge
 
-    parser = argparse.ArgumentParser(prog="astrid serve", description="Start the Astrid local read bridge.")
+    parser = argparse.ArgumentParser(
+        prog="astrid serve", description="Start the Astrid local bridge."
+    )
     parser.add_argument(
         "--host", default="127.0.0.1", help="Host to bind (default: 127.0.0.1)",
     )
@@ -391,31 +406,44 @@ def _dispatch_serve(args: list[str]) -> int:
         "--port", type=int, default=0, help="Port to bind (default: 0 = OS-assigned)",
     )
     parser.add_argument(
-        "--projects-root", default=None, help="Astrid projects root (default: ASTRID_PROJECTS_ROOT env or ~/astrid-projects)",
+        "--projects-root",
+        default=None,
+        help="Astrid projects root (default: ASTRID_PROJECTS_ROOT env "
+        "or ~/astrid-projects)",
     )
     parsed = parser.parse_args(args)
 
-    server = create_local_bridge_server(
-        host=parsed.host,
-        port=parsed.port,
-        projects_root=parsed.projects_root,
-    )
-    host, port = server.server_address
-    print(f"Astrid local bridge listening on http://{host}:{port}")
-
-    def _shutdown(_signum: int, _frame: Any) -> None:
-        print("\nShutting down...", flush=True)
-        server.shutdown()
-
-    signal.signal(signal.SIGINT, _shutdown)
-    signal.signal(signal.SIGTERM, _shutdown)
-
+    composition = compose_standard_bridge(parsed.projects_root)
     try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        pass
+        server = create_local_bridge_server(
+            host=parsed.host,
+            port=parsed.port,
+            projects_root=composition.projects_root,
+        )
+        # The repository bridge is injected only at this composition root;
+        # the HTTP routes read it from the server object. The writer stays
+        # owned by this root and is closed on shutdown below.
+        server.bridge = composition.bridge
+        server.bridge_writer = composition.writer
+        server.bridge_database_path = composition.database_path
+        host, port = server.server_address
+        print(f"Astrid local bridge listening on http://{host}:{port}")
+
+        def _shutdown(_signum: int, _frame: Any) -> None:
+            print("\nShutting down...", flush=True)
+            server.shutdown()
+
+        signal.signal(signal.SIGINT, _shutdown)
+        signal.signal(signal.SIGTERM, _shutdown)
+
+        try:
+            server.serve_forever()
+        except KeyboardInterrupt:
+            pass
+        finally:
+            server.server_close()
     finally:
-        server.server_close()
+        composition.writer.close()
 
     return 0
 

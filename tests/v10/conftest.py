@@ -137,3 +137,53 @@ def media_env(tmp_path: Path, core_registry):
         )
     finally:
         writer.close()
+
+
+@pytest.fixture
+def conformance_context(tmp_path: Path, standard_registry):
+    """Fresh standard-Astrid conformance context (m2 plan step 15, T24_impl).
+
+    Builds a :class:`~astrid.core.conformance.kit.ConformanceContext` over
+    one fresh database with the m1 project/timeline verticals **and** the
+    m2 kernel task/media/run repositories injected, plus a temporary
+    managed root under ``tmp_path`` that the kernel media spec's prepared
+    filesystem fixtures and managed publication share — without importing
+    any pack implementation into kernel code. Yields the context; the
+    writer is closed on teardown.
+    """
+    from astrid.core.conformance.kit import ConformanceContext
+    from astrid.core.events.service import EventAppendService
+    from astrid.core.receipts.service import ReceiptService
+    from astrid.core.repositories.media import MediaRepository
+    from astrid.core.repositories.projects import ProjectRepository
+    from astrid.core.repositories.runs import RunRepository
+    from astrid.core.repositories.tasks import TaskRepository
+    from astrid.core.store.writer import DatabaseWriter
+    from astrid.packs.timeline.repository import TimelineRepository
+
+    db_path = tmp_path / "conformance.sqlite3"
+    writer = DatabaseWriter(db_path, standard_registry)
+    try:
+        events = EventAppendService(standard_registry)
+        receipts = ReceiptService()
+        projects = ProjectRepository(events=events, receipts=receipts)
+        managed_root = tmp_path / "managed"
+        yield ConformanceContext(
+            db_path=db_path,
+            writer=writer,
+            registry=standard_registry,
+            events=events,
+            receipts=receipts,
+            projects=projects,
+            timelines=TimelineRepository(
+                events=events, receipts=receipts, projects=projects
+            ),
+            tasks=TaskRepository(events=events, receipts=receipts),
+            media=MediaRepository(
+                events=events, receipts=receipts, projects_root=managed_root
+            ),
+            runs=RunRepository(events=events, receipts=receipts),
+            managed_root=managed_root,
+        )
+    finally:
+        writer.close()

@@ -8,12 +8,13 @@
 
 PY ?= python3
 
-.PHONY: help check ci structure doctor ruff mypy cycles remotion-typecheck renderer-parity wheel ci-mirror editable
+.PHONY: help check ci structure doctor ruff mypy cycles remotion-typecheck renderer-parity wheel ci-mirror editable s1-gate
 
 help:
 	@echo "make check   - blocking gates: structure, doctor, ruff, mypy, cycles, Remotion, renderer parity"
 	@echo "make ci      - full CI deploy mirror: check + editable + wheel-install + pytest/coverage (minutes)"
-	@echo "make <gate>  - run one gate: structure | doctor | ruff | mypy | cycles | remotion-typecheck | renderer-parity | wheel | ci-mirror | editable"
+	@echo "make s1-gate - m1 S1 gate: 12 focused lanes + durable summary/logs in out/s1-gate/latest"
+	@echo "make <gate>  - run one gate: structure | doctor | ruff | mypy | cycles | remotion-typecheck | renderer-parity | wheel | ci-mirror | editable | s1-gate"
 
 # --- Fast gates: catch the common deploy blockers in seconds. Run before every push. ---
 check: structure doctor ruff mypy cycles remotion-typecheck renderer-parity
@@ -62,3 +63,17 @@ wheel:
 
 ci-mirror:
 	bash scripts/reshape/run_ci_checks.sh
+
+# --- m1 S1 gate (plan step 23): the twelve focused m1 lanes, one command ---
+# Runs the complete fresh-database, conformance, crash, contention, lint,
+# bridge, and provider lane hermetically (fresh ASTRID_PROJECTS_ROOT /
+# ASTRID_HOME, scrubbed task env) and retains a machine-readable summary plus
+# per-lane logs and JUnit XML under out/s1-gate/latest (gitignored). CI uploads
+# that directory with `if: always()` so evidence survives failures. This is the
+# SAME target the local CI mirror (run_ci_checks.sh) and GitHub Actions invoke,
+# keeping both entry points in lockstep. PY overrides the interpreter (e.g. a
+# runtime venv that provides banodoco_timeline_schema for the bridge lanes).
+s1-gate:
+	@rm -rf out/s1-gate/latest
+	@$(PY) scripts/reshape/s1_gate.py --out-dir out/s1-gate/latest
+	@echo "✓ s1-gate (12 focused lanes; summary + logs retained in out/s1-gate/latest)"

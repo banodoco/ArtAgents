@@ -592,6 +592,54 @@ class MediaPublicationError(MediaPreparationError):
     """Raised when atomic publication into the managed tree fails."""
 
 
+# ---------------------------------------------------------------------------
+# Deterministic crash hooks (m2 plan step 16, T26_impl)
+# ---------------------------------------------------------------------------
+# The subprocess crash matrix must be able to terminate a child *inside* the
+# filesystem pipeline — not only at SQL statement boundaries — so the
+# staging/publication sequence exposes deterministic hook points:
+#
+# - ``"staged"`` — after the quarantine copy and staged-file fsync;
+# - ``"published"`` — after the atomic rename and directory fsyncs (the
+#   managed digest now exists, no SQL row references it yet);
+# - ``"reused"`` — after a verified existing digest was reused and its
+#   staged copy drained.
+#
+# A crash at ``"published"`` (or at any repository SQL boundary after it,
+# before COMMIT) leaves an orphan managed digest with rolled-back SQL —
+# exactly the SD5 case: the digest is safe, non-semantic, and must be
+# verified and reused by the next import, never duplicated or swept. The
+# hook is test-only: production code never installs one, and an unset hook
+# is a no-op, so the shipping paths are byte-identical with or without the
+# hook facility compiled in.
+
+_CRASH_HOOK: Callable[[str], None] | None = None
+"""The installed deterministic crash hook (test-only, default unset)."""
+
+
+def set_media_crash_hook(hook: Callable[[str], None] | None) -> None:
+    """Install or clear the deterministic filesystem crash hook.
+
+    *hook* is invoked with a stable point name at every deterministic
+    filesystem boundary of the staging/publication pipeline. Tests install
+    a counting hook so a subprocess can ``os._exit`` at exactly one point;
+    kernel and pack code never install one.
+    """
+    global _CRASH_HOOK
+    _CRASH_HOOK = hook
+
+
+def media_crash_point(point: str) -> None:
+    """Invoke the installed crash hook for one deterministic boundary.
+
+    No-op when no hook is installed (the default), so the media pipeline's
+    behavior is unchanged outside the crash matrix.
+    """
+    hook = _CRASH_HOOK
+    if hook is not None:
+        hook(point)
+
+
 @dataclass(frozen=True, slots=True)
 class StagedMedia:
     """One file quarantined in the per-transaction staging directory.
@@ -756,6 +804,7 @@ def stage_prepared_media(
         raise MediaStagingError(
             f"cannot stage {prepared.source_path!s} into {staging_root!s}: {exc}"
         ) from exc
+    media_crash_point("staged")
     return StagedMedia(
         txn_id=valid_txn,
         staged_path=staged_path,
@@ -859,6 +908,7 @@ def publish_staged_media(
     if managed.exists():
         verify_media_bytes(managed, staged.digest)
         _remove_staged_file(staged)
+        media_crash_point("reused")
         return PublishedMedia(
             digest=staged.digest,
             managed_path=managed,
@@ -876,6 +926,7 @@ def publish_staged_media(
             f"cannot atomically publish {staged.staged_path!s} to {managed!s}: "
             f"{exc}"
         ) from exc
+    media_crash_point("published")
     return PublishedMedia(
         digest=staged.digest,
         managed_path=managed,
@@ -987,12 +1038,14 @@ __all__ = [
     "managed_media_path",
     "managed_root",
     "managed_shard_path",
+    "media_crash_point",
     "prepare_external_local",
     "prepare_media_directory",
     "prepare_media_file",
     "probe_media_file",
     "publish_prepared_media",
     "publish_staged_media",
+    "set_media_crash_hook",
     "sha256_file_bytes",
     "stage_prepared_media",
     "staging_path",

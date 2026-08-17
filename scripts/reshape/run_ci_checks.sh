@@ -266,6 +266,19 @@ if ! $JSON_MODE; then
   "$PYTHON_BIN" -m pytest -q -m renderer_parity "${RENDERER_PARITY_TESTS[@]}"
   "$PYTHON_BIN" -m pytest "${BROAD_PYTEST_ARGS[@]}" $COV_ARGS
 
+  # m1 S1 gate (plan step 23): the twelve focused m1 lanes via the SAME make
+  # target GitHub Actions runs, so the local mirror and CI stay in lockstep.
+  # Summary + per-lane logs are retained in out/s1-gate/latest on pass AND
+  # failure (CI uploads them with `if: always()`). ASTRID_CI_SKIP_GATE=1 opts
+  # out — GitHub Actions runs the gate in its own dedicated step, so the
+  # mirror lane does not re-run it there.
+  if [ "${ASTRID_CI_SKIP_GATE:-}" = "1" ]; then
+    echo "LANE s1-gate: SKIP (ASTRID_CI_SKIP_GATE=1)"
+  else
+    echo "LANE s1-gate: running (make s1-gate; 12 focused lanes, evidence in out/s1-gate/latest)"
+    make s1-gate PY="$PYTHON_BIN"
+  fi
+
   # Named Remotion typecheck lane.
   if [ ! -d remotion/node_modules ]; then
     echo "LANE remotion-typecheck: SKIP (remotion/node_modules absent; run 'cd remotion && npm ci' to enable)"

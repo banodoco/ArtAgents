@@ -36,8 +36,10 @@ from astrid.core.repositories.media import (
     MediaRepository,
 )
 from astrid.core.repositories.tasks import (
+    CORE_TASK_COMPLETED_EVENT_KIND,
     CORE_TASK_FAILED_EVENT_KIND,
     CORE_TASK_STARTED_EVENT_KIND,
+    CORE_TASK_STREAM_TYPE,
     TaskRepository,
 )
 from astrid.core.store.uow import UnitOfWork
@@ -673,3 +675,813 @@ def test_materialize_prepared_rejects_bad_relations_before_sql(env) -> None:
     assert excinfo.value.reason == "self"
     assert _receipt_count(env.writer, project.id) == receipts_before
     assert _project_head(env.writer, project.id) == head_before
+
+
+# ---------------------------------------------------------------------------
+# T18: fenced completion transaction (plan step 10)
+# ---------------------------------------------------------------------------
+
+
+def _prepare_output(env, *, name: str, content: bytes, **overrides):
+    """Prepare one PreparedMedia record under a fresh staging directory."""
+    from astrid.core.io.media_import import prepare_media_file
+
+    staging = env.projects_root / ".astrid" / "media" / ".staging" / f"t18-{name}"
+    staging.mkdir(parents=True, exist_ok=True)
+    path = staging / name
+    path.write_bytes(content)
+    prepared = prepare_media_file(path, root=staging)
+    entry = {
+        "ordinal": 0,
+        "is_primary": True,
+        "role": "result",
+        "label": name,
+        "path": name,
+        "prepared": prepared,
+    }
+    entry.update(overrides)
+    return entry
+
+
+def _started_attempt(env, *, project_id: str, idempotency_key: str = "t18-claim-k"):
+    """Admit, claim, and start one task; return (task, claim, started)."""
+    task = _admit(env, project_id=project_id, max_attempts=2)
+    claim = _claim(env, project_id=project_id, idempotency_key=idempotency_key)
+    assert claim is not None and claim.task.id == task.id
+    started = UnitOfWork(env.writer).run(
+        lambda u: env.task_repo.start(
+            u,
+            project_id=project_id,
+            task_id=task.id,
+            attempt_id=claim.attempt.id,
+            lease_id=claim.attempt.lease_id,
+            expected_status_version=1,
+            idempotency_key=f"{idempotency_key}:start",
+            now=TS,
+        )
+    )
+    return task, claim, started
+
+
+def _complete(env, *, project_id, task_id, attempt_id, lease_id, status_version,
+              outputs, key="t18-complete-k", **overrides):
+    args = {
+        "project_id": project_id,
+        "task_id": task_id,
+        "attempt_id": attempt_id,
+        "lease_id": lease_id,
+        "expected_status_version": status_version,
+        "idempotency_key": key,
+        "outputs": outputs,
+        "media_repo": env.media_repo,
+        "now": TS2,
+    }
+    args.update(overrides)
+
+    def run(u):
+        return env.task_repo.complete(u, **args)
+
+    return UnitOfWork(env.writer).run(run)
+
+
+def _task_output_rows(writer: DatabaseWriter, task_id: str):
+    return writer.submit(
+        lambda session: session.query(
+            "SELECT * FROM task_outputs WHERE task_id = ? ORDER BY ordinal ASC",
+            (task_id,),
+        )
+    )
+
+
+def _media_count(writer: DatabaseWriter, project_id: str) -> int:
+    return writer.submit(
+        lambda session: session.query_one(
+            "SELECT count(*) FROM media WHERE project_id = ?", (project_id,)
+        )[0]
+    )
+
+
+def test_complete_materializes_outputs_and_terminates_atomically(
+    env, core_registry,
+) -> None:
+    project = _create_project(env)
+    task, claim, started = _started_attempt(env, project_id=project.id)
+    receipts_before = _receipt_count(env.writer, project.id)
+    head_before = _project_head(env.writer, project.id)
+
+    out_a = _prepare_output(env, name="frame.svg", content=b"<svg/>")
+    out_b = _prepare_output(
+        env, name="story.md", content=b"# story",
+        ordinal=1, is_primary=False, role="output", label="story",
+    )
+    completed = _complete(
+        env,
+        project_id=project.id,
+        task_id=task.id,
+        attempt_id=claim.attempt.id,
+        lease_id=claim.attempt.lease_id,
+        status_version=started.status_version,
+        outputs=[out_a, out_b],
+    )
+
+    # The task is terminal succeeded with the winning attempt recorded.
+    assert completed.task.status == "succeeded"
+    assert completed.task.winning_attempt_id == claim.attempt.id
+    assert completed.task.finished_at == TS2
+    # The attempt terminated succeeded with version advanced.
+    assert completed.attempt.status == "succeeded"
+    assert completed.attempt.status_version == started.status_version + 1
+    assert completed.attempt.finished_at == TS2
+    # Ordered outputs: exactly the two prepared media, primary first.
+    assert [output.ordinal for output in completed.outputs] == [0, 1]
+    assert completed.outputs[0].role == "result"
+    assert completed.outputs[0].is_primary is True
+    assert completed.outputs[1].is_primary is False
+
+    # Ordered task_outputs rows with the byte identity and params evidence.
+    rows = _task_output_rows(env.writer, task.id)
+    assert [row["ordinal"] for row in rows] == [0, 1]
+    assert rows[0]["is_primary"] == 1
+    assert rows[0]["role"] == "result"
+    assert rows[0]["media_id"] == completed.outputs[0].media_id
+    params = json.loads(rows[0]["params_json"])
+    assert params["content_hash"] == out_a["prepared"].digest
+    assert params["label"] == "frame.svg"
+
+    # Media state: two media rows, one managed location each, imported events.
+    for output in completed.outputs:
+        media = env.media_repo.show(env.writer, output.media_id)
+        assert media.project_id == project.id
+        assert media.content_hash == output.params["content_hash"]
+        assert len(media.locations) == 1
+
+    # One receipt covering every ordered event id (media events in ordinal
+    # order, then the completed event), spanning the exact seq range.
+    assert _receipt_count(env.writer, project.id) == receipts_before + 1
+    assert len(completed.event_ids) == 3
+    assert _project_head(env.writer, project.id) == head_before + 3
+    stream_id = f"{task.id}:{CORE_TASK_STREAM_TYPE}"
+    events = _event_rows(env.writer, stream_id)
+    assert events[-1]["kind"] == CORE_TASK_COMPLETED_EVENT_KIND
+    # The receipt's ordered event ids match the events table order.
+    with env.writer.read_only_connection() as conn:
+        rows_events = conn.execute(
+            "SELECT event_id FROM events WHERE project_id = ? "
+            "ORDER BY project_seq ASC",
+            (project.id,),
+        ).fetchall()
+    tail = [str(row[0]) for row in rows_events][-3:]
+    assert completed.event_ids == tuple(tail)
+    # The task stream verifies as a canonical hash chain.
+    from astrid.core.events.service import EventAppendService
+
+    verification = EventAppendService(core_registry).verify_stream(
+        env.writer, stream_id
+    )
+    assert verification.event_count == verification.head_seq
+    assert verification.head_hash is not None
+
+
+def test_complete_replay_returns_stored_result_with_zero_new_rows(env) -> None:
+    project = _create_project(env)
+    task, claim, started = _started_attempt(env, project_id=project.id)
+    outputs = [_prepare_output(env, name="frame.svg", content=b"<svg/>")]
+    key = "t18-replay-k"
+
+    first = _complete(
+        env, project_id=project.id, task_id=task.id,
+        attempt_id=claim.attempt.id, lease_id=claim.attempt.lease_id,
+        status_version=started.status_version, outputs=outputs, key=key,
+    )
+    before = {
+        "receipts": _receipt_count(env.writer, project.id),
+        "head": _project_head(env.writer, project.id),
+        "outputs": len(_task_output_rows(env.writer, task.id)),
+    }
+    replayed = _complete(
+        env, project_id=project.id, task_id=task.id,
+        attempt_id=claim.attempt.id, lease_id=claim.attempt.lease_id,
+        status_version=started.status_version, outputs=outputs, key=key,
+    )
+    assert replayed.to_dict() == first.to_dict()
+    assert _receipt_count(env.writer, project.id) == before["receipts"]
+    assert _project_head(env.writer, project.id) == before["head"]
+    assert len(_task_output_rows(env.writer, task.id)) == before["outputs"]
+
+
+def test_complete_mismatch_changes_nothing_before_mutation(env) -> None:
+    from astrid.core.receipts import ReceiptMismatchError
+
+    project = _create_project(env)
+    task, claim, started = _started_attempt(env, project_id=project.id)
+    outputs = [_prepare_output(env, name="frame.svg", content=b"<svg/>")]
+    key = "t18-mismatch-k"
+    _complete(
+        env, project_id=project.id, task_id=task.id,
+        attempt_id=claim.attempt.id, lease_id=claim.attempt.lease_id,
+        status_version=started.status_version, outputs=outputs, key=key,
+    )
+    before = {
+        "receipts": _receipt_count(env.writer, project.id),
+        "head": _project_head(env.writer, project.id),
+    }
+    changed = [_prepare_output(env, name="changed.svg", content=b"<svg2/>")]
+    with pytest.raises(ReceiptMismatchError):
+        _complete(
+            env, project_id=project.id, task_id=task.id,
+            attempt_id=claim.attempt.id, lease_id=claim.attempt.lease_id,
+            status_version=started.status_version, outputs=changed, key=key,
+        )
+    assert _receipt_count(env.writer, project.id) == before["receipts"]
+    assert _project_head(env.writer, project.id) == before["head"]
+
+
+def test_complete_stale_or_losing_fences_write_nothing(env) -> None:
+    from astrid.core.repositories.tasks import TaskTransitionError
+
+    project = _create_project(env)
+    task, claim, started = _started_attempt(env, project_id=project.id)
+    outputs = [_prepare_output(env, name="frame.svg", content=b"<svg/>")]
+    baseline = {
+        "receipts": _receipt_count(env.writer, project.id),
+        "head": _project_head(env.writer, project.id),
+    }
+
+    # Stale status version: typed outcome, zero rows.
+    with pytest.raises(TaskTransitionError) as excinfo:
+        _complete(
+            env, project_id=project.id, task_id=task.id,
+            attempt_id=claim.attempt.id, lease_id=claim.attempt.lease_id,
+            status_version=started.status_version + 7, outputs=outputs,
+            key="t18-stale-version-k",
+        )
+    assert excinfo.value.reason == "stale_status_version"
+    assert _receipt_count(env.writer, project.id) == baseline["receipts"]
+    assert _project_head(env.writer, project.id) == baseline["head"]
+
+    # Wrong lease: typed outcome, zero rows.
+    with pytest.raises(TaskTransitionError) as excinfo:
+        _complete(
+            env, project_id=project.id, task_id=task.id,
+            attempt_id=claim.attempt.id, lease_id="not-the-lease",
+            status_version=started.status_version, outputs=outputs,
+            key="t18-lease-k",
+        )
+    assert excinfo.value.reason == "lease_mismatch"
+    assert _receipt_count(env.writer, project.id) == baseline["receipts"]
+
+    # Foreign attempt (another task's attempt): typed outcome, zero rows.
+    other_task, other_claim, _ = _started_attempt(
+        env, project_id=project.id, idempotency_key="t18-foreign-claim-k"
+    )
+    foreign_baseline = _receipt_count(env.writer, project.id)
+    with pytest.raises(TaskTransitionError) as excinfo:
+        _complete(
+            env, project_id=project.id, task_id=task.id,
+            attempt_id=other_claim.attempt.id, lease_id=other_claim.attempt.lease_id,
+            status_version=started.status_version, outputs=outputs,
+            key="t18-foreign-k",
+        )
+    assert excinfo.value.reason == "attempt_task_mismatch"
+    assert _receipt_count(env.writer, project.id) == foreign_baseline
+
+    # Winning completion, then a losing completion on the same attempt:
+    # the loser sees the terminal task and writes nothing.
+    _complete(
+        env, project_id=project.id, task_id=task.id,
+        attempt_id=claim.attempt.id, lease_id=claim.attempt.lease_id,
+        status_version=started.status_version, outputs=outputs,
+        key="t18-winner-k",
+    )
+    after_win = {
+        "receipts": _receipt_count(env.writer, project.id),
+        "head": _project_head(env.writer, project.id),
+    }
+    with pytest.raises(TaskTransitionError) as excinfo:
+        _complete(
+            env, project_id=project.id, task_id=task.id,
+            attempt_id=claim.attempt.id, lease_id=claim.attempt.lease_id,
+            status_version=started.status_version, outputs=outputs,
+            key="t18-loser-k",
+        )
+    assert excinfo.value.reason == "task_not_running"
+    assert _receipt_count(env.writer, project.id) == after_win["receipts"]
+    assert _project_head(env.writer, project.id) == after_win["head"]
+    assert len(_task_output_rows(env.writer, task.id)) == 1
+
+
+def test_complete_unblocks_eligible_dependents(env) -> None:
+    project = _create_project(env)
+    # Two tasks: `dep` hard-depends on both `task` and `fresh`; another
+    # dependent `partial` hard-depends on `task` plus an unsatisfied task.
+    task, claim, started = _started_attempt(env, project_id=project.id)
+    fresh_id = generate_lowercase_ulid()
+    UnitOfWork(env.writer).run(
+        lambda u: env.task_repo.create(
+            u, project_id=project.id,
+            capability="rendering.timeline_visualize",
+            spec=dict(SPEC_A), input_manifest=list(MANIFEST_A),
+            idempotency_key="t18-fresh-admit-k", task_id=fresh_id,
+            created_at=TS,
+        )
+    )
+    never = generate_lowercase_ulid()
+    UnitOfWork(env.writer).run(
+        lambda u: env.task_repo.create(
+            u, project_id=project.id,
+            capability="rendering.timeline_visualize",
+            spec=dict(SPEC_A), input_manifest=list(MANIFEST_A),
+            idempotency_key="t18-never-admit-k", task_id=never,
+            created_at=TS,
+        )
+    )
+    dep_id = generate_lowercase_ulid()
+    partial_id = generate_lowercase_ulid()
+    UnitOfWork(env.writer).run(
+        lambda u: env.task_repo.create(
+            u, project_id=project.id,
+            capability="rendering.timeline_visualize",
+            spec=dict(SPEC_A), input_manifest=list(MANIFEST_A),
+            idempotency_key="t18-dep-admit-k", task_id=dep_id,
+            created_at=TS,
+            dependencies=[
+                {"task_id": task.id, "kind": "hard"},
+                {"task_id": fresh_id, "kind": "hard"},
+            ],
+        )
+    )
+    UnitOfWork(env.writer).run(
+        lambda u: env.task_repo.create(
+            u, project_id=project.id,
+            capability="rendering.timeline_visualize",
+            spec=dict(SPEC_A), input_manifest=list(MANIFEST_A),
+            idempotency_key="t18-partial-admit-k", task_id=partial_id,
+            created_at=TS,
+            dependencies=[
+                {"task_id": task.id, "kind": "hard"},
+                {"task_id": never, "kind": "hard"},
+            ],
+        )
+    )
+    for task_id in (dep_id, partial_id):
+        row = _task_row(env.writer, task_id)
+        assert row["status"] == "blocked", task_id
+
+    # Complete `task`: `dep` stays blocked (fresh unsatisfied), `partial`
+    # stays blocked (never unsatisfied).
+    outputs = [_prepare_output(env, name="frame.svg", content=b"<svg/>")]
+    _complete(
+        env, project_id=project.id, task_id=task.id,
+        attempt_id=claim.attempt.id, lease_id=claim.attempt.lease_id,
+        status_version=started.status_version, outputs=outputs,
+        key="t18-unblock-first-k",
+    )
+    assert _task_row(env.writer, dep_id)["status"] == "blocked"
+    assert _task_row(env.writer, partial_id)["status"] == "blocked"
+
+    # Complete `fresh`: `dep` now has every hard dep satisfied and unblocks.
+    fresh_claim = _claim(env, project_id=project.id, idempotency_key="t18-fresh-claim-k")
+    assert fresh_claim is not None and fresh_claim.task.id == fresh_id
+    fresh_started = UnitOfWork(env.writer).run(
+        lambda u: env.task_repo.start(
+            u, project_id=project.id, task_id=fresh_id,
+            attempt_id=fresh_claim.attempt.id,
+            lease_id=fresh_claim.attempt.lease_id,
+            expected_status_version=1,
+            idempotency_key="t18-fresh-start-k", now=TS,
+        )
+    )
+    completed = _complete(
+        env, project_id=project.id, task_id=fresh_id,
+        attempt_id=fresh_claim.attempt.id,
+        lease_id=fresh_claim.attempt.lease_id,
+        status_version=fresh_started.status_version, outputs=outputs,
+        key="t18-unblock-second-k",
+    )
+    assert _task_row(env.writer, dep_id)["status"] == "queued"
+    assert _task_row(env.writer, partial_id)["status"] == "blocked"
+    # The completed event records the unblocked dependent deterministically.
+    stream_id = f"{fresh_id}:core.task"
+    events = _event_rows(env.writer, stream_id)
+    data = json.loads(events[-1]["payload_json"])["data"]
+    assert data["unblocked_dependents"] == [dep_id]
+
+
+def test_complete_updates_parent_run_projection(env) -> None:
+    from astrid.core.repositories.runs import RunRepository
+
+    runs = RunRepository(events=env.task_repo._events, receipts=env.task_repo._receipts)
+    project = _create_project(env)
+    child_a = generate_lowercase_ulid()
+    child_b = generate_lowercase_ulid()
+    fan = UnitOfWork(env.writer).run(
+        lambda u: runs.create(
+            u, project_id=project.id,
+            children=[
+                {
+                    "capability": "rendering.timeline_visualize",
+                    "spec": dict(SPEC_A), "input_manifest": list(MANIFEST_A),
+                    "task_id": child_a,
+                },
+                {
+                    "capability": "rendering.timeline_visualize",
+                    "spec": dict(SPEC_A), "input_manifest": list(MANIFEST_A),
+                    "task_id": child_b,
+                },
+            ],
+            idempotency_key="t18-run-k", created_at=TS,
+        )
+    )
+    assert fan.run_id
+    outputs = [_prepare_output(env, name="frame.svg", content=b"<svg/>")]
+
+    def complete_child(child_id: str, key: str):
+        claim = _claim(env, project_id=project.id, idempotency_key=key)
+        assert claim is not None and claim.task.id == child_id
+        started = UnitOfWork(env.writer).run(
+            lambda u: env.task_repo.start(
+                u, project_id=project.id, task_id=child_id,
+                attempt_id=claim.attempt.id, lease_id=claim.attempt.lease_id,
+                expected_status_version=1,
+                idempotency_key=f"{key}:start", now=TS,
+            )
+        )
+        return _complete(
+            env, project_id=project.id, task_id=child_id,
+            attempt_id=claim.attempt.id, lease_id=claim.attempt.lease_id,
+            status_version=started.status_version, outputs=outputs,
+            key=f"{key}:complete",
+        )
+
+    # First child: the run stays running with derived progress.
+    first = complete_child(child_a, "t18-run-claim-a")
+    assert first.run is not None
+    assert first.run["status"] == "running"
+    assert first.run["succeeded"] == 1 and first.run["total_children"] == 2
+    run_row = env.writer.submit(
+        lambda session: session.query_one(
+            "SELECT status, finished_at FROM runs WHERE id = ?", (fan.run_id,)
+        )
+    )
+    assert run_row["status"] == "running"
+    assert run_row["finished_at"] is None
+
+    # Second child: every child terminal -> the run succeeds and stamps.
+    second = complete_child(child_b, "t18-run-claim-b")
+    assert second.run is not None
+    assert second.run["status"] == "succeeded"
+    assert second.run["succeeded"] == 2
+    run_row = env.writer.submit(
+        lambda session: session.query_one(
+            "SELECT status, finished_at FROM runs WHERE id = ?", (fan.run_id,)
+        )
+    )
+    assert run_row["status"] == "succeeded"
+    assert run_row["finished_at"] == TS2
+
+
+def test_complete_enforces_one_primary_and_unique_ordinals(env) -> None:
+    from astrid.core.repositories.tasks import TaskValidationError
+
+    project = _create_project(env)
+    task, claim, started = _started_attempt(env, project_id=project.id)
+    baseline = _receipt_count(env.writer, project.id)
+
+    # Duplicate ordinals are rejected before any mutation.
+    dup = [
+        _prepare_output(env, name="a.svg", content=b"<svg/>", ordinal=0),
+        _prepare_output(
+            env, name="b.svg", content=b"<svg2/>", ordinal=0,
+            is_primary=False, role="output",
+        ),
+    ]
+    with pytest.raises(TaskValidationError) as excinfo:
+        _complete(
+            env, project_id=project.id, task_id=task.id,
+            attempt_id=claim.attempt.id, lease_id=claim.attempt.lease_id,
+            status_version=started.status_version, outputs=dup,
+            key="t18-dup-ordinal-k",
+        )
+    assert "duplicated" in str(excinfo.value)
+    assert _receipt_count(env.writer, project.id) == baseline
+
+    # Two primaries are rejected.
+    two_primary = [
+        _prepare_output(env, name="a.svg", content=b"<svg/>", ordinal=0),
+        _prepare_output(env, name="b.svg", content=b"<svg2/>", ordinal=1),
+    ]
+    with pytest.raises(TaskValidationError) as excinfo:
+        _complete(
+            env, project_id=project.id, task_id=task.id,
+            attempt_id=claim.attempt.id, lease_id=claim.attempt.lease_id,
+            status_version=started.status_version, outputs=two_primary,
+            key="t18-two-primary-k",
+        )
+    assert "exactly one primary" in str(excinfo.value)
+    assert _receipt_count(env.writer, project.id) == baseline
+
+    # A non-result primary is rejected (DDL CHECK mirror).
+    bad_role = [
+        _prepare_output(
+            env, name="a.svg", content=b"<svg/>",
+            ordinal=0, is_primary=True, role="output",
+        )
+    ]
+    with pytest.raises(TaskValidationError) as excinfo:
+        _complete(
+            env, project_id=project.id, task_id=task.id,
+            attempt_id=claim.attempt.id, lease_id=claim.attempt.lease_id,
+            status_version=started.status_version, outputs=bad_role,
+            key="t18-bad-role-k",
+        )
+    assert "only a 'result' output may be primary" in str(excinfo.value)
+    assert _receipt_count(env.writer, project.id) == baseline
+    assert _task_row(env.writer, task.id)["status"] == "running"
+
+
+# ---------------------------------------------------------------------------
+# T19: service-level completion (plan step 10)
+# ---------------------------------------------------------------------------
+
+
+def _execute_prepared(env, *, project_id, handler, **overrides):
+    """Execute through the service and return (service, prepared)."""
+    service = ExecutionService(
+        projects_root=env.projects_root, task_repo=env.task_repo
+    )
+    task = _admit(env, project_id=project_id, max_attempts=2)
+    claim = _claim(env, project_id=project_id)
+    assert claim is not None and claim.task.id == task.id
+    args = {
+        "project_id": project_id,
+        "task_id": claim.task.id,
+        "attempt_id": claim.attempt.id,
+        "lease_id": claim.attempt.lease_id,
+        "expected_status_version": claim.attempt.status_version,
+        "idempotency_key": "execute-k",
+        "handler": handler,
+        "now": TS2,
+    }
+    args.update(overrides)
+    result = service.execute(UnitOfWork(env.writer), **args)
+    assert result.outcome == "prepared"
+    assert result.prepared is not None
+    return service, result.prepared
+
+
+def _service_complete(env, service, prepared, *, key="t19-complete-k", **overrides):
+    args = {
+        "prepared": prepared,
+        "media_repo": env.media_repo,
+        "idempotency_key": key,
+        "now": TS2,
+    }
+    args.update(overrides)
+    return service.complete(UnitOfWork(env.writer), **args)
+
+
+def test_service_complete_materializes_prepared_outputs_and_terminates(
+    env, core_registry,
+) -> None:
+    from astrid.core.task_executor.service import CompletionResult
+
+    project = _create_project(env)
+    service, prepared = _execute_prepared(
+        env,
+        project_id=project.id,
+        handler=FakeHandler({"frame.svg": b"<svg/>", "story.md": b"# story"}),
+    )
+    receipts_before = _receipt_count(env.writer, project.id)
+    head_before = _project_head(env.writer, project.id)
+    assert _media_count(env.writer, project.id) == 0
+
+    result = _service_complete(env, service, prepared)
+    assert isinstance(result, CompletionResult)
+    assert result.outcome == "completed"
+    completed = result.completed
+    assert completed is not None
+
+    # The task is terminal succeeded with the winning attempt recorded and
+    # the attempt terminated succeeded with the version advanced.
+    assert completed.task.status == "succeeded"
+    assert completed.task.winning_attempt_id == prepared.attempt.id
+    assert completed.task.finished_at == TS2
+    assert completed.attempt.status == "succeeded"
+    assert completed.attempt.status_version == prepared.attempt.status_version + 1
+    assert completed.attempt.finished_at == TS2
+
+    # The full ordered output set: primary first, ordered roles, byte
+    # identity on the materialized media rows.
+    assert [output.ordinal for output in completed.outputs] == [0, 1]
+    assert completed.outputs[0].is_primary is True
+    assert completed.outputs[0].role == "result"
+    assert completed.outputs[1].is_primary is False
+    assert completed.outputs[1].role == "output"
+    rows = _task_output_rows(env.writer, prepared.task.id)
+    assert [row["ordinal"] for row in rows] == [0, 1]
+    assert rows[0]["is_primary"] == 1
+    assert rows[0]["media_id"] == completed.outputs[0].media_id
+    assert _media_count(env.writer, project.id) == 2
+
+    # One receipt covering every ordered event id (media events in ordinal
+    # order, then the completed event) and a verifiable stream chain.
+    assert _receipt_count(env.writer, project.id) == receipts_before + 1
+    assert len(completed.event_ids) == 3
+    assert _project_head(env.writer, project.id) == head_before + 3
+    stream_id = f"{prepared.task.id}:{CORE_TASK_STREAM_TYPE}"
+    events = _event_rows(env.writer, stream_id)
+    assert events[-1]["kind"] == CORE_TASK_COMPLETED_EVENT_KIND
+    with env.writer.read_only_connection() as conn:
+        rows_events = conn.execute(
+            "SELECT event_id FROM events WHERE project_id = ? "
+            "ORDER BY project_seq ASC",
+            (project.id,),
+        ).fetchall()
+    tail = [str(row[0]) for row in rows_events][-3:]
+    assert completed.event_ids == tuple(tail)
+    verification = EventAppendService(core_registry).verify_stream(
+        env.writer, stream_id
+    )
+    assert verification.event_count == verification.head_seq
+    assert verification.head_hash is not None
+
+
+def test_service_complete_replay_returns_full_stored_output_set(env) -> None:
+    from astrid.core.task_executor.service import CompletionResult
+
+    project = _create_project(env)
+    service, prepared = _execute_prepared(
+        env,
+        project_id=project.id,
+        handler=FakeHandler({"frame.svg": b"<svg/>", "story.md": b"# story"}),
+    )
+    key = "t19-replay-k"
+
+    first = _service_complete(env, service, prepared, key=key)
+    assert first.outcome == "completed" and first.completed is not None
+    before = {
+        "receipts": _receipt_count(env.writer, project.id),
+        "head": _project_head(env.writer, project.id),
+        "outputs": len(_task_output_rows(env.writer, prepared.task.id)),
+        "media": _media_count(env.writer, project.id),
+    }
+
+    # Identical retry under the same key: the full stored output set comes
+    # back and zero new rows are written.
+    replayed = _service_complete(env, service, prepared, key=key)
+    assert isinstance(replayed, CompletionResult)
+    assert replayed.outcome == "completed"
+    assert replayed.completed is not None
+    assert replayed.completed.to_dict() == first.completed.to_dict()
+    assert len(replayed.completed.outputs) == 2
+    assert [output.ordinal for output in replayed.completed.outputs] == [0, 1]
+    assert _receipt_count(env.writer, project.id) == before["receipts"]
+    assert _project_head(env.writer, project.id) == before["head"]
+    assert len(_task_output_rows(env.writer, prepared.task.id)) == before["outputs"]
+    assert _media_count(env.writer, project.id) == before["media"]
+
+
+def test_service_complete_stale_surfaces_typed_outcome_without_materialization(
+    env,
+) -> None:
+    from dataclasses import replace
+
+    from astrid.core.task_executor.service import CompletionResult
+
+    project = _create_project(env)
+    service, prepared = _execute_prepared(
+        env,
+        project_id=project.id,
+        handler=FakeHandler({"frame.svg": b"<svg/>", "story.md": b"# story"}),
+    )
+    baseline = {
+        "receipts": _receipt_count(env.writer, project.id),
+        "head": _project_head(env.writer, project.id),
+        "media": _media_count(env.writer, project.id),
+        "outputs": len(_task_output_rows(env.writer, prepared.task.id)),
+    }
+
+    # Stale status version: the typed stale outcome, zero semantic rows.
+    stale = replace(
+        prepared,
+        attempt=replace(
+            prepared.attempt,
+            status_version=prepared.attempt.status_version + 7,
+        ),
+    )
+    result = _service_complete(env, service, stale, key="t19-stale-version-k")
+    assert isinstance(result, CompletionResult)
+    assert result.outcome == "stale"
+    assert result.error is not None
+    assert result.error["reason"] == "stale_status_version"
+    assert result.error["task_id"] == prepared.task.id
+    assert result.error["attempt_id"] == prepared.attempt.id
+    assert _receipt_count(env.writer, project.id) == baseline["receipts"]
+    assert _project_head(env.writer, project.id) == baseline["head"]
+    assert _media_count(env.writer, project.id) == baseline["media"]
+    assert len(_task_output_rows(env.writer, prepared.task.id)) == baseline["outputs"]
+    assert _task_row(env.writer, prepared.task.id)["status"] == "running"
+
+    # Wrong lease: another stale outcome, zero semantic rows.
+    wrong_lease = replace(
+        prepared,
+        attempt=replace(prepared.attempt, lease_id="not-the-lease"),
+    )
+    result = _service_complete(env, service, wrong_lease, key="t19-lease-k")
+    assert result.outcome == "stale"
+    assert result.error is not None
+    assert result.error["reason"] == "lease_mismatch"
+    assert _receipt_count(env.writer, project.id) == baseline["receipts"]
+    assert _project_head(env.writer, project.id) == baseline["head"]
+    assert _media_count(env.writer, project.id) == baseline["media"]
+    assert len(_task_output_rows(env.writer, prepared.task.id)) == baseline["outputs"]
+
+
+def test_service_complete_losing_surfaces_typed_outcome_without_materialization(
+    env,
+) -> None:
+    from astrid.core.task_executor.service import CompletionResult
+
+    project = _create_project(env)
+    service, prepared = _execute_prepared(
+        env,
+        project_id=project.id,
+        handler=FakeHandler({"frame.svg": b"<svg/>", "story.md": b"# story"}),
+    )
+
+    # The winning completion decides the single-winner race first.
+    winner = _service_complete(env, service, prepared, key="t19-winner-k")
+    assert winner.outcome == "completed"
+    after_win = {
+        "receipts": _receipt_count(env.writer, project.id),
+        "head": _project_head(env.writer, project.id),
+        "media": _media_count(env.writer, project.id),
+        "outputs": len(_task_output_rows(env.writer, prepared.task.id)),
+    }
+
+    # A second completion on the same attempt loses: typed outcome, and the
+    # losing call materializes nothing (media/rows/receipts/head unchanged).
+    loser = _service_complete(env, service, prepared, key="t19-loser-k")
+    assert isinstance(loser, CompletionResult)
+    assert loser.outcome == "losing"
+    assert loser.error is not None
+    assert loser.error["reason"] == "task_not_running"
+    assert loser.error["task_id"] == prepared.task.id
+    assert loser.completed is None
+    assert _receipt_count(env.writer, project.id) == after_win["receipts"]
+    assert _project_head(env.writer, project.id) == after_win["head"]
+    assert _media_count(env.writer, project.id) == after_win["media"]
+    assert len(_task_output_rows(env.writer, prepared.task.id)) == after_win["outputs"]
+
+
+def test_service_complete_enforces_one_primary_and_ordered_roles(env) -> None:
+    from dataclasses import replace
+
+    from astrid.core.task_executor.service import CompletionResult
+
+    project = _create_project(env)
+    service, prepared = _execute_prepared(
+        env,
+        project_id=project.id,
+        handler=FakeHandler({"frame.svg": b"<svg/>", "story.md": b"# story"}),
+    )
+    baseline = {
+        "receipts": _receipt_count(env.writer, project.id),
+        "head": _project_head(env.writer, project.id),
+    }
+
+    # Two primaries: the service rejects before the command runs.
+    first, second = prepared.outputs
+    two_primary = replace(
+        prepared, outputs=(first, replace(second, is_primary=True))
+    )
+    from astrid.core.task_executor.service import TaskExecutorError
+
+    with pytest.raises(TaskExecutorError) as excinfo:
+        _service_complete(env, service, two_primary, key="t19-two-primary-k")
+    assert "exactly one primary" in str(excinfo.value)
+    assert _receipt_count(env.writer, project.id) == baseline["receipts"]
+    assert _project_head(env.writer, project.id) == baseline["head"]
+
+    # A non-result primary: rejected (DDL CHECK mirror).
+    bad_role = replace(prepared, outputs=(replace(first, role="output"), second))
+    with pytest.raises(TaskExecutorError) as excinfo:
+        _service_complete(env, service, bad_role, key="t19-bad-role-k")
+    assert "only a 'result' output may be primary" in str(excinfo.value)
+    assert _receipt_count(env.writer, project.id) == baseline["receipts"]
+    assert _project_head(env.writer, project.id) == baseline["head"]
+    assert _task_row(env.writer, prepared.task.id)["status"] == "running"
+
+    # Out-of-ordinal prepared outputs still complete with ordered roles: the
+    # service sorts by ordinal before the command, so the stored output set
+    # is deterministic regardless of the prepared tuple order.
+    shuffled = replace(prepared, outputs=(second, first))
+    result = _service_complete(env, service, shuffled, key="t19-ordered-k")
+    assert isinstance(result, CompletionResult)
+    assert result.outcome == "completed"
+    assert result.completed is not None
+    assert [output.ordinal for output in result.completed.outputs] == [0, 1]
+    rows = _task_output_rows(env.writer, prepared.task.id)
+    assert [row["ordinal"] for row in rows] == [0, 1]
+    assert rows[0]["is_primary"] == 1 and rows[0]["role"] == "result"
+    assert rows[1]["is_primary"] == 0 and rows[1]["role"] == "output"

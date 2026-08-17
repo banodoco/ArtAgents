@@ -45,6 +45,7 @@ from datetime import datetime, timedelta
 from typing import Any, Protocol
 
 from astrid.core.ids import generate_lowercase_ulid
+from astrid.core.io.media_import import PreparedMedia
 from astrid.core.receipts.canonical import (
     CanonicalizationError,
     canonical_bytes,
@@ -105,6 +106,14 @@ CORE_TASK_RETRY_COMMAND_KIND = "core.task.retry"
 CORE_TASK_RETRIED_EVENT_KIND = "core.task.retried"
 """The m2 event kind emitted when eligible failed/expired work is retried,
 creating a new fenced attempt (plan step 8, T14)."""
+
+CORE_TASK_COMPLETE_COMMAND_KIND = "core.task.complete"
+"""The m2 command kind that completion receipts are keyed on (plan step 10,
+T18)."""
+
+CORE_TASK_COMPLETED_EVENT_KIND = "core.task.completed"
+"""The m2 event kind emitted when one owned attempt completes successfully
+and the task reaches the terminal ``succeeded`` state (plan step 10, T18)."""
 
 DEFAULT_LEASE_SECONDS = 300
 """The default claim lease duration in seconds (plan step 7, T11).
@@ -732,6 +741,119 @@ class TaskRetryReadModel:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class TaskOutputReadModel:
+    """One immutable ordered task output (m2 plan step 10, T18).
+
+    A frozen projection of one ``task_outputs`` row: the deterministic
+    ``ordinal`` within the completing task, the ``role`` (``"result"`` for
+    the primary result output), the materialized ``media_id`` (project-scoped
+    byte-identity), the ``is_primary`` flag, and the caller-supplied output
+    ``params`` (label, staging-relative path, digest evidence). ``to_dict``
+    is the JSON-safe persisted shape and ``from_mapping`` rebuilds it for
+    exact replay.
+    """
+
+    ordinal: int
+    role: str
+    media_id: str
+    is_primary: bool
+    params: Mapping[str, Any]
+    created_at: str
+
+    def __post_init__(self) -> None:
+        if isinstance(self.ordinal, bool) or not isinstance(
+            self.ordinal, int
+        ) or self.ordinal < 0:
+            raise TaskValidationError(
+                f"output ordinal must be a non-negative integer, "
+                f"got {self.ordinal!r}"
+            )
+        if not isinstance(self.role, str) or not self.role:
+            raise TaskValidationError(
+                f"output role must be a non-empty string, got {self.role!r}"
+            )
+        if not isinstance(self.media_id, str) or not self.media_id:
+            raise TaskValidationError(
+                f"output media_id must be a non-empty string, "
+                f"got {self.media_id!r}"
+            )
+        if self.role != "result" and self.is_primary:
+            raise TaskValidationError(
+                "only a 'result' output may be primary (DDL CHECK "
+                "role = 'result' OR is_primary = 0)"
+            )
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return the JSON-safe dict persisted as the receipt result."""
+        return {
+            "ordinal": self.ordinal,
+            "role": self.role,
+            "media_id": self.media_id,
+            "is_primary": self.is_primary,
+            "params": dict(self.params),
+            "created_at": self.created_at,
+        }
+
+    @classmethod
+    def from_mapping(cls, value: Mapping[str, Any]) -> TaskOutputReadModel:
+        """Rebuild the frozen output read model from a stored mapping."""
+        return cls(
+            ordinal=int(value["ordinal"]),
+            role=str(value["role"]),
+            media_id=str(value["media_id"]),
+            is_primary=bool(value["is_primary"]),
+            params=dict(value.get("params") or {}),
+            created_at=str(value["created_at"]),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class TaskCompleteReadModel:
+    """One immutable fenced-completion result (m2 plan step 10, T18).
+
+    The receipt result of :meth:`TaskRepository.complete`: the refreshed
+    task read model (terminal ``succeeded`` with ``winning_attempt_id``
+    set), the one succeeded attempt (``status_version`` advanced,
+    ``finished_at`` set), the ordered materialized outputs, every ordered
+    event id the completion appended (media imported/related events in
+    ordinal order followed by the ``core.task.completed`` event), and —
+    when the task belongs to a run — the refreshed run projection mapping.
+    ``to_dict`` is the JSON-safe persisted shape and ``from_mapping``
+    rebuilds it for exact replay.
+    """
+
+    task: TaskReadModel
+    attempt: TaskAttemptReadModel
+    outputs: tuple[TaskOutputReadModel, ...]
+    event_ids: tuple[str, ...]
+    run: Mapping[str, Any] | None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return the JSON-safe dict persisted as the receipt result."""
+        return {
+            "task": self.task.to_dict(),
+            "attempt": self.attempt.to_dict(),
+            "outputs": [output.to_dict() for output in self.outputs],
+            "event_ids": list(self.event_ids),
+            "run": dict(self.run) if self.run is not None else None,
+        }
+
+    @classmethod
+    def from_mapping(cls, value: Mapping[str, Any]) -> TaskCompleteReadModel:
+        """Rebuild the frozen completion read model from a stored mapping."""
+        return cls(
+            task=TaskReadModel.from_mapping(value["task"]),
+            attempt=TaskAttemptReadModel.from_mapping(value["attempt"]),
+            outputs=tuple(
+                TaskOutputReadModel.from_mapping(output)
+                for output in (value.get("outputs") or [])
+            ),
+            event_ids=tuple(str(event_id) for event_id in (value.get("event_ids") or [])),
+            run=dict(value["run"]) if value.get("run") is not None else None,
+        )
+
+
 # ---------------------------------------------------------------------------
 # Canonical spec hashing
 # ---------------------------------------------------------------------------
@@ -992,6 +1114,48 @@ def _initial_status_from_dependencies(
         if dep_row is None or str(dep_row["status"]) != HARD_DEPENDENCY_SATISFIED_STATUS:
             return "blocked"
     return "queued"
+
+
+def derive_run_progress_counts(
+    uow: UnitOfWork, *, run_id: str, project_id: str
+) -> tuple[dict[str, int], str]:
+    """Derive one run's progress from its child task rows (m2 plan step 13).
+
+    The **single shared derivation** behind task completion's parent-run
+    recompute (``_update_run_projection_on_child_terminal``) and the run
+    repository's group cancel/retry and public ``derive_progress`` read. It
+    is a pure read over the ``tasks`` projection: children are counted by
+    ``status`` and the derived run status follows one rule everywhere —
+    ``running`` until every child is terminal, then ``failed`` when any
+    child failed, ``cancelled`` when any child was cancelled (and none
+    failed), else ``succeeded``. No cursor and no persisted mutable progress
+    aggregate ever exist; the caller may persist the returned projection
+    into ``runs.result_json``/``status`` or return it transaction-free.
+
+    Returns ``(counts, status)`` where ``counts`` maps each frozen task
+    status to its child count (absent statuses are simply not present).
+    """
+    status_rows = uow.query(
+        "SELECT status, COUNT(*) AS n FROM tasks "
+        "WHERE run_id = ? AND project_id = ? GROUP BY status",
+        (run_id, project_id),
+    )
+    counts = {str(row["status"]): int(row["n"]) for row in status_rows}
+    total = sum(counts.values())
+    succeeded = counts.get("succeeded", 0)
+    failed = counts.get("failed", 0)
+    cancelled = counts.get("cancelled", 0)
+    terminal = succeeded + failed + cancelled
+    if total > 0 and terminal == total:
+        if failed > 0:
+            status = "failed"
+        elif cancelled > 0:
+            status = "cancelled"
+        else:
+            status = "succeeded"
+    else:
+        status = "running"
+    return counts, status
 
 
 def _iso_le(left: str, right: str) -> bool:
@@ -3303,6 +3467,716 @@ class TaskRepository:
         )
         return result
 
+    def is_retry_eligible(
+        self,
+        uow: UnitOfWork,
+        *,
+        project_id: str,
+        task_id: str,
+    ) -> tuple[bool, str]:
+        """Read-only retry-eligibility check shared with group retry (m2 step 13).
+
+        Returns ``(True, "")`` when :meth:`retry` would accept the task
+        right now, otherwise ``(False, reason)`` with ``reason`` one of
+        ``"task_not_found"``, ``"task_terminal"``, ``"not_retryable"``, or
+        ``"attempt_budget_exhausted"`` — exactly the same rules :meth:`retry`
+        enforces before any mutation, applied read-only so the run
+        repository's group retry can filter "all eligible" children without
+        duplicating the race-hardened predicate. The check reads only; the
+        actual transition always goes through :meth:`retry` (same UoW, so
+        nothing can interleave between the check and the fenced transition).
+        """
+        _require_non_empty_string("task_id", task_id)
+        task_row = uow.query_one(
+            "SELECT * FROM tasks WHERE id = ? AND project_id = ?",
+            (task_id, project_id),
+        )
+        if task_row is None:
+            return False, "task_not_found"
+        prior_status = str(task_row["status"])
+        if prior_status not in ("queued", "blocked", "running"):
+            return False, "task_terminal"
+        if prior_status != "queued":
+            return False, "not_retryable"
+        prior_attempt_row = uow.query_one(
+            "SELECT * FROM execution_attempts WHERE task_id = ? "
+            "ORDER BY attempt_no DESC LIMIT 1",
+            (task_id,),
+        )
+        if prior_attempt_row is None:
+            return False, "not_retryable"
+        prior_attempt_status = str(prior_attempt_row["status"])
+        if prior_attempt_status not in ("failed", "expired"):
+            return False, "not_retryable"
+        if int(prior_attempt_row["attempt_no"]) >= int(task_row["max_attempts"]):
+            return False, "attempt_budget_exhausted"
+        return True, ""
+
+    # -- fenced completion (receipt-protected, m2 plan step 10, T18) -------
+
+    def complete(
+        self,
+        uow: UnitOfWork,
+        *,
+        project_id: str,
+        task_id: str,
+        attempt_id: str,
+        lease_id: str,
+        expected_status_version: int,
+        idempotency_key: str,
+        outputs: Sequence[Mapping[str, Any]],
+        media_repo: Any,
+        actor_kind: str = "local",
+        now: str | None = None,
+        command_kind: str = CORE_TASK_COMPLETE_COMMAND_KIND,
+    ) -> TaskCompleteReadModel:
+        """Complete one owned attempt atomically into media and outputs.
+
+        Inside the caller's active unit of work this commits, in one
+        ``BEGIN IMMEDIATE`` transaction: each prepared output is
+        materialized through the injected ``media_repo``'s in-UoW primitive
+        (T17, ``materialize_prepared`` — verified bytes published or reused,
+        media/location/relation rows, hash-chained ``core.media.*`` events),
+        the ordered ``task_outputs`` rows are inserted, the attempt
+        terminates ``succeeded`` (``status_version`` +1, ``finished_at``
+        set), the task reaches the terminal ``succeeded`` state with
+        ``winning_attempt_id`` set, eligible hard dependents are unblocked,
+        the parent run projection (when present) is recomputed, the
+        hash-chained ``core.task.completed`` event is appended, and **one**
+        complete receipt records every ordered event id.
+
+        Every fence is rechecked **before** any semantic mutation: the task
+        must be ``running`` and belong to *project_id*, and the attempt must
+        belong to that task, be live (``claimed`` or ``running``), carry the
+        caller's ``lease_id``, and match ``expected_status_version``. A
+        stale, foreign, terminal, or already-losing attempt raises the typed
+        :class:`TaskTransitionError` / :class:`TaskAttemptNotFoundError`
+        and changes zero rows — so complete can never race heartbeat,
+        expiry, cancellation, or another completion into a double terminal
+        outcome: the single writer FIFO plus the exact version/lease
+        predicates select exactly one winning attempt, and a losing or
+        stale completion materializes no media, no output, and no receipt.
+
+        *outputs* is the ordered list of validated prepared outputs; each
+        entry is a mapping of ``ordinal`` (non-negative int), ``is_primary``
+        (bool — exactly one per task), ``role`` (``"result"`` for the
+        primary; the DDL CHECK forbids ``is_primary`` on other roles),
+        ``label``/``path`` (optional metadata persisted in ``params_json``),
+        and ``prepared`` (the immutable :class:`PreparedMedia` record, byte
+        identity). Optional ``media_id``/``realm``/``locator``/``relations``
+        keys are passed through to the media materialization. ``media_repo``
+        is the caller's media repository (duck-typed on
+        ``materialize_prepared``); the kernel never constructs a second
+        writer.
+
+        Idempotency: the receipt gate runs first. An identical retry under
+        the same key returns exactly the stored completion with zero new
+        rows; a changed request under the same key raises
+        :class:`ReceiptMismatchError` before any mutation.
+        """
+        project_id = _require_non_empty_string("project_id", project_id)
+        task_id = _require_non_empty_string("task_id", task_id)
+        attempt_id = _require_non_empty_string("attempt_id", attempt_id)
+        lease_id = _require_non_empty_string("lease_id", lease_id)
+        idempotency_key = _require_non_empty_string(
+            "idempotency_key", idempotency_key
+        )
+        command_kind = _require_non_empty_string("command_kind", command_kind)
+        if isinstance(expected_status_version, bool) or not isinstance(
+            expected_status_version, int
+        ) or expected_status_version <= 0:
+            raise TaskValidationError(
+                "expected_status_version must be a positive integer, "
+                f"got {expected_status_version!r}"
+            )
+        if actor_kind not in ACTOR_KINDS:
+            raise TaskValidationError(
+                f"actor_kind must be one of {sorted(ACTOR_KINDS)}, "
+                f"got {actor_kind!r}"
+            )
+        if not hasattr(media_repo, "materialize_prepared"):
+            raise TaskValidationError(
+                "media_repo must expose materialize_prepared for the "
+                "in-UoW media primitive (T17), got "
+                f"{type(media_repo).__name__}"
+            )
+        normalized_outputs = self._normalize_completion_outputs(outputs)
+
+        # Semantic request identity: the fenced transition plus every
+        # caller-supplied output fact. Generated state (media/location ids,
+        # timestamps, publication reuse) never participates, and the
+        # prepared record's filesystem source path is excluded — media
+        # identity is byte SHA-256 alone (SD2), so a re-execution after a
+        # crash that re-prepares identical bytes at a fresh staging path
+        # replays instead of mismatching.
+        request: dict[str, Any] = {
+            "task_id": task_id,
+            "attempt_id": attempt_id,
+            "lease_id": lease_id,
+            "expected_status_version": expected_status_version,
+            "outputs": [
+                self._output_request_identity(entry) for entry in normalized_outputs
+            ],
+        }
+        try:
+            request_digest = request_hash(command_kind, request)
+        except CanonicalizationError as exc:
+            raise TaskValidationError(
+                f"cannot hash complete request: {exc}"
+            ) from exc
+
+        # Idempotency gate first: replay or mismatch before any fence read
+        # or sequence allocation.
+        replayed = self._receipts.check(
+            uow,
+            project_id=project_id,
+            idempotency_key=idempotency_key,
+            request_hash=request_digest,
+            command_kind=command_kind,
+        )
+        if replayed is not None:
+            return TaskCompleteReadModel.from_mapping(replayed)
+
+        stamp = now if now is not None else utc_now_iso()
+        if not isinstance(stamp, str) or not stamp:
+            raise TaskValidationError("now must be a non-empty string")
+
+        # Fences, all before any mutation (typed stale outcomes).
+        task_row = uow.query_one(
+            "SELECT * FROM tasks WHERE id = ? AND project_id = ?",
+            (task_id, project_id),
+        )
+        if task_row is None:
+            raise TaskNotFoundError(task_id=task_id)
+        if str(task_row["status"]) != "running":
+            raise TaskTransitionError(
+                task_id=task_id,
+                attempt_id=attempt_id,
+                reason="task_not_running",
+                detail=(
+                    f"task status is {task_row['status']!r}, expected 'running'"
+                ),
+            )
+        attempt_row = uow.query_one(
+            "SELECT * FROM execution_attempts WHERE id = ?", (attempt_id,)
+        )
+        if attempt_row is None:
+            raise TaskAttemptNotFoundError(attempt_id=attempt_id)
+        if str(attempt_row["task_id"]) != task_id:
+            raise TaskTransitionError(
+                task_id=task_id,
+                attempt_id=attempt_id,
+                reason="attempt_task_mismatch",
+            )
+        if str(attempt_row["status"]) not in ("claimed", "running"):
+            raise TaskTransitionError(
+                task_id=task_id,
+                attempt_id=attempt_id,
+                reason="attempt_not_live",
+                detail=(
+                    f"attempt status is {attempt_row['status']!r}, "
+                    "expected 'claimed' or 'running'"
+                ),
+            )
+        if str(attempt_row["lease_id"]) != lease_id:
+            raise TaskTransitionError(
+                task_id=task_id,
+                attempt_id=attempt_id,
+                reason="lease_mismatch",
+            )
+        if int(attempt_row["status_version"]) != expected_status_version:
+            raise TaskTransitionError(
+                task_id=task_id,
+                attempt_id=attempt_id,
+                reason="stale_status_version",
+                detail=(
+                    f"attempt status_version is "
+                    f"{attempt_row['status_version']}, expected "
+                    f"{expected_status_version}"
+                ),
+            )
+
+        next_version = expected_status_version + 1
+        stream_id = f"{task_id}:{CORE_TASK_STREAM_TYPE}"
+        txn_id = uuid.uuid4().hex
+        event_id = uuid.uuid4().hex
+        head_before = int(
+            uow.query_one(
+                "SELECT event_head_seq FROM projects WHERE id = ?",
+                (project_id,),
+            )["event_head_seq"]
+        )
+
+        # 1. Materialize every verified prepared output through the in-UoW
+        #    media primitive (T17), in deterministic ordinal order. Each
+        #    output appends its own hash-chained core.media event(s); no
+        #    receipt is written by the primitive.
+        materialized: list[dict[str, Any]] = []
+        for index, entry in enumerate(normalized_outputs):
+            materialize_args: dict[str, Any] = {
+                "project_id": project_id,
+                "prepared": entry["prepared"],
+                "idempotency_key": f"{idempotency_key}#out:{index}",
+                "actor_kind": actor_kind,
+                "created_at": stamp,
+            }
+            if entry.get("media_id") is not None:
+                materialize_args["media_id"] = entry["media_id"]
+            if entry.get("realm") is not None:
+                materialize_args["realm"] = entry["realm"]
+            if entry.get("locator") is not None:
+                materialize_args["locator"] = entry["locator"]
+            if entry.get("relations") is not None:
+                materialize_args["relations"] = entry["relations"]
+            result = media_repo.materialize_prepared(uow, **materialize_args)
+            materialized.append(
+                {
+                    "ordinal": entry["ordinal"],
+                    "is_primary": entry["is_primary"],
+                    "role": entry["role"],
+                    "label": entry.get("label"),
+                    "path": entry.get("path"),
+                    "prepared": entry["prepared"],
+                    "media_id": result.media_id,
+                }
+            )
+
+        # 2. The ordered task_outputs projection (one row per output).
+        output_models: list[TaskOutputReadModel] = []
+        for entry in materialized:
+            params: dict[str, Any] = {}
+            if entry.get("label") is not None:
+                params["label"] = entry["label"]
+            if entry.get("path") is not None:
+                params["path"] = entry["path"]
+            params["content_hash"] = entry["prepared"].digest
+            params["byte_size"] = entry["prepared"].byte_size
+            try:
+                params_json = canonical_json(params)
+            except CanonicalizationError as exc:
+                raise TaskValidationError(
+                    f"cannot serialize output params: {exc}"
+                ) from exc
+            uow.execute(
+                "INSERT INTO task_outputs "
+                "(task_id, ordinal, role, media_id, is_primary, "
+                "params_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    task_id,
+                    entry["ordinal"],
+                    entry["role"],
+                    entry["media_id"],
+                    1 if entry["is_primary"] else 0,
+                    params_json,
+                    stamp,
+                ),
+            )
+            output_models.append(
+                TaskOutputReadModel(
+                    ordinal=entry["ordinal"],
+                    role=entry["role"],
+                    media_id=entry["media_id"],
+                    is_primary=entry["is_primary"],
+                    params=params,
+                    created_at=stamp,
+                )
+            )
+
+        # 3. The attempt terminates succeeded: version +1, finished_at set,
+        #    fenced on the exact live status and version so a concurrent
+        #    transition can never be overwritten.
+        attempt_cursor = uow.execute(
+            "UPDATE execution_attempts SET status = 'succeeded', "
+            "status_version = ?, updated_at = ?, finished_at = ? "
+            "WHERE id = ? AND task_id = ? AND status IN ('claimed','running') "
+            "AND status_version = ?",
+            (
+                next_version,
+                stamp,
+                stamp,
+                attempt_id,
+                task_id,
+                expected_status_version,
+            ),
+        )
+        if attempt_cursor.rowcount != 1:
+            raise TaskTransitionError(
+                task_id=task_id,
+                attempt_id=attempt_id,
+                reason="stale_status_version",
+                detail="attempt changed between the fence check and the update",
+            )
+        # 4. The task reaches its terminal succeeded state: winning attempt
+        #    recorded, finished_at stamped, never resurrects (SD1).
+        task_cursor = uow.execute(
+            "UPDATE tasks SET status = 'succeeded', winning_attempt_id = ?, "
+            "updated_at = ?, finished_at = ? "
+            "WHERE id = ? AND status = 'running'",
+            (attempt_id, stamp, stamp, task_id),
+        )
+        if task_cursor.rowcount != 1:
+            raise TaskTransitionError(
+                task_id=task_id,
+                attempt_id=attempt_id,
+                reason="task_not_running",
+                detail="task changed between the fence read and the update",
+            )
+
+        # 5. Unblock eligible hard dependents: a blocked dependent whose
+        #    every hard dependency has now succeeded becomes queued (pure
+        #    projection update — the vocabulary has no unblocked event).
+        unblocked = self._unblock_eligible_dependents(
+            uow, task_id=task_id, stamp=stamp
+        )
+
+        # 6. Recompute the parent run projection when the task belongs to a
+        #    run (plan step 10: update any parent run projection).
+        run_id = task_row["run_id"]
+        run_projection: dict[str, Any] | None = None
+        if run_id is not None:
+            run_projection = self._update_run_projection_on_child_terminal(
+                uow,
+                run_id=str(run_id),
+                project_id=project_id,
+                stamp=stamp,
+            )
+
+        # 7. The hash-chained core.task.completed event on the task stream.
+        event_data: dict[str, Any] = {
+            "task_id": task_id,
+            "attempt_id": attempt_id,
+            "attempt_no": int(attempt_row["attempt_no"]),
+            "status_version": next_version,
+            "winning_attempt_id": attempt_id,
+            "outputs": [
+                {
+                    "ordinal": entry["ordinal"],
+                    "role": entry["role"],
+                    "media_id": entry["media_id"],
+                    "is_primary": entry["is_primary"],
+                    "content_hash": entry["prepared"].digest,
+                }
+                for entry in materialized
+            ],
+            "unblocked_dependents": unblocked,
+        }
+        changes: list[str] = [
+            "attempt_status",
+            "task_status",
+            "status_version",
+            "winning_attempt_id",
+            "finished_at",
+            "outputs",
+            "unblocked_dependents",
+        ]
+        append = self._events.append(
+            uow,
+            stream_id=stream_id,
+            project_id=project_id,
+            event_kind=CORE_TASK_COMPLETED_EVENT_KIND,
+            data=event_data,
+            changes=changes,
+            idempotency_key=idempotency_key,
+            txn_id=txn_id,
+            actor_kind=actor_kind,
+            command_kind=command_kind,
+            event_id=event_id,
+            created_at=stamp,
+        )
+
+        # 8. The one complete receipt covering every ordered event id the
+        #    completion appended (media events in ordinal order, then the
+        #    completed event), spanning the exact project-seq range.
+        ordered_events = uow.query(
+            "SELECT event_id, project_seq FROM events "
+            "WHERE project_id = ? AND project_seq > ? "
+            "ORDER BY project_seq ASC",
+            (project_id, head_before),
+        )
+        event_ids = tuple(str(row["event_id"]) for row in ordered_events)
+        if not event_ids:
+            raise TaskTransitionError(
+                task_id=task_id,
+                attempt_id=attempt_id,
+                reason="task_not_running",
+                detail="completion appended no events; the transaction "
+                "cannot be recorded",
+            )
+        first_seq = int(ordered_events[0]["project_seq"])
+        last_seq = int(ordered_events[-1]["project_seq"])
+
+        task_model = self._task_model(uow, task_id=task_id, project_id=project_id)
+        fresh = uow.query_one(
+            "SELECT * FROM execution_attempts WHERE id = ?", (attempt_id,)
+        )
+        if fresh is None:  # pragma: no cover - deleted rows cannot reappear
+            raise TaskAttemptNotFoundError(attempt_id=attempt_id)
+        result = TaskCompleteReadModel(
+            task=task_model,
+            attempt=self._attempt_read_model(fresh),
+            outputs=tuple(output_models),
+            event_ids=event_ids,
+            run=run_projection,
+        )
+        self._receipts.record(
+            uow,
+            project_id=project_id,
+            idempotency_key=idempotency_key,
+            request_hash=request_digest,
+            command_kind=command_kind,
+            txn_id=txn_id,
+            first_project_seq=first_seq,
+            last_project_seq=last_seq,
+            event_ids=list(event_ids),
+            result=result.to_dict(),
+            primary_stream_id=stream_id,
+            resulting_stream_seq=append.stream_seq,
+            created_at=stamp,
+        )
+        return result
+
+    # -- completion helpers ------------------------------------------------
+
+    @staticmethod
+    def _normalize_completion_outputs(
+        outputs: Sequence[Mapping[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Validate and order one completion command's output list.
+
+        Every rule that can be decided from the request alone runs here,
+        before hashing and before any SQL: the output list is non-empty,
+        each entry is a mapping with a unique non-negative ``ordinal``, a
+        boolean ``is_primary`` (exactly one per task), a role string
+        (``"result"`` for the primary; the DDL CHECK forbids primary on
+        other roles), and an immutable :class:`PreparedMedia` record.
+        Returns the entries ordered by ordinal (ties impossible after the
+        uniqueness check).
+        """
+        if isinstance(outputs, (str, bytes)) or not isinstance(
+            outputs, Sequence
+        ):
+            raise TaskValidationError(
+                "outputs must be a non-empty sequence of output mappings"
+            )
+        if not outputs:
+            raise TaskValidationError(
+                "complete requires at least one materialized output"
+            )
+        normalized: list[dict[str, Any]] = []
+        seen_ordinals: set[int] = set()
+        for index, raw in enumerate(outputs):
+            if not isinstance(raw, Mapping):
+                raise TaskValidationError(
+                    f"outputs[{index}] must be a mapping, got "
+                    f"{type(raw).__name__}"
+                )
+            ordinal = raw.get("ordinal")
+            if isinstance(ordinal, bool) or not isinstance(
+                ordinal, int
+            ) or ordinal < 0:
+                raise TaskValidationError(
+                    f"outputs[{index}].ordinal must be a non-negative "
+                    f"integer, got {ordinal!r}"
+                )
+            if ordinal in seen_ordinals:
+                raise TaskValidationError(
+                    f"outputs[{index}].ordinal {ordinal!r} is duplicated"
+                )
+            seen_ordinals.add(ordinal)
+            is_primary = raw.get("is_primary")
+            if not isinstance(is_primary, bool):
+                raise TaskValidationError(
+                    f"outputs[{index}].is_primary must be a boolean, "
+                    f"got {is_primary!r}"
+                )
+            role = raw.get("role")
+            if role is None:
+                role = "result" if is_primary else "output"
+            if not isinstance(role, str) or not role:
+                raise TaskValidationError(
+                    f"outputs[{index}].role must be a non-empty string, "
+                    f"got {role!r}"
+                )
+            if role != "result" and is_primary:
+                raise TaskValidationError(
+                    f"outputs[{index}]: only a 'result' output may be "
+                    "primary (DDL CHECK role = 'result' OR is_primary = 0)"
+                )
+            prepared = raw.get("prepared")
+            if not isinstance(prepared, PreparedMedia):
+                raise TaskValidationError(
+                    f"outputs[{index}].prepared must be a PreparedMedia "
+                    f"record, got {type(prepared).__name__}"
+                )
+            entry: dict[str, Any] = {
+                "ordinal": ordinal,
+                "is_primary": is_primary,
+                "role": role,
+                "prepared": prepared,
+            }
+            for key in ("label", "path", "media_id", "realm", "locator"):
+                if raw.get(key) is not None:
+                    value = raw[key]
+                    if not isinstance(value, str) or not value:
+                        raise TaskValidationError(
+                            f"outputs[{index}].{key} must be a non-empty "
+                            f"string, got {value!r}"
+                        )
+                    entry[key] = value
+            if raw.get("relations") is not None:
+                relations = raw["relations"]
+                if not isinstance(relations, Sequence) or isinstance(
+                    relations, (str, bytes)
+                ):
+                    raise TaskValidationError(
+                        f"outputs[{index}].relations must be a sequence"
+                    )
+                entry["relations"] = list(relations)
+            normalized.append(entry)
+        if sum(1 for entry in normalized if entry["is_primary"]) != 1:
+            raise TaskValidationError(
+                "complete requires exactly one primary output "
+                f"(got {sum(1 for e in normalized if e['is_primary'])})"
+            )
+        normalized.sort(key=lambda entry: entry["ordinal"])
+        return normalized
+
+    @staticmethod
+    def _output_request_identity(entry: Mapping[str, Any]) -> dict[str, Any]:
+        """The canonical request-identity mapping for one prepared output.
+
+        Media identity is byte SHA-256 alone (SD2): the filesystem
+        ``source_path`` of the prepared record is excluded so a
+        re-execution that re-prepares identical bytes under a fresh staging
+        directory replays instead of mismatching.
+        """
+        prepared = entry["prepared"]
+        identity: dict[str, Any] = {
+            "ordinal": entry["ordinal"],
+            "is_primary": entry["is_primary"],
+            "role": entry["role"],
+            "prepared": {
+                "digest": prepared.digest,
+                "byte_size": prepared.byte_size,
+                "media_kind": prepared.media_kind,
+                "mime_type": prepared.mime_type,
+                "rel_path": prepared.rel_path,
+            },
+        }
+        for key in ("label", "path", "media_id", "realm", "locator"):
+            if entry.get(key) is not None:
+                identity[key] = entry[key]
+        if entry.get("relations") is not None:
+            identity["relations"] = list(entry["relations"])
+        return identity
+
+    def _unblock_eligible_dependents(
+        self, uow: UnitOfWork, *, task_id: str, stamp: str
+    ) -> list[str]:
+        """Unblock blocked hard dependents whose every dependency satisfied.
+
+        A blocked task that hard-depends on *task_id* becomes ``queued``
+        exactly when all of its hard dependencies have reached the frozen
+        ``succeeded`` terminal state — the same predicate claim eligibility
+        uses. This is a pure projection update inside the completing
+        command; the vocabulary has no unblocked event kind. Returns the
+        unblocked task ids in deterministic order.
+        """
+        candidates = [
+            str(row["task_id"])
+            for row in uow.query(
+                "SELECT DISTINCT d.task_id FROM task_dependencies d "
+                "JOIN tasks t ON t.id = d.task_id "
+                "WHERE d.depends_on_task_id = ? AND d.kind = 'hard' "
+                "AND t.status = 'blocked'",
+                (task_id,),
+            )
+        ]
+        unblocked: list[str] = []
+        for dependent_id in sorted(candidates):
+            unsatisfied = uow.query_one(
+                "SELECT COUNT(*) AS n FROM task_dependencies d "
+                "JOIN tasks dep ON dep.id = d.depends_on_task_id "
+                "WHERE d.task_id = ? AND d.kind = 'hard' "
+                "AND dep.status <> 'succeeded'",
+                (dependent_id,),
+            )
+            if int(unsatisfied["n"]) != 0:
+                continue
+            cursor = uow.execute(
+                "UPDATE tasks SET status = 'queued', updated_at = ? "
+                "WHERE id = ? AND status = 'blocked'",
+                (stamp, dependent_id),
+            )
+            if cursor.rowcount == 1:
+                unblocked.append(dependent_id)
+        return unblocked
+
+    def _update_run_projection_on_child_terminal(
+        self,
+        uow: UnitOfWork,
+        *,
+        run_id: str,
+        project_id: str,
+        stamp: str,
+    ) -> dict[str, Any]:
+        """Recompute the parent run projection after one child completes.
+
+        Derives the group progress from the child task statuses ordered by
+        ``run_ordinal`` (no persisted cursor or mutable aggregate — plan
+        step 13's derivation rule, applied here at the completion path):
+        the ``result_json`` progress counts are rewritten and, when every
+        child is terminal, the run transitions to ``succeeded`` (all
+        succeeded), ``failed`` (any failed), or ``cancelled`` (otherwise)
+        with ``finished_at`` stamped. A run that is already terminal is
+        left untouched. Returns the JSON-safe projection mapping persisted
+        in ``result_json``.
+        """
+        run_row = uow.query_one(
+            "SELECT * FROM runs WHERE id = ? AND project_id = ?",
+            (run_id, project_id),
+        )
+        if run_row is None:  # pragma: no cover - FK guarantees existence
+            raise TaskTransitionError(
+                task_id="",
+                attempt_id="",
+                reason="task_not_running",
+                detail=f"run {run_id!r} vanished from the project",
+            )
+        if str(run_row["status"]) != "running":
+            # A terminal run is immutable for this path (group operations,
+            # plan step 13, own terminal-run rejection); keep the projection
+            # as it stands.
+            return {"status": str(run_row["status"]), "terminal": True}
+        counts, run_status = derive_run_progress_counts(
+            uow, run_id=run_id, project_id=project_id
+        )
+        total = sum(counts.values())
+        projection: dict[str, Any] = {
+            "total_children": total,
+            "succeeded": counts.get("succeeded", 0),
+            "failed": counts.get("failed", 0),
+            "cancelled": counts.get("cancelled", 0),
+            "status": run_status,
+        }
+        try:
+            result_json = canonical_json(projection)
+        except CanonicalizationError as exc:  # pragma: no cover - ints only
+            raise TaskValidationError(
+                f"cannot serialize run projection: {exc}"
+            ) from exc
+        uow.execute(
+            "UPDATE runs SET result_json = ?, status = ?, finished_at = ? "
+            "WHERE id = ? AND status = 'running'",
+            (
+                result_json,
+                run_status,
+                stamp if run_status != "running" else None,
+                run_id,
+            ),
+        )
+        return projection
+
     # -- internal lifecycle helpers ----------------------------------------
 
     def _task_model(
@@ -3364,6 +4238,8 @@ __all__ = [
     "CORE_TASK_CANCELLED_EVENT_KIND",
     "CORE_TASK_CLAIM_COMMAND_KIND",
     "CORE_TASK_CLAIMED_EVENT_KIND",
+    "CORE_TASK_COMPLETE_COMMAND_KIND",
+    "CORE_TASK_COMPLETED_EVENT_KIND",
     "CORE_TASK_CREATE_COMMAND_KIND",
     "CORE_TASK_CREATED_EVENT_KIND",
     "CORE_TASK_EXPIRE_COMMAND_KIND",
@@ -3384,12 +4260,14 @@ __all__ = [
     "TaskAttemptReadModel",
     "TaskCancelReadModel",
     "TaskClaimReadModel",
+    "TaskCompleteReadModel",
     "TaskDependencyError",
     "TaskDependencyReadModel",
     "TaskExpiryReadModel",
     "TaskFailReadModel",
     "TaskListRow",
     "TaskNotFoundError",
+    "TaskOutputReadModel",
     "TaskReadModel",
     "TaskRepository",
     "TaskRepositoryError",
@@ -3397,4 +4275,5 @@ __all__ = [
     "TaskTransitionError",
     "TaskValidationError",
     "compute_spec_hash",
+    "derive_run_progress_counts",
 ]

@@ -912,3 +912,55 @@ __all__ = [
     "read_events",
     "verify_chain",
 ]
+
+# ---------------------------------------------------------------------------
+# m1 kernel vocabulary surface (plan step 8)
+# ---------------------------------------------------------------------------
+#
+# The m1 kernel adds a frozen schema-pack vocabulary and its runtime
+# enforcement (stream/event/command declaration checks plus aggregate, type,
+# and project agreement) in ``astrid.core.events.registry``. Re-exporting the
+# validation API here lets repository handlers import one stable package
+# surface (``from astrid.core.events import validate_command_kind``) instead
+# of reaching into submodules, and it keeps this package the single public
+# events surface for both the task-run event log above and the kernel
+# vocabulary. The legacy names are untouched.
+
+from astrid.core.events.registry import (  # noqa: E402
+    CORE_COMMAND_KINDS,
+    CORE_EVENT_KINDS,
+    CORE_MANIFEST_VERSION,
+    CORE_PACK_ID,
+    CORE_STREAM_TYPES,
+    STREAM_AGGREGATE_RULES,
+    StreamAggregateRule,
+    aggregate_rule_for,
+    core_only_registry,
+    core_schema_pack_manifest,
+    register_core_vocabulary,
+    validate_command_kind,
+    validate_event_append,
+    validate_event_kind,
+    validate_stream_creation,
+    validate_stream_type,
+)
+
+__all__ = [
+    *__all__,
+    "CORE_COMMAND_KINDS",
+    "CORE_EVENT_KINDS",
+    "CORE_MANIFEST_VERSION",
+    "CORE_PACK_ID",
+    "CORE_STREAM_TYPES",
+    "STREAM_AGGREGATE_RULES",
+    "StreamAggregateRule",
+    "aggregate_rule_for",
+    "core_only_registry",
+    "core_schema_pack_manifest",
+    "register_core_vocabulary",
+    "validate_command_kind",
+    "validate_event_append",
+    "validate_event_kind",
+    "validate_stream_creation",
+    "validate_stream_type",
+]

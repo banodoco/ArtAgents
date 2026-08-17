@@ -33,6 +33,16 @@ execution paths:
    service returns the typed :class:`ExecutionResult` — it never raises for
    handler errors and never writes semantic state itself.
 
+6. **Fenced completion (plan step 10).** :meth:`ExecutionService.complete`
+   passes the prepared outputs of :meth:`execute` into the repository's
+   fenced completion command inside the caller's UoW, enforcing exactly one
+   primary and ordered roles before the command runs, and returns the typed
+   :class:`CompletionResult`: ``\"completed\"`` with the full stored
+   :class:`~astrid.core.repositories.tasks.TaskCompleteReadModel` (exact
+   replay included), or ``\"stale\"`` / ``\"losing\"`` with the typed error
+   detail and zero semantic rows when the completion lost a fence or the
+   single-winner race.
+
 The caller owns the unit of work and the writer; the service only submits
 short repository operations through them (single-writer architecture).
 """
@@ -59,11 +69,15 @@ from astrid.core.receipts.canonical import (
     canonical_json,
 )
 from astrid.core.repositories.tasks import (
+    CORE_TASK_COMPLETE_COMMAND_KIND,
     DEFAULT_LEASE_SECONDS,
+    TaskAttemptNotFoundError,
     TaskAttemptReadModel,
+    TaskCompleteReadModel,
     TaskFailReadModel,
     TaskReadModel,
     TaskRepository,
+    TaskTransitionError,
 )
 from astrid.core.store.uow import UnitOfWork
 from astrid.core.util.time import utc_now_iso
@@ -197,6 +211,46 @@ class ExecutionResult:
         if self.outcome == "failed" and self.failure is None:
             raise TaskExecutorError(
                 "a failed outcome must carry the routed failure receipt"
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class CompletionResult:
+    """The typed outcome of one :meth:`ExecutionService.complete` call.
+
+    ``outcome`` is ``\"completed\"`` (the fenced completion command won and
+    ``completed`` carries the full stored :class:`TaskCompleteReadModel`,
+    including every ordered materialized output), ``\"stale\"`` (the
+    completion lost to a version/lease/ownership fence — the caller is
+    behind the attempt's current state, so nothing was materialized), or
+    ``\"losing\"`` (the task already reached a terminal state, so this
+    completion lost the single-winner race and nothing was materialized).
+    Stale and losing outcomes carry the typed error detail in ``error``;
+    the repository guarantees zero semantic rows (no media, no
+    ``task_outputs``, no receipt, no head advance) for both.
+    """
+
+    outcome: str
+    completed: TaskCompleteReadModel | None = None
+    error: Mapping[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        if self.outcome not in ("completed", "stale", "losing"):
+            raise TaskExecutorError(
+                f"completion outcome must be 'completed', 'stale', or "
+                f"'losing', got {self.outcome!r}"
+            )
+        if self.outcome == "completed" and self.completed is None:
+            raise TaskExecutorError(
+                "a completed outcome must carry the stored completion"
+            )
+        if self.outcome in ("stale", "losing") and self.error is None:
+            raise TaskExecutorError(
+                "a stale or losing outcome must carry the typed error detail"
+            )
+        if self.outcome in ("stale", "losing") and self.completed is not None:
+            raise TaskExecutorError(
+                "a stale or losing outcome never carries a completion"
             )
 
 
@@ -349,6 +403,118 @@ class ExecutionService:
             ),
         )
 
+    def complete(
+        self,
+        uow: UnitOfWork,
+        *,
+        prepared: PreparedExecution,
+        media_repo: Any,
+        idempotency_key: str,
+        actor_kind: str = "local",
+        now: str | None = None,
+        command_kind: str | None = None,
+    ) -> CompletionResult:
+        """Complete one prepared execution through the fenced command.
+
+        Passes the prepared outputs of :meth:`execute` into the repository's
+        fenced completion command (:meth:`TaskRepository.complete`, plan
+        step 10): each output's immutable :class:`PreparedMedia` record is
+        materialized through the caller's ``media_repo`` in the same UoW
+        (verified bytes published or digest-reused), ordered ``task_outputs``
+        rows are inserted, the attempt and task terminate ``succeeded`` with
+        ``winning_attempt_id`` set, and **one** complete receipt records
+        every ordered event id. The service enforces the output contract
+        before the command runs — exactly one primary and ordered roles —
+        and sorts the entries by ordinal so the stored output set is
+        deterministic.
+
+        The outcome is always the typed :class:`CompletionResult`:
+
+        - ``\"completed\"`` — the command won; ``completed`` is the full
+          stored :class:`TaskCompleteReadModel`. An identical retry under
+          the same ``idempotency_key`` replays exactly the stored result,
+          including the complete stored output set, with zero new rows.
+        - ``\"stale\"`` — the completion lost a version/lease/ownership
+          fence (the caller is behind the attempt's current state) or the
+          attempt is unknown; ``error`` carries the typed reason and no
+          semantic row is materialized.
+        - ``\"losing\"`` — the task already reached a terminal state (the
+          single-winner race was decided earlier); ``error`` carries the
+          typed reason and no semantic row is materialized.
+
+        The caller owns the unit of work and the writer, exactly as with
+        :meth:`execute`; the service only submits the short repository
+        command through them.
+        """
+        if not isinstance(prepared, PreparedExecution):
+            raise TaskExecutorError(
+                "prepared must be the PreparedExecution returned by "
+                f"execute, got {type(prepared).__name__}"
+            )
+        if not hasattr(media_repo, "materialize_prepared"):
+            raise TaskExecutorError(
+                "media_repo must expose materialize_prepared for the "
+                "in-UoW media primitive (T17), got "
+                f"{type(media_repo).__name__}"
+            )
+        idempotency_key = str(idempotency_key).strip()
+        if not idempotency_key:
+            raise TaskExecutorError("idempotency_key must be a non-empty string")
+        stamp = now if now is not None else utc_now_iso()
+        if not isinstance(stamp, str) or not stamp:
+            raise TaskExecutorError("now must be a non-empty string")
+
+        # Service-level output contract: exactly one primary, ordered roles,
+        # deterministic ordinal order — enforced before the command runs.
+        outputs = self._completion_entries(prepared)
+
+        def run(u: UnitOfWork) -> TaskCompleteReadModel:
+            return self._task_repo.complete(
+                u,
+                project_id=prepared.task.project_id,
+                task_id=prepared.task.id,
+                attempt_id=prepared.attempt.id,
+                lease_id=prepared.attempt.lease_id,
+                expected_status_version=prepared.attempt.status_version,
+                idempotency_key=idempotency_key,
+                outputs=outputs,
+                media_repo=media_repo,
+                actor_kind=actor_kind,
+                now=stamp,
+                command_kind=command_kind
+                if command_kind is not None
+                else CORE_TASK_COMPLETE_COMMAND_KIND,
+            )
+
+        try:
+            completed = uow.run(run)
+        except TaskTransitionError as exc:
+            # A completion that lost to a terminal task is "losing"; every
+            # other version/lease/ownership fence is a stale caller. Either
+            # way the repository changed zero rows before raising.
+            outcome = "losing" if exc.reason == "task_not_running" else "stale"
+            return CompletionResult(
+                outcome=outcome,
+                error={
+                    "reason": exc.reason,
+                    "task_id": exc.task_id,
+                    "attempt_id": exc.attempt_id,
+                    "message": str(exc),
+                },
+            )
+        except TaskAttemptNotFoundError as exc:
+            return CompletionResult(
+                outcome="stale",
+                error={
+                    "reason": "attempt_not_found",
+                    "task_id": prepared.task.id,
+                    "attempt_id": exc.attempt_id,
+                    "message": str(exc),
+                },
+            )
+
+        return CompletionResult(outcome="completed", completed=completed)
+
     # -- internal orchestration -------------------------------------------
 
     def _start_with_staging(
@@ -486,3 +652,50 @@ class ExecutionService:
             )
 
         return uow.run(run)
+
+    @staticmethod
+    def _completion_entries(
+        prepared: PreparedExecution,
+    ) -> list[dict[str, Any]]:
+        """Enforce the output contract and order one completion's entries.
+
+        The service-side mirror of the repository's request validation
+        (``TaskRepository._normalize_completion_outputs``), run **before**
+        the completion command so a malformed prepared execution never
+        reaches SQL: exactly one primary output, the primary's role is
+        ``\"result\"`` (the DDL CHECK ``role = 'result' OR is_primary = 0``
+        mirror), and the entries are returned ordered by ordinal (ties
+        impossible after the manifest's unique-ordinal validation). Role
+        defaults follow the manifest convention: ``\"result\"`` for the
+        primary, ``\"output\"`` for every other entry.
+        """
+        outputs = list(prepared.outputs)
+        primaries = [output for output in outputs if output.is_primary]
+        if len(primaries) != 1:
+            raise TaskExecutorError(
+                "complete requires exactly one primary output "
+                f"(got {len(primaries)})"
+            )
+        primary = primaries[0]
+        role = primary.role if primary.role is not None else "result"
+        if role != "result":
+            raise TaskExecutorError(
+                "only a 'result' output may be primary "
+                "(DDL CHECK role = 'result' OR is_primary = 0)"
+            )
+        entries: list[dict[str, Any]] = []
+        for output in sorted(outputs, key=lambda out: out.ordinal):
+            entry: dict[str, Any] = {
+                "ordinal": output.ordinal,
+                "is_primary": output.is_primary,
+                "role": output.role if output.role is not None else (
+                    "result" if output.is_primary else "output"
+                ),
+                "prepared": output.prepared,
+            }
+            if output.label is not None:
+                entry["label"] = output.label
+            if output.path is not None:
+                entry["path"] = output.path
+            entries.append(entry)
+        return entries

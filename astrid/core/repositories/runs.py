@@ -1,4 +1,5 @@
-"""Run repository: one-transaction bounded direct-child fan-out (m2 plan step 12).
+"""Run repository: one-transaction bounded direct-child fan-out and derived
+group operations (m2 plan steps 12 and 13).
 
 :class:`RunRepository.create` is the run vertical's fan-out root: one writer
 transaction commits the ``core.run`` event stream and ``runs`` row, then up
@@ -8,7 +9,30 @@ acyclic dependency edges, ordered events (the ``core.run.created`` event
 first, then each child's ``core.task.created`` event in ordinal order), both
 heads, and **one** complete receipt carrying every ordered event id.
 
-Contracts kept here (v10 section 5.2; m2 plan step 12):
+Plan step 13 (T22) adds the group surface on top of that fan-out:
+
+- :meth:`RunRepository.derive_progress` derives ordered group progress from
+  the child ``tasks`` rows by ``run_ordinal`` — no cursor, no parent task,
+  and no persisted mutable progress aggregate (the single shared derivation
+  ``derive_run_progress_counts`` in the task repository also backs task
+  completion's parent-run recompute);
+- :meth:`RunRepository.cancel` is a receipt-protected group cancel that
+  drives every eligible queued/blocked child to the terminal ``cancelled``
+  state through the **shared task-cancel predicate**
+  (:meth:`TaskRepository.cancel`), skips already-terminal and running
+  children (a running child's owned attempt needs its executor's fence),
+  recomputes the run projection, appends ``core.run.cancelled``, and
+  records one run-level receipt;
+- :meth:`RunRepository.retry` is a receipt-protected group retry that
+  restarts all eligible children — or an explicit subset — through the
+  **shared task-retry predicate** (:meth:`TaskRepository.retry`) with the
+  shared read-only eligibility check (:meth:`TaskRepository.is_retry_eligible`),
+  recomputes the run projection, appends ``core.run.retried``, and records
+  one run-level receipt;
+- both group commands reject continuation of a terminal run
+  (:class:`RunTerminalError`) before any mutation.
+
+Contracts kept here (v10 section 5.2; m2 plan steps 12 and 13):
 
 - **Bounded fan-out.** ``children`` with more than 256 entries is rejected
   before any mutation (``RunValidationError``), so a child 257 can never
@@ -56,14 +80,19 @@ from astrid.core.receipts.canonical import (
 from astrid.core.receipts.service import ReceiptService
 from astrid.core.repositories.errors import ACTOR_KINDS, RepositoryError
 from astrid.core.repositories.tasks import (
+    CORE_TASK_CANCEL_COMMAND_KIND,
     CORE_TASK_CREATE_COMMAND_KIND,
     CORE_TASK_CREATED_EVENT_KIND,
+    CORE_TASK_RETRY_COMMAND_KIND,
     CORE_TASK_STREAM_TYPE,
+    DEFAULT_LEASE_SECONDS,
     TaskDependencyReadModel,
+    TaskRepository,
     _initial_status_from_dependencies,
     _normalize_dependencies,
     _validate_dependency_graph,
     compute_spec_hash,
+    derive_run_progress_counts,
 )
 from astrid.core.store.uow import UnitOfWork
 from astrid.core.util.time import utc_now_iso
@@ -76,6 +105,18 @@ CORE_RUN_CREATED_EVENT_KIND = "core.run.created"
 
 CORE_RUN_CREATE_COMMAND_KIND = "core.run.create"
 """The m2 command kind that fan-out receipts are keyed on."""
+
+CORE_RUN_CANCELLED_EVENT_KIND = "core.run.cancelled"
+"""The m2 event kind emitted by receipt-protected group cancellation."""
+
+CORE_RUN_CANCEL_COMMAND_KIND = "core.run.cancel"
+"""The m2 command kind that group-cancel receipts are keyed on."""
+
+CORE_RUN_RETRIED_EVENT_KIND = "core.run.retried"
+"""The m2 event kind emitted by receipt-protected group retry."""
+
+CORE_RUN_RETRY_COMMAND_KIND = "core.run.retry"
+"""The m2 command kind that group-retry receipts are keyed on."""
 
 RUN_STATUSES: tuple[str, ...] = ("running", "succeeded", "failed", "cancelled")
 """The frozen ``runs.status`` DDL CHECK vocabulary, in DDL order."""
@@ -135,6 +176,23 @@ class RunNotFoundError(RunRepositoryError):
     def __init__(self, *, run_id: str) -> None:
         self.run_id: str = run_id
         super().__init__(f"unknown run: {run_id!r}")
+
+
+class RunTerminalError(RunRepositoryError):
+    """Raised when a group command targets a terminal run.
+
+    Terminal runs are immutable for group continuation (m2 plan step 13):
+    neither group cancel nor group retry may drive children of a run that
+    already reached ``succeeded``, ``failed``, or ``cancelled``. ``status``
+    carries the frozen terminal run status that rejected the command.
+    """
+
+    def __init__(self, *, run_id: str, status: str) -> None:
+        self.run_id: str = run_id
+        self.status: str = status
+        super().__init__(
+            f"cannot continue terminal run {run_id!r} in status {status!r}"
+        )
 
 
 class ContinuationValidationError(RunValidationError):
@@ -247,6 +305,154 @@ class RunFanOutReadModel:
             last_ordinal=int(value["last_ordinal"]),
             evidence_ids=tuple(
                 str(evidence_id) for evidence_id in (value.get("evidence_ids") or [])
+            ),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class RunProgressReadModel:
+    """One immutable derived group-progress read (m2 plan step 13, T22).
+
+    The run repository never persists a cursor or a mutable progress
+    aggregate: every progress value is derived fresh from the child
+    ``tasks`` rows, ordered by ``run_ordinal``. ``status`` is the derived
+    run status under the single shared rule (``running`` until every child
+    is terminal, then ``failed``/``cancelled``/``succeeded``), and
+    ``ordered`` carries each child's ``(ordinal, task_id, status)`` in
+    ordinal order so callers can observe hard/soft gating and partial
+    failure without any step or plan abstraction.
+    """
+
+    run_id: str
+    project_id: str
+    status: str
+    total_children: int
+    succeeded: int
+    failed: int
+    cancelled: int
+    ordered: tuple[tuple[int, str, str], ...]
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return the JSON-safe dict for callers, events, and receipts."""
+        return {
+            "run_id": self.run_id,
+            "project_id": self.project_id,
+            "status": self.status,
+            "total_children": self.total_children,
+            "succeeded": self.succeeded,
+            "failed": self.failed,
+            "cancelled": self.cancelled,
+            "ordered": [
+                {"ordinal": ordinal, "task_id": task_id, "status": status}
+                for ordinal, task_id, status in self.ordered
+            ],
+        }
+
+    @classmethod
+    def from_mapping(cls, value: Mapping[str, Any]) -> RunProgressReadModel:
+        """Rebuild the frozen progress read model from a stored mapping."""
+        ordered: list[tuple[int, str, str]] = []
+        for entry in value.get("ordered") or []:
+            ordered.append(
+                (int(entry["ordinal"]), str(entry["task_id"]), str(entry["status"]))
+            )
+        return cls(
+            run_id=str(value["run_id"]),
+            project_id=str(value["project_id"]),
+            status=str(value["status"]),
+            total_children=int(value["total_children"]),
+            succeeded=int(value["succeeded"]),
+            failed=int(value["failed"]),
+            cancelled=int(value["cancelled"]),
+            ordered=tuple(ordered),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class RunCancelReadModel:
+    """One immutable group-cancel result (m2 plan step 13, T22).
+
+    ``run`` is the recomputed ``runs.result_json`` projection
+    (``total_children``/``succeeded``/``failed``/``cancelled``/``status``)
+    persisted by the command, ``progress`` the full derived read,
+    ``cancelled_task_ids`` the children the shared task-cancel predicate
+    drove to the terminal ``cancelled`` state (ordinal order), and
+    ``skipped_task_ids`` the children left untouched (already-terminal
+    children, and running children whose owned attempt fence a group
+    command cannot present). ``cancel_request_id`` is the one group-level
+    request id shared by every cancelled child.
+    """
+
+    run: Mapping[str, Any]
+    progress: RunProgressReadModel
+    cancelled_task_ids: tuple[str, ...]
+    skipped_task_ids: tuple[str, ...]
+    cancel_request_id: str
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return the JSON-safe dict persisted as the receipt result."""
+        return {
+            "run": dict(self.run),
+            "progress": self.progress.to_dict(),
+            "cancelled_task_ids": list(self.cancelled_task_ids),
+            "skipped_task_ids": list(self.skipped_task_ids),
+            "cancel_request_id": self.cancel_request_id,
+        }
+
+    @classmethod
+    def from_mapping(cls, value: Mapping[str, Any]) -> RunCancelReadModel:
+        """Rebuild the frozen cancel read model from a stored mapping."""
+        return cls(
+            run=dict(value["run"]),
+            progress=RunProgressReadModel.from_mapping(value["progress"]),
+            cancelled_task_ids=tuple(
+                str(task_id) for task_id in value["cancelled_task_ids"]
+            ),
+            skipped_task_ids=tuple(
+                str(task_id) for task_id in value["skipped_task_ids"]
+            ),
+            cancel_request_id=str(value["cancel_request_id"]),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class RunRetryReadModel:
+    """One immutable group-retry result (m2 plan step 13, T22).
+
+    ``run`` is the recomputed ``runs.result_json`` projection persisted by
+    the command, ``progress`` the full derived read, ``retried_task_ids``
+    the children the shared task-retry predicate restarted (a brand-new
+    fenced attempt each, ordinal order), and ``skipped_task_ids`` the
+    ineligible children left untouched (terminal tasks, never-claimed
+    work, running work, or exhausted attempt budgets — the same rules the
+    shared predicate enforces, applied read-only before any transition).
+    """
+
+    run: Mapping[str, Any]
+    progress: RunProgressReadModel
+    retried_task_ids: tuple[str, ...]
+    skipped_task_ids: tuple[str, ...]
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return the JSON-safe dict persisted as the receipt result."""
+        return {
+            "run": dict(self.run),
+            "progress": self.progress.to_dict(),
+            "retried_task_ids": list(self.retried_task_ids),
+            "skipped_task_ids": list(self.skipped_task_ids),
+        }
+
+    @classmethod
+    def from_mapping(cls, value: Mapping[str, Any]) -> RunRetryReadModel:
+        """Rebuild the frozen retry read model from a stored mapping."""
+        return cls(
+            run=dict(value["run"]),
+            progress=RunProgressReadModel.from_mapping(value["progress"]),
+            retried_task_ids=tuple(
+                str(task_id) for task_id in value["retried_task_ids"]
+            ),
+            skipped_task_ids=tuple(
+                str(task_id) for task_id in value["skipped_task_ids"]
             ),
         )
 
@@ -721,6 +927,616 @@ class RunRepository:
         )
         return result
 
+    # -- derived group progress (m2 plan step 13, T22) ---------------------
+
+    def derive_progress(
+        self,
+        uow: UnitOfWork,
+        *,
+        project_id: str,
+        run_id: str,
+    ) -> RunProgressReadModel:
+        """Derive one run's ordered group progress transaction-free.
+
+        A pure read: child task statuses are queried ordered by
+        ``run_ordinal`` and the run status is derived under the single
+        shared rule (``derive_run_progress_counts`` in the task
+        repository). No cursor and no persisted mutable progress aggregate
+        ever exist — the projection is always a function of the child
+        ``tasks`` rows at read time. Raises :class:`RunNotFoundError` for
+        an unknown or foreign run.
+        """
+        project_id = _require_non_empty_string("project_id", project_id)
+        run_id = _require_non_empty_string("run_id", run_id)
+        run_row = uow.query_one(
+            "SELECT id FROM runs WHERE id = ? AND project_id = ?",
+            (run_id, project_id),
+        )
+        if run_row is None:
+            raise RunNotFoundError(run_id=run_id)
+        return self._derive_progress(uow, project_id=project_id, run_id=run_id)
+
+    def _derive_progress(
+        self,
+        uow: UnitOfWork,
+        *,
+        project_id: str,
+        run_id: str,
+    ) -> RunProgressReadModel:
+        """Internal derivation used by the public read and group commands."""
+        counts, status = derive_run_progress_counts(
+            uow, run_id=run_id, project_id=project_id
+        )
+        children = uow.query(
+            "SELECT id, run_ordinal, status FROM tasks "
+            "WHERE run_id = ? AND project_id = ? ORDER BY run_ordinal ASC",
+            (run_id, project_id),
+        )
+        ordered = tuple(
+            (int(row["run_ordinal"]), str(row["id"]), str(row["status"]))
+            for row in children
+        )
+        return RunProgressReadModel(
+            run_id=run_id,
+            project_id=project_id,
+            status=status,
+            total_children=sum(counts.values()),
+            succeeded=counts.get("succeeded", 0),
+            failed=counts.get("failed", 0),
+            cancelled=counts.get("cancelled", 0),
+            ordered=ordered,
+        )
+
+    @staticmethod
+    def _recompute_run_projection(
+        uow: UnitOfWork,
+        *,
+        run_id: str,
+        project_id: str,
+        stamp: str,
+    ) -> dict[str, Any]:
+        """Recompute and persist one running run's derived projection.
+
+        Uses the single shared derivation (``derive_run_progress_counts``),
+        persists ``runs.result_json``/``status``/``finished_at`` inside the
+        caller's UoW, and returns the JSON-safe projection mapping. The
+        ``WHERE status = 'running'`` predicate makes the write a no-op for
+        a run that became terminal mid-command (impossible inside one
+        ``BEGIN IMMEDIATE`` transaction, but the fence keeps the projection
+        immutable for terminal runs — the same rule task completion
+        enforces).
+        """
+        counts, run_status = derive_run_progress_counts(
+            uow, run_id=run_id, project_id=project_id
+        )
+        projection: dict[str, Any] = {
+            "total_children": sum(counts.values()),
+            "succeeded": counts.get("succeeded", 0),
+            "failed": counts.get("failed", 0),
+            "cancelled": counts.get("cancelled", 0),
+            "status": run_status,
+        }
+        try:
+            result_json = canonical_json(projection)
+        except CanonicalizationError as exc:  # pragma: no cover - ints only
+            raise RunValidationError(
+                f"cannot serialize run projection: {exc}"
+            ) from exc
+        uow.execute(
+            "UPDATE runs SET result_json = ?, status = ?, finished_at = ? "
+            "WHERE id = ? AND status = 'running'",
+            (
+                result_json,
+                run_status,
+                stamp if run_status != "running" else None,
+                run_id,
+            ),
+        )
+        return projection
+
+    # -- receipt-protected group cancel (m2 plan step 13, T22) -------------
+
+    def cancel(
+        self,
+        uow: UnitOfWork,
+        *,
+        project_id: str,
+        run_id: str,
+        idempotency_key: str,
+        actor_kind: str = "local",
+        cancel_request_id: str | None = None,
+        now: str | None = None,
+        command_kind: str = CORE_RUN_CANCEL_COMMAND_KIND,
+    ) -> RunCancelReadModel:
+        """Cancel every eligible child of one running run atomically.
+
+        Inside the caller's active unit of work this drives each eligible
+        **queued/blocked** direct child to the terminal ``cancelled`` state
+        through the shared task-cancel predicate (:meth:`TaskRepository.cancel`
+        — the same race-hardened transition, receipt and event included),
+        in ordinal order, then recomputes the run projection, appends the
+        hash-chained ``core.run.cancelled`` event on the run stream, and
+        records **one** complete run-level receipt carrying every ordered
+        event id.
+
+        - **Eligibility.** A child is group-cancellable when it is
+          ``queued`` or ``blocked`` (no live attempt): the shared predicate
+          needs no attempt fence there. Already-terminal children
+          (``succeeded``/``failed``/``cancelled``) and ``running`` children
+          are skipped — a running child's owned attempt requires its
+          executor's exact ``attempt_id``/``lease_id``/``status_version``
+          fence, which a group signal cannot present, so the group command
+          never invents one.
+        - **Terminal-run rejection.** A run that already reached
+          ``succeeded``/``failed``/``cancelled`` raises
+          :class:`RunTerminalError` before any child is touched: terminal
+          runs never continue (m2 plan step 13).
+        - **Projection.** After the child transitions the run projection is
+          recomputed from the child rows (shared derivation): when every
+          child is terminal the run transitions to ``failed`` (any child
+          failed), ``cancelled`` (any child cancelled, none failed), or
+          ``succeeded``, stamping ``finished_at``; otherwise it stays
+          ``running``.
+        - **One group request id.** The effective ``cancel_request_id``
+          (the caller's or a fresh generated one) is shared by every
+          cancelled child and recorded on the run event.
+
+        Idempotency: the receipt gate runs first. An identical retry under
+        the same key returns exactly the stored group-cancel result with
+        zero new rows; a changed request under the same key raises
+        :class:`ReceiptMismatchError` before any mutation.
+        """
+        project_id = _require_non_empty_string("project_id", project_id)
+        run_id = _require_non_empty_string("run_id", run_id)
+        idempotency_key = _require_non_empty_string(
+            "idempotency_key", idempotency_key
+        )
+        command_kind = _require_non_empty_string("command_kind", command_kind)
+        if actor_kind not in ACTOR_KINDS:
+            raise RunValidationError(
+                f"actor_kind must be one of {sorted(ACTOR_KINDS)}, "
+                f"got {actor_kind!r}"
+            )
+        if cancel_request_id is not None:
+            _require_non_empty_string("cancel_request_id", cancel_request_id)
+
+        # Semantic request identity: the run plus any caller-supplied group
+        # cancel request id; generated state never participates.
+        request: dict[str, Any] = {"run_id": run_id}
+        if cancel_request_id is not None:
+            request["cancel_request_id"] = cancel_request_id
+        try:
+            request_digest = request_hash(command_kind, request)
+        except CanonicalizationError as exc:
+            raise RunValidationError(
+                f"cannot hash group-cancel request: {exc}"
+            ) from exc
+
+        # Idempotency gate first: replay or mismatch before any mutation.
+        replayed = self._receipts.check(
+            uow,
+            project_id=project_id,
+            idempotency_key=idempotency_key,
+            request_hash=request_digest,
+            command_kind=command_kind,
+        )
+        if replayed is not None:
+            return RunCancelReadModel.from_mapping(replayed)
+
+        stamp = now if now is not None else utc_now_iso()
+        if not isinstance(stamp, str) or not stamp:
+            raise RunValidationError("now must be a non-empty string")
+
+        # Fences before any mutation: the run exists, belongs to the
+        # project, and is nonterminal (terminal runs never continue).
+        run_row = uow.query_one(
+            "SELECT * FROM runs WHERE id = ? AND project_id = ?",
+            (run_id, project_id),
+        )
+        if run_row is None:
+            raise RunNotFoundError(run_id=run_id)
+        if str(run_row["status"]) != "running":
+            raise RunTerminalError(run_id=run_id, status=str(run_row["status"]))
+
+        children = uow.query(
+            "SELECT id, run_ordinal, status FROM tasks "
+            "WHERE run_id = ? AND project_id = ? ORDER BY run_ordinal ASC",
+            (run_id, project_id),
+        )
+
+        task_repo = TaskRepository(events=self._events, receipts=self._receipts)
+        effective_cancel_request_id = (
+            cancel_request_id
+            if cancel_request_id is not None
+            else generate_lowercase_ulid()
+        )
+        cancelled: list[str] = []
+        skipped: list[str] = []
+        txn_id = uuid.uuid4().hex
+        head_before = int(
+            uow.query_one(
+                "SELECT event_head_seq FROM projects WHERE id = ?",
+                (project_id,),
+            )["event_head_seq"]
+        )
+
+        # 1. Shared task-cancel predicate per eligible child, ordinal order.
+        for ordinal, child in enumerate(children):
+            child_id = str(child["id"])
+            if str(child["status"]) in ("queued", "blocked"):
+                task_repo.cancel(
+                    uow,
+                    project_id=project_id,
+                    task_id=child_id,
+                    idempotency_key=f"{idempotency_key}:child:{ordinal}",
+                    actor_kind=actor_kind,
+                    cancel_request_id=effective_cancel_request_id,
+                    now=stamp,
+                    command_kind=CORE_TASK_CANCEL_COMMAND_KIND,
+                )
+                cancelled.append(child_id)
+            else:
+                skipped.append(child_id)
+        if not cancelled:
+            raise RunValidationError(
+                f"run {run_id!r} has no cancellable children (queued/blocked); "
+                "terminal and running children need no group cancel"
+            )
+
+        # 2. Recompute the run projection from the child rows.
+        projection = self._recompute_run_projection(
+            uow, run_id=run_id, project_id=project_id, stamp=stamp
+        )
+
+        # 3. The hash-chained core.run.cancelled event on the run stream.
+        run_stream_id = f"{run_id}:{CORE_RUN_STREAM_TYPE}"
+        event_data: dict[str, Any] = {
+            "run_id": run_id,
+            "cancel_request_id": effective_cancel_request_id,
+            "cancelled_task_ids": cancelled,
+            "skipped_task_ids": skipped,
+            "status": projection["status"],
+            "progress": projection,
+        }
+        changes: list[str] = [
+            "run_status",
+            "cancel_request_id",
+            "cancelled_task_ids",
+            "skipped_task_ids",
+            "progress",
+        ]
+        append = self._events.append(
+            uow,
+            stream_id=run_stream_id,
+            project_id=project_id,
+            event_kind=CORE_RUN_CANCELLED_EVENT_KIND,
+            data=event_data,
+            changes=changes,
+            idempotency_key=idempotency_key,
+            txn_id=txn_id,
+            actor_kind=actor_kind,
+            command_kind=command_kind,
+            event_id=uuid.uuid4().hex,
+            created_at=stamp,
+        )
+
+        # 4. The one complete run-level receipt: every ordered event id the
+        #    group command appended (child cancelled events, then the run
+        #    event), spanning the exact project-seq range.
+        ordered_events = uow.query(
+            "SELECT event_id, project_seq FROM events "
+            "WHERE project_id = ? AND project_seq > ? "
+            "ORDER BY project_seq ASC",
+            (project_id, head_before),
+        )
+        event_ids = tuple(str(row["event_id"]) for row in ordered_events)
+        if not event_ids:  # pragma: no cover - children append events first
+            raise RunValidationError(
+                "group cancel appended no events; cannot record a receipt"
+            )
+        first_seq = int(ordered_events[0]["project_seq"])
+        last_seq = int(ordered_events[-1]["project_seq"])
+
+        result = RunCancelReadModel(
+            run=projection,
+            progress=self._derive_progress(
+                uow, project_id=project_id, run_id=run_id
+            ),
+            cancelled_task_ids=tuple(cancelled),
+            skipped_task_ids=tuple(skipped),
+            cancel_request_id=effective_cancel_request_id,
+        )
+        self._receipts.record(
+            uow,
+            project_id=project_id,
+            idempotency_key=idempotency_key,
+            request_hash=request_digest,
+            command_kind=command_kind,
+            txn_id=txn_id,
+            first_project_seq=first_seq,
+            last_project_seq=last_seq,
+            event_ids=event_ids,
+            result=result.to_dict(),
+            primary_stream_id=run_stream_id,
+            resulting_stream_seq=append.stream_seq,
+            created_at=stamp,
+        )
+        return result
+
+    # -- receipt-protected group retry (m2 plan step 13, T22) --------------
+
+    def retry(
+        self,
+        uow: UnitOfWork,
+        *,
+        project_id: str,
+        run_id: str,
+        idempotency_key: str,
+        actor_kind: str = "local",
+        executor_id: str | None = None,
+        selected_task_ids: Sequence[str] | None = None,
+        now: str | None = None,
+        command_kind: str = CORE_RUN_RETRY_COMMAND_KIND,
+        lease_seconds: int = DEFAULT_LEASE_SECONDS,
+    ) -> RunRetryReadModel:
+        """Retry every eligible child — or an explicit subset — atomically.
+
+        Inside the caller's active unit of work this restarts the run's
+        failed/expired work through the shared task-retry predicate
+        (:meth:`TaskRepository.retry` — the same attempt-budget and
+        terminal-immutability rules, receipt and event included), in
+        ordinal order, then recomputes the run projection, appends the
+        hash-chained ``core.run.retried`` event on the run stream, and
+        records **one** complete run-level receipt carrying every ordered
+        event id.
+
+        - **Retry all eligible.** Without *selected_task_ids* every child
+          that satisfies the shared retry eligibility (read through
+          :meth:`TaskRepository.is_retry_eligible`, then transitioned by the
+          shared predicate) is retried; ineligible children — terminal
+          tasks, never-claimed work, running work, blocked work, or
+          exhausted attempt budgets — are skipped and reported.
+        - **Explicit subset.** With *selected_task_ids* (a non-empty unique
+          sequence of direct children of this run) exactly those children
+          are retried in ordinal order; an id that is not a direct child
+          raises :class:`RunValidationError` before any mutation, and an
+          ineligible selected child raises the shared predicate's typed
+          :class:`TaskTransitionError` — one transaction, so nothing is
+          half-retried. The canonical sorted subset participates in the
+          request identity, so retrying a different subset under the same
+          key is a mismatch before any mutation.
+        - **Terminal-run rejection.** A run that already reached
+          ``succeeded``/``failed``/``cancelled`` raises
+          :class:`RunTerminalError` before any child is touched: terminal
+          runs never continue (m2 plan step 13).
+        - **Projection.** After the transitions the run projection is
+          recomputed from the child rows (shared derivation): retried
+          children are ``running`` again, so the run stays ``running`` with
+          refreshed counts.
+
+        Idempotency: the receipt gate runs first. An identical retry under
+        the same key returns exactly the stored group-retry result with
+        zero new rows; a changed request under the same key raises
+        :class:`ReceiptMismatchError` before any mutation.
+        """
+        project_id = _require_non_empty_string("project_id", project_id)
+        run_id = _require_non_empty_string("run_id", run_id)
+        idempotency_key = _require_non_empty_string(
+            "idempotency_key", idempotency_key
+        )
+        command_kind = _require_non_empty_string("command_kind", command_kind)
+        if actor_kind not in ACTOR_KINDS:
+            raise RunValidationError(
+                f"actor_kind must be one of {sorted(ACTOR_KINDS)}, "
+                f"got {actor_kind!r}"
+            )
+        if executor_id is not None:
+            _require_non_empty_string("executor_id", executor_id)
+        if isinstance(lease_seconds, bool) or not isinstance(
+            lease_seconds, int
+        ) or lease_seconds <= 0:
+            raise RunValidationError(
+                "lease_seconds must be a positive integer, "
+                f"got {lease_seconds!r}"
+            )
+        if selected_task_ids is not None:
+            if (
+                isinstance(selected_task_ids, (str, bytes))
+                or not isinstance(selected_task_ids, Sequence)
+                or not selected_task_ids
+            ):
+                raise RunValidationError(
+                    "selected_task_ids must be a non-empty sequence of "
+                    "non-empty task ids"
+                )
+            for entry in selected_task_ids:
+                _require_non_empty_string("selected_task_ids[]", entry)
+            if len(set(selected_task_ids)) != len(selected_task_ids):
+                raise RunValidationError(
+                    "selected_task_ids must not contain duplicates"
+                )
+
+        # Semantic request identity: the run plus the canonical sorted
+        # selection set (when supplied); generated state never participates.
+        request: dict[str, Any] = {"run_id": run_id}
+        if selected_task_ids is not None:
+            request["selected_task_ids"] = sorted(selected_task_ids)
+        try:
+            request_digest = request_hash(command_kind, request)
+        except CanonicalizationError as exc:
+            raise RunValidationError(
+                f"cannot hash group-retry request: {exc}"
+            ) from exc
+
+        # Idempotency gate first: replay or mismatch before any mutation.
+        replayed = self._receipts.check(
+            uow,
+            project_id=project_id,
+            idempotency_key=idempotency_key,
+            request_hash=request_digest,
+            command_kind=command_kind,
+        )
+        if replayed is not None:
+            return RunRetryReadModel.from_mapping(replayed)
+
+        stamp = now if now is not None else utc_now_iso()
+        if not isinstance(stamp, str) or not stamp:
+            raise RunValidationError("now must be a non-empty string")
+
+        # Fences before any mutation: the run exists, belongs to the
+        # project, and is nonterminal (terminal runs never continue).
+        run_row = uow.query_one(
+            "SELECT * FROM runs WHERE id = ? AND project_id = ?",
+            (run_id, project_id),
+        )
+        if run_row is None:
+            raise RunNotFoundError(run_id=run_id)
+        if str(run_row["status"]) != "running":
+            raise RunTerminalError(run_id=run_id, status=str(run_row["status"]))
+
+        children = uow.query(
+            "SELECT id, run_ordinal, status FROM tasks "
+            "WHERE run_id = ? AND project_id = ? ORDER BY run_ordinal ASC",
+            (run_id, project_id),
+        )
+
+        task_repo = TaskRepository(events=self._events, receipts=self._receipts)
+        selected: set[str] | None = (
+            set(selected_task_ids) if selected_task_ids is not None else None
+        )
+        if selected is not None:
+            child_ids = {str(child["id"]) for child in children}
+            unknown = sorted(selected - child_ids)
+            if unknown:
+                raise RunValidationError(
+                    "selected task ids are not direct children of run "
+                    f"{run_id!r}: {unknown}"
+                )
+        retried: list[str] = []
+        skipped: list[str] = []
+        txn_id = uuid.uuid4().hex
+        head_before = int(
+            uow.query_one(
+                "SELECT event_head_seq FROM projects WHERE id = ?",
+                (project_id,),
+            )["event_head_seq"]
+        )
+
+        # 1. Shared task-retry predicate per eligible child, ordinal order.
+        for ordinal, child in enumerate(children):
+            child_id = str(child["id"])
+            if selected is not None and child_id not in selected:
+                continue  # explicit subset: unselected children untouched
+            if selected is None:
+                eligible, _reason = task_repo.is_retry_eligible(
+                    uow, project_id=project_id, task_id=child_id
+                )
+                if not eligible:
+                    skipped.append(child_id)
+                    continue
+            task_repo.retry(
+                uow,
+                project_id=project_id,
+                task_id=child_id,
+                idempotency_key=f"{idempotency_key}:child:{ordinal}",
+                actor_kind=actor_kind,
+                executor_id=executor_id,
+                selected_task_ids=(
+                    sorted(selected) if selected is not None else None
+                ),
+                now=stamp,
+                command_kind=CORE_TASK_RETRY_COMMAND_KIND,
+                lease_seconds=lease_seconds,
+            )
+            retried.append(child_id)
+        if not retried:
+            raise RunValidationError(
+                f"run {run_id!r} has no eligible children to retry"
+            )
+
+        # 2. Recompute the run projection from the child rows.
+        projection = self._recompute_run_projection(
+            uow, run_id=run_id, project_id=project_id, stamp=stamp
+        )
+
+        # 3. The hash-chained core.run.retried event on the run stream.
+        run_stream_id = f"{run_id}:{CORE_RUN_STREAM_TYPE}"
+        event_data: dict[str, Any] = {
+            "run_id": run_id,
+            "executor_id": executor_id,
+            "retried_task_ids": retried,
+            "skipped_task_ids": skipped,
+            "selected_task_ids": (
+                sorted(selected) if selected is not None else None
+            ),
+            "status": projection["status"],
+            "progress": projection,
+        }
+        changes: list[str] = [
+            "run_status",
+            "executor_id",
+            "retried_task_ids",
+            "skipped_task_ids",
+            "selected_task_ids",
+            "progress",
+        ]
+        append = self._events.append(
+            uow,
+            stream_id=run_stream_id,
+            project_id=project_id,
+            event_kind=CORE_RUN_RETRIED_EVENT_KIND,
+            data=event_data,
+            changes=changes,
+            idempotency_key=idempotency_key,
+            txn_id=txn_id,
+            actor_kind=actor_kind,
+            command_kind=command_kind,
+            event_id=uuid.uuid4().hex,
+            created_at=stamp,
+        )
+
+        # 4. The one complete run-level receipt: every ordered event id the
+        #    group command appended (child retried events, then the run
+        #    event), spanning the exact project-seq range.
+        ordered_events = uow.query(
+            "SELECT event_id, project_seq FROM events "
+            "WHERE project_id = ? AND project_seq > ? "
+            "ORDER BY project_seq ASC",
+            (project_id, head_before),
+        )
+        event_ids = tuple(str(row["event_id"]) for row in ordered_events)
+        if not event_ids:  # pragma: no cover - children append events first
+            raise RunValidationError(
+                "group retry appended no events; cannot record a receipt"
+            )
+        first_seq = int(ordered_events[0]["project_seq"])
+        last_seq = int(ordered_events[-1]["project_seq"])
+
+        result = RunRetryReadModel(
+            run=projection,
+            progress=self._derive_progress(
+                uow, project_id=project_id, run_id=run_id
+            ),
+            retried_task_ids=tuple(retried),
+            skipped_task_ids=tuple(skipped),
+        )
+        self._receipts.record(
+            uow,
+            project_id=project_id,
+            idempotency_key=idempotency_key,
+            request_hash=request_digest,
+            command_kind=command_kind,
+            txn_id=txn_id,
+            first_project_seq=first_seq,
+            last_project_seq=last_seq,
+            event_ids=event_ids,
+            result=result.to_dict(),
+            primary_stream_id=run_stream_id,
+            resulting_stream_seq=append.stream_seq,
+            created_at=stamp,
+        )
+        return result
+
     # -- pure continuation-envelope validation (m2 plan step 12 item 4) ----
 
     @staticmethod
@@ -823,8 +1639,12 @@ class RunRepository:
 
 
 __all__ = [
+    "CORE_RUN_CANCEL_COMMAND_KIND",
+    "CORE_RUN_CANCELLED_EVENT_KIND",
     "CORE_RUN_CREATE_COMMAND_KIND",
     "CORE_RUN_CREATED_EVENT_KIND",
+    "CORE_RUN_RETRY_COMMAND_KIND",
+    "CORE_RUN_RETRIED_EVENT_KIND",
     "CORE_RUN_STREAM_TYPE",
     "ContinuationEnvelope",
     "ContinuationValidationError",
@@ -832,10 +1652,14 @@ __all__ = [
     "FROZEN_MAX_DIRECT_CHILDREN",
     "RUN_STATUSES",
     "RunAlreadyExistsError",
+    "RunCancelReadModel",
     "RunFanOutReadModel",
     "RunNotFoundError",
+    "RunProgressReadModel",
     "RunReadModel",
     "RunRepository",
     "RunRepositoryError",
+    "RunRetryReadModel",
+    "RunTerminalError",
     "RunValidationError",
 ]

@@ -1338,3 +1338,142 @@ def test_giant_file_inventory_matches_rationale() -> None:
             f"giant-file-rationale.md entry '{entry_path}' claims "
             f"{entry_lines} lines but on-disk count is {actual_lines}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Authority boundaries (m1 plan step 22 / NSA-3): the structure-contract view
+# ---------------------------------------------------------------------------
+
+
+_SCHEMA_PACK_MANIFEST = """\
+id: timeline
+version: 1
+depends_on:
+  - core >= 1
+migrations:
+  - version: 1
+    name: initial
+    path: migrations/0001_initial.sql
+    tables:
+      - timelines
+stream_types:
+  - timeline.timeline
+event_kinds:
+  - timeline.created
+  - timeline.saved
+command_kinds:
+  - timeline.create
+  - timeline.save
+repositories:
+  - TimelineRepository
+conformance:
+  - replay
+cli_mounts:
+  timelines: timelines
+bridge_mounts:
+  - timelines
+"""
+
+
+def _bootstrap_authority_root(root: Path) -> None:
+    """Minimal lint-scan root with a valid declared timeline schema pack."""
+    _bootstrap_structure_root(root)
+    _write(root, "astrid/packs/timeline/__init__.py", "")
+    _write(
+        root,
+        "astrid/packs/timeline/schema-pack.yaml",
+        _SCHEMA_PACK_MANIFEST,
+    )
+    _write(
+        root,
+        "astrid/packs/timeline/migrations/0001_initial.sql",
+        "CREATE TABLE timelines (\n"
+        "  id TEXT PRIMARY KEY,\n"
+        "  project_id TEXT NOT NULL,\n"
+        "  event_stream_id TEXT NOT NULL,\n"
+        "  name TEXT NOT NULL,\n"
+        "  document_json TEXT NOT NULL,\n"
+        "  asset_registry_json TEXT NOT NULL,\n"
+        "  created_at TEXT NOT NULL,\n"
+        "  updated_at TEXT NOT NULL\n"
+        ");\n",
+    )
+
+
+def test_validate_authority_boundaries_flags_every_rule_family(
+    tmp_path: Path,
+) -> None:
+    """Mutation fixtures for imports, writers, legacy authorities, and schema
+    ownership are all surfaced by the structure validator's authority gate."""
+    _bootstrap_authority_root(tmp_path)
+    _write(
+        tmp_path,
+        "astrid/core/evil.py",
+        "from astrid.packs.timeline.repository import TimelineRepository\n",
+    )
+    _write(
+        tmp_path,
+        "astrid/core/evil_writer.py",
+        "from astrid.core.store.writer import DatabaseWriter\n"
+        "writer = DatabaseWriter('/tmp/x.sqlite3', None)\n",
+    )
+    _write(
+        tmp_path,
+        "astrid/packs/timeline/bridge.py",
+        "from astrid.core.timeline.eventlog import LocalFsBackend\n",
+    )
+    _write(
+        tmp_path,
+        "astrid/packs/timeline/migrations/0002_bad.sql",
+        "CREATE TABLE events (\n"
+        "  id TEXT PRIMARY KEY,\n"
+        "  FOREIGN KEY (timeline_id) REFERENCES timelines (id)\n"
+        ");\n"
+        "CREATE TABLE sessions (id TEXT PRIMARY KEY);\n",
+    )
+
+    errors = structure.validate_authority_boundaries(tmp_path)
+
+    joined = "\n".join(errors)
+    assert "astrid/core/evil.py: kernel-to-pack import" in joined
+    assert "astrid/core/evil_writer.py: SQLite writer construction outside" in joined
+    assert "astrid/packs/timeline/bridge.py: legacy authority marker" in joined
+    assert "kernel FK from events to pack table 'timelines'" in joined
+    assert "forbidden table 'sessions'" in joined
+
+
+def test_validate_repo_structure_authority_exemptions_stay_green(
+    tmp_path: Path,
+) -> None:
+    """The single composition exemption, legacy files outside the supported
+    v10 entry paths, and read-only SQLite probes produce zero authority
+    errors inside the full structure report."""
+    _bootstrap_authority_root(tmp_path)
+    _write(tmp_path, "astrid/__init__.py", "")
+    _write(tmp_path, "astrid/core/runtime.py", "")
+    _write(tmp_path, "tests/test_example.py", "")
+    _write(tmp_path, "scripts/tool.py", "")
+    # The one documented kernel-to-pack composition exemption (serve root).
+    _write(
+        tmp_path,
+        "astrid/core/gateway/dispatch.py",
+        "from astrid.packs import register_standard_schema_packs\n",
+    )
+    # Legacy files stay in-tree and are never scanned for authority markers.
+    _write(
+        tmp_path,
+        "astrid/core/timeline/legacy_thing.py",
+        "from astrid.core.timeline.eventlog import LocalFsBackend\n",
+    )
+    # Read-only probes are not writers.
+    _write(
+        tmp_path,
+        "astrid/core/reader.py",
+        "import sqlite3\n"
+        "conn = sqlite3.connect('file:db.sqlite3?mode=ro', uri=True)\n",
+    )
+
+    report = validate_repo_structure(tmp_path)
+
+    assert structure.validate_authority_boundaries(tmp_path) == []
+    assert report.ok, report.errors

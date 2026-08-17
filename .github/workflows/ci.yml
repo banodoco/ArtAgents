@@ -81,8 +81,28 @@ jobs:
 
       - name: Run local CI mirror
         env:
+          # Coverage is skipped so the broad lane fits the job timeout; the S1
+          # gate is skipped here because the dedicated "Run S1 gate" step below
+          # runs it (same make target, so local and GitHub CI stay in lockstep).
           ASTRID_CI_SKIP_COVERAGE: "1"
+          ASTRID_CI_SKIP_GATE: "1"
         run: bash scripts/reshape/run_ci_checks.sh
+
+      - name: Run S1 gate (blocking, m1 event-core foundation)
+        # Twelve focused m1 lanes (manifest, catalog, migration, registry,
+        # receipt, replay, crash, contention, conformance, lint, bridge,
+        # provider) against a fresh hermetic root. Exits 1 on any lane failure
+        # so the job goes red, while the upload step below still retains all
+        # evidence (summary + logs) via `if: always()`.
+        run: make s1-gate
+
+      - name: Upload S1 gate summary and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: s1-gate-evidence
+          path: out/s1-gate/latest
+          if-no-files-found: ignore
 
       - name: Remotion typecheck (blocking, explicit)
         working-directory: remotion

@@ -7,24 +7,33 @@ import mimetypes
 import os
 import re
 import time
+from collections.abc import Mapping
 from email.utils import formatdate
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, ClassVar
 from urllib.parse import unquote, urlparse
 
-from astrid.core.foundation.project_paths import validate_project_slug
+from astrid.core.foundation.project_paths import sources_dir, validate_project_slug
+from astrid.core.integrations.reigh.bridge_service import (
+    BridgeError,
+    BridgeInternalError,
+    BridgeInvalidProjectError,
+    BridgeInvalidTimelineError,
+    BridgeIssue,
+    BridgeProjectNotFoundError,
+    BridgeSchemaIncompatibleError,
+    BridgeTimelineNotFoundError,
+    TimelineSaveRequest,
+)
 from astrid.core.integrations.reigh.local_bridge import (
-    BridgeTimelineRecord,
-    list_bridge_projects,
-    list_bridge_timelines,
-    load_bridge_timeline,
     resolve_bridge_asset,
     resolve_bridge_projects_root,
-    save_bridge_timeline,
 )
-from astrid.core.timeline.eventlog.types import EventLogStaleVersionError
-from astrid.core.timeline.events.schema import TimelineEventSchemaError
+from astrid.core.receipts.canonical import (
+    CanonicalizationError,
+    canonical_json,
+)
 from astrid.core.timeline.paths import validate_timeline_slug, validate_timeline_ulid
 
 _RANGE_RE = re.compile(r"^bytes\s*=\s*(\d*)\s*-\s*(\d*)\s*$")
@@ -32,6 +41,21 @@ _RANGELESS_FULL_BODY_LIMIT_BYTES = 64 * 1024 * 1024
 _RANGELESS_INITIAL_CHUNK_BYTES = 1024 * 1024
 _OPEN_ENDED_RANGE_CHUNK_BYTES = 4 * 1024 * 1024
 _DIAGNOSTICS_ENABLED = os.environ.get("ASTRID_BRIDGE_DIAGNOSTICS", "0") != "0"
+
+
+def _classify_persisted_registry_locator(locator: str) -> str:
+    """Classify a persisted-registry locator: ``http``, ``unsafe``, ``local``.
+
+    A locator is a path reference, never media identity (contract §9):
+    ``http``/``https`` values are HTTP-only, and any absolute or
+    ``..``-traversing path is unsafe and is never served from disk.
+    """
+    if locator.startswith("http://") or locator.startswith("https://"):
+        return "http"
+    candidate = Path(locator)
+    if candidate.is_absolute() or any(part == ".." for part in candidate.parts):
+        return "unsafe"
+    return "local"
 
 
 class LocalBridgeHTTPServer(ThreadingHTTPServer):
@@ -348,13 +372,134 @@ def make_local_bridge_handler(*, projects_root: Path):
             *,
             head_only: bool = False,
         ) -> None:
-            """Serve a local asset file with full Range support.
+            """Serve one asset with the frozen byte-serving semantics (§9).
 
-            200 — full file body with Accept-Ranges + Content-Type.
-            206 — single byte range with Content-Range.
-            416 — unsatisfiable range (start >= file size, etc.).
-            404 — asset key not in registry, file missing, or HTTP-only.
+            When the repository bridge is composed, the asset key resolves
+            only from the persisted timeline registry; otherwise the legacy
+            resolution path is kept for read-only compatibility fixtures.
+            Both paths share the same wire semantics (200/206/304/416/400,
+            HEAD, validators, OPTIONS).
             """
+            if getattr(self.server, "bridge", None) is not None:
+                self._serve_asset_from_persisted_registry(
+                    project_slug, timeline_ref, asset_key, head_only=head_only
+                )
+                return
+            self._serve_asset_legacy(
+                project_slug, timeline_ref, asset_key, head_only=head_only
+            )
+
+        def _serve_asset_from_persisted_registry(
+            self,
+            project_slug: str,
+            timeline_ref: str,
+            asset_key: str,
+            *,
+            head_only: bool = False,
+        ) -> None:
+            """Serve an asset resolved from the persisted timeline registry.
+
+            The registry comes from the repository bridge — never from a
+            sidecar file or a filesystem scan (contract §9: a locator is a
+            locator, never media identity). Safe-path rules reject absolute
+            and traversing locators; HTTP locators are never local.
+            """
+            try:
+                load = self._bridge().load_timeline(project_slug, timeline_ref)
+            except BridgeError as exc:
+                self._send_bridge_error(exc)
+                return
+
+            assets = load.registry.get("assets", {})
+            entry = assets.get(asset_key)
+            if not isinstance(entry, dict):
+                self._send_error(
+                    404,
+                    "asset_not_found",
+                    f"asset {asset_key!r} was not found in timeline {timeline_ref!r}",
+                )
+                return
+            locator = entry.get("file")
+            if not isinstance(locator, str) or not locator.strip():
+                self._send_error(
+                    404,
+                    "asset_not_found",
+                    f"asset {asset_key!r} has no file locator",
+                )
+                return
+            locator = locator.strip()
+
+            classification = _classify_persisted_registry_locator(locator)
+            if classification == "http":
+                self._send_error(
+                    404,
+                    "asset_not_local",
+                    f"asset {asset_key!r} is not available as a local file",
+                )
+                return
+            if classification == "unsafe":
+                self._send_error(
+                    404,
+                    "asset_not_found",
+                    f"asset {asset_key!r} has an unsafe locator: {locator!r}",
+                )
+                return
+
+            local_path = self._resolve_persisted_registry_local_path(
+                project_slug, locator
+            )
+            if local_path is None:
+                self._send_error(
+                    404,
+                    "asset_not_found",
+                    f"asset {asset_key!r} was not found on disk",
+                )
+                return
+
+            stat = local_path.stat()
+            file_size = stat.st_size
+            content_type, _ = mimetypes.guess_type(str(local_path))
+            if content_type is None:
+                content_type = "application/octet-stream"
+            etag = f'"{stat.st_mtime_ns:x}-{file_size:x}"'
+            last_modified = formatdate(stat.st_mtime, usegmt=True)
+            self._serve_resolved_asset(
+                local_path,
+                file_size,
+                content_type,
+                etag,
+                last_modified,
+                head_only=head_only,
+            )
+
+        def _resolve_persisted_registry_local_path(
+            self, project_slug: str, locator: str
+        ) -> Path | None:
+            """Resolve a safe relative locator under the project sources dir."""
+            sources_root = sources_dir(project_slug, root=projects_root).resolve()
+            candidate = (sources_root / locator).resolve()
+            if not candidate.is_relative_to(sources_root):
+                return None
+            if not candidate.is_file():
+                return None
+            return candidate
+
+        def _serve_asset_legacy(
+            self,
+            project_slug: str,
+            timeline_ref: str,
+            asset_key: str,
+            *,
+            head_only: bool = False,
+        ) -> None:
+            """Legacy resolution path for read-only compatibility fixtures."""
+            project_slug = self._validate_project(project_slug)
+            if project_slug is None:
+                return
+            timeline_ref = self._validate_timeline_ref(timeline_ref)
+            if timeline_ref is None:
+                return
+
             resolved = self._resolve_cached_asset(project_slug, timeline_ref, asset_key)
             if resolved is None:
                 unresolved = resolve_bridge_asset(
@@ -372,12 +517,40 @@ def make_local_bridge_handler(*, projects_root: Path):
                     )
                     return
                 self._send_error(
-                    404, "asset_not_found",
+                    404,
+                    "asset_not_found",
                     f"asset {asset_key!r} was not found in timeline {timeline_ref!r}",
                 )
                 return
 
             local_path, file_size, content_type, etag, last_modified, _was_cached = resolved
+            self._serve_resolved_asset(
+                local_path,
+                file_size,
+                content_type,
+                etag,
+                last_modified,
+                head_only=head_only,
+            )
+
+        def _serve_resolved_asset(
+            self,
+            local_path: Path,
+            file_size: int,
+            content_type: str,
+            etag: str,
+            last_modified: str,
+            *,
+            head_only: bool,
+        ) -> None:
+            """Wire semantics for a resolved local asset: 200/206/304/416/400.
+
+            Single-range grammar only (§9.3): a malformed Range header is a
+            400 text/plain, an unsatisfiable range is 416 with
+            ``Content-Range: bytes */<size>``, and ``If-None-Match`` matching
+            the ETag short-circuits to 304 with validators and cache headers
+            but no body. ``HEAD`` mirrors ``GET`` without a body.
+            """
 
             def send_asset_headers(
                 *,
@@ -519,42 +692,64 @@ def make_local_bridge_handler(*, projects_root: Path):
         # Route dispatcher
         # ------------------------------------------------------------------
 
+        def _bridge(self):
+            """The repository-backed bridge injected at the serve root.
+
+            Read routes have no filesystem/legacy-authority fallback: when
+            the injected service is absent they fail closed with a typed
+            500 ``internal`` envelope.
+            """
+            bridge = getattr(self.server, "bridge", None)
+            if bridge is None:
+                raise BridgeInternalError(
+                    "the repository bridge is not composed on this server"
+                )
+            return bridge
+
+        def _send_bridge_error(self, error: BridgeError) -> None:
+            """Serialize a typed bridge error with its frozen envelope."""
+            self._send_json(error.status_code, error.to_dict())
+
         def do_GET(self) -> None:  # noqa: N802
             path = urlparse(self.path).path
             parts = [part for part in unquote(path).split("/") if part]
 
             if parts == ["health"]:
-                self._send_json(200, {
-                    "ok": True,
-                    "projects_root": str(projects_root),
-                })
+                status = self._bridge().health(str(projects_root))
+                self._send_json(200, status.to_dict())
                 return
 
             if parts == ["projects"]:
-                self._send_json(200, {"projects": list_bridge_projects(root=projects_root)})
+                rows = [
+                    row.to_dict() for row in self._bridge().list_projects()
+                ]
+                self._send_json(200, {"projects": rows})
                 return
 
             if len(parts) == 3 and parts[0] == "projects" and parts[2] == "timelines":
-                project_slug = self._validate_project(parts[1])
-                if project_slug is None:
+                try:
+                    rows = [
+                        row.to_dict()
+                        for row in self._bridge().list_timelines(parts[1])
+                    ]
+                except (BridgeInvalidProjectError, BridgeProjectNotFoundError) as exc:
+                    self._send_bridge_error(exc)
                     return
-                rows = [
-                    _serialize_timeline_row(row)
-                    for row in list_bridge_timelines(project_slug, root=projects_root)
-                ]
                 self._send_json(200, {"timelines": rows})
                 return
 
             if len(parts) == 4 and parts[0] == "projects" and parts[2] == "timelines":
-                project_slug = self._validate_project(parts[1])
-                if project_slug is None:
-                    return
-                timeline_ref = self._validate_timeline_ref(parts[3])
-                if timeline_ref is None:
-                    return
-                payload = load_bridge_timeline(project_slug, timeline_ref, root=projects_root)
-                if payload is None:
-                    self._send_error(404, "timeline_not_found", f"timeline {timeline_ref!r} was not found")
+                try:
+                    payload = self._bridge().load_timeline(
+                        parts[1], parts[3]
+                    ).to_dict()
+                except (
+                    BridgeInvalidProjectError,
+                    BridgeInvalidTimelineError,
+                    BridgeProjectNotFoundError,
+                    BridgeTimelineNotFoundError,
+                ) as exc:
+                    self._send_bridge_error(exc)
                     return
                 self._send_json(200, payload)
                 return
@@ -566,13 +761,7 @@ def make_local_bridge_handler(*, projects_root: Path):
                 and parts[2] == "timelines"
                 and parts[4] == "assets"
             ):
-                project_slug = self._validate_project(parts[1])
-                if project_slug is None:
-                    return
-                timeline_ref = self._validate_timeline_ref(parts[3])
-                if timeline_ref is None:
-                    return
-                self._serve_asset(project_slug, timeline_ref, parts[5])
+                self._serve_asset(parts[1], parts[3], parts[5])
                 return
 
             self._send_error(404, "not_found", f"unknown route: {path}")
@@ -587,13 +776,9 @@ def make_local_bridge_handler(*, projects_root: Path):
                 and parts[2] == "timelines"
                 and parts[4] == "assets"
             ):
-                project_slug = self._validate_project(parts[1])
-                if project_slug is None:
-                    return
-                timeline_ref = self._validate_timeline_ref(parts[3])
-                if timeline_ref is None:
-                    return
-                self._serve_asset(project_slug, timeline_ref, parts[5], head_only=True)
+                self._serve_asset(
+                    parts[1], parts[3], parts[5], head_only=True
+                )
                 return
 
             self.send_response(404)
@@ -626,61 +811,50 @@ def make_local_bridge_handler(*, projects_root: Path):
                 and parts[2] == "timelines"
                 and parts[4] == "save"
             ):
-                project_slug = self._validate_project(parts[1])
-                if project_slug is None:
-                    return
-                timeline_ref = self._validate_timeline_ref(parts[3])
-                if timeline_ref is None:
-                    return
+                project_slug = parts[1]
+                timeline_ref = parts[3]
                 body = self._read_request_body()
                 if body is None:
-                    self._send_error(400, "invalid_body", "request body must be valid JSON")
+                    self._send_error(
+                        400, "invalid_body", "request body must be valid JSON"
+                    )
                     return
-                config = body.get("config")
-                if not isinstance(config, dict):
-                    self._send_error(400, "invalid_config", "body must contain a 'config' object")
+                # Route-level wire validation (contract §6.1): object
+                # config/registry and integer-only expected_version map to
+                # the frozen 400 envelopes; booleans are not versions.
+                try:
+                    request = TimelineSaveRequest.parse(body)
+                except BridgeError as exc:
+                    self._send_bridge_error(exc)
                     return
-                registry = body.get("registry")
-                if not isinstance(registry, dict):
-                    self._send_error(400, "invalid_registry", "body must contain a 'registry' object")
-                    return
-                expected_version = body.get("expected_version")
-                if not isinstance(expected_version, int):
-                    self._send_error(400, "invalid_expected_version", "body must contain an integer 'expected_version'")
+                # Deep wire-shape schema guard (contract §6.2): beyond
+                # "is an object", a non-object registry.assets or a payload
+                # that cannot canonicalize inside the kernel bounds is a
+                # typed 422 schema_incompatible with issues[], never a
+                # connection-close 500 (the incident's failure mode).
+                try:
+                    _validate_save_payload_schema(request)
+                except BridgeSchemaIncompatibleError as exc:
+                    self._send_bridge_error(exc)
                     return
                 try:
-                    result = save_bridge_timeline(
-                        project_slug,
-                        timeline_ref,
-                        config,
-                        registry=registry,
-                        expected_version=expected_version,
-                        root=projects_root,
+                    bridge = self._bridge()
+                    result = bridge.save_timeline(
+                        project_slug, timeline_ref, request
                     )
-                except EventLogStaleVersionError as exc:
-                    backend_head = self._get_head_version(project_slug, timeline_ref)
-                    self._send_json(409, {
-                        "error": "timeline_version_conflict",
-                        "detail": str(exc),
-                        "config_version": backend_head,
-                    })
+                except BridgeError as exc:
+                    self._send_bridge_error(exc)
                     return
-                except (TimelineEventSchemaError, ValueError) as exc:
-                    # The editor's config is a superset; a schema/validation
-                    # rejection is a typed 422 with JSON-pointer-style issues,
-                    # never a connection-close 500 (the incident's failure mode).
-                    self._send_json(422, {
-                        "error": "schema_incompatible",
-                        "detail": str(exc),
-                        "issues": [
-                            {"pointer": "", "code": "schema_incompatible", "message": str(exc)},
-                        ],
-                    })
+                except Exception as exc:  # noqa: BLE001 - defensive 500
+                    self._send_error(
+                        500,
+                        "internal",
+                        "unexpected failure while saving the timeline",
+                    )
                     return
-                if result is None:
-                    self._send_error(404, "timeline_not_found", f"timeline {timeline_ref!r} was not found")
-                    return
-                self._send_json(200, result)
+                # The committed response is the frozen load shape; internal
+                # receipt fields are absent by construction (contract §7).
+                self._send_json(200, result.to_dict())
                 return
 
             self._send_error(404, "not_found", f"unknown POST route: {path}")
@@ -753,38 +927,49 @@ def make_local_bridge_handler(*, projects_root: Path):
             self._send_error(400, "invalid_timeline", f"invalid timeline selector: {raw_timeline!r}")
             return None
 
-        def _get_head_version(self, project_slug: str, timeline_ref: str) -> int:
-            """Return the current event-log head version for a timeline, or 0 on failure."""
-            from astrid.core.integrations.reigh.local_bridge import find_bridge_timeline
-            from astrid.core.timeline.eventlog import LocalFsBackend
-
-            try:
-                record = find_bridge_timeline(project_slug, timeline_ref, root=projects_root)
-                if record is None:
-                    return 0
-                backend = LocalFsBackend(
-                    timeline_id=record.timeline_id,
-                    timeline_home=record.timeline_home,
-                )
-                return backend.head().version
-            except Exception:
-                return 0
-
     return Handler
 
 
-def _serialize_timeline_row(row: BridgeTimelineRecord) -> dict[str, Any]:
-    return {
-        "timeline_id": row.timeline_id,
-        "timeline_ulid": row.timeline_ulid,
-        "slug": row.slug,
-        "name": row.name,
-        "is_default": row.is_default,
-    }
+def _validate_save_payload_schema(request: TimelineSaveRequest) -> None:
+    """Route-level schema guard producing the frozen ``422`` envelope.
 
-
-
-
+    The repository treats ``config``/``registry`` as loose editor objects
+    (contract §5.2), so the only wire-shape violations beyond "is an
+    object" are a non-object ``registry.assets`` and payloads that cannot
+    canonicalize within the kernel bounds (NaN/Infinity/oversize). Both map
+    to ``422 schema_incompatible`` (contract §6.2) with JSON-pointer-style
+    ``issues[]``, mirroring the repository's canonicalization gate so the
+    route and the store agree on what is rejectable before any mutation.
+    """
+    issues: list[BridgeIssue] = []
+    assets = request.registry.get("assets", {})
+    if not isinstance(assets, Mapping):
+        issues.append(
+            BridgeIssue(
+                pointer="/registry/assets",
+                code="schema_incompatible",
+                message="registry.assets must be a JSON object",
+            )
+        )
+    for pointer, value in (
+        ("/config", request.config),
+        ("/registry", request.registry),
+    ):
+        try:
+            canonical_json(dict(value))
+        except CanonicalizationError as exc:
+            issues.append(
+                BridgeIssue(
+                    pointer=pointer,
+                    code="schema_incompatible",
+                    message=str(exc),
+                )
+            )
+    if issues:
+        raise BridgeSchemaIncompatibleError(
+            "config/registry failed schema validation",
+            issues=issues,
+        )
 
 
 def _looks_like_uuid(value: str) -> bool:
