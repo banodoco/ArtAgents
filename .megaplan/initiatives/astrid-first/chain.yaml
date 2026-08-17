@@ -71,7 +71,7 @@ milestones:
   idea: .megaplan/initiatives/astrid-first/briefs/reconcile.md
   branch: reconcile/astrid-first-20260813
   target_branch: main
-  merge_policy: review
+  merge_policy: auto
   phase_model:
   - execute=codex
   - finalize=codex
