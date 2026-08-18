@@ -36,9 +36,17 @@ Contracts kept here (v10 section 5.2; m2 plan steps 12 and 13):
 
 - **Bounded fan-out.** ``children`` with more than 256 entries is rejected
   before any mutation (``RunValidationError``), so a child 257 can never
-  consume a sequence or create a row. The result's ``evidence_ids`` is the
-  empty tuple: fan-out creates no evidence, no parent task, and no step
-  record (there is no step table at all).
+  consume a sequence or create a row. Ordinary fan-out (no ``evidence``
+  entries) keeps the result's ``evidence_ids`` the empty tuple: fan-out
+  creates no evidence, no parent task, and no step record (there is no step
+  table at all). m3 extends the same command with the ordered ``evidence``
+  entries (plan step 4, T5): each entry is recorded through the kernel
+  evidence vertical inside the same ``BEGIN IMMEDIATE`` transaction, one
+  ``core.evidence.recorded`` event per entry lands on the run stream (after
+  ``core.run.created``) in submission order, and the complete receipt
+  returns the ordered evidence ids while zero-task runs (``children=[]``)
+  are first-class — the receipt then carries the run id, no task ids, and
+  the evidence ids.
 - **Stable ordinals.** Each child's ``run_ordinal`` is its index in the
   submitted set (``0..len(children)-1``), backed by the unique
   ``tasks_run_ordinal`` index; the result returns the ordered task ids and
@@ -118,6 +126,25 @@ CORE_RUN_RETRIED_EVENT_KIND = "core.run.retried"
 CORE_RUN_RETRY_COMMAND_KIND = "core.run.retry"
 """The m2 command kind that group-retry receipts are keyed on."""
 
+CORE_RUN_CONTINUED_EVENT_KIND = "core.run.continued"
+"""The m3 event kind emitted by receipt-linked run continuation.
+
+One ``core.run.continued`` event is appended on the run stream **before**
+the continuation chunk's child creation events (m3 plan step 2). It
+carries the expected head that was CAS-checked, the chunk's ordinal range,
+and the next run-stream version so the event log alone can replay every
+continuation that advanced the stream head.
+"""
+
+CORE_RUN_CONTINUE_COMMAND_KIND = "core.run.continue"
+"""The m3 command kind that continuation receipts are keyed on.
+
+The frozen expected-head continuation command (``core.run.continue``)
+extends an existing running run with one bounded chunk of at most
+:data:`FROZEN_MAX_DIRECT_CHILDREN` normalized child specs and dependency
+edges under a caller-supplied expected run-stream head (CAS).
+"""
+
 RUN_STATUSES: tuple[str, ...] = ("running", "succeeded", "failed", "cancelled")
 """The frozen ``runs.status`` DDL CHECK vocabulary, in DDL order."""
 
@@ -195,6 +222,32 @@ class RunTerminalError(RunRepositoryError):
         )
 
 
+class RunStaleHeadError(RunRepositoryError):
+    """Raised when a continuation CAS targets a stale expected run head.
+
+    The expected-head check runs **before** any sequence allocation, event
+    append, child stream/row insert, or receipt write, so a stale or
+    ahead-of-head continuation changes zero rows. ``expected_version`` is
+    the caller-supplied CAS value and ``current_version`` the run stream's
+    actual ``event_streams.head_seq`` at check time (m3 plan step 2).
+    """
+
+    def __init__(
+        self,
+        *,
+        run_id: str,
+        expected_version: int,
+        current_version: int,
+    ) -> None:
+        self.run_id: str = run_id
+        self.expected_version: int = expected_version
+        self.current_version: int = current_version
+        super().__init__(
+            f"run continuation head conflict: run {run_id!r} has stream "
+            f"head {current_version}, expected {expected_version}"
+        )
+
+
 class ContinuationValidationError(RunValidationError):
     """Raised when a continuation envelope violates the frozen rules.
 
@@ -268,12 +321,15 @@ class RunReadModel:
 
 @dataclass(frozen=True, slots=True)
 class RunFanOutReadModel:
-    """One immutable fan-out result (m2 plan step 12).
+    """One immutable fan-out result (m2 plan step 12; m3 plan step 4).
 
     The receipt result of :meth:`RunRepository.create`: the run id, the
     ordered direct-child task ids (ordinal order), the ordinal range, and
-    the empty evidence-id list. ``evidence_ids`` is always empty — fan-out
-    creates no evidence rows, no parent task, and no step record.
+    the evidence-id list. ``evidence_ids`` preserves the empty tuple for
+    ordinary fan-out and carries the ordered evidence ids (submission
+    order) when the m3 ``evidence`` entries were recorded — zero-task runs
+    return it populated and ``task_ids`` empty. Fan-out never creates a
+    parent task or a step record.
     """
 
     run_id: str
@@ -306,6 +362,52 @@ class RunFanOutReadModel:
             evidence_ids=tuple(
                 str(evidence_id) for evidence_id in (value.get("evidence_ids") or [])
             ),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class RunContinuationReadModel:
+    """One immutable receipt-linked continuation result (m3 plan step 2).
+
+    The receipt result of :meth:`RunRepository.continue_run`: the run id,
+    the continuation chunk's ordered direct-child task ids (ordinal order),
+    the chunk's inclusive ordinal range, the ``expected_version`` that was
+    CAS-checked, and ``next_version`` — the run stream head after the
+    continuation event, which a subsequent continuation must present as its
+    ``expected_version``.
+    """
+
+    run_id: str
+    project_id: str
+    task_ids: tuple[str, ...]
+    first_ordinal: int
+    last_ordinal: int
+    next_version: int
+    expected_version: int
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return the JSON-safe dict persisted as the receipt result."""
+        return {
+            "run_id": self.run_id,
+            "project_id": self.project_id,
+            "task_ids": list(self.task_ids),
+            "first_ordinal": self.first_ordinal,
+            "last_ordinal": self.last_ordinal,
+            "next_version": self.next_version,
+            "expected_version": self.expected_version,
+        }
+
+    @classmethod
+    def from_mapping(cls, value: Mapping[str, Any]) -> RunContinuationReadModel:
+        """Rebuild the frozen continuation read model from a stored mapping."""
+        return cls(
+            run_id=str(value["run_id"]),
+            project_id=str(value["project_id"]),
+            task_ids=tuple(str(task_id) for task_id in value["task_ids"]),
+            first_ordinal=int(value["first_ordinal"]),
+            last_ordinal=int(value["last_ordinal"]),
+            next_version=int(value["next_version"]),
+            expected_version=int(value["expected_version"]),
         )
 
 
@@ -598,6 +700,99 @@ def _request_child(child: Mapping[str, Any]) -> dict[str, Any]:
     return entry
 
 
+def _normalize_evidence(index: int, entry: Any) -> dict[str, Any]:
+    """Validate one ordered evidence entry and freeze it into a plain dict.
+
+    The frozen evidence shape mirrors the kernel evidence vertical
+    (``EvidenceRepository.record``): a closed ``kind``, a non-empty
+    ``summary``, an object ``data`` that canonicalizes, and the optional
+    stable ``evidence_id`` plus the optional same-run ``task_id`` /
+    same-project ``media_id`` links. Generated values (a missing
+    ``evidence_id``) are excluded from the request identity. The cross-row
+    facts (direct-child task membership, same-project media) are validated
+    by the evidence vertical itself, inside the same unit of work, after
+    the run row and its children exist.
+    """
+    from astrid.core.repositories.evidence import EVIDENCE_KINDS
+
+    if not isinstance(entry, Mapping):
+        raise RunValidationError(
+            f"evidence entry at index {index} must be a JSON object, "
+            f"got {type(entry).__name__}"
+        )
+    kind = entry.get("kind")
+    if kind not in EVIDENCE_KINDS:
+        raise RunValidationError(
+            f"evidence entry at index {index} kind must be one of "
+            f"{sorted(EVIDENCE_KINDS)}, got {kind!r}"
+        )
+    summary = entry.get("summary")
+    if not isinstance(summary, str) or not summary.strip():
+        raise RunValidationError(
+            f"evidence entry at index {index} requires a non-empty summary"
+        )
+    data = entry.get("data")
+    if data is None:
+        data_dict: dict[str, Any] = {}
+    elif isinstance(data, Mapping):
+        data_dict = dict(data)
+    else:
+        raise RunValidationError(
+            f"evidence entry at index {index} data must be a JSON object"
+        )
+    try:
+        canonical_json(data_dict)
+    except CanonicalizationError as exc:
+        raise RunValidationError(
+            f"evidence entry at index {index} data must canonicalize: {exc}"
+        ) from exc
+    task_id = entry.get("task_id")
+    if task_id is not None and (not isinstance(task_id, str) or not task_id):
+        raise RunValidationError(
+            f"evidence entry at index {index} task_id must be a non-empty string"
+        )
+    media_id = entry.get("media_id")
+    if media_id is not None and (not isinstance(media_id, str) or not media_id):
+        raise RunValidationError(
+            f"evidence entry at index {index} media_id must be a non-empty string"
+        )
+    evidence_id = entry.get("evidence_id")
+    if evidence_id is not None and (
+        not isinstance(evidence_id, str) or not evidence_id
+    ):
+        raise RunValidationError(
+            f"evidence entry at index {index} evidence_id must be a "
+            "non-empty string"
+        )
+    return {
+        "evidence_id": evidence_id,
+        "kind": kind,
+        "summary": summary,
+        "data": data_dict,
+        "task_id": task_id,
+        "media_id": media_id,
+    }
+
+
+def _request_evidence(entry: Mapping[str, Any]) -> dict[str, Any]:
+    """The request-identity representation of one evidence entry.
+
+    Includes every caller-supplied fact (and the stable ``evidence_id``
+    only when the caller supplied it); generated values are excluded so an
+    identical retry under the same key hashes identically.
+    """
+    request_entry: dict[str, Any] = {
+        "kind": entry["kind"],
+        "summary": entry["summary"],
+        "data": entry["data"],
+        "task_id": entry["task_id"],
+        "media_id": entry["media_id"],
+    }
+    if entry["evidence_id"] is not None:
+        request_entry["evidence_id"] = entry["evidence_id"]
+    return request_entry
+
+
 # ---------------------------------------------------------------------------
 # Repository
 # ---------------------------------------------------------------------------
@@ -622,6 +817,7 @@ class RunRepository:
         *,
         project_id: str,
         children: Sequence[Mapping[str, Any]],
+        evidence: Sequence[Mapping[str, Any]] = (),
         idempotency_key: str,
         actor_kind: str = "local",
         run_id: str | None = None,
@@ -631,15 +827,20 @@ class RunRepository:
         created_at: str | None = None,
         command_kind: str = CORE_RUN_CREATE_COMMAND_KIND,
     ) -> RunFanOutReadModel:
-        """Create one run and its direct children atomically and idempotently.
+        """Create one run, its direct children, and ordered evidence atomically.
 
         Inside the caller's active unit of work this commits, in one
         ``BEGIN IMMEDIATE`` transaction: the ``core.run`` event stream and
         ``runs`` row (``status`` ``running``), the ``core.run.created``
         event, then each direct child's ``core.task`` stream, ``tasks`` row
         (stable ``run_ordinal`` = child index), resolved dependency edges,
-        and ``core.task.created`` event — followed by both heads and one
-        complete receipt carrying every ordered event id.
+        and ``core.task.created`` event — followed by the ordered m3
+        ``evidence`` entries, each recorded through the kernel evidence
+        vertical (one ``evidence_items`` row, one ``core.evidence.recorded``
+        event on the run stream, one ``core.evidence.record`` receipt per
+        entry, in submission order) — then both heads and one complete
+        receipt carrying every ordered event id and the ordered evidence
+        ids.
 
         *children* is a JSON array of at most
         :data:`FROZEN_MAX_DIRECT_CHILDREN` child definitions; a 257th child
@@ -649,11 +850,24 @@ class RunRepository:
         stable id for replay and dependency references, and dependencies
         follow the frozen task rules (validated same-project and acyclic at
         each child's creation, so a dependency may reference an earlier
-        child of this fan-out or any pre-existing project task).
+        child of this fan-out or any pre-existing project task). Zero-task
+        runs are first-class: ``children=[]`` creates the run with no child
+        tasks (the result's ``task_ids`` is then empty).
+
+        *evidence* is an optional JSON array of ordered evidence entries
+        ``{kind, summary, data?, task_id?, media_id?, evidence_id?}`` in
+        the closed five-kind vocabulary (``observation``, ``measurement``,
+        ``validation``, ``decision``, ``error``). Each entry is validated
+        (closed kind, non-empty summary, canonical object data, string
+        links) **before any write**, and the cross-row facts (direct-child
+        task membership, same-project media) are enforced by the evidence
+        vertical inside the same transaction — so a failing entry rolls the
+        whole command back to zero rows. Ordinary fan-out without evidence
+        keeps ``evidence_ids`` the empty tuple.
 
         Returns the :class:`RunFanOutReadModel` — run id, ordered task ids,
-        ordinal range, and an empty evidence-id list. No parent task, no
-        step record, and no evidence rows are ever created.
+        ordinal range, and the ordered evidence-id list. No parent task and
+        no step record are ever created.
 
         Idempotency: the receipt gate runs before any mutation. An identical
         retry under the same key returns exactly the stored fan-out result
@@ -688,16 +902,26 @@ class RunRepository:
                 f"{len(children)}"
             )
         normalized = tuple(_normalize_child(index, child) for index, child in enumerate(children))
+        if isinstance(evidence, (str, bytes)) or not isinstance(
+            evidence, Sequence
+        ):
+            raise RunValidationError("evidence must be a JSON array")
+        normalized_evidence = tuple(
+            _normalize_evidence(index, entry)
+            for index, entry in enumerate(evidence)
+        )
         input_dict = _require_json_object("input", input if input is not None else {})
 
         # Semantic request identity: the stable run id (when supplied), run
-        # facts, and every caller-supplied child fact participate.
+        # facts, and every caller-supplied child and evidence fact
+        # participate; generated values are excluded.
         request: dict[str, Any] = {
             "run_id": run_id,
             "kind": kind,
             "title": title,
             "input": input_dict,
             "children": [_request_child(child) for child in normalized],
+            "evidence": [_request_evidence(entry) for entry in normalized_evidence],
         }
         try:
             request_digest = request_hash(command_kind, request)
@@ -900,15 +1124,73 @@ class RunRepository:
             event_ids.append(append.event_id)
             last_project_seq = append.project_seq
 
-        # 4. The single complete receipt: every ordered event id, the exact
-        #    project sequence range, and the fan-out result.
+        # 4. Ordered evidence entries, in submission order: each delegates
+        #    to the kernel evidence vertical (one evidence_items row, one
+        #    core.evidence.recorded event on the run stream, one
+        #    core.evidence.record receipt), so the run stream advances past
+        #    the created event by exactly the number of evidence entries and
+        #    the complete run receipt can enumerate every ordered evidence
+        #    id. The evidence repository is imported at call time to break
+        #    the module cycle (evidence.py imports this module's
+        #    CORE_RUN_STREAM_TYPE at module scope). Because the children
+        #    already exist in this transaction, an evidence entry may link
+        #    the exact direct-child task ids created above.
+        from astrid.core.repositories.evidence import EvidenceRepository
+
+        evidence_repo = EvidenceRepository(
+            events=self._events, receipts=self._receipts
+        )
+        evidence_ids: list[str] = []
+        resulting_stream_seq = run_append.stream_seq
+        for index, entry in enumerate(normalized_evidence):
+            recorded = evidence_repo.record(
+                uow,
+                project_id=project_id,
+                run_id=run_id,
+                kind=entry["kind"],
+                summary=entry["summary"],
+                data=entry["data"],
+                task_id=entry["task_id"],
+                media_id=entry["media_id"],
+                evidence_id=entry["evidence_id"],
+                idempotency_key=f"{idempotency_key}:evidence:{index}",
+                actor_kind=actor_kind,
+                created_at=stamp,
+            )
+            evidence_ids.append(recorded.id)
+            if recorded.event_head_seq is None:
+                raise RunValidationError(
+                    "evidence recorded event seq missing for evidence "
+                    f"entry at index {index}"
+                )
+            # The evidence read model carries the recorded event's stream
+            # seq but not its event id; the run receipt must enumerate every
+            # ordered event id, so resolve the exact event row inside the
+            # same transaction.
+            evidence_event = uow.query_one(
+                "SELECT event_id, project_seq FROM events "
+                "WHERE stream_id = ? AND seq = ?",
+                (run_stream_id, recorded.event_head_seq),
+            )
+            if evidence_event is None:
+                raise RunValidationError(
+                    "evidence recorded event missing on the run stream "
+                    f"for evidence entry at index {index}"
+                )
+            event_ids.append(str(evidence_event["event_id"]))
+            last_project_seq = int(evidence_event["project_seq"])
+            resulting_stream_seq = recorded.event_head_seq
+
+        # 5. The single complete receipt: every ordered event id, the exact
+        #    project sequence range, and the fan-out result (with the
+        #    ordered evidence ids).
         result = RunFanOutReadModel(
             run_id=run_id,
             project_id=project_id,
             task_ids=tuple(task_ids),
             first_ordinal=0,
             last_ordinal=len(task_ids) - 1,
-            evidence_ids=(),
+            evidence_ids=tuple(evidence_ids),
         )
         self._receipts.record(
             uow,
@@ -922,7 +1204,398 @@ class RunRepository:
             event_ids=event_ids,
             result=result.to_dict(),
             primary_stream_id=run_stream_id,
-            resulting_stream_seq=run_append.stream_seq,
+            resulting_stream_seq=resulting_stream_seq,
+            created_at=stamp,
+        )
+        return result
+
+    # -- receipt-linked continuation CAS (m3 plan step 2) -----------------
+
+    def continue_run(
+        self,
+        uow: UnitOfWork,
+        *,
+        project_id: str,
+        run_id: str,
+        expected_version: int,
+        start_ordinal: int,
+        children: Sequence[Mapping[str, Any]],
+        idempotency_key: str,
+        actor_kind: str = "local",
+        now: str | None = None,
+        command_kind: str = CORE_RUN_CONTINUE_COMMAND_KIND,
+    ) -> RunContinuationReadModel:
+        """Extend one running run with a bounded continuation chunk atomically.
+
+        The frozen ``core.run.continue`` command (m3 plan step 2) extends an
+        existing **running** run with at most
+        :data:`FROZEN_MAX_DIRECT_CHILDREN` normalized child specs and
+        dependency edges under a caller-supplied expected run-stream head
+        (CAS). Inside the caller's active unit of work, in one
+        ``BEGIN IMMEDIATE`` transaction:
+
+        1. **Fences before any mutation.** A missing or foreign run raises
+           :class:`RunNotFoundError`, a terminal run raises
+           :class:`RunTerminalError`, a run whose stream head disagrees with
+           *expected_version* raises :class:`RunStaleHeadError`, and a chunk
+           whose ordinal range is not exactly contiguous with the run's
+           existing children (or would exceed the ``0 .. 255`` bound) raises
+           :class:`RunValidationError` — all before any sequence allocation,
+           event append, child stream/row insert, or receipt write.
+        2. **Continuation event first.** One hash-chained
+           ``core.run.continued`` event carrying the CAS-checked expected
+           head, the chunk's ordinal range, and the next run-stream version
+           is appended on the run stream **before** any child creation event.
+        3. **Reused child creation.** Each child is created exactly like
+           fan-out: the shared task normalization
+           (:func:`_normalize_child`), dependency normalization and graph
+           validation (``_normalize_dependencies``/``_validate_dependency_graph``
+           in the task repository — a dependency on a later child of this
+           chunk or a future chunk is a typed missing-dependency error, and
+           a cross-project dependency is a typed cross-project error), the
+           initial ``blocked``/``queued`` status, the ``core.task`` stream,
+           ``tasks`` row with a stable contiguous ``run_ordinal``, the
+           resolved edges, and the ``core.task.created`` event. Earlier
+           children of this chunk are visible to later children, so the
+           chunk graph stays acyclic by construction.
+        4. **One complete receipt.** The replayable receipt carries the
+           ordered event ids (continuation event first, then each child
+           event), the exact project-sequence range, and the result — task
+           ids, ordinal range, and ``next_version`` (the run stream head a
+           subsequent continuation must CAS on).
+
+        Idempotency mirrors fan-out: the receipt gate runs first, an
+        identical retry under the same key returns exactly the stored
+        continuation result with zero new rows, and a changed request under
+        the same key raises :class:`ReceiptMismatchError` before any
+        mutation.
+        """
+        project_id = _require_non_empty_string("project_id", project_id)
+        run_id = _require_non_empty_string("run_id", run_id)
+        idempotency_key = _require_non_empty_string(
+            "idempotency_key", idempotency_key
+        )
+        command_kind = _require_non_empty_string("command_kind", command_kind)
+        if (
+            isinstance(expected_version, bool)
+            or not isinstance(expected_version, int)
+            or expected_version < 0
+        ):
+            raise RunValidationError(
+                "expected_version must be a non-negative integer, "
+                f"got {expected_version!r}"
+            )
+        if isinstance(start_ordinal, bool) or not isinstance(start_ordinal, int):
+            raise RunValidationError(
+                "start_ordinal must be an integer, "
+                f"got {start_ordinal!r}"
+            )
+        if start_ordinal < 0 or start_ordinal >= FROZEN_MAX_DIRECT_CHILDREN:
+            raise RunValidationError(
+                f"start_ordinal must be within 0 .. "
+                f"{FROZEN_MAX_DIRECT_CHILDREN - 1}, got {start_ordinal}"
+            )
+        if actor_kind not in ACTOR_KINDS:
+            raise RunValidationError(
+                f"actor_kind must be one of {sorted(ACTOR_KINDS)}, "
+                f"got {actor_kind!r}"
+            )
+        if isinstance(children, (str, bytes)) or not isinstance(
+            children, Sequence
+        ):
+            raise RunValidationError("children must be a JSON array")
+        if not children:
+            raise RunValidationError(
+                "continuation requires at least one child spec"
+            )
+        if len(children) > FROZEN_MAX_DIRECT_CHILDREN:
+            raise RunValidationError(
+                "continuation admits at most "
+                f"{FROZEN_MAX_DIRECT_CHILDREN} children per chunk, got "
+                f"{len(children)}"
+            )
+        normalized = tuple(
+            _normalize_child(index, child) for index, child in enumerate(children)
+        )
+
+        # Semantic request identity: the stable run id, the CAS head, the
+        # chunk start, and every caller-supplied child fact participate;
+        # generated values never do.
+        request: dict[str, Any] = {
+            "run_id": run_id,
+            "expected_version": expected_version,
+            "start_ordinal": start_ordinal,
+            "children": [_request_child(child) for child in normalized],
+        }
+        try:
+            request_digest = request_hash(command_kind, request)
+        except CanonicalizationError as exc:
+            raise RunValidationError(
+                f"cannot hash continuation request: {exc}"
+            ) from exc
+
+        # Idempotency gate first: replay or mismatch before any mutation.
+        replayed = self._receipts.check(
+            uow,
+            project_id=project_id,
+            idempotency_key=idempotency_key,
+            request_hash=request_digest,
+            command_kind=command_kind,
+        )
+        if replayed is not None:
+            return RunContinuationReadModel.from_mapping(replayed)
+
+        stamp = now if now is not None else utc_now_iso()
+        if not isinstance(stamp, str) or not stamp:
+            raise RunValidationError("now must be a non-empty string")
+
+        # Fences before any mutation: the run exists, belongs to the
+        # project, and is nonterminal (terminal runs never continue).
+        run_row = uow.query_one(
+            "SELECT * FROM runs WHERE id = ? AND project_id = ?",
+            (run_id, project_id),
+        )
+        if run_row is None:
+            raise RunNotFoundError(run_id=run_id)
+        if str(run_row["status"]) != "running":
+            raise RunTerminalError(run_id=run_id, status=str(run_row["status"]))
+
+        # Expected-head CAS before any allocation: stale (or ahead-of-head)
+        # continuations change zero rows.
+        run_stream_id = f"{run_id}:{CORE_RUN_STREAM_TYPE}"
+        head_row = uow.query_one(
+            "SELECT head_seq FROM event_streams WHERE id = ?",
+            (run_stream_id,),
+        )
+        if head_row is None:  # pragma: no cover - runs rows always own a stream
+            raise RunRepositoryError(
+                f"run {run_id!r} has no event stream; cannot continue"
+            )
+        current_version = int(head_row["head_seq"])
+        if current_version != expected_version:
+            raise RunStaleHeadError(
+                run_id=run_id,
+                expected_version=expected_version,
+                current_version=current_version,
+            )
+
+        # Contiguous ordinal allocation: the chunk must start exactly at the
+        # next free ordinal and stay within the frozen 0 .. 255 bound.
+        max_row = uow.query_one(
+            "SELECT MAX(run_ordinal) AS max_ordinal FROM tasks "
+            "WHERE run_id = ? AND project_id = ?",
+            (run_id, project_id),
+        )
+        current_max = (
+            int(max_row["max_ordinal"])
+            if max_row is not None and max_row["max_ordinal"] is not None
+            else -1
+        )
+        if start_ordinal != current_max + 1:
+            raise RunValidationError(
+                "continuation ordinals must be contiguous with the run's "
+                f"existing children: run {run_id!r} has children through "
+                f"ordinal {current_max}, so the next chunk must start at "
+                f"{current_max + 1}, got {start_ordinal}"
+            )
+        last_ordinal = start_ordinal + len(normalized) - 1
+        if last_ordinal >= FROZEN_MAX_DIRECT_CHILDREN:
+            raise RunValidationError(
+                "continuation would exceed the "
+                f"{FROZEN_MAX_DIRECT_CHILDREN}-child ordinal bound "
+                f"(0 .. {FROZEN_MAX_DIRECT_CHILDREN - 1}): chunk spans "
+                f"{start_ordinal} .. {last_ordinal}"
+            )
+
+        txn_id = uuid.uuid4().hex
+
+        # 1. The core.run.continued event first, before any child event.
+        event_data: dict[str, Any] = {
+            "run_id": run_id,
+            "expected_version": expected_version,
+            "start_ordinal": start_ordinal,
+            "child_count": len(normalized),
+            "first_ordinal": start_ordinal,
+            "last_ordinal": last_ordinal,
+            "next_version": expected_version + 1,
+        }
+        changes: list[str] = [
+            "run_id",
+            "expected_version",
+            "start_ordinal",
+            "child_count",
+            "first_ordinal",
+            "last_ordinal",
+            "next_version",
+        ]
+        continuation_append = self._events.append(
+            uow,
+            stream_id=run_stream_id,
+            project_id=project_id,
+            event_kind=CORE_RUN_CONTINUED_EVENT_KIND,
+            data=event_data,
+            changes=changes,
+            idempotency_key=idempotency_key,
+            txn_id=txn_id,
+            actor_kind=actor_kind,
+            command_kind=command_kind,
+            event_id=uuid.uuid4().hex,
+            created_at=stamp,
+        )
+
+        # 2. Direct children in ordinal order, reusing the fan-out child
+        #    creation path (shared normalization, dependency validation, and
+        #    status derivation). Each child's graph is validated against the
+        #    tasks visible at its creation — earlier children of this chunk
+        #    plus pre-existing project tasks — so a dependency on a later
+        #    child is a typed missing-dependency error.
+        task_ids: list[str] = []
+        event_ids: list[str] = [continuation_append.event_id]
+        first_project_seq = continuation_append.project_seq
+        last_project_seq = continuation_append.project_seq
+        for index, child in enumerate(normalized):
+            ordinal = start_ordinal + index
+            child_id = (
+                child["task_id"]
+                if child["task_id"] is not None
+                else generate_lowercase_ulid()
+            )
+            available = (
+                child["available_at"] if child["available_at"] is not None else stamp
+            )
+            dependency_specs = _normalize_dependencies(
+                child_id, child["dependencies"]
+            )
+            _validate_dependency_graph(
+                uow,
+                task_id=child_id,
+                project_id=project_id,
+                dependency_specs=dependency_specs,
+            )
+            status = _initial_status_from_dependencies(uow, dependency_specs)
+            try:
+                spec_json = canonical_json(child["spec"])
+                input_manifest_json = canonical_json(child["input_manifest"])
+                spec_digest = compute_spec_hash(
+                    child["spec"], child["input_manifest"]
+                )
+            except CanonicalizationError as exc:
+                raise RunValidationError(
+                    f"cannot canonicalize continuation child at ordinal "
+                    f"{ordinal}: {exc}"
+                ) from exc
+
+            task_stream_id = f"{child_id}:{CORE_TASK_STREAM_TYPE}"
+            uow.execute(
+                "INSERT INTO event_streams "
+                "(id, project_id, stream_type, aggregate_id, head_seq, created_at) "
+                "VALUES (?, ?, ?, ?, 0, ?)",
+                (task_stream_id, project_id, CORE_TASK_STREAM_TYPE, child_id, stamp),
+            )
+            uow.execute(
+                "INSERT INTO tasks "
+                "(id, project_id, event_stream_id, run_id, run_ordinal, "
+                "capability, spec_json, spec_hash, input_manifest_json, status, "
+                "priority, available_at, max_attempts, winning_attempt_id, "
+                "cancel_request_id, cancel_requested_at, created_at, updated_at, "
+                "finished_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
+                "NULL, NULL, NULL, ?, ?, NULL)",
+                (
+                    child_id,
+                    project_id,
+                    task_stream_id,
+                    run_id,
+                    ordinal,
+                    child["capability"],
+                    spec_json,
+                    spec_digest,
+                    input_manifest_json,
+                    status,
+                    child["priority"],
+                    available,
+                    child["max_attempts"],
+                    stamp,
+                    stamp,
+                ),
+            )
+            for dep in dependency_specs:
+                uow.execute(
+                    "INSERT INTO task_dependencies "
+                    "(task_id, depends_on_task_id, kind, ordinal) "
+                    "VALUES (?, ?, ?, ?)",
+                    (child_id, dep.depends_on_task_id, dep.kind, dep.ordinal),
+                )
+            child_event_data: dict[str, Any] = {
+                "capability": child["capability"],
+                "spec": child["spec"],
+                "spec_hash": spec_digest,
+                "input_manifest": child["input_manifest"],
+                "priority": child["priority"],
+                "available_at": available,
+                "max_attempts": child["max_attempts"],
+                "status": status,
+                "run_id": run_id,
+                "run_ordinal": ordinal,
+            }
+            child_changes: list[str] = [
+                "capability",
+                "spec",
+                "spec_hash",
+                "input_manifest",
+                "priority",
+                "available_at",
+                "max_attempts",
+                "status",
+                "run_id",
+                "run_ordinal",
+            ]
+            if dependency_specs:
+                child_event_data["dependencies"] = [
+                    dep.to_dict() for dep in dependency_specs
+                ]
+                child_changes.append("dependencies")
+            append = self._events.append(
+                uow,
+                stream_id=task_stream_id,
+                project_id=project_id,
+                event_kind=CORE_TASK_CREATED_EVENT_KIND,
+                data=child_event_data,
+                changes=child_changes,
+                idempotency_key=f"{idempotency_key}:child:{ordinal}",
+                txn_id=txn_id,
+                actor_kind=actor_kind,
+                command_kind=CORE_TASK_CREATE_COMMAND_KIND,
+                event_id=uuid.uuid4().hex,
+                created_at=stamp,
+            )
+            task_ids.append(child_id)
+            event_ids.append(append.event_id)
+            last_project_seq = append.project_seq
+
+        # 3. The single complete receipt: the continuation event first, then
+        #    every ordered child event, spanning the exact project-seq range.
+        result = RunContinuationReadModel(
+            run_id=run_id,
+            project_id=project_id,
+            task_ids=tuple(task_ids),
+            first_ordinal=start_ordinal,
+            last_ordinal=last_ordinal,
+            next_version=continuation_append.stream_seq,
+            expected_version=expected_version,
+        )
+        self._receipts.record(
+            uow,
+            project_id=project_id,
+            idempotency_key=idempotency_key,
+            request_hash=request_digest,
+            command_kind=command_kind,
+            txn_id=txn_id,
+            first_project_seq=first_project_seq,
+            last_project_seq=last_project_seq,
+            event_ids=event_ids,
+            result=result.to_dict(),
+            primary_stream_id=run_stream_id,
+            resulting_stream_seq=continuation_append.stream_seq,
             created_at=stamp,
         )
         return result
@@ -1641,6 +2314,8 @@ class RunRepository:
 __all__ = [
     "CORE_RUN_CANCEL_COMMAND_KIND",
     "CORE_RUN_CANCELLED_EVENT_KIND",
+    "CORE_RUN_CONTINUE_COMMAND_KIND",
+    "CORE_RUN_CONTINUED_EVENT_KIND",
     "CORE_RUN_CREATE_COMMAND_KIND",
     "CORE_RUN_CREATED_EVENT_KIND",
     "CORE_RUN_RETRY_COMMAND_KIND",
@@ -1653,6 +2328,7 @@ __all__ = [
     "RUN_STATUSES",
     "RunAlreadyExistsError",
     "RunCancelReadModel",
+    "RunContinuationReadModel",
     "RunFanOutReadModel",
     "RunNotFoundError",
     "RunProgressReadModel",
@@ -1660,6 +2336,7 @@ __all__ = [
     "RunRepository",
     "RunRepositoryError",
     "RunRetryReadModel",
+    "RunStaleHeadError",
     "RunTerminalError",
     "RunValidationError",
 ]

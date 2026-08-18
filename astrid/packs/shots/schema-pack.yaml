@@ -5,9 +5,14 @@
 # contract and is validated by astrid.core.schema_packs.manifest.
 #
 # The shots pack owns exactly two tables (shots, shot_items) and declares the
-# future namespaced shot vocabulary. No executable repositories ship in m1
-# (repositories is empty); the declared event/command kinds are the normative
-# v10 examples and are registry-validated before any mutation.
+# m3 namespaced shot vocabulary: the pack-owned aggregate stream type
+# ``shot.shot`` (one stream per shot, registered so events can identify shot
+# subjects without adding pack vocabulary to kernel DDL), the receipt-backed
+# create/add/remove/reorder commands and events, and the executable
+# ``ShotRepository`` (kernel-writer backed). The declared names are
+# registry-validated before any mutation, and the kernel aggregate rule table
+# (astrid.core.events.registry.STREAM_AGGREGATE_RULES) owns the shot
+# aggregate semantics.
 id: shots
 version: 1
 depends_on:
@@ -19,12 +24,20 @@ migrations:
     tables:
       - shots
       - shot_items
-stream_types: []
+stream_types:
+  - shot.shot
 event_kinds:
+  - shot.created
   - shot.item_added
+  - shot.item_removed
+  - shot.reordered
 command_kinds:
+  - shot.create
   - shot.add_item
-repositories: []
+  - shot.remove_item
+  - shot.reorder
+repositories:
+  - ShotRepository
 conformance:
   - replay
   - mismatch_before_mutation
@@ -32,6 +45,7 @@ conformance:
   - vocabulary
   - writer_ownership
   - crash_atomicity
+  - hash_chain
 cli_mounts:
   shots: timelines shots
 bridge_mounts: []

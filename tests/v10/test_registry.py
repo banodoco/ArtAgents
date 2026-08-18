@@ -905,3 +905,252 @@ def test_m2_core_manifest_declares_only_required_stream_types() -> None:
         "core.media",
     }
     assert set(manifest.stream_types) == set(CORE_STREAM_TYPES)
+
+
+# ---------------------------------------------------------------------------
+# m3 plan step 1: run continuation, evidence vocabulary, and the references
+# and shots aggregate streams with their pack-owned repositories
+# ---------------------------------------------------------------------------
+
+M3_CORE_EVENT_KINDS = (
+    "core.run.continued",
+    "core.evidence.recorded",
+)
+M3_CORE_COMMAND_KINDS = ("core.run.continue",)
+
+M3_REFERENCE_STREAM_TYPE = "reference.reference"
+M3_REFERENCE_EVENT_KINDS = (
+    "reference.created",
+    "reference.archived",
+    "reference.media_associated",
+    "reference.primary_changed",
+    "reference.linked",
+)
+M3_REFERENCE_COMMAND_KINDS = (
+    "reference.create",
+    "reference.archive",
+    "reference.associate",
+    "reference.set_primary",
+    "reference.link",
+)
+
+M3_SHOT_STREAM_TYPE = "shot.shot"
+M3_SHOT_EVENT_KINDS = (
+    "shot.created",
+    "shot.item_added",
+    "shot.item_removed",
+    "shot.reordered",
+)
+M3_SHOT_COMMAND_KINDS = (
+    "shot.create",
+    "shot.add_item",
+    "shot.remove_item",
+    "shot.reorder",
+)
+
+
+def test_m3_core_run_continuation_and_evidence_vocabulary_is_declared() -> None:
+    frozen = core_only_registry()
+    for kind in M3_CORE_EVENT_KINDS:
+        assert kind in CORE_EVENT_KINDS
+        assert frozen.event_kinds[kind] == CORE_PACK_ID
+        assert validate_event_kind(frozen, kind) == kind
+    for kind in M3_CORE_COMMAND_KINDS:
+        assert kind in CORE_COMMAND_KINDS
+        assert frozen.command_kinds[kind] == CORE_PACK_ID
+        assert validate_command_kind(frozen, kind) == kind
+
+
+def test_m3_references_manifest_declares_aggregate_stream_and_repository() -> None:
+    registry = SchemaPackRegistry()
+    register_core_vocabulary(registry)
+    register_standard_schema_packs(registry)
+    frozen = registry.freeze()
+
+    assert frozen.stream_types[M3_REFERENCE_STREAM_TYPE] == "references"
+    assert validate_stream_type(frozen, M3_REFERENCE_STREAM_TYPE) == M3_REFERENCE_STREAM_TYPE
+    assert frozen.repositories["ReferenceRepository"] == "references"
+
+
+def test_m3_references_manifest_declares_lifecycle_media_and_link_vocabulary() -> None:
+    registry = SchemaPackRegistry()
+    register_core_vocabulary(registry)
+    register_standard_schema_packs(registry)
+    frozen = registry.freeze()
+
+    for kind in M3_REFERENCE_EVENT_KINDS:
+        assert kind in frozen.event_kinds, kind
+        assert frozen.event_kinds[kind] == "references", kind
+        assert validate_event_kind(frozen, kind) == kind
+    for kind in M3_REFERENCE_COMMAND_KINDS:
+        assert kind in frozen.command_kinds, kind
+        assert frozen.command_kinds[kind] == "references", kind
+        assert validate_command_kind(frozen, kind) == kind
+    # The frozen v10 example vocabulary stays declared (normative names).
+    assert "reference.primary_changed" in M3_REFERENCE_EVENT_KINDS
+    assert "reference.set_primary" in M3_REFERENCE_COMMAND_KINDS
+
+
+def test_m3_shots_manifest_declares_aggregate_stream_and_repository() -> None:
+    registry = SchemaPackRegistry()
+    register_core_vocabulary(registry)
+    register_standard_schema_packs(registry)
+    frozen = registry.freeze()
+
+    assert frozen.stream_types[M3_SHOT_STREAM_TYPE] == "shots"
+    assert validate_stream_type(frozen, M3_SHOT_STREAM_TYPE) == M3_SHOT_STREAM_TYPE
+    assert frozen.repositories["ShotRepository"] == "shots"
+
+
+def test_m3_shots_manifest_declares_item_mutation_vocabulary() -> None:
+    registry = SchemaPackRegistry()
+    register_core_vocabulary(registry)
+    register_standard_schema_packs(registry)
+    frozen = registry.freeze()
+
+    for kind in M3_SHOT_EVENT_KINDS:
+        assert kind in frozen.event_kinds, kind
+        assert frozen.event_kinds[kind] == "shots", kind
+        assert validate_event_kind(frozen, kind) == kind
+    for kind in M3_SHOT_COMMAND_KINDS:
+        assert kind in frozen.command_kinds, kind
+        assert frozen.command_kinds[kind] == "shots", kind
+        assert validate_command_kind(frozen, kind) == kind
+    # The frozen v10 example vocabulary stays declared (normative names).
+    assert "shot.item_added" in M3_SHOT_EVENT_KINDS
+    assert "shot.add_item" in M3_SHOT_COMMAND_KINDS
+
+
+def test_m3_reference_and_shot_streams_have_aggregate_rules() -> None:
+    frozen = _build_standard_frozen()
+    reference_rule = aggregate_rule_for(frozen, M3_REFERENCE_STREAM_TYPE)
+    assert reference_rule.declaring_pack == "references"
+    assert reference_rule.subject_type == "reference"
+    assert reference_rule.aggregate_is_project is False
+    shot_rule = aggregate_rule_for(frozen, M3_SHOT_STREAM_TYPE)
+    assert shot_rule.declaring_pack == "shots"
+    assert shot_rule.subject_type == "shot"
+    assert shot_rule.aggregate_is_project is False
+
+
+def test_m3_every_declared_stream_type_still_has_an_aggregate_rule() -> None:
+    frozen = _build_standard_frozen()
+    assert set(frozen.stream_types) == set(STREAM_AGGREGATE_RULES)
+    for stream_type in frozen.stream_types:
+        rule = aggregate_rule_for(frozen, stream_type)
+        assert rule.declaring_pack == frozen.stream_types[stream_type]
+
+
+def test_m3_reference_stream_creation_and_event_append_validate_end_to_end() -> None:
+    frozen = _build_standard_frozen()
+    validate_stream_creation(
+        frozen,
+        project_id="proj-1",
+        stream_type=M3_REFERENCE_STREAM_TYPE,
+        aggregate_id="reference-abc",
+    )
+    validate_event_append(
+        frozen,
+        project_id="proj-1",
+        stream_project_id="proj-1",
+        stream_type=M3_REFERENCE_STREAM_TYPE,
+        aggregate_id="reference-abc",
+        subject_type="reference",
+        subject_id="reference-abc",
+        event_kind="reference.created",
+        command_kind="reference.create",
+    )
+    # A core event can never land on a pack stream (and vice versa).
+    with pytest.raises(StreamAgreementError, match="declared by pack"):
+        validate_event_append(
+            frozen,
+            project_id="proj-1",
+            stream_project_id="proj-1",
+            stream_type=M3_REFERENCE_STREAM_TYPE,
+            aggregate_id="reference-abc",
+            subject_type="reference",
+            subject_id="reference-abc",
+            event_kind="core.project.created",
+        )
+
+
+def test_m3_shot_stream_creation_and_event_append_validate_end_to_end() -> None:
+    frozen = _build_standard_frozen()
+    validate_stream_creation(
+        frozen,
+        project_id="proj-1",
+        stream_type=M3_SHOT_STREAM_TYPE,
+        aggregate_id="shot-abc",
+    )
+    validate_event_append(
+        frozen,
+        project_id="proj-1",
+        stream_project_id="proj-1",
+        stream_type=M3_SHOT_STREAM_TYPE,
+        aggregate_id="shot-abc",
+        subject_type="shot",
+        subject_id="shot-abc",
+        event_kind="shot.created",
+        command_kind="shot.create",
+    )
+    # The pack stream requires the pack subject type, never a core subject.
+    with pytest.raises(StreamAgreementError, match="subject_type"):
+        validate_event_append(
+            frozen,
+            project_id="proj-1",
+            stream_project_id="proj-1",
+            stream_type=M3_SHOT_STREAM_TYPE,
+            aggregate_id="shot-abc",
+            subject_type="task",
+            subject_id="shot-abc",
+            event_kind="shot.created",
+        )
+
+
+def test_m3_colliding_pack_stream_type_is_rejected() -> None:
+    registry = SchemaPackRegistry()
+    register_core_vocabulary(registry)
+    register_standard_schema_packs(registry)
+    conflicting = _empty_manifest(id_="intruder")
+    conflicting["stream_types"] = [M3_REFERENCE_STREAM_TYPE]
+    with pytest.raises(SchemaPackDuplicateError, match=M3_REFERENCE_STREAM_TYPE):
+        registry.register_pack(parse_schema_pack_manifest(conflicting))
+    # No partial state: the intruder pack is absent afterwards.
+    assert "intruder" not in registry.freeze().packs
+
+
+def test_m3_pack_vocabulary_is_namespaced_and_owned() -> None:
+    frozen = _build_standard_frozen()
+    for kind in M3_REFERENCE_EVENT_KINDS + M3_SHOT_EVENT_KINDS:
+        assert kind.count(".") >= 1, kind
+        assert frozen.event_kinds[kind] in ("references", "shots"), kind
+    for kind in M3_REFERENCE_COMMAND_KINDS + M3_SHOT_COMMAND_KINDS:
+        assert kind.count(".") >= 1, kind
+        assert frozen.command_kinds[kind] in ("references", "shots"), kind
+    # No duplicate names within or across the kind families.
+    all_kinds = (
+        M3_REFERENCE_EVENT_KINDS
+        + M3_REFERENCE_COMMAND_KINDS
+        + M3_SHOT_EVENT_KINDS
+        + M3_SHOT_COMMAND_KINDS
+    )
+    assert len(all_kinds) == len(set(all_kinds))
+    assert set(all_kinds).isdisjoint(CORE_EVENT_KINDS)
+    assert set(all_kinds).isdisjoint(CORE_COMMAND_KINDS)
+
+
+def test_m3_standard_catalog_is_unchanged_at_20_tables() -> None:
+    """Manifest ownership, not DDL: the m3 vocabulary adds no tables."""
+    registry = SchemaPackRegistry()
+    register_core_vocabulary(registry)
+    register_standard_schema_packs(registry)
+    frozen = registry.freeze()
+    assert len(frozen.tables) == CORE_TABLE_COUNT + 1 + 2 + 3 == 20
+    assert frozen.tables["project_references"] == "references"
+    assert frozen.tables["media_references"] == "references"
+    assert frozen.tables["reference_links"] == "references"
+    assert frozen.tables["shots"] == "shots"
+    assert frozen.tables["shot_items"] == "shots"
+    assert frozen.tables["timelines"] == "timeline"
+    for table in CORE_TABLES:
+        assert frozen.tables[table] == CORE_PACK_ID

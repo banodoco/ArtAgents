@@ -115,6 +115,8 @@ The following DDL-baked enums are frozen exactly as transcribed in the normative
 
 **Decision:** evidence kinds are proposed as `observation`, `measurement`, `validation`, `decision`, and `error`. This is the m1 proposal; `evidence_items.kind` has no DDL CHECK and the list closes in Sprint 3 before evidence repositories freeze.
 
+**m3 closure:** the list is now **closed** exactly as `observation`, `measurement`, `validation`, `decision`, and `error` (m3 plan step 1/4; no DDL change — `evidence_items.kind` remains an open column enforced by the kernel `EvidenceRepository`).
+
 ## 9. Release-owner deadline for the platform matrix
 
 **Decision:**
@@ -135,6 +137,16 @@ The following DDL-baked enums are frozen exactly as transcribed in the normative
 - The actual out-of-tree TypeScript `AstridBridgeDataProvider` suite must be rerun against the repository bridge when that editor checkout becomes available (v10 §5.3 criterion 15, info priority).
 - This is a **hard named follow-up** owned by a human trigger. The in-tree substitute (SD3) does not satisfy it and no runtime code invents browser/provider-source parity.
 - S1 completion and the "editor-source parity" description both remain gated on the human acceptance decision (NSA-1).
+
+## 12. m3 closed contracts — soft archive, context rule, link symmetry, and aggregate streams
+
+**Status:** closed in milestone m3 (Sprint 3) and recorded here because repositories, events, and conformance specs consume these values; none of them changes frozen DDL vocabulary (section 7 remains verbatim).
+
+- **Soft archive (SD1-m3).** Archiving a reference is non-cascading: `project_references.archived_at` is set and one receipt-backed event is emitted, while associations (`media_references`), links (`reference_links`), events, and media bytes all remain. Default lists hide archived rows; direct historical lookup (`show` with history allowed, explicit inclusive lists) still returns them; new active mutations against an archived reference fail closed.
+- **Producing-task context rule.** Only the DDL-approved roles `used_as_input` and `inspired_by` may carry a `context_task_id`, and `used_as_input` requires one. Every context task must share the reference's project **and** must have produced the exact associated media through `task_outputs` — same-project exact-media provenance, not a free-form task reference.
+- **Link symmetry.** Only `related_to` is symmetric and stored in canonical `min(from_reference_id)`/`max(to_reference_id)` order so reversed retries converge on the same row; `belongs_to`, `wears`, `located_in`, and `associated_with` remain directional (their names describe the direction).
+- **Pack aggregate streams.** References and shots use their own registered aggregate stream types — `reference.reference` and `shot.shot` — with subject types `reference` and `shot`, so events can identify reference/shot subjects without placing pack vocabulary in kernel DDL (v10 §2.3 law 5; m3 plan step 1). Each pack's executable repository (`ReferenceRepository`, `ShotRepository`) receives only the caller's kernel `UnitOfWork`.
+- **Run continuation and evidence vocabulary.** `core.run.continue` / `core.run.continued` are the receipt-linked continuation command/event pair (section 6 contract, now implemented); `core.evidence.recorded` is the kernel evidence event appended on the run stream.
 
 ---
 

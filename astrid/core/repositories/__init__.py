@@ -43,9 +43,15 @@ __all__ = [
     "CORE_MEDIA_IMPORT_COMMAND_KIND",
     "CORE_MEDIA_IMPORTED_EVENT_KIND",
     "CORE_MEDIA_STREAM_TYPE",
+    "CORE_EVIDENCE_RECORDED_EVENT_KIND",
+    "CORE_EVIDENCE_RECORD_COMMAND_KIND",
     "CORE_PROJECT_CREATE_COMMAND_KIND",
     "CORE_PROJECT_CREATED_EVENT_KIND",
     "CORE_PROJECT_STREAM_TYPE",
+    "CORE_RUN_CANCEL_COMMAND_KIND",
+    "CORE_RUN_CANCELLED_EVENT_KIND",
+    "CORE_RUN_CONTINUE_COMMAND_KIND",
+    "CORE_RUN_CONTINUED_EVENT_KIND",
     "CORE_RUN_CREATE_COMMAND_KIND",
     "CORE_RUN_CREATED_EVENT_KIND",
     "CORE_RUN_STREAM_TYPE",
@@ -62,6 +68,11 @@ __all__ = [
     "CORE_TASK_STREAM_TYPE",
     "CommandVocabularyError",
     "EventVocabularyError",
+    "EVIDENCE_KINDS",
+    "EvidenceReadModel",
+    "EvidenceRepository",
+    "EvidenceRepositoryError",
+    "EvidenceValidationError",
     "MediaAlreadyExistsError",
     "MediaConflictError",
     "MediaLocationReadModel",
@@ -82,11 +93,13 @@ __all__ = [
     "ProjectValidationError",
     "RepositoryError",
     "RunAlreadyExistsError",
+    "RunContinuationReadModel",
     "RunFanOutReadModel",
     "RunNotFoundError",
     "RunReadModel",
     "RunRepository",
     "RunRepositoryError",
+    "RunStaleHeadError",
     "RunValidationError",
     "StreamAgreementError",
     "StreamVocabularyError",
@@ -166,16 +179,34 @@ _LAZY_MEDIA_NAMES = frozenset(
 
 _LAZY_RUN_NAMES = frozenset(
     {
+        "CORE_RUN_CANCEL_COMMAND_KIND",
+        "CORE_RUN_CANCELLED_EVENT_KIND",
+        "CORE_RUN_CONTINUE_COMMAND_KIND",
+        "CORE_RUN_CONTINUED_EVENT_KIND",
         "CORE_RUN_CREATE_COMMAND_KIND",
         "CORE_RUN_CREATED_EVENT_KIND",
         "CORE_RUN_STREAM_TYPE",
         "RunAlreadyExistsError",
+        "RunContinuationReadModel",
         "RunFanOutReadModel",
         "RunNotFoundError",
         "RunReadModel",
         "RunRepository",
         "RunRepositoryError",
+        "RunStaleHeadError",
         "RunValidationError",
+    }
+)
+
+_LAZY_EVIDENCE_NAMES = frozenset(
+    {
+        "CORE_EVIDENCE_RECORDED_EVENT_KIND",
+        "CORE_EVIDENCE_RECORD_COMMAND_KIND",
+        "EVIDENCE_KINDS",
+        "EvidenceReadModel",
+        "EvidenceRepository",
+        "EvidenceRepositoryError",
+        "EvidenceValidationError",
     }
 )
 
@@ -192,5 +223,8 @@ def __getattr__(name: str) -> Any:
         return getattr(module, name)
     if name in _LAZY_RUN_NAMES:
         module = importlib.import_module("astrid.core.repositories.runs")
+        return getattr(module, name)
+    if name in _LAZY_EVIDENCE_NAMES:
+        module = importlib.import_module("astrid.core.repositories.evidence")
         return getattr(module, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

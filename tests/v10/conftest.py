@@ -140,6 +140,46 @@ def media_env(tmp_path: Path, core_registry):
 
 
 @pytest.fixture
+def evidence_env(tmp_path: Path, core_registry):
+    """Fresh kernel writer plus project/media/task/run/evidence repositories.
+
+    Yields a small namespace with ``writer``, ``project_repo``, ``media_repo``
+    (bound to ``tmp_path`` as the projects root), ``task_repo``, ``run_repo``,
+    and the m3 ``evidence_repo`` (the kernel evidence vertical). The writer is
+    closed on teardown.
+    """
+    from types import SimpleNamespace
+
+    from astrid.core.events.service import EventAppendService
+    from astrid.core.receipts.service import ReceiptService
+    from astrid.core.repositories.evidence import EvidenceRepository
+    from astrid.core.repositories.media import MediaRepository
+    from astrid.core.repositories.projects import ProjectRepository
+    from astrid.core.repositories.runs import RunRepository
+    from astrid.core.repositories.tasks import TaskRepository
+    from astrid.core.store.writer import DatabaseWriter
+
+    db_path = tmp_path / "evidence_env.sqlite3"
+    writer = DatabaseWriter(db_path, core_registry)
+    try:
+        events = EventAppendService(core_registry)
+        receipts = ReceiptService()
+        yield SimpleNamespace(
+            writer=writer,
+            projects_root=tmp_path,
+            project_repo=ProjectRepository(events=events, receipts=receipts),
+            media_repo=MediaRepository(
+                events=events, receipts=receipts, projects_root=tmp_path
+            ),
+            task_repo=TaskRepository(events=events, receipts=receipts),
+            run_repo=RunRepository(events=events, receipts=receipts),
+            evidence_repo=EvidenceRepository(events=events, receipts=receipts),
+        )
+    finally:
+        writer.close()
+
+
+@pytest.fixture
 def conformance_context(tmp_path: Path, standard_registry):
     """Fresh standard-Astrid conformance context (m2 plan step 15, T24_impl).
 
@@ -159,6 +199,8 @@ def conformance_context(tmp_path: Path, standard_registry):
     from astrid.core.repositories.runs import RunRepository
     from astrid.core.repositories.tasks import TaskRepository
     from astrid.core.store.writer import DatabaseWriter
+    from astrid.packs.references.repository import ReferenceRepository
+    from astrid.packs.shots.repository import ShotRepository
     from astrid.packs.timeline.repository import TimelineRepository
 
     db_path = tmp_path / "conformance.sqlite3"
@@ -168,7 +210,7 @@ def conformance_context(tmp_path: Path, standard_registry):
         receipts = ReceiptService()
         projects = ProjectRepository(events=events, receipts=receipts)
         managed_root = tmp_path / "managed"
-        yield ConformanceContext(
+        context = ConformanceContext(
             db_path=db_path,
             writer=writer,
             registry=standard_registry,
@@ -185,5 +227,13 @@ def conformance_context(tmp_path: Path, standard_registry):
             runs=RunRepository(events=events, receipts=receipts),
             managed_root=managed_root,
         )
+        # The references pack repository is injected duck-typed (m3 T13):
+        # the kernel kit never imports a pack, so the context carries the
+        # pack-owned conformance factories' repository as a plain attribute.
+        context.references = ReferenceRepository(events=events, receipts=receipts)
+        # The shots pack repository is injected duck-typed (m3 T14) the same
+        # way, so the shot conformance factories drive the real repository.
+        context.shots = ShotRepository(events=events, receipts=receipts)
+        yield context
     finally:
         writer.close()

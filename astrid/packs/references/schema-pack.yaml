@@ -5,10 +5,15 @@
 # contract and is validated by astrid.core.schema_packs.manifest.
 #
 # The references pack owns exactly three tables (project_references,
-# media_references, reference_links) and declares the future namespaced
-# reference vocabulary. No executable repositories ship in m1 (repositories
-# is empty); the declared event/command kinds are the normative v10 examples
-# and are registry-validated before any mutation.
+# media_references, reference_links) and declares the m3 namespaced
+# reference vocabulary: the pack-owned aggregate stream type
+# ``reference.reference`` (one stream per reference, registered so events can
+# identify reference subjects without adding pack vocabulary to kernel DDL),
+# the receipt-backed lifecycle/media/link commands and events, and the
+# executable ``ReferenceRepository`` (kernel-writer backed). The declared
+# names are registry-validated before any mutation, and the kernel aggregate
+# rule table (astrid.core.events.registry.STREAM_AGGREGATE_RULES) owns the
+# reference aggregate semantics.
 id: references
 version: 1
 depends_on:
@@ -21,12 +26,22 @@ migrations:
       - project_references
       - media_references
       - reference_links
-stream_types: []
+stream_types:
+  - reference.reference
 event_kinds:
+  - reference.created
+  - reference.archived
+  - reference.media_associated
   - reference.primary_changed
+  - reference.linked
 command_kinds:
+  - reference.create
+  - reference.archive
+  - reference.associate
   - reference.set_primary
-repositories: []
+  - reference.link
+repositories:
+  - ReferenceRepository
 conformance:
   - replay
   - mismatch_before_mutation
@@ -34,6 +49,7 @@ conformance:
   - vocabulary
   - writer_ownership
   - crash_atomicity
+  - hash_chain
 cli_mounts:
   references: media references
 bridge_mounts: []

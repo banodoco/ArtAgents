@@ -49,12 +49,15 @@ from astrid.core.receipts import ReceiptMismatchError
 from astrid.core.repositories import (
     RunAlreadyExistsError,
     RunFanOutReadModel,
+    RunNotFoundError,
     RunRepositoryError,
     RunValidationError,
 )
 from astrid.core.repositories.runs import (
     CORE_RUN_CANCEL_COMMAND_KIND,
     CORE_RUN_CANCELLED_EVENT_KIND,
+    CORE_RUN_CONTINUE_COMMAND_KIND,
+    CORE_RUN_CONTINUED_EVENT_KIND,
     CORE_RUN_CREATE_COMMAND_KIND,
     CORE_RUN_CREATED_EVENT_KIND,
     CORE_RUN_RETRY_COMMAND_KIND,
@@ -66,10 +69,12 @@ from astrid.core.repositories.runs import (
     ContinuationEnvelope,
     ContinuationValidationError,
     RunCancelReadModel,
+    RunContinuationReadModel,
     RunProgressReadModel,
     RunReadModel,
     RunRepository,
     RunRetryReadModel,
+    RunStaleHeadError,
     RunTerminalError,
 )
 from astrid.core.repositories.tasks import (
@@ -635,6 +640,656 @@ def test_validate_continuation_envelope_rejects_violations(run_env) -> None:
     assert excinfo.value.field == "start_ordinal"
 
     assert _counts(run_env.writer) == counts
+
+
+# ---------------------------------------------------------------------------
+# Receipt-linked continuation command (m3 plan step 2, T2_impl)
+# ---------------------------------------------------------------------------
+
+
+def _continue_run(
+    env,
+    *,
+    project_id: str,
+    run_id: str,
+    expected_version: int,
+    start_ordinal: int,
+    children,
+    idempotency_key: str = "continue-k-1",
+    **overrides,
+):
+    args = {
+        "project_id": project_id,
+        "run_id": run_id,
+        "expected_version": expected_version,
+        "start_ordinal": start_ordinal,
+        "children": children,
+        "idempotency_key": idempotency_key,
+        "now": TS,
+    }
+    args.update(overrides)
+    return UnitOfWork(env.writer).run(
+        lambda u: env.run_repo.continue_run(u, **args)
+    )
+
+
+def _run_stream_head(writer: DatabaseWriter, run_id: str) -> int:
+    return int(
+        _stream_row(writer, f"{run_id}:{CORE_RUN_STREAM_TYPE}")["head_seq"]
+    )
+
+
+def _project_events(writer: DatabaseWriter, project_id: str):
+    """Every project event ordered by project_seq (kind, event_id, stream)."""
+    return writer.submit(
+        lambda session: session.query(
+            "SELECT e.kind, e.event_id, e.project_seq, s.stream_type, "
+            "s.aggregate_id FROM events e "
+            "JOIN event_streams s ON s.id = e.stream_id "
+            "WHERE e.project_id = ? ORDER BY e.project_seq ASC",
+            (project_id,),
+        )
+    )
+
+
+def test_continue_run_extends_run_with_contiguous_ordinals(run_env) -> None:
+    project = _create_project(run_env)
+    child_a = generate_lowercase_ulid()
+    child_b = generate_lowercase_ulid()
+    child_c = generate_lowercase_ulid()
+    child_d = generate_lowercase_ulid()
+    fanout = _fanout(
+        run_env,
+        project_id=project.id,
+        children=[_child(task_id=child_a), _child(task_id=child_b)],
+        idempotency_key="continue-fanout",
+    )
+    expected_version = _run_stream_head(run_env.writer, fanout.run_id)
+    assert expected_version == 1
+
+    result = _continue_run(
+        run_env,
+        project_id=project.id,
+        run_id=fanout.run_id,
+        expected_version=expected_version,
+        start_ordinal=2,
+        children=[_child(task_id=child_c), _child(task_id=child_d)],
+        idempotency_key="continue-1",
+    )
+    assert result.run_id == fanout.run_id
+    assert result.project_id == project.id
+    assert result.task_ids == (child_c, child_d)
+    assert result.first_ordinal == 2
+    assert result.last_ordinal == 3
+    assert result.expected_version == 1
+    assert result.next_version == 2
+
+    # The continuation advanced the run stream head by exactly one and the
+    # children carry stable contiguous ordinals after the original chunk.
+    assert _run_stream_head(run_env.writer, fanout.run_id) == 2
+    assert _task_row(run_env.writer, child_a)["run_ordinal"] == 0
+    assert _task_row(run_env.writer, child_b)["run_ordinal"] == 1
+    assert _task_row(run_env.writer, child_c)["run_ordinal"] == 2
+    assert _task_row(run_env.writer, child_d)["run_ordinal"] == 3
+    assert _task_row(run_env.writer, child_c)["run_id"] == fanout.run_id
+    assert _task_row(run_env.writer, child_d)["run_id"] == fanout.run_id
+    # The read model round-trips from its stored receipt result.
+    assert RunContinuationReadModel.from_mapping(result.to_dict()) == result
+
+
+def test_continue_run_emits_continuation_event_before_child_events(run_env) -> None:
+    project = _create_project(run_env)
+    child_a = generate_lowercase_ulid()
+    child_b = generate_lowercase_ulid()
+    child_c = generate_lowercase_ulid()
+    child_d = generate_lowercase_ulid()
+    fanout = _fanout(
+        run_env,
+        project_id=project.id,
+        children=[_child(task_id=child_a), _child(task_id=child_b)],
+        idempotency_key="continue-order-fanout",
+    )
+    run_stream = f"{fanout.run_id}:{CORE_RUN_STREAM_TYPE}"
+    result = _continue_run(
+        run_env,
+        project_id=project.id,
+        run_id=fanout.run_id,
+        expected_version=1,
+        start_ordinal=2,
+        children=[_child(task_id=child_c), _child(task_id=child_d)],
+        idempotency_key="continue-order",
+    )
+
+    # Project event order (project.created aside): run.created, child_a,
+    # child_b, then the continuation event, then child_c, child_d.
+    events = [
+        e
+        for e in _project_events(run_env.writer, project.id)
+        if e["kind"] != "core.project.created"
+    ]
+    assert [e["kind"] for e in events] == [
+        CORE_RUN_CREATED_EVENT_KIND,
+        CORE_TASK_CREATED_EVENT_KIND,
+        CORE_TASK_CREATED_EVENT_KIND,
+        CORE_RUN_CONTINUED_EVENT_KIND,
+        CORE_TASK_CREATED_EVENT_KIND,
+        CORE_TASK_CREATED_EVENT_KIND,
+    ]
+    continued = events[3]
+    assert continued["stream_type"] == CORE_RUN_STREAM_TYPE
+    assert continued["aggregate_id"] == fanout.run_id
+    assert json.loads(
+        _event_rows(run_env.writer, run_stream)[1]["payload_json"]
+    )["data"] == {
+        "run_id": fanout.run_id,
+        "expected_version": 1,
+        "start_ordinal": 2,
+        "child_count": 2,
+        "first_ordinal": 2,
+        "last_ordinal": 3,
+        "next_version": 2,
+    }
+
+    # One complete receipt: continuation event first, then ordered child
+    # events, spanning the exact project-seq range, with the full result.
+    receipt = _receipt_row(run_env.writer, project.id, "continue-order")
+    assert receipt is not None
+    assert receipt["command_kind"] == CORE_RUN_CONTINUE_COMMAND_KIND
+    assert receipt["primary_stream_id"] == run_stream
+    assert receipt["resulting_stream_seq"] == 2
+    event_ids = json.loads(receipt["event_ids_json"])
+    assert event_ids == [e["event_id"] for e in events[3:]]
+    assert receipt["first_project_seq"] == events[3]["project_seq"]
+    assert receipt["last_project_seq"] == events[5]["project_seq"]
+    stored = json.loads(receipt["result_json"])
+    assert stored == result.to_dict()
+    assert stored["task_ids"] == [child_c, child_d]
+    assert stored["first_ordinal"] == 2 and stored["last_ordinal"] == 3
+    assert stored["next_version"] == 2
+    # The continuation event chains on the run stream after run.created.
+    run_events = _event_rows(run_env.writer, run_stream)
+    assert [e["kind"] for e in run_events] == [
+        CORE_RUN_CREATED_EVENT_KIND,
+        CORE_RUN_CONTINUED_EVENT_KIND,
+    ]
+    assert run_events[0]["seq"] == 1 and run_events[1]["seq"] == 2
+
+
+def test_continue_run_rejects_missing_and_foreign_runs(run_env) -> None:
+    project = _create_project(run_env)
+    counts = _counts(run_env.writer)
+    missing = generate_lowercase_ulid()
+    with pytest.raises(RunNotFoundError):
+        _continue_run(
+            run_env,
+            project_id=project.id,
+            run_id=missing,
+            expected_version=0,
+            start_ordinal=0,
+            children=[_child()],
+            idempotency_key="continue-missing",
+        )
+    assert _counts(run_env.writer) == counts
+    # A run that belongs to another project is foreign: never visible.
+    other = _create_project(run_env, slug="beta")
+    foreign_run = _fanout(
+        run_env,
+        project_id=other.id,
+        children=[_child()],
+        idempotency_key="continue-foreign-fanout",
+    )
+    counts = _counts(run_env.writer)
+    with pytest.raises(RunNotFoundError):
+        _continue_run(
+            run_env,
+            project_id=project.id,
+            run_id=foreign_run.run_id,
+            expected_version=1,
+            start_ordinal=0,
+            children=[_child()],
+            idempotency_key="continue-foreign",
+        )
+    assert _counts(run_env.writer) == counts
+
+
+def test_continue_run_rejects_terminal_run(run_env) -> None:
+    project = _create_project(run_env)
+    child = generate_lowercase_ulid()
+    fanout = _fanout(
+        run_env,
+        project_id=project.id,
+        children=[_child(task_id=child)],
+        idempotency_key="continue-terminal-fanout",
+    )
+    # Drive the run terminal via group cancel (the only child is queued).
+    UnitOfWork(run_env.writer).run(
+        lambda u: run_env.run_repo.cancel(
+            u,
+            project_id=project.id,
+            run_id=fanout.run_id,
+            idempotency_key="continue-terminal-cancel",
+            now=TS,
+        )
+    )
+    assert _run_row(run_env.writer, fanout.run_id)["status"] == "cancelled"
+    counts = _counts(run_env.writer)
+    with pytest.raises(RunTerminalError) as excinfo:
+        _continue_run(
+            run_env,
+            project_id=project.id,
+            run_id=fanout.run_id,
+            expected_version=2,
+            start_ordinal=1,
+            children=[_child()],
+            idempotency_key="continue-terminal",
+        )
+    assert excinfo.value.status == "cancelled"
+    assert _counts(run_env.writer) == counts
+
+
+def test_continue_run_rejects_stale_head_before_mutation(run_env) -> None:
+    project = _create_project(run_env)
+    child = generate_lowercase_ulid()
+    fanout = _fanout(
+        run_env,
+        project_id=project.id,
+        children=[_child(task_id=child)],
+        idempotency_key="continue-stale-fanout",
+    )
+    counts = _counts(run_env.writer)
+    # A stale (behind) head and an ahead-of-head CAS both change zero rows.
+    with pytest.raises(RunStaleHeadError) as excinfo:
+        _continue_run(
+            run_env,
+            project_id=project.id,
+            run_id=fanout.run_id,
+            expected_version=0,
+            start_ordinal=1,
+            children=[_child()],
+            idempotency_key="continue-stale",
+        )
+    assert excinfo.value.expected_version == 0
+    assert excinfo.value.current_version == 1
+    with pytest.raises(RunStaleHeadError):
+        _continue_run(
+            run_env,
+            project_id=project.id,
+            run_id=fanout.run_id,
+            expected_version=5,
+            start_ordinal=1,
+            children=[_child()],
+            idempotency_key="continue-ahead",
+        )
+    assert _counts(run_env.writer) == counts
+
+
+def test_continue_run_rejects_gap_and_overlap_ordinals(run_env) -> None:
+    project = _create_project(run_env)
+    child = generate_lowercase_ulid()
+    fanout = _fanout(
+        run_env,
+        project_id=project.id,
+        children=[_child(task_id=child)],
+        idempotency_key="continue-ordinal-fanout",
+    )
+    counts = _counts(run_env.writer)
+    # A gap (next free ordinal is 1, caller says 5) is rejected.
+    with pytest.raises(RunValidationError) as excinfo:
+        _continue_run(
+            run_env,
+            project_id=project.id,
+            run_id=fanout.run_id,
+            expected_version=1,
+            start_ordinal=5,
+            children=[_child()],
+            idempotency_key="continue-gap",
+        )
+    assert "contiguous" in str(excinfo.value)
+    # An overlap (ordinal 1 already... ordinal 0 exists, so 0 overlaps).
+    with pytest.raises(RunValidationError):
+        _continue_run(
+            run_env,
+            project_id=project.id,
+            run_id=fanout.run_id,
+            expected_version=1,
+            start_ordinal=0,
+            children=[_child()],
+            idempotency_key="continue-overlap",
+        )
+    assert _counts(run_env.writer) == counts
+
+
+def test_continue_run_rejects_later_child_and_cross_project_dependencies(
+    run_env,
+) -> None:
+    project_a = _create_project(run_env, slug="alpha")
+    project_b = _create_project(run_env, slug="beta")
+    earlier = generate_lowercase_ulid()
+    fanout = _fanout(
+        run_env,
+        project_id=project_a.id,
+        children=[_child(task_id=earlier)],
+        idempotency_key="continue-dep-fanout",
+    )
+    foreign_task = generate_lowercase_ulid()
+    UnitOfWork(run_env.writer).run(
+        lambda u: (
+            u.execute(
+                "INSERT INTO event_streams "
+                "(id, project_id, stream_type, aggregate_id, head_seq, created_at) "
+                "VALUES (?, ?, 'core.task', ?, 0, ?)",
+                (
+                    f"{foreign_task}:{CORE_TASK_STREAM_TYPE}",
+                    project_b.id,
+                    foreign_task,
+                    TS,
+                ),
+            ),
+            u.execute(
+                "INSERT INTO tasks "
+                "(id, project_id, event_stream_id, capability, spec_json, "
+                "spec_hash, input_manifest_json, status, priority, available_at, "
+                "max_attempts, created_at, updated_at) "
+                "VALUES (?, ?, ?, 'foreign.capability', '{}', ?, '[]', 'queued', "
+                "0, ?, 1, ?, ?)",
+                (
+                    foreign_task,
+                    project_b.id,
+                    f"{foreign_task}:{CORE_TASK_STREAM_TYPE}",
+                    "x" * 64,
+                    TS,
+                    TS,
+                    TS,
+                ),
+            ),
+        )
+    )
+    counts = _counts(run_env.writer)
+    # Cross-project dependency in a continuation chunk -> typed error.
+    with pytest.raises(TaskDependencyError) as excinfo:
+        _continue_run(
+            run_env,
+            project_id=project_a.id,
+            run_id=fanout.run_id,
+            expected_version=1,
+            start_ordinal=1,
+            children=[
+                _child(
+                    dependencies=[
+                        {"task_id": foreign_task, "kind": "hard", "ordinal": 0}
+                    ]
+                )
+            ],
+            idempotency_key="continue-cross",
+        )
+    assert excinfo.value.reason == "cross_project"
+    # A dependency on a later child of the same chunk is typed missing: the
+    # later child does not exist yet when the earlier one is created.
+    later = generate_lowercase_ulid()
+    with pytest.raises(TaskDependencyError) as excinfo:
+        _continue_run(
+            run_env,
+            project_id=project_a.id,
+            run_id=fanout.run_id,
+            expected_version=1,
+            start_ordinal=1,
+            children=[
+                _child(
+                    task_id=generate_lowercase_ulid(),
+                    dependencies=[
+                        {"task_id": later, "kind": "hard", "ordinal": 0}
+                    ],
+                ),
+                _child(task_id=later),
+            ],
+            idempotency_key="continue-later-child",
+        )
+    assert excinfo.value.reason == "missing"
+    # A dependency on an earlier child of the same chunk resolves fine.
+    resolved = _continue_run(
+        run_env,
+        project_id=project_a.id,
+        run_id=fanout.run_id,
+        expected_version=1,
+        start_ordinal=1,
+        children=[
+            _child(
+                task_id=generate_lowercase_ulid(),
+                dependencies=[
+                    {"task_id": earlier, "kind": "hard", "ordinal": 0}
+                ],
+            )
+        ],
+        idempotency_key="continue-early-dep",
+    )
+    assert len(resolved.task_ids) == 1
+    assert _counts(run_env.writer) != counts
+
+
+def test_continue_run_rejects_chunk_bound_violations(run_env) -> None:
+    project = _create_project(run_env)
+    # A 257-child chunk is rejected before any mutation.
+    counts = _counts(run_env.writer)
+    with pytest.raises(RunValidationError):
+        _continue_run(
+            run_env,
+            project_id=project.id,
+            run_id=generate_lowercase_ulid(),
+            expected_version=0,
+            start_ordinal=0,
+            children=[_child() for _ in range(FROZEN_MAX_DIRECT_CHILDREN + 1)],
+            idempotency_key="continue-257",
+        )
+    assert _counts(run_env.writer) == counts
+    # A chunk that would push ordinals past 255 is rejected even though the
+    # chunk itself is at most 256 children.
+    fanout = _fanout(
+        run_env,
+        project_id=project.id,
+        children=[_child() for _ in range(255)],
+        idempotency_key="continue-bound-fanout",
+    )
+    counts = _counts(run_env.writer)
+    with pytest.raises(RunValidationError) as excinfo:
+        _continue_run(
+            run_env,
+            project_id=project.id,
+            run_id=fanout.run_id,
+            expected_version=1,
+            start_ordinal=255,
+            children=[_child(), _child()],
+            idempotency_key="continue-bound",
+        )
+    assert "ordinal bound" in str(excinfo.value)
+    assert _counts(run_env.writer) == counts
+
+
+def test_continue_run_replay_returns_stored_result_with_zero_new_rows(
+    run_env,
+) -> None:
+    project = _create_project(run_env)
+    child = generate_lowercase_ulid()
+    fanout = _fanout(
+        run_env,
+        project_id=project.id,
+        children=[_child()],
+        idempotency_key="continue-replay-fanout",
+    )
+    first = _continue_run(
+        run_env,
+        project_id=project.id,
+        run_id=fanout.run_id,
+        expected_version=1,
+        start_ordinal=1,
+        children=[_child(task_id=child)],
+        idempotency_key="continue-replay",
+    )
+    counts = _counts(run_env.writer)
+    second = _continue_run(
+        run_env,
+        project_id=project.id,
+        run_id=fanout.run_id,
+        expected_version=1,
+        start_ordinal=1,
+        children=[_child(task_id=child)],
+        idempotency_key="continue-replay",
+    )
+    assert second == first
+    assert second.to_dict() == first.to_dict()
+    assert _counts(run_env.writer) == counts
+
+
+def test_continue_run_mismatch_fails_before_any_mutation(run_env) -> None:
+    project = _create_project(run_env)
+    fanout = _fanout(
+        run_env,
+        project_id=project.id,
+        children=[_child()],
+        idempotency_key="continue-mismatch-fanout",
+    )
+    _continue_run(
+        run_env,
+        project_id=project.id,
+        run_id=fanout.run_id,
+        expected_version=1,
+        start_ordinal=1,
+        children=[_child(task_id=generate_lowercase_ulid())],
+        idempotency_key="continue-mismatch",
+    )
+    counts = _counts(run_env.writer)
+    with pytest.raises(ReceiptMismatchError):
+        _continue_run(
+            run_env,
+            project_id=project.id,
+            run_id=fanout.run_id,
+            expected_version=1,
+            start_ordinal=1,
+            children=[_child(task_id=generate_lowercase_ulid())],
+            idempotency_key="continue-mismatch",
+        )
+    assert _counts(run_env.writer) == counts
+
+
+def test_continue_run_validation(run_env) -> None:
+    project = _create_project(run_env)
+    fanout = _fanout(
+        run_env,
+        project_id=project.id,
+        children=[_child()],
+        idempotency_key="continue-validate-fanout",
+    )
+    counts = _counts(run_env.writer)
+    with pytest.raises(RunValidationError):
+        _continue_run(
+            run_env,
+            project_id="",
+            run_id=fanout.run_id,
+            expected_version=1,
+            start_ordinal=1,
+            children=[_child()],
+        )
+    with pytest.raises(RunValidationError):
+        _continue_run(
+            run_env,
+            project_id=project.id,
+            run_id=fanout.run_id,
+            expected_version=-1,
+            start_ordinal=1,
+            children=[_child()],
+        )
+    with pytest.raises(RunValidationError):
+        _continue_run(
+            run_env,
+            project_id=project.id,
+            run_id=fanout.run_id,
+            expected_version=True,
+            start_ordinal=1,
+            children=[_child()],
+        )
+    with pytest.raises(RunValidationError):
+        _continue_run(
+            run_env,
+            project_id=project.id,
+            run_id=fanout.run_id,
+            expected_version=1,
+            start_ordinal=-1,
+            children=[_child()],
+        )
+    with pytest.raises(RunValidationError):
+        _continue_run(
+            run_env,
+            project_id=project.id,
+            run_id=fanout.run_id,
+            expected_version=1,
+            start_ordinal=256,
+            children=[_child()],
+        )
+    with pytest.raises(RunValidationError):
+        _continue_run(
+            run_env,
+            project_id=project.id,
+            run_id=fanout.run_id,
+            expected_version=1,
+            start_ordinal=1,
+            children=[],
+        )
+    with pytest.raises(RunValidationError):
+        _continue_run(
+            run_env,
+            project_id=project.id,
+            run_id=fanout.run_id,
+            expected_version=1,
+            start_ordinal=1,
+            children="not-an-array",
+        )
+    with pytest.raises(RunValidationError):
+        _continue_run(
+            run_env,
+            project_id=project.id,
+            run_id=fanout.run_id,
+            expected_version=1,
+            start_ordinal=1,
+            children=[_child(capability="")],
+        )
+    with pytest.raises(RunRepositoryError):
+        _continue_run(
+            run_env,
+            project_id=project.id,
+            run_id=fanout.run_id,
+            expected_version=1,
+            start_ordinal=1,
+            children="bad",
+        )
+    assert _counts(run_env.writer) == counts
+
+
+def test_continue_run_keeps_plan_and_step_tables_absent(run_env) -> None:
+    project = _create_project(run_env)
+    fanout = _fanout(
+        run_env,
+        project_id=project.id,
+        children=[_child()],
+        idempotency_key="continue-forbidden-fanout",
+    )
+    _continue_run(
+        run_env,
+        project_id=project.id,
+        run_id=fanout.run_id,
+        expected_version=1,
+        start_ordinal=1,
+        children=[_child()],
+        idempotency_key="continue-forbidden",
+    )
+    present = run_env.writer.submit(
+        lambda session: {
+            row[0]
+            for row in session.query(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            )
+        }
+    )
+    for forbidden in FORBIDDEN_TABLES:
+        assert forbidden not in present
 
 
 # ---------------------------------------------------------------------------

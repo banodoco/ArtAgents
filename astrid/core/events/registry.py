@@ -29,7 +29,13 @@ implements the project vertical only, so m1 core event/command kinds are the
 project ones. m2 (plan step 1) registers the exact task lifecycle (admission,
 claim, start, expiry, cancellation, failure, retry, completion), run fan-out
 and group, and media (import, location replacement, relations) command/event
-kinds the m2 repositories consume.
+kinds the m2 repositories consume. m3 (plan step 1) adds the receipt-linked
+run continuation vocabulary (``core.run.continue``/``core.run.continued``),
+the kernel evidence event (``core.evidence.recorded``) and its receipt
+command kind (``core.evidence.record``), and registers
+aggregate agreement rules for the references and shots packs' own stream
+types (``reference.reference``, ``shot.shot``) so pack-owned repositories
+can create and write their aggregate streams without kernel DDL changes.
 """
 
 from __future__ import annotations
@@ -114,6 +120,13 @@ CORE_EVENT_KINDS: tuple[str, ...] = (
     "core.run.created",
     "core.run.cancelled",
     "core.run.retried",
+    # m3 run continuation: one event per receipt-linked continuation chunk,
+    # appended on the run stream before the chunk's child creation events.
+    "core.run.continued",
+    # m3 evidence: one event per recorded evidence item, appended on the run
+    # stream (the evidence repository is kernel-owned; the run stream carries
+    # the subject and the evidence rows are kernel tables).
+    "core.evidence.recorded",
     # m2 media events: import, location replacement, and relations.
     "core.media.imported",
     "core.media.location_replaced",
@@ -143,6 +156,12 @@ CORE_COMMAND_KINDS: tuple[str, ...] = (
     "core.run.create",
     "core.run.cancel",
     "core.run.retry",
+    # m3 run continuation: the expected-head CAS command that extends an
+    # existing run with a bounded chunk of child task specs and edges.
+    "core.run.continue",
+    # m3 evidence: the receipt-backed command that records one evidence
+    # item (observation/measurement/validation/decision/error) on a run.
+    "core.evidence.record",
     # m2 media commands: import, location replacement, and relations.
     "core.media.import",
     "core.media.replace_location",
@@ -262,11 +281,22 @@ STREAM_AGGREGATE_RULES: Mapping[str, StreamAggregateRule] = MappingProxyType(
             declaring_pack="timeline",
             subject_type="timeline",
         ),
+        "reference.reference": StreamAggregateRule(
+            stream_type="reference.reference",
+            declaring_pack="references",
+            subject_type="reference",
+        ),
+        "shot.shot": StreamAggregateRule(
+            stream_type="shot.shot",
+            declaring_pack="shots",
+            subject_type="shot",
+        ),
     }
 )
 """Aggregate agreement rules for every stream type the composed registry
-can declare today (core project/task/run/media and the timeline pack). The
-rule table lives here — the vocabulary module — not in repository handlers."""
+can declare today (core project/task/run/media, the timeline pack, and the
+m3 references/shots packs). The rule table lives here — the vocabulary
+module — not in repository handlers."""
 
 
 def _require_namespaced(

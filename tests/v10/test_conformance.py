@@ -8,8 +8,10 @@ writer_ownership, crash_atomicity, hash_chain) over the real writer,
 services, and repositories. This module proves two things:
 
 1. the *positive* contract — ``timeline.create`` and ``timeline.save``
-   conform on every dimension, and the manifest-only shot/reference commands
-   stay explicitly non-executable; and
+   conform on every dimension, the reference commands become executable
+   through the pack-owned factories (``astrid.packs.references.conformance``),
+   and the shot commands become executable through their own pack-owned
+   factory (``astrid.packs.shots.conformance``, m3 T14); and
 2. the *negative* contract — a deliberately non-conforming command is
    caught by each applicable dimension, so the kit cannot give false
    confidence by only passing correct commands.
@@ -163,15 +165,23 @@ def _run_all_deterministic(tmp_path: Path, spec: CommandSpec, *, key: str):
     raise last_error
 
 
-def test_manifest_only_shot_and_reference_commands_are_not_executable(
+def test_reference_and_shot_commands_are_executable_through_pack_factories(
     ctx,
+    conformance_context,
 ) -> None:
-    """Declared-but-unimplemented commands stay registry-only, never runnable.
+    """Pack-owned specs make reference and shot commands executable.
 
-    The shots and references schema packs declare their future vocabulary
-    (``shot.add_item``, ``reference.set_primary``) but ship ``repositories:
-    []``; the kit's executable set must never contain them, while the
-    registry still declares them so a would-be caller gets a typed error.
+    The references schema pack declares its executable repository and all
+    five command kinds; the pack-owned conformance factory
+    (``astrid.packs.references.conformance``) registers exactly those five
+    commands, so the kit drives them over the real repository instead of a
+    manifest-only expectation. The shots pack (m3 T14) declares its four
+    commands and its executable ``ShotRepository``; the pack-owned shot
+    factory (``astrid.packs.shots.conformance``) registers exactly
+    ``shot.create``/``shot.add_item``/``shot.remove_item``/``shot.reorder``.
+    Both executable sets stay outside the kernel standard set — the kit
+    never imports a pack — while every declared command remains
+    registry-validated so a would-be caller gets a typed error.
     """
     specs = standard_command_specs(ctx)
     for kind in NON_EXECUTABLE_COMMAND_KINDS:
@@ -181,15 +191,47 @@ def test_manifest_only_shot_and_reference_commands_are_not_executable(
 
         validate_command_kind(ctx.registry, kind)
 
-    for pack_id, command_kind in (
-        ("shots", "shot.add_item"),
-        ("references", "reference.set_primary"),
+    from astrid.packs.references.conformance import reference_command_specs
+    from astrid.packs.shots.conformance import shot_command_specs
+
+    reference_specs = reference_command_specs(conformance_context)
+    assert set(reference_specs) == {
+        "reference.create",
+        "reference.archive",
+        "reference.associate",
+        "reference.set_primary",
+        "reference.link",
+    }
+    references_manifest = load_schema_pack_manifest(
+        Path("astrid") / "packs" / "references" / "schema-pack.yaml"
+    )
+    assert "ReferenceRepository" in references_manifest.repositories
+
+    shot_specs = shot_command_specs(conformance_context)
+    assert set(shot_specs) == {
+        "shot.create",
+        "shot.add_item",
+        "shot.remove_item",
+        "shot.reorder",
+    }
+    shots_manifest = load_schema_pack_manifest(
+        Path("astrid") / "packs" / "shots" / "schema-pack.yaml"
+    )
+    assert "ShotRepository" in shots_manifest.repositories
+    for kind in (
+        "shot.create",
+        "shot.add_item",
+        "shot.remove_item",
+        "shot.reorder",
     ):
-        manifest = load_schema_pack_manifest(
-            Path("astrid") / "packs" / pack_id / "schema-pack.yaml"
-        )
-        assert manifest.repositories == (), pack_id
-        assert command_kind in manifest.command_kinds, pack_id
+        assert kind in shots_manifest.command_kinds, kind
+        assert kind in shot_specs, f"{kind} must be executable through the pack factory"
+
+    # Pack commands never enter the kernel executable set (no kernel->pack
+    # import): the standard specs stay exactly the timeline + opt-in kernel
+    # commands regardless of what the pack factories register.
+    for kind in (*reference_specs, *shot_specs):
+        assert kind not in standard_command_specs(conformance_context), kind
 
 
 def test_kernel_task_and_media_specs_conform_on_every_dimension(

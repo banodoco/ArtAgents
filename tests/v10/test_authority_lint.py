@@ -21,6 +21,18 @@ documented exemption is proven by a fixture that must stay clean:
   composition, and only legacy paths outside the supported v10 entries are
   exempt from the legacy-authority rule.
 
+The m3 reference and shot surfaces get their own adversarial fixtures and
+negative controls: kernel imports of ``references``/``shots`` repository and
+conformance modules fail, cross-pack implementation imports between the two
+new packs fail, a pack-owned ``DatabaseWriter`` or writable ``sqlite3.connect``
+inside either pack fails, and kernel FKs to ``project_references``/``shots``
+plus cross-pack FKs between the new packs fail. The negative controls prove
+that allowed kernel currency stays legal: kernel-module imports from packs,
+own-pack imports (the real conformance modules import their own repository),
+caller-supplied ``UnitOfWork`` use (``uow.execute`` / ``uow.connection``
+without constructing a writer), ``mode=ro`` probes, and pack-to-kernel FKs
+(``projects``/``media``/``tasks``) never trip a rule.
+
 All fixtures are pure text under ``tmp_path``; no fixture touches the real
 repository tree.
 """
@@ -79,16 +91,77 @@ migrations:
     path: migrations/0001_initial.sql
     tables:
       - shots
-stream_types: []
+      - shot_items
+stream_types:
+  - shot.shot
 event_kinds:
+  - shot.created
   - shot.item_added
+  - shot.item_removed
+  - shot.reordered
 command_kinds:
+  - shot.create
   - shot.add_item
-repositories: []
+  - shot.remove_item
+  - shot.reorder
+repositories:
+  - ShotRepository
 conformance:
   - replay
+  - mismatch_before_mutation
+  - same_project
+  - vocabulary
+  - writer_ownership
+  - crash_atomicity
+  - hash_chain
 cli_mounts:
   shots: timelines shots
+bridge_mounts: []
+"""
+
+# The real references schema-pack manifest shape: the pack owns the three
+# project_references/media_references/reference_links tables, the pack-owned
+# ``reference.reference`` aggregate stream, and the receipt-backed lifecycle/
+# media/link commands and events (m3).
+_REFERENCES_MANIFEST = """\
+id: references
+version: 1
+depends_on:
+  - core >= 1
+migrations:
+  - version: 1
+    name: initial
+    path: migrations/0001_initial.sql
+    tables:
+      - project_references
+      - media_references
+      - reference_links
+stream_types:
+  - reference.reference
+event_kinds:
+  - reference.created
+  - reference.archived
+  - reference.media_associated
+  - reference.primary_changed
+  - reference.linked
+command_kinds:
+  - reference.create
+  - reference.archive
+  - reference.associate
+  - reference.set_primary
+  - reference.link
+repositories:
+  - ReferenceRepository
+conformance:
+  - replay
+  - mismatch_before_mutation
+  - same_project
+  - vocabulary
+  - writer_ownership
+  - crash_atomicity
+  - hash_chain
+cli_mounts:
+  references: media references
 bridge_mounts: []
 """
 
@@ -101,7 +174,14 @@ def _write(root: Path, rel: str, body: str) -> Path:
 
 
 def _bootstrap(root: Path, *, with_shots: bool = False) -> None:
-    """Minimal lint-scan root: core + packs with valid pack manifests."""
+    """Minimal lint-scan root: core + packs with valid pack manifests.
+
+    The references pack is always present (it is a frozen m3 schema pack);
+    its migration FK's inward to kernel tables only (projects/media/tasks),
+    mirroring the real pack so the clean baseline proves pack-to-kernel FKs
+    are the allowed kernel currency. The shots pack is opt-in because some
+    m1 fixtures exercise a timeline-only composition.
+    """
     _write(root, "astrid/core/__init__.py", "")
     _write(root, "astrid/packs/__init__.py", "")
     _write(root, "astrid/packs/timeline/__init__.py", "")
@@ -120,6 +200,38 @@ def _bootstrap(root: Path, *, with_shots: bool = False) -> None:
         "  updated_at TEXT NOT NULL\n"
         ");\n",
     )
+    _write(root, "astrid/packs/references/__init__.py", "")
+    _write(root, "astrid/packs/references/schema-pack.yaml", _REFERENCES_MANIFEST)
+    _write(
+        root,
+        "astrid/packs/references/migrations/0001_initial.sql",
+        "CREATE TABLE project_references (\n"
+        "  id TEXT PRIMARY KEY,\n"
+        "  project_id TEXT NOT NULL REFERENCES projects (id),\n"
+        "  kind TEXT NOT NULL,\n"
+        "  name TEXT NOT NULL,\n"
+        "  created_at TEXT NOT NULL,\n"
+        "  updated_at TEXT NOT NULL,\n"
+        "  archived_at TEXT\n"
+        ");\n"
+        "CREATE TABLE media_references (\n"
+        "  id TEXT PRIMARY KEY,\n"
+        "  reference_id TEXT NOT NULL REFERENCES project_references (id),\n"
+        "  media_id TEXT NOT NULL REFERENCES media (id),\n"
+        "  role TEXT NOT NULL,\n"
+        "  context_task_id TEXT REFERENCES tasks (id),\n"
+        "  ordinal INTEGER NOT NULL DEFAULT 0,\n"
+        "  is_primary INTEGER NOT NULL DEFAULT 0,\n"
+        "  created_at TEXT NOT NULL\n"
+        ");\n"
+        "CREATE TABLE reference_links (\n"
+        "  from_reference_id TEXT NOT NULL REFERENCES project_references (id),\n"
+        "  to_reference_id TEXT NOT NULL REFERENCES project_references (id),\n"
+        "  kind TEXT NOT NULL,\n"
+        "  created_at TEXT NOT NULL,\n"
+        "  PRIMARY KEY (from_reference_id, to_reference_id, kind)\n"
+        ");\n",
+    )
     if with_shots:
         _write(root, "astrid/packs/shots/__init__.py", "")
         _write(root, "astrid/packs/shots/schema-pack.yaml", _SHOTS_MANIFEST)
@@ -128,7 +240,19 @@ def _bootstrap(root: Path, *, with_shots: bool = False) -> None:
             "astrid/packs/shots/migrations/0001_initial.sql",
             "CREATE TABLE shots (\n"
             "  id TEXT PRIMARY KEY,\n"
-            "  project_id TEXT NOT NULL\n"
+            "  project_id TEXT NOT NULL REFERENCES projects (id),\n"
+            "  name TEXT NOT NULL,\n"
+            "  sort_key TEXT NOT NULL,\n"
+            "  created_at TEXT NOT NULL,\n"
+            "  updated_at TEXT NOT NULL\n"
+            ");\n"
+            "CREATE TABLE shot_items (\n"
+            "  id TEXT PRIMARY KEY,\n"
+            "  shot_id TEXT NOT NULL REFERENCES shots (id),\n"
+            "  media_id TEXT NOT NULL REFERENCES media (id),\n"
+            "  sort_key TEXT NOT NULL,\n"
+            "  source_frame INTEGER,\n"
+            "  created_at TEXT NOT NULL\n"
             ");\n",
         )
 
@@ -194,6 +318,121 @@ def test_pack_to_pack_import_fails(tmp_path: Path) -> None:
         in error
         for error in errors
     ), errors
+
+
+def test_kernel_to_pack_import_of_new_repository_surfaces_fails(
+    tmp_path: Path,
+) -> None:
+    """The m3 references/shots repository and conformance modules are pack
+    surfaces: a kernel module importing any of them is a kernel-to-pack
+    violation (the same rule that guards the m1 timeline pack)."""
+    _bootstrap(tmp_path)
+    _write(
+        tmp_path,
+        "astrid/core/evil_repo_user.py",
+        "from astrid.packs.references.repository import ReferenceRepository\n"
+        "from astrid.packs.shots.repository import ShotRepository\n"
+        "from astrid.packs.references.conformance import reference_create_spec\n"
+        "from astrid.packs.shots.conformance import shot_create_spec\n",
+    )
+    errors = lint_import_boundaries(tmp_path)
+    for module in (
+        "astrid.packs.references.repository",
+        "astrid.packs.shots.repository",
+        "astrid.packs.references.conformance",
+        "astrid.packs.shots.conformance",
+    ):
+        assert any(
+            f"astrid/core/evil_repo_user.py: kernel-to-pack import {module!r}"
+            in error
+            for error in errors
+        ), (module, errors)
+
+
+def test_kernel_imports_of_kernel_currencies_stay_clean(tmp_path: Path) -> None:
+    """Negative control: kernel modules legitimately import the kernel
+    currency the packs receive (UoW, receipts, media/event services); those
+    imports are never pack imports and must not be flagged."""
+    _bootstrap(tmp_path)
+    _write(
+        tmp_path,
+        "astrid/core/legit_user.py",
+        "from astrid.core.store.uow import UnitOfWork\n"
+        "from astrid.core.receipts.service import ReceiptService\n"
+        "from astrid.core.repositories.media import MediaRepository\n"
+        "from astrid.core.events.service import EventAppendService\n",
+    )
+    errors = lint_import_boundaries(tmp_path)
+    assert errors == [], errors
+
+
+def test_cross_pack_implementation_imports_between_new_packs_fail(
+    tmp_path: Path,
+) -> None:
+    """The references and shots packs are independent implementations:
+    either pack importing the other's repository or conformance modules is a
+    pack-to-pack violation."""
+    _bootstrap(tmp_path, with_shots=True)
+    _write(
+        tmp_path,
+        "astrid/packs/references/evil.py",
+        "from astrid.packs.shots.repository import ShotRepository\n",
+    )
+    _write(
+        tmp_path,
+        "astrid/packs/references/evil_conformance.py",
+        "from astrid.packs.shots.conformance import shot_create_spec\n",
+    )
+    _write(
+        tmp_path,
+        "astrid/packs/shots/evil.py",
+        "from astrid.packs.references.repository import ReferenceRepository\n",
+    )
+    errors = lint_import_boundaries(tmp_path)
+    assert any(
+        "astrid/packs/references/evil.py: pack-to-pack import "
+        "'astrid.packs.shots.repository' from pack 'references'"
+        in error
+        for error in errors
+    ), errors
+    assert any(
+        "astrid/packs/references/evil_conformance.py: pack-to-pack import "
+        "'astrid.packs.shots.conformance' from pack 'references'"
+        in error
+        for error in errors
+    ), errors
+    assert any(
+        "astrid/packs/shots/evil.py: pack-to-pack import "
+        "'astrid.packs.references.repository' from pack 'shots'"
+        in error
+        for error in errors
+    ), errors
+
+
+def test_pack_import_of_kernel_currency_and_own_pack_stays_clean(
+    tmp_path: Path,
+) -> None:
+    """Negative control mirroring the real conformance modules: a pack may
+    import kernel currency (the conformance kit, UoW, receipts) and its own
+    pack's repository, but never another pack."""
+    _bootstrap(tmp_path)
+    _write(
+        tmp_path,
+        "astrid/packs/references/conformance.py",
+        "from astrid.core.conformance.kit import CommandSpec\n"
+        "from astrid.core.store.uow import UnitOfWork\n"
+        "from astrid.core.receipts import ReceiptMismatchError\n"
+        "from astrid.packs.references.repository import ReferenceRepository\n",
+    )
+    _write(
+        tmp_path,
+        "astrid/packs/shots/conformance.py",
+        "from astrid.core.conformance.kit import CommandSpec\n"
+        "from astrid.core.store.uow import UnitOfWork\n"
+        "from astrid.packs.shots.repository import ShotRepository\n",
+    )
+    errors = lint_import_boundaries(tmp_path)
+    assert errors == [], errors
 
 
 def test_legacy_rendering_and_builtin_pack_imports_stay_legal_in_kernel(
@@ -263,6 +502,75 @@ def test_conformance_kit_scratch_writer_is_exempt(tmp_path: Path) -> None:
         "astrid/core/conformance/kit.py",
         "from astrid.core.store.writer import DatabaseWriter\n"
         "writer = DatabaseWriter('/tmp/scratch.sqlite3', None)\n",
+    )
+    errors = lint_writer_authority(tmp_path)
+    assert errors == [], errors
+
+
+def test_pack_owned_repository_and_conformance_writer_construction_fails(
+    tmp_path: Path,
+) -> None:
+    """A DatabaseWriter or writable sqlite3.connect inside the references or
+    shots pack (repository or conformance surface) is a second write
+    authority: pack code must run inside the caller's kernel UoW."""
+    _bootstrap(tmp_path)
+    _write(
+        tmp_path,
+        "astrid/packs/references/repository.py",
+        "from astrid.core.store.writer import DatabaseWriter\n"
+        "writer = DatabaseWriter('/tmp/refs.sqlite3', None)\n",
+    )
+    _write(
+        tmp_path,
+        "astrid/packs/shots/repository.py",
+        "import sqlite3\n"
+        "conn = sqlite3.connect('/tmp/shots.sqlite3')\n",
+    )
+    _write(
+        tmp_path,
+        "astrid/packs/references/conformance.py",
+        "import sqlite3\n"
+        "conn = sqlite3.connect('/tmp/refs_conformance.sqlite3')\n",
+    )
+    _write(
+        tmp_path,
+        "astrid/packs/shots/conformance.py",
+        "from astrid.core.store.writer import DatabaseWriter\n"
+        "writer = DatabaseWriter('/tmp/shots_conformance.sqlite3', None)\n",
+    )
+    errors = lint_writer_authority(tmp_path)
+    for rel in (
+        "astrid/packs/references/repository.py",
+        "astrid/packs/shots/repository.py",
+        "astrid/packs/references/conformance.py",
+        "astrid/packs/shots/conformance.py",
+    ):
+        assert any(
+            f"{rel}: SQLite writer construction outside the kernel store"
+            in error
+            for error in errors
+        ), (rel, errors)
+
+
+def test_caller_supplied_uow_use_is_not_a_writer(tmp_path: Path) -> None:
+    """Negative control mirroring the real repositories: importing the
+    ``DatabaseWriter``/``sqlite3`` names and running inside the caller's
+    ``UnitOfWork`` (``uow.execute`` / ``uow.connection``) never constructs a
+    writer and must stay clean; only construction is a violation."""
+    _bootstrap(tmp_path)
+    _write(
+        tmp_path,
+        "astrid/packs/references/repository.py",
+        "import sqlite3\n"
+        "from astrid.core.store.uow import UnitOfWork\n"
+        "from astrid.core.store.writer import DatabaseWriter\n"
+        "\n"
+        "def create(uow: UnitOfWork) -> None:\n"
+        "    uow.execute(\"INSERT INTO project_references (id) VALUES (?)\", ('r1',))\n"
+        "\n"
+        "def show(uow: UnitOfWork) -> None:\n"
+        "    conn = uow.connection\n"
+        "    conn.execute(\"SELECT id FROM project_references\")\n",
     )
     errors = lint_writer_authority(tmp_path)
     assert errors == [], errors
@@ -342,6 +650,75 @@ def test_cross_pack_fk_fails(tmp_path: Path) -> None:
         "timelines to 'shots' (pack 'shots')" in error
         for error in errors
     ), errors
+
+
+def test_kernel_fk_to_new_pack_tables_fails(tmp_path: Path) -> None:
+    """Kernel FKs may reference kernel tables only: a kernel table may never
+    FK to the new pack-owned project_references or shots tables."""
+    _bootstrap(tmp_path, with_shots=True)
+    _write(
+        tmp_path,
+        "astrid/packs/timeline/migrations/0002_bad.sql",
+        "CREATE TABLE events (\n"
+        "  id TEXT PRIMARY KEY,\n"
+        "  FOREIGN KEY (reference_id) REFERENCES project_references (id),\n"
+        "  FOREIGN KEY (shot_id) REFERENCES shots (id)\n"
+        ");\n",
+    )
+    errors = lint_schema_ownership(tmp_path)
+    assert any(
+        "astrid/packs/timeline/migrations/0002_bad.sql: kernel FK from "
+        "events to pack table 'project_references'" in error
+        for error in errors
+    ), errors
+    assert any(
+        "astrid/packs/timeline/migrations/0002_bad.sql: kernel FK from "
+        "events to pack table 'shots'" in error
+        for error in errors
+    ), errors
+
+
+def test_cross_pack_fk_between_new_packs_fails(tmp_path: Path) -> None:
+    """The references and shots packs must never FK to each other: only
+    inward (pack-to-kernel) FKs are legal, so references-to-shots and
+    shots-to-references FKs are both violations."""
+    _bootstrap(tmp_path, with_shots=True)
+    _write(
+        tmp_path,
+        "astrid/packs/references/migrations/0002_bad.sql",
+        "CREATE TABLE media_references (\n"
+        "  id TEXT PRIMARY KEY,\n"
+        "  FOREIGN KEY (shot_id) REFERENCES shots (id)\n"
+        ");\n",
+    )
+    _write(
+        tmp_path,
+        "astrid/packs/shots/migrations/0002_bad.sql",
+        "CREATE TABLE shot_items (\n"
+        "  id TEXT PRIMARY KEY,\n"
+        "  FOREIGN KEY (reference_id) REFERENCES project_references (id)\n"
+        ");\n",
+    )
+    errors = lint_schema_ownership(tmp_path)
+    assert any(
+        "astrid/packs/references/migrations/0002_bad.sql: cross-pack FK from "
+        "media_references to 'shots' (pack 'shots')" in error
+        for error in errors
+    ), errors
+    assert any(
+        "astrid/packs/shots/migrations/0002_bad.sql: cross-pack FK from "
+        "shot_items to 'project_references' (pack 'references')" in error
+        for error in errors
+    ), errors
+
+
+def test_pack_to_kernel_fks_are_allowed_kernel_currency(tmp_path: Path) -> None:
+    """Negative control: the real references/shots migrations FK inward to
+    kernel tables only (projects/media/tasks) and to their own pack tables;
+    that is the allowed kernel currency and must never be flagged."""
+    _bootstrap(tmp_path, with_shots=True)
+    errors = lint_schema_ownership(tmp_path)
+    assert errors == [], errors
 
 
 def test_undeclared_table_fails(tmp_path: Path) -> None:
@@ -490,3 +867,64 @@ def test_mutation_fixture_fails_the_whole_authority_lint(
     assert "legacy authority marker 'LocalFsBackend'" in joined
     assert "kernel FK from events to pack table 'timelines'" in joined
     assert "forbidden table 'sessions'" in joined
+
+
+def test_new_surface_mutations_fail_the_whole_authority_lint(
+    tmp_path: Path,
+) -> None:
+    """One representative mutation per new m3 surface family, combined, is
+    caught by the combined lint: kernel-to-references import, references-to-
+    shots implementation import, a pack-owned writer, a kernel FK to
+    project_references, and a references-to-shots cross-pack FK."""
+    _bootstrap(tmp_path, with_shots=True)
+    _write(
+        tmp_path,
+        "astrid/core/evil.py",
+        "from astrid.packs.references.repository import ReferenceRepository\n",
+    )
+    _write(
+        tmp_path,
+        "astrid/packs/references/evil.py",
+        "from astrid.packs.shots.repository import ShotRepository\n",
+    )
+    _write(
+        tmp_path,
+        "astrid/packs/references/repository.py",
+        "from astrid.core.store.writer import DatabaseWriter\n"
+        "writer = DatabaseWriter('/tmp/x.sqlite3', None)\n",
+    )
+    _write(
+        tmp_path,
+        "astrid/packs/references/migrations/0002_bad.sql",
+        "CREATE TABLE media_references (\n"
+        "  id TEXT PRIMARY KEY,\n"
+        "  FOREIGN KEY (shot_id) REFERENCES shots (id)\n"
+        ");\n",
+    )
+    _write(
+        tmp_path,
+        "astrid/packs/timeline/migrations/0003_bad.sql",
+        "CREATE TABLE events (\n"
+        "  id TEXT PRIMARY KEY,\n"
+        "  FOREIGN KEY (reference_id) REFERENCES project_references (id)\n"
+        ");\n",
+    )
+    report = run_authority_lint(tmp_path)
+    assert not report.ok
+    joined = "\n".join(report.errors)
+    assert "kernel-to-pack import 'astrid.packs.references.repository'" in joined
+    assert (
+        "pack-to-pack import 'astrid.packs.shots.repository' from pack "
+        "'references'" in joined
+    )
+    assert (
+        "astrid/packs/references/repository.py: SQLite writer construction "
+        "outside the kernel store" in joined
+    )
+    assert (
+        "kernel FK from events to pack table 'project_references'" in joined
+    )
+    assert (
+        "cross-pack FK from media_references to 'shots' (pack 'shots')"
+        in joined
+    )
