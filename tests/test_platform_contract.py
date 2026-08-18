@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -47,11 +48,18 @@ after = {{
 }}
 print(json.dumps({{"before": before, "after": after, "resolved": resolved}}, sort_keys=True))
 """
+    # astrid is not installed in the runtime venv; the child resolves it from
+    # the project root, which PYTHONSAFEPATH (canonical launch env) removes
+    # from sys.path.  Pin PYTHONPATH so the probe subprocess can import astrid
+    # regardless of the ambient safe-path policy (same fix as
+    # tests/test_sdk_public_surface.py / tests/v10/test_writer_authority.py,
+    # VJ22 gate occurrence 0a0ce24c3510).
     completed = subprocess.run(
         [sys.executable, "-c", script],
         check=True,
         capture_output=True,
         text=True,
+        env={**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[1])},
     )
     return json.loads(completed.stdout)
 

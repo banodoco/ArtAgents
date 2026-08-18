@@ -66,10 +66,16 @@ payload = {
 }
 print(json.dumps(payload))
 """
+    # astrid is not installed in the runtime venv; the child resolves it from
+    # the project root, which PYTHONSAFEPATH (canonical launch env) removes
+    # from sys.path.  Pin PYTHONPATH so the probe subprocess can import astrid
+    # regardless of the ambient safe-path policy (same fix as
+    # tests/v10/test_writer_authority.py, VJ21 gate occurrence 0a0ce24c3510).
     completed = subprocess.run(
         [sys.executable, "-c", script],
         check=True,
         capture_output=True,
+        env={**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[1])},
         text=True,
     )
     return json.loads(completed.stdout)
