@@ -32,7 +32,7 @@ The parser also mounts the manifest-declared nested ``references`` family
 beneath ``media`` (``astrid/packs/references/schema-pack.yaml`` declares
 ``references: media references``): ``astrid media references <verb>``
 embeds the references product parser (``astrid/packs/references/cli.py``)
-so reference ``create/update/archive/associate/link/list/show`` are
+so reference ``create/update/archive/associate/link/set-primary/list/show`` are
 executable only beneath media (plan step 27, task T30). There is **no
 top-level references family** (sense check SC30).
 
@@ -358,7 +358,7 @@ def build_parser(client: Any) -> argparse.ArgumentParser:
             CommandSpec(
                 "references",
                 help="Nested reference create/update/archive/associate/link/"
-                "list/show (manifest-owned mount).",
+                "set-primary/list/show (manifest-owned mount).",
                 configure=_configure_references,
             ),
         ),

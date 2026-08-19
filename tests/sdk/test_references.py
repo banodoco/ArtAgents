@@ -20,8 +20,10 @@ envelope-shaped ``create``/``update``/``archive``/``associate``/``set_primary``/
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -36,6 +38,10 @@ from astrid.core.store.writer import DatabaseWriter
 from astrid.packs import build_standard_registry
 from astrid.packs.references.repository import (
     REFERENCE_CREATE_COMMAND_KIND,
+    REFERENCE_LINKED_EVENT_KIND,
+    REFERENCE_MEDIA_ASSOCIATED_EVENT_KIND,
+    REFERENCE_PRIMARY_CHANGED_EVENT_KIND,
+    REFERENCE_STREAM_TYPE,
     ReferenceRepository,
 )
 from astrid.sdk.contracts import derive_stable_id
@@ -152,6 +158,57 @@ def _create_reference(
         idempotency_key=idempotency_key,
         **overrides,
     )
+
+
+def _stream_id(ref_id: str) -> str:
+    return f"{ref_id}:{REFERENCE_STREAM_TYPE}"
+
+
+def _stream_head(env: SimpleNamespace, ref_id: str) -> int:
+    row = env.writer.submit(
+        lambda s: s.query_one(
+            "SELECT head_seq FROM event_streams WHERE id = ?", (_stream_id(ref_id),)
+        )
+    )
+    assert row is not None, f"no event stream for reference {ref_id}"
+    return int(row["head_seq"])
+
+
+def _stream_event(env: SimpleNamespace, ref_id: str, event_kind: str) -> Any:
+    """Return the most recent event of *event_kind* on a reference stream."""
+    return env.writer.submit(
+        lambda s: s.query_one(
+            "SELECT event_id, kind, subject_type, subject_id, seq FROM events "
+            "WHERE stream_id = ? AND kind = ? ORDER BY seq DESC LIMIT 1",
+            (_stream_id(ref_id), event_kind),
+        )
+    )
+
+
+def _event_count(env: SimpleNamespace) -> int:
+    return env.writer.submit(
+        lambda s: s.query_one("SELECT COUNT(*) FROM events")[0]
+    )
+
+
+def _media_reference_count(env: SimpleNamespace) -> int:
+    return env.writer.submit(
+        lambda s: s.query_one("SELECT COUNT(*) FROM media_references")[0]
+    )
+
+
+def _media_reference_is_primary(
+    env: SimpleNamespace, ref_id: str, media_id: str
+) -> bool:
+    row = env.writer.submit(
+        lambda s: s.query_one(
+            "SELECT is_primary FROM media_references "
+            "WHERE reference_id = ? AND media_id = ?",
+            (ref_id, media_id),
+        )
+    )
+    assert row is not None, f"no media_reference for {ref_id}/{media_id}"
+    return int(row["is_primary"]) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -467,3 +524,255 @@ def test_create_with_foreign_media_returns_validation_error(
     assert result.ok is False
     assert result.error is not None
     assert result.error.code == "validation_error"
+
+
+# ---------------------------------------------------------------------------
+# Stream-head advancement, event registration, atomic projection+receipt
+# ---------------------------------------------------------------------------
+#
+# These integration tests assert the committed post-conditions the SDK
+# exposes for set_primary/associate/link: exactly one stream-head advance,
+# one registered event whose subject points at the reference, and a receipt
+# committed in the same transaction as the projection. Statement-boundary
+# crash atomicity itself is proven at the repository level by
+# ``tests/v10/test_reference_conformance.py``.
+
+
+def test_set_primary_advances_stream_head_and_appends_registered_event(
+    env: SimpleNamespace,
+) -> None:
+    """set_primary advances the stream head by one and appends a registered
+    ``reference.primary_changed`` event whose subject is the reference."""
+    project = _create_project(env)
+    media_a = _import_media(env, project)
+    media_b = _import_media(env, project)
+    created = _create_reference(env, project, media_id=media_a)
+    ref_id = created.data["id"]
+
+    associated = env.service.associate(
+        project, ref_id, media_id=media_b, role="canonical", idempotency_key="assoc-b"
+    )
+    assert associated.ok is True
+    media_reference_id = associated.data["associations"][0]["id"]
+
+    head_before = _stream_head(env, ref_id)
+    changed = env.service.set_primary(
+        project, ref_id, media_reference_id=media_reference_id, idempotency_key="sp-1"
+    )
+    assert changed.ok is True
+
+    assert _stream_head(env, ref_id) == head_before + 1
+
+    event = _stream_event(env, ref_id, REFERENCE_PRIMARY_CHANGED_EVENT_KIND)
+    assert event is not None
+    assert event["kind"] == REFERENCE_PRIMARY_CHANGED_EVENT_KIND
+    assert event["subject_type"] == "reference"
+    assert event["subject_id"] == ref_id
+    assert event["event_id"] in changed.receipt.event_ids
+
+
+def test_associate_advances_stream_head_and_appends_registered_event(
+    env: SimpleNamespace,
+) -> None:
+    """associate advances the stream head by one and appends a registered
+    ``reference.media_associated`` event whose subject is the reference."""
+    project = _create_project(env)
+    media_a = _import_media(env, project)
+    media_b = _import_media(env, project)
+    created = _create_reference(env, project, media_id=media_a)
+    ref_id = created.data["id"]
+
+    head_before = _stream_head(env, ref_id)
+    result = env.service.associate(
+        project, ref_id, media_id=media_b, role="depicts", idempotency_key="assoc-1"
+    )
+    assert result.ok is True
+
+    assert _stream_head(env, ref_id) == head_before + 1
+
+    event = _stream_event(env, ref_id, REFERENCE_MEDIA_ASSOCIATED_EVENT_KIND)
+    assert event is not None
+    assert event["kind"] == REFERENCE_MEDIA_ASSOCIATED_EVENT_KIND
+    assert event["subject_type"] == "reference"
+    assert event["subject_id"] == ref_id
+    assert event["event_id"] in result.receipt.event_ids
+
+
+def test_link_advances_stream_head_and_appends_registered_event(
+    env: SimpleNamespace,
+) -> None:
+    """link advances the from-stream head by one and appends a registered
+    ``reference.linked`` event whose subject is the from-reference."""
+    project = _create_project(env)
+    media_a = _import_media(env, project)
+    media_b = _import_media(env, project)
+    ref_a = _create_reference(env, project, media_id=media_a).data["id"]
+    ref_b = _create_reference(env, project, media_id=media_b, name="Bryn").data["id"]
+
+    head_before = _stream_head(env, ref_a)
+    result = env.service.link(
+        project,
+        from_reference_id=ref_a,
+        to_reference_id=ref_b,
+        kind="belongs_to",
+        idempotency_key="link-1",
+    )
+    assert result.ok is True
+
+    assert _stream_head(env, ref_a) == head_before + 1
+
+    event = _stream_event(env, ref_a, REFERENCE_LINKED_EVENT_KIND)
+    assert event is not None
+    assert event["kind"] == REFERENCE_LINKED_EVENT_KIND
+    assert event["subject_type"] == "reference"
+    assert event["subject_id"] == ref_a
+    assert event["event_id"] in result.receipt.event_ids
+
+
+def test_set_primary_atomic_projection_association_receipt(
+    env: SimpleNamespace,
+) -> None:
+    """set_primary commits the projection, association flip, and receipt in one
+    transaction: the old primary is cleared, the new one is set, and the
+    receipt's event id and resulting stream seq match the committed state."""
+    project = _create_project(env)
+    media_a = _import_media(env, project)
+    media_b = _import_media(env, project)
+    created = _create_reference(env, project, media_id=media_a)
+    ref_id = created.data["id"]
+
+    associated = env.service.associate(
+        project, ref_id, media_id=media_b, role="canonical", idempotency_key="assoc-b"
+    )
+    assert associated.ok is True
+    media_reference_id = associated.data["associations"][0]["id"]
+
+    changed = env.service.set_primary(
+        project, ref_id, media_reference_id=media_reference_id, idempotency_key="sp-1"
+    )
+    assert changed.ok is True
+
+    # Projection: old primary cleared, new primary set.
+    assert _media_reference_is_primary(env, ref_id, media_a) is False
+    assert _media_reference_is_primary(env, ref_id, media_b) is True
+
+    # The show read model reflects the new primary.
+    shown = env.service.show(project, ref_id)
+    primary = [a for a in shown.data["media"] if a["is_primary"]]
+    assert len(primary) == 1
+    assert primary[0]["media_id"] == media_b
+
+    # The receipt row was committed alongside the projection.
+    receipt_row = env.writer.submit(
+        lambda s: s.query_one(
+            "SELECT event_ids_json, result_json, resulting_stream_seq "
+            "FROM command_receipts WHERE project_id = ? AND idempotency_key = ?",
+            (project, "sp-1"),
+        )
+    )
+    assert receipt_row is not None
+    event_ids = json.loads(receipt_row["event_ids_json"])
+    assert event_ids == list(changed.receipt.event_ids)
+    assert event_ids[0] == _stream_event(
+        env, ref_id, REFERENCE_PRIMARY_CHANGED_EVENT_KIND
+    )["event_id"]
+    stored_result = json.loads(receipt_row["result_json"])
+    assert stored_result["new_primary"]["media_id"] == media_b
+    assert receipt_row["resulting_stream_seq"] == _stream_head(env, ref_id)
+
+
+def test_associate_replay_returns_stored_receipt_zero_new_rows(
+    env: SimpleNamespace,
+) -> None:
+    """An identical associate retry replays the stored receipt with zero new
+    media_references rows and zero new events."""
+    project = _create_project(env)
+    media_a = _import_media(env, project)
+    media_b = _import_media(env, project)
+    created = _create_reference(env, project, media_id=media_a)
+    ref_id = created.data["id"]
+
+    first = env.service.associate(
+        project, ref_id, media_id=media_b, role="depicts", idempotency_key="assoc-r"
+    )
+    assert first.ok is True
+    first_receipt_id = first.receipt.receipt_id
+
+    media_count_before = _media_reference_count(env)
+    event_count_before = _event_count(env)
+
+    second = env.service.associate(
+        project, ref_id, media_id=media_b, role="depicts", idempotency_key="assoc-r"
+    )
+    assert second.ok is True
+    assert second.receipt.receipt_id == first_receipt_id
+    assert _media_reference_count(env) == media_count_before
+    assert _event_count(env) == event_count_before
+
+
+def test_associate_mismatch_rejected_before_mutation(env: SimpleNamespace) -> None:
+    """A changed associate request under the same key is rejected as
+    ``idempotency_mismatch`` before any row is written."""
+    project = _create_project(env)
+    media_a = _import_media(env, project)
+    media_b = _import_media(env, project)
+    created = _create_reference(env, project, media_id=media_a)
+    ref_id = created.data["id"]
+
+    first = env.service.associate(
+        project, ref_id, media_id=media_b, role="depicts", idempotency_key="assoc-m"
+    )
+    assert first.ok is True
+
+    media_count_before = _media_reference_count(env)
+    event_count_before = _event_count(env)
+
+    changed = env.service.associate(
+        project, ref_id, media_id=media_b, role="inspired_by", idempotency_key="assoc-m"
+    )
+    assert changed.ok is False
+    assert changed.error is not None
+    assert changed.error.code == "idempotency_mismatch"
+    assert _media_reference_count(env) == media_count_before
+    assert _event_count(env) == event_count_before
+
+
+def test_set_primary_mismatch_rejected_before_mutation(env: SimpleNamespace) -> None:
+    """A changed set_primary request under the same key is rejected as
+    ``idempotency_mismatch`` before the primary is moved or an event appended."""
+    project = _create_project(env)
+    media_a = _import_media(env, project)
+    media_b = _import_media(env, project)
+    media_c = _import_media(env, project)
+    created = _create_reference(env, project, media_id=media_a)
+    ref_id = created.data["id"]
+
+    assoc_b = env.service.associate(
+        project, ref_id, media_id=media_b, role="canonical", idempotency_key="assoc-b"
+    )
+    assoc_c = env.service.associate(
+        project, ref_id, media_id=media_c, role="canonical", idempotency_key="assoc-c"
+    )
+    assert assoc_b.ok is True
+    assert assoc_c.ok is True
+    media_reference_b = assoc_b.data["associations"][0]["id"]
+    media_reference_c = assoc_c.data["associations"][0]["id"]
+
+    first = env.service.set_primary(
+        project, ref_id, media_reference_id=media_reference_b, idempotency_key="sp-m"
+    )
+    assert first.ok is True
+
+    event_count_before = _event_count(env)
+
+    changed = env.service.set_primary(
+        project, ref_id, media_reference_id=media_reference_c, idempotency_key="sp-m"
+    )
+    assert changed.ok is False
+    assert changed.error is not None
+    assert changed.error.code == "idempotency_mismatch"
+    # No mutation: media_b stays primary, media_c stays non-primary, and no
+    # new event was appended.
+    assert _media_reference_is_primary(env, ref_id, media_b) is True
+    assert _media_reference_is_primary(env, ref_id, media_c) is False
+    assert _event_count(env) == event_count_before

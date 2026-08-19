@@ -17,7 +17,7 @@ handler renders through the shared product output layer
 concise human output, and stable exit codes stay aligned with the frozen SDK
 contract.
 
-Verbs (exactly these seven, one SDK call each):
+Verbs (exactly these eight, one SDK call each):
 
 - ``create`` — ``client.references.create`` (project, frozen ``--kind``,
   ``--name``, exact same-project ``--media`` id, optional
@@ -31,6 +31,9 @@ Verbs (exactly these seven, one SDK call each):
   ``--metadata``);
 - ``link`` — ``client.references.link`` (``--from``/``--to`` reference ids,
   frozen ``--kind``; ``related_to`` is symmetric);
+- ``set-primary <ref>`` — ``client.references.set_primary``
+  (``--media-reference`` association id; atomic primary-canonical
+  replacement);
 - ``list`` — ``client.references.list`` (active by default,
   ``--include-archived`` is the explicit inclusive read);
 - ``show <ref>`` — ``client.references.show`` (always includes archived).
@@ -157,6 +160,16 @@ def _cmd_link(parsed: argparse.Namespace) -> int:
         to_reference_id=parsed.to_reference,
         kind=parsed.kind,
         metadata=parsed.metadata,
+        idempotency_key=parsed.idempotency_key,
+    )
+    return print_result(result, as_json=parsed.json)
+
+
+def _cmd_set_primary(parsed: argparse.Namespace) -> int:
+    result = parsed.client.references.set_primary(
+        parsed.project,
+        parsed.ref,
+        media_reference_id=parsed.media_reference,
         idempotency_key=parsed.idempotency_key,
     )
     return print_result(result, as_json=parsed.json)
@@ -306,6 +319,19 @@ def _configure_link(subparser: argparse.ArgumentParser) -> None:
     subparser.set_defaults(handler=_cmd_link)
 
 
+def _configure_set_primary(subparser: argparse.ArgumentParser) -> None:
+    _add_project_arg(subparser)
+    subparser.add_argument("ref", help="Reference id.")
+    subparser.add_argument(
+        "--media-reference",
+        required=True,
+        help="Exact same-project canonical association id to promote to primary.",
+    )
+    _add_idempotency_key(subparser)
+    _add_json_flag(subparser)
+    subparser.set_defaults(handler=_cmd_set_primary)
+
+
 def _configure_list(subparser: argparse.ArgumentParser) -> None:
     _add_project_arg(subparser)
     subparser.add_argument(
@@ -353,6 +379,11 @@ COMMANDS: tuple[CommandSpec, ...] = (
         configure=_configure_link,
     ),
     CommandSpec(
+        "set-primary",
+        help="Replace the primary canonical media atomically.",
+        configure=_configure_set_primary,
+    ),
+    CommandSpec(
         "list",
         help="List active references in a project "
         "(--include-archived is the explicit inclusive read).",
@@ -369,15 +400,14 @@ COMMANDS: tuple[CommandSpec, ...] = (
 def build_parser(client: Any) -> argparse.ArgumentParser:
     """Build the nested ``media references`` product parser stamped with *client*.
 
-    Exactly the seven verbs above are registered: no aliases and no
+    Exactly the eight verbs above are registered: no aliases and no
     top-level exposure — this parser is only reachable beneath the media
-    family. ``set_primary`` stays an SDK-only service call (not mounted by
-    the frozen product registry).
+    family.
     """
     parser = argparse.ArgumentParser(
         prog="astrid media references",
         description=(
-            "Reference create/update/archive/associate/link/list/show "
+            "Reference create/update/archive/associate/link/set-primary/list/show "
             "(nested product family)."
         ),
     )

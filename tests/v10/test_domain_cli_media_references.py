@@ -6,7 +6,7 @@ Task T30 proves the ``media`` product family
 SDK adapters, import accepts **only files/folders**, relate accepts only the
 frozen five relation kinds, and the manifest-declared nested ``references``
 mount (``astrid/packs/references/cli.py``) exposes exactly
-``create|update|archive|associate|link|list|show`` beneath ``media`` — with
+``create|update|archive|associate|link|set-primary|list|show`` beneath ``media`` — with
 **no top-level references family**. Every mutation preserves exact media
 IDs, mutation receipts/keys, validation, and typed failure envelopes; all
 help is executable; and the gateway dispatch routes the media family (and
@@ -331,6 +331,32 @@ class _RecordingReferences:
                 "kind": kind,
             },
             receipt=_receipt("reference.link", key),
+            idempotency_key=key,
+        )
+
+    def set_primary(
+        self,
+        project,
+        ref,
+        *,
+        media_reference_id,
+        idempotency_key=None,
+    ):
+        self._owner.calls.append(
+            (
+                "references.set_primary",
+                {
+                    "project": project,
+                    "ref": ref,
+                    "media_reference_id": media_reference_id,
+                    "idempotency_key": idempotency_key,
+                },
+            )
+        )
+        key = idempotency_key or "generated-key"
+        return DomainResult.success(
+            {"reference_id": ref, "media_reference_id": media_reference_id},
+            receipt=_receipt("reference.set_primary", key),
             idempotency_key=key,
         )
 
@@ -763,7 +789,7 @@ def test_media_help_is_executable(argv: list[str]) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_references_parser_has_exactly_seven_verbs_beneath_media() -> None:
+def test_references_parser_has_exactly_eight_verbs_beneath_media() -> None:
     from astrid.packs.references.cli import COMMANDS, build_parser
 
     assert tuple(spec.name for spec in COMMANDS) == (
@@ -772,6 +798,7 @@ def test_references_parser_has_exactly_seven_verbs_beneath_media() -> None:
         "archive",
         "associate",
         "link",
+        "set-primary",
         "list",
         "show",
     )
@@ -784,6 +811,7 @@ def test_references_parser_has_exactly_seven_verbs_beneath_media() -> None:
         "archive",
         "associate",
         "link",
+        "set-primary",
         "list",
         "show",
     }
@@ -1152,6 +1180,55 @@ def test_references_unknown_verb_is_a_usage_error() -> None:
     with pytest.raises(SystemExit) as excinfo:
         _run(
             "media",
+            ["references", "frobnicate", "--project", "demo", "R-1"],
+            client=client,
+        )
+    assert excinfo.value.code == 2
+    assert client.calls == []
+
+
+def test_references_set_primary_is_one_sdk_call(capsys) -> None:
+    client = _FakeClient()
+    rc = _run(
+        "media",
+        [
+            "references",
+            "set-primary",
+            "--project",
+            "demo",
+            "R-1",
+            "--media-reference",
+            "MR-2",
+            "--idempotency-key",
+            "sp-key",
+            "--json",
+        ],
+        client=client,
+    )
+    assert rc == 0
+    assert client.calls == [
+        (
+            "references.set_primary",
+            {
+                "project": "demo",
+                "ref": "R-1",
+                "media_reference_id": "MR-2",
+                "idempotency_key": "sp-key",
+            },
+        )
+    ]
+    envelope = json.loads(capsys.readouterr().out)
+    assert set(envelope) == ENVELOPE_KEYS
+    assert envelope["ok"] is True
+    assert envelope["receipt"]["command_kind"] == "reference.set_primary"
+    assert envelope["idempotency_key"] == "sp-key"
+
+
+def test_references_set_primary_rejects_missing_media_reference() -> None:
+    client = _FakeClient()
+    with pytest.raises(SystemExit) as excinfo:
+        _run(
+            "media",
             ["references", "set-primary", "--project", "demo", "R-1"],
             client=client,
         )
@@ -1168,6 +1245,7 @@ def test_references_unknown_verb_is_a_usage_error() -> None:
         ["references", "archive", "--help"],
         ["references", "associate", "--help"],
         ["references", "link", "--help"],
+        ["references", "set-primary", "--help"],
         ["references", "list", "--help"],
         ["references", "show", "--help"],
     ],

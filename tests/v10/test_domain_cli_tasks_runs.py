@@ -766,6 +766,124 @@ def test_runs_retry_failed_without_selection_retries_all(capsys) -> None:
     assert envelope["data"]["retried_task_ids"] == ["T-2", "T-3"]
 
 
+def test_runs_retry_failed_all_mode_is_one_sdk_call(capsys) -> None:
+    """Frozen batch-retry decision: with no ``--task`` the retry targets every
+    eligible failed/expired child, so ``retry-failed <run_id>`` makes exactly
+    one ``client.runs.retry_failed`` call with ``selected_task_ids=None``.
+    An explicit subset requires repeatable ``--task``; no ``--run`` flag is
+    added to ``tasks retry``."""
+    client = _FakeClient()
+    rc = _run(
+        "runs",
+        ["retry-failed", "--project", "P-1", "R-1", "--json"],
+        client=client,
+    )
+    assert rc == 0
+    assert client.calls == [
+        (
+            "runs.retry_failed",
+            {
+                "project_id": "P-1",
+                "run_id": "R-1",
+                "selected_task_ids": None,
+                "idempotency_key": None,
+            },
+        )
+    ]
+    envelope = json.loads(capsys.readouterr().out)
+    assert envelope["data"]["retried_task_ids"] == ["T-2", "T-3"]
+    assert envelope["receipt"]["command_kind"] == "run.retry_failed"
+    assert envelope["idempotency_key"] == "generated-key"
+
+
+def test_runs_retry_failed_subset_mode_is_one_sdk_call(capsys) -> None:
+    """An explicit ``--task T1 --task T2`` subset retries only those children:
+    exactly one ``client.runs.retry_failed`` call with
+    ``selected_task_ids=["T1", "T2"]``."""
+    client = _FakeClient()
+    rc = _run(
+        "runs",
+        [
+            "retry-failed",
+            "--project",
+            "P-1",
+            "R-1",
+            "--task",
+            "T1",
+            "--task",
+            "T2",
+            "--json",
+        ],
+        client=client,
+    )
+    assert rc == 0
+    assert client.calls == [
+        (
+            "runs.retry_failed",
+            {
+                "project_id": "P-1",
+                "run_id": "R-1",
+                "selected_task_ids": ["T1", "T2"],
+                "idempotency_key": None,
+            },
+        )
+    ]
+    envelope = json.loads(capsys.readouterr().out)
+    assert envelope["data"]["retried_task_ids"] == ["T1", "T2"]
+    assert envelope["receipt"]["command_kind"] == "run.retry_failed"
+    assert envelope["idempotency_key"] == "generated-key"
+
+
+def test_runs_retry_failed_rejects_terminal_run(capsys) -> None:
+    """A terminal run cannot be retried: the SDK's typed ``terminal_state``
+    error surfaces as a failing envelope (exit 1, null data/receipt)."""
+    class _TerminalRuns(_RecordingRuns):
+        def retry_failed(
+            self, project_id, run_id, *, selected_task_ids=None, idempotency_key=None
+        ):
+            self._owner.calls.append(
+                (
+                    "runs.retry_failed",
+                    {
+                        "project_id": project_id,
+                        "run_id": run_id,
+                        "selected_task_ids": selected_task_ids,
+                        "idempotency_key": idempotency_key,
+                    },
+                )
+            )
+            return DomainResult.failure(
+                ErrorObject(
+                    code="terminal_state",
+                    message="run is already terminal",
+                    details={"run_id": run_id, "status": "succeeded"},
+                ),
+                idempotency_key=idempotency_key or "generated-key",
+            )
+
+    class _TerminalClient(_FakeClient):
+        def __init__(self) -> None:
+            super().__init__()
+            self.runs = _TerminalRuns(self)
+
+    client = _TerminalClient()
+    rc = _run(
+        "runs",
+        ["retry-failed", "--project", "P-1", "R-1", "--json"],
+        client=client,
+    )
+    assert rc == 1
+    assert len(client.calls) == 1
+    captured = capsys.readouterr()
+    envelope = json.loads(captured.out)
+    assert envelope["ok"] is False
+    assert envelope["data"] is None
+    assert envelope["error"]["code"] == "terminal_state"
+    assert envelope["receipt"] is None
+    assert envelope["idempotency_key"] == "generated-key"
+    assert captured.err == ""
+
+
 def test_runs_events_is_one_sdk_call(capsys) -> None:
     client = _FakeClient()
     rc = _run("runs", ["events", "--project", "P-1", "R-1", "--json"], client=client)

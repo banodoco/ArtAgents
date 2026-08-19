@@ -185,7 +185,7 @@ Product families:
 
 Nested mounts (manifest-owned):
   timelines shots       shot list/create/add/remove/reorder
-  media references      reference create/update/archive/associate/link/list/show
+  media references      reference create/update/archive/associate/link/set-primary/list/show
 
 Options:
   --json      print the exact SDK envelope (ok/data/error/receipt/idempotency_key)

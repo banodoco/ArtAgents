@@ -21,8 +21,10 @@ envelope-shaped ``list``/``show``/``create``/``add_item``/``remove_item``/
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -38,6 +40,8 @@ from astrid.packs import build_standard_registry
 from astrid.packs.shots.repository import (
     SHOT_ADD_ITEM_COMMAND_KIND,
     SHOT_CREATE_COMMAND_KIND,
+    SHOT_REORDERED_EVENT_KIND,
+    SHOT_STREAM_TYPE,
     ShotRepository,
 )
 from astrid.sdk.contracts import derive_stable_id
@@ -136,6 +140,43 @@ def _shot_count(env: SimpleNamespace) -> int:
 
 def _media_count(env: SimpleNamespace) -> int:
     return env.writer.submit(lambda s: s.query_one("SELECT COUNT(*) FROM media")[0])
+
+
+def _shot_item_count(env: SimpleNamespace) -> int:
+    return env.writer.submit(
+        lambda s: s.query_one("SELECT COUNT(*) FROM shot_items")[0]
+    )
+
+
+def _event_count(env: SimpleNamespace) -> int:
+    return env.writer.submit(
+        lambda s: s.query_one("SELECT COUNT(*) FROM events")[0]
+    )
+
+
+def _stream_id(shot_id: str) -> str:
+    return f"{shot_id}:{SHOT_STREAM_TYPE}"
+
+
+def _stream_head(env: SimpleNamespace, shot_id: str) -> int:
+    row = env.writer.submit(
+        lambda s: s.query_one(
+            "SELECT head_seq FROM event_streams WHERE id = ?", (_stream_id(shot_id),)
+        )
+    )
+    assert row is not None, f"no event stream for shot {shot_id}"
+    return int(row["head_seq"])
+
+
+def _stream_event(env: SimpleNamespace, shot_id: str, event_kind: str) -> Any:
+    """Return the most recent event of *event_kind* on a shot stream."""
+    return env.writer.submit(
+        lambda s: s.query_one(
+            "SELECT event_id, kind, subject_type, subject_id, seq FROM events "
+            "WHERE stream_id = ? AND kind = ? ORDER BY seq DESC LIMIT 1",
+            (_stream_id(shot_id), event_kind),
+        )
+    )
 
 
 def _create_shot(
@@ -408,6 +449,199 @@ def test_reorder_rejects_non_permutation_before_any_write(
 
     after = env.service.show(project, shot_id).data["items"]
     assert [i["id"] for i in after] == [i["id"] for i in before]
+
+
+# ---------------------------------------------------------------------------
+# reorder: stream-head advancement, event registration, atomic receipt,
+# replay, mismatch, and omission rejection
+# ---------------------------------------------------------------------------
+#
+# These integration tests assert the committed post-conditions the SDK
+# exposes for reorder: exactly one stream-head advance, one registered
+# ``shot.reordered`` event whose subject is the shot, and a receipt committed
+# in the same transaction as the projection. Statement-boundary crash
+# atomicity itself is proven at the repository level by
+# ``tests/v10/test_shot_conformance.py``.
+
+
+def test_reorder_advances_stream_head_and_appends_registered_event(
+    env: SimpleNamespace,
+) -> None:
+    """reorder advances the shot stream head by one and appends a registered
+    ``shot.reordered`` event whose subject is the shot."""
+    project = _create_project(env)
+    media_a = _import_media(env, project)
+    media_b = _import_media(env, project)
+    shot_id = _create_shot(env, project).data["id"]
+    item_a = env.service.add_item(
+        project, shot_id, media_id=media_a, position=0, idempotency_key="add-a"
+    ).data["item"]["id"]
+    item_b = env.service.add_item(
+        project, shot_id, media_id=media_b, position=1, idempotency_key="add-b"
+    ).data["item"]["id"]
+
+    head_before = _stream_head(env, shot_id)
+    reordered = env.service.reorder(
+        project, shot_id, [item_b, item_a], idempotency_key="reorder-1"
+    )
+    assert reordered.ok is True
+
+    assert _stream_head(env, shot_id) == head_before + 1
+
+    event = _stream_event(env, shot_id, SHOT_REORDERED_EVENT_KIND)
+    assert event is not None
+    assert event["kind"] == SHOT_REORDERED_EVENT_KIND
+    assert event["subject_type"] == "shot"
+    assert event["subject_id"] == shot_id
+    assert event["event_id"] in reordered.receipt.event_ids
+
+
+def test_reorder_atomic_projection_and_receipt(env: SimpleNamespace) -> None:
+    """reorder commits the item renumbering, the stream event, and the receipt
+    in one transaction: show reflects the exact new item order and the stored
+    receipt's event id and resulting stream seq match the committed state."""
+    project = _create_project(env)
+    media_a = _import_media(env, project)
+    media_b = _import_media(env, project)
+    shot_id = _create_shot(env, project).data["id"]
+    item_a = env.service.add_item(
+        project, shot_id, media_id=media_a, position=0, idempotency_key="add-a"
+    ).data["item"]["id"]
+    item_b = env.service.add_item(
+        project, shot_id, media_id=media_b, position=1, idempotency_key="add-b"
+    ).data["item"]["id"]
+
+    reordered = env.service.reorder(
+        project, shot_id, [item_b, item_a], idempotency_key="reorder-p"
+    )
+    assert reordered.ok is True
+
+    # Projection: the show read model reflects the exact new item order.
+    shown = env.service.show(project, shot_id)
+    assert shown.ok is True
+    assert [i["id"] for i in shown.data["items"]] == [item_b, item_a]
+    assert [i["media_id"] for i in shown.data["items"]] == [media_b, media_a]
+    assert [i["position"] for i in shown.data["items"]] == [0, 1]
+
+    # The receipt row was committed alongside the projection.
+    receipt_row = env.writer.submit(
+        lambda s: s.query_one(
+            "SELECT event_ids_json, result_json, resulting_stream_seq "
+            "FROM command_receipts WHERE project_id = ? AND idempotency_key = ?",
+            (project, "reorder-p"),
+        )
+    )
+    assert receipt_row is not None
+    event_ids = json.loads(receipt_row["event_ids_json"])
+    assert event_ids == list(reordered.receipt.event_ids)
+    assert event_ids[0] == _stream_event(
+        env, shot_id, SHOT_REORDERED_EVENT_KIND
+    )["event_id"]
+    stored_result = json.loads(receipt_row["result_json"])
+    assert stored_result["item_ids"] == [item_b, item_a]
+    assert stored_result["media_ids"] == [media_b, media_a]
+    assert receipt_row["resulting_stream_seq"] == _stream_head(env, shot_id)
+
+
+def test_reorder_replay_returns_stored_receipt_zero_new_rows(
+    env: SimpleNamespace,
+) -> None:
+    """An identical reorder retry replays the stored receipt with zero new
+    shot_items rows and zero new events."""
+    project = _create_project(env)
+    media_a = _import_media(env, project)
+    media_b = _import_media(env, project)
+    shot_id = _create_shot(env, project).data["id"]
+    item_a = env.service.add_item(
+        project, shot_id, media_id=media_a, position=0, idempotency_key="add-a"
+    ).data["item"]["id"]
+    item_b = env.service.add_item(
+        project, shot_id, media_id=media_b, position=1, idempotency_key="add-b"
+    ).data["item"]["id"]
+
+    first = env.service.reorder(
+        project, shot_id, [item_b, item_a], idempotency_key="reorder-r"
+    )
+    assert first.ok is True
+    first_receipt_id = first.receipt.receipt_id
+
+    item_count_before = _shot_item_count(env)
+    event_count_before = _event_count(env)
+
+    second = env.service.reorder(
+        project, shot_id, [item_b, item_a], idempotency_key="reorder-r"
+    )
+    assert second.ok is True
+    assert second.receipt.receipt_id == first_receipt_id
+    assert _shot_item_count(env) == item_count_before
+    assert _event_count(env) == event_count_before
+
+
+def test_reorder_mismatch_rejected_before_mutation(env: SimpleNamespace) -> None:
+    """A changed reorder request under the same key is rejected as
+    ``idempotency_mismatch`` before any row is written."""
+    project = _create_project(env)
+    media_a = _import_media(env, project)
+    media_b = _import_media(env, project)
+    shot_id = _create_shot(env, project).data["id"]
+    item_a = env.service.add_item(
+        project, shot_id, media_id=media_a, position=0, idempotency_key="add-a"
+    ).data["item"]["id"]
+    item_b = env.service.add_item(
+        project, shot_id, media_id=media_b, position=1, idempotency_key="add-b"
+    ).data["item"]["id"]
+
+    first = env.service.reorder(
+        project, shot_id, [item_b, item_a], idempotency_key="reorder-m"
+    )
+    assert first.ok is True
+
+    event_count_before = _event_count(env)
+
+    changed = env.service.reorder(
+        project, shot_id, [item_a, item_b], idempotency_key="reorder-m"
+    )
+    assert changed.ok is False
+    assert changed.error is not None
+    assert changed.error.code == "idempotency_mismatch"
+    # No mutation: the order stays [item_b, item_a] and no new event.
+    shown = env.service.show(project, shot_id)
+    assert [i["id"] for i in shown.data["items"]] == [item_b, item_a]
+    assert _event_count(env) == event_count_before
+
+
+def test_reorder_rejects_omission_before_mutation(env: SimpleNamespace) -> None:
+    """A reorder request that omits one current item id is rejected as a typed
+    ``validation_error`` before any row is written (zero new rows)."""
+    project = _create_project(env)
+    media_a = _import_media(env, project)
+    media_b = _import_media(env, project)
+    media_c = _import_media(env, project)
+    shot_id = _create_shot(env, project).data["id"]
+    item_a = env.service.add_item(
+        project, shot_id, media_id=media_a, position=0, idempotency_key="add-a"
+    ).data["item"]["id"]
+    item_b = env.service.add_item(
+        project, shot_id, media_id=media_b, position=1, idempotency_key="add-b"
+    ).data["item"]["id"]
+    item_c = env.service.add_item(
+        project, shot_id, media_id=media_c, position=2, idempotency_key="add-c"
+    ).data["item"]["id"]
+
+    item_count_before = _shot_item_count(env)
+    event_count_before = _event_count(env)
+
+    result = env.service.reorder(
+        project, shot_id, [item_b, item_a], idempotency_key="reorder-omit"
+    )
+    assert result.ok is False
+    assert result.error is not None
+    assert result.error.code == "validation_error"
+    assert _shot_item_count(env) == item_count_before
+    assert _event_count(env) == event_count_before
+
+    shown = env.service.show(project, shot_id)
+    assert [i["id"] for i in shown.data["items"]] == [item_a, item_b, item_c]
 
 
 # ---------------------------------------------------------------------------
