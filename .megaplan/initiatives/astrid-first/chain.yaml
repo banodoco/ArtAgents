@@ -5,7 +5,7 @@ milestones:
 - label: m1
   idea: .megaplan/initiatives/astrid-first/briefs/m1.md
   branch: megaplan/astrid-first/m1
-  profile: partnered-5
+  profile: partnered-codex
   vendor: codex
   robustness: thorough
   depth: high
@@ -13,7 +13,7 @@ milestones:
 - label: m2
   idea: .megaplan/initiatives/astrid-first/briefs/m2.md
   branch: megaplan/astrid-first/m2
-  profile: partnered-5
+  profile: partnered-codex
   vendor: codex
   robustness: thorough
   depth: high
@@ -21,7 +21,7 @@ milestones:
 - label: m3
   idea: .megaplan/initiatives/astrid-first/briefs/m3.md
   branch: megaplan/astrid-first/m3
-  profile: partnered-4
+  profile: partnered-codex
   vendor: codex
   robustness: full
   depth: medium
@@ -29,7 +29,7 @@ milestones:
 - label: m4
   idea: .megaplan/initiatives/astrid-first/briefs/m4.md
   branch: megaplan/astrid-first/m4
-  profile: partnered-4
+  profile: partnered-codex
   vendor: codex
   robustness: full
   depth: high
@@ -37,7 +37,7 @@ milestones:
 - label: m5
   idea: .megaplan/initiatives/astrid-first/briefs/m5.md
   branch: megaplan/astrid-first/m5
-  profile: partnered-3
+  profile: partnered-codex
   vendor: codex
   robustness: full
   depth: low
@@ -45,7 +45,7 @@ milestones:
 - label: m6
   idea: .megaplan/initiatives/astrid-first/briefs/m6.md
   branch: megaplan/astrid-first/m6
-  profile: partnered-4
+  profile: partnered-codex
   vendor: codex
   robustness: full
   depth: medium
@@ -53,7 +53,7 @@ milestones:
 - label: m7
   idea: .megaplan/initiatives/astrid-first/briefs/m7.md
   branch: megaplan/astrid-first/m7
-  profile: partnered-4
+  profile: partnered-codex
   vendor: codex
   robustness: full
   depth: medium
@@ -61,7 +61,7 @@ milestones:
 - label: m8
   idea: .megaplan/initiatives/astrid-first/briefs/m8.md
   branch: megaplan/astrid-first/m8
-  profile: partnered-3
+  profile: partnered-codex
   vendor: codex
   robustness: light
   depth: low
@@ -72,21 +72,7 @@ milestones:
   branch: reconcile/astrid-first-20260813
   target_branch: main
   merge_policy: review
-  phase_model:
-  - execute=codex
-  - finalize=codex
-  - critique=codex
-  - review=codex
-  - gate=codex
-  - plan=codex
-  - prep=codex
-  - critique_evaluator=codex
-  - revise=codex
-  - feedback=codex
-  - loop_plan=codex
-  - loop_execute=codex
-  - tiebreaker_researcher=codex
-  - tiebreaker_challenger=codex
+  profile: partnered-codex
   depends_on:
   - m8
 reconciliation:
