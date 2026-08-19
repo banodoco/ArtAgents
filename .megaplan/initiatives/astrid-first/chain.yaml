@@ -84,7 +84,7 @@ on_escalate:
 merge_policy: auto
 driver:
   execution_binding: required
-  intended_initiative_revision: 5a920045e088de43a1afcb51bf15cf12614e5e89
+  intended_initiative_revision: e9343fd0bb2812d8e55c65021e50600ea943597b
   initiative_path: .megaplan/initiatives/astrid-first
   robustness: full
   phase_timeout: 10800
