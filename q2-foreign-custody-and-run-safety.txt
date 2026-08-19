@@ -1,0 +1,206 @@
+Q2 — FOREIGN CUSTODY AND RUN SAFETY (astrid-first occurrence 70485500eadb)
+============================================================================
+model/provider/transport: hermes:deepseek:deepseek-v4-flash / deepseek / read-only tool-file session (file+web tools only, zero shell, zero writes).
+Report generated 2026-08-18T06:2xZ (read-only; no system state modified).
+Investigated: foreign fixer megaplan-maintenance (occurrence 0ae19cc17afd, session
+0ae19cc17afd-20260818T0607Z, babysitter pid 515965/515962 per swarm q3 @ ~06:17Z),
+shared candidate /workspace/runtime-candidates/arnold-4a830c6ac9a0, origin/main,
+astrid-first chain start readiness.
+
+
+1. FOREIGN FIXER PHASE (megaplan-maintenance / occurrence 0ae19cc17afd)
+-----------------------------------------------------------------------
+
+PHASE: **STEP 4 RELAUNCH IN FLIGHT — LIVE DRIVER ACTIVE; NOT TERMINAL (no handoff.md).**
+Ship+rebind are DONE; prove-movement + handoff are PENDING.
+
+Evidence:
+- Goal file /tmp/superfixer-goal-o9bybqmf.md STILL AUTHORIZES pushing past
+  d19dfdcd and `git -C <candidate> reset --hard origin/main`: STEP 3(b) SHIP
+  (lines 306-311) mandates push `fixer/megaplan-maintenance-20260813:main` then
+  `fetch origin main && reset --hard origin/main`, with the CONCURRENT-PUSH GUARD
+  (lines 312-319: re-read live rev after every push/reset, re-run (b)+(c) if the
+  rev moved). So the foreign fixer may lawfully move origin/main + candidate HEAD
+  again at any time while it is not terminal.
+- Recovery dir 0ae19cc17afd-20260818T0607Z/ enumerated (13 files): swarm-briefs
+  (q1-canonical-state, q2-fix-landed-verify, q3-relaunch-seam), swarm-results
+  (same + _report.json), operator/ (resume-plan.sh, scope-exclude-codex-pid.sh,
+  logs/resume.stdout.log). NO handoff.md, NO codex/ dir, NO evidence/ dir in this
+  session => fixer is MID-FLOW, not terminal. Swarm all succeeded
+  (_report.json: 3/3 ok, wall 436s, finished 06:10:43-06:17:59Z).
+- SHIP DONE: q2-fix-landed-verify.txt — refs/remotes/origin/main =
+  d19dfdcd23a3a7b7d7024b35baaed1b4ccfcf877; reflog fast-forward 27ba6507 ->
+  d19dfdcd fetched 2026-08-18T05:55:03Z (newest entry). Candidate HEAD = d19dfdcd
+  on branch fixer/megaplan-maintenance-20260818T0330Z-replay-proven. Regression
+  evidence recorded (focused 8/8 PASS, broad 335 pass/14 baseline-identical fails).
+- REBIND DONE: chain-c511d8baf7d7.json rebound_at 2026-08-18T06:03:59Z to
+  d19dfdcd/8e15ec9c…; manifest expected_head=d19dfdcd gen 103; seed
+  dispatch-current -> 103-d19dfdcd… ready:true errors:[]; marker
+  editable_source_head=d19dfdcd (per q1-canonical-state.txt).
+- RELAUNCH DONE-ISH (live): operator/resume-plan.sh + logs/resume.stdout.log —
+  `megaplan resume --plan m3b-custody-bound-repair-20260817-1428` dispatched
+  2026-08-18T06:21:11Z, {"success":true,"phase":"execute","state":"executed"}
+  (chain start --one had refused the durably-blocked plan at 06:07:08Z per script
+  header; fixer used the plan-resume seam instead, with operator attribution +
+  scope exclusions clearing the quality gate).
+- LIVE DRIVER CONFIRMED (events now advancing): m3b events.ndjson was FLAT at
+  seq 11070/11071 since 03:21Z (q1/q3), but now shows seq 11082 `session_start`
+  boundary=milestone_resume session_id=chain:524760:chain.yaml (driver pid 524760),
+  seq 11083 init 06:22:05Z, seq 11084 auto session, seq 11085 phase_start
+  phase=review 06:22:09Z (workflow_cursor review -> [halt, execute, override]),
+  seq 11086-11089 state_written/artifact_written 06:22:13Z. Plan state.json
+  current_state: "executed" (was "blocked" @06:17Z); chain-c511d8baf7d7.json
+  last_state: "executed" (was "blocked").
+- REMAINING STEPS (per goal STEP 5): prove movement (chain last_state left
+  blocked — already "executed"; same failure_fingerprint must not recur), then
+  write handoff.md at the recovery evidence root, then summarize. The fixer only
+  pushes again if the resume hits a NEW fixable defect (STEP 3 iterate / escalate
+  after 3 attempts) — each such iteration re-triggers push + candidate
+  reset --hard origin/main.
+- Liveness lease megaplan-maintenance.liveness-lease.json: status "stopped",
+  publisher_pid 523330, generated_at == expires_at 2026-08-18T06:21:19Z (0s TTL
+  stop record), run_id 6be72262, sequence 4. Not a live lease. Cloud marker
+  megaplan-maintenance.json: pid 515318 (DEAD), should_run=true (q3 probes) —
+  stale pid, cosmetic.
+
+2. TIP-STABILITY VERDICT
+------------------------
+STABLE AT d19dfdcd AS OF LAST FETCH — BUT NOT NETWORK-VERIFIED, AND THE FOREIGN
+FIXER REMAINS AUTHORIZED TO MOVE IT.
+
+- /workspace/arnold/.git/logs/refs/remotes/origin/main: 162 entries; LAST entry =
+  27ba6507bda62b24438a971ab61e98e002f42267 -> d19dfdcd23a3a7b7d7024b35baaed1b4ccfcf877
+  "fetch origin main: fast-forward", epoch 1787032503 = 2026-08-18T05:55:03Z.
+  NOTHING after it => remote-tracking ref has not moved since d19dfdcd.
+- Candidate HEAD reflog (worktree logs/HEAD): 205 entries; LAST entry =
+  27ba6507 -> d19dfdcd "commit: fix(execute): replay_proven bypasses only
+  temporal coordinator/fence fence for accepted-wave replay (occurrence
+  0ae19cc17afd)" epoch 1787029587 = 05:06:27Z. No reset/checkout/commit after =>
+  candidate HEAD == d19dfdcd == origin/main ref. (Note: the goal-mandated
+  post-push `reset --hard origin/main` is a no-op here since origin/main ==
+  candidate HEAD.)
+- No live `ls-remote` possible in this session (no network tool); stored-ref
+  state is authoritative for the local mirror. q2 swarm reached the same verdict
+  ("superseded — d19dfdcd was fast-forwarded onto origin/main by 05:55:03Z").
+- Drift fail-closed mechanism confirmed: runtime_provenance.py:211-215 — "the
+  live checkout revision must equal the seed's expected_revision exactly …
+  errors.append('source_revision_mismatch')". chain/__init__.py helpers
+  _current_git_head (line 1106, `git rev-parse HEAD`) / _current_head_sha (1766)
+  read the editable-root HEAD; _require_validation_checkout_at_ref (1120-1132)
+  raises validation_failed if local HEAD != refreshed origin/main. So ANY
+  foreign push + candidate reset changes candidate HEAD -> next astrid dispatch
+  attests live-HEAD != seed expected_revision -> source_revision_mismatch /
+  runtime_launch_attestation_mismatch -> fail closed.
+
+3. ASTRID BLOCKER SCAN
+----------------------
+NO BLOCKERS. All astrid identity stores consistent at d19dfdcd.
+
+- astrid-first.liveness-lease.json: status "stopped", publisher_pid 511485
+  (dead), expires_at 2026-08-18T06:03:10Z (expired), sequence 3, run_id
+  chain-start-20260814T2340Z. astrid-first.liveness-fence.json: runner_fence 90.
+- astrid-first.json (cloud marker): editable_source_head = d19dfdcd…;
+  editable_install_sync.runtime_sha256 = 8e15ec9c…; runtime_binding.current_identity
+  source_revision = d19dfdcd…, import_root = /workspace/runtime-candidates/arnold-4a830c6ac9a0;
+  relaunch_command = canonical `chain start --spec …/astrid-first/chain.yaml
+  --project-dir /workspace/astrid-first-ce15b5a3/astrid --one` with
+  MEGAPLAN_BOUND_RUNTIME_REVISION=d19dfdcd… and the dispatch-current seed pointer.
+  Marker pid 511485 is dead (stale, cosmetic).
+- Manifest /workspace/.megaplan/astrid-first.json: epic.expected_head =
+  d19dfdcd…, generation 59, indirection.verified_head = d19dfdcd…,
+  dependency_generation 1cb1b75b… (same venv as megaplan), runtime_root =
+  /workspace/runtime-candidates/arnold-4a830c6ac9a0.
+- Seed dispatch-current (astrid-first-20260814): expected_revision = d19dfdcd…,
+  manifest_generation 59, seed_path 59-d19dfdcd…-61680a61….
+- Chain record chain-097bd96bd408.json: last_state "between_milestones",
+  current_milestone_index 3, current_plan_name null (m4 UNBORN), m1/m2 done,
+  target_base_ref d3c4b566…. (Historical binding entry inside the file still
+  shows the old astrid-first import_root/source_revision d47b7575 — an m2-era
+  sub-record; the operative marker/manifest/seed are all d19dfdcd.)
+- Lock scan: astrid-first.json.runtime-cutover.lock (0 B), .astrid-first.liveness-
+  fence.lock (0 B), megaplan-maintenance.liveness-publisher.lock (0 B),
+  megaplan-maintenance.json.runtime-cutover.lock (0 B),
+  chain-c511d8baf7d7.occurrence-adopt.lock (0 B), chain-c511d8baf7d7.execution-
+  binding-migrate.lock (0 B) — ALL EMPTY, no holders. No *.lock anywhere under
+  /workspace/astrid-first-ce15b5a3/astrid/.megaplan. (Astrid and megaplan locks
+  are separate inodes regardless.)
+- Does `chain start` read the lease/fence? NO. Grep of chain/__init__.py for
+  liveness|lease|fence finds only the module docstring ("process/container
+  liveness") and the occurrence-join help text ("fenced claim/lease"); no reads
+  in the start path. Lease publishing lives in cli/__init__.py main() (lines
+  3889-3905) via managed_runner_lifecycle; cloud/liveness_lease.py
+  resolve_managed_session() (544-571) publishes only when the env is consistent
+  (ARNOLD_BABYSITTER_SESSION wins; mismatch with ARNOLD_REPAIR_SESSION => refuse
+  to publish = foreign-identity-leak guard). Stale/stopped leases therefore do
+  NOT gate `chain start`; the astrid babysitter (pid 510139 alive per q3 @
+  06:17Z, launched 06:01:12Z) will publish a fresh lease on launch.
+- Coordination: q3 confirmed exactly one megaplan-maintenance driver (this
+  fixer, 515962/515965) and the expected astrid babysitter 510139; no competing
+  megaplan fixer. The m3b resume adds driver pid 524760 (chain:524760) as of
+  06:22Z — still the same foreign fixer's chain.
+
+4. SAFETY VERDICT
+-----------------
+**(b) SAFE WITH CAVEATS — run `chain start --one` now is permissible, but the
+run is exposed to a foreign-tip movement that will fail it CLOSED (never
+corrupt it).**
+
+Nothing on the astrid side blocks a start: no held locks, no live lease
+contention (chain start does not read leases), m4 unborn, all astrid stores
+consistent at d19dfdcd, candidate HEAD == origin/main == d19dfdcd, origin/main
+reflog unmoved since 05:55:03Z. The drift trigger (candidate HEAD != seed
+expected_revision) is presently FALSE and any future drift fails closed via
+runtime_provenance source_revision_mismatch.
+
+CAVEATS (named):
+1. FOREIGN FIXER MID-RELAUNCH, NOT TERMINAL: no handoff.md in
+   0ae19cc17afd-20260818T0607Z/; its goal still authorizes pushing past
+   d19dfdcd and `git -C <candidate> reset --hard origin/main`. Its m3b resume is
+   LIVE (driver 524760, phase review started 06:22:09Z, events advancing). If
+   the resume hits a NEW fixable defect within the next ~30-60 min, the fixer
+   will commit -> push origin/main -> reset the candidate to the new tip =>
+   candidate HEAD moves => an in-flight astrid run fails closed
+   (runtime_launch_attestation_mismatch/source_revision_mismatch) and astrid's
+   manifest/seed/marker/chain binding (all d19dfdcd) go stale, requiring an
+   astrid-side rebind to the new rev before a clean retry.
+2. SHARED CANDIDATE UNDER ACTIVE WRITERS: the m3b execute phase runs codex
+   workers against /workspace/runtime-candidates/arnold-4a830c6ac9a0 (MP_RUNTIME/
+   PYTHONPATH); workers historically wrote tracked files (handoffs.py,
+   test_maintenance_operations.py — the 25-LOC scope-drift episode). Attestation
+   checks the git HEAD revision, not the tree hash, so dirty-tree writes alone do
+   not trip source_revision_mismatch, but concurrent git operations by the fixer
+   (reset/format-patch/fetch) during astrid's start window are possible.
+3. ORIGIN/MAIN NOT NETWORK-VERIFIED: tip = last-fetched state (05:55:03Z reflog
+   + loose ref). No live ls-remote was possible in this read-only session; a
+   remote push by any other epic's fixer between 05:55Z and now would not be
+   visible locally until the next fetch.
+4. STALE MARKER PIDS (cosmetic): megaplan marker pid 515318 dead, astrid marker
+   pid 511485 dead, should_run=true retained; no operational effect on chain
+   start, but don't read health from markers.
+
+IF A CONSERVATIVE WAIT IS PREFERRED (recommended for a zero-fail-closed run):
+wait until EITHER (i) `handoff.md` appears in
+/workspace/megaplan-maintenance/Arnold/.megaplan/plans/.chains/recovery/
+0ae19cc17afd-20260818T0607Z/ (fixer terminal; no further pushes expected), OR
+(ii) the m3b resume advances past its first execute wave AND
+/workspace/arnold/.git/logs/refs/remotes/origin/main still ends at
+`27ba6507 … d19dfdcd … 1787032503` (no new push) — then run with the same
+stores. Under the wait, the same condition holds: candidate HEAD must equal
+astrid seed expected_revision (d19dfdcd) at dispatch.
+
+5. UNKNOWNS
+-----------
+- Live origin/main beyond the 05:55:03Z local fetch (no network tool in this
+  session; ls-remote unreachable). Local mirror says d19dfdcd, unmoved.
+- Whether the m3b resume (driver 524760) will succeed or fail; if it fails with
+  a NEW defect, whether the fixer ships another commit+push+reset (its goal
+  authorizes it) and when.
+- Process liveness at this instant: babysitter pids 515965/515962 (megaplan) and
+  510139 (astrid) were alive at q3's 06:17Z observation; driver 524760 is
+  evidenced by events at 06:22Z. No /proc access to re-verify live.
+- The m3b execute-phase duration and whether its workers mutate the candidate
+  working tree during astrid's window (does not trip the revision check, but
+  could surface as dirty-tree noise).
+- Whether astrid's babysitter auto-rebinds astrid stores after a foreign push
+  (it has the rebind machinery per its own goal; exact trigger timing unverified
+  for this occurrence).

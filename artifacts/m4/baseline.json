@@ -1,0 +1,103 @@
+{
+  "baseline_path": "artifacts/m4/baseline.json",
+  "duration_seconds": 44.017,
+  "exit": 0,
+  "ok": true,
+  "problems": [],
+  "repo": {
+    "git_sha": "710ed4a448a1f2078b23030d708fb0ac9e266020",
+    "git_short_sha": "710ed4a448a1",
+    "root": "/workspace/astrid-first-ce15b5a3/astrid"
+  },
+  "schema": "astrid.m4_baseline.v1",
+  "selectors": {
+    "bridge_server": {
+      "duration_seconds": 29.629,
+      "failed": 0,
+      "junit": "artifacts/m4/bridge_server-junit.xml",
+      "log": "artifacts/m4/bridge_server.log",
+      "passed": 52,
+      "returncode": 0,
+      "selectors": [
+        "tests/integrations/reigh/test_local_bridge_server.py"
+      ],
+      "skipped": 0,
+      "status": "pass"
+    },
+    "media_pipeline": {
+      "duration_seconds": 1.876,
+      "failed": 0,
+      "junit": "artifacts/m4/media_pipeline-junit.xml",
+      "log": "artifacts/m4/media_pipeline.log",
+      "passed": 51,
+      "returncode": 0,
+      "selectors": [
+        "tests/v10/test_media_pipeline.py"
+      ],
+      "skipped": 0,
+      "status": "pass"
+    },
+    "timeline_repository": {
+      "duration_seconds": 2.196,
+      "failed": 0,
+      "junit": "artifacts/m4/timeline_repository-junit.xml",
+      "log": "artifacts/m4/timeline_repository.log",
+      "passed": 25,
+      "returncode": 0,
+      "selectors": [
+        "tests/v10/test_timeline_repository.py"
+      ],
+      "skipped": 0,
+      "status": "pass"
+    },
+    "v10_contract": {
+      "duration_seconds": 1.718,
+      "failed": 0,
+      "junit": "artifacts/m4/v10_contract-junit.xml",
+      "log": "artifacts/m4/v10_contract.log",
+      "passed": 41,
+      "returncode": 0,
+      "selectors": [
+        "tests/v10/test_catalog_migrations.py"
+      ],
+      "skipped": 0,
+      "status": "pass"
+    },
+    "writer_uow": {
+      "duration_seconds": 8.436,
+      "failed": 0,
+      "junit": "artifacts/m4/writer_uow-junit.xml",
+      "log": "artifacts/m4/writer_uow.log",
+      "passed": 37,
+      "returncode": 0,
+      "selectors": [
+        "tests/v10/test_writer_uow.py"
+      ],
+      "skipped": 0,
+      "status": "pass"
+    }
+  },
+  "timestamp": {
+    "finished_at": "2026-08-18T18:18:25Z",
+    "started_at": "2026-08-18T18:17:41Z"
+  },
+  "tools": {
+    "node": "v20.20.2",
+    "npm": "10.8.2",
+    "python": {
+      "executable": "/root/.pyenv/versions/3.11.11/bin/python3",
+      "version": "Python 3.11.11"
+    },
+    "python_packages": {
+      "astrid": "0.1.0",
+      "build": "1.5.0",
+      "jsonschema": "4.26.0",
+      "mypy": "1.17.0",
+      "pytest": "9.0.2",
+      "pytest-cov": "7.1.0",
+      "pytest-timeout": "2.4.0",
+      "referencing": "0.37.0",
+      "ruff": "0.12.0"
+    }
+  }
+}

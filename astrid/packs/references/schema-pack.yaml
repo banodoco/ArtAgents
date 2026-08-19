@@ -30,12 +30,14 @@ stream_types:
   - reference.reference
 event_kinds:
   - reference.created
+  - reference.updated
   - reference.archived
   - reference.media_associated
   - reference.primary_changed
   - reference.linked
 command_kinds:
   - reference.create
+  - reference.update
   - reference.archive
   - reference.associate
   - reference.set_primary

@@ -1,0 +1,440 @@
+{
+  "admission_path": "artifacts/m4/finalizer-admission.json",
+  "authority_lint": {
+    "errors": [],
+    "exemption_note": "the recorded exemptions are the two manifest-declared nested-mount parser composition edges (timelines->shots, media->references), mirroring the dispatch.py composition root",
+    "exemptions": [
+      "astrid/core/cli/domain_media.py: kernel-to-pack import 'astrid.packs.references' (only the serve composition root is exempt)",
+      "astrid/core/cli/domain_media.py: kernel-to-pack import 'astrid.packs.references.cli' (only the serve composition root is exempt)",
+      "astrid/packs/timeline/cli.py: pack-to-pack import 'astrid.packs.shots' from pack 'timeline'",
+      "astrid/packs/timeline/cli.py: pack-to-pack import 'astrid.packs.shots.cli' from pack 'timeline'"
+    ],
+    "ok": true
+  },
+  "drift": {
+    "checks": {
+      "cli_surface": {
+        "mounts": [
+          "projects",
+          "media",
+          "tasks",
+          "runs",
+          "timelines",
+          "timelines shots",
+          "media references"
+        ],
+        "nested_families": [
+          "references",
+          "shots"
+        ],
+        "product_families": [
+          "projects",
+          "media",
+          "tasks",
+          "runs",
+          "timelines"
+        ],
+        "product_timeline_verbs": [
+          "archive",
+          "create",
+          "diff",
+          "history",
+          "list",
+          "save",
+          "show"
+        ]
+      },
+      "schema_composition": {
+        "core_table_count": 14,
+        "pack_ids": [
+          "references",
+          "shots",
+          "timeline"
+        ],
+        "pack_tables": {
+          "media_references": [
+            "c",
+            "e",
+            "e",
+            "e",
+            "e",
+            "f",
+            "n",
+            "r",
+            "r",
+            "s"
+          ],
+          "project_references": [
+            "c",
+            "e",
+            "e",
+            "e",
+            "e",
+            "f",
+            "n",
+            "r",
+            "r",
+            "s"
+          ],
+          "reference_links": [
+            "c",
+            "e",
+            "e",
+            "e",
+            "e",
+            "f",
+            "n",
+            "r",
+            "r",
+            "s"
+          ],
+          "shot_items": [
+            "h",
+            "o",
+            "s",
+            "s",
+            "t"
+          ],
+          "shots": [
+            "h",
+            "o",
+            "s",
+            "s",
+            "t"
+          ],
+          "timelines": [
+            "e",
+            "e",
+            "i",
+            "i",
+            "l",
+            "m",
+            "n",
+            "t"
+          ]
+        },
+        "registry_error": "",
+        "registry_frozen": true,
+        "total_table_count": 20
+      },
+      "sdk_surface": {
+        "export_count": 34,
+        "exports": [
+          "AliasRecord",
+          "AstridClient",
+          "AstridSDKError",
+          "Capability",
+          "CapabilityAmbiguousError",
+          "CapabilityHandle",
+          "CapabilityInvocationError",
+          "CapabilityNotFoundError",
+          "CapabilityType",
+          "CapabilityValidationError",
+          "CapabilityMissingInputError",
+          "CapabilityPreconditionError",
+          "CapabilityRuntimeError",
+          "CapabilityLeaseError",
+          "CapabilityEventLogError",
+          "DiscoveryResult",
+          "EventStreamRecord",
+          "ExecError",
+          "InvocationResult",
+          "Output",
+          "Port",
+          "Provenance",
+          "RenderContext",
+          "SafetyDeclaration",
+          "UnsupportedCapabilityError",
+          "discover",
+          "generate",
+          "get_capability",
+          "invoke",
+          "read_events",
+          "render",
+          "renderer_main",
+          "subscribe_events",
+          "support"
+        ],
+        "is_list": true
+      },
+      "secrets": {
+        "scanned_files": 39,
+        "sentinel": "<redacted; the literal sentinel is never persisted in retained gate evidence>",
+        "sentinel_sha256_prefix": "397f6b833f9b8b10"
+      }
+    },
+    "ok": true,
+    "violations": []
+  },
+  "duration_seconds": 274.844,
+  "exit": 0,
+  "feasibility": {
+    "accepted": true,
+    "admitted": true,
+    "parseable": true,
+    "path": "/workspace/astrid-first-ce15b5a3/astrid/.megaplan/plans/m4-bridge-sdk-and-cli-domains-20260818-0642/task_feasibility.json",
+    "plan_hash": "sha256:fda0d8a5399c91477e24c84e6e204ec50fbb93aaebc5f1f52132d74d658d9b65",
+    "present": true,
+    "schema_version": "megaplan-task-feasibility-v2",
+    "task_contract_hash": "sha256:cf280ec74f49b2f7d98c415a9b3a408890e350448802632efa01a8eec87e660f",
+    "task_count": 38
+  },
+  "feasibility_problems": [],
+  "lane_subset": [
+    "contracts",
+    "composition",
+    "owner_lock",
+    "services",
+    "cli",
+    "bridge",
+    "media_conformance",
+    "task_run_conformance",
+    "pack_conformance",
+    "crash_contention",
+    "secrets",
+    "platform",
+    "authority_lint"
+  ],
+  "lanes": {
+    "authority_lint": {
+      "duration_seconds": 1.204,
+      "failed": 0,
+      "junit": "out/m4-gate/latest/authority_lint-junit.xml",
+      "log": "out/m4-gate/latest/authority_lint.log",
+      "passed": 28,
+      "returncode": 0,
+      "selectors": [
+        "tests/v10/test_authority_lint.py"
+      ],
+      "skipped": 0,
+      "status": "pass"
+    },
+    "bridge": {
+      "duration_seconds": 35.253,
+      "failed": 0,
+      "junit": "out/m4-gate/latest/bridge-junit.xml",
+      "log": "out/m4-gate/latest/bridge.log",
+      "passed": 86,
+      "returncode": 0,
+      "selectors": [
+        "tests/integrations/reigh/test_local_bridge_server.py",
+        "tests/integrations/reigh/test_repository_provider.py",
+        "tests/v10/test_shared_service_authority.py"
+      ],
+      "skipped": 0,
+      "status": "pass"
+    },
+    "cli": {
+      "duration_seconds": 6.227,
+      "failed": 0,
+      "junit": "out/m4-gate/latest/cli-junit.xml",
+      "log": "out/m4-gate/latest/cli.log",
+      "passed": 312,
+      "returncode": 0,
+      "selectors": [
+        "tests/v10/test_domain_cli_surface.py",
+        "tests/v10/test_domain_cli_projects_timelines.py",
+        "tests/v10/test_domain_cli_media_references.py",
+        "tests/v10/test_domain_cli_tasks_runs.py",
+        "tests/test_cli_registration_conformance.py",
+        "tests/test_canonical_aliases.py",
+        "tests/test_canonical_entrypoint.py",
+        "tests/session/test_cli_gate.py"
+      ],
+      "skipped": 0,
+      "status": "pass"
+    },
+    "composition": {
+      "duration_seconds": 103.881,
+      "failed": 0,
+      "junit": "out/m4-gate/latest/composition-junit.xml",
+      "log": "out/m4-gate/latest/composition.log",
+      "passed": 30,
+      "returncode": 0,
+      "selectors": [
+        "tests/v10/test_standard_application.py",
+        "tests/v10/test_pack_factoring.py"
+      ],
+      "skipped": 0,
+      "status": "pass"
+    },
+    "contracts": {
+      "duration_seconds": 2.219,
+      "failed": 0,
+      "junit": "out/m4-gate/latest/contracts-junit.xml",
+      "log": "out/m4-gate/latest/contracts.log",
+      "passed": 49,
+      "returncode": 0,
+      "selectors": [
+        "tests/v10/test_m4_contracts.py",
+        "tests/sdk/test_domain_contracts.py"
+      ],
+      "skipped": 0,
+      "status": "pass"
+    },
+    "crash_contention": {
+      "duration_seconds": 54.01,
+      "failed": 0,
+      "junit": "out/m4-gate/latest/crash_contention-junit.xml",
+      "log": "out/m4-gate/latest/crash_contention.log",
+      "passed": 14,
+      "returncode": 0,
+      "selectors": [
+        "tests/v10/test_crash_atomicity.py",
+        "tests/v10/test_contention.py"
+      ],
+      "skipped": 0,
+      "status": "pass"
+    },
+    "media_conformance": {
+      "duration_seconds": 3.774,
+      "failed": 0,
+      "junit": "out/m4-gate/latest/media_conformance-junit.xml",
+      "log": "out/m4-gate/latest/media_conformance.log",
+      "passed": 97,
+      "returncode": 0,
+      "selectors": [
+        "tests/v10/test_media_pipeline.py",
+        "tests/v10/test_media_repository.py"
+      ],
+      "skipped": 0,
+      "status": "pass"
+    },
+    "owner_lock": {
+      "duration_seconds": 1.84,
+      "failed": 0,
+      "junit": "out/m4-gate/latest/owner_lock-junit.xml",
+      "log": "out/m4-gate/latest/owner_lock.log",
+      "passed": 7,
+      "returncode": 0,
+      "selectors": [
+        "tests/v10/test_writer_authority.py"
+      ],
+      "skipped": 0,
+      "status": "pass"
+    },
+    "pack_conformance": {
+      "duration_seconds": 14.634,
+      "failed": 0,
+      "junit": "out/m4-gate/latest/pack_conformance-junit.xml",
+      "log": "out/m4-gate/latest/pack_conformance.log",
+      "passed": 12,
+      "returncode": 0,
+      "selectors": [
+        "tests/v10/test_reference_conformance.py",
+        "tests/v10/test_shot_conformance.py"
+      ],
+      "skipped": 0,
+      "status": "pass"
+    },
+    "platform": {
+      "duration_seconds": 37.437,
+      "failed": 0,
+      "junit": "out/m4-gate/latest/platform-junit.xml",
+      "log": "out/m4-gate/latest/platform.log",
+      "passed": 102,
+      "returncode": 0,
+      "selectors": [
+        "tests/test_platform_contract.py",
+        "tests/test_sdk_public_surface.py",
+        "tests/sdk/test_zero_secret_smoke.py"
+      ],
+      "skipped": 0,
+      "status": "pass"
+    },
+    "secrets": {
+      "duration_seconds": 2.357,
+      "failed": 0,
+      "junit": "out/m4-gate/latest/secrets-junit.xml",
+      "log": "out/m4-gate/latest/secrets.log",
+      "passed": 53,
+      "returncode": 0,
+      "selectors": [
+        "tests/core/util/test_secrets.py",
+        "tests/core/test_credentials_scope.py",
+        "tests/packs/rendering/test_sprite_sheet.py"
+      ],
+      "skipped": 0,
+      "status": "pass"
+    },
+    "services": {
+      "duration_seconds": 6.805,
+      "failed": 0,
+      "junit": "out/m4-gate/latest/services-junit.xml",
+      "log": "out/m4-gate/latest/services.log",
+      "passed": 124,
+      "returncode": 0,
+      "selectors": [
+        "tests/sdk/test_projects.py",
+        "tests/sdk/test_timelines.py",
+        "tests/sdk/test_media.py",
+        "tests/sdk/test_tasks.py",
+        "tests/sdk/test_runs.py",
+        "tests/sdk/test_references.py",
+        "tests/sdk/test_shots.py"
+      ],
+      "skipped": 0,
+      "status": "pass"
+    },
+    "task_run_conformance": {
+      "duration_seconds": 3.115,
+      "failed": 0,
+      "junit": "out/m4-gate/latest/task_run_conformance-junit.xml",
+      "log": "out/m4-gate/latest/task_run_conformance.log",
+      "passed": 47,
+      "returncode": 0,
+      "selectors": [
+        "tests/v10/test_task_lifecycle.py",
+        "tests/v10/test_multi_task_journey.py"
+      ],
+      "skipped": 0,
+      "status": "pass"
+    }
+  },
+  "ok": true,
+  "problems": [],
+  "python_matrix": {
+    "matrix_targets": [
+      "3.11",
+      "3.12"
+    ],
+    "primary": {
+      "executable": "/root/.pyenv/versions/3.11.11/bin/python3",
+      "version": "3.11.11"
+    },
+    "secondary": {
+      "executable": "/root/.pyenv/shims/python3.13",
+      "reason": "secondary interpreter found but the pinned dev extra (pytest) is not installed for it; the CI matrix job is the authoritative 3.11/3.12 execution",
+      "status": "unavailable",
+      "version": "3.13.0"
+    }
+  },
+  "repo": {
+    "git_sha": "6a654039c77efdc637f0a6c6385d71ce51f538ee",
+    "git_short_sha": "6a654039c77e",
+    "root": "/workspace/astrid-first-ce15b5a3/astrid"
+  },
+  "retained_reference": {
+    "baseline": {
+      "git_sha": "710ed4a448a1f2078b23030d708fb0ac9e266020",
+      "ok": true,
+      "parseable": true,
+      "present": true,
+      "schema": "astrid.m4_baseline.v1"
+    },
+    "note": "baseline and Reigh disposition are retained evidence; Reigh compatibility is reporting-only (SD1) and never an admission input",
+    "reigh_disposition": {
+      "authority_decision": "DENIED",
+      "overall_status": "unavailable",
+      "parseable": true,
+      "present": true,
+      "schema": "astrid.reigh_external_gate_disposition.v1",
+      "schema_ok": true
+    }
+  },
+  "schema": "astrid.m4_finalizer_admission.v1",
+  "timestamp": {
+    "finished_at": "2026-08-19T07:49:01Z",
+    "started_at": "2026-08-19T07:44:26Z"
+  }
+}

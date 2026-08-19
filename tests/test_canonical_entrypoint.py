@@ -64,3 +64,29 @@ def test_canonical_runtime_entrypoint_allows_matching_capability_only(
             _import_module(module_path, "guarded_module_wrong_capability")
 
     assert excinfo.value.code == 2
+
+
+def test_shots_product_cli_imports_without_canonical_entrypoint_guard(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The nested shots product parser retains canonical entrypoint behavior.
+
+    Task T29 mounts ``astrid/packs/shots/cli.py`` beneath the timelines
+    family. Product parser modules are imported by the gateway dispatch
+    path and must stay importable without ``ASTRID_INTERNAL_INVOCATION``:
+    ``guard_canonical_entrypoint`` remains reserved for pack ``run.py``
+    modules, so importing and building the shots parser must never raise
+    ``SystemExit`` (the guard's refusal) at import or build time.
+    """
+    monkeypatch.delenv("ASTRID_INTERNAL_INVOCATION", raising=False)
+    from astrid.packs.shots import cli as shots_cli
+
+    parser = shots_cli.build_parser(object())
+    assert parser.prog == "astrid timelines shots"
+    # The guard itself is still canonical and refuses direct module
+    # invocation without runtime context (unchanged behavior).
+    module_path = Path(__file__).parent / "guarded_module.py"
+    _write_guarded_module(module_path)
+    with pytest.raises(SystemExit) as excinfo:
+        _import_module(module_path, "guarded_module_retained")
+    assert excinfo.value.code == 2

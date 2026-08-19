@@ -6,6 +6,17 @@ registered per ``credentials.<provider>`` key; each resolver returns a
 ``CredentialsScope`` populated with that provider's resolved value (or
 raises ``AstridError`` when the key is missing).
 
+Resolution precedence (frozen in m4, plan Step 31):
+
+1. explicit option (caller-supplied key, ``ScopeRequest.explicit`` or the
+   ``explicit`` argument);
+2. process environment;
+3. injectable supported OS keychain (tier 3 — the default boundary never
+   accesses a keychain; ``keyring`` is imported lazily, never eagerly);
+4. one explicitly named env file, as a lower-priority convenience only.
+
+Broad cwd/repository/workspace/home env-file scavenging is absent.
+
 Canonical provider → env-var table
 ----------------------------------
 fal        → ``FAL_KEY``
@@ -19,9 +30,8 @@ giphy      → ``GIPHY_API_KEY``
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, ClassVar, Mapping
 
 from astrid.core.contracts.errors import AstridError
 from astrid.core.contracts.scoped_config import (
@@ -29,7 +39,7 @@ from astrid.core.contracts.scoped_config import (
     ScopedConfig,
     ScopeRequest,
 )
-from astrid.core.util.secrets import load_api_key
+from astrid.core.util.secrets import KeychainProvider, load_api_key
 
 # ---------------------------------------------------------------------------
 # Canonical provider → env-var table
@@ -70,13 +80,19 @@ class CredentialsScope(ScopedConfig):
         provider: str,
         *,
         env_file: Path | None = None,
+        explicit: str | None = None,
+        keychain: KeychainProvider | None = None,
     ) -> str:
-        """Resolve *provider*'s API key via the existing .env walk.
+        """Resolve *provider*'s API key in the frozen m4 precedence.
 
         Args:
             provider: Canonical provider key (must be in ``_PROVIDER_ENV``).
-            env_file: Optional explicit ``.env`` file path forwarded to
-                      ``load_api_key``.
+            env_file: Optional explicitly named ``.env`` file (lowest-priority
+                      convenience tier, forwarded to ``load_api_key``).
+            explicit: Optional caller-supplied explicit value (highest
+                      priority tier).
+            keychain: Optional injectable keychain boundary (tier 3). When
+                      ``None`` no OS keychain is ever accessed.
 
         Returns:
             The resolved API key string.
@@ -91,7 +107,12 @@ class CredentialsScope(ScopedConfig):
                 f"Unknown credentials provider: {provider!r} (valid: {valid})",
                 recovery_command="use a canonical provider name (fal, openai, anthropic, deepseek, fireworks, gemini, giphy)",
             )
-        return load_api_key(env_var, env_file=env_file)
+        return load_api_key(
+            env_var,
+            env_file=env_file,
+            explicit=explicit,
+            keychain=keychain,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -102,16 +123,23 @@ def _make_resolver(provider: str, env_var: str):
     """Factory: create a scope resolver for *provider*."""
 
     def _resolve(request: ScopeRequest) -> CredentialsScope:
-        # Explicit overrides take priority (caller-supplied key).
+        # Tier 1: explicit overrides take priority (caller-supplied key).
+        # ScopeRequest.explicit keys are scope keys ("credentials.fal"); the
+        # bare provider key ("fal") is also accepted for compatibility.
         explicit = request.explicit
         if explicit is not None:
-            value = explicit.get(provider)
-            if value is not None:
-                return CredentialsScope(provider=provider, value=str(value))
+            for key in (f"credentials.{provider}", provider):
+                value = explicit.get(key)
+                if value is not None:
+                    return CredentialsScope(provider=provider, value=str(value))
 
-        # Fall back to the .env walk.
+        # Tiers 2–4: process environment (from the request's env mapping when
+        # present, else os.environ), injectable keychain boundary (default:
+        # none), then an explicitly named env file (not carried by
+        # ScopeRequest, so the registry path resolves through the first three
+        # tiers; direct callers may pass env_file via CredentialsScope.get).
         try:
-            value = load_api_key(env_var)
+            value = load_api_key(env_var, environ=request.env)
         except AstridError:
             raise  # re-raise — missing credentials are fatal
         return CredentialsScope(provider=provider, value=value)

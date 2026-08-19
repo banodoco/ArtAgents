@@ -24,9 +24,11 @@ stream_types:
 event_kinds:
   - timeline.created
   - timeline.saved
+  - timeline.archived
 command_kinds:
   - timeline.create
   - timeline.save
+  - timeline.archive
 repositories:
   - TimelineRepository
 conformance:

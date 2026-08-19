@@ -67,12 +67,19 @@ __all__ = [
     "CORE_TASK_FAILED_EVENT_KIND",
     "CORE_TASK_STREAM_TYPE",
     "CommandVocabularyError",
+    "DEFAULT_EVENT_READ_LIMIT",
+    "EventNotFoundError",
+    "EventReadError",
+    "EventReadModel",
+    "EventRepository",
+    "EventRepositoryError",
     "EventVocabularyError",
     "EVIDENCE_KINDS",
     "EvidenceReadModel",
     "EvidenceRepository",
     "EvidenceRepositoryError",
     "EvidenceValidationError",
+    "MAX_EVENT_READ_LIMIT",
     "MediaAlreadyExistsError",
     "MediaConflictError",
     "MediaLocationReadModel",
@@ -210,6 +217,18 @@ _LAZY_EVIDENCE_NAMES = frozenset(
     }
 )
 
+_LAZY_EVENT_NAMES = frozenset(
+    {
+        "DEFAULT_EVENT_READ_LIMIT",
+        "EventNotFoundError",
+        "EventReadError",
+        "EventReadModel",
+        "EventRepository",
+        "EventRepositoryError",
+        "MAX_EVENT_READ_LIMIT",
+    }
+)
+
 
 def __getattr__(name: str) -> Any:
     if name in _LAZY_PROJECT_NAMES:
@@ -226,5 +245,8 @@ def __getattr__(name: str) -> Any:
         return getattr(module, name)
     if name in _LAZY_EVIDENCE_NAMES:
         module = importlib.import_module("astrid.core.repositories.evidence")
+        return getattr(module, name)
+    if name in _LAZY_EVENT_NAMES:
+        module = importlib.import_module("astrid.core.repositories.events")
         return getattr(module, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

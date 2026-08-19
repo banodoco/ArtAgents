@@ -53,7 +53,7 @@ import sqlite3
 import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, List
 
 from astrid.core.events.service import ACTOR_KINDS, EventAppendService
 from astrid.core.ids import generate_lowercase_ulid, is_lowercase_ulid
@@ -93,6 +93,31 @@ event log alone can reconstruct every save that advanced the stream head.
 
 TIMELINE_SAVE_COMMAND_KIND = "timeline.save"
 """The m1 command kind that timeline-save receipts are keyed on."""
+
+TIMELINE_ARCHIVE_COMMAND_KIND = "timeline.archive"
+"""The m4 command kind that timeline-archive receipts are keyed on (plan
+step 7). Archive is event-backed (SD1): the frozen ``timelines`` table has
+no ``archived_at`` column, so the archived state is derived from the
+presence of a ``timeline.archived`` event on the timeline stream."""
+
+TIMELINE_ARCHIVED_EVENT_KIND = "timeline.archived"
+"""The m4 event kind appended by the archive command (plan step 7).
+
+The event carries the archived timestamp and advances the timeline stream
+head exactly once; its presence on the stream is the single event-backed
+authority for archived state (there is no column and no second authority).
+Archived timelines disappear from ordinary lists and reject further saves,
+while direct historical lookup (show/history/diff) keeps working."""
+
+_TIMELINE_HISTORY_KINDS: tuple[str, ...] = (
+    TIMELINE_CREATED_EVENT_KIND,
+    TIMELINE_SAVED_EVENT_KIND,
+    TIMELINE_ARCHIVED_EVENT_KIND,
+)
+"""The ordered timeline lifecycle event kinds history/diff read, in stream
+order (created first, then saves, then archive). Archive never changes
+document/registry, so the version content used by ``diff`` is carried by
+``timeline.created`` and ``timeline.saved`` only."""
 
 _BRIDGE_CANONICAL_TOP_KEYS: tuple[str, ...] = (
     "config",
@@ -237,6 +262,25 @@ class TimelineNotFoundError(TimelineRepositoryError):
         )
 
 
+class TimelineArchivedError(TimelineRepositoryError):
+    """Raised when a command mutates an already-archived timeline.
+
+    Archive is final for mutations (SD1): once a ``timeline.archived``
+    event is committed on the stream, a whole-document save or a second
+    archive raises this before any allocation or projection change, so the
+    archived timeline, its events, both heads, and every receipt stay
+    unchanged. Direct historical lookup (show/history/diff) still works.
+    """
+
+    def __init__(self, *, timeline_id: str, project_id: str) -> None:
+        self.timeline_id: str = timeline_id
+        self.project_id: str = project_id
+        super().__init__(
+            f"timeline is archived and cannot be mutated: {timeline_id!r} "
+            f"in project {project_id!r}"
+        )
+
+
 # ---------------------------------------------------------------------------
 # Frozen read models
 # ---------------------------------------------------------------------------
@@ -316,6 +360,111 @@ class TimelineListRow:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class TimelineArchiveReadModel:
+    """The immutable result of one :meth:`TimelineRepository.archive` command.
+
+    ``config_version`` is the timeline stream head after the archive event
+    was appended (exactly one greater than the head before archive).
+    ``to_dict`` is the JSON-safe persisted receipt shape and
+    ``from_mapping`` rebuilds it for exact replay, so an identical retry
+    under the same idempotency key returns exactly the stored result.
+    """
+
+    timeline_id: str
+    project_id: str
+    archived_at: str
+    config_version: int
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return the JSON-safe dict persisted as the archive receipt result."""
+        return {
+            "timeline_id": self.timeline_id,
+            "project_id": self.project_id,
+            "archived_at": self.archived_at,
+            "config_version": self.config_version,
+        }
+
+    @classmethod
+    def from_mapping(cls, value: Mapping[str, Any]) -> TimelineArchiveReadModel:
+        """Rebuild the frozen archive read model from a stored mapping."""
+        return cls(
+            timeline_id=str(value["timeline_id"]),
+            project_id=str(value["project_id"]),
+            archived_at=str(value["archived_at"]),
+            config_version=int(value["config_version"]),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class TimelineHistoryEntry:
+    """One ordered timeline lifecycle event (history read, plan step 7).
+
+    ``version`` is the event's stream ``seq`` (1 for ``timeline.created``,
+    then one per save/archive). ``kind`` is one of
+    :data:`_TIMELINE_HISTORY_KINDS`. ``config`` and ``registry`` carry the
+    document/registry content for created/saved entries and ``None`` for
+    archive entries (archive never changes content); ``archived_at`` is set
+    only on the archive entry.
+    """
+
+    version: int
+    kind: str
+    created_at: str
+    config: Mapping[str, Any] | None
+    registry: Mapping[str, Any] | None
+    archived_at: str | None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return the JSON-safe dict exposed by the history read."""
+        return {
+            "version": self.version,
+            "kind": self.kind,
+            "created_at": self.created_at,
+            "config": dict(self.config) if self.config is not None else None,
+            "registry": dict(self.registry) if self.registry is not None else None,
+            "archived_at": self.archived_at,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class TimelineDiffEntry:
+    """One deterministic adjacent-version diff (diff read, plan step 7).
+
+    Compares two adjacent content versions (``from_version`` to
+    ``to_version``) over the document and registry keys. ``document`` and
+    ``registry`` each carry ``added``/``removed``/``changed`` key lists
+    (deterministically sorted). Registry keys are the asset keys under
+    ``registry.assets`` (the editor-visible registry vocabulary).
+    """
+
+    from_version: int
+    to_version: int
+    from_kind: str
+    to_kind: str
+    document: Mapping[str, list[str]]
+    registry: Mapping[str, list[str]]
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return the JSON-safe dict exposed by the diff read."""
+        return {
+            "from_version": self.from_version,
+            "to_version": self.to_version,
+            "from_kind": self.from_kind,
+            "to_kind": self.to_kind,
+            "document": {
+                "added": list(self.document["added"]),
+                "removed": list(self.document["removed"]),
+                "changed": list(self.document["changed"]),
+            },
+            "registry": {
+                "added": list(self.registry["added"]),
+                "removed": list(self.registry["removed"]),
+                "changed": list(self.registry["changed"]),
+            },
+        }
+
+
 # ---------------------------------------------------------------------------
 # Validation helpers
 # ---------------------------------------------------------------------------
@@ -341,6 +490,41 @@ def _query_one(reader: Any, sql: str, parameters: Sequence[Any] = ()) -> Any:
         return query_one(sql, parameters)
     cursor = reader.execute(sql, parameters)
     return cursor.fetchone()
+
+
+def _query_all(reader: Any, sql: str, parameters: Sequence[Any] = ()) -> list[Any]:
+    """Run one multi-row read on a UoW/WriterSession reader or a connection.
+
+    Mirrors :func:`_query_one`: a unit of work / writer session exposes
+    ``query(sql, params)`` returning a list of rows, while a raw
+    ``sqlite3.Connection`` exposes ``execute(...).fetchall()``. Used by the
+    history/diff reads and the archive state probe.
+    """
+    query = getattr(reader, "query", None)
+    if query is not None:
+        return list(query(sql, parameters))
+    cursor = reader.execute(sql, parameters)
+    return list(cursor.fetchall())
+
+
+def _key_diff(
+    before: Mapping[str, Any], after: Mapping[str, Any]
+) -> dict[str, list[str]]:
+    """Deterministic top-level key diff between two JSON objects.
+
+    Returns ``{"added": [...], "removed": [...], "changed": [...]}`` where
+    each list is sorted lexicographically: ``added`` keys exist only in
+    *after*, ``removed`` only in *before*, and ``changed`` exist in both but
+    compare unequal.
+    """
+    before_keys = set(before)
+    after_keys = set(after)
+    added = sorted(after_keys - before_keys)
+    removed = sorted(before_keys - after_keys)
+    changed = sorted(
+        key for key in (before_keys & after_keys) if before[key] != after[key]
+    )
+    return {"added": added, "removed": removed, "changed": changed}
 
 
 # ---------------------------------------------------------------------------
@@ -642,6 +826,7 @@ class TimelineRepository:
         expected_version: int,
         actor_kind: str = "local",
         command_kind: str = TIMELINE_SAVE_COMMAND_KIND,
+        idempotency_key: str | None = None,
         created_at: str | None = None,
     ) -> TimelineReadModel:
         """Whole-document CAS save: one atomic, idempotent commit (§6).
@@ -651,28 +836,37 @@ class TimelineRepository:
         the loose ``config``/``registry`` object shapes and the integer
         ``expected_version`` (booleans are rejected — a boolean is not a
         version, bridge §6.1), canonicalizes **only** the frozen bridge top
-        keys (:data:`_BRIDGE_CANONICAL_TOP_KEYS`), and derives the internal
-        idempotency key from project/timeline identity, the integer expected
-        head, and the canonical payload — the bridge route has no
-        ``idempotency_key`` field, so the repository derives one (receipt
-        secrecy, §7).
+        keys (:data:`_BRIDGE_CANONICAL_TOP_KEYS`), and resolves the effective
+        idempotency key:
 
-        Then, still in the one transaction: the receipt gate runs first (an
-        identical retry replays exactly the stored result with zero new
-        rows; a changed request under the same derived key raises
-        :class:`ReceiptMismatchError` before any mutation), the expected
-        head is CAS-checked **before** any allocation (a stale save raises
-        :class:`TimelineVersionConflictError` carrying the current head and
-        changes zero rows), ``document_json`` and ``asset_registry_json``
-        are updated, one hash-chained ``timeline.saved`` event carrying the
-        command delta is appended (advancing stream and project heads), and
-        the complete receipt is written. Returns the frozen load shape
-        (§5.2) with the new ``config_version`` — the stream head after the
-        save, exactly one greater than ``expected_version``.
+        - when *idempotency_key* is supplied, it is the caller's key, used
+          verbatim (a non-empty string, validated before any mutation);
+        - when absent, the repository derives the frozen bridge key from
+          project/timeline identity, the integer expected head, and the
+          canonical payload — the bridge route has no ``idempotency_key``
+          field, so the repository derives one (receipt secrecy, §7).
+
+        Both paths then share the exact same atomic command: the receipt
+        gate runs first (an identical retry replays exactly the stored
+        result with zero new rows; a changed request under the same key —
+        caller or derived — raises :class:`ReceiptMismatchError` before any
+        mutation), the expected head is CAS-checked **before** any
+        allocation (a stale save raises :class:`TimelineVersionConflictError`
+        carrying the current head and changes zero rows), ``document_json``
+        and ``asset_registry_json`` are updated, one hash-chained
+        ``timeline.saved`` event carrying the command delta is appended
+        (advancing stream and project heads), and the complete receipt is
+        written. Returns the frozen load shape (§5.2) with the new
+        ``config_version`` — the stream head after the save, exactly one
+        greater than ``expected_version``.
         """
         project_id = _require_non_empty_string("project_id", project_id)
         ref = _require_non_empty_string("ref", ref)
         command_kind = _require_non_empty_string("command_kind", command_kind)
+        if idempotency_key is not None:
+            idempotency_key = _require_non_empty_string(
+                "idempotency_key", idempotency_key
+            )
         if actor_kind not in ACTOR_KINDS:
             raise TimelineValidationError(
                 f"actor_kind must be one of {sorted(ACTOR_KINDS)}, "
@@ -710,7 +904,7 @@ class TimelineRepository:
             "expected_version": expected_version,
         }
         try:
-            request_digest = request_hash(command_kind, payload)
+            bridge_request_digest = request_hash(command_kind, payload)
         except CanonicalizationError as exc:
             raise TimelineValidationError(
                 f"cannot hash timeline save request: {exc}"
@@ -720,18 +914,44 @@ class TimelineRepository:
         # transaction (project-scoped: UUID, then ULID, then slug).
         timeline_id = self._resolve_id(uow, project_id, ref)
 
-        # Internal idempotency key: project/timeline identity + integer
-        # expected head + canonical payload (bridge §6.1 derivation rule).
+        # Effective idempotency key: the caller's key when supplied,
+        # otherwise the frozen bridge-derived key from project/timeline
+        # identity + integer expected head + canonical payload (bridge §6.1
+        # derivation rule). Both paths share the receipt gate below.
         derived_key = (
             f"{command_kind}:{project_id}:{timeline_id}:"
-            f"{expected_version}:{request_digest}"
+            f"{expected_version}:{bridge_request_digest}"
         )
+        if idempotency_key is None:
+            # Preserve the frozen bridge-derived key and its persisted
+            # request hash exactly: bridge identity already lives in the
+            # derived key, while its canonical payload remains the receipt
+            # hash used by earlier bridge saves.
+            effective_key = derived_key
+            request_digest = bridge_request_digest
+        else:
+            # A caller key is scoped only by project in command_receipts, so
+            # the resolved timeline target must participate in semantic
+            # request identity. Otherwise the same key and payload aimed at
+            # another timeline could replay the first timeline's result.
+            caller_request = {
+                "project_id": project_id,
+                "timeline_id": timeline_id,
+                **payload,
+            }
+            try:
+                request_digest = request_hash(command_kind, caller_request)
+            except CanonicalizationError as exc:  # pragma: no cover - payload hashed above
+                raise TimelineValidationError(
+                    f"cannot hash timeline save request: {exc}"
+                ) from exc
+            effective_key = idempotency_key
 
         # Idempotency gate first: replay or mismatch before any mutation.
         replayed = self._receipts.check(
             uow,
             project_id=project_id,
-            idempotency_key=derived_key,
+            idempotency_key=effective_key,
             request_hash=request_digest,
             command_kind=command_kind,
         )
@@ -751,6 +971,20 @@ class TimelineRepository:
                 f"timeline {timeline_id!r} is missing its event stream"
             )
         current_head = int(stream["head_seq"])
+
+        # Event-backed archive fence (SD1): an archived timeline rejects a
+        # later save before any allocation or projection change. The archived
+        # state is derived from the stream's ordered events, never a column.
+        if (
+            uow.query_one(
+                "SELECT 1 FROM events WHERE stream_id = ? AND kind = ? LIMIT 1",
+                (row["event_stream_id"], TIMELINE_ARCHIVED_EVENT_KIND),
+            )
+            is not None
+        ):
+            raise TimelineArchivedError(
+                timeline_id=timeline_id, project_id=project_id
+            )
 
         # Expected-head CAS before any allocation or projection change; a
         # stale save changes zero rows and carries the current head.
@@ -780,7 +1014,7 @@ class TimelineRepository:
             raise TimelineNotFoundError(ref=ref, project_id=project_id)
 
         # 2. The timeline.saved event: the command delta, hash-chained, with
-        #    the same derived key and a defense-in-depth expected-head CAS.
+        #    the same effective key and a defense-in-depth expected-head CAS.
         txn_id = uuid.uuid4().hex
         event_id = uuid.uuid4().hex
         append = self._events.append(
@@ -795,7 +1029,7 @@ class TimelineRepository:
                 "expected_version": expected_version,
             },
             changes=["config", "registry"],
-            idempotency_key=derived_key,
+            idempotency_key=effective_key,
             txn_id=txn_id,
             actor_kind=actor_kind,
             command_kind=command_kind,
@@ -849,7 +1083,7 @@ class TimelineRepository:
         self._receipts.record(
             uow,
             project_id=project_id,
-            idempotency_key=derived_key,
+            idempotency_key=effective_key,
             request_hash=request_digest,
             command_kind=command_kind,
             txn_id=txn_id,
@@ -858,6 +1092,146 @@ class TimelineRepository:
             event_ids=[append.event_id],
             result=read_model.to_dict(),
             primary_stream_id=str(row["event_stream_id"]),
+            resulting_stream_seq=append.stream_seq,
+            created_at=stamp,
+        )
+        return read_model
+
+    # -- event-backed archive (m4 plan step 7) -----------------------------
+
+    def archive(
+        self,
+        uow: UnitOfWork,
+        *,
+        project_id: str,
+        ref: str,
+        idempotency_key: str,
+        actor_kind: str = "local",
+        created_at: str | None = None,
+        command_kind: str = TIMELINE_ARCHIVE_COMMAND_KIND,
+    ) -> TimelineArchiveReadModel:
+        """Archive one timeline atomically and idempotently, event-backed.
+
+        Inside the caller's active unit of work this appends one hash-chained
+        ``timeline.archived`` event on the timeline stream (advancing the
+        stream and project heads) and records one complete receipt. The
+        frozen ``timelines`` table has no ``archived_at`` column (SD1), so
+        the archived state is derived solely from the presence of that event
+        on the stream — no projection is updated and no byte is deleted.
+        Archived timelines disappear from ordinary lists and reject later
+        saves, while direct historical lookup keeps working.
+
+        Rejections happen before any write: a missing or foreign timeline
+        raises :class:`TimelineNotFoundError`, an already-archived timeline
+        raises :class:`TimelineArchivedError`, and the receipt gate runs
+        first so an identical retry replays exactly the stored archive result
+        with zero new rows while a changed request under the same key raises
+        :class:`ReceiptMismatchError` before any mutation.
+        """
+        project_id = _require_non_empty_string("project_id", project_id)
+        ref = _require_non_empty_string("ref", ref)
+        idempotency_key = _require_non_empty_string(
+            "idempotency_key", idempotency_key
+        )
+        command_kind = _require_non_empty_string("command_kind", command_kind)
+        if actor_kind not in ACTOR_KINDS:
+            raise TimelineValidationError(
+                f"actor_kind must be one of {sorted(ACTOR_KINDS)}, "
+                f"got {actor_kind!r}"
+            )
+
+        # Resolve the address inside the same transaction (project-scoped).
+        timeline_id = self._resolve_id(uow, project_id, ref)
+
+        # Semantic request identity: project + timeline only; the generated
+        # archive timestamp never participates.
+        request: dict[str, Any] = {
+            "project_id": project_id,
+            "timeline_id": timeline_id,
+        }
+        try:
+            request_digest = request_hash(command_kind, request)
+        except CanonicalizationError as exc:
+            raise TimelineValidationError(
+                f"cannot hash timeline archive request: {exc}"
+            ) from exc
+
+        # Idempotency gate first: replay or mismatch before any mutation.
+        replayed = self._receipts.check(
+            uow,
+            project_id=project_id,
+            idempotency_key=idempotency_key,
+            request_hash=request_digest,
+            command_kind=command_kind,
+        )
+        if replayed is not None:
+            return TimelineArchiveReadModel.from_mapping(replayed)
+
+        # Fences before any write: the timeline exists in the project and is
+        # still active (no committed timeline.archived event on the stream).
+        row = uow.query_one(
+            "SELECT t.id, t.event_stream_id FROM timelines t "
+            "WHERE t.id = ? AND t.project_id = ?",
+            (timeline_id, project_id),
+        )
+        if row is None:
+            raise TimelineNotFoundError(ref=ref, project_id=project_id)
+        stream_id = str(row["event_stream_id"])
+        if uow._stream_row(stream_id) is None:
+            raise TimelineRepositoryError(
+                f"timeline {timeline_id!r} is missing its event stream"
+            )
+        if (
+            uow.query_one(
+                "SELECT 1 FROM events WHERE stream_id = ? AND kind = ? LIMIT 1",
+                (stream_id, TIMELINE_ARCHIVED_EVENT_KIND),
+            )
+            is not None
+        ):
+            raise TimelineArchivedError(
+                timeline_id=timeline_id, project_id=project_id
+            )
+
+        stamp = created_at if created_at is not None else utc_now_iso()
+        if not isinstance(stamp, str) or not stamp:
+            raise TimelineValidationError("created_at must be a non-empty string")
+        txn_id = uuid.uuid4().hex
+        event_id = uuid.uuid4().hex
+
+        # The single archive write: one hash-chained timeline.archived event
+        # (advancing stream and project heads), then the complete receipt.
+        append = self._events.append(
+            uow,
+            stream_id=stream_id,
+            project_id=project_id,
+            event_kind=TIMELINE_ARCHIVED_EVENT_KIND,
+            data={"timeline_id": timeline_id, "archived_at": stamp},
+            changes=["timeline_id", "archived_at"],
+            idempotency_key=idempotency_key,
+            txn_id=txn_id,
+            actor_kind=actor_kind,
+            command_kind=command_kind,
+            event_id=event_id,
+            created_at=stamp,
+        )
+        read_model = TimelineArchiveReadModel(
+            timeline_id=timeline_id,
+            project_id=project_id,
+            archived_at=stamp,
+            config_version=append.stream_seq,
+        )
+        self._receipts.record(
+            uow,
+            project_id=project_id,
+            idempotency_key=idempotency_key,
+            request_hash=request_digest,
+            command_kind=command_kind,
+            txn_id=txn_id,
+            first_project_seq=append.project_seq,
+            last_project_seq=append.project_seq,
+            event_ids=[append.event_id],
+            result=read_model.to_dict(),
+            primary_stream_id=stream_id,
             resulting_stream_seq=append.stream_seq,
             created_at=stamp,
         )
@@ -942,13 +1316,16 @@ class TimelineRepository:
     # -- reads -------------------------------------------------------------
 
     def list(self, writer: DatabaseWriter, project_id: str) -> list[TimelineListRow]:
-        """Sorted read-only list query: every timeline in one project.
+        """Sorted read-only list query: every active timeline in one project.
 
         A transaction-free read on a separate read-only connection (the
         frozen bridge ``GET /timelines`` shape, §5.1). Rows carry exactly
         ``{timeline_id, timeline_ulid, slug, name, is_default}``, ordered by
-        ``slug`` ascending (deterministic; ``timeline_id`` breaks ties). A
-        project with no timelines returns ``[]``; a missing project raises
+        ``slug`` ascending (deterministic; ``timeline_id`` breaks ties).
+        Archived timelines are hidden (SD1/m4 plan step 7): a timeline whose
+        stream has a ``timeline.archived`` event is excluded, while direct
+        historical lookup (show/history/diff) keeps returning it. A project
+        with no timelines returns ``[]``; a missing project raises
         :class:`ProjectNotFoundError` — never an empty authority-dependent
         view.
         """
@@ -974,8 +1351,16 @@ class TimelineRepository:
                 "LEFT JOIN events e ON e.stream_id = t.event_stream_id "
                 "AND e.kind = ? "
                 "WHERE t.project_id = ? "
+                "AND NOT EXISTS ("
+                "  SELECT 1 FROM events ae "
+                "  WHERE ae.stream_id = t.event_stream_id AND ae.kind = ?"
+                ") "
                 "ORDER BY slug ASC, timeline_id ASC",
-                (TIMELINE_CREATED_EVENT_KIND, project_id),
+                (
+                    TIMELINE_CREATED_EVENT_KIND,
+                    project_id,
+                    TIMELINE_ARCHIVED_EVENT_KIND,
+                ),
             ).fetchall()
         rows_out: list[TimelineListRow] = []
         for row in rows:
@@ -1071,7 +1456,151 @@ class TimelineRepository:
             config_version=int(row["head_seq"]),
         )
 
+    # -- history and adjacent-version diff reads (m4 plan step 7) ----------
+
+    def history(
+        self, writer: DatabaseWriter, project_id: str, ref: str
+    ) -> List[TimelineHistoryEntry]:
+        """Typed ordered history read: the timeline's lifecycle events.
+
+        A transaction-free read on a separate read-only connection. Returns
+        one :class:`TimelineHistoryEntry` per ordered ``timeline.created`` /
+        ``timeline.saved`` / ``timeline.archived`` event in stream sequence
+        (``version`` equals the event ``seq``). Created/saved entries carry
+        their document (``config``) and ``registry`` content; the archive
+        entry carries ``archived_at`` and ``None`` content (archive never
+        changes the document). A missing project/timeline raises the same
+        typed errors as :meth:`show`.
+        """
+        _require_non_empty_string("project_id", project_id)
+        _require_non_empty_string("ref", ref)
+        with writer.read_only_connection() as conn:
+            conn.row_factory = sqlite3.Row
+            timeline_id = self._resolve_id(conn, project_id, ref)
+            events = self._lifecycle_events(
+                conn, f"{timeline_id}:{TIMELINE_STREAM_TYPE}"
+            )
+        entries: list[TimelineHistoryEntry] = []
+        for event in events:
+            kind = event["kind"]
+            data = event["data"]
+            if kind in (TIMELINE_CREATED_EVENT_KIND, TIMELINE_SAVED_EVENT_KIND):
+                config = data.get("config")
+                registry = data.get("registry")
+                config = dict(config) if isinstance(config, Mapping) else None
+                registry = dict(registry) if isinstance(registry, Mapping) else None
+            else:
+                config = None
+                registry = None
+            archived_at = data.get("archived_at")
+            entries.append(
+                TimelineHistoryEntry(
+                    version=event["version"],
+                    kind=kind,
+                    created_at=event["created_at"],
+                    config=config,
+                    registry=registry,
+                    archived_at=archived_at if isinstance(archived_at, str) else None,
+                )
+            )
+        return entries
+
+    def diff(
+        self, writer: DatabaseWriter, project_id: str, ref: str
+    ) -> List[TimelineDiffEntry]:
+        """Deterministic adjacent-version diff read over document/registry keys.
+
+        A transaction-free read on a separate read-only connection. Content
+        versions come from the ordered ``timeline.created`` / ``timeline.saved``
+        events (the archive event never changes content), so each adjacent
+        pair yields one :class:`TimelineDiffEntry` with ``document`` and
+        ``registry`` ``added``/``removed``/``changed`` key lists, all sorted
+        deterministically. Registry keys are the asset keys under
+        ``registry.assets``. A single-version timeline yields ``[]``.
+        """
+        _require_non_empty_string("project_id", project_id)
+        _require_non_empty_string("ref", ref)
+        with writer.read_only_connection() as conn:
+            conn.row_factory = sqlite3.Row
+            timeline_id = self._resolve_id(conn, project_id, ref)
+            events = self._lifecycle_events(
+                conn, f"{timeline_id}:{TIMELINE_STREAM_TYPE}"
+            )
+        versions: list[dict[str, Any]] = []
+        for event in events:
+            if event["kind"] not in (
+                TIMELINE_CREATED_EVENT_KIND,
+                TIMELINE_SAVED_EVENT_KIND,
+            ):
+                continue
+            data = event["data"]
+            config = data.get("config")
+            registry = data.get("registry")
+            config = dict(config) if isinstance(config, Mapping) else {}
+            registry = dict(registry) if isinstance(registry, Mapping) else {}
+            assets = registry.get("assets")
+            assets = dict(assets) if isinstance(assets, Mapping) else {}
+            versions.append(
+                {
+                    "version": event["version"],
+                    "kind": event["kind"],
+                    "config": config,
+                    "assets": assets,
+                }
+            )
+        diffs: list[TimelineDiffEntry] = []
+        for before, after in zip(versions, versions[1:]):
+            diffs.append(
+                TimelineDiffEntry(
+                    from_version=before["version"],
+                    to_version=after["version"],
+                    from_kind=before["kind"],
+                    to_kind=after["kind"],
+                    document=_key_diff(before["config"], after["config"]),
+                    registry=_key_diff(before["assets"], after["assets"]),
+                )
+            )
+        return diffs
+
     # -- private helpers ---------------------------------------------------
+
+    def _lifecycle_events(
+        self, reader: Any, stream_id: str
+    ) -> List[dict[str, Any]]:
+        """Return the ordered timeline lifecycle events with parsed data.
+
+        Reads ``timeline.created`` / ``timeline.saved`` / ``timeline.archived``
+        events in stream ``seq`` order and parses each canonical payload into
+        ``{"version", "kind", "created_at", "data"}``. Archive state is
+        derived from these ordered events alone (SD1).
+        """
+        rows = _query_all(
+            reader,
+            "SELECT seq, kind, created_at, payload_json FROM events "
+            "WHERE stream_id = ? AND kind IN (?, ?, ?) ORDER BY seq ASC",
+            (stream_id, *_TIMELINE_HISTORY_KINDS),
+        )
+        events: list[dict[str, Any]] = []
+        for row in rows:
+            seq = int(row["seq"])
+            kind = str(row["kind"])
+            created_at = str(row["created_at"])
+            try:
+                payload = parse_json(str(row["payload_json"]))
+            except CanonicalizationError as exc:
+                raise TimelineRepositoryError(
+                    f"timeline event {kind!r} at seq {seq} has invalid JSON: {exc}"
+                ) from exc
+            data = payload.get("data") if isinstance(payload, Mapping) else {}
+            events.append(
+                {
+                    "version": seq,
+                    "kind": kind,
+                    "created_at": created_at,
+                    "data": dict(data) if isinstance(data, Mapping) else {},
+                }
+            )
+        return events
 
     def _default_timeline_id(
         self, settings_json: str, project_id: str
@@ -1111,12 +1640,18 @@ class TimelineRepository:
 
 __all__ = [
     "DEFAULT_TIMELINE_KEY_SUFFIX",
+    "TIMELINE_ARCHIVE_COMMAND_KIND",
+    "TIMELINE_ARCHIVED_EVENT_KIND",
     "TIMELINE_CREATE_COMMAND_KIND",
     "TIMELINE_CREATED_EVENT_KIND",
     "TIMELINE_SAVE_COMMAND_KIND",
     "TIMELINE_SAVED_EVENT_KIND",
     "TIMELINE_STREAM_TYPE",
     "TimelineAlreadyExistsError",
+    "TimelineArchiveReadModel",
+    "TimelineArchivedError",
+    "TimelineDiffEntry",
+    "TimelineHistoryEntry",
     "TimelineListRow",
     "TimelineNotFoundError",
     "TimelineReadModel",

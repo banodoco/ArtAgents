@@ -81,6 +81,8 @@ from astrid.core.gateway.dispatch import (
 from astrid.core.gateway.help import (
     _packs_subcommand_list,
     _print_entrypoint_help,
+    _print_product_help,
+    _product_help_text,
 )
 from astrid.core.gateway.project import (
     _AUTO_BIND_RUN_VERBS,
@@ -195,8 +197,15 @@ def main(argv: list[str] | None = None) -> int:
 def _main_impl(raw: list[str]) -> int:
     raw = _normalize_gateway_lifecycle_compat(raw)
     first_arg = next(iter(raw), None)
-    if first_arg in {"-h", "--help", "help"}:
+    if first_arg in {"-h", "--help"}:
         _print_entrypoint_help()
+        return 0
+    # `astrid help` is the product-focused executable help (m4 plan step
+    # 24, task T26): exactly the five product families, nested mounts,
+    # the --json envelope convention, and stable exit codes. It is
+    # session-free by construction (help is documentation).
+    if first_arg == "help":
+        _print_product_help()
         return 0
     if first_arg == "--version":
         print("astrid")

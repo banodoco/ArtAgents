@@ -1,10 +1,28 @@
-"""API key resolution via environment variables and .env file walk."""
+"""API key resolution with the frozen m4 precedence.
+
+Resolution order (frozen in m4, plan Step 31):
+
+1. **Explicit option** — a non-empty caller-supplied value.
+2. **Process environment** — ``os.environ`` (or the injected environment
+   mapping).
+3. **Supported OS keychain (injectable boundary)** — consulted only when an
+   injected :class:`KeychainProvider` supplies a value; the default boundary
+   never touches an OS keychain and the ``keyring`` dependency is imported
+   lazily, so domain-only use and tests never access a keychain.
+4. **One explicitly named env file** — a lower-priority convenience, consulted
+   only when the caller names ``env_file`` explicitly.
+
+Broad cwd/repository/workspace/home env-file scavenging is **removed**: an env
+file is never discovered implicitly, and no placeholder/search profile adds
+paths.
+"""
 
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Protocol
 
 from astrid.core.contracts.errors import AstridError
 
@@ -13,6 +31,60 @@ EnvSearchProfile = Literal["default", "reigh"]
 _RECOVERY_HINTS: dict[str, str] = {
     "GIPHY_API_KEY": "Get a GIPHY API key at https://developers.giphy.com/dashboard/.",
 }
+
+
+# ---------------------------------------------------------------------------
+# Injectable keychain boundary
+# ---------------------------------------------------------------------------
+
+
+class KeychainProvider(Protocol):
+    """Injectable OS-keychain boundary (tier 3 of the frozen precedence).
+
+    Implementations return the stored secret for *name* or ``None`` when the
+    keychain is unavailable or holds no value. Injection keeps the boundary
+    testable and keeps domain-only use and tests free of keychain access.
+    """
+
+    def get(self, name: str) -> str | None:
+        """Return the stored secret for *name*, or ``None`` when unavailable."""
+        ...
+
+
+class NullKeychainProvider:
+    """Default keychain boundary: never accesses an OS keychain."""
+
+    def get(self, name: str) -> str | None:
+        return None
+
+
+class OSKeychainProvider:
+    """Supported OS-keychain boundary backed by the ``keyring`` dependency.
+
+    ``keyring`` is imported **lazily** inside :meth:`get`, so importing this
+    module or resolving a credential that an earlier precedence tier satisfies
+    never accesses a keychain (no eager keychain access). Any keychain
+    unavailability is treated as "no value", letting resolution fall through to
+    the named env file tier.
+    """
+
+    def get(self, name: str) -> str | None:
+        try:
+            import keyring  # noqa: PLC0415 - lazy: no eager keychain access
+        except Exception:  # noqa: BLE001 - keychain absence degrades to "no value"
+            return None
+        try:
+            value = keyring.get_password("astrid", name)
+        except Exception:  # noqa: BLE001 - backend failure degrades to "no value"
+            return None
+        if not value:
+            return None
+        return value
+
+
+# ---------------------------------------------------------------------------
+# Env-file parsing and discovery
+# ---------------------------------------------------------------------------
 
 
 def read_env_value(env_path: Path, key: str) -> str:
@@ -35,85 +107,73 @@ def candidate_env_files(
     *,
     profile: EnvSearchProfile = "default",
 ) -> list[Path]:
-    candidates: list[Path] = []
-    if env_file is not None:
-        candidates.append(env_file)
-    repo_root = Path(__file__).resolve().parents[2]
-    workspace = repo_root.parent
-    if profile == "reigh":
-        names = ("this.env", ".env.local", ".env")
-        candidates.extend(
-            [
-                Path.cwd() / name
-                for name in names
-            ]
-        )
-        candidates.extend(repo_root / name for name in names)
-        candidates.extend(workspace / name for name in names)
-        candidates.extend(workspace / "reigh-app" / name for name in names)
-        candidates.extend(Path.home() / name for name in names)
-        candidates.extend(Path.home() / ".codex" / name for name in names)
-    else:
-        # Local override convention: `.env.local` wins over `.env` in the
-        # working/repo/workspace dirs (so a developer's gitignored
-        # `.env.local` is honored, matching the `reigh` profile).
-        local_names = (".env.local", ".env")
-        candidates.extend(Path.cwd() / name for name in local_names)
-        candidates.append(Path(__file__).resolve().parent / ".env")
-        candidates.extend(repo_root / name for name in local_names)
-        candidates.extend(workspace / name for name in local_names)
-        candidates.extend(
-            [
-                workspace / "reigh-app" / ".env",
-                workspace / "reigh-worker" / ".env",
-                workspace / "reigh-worker-orchestrator" / ".env",
-                Path.home() / ".env",
-                Path.home() / ".codex" / ".env",
-                Path.home() / ".claude" / ".env",
-                Path.home() / ".hermes" / ".env",
-            ]
-        )
-    seen: set[Path] = set()
-    unique: list[Path] = []
-    for candidate in candidates:
-        resolved = candidate.expanduser().resolve()
-        if resolved not in seen:
-            seen.add(resolved)
-            unique.append(resolved)
-    return unique
+    """Return at most the one explicitly named env file.
+
+    Broad cwd/repository/workspace/home env-file scavenging was removed in m4:
+    an env file is consulted **only** when the caller names it explicitly. The
+    ``profile`` argument is retained for call-site compatibility
+    (``astrid.core.integrations.reigh.env``); both profiles behave identically
+    and add no implicit paths.
+    """
+    if env_file is None:
+        return []
+    resolved = env_file.expanduser().resolve()
+    return [resolved]
 
 
-def load_api_key(name: str, env_file: Path | None = None) -> str:
-    """Resolve *name* from candidate .env files first, then the environment.
+# ---------------------------------------------------------------------------
+# Canonical resolver
+# ---------------------------------------------------------------------------
 
-    ``.env`` files take precedence over an exported environment variable so a
-    stale or empty shell value never shadows the key the repo actually carries.
-    An explicit ``env_file`` is checked before the standard ``.env`` walk; the
-    process environment is the final fallback when no ``.env`` defines *name*.
+
+def load_api_key(
+    name: str,
+    env_file: Path | None = None,
+    *,
+    explicit: str | None = None,
+    keychain: KeychainProvider | None = None,
+    environ: Mapping[str, str] | None = None,
+) -> str:
+    """Resolve *name* in the frozen m4 precedence.
 
     Args:
         name: The environment variable name (e.g. ``"FAL_KEY"``).
-        env_file: An explicit .env file path, checked before the standard walk.
+        env_file: An explicitly named .env file, consulted as the **lowest**
+            priority convenience tier only.
+        explicit: A caller-supplied explicit value (highest priority tier).
+        keychain: An injectable keychain boundary (tier 3). When ``None``, the
+            default :class:`NullKeychainProvider` is used and no OS keychain is
+            ever accessed.
+        environ: The process environment mapping to read for tier 2. Defaults
+            to ``os.environ``.
 
     Returns:
         The resolved key string.
 
     Raises:
-        AstridError: If the key is not found in any location.
+        AstridError: If no tier yields a value. The message names the tiers
+            tried and never contains a secret value, file contents, or paths.
     """
-    tried: list[str] = []
-    for candidate in candidate_env_files(env_file):
-        tried.append(str(candidate))
-        if key := read_env_value(candidate, name):
-            return key
-    if key := os.environ.get(name, "").strip():
-        return key
-    tried.append(f"{name} environment variable")
-    recovery = f"set {name} in your environment or a .env file"
+    if explicit is not None and str(explicit).strip():
+        return str(explicit).strip()
+
+    env = os.environ if environ is None else environ
+    if value := env.get(name, "").strip():
+        return value
+
+    provider = keychain if keychain is not None else NullKeychainProvider()
+    if value := (provider.get(name) or "").strip():
+        return value
+
+    if env_file is not None:
+        if value := read_env_value(env_file, name).strip():
+            return value
+
+    recovery = f"set {name} in your environment or pass an explicit env file"
     if hint := _RECOVERY_HINTS.get(name):
         recovery = f"{recovery}. {hint}"
     raise AstridError(
-        f"{name} not found. Tried: {', '.join(tried)}",
+        f"{name} not found. Tried: explicit option, environment, keychain, env file.",
         recovery_command=recovery,
     )
 

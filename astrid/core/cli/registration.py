@@ -100,3 +100,51 @@ def register_commands(
         subparser = subparsers.add_parser(spec.name, **kwargs)
         if spec.configure is not None:
             spec.configure(subparser)
+
+
+def register_product_commands(
+    subparsers: Any,
+    commands: Sequence[CommandSpec],
+    *,
+    family: str,
+    client: Any,
+) -> tuple[CommandSpec, ...]:
+    """Register one product family's commands, stamping the shared client.
+
+    This is the single registration path for product-family parsers (m4
+    plan step 24): every subparser receives the composed ``AstridClient``
+    (and its ``family``) as defaults, so handlers are rule-free SDK
+    adapters that read the client from ``parsed.client``. The *family*
+    must be a core product family or a manifest-declared nested family
+    (shots, references); an unknown family is rejected before any parser
+    is built.
+
+    Returns the stamped ``CommandSpec`` entries (one per input command,
+    in order) so routing assertions — including the plan-step-30 shared
+    service-authority proof — can introspect that every CLI handler is
+    routed through the shared client without re-implementing the stamping
+    logic.
+    """
+    from astrid.core.cli.domain_product import is_registered_family
+
+    if not is_registered_family(family):
+        raise ValueError(f"{family!r} is not a registered product family")
+
+    def _stamp(spec: CommandSpec) -> CommandSpec:
+        base = spec.configure
+
+        def configure(subparser: argparse.ArgumentParser) -> None:
+            if base is not None:
+                base(subparser)
+            subparser.set_defaults(family=family, client=client)
+
+        return CommandSpec(
+            name=spec.name,
+            help=spec.help,
+            aliases=spec.aliases,
+            configure=configure,
+        )
+
+    stamped = [_stamp(spec) for spec in commands]
+    register_commands(subparsers, stamped)
+    return tuple(stamped)

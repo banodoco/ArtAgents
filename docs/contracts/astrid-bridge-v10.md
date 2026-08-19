@@ -207,7 +207,34 @@ Every asset response (200/206/304/416) emits CORS headers when allowed, plus:
 
 - `204` with CORS headers (§2.3) and `Content-Length: 0`; no body.
 
-## 11. In-tree provider-contract client — m1 substitute
+## 11. Reserved route — `POST /projects/:slug/timelines/:ref/copy` (planned m6, NOT implemented in m4)
+
+**Status: reserved contract only.** The save-as-copy route is documented in m4
+(`docs/astrid-v10-implementation-decisions.md` §16, CF-08C82BBD608F2CCF8A7E /
+CF-F0DB9D4F2A612C886B3B) and **implemented in m6**. In m4:
+
+- The route is **not registered**. `POST /projects/:slug/timelines/:ref/copy`
+  resolves through the existing route grammar in §1: "any other path returns
+  404 with the `not_found` envelope" (and `POST` falls under the same rule —
+  "unknown POST route → 404").
+- No `timelines copy` CLI verb is registered.
+
+**Planned m6 semantics (frozen now, implemented later):**
+
+- **Request body:** optional target name (object; may be empty/absent).
+- **Idempotency key:** deterministic derived key from source timeline identity
+  + source head + canonical copy payload.
+- **CAS on the source head:** a stale source head returns
+  `409 timeline_version_conflict` with the current head and zero database
+  mutation.
+- **Response:** the new timeline row — fresh id, `config_version` 0, and
+  `copied_from` recorded in the `timeline.created` event payload.
+- **Error mapping:** 404/409/422 per the frozen bridge error vocabulary
+  (§2.2).
+- **Receipt secrecy:** the response never exposes a receipt or idempotency key
+  (§7).
+
+## 12. In-tree provider-contract client — m1 substitute
 
 - m1 ships an in-tree, field-for-field client matching the recorded `AstridBridgeDataProvider` list/load/save/reload contract, including stale-save `409` observation and save retention across HTTP server and database restart.
-- The in-tree client is an **m1 substitute**, not editor-source parity. The real out-of-tree TypeScript `AstridBridgeDataProvider` suite is a hard named follow-up gate (NSA-1; `docs/astrid-v10-implementation-decisions.md` §3/§12). Nothing in this contract claims browser or provider-source parity for the substitute.
+- The in-tree client is an **m1 substitute**, not editor-source parity. The real out-of-tree TypeScript `AstridBridgeDataProvider` suite is a hard named follow-up gate (NSA-1; `docs/astrid-v10-implementation-decisions.md` §3, §11, and §14). Nothing in this contract claims browser or provider-source parity for the substitute.

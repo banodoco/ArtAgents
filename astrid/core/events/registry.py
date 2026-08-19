@@ -131,6 +131,8 @@ CORE_EVENT_KINDS: tuple[str, ...] = (
     "core.media.imported",
     "core.media.location_replaced",
     "core.media.related",
+    # m4 media event: stable byte-verified verification (plan step 10).
+    "core.media.verified",
 )
 """Core event kinds: the m1 project vertical plus the exact m2 task, run, and
 media event kinds consumed by admission, lifecycle transitions, fan-out,
@@ -166,6 +168,8 @@ CORE_COMMAND_KINDS: tuple[str, ...] = (
     "core.media.import",
     "core.media.replace_location",
     "core.media.relate",
+    # m4 media command: stable byte-verified verification (plan step 10).
+    "core.media.verify",
 )
 """Core command kinds: the m1 project vertical plus the exact m2 task, run,
 and media command kinds. Follows the v10 law-5 namespaced-verb grammar used by

@@ -60,6 +60,7 @@ from astrid.core.schema_packs.registry import (
 from astrid.core.store.writer import DatabaseWriter
 from astrid.packs.timeline.bridge import TimelineBridgeAdapter
 from astrid.packs.timeline.repository import TimelineRepository
+from astrid.sdk.projects import ProjectsService
 
 STANDARD_SCHEMA_PACKS: tuple[str, ...] = ("timeline", "shots", "references")
 """Exactly the in-tree schema packs the standard composition registers."""
@@ -99,6 +100,26 @@ def build_standard_registry() -> FrozenSchemaPackRegistry:
     register_core_vocabulary(registry)
     register_standard_schema_packs(registry)
     return registry.freeze()
+
+
+def open_standard_writer(
+    database_path: str | Path,
+    *,
+    registry: FrozenSchemaPackRegistry | None = None,
+) -> DatabaseWriter:
+    """Open the single standard-Astrid database writer at ``database_path``.
+
+    This is the one writer-construction seam for the standard application
+    composition (``astrid.application.compose_standard_application``): it
+    keeps :mod:`astrid.packs` the single place that constructs the standard
+    database/writer (authority lint), returns exactly one
+    :class:`DatabaseWriter` (the single write queue), and never opens a
+    second writer or a legacy authority. The parent directory must already
+    exist; the caller owns the writer lifecycle (``close()`` on shutdown).
+    """
+    if registry is None:
+        registry = build_standard_registry()
+    return DatabaseWriter(database_path, registry)
 
 
 def collect_live_staging_txn_ids(writer: DatabaseWriter) -> set[str]:
@@ -180,8 +201,11 @@ def compose_standard_bridge(
     default), derives ``${root}/.astrid/astrid.sqlite3``, creates the
     managed-data directory, composes the standard registry (unless one is
     injected), opens exactly one ``DatabaseWriter`` (the single write
-    authority), wires the kernel services and repositories, and returns the
-    frozen composition with the timeline bridge adapter.
+    authority), wires the kernel services and repositories, constructs the
+    typed project/timeline **services** over that one writer, and returns
+    the frozen composition whose bridge adapter is backed by those services
+    (plan step 20) — the adapter holds no SQL and never opens a writer of
+    its own.
 
     Must be called only from the gateway serve composition root. The caller
     owns the writer lifecycle (``close()`` on shutdown).
@@ -204,8 +228,22 @@ def compose_standard_bridge(
     timelines = TimelineRepository(
         events=events, receipts=receipts, projects=projects
     )
+    # The bridge adapter is composed over the **typed SDK services**
+    # (m4 plan step 20, task T21) — the same project/timeline services the
+    # standard application wires for SDK/CLI consumers, over the one shared
+    # writer queue. The adapter holds no SQL and never opens a writer of
+    # its own; it supplies the hidden deterministic bridge save key through
+    # the service's caller-key slot.
+    from astrid.sdk.timelines import TimelinesService  # lazy: pack-owned (m4)
+
+    projects_service = ProjectsService(writer, projects, receipts)
+    timelines_service = TimelinesService(
+        writer, projects, timelines, receipts
+    )
     bridge = TimelineBridgeAdapter(
-        writer=writer, projects=projects, timelines=timelines
+        writer=writer,
+        projects=projects_service,
+        timelines=timelines_service,
     )
     return StandardBridgeComposition(
         projects_root=root,
@@ -229,6 +267,7 @@ __all__: list[str] = [
     "build_standard_registry",
     "collect_live_staging_txn_ids",
     "compose_standard_bridge",
+    "open_standard_writer",
     "register_standard_schema_packs",
     "run_startup_staging_gc",
 ]

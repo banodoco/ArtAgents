@@ -64,6 +64,11 @@ from .discovery import (
 )
 
 # ---------------------------------------------------------------------------
+# Client lifecycle (m4 plan step 18, task T19)
+# ---------------------------------------------------------------------------
+from .client import AstridClient
+
+# ---------------------------------------------------------------------------
 # DTOs
 # ---------------------------------------------------------------------------
 from .dto import (
@@ -135,6 +140,16 @@ from .rendering import (
 # ---------------------------------------------------------------------------
 # Invocation
 # ---------------------------------------------------------------------------
+# ``run_executor`` / ``run_orchestrator`` are **internal runner seams**, not
+# public exports: they accept raw registries and are reachable only through
+# the private module ``__getattr__`` hook below. They are never imported
+# into this namespace, so ``astrid.sdk.__dict__`` carries no raw runner
+# attribute and ``from astrid.sdk import *`` cannot reach them (they are
+# deliberately absent from ``__all__``). The typed ``invoke`` facade
+# resolves ``sdk_module.run_executor``/``run_orchestrator`` through this
+# module at call time, and the frozen public-surface tests monkeypatch
+# ``sdk.run_executor`` — both keep working because the hook returns the
+# private seam from ``.invocation`` (m4 plan step 19, task T20).
 from .invocation import (
     _discover_invocation_manifest_path,
     _normalize_executor_result,
@@ -143,12 +158,29 @@ from .invocation import (
     discover,
     get_capability,
     invoke,
-    run_executor,
-    run_orchestrator,
 )
+
+
+def __getattr__(name: str):
+    # Private lazy runner-seam resolution (m4 plan step 19, task T20): the
+    # raw runner wrappers live in ``.invocation`` and are never stored as
+    # module attributes here. ``invoke`` and the frozen tests reach them
+    # through this hook at call time, so a monkeypatched
+    # ``sdk.run_executor`` remains visible to the facade.
+    if name == "run_executor":
+        from .invocation import run_executor
+
+        return run_executor
+    if name == "run_orchestrator":
+        from .invocation import run_orchestrator
+
+        return run_orchestrator
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = [
     "AliasRecord",
+    "AstridClient",
     "AstridSDKError",
     "Capability",
     "CapabilityAmbiguousError",
@@ -179,8 +211,6 @@ __all__ = [
     "read_events",
     "render",
     "renderer_main",
-    "run_executor",
-    "run_orchestrator",
     "subscribe_events",
     "support",
 ]

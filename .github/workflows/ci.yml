@@ -119,6 +119,136 @@ jobs:
           path: coverage.xml
           if-no-files-found: ignore
 
+  m4-gate:
+    name: m4 focused gate (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        # The frozen m4 platform matrix: CPython 3.11 and 3.12 (Linux CI,
+        # editable installation for the development gate).
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+
+      - name: Install system media tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[dev]'
+
+      - name: Run m4 finalizer gate (blocking)
+        # 13 retained focused lanes + live authority lint + forbidden
+        # authority/schema/surface drift rejection + Python matrix + the
+        # present-accepted feasibility admission (fails closed when the
+        # admission is missing or rejected). The external Reigh editor lane
+        # is reporting-only (SD1) and runs in the dedicated job below.
+        env:
+          ASTRID_CI_SKIP_COVERAGE: "1"
+        run: make m4-gate
+
+      - name: Upload m4 gate admission and lane evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: m4-gate-evidence-${{ matrix.python-version }}
+          path: |
+            artifacts/m4/finalizer-admission.json
+            out/m4-gate/latest
+          if-no-files-found: ignore
+
+  m4-editor-reporting:
+    name: m4 external editor lane (reporting-only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          # The frozen m4 platform matrix keeps CPython 3.11/3.12 pinned;
+          # this reporting lane runs the primary 3.11 target.
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          # The frozen Node floor (docs/contracts/supported-platforms.md):
+          # 20.19 is pinned, never "latest 20.x".
+          node-version: "20.19.0"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[dev]'
+
+      - name: Install current stable Chromium (editor lane)
+        # Executes the frozen "current stable Chromium" browser target
+        # (docs/contracts/supported-platforms.md): Playwright installs its
+        # current stable Chromium build plus the OS libraries it needs
+        # (--with-deps) under the pinned Node 20.19 floor.
+        working-directory: scripts/reshape/editor_browser_smoke
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Run browser-backed editor selector (current stable Chromium)
+        # A real browser-backed selector: Playwright launches the installed
+        # current stable Chromium headless and asserts the frozen bridge
+        # timeline read model through DOM locators (real JS + real network
+        # + real DOM). This step is NOT continue-on-error: the documented
+        # target must actually execute, so a browser failure is visible
+        # editor-lane evidence, not a silent gap.
+        working-directory: scripts/reshape/editor_browser_smoke
+        run: npm run smoke
+
+      - name: Fetch pinned Reigh checkout (reporting-only)
+        # The external editor repo is observed, never modified (SD1). A
+        # fetch failure is retained evidence, not an m4 admission input.
+        continue-on-error: true
+        run: |
+          git clone --filter=blob:none --no-checkout \
+            https://github.com/banodoco/reigh-app.git /tmp/reigh-app
+          cd /tmp/reigh-app
+          git fetch --depth 1 origin bc2d8b0327c1c7dbdcd7b7445440d8ca180dd677
+          git checkout FETCH_HEAD
+
+      - name: Run pinned Reigh disposition lane (reporting-only)
+        # Always runs and retains schema-validated disposition evidence;
+        # external incompatibility is a hard named follow-up, never a
+        # success prerequisite for make m4-gate (SD1).
+        continue-on-error: true
+        run: python scripts/reigh_disposition_report.py --reigh-repo /tmp/reigh-app
+
+      - name: Upload Reigh disposition evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: m4-reigh-disposition
+          path: artifacts/m4/reigh-external-gate-disposition.json
+          if-no-files-found: ignore
+
   pack-recoverability-exhaustive:
     name: Pack recoverability exhaustive (opt-in)
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_pack_recoverability_exhaustive }}

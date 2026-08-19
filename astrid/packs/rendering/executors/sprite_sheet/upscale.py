@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import base64
 import json
-import os
 import subprocess
 import sys
 import time
@@ -15,7 +14,8 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from astrid.core.util.secrets import candidate_env_files, load_api_key, read_env_value
+from astrid.core.contracts.errors import AstridError
+from astrid.core.util.credentials_scope import CredentialsScope
 from astrid.packs.generation.executors.generate_image_openai.run import (
     API_URL,
     DEFAULT_MODEL,
@@ -44,47 +44,18 @@ def _run(cmd: list[str]) -> None:
     subprocess.run(cmd, check=True)
 
 
-def _workspace_env_files(env_file: Path | None) -> list[Path]:
-    candidates = candidate_env_files(env_file)
-    repo_root = Path(__file__).resolve().parents[3]
-    workspace = repo_root.parent
-    candidates.extend(
-        [
-            Path.cwd() / ".env",
-            workspace / ".env",
-            workspace / "reigh-app" / ".env",
-            workspace / "reigh-worker" / ".env",
-            workspace / "reigh-worker-orchestrator" / ".env",
-        ]
-    )
-    seen: set[Path] = set()
-    unique: list[Path] = []
-    for candidate in candidates:
-        resolved = candidate.expanduser().resolve()
-        if resolved not in seen:
-            seen.add(resolved)
-            unique.append(resolved)
-    return unique
-
-
 def load_fal_key(env_file: Path | None = None) -> str:
-    # Primary: use the canonical scoped credentials resolver (FAL_KEY).
+    """Resolve the FAL key through the canonical resolver only (m4 Step 31).
+
+    Frozen precedence: explicit option, process environment, injectable
+    supported OS keychain, then one explicitly named env file. Broad
+    cwd/repository/workspace/home env-file scavenging is absent, so the
+    key is never discovered from an implicit file.
+    """
     try:
-        from astrid.core.util.credentials_scope import CredentialsScope
         return CredentialsScope.get("fal", env_file=env_file)
-    except Exception:
-        pass
-    # Fallback: check FAL_API_KEY for backward compatibility.
-    for key_name in ("FAL_API_KEY",):
-        if key := os.environ.get(key_name, "").strip():
-            return key
-    tried: list[str] = ["CredentialsScope.get('fal')", ", ".join(FAL_KEY_NAMES) + " environment variables"]
-    for candidate in _workspace_env_files(env_file):
-        tried.append(str(candidate))
-        for key_name in FAL_KEY_NAMES:
-            if key := read_env_value(candidate, key_name):
-                return key
-    raise SystemExit(f"FAL_KEY or FAL_API_KEY not found. Tried: {', '.join(tried)}")
+    except AstridError as exc:
+        raise SystemExit(f"FAL key not found. {exc.cause}") from exc
 
 
 def _download_url(url: str, output_path: Path, *, force: bool, timeout: int) -> None:

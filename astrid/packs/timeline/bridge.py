@@ -1,17 +1,16 @@
-"""Timeline bridge adapter over the project and timeline repositories.
+"""Timeline bridge adapter over the project and timeline SDK services.
 
-(m1 plan step 18.) This adapter is the repository-backed bridge's read/CAS
-surface: it translates the frozen HTTP contract
-(``docs/contracts/astrid-bridge-v10.md``) into repository calls and maps
-every repository outcome onto the repository-neutral DTOs and typed errors
-of :mod:`astrid.core.integrations.reigh.bridge_service`.
-
-The adapter is the **only** boundary that may import both the kernel
-bridge contracts and the timeline pack repository. It is injected at the
-gateway serve composition root (``astrid.core.gateway.dispatch``) through
-``astrid.packs.compose_standard_bridge``; there is no legacy authority
-fallback anywhere in this module — reads and CAS saves go exclusively to
-the project and timeline repositories.
+(m4 plan step 20, task T21.) This adapter is the service-backed bridge's
+read/CAS surface: it translates the frozen HTTP contract
+(``docs/contracts/astrid-bridge-v10.md``) into **typed SDK service methods**
+and maps every stable service error onto the frozen bridge DTOs
+(``400 invalid_project``/``invalid_timeline``, ``404 project_not_found``/
+``timeline_not_found``, ``409 timeline_version_conflict`` with the current
+``config_version``, ``422 schema_incompatible`` with ``issues[]``). It is
+composed over the standard application's project and timeline services at
+the gateway serve composition root (``astrid.packs.compose_standard_bridge``)
+and holds no SQL and no writer of its own; there is no legacy authority
+fallback anywhere in this module.
 
 Mapping rules kept here:
 
@@ -19,15 +18,30 @@ Mapping rules kept here:
   (``400 invalid_project``); a missing project is ``404 project_not_found``
   (never an empty authority-dependent view);
 - ``:ref`` is validated as canonical UUID, lowercase ULID, or slug before
-  any read (``400 invalid_timeline``); the repository resolves it
-  project-scoped in §8 order;
+  any read (``400 invalid_timeline``); the service resolves it project-scoped
+  in §8 order;
 - ``POST .../save`` bodies are parsed by
   :class:`~astrid.core.integrations.reigh.bridge_service.TimelineSaveRequest`
   (``400 invalid_body/invalid_config/invalid_registry/invalid_expected_version``);
   a stale expected head maps to ``409 timeline_version_conflict`` with the
-  current ``config_version``; the repository CAS changes zero rows;
+  current ``config_version`` re-read through the service (the CAS changed
+  zero rows);
+- **bridge saves supply the hidden deterministic bridge save key** (bridge
+  §6.1 derivation: command kind + project/timeline identity + integer
+  expected head + canonical payload digest). The key is passed through the
+  service's caller-key slot into the same receipt-gated atomic save the SDK
+  uses with its caller-visible keys, so a lost response replays the exact
+  committed result with zero new rows — identical to an SDK retry under its
+  own key. The key itself never appears in any response;
 - every response is a frozen DTO whose serialization can never include a
-  receipt field (receipt secrecy, §7, enforced by construction).
+  receipt field or an idempotency key (receipt secrecy, §7, enforced by
+  construction).
+
+Compatibility note (temporary, removed by the T22 constructor-injection
+cutover): the constructor also accepts the repository pair
+(``ProjectRepository``/``TimelineRepository``) used by the pre-T22
+repository-provider fixtures. That legacy path is exercised only by those
+fixtures and is migrated to services in plan step 21.
 """
 
 from __future__ import annotations
@@ -37,11 +51,12 @@ from collections.abc import Mapping
 from typing import Any
 
 from astrid.core.integrations.reigh.bridge_service import (
-    BridgeError,
     BridgeInternalError,
     BridgeInvalidProjectError,
     BridgeInvalidTimelineError,
+    BridgeIssue,
     BridgeProjectNotFoundError,
+    BridgeSchemaIncompatibleError,
     BridgeTimelineNotFoundError,
     BridgeVersionConflictError,
     HealthStatus,
@@ -51,6 +66,7 @@ from astrid.core.integrations.reigh.bridge_service import (
     TimelineSaveRequest,
 )
 from astrid.core.receipts import ReceiptMismatchError
+from astrid.core.receipts.canonical import CanonicalizationError, request_hash
 from astrid.core.repositories.errors import RepositoryError
 from astrid.core.repositories.projects import (
     ProjectNotFoundError,
@@ -59,17 +75,20 @@ from astrid.core.repositories.projects import (
 from astrid.core.store.uow import UnitOfWork
 from astrid.core.store.writer import DatabaseWriter
 from astrid.packs.timeline.repository import (
+    TIMELINE_SAVE_COMMAND_KIND,
     TimelineNotFoundError,
     TimelineRepository,
     TimelineValidationError,
     TimelineVersionConflictError,
 )
+from astrid.sdk.projects import ProjectsService
+from astrid.sdk.timelines import TimelinesService
 
 _PROJECT_SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 """Project slug grammar, mirroring the project repository's immutable rule.
 
 The bridge validates ``:slug`` before any read so a malformed slug is a
-``400 invalid_project``, never a repository lookup.
+``400 invalid_project``, never a service lookup.
 """
 
 _UUID_RE = re.compile(
@@ -91,23 +110,29 @@ def _is_timeline_ref(ref: str) -> bool:
 
 
 class TimelineBridgeAdapter:
-    """Stateless adapter composing the project + timeline repositories.
+    """Stateless adapter composing the project + timeline services.
 
-    A single instance is safe to share across HTTP requests. Reads run
-    transaction-free on the writer's separate read-only connection; CAS
-    saves run inside one ``BEGIN IMMEDIATE`` unit of work per request.
+    A single instance is safe to share across HTTP requests. In the
+    service-backed composition every read and mutation runs through the
+    typed SDK services (which open one unit of work over the single shared
+    writer per mutation); the adapter itself never executes SQL and never
+    constructs a service. The repository pair accepted by the constructor
+    is the temporary pre-T22 compatibility path only.
     """
 
     def __init__(
         self,
         *,
         writer: DatabaseWriter,
-        projects: ProjectRepository,
-        timelines: TimelineRepository,
+        projects: ProjectRepository | ProjectsService,
+        timelines: TimelineRepository | TimelinesService,
     ) -> None:
         self._writer = writer
         self._projects = projects
         self._timelines = timelines
+        self._service_mode = isinstance(projects, ProjectsService) and isinstance(
+            timelines, TimelinesService
+        )
 
     # -- health / projects -------------------------------------------------
 
@@ -117,6 +142,13 @@ class TimelineBridgeAdapter:
 
     def list_projects(self) -> list[ProjectRow]:
         """``GET /projects``: sorted project rows (slug ascending)."""
+        if self._service_mode:
+            result = self._projects.list()
+            self._raise_service_failure(result)
+            return [
+                ProjectRow(slug=row["slug"], name=row["name"])
+                for row in result.data
+            ]
         return [
             ProjectRow(slug=row.slug, name=row.name)
             for row in self._projects.list(self._writer)
@@ -127,6 +159,19 @@ class TimelineBridgeAdapter:
     def list_timelines(self, project_slug: str) -> list[TimelineRow]:
         """``GET /projects/:slug/timelines`` (contract §5.1)."""
         project_id = self._resolve_project_id(project_slug)
+        if self._service_mode:
+            result = self._timelines.list(project_slug)
+            self._raise_service_failure(result, timeline=True)
+            return [
+                TimelineRow(
+                    timeline_id=row["timeline_id"],
+                    timeline_ulid=row["timeline_ulid"],
+                    slug=row["slug"],
+                    name=row["name"],
+                    is_default=row["is_default"],
+                )
+                for row in result.data
+            ]
         return [
             TimelineRow(
                 timeline_id=row.timeline_id,
@@ -140,8 +185,10 @@ class TimelineBridgeAdapter:
 
     def load_timeline(self, project_slug: str, ref: str) -> TimelineLoad:
         """``GET /projects/:slug/timelines/:ref`` (contract §5.2)."""
-        project_id = self._resolve_project_id(project_slug)
         self._validate_timeline_ref(ref)
+        if self._service_mode:
+            return self._service_load(project_slug, ref)
+        project_id = self._resolve_project_id(project_slug)
         try:
             model = self._timelines.show(self._writer, project_id, ref)
         except TimelineNotFoundError as exc:
@@ -161,14 +208,19 @@ class TimelineBridgeAdapter:
     ) -> TimelineLoad:
         """``POST /projects/:slug/timelines/:ref/save`` (contract §6).
 
-        Runs the whole-document CAS save inside one ``BEGIN IMMEDIATE``
-        unit of work: a stale expected head raises
-        :class:`BridgeVersionConflictError` carrying the current head and
-        changes zero rows; the committed response is the frozen load shape
-        with the new ``config_version`` (head + 1).
+        Service-backed: resolves the project and timeline through the typed
+        services, derives the hidden deterministic bridge save key (§6.1),
+        and runs the whole-document CAS save through the timeline service
+        inside one ``BEGIN IMMEDIATE`` unit of work. A stale expected head
+        raises :class:`BridgeVersionConflictError` carrying the current
+        ``config_version`` (re-read through the service) and changes zero
+        rows; the committed response is the frozen load shape with the new
+        ``config_version`` (head + 1). Receipts and the derived key are
+        stripped by construction.
         """
+        if self._service_mode:
+            return self._service_save(project_slug, ref, request)
         project_id = self._resolve_project_id(project_slug)
-        self._validate_timeline_ref(ref)
         try:
             model = UnitOfWork(self._writer).run(
                 lambda u: self._timelines.save(
@@ -200,6 +252,160 @@ class TimelineBridgeAdapter:
             raise BridgeInternalError(str(exc)) from exc
         return self._to_load(model)
 
+    # -- service-backed helpers (plan step 20) ------------------------------
+
+    def _service_load(self, project_slug: str, ref: str) -> TimelineLoad:
+        """Load one timeline through the timeline service."""
+        self._resolve_project_id(project_slug)
+        result = self._timelines.show(project_slug, ref)
+        self._raise_service_failure(result, timeline=True)
+        return self._to_load(result.data)
+
+    def _service_save(
+        self, project_slug: str, ref: str, request: TimelineSaveRequest
+    ) -> TimelineLoad:
+        """CAS-save one timeline through the service with the derived key."""
+        project_id = self._resolve_project_id(project_slug)
+        shown = self._timelines.show(project_slug, ref)
+        self._raise_service_failure(shown, timeline=True)
+        derived_key = self._derive_bridge_save_key(
+            project_id=project_id,
+            timeline_id=shown.data["timeline_id"],
+            request=request,
+        )
+        result = self._timelines.save(
+            project_slug,
+            ref,
+            config=request.config,
+            registry=request.registry,
+            expected_version=request.expected_version,
+            idempotency_key=derived_key,
+        )
+        if not result.ok:
+            self._raise_save_failure(result, project_slug=project_slug, ref=ref)
+        return self._to_load(result.data)
+
+    def _raise_save_failure(
+        self,
+        result: Any,
+        *,
+        project_slug: str,
+        ref: str,
+    ) -> None:
+        """Map a failed save envelope onto the frozen bridge DTOs."""
+        error = result.error
+        code = error.code if error is not None else "internal_error"
+        message = error.message if error is not None else "unexpected internal error"
+        if code == "not_found":
+            raise BridgeTimelineNotFoundError(message)
+        if code == "validation_error":
+            # Route-level parse/schema guards already produced the frozen
+            # 400/422 envelopes; a service-level validation on the save is
+            # the invalid_timeline surface (unchanged from the repository
+            # adapter's mapping).
+            raise BridgeInvalidTimelineError(message)
+        if code == "stale_version":
+            current = self._service_current_version(project_slug, ref)
+            raise BridgeVersionConflictError(message, config_version=current)
+        if code == "idempotency_mismatch":
+            # Unreachable on the bridge (the derived key includes the request
+            # digest, so a changed payload derives a different key), but
+            # never let a receipt detail leak into a response.
+            raise BridgeInternalError(
+                "internal idempotency mismatch on the save route"
+            )
+        if code == "unavailable":
+            raise BridgeInternalError(
+                "the timeline service is temporarily unavailable"
+            )
+        raise BridgeInternalError(message)
+
+    def _service_current_version(self, project_slug: str, ref: str) -> int:
+        """Re-read the current head after a stale CAS (zero rows changed)."""
+        result = self._timelines.show(project_slug, ref)
+        if not result.ok:
+            raise BridgeInternalError("cannot read the current timeline version")
+        return int(result.data["config_version"])
+
+    def _derive_bridge_save_key(
+        self,
+        *,
+        project_id: str,
+        timeline_id: str,
+        request: TimelineSaveRequest,
+    ) -> str:
+        """Derive the hidden deterministic bridge save key (bridge §6.1).
+
+        Mirrors the repository's derivation exactly — command kind +
+        project/timeline identity + integer expected head + canonical
+        payload digest — so bridge retries and SDK retries share one atomic,
+        receipt-gated save implementation. The key is supplied through the
+        service's caller-key slot and is never returned to any caller.
+        """
+        assets = request.registry.get("assets", {})
+        if not isinstance(assets, Mapping):
+            raise BridgeSchemaIncompatibleError(
+                "config/registry failed schema validation",
+                issues=[
+                    BridgeIssue(
+                        pointer="/registry/assets",
+                        code="schema_incompatible",
+                        message="registry.assets must be a JSON object",
+                    )
+                ],
+            )
+        payload = {
+            "config": dict(request.config),
+            "registry": {"assets": dict(assets)},
+            "expected_version": request.expected_version,
+        }
+        try:
+            digest = request_hash(TIMELINE_SAVE_COMMAND_KIND, payload)
+        except CanonicalizationError as exc:
+            raise BridgeSchemaIncompatibleError(
+                "config/registry failed schema validation",
+                issues=[
+                    BridgeIssue(
+                        pointer="/config",
+                        code="schema_incompatible",
+                        message=str(exc),
+                    )
+                ],
+            ) from exc
+        return (
+            f"{TIMELINE_SAVE_COMMAND_KIND}:{project_id}:{timeline_id}:"
+            f"{request.expected_version}:{digest}"
+        )
+
+    def _raise_service_failure(
+        self, result: Any, *, timeline: bool = False
+    ) -> None:
+        """Map a failed service envelope onto the frozen bridge DTOs.
+
+        ``timeline=False`` (the default) maps project-context failures;
+        ``timeline=True`` maps timeline-context failures. ``stale_version``
+        is handled by :meth:`_raise_save_failure` only (it needs the route's
+        project/ref context to re-read the current head).
+        """
+        if result.ok:
+            return
+        error = result.error
+        code = error.code if error is not None else "internal_error"
+        message = error.message if error is not None else "unexpected internal error"
+        if code == "not_found":
+            if timeline:
+                raise BridgeTimelineNotFoundError(message)
+            raise BridgeProjectNotFoundError(message)
+        if code == "validation_error":
+            if timeline:
+                raise BridgeInvalidTimelineError(message)
+            raise BridgeInvalidProjectError(message)
+        if code == "unavailable":
+            raise BridgeInternalError(
+                "the timeline service is temporarily unavailable"
+            )
+        raise BridgeInternalError(message)
+
     # -- private helpers ----------------------------------------------------
 
     def _resolve_project_id(self, project_slug: str) -> str:
@@ -218,6 +424,10 @@ class TimelineBridgeAdapter:
                 "project slug must be lowercase letters/digits joined by "
                 f"single hyphens, got {project_slug!r}"
             )
+        if self._service_mode:
+            result = self._projects.show(project_slug)
+            self._raise_service_failure(result)
+            return str(result.data["id"])
         with self._writer.read_only_connection() as conn:
             row = conn.execute(
                 "SELECT id FROM projects WHERE slug = ?", (project_slug,)
@@ -242,17 +452,29 @@ class TimelineBridgeAdapter:
         return ref
 
     @staticmethod
-    def _to_load(model: Any) -> TimelineLoad:
-        """Wrap a repository read model in the frozen load DTO."""
+    def _to_load(data: Any) -> TimelineLoad:
+        """Wrap a read model (service dict or repository dataclass) in the
+        frozen load DTO."""
+        if isinstance(data, Mapping):
+            return TimelineLoad(
+                timeline_id=data["timeline_id"],
+                timeline_ulid=data["timeline_ulid"],
+                slug=data["slug"],
+                name=data["name"],
+                is_default=bool(data.get("is_default", False)),
+                config=dict(data["config"]),
+                registry=dict(data["registry"]),
+                config_version=int(data["config_version"]),
+            )
         return TimelineLoad(
-            timeline_id=model.timeline_id,
-            timeline_ulid=model.timeline_ulid,
-            slug=model.slug,
-            name=model.name,
-            is_default=model.is_default,
-            config=dict(model.config),
-            registry=dict(model.registry),
-            config_version=model.config_version,
+            timeline_id=data.timeline_id,
+            timeline_ulid=data.timeline_ulid,
+            slug=data.slug,
+            name=data.name,
+            is_default=data.is_default,
+            config=dict(data.config),
+            registry=dict(data.registry),
+            config_version=data.config_version,
         )
 
 

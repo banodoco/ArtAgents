@@ -5,6 +5,13 @@ from __future__ import annotations
 import importlib
 
 _SDK_EXPORTS = (
+    # Curated public SDK surface (m4 plan step 19, task T20): lazy
+    # discovery, typed invoke, generate, render, event reads, and the
+    # public DTO/exception taxonomy. The raw runner seams
+    # (``run_executor``/``run_orchestrator``) and caller registry-injection
+    # helpers are internal to ``astrid.sdk`` and are never exported here.
+    # Ordering of this tuple is not a compatibility promise; the frozen
+    # curated name set in tests/_sdk_contract.py stays authoritative.
     "discover",
     "get_capability",
     "invoke",
@@ -45,6 +52,14 @@ __all__ = _SDK_EXPORTS
 def __getattr__(name: str):
     if name == "audit":
         return importlib.import_module(".core.audit", __name__)
+    if name == "AstridClient":
+        # Lazy client lifecycle: importing ``astrid`` must never import the
+        # SDK package or open a database. ``AstridClient`` is deliberately
+        # not part of ``__all__`` (the frozen curated SDK-name tuple in
+        # tests/_sdk_contract.py stays authoritative); it is reachable as
+        # ``astrid.AstridClient`` / ``from astrid import AstridClient`` and
+        # from ``astrid.sdk``.
+        return importlib.import_module(".sdk.client", __name__).AstridClient
     if name not in _SDK_EXPORTS:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
     module = importlib.import_module(".sdk", __name__)
@@ -52,4 +67,4 @@ def __getattr__(name: str):
 
 
 def __dir__() -> list[str]:
-    return sorted(set(globals()) | set(_SDK_EXPORTS) | {"audit"})
+    return sorted(set(globals()) | set(_SDK_EXPORTS) | {"audit", "AstridClient"})

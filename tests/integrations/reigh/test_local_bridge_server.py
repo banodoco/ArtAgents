@@ -8,9 +8,6 @@ from typing import Any, Generator
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
-from astrid.core.integrations.reigh.local_bridge import (
-    save_bridge_timeline,
-)
 from astrid.core.integrations.reigh.local_bridge_server import create_local_bridge_server
 from astrid.core.store.uow import UnitOfWork
 from astrid.packs import compose_standard_bridge
@@ -175,6 +172,7 @@ def _get_bytes(
     *,
     range_header: str | None = None,
     if_none_match: str | None = None,
+    origin: str | None = None,
 ) -> tuple[int, dict[str, str], bytes]:
     """Fetch raw bytes from the bridge, returning (status, headers, body)."""
     req = Request(url)
@@ -182,6 +180,8 @@ def _get_bytes(
         req.add_header("Range", range_header)
     if if_none_match is not None:
         req.add_header("If-None-Match", if_none_match)
+    if origin is not None:
+        req.add_header("Origin", origin)
     try:
         with urlopen(req) as response:  # noqa: S310
             headers = dict(response.headers)
@@ -228,10 +228,12 @@ def repository_server(
     never fall back to a filesystem authority.
     """
     composition = compose_standard_bridge(projects_root)
-    server = create_local_bridge_server(projects_root=projects_root)
-    server.bridge = composition.bridge
-    server.bridge_writer = composition.writer
-    server.bridge_database_path = composition.database_path
+    server = create_local_bridge_server(
+        projects_root=projects_root,
+        bridge=composition.bridge,
+        writer=composition.writer,
+        database_path=composition.database_path,
+    )
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     host, port = server.server_address
@@ -450,37 +452,33 @@ def test_server_returns_normal_http_errors_for_unknown_or_invalid_resources(
 
 
 # ---------------------------------------------------------------------------
-# Asset endpoint tests
+# Asset endpoint tests (repository-backed, m4 plan step 22)
 # ---------------------------------------------------------------------------
+#
+# The legacy sidecar/FSA asset fallback was removed in step 22: every asset
+# resolves from the persisted timeline registry through kernel
+# media/location records in the route project, the local bytes are verified
+# against the media content SHA-256 before streaming, and a server without
+# the composed repository bridge fails closed with the typed 500 envelope.
+
 
 def test_asset_200_full_response_with_correct_headers(
-    seed_bridge_project, tmp_bridge_root: Path,
+    tmp_bridge_root: Path,
 ) -> None:
     """Full asset fetch returns 200, Accept-Ranges, Content-Type, and full body."""
     timeline_id = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
     timeline_ulid = "01JM4K5N7P00000000000000AA"
-    project_dir = seed_bridge_project(
-        slug="media-proj",
-        timeline_ulid=timeline_ulid,
-        timeline_id=timeline_id,
-        assets={},
-    )
-
-    # Create a real media file in sources/
-    sources_dir = project_dir / "sources"
-    sources_dir.mkdir(parents=True, exist_ok=True)
+    registry = {"assets": {"clip-a": {"file": "clip-a.mp4"}}}
     asset_content = b"Hello, this is a test asset file with some bytes!\n" * 10
-    asset_path = sources_dir / "clip-a.mp4"
-    asset_path.write_bytes(asset_content)
-
-    # Write registry with the asset key -> file mapping
-    registry_path = project_dir / "timelines" / timeline_ulid / "registry.json"
-    registry_path.write_text(
-        json.dumps({"assets": {"clip-a": {"file": "clip-a.mp4"}}}),
-        encoding="utf-8",
-    )
-
-    with running_server(tmp_bridge_root) as base_url:
+    with repository_server(tmp_bridge_root) as (base_url, composition):
+        _repo_seed_asset_timeline(
+            composition,
+            slug="media-proj",
+            timeline_id=timeline_id,
+            timeline_ulid=timeline_ulid,
+            registry=registry,
+            media={"clip-a": (asset_content, "clip-a.mp4")},
+        )
         url = f"{base_url}/projects/media-proj/timelines/{timeline_id}/assets/clip-a"
         status, headers, body = _get_bytes(url)
 
@@ -495,30 +493,25 @@ def test_asset_200_full_response_with_correct_headers(
 
 
 def test_asset_head_response_with_media_headers(
-    seed_bridge_project, tmp_bridge_root: Path,
+    tmp_bridge_root: Path,
 ) -> None:
     timeline_id = "a0a0a0a0-a0a0-a0a0-a0a0-a0a0a0a0a0a0"
     timeline_ulid = "01JM4K5N7P0000000000000A0A"
-    project_dir = seed_bridge_project(
-        slug="head-media-proj",
-        timeline_ulid=timeline_ulid,
-        timeline_id=timeline_id,
-        assets={},
-    )
-
-    sources_dir = project_dir / "sources"
-    sources_dir.mkdir(parents=True, exist_ok=True)
+    registry = {"assets": {"clip-head": {"file": "clip-head.mp4"}}}
     asset_content = b"head metadata only"
-    (sources_dir / "clip-head.mp4").write_bytes(asset_content)
-
-    registry_path = project_dir / "timelines" / timeline_ulid / "registry.json"
-    registry_path.write_text(
-        json.dumps({"assets": {"clip-head": {"file": "clip-head.mp4"}}}),
-        encoding="utf-8",
-    )
-
-    with running_server(tmp_bridge_root) as base_url:
-        url = f"{base_url}/projects/head-media-proj/timelines/{timeline_id}/assets/clip-head"
+    with repository_server(tmp_bridge_root) as (base_url, composition):
+        _repo_seed_asset_timeline(
+            composition,
+            slug="head-media-proj",
+            timeline_id=timeline_id,
+            timeline_ulid=timeline_ulid,
+            registry=registry,
+            media={"clip-head": (asset_content, "clip-head.mp4")},
+        )
+        url = (
+            f"{base_url}/projects/head-media-proj/timelines/{timeline_id}"
+            "/assets/clip-head"
+        )
         status, headers = _head(url)
 
     assert status == 200
@@ -530,31 +523,22 @@ def test_asset_head_response_with_media_headers(
 
 
 def test_asset_206_byte_range(
-    seed_bridge_project, tmp_bridge_root: Path,
+    tmp_bridge_root: Path,
 ) -> None:
     """Byte range request returns 206 with correct Content-Range and partial body."""
     timeline_id = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
     timeline_ulid = "01JM4K5N7P00000000000000BB"
-    project_dir = seed_bridge_project(
-        slug="range-proj",
-        timeline_ulid=timeline_ulid,
-        timeline_id=timeline_id,
-        assets={},
-    )
-
-    sources_dir = project_dir / "sources"
-    sources_dir.mkdir(parents=True, exist_ok=True)
+    registry = {"assets": {"alpha": {"file": "alpha.bin"}}}
     asset_content = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ"  # 26 bytes
-    asset_path = sources_dir / "alpha.bin"
-    asset_path.write_bytes(asset_content)
-
-    registry_path = project_dir / "timelines" / timeline_ulid / "registry.json"
-    registry_path.write_text(
-        json.dumps({"assets": {"alpha": {"file": "alpha.bin"}}}),
-        encoding="utf-8",
-    )
-
-    with running_server(tmp_bridge_root) as base_url:
+    with repository_server(tmp_bridge_root) as (base_url, composition):
+        _repo_seed_asset_timeline(
+            composition,
+            slug="range-proj",
+            timeline_id=timeline_id,
+            timeline_ulid=timeline_ulid,
+            registry=registry,
+            media={"alpha": (asset_content, "alpha.bin")},
+        )
         url = f"{base_url}/projects/range-proj/timelines/{timeline_id}/assets/alpha"
         # Request bytes 5-14 (10 bytes: FGHIJKLMNO)
         status, headers, body = _get_bytes(url, range_header="bytes=5-14")
@@ -568,7 +552,7 @@ def test_asset_206_byte_range(
 
 
 def test_asset_range_less_large_response_returns_initial_partial_chunk(
-    seed_bridge_project, tmp_bridge_root: Path, monkeypatch,
+    tmp_bridge_root: Path, monkeypatch,
 ) -> None:
     """Large range-less asset fetches should not stream the whole source file."""
     import astrid.core.integrations.reigh.local_bridge_server as bridge_server
@@ -578,26 +562,21 @@ def test_asset_range_less_large_response_returns_initial_partial_chunk(
 
     timeline_id = "abababab-abab-abab-abab-abababababab"
     timeline_ulid = "01JM4K5N7P0000000000000ABA"
-    project_dir = seed_bridge_project(
-        slug="large-media-proj",
-        timeline_ulid=timeline_ulid,
-        timeline_id=timeline_id,
-        assets={},
-    )
-
-    sources_dir = project_dir / "sources"
-    sources_dir.mkdir(parents=True, exist_ok=True)
+    registry = {"assets": {"large": {"file": "large.mp4"}}}
     asset_content = b"0123456789abcdefghijklmnopqrstuvwxyz"
-    (sources_dir / "large.mp4").write_bytes(asset_content)
-
-    registry_path = project_dir / "timelines" / timeline_ulid / "registry.json"
-    registry_path.write_text(
-        json.dumps({"assets": {"large": {"file": "large.mp4"}}}),
-        encoding="utf-8",
-    )
-
-    with running_server(tmp_bridge_root) as base_url:
-        url = f"{base_url}/projects/large-media-proj/timelines/{timeline_id}/assets/large"
+    with repository_server(tmp_bridge_root) as (base_url, composition):
+        _repo_seed_asset_timeline(
+            composition,
+            slug="large-media-proj",
+            timeline_id=timeline_id,
+            timeline_ulid=timeline_ulid,
+            registry=registry,
+            media={"large": (asset_content, "large.mp4")},
+        )
+        url = (
+            f"{base_url}/projects/large-media-proj/timelines/{timeline_id}"
+            "/assets/large"
+        )
         status, headers, body = _get_bytes(url)
 
     assert status == 206
@@ -609,31 +588,22 @@ def test_asset_range_less_large_response_returns_initial_partial_chunk(
 
 
 def test_asset_206_open_ended_range(
-    seed_bridge_project, tmp_bridge_root: Path,
+    tmp_bridge_root: Path,
 ) -> None:
     """Open-ended range (bytes=N-) returns from N to end."""
     timeline_id = "cccccccc-cccc-cccc-cccc-cccccccccccc"
     timeline_ulid = "01JM4K5N7P00000000000000CC"
-    project_dir = seed_bridge_project(
-        slug="open-proj",
-        timeline_ulid=timeline_ulid,
-        timeline_id=timeline_id,
-        assets={},
-    )
-
-    sources_dir = project_dir / "sources"
-    sources_dir.mkdir(parents=True, exist_ok=True)
+    registry = {"assets": {"digits": {"file": "digits.bin"}}}
     asset_content = b"0123456789"  # 10 bytes
-    asset_path = sources_dir / "digits.bin"
-    asset_path.write_bytes(asset_content)
-
-    registry_path = project_dir / "timelines" / timeline_ulid / "registry.json"
-    registry_path.write_text(
-        json.dumps({"assets": {"digits": {"file": "digits.bin"}}}),
-        encoding="utf-8",
-    )
-
-    with running_server(tmp_bridge_root) as base_url:
+    with repository_server(tmp_bridge_root) as (base_url, composition):
+        _repo_seed_asset_timeline(
+            composition,
+            slug="open-proj",
+            timeline_id=timeline_id,
+            timeline_ulid=timeline_ulid,
+            registry=registry,
+            media={"digits": (asset_content, "digits.bin")},
+        )
         url = f"{base_url}/projects/open-proj/timelines/{timeline_id}/assets/digits"
         status, headers, body = _get_bytes(url, range_header="bytes=7-")
 
@@ -644,31 +614,22 @@ def test_asset_206_open_ended_range(
 
 
 def test_asset_206_suffix_range(
-    seed_bridge_project, tmp_bridge_root: Path,
+    tmp_bridge_root: Path,
 ) -> None:
     """Suffix range (bytes=-N) returns last N bytes."""
     timeline_id = "dddddddd-dddd-dddd-dddd-dddddddddddd"
     timeline_ulid = "01JM4K5N7P00000000000000DD"
-    project_dir = seed_bridge_project(
-        slug="suffix-proj",
-        timeline_ulid=timeline_ulid,
-        timeline_id=timeline_id,
-        assets={},
-    )
-
-    sources_dir = project_dir / "sources"
-    sources_dir.mkdir(parents=True, exist_ok=True)
+    registry = {"assets": {"letters": {"file": "letters.bin"}}}
     asset_content = b"abcdefghij"  # 10 bytes
-    asset_path = sources_dir / "letters.bin"
-    asset_path.write_bytes(asset_content)
-
-    registry_path = project_dir / "timelines" / timeline_ulid / "registry.json"
-    registry_path.write_text(
-        json.dumps({"assets": {"letters": {"file": "letters.bin"}}}),
-        encoding="utf-8",
-    )
-
-    with running_server(tmp_bridge_root) as base_url:
+    with repository_server(tmp_bridge_root) as (base_url, composition):
+        _repo_seed_asset_timeline(
+            composition,
+            slug="suffix-proj",
+            timeline_id=timeline_id,
+            timeline_ulid=timeline_ulid,
+            registry=registry,
+            media={"letters": (asset_content, "letters.bin")},
+        )
         url = f"{base_url}/projects/suffix-proj/timelines/{timeline_id}/assets/letters"
         status, headers, body = _get_bytes(url, range_header="bytes=-4")
 
@@ -679,31 +640,21 @@ def test_asset_206_suffix_range(
 
 
 def test_asset_416_range_not_satisfiable_start_beyond_size(
-    seed_bridge_project, tmp_bridge_root: Path,
+    tmp_bridge_root: Path,
 ) -> None:
     """Range start >= file size returns 416."""
     timeline_id = "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"
     timeline_ulid = "01JM4K5N7P00000000000000EE"
-    project_dir = seed_bridge_project(
-        slug="four16-proj",
-        timeline_ulid=timeline_ulid,
-        timeline_id=timeline_id,
-        assets={},
-    )
-
-    sources_dir = project_dir / "sources"
-    sources_dir.mkdir(parents=True, exist_ok=True)
-    asset_content = b"small"  # 5 bytes
-    asset_path = sources_dir / "tiny.bin"
-    asset_path.write_bytes(asset_content)
-
-    registry_path = project_dir / "timelines" / timeline_ulid / "registry.json"
-    registry_path.write_text(
-        json.dumps({"assets": {"tiny": {"file": "tiny.bin"}}}),
-        encoding="utf-8",
-    )
-
-    with running_server(tmp_bridge_root) as base_url:
+    registry = {"assets": {"tiny": {"file": "tiny.bin"}}}
+    with repository_server(tmp_bridge_root) as (base_url, composition):
+        _repo_seed_asset_timeline(
+            composition,
+            slug="four16-proj",
+            timeline_id=timeline_id,
+            timeline_ulid=timeline_ulid,
+            registry=registry,
+            media={"tiny": (b"small", "tiny.bin")},
+        )
         url = f"{base_url}/projects/four16-proj/timelines/{timeline_id}/assets/tiny"
         status, headers, body = _get_bytes(url, range_header="bytes=10-20")
 
@@ -712,13 +663,18 @@ def test_asset_416_range_not_satisfiable_start_beyond_size(
 
 
 def test_asset_404_for_missing_asset_key(
-    seed_bridge_project, tmp_bridge_root: Path,
+    tmp_bridge_root: Path,
 ) -> None:
     """Non-existent asset key returns 404 JSON error."""
     timeline_id = "ffffffff-ffff-ffff-ffff-ffffffffffff"
-    seed_bridge_project(slug="nope-proj", timeline_id=timeline_id, assets={})
-
-    with running_server(tmp_bridge_root) as base_url:
+    with repository_server(tmp_bridge_root) as (base_url, composition):
+        _repo_seed_asset_timeline(
+            composition,
+            slug="nope-proj",
+            timeline_id=timeline_id,
+            timeline_ulid="01JM4K5N7P0000000000000NP1",
+            registry={"assets": {}},
+        )
         status, error = _get_error(
             f"{base_url}/projects/nope-proj/timelines/{timeline_id}/assets/no-such-key",
         )
@@ -728,25 +684,22 @@ def test_asset_404_for_missing_asset_key(
 
 
 def test_asset_404_for_http_only_asset(
-    seed_bridge_project, tmp_bridge_root: Path,
+    tmp_bridge_root: Path,
 ) -> None:
     """HTTP-referenced asset (not local) returns 404 JSON error."""
     timeline_id = "11111111-1111-1111-1111-1111111111ab"
     timeline_ulid = "01JM4K5N7P00000000000000FF"
-    project_dir = seed_bridge_project(
-        slug="http-proj",
-        timeline_ulid=timeline_ulid,
-        timeline_id=timeline_id,
-        assets={},
-    )
-
-    registry_path = project_dir / "timelines" / timeline_ulid / "registry.json"
-    registry_path.write_text(
-        json.dumps({"assets": {"remote-one": {"file": "https://example.com/video.mp4"}}}),
-        encoding="utf-8",
-    )
-
-    with running_server(tmp_bridge_root) as base_url:
+    registry = {
+        "assets": {"remote-one": {"file": "https://example.com/video.mp4"}}
+    }
+    with repository_server(tmp_bridge_root) as (base_url, composition):
+        _repo_seed_asset_timeline(
+            composition,
+            slug="http-proj",
+            timeline_id=timeline_id,
+            timeline_ulid=timeline_ulid,
+            registry=registry,
+        )
         status, error = _get_error(
             f"{base_url}/projects/http-proj/timelines/{timeline_id}/assets/remote-one",
         )
@@ -756,13 +709,18 @@ def test_asset_404_for_http_only_asset(
 
 
 def test_asset_404_for_invalid_project(
-    seed_bridge_project, tmp_bridge_root: Path,
+    tmp_bridge_root: Path,
 ) -> None:
     """Asset request with invalid project slug returns 400."""
     timeline_id = "22222222-2222-2222-2222-222222222222"
-    seed_bridge_project(slug="valid-proj", timeline_id=timeline_id)
-
-    with running_server(tmp_bridge_root) as base_url:
+    with repository_server(tmp_bridge_root) as (base_url, composition):
+        _repo_seed_asset_timeline(
+            composition,
+            slug="valid-proj",
+            timeline_id=timeline_id,
+            timeline_ulid="01JM4K5N7P0000000000000VP1",
+            registry={"assets": {}},
+        )
         status, error = _get_error(
             f"{base_url}/projects/%2E%2E/timelines/{timeline_id}/assets/some-key",
         )
@@ -772,19 +730,45 @@ def test_asset_404_for_invalid_project(
 
 
 def test_asset_404_for_invalid_timeline(
-    seed_bridge_project, tmp_bridge_root: Path,
+    tmp_bridge_root: Path,
 ) -> None:
     """Asset request with invalid timeline selector returns 400."""
     timeline_id = "33333333-3333-3333-3333-333333333333"
-    seed_bridge_project(slug="valid-proj", timeline_id=timeline_id)
-
-    with running_server(tmp_bridge_root) as base_url:
+    with repository_server(tmp_bridge_root) as (base_url, composition):
+        _repo_seed_asset_timeline(
+            composition,
+            slug="valid-proj",
+            timeline_id=timeline_id,
+            timeline_ulid="01JM4K5N7P0000000000000VP2",
+            registry={"assets": {}},
+        )
         status, error = _get_error(
             f"{base_url}/projects/valid-proj/timelines/!!!bad!!!selector!!!/assets/some-key",
         )
 
     assert status == 400
     assert error["error"] == "invalid_timeline"
+
+
+def test_asset_fails_closed_without_composed_bridge(
+    seed_bridge_project, tmp_bridge_root: Path,
+) -> None:
+    """A server without the repository bridge fails closed with 500 internal.
+
+    The legacy sidecar/FSA asset fallback is gone (m4 plan step 22): there
+    is exactly one supported asset path, and it requires the injected
+    repository bridge and writer.
+    """
+    timeline_id = "44444444-4444-4444-4444-444444444444"
+    seed_bridge_project(slug="fallback-proj", timeline_id=timeline_id)
+
+    with running_server(tmp_bridge_root) as base_url:
+        status, error = _get_error(
+            f"{base_url}/projects/fallback-proj/timelines/{timeline_id}/assets/some-key",
+        )
+
+    assert status == 500
+    assert error["error"] == "internal"
 
 
 # ---------------------------------------------------------------------------
@@ -1030,36 +1014,51 @@ def test_cors_preflight_disallowed_origin_omits_cors_headers(
 
 
 def test_asset_lookup_after_registry_write(
-    seed_bridge_project, tmp_bridge_root: Path,
+    tmp_bridge_root: Path,
 ) -> None:
-    """PUT a registry with an asset mapping, then GET the asset through the existing endpoint."""
+    """Save a registry through the bridge, then GET the asset back.
+
+    The registry write commits through the bridge POST (the combined save;
+    the standalone PUT /registry route is gone), and the asset endpoint
+    resolves the saved ``file`` alias through the kernel media location.
+    """
     timeline_id = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1"
     timeline_ulid = "01JM4K5N7P00000000000RARW1"
-    project_dir = seed_bridge_project(
-        slug="rarw-proj",
-        timeline_ulid=timeline_ulid,
-        timeline_id=timeline_id,
-        assets={},
-    )
-
-    # Create a real source file
-    sources_dir = project_dir / "sources"
-    sources_dir.mkdir(parents=True, exist_ok=True)
     asset_content = b"Registry-written asset content for readback verification.\n" * 5
-    asset_path = sources_dir / "rarw-clip.webm"
-    asset_path.write_bytes(asset_content)
+    with repository_server(tmp_bridge_root) as (base_url, composition):
+        project = _repo_create_project(
+            composition, slug="rarw-proj", key="proj-1"
+        )
+        _repo_create_timeline(
+            composition,
+            project_id=project.id,
+            slug="primary",
+            key="tl-1",
+            timeline_id=timeline_id,
+            timeline_ulid=timeline_ulid,
+        )
+        asset_path = _write_source_file(
+            composition, "rarw-proj", "rarw-clip.webm", asset_content
+        )
+        _repo_import_media(
+            composition,
+            project_id=project.id,
+            path=asset_path,
+            key="media-1",
+            realm="managed_local",
+            locator="rarw-clip.webm",
+        )
 
-    # Step 1: Write the registry through the combined save (B5 removed PUT /registry)
-    save_bridge_timeline(
-        "rarw-proj",
-        timeline_id,
-        {"clips": [], "tracks": []},
-        registry={"assets": {"rarw-clip": {"file": "rarw-clip.webm"}}},
-        expected_version=0,
-        root=tmp_bridge_root,
-    )
+        # Step 1: Write the registry through the combined save.
+        save_url = f"{base_url}/projects/rarw-proj/timelines/{timeline_id}/save"
+        save_status, save_result = _post_json(save_url, {
+            "config": {"clips": [], "tracks": []},
+            "registry": {"assets": {"rarw-clip": {"file": "rarw-clip.webm"}}},
+            "expected_version": 1,
+        })
+        assert save_status == 200
+        assert save_result["config_version"] == 2
 
-    with running_server(tmp_bridge_root) as base_url:
         # Step 2: Read the asset back through the asset endpoint
         asset_url = f"{base_url}/projects/rarw-proj/timelines/{timeline_id}/assets/rarw-clip"
         asset_status, asset_headers, asset_body = _get_bytes(asset_url)
@@ -1071,38 +1070,46 @@ def test_asset_lookup_after_registry_write(
 
 
 def test_asset_lookup_after_registry_write_sources_relative(
-    seed_bridge_project, tmp_bridge_root: Path,
+    tmp_bridge_root: Path,
 ) -> None:
-    """Registry entries resolve relative to the project sources/ directory."""
+    """Registry ``file`` aliases resolve through nested media locations."""
     timeline_id = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbb2"
     timeline_ulid = "01JM4K5N7P00000000000RARW2"
-    project_dir = seed_bridge_project(
-        slug="rarw-src-proj",
-        timeline_ulid=timeline_ulid,
-        timeline_id=timeline_id,
-        assets={},
-    )
-
-    sources_dir = project_dir / "sources"
-    sources_dir.mkdir(parents=True, exist_ok=True)
-    # Nested path relative to sources/
-    nested_dir = sources_dir / "nested"
-    nested_dir.mkdir(parents=True, exist_ok=True)
     asset_content = b"Nested file content.\n"
-    asset_path = nested_dir / "deep.bin"
-    asset_path.write_bytes(asset_content)
+    with repository_server(tmp_bridge_root) as (base_url, composition):
+        project = _repo_create_project(
+            composition, slug="rarw-src-proj", key="proj-1"
+        )
+        _repo_create_timeline(
+            composition,
+            project_id=project.id,
+            slug="primary",
+            key="tl-1",
+            timeline_id=timeline_id,
+            timeline_ulid=timeline_ulid,
+        )
+        asset_path = _write_source_file(
+            composition, "rarw-src-proj", "nested/deep.bin", asset_content
+        )
+        _repo_import_media(
+            composition,
+            project_id=project.id,
+            path=asset_path,
+            key="media-1",
+            realm="managed_local",
+            locator="nested/deep.bin",
+        )
+        save_url = (
+            f"{base_url}/projects/rarw-src-proj/timelines/{timeline_id}/save"
+        )
+        save_status, save_result = _post_json(save_url, {
+            "config": {"clips": [], "tracks": []},
+            "registry": {"assets": {"deep-asset": {"file": "nested/deep.bin"}}},
+            "expected_version": 1,
+        })
+        assert save_status == 200
+        assert save_result["config_version"] == 2
 
-    save_bridge_timeline(
-        "rarw-src-proj",
-        timeline_id,
-        {"clips": [], "tracks": []},
-        registry={"assets": {"deep-asset": {"file": "nested/deep.bin"}}},
-        expected_version=0,
-        root=tmp_bridge_root,
-    )
-
-    with running_server(tmp_bridge_root) as base_url:
-        # Read it back
         asset_url = f"{base_url}/projects/rarw-src-proj/timelines/{timeline_id}/assets/deep-asset"
         asset_status, asset_headers, asset_body = _get_bytes(asset_url)
 
@@ -1586,6 +1593,50 @@ def _write_source_file(
     return path
 
 
+def _repo_import_media(
+    composition,
+    *,
+    project_id: str,
+    path: Path,
+    key: str,
+    realm: str = "managed_local",
+    locator: str | None = None,
+    media_id: str | None = None,
+):
+    """Import one prepared media file through the kernel media repository.
+
+    The import commits a ``media`` row (content SHA-256 identity), one
+    ``media_locations`` projection (realm + locator alias), the
+    ``core.media`` stream, and a receipt in one unit of work. For the
+    default ``managed_local`` realm the bytes are copied into the frozen
+    digest tree, so serving resolves the managed path from the content
+    hash; the explicit *locator* is stored as the replaceable alias that
+    the timeline registry ``file`` value matches (m4 plan step 22).
+    """
+    from astrid.core.events.service import EventAppendService
+    from astrid.core.io.media_import import prepare_media_file
+    from astrid.core.receipts import ReceiptService
+    from astrid.core.repositories.media import MediaRepository
+
+    media = MediaRepository(
+        events=EventAppendService(composition.registry),
+        receipts=ReceiptService(),
+        projects_root=composition.projects_root,
+    )
+    prepared = prepare_media_file(path)
+    return UnitOfWork(composition.writer).run(
+        lambda u: media.import_prepared(
+            u,
+            project_id=project_id,
+            prepared=prepared,
+            idempotency_key=key,
+            realm=realm,
+            locator=locator,
+            media_id=media_id,
+        )
+    )
+
+
 def _repo_seed_asset_timeline(
     composition,
     *,
@@ -1593,8 +1644,17 @@ def _repo_seed_asset_timeline(
     timeline_id: str,
     timeline_ulid: str,
     registry: dict[str, Any],
+    media: dict[str, tuple[bytes, str]] | None = None,
 ):
-    """Create one project and one timeline with a persisted asset registry."""
+    """Create one project and one timeline with a persisted asset registry.
+
+    *media* maps an asset key to ``(content, locator)``: each entry is
+    written under the project sources dir and imported through the kernel
+    media repository with a ``managed_local`` location whose alias equals
+    the locator, so the registry ``file`` value resolves project-scoped
+    through ``media_locations`` (m4 plan step 22). The registry entry for
+    the same key must carry ``{"file": <locator>}`` (or ``media_id``).
+    """
     project = _repo_create_project(composition, slug=slug, key=f"proj-{slug}")
     _repo_create_timeline(
         composition,
@@ -1605,6 +1665,16 @@ def _repo_seed_asset_timeline(
         timeline_ulid=timeline_ulid,
         registry=registry,
     )
+    for index, (content, locator) in enumerate((media or {}).values()):
+        path = _write_source_file(composition, slug, locator, content)
+        _repo_import_media(
+            composition,
+            project_id=project.id,
+            path=path,
+            key=f"media-{slug}-{index}",
+            realm="managed_local",
+            locator=locator,
+        )
     return project
 
 
@@ -1623,9 +1693,7 @@ def test_persisted_registry_asset_200_full_response_with_headers(
             timeline_id=timeline_id,
             timeline_ulid=timeline_ulid,
             registry=registry,
-        )
-        _write_source_file(
-            composition, "media-proj", "clip-a.mp4", asset_content
+            media={"clip-a": (asset_content, "clip-a.mp4")},
         )
         url = (
             f"{base_url}/projects/media-proj/timelines/{timeline_id}"
@@ -1661,8 +1729,8 @@ def test_persisted_registry_asset_head_returns_headers_without_body(
             timeline_id=timeline_id,
             timeline_ulid=timeline_ulid,
             registry=registry,
+            media={"clip": (asset_content, "clip.bin")},
         )
-        _write_source_file(composition, "head-proj", "clip.bin", asset_content)
         url = f"{base_url}/projects/head-proj/timelines/{timeline_id}/assets/clip"
         status, headers = _head(url)
 
@@ -1689,8 +1757,8 @@ def test_persisted_registry_asset_206_byte_ranges(
             timeline_id=timeline_id,
             timeline_ulid=timeline_ulid,
             registry=registry,
+            media={"alpha": (asset_content, "alpha.bin")},
         )
-        _write_source_file(composition, "range-proj", "alpha.bin", asset_content)
         url = f"{base_url}/projects/range-proj/timelines/{timeline_id}/assets/alpha"
 
         closed_status, closed_headers, closed_body = _get_bytes(
@@ -1732,8 +1800,8 @@ def test_persisted_registry_asset_304_when_if_none_match_matches(
             timeline_id=timeline_id,
             timeline_ulid=timeline_ulid,
             registry=registry,
+            media={"clip": (asset_content, "clip.bin")},
         )
-        _write_source_file(composition, "cache-proj", "clip.bin", asset_content)
         url = f"{base_url}/projects/cache-proj/timelines/{timeline_id}/assets/clip"
 
         status, headers, _body = _get_bytes(url)
@@ -1768,8 +1836,8 @@ def test_persisted_registry_asset_400_for_malformed_range(
             timeline_id=timeline_id,
             timeline_ulid=timeline_ulid,
             registry=registry,
+            media={"clip": (b"x" * 8, "clip.bin")},
         )
-        _write_source_file(composition, "badrange-proj", "clip.bin", b"x" * 8)
         url = (
             f"{base_url}/projects/badrange-proj/timelines/{timeline_id}"
             "/assets/clip"
@@ -1800,13 +1868,22 @@ def test_persisted_registry_asset_416_when_range_start_beyond_size(
             timeline_id=timeline_id,
             timeline_ulid=timeline_ulid,
             registry=registry,
+            media={"tiny": (b"small", "tiny.bin")},
         )
-        _write_source_file(composition, "four16-proj", "tiny.bin", b"small")
         url = f"{base_url}/projects/four16-proj/timelines/{timeline_id}/assets/tiny"
-        status, headers, _body = _get_bytes(url, range_header="bytes=10-20")
+        status, headers, _body = _get_bytes(
+            url,
+            range_header="bytes=10-20",
+            origin="http://localhost:3000",
+        )
 
     assert status == 416
     assert headers.get("Content-Range") == "bytes */5"
+    assert headers.get("Accept-Ranges") == "bytes"
+    assert headers.get("Cache-Control") == "private, no-cache"
+    assert headers.get("ETag")
+    assert headers.get("Last-Modified")
+    assert headers.get("Access-Control-Allow-Origin") == "http://localhost:3000"
 
 
 def test_persisted_registry_asset_404_for_missing_key(
@@ -1879,13 +1956,11 @@ def test_persisted_registry_asset_404_for_unsafe_or_missing_locator(
             timeline_id=timeline_id,
             timeline_ulid=timeline_ulid,
             registry=registry,
+            media={"clean": (b"inside", "nested/deep.bin")},
         )
         # A real file exists outside sources (escape target) and the clean
         # nested file exists inside sources; only the clean one is served.
         (tmp_bridge_root / "escape.png").write_bytes(b"outside")
-        _write_source_file(
-            composition, "unsafe-proj", "nested/deep.bin", b"inside"
-        )
         for key in ("escape", "absolute", "ghost"):
             url = (
                 f"{base_url}/projects/unsafe-proj/timelines/{timeline_id}"
@@ -1967,6 +2042,186 @@ def test_persisted_registry_asset_options_preflight(
     assert headers.get("Access-Control-Allow-Headers") == (
         "Content-Type, Range, If-None-Match, If-Modified-Since"
     )
+
+
+def test_persisted_registry_asset_serves_registered_media_id(
+    tmp_bridge_root: Path,
+) -> None:
+    """A registry entry's registered ``media_id`` resolves and serves.
+
+    The explicit media id is resolved project-scoped through the kernel
+    media row (m4 plan step 22); the ``file`` alias is not required when
+    the registered identity is present.
+    """
+    timeline_id = "aaaaaac1-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+    timeline_ulid = "01jm4k5n7p0000000000000pc1"
+    asset_content = b"served through the registered media id\n" * 8
+    with repository_server(tmp_bridge_root) as (base_url, composition):
+        project = _repo_create_project(
+            composition, slug="mediaid-proj", key="proj-1"
+        )
+        asset_path = _write_source_file(
+            composition, "mediaid-proj", "mid.bin", asset_content
+        )
+        media = _repo_import_media(
+            composition,
+            project_id=project.id,
+            path=asset_path,
+            key="media-1",
+            realm="managed_local",
+            locator="mid.bin",
+        )
+        _repo_create_timeline(
+            composition,
+            project_id=project.id,
+            slug="primary",
+            key="tl-1",
+            timeline_id=timeline_id,
+            timeline_ulid=timeline_ulid,
+            registry={"assets": {"clip": {"media_id": media.id}}},
+        )
+        url = f"{base_url}/projects/mediaid-proj/timelines/{timeline_id}/assets/clip"
+        status, headers, body = _get_bytes(url)
+
+    assert status == 200
+    assert int(headers.get("Content-Length", "0")) == len(asset_content)
+    assert body == asset_content
+
+
+def test_persisted_registry_asset_404_cross_project_locator_alias(
+    tmp_bridge_root: Path,
+) -> None:
+    """A locator alias owned by another project never resolves (404).
+
+    The kernel ``media_locations`` lookup is joined to the route project
+    (m4 plan step 9): the same alias in another project is
+    indistinguishable from an unknown one, so no cross-project bytes are
+    ever streamed.
+    """
+    timeline_id = "aaaaaac2-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+    timeline_ulid = "01jm4k5n7p0000000000000pc2"
+    asset_content = b"owned by the other project\n"
+    with repository_server(tmp_bridge_root) as (base_url, composition):
+        other = _repo_create_project(
+            composition, slug="other-proj", key="proj-other"
+        )
+        other_path = _write_source_file(
+            composition, "other-proj", "shared.bin", asset_content
+        )
+        _repo_import_media(
+            composition,
+            project_id=other.id,
+            path=other_path,
+            key="media-other",
+            realm="managed_local",
+            locator="shared.bin",
+        )
+        own = _repo_create_project(composition, slug="own-proj", key="proj-own")
+        _repo_create_timeline(
+            composition,
+            project_id=own.id,
+            slug="primary",
+            key="tl-own",
+            timeline_id=timeline_id,
+            timeline_ulid=timeline_ulid,
+            registry={"assets": {"clip": {"file": "shared.bin"}}},
+        )
+        url = f"{base_url}/projects/own-proj/timelines/{timeline_id}/assets/clip"
+        status, error = _get_error(url)
+
+    assert status == 404
+    assert error["error"] == "asset_not_found"
+
+
+def test_persisted_registry_asset_404_cross_project_media_id(
+    tmp_bridge_root: Path,
+) -> None:
+    """A media id owned by another project never resolves (404)."""
+    timeline_id = "aaaaaac3-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+    timeline_ulid = "01jm4k5n7p0000000000000pc3"
+    asset_content = b"foreign media bytes\n"
+    with repository_server(tmp_bridge_root) as (base_url, composition):
+        other = _repo_create_project(
+            composition, slug="foreign-proj", key="proj-foreign"
+        )
+        other_path = _write_source_file(
+            composition, "foreign-proj", "foreign.bin", asset_content
+        )
+        foreign_media = _repo_import_media(
+            composition,
+            project_id=other.id,
+            path=other_path,
+            key="media-foreign",
+            realm="managed_local",
+            locator="foreign.bin",
+        )
+        own = _repo_create_project(composition, slug="ref-proj", key="proj-ref")
+        _repo_create_timeline(
+            composition,
+            project_id=own.id,
+            slug="primary",
+            key="tl-ref",
+            timeline_id=timeline_id,
+            timeline_ulid=timeline_ulid,
+            registry={"assets": {"clip": {"media_id": foreign_media.id}}},
+        )
+        url = f"{base_url}/projects/ref-proj/timelines/{timeline_id}/assets/clip"
+        status, error = _get_error(url)
+
+    assert status == 404
+    assert error["error"] == "asset_not_found"
+
+
+def test_persisted_registry_asset_404_when_local_bytes_do_not_match_hash(
+    tmp_bridge_root: Path,
+) -> None:
+    """Bytes that no longer match the media content hash are never served.
+
+    An ``external_local`` reference-in-place location is re-hashed before
+    streaming (m4 plan step 22): after the source file's bytes change, the
+    actual SHA-256 no longer matches the media row's ``content_hash`` and
+    the asset fails closed with ``404 asset_not_found``.
+    """
+    timeline_id = "aaaaaac4-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+    timeline_ulid = "01jm4k5n7p0000000000000pc4"
+    asset_content = b"immutable registered bytes\n" * 6
+    with repository_server(tmp_bridge_root) as (base_url, composition):
+        project = _repo_create_project(
+            composition, slug="ext-proj", key="proj-1"
+        )
+        asset_path = _write_source_file(
+            composition, "ext-proj", "ext.bin", asset_content
+        )
+        media = _repo_import_media(
+            composition,
+            project_id=project.id,
+            path=asset_path,
+            key="media-1",
+            realm="external_local",
+        )
+        _repo_create_timeline(
+            composition,
+            project_id=project.id,
+            slug="primary",
+            key="tl-1",
+            timeline_id=timeline_id,
+            timeline_ulid=timeline_ulid,
+            registry={"assets": {"clip": {"media_id": media.id}}},
+        )
+        url = f"{base_url}/projects/ext-proj/timelines/{timeline_id}/assets/clip"
+
+        ok_status, ok_headers, ok_body = _get_bytes(url)
+        assert ok_status == 200
+        assert ok_body == asset_content
+        assert int(ok_headers.get("Content-Length", "0")) == len(asset_content)
+
+        # Mutate the reference-in-place bytes: the next fetch must fail
+        # closed even though the media row and registry are untouched.
+        asset_path.write_bytes(b"tampered bytes that no longer match\n")
+        status, error = _get_error(url)
+
+    assert status == 404
+    assert error["error"] == "asset_not_found"
 
 
 # ---------------------------------------------------------------------------

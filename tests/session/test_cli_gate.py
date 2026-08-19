@@ -394,6 +394,32 @@ def test_allowlist_help_runs_without_session(
     assert "Astrid command gateway" in stdout
 
 
+def test_product_help_runs_without_session(
+    env: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`astrid help` is the product-focused executable help (m4 plan step 24,
+    task T26) and needs no bound session: exactly the five product families,
+    the two manifest-declared nested mounts, the --json envelope convention,
+    and the stable exit codes, with serve/doctor/run excluded from the
+    product census.
+    """
+    monkeypatch.delenv(ASTRID_SESSION_ID_ENV, raising=False)
+    rc, stdout, stderr = _run_pipeline(["help"])
+    assert rc == 0
+    assert stderr == ""
+    assert (
+        "Product census (exactly five families): "
+        "projects media tasks runs timelines" in stdout
+    )
+    for family in ("projects", "media", "tasks", "runs", "timelines"):
+        assert family in stdout
+    assert "timelines shots" in stdout
+    assert "media references" in stdout
+    assert "Excluded from the product census until m6: serve, doctor, run" in stdout
+    assert "no session bound" not in stdout
+    assert "no session bound" not in stderr
+
+
 def test_allowlist_version_runs_without_session(
     env: dict[str, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:

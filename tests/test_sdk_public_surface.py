@@ -124,22 +124,40 @@ def test_curated_sdk_names_do_not_shadow_existing_top_level_modules() -> None:
 
 
 def test_generate_facade_is_lazy_public_surface() -> None:
+    # Purge the SDK package from sys.modules so importing ``astrid`` is
+    # provably lazy. The purge is restored afterwards: other tests in the
+    # same process imported the SDK modules before this test ran and keep
+    # references to those class objects, so leaving the fresh re-imports in
+    # place would split class identity (e.g. two DomainResult classes) and
+    # break later product-CLI dispatch in this process (m4 platform lane).
+    popped: dict[str, Any] = {}
     for module_name in [
         name for name in sys.modules if name == "astrid.sdk" or name.startswith("astrid.sdk.")
     ]:
-        sys.modules.pop(module_name, None)
-    astrid = _import_public_module()
-    astrid_modules_before = {
-        name for name in sys.modules if name == "astrid.sdk" or name.startswith("astrid.sdk.")
-    }
+        popped[module_name] = sys.modules.pop(module_name, None)
+    try:
+        astrid = _import_public_module()
+        astrid_modules_before = {
+            name
+            for name in sys.modules
+            if name == "astrid.sdk" or name.startswith("astrid.sdk.")
+        }
 
-    assert "generate" in astrid.__all__
-    assert astrid_modules_before == set()
+        assert "generate" in astrid.__all__
+        assert astrid_modules_before == set()
 
-    facade = astrid.generate
+        facade = astrid.generate
 
-    assert "astrid.sdk" in sys.modules
-    assert type(facade).__name__ == "GenerationFacade"
+        assert "astrid.sdk" in sys.modules
+        assert type(facade).__name__ == "GenerationFacade"
+    finally:
+        # Restore the purged modules (overwriting the test's fresh
+        # re-imports) so every module imported before this test keeps its
+        # class identity — otherwise a later product-CLI dispatch in this
+        # process binds a second DomainResult class and breaks
+        # isinstance-based envelope checks (m4 platform lane).
+        for module_name, module in popped.items():
+            sys.modules[module_name] = module
 
 
 def test_representative_top_level_submodule_imports_resolve() -> None:

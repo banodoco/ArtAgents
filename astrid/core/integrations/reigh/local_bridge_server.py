@@ -11,10 +11,9 @@ from collections.abc import Mapping
 from email.utils import formatdate
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any
 from urllib.parse import unquote, urlparse
 
-from astrid.core.foundation.project_paths import sources_dir, validate_project_slug
 from astrid.core.integrations.reigh.bridge_service import (
     BridgeError,
     BridgeInternalError,
@@ -27,14 +26,30 @@ from astrid.core.integrations.reigh.bridge_service import (
     TimelineSaveRequest,
 )
 from astrid.core.integrations.reigh.local_bridge import (
-    resolve_bridge_asset,
     resolve_bridge_projects_root,
 )
 from astrid.core.receipts.canonical import (
     CanonicalizationError,
     canonical_json,
 )
-from astrid.core.timeline.paths import validate_timeline_slug, validate_timeline_ulid
+
+if TYPE_CHECKING:
+    from astrid.core.repositories.media import (
+        MediaNotFoundError,
+        MediaRepository,
+    )
+    from astrid.core.repositories.projects import (
+        ProjectRepository,
+    )
+
+# SQL and repository imports are deliberately **not** module-level (m4 plan
+# step 30): the bridge save route and every product route resolve through
+# the constructor-injected service-backed bridge, and the only raw-SQL /
+# kernel-repository use left on this server is the read-only asset-serving
+# path (m4 plan step 22), which imports them lazily inside the handler
+# methods that serve bytes. Importing this module therefore never imports
+# SQLite or a repository implementation, and no handler reaches for a
+# legacy authority.
 
 _RANGE_RE = re.compile(r"^bytes\s*=\s*(\d*)\s*-\s*(\d*)\s*$")
 _RANGELESS_FULL_BODY_LIMIT_BYTES = 64 * 1024 * 1024
@@ -62,25 +77,101 @@ class LocalBridgeHTTPServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
+    # Constructor-injected bridge authority (m4 plan step 21, task T22):
+    # the repository bridge, its single writer, and the resolved database
+    # path are mandatory constructor inputs — the class has no
+    # post-construction authority assignment path — and may never be
+    # reassigned while the server is serving. Assigning any of them after
+    # ``serve_forever`` has started would create a second write authority,
+    # so it is rejected at runtime.
+    _BRIDGE_AUTHORITY_ATTRIBUTES = frozenset(
+        {"bridge", "bridge_writer", "bridge_database_path"}
+    )
+
+    def __init__(
+        self,
+        server_address: tuple[str, int],
+        RequestHandlerClass: type[BaseHTTPRequestHandler],
+        *,
+        bridge: Any | None,
+        bridge_writer: Any | None,
+        bridge_database_path: str | Path | None,
+    ) -> None:
+        """Bind the server and install the bridge authority at construction.
+
+        The repository bridge, its single writer, and the resolved
+        database path are **mandatory constructor inputs** (m4 plan step
+        21, task T22): the class has no post-construction authority
+        assignment path, and the runtime guard below rejects any
+        reassignment while the server is serving. An explicit ``None``
+        bridge/writer is the deliberate fail-closed configuration used by
+        the frozen bridge tests (every read route answers the typed
+        ``500 internal`` envelope).
+        """
+        super().__init__(server_address, RequestHandlerClass)
+        self._serving = False
+        self.bridge = bridge
+        self.bridge_writer = bridge_writer
+        self.bridge_database_path = bridge_database_path
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        if (
+            name in self._BRIDGE_AUTHORITY_ATTRIBUTES
+            and getattr(self, "_serving", False)
+        ):
+            raise AttributeError(
+                f"{name!r} is constructor-injected on the bridge server and "
+                "cannot be reassigned while the server is serving"
+            )
+        super().__setattr__(name, value)
+
+    def serve_forever(self, poll_interval: float = 0.5) -> None:
+        self._serving = True
+        try:
+            super().serve_forever(poll_interval)
+        finally:
+            self._serving = False
+
 
 def create_local_bridge_server(
     *,
     projects_root: str | Path | None = None,
     host: str = "127.0.0.1",
     port: int = 0,
+    bridge: Any | None = None,
+    writer: Any | None = None,
+    database_path: str | Path | None = None,
 ) -> ThreadingHTTPServer:
-    """Create a bridge HTTP server bound to the requested host/port."""
+    """Create a bridge HTTP server bound to the requested host/port.
+
+    The supported composition root (``astrid.core.gateway.dispatch``,
+    ``_dispatch_serve``) injects the repository-backed bridge, its single
+    writer, and the resolved database path **through the server
+    constructor** (m4 plan step 21): this factory forwards them to
+    :class:`LocalBridgeHTTPServer` and never assigns ``server.bridge``
+    after construction, so the HTTP server never gains a second authority.
+    The *bridge*/*writer*/*database_path* parameters default to ``None``
+    only for the frozen bridge-test fixture pattern (``running_server``),
+    which exercises the deliberate fail-closed configuration: every read
+    route — including asset serving (m4 plan step 22 removed the legacy
+    sidecar/FSA asset fallback) — answers the typed ``500 internal``
+    envelope.
+    """
     resolved_root = resolve_bridge_projects_root(projects_root)
     handler = make_local_bridge_handler(projects_root=resolved_root)
-    return LocalBridgeHTTPServer((host, port), handler)
+    return LocalBridgeHTTPServer(
+        (host, port),
+        handler,
+        bridge=bridge,
+        bridge_writer=writer,
+        bridge_database_path=database_path,
+    )
 
 
 def make_local_bridge_handler(*, projects_root: Path):
     """Build a request handler bound to one resolved projects root."""
 
     class Handler(BaseHTTPRequestHandler):
-        _asset_resolution_cache: ClassVar[dict[tuple[str, str, str], dict[str, Any]]] = {}
-
         def log_message(self, _fmt: str, *_args: Any) -> None:
             return
 
@@ -184,186 +275,6 @@ def make_local_bridge_handler(*, projects_root: Path):
         def _send_error(self, status: int, code: str, detail: str) -> None:
             self._send_json(status, {"error": code, "detail": detail})
 
-        # ------------------------------------------------------------------
-        # Asset serving helpers
-        # ------------------------------------------------------------------
-
-
-
-        def _serve_file(
-            self,
-            local_path: Path,
-            *,
-            content_type: str,
-            cache_control: str,
-            head_only: bool = False,
-        ) -> None:
-            stat = local_path.stat()
-            file_size = stat.st_size
-            etag = f'"{stat.st_mtime_ns:x}-{file_size:x}"'
-            last_modified = formatdate(stat.st_mtime, usegmt=True)
-
-            def send_file_headers(
-                *,
-                content_length: int,
-                content_range: str | None = None,
-            ) -> None:
-                self._set_cors_headers()
-                self.send_header("Content-Type", content_type)
-                self.send_header("Content-Length", str(content_length))
-                if content_range is not None:
-                    self.send_header("Content-Range", content_range)
-                self.send_header("Accept-Ranges", "bytes")
-                self.send_header("Cache-Control", cache_control)
-                self.send_header("ETag", etag)
-                self.send_header("Last-Modified", last_modified)
-
-            def stream_file_range(range_start: int, content_len: int) -> None:
-                try:
-                    with local_path.open("rb") as fh:
-                        fh.seek(range_start)
-                        remaining = content_len
-                        while remaining > 0:
-                            chunk = fh.read(min(65536, remaining))
-                            if not chunk:
-                                break
-                            self.wfile.write(chunk)
-                            remaining -= len(chunk)
-                except (BrokenPipeError, ConnectionResetError):
-                    return
-
-            range_header = self.headers.get("Range")
-            if range_header is None:
-                if self.headers.get("If-None-Match") == etag:
-                    self.send_response(304)
-                    self._set_cors_headers()
-                    self.send_header("ETag", etag)
-                    self.send_header("Last-Modified", last_modified)
-                    self.send_header("Cache-Control", cache_control)
-                    self.end_headers()
-                    return
-
-                self.send_response(200)
-                send_file_headers(content_length=file_size)
-                self.end_headers()
-                if head_only:
-                    return
-                stream_file_range(0, file_size)
-                return
-
-            match = _RANGE_RE.match(range_header)
-            if match is None:
-                self.send_response(400)
-                self.send_header("Content-Type", "text/plain")
-                self.end_headers()
-                self.wfile.write(b"invalid Range header")
-                return
-
-            range_start_str = match.group(1)
-            range_end_str = match.group(2)
-            if range_start_str == "" and range_end_str == "":
-                self.send_response(400)
-                self.send_header("Content-Type", "text/plain")
-                self.end_headers()
-                self.wfile.write(b"empty Range")
-                return
-
-            if range_start_str == "":
-                suffix_len = int(range_end_str)
-                if suffix_len <= 0:
-                    self._send_416(file_size)
-                    return
-                range_start = max(0, file_size - suffix_len)
-                range_end = file_size - 1
-            elif range_end_str == "":
-                range_start = int(range_start_str)
-                range_end = file_size - 1
-            else:
-                range_start = int(range_start_str)
-                range_end = int(range_end_str)
-
-            if range_start < 0 or range_end < range_start or range_start >= file_size:
-                self._send_416(file_size)
-                return
-
-            if range_end >= file_size:
-                range_end = file_size - 1
-
-            content_len = range_end - range_start + 1
-            self.send_response(206)
-            send_file_headers(
-                content_length=content_len,
-                content_range=f"bytes {range_start}-{range_end}/{file_size}",
-            )
-            self.end_headers()
-            if head_only:
-                return
-            stream_file_range(range_start, content_len)
-
-
-
-        def _resolve_cached_asset(
-            self,
-            project_slug: str,
-            timeline_ref: str,
-            asset_key: str,
-        ) -> tuple[Path, int, str, str, str, bool] | None:
-            """Resolve an asset path once and cache the result per file identity.
-
-            The cache is keyed by (project, timeline, asset_key) and invalidated
-            when the underlying file's mtime or size changes. This avoids the
-            expensive registry re-sync and timeline lookup on every byte-range
-            request for the same asset.
-            """
-            cache_key = (project_slug, timeline_ref, asset_key)
-            cached = self._asset_resolution_cache.get(cache_key)
-            if cached is not None:
-                local_path = cached["local_path"]
-                try:
-                    stat = local_path.stat()
-                except OSError:
-                    self._asset_resolution_cache.pop(cache_key, None)
-                    return None
-                if stat.st_mtime_ns == cached["mtime_ns"] and stat.st_size == cached["file_size"]:
-                    return (
-                        local_path,
-                        cached["file_size"],
-                        cached["content_type"],
-                        cached["etag"],
-                        cached["last_modified"],
-                        True,
-                    )
-                self._asset_resolution_cache.pop(cache_key, None)
-
-            resolved = resolve_bridge_asset(
-                project_slug, timeline_ref, asset_key, root=projects_root, sync_sources=False,
-            )
-            if resolved is None:
-                return None
-            if resolved.source_kind == "http":
-                return None
-            local_path = resolved.local_path
-            if local_path is None or not local_path.is_file():
-                return None
-
-            stat = local_path.stat()
-            file_size = stat.st_size
-            content_type, _ = mimetypes.guess_type(str(local_path))
-            if content_type is None:
-                content_type = "application/octet-stream"
-            etag = f'"{stat.st_mtime_ns:x}-{file_size:x}"'
-            last_modified = formatdate(stat.st_mtime, usegmt=True)
-
-            self._asset_resolution_cache[cache_key] = {
-                "local_path": local_path,
-                "file_size": file_size,
-                "mtime_ns": stat.st_mtime_ns,
-                "content_type": content_type,
-                "etag": etag,
-                "last_modified": last_modified,
-            }
-            return local_path, file_size, content_type, etag, last_modified, False
-
         def _serve_asset(
             self,
             project_slug: str,
@@ -374,18 +285,16 @@ def make_local_bridge_handler(*, projects_root: Path):
         ) -> None:
             """Serve one asset with the frozen byte-serving semantics (§9).
 
-            When the repository bridge is composed, the asset key resolves
-            only from the persisted timeline registry; otherwise the legacy
-            resolution path is kept for read-only compatibility fixtures.
-            Both paths share the same wire semantics (200/206/304/416/400,
-            HEAD, validators, OPTIONS).
+            There is exactly one supported resolution path (m4 plan step
+            22): the asset key resolves from the persisted timeline
+            registry through kernel media/location records in the route
+            project, the local bytes are verified against the media
+            content SHA-256 before streaming, and only verified local
+            locations are served. The legacy sidecar/FSA asset fallback
+            was removed — a server without the injected repository bridge
+            fails closed with the typed ``500 internal`` envelope.
             """
-            if getattr(self.server, "bridge", None) is not None:
-                self._serve_asset_from_persisted_registry(
-                    project_slug, timeline_ref, asset_key, head_only=head_only
-                )
-                return
-            self._serve_asset_legacy(
+            self._serve_asset_from_persisted_registry(
                 project_slug, timeline_ref, asset_key, head_only=head_only
             )
 
@@ -397,13 +306,28 @@ def make_local_bridge_handler(*, projects_root: Path):
             *,
             head_only: bool = False,
         ) -> None:
-            """Serve an asset resolved from the persisted timeline registry.
+            """Serve one asset through kernel media/location records.
 
-            The registry comes from the repository bridge — never from a
-            sidecar file or a filesystem scan (contract §9: a locator is a
-            locator, never media identity). Safe-path rules reject absolute
-            and traversing locators; HTTP locators are never local.
+            The registry entry comes from the repository bridge — never
+            from a sidecar file or a filesystem scan (contract §9: a
+            locator is a locator, never media identity). Resolution:
+
+            1. the entry's registered ``media_id``, or
+            2. a matching kernel ``media_locations`` alias (``file``) in
+               the route project (m4 plan step 9 project-scoped lookup),
+
+            then the media row's actual local location is verified against
+            its content SHA-256 before any byte is streamed (m4 plan step
+            22). A cross-project media id or alias is indistinguishable
+            from an unknown one (``404 asset_not_found``); HTTP locators
+            are never local (``404 asset_not_local``); unsafe locator
+            aliases and unverified or missing bytes are never served.
             """
+            import sqlite3
+
+            from astrid.core.repositories.media import MediaNotFoundError
+            from astrid.core.repositories.projects import ProjectNotFoundError
+
             try:
                 load = self._bridge().load_timeline(project_slug, timeline_ref)
             except BridgeError as exc:
@@ -411,6 +335,13 @@ def make_local_bridge_handler(*, projects_root: Path):
                 return
 
             assets = load.registry.get("assets", {})
+            if not isinstance(assets, Mapping):
+                self._send_error(
+                    404,
+                    "asset_not_found",
+                    f"asset {asset_key!r} was not found in timeline {timeline_ref!r}",
+                )
+                return
             entry = assets.get(asset_key)
             if not isinstance(entry, dict):
                 self._send_error(
@@ -419,45 +350,94 @@ def make_local_bridge_handler(*, projects_root: Path):
                     f"asset {asset_key!r} was not found in timeline {timeline_ref!r}",
                 )
                 return
-            locator = entry.get("file")
-            if not isinstance(locator, str) or not locator.strip():
-                self._send_error(
-                    404,
-                    "asset_not_found",
-                    f"asset {asset_key!r} has no file locator",
-                )
-                return
-            locator = locator.strip()
 
-            classification = _classify_persisted_registry_locator(locator)
-            if classification == "http":
-                self._send_error(
-                    404,
-                    "asset_not_local",
-                    f"asset {asset_key!r} is not available as a local file",
-                )
-                return
-            if classification == "unsafe":
-                self._send_error(
-                    404,
-                    "asset_not_found",
-                    f"asset {asset_key!r} has an unsafe locator: {locator!r}",
-                )
-                return
-
-            local_path = self._resolve_persisted_registry_local_path(
-                project_slug, locator
+            raw_media_id = entry.get("media_id")
+            media_id_ref = (
+                raw_media_id.strip()
+                if isinstance(raw_media_id, str) and raw_media_id.strip()
+                else None
             )
-            if local_path is None:
+            raw_locator = entry.get("file")
+            locator = raw_locator.strip() if isinstance(raw_locator, str) and raw_locator.strip() else None
+            if media_id_ref is None and locator is None:
                 self._send_error(
                     404,
                     "asset_not_found",
-                    f"asset {asset_key!r} was not found on disk",
+                    f"asset {asset_key!r} has no media id or file locator",
                 )
                 return
 
+            if media_id_ref is None:
+                assert locator is not None  # the guard above guarantees one ref
+                # Safe-path rules for the locator alias (contract §9): an
+                # HTTP locator is never local and an absolute or
+                # ``..``-traversing alias is never used as a lookup key.
+                classification = _classify_persisted_registry_locator(locator)
+                if classification == "http":
+                    self._send_error(
+                        404,
+                        "asset_not_local",
+                        f"asset {asset_key!r} is not available as a local file",
+                    )
+                    return
+                if classification == "unsafe":
+                    self._send_error(
+                        404,
+                        "asset_not_found",
+                        f"asset {asset_key!r} has an unsafe locator: {locator!r}",
+                    )
+                    return
+
+            try:
+                writer = self._bridge_writer()
+            except BridgeError as exc:
+                self._send_bridge_error(exc)
+                return
+            try:
+                project_id = self._projects_repository().resolve(writer, project_slug)
+            except ProjectNotFoundError:
+                self._send_error(
+                    404,
+                    "project_not_found",
+                    f"project {project_slug!r} was not found",
+                )
+                return
+
+            media = self._media_repository()
+            try:
+                if media_id_ref is not None:
+                    with writer.read_only_connection() as conn:
+                        conn.row_factory = sqlite3.Row
+                        resolved_media_id = media.resolve_media(
+                            conn,
+                            project_id=project_id,
+                            media_id=media_id_ref,
+                        )
+                else:
+                    assert locator is not None  # the guard above guarantees one ref
+                    resolved_media_id = self._resolve_locator_alias(
+                        media, writer, project_id, locator
+                    )
+            except MediaNotFoundError:
+                self._send_error(
+                    404,
+                    "asset_not_found",
+                    f"asset {asset_key!r} was not found in project {project_slug!r}",
+                )
+                return
+
+            media_model = media.show(writer, resolved_media_id)
+            verified = self._resolve_verified_local_location(media_model)
+            if verified is None:
+                self._send_error(
+                    404,
+                    "asset_not_found",
+                    f"asset {asset_key!r} has no verified local bytes in project {project_slug!r}",
+                )
+                return
+
+            local_path, file_size = verified
             stat = local_path.stat()
-            file_size = stat.st_size
             content_type, _ = mimetypes.guess_type(str(local_path))
             if content_type is None:
                 content_type = "application/octet-stream"
@@ -472,66 +452,130 @@ def make_local_bridge_handler(*, projects_root: Path):
                 head_only=head_only,
             )
 
-        def _resolve_persisted_registry_local_path(
-            self, project_slug: str, locator: str
-        ) -> Path | None:
-            """Resolve a safe relative locator under the project sources dir."""
-            sources_root = sources_dir(project_slug, root=projects_root).resolve()
-            candidate = (sources_root / locator).resolve()
-            if not candidate.is_relative_to(sources_root):
-                return None
-            if not candidate.is_file():
-                return None
-            return candidate
-
-        def _serve_asset_legacy(
+        def _resolve_locator_alias(
             self,
-            project_slug: str,
-            timeline_ref: str,
-            asset_key: str,
-            *,
-            head_only: bool = False,
-        ) -> None:
-            """Legacy resolution path for read-only compatibility fixtures."""
-            project_slug = self._validate_project(project_slug)
-            if project_slug is None:
-                return
-            timeline_ref = self._validate_timeline_ref(timeline_ref)
-            if timeline_ref is None:
-                return
+            media: MediaRepository,
+            writer: Any,
+            project_id: str,
+            locator: str,
+        ) -> str:
+            """Resolve a registry ``file`` alias to a project-scoped media id.
 
-            resolved = self._resolve_cached_asset(project_slug, timeline_ref, asset_key)
-            if resolved is None:
-                unresolved = resolve_bridge_asset(
-                    project_slug,
-                    timeline_ref,
-                    asset_key,
-                    root=projects_root,
-                    sync_sources=False,
-                )
-                if unresolved is not None and unresolved.source_kind == "http":
-                    self._send_error(
-                        404,
-                        "asset_not_local",
-                        f"asset {asset_key!r} is not available as a local file",
-                    )
-                    return
-                self._send_error(
-                    404,
-                    "asset_not_found",
-                    f"asset {asset_key!r} was not found in timeline {timeline_ref!r}",
-                )
-                return
+            The alias is matched against the kernel ``media_locations``
+            rows of the route project in both supported realms
+            (managed first, then external reference-in-place). A locator
+            is a replaceable alias, never media identity; an alias that
+            matches no location — including one that belongs to another
+            project — raises :class:`MediaNotFoundError`.
+            """
+            import sqlite3
 
-            local_path, file_size, content_type, etag, last_modified, _was_cached = resolved
-            self._serve_resolved_asset(
-                local_path,
-                file_size,
-                content_type,
-                etag,
-                last_modified,
-                head_only=head_only,
+            from astrid.core.repositories.media import (
+                EXTERNAL_LOCAL_REALM,
+                MANAGED_LOCAL_REALM,
+                MediaNotFoundError,
             )
+
+            last_error: MediaNotFoundError | None = None
+            with writer.read_only_connection() as conn:
+                conn.row_factory = sqlite3.Row
+                for realm in (MANAGED_LOCAL_REALM, EXTERNAL_LOCAL_REALM):
+                    try:
+                        return media.resolve_media(
+                            conn,
+                            project_id=project_id,
+                            realm=realm,
+                            locator=locator,
+                        )
+                    except MediaNotFoundError as exc:
+                        last_error = exc
+            if last_error is None:  # pragma: no cover - both realms always run
+                raise MediaNotFoundError(media_id=locator)
+            raise last_error
+
+        def _projects_repository(self) -> ProjectRepository:
+            """Read-only project resolution over the injected single writer.
+
+            Only :meth:`ProjectRepository.resolve` is used (a
+            transaction-free read on the writer's read-only connection);
+            the event append and receipt services are never touched, so a
+            lightweight instance is safe and opens no second authority.
+            The repository implementation is imported lazily so importing
+            this module never imports a repository (plan step 30).
+            """
+            from astrid.core.repositories.projects import ProjectRepository
+
+            return ProjectRepository(  # type: ignore[arg-type]
+                events=None,
+                receipts=None,
+            )
+
+        def _media_repository(self) -> MediaRepository:
+            """Read-only media/location resolution over the injected writer.
+
+            Only :meth:`MediaRepository.resolve_media` and
+            :meth:`MediaRepository.show` are used (transaction-free reads
+            on the writer's read-only connection); the event append and
+            receipt services are never touched, so a lightweight instance
+            is safe and opens no second authority. The repository
+            implementation is imported lazily so importing this module
+            never imports a repository (plan step 30).
+            """
+            from astrid.core.repositories.media import MediaRepository
+
+            return MediaRepository(  # type: ignore[arg-type]
+                events=None,
+                receipts=None,
+                projects_root=projects_root,
+            )
+
+        def _bridge_writer(self) -> Any:
+            """The single repository writer injected at the serve root."""
+            writer = getattr(self.server, "bridge_writer", None)
+            if writer is None:
+                raise BridgeInternalError(
+                    "the repository writer is not composed on this server"
+                )
+            return writer
+
+        def _resolve_verified_local_location(
+            self,
+            media_model: Any,
+        ) -> tuple[Path, int] | None:
+            """Return the first location whose bytes match the media hash.
+
+            Managed locations resolve to the frozen digest tree path for
+            the media content hash; external locations resolve to their
+            registered reference-in-place path. A location is served only
+            when it exists and its actual bytes SHA-256 to the media row's
+            ``content_hash`` (m4 plan step 22: actual-byte verification
+            before streaming).
+            """
+            from astrid.core.io.media_import import (
+                managed_media_path,
+                sha256_file_bytes,
+            )
+            from astrid.core.repositories.media import (
+                EXTERNAL_LOCAL_REALM,
+                MANAGED_LOCAL_REALM,
+            )
+
+            for location in media_model.locations:
+                if location.realm == MANAGED_LOCAL_REALM:
+                    path = managed_media_path(projects_root, media_model.content_hash)
+                elif location.realm == EXTERNAL_LOCAL_REALM:
+                    path = Path(location.locator)
+                else:
+                    continue
+                try:
+                    if not path.is_file():
+                        continue
+                    if sha256_file_bytes(path) != media_model.content_hash:
+                        continue
+                    return path, int(path.stat().st_size)
+                except OSError:
+                    continue
+            return None
 
         def _serve_resolved_asset(
             self,
@@ -644,7 +688,11 @@ def make_local_bridge_handler(*, projects_root: Path):
             if range_start_str == "" and range_end_str != "":
                 suffix_len = int(range_end_str)
                 if suffix_len <= 0:
-                    self._send_416(file_size)
+                    self._send_416(
+                        file_size,
+                        etag=etag,
+                        last_modified=last_modified,
+                    )
                     return
                 range_start = max(0, file_size - suffix_len)
                 range_end = file_size - 1
@@ -661,7 +709,11 @@ def make_local_bridge_handler(*, projects_root: Path):
 
             # ---- Validate range ----
             if range_start < 0 or range_end < range_start or range_start >= file_size:
-                self._send_416(file_size)
+                self._send_416(
+                    file_size,
+                    etag=etag,
+                    last_modified=last_modified,
+                )
                 return
 
             # Clamp range_end to file_size - 1
@@ -681,10 +733,21 @@ def make_local_bridge_handler(*, projects_root: Path):
 
             stream_file_range(range_start, content_len)
 
-        def _send_416(self, file_size: int) -> None:
+        def _send_416(
+            self,
+            file_size: int,
+            *,
+            etag: str,
+            last_modified: str,
+        ) -> None:
             self.send_response(416)
+            self._set_cors_headers()
             self.send_header("Content-Range", f"bytes */{file_size}")
             self.send_header("Content-Type", "text/plain")
+            self.send_header("Accept-Ranges", "bytes")
+            self.send_header("Cache-Control", "private, no-cache")
+            self.send_header("ETag", etag)
+            self.send_header("Last-Modified", last_modified)
             self.send_header("Content-Length", "0")
             self.end_headers()
 
@@ -845,7 +908,7 @@ def make_local_bridge_handler(*, projects_root: Path):
                 except BridgeError as exc:
                     self._send_bridge_error(exc)
                     return
-                except Exception as exc:  # noqa: BLE001 - defensive 500
+                except Exception as _exc:  # noqa: BLE001 - defensive 500
                     self._send_error(
                         500,
                         "internal",
@@ -896,37 +959,6 @@ def make_local_bridge_handler(*, projects_root: Path):
                 return None
             return payload if isinstance(payload, dict) else None
 
-        def _validate_project(self, raw_project: str) -> str | None:
-            try:
-                project_slug = validate_project_slug(raw_project)
-            except Exception:
-                self._send_error(400, "invalid_project", f"invalid project slug: {raw_project!r}")
-                return None
-
-            if not (projects_root / project_slug / "project.json").is_file():
-                self._send_error(404, "project_not_found", f"project {project_slug!r} was not found")
-                return None
-            return project_slug
-
-        def _validate_timeline_ref(self, raw_timeline: str) -> str | None:
-            try:
-                validate_timeline_ulid(raw_timeline)
-                return raw_timeline
-            except Exception:
-                pass
-
-            try:
-                validate_timeline_slug(raw_timeline)
-                return raw_timeline
-            except Exception:
-                pass
-
-            if _looks_like_uuid(raw_timeline):
-                return raw_timeline
-
-            self._send_error(400, "invalid_timeline", f"invalid timeline selector: {raw_timeline!r}")
-            return None
-
     return Handler
 
 
@@ -970,10 +1002,3 @@ def _validate_save_payload_schema(request: TimelineSaveRequest) -> None:
             "config/registry failed schema validation",
             issues=issues,
         )
-
-
-def _looks_like_uuid(value: str) -> bool:
-    parts = value.split("-")
-    if len(parts) != 5:
-        return False
-    return all(parts) and all(all(char in "0123456789abcdefABCDEF" for char in part) for part in parts)

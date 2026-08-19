@@ -2,11 +2,25 @@ name: Bridge Latency Gate (Astrid PR)
 
 # GET + warm-save p95 regression gate for Astrid-side changes (incident
 # timeline-save-latency-error-20260812, T2.4 MUST-FIX 5). Runs the reigh
-# reporter (scripts/bridge-latency-report.mjs) against a disposable 2,000-event
-# fixture served by THIS PR's astrid checkout:
+# reporter (scripts/bridge-latency-report.mjs in the reigh checkout) against
+# a disposable 2,000-event fixture served by THIS PR's astrid checkout:
 #   - GET p95  <= 500ms (existing B7 warm GET SLO)
 #   - save p95 <= 500ms (NEW warm-save SLO — the incident's save was ~1s+)
 #   - 10s hard deadline (BRIDGE_REQUEST_TIMEOUT_MS) retained
+#
+# The final step is the pinned Reigh evidence lane (m4 plan step 23, task
+# T24): it runs **always** (if: always()), verifies the requested vs
+# resolved Astrid and Reigh SHAs, installs the Reigh lockfile, runs the five
+# pinned external selectors independently plus the latency target, and
+# emits schema-validated retained disposition evidence at
+# artifacts/m4/reigh-external-gate-disposition.json. The Astrid checkout
+# above is pinned to the triggering PR-head ref *before* any setup or
+# latency work, so the requested SHA supplied to the reporter is always the
+# checkout that actually ran. The lane is reporting-only: external
+# incompatibility is recorded as retained evidence, never an input to
+# m4-gate success, and reporting failures (mismatched checkout,
+# absent/malformed evidence) fail the job closed.
+#
 # Triggers on astrid PRs touching the timeline eventlog or the reigh bridge so
 # astrid changes that regress save latency fail CI on the astrid side. The
 # reigh-side workflow (reigh-timeline-main/.github/workflows/bridge-latency.yml)
@@ -24,16 +38,26 @@ on:
 
 jobs:
   bridge-latency:
-    name: GET + save p95 gate
+    name: GET + save p95 gate + pinned Reigh disposition
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           repository: peteromallet/Astrid
+          # Pin THIS PR's triggering ref (PR head, else the pushed SHA)
+          # before any latency/setup work: the lane must run latency and
+          # emit disposition evidence for exactly the code under review,
+          # never a default-branch checkout. The reporter then verifies
+          # requested (this ref) equals resolved (the checkout HEAD) and
+          # fails closed on a mismatch.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           path: astrid
       - uses: actions/checkout@v4
         with:
           repository: banodoco/reigh-app
+          # The pinned Reigh commit frozen by the m4 disposition
+          # (docs/astrid-v10-implementation-decisions.md section 14).
+          ref: bc2d8b0327c1c7dbdcd7b7445440d8ca180dd677
           path: reigh-timeline-main
       - uses: actions/setup-python@v5
         with:
@@ -52,3 +76,25 @@ jobs:
         env:
           ASTRID_PYTHON: python3
         run: make bridge-latency-check
+      - name: Run pinned Reigh disposition lane (always, reporting-only)
+        # Always runs — even when the latency gate or a selector fails — so
+        # the lane retains results and the disposition evidence is always
+        # emitted. A mismatched Astrid checkout or absent/malformed evidence
+        # makes this step fail closed (exit non-zero); external incompatibility
+        # is recorded as retained evidence and never gates m4 admission.
+        if: always()
+        working-directory: astrid
+        env:
+          ASTRID_PYTHON: python3
+        run: |
+          python3 scripts/reigh_disposition_report.py \
+            --astrid-repo "$GITHUB_WORKSPACE/astrid" \
+            --reigh-repo "$GITHUB_WORKSPACE/reigh-timeline-main" \
+            --astrid-requested-sha "${{ github.event.pull_request.head.sha || github.sha }}"
+      - name: Upload retained disposition evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reigh-external-gate-disposition
+          path: astrid/artifacts/m4/reigh-external-gate-disposition.json
+          if-no-files-found: error

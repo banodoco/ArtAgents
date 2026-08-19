@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from importlib import import_module
 import logging
 import signal
 import subprocess
 import sys
+from importlib import import_module
 from pathlib import Path
 from typing import Any
 
@@ -300,10 +300,62 @@ def _dispatch_themes(args: list[str]) -> int:
     return cli.main(args)
 
 
+_PRODUCT_TIMELINE_VERBS: frozenset[str] = frozenset(
+    {"create", "list", "show", "save", "archive", "history", "diff"}
+)
+"""The seven product timeline verbs (m4 plan step 26, task T28).
+
+These verbs route through the product timeline family (one-call SDK
+adapters in ``astrid/packs/timeline/cli.py``); every other ``astrid
+timelines`` verb (visualize, clip, track, ...) keeps the legacy timeline
+CLI until m6, so supported product paths use the SDK services while
+legacy/developer tooling remains temporarily callable.
+"""
+
+_PRODUCT_TIMELINE_NESTED_MOUNTS: frozenset[str] = frozenset({"shots"})
+"""The manifest-declared nested mounts beneath ``timelines`` (plan step 26,
+task T29).
+
+``timelines shots`` routes through the product boundary too: the nested
+shots parser (``astrid/packs/shots/cli.py``) is embedded in the timelines
+family parser, and there is **no top-level shots family** (sense check
+SC29).
+"""
+
+
 def _dispatch_timelines(args: list[str]) -> int:
+    """Dispatch ``astrid timelines`` — product verbs through the SDK family.
+
+    The seven product verbs (create/list/show/save/archive/history/diff)
+    and the manifest-declared nested ``shots`` mount are cut over to the
+    product dispatch boundary: one composed ``AstridClient`` and one SDK
+    call per handler. All remaining verbs (visualize, clip, track, effect,
+    transition, theme, audio, arrangement, pool, registry, ls, rename,
+    finalize, tombstone, purge, set-default, export, ...) fall through to
+    the legacy timeline CLI, which stays callable until m6 teardown.
+    ``copy`` is absent from both surfaces (reserved for m6), so no route
+    can reach a save-as-copy implementation.
+    """
+    if args and (
+        args[0] in _PRODUCT_TIMELINE_VERBS
+        or args[0] in _PRODUCT_TIMELINE_NESTED_MOUNTS
+    ):
+        return _dispatch_product(["timelines", *args])
     from astrid.core.cli import timeline as timelines_cli
 
     return timelines_cli.main(args)
+
+
+def _dispatch_media(args: list[str]) -> int:
+    """Dispatch ``astrid media`` — every verb through the product boundary.
+
+    The media family has no legacy CLI: all six product verbs
+    (import/list/show/verify/relocate/relate) and the manifest-declared
+    nested ``references`` mount route through one composed ``AstridClient``
+    and one SDK call per handler (m4 plan step 27, task T30). ``references``
+    is never a top-level command (sense check SC30).
+    """
+    return _dispatch_product(["media", *args])
 
 
 def _dispatch_modalities(args: list[str]) -> int:
@@ -419,13 +471,15 @@ def _dispatch_serve(args: list[str]) -> int:
             host=parsed.host,
             port=parsed.port,
             projects_root=composition.projects_root,
+            # Bridge, writer, and database path are constructor-injected at
+            # this composition root (m4 plan step 21): there is no
+            # post-construction ``server.bridge = ...`` assignment, so the
+            # HTTP server never gains a second authority. The writer stays
+            # owned by this root and is closed on shutdown below.
+            bridge=composition.bridge,
+            writer=composition.writer,
+            database_path=composition.database_path,
         )
-        # The repository bridge is injected only at this composition root;
-        # the HTTP routes read it from the server object. The writer stays
-        # owned by this root and is closed on shutdown below.
-        server.bridge = composition.bridge
-        server.bridge_writer = composition.writer
-        server.bridge_database_path = composition.database_path
         host, port = server.server_address
         print(f"Astrid local bridge listening on http://{host}:{port}")
 
@@ -446,6 +500,51 @@ def _dispatch_serve(args: list[str]) -> int:
         composition.writer.close()
 
     return 0
+
+
+def _dispatch_product(args: list[str]) -> int:
+    """Run one product-family command with one composed ``AstridClient``.
+
+    The product dispatch boundary (m4 plan step 24) accepts exactly the
+    five product families. Operational commands (``serve``, ``doctor``),
+    legacy/developer commands, and the singular ``run`` alias are excluded
+    from product dispatch by construction and keep their legacy routes
+    until m6. The family token is validated **before** any database is
+    opened, then one ``AstridClient`` is composed, handed to the family's
+    rule-free SDK handler, and closed deterministically.
+    """
+    from astrid.core.cli.domain_product import (
+        PRODUCT_FAMILY_SET,
+        run_product_family,
+    )
+
+    if not args:
+        raise AstridError(
+            "a product family is required",
+            valid_options=sorted(PRODUCT_FAMILY_SET),
+            recovery_command="astrid projects --help",
+            state_snapshot={"command": "product"},
+        )
+    family, rest = args[0], args[1:]
+    if family not in PRODUCT_FAMILY_SET:
+        raise AstridError(
+            f"unknown product command '{family}'",
+            valid_options=sorted(PRODUCT_FAMILY_SET),
+            recovery_command="astrid --help",
+            state_snapshot={"command": family},
+        )
+
+    from astrid.sdk.client import AstridClient
+
+    with AstridClient.open() as client:
+        return run_product_family(family, rest, client=client)
+
+
+def _product_top_level_commands() -> frozenset[str]:
+    """The exact five-family product census (m4 plan step 24)."""
+    from astrid.core.cli.domain_product import product_top_level_commands
+
+    return product_top_level_commands()
 
 
 _TOP_LEVEL_HANDLERS = {
@@ -478,6 +577,7 @@ _TOP_LEVEL_HANDLERS = {
     "projects": _dispatch_projects,
     "themes": _dispatch_themes,
     "timelines": _dispatch_timelines,
+    "media": _dispatch_media,
     "modalities": _dispatch_modalities,
     "renderers": _dispatch_renderers,
     "replay": _dispatch_replay,

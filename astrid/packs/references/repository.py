@@ -81,11 +81,26 @@ reference's identity and its initial media association.
 REFERENCE_ARCHIVED_EVENT_KIND = "reference.archived"
 """The m3 event kind emitted by the receipt-backed soft archive."""
 
+REFERENCE_UPDATED_EVENT_KIND = "reference.updated"
+"""The m4 event kind emitted by the receipt-backed mutable update (plan step 14).
+
+Carries only the mutable semantic fields that changed (``name``,
+``description``, ``metadata``) plus the refreshed ``updated_at``. ``kind``
+and ``project_id`` are immutable and never appear in the payload; the
+receipt's request hash binds the exact requested delta so replay and
+mismatch-before-mutation hold across identical and changed updates.
+"""
+
 REFERENCE_CREATE_COMMAND_KIND = "reference.create"
 """The m3 command kind that reference-create receipts are keyed on."""
 
 REFERENCE_ARCHIVE_COMMAND_KIND = "reference.archive"
 """The m3 command kind that reference-archive receipts are keyed on."""
+
+REFERENCE_UPDATE_COMMAND_KIND = "reference.update"
+"""The m4 command kind that reference-update receipts are keyed on (plan
+step 14): mutable name/description/metadata updates while project and kind
+stay immutable."""
 
 REFERENCE_ASSOCIATE_COMMAND_KIND = "reference.associate"
 """The m3 command kind that single and bulk media-association receipts are
@@ -745,6 +760,68 @@ def _next_canonical_ordinal(uow: UnitOfWork, reference_id: str) -> int:
     return int(row["nxt"])
 
 
+def _build_reference_read_model(
+    uow: UnitOfWork, *, project_id: str, reference_id: str
+) -> ReferenceReadModel:
+    """Rebuild the frozen reference read model inside the active UoW.
+
+    Joins the current ``project_references`` row, the reference stream head,
+    and the ordered ``media_references`` associations (role, then ordinal,
+    then id), so the model reflects every change the caller's command just
+    committed in this transaction. Raises :class:`ReferenceNotFoundError`
+    for a missing or foreign reference.
+    """
+    row = uow.query_one(
+        "SELECT r.*, s.head_seq FROM project_references r "
+        "JOIN event_streams s ON s.id = ? "
+        "WHERE r.id = ? AND r.project_id = ?",
+        (f"{reference_id}:{REFERENCE_STREAM_TYPE}", reference_id, project_id),
+    )
+    if row is None:
+        raise ReferenceNotFoundError(
+            reference_id=reference_id, project_id=project_id
+        )
+    media_rows = uow.query(
+        "SELECT * FROM media_references WHERE reference_id = ? "
+        "ORDER BY role ASC, ordinal ASC, id ASC",
+        (reference_id,),
+    )
+    media = tuple(
+        ReferenceMediaReadModel(
+            id=str(m["id"]),
+            media_id=str(m["media_id"]),
+            role=str(m["role"]),
+            context_task_id=m["context_task_id"],
+            ordinal=int(m["ordinal"]),
+            is_primary=bool(m["is_primary"]),
+            metadata=_parse_object(
+                str(m["metadata_json"]),
+                label="media association",
+                subject=str(m["id"]),
+            ),
+            created_at=str(m["created_at"]),
+        )
+        for m in media_rows
+    )
+    return ReferenceReadModel(
+        id=str(row["id"]),
+        project_id=str(row["project_id"]),
+        kind=str(row["kind"]),
+        name=str(row["name"]),
+        description=str(row["description"]),
+        metadata=_parse_object(
+            str(row["metadata_json"]),
+            label="reference",
+            subject=str(row["id"]),
+        ),
+        created_at=str(row["created_at"]),
+        updated_at=str(row["updated_at"]),
+        archived_at=row["archived_at"],
+        event_head_seq=int(row["head_seq"]),
+        media=media,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Repository
 # ---------------------------------------------------------------------------
@@ -1182,6 +1259,195 @@ class ReferenceRepository:
             created_at=stamp,
         )
         return result
+
+    # -- mutable update (m4 plan step 14) -----------------------------------
+
+    def update(
+        self,
+        uow: UnitOfWork,
+        *,
+        project_id: str,
+        reference_id: str,
+        name: str | None = None,
+        description: str | None = None,
+        metadata: Mapping[str, Any] | None = None,
+        idempotency_key: str,
+        actor_kind: str = "local",
+        now: str | None = None,
+        command_kind: str = REFERENCE_UPDATE_COMMAND_KIND,
+    ) -> ReferenceReadModel:
+        """Mutate a reference's name/description/metadata atomically.
+
+        Inside the caller's active unit of work this refreshes only the
+        **mutable** semantic fields on the ``project_references`` row
+        (``name``, ``description``, ``metadata_json``) and ``updated_at``,
+        appends one hash-chained ``reference.updated`` event on the
+        reference's own stream, advances both heads, and records one
+        complete receipt carrying the refreshed read model. ``kind`` and
+        ``project_id`` are immutable and never change; a supplied ``kind``
+        is not even an accepted argument, so the frozen DDL CHECK vocabulary
+        is preserved by construction.
+
+        Each of ``name``/``description``/``metadata`` is an optional delta:
+        ``None`` means "leave unchanged", a provided value replaces the
+        current one (an explicit empty ``metadata`` mapping clears it). An
+        empty/whitespace ``name`` is rejected (as at create).
+
+        Rejections happen **before any write**: a missing or foreign
+        reference raises :class:`ReferenceNotFoundError`, and an archived
+        reference raises :class:`ReferenceArchivedError` (archive is final
+        for mutations, SD1). Idempotency mirrors the other commands: the
+        receipt gate runs first, an identical retry returns exactly the
+        stored result with zero new rows, and a changed delta under the same
+        key raises :class:`ReceiptMismatchError` before any mutation.
+        """
+        project_id = _require_non_empty_string("project_id", project_id)
+        reference_id = _require_non_empty_string("reference_id", reference_id)
+        idempotency_key = _require_non_empty_string(
+            "idempotency_key", idempotency_key
+        )
+        command_kind = _require_non_empty_string("command_kind", command_kind)
+        if actor_kind not in ACTOR_KINDS:
+            raise ReferenceValidationError(
+                f"actor_kind must be one of {sorted(ACTOR_KINDS)}, "
+                f"got {actor_kind!r}"
+            )
+        if name is not None:
+            if not isinstance(name, str) or not name.strip():
+                raise ReferenceValidationError(
+                    "name must contain at least one non-whitespace character"
+                )
+        if description is not None and not isinstance(description, str):
+            raise ReferenceValidationError("description must be a string")
+        if metadata is not None and not isinstance(metadata, Mapping):
+            raise ReferenceValidationError("metadata must be a JSON object")
+        metadata_delta = dict(metadata) if metadata is not None else None
+
+        # Semantic request identity: the exact requested delta. None fields
+        # mean "unchanged", so an identical retry replays and any changed
+        # delta under the same key mismatches before mutation.
+        request: dict[str, Any] = {
+            "project_id": project_id,
+            "reference_id": reference_id,
+            "name": name,
+            "description": description,
+            "metadata": metadata_delta,
+        }
+        try:
+            request_digest = request_hash(command_kind, request)
+        except CanonicalizationError as exc:
+            raise ReferenceValidationError(
+                f"cannot hash reference update request: {exc}"
+            ) from exc
+
+        # Idempotency gate first: replay or mismatch before any mutation.
+        replayed = self._receipts.check(
+            uow,
+            project_id=project_id,
+            idempotency_key=idempotency_key,
+            request_hash=request_digest,
+            command_kind=command_kind,
+        )
+        if replayed is not None:
+            return ReferenceReadModel.from_mapping(replayed)
+
+        # Fences before any write: the reference exists in the project and
+        # is still active.
+        row = uow.query_one(
+            "SELECT name, description, metadata_json, archived_at "
+            "FROM project_references WHERE id = ? AND project_id = ?",
+            (reference_id, project_id),
+        )
+        if row is None:
+            raise ReferenceNotFoundError(
+                reference_id=reference_id, project_id=project_id
+            )
+        if row["archived_at"] is not None:
+            raise ReferenceArchivedError(reference_id=reference_id)
+
+        current_metadata = _parse_object(
+            str(row["metadata_json"]),
+            label="reference",
+            subject=reference_id,
+        )
+        new_name = name if name is not None else str(row["name"])
+        new_description = (
+            description if description is not None else str(row["description"])
+        )
+        new_metadata = (
+            metadata_delta if metadata_delta is not None else current_metadata
+        )
+
+        try:
+            metadata_json = canonical_json(new_metadata)
+        except CanonicalizationError as exc:
+            raise ReferenceValidationError(
+                f"cannot canonicalize reference metadata: {exc}"
+            ) from exc
+
+        stamp = now if now is not None else utc_now_iso()
+        if not isinstance(stamp, str) or not stamp:
+            raise ReferenceValidationError("now must be a non-empty string")
+        txn_id = uuid.uuid4().hex
+        event_id = uuid.uuid4().hex
+        stream_id = f"{reference_id}:{REFERENCE_STREAM_TYPE}"
+
+        # 1. The only projection change: mutable fields plus updated_at.
+        uow.execute(
+            "UPDATE project_references SET name = ?, description = ?, "
+            "metadata_json = ?, updated_at = ? "
+            "WHERE id = ? AND project_id = ? AND archived_at IS NULL",
+            (
+                new_name,
+                new_description,
+                metadata_json,
+                stamp,
+                reference_id,
+                project_id,
+            ),
+        )
+        # 2. The hash-chained reference.updated event on the own stream;
+        #    the append advances both heads atomically.
+        append = self._events.append(
+            uow,
+            stream_id=stream_id,
+            project_id=project_id,
+            event_kind=REFERENCE_UPDATED_EVENT_KIND,
+            data={
+                "reference_id": reference_id,
+                "name": new_name,
+                "description": new_description,
+                "metadata": new_metadata,
+                "updated_at": stamp,
+            },
+            changes=["name", "description", "metadata", "updated_at"],
+            idempotency_key=idempotency_key,
+            txn_id=txn_id,
+            actor_kind=actor_kind,
+            command_kind=command_kind,
+            event_id=event_id,
+            created_at=stamp,
+        )
+        # 3. The complete receipt with the refreshed read model.
+        read_model = _build_reference_read_model(
+            uow, project_id=project_id, reference_id=reference_id
+        )
+        self._receipts.record(
+            uow,
+            project_id=project_id,
+            idempotency_key=idempotency_key,
+            request_hash=request_digest,
+            command_kind=command_kind,
+            txn_id=txn_id,
+            first_project_seq=append.project_seq,
+            last_project_seq=append.project_seq,
+            event_ids=[append.event_id],
+            result=read_model.to_dict(),
+            primary_stream_id=stream_id,
+            resulting_stream_seq=append.stream_seq,
+            created_at=stamp,
+        )
+        return read_model
 
     # -- media association --------------------------------------------------
 
@@ -2148,6 +2414,8 @@ __all__ = [
     "REFERENCE_SET_PRIMARY_COMMAND_KIND",
     "REFERENCE_STREAM_TYPE",
     "REFERENCE_SYMMETRIC_LINK_KIND",
+    "REFERENCE_UPDATE_COMMAND_KIND",
+    "REFERENCE_UPDATED_EVENT_KIND",
     "ReferenceAlreadyExistsError",
     "ReferenceArchiveReadModel",
     "ReferenceArchivedError",

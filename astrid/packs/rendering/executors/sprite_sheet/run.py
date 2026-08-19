@@ -59,7 +59,6 @@ from .upscale import (  # noqa: F401
     _request_payload_for_image_model,
     _scale_upscaled_image,
     _sprite_prompt,
-    _workspace_env_files,
     _write_first_image,
     ai_upscale_frames_with_fal,
     load_fal_key,
@@ -392,7 +391,7 @@ def build_parser() -> argparse.ArgumentParser:
     add("--ai-upscale-resemblance", type=float, default=0.9, help="FAL Clarity resemblance/control strength. Higher preserves the source frame better.")
     add("--ai-upscale-guidance-scale", type=float, default=4.0)
     add("--ai-upscale-steps", type=int, default=28)
-    add("--fal-env-file", type=Path, help="Env file containing FAL_KEY or FAL_API_KEY. Falls back to workspace env files.")
+    add("--fal-env-file", type=Path, help="Explicitly named env file containing FAL_KEY (lowest-priority convenience tier; canonical precedence is explicit option, process env, keychain, then this file).")
     add("--fal-timeout", type=int, default=900)
     add("--fal-logs", action="store_true", help="Print FAL queue logs while AI upscaling.")
     add("--frames", type=int, help="Number of animation frames to generate. Defaults to grid capacity, or 16 when no grid is supplied.")

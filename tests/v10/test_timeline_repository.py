@@ -73,12 +73,15 @@ from astrid.core.repositories import ProjectNotFoundError, ProjectRepository
 from astrid.core.store.uow import UnitOfWork
 from astrid.core.store.writer import DatabaseWriter
 from astrid.packs.timeline.repository import (
+    TIMELINE_ARCHIVE_COMMAND_KIND,
+    TIMELINE_ARCHIVED_EVENT_KIND,
     TIMELINE_CREATE_COMMAND_KIND,
     TIMELINE_CREATED_EVENT_KIND,
     TIMELINE_SAVE_COMMAND_KIND,
     TIMELINE_SAVED_EVENT_KIND,
     TIMELINE_STREAM_TYPE,
     TimelineAlreadyExistsError,
+    TimelineArchivedError,
     TimelineNotFoundError,
     TimelineRepository,
     TimelineSlugConflictError,
@@ -89,6 +92,7 @@ from astrid.packs.timeline.repository import (
 
 TS = "2026-08-15T00:00:00.000000+00:00"
 TS2 = "2026-08-15T01:00:00.000000+00:00"
+TS3 = "2026-08-15T02:00:00.000000+00:00"
 
 _CROCKFORD_ULID_RE = re.compile(r"^[0123456789abcdefghjkmnpqrstvwxyz]{26}$")
 _UUID_RE = re.compile(
@@ -183,6 +187,21 @@ def _save_timeline(
     args.update(overrides)
     return UnitOfWork(writer).run(
         lambda u: repo.save(u, project_id=project_id, ref=ref, **args)
+    )
+
+
+def _archive_timeline(
+    repo: TimelineRepository,
+    writer: DatabaseWriter,
+    project_id: str,
+    ref: str,
+    **overrides,
+):
+    """Run one event-backed archive inside its own unit of work."""
+    args = {"idempotency_key": "tl-archive-1", "created_at": TS3}
+    args.update(overrides)
+    return UnitOfWork(writer).run(
+        lambda u: repo.archive(u, project_id=project_id, ref=ref, **args)
     )
 
 
@@ -1277,5 +1296,553 @@ def test_save_survives_restart_reconstruction(
             )
         )
         assert settings["default_timeline_id"] == created.timeline_id
+    finally:
+        reopened.close()
+
+
+# ---------------------------------------------------------------------------
+# Caller-keyed save (m4 plan step 6, task T7)
+# ---------------------------------------------------------------------------
+
+
+def test_save_with_caller_key_commits_and_replays(
+    repo: TimelineRepository,
+    project_repo: ProjectRepository,
+    writer: DatabaseWriter,
+) -> None:
+    project = _create_project(project_repo, writer)
+    created = _create_timeline(repo, writer, project.id, slug="main")
+    stream_id = f"{created.timeline_id}:{TIMELINE_STREAM_TYPE}"
+
+    saved = _save_timeline(
+        repo, writer, project.id, "main", idempotency_key="sdk-key-1"
+    )
+    assert saved.config_version == 2
+    assert saved.config == SAVED_CONFIG
+
+    # The receipt is keyed on the caller key, not the bridge-derived key.
+    receipt = writer.submit(
+        lambda session: session.query_one(
+            "SELECT * FROM command_receipts "
+            "WHERE project_id = ? AND idempotency_key = ?",
+            (project.id, "sdk-key-1"),
+        )
+    )
+    assert receipt is not None
+    assert receipt["command_kind"] == TIMELINE_SAVE_COMMAND_KIND
+    assert receipt["primary_stream_id"] == stream_id
+    assert receipt["resulting_stream_seq"] == 2
+
+    # The saved event carries the caller key verbatim.
+    event = writer.submit(
+        lambda session: session.query_one(
+            "SELECT * FROM events WHERE stream_id = ? AND kind = ?",
+            (stream_id, TIMELINE_SAVED_EVENT_KIND),
+        )
+    )
+    assert event["idempotency_key"] == "sdk-key-1"
+
+    # Lost-response replay: an identical retry returns the committed result
+    # with zero new rows.
+    before = _counts(writer)
+    replayed = _save_timeline(
+        repo, writer, project.id, "main", idempotency_key="sdk-key-1"
+    )
+    assert replayed == saved
+    assert _counts(writer) == before
+
+
+def test_save_with_caller_key_mismatch_rejected_before_mutation(
+    repo: TimelineRepository,
+    project_repo: ProjectRepository,
+    writer: DatabaseWriter,
+) -> None:
+    project = _create_project(project_repo, writer)
+    created = _create_timeline(repo, writer, project.id, slug="main")
+    first = _save_timeline(
+        repo, writer, project.id, "main", idempotency_key="sdk-key-1"
+    )
+    assert first.config_version == 2
+    before = _save_surfaces(writer, project.id, created.timeline_id)
+
+    # The same caller key with a changed payload must raise
+    # idempotency_mismatch before the CAS check and before any mutation.
+    with pytest.raises(ReceiptMismatchError) as excinfo:
+        _save_timeline(
+            repo,
+            writer,
+            project.id,
+            "main",
+            idempotency_key="sdk-key-1",
+            config={"fps": 60},
+            expected_version=1,
+        )
+    assert excinfo.value.idempotency_key == "sdk-key-1"
+    assert excinfo.value.project_id == project.id
+    assert _save_surfaces(writer, project.id, created.timeline_id) == before
+
+
+def test_save_with_caller_key_rejects_same_payload_for_another_timeline(
+    repo: TimelineRepository,
+    project_repo: ProjectRepository,
+    writer: DatabaseWriter,
+) -> None:
+    project = _create_project(project_repo, writer)
+    _create_timeline(repo, writer, project.id, slug="main")
+    other = _create_timeline(
+        repo,
+        writer,
+        project.id,
+        slug="other",
+        idempotency_key="tl-create-2",
+    )
+    _save_timeline(
+        repo, writer, project.id, "main", idempotency_key="sdk-key-1"
+    )
+    before = _save_surfaces(writer, project.id, other.timeline_id)
+
+    # Receipt keys are project-scoped, so the resolved timeline target is
+    # semantic input even when the config, registry, and expected head are
+    # byte-identical. The mismatch gate fires before touching ``other``.
+    with pytest.raises(ReceiptMismatchError):
+        _save_timeline(
+            repo, writer, project.id, "other", idempotency_key="sdk-key-1"
+        )
+    assert _save_surfaces(writer, project.id, other.timeline_id) == before
+
+
+def test_save_caller_key_and_bridge_derived_key_coexist(
+    repo: TimelineRepository,
+    project_repo: ProjectRepository,
+    writer: DatabaseWriter,
+) -> None:
+    project = _create_project(project_repo, writer)
+    created = _create_timeline(repo, writer, project.id, slug="main")
+
+    # A caller-keyed save at head 1.
+    first = _save_timeline(
+        repo, writer, project.id, "main", idempotency_key="sdk-key-1"
+    )
+    assert first.config_version == 2
+
+    # A bridge-derived save (no caller key) at the fresh head 2.
+    second = _save_timeline(
+        repo, writer, project.id, "main", config={"fps": 60}, expected_version=2
+    )
+    assert second.config_version == 3
+
+    receipts = writer.submit(
+        lambda session: session.query(
+            "SELECT idempotency_key FROM command_receipts "
+            "WHERE project_id = ? AND command_kind = ?",
+            (project.id, TIMELINE_SAVE_COMMAND_KIND),
+        )
+    )
+    assert len(receipts) == 2
+    keys = {row["idempotency_key"] for row in receipts}
+    assert "sdk-key-1" in keys
+    bridge_keys = keys - {"sdk-key-1"}
+    assert len(bridge_keys) == 1
+    (bridge_key,) = bridge_keys
+    # The absent-caller-key path still derives the frozen bridge key.
+    assert bridge_key.startswith(
+        f"{TIMELINE_SAVE_COMMAND_KIND}:{project.id}:{created.timeline_id}:2:"
+    )
+
+
+def test_save_with_caller_key_survives_restart_reconstruction(
+    repo: TimelineRepository,
+    project_repo: ProjectRepository,
+    tmp_path: Path,
+    standard_registry,
+) -> None:
+    db_path = tmp_path / "astrid.sqlite3"
+    writer = DatabaseWriter(db_path, standard_registry)
+    try:
+        project = _create_project(project_repo, writer, slug="pilot")
+        created = _create_timeline(repo, writer, project.id, slug="main")
+        _save_timeline(
+            repo, writer, project.id, "main", idempotency_key="sdk-key-1"
+        )
+        before = repo.show(writer, project.id, "main")
+        assert before.config_version == 2
+    finally:
+        writer.close()
+
+    reopened = DatabaseWriter(db_path, standard_registry)
+    try:
+        # Reload after restart returns the caller-keyed saved shape.
+        assert repo.show(reopened, project.id, "main") == before
+        # The caller-keyed receipt persists and still replays after restart.
+        replayed = _save_timeline(
+            repo, reopened, project.id, "main", idempotency_key="sdk-key-1"
+        )
+        assert replayed == before
+        assert repo.show(reopened, project.id, created.timeline_id) == before
+    finally:
+        reopened.close()
+
+
+@pytest.mark.parametrize("idempotency_key", [None, "sdk-key-crash"])
+def test_save_identity_paths_roll_back_every_surface_on_crash(
+    repo: TimelineRepository,
+    project_repo: ProjectRepository,
+    writer: DatabaseWriter,
+    idempotency_key: str | None,
+) -> None:
+    project = _create_project(project_repo, writer)
+    created = _create_timeline(repo, writer, project.id, slug="main")
+    before = _save_surfaces(writer, project.id, created.timeline_id)
+
+    def crash_after_projection(kind: str, sql: str, _params: tuple) -> None:
+        if kind == "statement" and sql.startswith("UPDATE timelines SET"):
+            raise RuntimeError("simulated crash after timeline projection write")
+
+    with pytest.raises(RuntimeError):
+        UnitOfWork(writer, on_statement=crash_after_projection).run(
+            lambda u: repo.save(
+                u,
+                project_id=project.id,
+                ref="main",
+                config=SAVED_CONFIG,
+                registry={"assets": SAVED_ASSETS},
+                expected_version=1,
+                idempotency_key=idempotency_key,
+                created_at=TS2,
+            )
+        )
+
+    # Projection, event, both heads, and receipt all roll back together for
+    # caller and bridge-derived identities; no partial save is observable.
+    assert _save_surfaces(writer, project.id, created.timeline_id) == before
+
+
+# ---------------------------------------------------------------------------
+# Event-backed archive, ordered history, and adjacent-version diffs
+# (m4 plan step 7, task T8)
+# ---------------------------------------------------------------------------
+
+
+def test_archive_commits_archived_event_and_receipt_atomically(
+    repo: TimelineRepository,
+    project_repo: ProjectRepository,
+    writer: DatabaseWriter,
+    standard_registry,
+) -> None:
+    project = _create_project(project_repo, writer)
+    created = _create_timeline(repo, writer, project.id, slug="main")
+    stream_id = f"{created.timeline_id}:{TIMELINE_STREAM_TYPE}"
+
+    archived = _archive_timeline(repo, writer, project.id, "main")
+
+    # The archive read model: no projection changed (SD1), config_version is
+    # the stream head after the archive event.
+    assert archived.timeline_id == created.timeline_id
+    assert archived.project_id == project.id
+    assert archived.archived_at == TS3
+    assert archived.config_version == 2
+
+    # Exactly [created, archived] on the stream; the archived event is
+    # hash-chained onto the created event and advances both heads.
+    events = writer.submit(
+        lambda session: session.query(
+            "SELECT * FROM events WHERE stream_id = ? ORDER BY seq ASC",
+            (stream_id,),
+        )
+    )
+    assert [event["kind"] for event in events] == [
+        TIMELINE_CREATED_EVENT_KIND,
+        TIMELINE_ARCHIVED_EVENT_KIND,
+    ]
+    archived_event = events[1]
+    assert archived_event["seq"] == 2
+    assert archived_event["project_seq"] == 3
+    assert archived_event["subject_type"] == "timeline"
+    assert archived_event["subject_id"] == created.timeline_id
+    assert json.loads(archived_event["changes_json"]) == [
+        "timeline_id",
+        "archived_at",
+    ]
+    payload = json.loads(archived_event["payload_json"])
+    assert payload["data"] == {
+        "timeline_id": created.timeline_id,
+        "archived_at": TS3,
+    }
+    created_payload = json.loads(events[0]["payload_json"])
+    assert payload["_integrity"]["previous_event_hash"] == created_payload[
+        "_integrity"
+    ]["event_hash"]
+
+    # The archive receipt points at the stream with the exact sequence.
+    receipt = writer.submit(
+        lambda session: session.query_one(
+            "SELECT * FROM command_receipts "
+            "WHERE project_id = ? AND command_kind = ?",
+            (project.id, TIMELINE_ARCHIVE_COMMAND_KIND),
+        )
+    )
+    assert receipt is not None
+    assert receipt["primary_stream_id"] == stream_id
+    assert receipt["resulting_stream_seq"] == 2
+    assert receipt["first_project_seq"] == 3
+    assert receipt["last_project_seq"] == 3
+    assert json.loads(receipt["event_ids_json"]) == [archived_event["event_id"]]
+    assert json.loads(receipt["result_json"]) == archived.to_dict()
+
+    # Both heads advanced by exactly one; the chain verifies genesis→head.
+    assert _stream_row(writer, stream_id)["head_seq"] == 2
+    assert _project_row(writer, project.id)["event_head_seq"] == 3
+    verification = EventAppendService(standard_registry).verify_stream(
+        writer, stream_id
+    )
+    assert verification.event_count == 2
+    assert verification.head_seq == 2
+
+    # No projection row changed: the archived state lives only in the event.
+    timeline = _timeline_row(writer, created.timeline_id)
+    assert json.loads(timeline["document_json"]) == CONFIG
+    assert json.loads(timeline["asset_registry_json"]) == ASSETS
+
+    # Direct historical lookup still returns the archived timeline.
+    assert repo.show(writer, project.id, "main").timeline_id == created.timeline_id
+
+
+def test_archive_replay_returns_stored_result_with_zero_new_rows(
+    repo: TimelineRepository,
+    project_repo: ProjectRepository,
+    writer: DatabaseWriter,
+) -> None:
+    project = _create_project(project_repo, writer)
+    created = _create_timeline(repo, writer, project.id, slug="main")
+    first = _archive_timeline(repo, writer, project.id, "main")
+    before = _counts(writer)
+
+    replayed = _archive_timeline(repo, writer, project.id, "main")
+    assert replayed == first
+    assert _counts(writer) == before
+    assert _stream_row(writer, f"{created.timeline_id}:{TIMELINE_STREAM_TYPE}")[
+        "head_seq"
+    ] == 2
+
+
+def test_archive_mismatch_rejected_before_mutation(
+    repo: TimelineRepository,
+    project_repo: ProjectRepository,
+    writer: DatabaseWriter,
+) -> None:
+    project = _create_project(project_repo, writer)
+    _create_timeline(repo, writer, project.id, slug="main")
+    _create_timeline(
+        repo, writer, project.id, slug="other", idempotency_key="tl-create-2"
+    )
+    _archive_timeline(repo, writer, project.id, "main")
+    before = _counts(writer)
+
+    # Same caller key, different timeline: idempotency mismatch before any
+    # mutation.
+    with pytest.raises(ReceiptMismatchError):
+        _archive_timeline(repo, writer, project.id, "other")
+    assert _counts(writer) == before
+
+
+def test_archive_already_archived_rejected_with_zero_mutation(
+    repo: TimelineRepository,
+    project_repo: ProjectRepository,
+    writer: DatabaseWriter,
+) -> None:
+    project = _create_project(project_repo, writer)
+    created = _create_timeline(repo, writer, project.id, slug="main")
+    _archive_timeline(repo, writer, project.id, "main")
+    before = _counts(writer)
+
+    with pytest.raises(TimelineArchivedError) as excinfo:
+        _archive_timeline(
+            repo, writer, project.id, "main", idempotency_key="tl-archive-2"
+        )
+    assert excinfo.value.timeline_id == created.timeline_id
+    assert excinfo.value.project_id == project.id
+    assert _counts(writer) == before
+
+
+def test_save_after_archive_rejected_with_zero_mutation(
+    repo: TimelineRepository,
+    project_repo: ProjectRepository,
+    writer: DatabaseWriter,
+) -> None:
+    project = _create_project(project_repo, writer)
+    created = _create_timeline(repo, writer, project.id, slug="main")
+    _save_timeline(repo, writer, project.id, "main")
+    _archive_timeline(repo, writer, project.id, "main")
+    before = _save_surfaces(writer, project.id, created.timeline_id)
+
+    # A fresh save against the archived timeline is rejected before the CAS
+    # and before any mutation (the derived key differs, so the archived fence
+    # fires).
+    with pytest.raises(TimelineArchivedError) as excinfo:
+        _save_timeline(
+            repo,
+            writer,
+            project.id,
+            "main",
+            config={"fps": 60},
+            expected_version=3,
+        )
+    assert excinfo.value.timeline_id == created.timeline_id
+    assert _save_surfaces(writer, project.id, created.timeline_id) == before
+
+    # A caller-keyed save is rejected the same way.
+    with pytest.raises(TimelineArchivedError):
+        _save_timeline(
+            repo,
+            writer,
+            project.id,
+            "main",
+            idempotency_key="post-archive-save",
+            config={"fps": 60},
+            expected_version=3,
+        )
+    assert _save_surfaces(writer, project.id, created.timeline_id) == before
+
+
+def test_list_hides_archived_timelines_but_show_still_works(
+    repo: TimelineRepository,
+    project_repo: ProjectRepository,
+    writer: DatabaseWriter,
+) -> None:
+    project = _create_project(project_repo, writer)
+    _create_timeline(repo, writer, project.id, slug="keep")
+    _create_timeline(
+        repo, writer, project.id, slug="gone", idempotency_key="tl-create-2"
+    )
+    assert [row.slug for row in repo.list(writer, project.id)] == ["gone", "keep"]
+
+    _archive_timeline(repo, writer, project.id, "gone")
+
+    # The archived timeline disappears from the ordinary list, while show
+    # (direct historical lookup) still returns it.
+    assert [row.slug for row in repo.list(writer, project.id)] == ["keep"]
+    shown = repo.show(writer, project.id, "gone")
+    assert shown.slug == "gone"
+    assert shown.config_version == 2
+
+
+def test_history_returns_ordered_lifecycle_events(
+    repo: TimelineRepository,
+    project_repo: ProjectRepository,
+    writer: DatabaseWriter,
+) -> None:
+    project = _create_project(project_repo, writer)
+    created = _create_timeline(repo, writer, project.id, slug="main")
+    _save_timeline(repo, writer, project.id, "main")
+    _archive_timeline(repo, writer, project.id, "main")
+
+    history = repo.history(writer, project.id, "main")
+    assert [entry.kind for entry in history] == [
+        TIMELINE_CREATED_EVENT_KIND,
+        TIMELINE_SAVED_EVENT_KIND,
+        TIMELINE_ARCHIVED_EVENT_KIND,
+    ]
+    assert [entry.version for entry in history] == [1, 2, 3]
+
+    created_entry = history[0]
+    assert created_entry.config == CONFIG
+    assert created_entry.registry == {"assets": ASSETS}
+    assert created_entry.archived_at is None
+
+    saved_entry = history[1]
+    assert saved_entry.config == SAVED_CONFIG
+    assert saved_entry.registry == {"assets": SAVED_ASSETS}
+
+    archived_entry = history[2]
+    assert archived_entry.config is None
+    assert archived_entry.registry is None
+    assert archived_entry.archived_at == TS3
+
+    # History resolves through every address form, like show.
+    assert repo.history(writer, project.id, created.timeline_id) == history
+    assert repo.history(writer, project.id, created.timeline_ulid) == history
+
+
+def test_diff_returns_deterministic_adjacent_diffs(
+    repo: TimelineRepository,
+    project_repo: ProjectRepository,
+    writer: DatabaseWriter,
+) -> None:
+    project = _create_project(project_repo, writer)
+    _create_timeline(repo, writer, project.id, slug="main")
+    _save_timeline(repo, writer, project.id, "main")
+    _save_timeline(
+        repo,
+        writer,
+        project.id,
+        "main",
+        config={"fps": 60},
+        registry={"assets": {"hero": {"path": "hero-v3.png"}, "side": {"path": "side.png"}}},
+        expected_version=2,
+    )
+
+    diffs = repo.diff(writer, project.id, "main")
+    assert len(diffs) == 2
+
+    # 1 → 2: every config key changed; hero's asset entry changed.
+    first = diffs[0]
+    assert (first.from_version, first.to_version) == (1, 2)
+    assert first.from_kind == TIMELINE_CREATED_EVENT_KIND
+    assert first.to_kind == TIMELINE_SAVED_EVENT_KIND
+    assert first.document["added"] == []
+    assert first.document["removed"] == []
+    assert first.document["changed"] == ["fps", "nested", "resolution"]
+    assert first.registry["added"] == []
+    assert first.registry["removed"] == []
+    assert first.registry["changed"] == ["hero"]
+
+    # 2 → 3: nested + resolution dropped, fps changed; side asset added.
+    second = diffs[1]
+    assert (second.from_version, second.to_version) == (2, 3)
+    assert second.document["added"] == []
+    assert second.document["removed"] == ["nested", "resolution"]
+    assert second.document["changed"] == ["fps"]
+    assert second.registry["added"] == ["side"]
+    assert second.registry["removed"] == []
+    assert second.registry["changed"] == ["hero"]
+
+
+def test_archive_state_survives_restart(
+    repo: TimelineRepository,
+    project_repo: ProjectRepository,
+    tmp_path: Path,
+    standard_registry,
+) -> None:
+    db_path = tmp_path / "astrid.sqlite3"
+    writer = DatabaseWriter(db_path, standard_registry)
+    try:
+        project = _create_project(project_repo, writer, slug="pilot")
+        _create_timeline(repo, writer, project.id, slug="keep")
+        _create_timeline(
+            repo, writer, project.id, slug="gone", idempotency_key="tl-create-2"
+        )
+        _save_timeline(repo, writer, project.id, "gone")
+        _archive_timeline(repo, writer, project.id, "gone")
+        before_history = repo.history(writer, project.id, "gone")
+        before_diffs = repo.diff(writer, project.id, "gone")
+    finally:
+        writer.close()
+
+    reopened = DatabaseWriter(db_path, standard_registry)
+    try:
+        # The archived state is reconstructed from the ordered events (SD1):
+        # the list hides it, show still returns it, save is still rejected,
+        # and history/diff are deterministic after restart.
+        assert [row.slug for row in repo.list(reopened, project.id)] == ["keep"]
+        assert repo.show(reopened, project.id, "gone").slug == "gone"
+        with pytest.raises(TimelineArchivedError):
+            _save_timeline(
+                repo, reopened, project.id, "gone", config={"fps": 120}, expected_version=3
+            )
+        assert repo.history(reopened, project.id, "gone") == before_history
+        assert repo.diff(reopened, project.id, "gone") == before_diffs
+        EventAppendService(standard_registry).verify_stream(
+            reopened, f"{repo.resolve(reopened, project.id, 'gone')}:{TIMELINE_STREAM_TYPE}"
+        )
     finally:
         reopened.close()

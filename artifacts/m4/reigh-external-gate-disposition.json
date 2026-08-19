@@ -1,0 +1,112 @@
+{
+  "astrid": {
+    "requested_provided": true,
+    "requested_sha": "6a654039c77efdc637f0a6c6385d71ce51f538ee",
+    "resolved_sha": "6a654039c77efdc637f0a6c6385d71ce51f538ee",
+    "verified": true
+  },
+  "authority": {
+    "astrid_route_surface": "frozen; never widened for m4",
+    "decision": "DENIED",
+    "scope": "external Reigh correction authority for m4 is DENIED; the lane is reporting-only retained evidence"
+  },
+  "duration_seconds": 0.005,
+  "exit": 0,
+  "latency": {
+    "duration_seconds": 0.0,
+    "log": "",
+    "reason": "reigh checkout absent",
+    "returncode": null,
+    "status": "unavailable"
+  },
+  "latency_target": "GET and warm-save p95 <= 500ms (make bridge-latency-check)",
+  "observed_at": {
+    "finished_at": "2026-08-19T07:49:39Z",
+    "started_at": "2026-08-19T07:49:39Z"
+  },
+  "ok": true,
+  "overall_status": "unavailable",
+  "owner_follow_up": {
+    "authorization_required": true,
+    "follow_up": "a Reigh-side correction requires recorded upstream owner authorization (banodoco/reigh-app repository owner) or a North Star amendment before any change; tracked in docs/astrid-v10-implementation-decisions.md section 14",
+    "owner": "banodoco/reigh-app upstream repository owner"
+  },
+  "problems": [],
+  "reigh": {
+    "pin_checked_out": false,
+    "pin_present": false,
+    "reason": "reigh checkout absent; the Step 23 lane must fetch and verify it mechanically",
+    "requested_sha": "bc2d8b0327c1c7dbdcd7b7445440d8ca180dd677",
+    "resolved_sha": null
+  },
+  "report_path": "artifacts/m4/reigh-external-gate-disposition.json",
+  "repository": "banodoco/reigh-app",
+  "schema": "astrid.reigh_external_gate_disposition.v1",
+  "selectors": {
+    "src/tools/video-editor/data/AstridBridgeDataProvider.test.ts": {
+      "duration_seconds": 0.0,
+      "log": "",
+      "reason": "reigh checkout absent",
+      "returncode": null,
+      "status": "unavailable"
+    },
+    "src/tools/video-editor/hooks/usePollSync.test.ts": {
+      "duration_seconds": 0.0,
+      "log": "",
+      "reason": "reigh checkout absent",
+      "returncode": null,
+      "status": "unavailable"
+    },
+    "src/tools/video-editor/hooks/useTimelinePersistence.test.tsx": {
+      "duration_seconds": 0.0,
+      "log": "",
+      "reason": "reigh checkout absent",
+      "returncode": null,
+      "status": "unavailable"
+    },
+    "src/tools/video-editor/lib/timeline-save-utils.test.ts": {
+      "duration_seconds": 0.0,
+      "log": "",
+      "reason": "reigh checkout absent",
+      "returncode": null,
+      "status": "unavailable"
+    },
+    "src/tools/video-editor/testing/__tests__/providerCompatibility.astrid.test.ts": {
+      "duration_seconds": 0.0,
+      "log": "",
+      "reason": "reigh checkout absent",
+      "returncode": null,
+      "status": "unavailable"
+    }
+  },
+  "setup": {
+    "duration_seconds": 0.0,
+    "log": "",
+    "reason": "reigh checkout absent",
+    "returncode": null,
+    "status": "unavailable"
+  },
+  "soft_conflict_state": "soft conflicts are enabled by the external compatibility suite; the frozen Astrid CAS contract remains authoritative and is never widened for m4",
+  "source_contradictions": [
+    {
+      "description": "AstridBridgeDataProvider.saveTimeline ignores `expectedVersion` (soft conflicts enabled by the external compatibility suite)",
+      "id": "ignores_expected_version",
+      "soft_conflict": true
+    },
+    {
+      "description": "It sends a `{config}`-only save body without the frozen registry/expected_version fields",
+      "id": "config_only_save_body",
+      "soft_conflict": false
+    },
+    {
+      "description": "It performs a separate registry PUT (split write authority)",
+      "id": "separate_registry_put",
+      "soft_conflict": false
+    },
+    {
+      "description": "It retains a local-file/FSA path (filesystem authority)",
+      "id": "local_file_fsa_path",
+      "soft_conflict": false
+    }
+  ]
+}

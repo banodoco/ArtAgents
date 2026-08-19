@@ -44,6 +44,7 @@ command callers, and every command must run inside the caller's
 
 from __future__ import annotations
 
+import os
 import sqlite3
 import uuid
 from collections.abc import Mapping, Sequence
@@ -54,10 +55,13 @@ from typing import Any, Protocol
 from astrid.core.ids import generate_lowercase_ulid
 from astrid.core.io.media_import import (
     MEDIA_LOCATION_REALMS,
+    MediaPathError,
     PreparedMedia,
     managed_media_path,
     media_crash_point,
     publish_prepared_media,
+    sha256_file_bytes,
+    validate_digest,
     validate_media_kind,
 )
 from astrid.core.receipts.canonical import (
@@ -95,6 +99,14 @@ CORE_MEDIA_RELATED_EVENT_KIND = "core.media.related"
 """The m2 event kind emitted for every materialized media relation (plan
 step 5, T8): one hash-chained event per relation, on the from-media's
 stream, in ordinal order."""
+
+CORE_MEDIA_VERIFY_COMMAND_KIND = "core.media.verify"
+"""The m4 command kind that media verification receipts are keyed on (plan
+step 10)."""
+
+CORE_MEDIA_VERIFIED_EVENT_KIND = "core.media.verified"
+"""The m4 event kind emitted by every stable fingerprint-verified
+verification (plan step 10)."""
 
 MEDIA_RELATION_KINDS: tuple[str, ...] = (
     "derived_from",
@@ -243,6 +255,35 @@ class MediaRelationError(MediaRepositoryError):
         if kind is not None:
             message = f"{message} ({kind!r})"
         message = f"{message} rejected: {reason}"
+        if detail is not None:
+            message = f"{message} ({detail})"
+        super().__init__(message)
+
+
+class MediaVerificationError(MediaRepositoryError):
+    """Raised when a verified location's bytes changed or mismatch identity.
+
+    The stable-verification command (plan step 10) prepares a fingerprint of
+    the location's bytes outside the transaction and re-stats plus re-hashes
+    them inside the unit of work. Any mismatch — a changed size/mtime, a
+    changed byte digest, or bytes that no longer hash to the media's
+    immutable ``content_hash`` — raises this before any event append,
+    projection change, head advance, or receipt write, so a mutated or
+    replaced location can never reach a verification stamp (zero mutation).
+    """
+
+    def __init__(
+        self,
+        *,
+        media_id: str,
+        reason: str,
+        detail: str | None = None,
+    ) -> None:
+        if reason not in ("changed",):
+            raise ValueError(f"unknown media verification reason {reason!r}")
+        self.media_id: str = media_id
+        self.reason: str = reason
+        message = f"media {media_id!r} verification rejected: {reason}"
         if detail is not None:
             message = f"{message} ({detail})"
         super().__init__(message)
@@ -514,6 +555,72 @@ class MaterializedMedia:
 
 
 # ---------------------------------------------------------------------------
+# Prepared verification fingerprint (m4 plan step 10)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class MediaFingerprint:
+    """One prepared location fingerprint for stable verification.
+
+    Captures, **outside any transaction**, the byte size, nanosecond mtime,
+    and lowercase SHA-256 digest of a location's bytes. The verify command
+    re-stats and re-hashes the same path inside the unit of work and compares
+    against this record, so any change between preparation and commit — a
+    byte mutation, a replacement, or a missing file — is detected before any
+    event, head, projection, or receipt write (the time-of-check/time-of-use
+    race is closed).
+    """
+
+    path: str
+    byte_size: int
+    mtime_ns: int
+    digest: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.path, str) or not self.path:
+            raise MediaValidationError("fingerprint path must be a non-empty string")
+        if isinstance(self.byte_size, bool) or not isinstance(
+            self.byte_size, int
+        ) or self.byte_size < 0:
+            raise MediaValidationError(
+                "fingerprint byte_size must be a non-negative integer"
+            )
+        if isinstance(self.mtime_ns, bool) or not isinstance(self.mtime_ns, int):
+            raise MediaValidationError("fingerprint mtime_ns must be an integer")
+        validate_digest(self.digest)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return the JSON-safe mapping (not persisted, used for inspection)."""
+        return {
+            "path": self.path,
+            "byte_size": self.byte_size,
+            "mtime_ns": self.mtime_ns,
+            "digest": self.digest,
+        }
+
+
+def prepare_media_fingerprint(path: str | Path) -> MediaFingerprint:
+    """Hash one location outside any transaction (m4 plan step 10).
+
+    Stats and hashes *path* to produce the immutable :class:`MediaFingerprint`
+    a caller passes into :meth:`MediaRepository.verify`. A missing, symlink,
+    or non-regular path raises :class:`MediaPathError` before any SQL, exactly
+    like the other preparation entry points in ``astrid.core.io.media_import``.
+    """
+    file_path = Path(path)
+    if file_path.is_symlink() or not file_path.is_file():
+        raise MediaPathError(f"prepared file must be a regular file: {file_path!s}")
+    stat = file_path.stat()
+    return MediaFingerprint(
+        path=str(file_path),
+        byte_size=int(stat.st_size),
+        mtime_ns=int(stat.st_mtime_ns),
+        digest=sha256_file_bytes(file_path),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Validation helpers
 # ---------------------------------------------------------------------------
 
@@ -522,6 +629,22 @@ def _require_non_empty_string(name: str, value: Any) -> str:
     if not isinstance(value, str) or not value:
         raise MediaValidationError(f"{name} must be a non-empty string")
     return value
+
+
+def _query_one(reader: Any, sql: str, parameters: Sequence[Any] = ()) -> Any:
+    """Run one read on a UoW/WriterSession reader or a raw connection.
+
+    The unit of work and the writer session expose ``query_one(sql, params)``;
+    a ``sqlite3.Connection`` exposes ``execute(...).fetchone()``. Both shapes
+    are accepted so the project-scoped media resolution helper works both
+    transaction-free on a read-only connection and inside a ``BEGIN
+    IMMEDIATE`` unit of work.
+    """
+    query_one = getattr(reader, "query_one", None)
+    if query_one is not None:
+        return query_one(sql, parameters)
+    cursor = reader.execute(sql, parameters)
+    return cursor.fetchone()
 
 
 # ---------------------------------------------------------------------------
@@ -541,6 +664,64 @@ class MediaRepository:
         self._events = events
         self._receipts = receipts
         self._projects_root = Path(projects_root)
+
+    # -- project-scoped resolution (m4 plan step 9) ------------------------
+
+    def resolve_media(
+        self,
+        reader: Any,
+        *,
+        project_id: str,
+        media_id: str | None = None,
+        realm: str | None = None,
+        locator: str | None = None,
+    ) -> str:
+        """Resolve an explicit media id or locator alias within one project.
+
+        Every media reference is project-scoped (m4 plan step 9): the lookup
+        joins to ``media.project_id`` equal to the route *project_id*, so a
+        media id — or a ``(realm, locator)`` alias — that belongs to another
+        project is indistinguishable from an unknown one and raises
+        :class:`MediaNotFoundError` (no existence leak across projects).
+        Locators are never globally unique in the frozen schema and are
+        replaceable aliases, never media identity (SD2).
+
+        Exactly one of ``media_id`` or the ``realm``/``locator`` alias pair
+        must be supplied. Accepts a unit of work (in-UoW resolution inside a
+        command) or a read-only ``sqlite3.Connection`` (transaction-free
+        lookup), and returns the canonical media id on success.
+        """
+        project_id = _require_non_empty_string("project_id", project_id)
+        has_id = media_id is not None
+        has_locator = realm is not None or locator is not None
+        if has_id == has_locator:
+            raise MediaValidationError(
+                "resolve_media requires exactly one of media_id or the "
+                "(realm, locator) alias pair"
+            )
+        if has_id:
+            media_id = _require_non_empty_string("media_id", media_id)
+            row = _query_one(
+                reader,
+                "SELECT id FROM media WHERE id = ? AND project_id = ?",
+                (media_id, project_id),
+            )
+            if row is None:
+                raise MediaNotFoundError(media_id=media_id)
+            return str(row["id"])
+        realm = _require_non_empty_string("realm", realm)
+        locator = _require_non_empty_string("locator", locator)
+        row = _query_one(
+            reader,
+            "SELECT m.id AS media_id FROM media_locations l "
+            "JOIN media m ON m.id = l.media_id "
+            "WHERE l.realm = ? AND l.locator = ? AND m.project_id = ? "
+            "LIMIT 1",
+            (realm, locator, project_id),
+        )
+        if row is None:
+            raise MediaNotFoundError(media_id=f"{realm}:{locator}")
+        return str(row["media_id"])
 
     # -- prepared import ---------------------------------------------------
 
@@ -1224,6 +1405,201 @@ class MediaRepository:
         )
         return read_model
 
+    # -- stable verification (m4 plan step 10) ----------------------------
+
+    def verify(
+        self,
+        uow: UnitOfWork,
+        *,
+        project_id: str,
+        media_id: str,
+        realm: str,
+        idempotency_key: str,
+        fingerprint: MediaFingerprint,
+        actor_kind: str = "local",
+        created_at: str | None = None,
+        command_kind: str = CORE_MEDIA_VERIFY_COMMAND_KIND,
+    ) -> MediaReadModel:
+        """Race-safe fingerprint-verified verification of one local location.
+
+        The caller hashes the selected local location **outside** the
+        transaction (:func:`prepare_media_fingerprint`), producing a
+        :class:`MediaFingerprint` of ``(path, byte_size, mtime_ns, digest)``.
+        Inside the caller's unit of work this then:
+
+        1. resolves *media_id* project-scoped and loads the single
+           ``realm`` location (a cross-project id is indistinguishable from
+           an unknown one — :class:`MediaNotFoundError`, no existence leak);
+        2. **re-stats** the fingerprint path (missing → ``not_found``;
+           changed size/mtime → :class:`MediaVerificationError`) and
+           **re-hashes** it (changed bytes → :class:`MediaVerificationError`),
+           and requires the prepared digest to equal the media's immutable
+           ``content_hash``;
+        3. only an unchanged fingerprint proceeds: the
+           ``core.media.verified`` event is appended, the location's
+           ``verified_at`` stamp advances, both heads move, and one complete
+           receipt is written.
+
+        A missing, mutated, or replaced location therefore causes **zero**
+        mutation — no event, head, projection, or receipt change — because
+        every integrity fence runs before the first write. Idempotency: an
+        identical retry replays the stored result with zero new rows; a
+        changed request under the same key raises :class:`ReceiptMismatchError`
+        before any mutation.
+        """
+        project_id = _require_non_empty_string("project_id", project_id)
+        media_id = _require_non_empty_string("media_id", media_id)
+        idempotency_key = _require_non_empty_string(
+            "idempotency_key", idempotency_key
+        )
+        command_kind = _require_non_empty_string("command_kind", command_kind)
+        if realm not in (MANAGED_LOCAL_REALM, EXTERNAL_LOCAL_REALM):
+            raise MediaValidationError(
+                "verify supports only the local realms "
+                f"{MANAGED_LOCAL_REALM!r} and {EXTERNAL_LOCAL_REALM!r}, "
+                f"got {realm!r}"
+            )
+        if actor_kind not in ACTOR_KINDS:
+            raise MediaValidationError(
+                f"actor_kind must be one of {sorted(ACTOR_KINDS)}, "
+                f"got {actor_kind!r}"
+            )
+        if not isinstance(fingerprint, MediaFingerprint):
+            raise MediaValidationError(
+                "fingerprint must be a MediaFingerprint record, got "
+                f"{type(fingerprint).__name__}"
+            )
+
+        # Project-scoped resolution (plan step 9): a media id in another
+        # project is indistinguishable from an unknown one.
+        media_id = self.resolve_media(uow, project_id=project_id, media_id=media_id)
+
+        # The media row and its single realm location are the authority.
+        media_row = uow.query_one(
+            "SELECT content_hash FROM media WHERE id = ? AND project_id = ?",
+            (media_id, project_id),
+        )
+        if media_row is None:
+            raise MediaNotFoundError(media_id=media_id)
+        content_hash = str(media_row["content_hash"])
+
+        location_rows = uow.query(
+            "SELECT id, realm, locator, verified_at FROM media_locations "
+            "WHERE media_id = ? AND realm = ? ORDER BY created_at ASC, id ASC",
+            (media_id, realm),
+        )
+        if not location_rows:
+            raise MediaLocationNotFoundError(media_id=media_id, realm=realm)
+        if len(location_rows) > 1:
+            raise MediaConflictError(
+                media_id=media_id,
+                reason="multiple_locations",
+                detail=(
+                    f"realm={realm!r} has {len(location_rows)} locations; "
+                    "verification requires an unambiguous single location"
+                ),
+            )
+        location_row = location_rows[0]
+        location_id = str(location_row["id"])
+        locator = str(location_row["locator"])
+
+        # The fingerprint must have been prepared from this exact location.
+        if os.path.abspath(fingerprint.path) != os.path.abspath(locator):
+            raise MediaValidationError(
+                "fingerprint path does not match the location locator "
+                f"for realm={realm!r}"
+            )
+
+        # Integrity fence FIRST (before the receipt gate and before any
+        # write): a missing, mutated, or replaced location can never replay
+        # a stale stamp nor mutate a single row.
+        self._recheck_fingerprint(
+            fingerprint, content_hash=content_hash, media_id=media_id
+        )
+
+        # Semantic request identity: the addressed media, realm, and the
+        # immutable content hash. The prepared fingerprint is an observation,
+        # never part of request identity.
+        request = {
+            "media_id": media_id,
+            "realm": realm,
+            "content_hash": content_hash,
+        }
+        try:
+            request_digest = request_hash(command_kind, request)
+        except CanonicalizationError as exc:
+            raise MediaValidationError(
+                f"cannot hash media verify request: {exc}"
+            ) from exc
+
+        replayed = self._receipts.check(
+            uow,
+            project_id=project_id,
+            idempotency_key=idempotency_key,
+            request_hash=request_digest,
+            command_kind=command_kind,
+        )
+        if replayed is not None:
+            return MediaReadModel.from_mapping(replayed)
+
+        stamp = created_at if created_at is not None else utc_now_iso()
+        if not isinstance(stamp, str) or not stamp:
+            raise MediaValidationError("created_at must be a non-empty string")
+        txn_id = uuid.uuid4().hex
+        event_id = uuid.uuid4().hex
+        stream_id = f"{media_id}:{CORE_MEDIA_STREAM_TYPE}"
+
+        # 1. The only projection change: the location's verification stamp.
+        uow.execute(
+            "UPDATE media_locations SET verified_at = ? WHERE id = ?",
+            (stamp, location_id),
+        )
+
+        # 2. The hash-chained core.media.verified event on the media stream;
+        #    the append advances both heads atomically.
+        append = self._events.append(
+            uow,
+            stream_id=stream_id,
+            project_id=project_id,
+            event_kind=CORE_MEDIA_VERIFIED_EVENT_KIND,
+            data={
+                "media_id": media_id,
+                "content_hash": content_hash,
+                "realm": realm,
+                "locator": locator,
+                "byte_size": fingerprint.byte_size,
+                "verified_at": stamp,
+            },
+            changes=["verified_at"],
+            idempotency_key=idempotency_key,
+            txn_id=txn_id,
+            actor_kind=actor_kind,
+            command_kind=command_kind,
+            event_id=event_id,
+            created_at=stamp,
+        )
+
+        # 3. The complete receipt: the refreshed media read model.
+        read_model = self._media_read_model(
+            uow, media_id=media_id, project_id=project_id
+        )
+        self._receipts.record(
+            uow,
+            project_id=project_id,
+            idempotency_key=idempotency_key,
+            request_hash=request_digest,
+            command_kind=command_kind,
+            txn_id=txn_id,
+            first_project_seq=append.project_seq,
+            last_project_seq=append.project_seq,
+            event_ids=[append.event_id],
+            result=read_model.to_dict(),
+            primary_stream_id=stream_id,
+            resulting_stream_seq=append.stream_seq,
+            created_at=stamp,
+        )
+        return read_model
+
     def materialize_prepared(
         self,
         uow: UnitOfWork,
@@ -1620,6 +1996,51 @@ class MediaRepository:
             stack.extend(adjacency.get(node, ()))
         return False
 
+    @staticmethod
+    def _recheck_fingerprint(
+        fingerprint: MediaFingerprint,
+        *,
+        content_hash: str,
+        media_id: str,
+    ) -> None:
+        """Re-stat and re-hash a prepared fingerprint inside the UoW.
+
+        This is the stable-verification integrity fence (plan step 10): it
+        closes the hash-to-commit race by comparing the location's current
+        ``(size, mtime_ns, digest)`` against the fingerprint prepared outside
+        the transaction. A missing location raises :class:`MediaNotFoundError`
+        (typed not-found), while a changed size/mtime, a changed digest, or a
+        digest that does not equal the media's immutable ``content_hash``
+        raises :class:`MediaVerificationError` (typed integrity) — all before
+        any event, head, projection, or receipt write.
+        """
+        path = Path(fingerprint.path)
+        if path.is_symlink() or not path.is_file():
+            raise MediaNotFoundError(media_id=media_id)
+        stat = path.stat()
+        if (
+            int(stat.st_size) != fingerprint.byte_size
+            or int(stat.st_mtime_ns) != fingerprint.mtime_ns
+        ):
+            raise MediaVerificationError(
+                media_id=media_id,
+                reason="changed",
+                detail="location size/mtime changed between hash and commit",
+            )
+        actual_digest = sha256_file_bytes(path)
+        if actual_digest != fingerprint.digest:
+            raise MediaVerificationError(
+                media_id=media_id,
+                reason="changed",
+                detail="location bytes changed between hash and commit",
+            )
+        if fingerprint.digest != content_hash:
+            raise MediaVerificationError(
+                media_id=media_id,
+                reason="changed",
+                detail="location bytes do not match the media content hash",
+            )
+
     def _normalize_relations(
         self, relations: Sequence[Mapping[str, Any]]
     ) -> list[MediaRelationReadModel]:
@@ -2010,15 +2431,20 @@ __all__ = [
     "CORE_MEDIA_RELATE_COMMAND_KIND",
     "CORE_MEDIA_REPLACE_LOCATION_COMMAND_KIND",
     "CORE_MEDIA_STREAM_TYPE",
+    "CORE_MEDIA_VERIFIED_EVENT_KIND",
+    "CORE_MEDIA_VERIFY_COMMAND_KIND",
     "EXTERNAL_LOCAL_REALM",
     "MANAGED_LOCAL_REALM",
     "MEDIA_RELATION_KINDS",
     "MaterializedMedia",
     "MediaAlreadyExistsError",
     "MediaConflictError",
+    "MediaFingerprint",
     "MediaLocationNotFoundError",
     "MediaNotFoundError",
     "MediaRelationError",
     "MediaRepository",
     "MediaValidationError",
+    "MediaVerificationError",
+    "prepare_media_fingerprint",
 ]

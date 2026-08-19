@@ -4,6 +4,14 @@ Extracted from ``astrid/gateway.py`` during M4 batch 41 (T42) to keep the
 gateway facade focused while preserving the help-printing entrypoints that
 callers and monkeypatch seams rely on via ``astrid.core.gateway._print_entrypoint_help``
 and ``astrid.core.gateway._packs_subcommand_list``.
+
+``_product_help_text`` / ``_print_product_help`` (m4 plan step 24, task
+T26) are the product-focused executable help: exactly the five product
+families from the explicit registry (``astrid/core/cli/domain_product.py``),
+the two manifest-declared nested mounts, the ``--json`` envelope
+convention, and the stable exit codes. Operational commands (``serve``,
+``doctor``) and the singular legacy ``run`` alias are excluded from the
+product census and from primary product help until m6.
 """
 
 from __future__ import annotations
@@ -141,3 +149,57 @@ Recent renames (both old forms still work):
   ``astrid author`` and ``astrid run`` are deprecated aliases. Migration is cosmetic — old invocations are accepted.
 """
     )
+
+
+def _product_help_text() -> str:
+    """Return the product-focused executable help (m4 plan step 24, T26).
+
+    The text is generated from the explicit product registry so the
+    advertised census can never drift from ``astrid/core/cli/domain_product.py``:
+    exactly the five families, the two manifest-declared nested mounts, the
+    ``--json`` envelope convention, and the stable exit codes. Operational
+    commands (``serve``, ``doctor``) and the singular legacy ``run`` alias
+    are excluded from the product census and primary product help until m6.
+    """
+    from astrid.core.cli.domain_product import PRODUCT_FAMILIES
+
+    families = " ".join(PRODUCT_FAMILIES)
+    return f"""Astrid product commands — the five m4 product families
+
+The product registry owns exactly five families, sourced from the explicit
+in-tree registry and schema-pack manifests. ``shots`` mounts beneath
+``timelines`` and ``references`` mounts beneath ``media``.
+
+Usage:
+  python3 -m astrid <family> <command> [options]
+  python3 -m astrid <family> --help
+
+Product census (exactly five families): {families}
+
+Product families:
+  projects    project create/list/show/update/select
+  media       media import/list/show/verify/relocate/relate
+  tasks       task create/list/show/cancel/retry/events
+  runs        run list/show/cancel/retry-failed/events
+  timelines   timeline create/list/show/save/archive/history/diff
+
+Nested mounts (manifest-owned):
+  timelines shots       shot list/create/add/remove/reorder
+  media references      reference create/update/archive/associate/link/list/show
+
+Options:
+  --json      print the exact SDK envelope (ok/data/error/receipt/idempotency_key)
+  -h, --help  show help
+
+Exit codes:
+  0  success (envelope ok=true)
+  1  typed SDK error (envelope ok=false)
+  2  usage/parse error
+
+Excluded from the product census until m6: serve, doctor, run (singular alias).
+"""
+
+
+def _print_product_help() -> None:
+    """Print the product-focused executable help to stdout."""
+    print(_product_help_text(), end="")

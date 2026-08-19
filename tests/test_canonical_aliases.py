@@ -1,11 +1,13 @@
 import importlib.util
-from typing import get_args
 import unittest
+from typing import get_args
 
-from astrid.core.pack import PACK_ALIAS_KINDS, PackAliasKind
-from astrid.core.execution.executor import ExecutorDefinition, ExecutorRegistry, load_default_registry as load_executor_registry
-from astrid.core.execution.orchestrator import OrchestratorDefinition, OrchestratorRegistry, load_default_registry as load_orchestrator_registry
 from astrid.core.element import ElementDefinition, ElementRegistry
+from astrid.core.execution.executor import ExecutorDefinition, ExecutorRegistry
+from astrid.core.execution.executor import load_default_registry as load_executor_registry
+from astrid.core.execution.orchestrator import OrchestratorDefinition, OrchestratorRegistry
+from astrid.core.execution.orchestrator import load_default_registry as load_orchestrator_registry
+from astrid.core.pack import PACK_ALIAS_KINDS, PackAliasKind
 
 
 class CanonicalAliasTest(unittest.TestCase):
@@ -47,6 +49,93 @@ class CanonicalAliasTest(unittest.TestCase):
         self.assertIsNone(importlib.util.find_spec("astrid.event_talks"))
         self.assertIsNone(importlib.util.find_spec("astrid.thumbnail_maker"))
         self.assertIsNone(importlib.util.find_spec("astrid.understand"))
+
+
+class TimelineProductParserAliasTest(unittest.TestCase):
+    """The m4 product timelines parser (plan step 26, task T28) is alias-free.
+
+    Exactly the seven planned verbs are registered — plus the
+    manifest-owned nested ``shots`` mount (``astrid timelines shots``,
+    plan step 26, task T29) — while obsolete aliases (``ls``, ...) and the
+    legacy migration/push/pull/sync/audit/erase/repair verbs are absent,
+    and ``copy`` (reserved save-as-copy, m6) is never registered.
+    """
+
+    @staticmethod
+    def _choices():
+        import argparse
+
+        from astrid.packs.timeline.cli import build_parser
+
+        parser = build_parser(client=object())
+        for action in parser._actions:
+            if isinstance(action, argparse._SubParsersAction):
+                return set(action.choices)
+        raise AssertionError("timelines product parser has no subparsers")
+
+    def test_product_timeline_parser_has_no_obsolete_aliases(self) -> None:
+        from astrid.packs.timeline.cli import COMMANDS
+
+        self.assertEqual(
+            tuple(spec.name for spec in COMMANDS),
+            ("create", "list", "show", "save", "archive", "history", "diff"),
+        )
+        for spec in COMMANDS:
+            with self.subTest(command=spec.name):
+                self.assertEqual(spec.aliases, ())
+
+    def test_product_timeline_parser_exposes_only_the_seven_verbs(self) -> None:
+        # The manifest-owned nested ``shots`` mount is a declared parser
+        # choice beneath ``timelines`` (the shots family lives only there);
+        # the seven timeline verbs are the only SDK-adapter verbs, and
+        # ``copy`` plus every legacy/obsolete alias stays absent.
+        self.assertEqual(
+            self._choices(),
+            {
+                "create",
+                "list",
+                "show",
+                "save",
+                "archive",
+                "history",
+                "diff",
+                "shots",
+            },
+        )
+
+    def test_legacy_timeline_verbs_are_absent_from_product_parser(self) -> None:
+        choices = self._choices()
+        for verb in (
+            "migration",
+            "migrate",
+            "push",
+            "pull",
+            "sync",
+            "audit",
+            "erase",
+            "repair",
+            "ls",
+            "visualize",
+            "rename",
+            "finalize",
+            "tombstone",
+            "purge",
+            "set-default",
+            "export",
+        ):
+            with self.subTest(verb=verb):
+                self.assertNotIn(verb, choices)
+
+    def test_timelines_copy_is_absent_from_product_parser(self) -> None:
+        # Save-as-copy is reserved contractually (plan step 2) and
+        # implemented in m6; the CLI verb must never be registered.
+        self.assertNotIn("copy", self._choices())
+        from astrid.packs.timeline.cli import build_parser
+
+        parser = build_parser(client=object())
+        with self.assertRaises(SystemExit) as raised:
+            parser.parse_args(["copy", "main"])
+        self.assertEqual(raised.exception.code, 2)
 
 
 if __name__ == "__main__":

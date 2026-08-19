@@ -24,32 +24,31 @@ transaction-free show/list reads.
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 
 import pytest
 
-from astrid.core.events.service import EventAppendService, payload_event_hash
+from astrid.core.events.service import payload_event_hash
 from astrid.core.ids import generate_lowercase_ulid
 from astrid.core.io.media_import import (
-    MANAGED_ROOT_DIRNAME,
     PreparedMedia,
     managed_media_path,
     prepare_external_local,
     prepare_media_file,
     staging_path,
 )
-from astrid.core.receipts import ReceiptMismatchError, ReceiptService, request_hash
+from astrid.core.receipts import ReceiptMismatchError, request_hash
 from astrid.core.repositories import (
     MediaAlreadyExistsError,
     MediaConflictError,
     MediaLocationReadModel,
     MediaNotFoundError,
     MediaReadModel,
+    MediaRelateReadModel,
     MediaRelationError,
     MediaRelationReadModel,
-    MediaRelateReadModel,
-    MediaRepository,
     MediaRepositoryError,
     MediaValidationError,
 )
@@ -61,10 +60,14 @@ from astrid.core.repositories.media import (
     CORE_MEDIA_RELATED_EVENT_KIND,
     CORE_MEDIA_REPLACE_LOCATION_COMMAND_KIND,
     CORE_MEDIA_STREAM_TYPE,
+    CORE_MEDIA_VERIFIED_EVENT_KIND,
+    CORE_MEDIA_VERIFY_COMMAND_KIND,
     EXTERNAL_LOCAL_REALM,
     MANAGED_LOCAL_REALM,
-    MEDIA_RELATION_KINDS,
+    MediaFingerprint,
     MediaLocationNotFoundError,
+    MediaVerificationError,
+    prepare_media_fingerprint,
 )
 from astrid.core.store.uow import UnitOfWork
 from astrid.core.store.writer import DatabaseWriter
@@ -293,7 +296,7 @@ def test_receipt_contents_are_complete(media_env) -> None:
         _write(media_env.projects_root, "in/a.bin", b"receipt bytes"),
         root=media_env.projects_root / "in",
     )
-    media = _import(
+    _import(
         media_env,
         project_id=project.id,
         prepared=prepared,
@@ -1708,3 +1711,451 @@ def test_relate_read_model_roundtrip_and_validation(media_env) -> None:
             idempotency_key="relate-empty-k",
             relations=[],
         )
+
+
+# ---------------------------------------------------------------------------
+# Project-scoped media resolution (m4 plan step 9, task T10)
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_media_by_id_within_project_returns_canonical_id(media_env) -> None:
+    project = _create_project(media_env)
+    prepared = prepare_media_file(
+        _write(media_env.projects_root, "in/a.bin", b"resolve by id"),
+        root=media_env.projects_root / "in",
+    )
+    media = _import(
+        media_env, project_id=project.id, prepared=prepared, idempotency_key="r-id-k"
+    )
+
+    resolved = media_env.writer.submit(
+        lambda session: media_env.media_repo.resolve_media(
+            session, project_id=project.id, media_id=media.id
+        )
+    )
+    assert resolved == media.id
+
+
+def test_resolve_media_by_id_cross_project_is_not_found(media_env) -> None:
+    project_a = _create_project(media_env, slug="alpha")
+    project_b = _create_project(media_env, slug="beta")
+    prepared = prepare_media_file(
+        _write(media_env.projects_root, "in/a.bin", b"foreign id"),
+        root=media_env.projects_root / "in",
+    )
+    media_a = _import(
+        media_env, project_id=project_a.id, prepared=prepared, idempotency_key="r-fid-k"
+    )
+
+    # A media id from another project is indistinguishable from unknown.
+    with pytest.raises(MediaNotFoundError) as excinfo:
+        media_env.writer.submit(
+            lambda session: media_env.media_repo.resolve_media(
+                session, project_id=project_b.id, media_id=media_a.id
+            )
+        )
+    assert excinfo.value.media_id == media_a.id
+
+
+def test_resolve_media_by_locator_alias_within_project(media_env) -> None:
+    project = _create_project(media_env)
+    source = _write(media_env.projects_root, "ext/a.bin", b"locator alias")
+    prepared = prepare_external_local(source, root=media_env.projects_root / "ext")
+    media = _import(
+        media_env,
+        project_id=project.id,
+        prepared=prepared,
+        idempotency_key="r-loc-k",
+        realm=EXTERNAL_LOCAL_REALM,
+    )
+
+    resolved = media_env.writer.submit(
+        lambda session: media_env.media_repo.resolve_media(
+            session,
+            project_id=project.id,
+            realm=EXTERNAL_LOCAL_REALM,
+            locator=str(source),
+        )
+    )
+    assert resolved == media.id
+
+
+def test_resolve_media_by_locator_alias_cross_project_is_not_found(media_env) -> None:
+    """A locator alias is never globally unique; resolution is project-scoped.
+
+    This is the CF-0E82 regression: the locator lookup must join
+    ``media_locations`` to ``media`` and require ``media.project_id`` to
+    equal the route project. The same locator existing in another project
+    must never resolve here (and a foreign-only locator is not_found).
+    """
+    project_a = _create_project(media_env, slug="alpha")
+    project_b = _create_project(media_env, slug="beta")
+    source = _write(media_env.projects_root, "ext/shared.bin", b"shared locator")
+    prepared = prepare_external_local(source, root=media_env.projects_root / "ext")
+    media_a = _import(
+        media_env,
+        project_id=project_a.id,
+        prepared=prepared,
+        idempotency_key="r-shared-a-k",
+        realm=EXTERNAL_LOCAL_REALM,
+    )
+    media_b = _import(
+        media_env,
+        project_id=project_b.id,
+        prepared=prepared,
+        idempotency_key="r-shared-b-k",
+        realm=EXTERNAL_LOCAL_REALM,
+    )
+    assert media_a.id != media_b.id
+
+    # The same locator resolves to each project's own media row.
+    resolved_a = media_env.writer.submit(
+        lambda session: media_env.media_repo.resolve_media(
+            session,
+            project_id=project_a.id,
+            realm=EXTERNAL_LOCAL_REALM,
+            locator=str(source),
+        )
+    )
+    assert resolved_a == media_a.id
+    resolved_b = media_env.writer.submit(
+        lambda session: media_env.media_repo.resolve_media(
+            session,
+            project_id=project_b.id,
+            realm=EXTERNAL_LOCAL_REALM,
+            locator=str(source),
+        )
+    )
+    assert resolved_b == media_b.id
+
+    # A locator that exists only in another project is not_found here.
+    foreign_source = _write(media_env.projects_root, "ext/foreign.bin", b"foreign")
+    foreign_prepared = prepare_external_local(
+        foreign_source, root=media_env.projects_root / "ext"
+    )
+    _import(
+        media_env,
+        project_id=project_a.id,
+        prepared=foreign_prepared,
+        idempotency_key="r-foreign-k",
+        realm=EXTERNAL_LOCAL_REALM,
+    )
+    with pytest.raises(MediaNotFoundError):
+        media_env.writer.submit(
+            lambda session: media_env.media_repo.resolve_media(
+                session,
+                project_id=project_b.id,
+                realm=EXTERNAL_LOCAL_REALM,
+                locator=str(foreign_source),
+            )
+        )
+
+
+def test_resolve_media_requires_exactly_one_form(media_env) -> None:
+    project = _create_project(media_env)
+
+    with pytest.raises(MediaValidationError):
+        media_env.writer.submit(
+            lambda session: media_env.media_repo.resolve_media(
+                session, project_id=project.id
+            )
+        )
+    with pytest.raises(MediaValidationError):
+        media_env.writer.submit(
+            lambda session: media_env.media_repo.resolve_media(
+                session,
+                project_id=project.id,
+                media_id=generate_lowercase_ulid(),
+                realm=EXTERNAL_LOCAL_REALM,
+                locator="/tmp/x.bin",
+            )
+        )
+    # A locator alias requires both realm and locator.
+    with pytest.raises(MediaValidationError):
+        media_env.writer.submit(
+            lambda session: media_env.media_repo.resolve_media(
+                session, project_id=project.id, realm=EXTERNAL_LOCAL_REALM
+            )
+        )
+
+
+# ---------------------------------------------------------------------------
+# Stable verification (m4 plan step 10)
+# ---------------------------------------------------------------------------
+
+
+def _verify(
+    env,
+    *,
+    project_id: str,
+    media_id: str,
+    realm: str,
+    idempotency_key: str,
+    fingerprint: MediaFingerprint,
+    **overrides,
+):
+    args = {
+        "project_id": project_id,
+        "media_id": media_id,
+        "realm": realm,
+        "idempotency_key": idempotency_key,
+        "fingerprint": fingerprint,
+        "created_at": TS2,
+    }
+    args.update(overrides)
+    return UnitOfWork(env.writer).run(lambda u: env.media_repo.verify(u, **args))
+
+
+def _managed_media(env, *, key: str = "import-k-1"):
+    """Import one managed PNG and return ``(project, media)``."""
+    project = _create_project(env)
+    source = _write(env.projects_root, "in/shot.png", PNG_BYTES)
+    prepared = prepare_media_file(source, root=env.projects_root / "in")
+    media = _import(env, project_id=project.id, prepared=prepared, idempotency_key=key)
+    return project, media
+
+
+def test_verify_stamps_location_appends_event_and_writes_receipt(media_env) -> None:
+    project, media = _managed_media(media_env)
+    media_id = media.id
+    locator = media.locations[0].locator
+
+    fingerprint = prepare_media_fingerprint(locator)
+    before = _counts(media_env.writer)
+
+    result = _verify(
+        media_env,
+        project_id=project.id,
+        media_id=media_id,
+        realm=MANAGED_LOCAL_REALM,
+        idempotency_key="verify-k-1",
+        fingerprint=fingerprint,
+    )
+
+    # Exactly one new event and one new receipt; no new media/location rows.
+    after = _counts(media_env.writer)
+    assert (after[1], after[2]) == (before[1], before[2])
+    assert after[3] == before[3] + 1
+    assert after[4] == before[4] + 1
+
+    # The location's verification stamp advanced to the command instant.
+    loc_rows = _location_rows(media_env.writer, media_id)
+    assert len(loc_rows) == 1
+    assert loc_rows[0]["verified_at"] == TS2
+
+    # The returned read model carries the refreshed stamp.
+    assert result.locations[0].verified_at == TS2
+
+    # The verified event landed on the media stream in order.
+    stream_id = f"{media_id}:{CORE_MEDIA_STREAM_TYPE}"
+    events = _event_rows(media_env.writer, stream_id)
+    assert [str(row["kind"]) for row in events] == [
+        CORE_MEDIA_IMPORTED_EVENT_KIND,
+        CORE_MEDIA_VERIFIED_EVENT_KIND,
+    ]
+    # Both heads advanced exactly one.
+    stream = _stream_row(media_env.writer, stream_id)
+    assert int(stream["head_seq"]) == 2
+
+    # The receipt is keyed on the verify command kind.
+    receipt = _receipt_row(media_env.writer, project.id, "verify-k-1")
+    assert receipt["command_kind"] == CORE_MEDIA_VERIFY_COMMAND_KIND
+
+
+def test_verify_mutated_bytes_cause_zero_mutation(media_env) -> None:
+    project, media = _managed_media(media_env)
+    locator = media.locations[0].locator
+
+    # Prepare the fingerprint, then mutate the bytes (size change).
+    fingerprint = prepare_media_fingerprint(locator)
+    Path(locator).write_bytes(PNG_BYTES + b"mutated")
+    before = _counts(media_env.writer)
+
+    with pytest.raises(MediaVerificationError):
+        _verify(
+            media_env,
+            project_id=project.id,
+            media_id=media.id,
+            realm=MANAGED_LOCAL_REALM,
+            idempotency_key="verify-k-1",
+            fingerprint=fingerprint,
+        )
+
+    # Zero mutation: no new event, head, projection, or receipt change, and
+    # the location stamp stays at the import instant (TS), not the command.
+    assert _counts(media_env.writer) == before
+    loc_rows = _location_rows(media_env.writer, media.id)
+    assert loc_rows[0]["verified_at"] == TS
+
+
+def test_verify_same_size_replacement_detected_by_rehash(media_env) -> None:
+    project, media = _managed_media(media_env)
+    locator = media.locations[0].locator
+
+    fingerprint = prepare_media_fingerprint(locator)
+    # Replace with same-size, different bytes, then restore the mtime so only
+    # the content re-hash can detect the change (the TOCTOU race).
+    replacement = b"\x89PNG\r\n\x1a\n" + b"\x01" * 16
+    assert len(replacement) == len(PNG_BYTES)
+    path = Path(locator)
+    path.write_bytes(replacement)
+    os.utime(path, ns=(path.stat().st_atime_ns, fingerprint.mtime_ns))
+    before = _counts(media_env.writer)
+
+    with pytest.raises(MediaVerificationError):
+        _verify(
+            media_env,
+            project_id=project.id,
+            media_id=media.id,
+            realm=MANAGED_LOCAL_REALM,
+            idempotency_key="verify-k-1",
+            fingerprint=fingerprint,
+        )
+
+    assert _counts(media_env.writer) == before
+    assert _location_rows(media_env.writer, media.id)[0]["verified_at"] == TS
+
+
+def test_verify_missing_location_causes_zero_mutation(media_env) -> None:
+    project, media = _managed_media(media_env)
+    locator = media.locations[0].locator
+
+    fingerprint = prepare_media_fingerprint(locator)
+    Path(locator).unlink()
+    before = _counts(media_env.writer)
+
+    with pytest.raises(MediaNotFoundError):
+        _verify(
+            media_env,
+            project_id=project.id,
+            media_id=media.id,
+            realm=MANAGED_LOCAL_REALM,
+            idempotency_key="verify-k-1",
+            fingerprint=fingerprint,
+        )
+
+    assert _counts(media_env.writer) == before
+    assert _location_rows(media_env.writer, media.id)[0]["verified_at"] == TS
+
+
+def test_verify_replays_and_mismatches(media_env) -> None:
+    project, media = _managed_media(media_env)
+    locator = media.locations[0].locator
+    fingerprint = prepare_media_fingerprint(locator)
+
+    first = _verify(
+        media_env,
+        project_id=project.id,
+        media_id=media.id,
+        realm=MANAGED_LOCAL_REALM,
+        idempotency_key="verify-k-1",
+        fingerprint=fingerprint,
+    )
+
+    # A second media with a different content hash, for the mismatch case.
+    other_source = _write(media_env.projects_root, "in/other.png", PNG_BYTES + b"\x02")
+    other_prepared = prepare_media_file(
+        other_source, root=media_env.projects_root / "in"
+    )
+    other_media = _import(
+        media_env,
+        project_id=project.id,
+        prepared=other_prepared,
+        idempotency_key="import-other",
+    )
+    other_fingerprint = prepare_media_fingerprint(other_media.locations[0].locator)
+    counts = _counts(media_env.writer)
+
+    # An identical retry replays the stored result with zero new rows.
+    replayed = _verify(
+        media_env,
+        project_id=project.id,
+        media_id=media.id,
+        realm=MANAGED_LOCAL_REALM,
+        idempotency_key="verify-k-1",
+        fingerprint=fingerprint,
+    )
+    assert replayed == first
+    assert _counts(media_env.writer) == counts
+
+    # A changed request under the same key mismatches before any mutation:
+    # a different media (a different content hash) is different canonical
+    # input, even though its bytes verify fine.
+    with pytest.raises(ReceiptMismatchError):
+        _verify(
+            media_env,
+            project_id=project.id,
+            media_id=other_media.id,
+            realm=MANAGED_LOCAL_REALM,
+            idempotency_key="verify-k-1",
+            fingerprint=other_fingerprint,
+        )
+    assert _counts(media_env.writer) == counts
+
+
+def test_verify_cross_project_media_returns_not_found(media_env) -> None:
+    project_a, media = _managed_media(media_env, key="import-a")
+    project_b = _create_project(media_env, slug="other")
+    locator = media.locations[0].locator
+    fingerprint = prepare_media_fingerprint(locator)
+
+    # A media id that belongs to another project is indistinguishable from an
+    # unknown one (no existence leak across projects).
+    with pytest.raises(MediaNotFoundError):
+        _verify(
+            media_env,
+            project_id=project_b.id,
+            media_id=media.id,
+            realm=MANAGED_LOCAL_REALM,
+            idempotency_key="verify-k-1",
+            fingerprint=fingerprint,
+        )
+
+
+def test_verify_external_local_location(media_env) -> None:
+    project = _create_project(media_env)
+    source = _write(media_env.projects_root, "external/shot.png", PNG_BYTES)
+    prepared = prepare_external_local(source)
+    media = _import(
+        media_env,
+        project_id=project.id,
+        prepared=prepared,
+        idempotency_key="import-ext-1",
+        realm=EXTERNAL_LOCAL_REALM,
+    )
+    locator = media.locations[0].locator
+    assert media.locations[0].verified_at is None
+
+    fingerprint = prepare_media_fingerprint(locator)
+    result = _verify(
+        media_env,
+        project_id=project.id,
+        media_id=media.id,
+        realm=EXTERNAL_LOCAL_REALM,
+        idempotency_key="verify-ext-1",
+        fingerprint=fingerprint,
+    )
+    assert result.locations[0].verified_at == TS2
+
+
+def test_verify_fingerprint_for_wrong_path_is_validation_error(media_env) -> None:
+    project, media = _managed_media(media_env)
+
+    # A fingerprint prepared from a different path must be rejected before any
+    # mutation (the verify must target the location's actual locator).
+    other = _write(media_env.projects_root, "elsewhere.bin", PNG_BYTES)
+    fingerprint = prepare_media_fingerprint(other)
+    before = _counts(media_env.writer)
+
+    with pytest.raises(MediaValidationError):
+        _verify(
+            media_env,
+            project_id=project.id,
+            media_id=media.id,
+            realm=MANAGED_LOCAL_REALM,
+            idempotency_key="verify-k-1",
+            fingerprint=fingerprint,
+        )
+
+    assert _counts(media_env.writer) == before
+    assert _location_rows(media_env.writer, media.id)[0]["verified_at"] == TS

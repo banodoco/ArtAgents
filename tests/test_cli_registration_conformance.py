@@ -198,6 +198,159 @@ class PhasedAllowlistTest(unittest.TestCase):
         self.assertEqual(overlap, set(),
                          f"Modules in both allowlisted and expected-future: {overlap}")
 
+
+class ProductRegistryConformanceTest(unittest.TestCase):
+    """The m4 product registry (plan step 24, task T25) conforms exactly.
+
+    Exactly five product families; shots/references attach as nested
+    mounts from the explicit in-tree manifest declarations; serve, doctor,
+    and the singular ``run`` alias stay outside the product census and
+    product dispatch; handlers receive the composed AstridClient.
+    """
+
+    def test_product_census_is_exactly_five_families(self) -> None:
+        from astrid.core.cli.domain_product import (
+            PRODUCT_FAMILIES,
+            product_top_level_commands,
+        )
+
+        self.assertEqual(
+            frozenset(PRODUCT_FAMILIES),
+            {"projects", "media", "tasks", "runs", "timelines"},
+        )
+        self.assertEqual(len(PRODUCT_FAMILIES), 5)
+        self.assertEqual(product_top_level_commands(), frozenset(PRODUCT_FAMILIES))
+
+    def test_nested_mounts_attach_under_timelines_and_media(self) -> None:
+        from astrid.core.cli.domain_product import (
+            build_product_mounts,
+            product_top_level_commands,
+        )
+
+        by_family = {mount.family: mount.mount_path for mount in build_product_mounts()}
+        self.assertEqual(by_family["shots"], ("timelines", "shots"))
+        self.assertEqual(by_family["references"], ("media", "references"))
+        # Nested families are not top-level product commands.
+        self.assertNotIn("shots", product_top_level_commands())
+        self.assertNotIn("references", product_top_level_commands())
+
+    def test_manifest_mounts_declared_in_tree(self) -> None:
+        from astrid.core.cli.domain_product import read_manifest_cli_mounts
+
+        declared = {mount.family: mount.token for mount in read_manifest_cli_mounts()}
+        self.assertEqual(
+            declared,
+            {
+                "timelines": "timelines",
+                "shots": "timelines shots",
+                "references": "media references",
+            },
+        )
+
+    def test_operational_and_singular_run_excluded(self) -> None:
+        from astrid.core.cli.domain_product import (
+            EXCLUDED_FROM_PRODUCT_CENSUS,
+            is_product_family,
+            product_top_level_commands,
+        )
+
+        for excluded in ("serve", "doctor", "run"):
+            with self.subTest(excluded=excluded):
+                self.assertIn(excluded, EXCLUDED_FROM_PRODUCT_CENSUS)
+                self.assertFalse(is_product_family(excluded))
+                self.assertNotIn(excluded, product_top_level_commands())
+
+    def test_register_product_commands_stamps_client_and_family(self) -> None:
+        from astrid.core.cli.registration import (
+            CommandSpec,
+            register_product_commands,
+        )
+
+        parser = argparse.ArgumentParser(prog="astrid projects")
+        sub = parser.add_subparsers(dest="command", required=True)
+        client = object()
+        register_product_commands(
+            sub,
+            [
+                CommandSpec(
+                    "ls",
+                    help="List projects",
+                    configure=lambda p: p.set_defaults(
+                        handler=lambda parsed: (parsed.client, parsed.family)
+                    ),
+                )
+            ],
+            family="projects",
+            client=client,
+        )
+
+        parsed = parser.parse_args(["ls"])
+        self.assertIs(parsed.client, client)
+        self.assertEqual(parsed.family, "projects")
+        self.assertEqual(parsed.handler(parsed), (client, "projects"))
+
+    def test_register_product_commands_rejects_unknown_family(self) -> None:
+        from astrid.core.cli.registration import (
+            CommandSpec,
+            register_product_commands,
+        )
+
+        parser = argparse.ArgumentParser(prog="astrid")
+        sub = parser.add_subparsers(dest="command", required=True)
+        with self.assertRaises(ValueError):
+            register_product_commands(
+                sub,
+                [
+                    CommandSpec(
+                        "ls",
+                        help="List",
+                        configure=lambda p: p.set_defaults(handler=lambda parsed: 0),
+                    )
+                ],
+                family="serve",
+                client=object(),
+            )
+
+    def test_product_registry_rejects_invalid_mounts(self) -> None:
+        from astrid.core.cli.domain_product import (
+            PRODUCT_FAMILIES,
+            ManifestMount,
+            ProductRegistryError,
+            _validate_mounts,
+        )
+
+        base = (
+            ManifestMount("timelines", "timelines", "timeline"),
+            ManifestMount("shots", "timelines shots", "shots"),
+            ManifestMount("references", "media references", "references"),
+        )
+        # Valid base registry builds.
+        self.assertEqual(len(_validate_mounts(PRODUCT_FAMILIES, base)), 7)
+
+        # Missing declaration.
+        with self.assertRaises(ProductRegistryError):
+            _validate_mounts(PRODUCT_FAMILIES, base[:2])
+        # Duplicate family declaration.
+        with self.assertRaises(ProductRegistryError):
+            _validate_mounts(PRODUCT_FAMILIES, base + base[1:2])
+        # Unexpected family.
+        with self.assertRaises(ProductRegistryError):
+            _validate_mounts(
+                PRODUCT_FAMILIES,
+                base
+                + (ManifestMount("extra", "projects extra", "extra-pack"),),
+            )
+        # Unexpected path for a declared family.
+        with self.assertRaises(ProductRegistryError):
+            _validate_mounts(
+                PRODUCT_FAMILIES,
+                (
+                    ManifestMount("timelines", "timelines", "timeline"),
+                    ManifestMount("shots", "media references", "shots"),
+                    ManifestMount("references", "media references", "references"),
+                ),
+            )
+
     def test_allowlisted_has_no_unregistered_commands(self) -> None:
         """Every allowlisted module's COMMANDS must pass through register_commands
         without error (strict mode)."""
