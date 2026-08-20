@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "astrid"
 version = "0.1.0"
@@ -61,24 +65,53 @@ runpod = [
 
 [tool.setuptools.packages.find]
 include = ["astrid*"]
+exclude = [
+    # Tests are not part of the installed product.  Keeping this exclusion
+    # explicit prevents a future in-tree pack test package from becoming a
+    # runtime dependency by accident.
+    "astrid.*.tests",
+    # Golden provider examples and pack skills are authoring material, not
+    # installed runtime modules.
+    "astrid.*.golden*",
+    "astrid.*.skill*",
+]
 
 [tool.setuptools.package-data]
 astrid = [
-    # m1 schema-pack resources (plan step 23): every core and in-tree pack
-    # YAML manifest and SQL migration must ship in editable installs and
-    # wheels. Patterns are scoped to the exact resource directories; this is
-    # not a broad packs/** packaging expansion.
-    "core/migrations/sql/core/*.sql",
-    "packs/timeline/*.yaml",
-    "packs/timeline/migrations/*.sql",
-    "packs/shots/*.yaml",
-    "packs/shots/migrations/*.sql",
-    "packs/references/*.yaml",
-    "packs/references/migrations/*.sql",
-    "core/rendering/schemas/v1/*.json",
-    "core/pack/schemas/v1/*.json",
+    # Core data consumed through Path(__file__) or importlib.resources.
+    # Python modules are discovered above; these patterns deliberately name
+    # data formats rather than copying documentation, skills, tests, caches,
+    # or build/planning material into the wheel.
+    "core/**/*.json",
+    "core/**/*.sql",
+    "core/**/*.yaml",
     "core/rendering/fixtures/renderer_parity/*",
-    "packs/rendering/**/*.yaml",
+    "core/rendering/schemas/v1/*.json",
+
+    # The frozen schema-pack composition: core plus timeline, shots, and
+    # references.  The three manifests and their migrations are required for
+    # a first installed run and for too-new-schema refusal.
+    "core/migrations/sql/core/*.sql",
+    "packs/timeline/schema-pack.yaml",
+    "packs/timeline/migrations/*.sql",
+    "packs/shots/schema-pack.yaml",
+    "packs/shots/migrations/*.sql",
+    "packs/references/schema-pack.yaml",
+    "packs/references/migrations/*.sql",
+
+    # Capability manifests and their runtime data.  STAGE.md, skill files,
+    # requirements files, golden logs, and other authoring-only material are
+    # intentionally not included by these patterns.
+    "packs/**/pack.yaml",
+    "packs/**/*.yaml",
+    "packs/**/*.json",
+    "packs/text_analysis/fixtures/*.txt",
+    "packs/**/*.html",
+    "packs/**/*.css",
+    "packs/**/*.js",
+    "packs/**/*.ts",
+    "packs/**/*.tsx",
+    "packs/**/*.ttf",
 ]
 
 [tool.ruff]
