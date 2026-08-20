@@ -366,7 +366,7 @@ def test_reserved_copy_route_404s_on_live_server(tmp_path: Path) -> None:
 
 
 def test_no_timelines_copy_cli_verb_registered() -> None:
-    """No ``timelines copy`` verb is registered anywhere in m4.
+    """No ``timelines copy`` verb is registered anywhere in m6.
 
     Asserts both the frozen documents and the executable CLI parser surface.
     """
@@ -375,9 +375,9 @@ def test_no_timelines_copy_cli_verb_registered() -> None:
     assert "No `timelines copy` CLI verb is registered" in bridge
     assert "`timelines copy` CLI verb" in decisions
 
-    from astrid.core.cli.timeline import build_parser
+    from astrid.packs.timeline.cli import build_parser
 
-    parser = build_parser()
+    parser = build_parser(object())
     verbs: list[str] = []
     for action in parser._actions:
         if getattr(action, "choices", None):

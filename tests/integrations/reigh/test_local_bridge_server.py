@@ -2384,3 +2384,128 @@ def test_in_tree_client_completes_provider_restart_journey(
         )
         assert reloaded_after_restart["config_version"] == 3
         assert reloaded_after_restart["config"] in (config_3a, config_3b)
+
+
+# ---------------------------------------------------------------------------
+# astrid serve: editor-open, readiness line, and typed failures (m6)
+# ---------------------------------------------------------------------------
+
+
+class _FakeServeServer:
+    """Stand-in for the bridge HTTP server so serve returns instead of blocking."""
+
+    server_address = ("127.0.0.1", 45678)
+
+    def shutdown(self) -> None:
+        pass
+
+    def server_close(self) -> None:
+        pass
+
+    def serve_forever(self) -> None:
+        pass
+
+
+def _patch_serve_server(monkeypatch) -> None:
+    """Route serve's lazily-imported server factory to the non-blocking fake."""
+    monkeypatch.setattr(
+        "astrid.core.integrations.reigh.local_bridge_server.create_local_bridge_server",
+        lambda **kwargs: _FakeServeServer(),
+    )
+
+
+def test_serve_editor_path_opens_and_prints_readiness(
+    tmp_bridge_root: Path, monkeypatch, capsys
+) -> None:
+    import astrid.core.gateway.dispatch as dispatch_mod
+
+    editor = tmp_bridge_root / "editor-bundle"
+    editor.mkdir()
+    opened: list[Path] = []
+
+    monkeypatch.setattr(dispatch_mod, "_open_editor", lambda p: opened.append(p))
+    _patch_serve_server(monkeypatch)
+
+    code = dispatch_mod._dispatch_serve(
+        ["--projects-root", str(tmp_bridge_root), "--editor-path", str(editor)]
+    )
+    out = capsys.readouterr().out
+
+    assert code == 0
+    assert "Astrid ready" in out
+    assert "bridge at http://127.0.0.1:45678" in out
+    assert f"editor at {editor.resolve()}" in out
+    assert opened == [editor.resolve()]
+
+
+def test_serve_no_open_editor_skips_editor(
+    tmp_bridge_root: Path, monkeypatch, capsys
+) -> None:
+    import astrid.core.gateway.dispatch as dispatch_mod
+
+    opened: list[Path] = []
+    monkeypatch.setattr(dispatch_mod, "_open_editor", lambda p: opened.append(p))
+    _patch_serve_server(monkeypatch)
+
+    code = dispatch_mod._dispatch_serve(
+        ["--projects-root", str(tmp_bridge_root), "--no-open-editor"]
+    )
+    out = capsys.readouterr().out
+
+    assert code == 0
+    assert "Astrid ready" in out
+    assert "editor: not opened" in out
+    assert opened == []
+
+
+def test_serve_missing_editor_path_exits_one(
+    tmp_bridge_root: Path, monkeypatch, capsys
+) -> None:
+    import astrid.core.gateway.dispatch as dispatch_mod
+
+    missing = tmp_bridge_root / "does-not-exist"
+    code = dispatch_mod._dispatch_serve(
+        ["--projects-root", str(tmp_bridge_root), "--editor-path", str(missing)]
+    )
+    err = capsys.readouterr().err
+
+    assert code == 1
+    assert "serve failed" in err
+    assert "--editor-path does not exist" in err
+
+
+def test_serve_unopenable_database_exits_one(
+    tmp_bridge_root: Path, monkeypatch, capsys
+) -> None:
+    import astrid.core.gateway.dispatch as dispatch_mod
+
+    (tmp_bridge_root / ".astrid").mkdir()
+    (tmp_bridge_root / ".astrid" / "astrid.sqlite3").write_bytes(
+        b"not a sqlite database"
+    )
+    code = dispatch_mod._dispatch_serve(["--projects-root", str(tmp_bridge_root)])
+    err = capsys.readouterr().err
+
+    assert code == 1
+    assert "serve failed" in err
+    assert "cannot open the Astrid database" in err
+
+
+def test_serve_readiness_without_editor_bundle(
+    tmp_bridge_root: Path, monkeypatch, capsys
+) -> None:
+    import astrid.core.gateway.dispatch as dispatch_mod
+
+    opened: list[Path] = []
+    monkeypatch.setattr(dispatch_mod, "_locate_reigh_editor", lambda: None)
+    monkeypatch.setattr(dispatch_mod, "_open_editor", lambda p: opened.append(p))
+    _patch_serve_server(monkeypatch)
+
+    code = dispatch_mod._dispatch_serve(["--projects-root", str(tmp_bridge_root)])
+    out = capsys.readouterr().out
+
+    assert code == 0
+    assert "Astrid ready" in out
+    assert "editor: not opened" in out
+    assert "open the bridge manually at http://127.0.0.1:45678" in out
+    assert opened == []

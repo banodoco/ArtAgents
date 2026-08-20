@@ -6,12 +6,12 @@ callers and monkeypatch seams rely on via ``astrid.core.gateway._print_entrypoin
 and ``astrid.core.gateway._packs_subcommand_list``.
 
 ``_product_help_text`` / ``_print_product_help`` (m4 plan step 24, task
-T26) are the product-focused executable help: exactly the five product
-families from the explicit registry (``astrid/core/cli/domain_product.py``),
+T26) are the executable help. As of m6 they document the complete
+eight-family surface: the five product families from the explicit registry
+(``astrid/core/cli/domain_product.py``) with their kernel/pack ownership,
 the two manifest-declared nested mounts, the ``--json`` envelope
-convention, and the stable exit codes. Operational commands (``serve``,
-``doctor``) and the singular legacy ``run`` alias are excluded from the
-product census and from primary product help until m6.
+convention, the stable exit codes, and the three operational families
+(``serve``, ``doctor``, ``backup``).
 """
 
 from __future__ import annotations
@@ -36,156 +36,85 @@ def _packs_subcommand_list() -> str:
 
 
 def _print_entrypoint_help() -> None:
-    packs_verbs = _packs_subcommand_list()
     print(
-        f"""Astrid command gateway — Python SDK + CLI
+        """Astrid command gateway — Python SDK + CLI
 
 The canonical Python boundary is ``import astrid`` (see docs/reference/sdk.md).
-This gateway is the CLI entry point for orchestration, authoring, and task management.
+This gateway is the CLI entry point for the eight families: the five product
+families (projects, timelines, media, tasks, runs) and the three operational
+families (serve, doctor, backup).
 
 Usage:
-  python3 -m astrid doctor
-  python3 -m astrid setup [--apply]
+  python3 -m astrid <family> <command> [options]
+  python3 -m astrid help
 
-Start here:
-  python3 -m astrid next
-  python3 -m astrid status
-  python3 -m astrid projects ls
-  python3 -m astrid projects select <project>
+Product families:
+  python3 -m astrid projects ...
+  python3 -m astrid timelines ...
+  python3 -m astrid media ...
+  python3 -m astrid tasks ...
+  python3 -m astrid runs ...
 
-    # orchestrators — multi-step pipelines
-  python3 -m astrid orchestrators {{list,inspect,validate,fork,run}} ...
-    # orchestrate — create and compile new orchestration tools
-  python3 -m astrid orchestrate {{new,check,describe,compile,test,explain}} <pack>.<name>
-    # task-mode — lifecycle verbs for running orchestrated plans
-  Task-mode operator verbs:
-    python3 -m astrid start <pack>.<name> --project <slug> [--name <run-id>]
-    python3 -m astrid abort --project <slug>
-    python3 -m astrid status --project <slug>
-    python3 -m astrid runs ls [--project <slug>]
-  Plan-mutation verbs (Sprint 3):
-    python3 -m astrid plan add-step --project <slug> --run-id <id> --step-id <id> --command '...' [--adapter local|manual] [--after|--before|--into <path>]
-    python3 -m astrid plan edit-step <path> --project <slug> --run-id <id> [--command '...'] [--assignee ...]
-    python3 -m astrid plan remove-step <path> --project <slug> --run-id <id>
-    python3 -m astrid plan supersede-step <path> --project <slug> --run-id <id> --scope {{all,future-iterations,future-items}}
-    python3 -m astrid claim <step> --project <slug> --run-id <id> [--for agent:<id>|human:<name>]
-    python3 -m astrid unclaim <step> --project <slug> --run-id <id> [--for agent:<id>|human:<name>]
-  Task-mode agent-facing verbs (mid-run):
-    python3 -m astrid next --project <slug>
-    python3 -m astrid ack <step> --project <slug> --decision {{approve,retry,iterate,abort}} [--agent <id> | --human <name>] [--evidence path] [--feedback "..."] [--item id]
-    python3 -m astrid hook stop   # Claude Code Stop-hook entry point; see docs/guides/hooks.md
-    python3 -m astrid skip   # skip a step (use --help for details)
-    # sessions -- tab binding and takeover
-  Session verbs (Sprint 1):
-    python3 -m astrid attach [<project>] [--default] [--timeline <slug>] [--session <id>] [--as agent:<id>]
-    python3 -m astrid status
-    python3 -m astrid sessions {{ls,detach,takeover}} ...
-    # skills -- installable agent capabilities
-  python3 -m astrid skills {{list,install,uninstall,sync,doctor}} ...
-    # packs -- build and validate packs
-  python3 -m astrid packs {{{packs_verbs}}} ...
-    # executors — single-step CLI tools
-  python3 -m astrid executors {{new,list,inspect,validate,fork,install,run}} ...
-    # elements — reusable building blocks
-  python3 -m astrid elements {{list,inspect,fork,install}} ...
-    # projects — project CRUD
-  python3 -m astrid projects {{ls,select,use,default,create,update,show,theme,source}} ...
-  python3 -m astrid themes ls
-    # timelines -- timeline management
-  python3 -m astrid timelines {{ls,create,show,visualize,rename,finalize,tombstone,purge,set-default}} ...
-  python3 -m astrid timelines visualize [timeline-slug] --project PROJECT [--all|--shot ID|--range START..END|--at TIME|--clip ID|--asset ID]
-    # models -- model catalog discovery
-  python3 -m astrid models {{list,show}} ...
-    # modalities -- output modality discovery
-  python3 -m astrid modalities {{list,inspect}} ...
-    # renderers -- pluggable timeline renderer scaffolding, discovery, smoke
-  python3 -m astrid renderers {{create,list,inspect,validate,smoke,replay}} ...  # scaffold, discover, inspect, validate, smoke, and replay renderer packs
-  python3 -m astrid reigh-data --project-id PROJECT_ID [--out PATH]
-  python3 -m astrid worker --pool banodoco [--worker-id ID] [--max-iterations N]
-    # run-audit — inspect completed runs
-  python3 -m astrid runs {{ls,show,artifacts,trace,cost}} ...
-  python3 -m astrid events {{verify,tail}} --run <id> --project <slug>
-  python3 -m astrid audit --run RUN_DIR
-    # infrastructure — setup, events, worker, runpod
-  python3 -m astrid runpod sweep [--hard] [--dry-run] [--projects-root PATH]
-  python3 -m astrid runpod volumes ls
-  python3 -m astrid runpod ensure-storage <name> [--size <GB>] [--datacenter <id>]
-    # publish / reigh-data (executor-backed)
-  python3 -m astrid publish ...
-  python3 -m astrid publish-youtube ...
-  python3 -m astrid upload-youtube ...
-  python3 -m astrid --video SRC --brief BRIEF --out out/runs/name [--render]
-  python3 -m astrid --brief BRIEF --out out/runs/name --target-duration SECONDS [--render]
-Build a new pack:
-  python3 -m astrid packs new <id>
-  python3 -m astrid executors new <pack>.<slug>
-  python3 -m astrid orchestrators new <pack>.<slug>
-  python3 -m astrid packs validate <path>
+Operational families:
+  python3 -m astrid serve [--host HOST] [--port PORT] [--projects-root PATH]
+  python3 -m astrid doctor [--json]
+  python3 -m astrid backup create [--out PATH]
+  python3 -m astrid backup restore <BACKUP_PATH>
 
-Browse available tools:
-  python3 -m astrid orchestrators list
-  python3 -m astrid executors list
-  python3 -m astrid elements list
-  python3 -m astrid projects show --project PROJECT
-  python3 -m astrid modalities list
+Nested mounts (manifest-owned):
+  python3 -m astrid timelines shots ...
+  python3 -m astrid media references ...
 
-Inspect before running:
-  python3 -m astrid orchestrators inspect video_editing.hype --json
-  python3 -m astrid executors inspect rendering.render --json
-  python3 -m astrid elements inspect effects text-card --json
-  python3 -m astrid modalities inspect generic_card --json
-
-Run any tool through this gateway:
-  python3 -m astrid orchestrators run ORCHESTRATOR_ID --project PROJECT ...
-  python3 -m astrid executors run EXECUTOR_ID --project PROJECT ...
+Options:
+  --json      print the exact SDK envelope (ok/data/error/receipt/idempotency_key)
+  -h, --help  show help
 
 Notes:
   python3 -m astrid is the package entry point.
-  Use orchestrators for workflows, executors for concrete work, and elements for render building blocks.
-
-Recent renames (both old forms still work):
-  astrid author → astrid orchestrate   (preferred: ``astrid orchestrate``)
-  astrid run {{show,...}} → astrid runs {{ls,show,artifacts,trace,cost}}  (preferred: ``astrid runs``)
-  ``astrid author`` and ``astrid run`` are deprecated aliases. Migration is cosmetic — old invocations are accepted.
+  Use ``python3 -m astrid help`` for the full family census, kernel/pack
+  ownership, nested mounts, and stable exit codes.
 """
     )
 
 
 def _product_help_text() -> str:
-    """Return the product-focused executable help (m4 plan step 24, T26).
+    """Return the executable help for the eight-family gateway surface.
 
-    The text is generated from the explicit product registry so the
-    advertised census can never drift from ``astrid/core/cli/domain_product.py``:
-    exactly the five families, the two manifest-declared nested mounts, the
-    ``--json`` envelope convention, and the stable exit codes. Operational
-    commands (``serve``, ``doctor``) and the singular legacy ``run`` alias
-    are excluded from the product census and primary product help until m6.
+    The text is generated from the explicit product registry plus the three
+    operational families, so the advertised census can never drift from
+    ``astrid/core/cli/domain_product.py``: the five product families (with
+    their kernel/pack ownership), the two manifest-declared nested mounts,
+    the ``--json`` envelope convention, the stable exit codes, and the
+    three operational families (``serve``, ``doctor``, ``backup``).
     """
-    from astrid.core.cli.domain_product import PRODUCT_FAMILIES
+    families = "projects timelines media tasks runs serve doctor backup"
+    return f"""Astrid product commands — the eight m6 families
 
-    families = " ".join(PRODUCT_FAMILIES)
-    return f"""Astrid product commands — the five m4 product families
-
-The product registry owns exactly five families, sourced from the explicit
-in-tree registry and schema-pack manifests. ``shots`` mounts beneath
-``timelines`` and ``references`` mounts beneath ``media``.
+The gateway owns exactly eight families: the five product families and the
+three operational families. ``shots`` mounts beneath ``timelines`` and
+``references`` mounts beneath ``media``.
 
 Usage:
   python3 -m astrid <family> <command> [options]
   python3 -m astrid <family> --help
 
-Product census (exactly five families): {families}
+Family census (exactly eight families): {families}
 
 Product families:
-  projects    project create/list/show/update/select
-  media       media import/list/show/verify/relocate/relate
-  tasks       task create/list/show/cancel/retry/events
-  runs        run list/show/cancel/retry-failed/events
-  timelines   timeline create/list/show/save/archive/history/diff
+  projects    [kernel] project create/list/show/update/select
+  media       [kernel] media import/list/show/verify/relocate/relate
+  tasks       [kernel] task create/list/show/cancel/retry/events
+  runs        [kernel] run list/show/cancel/retry-failed/events
+  timelines   [pack: timeline] timeline create/list/show/save/archive/history/diff
+
+Operational families:
+  serve       [kernel] start the local repository bridge
+  doctor      [kernel] read-only database/filesystem diagnostics
+  backup      [kernel] create/restore SQLite + managed-media backups
 
 Nested mounts (manifest-owned):
-  timelines shots       shot list/create/add/remove/reorder
-  media references      reference create/update/archive/associate/link/set-primary/list/show
+  timelines shots       [pack: shots] shot list/create/add/remove/reorder
+  media references      [pack: references] reference create/update/archive/associate/link/set-primary/list/show
 
 Options:
   --json      print the exact SDK envelope (ok/data/error/receipt/idempotency_key)
@@ -195,8 +124,6 @@ Exit codes:
   0  success (envelope ok=true)
   1  typed SDK error (envelope ok=false)
   2  usage/parse error
-
-Excluded from the product census until m6: serve, doctor, run (singular alias).
 """
 
 

@@ -12,15 +12,22 @@ Covers:
   ``TransitionSetPayload``) validate through the same registry path
   independent of CLI argparse.
 - Projection boundary validates track kinds through the registry.
-- Doctor ``_check_timeline_catalog`` sources default and options from
-  the registry.
+- Doctor exposes the six v10 checks (``sqlite_quick_check``, ``fk_integrity``,
+  ``schema_versions``, ``media_paths``, ``data_paths``, ``python_version``)
+  with a stable ``{"ok": bool, "checks": [...]}`` JSON envelope and fail-closed
+  exit codes on a missing/corrupt database.
 
 All tests bypass CLI parsing — they exercise the kernel/SDK APIs directly.
 """
 
 from __future__ import annotations
 
+import contextlib
+import io
+import json
+import tempfile
 import unittest
+from pathlib import Path
 
 from astrid.core.timeline.events.schema import (
     ClipAddedPayload,
@@ -372,27 +379,68 @@ class ProjectionBoundaryKindTest(unittest.TestCase):
 
 
 # ============================================================================
-# Doctor expectations — registry defaults
+# Doctor expectations — six v10 checks with a stable fail-closed JSON shape
 # ============================================================================
 
 
-class DoctorTransitionDefaultsTest(unittest.TestCase):
-    """Doctor sources transition defaults from registry."""
+class DoctorV10ChecksTest(unittest.TestCase):
+    """The v10 doctor reports six checks and fails closed on a corrupt DB."""
 
-    def test_doctor_default_transition_matches_registry(self) -> None:
+    def _fresh_project(self, root) -> None:
+        from astrid.application import compose_standard_application
+
+        with compose_standard_application(projects_root=root) as app:
+            created = app.projects_service.create(
+                slug="demo", name="Demo", idempotency_key="p1"
+            )
+        self.assertTrue(created.ok, created.error)
+
+    def test_doctor_reports_six_v10_checks(self) -> None:
         from astrid.core import doctor as doctor_mod
-        default = default_transition_kind()
-        self.assertIsNotNone(default)
-        self.assertEqual(default, "cross-fade")
 
-        # The doctor's _check_timeline_catalog uses default_transition_kind()
-        # and transition_kind_options() — verify we can call the check directly.
-        result = doctor_mod._check_timeline_catalog()  # type: ignore[attr-defined]
-        self.assertIsInstance(result, str)
-        self.assertIn("cross-fade", result)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._fresh_project(root)
+            checks = doctor_mod.run_checks(projects_root=root)
 
-    def test_doctor_transition_kind_options_match_registry(self) -> None:
-        options = transition_kind_options()
-        self.assertIn("cross-fade", options)
-        # Doctor uses these same options.
-        self.assertTrue(len(options) >= 1)
+        self.assertEqual(
+            {c.name for c in checks},
+            {
+                "python_version",
+                "data_paths",
+                "media_paths",
+                "sqlite_quick_check",
+                "fk_integrity",
+                "schema_versions",
+            },
+        )
+        self.assertTrue(all(c.status == "ok" for c in checks))
+
+    def test_doctor_json_fails_closed_on_corrupt_db(self) -> None:
+        from astrid.core import doctor as doctor_mod
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".astrid").mkdir()
+            (root / ".astrid" / "astrid.sqlite3").write_bytes(b"not a sqlite database")
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                code = doctor_mod.main(["--json", "--projects-root", str(root)])
+            payload = json.loads(stdout.getvalue())
+
+        self.assertEqual(code, 1)
+        self.assertFalse(payload["ok"])
+        names = {item["name"] for item in payload["checks"]}
+        self.assertEqual(
+            names,
+            {
+                "python_version",
+                "data_paths",
+                "media_paths",
+                "sqlite_quick_check",
+                "fk_integrity",
+                "schema_versions",
+            },
+        )
+        for item in payload["checks"]:
+            self.assertEqual(set(item), {"name", "status", "detail", "required"})

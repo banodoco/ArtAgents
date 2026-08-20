@@ -63,7 +63,12 @@ from astrid.packs.timeline.repository import TimelineRepository
 from astrid.sdk.projects import ProjectsService
 
 STANDARD_SCHEMA_PACKS: tuple[str, ...] = ("timeline", "shots", "references")
-"""Exactly the in-tree schema packs the standard composition registers."""
+"""Exactly the in-tree schema packs the standard composition registers.
+
+The literal tuple is required by the deterministic pack-factoring surgery
+(``scripts/reshape/check_pack_factoring.py`` patches this exact literal in
+temporary copies), so it must stay defined here verbatim.
+"""
 
 LIVE_ATTEMPT_STAGING_KEY = "staging_txn_id"
 """Reserved ``execution_attempts.progress_json`` key holding the staging txn id.

@@ -3,16 +3,33 @@ from __future__ import annotations
 import contextlib
 import io
 import json
-import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
+from astrid.application import compose_standard_application
 from astrid.core import doctor
 from astrid.core.gateway import setup as setup_cli
-from astrid.core.project.project import create_project
 from astrid.core.structure import TOP_LEVEL_ASTRID_DIRS, validate_repo_structure
+
+V10_CHECK_NAMES = {
+    "python_version",
+    "data_paths",
+    "media_paths",
+    "sqlite_quick_check",
+    "fk_integrity",
+    "schema_versions",
+}
+
+V10_CHECK_ORDER = [
+    "python_version",
+    "data_paths",
+    "media_paths",
+    "sqlite_quick_check",
+    "fk_integrity",
+    "schema_versions",
+]
 
 
 class DoctorSetupTest(unittest.TestCase):
@@ -23,395 +40,106 @@ class DoctorSetupTest(unittest.TestCase):
             result = fn(argv)
         return result, stdout.getvalue(), stderr.getvalue()
 
-    def _stable_env_template_check(self) -> doctor.DoctorCheck:
-        return doctor.DoctorCheck(
-            name="env template",
-            status="ok",
-            detail="test-provisioned env template",
-            required=False,
-        )
+    def _fresh_project(self, root: Path) -> None:
+        """Create a migrated database plus managed dirs under *root*."""
+        with compose_standard_application(projects_root=root) as app:
+            created = app.projects_service.create(
+                slug="demo", name="Demo", idempotency_key="p1"
+            )
+        self.assertTrue(created.ok, created.error)
 
-    def _stable_dependency_audit_check(self, **_kwargs) -> doctor.DoctorCheck:
-        return doctor.DoctorCheck(
-            name="dependency audit",
-            status="ok",
-            detail="test-provisioned dependency audit",
-        )
+    def test_doctor_reports_exactly_six_v10_checks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._fresh_project(root)
+            checks = doctor.run_checks(projects_root=root)
 
-    def test_doctor_text_and_json_reports_required_checks(self) -> None:
-        with mock.patch.object(
-            doctor,
-            "_check_dependency_audit",
-            side_effect=self._stable_dependency_audit_check,
-        ), mock.patch.object(doctor, "_check_env_template", side_effect=self._stable_env_template_check):
-            result, stdout, stderr = self.capture(doctor.main, [])
+        self.assertEqual([c.name for c in checks], V10_CHECK_ORDER)
+        self.assertEqual({c.name for c in checks}, V10_CHECK_NAMES)
+        for check in checks:
+            self.assertEqual(check.status, "ok", check)
+        media = next(c for c in checks if c.name == "media_paths")
+        # A fresh project with no managed media tree is an optional "ok".
+        self.assertFalse(media.required)
+
+    def test_doctor_json_shape_is_stable(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._fresh_project(root)
+            result, stdout, stderr = self.capture(
+                doctor.main, ["--json", "--projects-root", str(root)]
+            )
+
+        self.assertEqual(result, 0, stderr)
+        payload = json.loads(stdout)
+        self.assertEqual(set(payload), {"ok", "checks"})
+        self.assertTrue(payload["ok"])
+        self.assertEqual(len(payload["checks"]), 6)
+        for item in payload["checks"]:
+            self.assertEqual(set(item), {"name", "status", "detail", "required"})
+            self.assertIn(item["name"], V10_CHECK_NAMES)
+
+    def test_doctor_text_output_lists_v10_checks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._fresh_project(root)
+            result, stdout, stderr = self.capture(
+                doctor.main, ["--projects-root", str(root)]
+            )
 
         self.assertEqual(result, 0, stderr)
         self.assertIn("Astrid doctor", stdout)
-        self.assertIn("[ok] python:", stdout)
-        self.assertIn("[ok] dependency audit:", stdout)
-        self.assertIn("[ok] env template:", stdout)
-        self.assertIn("[ok] executor registry:", stdout)
-        self.assertIn("[ok] orchestrator registry:", stdout)
-        self.assertIn("[ok] local pack manifest:", stdout)
-        self.assertIn("[ok] element registry:", stdout)
-        self.assertIn("[ok] repo structure:", stdout)
-        self.assertIn("[ok] vibecomfy metadata:", stdout)
-        self.assertIn("[ok] remotion config:", stdout)
-        self.assertIn("[ok] timeline catalog:", stdout)
-        self.assertIn("stale project runs:", stdout)
-        self.assertIn("runpod stale handles:", stdout)
+        for name in V10_CHECK_NAMES:
+            self.assertIn(f"[ok] {name}:", stdout)
 
-        with mock.patch.object(
-            doctor,
-            "_check_dependency_audit",
-            side_effect=self._stable_dependency_audit_check,
-        ), mock.patch.object(doctor, "_check_env_template", side_effect=self._stable_env_template_check):
-            result, stdout, stderr = self.capture(doctor.main, ["--json"])
-        self.assertEqual(result, 0, stderr)
-        payload = json.loads(stdout)
-        self.assertTrue(payload["ok"])
-        self.assertIn("repo structure", {item["name"] for item in payload["checks"]})
-        self.assertIn("vibecomfy metadata", {item["name"] for item in payload["checks"]})
-        self.assertIn("dependency audit", {item["name"] for item in payload["checks"]})
-        self.assertIn("env template", {item["name"] for item in payload["checks"]})
-        self.assertIn("local pack manifest", {item["name"] for item in payload["checks"]})
-        self.assertIn("stale project runs", {item["name"] for item in payload["checks"]})
+    def test_doctor_fails_closed_on_missing_database(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".astrid").mkdir()
+            checks = doctor.run_checks(projects_root=root)
+            result, stdout, stderr = self.capture(
+                doctor.main, ["--json", "--projects-root", str(root)]
+            )
 
-    def test_doctor_required_check_failure_returns_nonzero(self) -> None:
-        with mock.patch.object(doctor, "load_executor_registry", side_effect=RuntimeError("registry exploded")):
-            result, stdout, stderr = self.capture(doctor.main, [])
-
+        by_name = {c.name: c for c in checks}
+        for name in ("sqlite_quick_check", "fk_integrity", "schema_versions"):
+            self.assertEqual(by_name[name].status, "fail", by_name[name])
         self.assertEqual(result, 1)
-        self.assertEqual(stderr, "")
-        self.assertIn("[fail] executor registry: registry exploded", stdout)
+        payload = json.loads(stdout)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(len(payload["checks"]), 6)
 
-    def test_doctor_optional_binaries_warn_by_default_and_can_be_strict(self) -> None:
-        with mock.patch.object(
-            doctor,
-            "_check_dependency_audit",
-            side_effect=self._stable_dependency_audit_check,
-        ), mock.patch.object(doctor.shutil, "which", return_value=None), mock.patch.object(
-            doctor,
-            "_check_env_template",
-            side_effect=self._stable_env_template_check,
-        ):
-            result, stdout, stderr = self.capture(doctor.main, [])
-            strict_result, strict_stdout, strict_stderr = self.capture(doctor.main, ["--strict-optional"])
-
-        self.assertEqual(result, 0, stderr)
-        self.assertIn("[warn] optional binary ffmpeg: not found on PATH", stdout)
-        self.assertEqual(strict_result, 1, strict_stderr)
-        self.assertIn("[warn] optional binary ffmpeg: not found on PATH", strict_stdout)
-
-    def test_dependency_audit_and_env_template_succeed_for_minimal_project(self) -> None:
+    def test_doctor_fails_closed_on_corrupt_database(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            (root / "astrid").mkdir()
-            (root / "astrid" / "app.py").write_text("import requests\n", encoding="utf-8")
-            (root / "pyproject.toml").write_text(
-                "\n".join(
-                    [
-                        "[project]",
-                        'name = "tmp"',
-                        'version = "0.0.0"',
-                        "dependencies = [",
-                        '  "requests>=2",',
-                        "]",
-                    ]
-                ),
-                encoding="utf-8",
+            (root / ".astrid").mkdir()
+            (root / ".astrid" / "astrid.sqlite3").write_bytes(
+                b"not a sqlite database"
             )
-            (root / ".env.example").write_text(
-                "\n".join(
-                    [
-                        "# Required: populate for API calls",
-                        "OPENAI_API_KEY=",
-                        "# Optional: only for alternate providers",
-                        "GEMINI_API_KEY=",
-                    ]
-                ),
-                encoding="utf-8",
-            )
-            env_file = root / ".env"
-            env_file.write_text("OPENAI_API_KEY=test-value\n", encoding="utf-8")
-
-            dependency_check = doctor._check_dependency_audit(repo_root=root)
-            env_check = doctor._check_env_template(repo_root=root, environ={}, env_candidates=[env_file])
-
-        self.assertEqual(dependency_check.status, "ok")
-        self.assertIn("third-party import", dependency_check.detail)
-        self.assertEqual(env_check.status, "ok")
-        self.assertIn("required key(s) present", env_check.detail)
-
-    def test_env_template_check_fails_for_missing_required_key(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            (root / ".env.example").write_text(
-                "\n".join(
-                    [
-                        "# Required: populate for API calls",
-                        "OPENAI_API_KEY=",
-                        "# Optional: alternate provider",
-                        "GEMINI_API_KEY=",
-                    ]
-                ),
-                encoding="utf-8",
-            )
-            env_file = root / ".env"
-            env_file.write_text("GEMINI_API_KEY=unused\n", encoding="utf-8")
-
-            check = doctor._check_env_template(repo_root=root, environ={}, env_candidates=[env_file])
-
-        self.assertEqual(check.status, "fail")
-        self.assertIn("OPENAI_API_KEY", check.detail)
-
-    def test_dependency_audit_fails_for_undeclared_dependency(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            (root / "astrid").mkdir()
-            (root / "astrid" / "app.py").write_text("import requests\n", encoding="utf-8")
-            (root / "pyproject.toml").write_text(
-                "\n".join(
-                    [
-                        "[project]",
-                        'name = "tmp"',
-                        'version = "0.0.0"',
-                        "dependencies = [",
-                        '  "filelock>=3.13",',
-                        "]",
-                    ]
-                ),
-                encoding="utf-8",
+            checks = doctor.run_checks(projects_root=root)
+            result, stdout, stderr = self.capture(
+                doctor.main, ["--json", "--projects-root", str(root)]
             )
 
-            check = doctor._check_dependency_audit(repo_root=root)
+        by_name = {c.name: c for c in checks}
+        for name in ("sqlite_quick_check", "fk_integrity", "schema_versions"):
+            self.assertEqual(by_name[name].status, "fail", by_name[name])
+        self.assertEqual(result, 1)
+        payload = json.loads(stdout)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(len(payload["checks"]), 6)
 
-        self.assertEqual(check.status, "fail")
-        self.assertIn("requests", check.detail)
-
-    def test_dependency_audit_ignores_pack_imports(self) -> None:
+    def test_doctor_is_read_only(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            (root / "astrid" / "packs" / "demo").mkdir(parents=True)
-            (root / "astrid" / "core").mkdir(parents=True)
-            (root / "astrid" / "core" / "app.py").write_text("import json\n", encoding="utf-8")
-            (root / "astrid" / "packs" / "demo" / "run.py").write_text("import requests\n", encoding="utf-8")
-            (root / "pyproject.toml").write_text(
-                "\n".join(
-                    [
-                        "[project]",
-                        'name = "tmp"',
-                        'version = "0.0.0"',
-                        "dependencies = [",
-                        '  "filelock>=3.13",',
-                        "]",
-                    ]
-                ),
-                encoding="utf-8",
-            )
+            self._fresh_project(root)
+            db_path = root / ".astrid" / "astrid.sqlite3"
+            before = db_path.read_bytes()
+            doctor.run_checks(projects_root=root)
+            doctor.main(["--json", "--projects-root", str(root)])
+            after = db_path.read_bytes()
 
-            check = doctor._check_dependency_audit(repo_root=root)
-
-        self.assertEqual(check.status, "ok")
-
-    def test_dependency_audit_warns_for_missing_private_runpod_dependency(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            (root / "astrid").mkdir()
-            (root / "astrid" / "app.py").write_text("import runpod_lifecycle\n", encoding="utf-8")
-            (root / "pyproject.toml").write_text(
-                "\n".join(
-                    [
-                        "[project]",
-                        'name = "tmp"',
-                        'version = "0.0.0"',
-                        "dependencies = [",
-                        '  "filelock>=3.13",',
-                        "]",
-                    ]
-                ),
-                encoding="utf-8",
-            )
-
-            real_find_spec = doctor.importlib.util.find_spec
-
-            def fake_find_spec(name: str):
-                if name == "runpod_lifecycle":
-                    return None
-                return real_find_spec(name)
-
-            with mock.patch.object(doctor.importlib.util, "find_spec", side_effect=fake_find_spec), mock.patch.object(
-                doctor.importlib.metadata,
-                "packages_distributions",
-                return_value={"filelock": ["filelock"]},
-            ):
-                check = doctor._check_dependency_audit(repo_root=root)
-
-        self.assertEqual(check.status, "warn")
-        self.assertFalse(check.required)
-        self.assertIn("runpod-lifecycle", check.detail)
-
-    def test_local_pack_manifest_check_ignores_empty_local_pack_dir(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            (root / "astrid" / "packs" / "local").mkdir(parents=True)
-
-            check = doctor._check_local_pack_manifest(repo_root=root)
-
-        self.assertEqual(check.status, "ok")
-        self.assertFalse(check.required)
-        self.assertIn("no local pack manifest", check.detail)
-
-    def test_local_pack_manifest_check_materializes_missing_manifest_for_local_elements(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            local_pack = root / "astrid" / "packs" / "local"
-            element_root = local_pack / "elements" / "effects" / "stamp"
-            element_root.mkdir(parents=True)
-            (element_root / "element.yaml").write_text("id: stamp\n", encoding="utf-8")
-
-            check = doctor._check_local_pack_manifest(repo_root=root)
-
-            self.assertEqual(check.status, "ok")
-            self.assertFalse(check.required)
-            self.assertIn("created for local element manifests", check.detail)
-            self.assertTrue((local_pack / "pack.yaml").is_file())
-
-    def test_local_pack_manifest_check_fails_for_invalid_existing_manifest(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            local_pack = root / "astrid" / "packs" / "local"
-            element_root = local_pack / "elements" / "effects" / "stamp"
-            element_root.mkdir(parents=True)
-            (element_root / "element.yaml").write_text("id: stamp\n", encoding="utf-8")
-            (local_pack / "pack.yaml").write_text("id: not_local\nname: Broken\n", encoding="utf-8")
-
-            check = doctor._check_local_pack_manifest(repo_root=root)
-
-        self.assertEqual(check.status, "fail")
-        self.assertIn("astrid/packs/local/pack.yaml is invalid", check.detail)
-        self.assertIn("must match folder name", check.detail)
-
-    def test_dependency_audit_treats_missing_arnold_parent_as_optional(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            (root / "astrid").mkdir()
-            (root / "astrid" / "app.py").write_text("from arnold.pipeline import Stage\n", encoding="utf-8")
-            (root / "pyproject.toml").write_text(
-                "\n".join(
-                    [
-                        "[project]",
-                        'name = "tmp"',
-                        'version = "0.0.0"',
-                        "dependencies = [",
-                        '  "filelock>=3.13",',
-                        "]",
-                    ]
-                ),
-                encoding="utf-8",
-            )
-
-            real_find_spec = doctor.importlib.util.find_spec
-
-            def fake_find_spec(name: str):
-                if name == "arnold.pipeline":
-                    raise ModuleNotFoundError("No module named 'arnold'")
-                if name == "arnold":
-                    return None
-                return real_find_spec(name)
-
-            with mock.patch.object(doctor.importlib.util, "find_spec", side_effect=fake_find_spec), mock.patch.object(
-                doctor.importlib.metadata,
-                "packages_distributions",
-                return_value={"filelock": ["filelock"]},
-            ):
-                check = doctor._check_dependency_audit(repo_root=root, optional_missing_is_ok=True)
-
-        self.assertEqual(check.status, "ok")
-        self.assertFalse(check.required)
-        self.assertIn("arnold missing", check.detail)
-
-    def test_doctor_repairs_confidently_dead_project_run_records(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            projects_root = Path(tmp)
-            create_project("demo", root=projects_root)
-            run_dir = projects_root / "demo" / "runs" / "01ARZ3NDEKTSV4RRFFQ69G5FAA"
-            run_dir.mkdir(parents=True)
-            run_json = run_dir / "run.json"
-            run_json.write_text(
-                json.dumps(
-                    {
-                        "artifacts": {},
-                        "created_at": "2026-06-04T00:00:00Z",
-                        "kind": "executor",
-                        "metadata": {
-                            "pid": 424242,
-                            "prepared_at": "2026-06-04T00:00:00Z",
-                            "process_platform": sys.platform,
-                        },
-                        "out": str(run_dir),
-                        "project_slug": "demo",
-                        "run_id": "01ARZ3NDEKTSV4RRFFQ69G5FAA",
-                        "schema_version": 1,
-                        "status": "running",
-                        "updated_at": "2026-06-04T00:00:00Z",
-                    }
-                ),
-                encoding="utf-8",
-            )
-
-            with mock.patch.object(doctor, "_probe_pid_liveness", return_value="dead"), mock.patch(
-                "astrid.core.foundation.project_paths.resolve_projects_root",
-                return_value=projects_root,
-            ):
-                check = doctor._check_stale_project_runs()
-
-            repaired = json.loads(run_json.read_text(encoding="utf-8"))
-
-        self.assertEqual(check.status, "warn")
-        self.assertIn("repaired 1 stale RUNNING project run", check.detail)
-        self.assertEqual(repaired["status"], "failed")
-        self.assertEqual(repaired["metadata"]["doctor_repair"]["kind"], "stale_running")
-        self.assertEqual(repaired["metadata"]["doctor_repair"]["liveness"], "dead")
-        self.assertIn("astrid doctor repaired stale RUNNING record", repaired["metadata"]["error"])
-
-    def test_doctor_leaves_running_record_untouched_when_liveness_is_unknown(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            projects_root = Path(tmp)
-            create_project("demo", root=projects_root)
-            run_dir = projects_root / "demo" / "runs" / "01ARZ3NDEKTSV4RRFFQ69G5FAB"
-            run_dir.mkdir(parents=True)
-            run_json = run_dir / "run.json"
-            original = {
-                "artifacts": {},
-                "created_at": "2026-06-04T00:00:00Z",
-                "kind": "executor",
-                "metadata": {
-                    "pid": 424243,
-                    "prepared_at": "2026-06-04T00:00:00Z",
-                    "process_platform": "different-platform",
-                },
-                "out": str(run_dir),
-                "project_slug": "demo",
-                "run_id": "01ARZ3NDEKTSV4RRFFQ69G5FAB",
-                "schema_version": 1,
-                "status": "running",
-                "updated_at": "2026-06-04T00:00:00Z",
-            }
-            run_json.write_text(json.dumps(original), encoding="utf-8")
-
-            with mock.patch(
-                "astrid.core.foundation.project_paths.resolve_projects_root",
-                return_value=projects_root,
-            ):
-                check = doctor._check_stale_project_runs()
-
-            unchanged = json.loads(run_json.read_text(encoding="utf-8"))
-
-        self.assertEqual(check.status, "warn")
-        self.assertIn("liveness was unknown", check.detail)
-        self.assertEqual(unchanged, original)
+        self.assertEqual(before, after)
 
     def test_setup_dry_run_does_not_mutate_workspace(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

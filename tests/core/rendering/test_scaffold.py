@@ -9,8 +9,7 @@ Locks the exact scaffold contract:
 * static validation of the generated pack/renderer manifests
   (``validate_pack`` + canonical manifest loading);
 * the generated ``test_renderer.py`` passes when run on the scaffold output;
-* the ``create`` CLI route (``cli.main`` and
-  ``gateway.dispatch._dispatch_renderers``) writes to the requested directory.
+* the ``create`` CLI route (``cli.main``) writes to the requested directory.
 """
 
 from __future__ import annotations
@@ -22,7 +21,7 @@ from pathlib import Path
 
 import pytest
 
-from astrid.core.gateway.dispatch import _TOP_LEVEL_HANDLERS, _dispatch_renderers
+from astrid.core.gateway.dispatch import _TOP_LEVEL_HANDLERS
 from astrid.core.pack.manifest import load_manifest_mapping
 from astrid.core.pack.validate import validate_pack
 from astrid.core.rendering.cli import main as renderers_cli_main
@@ -184,7 +183,6 @@ def test_create_cli_route_writes_to_requested_directory(tmp_path: Path) -> None:
     assert _scaffold_file_names(dest) == _EXPECTED_FILES
 
     dispatch_dest = tmp_path / "dispatch_wave"
-    assert _dispatch_renderers(["create", "wave", str(dispatch_dest)]) == 0
+    assert renderers_cli_main(["create", "wave", str(dispatch_dest)]) == 0
     assert _scaffold_file_names(dispatch_dest) == _EXPECTED_FILES
-    assert "renderers" in _TOP_LEVEL_HANDLERS
-    assert _TOP_LEVEL_HANDLERS["renderers"] is _dispatch_renderers
+    assert "renderers" not in _TOP_LEVEL_HANDLERS

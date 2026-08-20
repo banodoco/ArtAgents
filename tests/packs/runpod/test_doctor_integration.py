@@ -1,168 +1,122 @@
-"""Test astrid doctor stale-handle reporting (read-only)."""
+"""Doctor integration coverage (m6 v10 rewrite).
+
+The old runpod stale-handle / executor-registry doctor checks were removed in
+the v10 rewrite. This module now asserts the new six-check doctor surface:
+
+- ``sqlite_quick_check`` — read-only ``PRAGMA quick_check``;
+- ``fk_integrity`` — ``PRAGMA foreign_key_check``;
+- ``schema_versions`` — applied core + pack migrations vs the registry;
+- ``media_paths`` — managed-media root and ``sha256/`` digest tree;
+- ``data_paths`` — projects root and ``.astrid/`` accessibility;
+- ``python_version`` — the Python 3.10+ floor.
+
+plus the stable ``{"ok": bool, "checks": [...]}`` JSON envelope and fail-closed
+exit codes on a missing/corrupt database.
+"""
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import tempfile
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from unittest.mock import patch
 
-from astrid.core.integrations.runpod.sweeper import POD_HANDLE_FILENAME
+from astrid.application import compose_standard_application
+from astrid.core import doctor
 
-
-def _make_stale_handle(pod_id: str = "pod-stale") -> dict:
-    """Build a pod_handle with terminate_at in the past."""
-    return {
-        "pod_id": pod_id,
-        "ssh": "root@10.0.0.1 -p 2222",
-        "name": f"astrid-test-{pod_id}",
-        "name_prefix": "astrid-test",
-        "terminate_at": (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),
-        "gpu_type": "NVIDIA GeForce RTX 4090",
-        "hourly_rate": 0.34,
-        "provisioned_at": (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat(),
-        "config_snapshot": {
-            "api_key_ref": "RUNPOD_API_KEY",
-            "datacenter_id": "US-GA-1",
-            "image": "runpod/pytorch:latest",
-            "container_disk_in_gb": 200,
-            "volume_in_gb": 0,
-            "network_volume_id": None,
-            "ports": "8888/http,22/tcp",
-        },
-    }
+V10_CHECK_NAMES = {
+    "python_version",
+    "data_paths",
+    "media_paths",
+    "sqlite_quick_check",
+    "fk_integrity",
+    "schema_versions",
+}
 
 
-def _write_stale_handle(projects_root: Path, project: str, run_id: str, step_id: str) -> Path:
-    """Write a stale pod_handle.json in the canonical path."""
-    produces_dir = projects_root / project / "runs" / run_id / "steps" / step_id / "v1" / "produces"
-    produces_dir.mkdir(parents=True)
-    handle_path = produces_dir / POD_HANDLE_FILENAME
-    handle_path.write_text(json.dumps(_make_stale_handle(pod_id=run_id)))
-    return handle_path
+def _fresh_project(root: Path) -> None:
+    """Create a migrated database plus managed dirs under *root*."""
+    with compose_standard_application(projects_root=root) as app:
+        created = app.projects_service.create(
+            slug="demo", name="Demo", idempotency_key="p1"
+        )
+        assert created.ok, created.error
 
 
-def _write_noncanonical_stale_handle(projects_root: Path, project: str, run_id: str) -> Path:
-    """Write a stale pod_handle.json under a non-produces path that sweep must ignore."""
-    handle_path = (
-        projects_root
-        / project
-        / "runs"
-        / run_id
-        / "steps"
-        / "step-a"
-        / "v1"
-        / "scratch"
-        / POD_HANDLE_FILENAME
-    )
-    handle_path.parent.mkdir(parents=True)
-    handle_path.write_text(json.dumps(_make_stale_handle(pod_id=run_id)))
-    return handle_path
+def _capture(argv: list[str]) -> tuple[int, str]:
+    stdout = io.StringIO()
+    with contextlib.redirect_stdout(stdout):
+        code = doctor.main(argv)
+    return code, stdout.getvalue()
 
 
-# ---------------------------------------------------------------------------
-# Read-only: doctor finds stale handles
-# ---------------------------------------------------------------------------
-
-
-def test_doctor_finds_stale_handles() -> None:
-    """_check_runpod_stale_handles reports stale handles with status=warn."""
+def test_doctor_reports_six_v10_checks() -> None:
+    """run_checks returns exactly the six v10 checks, all ok on a fresh root."""
     with tempfile.TemporaryDirectory() as tmp:
-        projects_root = Path(tmp)
-        _write_stale_handle(projects_root, "proj", "run-stale", "step-a")
+        root = Path(tmp)
+        _fresh_project(root)
+        checks = doctor.run_checks(projects_root=root)
 
-        # Patch resolve_projects_root to return our temp dir
-        with patch("astrid.core.foundation.project_paths.resolve_projects_root", return_value=projects_root):
-            from astrid.core.doctor import _check_runpod_stale_handles
+    assert [c.name for c in checks] == [
+        "python_version",
+        "data_paths",
+        "media_paths",
+        "sqlite_quick_check",
+        "fk_integrity",
+        "schema_versions",
+    ]
+    assert {c.name for c in checks} == V10_CHECK_NAMES
+    assert all(c.status == "ok" for c in checks)
 
-            check = _check_runpod_stale_handles()
-            assert check.status == "warn"
-            assert "stale" in check.detail.lower()
-            assert "1" in check.detail
 
-
-def test_doctor_reports_zero_stale_when_none() -> None:
-    """_check_runpod_stale_handles reports ok when no handles exist."""
+def test_doctor_json_envelope_is_stable() -> None:
+    """--json emits the stable {ok, checks:[{name,status,detail,required}]} shape."""
     with tempfile.TemporaryDirectory() as tmp:
-        projects_root = Path(tmp)
+        root = Path(tmp)
+        _fresh_project(root)
+        code, out = _capture(["--json", "--projects-root", str(root)])
 
-        with patch("astrid.core.foundation.project_paths.resolve_projects_root", return_value=projects_root):
-            from astrid.core.doctor import _check_runpod_stale_handles
+    assert code == 0
+    payload = json.loads(out)
+    assert set(payload) == {"ok", "checks"}
+    assert payload["ok"] is True
+    assert len(payload["checks"]) == 6
+    for item in payload["checks"]:
+        assert set(item) == {"name", "status", "detail", "required"}
+        assert item["name"] in V10_CHECK_NAMES
 
-            check = _check_runpod_stale_handles()
-            assert check.status == "ok"
-            assert "no stale" in check.detail.lower()
 
-
-def test_doctor_ignores_stale_noncanonical_handles() -> None:
-    """Doctor only warns for stale canonical pod handles under produces/."""
+def test_doctor_fails_closed_on_missing_database() -> None:
+    """A missing DB yields exit 1 and ok=false without raising."""
     with tempfile.TemporaryDirectory() as tmp:
-        projects_root = Path(tmp)
-        _write_noncanonical_stale_handle(projects_root, "proj", "run-scratch")
+        root = Path(tmp)
+        (root / ".astrid").mkdir()
+        checks = doctor.run_checks(projects_root=root)
+        code, out = _capture(["--json", "--projects-root", str(root)])
 
-        with patch("astrid.core.foundation.project_paths.resolve_projects_root", return_value=projects_root):
-            from astrid.core.doctor import _check_runpod_stale_handles
-
-            check = _check_runpod_stale_handles()
-            assert check.status == "ok"
-            assert "no stale" in check.detail.lower()
-
-
-def test_doctor_handles_missing_projects_root() -> None:
-    """_check_runpod_stale_handles returns ok when projects root missing."""
-    with patch("astrid.core.foundation.project_paths.resolve_projects_root", return_value=Path("/nonexistent/path/xyz")):
-        from astrid.core.doctor import _check_runpod_stale_handles
-
-        check = _check_runpod_stale_handles()
-        assert check.status == "ok"
-        assert "no projects root" in check.detail.lower()
+    by_name = {c.name: c for c in checks}
+    for name in ("sqlite_quick_check", "fk_integrity", "schema_versions"):
+        assert by_name[name].status == "fail"
+    assert code == 1
+    payload = json.loads(out)
+    assert payload["ok"] is False
+    assert len(payload["checks"]) == 6
 
 
-# ---------------------------------------------------------------------------
-# Read-only: never calls terminate or append_event_locked
-# ---------------------------------------------------------------------------
-
-
-def test_doctor_does_not_mutate() -> None:
-    """_check_runpod_stale_handles is purely read-only — no terminate, no append."""
+def test_doctor_fails_closed_on_corrupt_database() -> None:
+    """A corrupt DB file yields exit 1 and ok=false without raising."""
     with tempfile.TemporaryDirectory() as tmp:
-        projects_root = Path(tmp)
-        _write_stale_handle(projects_root, "proj", "run-readonly", "step-x")
+        root = Path(tmp)
+        (root / ".astrid").mkdir()
+        (root / ".astrid" / "astrid.sqlite3").write_bytes(b"not a sqlite database")
+        checks = doctor.run_checks(projects_root=root)
+        code, out = _capture(["--json", "--projects-root", str(root)])
 
-        with patch("astrid.core.foundation.project_paths.resolve_projects_root", return_value=projects_root), \
-             patch("runpod_lifecycle.discovery.terminate") as terminate, \
-             patch("astrid.core.integrations.runpod.sweeper.append_runpod_sweeper_event") as append_event:
-            from astrid.core.doctor import _check_runpod_stale_handles
-
-            # This should NOT import or call discovery.terminate / append_event_locked
-            check = _check_runpod_stale_handles()
-
-            # Verify the check result
-            assert check.status == "warn"
-
-            # Verify the handle file was NOT deleted or modified
-            handle_path = projects_root / "proj" / "runs" / "run-readonly" / "steps" / "step-x" / "v1" / "produces" / POD_HANDLE_FILENAME
-            assert handle_path.is_file(), "doctor must not delete or modify pod_handle.json"
-            terminate.assert_not_called()
-            append_event.assert_not_called()
-
-
-# ---------------------------------------------------------------------------
-# No symmetric runpod metadata check (out of scope per brief)
-# ---------------------------------------------------------------------------
-
-
-def test_doctor_has_no_runpod_metadata_check() -> None:
-    """Doctor should NOT include a symmetric runpod metadata check."""
-    # The run_checks function should not contain any runpod metadata checks
-    import inspect
-
-    from astrid.core import doctor
-
-    source = inspect.getsource(doctor.run_checks)
-    # "runpod metadata" or "runpod catalog" should not appear
-    assert "runpod metadata" not in source
-    assert "runpod catalog" not in source
-    # _check_runpod_stale_handles should be called (only runpod check)
-    assert "_check_runpod_stale_handles" in source
+    by_name = {c.name: c for c in checks}
+    for name in ("sqlite_quick_check", "fk_integrity", "schema_versions"):
+        assert by_name[name].status == "fail"
+    assert code == 1
+    payload = json.loads(out)
+    assert payload["ok"] is False
+    assert len(payload["checks"]) == 6

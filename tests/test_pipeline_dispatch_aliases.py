@@ -15,29 +15,52 @@ class PipelineDispatchAliasTest(unittest.TestCase):
 
         help_text = stdout.getvalue()
         self.assertIn("Astrid command gateway", help_text)
-        self.assertIn("python3 -m astrid orchestrators {list,inspect,validate,fork,run}", help_text)
-        self.assertIn("python3 -m astrid executors {new,list,inspect,validate,fork,install,run}", help_text)
-        self.assertIn("python3 -m astrid elements {list,inspect,fork,install}", help_text)
         self.assertIn("python3 -m astrid is the package entry point", help_text)
+        # The eight m6 families are all documented.
+        for family in (
+            "projects",
+            "timelines",
+            "media",
+            "tasks",
+            "runs",
+            "serve",
+            "doctor",
+            "backup",
+        ):
+            self.assertIn(f"python3 -m astrid {family}", help_text)
+        # Removed families must not be documented anywhere.
+        for removed in (
+            "orchestrators",
+            "executors",
+            "elements",
+            "packs",
+            "orchestrate",
+            "author",
+            "renderers",
+            "replay",
+            "publish",
+            "setup",
+        ):
+            self.assertNotIn(removed, help_text)
         self.assertNotIn("gateway.py", help_text)
         self.assertNotIn("conductors", help_text)
         self.assertNotIn("performers", help_text)
 
-    def test_elements_dispatches_before_pipeline_validation(self) -> None:
-        from astrid.core.element import cli as elements_cli
-
-        with (
-            mock.patch(
-                "astrid.core.session.binding.resolve_current_session_with_fs_fallback",
-                return_value=object(),
-            ),
-            mock.patch.object(elements_cli, "main", return_value=31) as elements_main,
-        ):
-            self.assertEqual(gateway.main(["elements", "list"]), 31)
-            elements_main.assert_called_once_with(["list"])
-
     def test_legacy_public_dispatch_tokens_are_rejected(self) -> None:
-        for token in ("performers", "instruments", "conductors", "primitives"):
+        for token in (
+            "performers",
+            "instruments",
+            "conductors",
+            "primitives",
+            "run",
+            "author",
+            "orchestrate",
+            "renderers",
+            "replay",
+            "elements",
+            "publish",
+            "setup",
+        ):
             with self.subTest(token=token):
                 stderr = io.StringIO()
                 with contextlib.redirect_stderr(stderr):
@@ -45,171 +68,94 @@ class PipelineDispatchAliasTest(unittest.TestCase):
                 self.assertEqual(exit_code, 2)
                 self.assertIn(f"unknown command '{token}'", stderr.getvalue())
 
-    def test_doctor_and_setup_dispatch_before_legacy_validation(self) -> None:
-        from astrid.core import doctor
-        from astrid.core.gateway import setup as setup_cli
-
-        with (
-            mock.patch(
-                "astrid.core.session.binding.resolve_current_session_with_fs_fallback",
-                return_value=object(),
-            ),
-            mock.patch.object(doctor, "main", return_value=41) as doctor_main,
-        ):
-            self.assertEqual(gateway.main(["doctor", "--help"]), 41)
-            doctor_main.assert_called_once_with(["--help"])
-
-        with (
-            mock.patch(
-                "astrid.core.session.binding.resolve_current_session_with_fs_fallback",
-                return_value=object(),
-            ),
-            mock.patch.object(setup_cli, "main", return_value=42) as setup_main,
-        ):
-            self.assertEqual(gateway.main(["setup", "--help"]), 42)
-            setup_main.assert_called_once_with(["--help"])
-
-    def test_publish_style_dispatch_resolves_executor_runtime_from_registry_metadata(self) -> None:
-        registry = mock.Mock()
-        publish_entrypoint = mock.Mock(return_value=51)
-        youtube_entrypoint = mock.Mock(return_value=52)
-        reigh_data_entrypoint = mock.Mock(return_value=53)
-
-        registry.get.side_effect = [
-            mock.Mock(id="reigh.publish", metadata={"runtime_module": "reigh.publish.module", "runtime_entrypoint": "main"}),
-            mock.Mock(id="youtube.upload", metadata={"runtime_module": "youtube.upload.module", "runtime_entrypoint": "main"}),
-            mock.Mock(id="youtube.upload", metadata={"runtime_module": "youtube.upload.module", "runtime_entrypoint": "main"}),
-            mock.Mock(id="reigh.reigh_data", metadata={"runtime_module": "reigh.reigh_data.module", "runtime_entrypoint": "main"}),
-        ]
-
-        with (
-            mock.patch(
-                "astrid.core.session.binding.resolve_current_session_with_fs_fallback",
-                return_value=object(),
-            ),
-            mock.patch("astrid.core.execution.executor.registry.load_default_registry", return_value=registry),
-            mock.patch(
-                "astrid.core.pack.resolver.resolve_callable_from_metadata",
-                side_effect=[
-                    publish_entrypoint,
-                    youtube_entrypoint,
-                    youtube_entrypoint,
-                    reigh_data_entrypoint,
-                ],
-            ) as resolve_runtime,
-        ):
-            self.assertEqual(gateway.main(["publish", "--help"]), 51)
-            self.assertEqual(gateway.main(["publish-youtube", "--help"]), 52)
-            self.assertEqual(gateway.main(["upload-youtube", "--help"]), 52)
-            self.assertEqual(gateway.main(["reigh-data", "--help"]), 53)
+    def test_top_level_handlers_are_exactly_eight_families(self) -> None:
+        from astrid.core.gateway.dispatch import _TOP_LEVEL_HANDLERS
 
         self.assertEqual(
-            [call.args[0] for call in registry.get.call_args_list],
-            ["reigh.publish", "youtube.upload", "youtube.upload", "reigh.reigh_data"],
+            set(_TOP_LEVEL_HANDLERS),
+            {
+                "projects",
+                "timelines",
+                "media",
+                "tasks",
+                "runs",
+                "serve",
+                "doctor",
+                "backup",
+            },
         )
-        publish_entrypoint.assert_called_once_with(["--help"])
-        self.assertEqual(youtube_entrypoint.call_count, 2)
-        reigh_data_entrypoint.assert_called_once_with(["--help"])
-        self.assertEqual(
-            [call.kwargs["owner_id"] for call in resolve_runtime.call_args_list],
-            ["reigh.publish", "youtube.upload", "youtube.upload", "reigh.reigh_data"],
+        # The removed handlers (run/author/orchestrate/renderers/replay/...) do
+        # not appear anywhere in the handler table (m6 teardown).
+        for removed in (
+            "run",
+            "author",
+            "orchestrate",
+            "renderers",
+            "replay",
+            "elements",
+            "executors",
+            "orchestrators",
+            "publish",
+            "setup",
+            "packs",
+        ):
+            self.assertNotIn(removed, _TOP_LEVEL_HANDLERS)
+
+    def test_product_families_route_through_product_dispatch(self) -> None:
+        """All five product families prepend their token to _dispatch_product."""
+        from astrid.core.gateway import dispatch
+
+        seen: dict[str, object] = {}
+
+        def _fake_product(args):  # noqa: ANN001
+            seen["args"] = list(args)
+            return 7
+
+        with mock.patch.object(dispatch, "_dispatch_product", _fake_product):
+            for family in ("projects", "timelines", "media", "tasks", "runs"):
+                with self.subTest(family=family):
+                    handler = dispatch._TOP_LEVEL_HANDLERS[family]
+                    self.assertEqual(handler(["list"]), 7)
+                    self.assertEqual(seen["args"], [family, "list"])
+
+    def test_operational_families_have_their_own_routes(self) -> None:
+        """serve/doctor/backup dispatch through their own handlers, never
+        through the product boundary."""
+        from astrid.core.gateway import dispatch
+
+        for family in ("serve", "doctor", "backup"):
+            with self.subTest(family=family):
+                handler = dispatch._TOP_LEVEL_HANDLERS[family]
+                self.assertNotEqual(handler, dispatch._dispatch_product)
+        self.assertIs(
+            dispatch._TOP_LEVEL_HANDLERS["serve"], dispatch._dispatch_serve
         )
-
-    def test_run_alias_warns_and_delegates_to_runs(self) -> None:
-        with (
-            mock.patch(
-                "astrid.core.session.binding.resolve_current_session_with_fs_fallback",
-                return_value=object(),
-            ),
-            mock.patch("astrid.core.task.lifecycle.cmd_runs_ls", return_value=57) as runs_ls,
-        ):
-            stderr = io.StringIO()
-            with contextlib.redirect_stderr(stderr):
-                self.assertEqual(gateway.main(["run", "ls"]), 57)
-
-        warning = stderr.getvalue()
-        self.assertIn("'astrid run' is deprecated", warning)
-        self.assertIn("'astrid runs'", warning)
-        self.assertIn("0.3.0", warning)
-        runs_ls.assert_called_once_with([])
-
-    def test_runs_canonical_command_does_not_warn(self) -> None:
-        with (
-            mock.patch(
-                "astrid.core.session.binding.resolve_current_session_with_fs_fallback",
-                return_value=object(),
-            ),
-            mock.patch("astrid.core.task.lifecycle.cmd_runs_ls", return_value=58) as runs_ls,
-        ):
-            stderr = io.StringIO()
-            with contextlib.redirect_stderr(stderr):
-                self.assertEqual(gateway.main(["runs", "ls"]), 58)
-
-        self.assertNotIn("deprecated", stderr.getvalue())
-        runs_ls.assert_called_once_with([])
-
-    def test_author_alias_warns_and_delegates_to_orchestrate(self) -> None:
-        with (
-            mock.patch(
-                "astrid.core.session.binding.resolve_current_session_with_fs_fallback",
-                return_value=object(),
-            ),
-            mock.patch("astrid.core.orchestrate.cli.main", return_value=59) as orchestrate_main,
-        ):
-            stderr = io.StringIO()
-            with contextlib.redirect_stderr(stderr):
-                self.assertEqual(gateway.main(["author", "describe", "pack.thing"]), 59)
-
-        warning = stderr.getvalue()
-        self.assertIn("'astrid author' is deprecated", warning)
-        self.assertIn("'astrid orchestrate'", warning)
-        self.assertIn("0.3.0", warning)
-        orchestrate_main.assert_called_once_with(["describe", "pack.thing"])
-
-    def test_orchestrate_canonical_command_does_not_warn(self) -> None:
-        with (
-            mock.patch(
-                "astrid.core.session.binding.resolve_current_session_with_fs_fallback",
-                return_value=object(),
-            ),
-            mock.patch("astrid.core.orchestrate.cli.main", return_value=60) as orchestrate_main,
-        ):
-            stderr = io.StringIO()
-            with contextlib.redirect_stderr(stderr):
-                self.assertEqual(gateway.main(["orchestrate", "describe", "pack.thing"]), 60)
-
-        self.assertNotIn("deprecated", stderr.getvalue())
-        orchestrate_main.assert_called_once_with(["describe", "pack.thing"])
+        self.assertIs(
+            dispatch._TOP_LEVEL_HANDLERS["doctor"], dispatch._dispatch_doctor
+        )
+        self.assertIs(
+            dispatch._TOP_LEVEL_HANDLERS["backup"], dispatch._dispatch_backup
+        )
 
     def test_unknown_command_exits_2_with_message(self) -> None:
-        """T7: unknown non-flag command prints to stderr and exits 2."""
-        with (
-            mock.patch(
-                "astrid.core.session.binding.resolve_current_session_with_fs_fallback",
-                return_value=object(),
-            ),
-        ):
-            stderr = io.StringIO()
-            with contextlib.redirect_stderr(stderr):
-                exit_code = gateway.main(["boguscmd"])
-            self.assertEqual(exit_code, 2)
-            self.assertIn("unknown command 'boguscmd'", stderr.getvalue())
+        """Unknown non-flag command prints to stderr and exits 2."""
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            exit_code = gateway.main(["boguscmd"])
+        self.assertEqual(exit_code, 2)
+        self.assertIn("unknown command 'boguscmd'", stderr.getvalue())
 
-    def test_flag_style_invocation_still_passes_through(self) -> None:
-        """T7: --prefixed args pass through to default brief orchestrator."""
-        with (
-            mock.patch(
-                "astrid.core.session.binding.resolve_current_session_with_fs_fallback",
-                return_value=object(),
-            ),
-            mock.patch(
-                "astrid.core.gateway._run_default_brief_orchestrator",
-                return_value=42,
-            ) as mock_fallback,
-        ):
+    def test_flag_style_first_token_is_rejected_as_unknown_command(self) -> None:
+        """Flag-style invocations are rejected: there is no default brief
+        orchestrator fallthrough in the m6 gateway."""
+        from astrid.core.gateway import dispatch
+
+        self.assertFalse(hasattr(dispatch, "_run_default_brief_orchestrator"))
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
             exit_code = gateway.main(["--brief", "some brief text"])
-            self.assertEqual(exit_code, 42)
-            mock_fallback.assert_called_once_with(["--brief", "some brief text"])
+        self.assertEqual(exit_code, 2)
+        self.assertIn("unknown command '--brief'", stderr.getvalue())
 
     def test_package_is_executable(self) -> None:
         import runpy
@@ -217,57 +163,53 @@ class PipelineDispatchAliasTest(unittest.TestCase):
         old_argv = sys.argv
         stdout = io.StringIO()
         try:
-            sys.argv = ["python3 -m astrid", "elements", "list", "--kind", "effects"]
-            with (
-                mock.patch(
-                    "astrid.core.session.binding.resolve_current_session_with_fs_fallback",
-                    return_value=object(),
-                ),
-                contextlib.redirect_stdout(stdout),
-            ):
+            sys.argv = ["python3 -m astrid", "projects", "--help"]
+            with contextlib.redirect_stdout(stdout):
                 with self.assertRaises(SystemExit) as raised:
                     runpy.run_module("astrid", run_name="__main__")
         finally:
             sys.argv = old_argv
 
         self.assertEqual(raised.exception.code, 0)
-        self.assertIn("effects\ttext-card", stdout.getvalue())
-
-    def test_patch_dispatch_seam_through_pipeline_direct_call(self) -> None:
-        """Characterize: _dispatch_elements patched through astrid.core.gateway
-        IS intercepted when called directly (not via main(), which captures
-        references in _TOP_LEVEL_HANDLERS at import time)."""
-        with mock.patch(
-            "astrid.core.gateway._dispatch_elements",
-            return_value=55,
-        ) as patched_dispatch:
-            result = gateway._dispatch_elements(["list"])
-            self.assertEqual(result, 55)
-            patched_dispatch.assert_called_once_with(["list"])
+        self.assertIn("create", stdout.getvalue())
 
     def test_dispatch_helpers_captured_in_top_level_handlers(self) -> None:
-        """Characterize: _dispatch_elements in _TOP_LEVEL_HANDLERS holds the
-        original function reference. Mocking the module attribute does NOT
-        intercept calls routed through main() because the handler dict was
-        populated at import time. This is a documented compatibility seam:
-        legacy patches that need to intercept dispatch must target
-        _TOP_LEVEL_HANDLERS or the lower-level CLI module entry points."""
-        import astrid.core.gateway
+        """Characterize: the product/operational handler dict holds the exact
+        function references from astrid.core.gateway.dispatch, so patching the
+        module attribute intercepts direct calls (tasks/runs are lambdas that
+        prepend the family token)."""
+        import astrid.core.gateway.dispatch as dispatch
 
-        original = astrid.core.gateway._TOP_LEVEL_HANDLERS["elements"]
-        self.assertIs(original, astrid.core.gateway._dispatch_elements)
-
-        with mock.patch(
-            "astrid.core.gateway._dispatch_elements",
-            return_value=999,
+        for family, attr in (
+            ("projects", "_dispatch_projects"),
+            ("timelines", "_dispatch_timelines"),
+            ("media", "_dispatch_media"),
+            ("serve", "_dispatch_serve"),
+            ("doctor", "_dispatch_doctor"),
+            ("backup", "_dispatch_backup"),
         ):
-            # The handler dict still holds the original reference
-            self.assertIsNot(
-                astrid.core.gateway._TOP_LEVEL_HANDLERS["elements"],
-                astrid.core.gateway._dispatch_elements,
-            )
-            # Direct call goes through the mock
-            self.assertEqual(astrid.core.gateway._dispatch_elements(["x"]), 999)
+            with self.subTest(family=family):
+                self.assertIs(
+                    dispatch._TOP_LEVEL_HANDLERS[family],
+                    getattr(dispatch, attr),
+                )
+
+        # The tasks/runs handlers are lambdas that forward to the product
+        # boundary with the family token prepended.
+        for family in ("tasks", "runs"):
+            with self.subTest(family=family):
+                seen: dict[str, object] = {}
+
+                def _fake_product(args):  # noqa: ANN001
+                    seen["args"] = list(args)
+                    return 8
+
+                with mock.patch.object(
+                    dispatch, "_dispatch_product", _fake_product
+                ):
+                    result = dispatch._TOP_LEVEL_HANDLERS[family](["show"])
+                self.assertEqual(result, 8)
+                self.assertEqual(seen["args"], [family, "show"])
 
 
 if __name__ == "__main__":

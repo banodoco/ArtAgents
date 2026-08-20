@@ -1,6 +1,6 @@
 """M2 public-surface characterization tests.
 
-Captures the canonical import surface, deprecated CLI alias routing,
+Captures the canonical import surface, the eight-family CLI surface,
 and Banodoco integration imports so that structural changes can be
 verified against a known baseline.
 
@@ -59,77 +59,108 @@ class RootModuleImportTest(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Deprecated CLI alias routing — astrid run and astrid author
+# Eight-family CLI surface — m6 cutover
 # ---------------------------------------------------------------------------
 
-class DeprecatedCLIAliasTest(unittest.TestCase):
-    """Deprecated CLI aliases must route to their canonical equivalents.
+class EightFamilySurfaceTest(unittest.TestCase):
+    """The m6 gateway owns exactly eight families and no removed aliases.
 
-    In `astrid/gateway.py`:
-      "run" → _dispatch_runs  (deprecated alias for "runs")
-      "author" → _dispatch_orchestrate  (deprecated alias for "orchestrate")
+    The five product families (projects, timelines, media, tasks, runs)
+    plus the three operational families (serve, doctor, backup). The
+    deprecated ``run``/``author``/``orchestrate`` aliases and their
+    handler wrappers were removed by the m6 teardown.
     """
 
-    def test_run_alias_maps_to_runs_handler(self) -> None:
+    def test_top_level_handlers_are_exactly_eight_families(self) -> None:
         import astrid.core.gateway
 
-        self.assertIn("run", astrid.core.gateway._TOP_LEVEL_HANDLERS,
-                      "'run' must be a top-level handler key")
-        self.assertIn("runs", astrid.core.gateway._TOP_LEVEL_HANDLERS,
-                      "'runs' must be a top-level handler key")
+        self.assertEqual(
+            set(astrid.core.gateway._TOP_LEVEL_HANDLERS),
+            {
+                "projects",
+                "timelines",
+                "media",
+                "tasks",
+                "runs",
+                "serve",
+                "doctor",
+                "backup",
+            },
+        )
 
-        run_handler = astrid.core.gateway._TOP_LEVEL_HANDLERS["run"]
-        runs_handler = astrid.core.gateway._TOP_LEVEL_HANDLERS["runs"]
-
-        # The deprecated "run" alias should delegate to _dispatch_runs too
-        # (both wrap it via lambdas, so we check the functions are equivalent)
-        self.assertIsNotNone(run_handler, "run handler must not be None")
-        self.assertIsNotNone(runs_handler, "runs handler must not be None")
-
-    def test_author_alias_maps_to_orchestrate_handler(self) -> None:
+    def test_removed_alias_handlers_are_absent(self) -> None:
         import astrid.core.gateway
 
-        self.assertIn("author", astrid.core.gateway._TOP_LEVEL_HANDLERS,
-                      "'author' must be a top-level handler key")
-        self.assertIn("orchestrate", astrid.core.gateway._TOP_LEVEL_HANDLERS,
-                      "'orchestrate' must be a top-level handler key")
+        for removed in (
+            "run",
+            "author",
+            "orchestrate",
+            "renderers",
+            "replay",
+            "elements",
+            "executors",
+            "orchestrators",
+            "publish",
+            "setup",
+            "packs",
+        ):
+            with self.subTest(removed=removed):
+                self.assertNotIn(removed, astrid.core.gateway._TOP_LEVEL_HANDLERS)
 
-        author_handler = astrid.core.gateway._TOP_LEVEL_HANDLERS["author"]
-        orch_handler = astrid.core.gateway._TOP_LEVEL_HANDLERS["orchestrate"]
+        # The deprecated alias helper functions are gone too.
+        self.assertFalse(hasattr(astrid.core.gateway, "_dispatch_run"))
+        self.assertFalse(
+            hasattr(astrid.core.gateway, "_run_default_brief_orchestrator")
+        )
 
-        # M5 keeps "author" as a public alias but routes it through a warning
-        # wrapper so callers see the canonical "orchestrate" replacement.
-        self.assertIsNotNone(author_handler, "author handler must not be None")
-        self.assertIsNot(author_handler, orch_handler,
-                         "'author' must use the deprecating wrapper, not the "
-                         "canonical orchestrate handler directly")
+    def test_top_level_commands_are_exactly_eight_families(self) -> None:
+        import astrid.core.gateway
 
-    def test_help_text_documents_deprecated_aliases(self) -> None:
-        """The gateway help text must document that run/author are deprecated."""
+        self.assertEqual(
+            astrid.core.gateway._top_level_commands(),
+            frozenset(
+                {
+                    "projects",
+                    "timelines",
+                    "media",
+                    "tasks",
+                    "runs",
+                    "serve",
+                    "doctor",
+                    "backup",
+                }
+            ),
+        )
+
+    def test_help_text_documents_the_eight_families(self) -> None:
+        """The gateway help text documents the eight families and no
+        deprecated aliases."""
         import io
 
         import astrid.core.gateway
 
-        # _print_entrypoint_help prints to stdout; capture its output
         captured = io.StringIO()
         with mock.patch("sys.stdout", captured):
             astrid.core.gateway._print_entrypoint_help()
 
         text = captured.getvalue()
-        self.assertIn("astrid author", text)
-        self.assertIn("deprecated aliases", text)
-
-    def test_run_dispatches_to_runs(self) -> None:
-        """_dispatch_run delegates to _dispatch_runs."""
-        import astrid.core.gateway
-
-        # The _dispatch_run function is the deprecated alias that delegates
-        self.assertTrue(callable(astrid.core.gateway._dispatch_run))
-        self.assertIn(
-            "Deprecated alias",
-            astrid.core.gateway._dispatch_run.__doc__ or "",
-            "_dispatch_run docstring must note it is a deprecated alias",
-        )
+        for family in (
+            "projects",
+            "timelines",
+            "media",
+            "tasks",
+            "runs",
+            "serve",
+            "doctor",
+            "backup",
+        ):
+            self.assertIn(f"astrid {family}", text)
+        for removed in (
+            "astrid author",
+            "astrid orchestrate",
+            "deprecated aliases",
+        ):
+            self.assertNotIn(removed, text)
 
 
 # ---------------------------------------------------------------------------

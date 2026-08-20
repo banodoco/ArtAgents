@@ -22,7 +22,7 @@ from pathlib import Path
 
 import pytest
 
-from astrid.core.gateway.dispatch import _TOP_LEVEL_HANDLERS, _dispatch_renderers
+from astrid.core.gateway.dispatch import _TOP_LEVEL_HANDLERS
 from astrid.core.rendering.cli import main as renderers_cli_main
 from astrid.core.rendering.publication import is_render_result_committed
 from astrid.core.rendering.scaffold import create_renderer_scaffold
@@ -231,10 +231,9 @@ def test_dispatch_renderers_routes_list_and_smoke(
     tmp_path: Path,
     capsys,
 ) -> None:
-    assert "renderers" in _TOP_LEVEL_HANDLERS
-    assert _TOP_LEVEL_HANDLERS["renderers"] is _dispatch_renderers
+    assert "renderers" not in _TOP_LEVEL_HANDLERS
 
-    assert _dispatch_renderers(["list"]) == 0
+    assert renderers_cli_main(["list"]) == 0
     lines = [line for line in _stdout(capsys).splitlines() if line.strip()]
     for capability_id in BUILTIN_IDS:
         assert capability_id in lines
@@ -242,7 +241,7 @@ def test_dispatch_renderers_routes_list_and_smoke(
     create_renderer_scaffold("wave", tmp_path / "wave")
     out_path = tmp_path / "dispatch-out.mp4"
     assert (
-        _dispatch_renderers(
+        renderers_cli_main(
             [
                 "smoke",
                 "wave.wave",

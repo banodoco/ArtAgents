@@ -29,6 +29,17 @@ Rules:
     legacy save/asset routes in ``local_bridge_server.py`` are the
     documented teardown bridge (owned by later tasks), not a fallback.
 
+``removed_authorities``
+    The eight-family product paths (dispatch routes, SDK modules, the
+    application composition, the bridge composition, and the pack modules)
+    must never import a removed authority module: the legacy
+    ``astrid.core.timeline.eventlog`` / ``astrid.core.threads`` /
+    ``astrid.core.session`` authorities, the deleted
+    ``astrid.core.cli.{timeline,project,session}`` CLI modules, and the
+    removed ``reigh.supabase_client`` / ``reigh.data_provider`` integrations.
+    The legacy modules stay in-tree as dead code for non-product consumers;
+    only their import from a product path is forbidden (m6 plan step 8).
+
 ``schema_ownership``
     Parsed from migration SQL plus manifest-declared table ownership:
     - kernel foreign keys may reference kernel tables only (never a pack
@@ -77,6 +88,15 @@ SUPPORTED_ENTRY_PATHS = (
     "astrid/packs/timeline/bridge.py",
     "astrid/packs/__init__.py",
     COMPOSITION_EXEMPTION,
+    # Eight-family dispatch paths (m6): the gateway entrypoint and the
+    # product-family dispatch boundary route the five product families plus
+    # serve/doctor/backup. They must never import a legacy/removed authority.
+    "astrid/core/gateway/__init__.py",
+    "astrid/core/cli/domain_product.py",
+    "astrid/core/cli/domain_projects.py",
+    "astrid/core/cli/domain_media.py",
+    "astrid/core/cli/domain_tasks.py",
+    "astrid/core/cli/domain_runs.py",
 )
 """Supported v10 entry paths the legacy-authority rule scans."""
 
@@ -85,11 +105,55 @@ LEGACY_AUTHORITY_MARKERS = (
     "astrid.core.timeline.eventlog",
     "supabase",
     "data_provider",
-    "sidecar",
+    # Removed-authority modules (m6 plan step 8): dead code that the
+    # eight-family product paths must never import.
+    "astrid.core.threads",
+    "astrid.core.session",
+    "astrid.core.cli.timeline",
+    "astrid.core.cli.project",
+    "astrid.core.cli.session",
+    "astrid.core.integrations.reigh.supabase_client",
+    "astrid.core.integrations.reigh.data_provider",
 )
 """Legacy authority markers (capitalized/qualified so the absence
 declarations in docstrings — e.g. 'no FSA/Supabase fallback' — never trip
 the rule)."""
+
+REMOVED_AUTHORITY_MODULES = (
+    "astrid.core.timeline.eventlog",
+    "astrid.core.threads",
+    "astrid.core.session",
+    "astrid.core.cli.timeline",
+    "astrid.core.cli.project",
+    "astrid.core.cli.session",
+    "astrid.core.integrations.reigh.supabase_client",
+    "astrid.core.integrations.reigh.data_provider",
+)
+"""Removed authority modules forbidden from the eight-family product paths.
+
+The m6 cutover removes these authorities from the product surface: the
+legacy file/JSONL/FSA authorities (``eventlog``), the legacy thread/session
+kernels, the deleted timeline/project/session CLI modules, and the removed
+Reigh Supabase/data-provider integrations. The modules stay in-tree as dead
+code for non-product consumers; only their import from a product path is a
+lint error.
+"""
+
+# Product paths scanned by ``lint_removed_authorities``: the eight-family
+# dispatch routes, the SDK, the application composition, the bridge
+# composition, and the pack modules — not the entire ``astrid/`` tree. The
+# pack product paths are the standard schema packs only (those shipping a
+# ``schema-pack.yaml``): the m1-m6 legacy capability packs stay in-tree as
+# non-product dead code and keep their own import graph.
+_PRODUCT_PATH_DIRS = (
+    "astrid/core/gateway",  # eight-family dispatch routes
+    "astrid/sdk",           # SDK modules
+)
+
+_PRODUCT_PATH_FILES = (
+    "astrid/application.py",                            # application composition
+    "astrid/core/integrations/reigh/bridge_service.py",  # bridge composition
+)
 
 # The m1-m6 legacy rendering/builtin capability packs remain in-tree
 # (plan step 22.3): kernel CLI/gateway modules legitimately import them.
@@ -184,6 +248,69 @@ def _is_legacy_pack_module(module: str) -> bool:
     )
 
 
+def _pack_cli_mount_families(root: Path, pack_id: str) -> frozenset[str]:
+    """The host families into which *pack_id*'s manifest declares CLI mounts.
+
+    ``cli_mounts`` values are ``"<family> <verb>"`` tokens (e.g. the shots
+    manifest's ``shots: timelines shots``), so the family is the first token.
+    """
+    manifest_path = root / "astrid" / "packs" / pack_id / "schema-pack.yaml"
+    if not manifest_path.is_file():
+        return frozenset()
+    try:
+        manifest = load_schema_pack_manifest(manifest_path)
+    except Exception:  # noqa: BLE001 - a broken manifest is a different rule
+        return frozenset()
+    families: set[str] = set()
+    for value in manifest.cli_mounts.values():
+        tokens = value.split()
+        if tokens:
+            families.add(tokens[0])
+    return frozenset(families)
+
+
+def _kernel_cli_family(rel: str) -> str | None:
+    """The product family of an ``astrid/core/cli/domain_<family>.py`` module."""
+    prefix = "astrid/core/cli/domain_"
+    if rel.startswith(prefix) and rel.endswith(".py"):
+        return rel[len(prefix) : -3]
+    return None
+
+
+def _is_declared_cli_mount_import(
+    root: Path, rel: str, module: str, *, pack_dir_name: str | None = None
+) -> bool:
+    """Whether *module* is a manifest-declared nested CLI mount import.
+
+    A kernel family module or a host pack's ``cli`` module may embed another
+    schema pack's ``cli`` module only when the target pack's manifest
+    declares a ``cli_mounts`` entry whose host family matches the importing
+    family (e.g. ``references: media references`` allows
+    ``astrid/core/cli/domain_media.py`` to embed the references parser, and
+    ``shots: timelines shots`` allows ``astrid/packs/timeline/cli.py`` to
+    embed the shots parser). This is declared composition, never a hidden
+    second authority: repository/conformance/service imports stay forbidden.
+    """
+    if not (module == "astrid.packs" or module.startswith("astrid.packs.")):
+        return False
+    parts = module.split(".")
+    if len(parts) < 3:
+        return False
+    target_pack = parts[2]
+    if len(parts) > 3 and parts[3] != "cli":
+        return False
+    mount_families = _pack_cli_mount_families(root, target_pack)
+    if not mount_families:
+        return False
+    if pack_dir_name is not None:
+        # Pack-to-pack: the importing pack is a declared host of the
+        # target's mount when one of its own cli_mount families matches.
+        importing_families = _pack_cli_mount_families(root, pack_dir_name)
+        return bool(mount_families & importing_families)
+    family = _kernel_cli_family(rel)
+    return family is not None and family in mount_families
+
+
 def lint_import_boundaries(root: Path) -> list[str]:
     """Kernel-to-pack and pack-to-pack import violations.
 
@@ -210,6 +337,8 @@ def lint_import_boundaries(root: Path) -> list[str]:
                 continue
             if _is_legacy_pack_module(module):
                 continue
+            if _is_declared_cli_mount_import(root, rel, module):
+                continue
             errors.append(
                 f"{rel}: kernel-to-pack import {module!r} "
                 "(only the serve composition root is exempt)"
@@ -231,11 +360,16 @@ def lint_import_boundaries(root: Path) -> list[str]:
                 if not module.startswith("astrid.packs."):
                     continue
                 other_pack = module.split(".")[2]
-                if other_pack != pack_dir.name:
-                    errors.append(
-                        f"{rel}: pack-to-pack import {module!r} from "
-                        f"pack {pack_dir.name!r}"
-                    )
+                if other_pack == pack_dir.name:
+                    continue
+                if _is_declared_cli_mount_import(
+                    root, rel, module, pack_dir_name=pack_dir.name
+                ):
+                    continue
+                errors.append(
+                    f"{rel}: pack-to-pack import {module!r} from "
+                    f"pack {pack_dir.name!r}"
+                )
     return errors
 
 
@@ -294,6 +428,79 @@ def lint_legacy_authorities(root: Path) -> list[str]:
                 errors.append(
                     f"{rel}: legacy authority marker {marker!r} in a "
                     "supported v10 entry path"
+                )
+    return errors
+
+
+def _is_removed_authority(module: str) -> bool:
+    """Whether *module* is a removed authority module (or a submodule)."""
+    return any(
+        module == removed or module.startswith(removed + ".")
+        for removed in REMOVED_AUTHORITY_MODULES
+    )
+
+
+def _schema_pack_ids(root: Path) -> frozenset[str]:
+    """The standard schema-pack ids under ``astrid/packs`` (manifest present).
+
+    Mirrors :func:`lint_import_boundaries`: a pack directory is a product
+    schema pack only when it ships a ``schema-pack.yaml``. The m1-m6 legacy
+    capability packs (rendering, builtin, generation, iteration,
+    video_editing, ...) are non-product dead code and are never product
+    paths for the removed-authority rule.
+    """
+    packs_root = root / "astrid" / "packs"
+    return frozenset(
+        path.name
+        for path in _child_dirs(packs_root)
+        if (path / "schema-pack.yaml").is_file()
+    )
+
+
+def _is_removed_authority_product_path(root: Path, rel: str) -> bool:
+    """Whether *rel* is one of the eight-family product paths.
+
+    The product surface is exactly: the eight-family dispatch routes
+    (``astrid/core/gateway/``), the SDK modules (``astrid/sdk/``), the
+    application composition (``astrid/application.py``), the bridge
+    composition (``astrid/core/integrations/reigh/bridge_service.py``), and
+    the standard schema-pack modules (``astrid/packs/<schema-pack>``).
+    Everything else in the tree is non-product (legacy dead code that may
+    stay in-tree), including the m1-m6 legacy capability packs.
+    """
+    if rel in _PRODUCT_PATH_FILES:
+        return True
+    if rel == "astrid/packs" or rel.startswith("astrid/packs/"):
+        pack_id = rel.split("/")[2]
+        return pack_id in _schema_pack_ids(root)
+    return any(rel == d or rel.startswith(d + "/") for d in _PRODUCT_PATH_DIRS)
+
+
+def lint_removed_authorities(root: Path) -> list[str]:
+    """Removed-authority imports from the eight-family product paths.
+
+    The m6 cutover removes the legacy file/JSONL/FSA/Supabase authorities and
+    the legacy timeline/project/session CLI modules from the product surface.
+    Any product path (dispatch route, SDK module, application composition,
+    bridge composition, or pack module) that imports one of the removed
+    authority modules is a second authority and a lint error. The legacy
+    modules stay in-tree as dead code for non-product consumers; only their
+    import from a product path is forbidden.
+    """
+    errors: list[str] = []
+    for path in _iter_python(root / "astrid"):
+        rel = _rel(path, root)
+        if not _is_removed_authority_product_path(root, rel):
+            continue
+        try:
+            modules = _imported_modules(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, SyntaxError):
+            continue
+        for module in sorted(modules):
+            if _is_removed_authority(module):
+                errors.append(
+                    f"{rel}: removed-authority import {module!r} from a "
+                    "product path"
                 )
     return errors
 
@@ -465,6 +672,7 @@ def run_authority_lint(root: str | Path = REPO_ROOT) -> LintReport:
     errors.extend(lint_import_boundaries(repo_root))
     errors.extend(lint_writer_authority(repo_root))
     errors.extend(lint_legacy_authorities(repo_root))
+    errors.extend(lint_removed_authorities(repo_root))
     errors.extend(lint_schema_ownership(repo_root))
     return LintReport(errors=tuple(sorted(errors)))
 

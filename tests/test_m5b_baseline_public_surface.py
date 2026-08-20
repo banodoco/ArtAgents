@@ -1,21 +1,21 @@
 """Baseline public-surface guardrail tests for m5b god-module splits.
 
 Captures the pre-split public import surface of ``astrid.core.timeline`` and
-``astrid.core.task.lifecycle``, plus CLI behavior guardrails for default
-brief routing, unknown top-level commands, and documented lifecycle command
-parsing.  These tests must continue to pass after the splits; only the
+``astrid.core.task.lifecycle``, plus CLI behavior guardrails for flag-style
+invocation rejection, unknown top-level commands, and documented lifecycle
+command parsing.  These tests must continue to pass after the splits; only the
 compatibility-shim re-exports may change which internal module provides the
 symbol.
 
-DO NOT MODIFY the assertions in this module without a corresponding plan
-change.  They are the contractual baseline.
+The m6 cutover removed the default brief routing fallthrough, the lifecycle
+top-level verbs, and the singular ``run``/``claim`` aliases; the tests below
+assert the resulting eight-family surface.
 """
 
 from __future__ import annotations
 
 import contextlib
 import io
-import sys
 import unittest
 from unittest import mock
 
@@ -589,156 +589,75 @@ class UnknownCommandGuardrailTest(unittest.TestCase):
             self.assertIn("unknown command", stderr.getvalue())
 
     def test_unknown_command_never_routes_to_default_orchestrator(self) -> None:
-        """Verify that an unknown command does NOT invoke the default orchestrator."""
+        """Verify that an unknown command does NOT invoke any default
+        orchestrator — the m6 teardown deleted the fallthrough entirely."""
         from astrid.core import gateway
 
+        self.assertFalse(
+            hasattr(gateway, "_run_default_brief_orchestrator"),
+            "the default-brief fallthrough must be gone after the m6 teardown",
+        )
         with (
             mock.patch(
                 "astrid.core.session.binding.resolve_current_session_with_fs_fallback",
                 return_value=object(),
             ),
-            mock.patch(
-                "astrid.core.gateway._run_default_brief_orchestrator",
-            ) as mock_fallback,
         ):
             stderr = io.StringIO()
             with contextlib.redirect_stderr(stderr):
                 exit_code = gateway.main(["boguscmd"])
             self.assertEqual(exit_code, 2)
-            mock_fallback.assert_not_called()
+            self.assertIn("unknown command", stderr.getvalue())
 
 
 # ---------------------------------------------------------------------------
-# CLI guardrails — default brief routing
+# CLI guardrails — flag-style invocations are rejected
 # ---------------------------------------------------------------------------
 
-class DefaultBriefRoutingTest(unittest.TestCase):
-    """Top-level brief/--video flags must route to the default orchestrator.
+class FlagStyleInvocationRejectionTest(unittest.TestCase):
+    """Flag-style first tokens must be rejected as unknown commands.
 
-    The gateway routes flag-style invocations (those whose first token
-    starts with ``--``) to ``_run_default_brief_orchestrator``, which
-    resolves ``video_editing.hype`` via the orchestrator registry.
+    The m6 gateway has no default brief orchestrator: an invocation whose
+    first token starts with ``--`` is an unknown command and exits 2 with
+    a clear error, exactly like any other unknown token.
     """
 
-    def test_double_dash_brief_routes_to_default(self) -> None:
+    def test_double_dash_brief_is_rejected(self) -> None:
         from astrid.core import gateway
 
-        with (
-            mock.patch(
-                "astrid.core.session.binding.resolve_current_session_with_fs_fallback",
-                return_value=object(),
-            ),
-            mock.patch(
-                "astrid.core.gateway._run_default_brief_orchestrator",
-                return_value=42,
-            ) as mock_fallback,
-        ):
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
             exit_code = gateway.main(["--brief", "test brief content"])
-            self.assertEqual(exit_code, 42)
-            mock_fallback.assert_called_once_with(["--brief", "test brief content"])
+        self.assertEqual(exit_code, 2)
+        self.assertIn("unknown command '--brief'", stderr.getvalue())
 
-    def test_double_dash_video_routes_to_default(self) -> None:
+    def test_double_dash_video_is_rejected(self) -> None:
         from astrid.core import gateway
 
-        with (
-            mock.patch(
-                "astrid.core.session.binding.resolve_current_session_with_fs_fallback",
-                return_value=object(),
-            ),
-            mock.patch(
-                "astrid.core.gateway._run_default_brief_orchestrator",
-                return_value=43,
-            ) as mock_fallback,
-        ):
-            exit_code = gateway.main(["--video", "some/video.mp4", "--brief", "desc"])
-            self.assertEqual(exit_code, 43)
-            mock_fallback.assert_called_once_with(
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            exit_code = gateway.main(
                 ["--video", "some/video.mp4", "--brief", "desc"]
             )
+        self.assertEqual(exit_code, 2)
+        self.assertIn("unknown command '--video'", stderr.getvalue())
 
-    def test_flag_style_out_routes_to_default(self) -> None:
+    def test_flag_style_out_is_rejected(self) -> None:
         from astrid.core import gateway
 
-        with (
-            mock.patch(
-                "astrid.core.session.binding.resolve_current_session_with_fs_fallback",
-                return_value=object(),
-            ),
-            mock.patch(
-                "astrid.core.gateway._run_default_brief_orchestrator",
-                return_value=44,
-            ) as mock_fallback,
-        ):
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
             exit_code = gateway.main(["--out", "runs/testrun", "--brief", "b"])
-            self.assertEqual(exit_code, 44)
-            mock_fallback.assert_called_once()
+        self.assertEqual(exit_code, 2)
+        self.assertIn("unknown command '--out'", stderr.getvalue())
 
-    def test_double_dash_render_routes_to_default(self) -> None:
+    def test_no_fallback_is_invoked_for_flag_style_args(self) -> None:
         from astrid.core import gateway
 
-        with (
-            mock.patch(
-                "astrid.core.session.binding.resolve_current_session_with_fs_fallback",
-                return_value=object(),
-            ),
-            mock.patch(
-                "astrid.core.gateway._run_default_brief_orchestrator",
-                return_value=45,
-            ) as mock_fallback,
-        ):
-            exit_code = gateway.main(
-                ["--brief", "hello", "--out", "runs/x", "--render"]
-            )
-            self.assertEqual(exit_code, 45)
-            mock_fallback.assert_called_once()
-
-    def test_target_duration_flag_routes_to_default(self) -> None:
-        from astrid.core import gateway
-
-        with (
-            mock.patch(
-                "astrid.core.session.binding.resolve_current_session_with_fs_fallback",
-                return_value=object(),
-            ),
-            mock.patch(
-                "astrid.core.gateway._run_default_brief_orchestrator",
-                return_value=46,
-            ) as mock_fallback,
-        ):
-            exit_code = gateway.main(
-                ["--brief", "x", "--out", "runs/y", "--target-duration", "60"]
-            )
-            self.assertEqual(exit_code, 46)
-            mock_fallback.assert_called_once()
-
-    def test_default_routing_preserves_all_args(self) -> None:
-        """The complete argv is forwarded to the default orchestrator."""
-        from astrid.core import gateway
-
-        argv = [
-            "--video",
-            "input.mp4",
-            "--brief",
-            "Make a video about cats",
-            "--out",
-            "runs/cats",
-            "--render",
-            "--target-duration",
-            "90",
-        ]
-        with (
-            mock.patch(
-                "astrid.core.session.binding.resolve_current_session_with_fs_fallback",
-                return_value=object(),
-            ),
-            mock.patch(
-                "astrid.core.gateway._run_default_brief_orchestrator",
-                return_value=47,
-            ) as mock_fallback,
-        ):
-            exit_code = gateway.main(argv)
-            self.assertEqual(exit_code, 47)
-            mock_fallback.assert_called_once_with(argv)
+        # The m6 gateway exposes no default-brief fallthrough to patch.
+        self.assertFalse(
+            hasattr(gateway, "_run_default_brief_orchestrator")
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -852,12 +771,9 @@ class LifecycleCommandParsingTest(unittest.TestCase):
         help_text = stdout.getvalue()
         self.assertIn("--project", help_text)
 
-    def test_entrypoint_help_lists_core_lifecycle_verbs(self) -> None:
-        """The top-level help must mention the core lifecycle verbs.
-
-        NOTE: ``skip`` is intentionally omitted from the top-level help in the
-        pre-split state — it is documented in ``cmd_skip``'s own --help output.
-        """
+    def test_entrypoint_help_lists_the_eight_families(self) -> None:
+        """The top-level help documents exactly the eight m6 families and no
+        removed lifecycle/legacy verbs."""
         from astrid.core.gateway import _print_entrypoint_help
 
         stdout = io.StringIO()
@@ -865,22 +781,29 @@ class LifecycleCommandParsingTest(unittest.TestCase):
             _print_entrypoint_help()
         help_text = stdout.getvalue()
 
-        lifecycle_verbs = [
-            "start",
-            "next",
-            "ack",
-            "abort",
-            "status",
-        ]
-        for verb in lifecycle_verbs:
-            with self.subTest(verb=verb):
-                self.assertIn(f"astrid {verb}", help_text, f"missing {verb} in help")
+        for family in (
+            "projects",
+            "timelines",
+            "media",
+            "tasks",
+            "runs",
+            "serve",
+            "doctor",
+            "backup",
+        ):
+            with self.subTest(family=family):
+                self.assertIn(
+                    f"astrid {family}", help_text, f"missing {family} in help"
+                )
 
-        # After T11 normalization, skip is listed in top-level help
-        self.assertIn("astrid skip", help_text)
+        # Removed lifecycle/legacy verbs are no longer advertised.
+        for removed in ("start", "next", "ack", "abort", "status", "claim"):
+            with self.subTest(removed=removed):
+                self.assertNotIn(f"astrid {removed}", help_text)
 
-    def test_entrypoint_help_lists_runs_and_claim(self) -> None:
-        """Top-level help mentions the 'runs ls' and 'claim' verbs."""
+    def test_entrypoint_help_documents_runs_family_not_singular_run(self) -> None:
+        """Top-level help mentions the 'runs' family; the singular 'run'
+        alias and 'claim' verb are gone."""
         from astrid.core.gateway import _print_entrypoint_help
 
         stdout = io.StringIO()
@@ -888,8 +811,8 @@ class LifecycleCommandParsingTest(unittest.TestCase):
             _print_entrypoint_help()
         help_text = stdout.getvalue()
 
-        self.assertIn("runs ls", help_text)
-        self.assertIn("claim", help_text)
+        self.assertIn("astrid runs", help_text)
+        self.assertNotIn("claim", help_text)
 
     def test_top_level_help_exits_0(self) -> None:
         """python3 -m astrid --help exits 0."""

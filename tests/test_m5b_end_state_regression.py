@@ -12,7 +12,6 @@ contract the refactor must satisfy.
 from __future__ import annotations
 
 import ast
-import json
 import os
 import subprocess
 import sys
@@ -21,6 +20,23 @@ from pathlib import Path
 from unittest import mock
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _repo_env() -> dict[str, str]:
+    """Environment for ``python -m astrid`` subprocess invocations.
+
+    The runtime environment runs with ``PYTHONSAFEPATH=1`` and a
+    PYTHONPATH that does not include the repository, so subprocesses must
+    be given the repo root explicitly to resolve the in-tree ``astrid``
+    package.
+    """
+    repo_root = str(_REPO_ROOT)
+    prior = os.environ.get("PYTHONPATH", "")
+    return {
+        **os.environ,
+        "PYTHONPATH": repo_root if not prior else repo_root + os.pathsep + prior,
+        "ASTRID_NO_NUDGE": "1",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -116,15 +132,14 @@ class RawDispatchRemovalTest(unittest.TestCase):
 class UnknownCommandDoesNotHitDefaultHypeTest(unittest.TestCase):
     """Unknown top-level commands must not invoke the default hype orchestrator.
 
-    Today ``astrid gateway/dispatch.py:_dispatch()`` falls through to
-    ``_run_default_brief_orchestrator(raw)`` whenever ``raw[0]`` starts
-    with ``--`` and doesn't match any known verb.  This is surprising
-    behavior: ``astrid --typo`` silently runs hype instead of reporting
-    an unknown command.
+    Historically ``astrid gateway/dispatch.py:_dispatch()`` fell through to
+    ``_run_default_brief_orchestrator(raw)`` whenever ``raw[0]`` started
+    with ``--`` and didn't match any known verb.  The m6 cutover deleted
+    that fallthrough entirely.
 
-    After the refactor, unknown commands (including those starting with
-    ``--``) must exit with a non-zero code and a clear error message,
-    never hitting the default hype path.
+    Unknown commands (including those starting with ``--``) exit with a
+    non-zero code and a clear error message, never hitting the default
+    hype path.
     """
 
     def test_unknown_top_level_command_exits_nonzero(self) -> None:
@@ -133,7 +148,7 @@ class UnknownCommandDoesNotHitDefaultHypeTest(unittest.TestCase):
             [sys.executable, "-m", "astrid", "nonexistent_cmd_xyzzy"],
             capture_output=True,
             text=True,
-            env={**os.environ, "ASTRID_NO_NUDGE": "1"},
+            env=_repo_env(),
             timeout=30,
         )
         self.assertNotEqual(result.returncode, 0, "Unknown command should exit non-zero")
@@ -149,7 +164,7 @@ class UnknownCommandDoesNotHitDefaultHypeTest(unittest.TestCase):
             [sys.executable, "-m", "astrid", "--not-a-real-flag", "value"],
             capture_output=True,
             text=True,
-            env={**os.environ, "ASTRID_NO_NUDGE": "1"},
+            env=_repo_env(),
             timeout=30,
         )
         # Must not exit 0 (hype default path exits 0 on simple brief routing).
@@ -162,26 +177,24 @@ class UnknownCommandDoesNotHitDefaultHypeTest(unittest.TestCase):
         )
 
     def test_empty_flags_do_not_trigger_hype(self) -> None:
-        """``astrid --video src --brief b --out o`` should route to hype but
-        ``astrid --unknown`` must not.
-        """
+        """``astrid --unknown`` must be rejected, never routed to hype."""
         # An unknown long-option-only invocation.
         result = subprocess.run(
             [sys.executable, "-m", "astrid", "--made-up-option"],
             capture_output=True,
             text=True,
-            env={**os.environ, "ASTRID_NO_NUDGE": "1"},
+            env=_repo_env(),
             timeout=30,
         )
-        # The current fallthrough would try to run hype with this argv;
-        # after refactor it must be rejected.
+        # The m6 gateway rejects every unknown first token, including
+        # flag-style ones: there is no default-hype fallthrough.
         self.assertNotEqual(
             result.returncode,
             0,
             "Unknown long option should not silently exit 0",
         )
         stderr_lower = result.stderr.lower()
-        # Should complain about an unknown option, not start running hype.
+        # Should complain about an unknown command, not start running hype.
         self.assertTrue(
             "unknown" in stderr_lower or "unrecognized" in stderr_lower or "error" in stderr_lower,
             f"Expected an error message for unknown option, got: {result.stderr[:200]}",
@@ -193,83 +206,67 @@ class UnknownCommandDoesNotHitDefaultHypeTest(unittest.TestCase):
             [sys.executable, "-m", "astrid", "--help"],
             capture_output=True,
             text=True,
-            env={**os.environ, "ASTRID_NO_NUDGE": "1"},
+            env=_repo_env(),
             timeout=30,
         )
         self.assertEqual(result.returncode, 0, "--help should still exit 0")
 
 
 # ---------------------------------------------------------------------------
-# 3.  Packs active-parser ``args.json`` behavior
+# 3.  Product-family help is executable (packs removed by the m6 cutover)
 # ---------------------------------------------------------------------------
 
-class PacksArgsJsonBehaviorTest(unittest.TestCase):
-    """The ``packs`` CLI must honour ``--json`` / ``--json_output``
-    consistently across subcommands.
-
-    After the refactor the ``packs`` subcommand parser must use a single
-    active argparse instance (the "active parser") so that ``--json`` is
-    recognised at the correct position and ``args.json`` / ``args.json_output``
-    is populated reliably.  This guards against regressions from the
-    parser unification work.
+class FamilyHelpIsExecutableTest(unittest.TestCase):
+    """The m6 gateway removed the ``packs`` family; the five product
+    families are the executable surface. Each family's ``--help`` exits 0
+    through the product dispatch boundary (argparse help short-circuits
+    before any database is opened).
     """
 
-    def test_packs_list_json_outputs_valid_json(self) -> None:
-        """``packs list --json`` produces structurally valid JSON."""
+    def test_projects_help_is_executable(self) -> None:
+        """``projects --help`` exits 0 and documents the five verbs."""
+        result = subprocess.run(
+            [sys.executable, "-m", "astrid", "projects", "--help"],
+            capture_output=True,
+            text=True,
+            env=_repo_env(),
+            timeout=30,
+        )
+        self.assertEqual(
+            result.returncode, 0, f"projects --help failed: {result.stderr}"
+        )
+        self.assertIn("create", result.stdout)
+        self.assertIn("select", result.stdout)
+
+    def test_timelines_help_is_executable_and_names_verbs_and_shots(self) -> None:
+        """``timelines --help`` exits 0 and documents the seven verbs plus
+        the nested shots mount."""
+        result = subprocess.run(
+            [sys.executable, "-m", "astrid", "timelines", "--help"],
+            capture_output=True,
+            text=True,
+            env=_repo_env(),
+            timeout=30,
+        )
+        self.assertEqual(
+            result.returncode, 0, f"timelines --help failed: {result.stderr}"
+        )
+        for verb in ("create", "list", "show", "save", "archive", "history", "diff"):
+            self.assertIn(verb, result.stdout)
+        self.assertIn("shots", result.stdout)
+
+    def test_removed_packs_family_is_rejected(self) -> None:
+        """``packs`` is no longer a top-level family: it exits 2 with an
+        unknown-command error instead of running the old pack CLI."""
         result = subprocess.run(
             [sys.executable, "-m", "astrid", "packs", "list", "--json"],
             capture_output=True,
             text=True,
+            env=_repo_env(),
             timeout=30,
         )
-        self.assertEqual(result.returncode, 0, f"packs list --json failed: {result.stderr}")
-        stdout = result.stdout.strip()
-        self.assertTrue(stdout, "Expected non-empty JSON output")
-        try:
-            data = json.loads(stdout)
-        except json.JSONDecodeError as exc:
-            self.fail(f"Output is not valid JSON: {exc}\nOutput: {stdout[:500]}")
-        self.assertIsInstance(data, dict, "Top-level output must be a JSON object")
-        self.assertIn("packs", data, "JSON output must contain a 'packs' key")
-        self.assertIsInstance(data["packs"], list, "'packs' must be a list")
-
-    def test_packs_list_json_output_has_groups(self) -> None:
-        """``packs list --json`` includes domain-grouped output."""
-        result = subprocess.run(
-            [sys.executable, "-m", "astrid", "packs", "list", "--json"],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        data = json.loads(result.stdout)
-        self.assertIn("groups", data, "JSON output must contain 'groups' key")
-        self.assertIsInstance(data["groups"], list, "'groups' must be a list")
-
-    def test_packs_list_no_json_produces_tabular_output(self) -> None:
-        """``packs list`` without --json produces tab-separated text, not JSON."""
-        result = subprocess.run(
-            [sys.executable, "-m", "astrid", "packs", "list"],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        self.assertEqual(result.returncode, 0, f"packs list failed: {result.stderr}")
-        stdout = result.stdout.strip()
-        # Tabular output contains tab characters; JSON does not.
-        self.assertIn("\t", stdout, "Tabular output should contain tabs")
-        # Should not parse as JSON.
-        with self.assertRaises(json.JSONDecodeError):
-            json.loads(stdout)
-
-    def test_packs_inspect_json_flag_is_recognized(self) -> None:
-        """``packs inspect --help`` mentions --json flag."""
-        result = subprocess.run(
-            [sys.executable, "-m", "astrid", "packs", "inspect", "--help"],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        self.assertIn("--json", result.stdout, "inspect help must document --json flag")
+        self.assertEqual(result.returncode, 2, "packs must be an unknown command")
+        self.assertIn("unknown command 'packs'", result.stderr)
 
 
 # ---------------------------------------------------------------------------
@@ -393,13 +390,11 @@ class LifecycleImportLayeringValidationTest(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class DefaultBriefRoutingIsExplicitTest(unittest.TestCase):
-    """The default-hype routing must be an explicit verb, not a fallthrough.
+    """The default-hype routing fallthrough is gone (m6 teardown).
 
-    Currently ``_run_default_brief_orchestrator()`` is reached as the
-    catch-all at the bottom of ``_dispatch()``.  After the refactor,
-    brief-based orchestration must be invoked through a named verb (e.g.
-    ``astrid orchestrate`` or ``astrid run --brief ...``) rather than a
-    silent fallthrough.
+    ``_run_default_brief_orchestrator`` was the catch-all at the bottom of
+    ``_dispatch()``; the m6 cutover deleted it. Brief-based orchestration
+    is no longer reachable through any gateway route.
     """
 
     def test_default_brief_not_reached_by_unknown_args(self) -> None:

@@ -119,7 +119,6 @@ def _sdk_error_from_exception(exc: Any) -> AstridSDKError | None:
         OrchestratorRunnerError,
     )
     from astrid.core.execution.orchestrator.schema import OrchestratorValidationError
-    from astrid.core.session.lease import LeaseError
 
     if isinstance(exc, (ExecutorRunnerError, OrchestratorRunnerError)):
         if _looks_like_missing_input(str(exc)):
@@ -137,7 +136,15 @@ def _sdk_error_from_exception(exc: Any) -> AstridSDKError | None:
         if exc.kind == "precondition":
             return CapabilityPreconditionError(exc.message)
         return CapabilityRuntimeError(exc.message)
-    if isinstance(exc, (LeaseError, NotWriterError, StaleEpochError)):
+    # The legacy session/lease authority was removed in the m6 cutover and
+    # its module must never be imported from a product path. Errors raised
+    # by the in-tree legacy session code still surface through this mapper,
+    # so they are classified by origin module path — never by import — and
+    # map to the lease-error category alongside the kernel writer/epoch
+    # errors (the SDK class stays for the public envelope surface).
+    if isinstance(exc, (NotWriterError, StaleEpochError)):
+        return CapabilityLeaseError(str(exc))
+    if type(exc).__module__.startswith("astrid.core.session"):
         return CapabilityLeaseError(str(exc))
     if isinstance(exc, (StaleTailError, EventLogError)):
         return CapabilityEventLogError(str(exc))

@@ -61,10 +61,12 @@ def test_product_census_is_exactly_five_families() -> None:
     assert len(PRODUCT_FAMILIES) == 5
 
 
-def test_operational_and_singular_run_are_excluded() -> None:
-    """serve/doctor and the singular run alias are outside the census."""
-    for excluded in ("serve", "doctor", "run"):
-        assert excluded in EXCLUDED_FROM_PRODUCT_CENSUS
+def test_operational_families_are_excluded_from_product_census() -> None:
+    """serve/doctor/backup are operational families outside the census."""
+    assert EXCLUDED_FROM_PRODUCT_CENSUS == frozenset(
+        {"serve", "doctor", "backup"}
+    )
+    for excluded in EXCLUDED_FROM_PRODUCT_CENSUS:
         assert not is_product_family(excluded)
         assert excluded not in product_top_level_commands()
 
@@ -418,7 +420,7 @@ def test_dispatch_product_rejects_excluded_commands_before_opening(
 
     from astrid.core.gateway import dispatch
 
-    for excluded in ("serve", "doctor", "run", "sessions", "renderers"):
+    for excluded in ("serve", "doctor", "backup", "sessions", "renderers"):
         with pytest.raises(AstridError, match="unknown product command"):
             dispatch._dispatch_product([excluded])
 
@@ -443,6 +445,43 @@ def test_product_census_hook_matches_domain_registry() -> None:
     from astrid.core.gateway import dispatch
 
     assert dispatch._product_top_level_commands() == product_top_level_commands()
+
+
+def test_top_level_commands_are_exactly_eight_families() -> None:
+    from astrid.core.gateway import dispatch
+
+    assert dispatch._top_level_commands() == frozenset(
+        {
+            "projects",
+            "timelines",
+            "media",
+            "tasks",
+            "runs",
+            "serve",
+            "doctor",
+            "backup",
+        }
+    )
+    assert len(dispatch._top_level_commands()) == 8
+
+
+def test_all_five_product_families_route_through_product_dispatch(
+    monkeypatch,
+) -> None:
+    """Every product-family handler prepends its token to _dispatch_product."""
+    from astrid.core.gateway import dispatch
+
+    seen: dict[str, object] = {}
+
+    def _fake_product(args):  # noqa: ANN001
+        seen["args"] = list(args)
+        return 7
+
+    monkeypatch.setattr(dispatch, "_dispatch_product", _fake_product)
+    for family in ("projects", "timelines", "media", "tasks", "runs"):
+        handler = dispatch._TOP_LEVEL_HANDLERS[family]
+        assert handler(["list", "--json"]) == 7
+        assert seen["args"] == [family, "list", "--json"]
 
 
 # ---------------------------------------------------------------------------
@@ -592,32 +631,32 @@ def test_print_result_returns_stable_exit_codes(capsys) -> None:
 def test_product_help_text_declares_exact_census_and_mounts() -> None:
     text = _product_help_text()
     assert (
-        "Product census (exactly five families): "
-        "projects media tasks runs timelines" in text
+        "Family census (exactly eight families): "
+        "projects timelines media tasks runs serve doctor backup" in text
     )
     for family in PRODUCT_FAMILIES:
         assert family in text
+    for operational in ("serve", "doctor", "backup"):
+        assert operational in text
     assert "timelines shots" in text
     assert "media references" in text
-    assert (
-        "Excluded from the product census until m6: serve, doctor, run"
-        in text
-    )
+    for excluded in EXCLUDED_FROM_PRODUCT_CENSUS:
+        assert excluded in text
 
 
 def test_product_help_census_matches_explicit_registry() -> None:
     text = _product_help_text()
     census_line = next(
-        line for line in text.splitlines() if line.startswith("Product census")
+        line for line in text.splitlines() if line.startswith("Family census")
     )
     census = census_line.split(":", 1)[1].split()
-    assert tuple(census) == PRODUCT_FAMILIES
-    # Every advertised family is a real registered product family.
-    for family in census:
+    assert tuple(census[5:]) == ("serve", "doctor", "backup")
+    assert set(census[:5]) == set(PRODUCT_FAMILIES)
+    # Every advertised product family is a real registered product family.
+    for family in census[:5]:
         assert is_product_family(family)
-    # Operational commands and the singular run alias are never advertised.
-    for excluded in EXCLUDED_FROM_PRODUCT_CENSUS:
-        assert excluded not in census
+    # The three operational families are exactly the excluded set.
+    assert set(census[5:]) == set(EXCLUDED_FROM_PRODUCT_CENSUS)
 
 
 def test_product_help_documents_stable_exit_codes() -> None:
@@ -638,4 +677,4 @@ def test_print_product_help_prints_to_stdout(capsys) -> None:
     _print_product_help()
     captured = capsys.readouterr()
     assert captured.out.startswith("Astrid product commands")
-    assert "Product census (exactly five families)" in captured.out
+    assert "Family census (exactly eight families)" in captured.out

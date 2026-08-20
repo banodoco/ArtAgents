@@ -24,7 +24,7 @@ import sys
 from pathlib import Path
 
 from astrid.core.foundation.hash import sha256_file
-from astrid.core.gateway.dispatch import _TOP_LEVEL_HANDLERS, _dispatch_replay
+from astrid.core.gateway.dispatch import _TOP_LEVEL_HANDLERS
 from astrid.core.rendering.cli import main as renderers_cli_main
 from astrid.core.rendering.contracts import compute_request_digest
 from astrid.core.rendering.registry import load_default_registries
@@ -390,15 +390,14 @@ def test_replay_missing_bundle_dir_fails(capsys) -> None:
 
 
 def test_dispatch_routes_replay_verb(tmp_path: Path, capsys) -> None:
-    assert "replay" in _TOP_LEVEL_HANDLERS
-    assert _TOP_LEVEL_HANDLERS["replay"] is _dispatch_replay
+    assert "replay" not in _TOP_LEVEL_HANDLERS
 
     extra_root = _copy_pack(tmp_path)
     candidate = _candidate(extra_root)
     bundle_dir = _make_bundle(tmp_path, candidate)
 
     assert (
-        _dispatch_replay([str(bundle_dir), "--pack-root", str(extra_root)]) == 0
+        renderers_cli_main(["replay", str(bundle_dir), "--pack-root", str(extra_root)]) == 0
     )
     text = _stdout(capsys)
     assert f"replay: {BACKEND_ID}" in text

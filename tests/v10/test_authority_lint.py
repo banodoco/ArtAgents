@@ -44,6 +44,7 @@ from pathlib import Path
 from scripts.reshape.authority_lint import (
     lint_import_boundaries,
     lint_legacy_authorities,
+    lint_removed_authorities,
     lint_schema_ownership,
     lint_writer_authority,
     run_authority_lint,
@@ -609,6 +610,113 @@ def test_legacy_files_outside_supported_paths_are_allowed(tmp_path: Path) -> Non
     )
     errors = lint_legacy_authorities(tmp_path)
     assert errors == [], errors
+
+
+# ---------------------------------------------------------------------------
+# Removed authorities
+# ---------------------------------------------------------------------------
+
+
+def test_removed_authority_import_in_product_path_fails(tmp_path: Path) -> None:
+    """A product path (SDK module) importing a removed authority fails."""
+    _bootstrap(tmp_path)
+    _write(
+        tmp_path,
+        "astrid/sdk/evil.py",
+        "from astrid.core.session import lease\n"
+        "token = lease.LeaseError\n",
+    )
+    errors = lint_removed_authorities(tmp_path)
+    assert any(
+        "astrid/sdk/evil.py: removed-authority import 'astrid.core.session' "
+        "from a product path" in error
+        for error in errors
+    ), errors
+
+
+def test_removed_authority_import_in_non_product_path_stays_legal(
+    tmp_path: Path,
+) -> None:
+    """The same removed-authority import outside a product path is legal:
+    legacy dead code may stay in-tree as long as no product path imports it."""
+    _bootstrap(tmp_path)
+    _write(
+        tmp_path,
+        "astrid/core/timeline/legacy_thing.py",
+        "from astrid.core.session import lease\n"
+        "token = lease.LeaseError\n",
+    )
+    errors = lint_removed_authorities(tmp_path)
+    assert errors == [], errors
+
+
+def test_removed_authority_import_in_dispatch_route_fails(tmp_path: Path) -> None:
+    """The eight-family dispatch routes are product paths: a dispatch-route
+    import of a deleted CLI module fails."""
+    _bootstrap(tmp_path)
+    _write(
+        tmp_path,
+        "astrid/core/gateway/dispatch.py",
+        "from astrid.core.cli.timeline import main\n",
+    )
+    errors = lint_removed_authorities(tmp_path)
+    assert any(
+        "astrid/core/gateway/dispatch.py: removed-authority import "
+        "'astrid.core.cli.timeline' from a product path" in error
+        for error in errors
+    ), errors
+
+
+def test_removed_authority_import_in_pack_fails(tmp_path: Path) -> None:
+    """A pack module importing a removed authority fails."""
+    _bootstrap(tmp_path)
+    _write(
+        tmp_path,
+        "astrid/packs/timeline/evil.py",
+        "from astrid.core.integrations.reigh.supabase_client import client\n",
+    )
+    errors = lint_removed_authorities(tmp_path)
+    assert any(
+        "astrid/packs/timeline/evil.py: removed-authority import "
+        "'astrid.core.integrations.reigh.supabase_client' from a product path"
+        in error
+        for error in errors
+    ), errors
+
+
+def test_product_path_importing_kernel_currency_stays_clean(
+    tmp_path: Path,
+) -> None:
+    """Negative control: a product path may import non-removed kernel
+    currency (UoW, receipts); only removed authorities are flagged."""
+    _bootstrap(tmp_path)
+    _write(
+        tmp_path,
+        "astrid/sdk/good.py",
+        "from astrid.core.store.uow import UnitOfWork\n"
+        "from astrid.core.receipts import ReceiptService\n",
+    )
+    errors = lint_removed_authorities(tmp_path)
+    assert errors == [], errors
+
+
+def test_removed_authority_import_fails_the_whole_authority_lint(
+    tmp_path: Path,
+) -> None:
+    """run_authority_lint registers lint_removed_authorities: a product-path
+    removed-authority import is caught by the aggregate lint."""
+    _bootstrap(tmp_path)
+    _write(
+        tmp_path,
+        "astrid/sdk/evil.py",
+        "from astrid.core.cli.project import main\n",
+    )
+    report = run_authority_lint(tmp_path)
+    assert not report.ok
+    assert any(
+        "removed-authority import 'astrid.core.cli.project'" in error
+        for error in report.errors
+    ), report.errors
 
 
 # ---------------------------------------------------------------------------

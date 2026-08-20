@@ -9,9 +9,9 @@ Task T28 (plan step 26) proves the ``timelines`` product family
 (``astrid/packs/timeline/cli.py``): exactly the seven planned verbs are
 reachable through one-call SDK adapters, legacy aliases and
 migration/push/pull/sync/audit/erase/repair are absent, ``copy`` is
-absent (reserved for m6), all help is executable, and the gateway
-dispatch routes the seven verbs through the product boundary while
-legacy/developer verbs keep the legacy CLI until m6.
+absent (deferred past m6), all help is executable, and the gateway
+dispatch routes every timelines verb through the product boundary
+(m6 teardown removed the legacy timeline CLI and its fallback).
 
 Task T29 (plan step 26 nested shots) proves the manifest-declared nested
 ``shots`` mount (``astrid/packs/shots/cli.py``): shot
@@ -864,19 +864,30 @@ def test_dispatch_timelines_routes_product_verbs_through_product_dispatch(
     assert seen["args"] == ["timelines", "create", "--project", "demo", "main"]
 
 
-def test_dispatch_timelines_keeps_legacy_verbs_on_legacy_cli(monkeypatch) -> None:
+def test_dispatch_timelines_has_no_legacy_cli_fallback(monkeypatch) -> None:
+    """m6 teardown: every timelines route goes through the product boundary.
+
+    ``astrid.core.cli.timeline`` is deleted, so there is no legacy CLI to
+    fall back to — even a formerly-legacy verb (e.g. ``visualize``) is
+    forwarded to ``_dispatch_product`` (the family parser rejects it).
+    """
     from astrid.core.gateway import dispatch
 
     seen: dict[str, object] = {}
 
-    def _fake_legacy_main(args):  # noqa: ANN001
+    def _fake_product(args):  # noqa: ANN001
         seen["args"] = list(args)
         return 3
 
-    monkeypatch.setattr(dispatch, "_dispatch_product", lambda args: (_ for _ in ()).throw(AssertionError("must not route to product")))
-    monkeypatch.setattr("astrid.core.cli.timeline.main", _fake_legacy_main)
+    monkeypatch.setattr(dispatch, "_dispatch_product", _fake_product)
     assert dispatch._dispatch_timelines(["visualize", "--project", "demo"]) == 3
-    assert seen["args"] == ["visualize", "--project", "demo"]
+    assert seen["args"] == ["timelines", "visualize", "--project", "demo"]
+
+    # The legacy timeline CLI module no longer exists anywhere in the tree.
+    import importlib
+
+    with pytest.raises(ImportError):
+        importlib.import_module("astrid.core.cli.timeline")
 
 
 # ---------------------------------------------------------------------------

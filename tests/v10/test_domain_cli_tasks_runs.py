@@ -1011,3 +1011,46 @@ def test_runs_retry_failed_help_is_executable(capsys) -> None:
     out = capsys.readouterr().out
     assert "--task" in out
     assert "--idempotency-key" in out
+
+
+# ---------------------------------------------------------------------------
+# Gateway dispatch cutover for the tasks/runs families (m6)
+# ---------------------------------------------------------------------------
+
+
+def test_tasks_and_runs_are_registered_top_level_families() -> None:
+    from astrid.core.gateway import dispatch
+
+    assert {"tasks", "runs"} <= dispatch._top_level_commands()
+    assert "tasks" in dispatch._TOP_LEVEL_HANDLERS
+    assert "runs" in dispatch._TOP_LEVEL_HANDLERS
+
+
+def test_dispatch_tasks_routes_through_product_dispatch(monkeypatch) -> None:
+    from astrid.core.gateway import dispatch
+
+    seen: dict[str, object] = {}
+
+    def _fake_product(args):  # noqa: ANN001
+        seen["args"] = list(args)
+        return 7
+
+    monkeypatch.setattr(dispatch, "_dispatch_product", _fake_product)
+    handler = dispatch._TOP_LEVEL_HANDLERS["tasks"]
+    assert handler(["list", "--project", "demo"]) == 7
+    assert seen["args"] == ["tasks", "list", "--project", "demo"]
+
+
+def test_dispatch_runs_routes_through_product_dispatch(monkeypatch) -> None:
+    from astrid.core.gateway import dispatch
+
+    seen: dict[str, object] = {}
+
+    def _fake_product(args):  # noqa: ANN001
+        seen["args"] = list(args)
+        return 7
+
+    monkeypatch.setattr(dispatch, "_dispatch_product", _fake_product)
+    handler = dispatch._TOP_LEVEL_HANDLERS["runs"]
+    assert handler(["list"]) == 7
+    assert seen["args"] == ["runs", "list"]

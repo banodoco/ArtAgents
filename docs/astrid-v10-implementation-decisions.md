@@ -284,9 +284,11 @@ closed with a typed `unavailable` error.
   process, or a standalone CLI/SDK process when no server owns the database.
 - The lock is recorded as an explicit temporary deviation from the North Star's
   concurrency model (CF-A2410DC6D581F4B178BE / CF-BBA66D60FBD98B49F5E1).
-- **m6 closure design:** mutations route through the serving process via
-  loopback RPC, or an exclusive service-owner protocol is adopted; the lock and
-  this deviation are **removed in m6**.
+- **m6 closure design (corrected, see §18.1):** the loopback-RPC closure was
+  originally planned for m6. The North Star's "no remote execution" scope
+  refers to **remote GPU execution**, not a local loopback RPC — a local
+  loopback RPC is not "remote execution" and remains a valid closure path. The
+  full closure is deferred to m7/m8; the owner lock **stays for m6**.
 
 ## 16. Reserved save-as-copy route (planned m6, not implemented in m4)
 
@@ -309,7 +311,9 @@ Planned route: `POST /projects/:slug/timelines/:ref/copy` — reserved semantics
   key.
 - **m4 behavior:** the route is NOT implemented; it resolves through the
   existing "any other path → 404" grammar rule, and no `timelines copy` CLI
-  verb is registered. Implementation and the CLI verb land in **m6**.
+  verb is registered. Implementation and the CLI verb were originally planned
+  for m6 but are **deferred past m6** (see §18.2): the reserved route stays
+  absent and its 404 behavior is preserved.
 
 ## 17. Media relation kinds and repository rules (frozen)
 
@@ -331,9 +335,49 @@ relation rules to the repository:
 There is **no per-kind direction matrix** and none may be invented; `variant_of`
 direction is defined only by the one-parent rule.
 
+## 18. m6 settled deviations — owner lock stays, timelines copy deferred (Sprint 6)
+
+**Status:** settled in m6 (Sprint 6). Two open questions from the m6 plan are
+resolved as documented deviations and recorded here so neither is silently
+reopened or overridden.
+
+### 18.1 Owner lock stays for m6 (loopback-RPC closure deferred to m7/m8)
+
+**Decision:** the §15 exclusive-owner lock is **not removed in m6**. It stays
+to preserve single-writer semantics through the m6 backup/restore surface:
+`create_backup` and `restore_backup` acquire the `DatabaseOwnerLock` before
+touching the database, so a backup or restore can never race a live writer.
+
+- The full loopback-RPC closure (mutations routed through the serving process
+  via a local loopback RPC, or an exclusive service-owner protocol adopted) is
+  **deferred to m7/m8** with a concrete path; only then is the lock and this
+  deviation removed.
+- **Rationale correction:** the North Star's "no remote execution" scope refers
+  to **remote GPU execution**, not a local loopback RPC. A local loopback RPC
+  is not "remote execution" and is therefore not excluded by the m6 anti-scope;
+  the closure is deferred for scope and sequencing, not because it is
+  forbidden. This is a continued deviation recorded explicitly, not a silent
+  override of §15.
+
+### 18.2 `timelines copy` CLI verb deferred past m6
+
+**Decision:** the §16 reserved save-as-copy bridge route and its `timelines
+copy` CLI verb are **deferred past m6**. The reserved route stays **absent** —
+it continues to resolve through the existing "any other path → 404" grammar
+rule, and no `timelines copy` verb is registered. The 404 behavior is preserved
+unchanged. This is a bridge route, not a CLI-family-scope item, and the m6
+anti-scope forbids new editor feature work, so the verb does not land in m6.
+
 ---
 
 **Record of amendments:**
+
+- **m6 amendment 1 (Sprint 6):** added §18 (owner lock stays for m6 with the
+  loopback-RPC closure deferred to m7/m8 and the corrected "remote GPU
+  execution" rationale; `timelines copy` deferred past m6 with the reserved
+  route absent and 404 preserved) and corrected §15's m6-closure wording and
+  §16's "lands in m6" wording. No previously frozen m1–m4 value was reopened by
+  this amendment.
 
 - **m4 amendment 1 (Sprint 4–5):** added §13–§17 (SDK contract freeze,
   inspected Reigh provider state and external-gate disposition, temporary

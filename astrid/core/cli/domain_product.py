@@ -21,9 +21,8 @@ Rules enforced before any dispatch (sense check SC25):
   from any other source is impossible by construction.
 
 The product census also excludes the operational commands (``serve``,
-``doctor``), legacy/developer commands, and the singular ``run`` alias:
-they keep their legacy routes until m6 but are never part of the
-five-family product registry, help, or product dispatch.
+``doctor``, ``backup``): they are never part of the five-family product
+registry, help, or product dispatch.
 
 The dispatch boundary (:func:`run_product_family`) composes one
 ``AstridClient`` and passes it to the family's in-tree parser builder, so
@@ -66,13 +65,13 @@ PRODUCT_FAMILIES: tuple[str, ...] = (
 PRODUCT_FAMILY_SET: frozenset[str] = frozenset(PRODUCT_FAMILIES)
 
 EXCLUDED_FROM_PRODUCT_CENSUS: frozenset[str] = frozenset(
-    {"serve", "doctor", "run"}
+    {"serve", "doctor", "backup"}
 )
-"""Operational commands and the singular legacy ``run`` alias.
+"""Operational commands excluded from the product census.
 
-``serve`` and ``doctor`` stay callable until m6 (operational tooling);
-``run`` is the legacy singular alias of ``runs``. None of them is a
-product family, appears in product help, or dispatches through the
+``serve``, ``doctor``, and ``backup`` are operational families (tooling
+over the single SQLite file and managed-media root). None of them is a
+product family, appears in the product census, or dispatches through the
 product boundary.
 """
 

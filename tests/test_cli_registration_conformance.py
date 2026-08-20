@@ -33,9 +33,17 @@ from astrid.core.cli.registration import CommandSpec, register_commands
 # planned in this epic).  They are no longer in any gate list.
 
 _ALLOWLISTED: tuple[str, ...] = (
-    # M4 T50: Session CLI parser now uses CommandSpec + register_commands.
-    # W5: lifted into the top-level CLI aggregation tier.
-    "astrid.core.cli.session",
+    # m6 teardown: the seven product-family CLI modules (five product
+    # families + the two manifest-declared nested mounts) are the pruned
+    # allowlist. The legacy session/timeline/project CLI modules were
+    # deleted by the m6 cutover (T5/T6-T9).
+    "astrid.core.cli.domain_projects",
+    "astrid.core.cli.domain_media",
+    "astrid.core.cli.domain_tasks",
+    "astrid.core.cli.domain_runs",
+    "astrid.packs.timeline.cli",
+    "astrid.packs.shots.cli",
+    "astrid.packs.references.cli",
 )
 
 # Fully decomposed during M4 — below the 1,200-line threshold and using
@@ -204,8 +212,8 @@ class ProductRegistryConformanceTest(unittest.TestCase):
 
     Exactly five product families; shots/references attach as nested
     mounts from the explicit in-tree manifest declarations; serve, doctor,
-    and the singular ``run`` alias stay outside the product census and
-    product dispatch; handlers receive the composed AstridClient.
+    and backup stay outside the product census and product dispatch
+    (m6 cutover); handlers receive the composed AstridClient.
     """
 
     def test_product_census_is_exactly_five_families(self) -> None:
@@ -247,18 +255,24 @@ class ProductRegistryConformanceTest(unittest.TestCase):
             },
         )
 
-    def test_operational_and_singular_run_excluded(self) -> None:
+    def test_operational_families_excluded_from_product_census(self) -> None:
         from astrid.core.cli.domain_product import (
             EXCLUDED_FROM_PRODUCT_CENSUS,
             is_product_family,
             product_top_level_commands,
         )
 
-        for excluded in ("serve", "doctor", "run"):
+        self.assertEqual(
+            EXCLUDED_FROM_PRODUCT_CENSUS,
+            frozenset({"serve", "doctor", "backup"}),
+        )
+        for excluded in ("serve", "doctor", "backup"):
             with self.subTest(excluded=excluded):
                 self.assertIn(excluded, EXCLUDED_FROM_PRODUCT_CENSUS)
                 self.assertFalse(is_product_family(excluded))
                 self.assertNotIn(excluded, product_top_level_commands())
+        # The removed singular run alias is gone from the top-level surface.
+        self.assertNotIn("run", product_top_level_commands())
 
     def test_register_product_commands_stamps_client_and_family(self) -> None:
         from astrid.core.cli.registration import (
