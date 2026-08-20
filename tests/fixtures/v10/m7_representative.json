@@ -1,0 +1,224 @@
+{
+  "schema": "astrid.m7_representative_fixture.v1",
+  "fixture_id": "m7-representative-v1",
+  "fixture_version": 1,
+  "provenance": {
+    "credential_free": true,
+    "source": "tests/fixtures/v10/m7_representative.json",
+    "construction": "repository-backed standard application",
+    "generated_outputs": [
+      "generation.generate_image",
+      "rendering.timeline_visualize"
+    ]
+  },
+  "baseline": {
+    "status": "provisional",
+    "reason": "no approved m6 baseline exists"
+  },
+  "clock": "2026-08-20T00:00:00.000000+00:00",
+  "project": {
+    "id": "m7-project-id",
+    "slug": "m7-representative",
+    "name": "M7 Representative",
+    "settings": {
+      "fps": 24,
+      "fixture": "m7-representative-v1"
+    }
+  },
+  "timeline": {
+    "id": "m7-timeline-id",
+    "ulid": "01KYPVKMW5STB4W6FE05ED8242",
+    "slug": "main",
+    "name": "Main",
+    "config": {
+      "theme": "banodoco-default",
+      "tracks": [
+        {
+          "id": "source",
+          "kind": "visual",
+          "label": "Source"
+        },
+        {
+          "id": "captions",
+          "kind": "visual",
+          "label": "Captions"
+        }
+      ],
+      "clips": [
+        {
+          "id": "source-main",
+          "at": 0,
+          "track": "source",
+          "clipType": "media",
+          "asset": "managed-source",
+          "from": 0,
+          "to": 2
+        },
+        {
+          "id": "caption-main",
+          "at": 0.5,
+          "track": "captions",
+          "clipType": "text",
+          "hold": 1,
+          "text": {
+            "content": "m7 representative",
+            "fontSize": 32
+          }
+        }
+      ]
+    },
+    "registry": {
+      "assets": {
+        "managed-source": {
+          "type": "image/png",
+          "file": "managed-source.png"
+        },
+        "external-source": {
+          "type": "image/png",
+          "file": "external-source.png"
+        }
+      }
+    }
+  },
+  "media": [
+    {
+      "key": "managed-source",
+      "relative_path": "fixture-input/managed-source.png",
+      "realm": "managed_local",
+      "bytes_hex": "4153545249442d4d372d4d414e414745442d534f555243452d7631",
+      "provenance": {
+        "kind": "fixture_input",
+        "source": "credential-free literal bytes"
+      }
+    },
+    {
+      "key": "external-source",
+      "relative_path": "fixture-input/external-source.png",
+      "realm": "external_local",
+      "bytes_hex": "4153545249442d4d372d45585445524e414c2d534f555243452d7631",
+      "provenance": {
+        "kind": "fixture_input",
+        "source": "credential-free literal bytes"
+      }
+    },
+    {
+      "key": "generation-output",
+      "relative_path": "fixture-output/generation.png",
+      "realm": "managed_local",
+      "bytes_hex": "4153545249442d4d372d47454e45524154494f4e2d4f55545055542d7631",
+      "provenance": {
+        "kind": "generation_output",
+        "capability": "generation.generate_image",
+        "backend": "deterministic-fixture"
+      }
+    },
+    {
+      "key": "render-output",
+      "relative_path": "fixture-output/render.json",
+      "realm": "managed_local",
+      "bytes_hex": "7b226361706162696c697479223a2272656e646572696e672e74696d656c696e655f76697375616c697a65222c2266697874757265223a226d372d726570726573656e7461746976652d7631227d",
+      "provenance": {
+        "kind": "render_output",
+        "capability": "rendering.timeline_visualize",
+        "backend": "deterministic-fixture"
+      }
+    }
+  ],
+  "runs": {
+    "understanding": {
+      "id": "m7-understanding-run",
+      "kind": "understanding",
+      "query": "Describe the representative fixture.",
+      "evidence": [
+        {
+          "kind": "observation",
+          "summary": "deterministic reasoning"
+        },
+        {
+          "kind": "measurement",
+          "summary": "one representative input"
+        },
+        {
+          "kind": "decision",
+          "summary": "fixture is ready"
+        }
+      ]
+    },
+    "fanout": {
+      "id": "m7-fanout-run",
+      "children": [
+        {
+          "id": "m7-fanout-parent",
+          "capability": "generation.generate_image",
+          "spec": {
+            "fixture": "m7-representative-v1",
+            "stage": "generation"
+          }
+        },
+        {
+          "id": "m7-fanout-dependent",
+          "capability": "rendering.timeline_visualize",
+          "spec": {
+            "fixture": "m7-representative-v1",
+            "stage": "render"
+          },
+          "dependencies": [
+            {
+              "task_id": "m7-fanout-parent",
+              "kind": "hard",
+              "ordinal": 0
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "references": [
+    {
+      "id": "m7-reference-source",
+      "kind": "character",
+      "name": "Representative source",
+      "primary_media_key": "managed-source",
+      "associations": [
+        {
+          "media_key": "external-source",
+          "role": "inspired_by"
+        },
+        {
+          "media_key": "generation-output",
+          "role": "inspired_by"
+        }
+      ]
+    },
+    {
+      "id": "m7-reference-render",
+      "kind": "other",
+      "name": "Representative render",
+      "primary_media_key": "render-output"
+    }
+  ],
+  "shots": {
+    "id": "m7-shot-main",
+    "name": "Opening",
+    "items": [
+      "managed-source",
+      "generation-output"
+    ]
+  },
+  "gallery": {
+    "relative_path": "gallery/index.html",
+    "bytes_hex": "3c68746d6c3e3c7469746c653e4d3720526570726573656e7461746976653c2f7469746c653e3c2f68746d6c3e",
+    "provenance": "deterministic static gallery marker"
+  },
+  "expected": {
+    "media_count": 4,
+    "managed_media_count": 3,
+    "external_media_count": 1,
+    "timeline_count": 1,
+    "reference_count": 2,
+    "shot_count": 1,
+    "shot_item_count": 2,
+    "fanout_child_count": 2,
+    "understanding_task_count": 0
+  }
+}

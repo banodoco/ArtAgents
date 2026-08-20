@@ -3,43 +3,43 @@
 Astrid is a Python SDK and harness toolkit for building and running
 agentic UXes — pipelines where agents and humans collaborate to make art.
 
-## Install
+## Prerequisites
+
+Astrid requires Python 3.11+. The clean-machine journey uses the checkout
+directly; it needs no API keys, network access, or hosted service.
+
+From the repository root, confirm the gateway is available:
 
 ```bash
-pip install astrid
-```
-
-Astrid requires Python 3.11+.  No API keys, network access, or hosted
-services are required — everything runs locally.
-
-For a development install from a local checkout:
-
-```bash
-cd /path/to/Astrid
-pip install -e .
+python3 -m astrid --help
+python3 -m astrid doctor --json
 ```
 
 ## Your First Command
 
-From any shell, run the universal port-of-call:
+From any shell, run the read-only health check:
+
+Other useful zero-secret commands:
 
 ```bash
-python3 -m astrid next
+python3 -m astrid doctor --json   # read-only health check
+python3 -m astrid projects list --json
 ```
 
-`next` always prints exactly one legal action.  On a cold start it tells
-you to attach to a project.  Once attached, it guides you through
-discovery, execution, and task steps.  Use it as your always-available
-compass.
+`doctor --json` is the first diagnostic on a clean machine. It reports
+`schema_versions`, media paths, SQLite quick-check, and foreign-key status
+without repairing or rewriting data. A failing `schema_versions` check means
+the database is newer or incompatible with this checkout; preserve the
+database, use a compatible checkout, or restore a known-good backup.
 
-Other useful zero-setup commands:
+The local bridge is optional. If its process or owner lock is unavailable,
+keep the local project and use the typed `unavailable` error plus the doctor
+report to decide whether to retry. No hosted dependency is needed for the
+SDK and CLI journeys.
 
-```bash
-python3 -m astrid status          # read-side breadcrumb
-python3 -m astrid attach <project>  # bind a session to a project
-python3 -m astrid doctor          # health check
-python3 -m astrid setup           # configure local environment
-```
+For the complete project, timeline, media, recovery, and failure journeys,
+continue with [CLI journeys](guides/cli-journeys.md). For renderer-specific
+diagnostics, see [Debugging](guides/debugging.md).
 
 ## Where to Go Next
 

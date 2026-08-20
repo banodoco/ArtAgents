@@ -12,8 +12,185 @@ on:
         type: boolean
 
 jobs:
+  m7-admission:
+    name: m7 finalizer admission
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run m7 finalizer admission first
+        # This is the custody boundary for every m7 lane.  A missing,
+        # rejected, stale, or plan-mismatched admission fails closed.
+        run: |
+          python3 scripts/reshape/m7_gate.py \
+            --artifact-dir artifacts/m7 \
+            --admission artifacts/m7/finalizer-admission.json
+
+      - name: Upload m7 admission evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: m7-finalizer-admission
+          path: artifacts/m7/finalizer-admission.json
+          if-no-files-found: ignore
+
+  m7-release-candidate:
+    name: m7 release-candidate evidence and gates
+    needs: m7-admission
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+
+      - name: Install system media tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[dev]'
+
+      - name: Download admitted custody record
+        uses: actions/download-artifact@v4
+        with:
+          name: m7-finalizer-admission
+          path: artifacts/m7
+
+      - name: Revalidate admission before m7 execution
+        run: |
+          python3 scripts/reshape/m7_gate.py \
+            --check \
+            --artifact-dir artifacts/m7 \
+            --admission artifacts/m7/finalizer-admission.json
+
+      - name: Focused m7 fixture lane
+        run: timeout 120 python3 -m pytest tests/v10/test_m7_fixture.py -q
+
+      - name: Focused m7 backup lane
+        run: timeout 120 python3 -m pytest tests/v10/test_backup_restore.py -q
+
+      - name: Focused m7 hardening lane
+        run: timeout 120 python3 -m pytest tests/v10/test_m7_hardening.py -q
+
+      - name: Focused m7 contention lane
+        run: timeout 120 python3 -m pytest tests/v10/test_m7_bridge_contention.py -q
+
+      - name: Focused m7 dogfood lane
+        run: timeout 120 python3 -m pytest tests/v10/test_m7_dogfood.py -q
+
+      - name: Focused m7 documentation lane
+        run: timeout 120 python3 -m pytest tests/v10/test_m7_docs.py -q
+
+      - name: Focused m7 performance report (report-only)
+        # No approved normative budget exists; retain the report without
+        # turning performance into a blocking GA claim.
+        continue-on-error: true
+        run: timeout 120 python3 -m pytest tests/v10/test_m7_performance.py -q
+
+      - name: Existing m3 pack-factoring gate
+        run: timeout 120 python3 -m pytest tests/v10/test_pack_factoring.py -q
+
+      - name: Existing m6 gate
+        run: timeout 120 python3 -m pytest tests/v10/test_m6_gate.py -q
+
+      - name: Authority lint
+        run: python3 scripts/reshape/authority_lint.py
+
+      - name: Pack factoring check
+        run: python3 scripts/reshape/check_pack_factoring.py
+
+      - name: All v10 tests
+        run: timeout 900 python3 -m pytest tests/v10 -q
+
+      - name: Repository-wide lint
+        run: python3 scripts/reshape/compare_ruff_baseline.py
+
+      - name: Repository-wide typecheck
+        run: python3 scripts/reshape/compare_mypy_baseline.py
+
+      - name: Repository-wide test gate
+        run: timeout 900 python3 -m pytest tests -q
+
+      - name: Set up Node for repository typecheck
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: remotion/package-lock.json
+
+      - name: Install pinned Remotion toolchain
+        working-directory: remotion
+        run: npm ci
+
+      - name: Remotion typecheck
+        working-directory: remotion
+        run: npm run typecheck
+
+      - name: Revalidate admission immediately before m7 publication
+        run: |
+          python3 scripts/reshape/m7_gate.py \
+            --check \
+            --artifact-dir artifacts/m7 \
+            --admission artifacts/m7/finalizer-admission.json
+
+      - name: Publish m7 GA evidence atomically
+        # m7_gate.py revalidates the same hash immediately before replacing
+        # acceptance.json and defects.md. Items 11/12 stay provisional or
+        # retained, and item 6 external Reigh proof is not substituted by the
+        # in-tree bridge lane.
+        run: make m7-gate
+
+      - name: Assert honest non-substitutable m7 dispositions
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          acceptance = json.loads(Path("artifacts/m7/acceptance.json").read_text())
+          unresolved = {
+              item["id"]: item
+              for item in acceptance["unresolved_external_manual_gates"]
+          }
+          assert unresolved["external-reigh-editor"]["status"] == "unresolved"
+          assert unresolved["installed-artifact-items-11-12"]["status"] == "deferred"
+          assert unresolved["performance-budget"]["status"] == "unresolved"
+          assert acceptance["ga_items"]["11"]["label"] == "provisional"
+          assert acceptance["ga_items"]["12"]["label"] == "retained"
+          PY
+
+      - name: Upload m7 evidence on success or failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: m7-release-candidate-evidence
+          path: |
+            artifacts/m7/**
+            out/m7-gate/**
+          if-no-files-found: ignore
+
   python:
     name: Python quality gates
+    needs: m7-release-candidate
     runs-on: ubuntu-latest
     timeout-minutes: 55
 

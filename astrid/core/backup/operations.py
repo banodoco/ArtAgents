@@ -30,6 +30,7 @@ and leaves the live database and media tree untouched.
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import sqlite3
@@ -61,8 +62,50 @@ BACKUP_MEDIA_DIR = "media"
 BACKUP_METADATA_NAME = "backup.json"
 """The envelope metadata file name inside a backup directory."""
 
+BACKUP_PUBLICATION_SCHEMA = "astrid.backup_publication.v1"
+"""Durable marker schema for an interrupted backup-directory publish."""
+
+BACKUP_PUBLICATION_BOUNDARIES = (
+    "staged_complete",
+    "previous_moved",
+    "destination_published",
+    "previous_cleaned",
+)
+"""Observable hard-death boundaries used by the backup crash matrix."""
+
 RESTORE_STAGING_DIR = ".restore-staging"
 """The staging root under ``.astrid`` used by :func:`restore_backup`."""
+
+RESTORE_JOURNAL_SCHEMA = "astrid.restore_journal.v1"
+"""Durable marker schema for an interrupted database/media restore."""
+
+RESTORE_JOURNAL_NAME = "restore-journal.json"
+"""The journal name inside one restore transaction directory."""
+
+RESTORE_SWAP_BOUNDARIES = (
+    "database_moved",
+    "media_moved",
+    "database_published",
+    "media_published",
+)
+"""Observable hard-death boundaries used by the restore crash matrix."""
+
+# Keep a descriptive alias for callers that use the recovery terminology.
+RESTORE_RECOVERY_BOUNDARIES = RESTORE_SWAP_BOUNDARIES
+"""Alias for :data:`RESTORE_SWAP_BOUNDARIES`."""
+
+_RESTORE_KILL_ENV = "ASTRID_RESTORE_KILL_BOUNDARY"
+_RESTORE_RUNTIME_LOG_ENV = "ASTRID_RESTORE_RUNTIME_LOG"
+_RESTORE_PHASES = frozenset(
+    {
+        "prepared",
+        "database_moved",
+        "media_moved",
+        "database_published",
+        "media_published",
+    }
+)
+_RESTORE_DATABASE_SIDECARS = ("-wal", "-shm")
 
 MANAGED_DIR_NAME = ".astrid"
 """The managed-data directory name under the projects root."""
@@ -161,6 +204,39 @@ class RestoreResult:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class _RestoreJournal:
+    """Validated paths and state read from one restore journal."""
+
+    journal_path: Path
+    transaction_dir: Path
+    previous_dir: Path
+    database_path: Path
+    media_path: Path
+    staged_database: Path
+    staged_media: Path
+    had_database: bool
+    had_media: bool
+    database_sidecars: tuple[str, ...]
+    phase: str
+
+    def payload(self, *, phase: str | None = None) -> dict[str, object]:
+        """Return the complete JSON payload for an atomic journal update."""
+        return {
+            "schema": RESTORE_JOURNAL_SCHEMA,
+            "transaction": str(self.transaction_dir.resolve()),
+            "previous": str(self.previous_dir.resolve()),
+            "database": str(self.database_path.resolve()),
+            "media": str(self.media_path.resolve()),
+            "staged_database": str(self.staged_database.resolve()),
+            "staged_media": str(self.staged_media.resolve()),
+            "had_database": self.had_database,
+            "had_media": self.had_media,
+            "database_sidecars": list(self.database_sidecars),
+            "phase": phase if phase is not None else self.phase,
+        }
+
+
 # ---------------------------------------------------------------------------
 # Exclusion helpers
 # ---------------------------------------------------------------------------
@@ -255,6 +331,560 @@ def _copy_media_tree(projects_root: Path, dest_media: Path) -> int:
     return count
 
 
+# ---------------------------------------------------------------------------
+# Recoverable backup publication
+# ---------------------------------------------------------------------------
+
+
+def _publication_marker_path(dest: Path) -> Path:
+    """Return the sibling marker that journals publication of *dest*."""
+    return dest.parent / f".{dest.name}.publication.json"
+
+
+def _publication_runtime_log(boundary: str, *, marker: Path) -> None:
+    """Record a boundary in the optional child-process runtime log."""
+    log_path = os.environ.get("ASTRID_BACKUP_RUNTIME_LOG")
+    if not log_path:
+        return
+    record = {
+        "boundary": boundary,
+        "marker": str(marker),
+        "pid": os.getpid(),
+    }
+    with Path(log_path).open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(record, sort_keys=True) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+
+
+def _publication_boundary(boundary: str, *, marker: Path) -> None:
+    """Expose a durable publication boundary and optionally hard-kill.
+
+    The environment hook is deliberately test-only and inert for normal
+    callers.  The child exits with ``os._exit`` so neither Python cleanup nor
+    the owner-lock release can mask the exact filesystem state under test.
+    """
+    if boundary not in BACKUP_PUBLICATION_BOUNDARIES:
+        raise BackupError(f"unknown backup publication boundary: {boundary!r}")
+    _publication_runtime_log(boundary, marker=marker)
+    if os.environ.get("ASTRID_BACKUP_KILL_BOUNDARY") == boundary:
+        os._exit(77)  # noqa: PLR1722 - intentional hard-death test seam
+
+
+def _fsync_directory(path: Path) -> None:
+    """Durably record a directory rename where the platform supports it."""
+    flags = getattr(os, "O_DIRECTORY", 0) | os.O_RDONLY
+    fd: int | None = None
+    try:
+        fd = os.open(path, flags)
+        os.fsync(fd)
+    except OSError:
+        # The marker and directory swaps are still atomic on the supported
+        # filesystem when directory fsync is unavailable (e.g. some tmpfs).
+        pass
+    finally:
+        if fd is not None:
+            os.close(fd)
+
+
+def _remove_publication_path(path: Path) -> None:
+    """Remove one journaled directory or file without following links."""
+    if path.is_dir() and not path.is_symlink():
+        shutil.rmtree(path)
+    else:
+        path.unlink(missing_ok=True)
+
+
+def _backup_artifact_complete(path: Path) -> bool:
+    """Return whether *path* has the complete directory-level layout."""
+    if not path.is_dir():
+        return False
+    if not (path / BACKUP_DATABASE_NAME).is_file():
+        return False
+    if not (path / BACKUP_METADATA_NAME).is_file():
+        return False
+    if not (path / BACKUP_MEDIA_DIR).is_dir():
+        return False
+    try:
+        payload = json.loads(
+            (path / BACKUP_METADATA_NAME).read_text(encoding="utf-8")
+        )
+    except (OSError, json.JSONDecodeError):
+        return False
+    return isinstance(payload, dict) and payload.get("version") == BACKUP_FORMAT_VERSION
+
+
+def _read_publication_marker(marker: Path, dest: Path) -> dict[str, object]:
+    """Read and constrain a marker before using any journaled path."""
+    try:
+        payload = json.loads(marker.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise BackupError(f"invalid backup publication marker: {marker}") from exc
+    if not isinstance(payload, dict) or payload.get("schema") != BACKUP_PUBLICATION_SCHEMA:
+        raise BackupError(f"unsupported backup publication marker: {marker}")
+    target = Path(str(payload.get("target", ""))).resolve()
+    if target != dest.resolve():
+        raise BackupError(f"backup publication marker targets {target}, not {dest}")
+    parent = dest.parent.resolve()
+    paths: dict[str, object] = {"target": target}
+    for key in ("staging", "previous"):
+        raw = payload.get(key)
+        if raw is None:
+            paths[key] = None
+            continue
+        value = Path(str(raw)).resolve()
+        if value.parent != parent or value == target:
+            raise BackupError(f"unsafe backup publication marker path: {value}")
+        paths[key] = value
+    phase = payload.get("phase")
+    if phase not in {"staged", "previous_moved", "published"}:
+        raise BackupError(f"invalid backup publication phase: {phase!r}")
+    paths["phase"] = phase
+    return paths
+
+
+def _write_publication_marker(
+    marker: Path,
+    *,
+    dest: Path,
+    staging: Path,
+    previous: Path | None,
+    phase: str,
+) -> None:
+    """Atomically persist one backup publication journal state."""
+    write_json_atomic(
+        marker,
+        {
+            "schema": BACKUP_PUBLICATION_SCHEMA,
+            "target": str(dest.resolve()),
+            "staging": str(staging.resolve()),
+            "previous": str(previous.resolve()) if previous is not None else None,
+            "phase": phase,
+        },
+    )
+
+
+def recover_backup_publication(dest_path: str | Path) -> None:
+    """Recover one interrupted backup publication before it is reopened.
+
+    A marker is the authority for an in-flight overwrite.  Recovery chooses a
+    complete staged directory when available, otherwise restores the complete
+    previous directory; it never accepts a partially populated destination.
+    The operation is idempotent and is intentionally independent of SQLite.
+    """
+    dest = Path(dest_path)
+    marker = _publication_marker_path(dest)
+    if not marker.exists():
+        return
+    paths = _read_publication_marker(marker, dest)
+    staging = paths["staging"]
+    previous = paths["previous"]
+    phase = paths["phase"]
+    assert isinstance(staging, Path)
+    assert previous is None or isinstance(previous, Path)
+
+    target_complete = _backup_artifact_complete(dest)
+    staging_complete = _backup_artifact_complete(staging)
+    previous_complete = previous is not None and _backup_artifact_complete(previous)
+
+    if phase == "staged":
+        if target_complete:
+            _remove_publication_path(staging)
+        elif staging_complete and not dest.exists():
+            os.replace(staging, dest)
+        else:
+            raise BackupError("backup publication has no complete old or new destination")
+    elif phase == "previous_moved":
+        if target_complete:
+            _remove_publication_path(staging)
+            if previous is not None:
+                _remove_publication_path(previous)
+        elif staging_complete:
+            if dest.exists():
+                _remove_publication_path(dest)
+            os.replace(staging, dest)
+            if previous is not None:
+                _remove_publication_path(previous)
+        elif previous_complete:
+            if dest.exists():
+                _remove_publication_path(dest)
+            assert previous is not None
+            os.replace(previous, dest)
+            _remove_publication_path(staging)
+        else:
+            raise BackupError("backup publication has no complete old or new destination")
+    else:  # published
+        if target_complete:
+            _remove_publication_path(staging)
+            if previous is not None:
+                _remove_publication_path(previous)
+        elif staging_complete:
+            if dest.exists():
+                _remove_publication_path(dest)
+            os.replace(staging, dest)
+            if previous is not None:
+                _remove_publication_path(previous)
+        elif previous_complete:
+            if dest.exists():
+                _remove_publication_path(dest)
+            assert previous is not None
+            os.replace(previous, dest)
+        else:
+            raise BackupError("backup publication has no complete old or new destination")
+
+    marker.unlink(missing_ok=True)
+    _fsync_directory(dest.parent)
+
+
+def _restore_is_file(path: Path) -> bool:
+    """Return whether *path* is a regular, non-symlink file."""
+    return path.is_file() and not path.is_symlink()
+
+
+def _restore_is_dir(path: Path) -> bool:
+    """Return whether *path* is a regular, non-symlink directory."""
+    return path.is_dir() and not path.is_symlink()
+
+
+def _remove_restore_path(path: Path) -> None:
+    """Remove one restore-owned path without following a symlink."""
+    if path.is_symlink() or path.is_file():
+        path.unlink(missing_ok=True)
+    elif path.is_dir():
+        shutil.rmtree(path)
+
+
+def _restore_runtime_log(boundary: str, *, journal: Path) -> None:
+    """Record one restore boundary in the optional child-process log."""
+    log_path = os.environ.get(_RESTORE_RUNTIME_LOG_ENV)
+    if not log_path:
+        return
+    record = {"boundary": boundary, "journal": str(journal), "pid": os.getpid()}
+    with Path(log_path).open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(record, sort_keys=True) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+
+
+def _restore_boundary(boundary: str, *, journal: Path) -> None:
+    """Expose one restore move and optionally hard-kill the child process."""
+    if boundary not in RESTORE_SWAP_BOUNDARIES:
+        raise BackupError(f"unknown restore swap boundary: {boundary!r}")
+    _restore_runtime_log(boundary, journal=journal)
+    if os.environ.get(_RESTORE_KILL_ENV) == boundary:
+        os._exit(78)  # noqa: PLR1722 - intentional hard-death test seam
+
+
+def _restore_path_from_payload(
+    payload: dict[str, object], key: str, *, journal: Path
+) -> Path:
+    raw = payload.get(key)
+    if not isinstance(raw, str) or not raw:
+        raise BackupError(f"restore journal is missing {key}: {journal}")
+    return Path(raw).resolve()
+
+
+def _read_restore_journal(
+    journal_path: str | Path,
+    *,
+    expected_database: str | Path | None = None,
+) -> _RestoreJournal:
+    """Read and constrain one restore journal before using its paths."""
+    journal = Path(journal_path)
+    if journal.is_symlink() or not journal.is_file():
+        raise BackupError(f"restore journal is not a regular file: {journal}")
+    try:
+        payload = json.loads(journal.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise BackupError(f"invalid restore journal: {journal}") from exc
+    if not isinstance(payload, dict) or payload.get("schema") != RESTORE_JOURNAL_SCHEMA:
+        raise BackupError(f"unsupported restore journal: {journal}")
+
+    transaction_dir = journal.parent.resolve()
+    transaction = _restore_path_from_payload(payload, "transaction", journal=journal)
+    previous_dir = _restore_path_from_payload(payload, "previous", journal=journal)
+    database_path = _restore_path_from_payload(payload, "database", journal=journal)
+    media_path = _restore_path_from_payload(payload, "media", journal=journal)
+    staged_database = _restore_path_from_payload(
+        payload, "staged_database", journal=journal
+    )
+    staged_media = _restore_path_from_payload(payload, "staged_media", journal=journal)
+
+    if transaction != transaction_dir:
+        raise BackupError(f"restore journal transaction escapes its directory: {journal}")
+    if previous_dir != transaction_dir / "previous":
+        raise BackupError(f"restore journal previous path is unsafe: {journal}")
+    if staged_database != transaction_dir / BACKUP_DATABASE_NAME:
+        raise BackupError(f"restore journal database stage is unsafe: {journal}")
+    if staged_media != transaction_dir / BACKUP_MEDIA_DIR:
+        raise BackupError(f"restore journal media stage is unsafe: {journal}")
+
+    if expected_database is not None:
+        expected_db = Path(expected_database).resolve()
+        if database_path != expected_db:
+            raise BackupError(
+                f"restore journal targets {database_path}, not {expected_db}"
+            )
+        expected_media = expected_db.parent / MEDIA_DIR_NAME
+        if media_path != expected_media:
+            raise BackupError(f"restore journal media target is unsafe: {journal}")
+    elif media_path != database_path.parent / MEDIA_DIR_NAME:
+        raise BackupError(f"restore journal media target is unsafe: {journal}")
+
+    had_database = payload.get("had_database")
+    had_media = payload.get("had_media")
+    if not isinstance(had_database, bool) or not isinstance(had_media, bool):
+        raise BackupError(f"restore journal has invalid prior-state flags: {journal}")
+
+    raw_sidecars = payload.get("database_sidecars")
+    if not isinstance(raw_sidecars, list) or any(
+        item not in _RESTORE_DATABASE_SIDECARS for item in raw_sidecars
+    ):
+        raise BackupError(f"restore journal has invalid database sidecars: {journal}")
+    database_sidecars = tuple(dict.fromkeys(str(item) for item in raw_sidecars))
+    phase = payload.get("phase")
+    if phase not in _RESTORE_PHASES:
+        raise BackupError(f"restore journal has invalid phase: {phase!r}")
+
+    return _RestoreJournal(
+        journal_path=journal,
+        transaction_dir=transaction_dir,
+        previous_dir=previous_dir,
+        database_path=database_path,
+        media_path=media_path,
+        staged_database=staged_database,
+        staged_media=staged_media,
+        had_database=had_database,
+        had_media=had_media,
+        database_sidecars=database_sidecars,
+        phase=str(phase),
+    )
+
+
+def _write_restore_journal(state: _RestoreJournal, *, phase: str) -> _RestoreJournal:
+    """Atomically persist one restore phase and return the updated state."""
+    if phase not in _RESTORE_PHASES:
+        raise BackupError(f"unknown restore journal phase: {phase!r}")
+    write_json_atomic(state.journal_path, state.payload(phase=phase))
+    return _RestoreJournal(
+        journal_path=state.journal_path,
+        transaction_dir=state.transaction_dir,
+        previous_dir=state.previous_dir,
+        database_path=state.database_path,
+        media_path=state.media_path,
+        staged_database=state.staged_database,
+        staged_media=state.staged_media,
+        had_database=state.had_database,
+        had_media=state.had_media,
+        database_sidecars=state.database_sidecars,
+        phase=phase,
+    )
+
+
+def _old_database_source(state: _RestoreJournal) -> Path | None:
+    previous = state.previous_dir / BACKUP_DATABASE_NAME
+    if _restore_is_file(previous):
+        return previous
+    if state.phase == "prepared" and _restore_is_file(state.database_path):
+        return state.database_path
+    return None
+
+
+def _old_sidecar_source(state: _RestoreJournal, suffix: str) -> Path | None:
+    previous = state.previous_dir / f"{BACKUP_DATABASE_NAME}{suffix}"
+    if _restore_is_file(previous):
+        return previous
+    if state.phase == "prepared":
+        live = Path(f"{state.database_path}{suffix}")
+        if _restore_is_file(live):
+            return live
+    return None
+
+
+def _old_media_source(state: _RestoreJournal) -> Path | None:
+    previous = state.previous_dir / BACKUP_MEDIA_DIR
+    if _restore_is_dir(previous):
+        return previous
+    if state.phase in {"prepared", "database_moved"} and _restore_is_dir(
+        state.media_path
+    ):
+        return state.media_path
+    return None
+
+
+def _old_restore_available(state: _RestoreJournal) -> bool:
+    """Return whether the journal still identifies a complete old state."""
+    if state.had_database and _old_database_source(state) is None:
+        return False
+    if state.had_media and _old_media_source(state) is None:
+        return False
+    for suffix in state.database_sidecars:
+        if _old_sidecar_source(state, suffix) is None:
+            return False
+    return True
+
+
+def _new_restore_mode(state: _RestoreJournal) -> str | None:
+    """Return the journal-authorized complete-new state, if one exists."""
+    staged_complete = _restore_is_file(state.staged_database) and _restore_is_dir(
+        state.staged_media
+    )
+    if staged_complete:
+        return "staged"
+    if (
+        state.phase == "database_published"
+        and _restore_is_file(state.database_path)
+        and _restore_is_dir(state.staged_media)
+    ):
+        return "database_published"
+    if (
+        state.phase == "media_published"
+        and _restore_is_file(state.database_path)
+        and _restore_is_dir(state.media_path)
+    ):
+        return "published"
+    return None
+
+
+def _finish_restore_transaction(state: _RestoreJournal) -> None:
+    """Remove journal-owned paths after an old or new state is selected."""
+    _remove_restore_path(state.staged_database)
+    _remove_restore_path(state.staged_media)
+    _remove_restore_path(state.previous_dir)
+    state.journal_path.unlink(missing_ok=True)
+    try:
+        state.transaction_dir.rmdir()
+    except OSError:
+        # An unrelated file in the transaction directory is not semantic
+        # restore state. Leave it alone and let the next recovery ignore it.
+        pass
+
+
+def _restore_old_state(state: _RestoreJournal) -> None:
+    """Restore the exact pre-restore database/media pair named by the journal."""
+    if state.had_database:
+        source = _old_database_source(state)
+        if source is None:
+            raise BackupError("restore journal lost the previous database")
+        if source != state.database_path:
+            _remove_restore_path(state.database_path)
+            os.replace(source, state.database_path)
+        expected_sidecars = set(state.database_sidecars)
+        for suffix in _RESTORE_DATABASE_SIDECARS:
+            target = Path(f"{state.database_path}{suffix}")
+            source_sidecar = _old_sidecar_source(state, suffix)
+            if suffix in expected_sidecars:
+                if source_sidecar is None:
+                    raise BackupError("restore journal lost a previous database sidecar")
+                if source_sidecar != target:
+                    _remove_restore_path(target)
+                    os.replace(source_sidecar, target)
+            else:
+                _remove_restore_path(target)
+    else:
+        _remove_restore_path(state.database_path)
+        for suffix in _RESTORE_DATABASE_SIDECARS:
+            _remove_restore_path(Path(f"{state.database_path}{suffix}"))
+
+    if state.had_media:
+        source_media = _old_media_source(state)
+        if source_media is None:
+            raise BackupError("restore journal lost the previous media tree")
+        if source_media != state.media_path:
+            _remove_restore_path(state.media_path)
+            os.replace(source_media, state.media_path)
+    else:
+        _remove_restore_path(state.media_path)
+
+    _finish_restore_transaction(state)
+
+
+def _restore_new_state(state: _RestoreJournal, mode: str) -> None:
+    """Complete the journal-authorized replacement state."""
+    if mode == "staged":
+        _validate_staged_database(state.staged_database)
+        _remove_restore_path(state.database_path)
+        for suffix in _RESTORE_DATABASE_SIDECARS:
+            _remove_restore_path(Path(f"{state.database_path}{suffix}"))
+        os.replace(state.staged_database, state.database_path)
+        state = _write_restore_journal(state, phase="database_published")
+        _remove_restore_path(state.media_path)
+        os.replace(state.staged_media, state.media_path)
+        state = _write_restore_journal(state, phase="media_published")
+    elif mode == "database_published":
+        _validate_staged_database(state.database_path)
+        _remove_restore_path(state.media_path)
+        os.replace(state.staged_media, state.media_path)
+        state = _write_restore_journal(state, phase="media_published")
+    elif mode == "published":
+        _validate_staged_database(state.database_path)
+    else:
+        raise BackupError(f"unknown complete restore mode: {mode!r}")
+    _finish_restore_transaction(state)
+
+
+def _recover_restore_transaction(
+    journal_path: str | Path,
+    *,
+    expected_database: str | Path,
+) -> None:
+    """Resolve one interrupted restore using only its durable journal."""
+    state = _read_restore_journal(
+        journal_path, expected_database=expected_database
+    )
+    old_available = _old_restore_available(state)
+    new_mode = _new_restore_mode(state)
+
+    # Preserve an existing editable database when it is still available. A
+    # fresh root has no old database, so it prefers a complete staged restore;
+    # this avoids silently discarding the first restore on an empty project.
+    if state.had_database and old_available:
+        _restore_old_state(state)
+    elif new_mode is not None:
+        _restore_new_state(state, new_mode)
+    elif old_available:
+        _restore_old_state(state)
+    else:
+        raise BackupError(
+            "restore journal has neither a complete previous nor replacement state"
+        )
+
+
+def recover_restore_staging(projects_root: str | Path | None = None) -> int:
+    """Recover journaled restore transactions before opening a writer.
+
+    Only a directory containing the exact :data:`RESTORE_JOURNAL_NAME` is a
+    restore transaction. Arbitrary files and directories under
+    ``.astrid/.restore-staging`` are ignored and never treated as semantic
+    database or media state.
+    """
+    root = resolve_projects_root(projects_root)
+    database_path = derive_database_path(root)
+    staging_root = database_path.parent / RESTORE_STAGING_DIR
+    if not _restore_is_dir(staging_root):
+        return 0
+    recovered = 0
+    for transaction_dir in sorted(staging_root.iterdir(), key=lambda path: path.name):
+        if transaction_dir.is_symlink() or not transaction_dir.is_dir():
+            continue
+        journal = transaction_dir / RESTORE_JOURNAL_NAME
+        if journal.is_symlink() or not journal.is_file():
+            continue
+        _recover_restore_transaction(journal, expected_database=database_path)
+        recovered += 1
+    return recovered
+
+
+def recover_interrupted_restore(projects_root: str | Path | None = None) -> int:
+    """Compatibility-named entry point for startup restore recovery."""
+    return recover_restore_staging(projects_root)
+
+
+def recover_interrupted_restores(projects_root: str | Path | None = None) -> int:
+    """Plural alias for :func:`recover_restore_staging`."""
+    return recover_restore_staging(projects_root)
+
+
 def _validate_backup_layout(backup: Path) -> None:
     if not backup.is_dir():
         raise RestoreValidationError(f"backup path is not a directory: {backup}")
@@ -265,6 +895,10 @@ def _validate_backup_layout(backup: Path) -> None:
     if not (backup / BACKUP_METADATA_NAME).is_file():
         raise RestoreValidationError(
             f"backup is missing {BACKUP_METADATA_NAME}: {backup}"
+        )
+    if not _restore_is_dir(backup / BACKUP_MEDIA_DIR):
+        raise RestoreValidationError(
+            f"backup is missing {BACKUP_MEDIA_DIR}: {backup}"
         )
 
 
@@ -301,29 +935,94 @@ def create_backup(
         if dest_path is not None
         else _default_backup_dest(root)
     )
-    dest.mkdir(parents=True, exist_ok=True)
-    dest_db = dest / BACKUP_DATABASE_NAME
-    dest_media = dest / BACKUP_MEDIA_DIR
-    dest_meta = dest / BACKUP_METADATA_NAME
-
     lock = DatabaseOwnerLock(db_path)
     try:
+        # A prior hard-dead child may have left a complete staging directory,
+        # a moved previous directory, or a published new directory. Resolve
+        # that journal before creating another attempt so overwrite is
+        # idempotent and never layers a new publication over mixed bytes.
+        recover_backup_publication(dest)
+        if dest.exists() and not dest.is_dir():
+            raise BackupError(f"backup destination is not a directory: {dest}")
+
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        staging = dest.parent / f".{dest.name}.staging-{uuid.uuid4().hex}"
+        previous = dest.parent / f".{dest.name}.previous-{uuid.uuid4().hex}"
+        marker = _publication_marker_path(dest)
+        staging.mkdir(parents=True, exist_ok=False)
         try:
-            packs, sqlite_pages = _online_backup(db_path, dest_db)
-        except sqlite3.Error as exc:
-            raise BackupError(f"SQLite online backup failed: {exc}") from exc
+            dest_db = staging / BACKUP_DATABASE_NAME
+            dest_media = staging / BACKUP_MEDIA_DIR
+            dest_meta = staging / BACKUP_METADATA_NAME
+            try:
+                packs, sqlite_pages = _online_backup(db_path, dest_db)
+            except sqlite3.Error as exc:
+                raise BackupError(f"SQLite online backup failed: {exc}") from exc
 
-        media_files = _copy_media_tree(root, dest_media)
+            # Keep an explicit empty media directory in the complete marker
+            # state so recovery can distinguish a finished empty tree from a
+            # child that died before the managed-media stage was materialized.
+            dest_media.mkdir(parents=True, exist_ok=True)
+            media_files = _copy_media_tree(root, dest_media)
+            created_at = _utc_now()
+            result = BackupResult(
+                dest_path=dest,
+                created_at=created_at,
+                packs=packs,
+                media_files=media_files,
+                sqlite_pages=sqlite_pages,
+            )
+            # The marker is written only after every database, managed-media,
+            # and metadata byte is complete in the sibling staging directory.
+            write_json_atomic(dest_meta, result.to_dict())
+            _write_publication_marker(
+                marker,
+                dest=dest,
+                staging=staging,
+                previous=previous if dest.exists() else None,
+                phase="staged",
+            )
+            _publication_boundary("staged_complete", marker=marker)
 
-        created_at = _utc_now()
-        result = BackupResult(
-            dest_path=dest,
-            created_at=created_at,
-            packs=packs,
-            media_files=media_files,
-            sqlite_pages=sqlite_pages,
-        )
-        write_json_atomic(dest_meta, result.to_dict())
+            if dest.exists():
+                os.replace(dest, previous)
+                _write_publication_marker(
+                    marker,
+                    dest=dest,
+                    staging=staging,
+                    previous=previous,
+                    phase="previous_moved",
+                )
+                _fsync_directory(dest.parent)
+                _publication_boundary("previous_moved", marker=marker)
+
+            os.replace(staging, dest)
+            _write_publication_marker(
+                marker,
+                dest=dest,
+                staging=staging,
+                previous=previous if previous.exists() else None,
+                phase="published",
+            )
+            _fsync_directory(dest.parent)
+            _publication_boundary("destination_published", marker=marker)
+
+            if previous.exists():
+                _remove_publication_path(previous)
+            _fsync_directory(dest.parent)
+            _publication_boundary("previous_cleaned", marker=marker)
+            marker.unlink(missing_ok=True)
+            _fsync_directory(dest.parent)
+        except BaseException:
+            # Ordinary failures retain the marker for the next invocation;
+            # hard-death tests intentionally bypass this cleanup entirely.
+            if not os.environ.get("ASTRID_BACKUP_KILL_BOUNDARY"):
+                if staging.exists():
+                    _remove_publication_path(staging)
+                if previous.exists() and not dest.exists():
+                    os.replace(previous, dest)
+                marker.unlink(missing_ok=True)
+            raise
     finally:
         lock.release()
 
@@ -386,51 +1085,64 @@ def _atomic_swap(
     live_media: Path,
     staged_db: Path,
     staged_media: Path,
+    *,
+    journal_path: Path,
 ) -> None:
-    """Atomically replace the live database and media tree with staged copies.
+    """Publish staged database/media with a durable old-or-new journal.
 
-    The live database (and any ``-wal``/``-shm`` siblings) and media tree are
-    moved aside under ``.astrid/.restore-staging/`` before the staged copies
-    are moved into place with ``os.replace`` (atomic on the same filesystem).
-    On any failure the moved-aside state is rolled back; on success the
-    previous state is discarded.
+    The journal is created before this function is called and is updated
+    atomically after each database or media move. A hard-dead process therefore
+    leaves enough authoritative state for :func:`recover_restore_staging` to
+    select the complete prior pair or finish the complete replacement.
     """
-    astrid_dir = live_db.parent
-    staging_root = astrid_dir / RESTORE_STAGING_DIR
-    staging_root.mkdir(parents=True, exist_ok=True)
-    prev_dir = staging_root / f"previous-{uuid.uuid4().hex}"
-    prev_dir.mkdir(parents=True, exist_ok=False)
+    state = _read_restore_journal(journal_path, expected_database=live_db)
+    if state.staged_database != staged_db or state.staged_media != staged_media:
+        raise BackupError("restore journal staging paths do not match the swap")
+    if not _restore_is_file(staged_db) or not _restore_is_dir(staged_media):
+        raise BackupError("restore staging is incomplete before publication")
 
-    # A replaced database must not read stale WAL/SHM bytes from the old file.
-    for suffix in ("-wal", "-shm"):
-        Path(f"{live_db}{suffix}").unlink(missing_ok=True)
-
-    had_db = live_db.exists()
-    had_media = live_media.is_dir()
-    moved_db = False
-    moved_media = False
+    # The journal owns the previous directory. Keeping it inside the
+    # transaction makes arbitrary sibling files irrelevant to recovery.
+    state.previous_dir.mkdir(parents=True, exist_ok=True)
     try:
-        if had_db:
-            os.replace(live_db, prev_dir / BACKUP_DATABASE_NAME)
-            moved_db = True
-        if had_media:
-            os.replace(live_media, prev_dir / BACKUP_MEDIA_DIR)
-            moved_media = True
+        if state.had_database:
+            os.replace(live_db, state.previous_dir / BACKUP_DATABASE_NAME)
+            for suffix in state.database_sidecars:
+                sidecar = Path(f"{live_db}{suffix}")
+                if _restore_is_file(sidecar):
+                    os.replace(
+                        sidecar,
+                        state.previous_dir / f"{BACKUP_DATABASE_NAME}{suffix}",
+                    )
+            state = _write_restore_journal(state, phase="database_moved")
+            _restore_boundary("database_moved", journal=journal_path)
+        if state.had_media:
+            os.replace(live_media, state.previous_dir / BACKUP_MEDIA_DIR)
+            state = _write_restore_journal(state, phase="media_moved")
+            _restore_boundary("media_moved", journal=journal_path)
+
+        # A replaced database must not read stale WAL/SHM bytes from the old
+        # file. The old sidecars are already journaled in ``previous``.
+        for suffix in _RESTORE_DATABASE_SIDECARS:
+            _remove_restore_path(Path(f"{live_db}{suffix}"))
         os.replace(staged_db, live_db)
-        if staged_media.is_dir():
-            os.replace(staged_media, live_media)
+        state = _write_restore_journal(state, phase="database_published")
+        _restore_boundary("database_published", journal=journal_path)
+        _remove_restore_path(live_media)
+        os.replace(staged_media, live_media)
+        state = _write_restore_journal(state, phase="media_published")
+        _restore_boundary("media_published", journal=journal_path)
     except BaseException:
-        # Roll back anything already moved so live data is not lost.
-        live_db.unlink(missing_ok=True)
-        if moved_db:
-            os.replace(prev_dir / BACKUP_DATABASE_NAME, live_db)
-        if moved_media and (prev_dir / BACKUP_MEDIA_DIR).is_dir():
-            if live_media.exists():
-                shutil.rmtree(live_media, ignore_errors=True)
-            os.replace(prev_dir / BACKUP_MEDIA_DIR, live_media)
+        # A normal exception gets the same deterministic recovery as a fresh
+        # process. Hard-death hooks use os._exit and never reach this block.
+        try:
+            _recover_restore_transaction(journal_path, expected_database=live_db)
+        except BaseException:
+            # Preserve the journal for the next standard composition if the
+            # in-process rollback itself cannot complete.
+            pass
         raise
-    # Success: the previous live state is superseded and discarded.
-    shutil.rmtree(prev_dir, ignore_errors=True)
+    _finish_restore_transaction(state)
 
 
 def restore_backup(
@@ -446,6 +1158,10 @@ def restore_backup(
     """
     root = resolve_projects_root(projects_root)
     backup = Path(backup_path)
+    try:
+        recover_backup_publication(backup)
+    except BackupError as exc:
+        raise RestoreValidationError(f"backup publication recovery failed: {exc}") from exc
     _validate_backup_layout(backup)
 
     live_db = derive_database_path(root)
@@ -455,22 +1171,59 @@ def restore_backup(
 
     lock = DatabaseOwnerLock(live_db)
     try:
+        try:
+            recover_restore_staging(root)
+        except BackupError as exc:
+            raise RestoreValidationError(
+                f"interrupted restore recovery failed: {exc}"
+            ) from exc
         astrid_dir = live_db.parent
         astrid_dir.mkdir(parents=True, exist_ok=True)
         staging_root = astrid_dir / RESTORE_STAGING_DIR
         staging_root.mkdir(parents=True, exist_ok=True)
         txn_dir = staging_root / uuid.uuid4().hex
         txn_dir.mkdir(parents=True, exist_ok=False)
+        journal_path = txn_dir / RESTORE_JOURNAL_NAME
         try:
             staged_db = txn_dir / BACKUP_DATABASE_NAME
             staged_media = txn_dir / BACKUP_MEDIA_DIR
             shutil.copy2(backup / BACKUP_DATABASE_NAME, staged_db)
-            if backup_media.is_dir():
-                shutil.copytree(backup_media, staged_media)
+            shutil.copytree(backup_media, staged_media)
             _validate_staged_database(staged_db)
-            _atomic_swap(live_db, live_media, staged_db, staged_media)
+            previous_dir = txn_dir / "previous"
+            previous_dir.mkdir(parents=True, exist_ok=True)
+            state = _RestoreJournal(
+                journal_path=journal_path,
+                transaction_dir=txn_dir,
+                previous_dir=previous_dir,
+                database_path=live_db,
+                media_path=live_media,
+                staged_database=staged_db,
+                staged_media=staged_media,
+                had_database=_restore_is_file(live_db),
+                had_media=_restore_is_dir(live_media),
+                database_sidecars=tuple(
+                    suffix
+                    for suffix in _RESTORE_DATABASE_SIDECARS
+                    if _restore_is_file(Path(f"{live_db}{suffix}"))
+                ),
+                phase="prepared",
+            )
+            write_json_atomic(journal_path, state.payload())
+            _atomic_swap(
+                live_db,
+                live_media,
+                staged_db,
+                staged_media,
+                journal_path=journal_path,
+            )
         finally:
-            shutil.rmtree(txn_dir, ignore_errors=True)
+            # Hard-death tests bypass this finally. If an ordinary failure
+            # recovered successfully (or staging validation failed before a
+            # journal existed), remove the private transaction directory;
+            # otherwise preserve the durable journal for startup recovery.
+            if not journal_path.exists():
+                shutil.rmtree(txn_dir, ignore_errors=True)
     finally:
         lock.release()
 
@@ -487,10 +1240,20 @@ __all__ = [
     "BACKUP_FORMAT_VERSION",
     "BACKUP_MEDIA_DIR",
     "BACKUP_METADATA_NAME",
+    "BACKUP_PUBLICATION_BOUNDARIES",
+    "BACKUP_PUBLICATION_SCHEMA",
+    "RESTORE_JOURNAL_NAME",
+    "RESTORE_JOURNAL_SCHEMA",
+    "RESTORE_RECOVERY_BOUNDARIES",
+    "RESTORE_SWAP_BOUNDARIES",
     "BackupError",
     "BackupResult",
     "RestoreResult",
     "RestoreValidationError",
     "create_backup",
+    "recover_backup_publication",
+    "recover_interrupted_restore",
+    "recover_interrupted_restores",
+    "recover_restore_staging",
     "restore_backup",
 ]

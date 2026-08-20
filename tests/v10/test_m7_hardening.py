@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -25,6 +26,7 @@ from astrid.core.repositories.media import (
     EXTERNAL_LOCAL_REALM,
     MANAGED_LOCAL_REALM,
 )
+from astrid.core.store.uow import UnitOfWork
 from astrid.packs import compose_standard_bridge
 from tests.v10._m7_fixture import build_m7_fixture
 
@@ -194,15 +196,19 @@ def test_corruption_matrix_has_stable_public_failures_and_is_read_only(
     external = missing_root / "fixture-input" / "external-source.png"
     external.unlink()
     before_missing = _tree_snapshot(missing_root)
+    missing_codes = []
     with compose_standard_application(missing_root) as app:
-        result = app.media_service.verify(
-            "m7-representative",
-            "m7-media-external-source",
-            realm=EXTERNAL_LOCAL_REALM,
-            idempotency_key="m7-missing-media-verify",
-        )
-    assert not result.ok
-    assert result.error is not None and result.error.code == "internal_error"
+        for ordinal in range(2):
+            result = app.media_service.verify(
+                "m7-representative",
+                "m7-media-external-source",
+                realm=EXTERNAL_LOCAL_REALM,
+                idempotency_key=f"m7-missing-media-verify-{ordinal}",
+            )
+            assert not result.ok
+            assert result.error is not None
+            missing_codes.append(result.error.code)
+    assert missing_codes == ["internal_error", "internal_error"]
     assert _tree_snapshot(missing_root) == before_missing
 
     mutated_root = tmp_path / "mutated-media"
@@ -221,18 +227,21 @@ def test_corruption_matrix_has_stable_public_failures_and_is_read_only(
     original = managed.read_bytes()
     managed.write_bytes(bytes([original[0] ^ 0xFF]) + original[1:])
     before_mutated = _tree_snapshot(mutated_root)
+    mutated_codes = []
     with compose_standard_application(mutated_root) as app:
-        result = app.media_service.verify(
-            "m7-representative",
-            "m7-media-managed-source",
-            realm=MANAGED_LOCAL_REALM,
-            idempotency_key="m7-mutated-media-verify",
-        )
-    assert not result.ok
+        for ordinal in range(2):
+            result = app.media_service.verify(
+                "m7-representative",
+                "m7-media-managed-source",
+                realm=MANAGED_LOCAL_REALM,
+                idempotency_key=f"m7-mutated-media-verify-{ordinal}",
+            )
+            assert not result.ok
+            assert result.error is not None
+            mutated_codes.append(result.error.code)
     # The public SDK taxonomy deliberately bounds an unmapped integrity
-    # exception to internal_error; the important contract here is that this
-    # code is stable and the command performs no receipt/event mutation.
-    assert result.error is not None and result.error.code == "internal_error"
+    # exception to internal_error; repeated rejects must not drift or write.
+    assert mutated_codes == ["internal_error", "internal_error"]
     assert _tree_snapshot(mutated_root) == before_mutated
 
     corrupt_root = tmp_path / "corrupt-sqlite"
@@ -263,6 +272,7 @@ def test_corruption_matrix_has_stable_public_failures_and_is_read_only(
     }
     assert statuses["sqlite_quick_check"][0] == "fail"
     assert statuses["fk_integrity"][0] == "fail"
+    assert _doctor_statuses(corrupt_root) == statuses
     assert _tree_snapshot(corrupt_root) == before_corrupt
 
     fk_root = tmp_path / "foreign-key"
@@ -286,6 +296,7 @@ def test_corruption_matrix_has_stable_public_failures_and_is_read_only(
     fk_statuses = _doctor_statuses(fk_root)
     assert fk_statuses["fk_integrity"][0] == "fail"
     assert "foreign key violation" in fk_statuses["fk_integrity"][1]
+    assert _doctor_statuses(fk_root) == fk_statuses
     assert _tree_snapshot(fk_root) == before_fk
 
 
@@ -303,6 +314,314 @@ def test_too_new_core_and_pack_migrations_refuse_before_writer_use(
     assert statuses["schema_versions"][0] == "fail"
     assert "too new" in statuses["schema_versions"][1] or "not registered" in statuses["schema_versions"][1]
 
-    with pytest.raises(MigrationTooNewError):
-        compose_standard_bridge(root)
+    refusal_messages = []
+    for _ in range(2):
+        with pytest.raises(MigrationTooNewError) as caught:
+            compose_standard_bridge(root)
+        refusal_messages.append(str(caught.value))
+    assert refusal_messages[0] == refusal_messages[1]
     assert _tree_snapshot(root) == before
+
+
+def _stage(root: Path, txn_id: str, name: str, content: bytes) -> Path:
+    """Create one deterministic staging directory for the GC matrix."""
+    directory = root / ".astrid" / "media" / ".staging" / txn_id
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / name
+    path.write_bytes(content)
+    return path
+
+
+def test_startup_gc_keeps_live_attempts_and_only_removes_orphans(
+    tmp_path: Path,
+) -> None:
+    """Startup fencing protects live staging and leaves managed bytes intact."""
+    fixture = build_m7_fixture(tmp_path / "gc")
+    database = fixture.root / ".astrid" / "astrid.sqlite3"
+    live_txn = "ab" * 16
+    terminal_txn = "cd" * 16
+    orphan_txn = "ef" * 16
+    live_path = _stage(fixture.root, live_txn, "live.bin", b"live-attempt")
+    terminal_path = _stage(
+        fixture.root, terminal_txn, "terminal.bin", b"terminal-attempt"
+    )
+    orphan_path = _stage(fixture.root, orphan_txn, "orphan.bin", b"orphan")
+    arbitrary = fixture.root / ".astrid" / "media" / ".staging" / "not-a-txn"
+    arbitrary.mkdir(parents=True)
+    (arbitrary / "keep.txt").write_bytes(b"non-semantic entry")
+    managed_before = _hash_tree(fixture.root / ".astrid" / "media" / "sha256")
+
+    with sqlite3.connect(database) as connection:
+        task_id = fixture.spec["runs"]["fanout"]["children"][0]["id"]
+        for ordinal, (attempt_id, txn_id, status) in enumerate(
+            (
+                ("m7-live-attempt", live_txn, "running"),
+                ("m7-terminal-attempt", terminal_txn, "failed"),
+            ),
+            start=1,
+        ):
+            connection.execute(
+                "INSERT INTO execution_attempts "
+                "(id, task_id, attempt_no, executor_id, status, status_version, "
+                "lease_id, lease_expires_at, heartbeat_counter, last_heartbeat_at, "
+                "progress_json, error_json, created_at, updated_at, finished_at) "
+                "VALUES (?, ?, ?, ?, ?, 1, ?, ?, 0, NULL, ?, '{}', ?, ?, NULL)",
+                (
+                    attempt_id,
+                    task_id,
+                    ordinal,
+                    "m7-test-executor",
+                    status,
+                    f"lease-{attempt_id}",
+                    "2026-08-20T01:00:00+00:00",
+                    json.dumps({"staging_txn_id": txn_id}),
+                    "2026-08-20T00:00:00+00:00",
+                    "2026-08-20T00:00:00+00:00",
+                ),
+            )
+
+    composition = compose_standard_bridge(fixture.root)
+    try:
+        with composition.writer.read_only_connection() as connection:
+            assert connection.execute("SELECT COUNT(*) FROM projects").fetchone()[0] == 1
+    finally:
+        composition.writer.close()
+
+    assert live_path.exists()
+    assert not terminal_path.exists()
+    assert not orphan_path.exists()
+    assert (arbitrary / "keep.txt").exists()
+    assert _hash_tree(fixture.root / ".astrid" / "media" / "sha256") == managed_before
+
+
+def _event_chain_snapshot(root: Path, project_id: str) -> dict[str, object]:
+    """Return projection/receipt facts used to classify old-or-complete state."""
+    with compose_standard_application(projects_root=root) as app:
+        with app.writer.read_only_connection() as connection:
+            timeline = connection.execute(
+                "SELECT document_json, asset_registry_json FROM timelines "
+                "WHERE project_id = ?",
+                (project_id,),
+            ).fetchone()
+            counts = {
+                table: int(
+                    connection.execute(
+                        f"SELECT COUNT(*) FROM {table} WHERE project_id = ?",
+                        (project_id,),
+                    ).fetchone()[0]
+                )
+                for table in ("events", "command_receipts", "event_streams")
+            }
+            receipt = connection.execute(
+                "SELECT idempotency_key, first_project_seq, last_project_seq "
+                "FROM command_receipts WHERE project_id = ? "
+                "AND idempotency_key = 'm7-uow-crash-save'",
+                (project_id,),
+            ).fetchone()
+            stream_ids = [
+                str(row[0])
+                for row in connection.execute(
+                    "SELECT id FROM event_streams WHERE project_id = ? ORDER BY id",
+                    (project_id,),
+                ).fetchall()
+            ]
+        summaries = []
+        for stream_id in stream_ids:
+            summary = app.events.verify_stream(app.writer, stream_id)
+            summaries.append((stream_id, summary.event_count, summary.head_hash))
+        return {
+            "timeline": tuple(timeline) if timeline is not None else None,
+            "counts": tuple(sorted(counts.items())),
+            "receipt": tuple(receipt) if receipt is not None else None,
+            "chains": tuple(summaries),
+        }
+
+
+def _timeline_save_child() -> str:
+    """Child process that exits at one observed UoW statement boundary."""
+    return """import json
+import os
+import sys
+from pathlib import Path
+
+from astrid.application import compose_standard_application
+from astrid.core.store.uow import UnitOfWork
+
+root = Path(sys.argv[1])
+log = Path(sys.argv[2])
+target = int(sys.argv[3])
+project_id = sys.argv[4]
+seen = {"n": 0}
+
+
+def observe(kind, sql, params):
+    with log.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps({"boundary": seen["n"], "kind": kind, "sql": sql}) + "\\n")
+        handle.flush()
+    if seen["n"] == target:
+        os._exit(78)
+    seen["n"] += 1
+
+
+with compose_standard_application(projects_root=root) as app:
+    UnitOfWork(app.writer, on_statement=observe).run(
+        lambda u: app.timelines.save(
+            u,
+            project_id=project_id,
+            ref="main",
+            config={"fps": 24, "resolution": [1920, 1080], "fixture_state": "crash-complete"},
+            registry={"assets": {}},
+            expected_version=2,
+            idempotency_key="m7-uow-crash-save",
+            created_at="2026-08-20T00:00:00.000000+00:00",
+        )
+    )
+"""
+
+
+def test_uow_statement_boundaries_reopen_old_or_complete_with_receipts(
+    tmp_path: Path,
+) -> None:
+    """Every injected statement crash leaves no partial timeline projection."""
+    template = build_m7_fixture(tmp_path / "uow-template")
+    project_id = str(template.spec["project"]["id"])
+    baseline = _event_chain_snapshot(template.root, project_id)
+    repo_root = Path(__file__).resolve().parents[2]
+
+    # Learn the complete observer trace once; each boundary is then exercised
+    # in a fresh copy and retains the child log as first-class evidence.
+    trace_log = tmp_path / "uow-trace.log"
+    trace_root = tmp_path / "uow-trace-root"
+    shutil.copytree(template.root, trace_root)
+    trace_env = {**os.environ, "PYTHONPATH": str(repo_root)}
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            _timeline_save_child(),
+            str(trace_root),
+            str(trace_log),
+            "-1",
+            project_id,
+        ],
+        cwd=repo_root,
+        env=trace_env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    trace = [json.loads(line) for line in trace_log.read_text(encoding="utf-8").splitlines()]
+    assert trace and trace[-1]["kind"] == "commit"
+
+    for boundary in range(len(trace)):
+        crash_root = tmp_path / f"uow-crash-{boundary}"
+        shutil.copytree(template.root, crash_root)
+        log = tmp_path / f"uow-crash-{boundary}.log"
+        child = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                _timeline_save_child(),
+                str(crash_root),
+                str(log),
+                str(boundary),
+                project_id,
+            ],
+            cwd=repo_root,
+            env=trace_env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert child.returncode == 78, child.stderr
+        records = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+        assert records and records[-1]["boundary"] == boundary
+
+        after = _event_chain_snapshot(crash_root, project_id)
+        if after == baseline:
+            continue
+        # A post-commit kill is accepted only as one complete command: the
+        # receipt, event, projection, and every stream hash chain are present.
+        assert after["receipt"] is not None
+        assert after["timeline"] is not None
+        assert "crash-complete" in str(after["timeline"])
+        assert after["counts"] != baseline["counts"]
+        assert all(summary[2] for summary in after["chains"])
+
+
+def _migration_child() -> str:
+    """Child process that hard-deads during one migration SQL statement."""
+    return """import os
+import sqlite3
+import sys
+from pathlib import Path
+
+from astrid.core.store.writer import DatabaseWriter
+from astrid.packs import build_standard_registry
+
+database = Path(sys.argv[1])
+log = Path(sys.argv[2])
+needle = sys.argv[3]
+real_connect = sqlite3.connect
+
+
+class CrashConnection(sqlite3.Connection):
+    def execute(self, sql, parameters=()):
+        if needle in sql:
+            with log.open("a", encoding="utf-8") as handle:
+                handle.write(sql + "\\n")
+                handle.flush()
+            os._exit(78)
+        return super().execute(sql, parameters)
+
+
+def connect(*args, **kwargs):
+    kwargs["factory"] = CrashConnection
+    return real_connect(*args, **kwargs)
+
+
+sqlite3.connect = connect
+DatabaseWriter(database, build_standard_registry())
+"""
+
+
+def test_migration_statement_crashes_reopen_as_complete_schema(
+    tmp_path: Path,
+) -> None:
+    """A hard-dead migration never leaves a partially applied catalog."""
+    repo_root = Path(__file__).resolve().parents[2]
+    environment = {**os.environ, "PYTHONPATH": str(repo_root)}
+    for ordinal, needle in enumerate(("CREATE TABLE projects", "INSERT INTO schema_migrations")):
+        root = tmp_path / f"migration-crash-{ordinal}"
+        root.mkdir()
+        database = root / ".astrid" / "astrid.sqlite3"
+        database.parent.mkdir(parents=True)
+        log = root / "migration-child.log"
+        child = subprocess.run(
+            [sys.executable, "-c", _migration_child(), str(database), str(log), needle],
+            cwd=repo_root,
+            env=environment,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert child.returncode == 78, child.stderr
+        assert needle in log.read_text(encoding="utf-8")
+
+        composition = compose_standard_bridge(root)
+        try:
+            with composition.writer.read_only_connection() as connection:
+                migrations = connection.execute(
+                    "SELECT pack, version FROM schema_migrations ORDER BY pack, version"
+                ).fetchall()
+                tables = {
+                    str(row[0])
+                    for row in connection.execute(
+                        "SELECT name FROM sqlite_master WHERE type = 'table'"
+                    ).fetchall()
+                }
+            assert len(migrations) == 4
+            assert {"projects", "events", "timelines", "shots", "project_references"} <= tables
+        finally:
+            composition.writer.close()

@@ -18,8 +18,11 @@ Covers the operational ``backup`` family contract:
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import sqlite3
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -31,6 +34,7 @@ from astrid.core.backup import (
     restore_backup,
 )
 from astrid.core.backup import cli as backup_cli
+from astrid.core.backup.operations import recover_backup_publication
 
 _PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
 
@@ -192,6 +196,66 @@ def test_backup_overwrite_is_idempotent(tmp_path: Path) -> None:
         assert conn.execute("PRAGMA quick_check").fetchone()[0] == "ok"
     finally:
         conn.close()
+
+
+def test_backup_publication_crash_matrix_recovers_old_or_complete_destination(
+    tmp_path: Path,
+) -> None:
+    """Every publication hard-death boundary reopens and restores safely."""
+    _seed_project(tmp_path)
+    dest = tmp_path / "backup"
+    create_backup(projects_root=tmp_path, dest_path=dest)
+    runtime_log = tmp_path / "backup-runtime.log"
+    repo_root = Path(__file__).resolve().parents[2]
+    child = (
+        "import sys; from pathlib import Path; "
+        "from astrid.core.backup.operations import create_backup; "
+        "create_backup(projects_root=Path(sys.argv[1]), dest_path=Path(sys.argv[2]))"
+    )
+
+    for boundary in (
+        "staged_complete",
+        "previous_moved",
+        "destination_published",
+        "previous_cleaned",
+    ):
+        runtime_log.write_text("", encoding="utf-8")
+        child_env = os.environ.copy()
+        child_env["ASTRID_BACKUP_KILL_BOUNDARY"] = boundary
+        child_env["ASTRID_BACKUP_RUNTIME_LOG"] = str(runtime_log)
+        child_env["PYTHONPATH"] = str(repo_root)
+        completed = subprocess.run(
+            [sys.executable, "-c", child, str(tmp_path), str(dest)],
+            cwd=repo_root,
+            env=child_env,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        assert completed.returncode == 77, completed.stderr
+        records = [
+            json.loads(line)
+            for line in runtime_log.read_text(encoding="utf-8").splitlines()
+            if line
+        ]
+        assert records and records[-1]["boundary"] == boundary
+
+        recover_backup_publication(dest)
+        marker = dest.parent / f".{dest.name}.publication.json"
+        assert not marker.exists()
+        assert (dest / "astrid.sqlite3").is_file()
+        assert (dest / "backup.json").is_file()
+        assert (dest / "media").is_dir()
+        assert not list(dest.parent.glob(f".{dest.name}.staging-*"))
+        assert not list(dest.parent.glob(f".{dest.name}.previous-*"))
+        with sqlite3.connect(f"file:{dest / 'astrid.sqlite3'}?mode=ro", uri=True) as conn:
+            assert conn.execute("PRAGMA quick_check").fetchone()[0] == "ok"
+
+        _destroy_live_data(tmp_path)
+        restore_backup(dest, projects_root=tmp_path)
+        with compose_standard_application(projects_root=tmp_path) as app:
+            with app.writer.read_only_connection() as conn:
+                assert conn.execute("SELECT COUNT(*) FROM projects").fetchone()[0] == 1
 
 
 def test_backup_envelope_metadata_shape(tmp_path: Path) -> None:

@@ -1,10 +1,9 @@
-# CLI journeys — every v10 §4 product command, runnable from a clean machine
+# CLI journeys — supported product and recovery commands
 
-This guide walks the complete v10 §4 command-line surface: the five product
-families (`projects`, `media`, `tasks`, `runs`, `timelines`) plus the two
-manifest-declared nested mounts (`media references`, `timelines shots`).
-Every journey below is runnable as written; every example uses `--json` so
-you see the exact five-key SDK envelope that the CLI prints on `stdout`.
+This guide walks the five product families (`projects`, `media`, `tasks`,
+`runs`, `timelines`), the two nested mounts (`media references`, `timelines
+shots`), and the local backup/diagnostic commands. Examples use `--json` where
+the command returns an SDK envelope.
 
 Normative references: `docs/astrid-first-sprint-plan-20260813.md` (Sprints 5–6),
 `docs/contracts/astrid-sdk-v10.md` (envelope contract).
@@ -13,25 +12,24 @@ Normative references: `docs/astrid-first-sprint-plan-20260813.md` (Sprints 5–6
 
 ## Clean-machine preamble (zero configuration)
 
-Astrid's product commands need no configuration file, no server, and no
-prior setup to *parse*: every family is reachable through the package entry
-point. The only runtime prerequisite is a project to operate on, created
-with the `projects` family below.
+Astrid's product commands need no configuration file, credentials, or hosted
+service. The only runtime prerequisite is a project to operate on, created
+with the `projects` family below. Run commands from the repository root.
 
 ```bash
 # 1. Confirm the CLI is reachable (prints the product census).
 python3 -m astrid --help
 
-# 2. Inspect any family or verb without side effects (--help exits 0).
-python3 -m astrid <family> --help
-python3 -m astrid <family> <verb> --help
+# 2. Inspect a concrete family and verb without side effects.
+python3 -m astrid projects --help
+python3 -m astrid timelines save --help
 ```
 
 Notes:
 
-- **No server required for these journeys.** The `serve` operational command
-  is deferred to m6; the product families below run directly against the
-  on-disk store through one composed `AstridClient`.
+- **No server required for product commands.** The product families below run
+  directly against the local store through one composed client. `serve` is
+  only needed when an HTTP editor client is being used.
 - **One verb = one SDK call.** Every handler parses arguments, makes exactly
   one SDK service call, and renders the result. There is no SQL or domain
   logic in the CLI layer.
@@ -150,7 +148,7 @@ Media relation `--kind` is restricted to the frozen five kinds:
 ## 3. `media references` — create / update / archive / associate / link / set-primary / list / show
 
 The `references` family is a manifest-declared **nested mount**: it is
-reachable only beneath `media` (`astrid media references <verb>`) and is
+reachable only beneath `media` (for example, `astrid media references list`) and is
 never a top-level command.
 
 ```bash
@@ -290,18 +288,12 @@ python3 -m astrid timelines history --project demo primary --json
 python3 -m astrid timelines diff --project demo primary --json
 ```
 
-> **`timelines copy` is reserved, not implemented.** The save-as-copy route
-> (`POST /projects/:slug/timelines/:ref/copy`) and its `timelines copy` CLI
-> verb are deferred to m6 (see `docs/astrid-v10-implementation-decisions.md`
-> section 16). It is **not** registered in this milestone and is absent from
-> the parser by construction.
-
 ---
 
 ## 7. `timelines shots` — list / create / add / remove / reorder
 
 The `shots` family is a manifest-declared **nested mount**: it is reachable
-only beneath `timelines` (`astrid timelines shots <verb>`) and is never a
+only beneath `timelines` (for example, `astrid timelines shots list`) and is never a
 top-level command.
 
 ```bash
@@ -339,3 +331,48 @@ item id is rejected by the service before any write.
 
 Scripts should parse the `--json` envelope for outcome details and treat the
 process exit code as the coarse success/failure signal.
+
+## 8. Diagnostics and failure recovery
+
+Run the read-only doctor before changing a project:
+
+```bash
+python3 -m astrid doctor --json --projects-root ./projects
+```
+
+An unavailable local service or owner lock is reported as the typed
+`unavailable` condition. Retry after the owning process exits; do not open a
+second writer. A doctor result with `schema_versions: fail` indicates a
+too-new migration or schema incompatibility. Keep the original project and
+select a compatible checkout or restore a compatible backup.
+
+Timeline saves are compare-and-swap operations. A stale expected version is
+an HTTP `409 timeline_version_conflict` (or SDK `stale_version`) and changes
+nothing. Load the current timeline, merge the local draft, and save again with
+the returned version:
+
+```bash
+python3 -m astrid timelines show --project demo primary --json
+python3 -m astrid timelines save --project demo primary \
+  --config '{"width":1920,"height":1080}' \
+  --registry '{"assets":{}}' --expected-version 1 --json
+```
+
+For missing or byte-mutated media, run verification again with the recorded
+realm. The service rejects the read without rewriting the media; the current
+public envelope uses `internal_error` for this unmapped integrity failure.
+
+```bash
+python3 -m astrid media verify M_01ABC --project demo \
+  --realm managed_local --json
+```
+
+Backups are staged and validated before publication. If a restore process is
+interrupted, run the same restore command again or start the local bridge; the
+startup path reads its durable journal before opening the writer and accepts
+only the previous complete state or the complete restored state:
+
+```bash
+python3 -m astrid backup create --projects-root ./projects --out ./backup
+python3 -m astrid backup restore ./backup --projects-root ./projects
+```

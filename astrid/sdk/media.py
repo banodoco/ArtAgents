@@ -191,17 +191,18 @@ class MediaService:
                 ordinal=0,
             )
             try:
-                model = UnitOfWork(self._writer).run(
-                    lambda uow, p=prepared, ck=child_key, mid=media_id: (
-                        self._media.import_prepared(
-                            uow,
-                            project_id=project_id,
-                            prepared=p,
-                            idempotency_key=ck,
-                            media_id=mid,
-                            realm=realm,
-                        )
+                def import_prepared(uow: UnitOfWork) -> Any:
+                    return self._media.import_prepared(
+                        uow,
+                        project_id=project_id,
+                        prepared=prepared,
+                        idempotency_key=child_key,
+                        media_id=media_id,
+                        realm=realm,
                     )
+
+                model = UnitOfWork(self._writer).run(
+                    import_prepared
                 )
             except Exception as exc:  # noqa: BLE001 - centralized mapping
                 return DomainResult.failure(map_error(exc), idempotency_key=key)

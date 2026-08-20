@@ -1,0 +1,179 @@
+{
+  "budget_source": null,
+  "budget_status": "unresolved",
+  "comparisons": [],
+  "environment": {
+    "machine": "x86_64",
+    "platform": "Linux-6.8.0-136-generic-x86_64-with-glibc2.35",
+    "pytest": "9.0.2",
+    "python": "3.11.11",
+    "sqlite": "3.37.2",
+    "system": "Linux"
+  },
+  "fixture": {
+    "baseline": {
+      "reason": "no approved m6 baseline exists",
+      "status": "provisional"
+    },
+    "fixture_id": "m7-representative-v1",
+    "fixture_version": 1,
+    "source": "tests/fixtures/v10/m7_representative.json",
+    "spec_sha256": "267b31bdf2333bf81863e2e33a76f6714c1f3ed112d781bba6358955d7ffd0ab"
+  },
+  "generated_at": "2026-08-20T19:44:20.247348+00:00",
+  "operations": {
+    "bootstrap": {
+      "cold": {
+        "max_ms": 10.960853,
+        "median_ms": 10.364365,
+        "p95_ms": 10.901204,
+        "sample_count": 3,
+        "samples_ms": [
+          10.960853,
+          7.833408,
+          10.364365
+        ]
+      },
+      "definition": "fresh fixture root, first standard application composition",
+      "warm": {
+        "max_ms": 10.483763,
+        "median_ms": 10.290373,
+        "p95_ms": 10.464424,
+        "sample_count": 3,
+        "samples_ms": [
+          10.483763,
+          10.068716,
+          10.290373
+        ]
+      }
+    },
+    "change_feed": {
+      "cold": {
+        "max_ms": 2.295366,
+        "median_ms": 2.174825,
+        "p95_ms": 2.283312,
+        "sample_count": 3,
+        "samples_ms": [
+          2.295366,
+          2.174825,
+          1.942747
+        ]
+      },
+      "definition": "public repository-backed operation on the fixture",
+      "warm": {
+        "max_ms": 2.881227,
+        "median_ms": 2.717521,
+        "p95_ms": 2.880593,
+        "sample_count": 8,
+        "samples_ms": [
+          2.837647,
+          2.687925,
+          2.879416,
+          2.747117,
+          2.361265,
+          2.684494,
+          2.881227,
+          2.577696
+        ]
+      }
+    },
+    "gallery_list": {
+      "cold": {
+        "max_ms": 8.198568,
+        "median_ms": 6.76065,
+        "p95_ms": 8.054776,
+        "sample_count": 3,
+        "samples_ms": [
+          6.76065,
+          6.75981,
+          8.198568
+        ]
+      },
+      "definition": "public repository-backed operation on the fixture",
+      "warm": {
+        "max_ms": 6.963359,
+        "median_ms": 6.559716,
+        "p95_ms": 6.906908,
+        "sample_count": 8,
+        "samples_ms": [
+          6.963359,
+          6.80207,
+          6.34102,
+          6.4081,
+          6.191792,
+          6.768639,
+          6.608601,
+          6.510831
+        ]
+      }
+    },
+    "media_verify": {
+      "cold": {
+        "max_ms": 10.526914,
+        "median_ms": 9.344327,
+        "p95_ms": 10.408655,
+        "sample_count": 3,
+        "samples_ms": [
+          9.344327,
+          10.526914,
+          9.109116
+        ]
+      },
+      "definition": "public repository-backed operation on the fixture",
+      "warm": {
+        "max_ms": 9.139146,
+        "median_ms": 6.726684,
+        "p95_ms": 8.594211,
+        "sample_count": 8,
+        "samples_ms": [
+          9.139146,
+          6.51886,
+          6.59537,
+          6.661139,
+          6.792229,
+          7.04905,
+          7.582189,
+          6.23705
+        ]
+      }
+    },
+    "timeline_load_save": {
+      "cold": {
+        "max_ms": 10.530904,
+        "median_ms": 10.167575,
+        "p95_ms": 10.494571,
+        "sample_count": 3,
+        "samples_ms": [
+          9.816806,
+          10.530904,
+          10.167575
+        ]
+      },
+      "definition": "public repository-backed operation on the fixture",
+      "warm": {
+        "max_ms": 9.977365,
+        "median_ms": 6.803155,
+        "p95_ms": 8.957379,
+        "sample_count": 8,
+        "samples_ms": [
+          9.977365,
+          7.06312,
+          6.78766,
+          6.47709,
+          6.74716,
+          6.995129,
+          6.765331,
+          6.818651
+        ]
+      }
+    }
+  },
+  "report_only": true,
+  "sample_policy": {
+    "clock": "time.perf_counter_ns",
+    "cold_samples": 3,
+    "unit": "milliseconds",
+    "warm_samples": 8
+  },
+  "schema": "astrid.m7_performance.v1"
+}

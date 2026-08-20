@@ -40,6 +40,7 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
+from astrid.core.backup.operations import recover_restore_staging
 from astrid.core.events.registry import register_core_vocabulary
 from astrid.core.events.service import EventAppendService
 from astrid.core.foundation.project_paths import resolve_projects_root
@@ -216,6 +217,10 @@ def compose_standard_bridge(
     owns the writer lifecycle (``close()`` on shutdown).
     """
     root = resolve_projects_root(projects_root)
+    # Restore recovery is a read-before-write filesystem decision. It must
+    # resolve any journal left by a hard-dead restore before the database
+    # writer can open and observe a mixed database/media pair.
+    recover_restore_staging(root)
     database_path = derive_database_path(root)
     database_path.parent.mkdir(parents=True, exist_ok=True)
     if registry is None:
