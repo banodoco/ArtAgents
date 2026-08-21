@@ -1,4 +1,4 @@
-"""Deterministic temporary-copy factoring check (m3 Step 14 / T15).
+"""Deterministic packaged and temporary-copy factoring checks.
 
 Proves that each in-tree schema pack (``timeline``, ``shots``, ``references``)
 can be removed **only inside a temporary source copy** -- both the pack
@@ -8,10 +8,11 @@ directory and the explicit standard registration tuple
 test lane stays green and the remaining manifest-derived catalog is
 unchanged.
 
-This is a source-composition proof (v10 GA item 12 / Phase 1): there is no
-runtime discovery, no install/uninstall path, no third-party loading, and no
-generic plugin infrastructure. The real repository tree is never mutated; all
-edits happen in a throwaway copy under the system temp directory.
+The original source-composition proof remains available for the v10 regression
+floor. The packaged mode starts from one unpacked wheel, removes one standard
+schema pack at a time, patches only the explicit registration tuple, and runs
+the same complete kernel lane against that artifact root. Both modes are
+throwaway checks: the real repository and the supplied wheel are never mutated.
 
 Lane completeness
 -----------------
@@ -48,6 +49,11 @@ pack is absent from the frozen registry and the registration tuple, and a
 fresh database opened from the modified composition contains exactly the
 remaining tables (never the removed pack's).
 
+Packaged mode additionally checks that the removed pack's stream, event,
+command, repository, CLI, and bridge vocabulary is absent, every foreign key
+stays within the kernel or its owning pack, and every remaining SDK service
+uses the one writer supplied by the composition.
+
 Sketch verification
 -------------------
 The check also locks the software-engineering-agent composition sketch
@@ -64,12 +70,15 @@ uninstalled.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -90,6 +99,63 @@ PACK_TABLES: dict[str, tuple[str, ...]] = {
 m1/m3 catalog; never inferred from a live database)."""
 
 ALL_PACK_TABLES: frozenset[str] = frozenset().union(*PACK_TABLES.values())
+
+PACK_VOCABULARY: dict[str, dict[str, tuple[str, ...]]] = {
+    "timeline": {
+        "stream_types": ("timeline.timeline",),
+        "event_kinds": ("timeline.created", "timeline.saved", "timeline.archived"),
+        "command_kinds": ("timeline.create", "timeline.save", "timeline.archive"),
+        "repositories": ("TimelineRepository",),
+        "cli_mounts": ("timelines",),
+        "bridge_mounts": ("timelines",),
+    },
+    "shots": {
+        "stream_types": ("shot.shot",),
+        "event_kinds": (
+            "shot.created",
+            "shot.item_added",
+            "shot.item_removed",
+            "shot.reordered",
+        ),
+        "command_kinds": (
+            "shot.create",
+            "shot.add_item",
+            "shot.remove_item",
+            "shot.reorder",
+        ),
+        "repositories": ("ShotRepository",),
+        "cli_mounts": ("shots",),
+        "bridge_mounts": (),
+    },
+    "references": {
+        "stream_types": ("reference.reference",),
+        "event_kinds": (
+            "reference.created",
+            "reference.updated",
+            "reference.archived",
+            "reference.media_associated",
+            "reference.primary_changed",
+            "reference.linked",
+        ),
+        "command_kinds": (
+            "reference.create",
+            "reference.update",
+            "reference.archive",
+            "reference.associate",
+            "reference.set_primary",
+            "reference.link",
+        ),
+        "repositories": ("ReferenceRepository",),
+        "cli_mounts": ("references",),
+        "bridge_mounts": (),
+    },
+}
+"""The complete vocabulary owned by each fixed schema pack.
+
+This is an explicit audit input, not a discovery result. It is compared with
+the installed registry after each pack is removed so a surviving namespace
+cannot masquerade as a reduced composition.
+"""
 
 SKETCH_DOC = "docs/architecture/software-engineering-pack-sketch.md"
 """Repo-root-relative path of the software-engineering-agent composition
@@ -236,6 +302,498 @@ def build_temp_source_copy(
     except BaseException:
         shutil.rmtree(work, ignore_errors=True)
         raise
+
+
+# ---------------------------------------------------------------------------
+# Packaged-artifact factoring (m8 Step 8)
+# ---------------------------------------------------------------------------
+
+
+def unpack_wheel(wheel: str | Path, destination: str | Path) -> Path:
+    """Safely unpack one wheel into an artifact root and return that root.
+
+    The destination is created by the caller or by this function and is never
+    treated as a source checkout.  Wheel member paths are constrained before
+    extraction so a malformed artifact fails closed rather than escaping the
+    temporary composition.
+    """
+    archive_path = Path(wheel).expanduser().resolve()
+    root = Path(destination).expanduser().resolve()
+    if not archive_path.is_file() or archive_path.suffix != ".whl":
+        raise ValueError(f"wheel does not exist or is not a wheel: {archive_path}")
+    root.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(archive_path) as archive:
+        for member in archive.infolist():
+            relative = Path(member.filename)
+            target = (root / relative).resolve()
+            if target != root and root not in target.parents:
+                raise ValueError(f"wheel member escapes artifact root: {member.filename!r}")
+            if member.is_dir():
+                target.mkdir(parents=True, exist_ok=True)
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(archive.read(member))
+    package_root = root / "astrid"
+    if not (package_root / "__init__.py").is_file():
+        raise ValueError(f"unpacked wheel is missing the astrid package: {root}")
+    return root
+
+
+def build_temp_artifact_copy(
+    wheel: str | Path,
+    removed_pack: str,
+    *,
+    base_dir: Path | None = None,
+    artifact_root: Path | None = None,
+) -> Path:
+    """Create one reduced composition from an unpacked wheel.
+
+    When *artifact_root* is supplied it is copied first, which lets callers
+    factor one already-unpacked wheel without rebuilding or mutating it.
+    Otherwise the supplied wheel is unpacked into the temporary composition.
+    The returned path is the temporary artifact root; its parent owns the
+    complete cleanup boundary.
+    """
+    if removed_pack not in DOMAIN_PACKS:
+        raise ValueError(
+            f"unknown domain pack {removed_pack!r}; expected one of {DOMAIN_PACKS}"
+        )
+    work = Path(tempfile.mkdtemp(prefix="astrid-artifact-factoring-", dir=base_dir))
+    root = work / "artifact"
+    try:
+        if artifact_root is None:
+            unpack_wheel(wheel, root)
+        else:
+            source = Path(artifact_root).expanduser().resolve()
+            if not (source / "astrid" / "__init__.py").is_file():
+                raise ValueError(f"artifact root is missing the astrid package: {source}")
+            shutil.copytree(source, root, symlinks=False)
+        pack_root = root / "astrid" / "packs" / removed_pack
+        if not pack_root.is_dir():
+            raise ValueError(
+                f"artifact root is missing the {removed_pack!r} schema pack: {pack_root}"
+            )
+        shutil.rmtree(pack_root)
+        _patch_packs_init(root / "astrid" / "packs" / "__init__.py", removed_pack)
+        return root
+    except BaseException:
+        shutil.rmtree(work, ignore_errors=True)
+        raise
+
+
+def _artifact_test_workspace(
+    artifact_root: Path, *, base_dir: Path | None = None
+) -> Path:
+    """Copy only the fixed kernel tests needed by the packaged lane.
+
+    The source tree contains many domain-specific v10 files, but the packaged
+    lane deliberately executes only :data:`KERNEL_LANE`.  Copying that exact
+    list keeps each installed-root subprocess small and makes the fixed suite
+    boundary auditable; it does not change which tests are executed.
+    """
+    work = Path(tempfile.mkdtemp(prefix="astrid-artifact-kernel-", dir=base_dir))
+    try:
+        (work / "tests").mkdir(parents=True, exist_ok=True)
+        for relative in _LANE_CONFTEST_FILES:
+            source = REPO_ROOT / relative
+            target = work / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+        for relative in ("tests/v10/__init__.py", "tests/v10/conftest.py", *KERNEL_LANE):
+            source = REPO_ROOT / relative
+            target = work / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+        for relative in _LANE_FIXTURES:
+            source = REPO_ROOT / relative
+            if source.exists():
+                shutil.copytree(
+                    source,
+                    work / relative,
+                    ignore=_COPY_IGNORE,
+                    symlinks=False,
+                )
+        for relative in _LANE_SCRIPTS:
+            source = REPO_ROOT / relative
+            target = work / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+        shutil.copy2(REPO_ROOT / "pyproject.toml", work / "pyproject.toml")
+        # Keep the installed root first so a source checkout or editable
+        # distribution cannot satisfy an import in the kernel lane.
+        (work / "artifact-root.txt").write_text(str(artifact_root) + "\n")
+        return work
+    except BaseException:
+        shutil.rmtree(work, ignore_errors=True)
+        raise
+
+
+def _artifact_environment(*roots: Path) -> dict[str, str]:
+    """Return a child environment whose only Astrid import roots are explicit."""
+    environment = os.environ.copy()
+    environment["PYTHONPATH"] = os.pathsep.join(str(root) for root in roots)
+    environment["PYTHONNOUSERSITE"] = "1"
+    environment["ASTRID_INTERNAL_INVOCATION"] = "1"
+    environment["ASTRID_NO_NUDGE"] = "1"
+    for name in (
+        "ASTRID_SESSION_ID",
+        "ASTRID_REPO_ROOT",
+        "ASTRID_PACKS_PATH",
+        "ASTRID_THEMES_ROOT",
+        "OPENAI_API_KEY",
+        "SUPABASE_URL",
+    ):
+        environment.pop(name, None)
+    return environment
+
+
+_ARTIFACT_COMPOSITION_PROBE = r'''
+import json
+import sqlite3
+import sys
+from pathlib import Path
+
+import astrid
+
+from astrid.core.events.registry import register_core_vocabulary
+from astrid.core.migrations.catalog import CORE_TABLES
+from astrid.core.schema_packs.registry import SchemaPackRegistry
+from astrid.core.store.database import open_database
+from astrid.core.store.writer import DatabaseWriter
+from astrid.packs import STANDARD_SCHEMA_PACKS, register_standard_schema_packs
+
+
+removed_pack = sys.argv[1]
+expected = json.loads(sys.argv[2])
+artifact_root = Path(sys.argv[3]).resolve()
+assert Path(astrid.__file__).resolve().is_relative_to(artifact_root), astrid.__file__
+
+registry = SchemaPackRegistry()
+register_core_vocabulary(registry)
+register_standard_schema_packs(registry)
+frozen = registry.freeze()
+remaining = {pack for pack in STANDARD_SCHEMA_PACKS}
+assert removed_pack not in remaining
+assert removed_pack not in frozen.packs
+
+expected_pack_tables = set(expected["remaining_tables"])
+expected_tables = set(CORE_TABLES) | expected_pack_tables
+assert set(frozen.tables) == expected_tables
+assert set(frozen.tables).isdisjoint(expected["removed_tables"])
+for field, values in expected["removed_vocabulary"].items():
+    mapping = getattr(frozen, field)
+    for value in values:
+        assert value not in mapping, (field, value, mapping)
+
+database = artifact_root / ("factoring-" + removed_pack + ".sqlite3")
+for suffix in ("", "-wal", "-shm"):
+    database.with_name(database.name + suffix).unlink(missing_ok=True)
+connection = open_database(database, frozen)
+try:
+    tables = {
+        row[0]
+        for row in connection.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+        )
+    }
+    assert tables == expected_tables
+    assert tables.isdisjoint(expected["removed_tables"])
+    connection.execute("PRAGMA foreign_keys = ON")
+    foreign_keys = {
+        (table, row[2])
+        for table in tables
+        for row in connection.execute("PRAGMA foreign_key_list('" + table + "')")
+    }
+finally:
+    connection.close()
+
+owners = {table: "core" for table in CORE_TABLES}
+owners.update(frozen.tables)
+for source, target in foreign_keys:
+    source_pack = owners[source]
+    target_pack = owners[target]
+    assert target_pack == "core" or target_pack == source_pack, (source, target)
+    assert target not in expected["removed_tables"], (source, target)
+
+# The reduced composition still has one explicit writer seam.  Kernel and
+# remaining pack services may share it, but no service or pack repository may
+# create a second writer of its own.
+from astrid.core.events.service import EventAppendService
+from astrid.core.receipts import ReceiptService
+from astrid.core.repositories.evidence import EvidenceRepository
+from astrid.core.repositories.media import MediaRepository
+from astrid.core.repositories.projects import ProjectRepository
+from astrid.core.repositories.runs import RunRepository
+from astrid.core.repositories.tasks import TaskRepository
+from astrid.core.repositories.events import EventRepository
+from astrid.sdk.media import MediaService
+from astrid.sdk.projects import ProjectsService
+from astrid.sdk.runs import RunsService
+from astrid.sdk.tasks import TasksService
+
+writer_database = artifact_root / ("writer-" + removed_pack + ".sqlite3")
+for suffix in ("", "-wal", "-shm"):
+    writer_database.with_name(writer_database.name + suffix).unlink(missing_ok=True)
+writer = DatabaseWriter(writer_database, frozen)
+try:
+    events = EventAppendService(frozen)
+    receipts = ReceiptService()
+    projects = ProjectRepository(events=events, receipts=receipts)
+    tasks = TaskRepository(events=events, receipts=receipts)
+    media = MediaRepository(events=events, receipts=receipts, projects_root=artifact_root)
+    runs = RunRepository(events=events, receipts=receipts)
+    evidence = EvidenceRepository(events=events, receipts=receipts)
+    event_log = EventRepository(writer)
+    services = [
+        ProjectsService(writer, projects, receipts),
+        MediaService(writer, projects, media, receipts),
+        TasksService(writer, tasks, receipts, event_log),
+        RunsService(writer, runs, receipts, evidence, event_log),
+    ]
+    repositories = [projects, tasks, media, runs, evidence]
+    if "timeline" in remaining:
+        from astrid.packs.timeline.repository import TimelineRepository
+        from astrid.sdk.timelines import TimelinesService
+        timelines = TimelineRepository(events=events, receipts=receipts, projects=projects)
+        services.append(TimelinesService(writer, projects, timelines, receipts))
+        repositories.append(timelines)
+    if "shots" in remaining:
+        from astrid.packs.shots.repository import ShotRepository
+        from astrid.sdk.shots import ShotsService
+        shots = ShotRepository(events=events, receipts=receipts)
+        services.append(ShotsService(writer, projects, shots, receipts))
+        repositories.append(shots)
+    if "references" in remaining:
+        from astrid.packs.references.repository import ReferenceRepository
+        from astrid.sdk.references import ReferencesService
+        references = ReferenceRepository(events=events, receipts=receipts)
+        services.append(ReferencesService(writer, projects, references, receipts))
+        repositories.append(references)
+    assert services
+    assert {id(getattr(service, "_writer", None)) for service in services} == {id(writer)}
+    assert all(not hasattr(repository, "_writer") for repository in repositories)
+finally:
+    writer.close()
+
+print(json.dumps({
+    "removed_pack": removed_pack,
+    "remaining_packs": sorted(remaining),
+    "tables": len(expected_tables),
+    "foreign_keys": len(foreign_keys),
+    "writer": "one-shared-writer",
+}))
+'''
+
+
+def verify_artifact_composition(
+    artifact_root: Path,
+    removed_pack: str,
+    *,
+    python: str | None = None,
+    timeout: int = 30,
+) -> str:
+    """Run installed-root catalog, vocabulary, FK, and writer checks."""
+    if removed_pack not in DOMAIN_PACKS:
+        raise ValueError(
+            f"unknown domain pack {removed_pack!r}; expected one of {DOMAIN_PACKS}"
+        )
+    remaining_tables = sorted(ALL_PACK_TABLES - set(PACK_TABLES[removed_pack]))
+    expected = {
+        "remaining_tables": remaining_tables,
+        "removed_tables": list(PACK_TABLES[removed_pack]),
+        "removed_vocabulary": PACK_VOCABULARY[removed_pack],
+    }
+    interpreter = python or sys.executable
+    environment = _artifact_environment(artifact_root)
+    process = subprocess.run(
+        [
+            interpreter,
+            "-c",
+            _ARTIFACT_COMPOSITION_PROBE,
+            removed_pack,
+            json.dumps(expected, sort_keys=True),
+            str(artifact_root),
+        ],
+        cwd=artifact_root,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+    if process.returncode != 0:
+        raise AssertionError(
+            f"installed-root checks failed for {removed_pack}:\n"
+            f"{process.stdout}\n{process.stderr}"
+        )
+    return process.stdout.strip()
+
+
+def run_artifact_kernel_suite(
+    artifact_root: Path,
+    *,
+    python: str | None = None,
+    base_dir: Path | None = None,
+    timeout: int = 90,
+) -> subprocess.CompletedProcess[str]:
+    """Run the complete fixed kernel suite against one artifact root."""
+    interpreter = python or sys.executable
+    test_workspace = _artifact_test_workspace(artifact_root, base_dir=base_dir)
+    try:
+        environment = _artifact_environment(artifact_root, test_workspace)
+        command = [
+            interpreter,
+            "-m",
+            "pytest",
+            "-q",
+            "--tb=short",
+            "-p",
+            "no:cacheprovider",
+            "--no-header",
+            *KERNEL_LANE,
+        ]
+        return subprocess.run(
+            command,
+            cwd=test_workspace,
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    finally:
+        shutil.rmtree(test_workspace, ignore_errors=True)
+
+
+@dataclass(frozen=True)
+class ArtifactRemovalResult:
+    """Evidence for one pack removal from one unpacked wheel."""
+
+    removed_pack: str
+    catalog_output: str
+    kernel_returncode: int
+    kernel_output: str
+    kernel_error: str
+
+    @property
+    def ok(self) -> bool:
+        return self.kernel_returncode == 0
+
+
+@dataclass(frozen=True)
+class ArtifactFactoringResult:
+    """Combined packaged-factorability result for all standard packs."""
+
+    removals: tuple[ArtifactRemovalResult, ...]
+    sketch_summary: str
+
+    @property
+    def ok(self) -> bool:
+        return bool(self.removals) and all(result.ok for result in self.removals)
+
+
+def check_artifact_removal(
+    removed_pack: str,
+    *,
+    wheel: str | Path,
+    artifact_root: Path | None = None,
+    python: str | None = None,
+    base_dir: Path | None = None,
+    keep_temp: bool = False,
+    kernel_timeout: int = 90,
+    catalog_timeout: int = 30,
+) -> ArtifactRemovalResult:
+    """Remove one pack from a wheel root and run every packaged check."""
+    reduced_root = build_temp_artifact_copy(
+        wheel,
+        removed_pack,
+        base_dir=base_dir,
+        artifact_root=artifact_root,
+    )
+    work = reduced_root.parent
+    try:
+        catalog_output = verify_artifact_composition(
+            reduced_root,
+            removed_pack,
+            python=python,
+            timeout=catalog_timeout,
+        )
+        kernel = run_artifact_kernel_suite(
+            reduced_root,
+            python=python,
+            base_dir=work,
+            timeout=kernel_timeout,
+        )
+        return ArtifactRemovalResult(
+            removed_pack=removed_pack,
+            catalog_output=catalog_output,
+            kernel_returncode=kernel.returncode,
+            kernel_output=kernel.stdout,
+            kernel_error=kernel.stderr,
+        )
+    finally:
+        if not keep_temp:
+            shutil.rmtree(work, ignore_errors=True)
+
+
+def check_artifact_factoring(
+    *,
+    wheel: str | Path,
+    packs: tuple[str, ...] = DOMAIN_PACKS,
+    artifact_root: Path | None = None,
+    python: str | None = None,
+    base_dir: Path | None = None,
+    keep_temp: bool = False,
+    kernel_timeout: int = 90,
+    catalog_timeout: int = 30,
+) -> ArtifactFactoringResult:
+    """Run packaged factorability independently for every requested pack.
+
+    All reductions start from one unpacked copy of the selected wheel.  Each
+    pack still receives its own copied artifact root and its own complete
+    kernel subprocess, so one reduced composition cannot share runtime state
+    with another, while wheel extraction and its package-data audit happen
+    exactly once.
+    """
+    requested = tuple(packs)
+    if not requested:
+        raise ValueError("at least one domain pack is required")
+    unknown = set(requested) - set(DOMAIN_PACKS)
+    if unknown:
+        raise ValueError(
+            f"unknown domain pack(s) {sorted(unknown)!r}; expected one of {DOMAIN_PACKS}"
+        )
+
+    base_work = Path(tempfile.mkdtemp(prefix="astrid-artifact-base-", dir=base_dir))
+    base_root = base_work / "artifact"
+    try:
+        if artifact_root is None:
+            unpack_wheel(wheel, base_root)
+        else:
+            source = Path(artifact_root).expanduser().resolve()
+            if not (source / "astrid" / "__init__.py").is_file():
+                raise ValueError(f"artifact root is missing the astrid package: {source}")
+            shutil.copytree(source, base_root, symlinks=False)
+
+        removals = tuple(
+            check_artifact_removal(
+                pack,
+                wheel=wheel,
+                artifact_root=base_root,
+                python=python,
+                base_dir=base_work,
+                keep_temp=keep_temp,
+                kernel_timeout=kernel_timeout,
+                catalog_timeout=catalog_timeout,
+            )
+            for pack in requested
+        )
+        return ArtifactFactoringResult(
+            removals=removals,
+            sketch_summary=verify_sketch_kernel_inventory(),
+        )
+    finally:
+        if not keep_temp:
+            shutil.rmtree(base_work, ignore_errors=True)
 
 
 _CATALOG_SNIPPET = r"""
@@ -497,10 +1055,79 @@ def main(argv: list[str] | None = None) -> int:
         default=list(DOMAIN_PACKS),
         help="packs to remove one at a time (default: all three domain packs)",
     )
+    parser.add_argument(
+        "--wheel",
+        default=None,
+        help="run packaged-artifact factoring against this one wheel",
+    )
+    parser.add_argument(
+        "--artifact-root",
+        default=None,
+        help="factor a previously unpacked artifact root instead of a wheel",
+    )
     parser.add_argument("--python", default=None, help="interpreter for subprocesses")
     parser.add_argument("--keep-temp", action="store_true", help="keep temp copies on failure")
     parser.add_argument("--lane-timeout", type=int, default=90, help="per-lane pytest timeout")
     args = parser.parse_args(argv)
+
+    if args.artifact_root is not None and args.wheel is None:
+        parser.error("--artifact-root requires --wheel as its artifact identity")
+
+    if args.wheel is not None:
+        failures: list[str] = []
+        for pack in args.packs:
+            try:
+                result = check_artifact_removal(
+                    pack,
+                    wheel=args.wheel,
+                    artifact_root=(
+                        Path(args.artifact_root).expanduser().resolve()
+                        if args.artifact_root is not None
+                        else None
+                    ),
+                    python=args.python,
+                    keep_temp=args.keep_temp,
+                    kernel_timeout=args.lane_timeout,
+                )
+            except Exception as exc:  # noqa: BLE001 - CLI must always exit non-zero
+                print(f"[FAIL] packaged removal {pack}: {exc}", file=sys.stderr)
+                failures.append(pack)
+                continue
+            if result.ok:
+                print(f"[PASS] packaged removal {pack}: {result.catalog_output}")
+                summary = (result.kernel_output or "").strip().splitlines()[-1:]
+                if summary:
+                    print(f"       kernel lane: {summary[0]}")
+            else:
+                print(
+                    f"[FAIL] packaged removal {pack}: kernel lane exited "
+                    f"{result.kernel_returncode}",
+                    file=sys.stderr,
+                )
+                tail = "\n".join(
+                    (result.kernel_output or "").splitlines()[-4:]
+                    + (result.kernel_error or "").splitlines()[-4:]
+                )
+                print(f"       kernel lane tail:\n{tail}", file=sys.stderr)
+                failures.append(pack)
+        try:
+            sketch_summary = verify_sketch_kernel_inventory()
+        except Exception as exc:  # noqa: BLE001 - CLI must always exit non-zero
+            print(f"[FAIL] software-engineering-agent sketch: {exc}", file=sys.stderr)
+            return 1
+        print(f"[PASS] software-engineering-agent sketch: {sketch_summary}")
+        if failures:
+            print(
+                f"packaged factoring check FAILED for: {', '.join(failures)}",
+                file=sys.stderr,
+            )
+            return 1
+        print(
+            "packaged factoring check PASSED: every requested domain pack is "
+            "removable from one unpacked wheel while the complete kernel lane, "
+            "catalog, authority, and writer checks stay green."
+        )
+        return 0
 
     failures: list[str] = []
     for pack in args.packs:

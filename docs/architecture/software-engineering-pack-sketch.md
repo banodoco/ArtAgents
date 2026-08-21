@@ -1,9 +1,10 @@
 # Software-Engineering-Agent Composition Sketch
 
-Status: **illustrative source-composition proof** (v10 GA item 12 / Phase 1).
-Scope: documents how a second agent reuses the unchanged 14-table kernel with
-its own in-tree packs. It is not SWE product scope, not a commitment to any
-pack's DDL or API, and not a dynamic plugin loader.
+Status: **illustrative packaged-artifact and source-composition proof** (v10
+GA item 12 / Phase 1). Scope: documents how a second agent reuses the
+unchanged 14-table kernel with its own in-tree packs. It is not SWE product
+scope, not a commitment to any pack's DDL or API, and not a dynamic plugin
+loader.
 
 ## 1. The composition
 
@@ -120,3 +121,30 @@ The focused tests in `tests/v10/test_pack_factoring.py` exercise the positive
 binding and the negative controls (an injected extra kernel table and a
 dropped kernel table both fail), so the sketch cannot silently grow the
 kernel.
+
+## 8. Packaged artifact-root proof (m8 GA gate)
+
+The packaged factoring lane begins with exactly one built wheel and unpacks it
+into a throwaway artifact root. For each of `timeline`, `shots`, and
+`references`, the lane removes that pack directory and edits only the explicit
+standard registration tuple in the temporary root. The wheel and checkout are
+never edited.
+
+For every reduced root, the lane proves all of the following before accepting
+the composition:
+
+1. `astrid` imports from the reduced artifact root, not the checkout;
+2. the frozen registry contains the kernel plus only the two remaining pack
+   tables, stream/event/command/repository/mount vocabulary, and no omitted
+   pack vocabulary;
+3. a fresh migrated database has exactly those tables, with foreign keys
+   pointing only to the kernel or the owning pack;
+4. the kernel and every remaining pack service use one explicit database
+   writer, with repositories remaining writer-free; and
+5. the complete fixed kernel test lane remains green against that reduced
+   root.
+
+This is an artifact-root composition proof, not a loader contract. The
+software-engineering composition above remains the unchanged 14-table kernel
+plus its own `workspace`, `changeset`, and `review` packs, and the inventory
+binding in section 2 remains normative.

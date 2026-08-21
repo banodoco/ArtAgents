@@ -1,6 +1,7 @@
 # Astrid v10 Implementation Decisions
 
-**Artifact status:** frozen for milestone m1 (Sprint 1) execution.
+**Artifact status:** frozen through the m8 packaged GA release contract;
+original m1–m6 decisions remain historical unless explicitly amended below.
 
 **Normative sources:** `unified-data-model-plan-v10-20260813.md` (v10, §2/§4.2/§5/§7), `astrid-first-sprint-plan-20260813.md` (Sprint 1, ticket S1-16), `astrid-first-sprint-plan-review-20260813.md` (concrete fixes 2/3/10), and the m1 plan `m1-event-core-and-20260814-2340`.
 
@@ -370,7 +371,53 @@ anti-scope forbids new editor feature work, so the verb does not land in m6.
 
 ---
 
+## 19. m8 packaged GA release and evidence contract
+
+**Decision (frozen for m8):** the packaged GA gate uses the following release
+matrix. This section is the normative companion to
+`docs/contracts/supported-platforms.md` §1; it does not reopen the historical
+m4 development matrix in that document.
+
+| Dimension | Frozen decision |
+|---|---|
+| OS | Linux and macOS are blocking release targets. Windows is unsupported and is not represented by emulation or metadata-only evidence. |
+| Python | CPython 3.11 and 3.12 on each declared OS, exercised from the installed wheel outside the source checkout. |
+| Browser | Current stable Chromium for the editor-contract lane; Firefox, Safari, and Edge are unsupported m8 browser targets. |
+| Package | The existing Python distribution `astrid`, built as one repository-local wheel. |
+| Version | `0.1.0`, sourced only from `pyproject.toml` and required to match wheel metadata, installed package reporting, and every evidence record. Future releases update that single source before running the gate. |
+| Publication | Local release artifact directory only. m8 does not publish to PyPI, a cloud registry, a hosted service, or any other external location. |
+| macOS signing/notarization | The wheel is explicitly **unsigned and unnotarized**. It is not a signed installer, application bundle, notarized artifact, or Gatekeeper-ready distribution; no signing credentials are assumed. |
+| Clean account | A fresh credential-free local account with isolated home, state, project, media, cache, configuration, and browser-profile paths. Account, cloud, and provider credentials/configuration must be absent. |
+| Evidence owner | The Astrid Release Owner role owns the matrix, evidence completeness, wheel-digest consistency, and ship decision. CI lane owners produce automated records; a designated physical-device operator retains manual device records under the Release Owner's custody. |
+
+**Evidence classification:**
+
+- **Blocking automated evidence** includes packaging, installed imports/help/
+  version, runtime contract and credential-free journey, authority and
+  factoring scans, and current stable Chromium editor-contract checks for each
+  declared Linux/macOS and CPython 3.11/3.12 automated lane. Every record
+  names the same wheel SHA-256 and installed artifact path.
+- **Retained physical-device evidence** is a clean-account editor journey on a
+  real macOS device using current stable Chromium, including actual browser
+  opening and local filesystem behavior. Automated tests cannot be relabeled
+  as physical-device proof, and simulated macOS runs cannot satisfy it.
+- **Signing evidence** is not expected or accepted for this artifact. The
+  absence of signing/notarization is a declared release fact, not a claim to
+  conceal in a passing CI result.
+
+The m8 gate may publish acceptance, authority, performance, clean-account,
+handoff, and ship artifacts only after all blocking automated evidence is
+green, required physical-device evidence is retained, and all records refer to
+the same `astrid` 0.1.0 wheel digest. Source-only, authenticated-account,
+different-wheel, stale, missing, or digest-mismatched evidence blocks
+publication.
+
 **Record of amendments:**
+
+- **m8 amendment 1 (Sprint 8):** added §19, freezing the packaged GA OS,
+  Python, browser, package, version, local-publication, clean-account,
+  evidence-ownership, and unsigned/unnotarized macOS decisions. No earlier
+  v10 schema, authority, or product decision was reopened.
 
 - **m6 amendment 1 (Sprint 6):** added §18 (owner lock stays for m6 with the
   loopback-RPC closure deferred to m7/m8 and the corrected "remote GPU

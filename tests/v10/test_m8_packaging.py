@@ -15,6 +15,7 @@ import pytest
 
 from astrid.core.migrations.runner import MigrationTooNewError, probe_database
 from astrid.core.schema_packs.standard import build_standard_registry
+from scripts.reshape.installed_artifact import build_once
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -174,7 +175,11 @@ def _run_installed(
     child_env.pop("PYTHONPATH", None)
     child_env.pop("PYTHONHOME", None)
     return subprocess.run(
-        [str(child_python), "-I", *args],
+        # This T2 fixture intentionally reuses the already-provisioned global
+        # runtime dependencies through --system-site-packages. T3 owns the
+        # stricter no-system-site-packages dependency-leak proof; PYTHONNOUSERSITE
+        # and PYTHONSAFEPATH still keep user/site and checkout paths out.
+        [str(child_python), *args],
         cwd=outside,
         env=child_env,
         capture_output=True,
@@ -293,6 +298,88 @@ def test_too_new_core_and_pack_migrations_refuse_without_mutation(
     with pytest.raises(MigrationTooNewError):
         probe_database(database, build_standard_registry())
     assert database.read_bytes() == before
+
+
+def test_shared_harness_smoke_checks_installed_basics_and_failure_boundaries(
+    tmp_path: Path,
+) -> None:
+    """Exercise the shared artifact boundary used by the release smoke.
+
+    The packaging fixture above intentionally retains its small T2-specific
+    setup.  This test covers the T4 contract: all product checks run through
+    the build-once harness, explicit workspaces survive close, and failed
+    resource/import probes remain nonzero evidence rather than being hidden.
+    """
+    workspace = tmp_path / "explicit-installed-workspace"
+    harness = build_once(
+        REPO_ROOT,
+        workspace=workspace,
+        # Help and doctor are gateway-level product checks and therefore need
+        # the wheel's declared runtime dependencies.  The T3 harness tests
+        # retain the no-dependency isolation proof separately.
+        install_dependencies=True,
+    )
+    try:
+        version = harness.run_module(
+            "installed-version", "astrid", ["--version"], check=True
+        )
+        assert version.stdout.strip() == "astrid"
+
+        help_record = harness.run_module("installed-help", "astrid", ["help"], check=True)
+        assert "Family census (exactly eight families):" in help_record.stdout
+
+        doctor_help = harness.run_module(
+            "installed-doctor-help", "astrid", ["doctor", "--help"], check=True
+        )
+        assert "doctor" in doctor_help.output.lower()
+
+        resources = harness.run_lane(
+            "installed-resource-probe",
+            [
+                "-c",
+                "from importlib import resources; "
+                "required=('core/migrations/sql/core/0001_initial.sql',"
+                "'packs/timeline/schema-pack.yaml','packs/shots/schema-pack.yaml',"
+                "'packs/references/schema-pack.yaml'); "
+                "root=resources.files('astrid'); "
+                "missing=[name for name in required if not root.joinpath(*name.split('/')).is_file()]; "
+                "assert not missing, missing; print('resources: OK')",
+            ],
+            check=True,
+        )
+        assert "resources: OK" in resources.stdout
+
+        missing = harness.run_lane(
+            "missing-resource-adversary",
+            [
+                "-c",
+                "from importlib import resources; "
+                "assert resources.files('astrid').joinpath('missing-release-resource').is_file()",
+            ],
+        )
+        assert missing.returncode != 0
+        assert missing.status == "failed"
+        assert missing.error and "status" in missing.error
+
+        checkout = harness.run_lane(
+            "checkout-import-adversary",
+            ["-c", f"print({str(REPO_ROOT)!r})"],
+        )
+        assert checkout.returncode == 0
+        assert checkout.status == "failed"
+        assert checkout.error and "source-tree path" in checkout.error
+    finally:
+        harness.close()
+
+    # An explicitly supplied workspace is caller-owned and must remain
+    # inspectable after the lane finishes.
+    assert workspace.is_dir()
+    assert (workspace / "dist").is_dir()
+
+    auto_harness = build_once(REPO_ROOT)
+    auto_workspace = auto_harness.workspace
+    auto_harness.close()
+    assert not auto_workspace.exists()
 
 
 __all__ = ["test_wheel_metadata_entry_points_and_runtime_modules"]

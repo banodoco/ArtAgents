@@ -63,17 +63,34 @@ runpod = [
     "runpod-lifecycle>=0.3",
 ]
 
+[tool.setuptools]
+# Only the package-data patterns below are release inputs.  In particular,
+# do not let setuptools' VCS/egg-info package-data defaults pull authoring
+# files from namespace-like directories such as packs/*/golden or packs/*/tests.
+include-package-data = false
+
 [tool.setuptools.packages.find]
 include = ["astrid*"]
 exclude = [
     # Tests are not part of the installed product.  Keeping this exclusion
     # explicit prevents a future in-tree pack test package from becoming a
     # runtime dependency by accident.
-    "astrid.*.tests",
+    "astrid.*.tests*",
     # Golden provider examples and pack skills are authoring material, not
     # installed runtime modules.
     "astrid.*.golden*",
     "astrid.*.skill*",
+    "astrid.skills*",
+]
+
+[tool.setuptools.exclude-package-data]
+astrid = [
+    # Defensive exclusions for non-package directories that may be surfaced
+    # by a source/VCS manifest in a future setuptools release.
+    "**/__pycache__/*",
+    "packs/**/tests/*",
+    "packs/**/golden/*",
+    "packs/**/skill/*",
 ]
 
 [tool.setuptools.package-data]
