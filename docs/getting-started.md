@@ -19,6 +19,10 @@ python3 -m astrid doctor --json
 
 From any shell, run the read-only health check:
 
+```bash
+python3 -m astrid doctor --json   # read-only health check
+```
+
 Other useful zero-secret commands:
 
 ```bash
