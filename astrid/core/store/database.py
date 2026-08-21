@@ -30,6 +30,7 @@ from astrid.core.migrations.catalog import CONNECTION_PRAGMAS
 from astrid.core.migrations.runner import (
     apply_pending_migrations,
     probe_database,
+    read_only_uri,
 )
 from astrid.core.schema_packs.registry import FrozenSchemaPackRegistry
 
@@ -85,7 +86,7 @@ def open_database(
                 f"cannot open database read-only: {db_path} does not exist"
             )
         return sqlite3.connect(
-            f"file:{db_path}?mode=ro", uri=True, isolation_level=None
+            read_only_uri(db_path), uri=True, isolation_level=None
         )
     conn = sqlite3.connect(str(db_path), isolation_level=None)
     try:

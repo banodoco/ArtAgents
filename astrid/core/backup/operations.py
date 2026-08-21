@@ -46,6 +46,7 @@ from astrid.core.integrations.reigh.bridge_service import derive_database_path
 from astrid.core.migrations.runner import (
     MigrationError,
     probe_database,
+    read_only_uri,
     read_schema_migrations,
 )
 from astrid.core.store.ownership import DatabaseOwnerLock
@@ -281,7 +282,7 @@ def _online_backup(
     The snapshot is written to a sibling temp file and atomically moved into
     place so an idempotent re-backup never observes a half-written file.
     """
-    source = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, isolation_level=None)
+    source = sqlite3.connect(read_only_uri(db_path), uri=True, isolation_level=None)
     try:
         packs = _read_migration_state(source)
         sqlite_pages = int(source.execute("PRAGMA page_count").fetchone()[0])
@@ -295,6 +296,12 @@ def _online_backup(
             destination = sqlite3.connect(str(tmp_path))
             try:
                 source.backup(destination)
+                # The backup API copies the source header verbatim, which
+                # carries journal_mode=WAL; a single-file WAL snapshot cannot
+                # be opened read-only (its -shm index is missing), so restore
+                # validation fails on it. Rewrite the header to DELETE mode so
+                # the snapshot is a portable, self-contained single file.
+                destination.execute("PRAGMA journal_mode=DELETE")
             finally:
                 destination.close()
             os.replace(tmp_path, dest_db)

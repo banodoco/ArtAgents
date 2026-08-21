@@ -689,10 +689,19 @@ def _database_bytes(path: Path) -> tuple[bytes, dict[str, bytes]]:
 
 
 def _assert_database_unchanged(path: Path, before: tuple[bytes, dict[str, bytes]]) -> None:
-    """Assert the database content file and pre-existing sidecars are identical."""
+    """Assert the database content file and pre-existing sidecars are identical.
+
+    The ``-shm`` WAL index is volatile by design: any open — including a
+    read-only probe — may update its reader markers, so its content is not
+    database content. Pre-existing ``-wal`` content is compared byte-for-byte;
+    a pre-existing ``-shm`` is only required to still exist.
+    """
     after_main, after_sidecars = _database_bytes(path)
     assert after_main == before[0]
     for name, content in before[1].items():
+        if name.endswith("-shm"):
+            assert name in after_sidecars, name
+            continue
         assert after_sidecars[name] == content, name
 
 

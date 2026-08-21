@@ -278,6 +278,26 @@ def _validate_applied_migrations(
                 )
 
 
+def read_only_uri(db_path: Path) -> str:
+    """Return a read-only SQLite URI for *db_path*.
+
+    A database whose header declares WAL format but whose ``-wal``/``-shm``
+    sidecars do not exist (a freshly pragma-switched or copied snapshot) can
+    never be opened ``mode=ro`` — SQLite must create the ``-shm`` index,
+    which read-only opens cannot do. Because no ``-wal`` exists, the main
+    file is complete and quiescent, so ``immutable=1`` reads it directly and
+    correctly. Whenever a ``-wal`` exists the normal ``mode=ro`` open is used
+    so committed WAL content is still visible.
+    """
+    header = db_path.read_bytes()[:20]
+    wal_format = len(header) >= 20 and header[18] == 2  # file-format read version
+    has_wal = Path(f"{db_path}-wal").exists()
+    has_shm = Path(f"{db_path}-shm").exists()
+    if wal_format and not has_wal and not has_shm:
+        return f"file:{db_path}?immutable=1"
+    return f"file:{db_path}?mode=ro"
+
+
 def probe_database(
     path: str | Path,
     registry: FrozenSchemaPackRegistry,
@@ -293,9 +313,7 @@ def probe_database(
     db_path = Path(path)
     if not db_path.exists():
         return DatabaseProbe(path=db_path, exists=False, applied=())
-    conn = sqlite3.connect(
-        f"file:{db_path}?mode=ro", uri=True, isolation_level=None
-    )
+    conn = sqlite3.connect(read_only_uri(db_path), uri=True, isolation_level=None)
     try:
         applied = read_schema_migrations(conn)
     finally:
