@@ -94,6 +94,28 @@ event log alone can reconstruct every save that advanced the stream head.
 TIMELINE_SAVE_COMMAND_KIND = "timeline.save"
 """The m1 command kind that timeline-save receipts are keyed on."""
 
+TIMELINE_CONFIG_REPLACED_EVENT_KIND = "timeline.config_replaced"
+"""The m2 event kind appended by the whole-config replacement command.
+
+``timeline.config_replaced`` is the lossless runtime full-replacement
+surface (projection/reset path): the event carries the newly committed
+``config`` and ``registry`` plus the ``expected_version`` that was
+CAS-checked, exactly like ``timeline.saved`` — the two event kinds differ
+only in meaning (whole-document CAS save vs. full-config replacement), not
+in payload shape.
+"""
+
+TIMELINE_REPLACE_CONFIG_COMMAND_KIND = "timeline.replace_config"
+"""The m2 command kind that timeline-replace_config receipts are keyed on.
+
+Declared by the timeline pack manifest; implemented by
+:meth:`TimelineRepository.replace_config`. Receipt keys follow the save
+convention — ``timeline.replace_config:{timeline_id}:{expected_version}``
+when the caller supplies the key, or the derived bridge key
+``{command_kind}:{project_id}:{timeline_id}:{expected_version}:{digest}``
+when it does not.
+"""
+
 TIMELINE_ARCHIVE_COMMAND_KIND = "timeline.archive"
 """The m4 command kind that timeline-archive receipts are keyed on (plan
 step 7). Archive is event-backed (SD1): the frozen ``timelines`` table has
@@ -1097,6 +1119,286 @@ class TimelineRepository:
         )
         return read_model
 
+    # -- whole-config replacement (m2; the lossless full-replacement path) --
+
+    def replace_config(
+        self,
+        uow: UnitOfWork,
+        *,
+        project_id: str,
+        ref: str,
+        config: Mapping[str, Any],
+        registry: Mapping[str, Any],
+        expected_version: int,
+        actor_kind: str = "local",
+        command_kind: str = TIMELINE_REPLACE_CONFIG_COMMAND_KIND,
+        idempotency_key: str | None = None,
+        created_at: str | None = None,
+    ) -> TimelineReadModel:
+        """Whole-config CAS replacement: one atomic, idempotent commit.
+
+        The runtime full-replacement surface behind the declared
+        ``timeline.replace_config`` command. Inside the caller's single
+        ``BEGIN IMMEDIATE`` unit of work this is structurally the
+        whole-document CAS save (:meth:`save` — same validation, same
+        expected-head CAS, same receipt shape) but appends the
+        **``timeline.config_replaced``** event kind instead of
+        ``timeline.saved``. The event kind is deliberately NOT changed to
+        ``timeline.saved``: ``timeline.config_replaced`` is the lossless
+        full-config replacement surface consumed by the projection/reset
+        path, and routing through ``save()`` would emit ``timeline.saved``
+        and break that path.
+
+        - *config*/*registry* are loose JSON objects and *expected_version*
+          the integer CAS head (booleans rejected, bridge §6.1), with only
+          the frozen bridge top keys
+          (:data:`_BRIDGE_CANONICAL_TOP_KEYS`) canonicalized;
+        - the expected head is CAS-checked **before** any allocation (a
+          stale write raises :class:`TimelineVersionConflictError` and
+          changes zero rows);
+        - ``document_json``/``asset_registry_json`` are updated, one
+          hash-chained ``timeline.config_replaced`` event carrying the
+          command delta is appended (advancing stream and project heads),
+          and the complete receipt is written;
+        - the effective idempotency key mirrors :meth:`save`: the caller's
+          key verbatim when supplied (canonical form
+          ``timeline.replace_config:{timeline_id}:{expected_version}``),
+          otherwise the derived bridge key from project/timeline identity +
+          integer expected head + canonical payload.
+
+        Returns the frozen load shape (§5.2) with the new ``config_version``
+        — the stream head after the replacement, exactly one greater than
+        *expected_version*. An identical retry under the same key replays
+        the stored result with zero new rows; a changed request under the
+        same key raises :class:`ReceiptMismatchError` before any mutation.
+        """
+        project_id = _require_non_empty_string("project_id", project_id)
+        ref = _require_non_empty_string("ref", ref)
+        command_kind = _require_non_empty_string("command_kind", command_kind)
+        if idempotency_key is not None:
+            idempotency_key = _require_non_empty_string(
+                "idempotency_key", idempotency_key
+            )
+        if actor_kind not in ACTOR_KINDS:
+            raise TimelineValidationError(
+                f"actor_kind must be one of {sorted(ACTOR_KINDS)}, "
+                f"got {actor_kind!r}"
+            )
+        if not isinstance(config, Mapping):
+            raise TimelineValidationError("config must be a JSON object")
+        if not isinstance(registry, Mapping):
+            raise TimelineValidationError("registry must be a JSON object")
+        if isinstance(expected_version, bool) or not isinstance(
+            expected_version, int
+        ):
+            raise TimelineValidationError(
+                "expected_version must be an integer (a boolean is not a "
+                "version), got "
+                f"{type(expected_version).__name__}"
+            )
+
+        assets = registry.get("assets", {})
+        if not isinstance(assets, Mapping):
+            raise TimelineValidationError("registry.assets must be a JSON object")
+        registry_shape = {"assets": dict(assets)}
+        # Canonicalize only the frozen bridge top keys; timeline/project
+        # identity stays out of the payload and enters the derived key.
+        try:
+            config_json = canonical_json(dict(config))
+            assets_json = canonical_json(dict(assets))
+        except CanonicalizationError as exc:
+            raise TimelineValidationError(
+                f"cannot canonicalize timeline replace_config payload: {exc}"
+            ) from exc
+        payload = {
+            "config": dict(config),
+            "registry": registry_shape,
+            "expected_version": expected_version,
+        }
+        try:
+            bridge_request_digest = request_hash(command_kind, payload)
+        except CanonicalizationError as exc:
+            raise TimelineValidationError(
+                f"cannot hash timeline replace_config request: {exc}"
+            ) from exc
+
+        # Resolve the address to the canonical timeline id inside the same
+        # transaction (project-scoped: UUID, then ULID, then slug).
+        timeline_id = self._resolve_id(uow, project_id, ref)
+
+        # Effective idempotency key: the caller's key when supplied,
+        # otherwise the derived bridge key — mirroring save's derivation.
+        derived_key = (
+            f"{command_kind}:{project_id}:{timeline_id}:"
+            f"{expected_version}:{bridge_request_digest}"
+        )
+        if idempotency_key is None:
+            effective_key = derived_key
+            request_digest = bridge_request_digest
+        else:
+            caller_request = {
+                "project_id": project_id,
+                "timeline_id": timeline_id,
+                **payload,
+            }
+            try:
+                request_digest = request_hash(command_kind, caller_request)
+            except CanonicalizationError as exc:  # pragma: no cover - payload hashed above
+                raise TimelineValidationError(
+                    f"cannot hash timeline replace_config request: {exc}"
+                ) from exc
+            effective_key = idempotency_key
+
+        # Idempotency gate first: replay or mismatch before any mutation.
+        replayed = self._receipts.check(
+            uow,
+            project_id=project_id,
+            idempotency_key=effective_key,
+            request_hash=request_digest,
+            command_kind=command_kind,
+        )
+        if replayed is not None:
+            return TimelineReadModel.from_mapping(replayed)
+
+        row = uow.query_one(
+            "SELECT t.id, t.project_id, t.event_stream_id, t.name "
+            "FROM timelines t WHERE t.id = ? AND t.project_id = ?",
+            (timeline_id, project_id),
+        )
+        if row is None:
+            raise TimelineNotFoundError(ref=ref, project_id=project_id)
+        stream = uow._stream_row(str(row["event_stream_id"]))
+        if stream is None:
+            raise TimelineRepositoryError(
+                f"timeline {timeline_id!r} is missing its event stream"
+            )
+        current_head = int(stream["head_seq"])
+
+        # Event-backed archive fence (SD1): an archived timeline rejects a
+        # later replacement before any allocation or projection change.
+        if (
+            uow.query_one(
+                "SELECT 1 FROM events WHERE stream_id = ? AND kind = ? LIMIT 1",
+                (row["event_stream_id"], TIMELINE_ARCHIVED_EVENT_KIND),
+            )
+            is not None
+        ):
+            raise TimelineArchivedError(
+                timeline_id=timeline_id, project_id=project_id
+            )
+
+        # Expected-head CAS before any allocation or projection change; a
+        # stale write changes zero rows and carries the current head.
+        if current_head != expected_version:
+            raise TimelineVersionConflictError(
+                project_id=project_id,
+                timeline_id=timeline_id,
+                expected_version=expected_version,
+                current_version=current_head,
+            )
+
+        stamp = created_at if created_at is not None else utc_now_iso()
+        if not isinstance(stamp, str) or not stamp:
+            raise TimelineValidationError("created_at must be a non-empty string")
+
+        # 1. Whole-document projection update: document plus registry.
+        changed = uow.update_projection(
+            "timelines",
+            {
+                "document_json": config_json,
+                "asset_registry_json": assets_json,
+                "updated_at": stamp,
+            },
+            {"id": timeline_id, "project_id": project_id},
+        )
+        if changed != 1:
+            raise TimelineNotFoundError(ref=ref, project_id=project_id)
+
+        # 2. The timeline.config_replaced event: the command delta,
+        #    hash-chained, with the same effective key and a
+        #    defense-in-depth expected-head CAS.
+        txn_id = uuid.uuid4().hex
+        event_id = uuid.uuid4().hex
+        append = self._events.append(
+            uow,
+            stream_id=str(row["event_stream_id"]),
+            project_id=project_id,
+            event_kind=TIMELINE_CONFIG_REPLACED_EVENT_KIND,
+            data={
+                "timeline_id": timeline_id,
+                "config": dict(config),
+                "registry": registry_shape,
+                "expected_version": expected_version,
+            },
+            changes=["config", "registry"],
+            idempotency_key=effective_key,
+            txn_id=txn_id,
+            actor_kind=actor_kind,
+            command_kind=command_kind,
+            event_id=event_id,
+            expected_head_seq=expected_version,
+            created_at=stamp,
+        )
+
+        # 3. Aliases and default projection for the frozen read model — the
+        #    timeline.created envelope and settings_json are the only
+        #    authorities (SD1), never convenience columns.
+        alias = uow.query_one(
+            "SELECT json_extract(payload_json, '$.data.timeline_ulid') "
+            "AS timeline_ulid, json_extract(payload_json, '$.data.slug') "
+            "AS slug FROM events WHERE stream_id = ? AND kind = ? "
+            "ORDER BY seq ASC LIMIT 1",
+            (row["event_stream_id"], TIMELINE_CREATED_EVENT_KIND),
+        )
+        if alias is None:
+            raise TimelineRepositoryError(
+                f"timeline {timeline_id!r} is missing its timeline.created "
+                "alias metadata"
+            )
+        timeline_ulid = alias["timeline_ulid"]
+        slug = alias["slug"]
+        if not isinstance(timeline_ulid, str) or not isinstance(slug, str):
+            raise TimelineRepositoryError(
+                f"timeline {timeline_id!r} has malformed timeline.created "
+                "alias metadata"
+            )
+        project_row = uow.query_one(
+            "SELECT settings_json FROM projects WHERE id = ?", (project_id,)
+        )
+        if project_row is None:
+            raise ProjectNotFoundError(project_id=project_id)
+        default_id = self._default_timeline_id(
+            str(project_row["settings_json"]), project_id
+        )
+
+        # 4. The complete receipt and the committed frozen load shape.
+        read_model = TimelineReadModel(
+            timeline_id=timeline_id,
+            timeline_ulid=timeline_ulid,
+            slug=slug,
+            name=str(row["name"]),
+            is_default=default_id == timeline_id,
+            config=dict(config),
+            registry=registry_shape,
+            config_version=append.stream_seq,
+        )
+        self._receipts.record(
+            uow,
+            project_id=project_id,
+            idempotency_key=effective_key,
+            request_hash=request_digest,
+            command_kind=command_kind,
+            txn_id=txn_id,
+            first_project_seq=append.project_seq,
+            last_project_seq=append.project_seq,
+            event_ids=[append.event_id],
+            result=read_model.to_dict(),
+            primary_stream_id=str(row["event_stream_id"]),
+            resulting_stream_seq=append.stream_seq,
+            created_at=stamp,
+        )
+        return read_model
+
     # -- event-backed archive (m4 plan step 7) -----------------------------
 
     def archive(
@@ -1642,8 +1944,10 @@ __all__ = [
     "DEFAULT_TIMELINE_KEY_SUFFIX",
     "TIMELINE_ARCHIVE_COMMAND_KIND",
     "TIMELINE_ARCHIVED_EVENT_KIND",
+    "TIMELINE_CONFIG_REPLACED_EVENT_KIND",
     "TIMELINE_CREATE_COMMAND_KIND",
     "TIMELINE_CREATED_EVENT_KIND",
+    "TIMELINE_REPLACE_CONFIG_COMMAND_KIND",
     "TIMELINE_SAVE_COMMAND_KIND",
     "TIMELINE_SAVED_EVENT_KIND",
     "TIMELINE_STREAM_TYPE",

@@ -756,11 +756,13 @@ M2_RUN_EVENT_KINDS = (
     "core.run.created",
     "core.run.cancelled",
     "core.run.retried",
+    "core.run.closed",
 )
 M2_RUN_COMMAND_KINDS = (
     "core.run.create",
     "core.run.cancel",
     "core.run.retry",
+    "core.run.close",
 )
 M2_MEDIA_EVENT_KINDS = (
     "core.media.imported",

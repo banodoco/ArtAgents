@@ -17,15 +17,19 @@ recomputes to ``succeeded``. No unregistered legacy kinds are replayed.
 Fallback path (completed run with **no** importable artifacts): the
 claim/start/complete fences cannot be presented (``complete`` requires at
 least one materialized output), so the run is created **zero-child** with
-the same evidence. The run row legitimately stays ``running`` — no raw
-SQL status writes are ever performed. Media relations (``derived_from``)
-are wired when both output and input media exist.
+the same evidence. A zero-child run derives ``running`` forever (its
+status is derived from children and ``total==0`` → ``running``), so the
+run is then **closed succeeded** through the kernel ``core.run.close``
+command: terminal status, ``finished_at`` (the legacy completion time),
+and the ``core.run.closed`` event with its own receipt. Media relations
+(``derived_from``) are wired when both output and input media exist.
 
 Both paths are fully receipted and deterministic: the receipt key
 ``v10-migrate:run:{slug}:{run_id}`` gates the run fan-out and derived
-suffix keys gate claim/start/complete, so reruns replay with zero new
-rows. Cross-project run-id copies collide globally: the second occurrence
-derives a deterministic ULID and a ``:id2`` key.
+suffix keys gate claim/start/complete; the zero-child close uses the
+dedicated key ``v10-migrate:run-close:{slug}:{run_id}``. Reruns replay
+with zero new rows. Cross-project run-id copies collide globally: the
+second occurrence derives a deterministic ULID and a ``:id2`` key.
 
 Dry-run by default; ``--apply`` mutates.
 
@@ -341,6 +345,29 @@ def _zero_child_path(
         )
     except Exception as exc:  # noqa: BLE001
         raise SystemExit(f"run {run['run_id']}: zero-child run failed: {exc}")
+
+    # The zero-child run derives ``running`` forever (``total==0``), so no
+    # child transition can ever terminalize it: close it succeeded under a
+    # dedicated receipt key. The close is fully receipted and idempotent —
+    # a rerun replays both the fan-out (via ``key``) and this close (via
+    # ``close_key``) with zero new rows.
+    started_at = _started_at(run_json, run, created_at)
+    finished_at = _finished_at(run_json, run, started_at)
+    close_key = f"v10-migrate:run-close:{slug}:{run['run_id']}"
+    try:
+        UnitOfWork(client.app.writer).run(
+            lambda uow: client.app.runs.close(
+                uow,
+                project_id=project_id,
+                run_id=run["run_id"],
+                outcome="succeeded",
+                idempotency_key=close_key,
+                actor_kind="system",
+                now=finished_at,
+            )
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise SystemExit(f"run {run['run_id']}: zero-child close failed: {exc}")
 
     # Media relations (derived_from) when both sides exist.
     output_ids = [

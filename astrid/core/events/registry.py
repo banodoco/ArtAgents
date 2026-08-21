@@ -116,10 +116,12 @@ CORE_EVENT_KINDS: tuple[str, ...] = (
     "core.task.failed",
     "core.task.retried",
     "core.task.completed",
-    # m2 run events: fan-out creation and the group cancel/retry effects.
+    # m2 run events: fan-out creation, the group cancel/retry effects, and
+    # the terminal close for runs that own no non-terminal child work.
     "core.run.created",
     "core.run.cancelled",
     "core.run.retried",
+    "core.run.closed",
     # m3 run continuation: one event per receipt-linked continuation chunk,
     # appended on the run stream before the chunk's child creation events.
     "core.run.continued",
@@ -154,10 +156,12 @@ CORE_COMMAND_KINDS: tuple[str, ...] = (
     "core.task.fail",
     "core.task.retry",
     "core.task.complete",
-    # m2 run commands: one-transaction fan-out creation and group operations.
+    # m2 run commands: one-transaction fan-out creation, group operations,
+    # and the terminal close for runs that own no non-terminal child work.
     "core.run.create",
     "core.run.cancel",
     "core.run.retry",
+    "core.run.close",
     # m3 run continuation: the expected-head CAS command that extends an
     # existing run with a bounded chunk of child task specs and edges.
     "core.run.continue",

@@ -29,8 +29,16 @@ Plan step 13 (T22) adds the group surface on top of that fan-out:
   shared read-only eligibility check (:meth:`TaskRepository.is_retry_eligible`),
   recomputes the run projection, appends ``core.run.retried``, and records
   one run-level receipt;
-- both group commands reject continuation of a terminal run
-  (:class:`RunTerminalError`) before any mutation.
+- :meth:`RunRepository.close` is a receipt-protected **terminal close** for
+  runs that own no non-terminal child work (zero-child runs derive
+  ``running`` forever — ``total==0`` — and can never terminalize through a
+  child transition): it writes the terminal status/``finished_at``, folds
+  the declared outcome into ``result_json``, appends ``core.run.closed``,
+  and records one run-level receipt, refusing any run that still owns a
+  non-terminal child;
+- the group commands reject continuation of a terminal run
+  (:class:`RunTerminalError`) before any mutation, and ``close`` applies
+  the same terminal-run fence.
 
 Contracts kept here (v10 section 5.2; m2 plan steps 12 and 13):
 
@@ -126,6 +134,26 @@ CORE_RUN_RETRIED_EVENT_KIND = "core.run.retried"
 CORE_RUN_RETRY_COMMAND_KIND = "core.run.retry"
 """The m2 command kind that group-retry receipts are keyed on."""
 
+CORE_RUN_CLOSED_EVENT_KIND = "core.run.closed"
+"""The m2 event kind emitted by receipt-protected terminal close.
+
+``core.run.close`` is the terminal transition for runs that own **no
+non-terminal child work**: zero-child runs (whose derived status can never
+leave ``running`` — ``total==0`` derives ``running``) and runs whose every
+child is already terminal. It writes the run's terminal status,
+``finished_at``, and outcome, appends this event on the run stream, and
+records one run-level receipt.
+"""
+
+CORE_RUN_CLOSE_COMMAND_KIND = "core.run.close"
+"""The m2 command kind that run-close receipts are keyed on.
+
+The canonical receipt key shape used by callers is
+``core.run.close:{project_id}:{run_id}`` (the receipt service scopes keys
+by project); the migration derives ``v10-migrate:run-close:{slug}:{run_id}``
+from the same command kind.
+"""
+
 CORE_RUN_CONTINUED_EVENT_KIND = "core.run.continued"
 """The m3 event kind emitted by receipt-linked run continuation.
 
@@ -147,6 +175,24 @@ edges under a caller-supplied expected run-stream head (CAS).
 
 RUN_STATUSES: tuple[str, ...] = ("running", "succeeded", "failed", "cancelled")
 """The frozen ``runs.status`` DDL CHECK vocabulary, in DDL order."""
+
+CLOSED_RUN_OUTCOMES: tuple[str, ...] = ("succeeded", "failed", "cancelled")
+"""The terminal outcomes :meth:`RunRepository.close` accepts.
+
+The caller of ``close`` declares the terminal outcome for work the run
+owns outright (no child task completed it) — every value is also a valid
+``runs.status`` terminal value, so the outcome writes straight through to
+the run status and projection.
+"""
+
+TERMINAL_TASK_STATUSES: tuple[str, ...] = ("succeeded", "failed", "cancelled")
+"""The child task statuses that need no run work.
+
+:meth:`RunRepository.close` refuses a run that owns any child outside this
+set: a queued/blocked/running child means the run still owns non-terminal
+work that only its own lifecycle transition (or a group cancel/retry) may
+resolve.
+"""
 
 FROZEN_MAX_DIRECT_CHILDREN = 256
 """The frozen at-most-256 direct-child bound (m2 plan step 12).
@@ -556,6 +602,38 @@ class RunRetryReadModel:
             skipped_task_ids=tuple(
                 str(task_id) for task_id in value["skipped_task_ids"]
             ),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class RunCloseReadModel:
+    """One immutable run-close result (receipt-protected terminal close).
+
+    ``run`` is the terminal ``runs.result_json`` projection persisted by
+    the command (the prior projection keys preserved, ``status`` and
+    ``outcome`` folded in), and ``outcome`` is the declared terminal
+    outcome (``succeeded``/``failed``/``cancelled``). ``to_dict`` is the
+    JSON-safe persisted shape and ``from_mapping`` rebuilds it for exact
+    replay, so an identical retry under the same idempotency key returns
+    exactly the stored close result with zero new rows.
+    """
+
+    run: Mapping[str, Any]
+    outcome: str
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return the JSON-safe dict persisted as the receipt result."""
+        return {
+            "run": dict(self.run),
+            "outcome": self.outcome,
+        }
+
+    @classmethod
+    def from_mapping(cls, value: Mapping[str, Any]) -> RunCloseReadModel:
+        """Rebuild the frozen close read model from a stored mapping."""
+        return cls(
+            run=dict(value["run"]),
+            outcome=str(value["outcome"]),
         )
 
 
@@ -2210,6 +2288,203 @@ class RunRepository:
         )
         return result
 
+    # -- receipt-protected terminal close (runs with no non-terminal work) --
+
+    def close(
+        self,
+        uow: UnitOfWork,
+        *,
+        project_id: str,
+        run_id: str,
+        outcome: str,
+        idempotency_key: str,
+        actor_kind: str = "local",
+        now: str | None = None,
+        command_kind: str = CORE_RUN_CLOSE_COMMAND_KIND,
+    ) -> RunCloseReadModel:
+        """Terminally close one run that owns no non-terminal child work.
+
+        Inside the caller's active unit of work this transitions a
+        ``running`` run to the caller-declared terminal *outcome*
+        (``succeeded``/``failed``/``cancelled``): the ``runs.status`` and
+        ``finished_at`` columns are written, the outcome is folded into
+        ``runs.result_json`` (every existing projection key preserved,
+        ``status`` set to the outcome and ``outcome`` added), one
+        hash-chained ``core.run.closed`` event is appended on the run
+        stream, and one complete run-level receipt is recorded.
+
+        - **Zero-child runs are first-class.** A run created with
+          ``children=[]`` derives ``running`` forever under the shared
+          derivation rule (``total==0`` → ``running``), so no child
+          transition can ever terminalize it; ``close`` is its terminal
+          transition.
+        - **Non-terminal children are refused.** A run that still owns a
+          queued/blocked/running child raises :class:`RunValidationError`
+          before any mutation — that child's work must resolve through its
+          own lifecycle transition or a group cancel/retry first. Already
+          terminal children are fine (their completion already recomputed
+          the projection; a run whose every child is terminal is normally
+          already terminal, so the running-CAS below refuses it).
+        - **Terminal-run rejection.** A run that already reached
+          ``succeeded``/``failed``/``cancelled`` raises
+          :class:`RunTerminalError` before any mutation: terminal runs
+          never change (SD1).
+        - **Projection.** The existing ``result_json`` keys are preserved
+          and the outcome is folded in (``status`` and ``outcome``),
+          matching the shared projection recompute's key shape where the
+          prior projection already carries counts.
+
+        Idempotency: the receipt gate runs first. An identical retry under
+        the same key returns exactly the stored close result with zero new
+        rows; a changed request under the same key raises
+        :class:`ReceiptMismatchError` before any mutation. Callers key
+        close receipts on the run identity, e.g.
+        ``core.run.close:{project_id}:{run_id}``.
+        """
+        project_id = _require_non_empty_string("project_id", project_id)
+        run_id = _require_non_empty_string("run_id", run_id)
+        idempotency_key = _require_non_empty_string(
+            "idempotency_key", idempotency_key
+        )
+        command_kind = _require_non_empty_string("command_kind", command_kind)
+        if outcome not in CLOSED_RUN_OUTCOMES:
+            raise RunValidationError(
+                f"outcome must be one of {CLOSED_RUN_OUTCOMES}, got {outcome!r}"
+            )
+        if actor_kind not in ACTOR_KINDS:
+            raise RunValidationError(
+                f"actor_kind must be one of {sorted(ACTOR_KINDS)}, "
+                f"got {actor_kind!r}"
+            )
+
+        # Semantic request identity: the run and the declared outcome;
+        # generated state never participates.
+        request: dict[str, Any] = {"run_id": run_id, "outcome": outcome}
+        try:
+            request_digest = request_hash(command_kind, request)
+        except CanonicalizationError as exc:
+            raise RunValidationError(
+                f"cannot hash run-close request: {exc}"
+            ) from exc
+
+        # Idempotency gate first: replay or mismatch before any mutation.
+        replayed = self._receipts.check(
+            uow,
+            project_id=project_id,
+            idempotency_key=idempotency_key,
+            request_hash=request_digest,
+            command_kind=command_kind,
+        )
+        if replayed is not None:
+            return RunCloseReadModel.from_mapping(replayed)
+
+        stamp = now if now is not None else utc_now_iso()
+        if not isinstance(stamp, str) or not stamp:
+            raise RunValidationError("now must be a non-empty string")
+
+        # Fences before any mutation: the run exists, belongs to the
+        # project, and is still running (terminal runs never change).
+        run_row = uow.query_one(
+            "SELECT * FROM runs WHERE id = ? AND project_id = ?",
+            (run_id, project_id),
+        )
+        if run_row is None:
+            raise RunNotFoundError(run_id=run_id)
+        if str(run_row["status"]) != "running":
+            raise RunTerminalError(run_id=run_id, status=str(run_row["status"]))
+
+        # Refuse any non-terminal child: the run still owns live work that
+        # only its own lifecycle transition (or group cancel/retry) resolves.
+        non_terminal = uow.query_one(
+            "SELECT id FROM tasks WHERE run_id = ? AND project_id = ? "
+            "AND status NOT IN ('succeeded', 'failed', 'cancelled') LIMIT 1",
+            (run_id, project_id),
+        )
+        if non_terminal is not None:
+            raise RunValidationError(
+                f"run {run_id!r} still owns non-terminal child task "
+                f"{non_terminal['id']!r}; resolve or cancel its work before "
+                "closing the run"
+            )
+
+        # Projection: preserve every existing result_json key, fold in the
+        # derived counts (matching the shared projection recompute's key
+        # shape), the terminal status, and the outcome.
+        projection: dict[str, Any] = {}
+        existing = parse_json(str(run_row["result_json"])) if run_row["result_json"] else {}
+        if isinstance(existing, Mapping):
+            projection.update(dict(existing))
+        counts, _run_status = derive_run_progress_counts(
+            uow, run_id=run_id, project_id=project_id
+        )
+        projection.update(
+            {
+                "total_children": sum(counts.values()),
+                "succeeded": counts.get("succeeded", 0),
+                "failed": counts.get("failed", 0),
+                "cancelled": counts.get("cancelled", 0),
+                "status": outcome,
+                "outcome": outcome,
+            }
+        )
+        try:
+            result_json = canonical_json(projection)
+        except CanonicalizationError as exc:  # pragma: no cover - ints only
+            raise RunValidationError(
+                f"cannot serialize run-close projection: {exc}"
+            ) from exc
+        cursor = uow.execute(
+            "UPDATE runs SET status = ?, finished_at = ?, result_json = ? "
+            "WHERE id = ? AND status = 'running'",
+            (outcome, stamp, result_json, run_id),
+        )
+        if cursor.rowcount != 1:  # pragma: no cover - CAS re-checked above
+            raise RunTerminalError(run_id=run_id, status="terminal")
+
+        # The hash-chained core.run.closed event on the run stream.
+        run_stream_id = f"{run_id}:{CORE_RUN_STREAM_TYPE}"
+        txn_id = uuid.uuid4().hex
+        event_data: dict[str, Any] = {
+            "run_id": run_id,
+            "outcome": outcome,
+            "status": outcome,
+            "progress": projection,
+        }
+        changes: list[str] = ["run_status", "outcome", "progress"]
+        append = self._events.append(
+            uow,
+            stream_id=run_stream_id,
+            project_id=project_id,
+            event_kind=CORE_RUN_CLOSED_EVENT_KIND,
+            data=event_data,
+            changes=changes,
+            idempotency_key=idempotency_key,
+            txn_id=txn_id,
+            actor_kind=actor_kind,
+            command_kind=command_kind,
+            event_id=uuid.uuid4().hex,
+            created_at=stamp,
+        )
+
+        # The one complete run-level receipt spanning the close event.
+        result = RunCloseReadModel(run=projection, outcome=outcome)
+        self._receipts.record(
+            uow,
+            project_id=project_id,
+            idempotency_key=idempotency_key,
+            request_hash=request_digest,
+            command_kind=command_kind,
+            txn_id=txn_id,
+            first_project_seq=append.project_seq,
+            last_project_seq=append.project_seq,
+            event_ids=[append.event_id],
+            result=result.to_dict(),
+            primary_stream_id=run_stream_id,
+            resulting_stream_seq=append.stream_seq,
+            created_at=stamp,
+        )
+        return result
+
     # -- pure continuation-envelope validation (m2 plan step 12 item 4) ----
 
     @staticmethod
@@ -2312,8 +2587,11 @@ class RunRepository:
 
 
 __all__ = [
+    "CLOSED_RUN_OUTCOMES",
     "CORE_RUN_CANCEL_COMMAND_KIND",
     "CORE_RUN_CANCELLED_EVENT_KIND",
+    "CORE_RUN_CLOSE_COMMAND_KIND",
+    "CORE_RUN_CLOSED_EVENT_KIND",
     "CORE_RUN_CONTINUE_COMMAND_KIND",
     "CORE_RUN_CONTINUED_EVENT_KIND",
     "CORE_RUN_CREATE_COMMAND_KIND",
@@ -2328,6 +2606,7 @@ __all__ = [
     "RUN_STATUSES",
     "RunAlreadyExistsError",
     "RunCancelReadModel",
+    "RunCloseReadModel",
     "RunContinuationReadModel",
     "RunFanOutReadModel",
     "RunNotFoundError",
@@ -2339,4 +2618,5 @@ __all__ = [
     "RunStaleHeadError",
     "RunTerminalError",
     "RunValidationError",
+    "TERMINAL_TASK_STATUSES",
 ]

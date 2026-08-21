@@ -679,5 +679,147 @@ class ManagedPackConfigReplacementSurfaceTest(unittest.TestCase):
             self.assertNotIn("'kind': 'arrangement.replaced'", source, str(path))
 
 
+class ManagedWriteKernelReceiptTest(unittest.TestCase):
+    """Prove managed config_replaced writes get a kernel receipt.
+
+    ``pack_write_gateway`` routes ``timeline.config_replaced`` events through
+    :class:`~astrid.packs.timeline.repository.TimelineRepository.replace_config`
+    when a kernel writer is supplied: the kernel timeline store records the
+    ``timeline.config_replaced`` event and a receipt under the key
+    ``timeline.replace_config:{timeline_id}:{expected_version}``, while the
+    eventlog path keeps its existing behavior.
+    """
+
+    def test_config_replaced_gateway_write_records_kernel_receipt(self):
+        from astrid.application import compose_standard_application
+        from astrid.packs.timeline.repository import (
+            TIMELINE_CONFIG_REPLACED_EVENT_KIND,
+            TIMELINE_REPLACE_CONFIG_COMMAND_KIND,
+            TIMELINE_STREAM_TYPE,
+        )
+
+        tmp_root = Path(tempfile.mkdtemp(prefix="mgt-receipt-", dir=ROOT))
+        self.addCleanup(shutil.rmtree, tmp_root, ignore_errors=True)
+        env = patch.dict(
+            "os.environ",
+            {project_paths.PROJECTS_ROOT_ENV: str(tmp_root)},
+        )
+        env.start()
+        self.addCleanup(env.stop)
+
+        # Kernel side: standard application with the kernel project + timeline.
+        app = compose_standard_application(projects_root=str(tmp_root))
+        self.addCleanup(app.close)
+        project_created = app.projects_service.create(
+            slug="receipt-proj", name="Receipt Project"
+        )
+        self.assertIsNotNone(project_created.data, project_created.error)
+        created = app.timelines_service.create(
+            project="receipt-proj",
+            slug="receipt-tl",
+            name="Receipt Timeline",
+            idempotency_key="receipt-tl-create",
+        )
+        self.assertIsNotNone(created.data, created.error)
+        timeline_id = created.data["timeline_id"]
+        project_id = app.projects.resolve(app.writer, "receipt-proj")
+
+        # Eventlog side: the managed filesystem project/timeline binding.
+        from astrid.core.project.project import create_project as fs_create_project
+        from astrid.core.timeline.crud import create_timeline as fs_create_timeline
+        from astrid.core.timeline.paths import find_timeline_by_slug
+
+        fs_create_project("receipt-proj")
+        fs_create_timeline("receipt-proj", "receipt-tl")
+        found = find_timeline_by_slug("receipt-proj", "receipt-tl")
+        self.assertIsNotNone(found)
+        ulid, _tdir = found
+
+        # Managed write through the gateway, with kernel writer access.
+        result = pack_write_gateway(
+            project_slug="receipt-proj",
+            timeline_slug="receipt-tl",
+            timeline_ulid=ulid,
+            timeline_event_stream_id="",
+            events=[_arrangement_event([{"id": "clip-1"}])],
+            actor=TimelineActor(
+                type="system", id="test:receipt", display="Receipt Test"
+            ),
+            root=tmp_root,
+            writer=app.writer,
+        )
+        self.assertEqual(result.attempts, 1)
+        self.assertGreater(result.new_version, 0)
+
+        # Kernel receipt exists under the replace_config key convention.
+        import sqlite3
+
+        with app.writer.read_only_connection() as conn:
+            conn.row_factory = sqlite3.Row
+            receipt = conn.execute(
+                "SELECT * FROM command_receipts WHERE project_id = ? "
+                "AND idempotency_key = ?",
+                (
+                    project_id,
+                    f"timeline.replace_config:{timeline_id}:1",
+                ),
+            ).fetchone()
+        self.assertIsNotNone(receipt, "replace_config receipt must exist")
+        self.assertEqual(receipt["command_kind"], TIMELINE_REPLACE_CONFIG_COMMAND_KIND)
+        self.assertEqual(receipt["primary_stream_id"], f"{timeline_id}:{TIMELINE_STREAM_TYPE}")
+        self.assertEqual(receipt["resulting_stream_seq"], 2)
+
+        # Kernel event kind is unchanged: timeline.config_replaced.
+        with app.writer.read_only_connection() as conn:
+            conn.row_factory = sqlite3.Row
+            kernel_event = conn.execute(
+                "SELECT * FROM events WHERE stream_id = ? AND kind = ?",
+                (
+                    f"{timeline_id}:{TIMELINE_STREAM_TYPE}",
+                    TIMELINE_CONFIG_REPLACED_EVENT_KIND,
+                ),
+            ).fetchone()
+        self.assertIsNotNone(kernel_event)
+        self.assertEqual(kernel_event["seq"], 2)
+
+        # The kernel timeline projection advanced (created=1, replaced=2).
+        shown = app.timelines_service.show("receipt-proj", "receipt-tl")
+        self.assertIsNotNone(shown.data, shown.error)
+        self.assertEqual(shown.data["config_version"], 2)
+        self.assertEqual(shown.data["config"]["clips"][0]["id"], "clip-1")
+
+    def test_config_replaced_gateway_without_writer_has_no_kernel_receipt(self):
+        """Without a kernel writer the gateway keeps eventlog-only behavior."""
+        tmp_root = Path(tempfile.mkdtemp(prefix="mgt-noreceipt-", dir=ROOT))
+        self.addCleanup(shutil.rmtree, tmp_root, ignore_errors=True)
+        env = patch.dict(
+            "os.environ",
+            {project_paths.PROJECTS_ROOT_ENV: str(tmp_root)},
+        )
+        env.start()
+        self.addCleanup(env.stop)
+
+        from astrid.core.project.project import create_project as fs_create_project
+        from astrid.core.timeline.crud import create_timeline as fs_create_timeline
+        from astrid.core.timeline.paths import find_timeline_by_slug
+
+        fs_create_project("noreceipt-proj")
+        fs_create_timeline("noreceipt-proj", "noreceipt-tl")
+        found = find_timeline_by_slug("noreceipt-proj", "noreceipt-tl")
+        self.assertIsNotNone(found)
+        ulid, _tdir = found
+
+        result = pack_write_gateway(
+            project_slug="noreceipt-proj",
+            timeline_slug="noreceipt-tl",
+            timeline_ulid=ulid,
+            timeline_event_stream_id="",
+            events=[_arrangement_event()],
+            actor=TimelineActor(type="system", id="test:noreceipt", display="No Receipt"),
+            root=tmp_root,
+        )
+        self.assertEqual(result.attempts, 1)
+
+
 if __name__ == "__main__":
     unittest.main()

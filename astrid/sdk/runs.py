@@ -1,12 +1,13 @@
 """Typed run SDK service (m4 plan step 13, task T14).
 
 Exposes repository-backed run ``list``, ``show`` (with optional evidence and
-derived child progress), ``cancel``, ``retry_failed``, and ordered ``events``
-over the kernel :class:`~astrid.core.repositories.runs.RunRepository` with the
-frozen SDK envelope (``docs/contracts/astrid-sdk-v10.md`` section 1).
+derived child progress), ``cancel``, ``retry_failed``, ``close``, and ordered
+``events`` over the kernel
+:class:`~astrid.core.repositories.runs.RunRepository` with the frozen SDK
+envelope (``docs/contracts/astrid-sdk-v10.md`` section 1).
 
 The service is a thin adapter over the repository's existing grouping,
-cancellation, and retry-selection logic (m2 plan steps 12-13):
+cancellation, retry-selection, and close logic (m2 plan steps 12-13):
 
 - **list** returns one lightweight read model per run in a project, ordered
   by ``started_at`` then id;
@@ -20,6 +21,10 @@ cancellation, and retry-selection logic (m2 plan steps 12-13):
 - **retry_failed** restarts the run's eligible failed/expired children (or an
   explicit ``selected_task_ids`` subset) through the shared task-retry
   predicate, preserving attempt-budget and terminal-immutability rules;
+- **close** terminally closes a run that owns no non-terminal child work
+  (zero-child runs, whose derived status can never leave ``running``, and
+  runs whose every child is already terminal), folding the declared outcome
+  into the projection and returning one complete run-level receipt;
 - **events** returns the run's ordered ``core.run`` stream events through the
   read-only :class:`~astrid.core.repositories.events.EventRepository`.
 
@@ -249,6 +254,51 @@ class RunsService:
                     run_id=run_id,
                     idempotency_key=key,
                     selected_task_ids=selected_task_ids,
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 - centralized bounded mapping
+            return DomainResult.failure(map_error(exc), idempotency_key=key)
+        return DomainResult.success(
+            model.to_dict(),
+            receipt=self._committed_receipt(project_id, key),
+            idempotency_key=key,
+        )
+
+    # -- close -------------------------------------------------------------
+
+    def close(
+        self,
+        project_id: str,
+        run_id: str,
+        *,
+        outcome: str = "succeeded",
+        idempotency_key: str | None = None,
+    ) -> DomainResult[dict[str, Any]]:
+        """Terminally close a run that owns no non-terminal child work.
+
+        The terminal transition for zero-child runs (whose derived status
+        can never leave ``running``) and any run whose every child is
+        already terminal: writes the run's terminal ``status`` and
+        ``finished_at``, folds *outcome* (``succeeded``/``failed``/
+        ``cancelled``) into ``result_json``, emits ``core.run.closed``, and
+        returns one complete run-level receipt. A run that still owns a
+        queued/blocked/running child is a typed ``validation_error`` and a
+        terminal run a typed ``terminal_state``.
+        """
+        try:
+            key = self._resolve_key(idempotency_key)
+        except ServiceValidationError as exc:
+            return DomainResult.failure(
+                map_error(exc), idempotency_key=idempotency_key or ""
+            )
+        try:
+            model = UnitOfWork(self._writer).run(
+                lambda uow: self._runs.close(
+                    uow,
+                    project_id=project_id,
+                    run_id=run_id,
+                    outcome=outcome,
+                    idempotency_key=key,
                 )
             )
         except Exception as exc:  # noqa: BLE001 - centralized bounded mapping

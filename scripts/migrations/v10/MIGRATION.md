@@ -105,7 +105,12 @@ items proceed. `migrate_media` additionally skips paths already present in
 - **Zero-child path** (completed run with no importable artifacts): the
   `complete` fence cannot be presented (it requires ≥1 materialized
   output), so the run is created with `children=[]` plus the same evidence;
-  the run row stays `running`. **No raw SQL status writes ever.**
+  a zero-child run derives `running` forever (status comes from children
+  and `total==0` → `running`), so it is then **closed succeeded** through
+  the kernel `core.run.close` command (terminal status, `finished_at` =
+  the legacy completion time, `core.run.closed` event) under the receipt
+  key `v10-migrate:run-close:{slug}:{run_id}`. **No raw SQL status writes
+  ever.**
 - If `complete` raises mid-way, the attempt is terminally `fail`ed with a
   `migration_complete_failed` error instead of being left running.
 
