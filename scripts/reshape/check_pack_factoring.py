@@ -549,8 +549,8 @@ try:
     services = [
         ProjectsService(writer, projects, receipts),
         MediaService(writer, projects, media, receipts),
-        TasksService(writer, tasks, receipts, event_log),
-        RunsService(writer, runs, receipts, evidence, event_log),
+        TasksService(writer, projects, tasks, receipts, event_log),
+        RunsService(writer, projects, runs, receipts, evidence, event_log),
     ]
     repositories = [projects, tasks, media, runs, evidence]
     if "timeline" in remaining:

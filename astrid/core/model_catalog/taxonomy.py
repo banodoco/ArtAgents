@@ -25,6 +25,7 @@ AUDIO_MODALITY = "audio"
 LOCAL_BACKEND_ID = "local"
 CLOUD_BACKEND_ID = "cloud"
 CODEX_BACKEND_ID = "codex"
+WAVESPEED_BACKEND_ID = "wavespeed"
 
 IMAGE_FEATURES: tuple[Feature, ...] = (
     "prompt",
@@ -36,6 +37,10 @@ IMAGE_FEATURES: tuple[Feature, ...] = (
     "strength",
     "guidance_scale",
     "steps",
+    "upscale_mode",
+    "upscale_factor",
+    "target_resolution",
+    "noise_scale",
 )
 
 VIDEO_FEATURES: tuple[Feature, ...] = (
@@ -61,6 +66,11 @@ VIDEO_FEATURES: tuple[Feature, ...] = (
     "acceleration",
     "driving_type",
     "subject_type",
+    # Upscale-mode features (shared image/video registry key).
+    "upscale_mode",
+    "upscale_factor",
+    "target_resolution",
+    "noise_scale",
 )
 
 AUDIO_FEATURES: tuple[Feature, ...] = (
@@ -103,6 +113,7 @@ BUILTIN_GENERATION_BACKEND_IDS: tuple[str, ...] = (
     CLOUD_BACKEND_ID,
     CODEX_BACKEND_ID,
     LOCAL_BACKEND_ID,
+    WAVESPEED_BACKEND_ID,
 )
 
 

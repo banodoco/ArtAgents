@@ -48,6 +48,7 @@ from typing import Any
 
 from astrid.core.receipts.service import CommandReceipt, ReceiptService
 from astrid.core.repositories.events import EventRepository
+from astrid.core.repositories.projects import ProjectRepository
 from astrid.core.repositories.tasks import (
     CORE_TASK_CREATE_COMMAND_KIND,
     CORE_TASK_STREAM_TYPE,
@@ -70,18 +71,21 @@ class TasksService:
 
     Stateless: a single instance is safe to share across concurrent callers.
     The constructor receives the shared :class:`DatabaseWriter` (one writer
-    queue), the task repository, the receipt service, and the read-only
-    ordered event repository; it holds no SQL and opens no writer of its own.
+    queue), the project repository (for project id/slug resolution), the
+    task repository, the receipt service, and the read-only ordered event
+    repository; it holds no SQL and opens no writer of its own.
     """
 
     def __init__(
         self,
         writer: DatabaseWriter,
+        projects: ProjectRepository,
         tasks: TaskRepository,
         receipts: ReceiptService,
         event_log: EventRepository,
     ) -> None:
         self._writer = writer
+        self._projects = projects
         self._tasks = tasks
         self._receipts = receipts
         self._event_log = event_log
@@ -103,6 +107,11 @@ class TasksService:
     ) -> DomainResult[dict[str, Any]]:
         """Admit one immutable task and return its committed receipt envelope.
 
+        ``project_id`` accepts the canonical project id **or** the project's
+        immutable slug; it is resolved through the project repository before
+        the id is derived, and an unknown address is a typed
+        ``not_found``/``validation_error`` with zero mutation.
+
         The idempotency key is the caller's when supplied, otherwise a fresh
         key generated before mutation. The task id is derived
         deterministically from the key (project-scoped), so an identical
@@ -112,7 +121,12 @@ class TasksService:
         """
         try:
             key = self._resolve_key(idempotency_key)
+            project_id = self._projects.resolve(self._writer, project_id)
         except ServiceValidationError as exc:
+            return DomainResult.failure(
+                map_error(exc), idempotency_key=idempotency_key or ""
+            )
+        except Exception as exc:  # noqa: BLE001 - centralized bounded mapping
             return DomainResult.failure(
                 map_error(exc), idempotency_key=idempotency_key or ""
             )
@@ -149,8 +163,13 @@ class TasksService:
     # -- list --------------------------------------------------------------
 
     def list(self, project_id: str) -> DomainResult[list[dict[str, Any]]]:
-        """Return every task in one project (created_at, then id order)."""
+        """Return every task in one project (created_at, then id order).
+
+        ``project_id`` accepts the canonical project id or the immutable
+        slug; an unknown address is a typed ``not_found``.
+        """
         try:
+            project_id = self._projects.resolve(self._writer, project_id)
             rows = self._tasks.list(self._writer, project_id)
         except Exception as exc:  # noqa: BLE001 - centralized bounded mapping
             return DomainResult.failure(map_error(exc))
@@ -193,7 +212,12 @@ class TasksService:
         """
         try:
             key = self._resolve_key(idempotency_key)
+            project_id = self._projects.resolve(self._writer, project_id)
         except ServiceValidationError as exc:
+            return DomainResult.failure(
+                map_error(exc), idempotency_key=idempotency_key or ""
+            )
+        except Exception as exc:  # noqa: BLE001 - centralized bounded mapping
             return DomainResult.failure(
                 map_error(exc), idempotency_key=idempotency_key or ""
             )
@@ -236,7 +260,12 @@ class TasksService:
         """
         try:
             key = self._resolve_key(idempotency_key)
+            project_id = self._projects.resolve(self._writer, project_id)
         except ServiceValidationError as exc:
+            return DomainResult.failure(
+                map_error(exc), idempotency_key=idempotency_key or ""
+            )
+        except Exception as exc:  # noqa: BLE001 - centralized bounded mapping
             return DomainResult.failure(
                 map_error(exc), idempotency_key=idempotency_key or ""
             )

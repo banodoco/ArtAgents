@@ -76,7 +76,9 @@ def env(tmp_path: Path):
             runs=runs,
             evidence=evidence,
             event_log=event_log,
-            service=RunsService(writer, runs, receipts, evidence, event_log),
+            service=RunsService(
+                writer, projects, runs, receipts, evidence, event_log
+            ),
         )
     finally:
         writer.close()
@@ -454,3 +456,34 @@ def test_events_missing_returns_not_found(env: SimpleNamespace) -> None:
     assert result.ok is False
     assert result.error is not None
     assert result.error.code == "not_found"
+
+
+# ---------------------------------------------------------------------------
+# Project slug resolution (CLI parity with projects/media families)
+# ---------------------------------------------------------------------------
+
+
+def test_list_show_events_accept_project_slug(env: SimpleNamespace) -> None:
+    project_id = _create_project(env, slug="runproj")
+    run_id, _ = _create_run(
+        env, project_id=project_id, children=[_child(task_id=generate_lowercase_ulid())]
+    )
+
+    listed = env.service.list("runproj")
+    assert listed.ok is True
+    assert [row["id"] for row in listed.data] == [run_id]
+    shown = env.service.show("runproj", run_id)
+    assert shown.ok is True
+    assert shown.data["id"] == run_id
+    events = env.service.events("runproj", run_id)
+    assert events.ok is True
+    assert events.data[0]["kind"] == "core.run.created"
+
+
+def test_unknown_project_slug_fails_loudly_not_silently_empty(
+    env: SimpleNamespace,
+) -> None:
+    listed = env.service.list("nope")
+    assert listed.ok is False
+    assert listed.error is not None
+    assert listed.error.code in ("not_found", "validation_error")

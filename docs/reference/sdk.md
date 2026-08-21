@@ -25,10 +25,12 @@ print(cap.schema, cap.inputs, cap.outputs)
 
 # Invocation (dry-run)
 result = astrid.invoke(
-    "editorial.arrange",
+    "iteration.experiment_review",
     kind="executor",
     include_installed=False,
-    out="/tmp/arrange-out",
+    out="/tmp/review-out",
+    project="demo",
+    inputs={"review": "experiments/prompt-brevity/review.json"},
     dry_run=True,
 )
 print(result.ok, result.raw_result)
@@ -72,6 +74,12 @@ print(len(inventory.capabilities))
 import json
 json.dumps(inventory.to_dict())
 ```
+
+`include_installed=False` scopes discovery to the in-tree packs. Externally
+installed packs load with the registry by default; a single broken installed
+manifest fails the whole discovery call, so scripted and agent workflows
+should pin `include_installed=False` unless they explicitly need installed
+packs.
 
 `discover()` loads the executor, orchestrator, and element registries in
 dependency order (executor first, then orchestrator, then elements). Element
@@ -127,53 +135,49 @@ import astrid
 from pathlib import Path
 
 result = astrid.invoke(
-    "editorial.arrange",
+    "iteration.experiment_review",
     kind="executor",
     include_installed=False,
-    out=Path("./out/arrange-test"),
-    project="demo-project",
-    inputs={"brief": "test"},
+    out=Path("./out/review-test"),
+    project="demo",
+    inputs={"review": "experiments/prompt-brevity/review.json"},
     dry_run=True,
-    verbose=True,
 )
-print(result.ok)                    # True if no validation errors
+print(result.ok)                     # True if no validation errors
 print(result.raw_result["dry_run"])  # True
 print(result.raw_result["command"])
 ```
 
+`kind` is required (`"executor"` or `"orchestrator"`), and every executor
+run belongs to exactly one project: pass `project=<slug>` (the slug or id
+of an existing project).
+
 ### Regular Invocation
+
+A real executor run addressed with `project=` writes its outputs inside the
+project's own `runs/<run-id>/` tree — do **not** pass `out=` together with
+`project=` (the two are mutually exclusive; `out=` is only for project-less
+tooling runs):
 
 ```python
 import astrid
 
 result = astrid.invoke(
-    "editorial.arrange",
+    "iteration.experiment_review",
     kind="executor",
     include_installed=False,
-    out="./out/arrange-real",
-    project="demo-project",
-    inputs={"brief": "resize and normalize"},
-    python_exec="/usr/bin/python3",
+    project="demo",
+    inputs={"review": "experiments/prompt-brevity/review.json"},
 )
-print(result.ok)                      # True on success
-print(result.raw_result["returncode"])  # 0 on success
-print(result.error)                   # ExecError mapping if !ok
+print(result.ok)        # True on success
+print(result.run_id)    # the project-scoped run id under demo/runs/
+print(result.outputs)   # {"review_html": ..., "review_summary": ...}
+print(result.error)     # error mapping if not ok
 ```
 
-Orchestrator invocation omits the `out` requirement:
-
-```python
-result = astrid.invoke(
-    "video_editing.hype",
-    kind="orchestrator",
-    include_installed=False,
-    inputs={"video": "input.mp4"},
-    brief="./brief.md",
-    orchestrator_args=("--render",),
-    dry_run=True,
-)
-print(result.raw_result["planned_commands"])
-```
+Orchestrator invocations take the same arguments minus `out` (their outputs
+also land in the project run tree); `brief` and `orchestrator_args` are
+orchestrator-specific options.
 
 ### Typed Error Handling
 
@@ -185,32 +189,32 @@ import astrid
 
 # Not-found
 try:
-    astrid.get_capability("missing.capability", kind="executor")
+    astrid.get_capability("missing.capability", kind="executor", include_installed=False)
 except astrid.CapabilityNotFoundError as e:
     print(f"Not found: {e}")
 
 # Ambiguous bare lookup
 try:
-    astrid.get_capability("fade", kind="element")
+    astrid.get_capability("fade", kind="element", include_installed=False)
 except astrid.CapabilityAmbiguousError as e:
     print(f"Multiple matches: {e}")
     # e carries candidate list in the message
 
 # Element invocation is rejected
 try:
-    astrid.invoke("effects/text-card", kind="element")
+    astrid.invoke("effects/text-card", kind="element", include_installed=False)
 except astrid.UnsupportedCapabilityError as e:
     print(f"Cannot invoke element: {e}")
 
-# Missing required out path for executors
+# Executor runs require a project (validation happens before any side effect)
 try:
-    astrid.invoke("editorial.arrange", kind="executor")
-except astrid.CapabilityInvocationError as e:
-    print(f"Invocation error: {e}")
+    astrid.invoke("iteration.experiment_review", kind="executor", include_installed=False)
+except astrid.CapabilityValidationError as e:
+    print(f"Project required: {e}")
 
 # Runner exceptions are preserved as __cause__
 try:
-    astrid.invoke("some.executor", kind="executor", out="/tmp/out")
+    astrid.invoke("some.executor", kind="executor", out="/tmp/out", project="demo")
 except astrid.CapabilityInvocationError as e:
     original = e.__cause__  # The exception raised by the runner
 ```
@@ -297,7 +301,13 @@ semantics, partial-output optionality, and domain-manifest coexistence rules.
 ```python
 import astrid
 
-result = astrid.invoke("editorial.transcribe", kind="executor", out="/tmp/transcribe-out")
+result = astrid.invoke(
+    "iteration.experiment_review",
+    kind="executor",
+    include_installed=False,
+    project="demo",
+    inputs={"review": "experiments/prompt-brevity/review.json"},
+)
 if result.manifest_path:
     import json
     with open(result.manifest_path) as fh:

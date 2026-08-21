@@ -98,6 +98,10 @@ def test_doctor_fails_closed_on_missing_database() -> None:
     by_name = {c.name: c for c in checks}
     for name in ("sqlite_quick_check", "fk_integrity", "schema_versions"):
         assert by_name[name].status == "fail"
+        # The missing-database diagnostic always carries the brand-new-root
+        # guidance (informational only; the check still fails).
+        assert "brand-new projects root" in by_name[name].detail
+        assert "astrid projects create" in by_name[name].detail
     assert code == 1
     payload = json.loads(out)
     assert payload["ok"] is False

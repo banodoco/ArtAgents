@@ -68,7 +68,7 @@ def _add_project_arg(subparser: argparse.ArgumentParser) -> None:
     subparser.add_argument(
         "--project",
         required=True,
-        help="Owning project id (run ids are project-scoped).",
+        help="Owning project id or slug (run ids are project-scoped).",
     )
 
 

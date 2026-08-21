@@ -9,6 +9,45 @@ schema_version: 2
 #
 models:
   # =========================================================================
+  # seedvr2-upscaler — SeedVR2 real-world upscaler (fal-ai/seedvr/upscale/image/seamless)
+  #
+  # Image upscaling with seamless-tiling retention.  Prompt-less: the mode
+  # requires only an image_ref.  Optional knobs: upscale_mode (factor|target),
+  # upscale_factor (1-10), target_resolution (720p/1080p/1440p/2160p),
+  # noise_scale, seed, enable_safety_checker, output_format.
+  # =========================================================================
+  - id: seedvr2-upscaler
+    modality: image
+    modes:
+      upscale:
+        supports:
+          - image_ref
+          - upscale_mode
+          - upscale_factor
+          - target_resolution
+          - seed
+          - noise_scale
+          - enable_safety_checker
+          - output_format
+        requires:
+          - image_ref
+        backends:
+          cloud:
+            endpoint: fal-ai/seedvr/upscale/image/seamless
+            param_map:
+              image_ref: image_url
+              upscale_mode: upscale_mode
+              upscale_factor: upscale_factor
+              target_resolution: target_resolution
+              seed: seed
+              noise_scale: noise_scale
+              enable_safety_checker: enable_safety_checker
+              output_format: output_format
+            price:
+              unit: image
+              usd: 0.0025
+
+  # =========================================================================
   # z-image — Z Image Turbo (text-to-image + image-to-image)
   #
   # Local templates (vibecomfy):
@@ -747,6 +786,56 @@ models:
               instrumental: is_instrumental
               seed: seed
               duration: duration
+            price:
+              unit: audio
+              usd: 0.15
+
+  - id: minimax-music-3
+    modality: audio
+    modes:
+      music:
+        supports:
+          - prompt
+          - lyrics_prompt
+          - seed
+          - count
+          - duration
+          - guidance_scale
+          - steps
+        requires:
+          - prompt
+          - lyrics_prompt
+        backends:
+          cloud:
+            endpoint: minimax/music-3
+            param_map:
+              prompt: prompt
+              lyrics_prompt: lyrics
+              seed: seed
+              duration: duration
+              guidance_scale: guidance_scale
+              steps: num_inference_steps
+            price:
+              unit: second
+              usd: 0.002
+
+  - id: minimax-music-3.0
+    modality: audio
+    modes:
+      music:
+        supports:
+          - prompt
+          - lyrics_prompt
+          - instrumental
+        requires:
+          - prompt
+        backends:
+          wavespeed:
+            endpoint: https://api.wavespeed.ai/api/v3/minimax/music-3.0
+            param_map:
+              prompt: prompt
+              lyrics_prompt: lyrics
+              instrumental: is_instrumental
             price:
               unit: audio
               usd: 0.15

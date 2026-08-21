@@ -88,6 +88,31 @@ python3 -m astrid media references ...      # create/update/archive/associate/li
 python3 -m astrid timelines shots ...       # list/create/add/remove/reorder
 ```
 
+## Runs & tasks
+
+There is no `runs create` verb anywhere: a run comes into existence through
+the kernel, never by hand. `RunRepository.create` is the fan-out root — one
+transaction commits the `core.run` event stream, the `runs` row, its ordered
+child tasks, and evidence together. You rarely call it directly: pack
+capabilities invoked through the SDK create their own runs (e.g.
+`astrid.sdk.invoke("understanding.understand", ...)` commits one zero-task
+run plus evidence via the understanding adapter), while
+`client.tasks.create` admits standalone tasks that belong to no run. The
+CLI `tasks`/`runs` families then list and drive that work — `--project`
+takes the project slug or id:
+
+```bash
+python3 -m astrid tasks list --project demo --json
+python3 -m astrid runs show <run_id> --project demo --json --evidence
+python3 -m astrid runs cancel <run_id> --project demo --json
+python3 -m astrid runs retry-failed <run_id> --project demo --json
+```
+
+A run with zero children (or all children terminal) never leaves `running`
+on its own; terminalize it through the SDK:
+`client.runs.close(project, run_id)` (the kernel `core.run.close`
+transition).
+
 ## Operational families
 
 ```bash

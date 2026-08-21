@@ -45,6 +45,11 @@ MEDIA_DIR_NAME = "media"
 SHA256_DIR_NAME = "sha256"
 STAGING_DIR_NAME = ".staging"
 
+NEW_ROOT_GUIDANCE = (
+    "expected on a brand-new projects root; run "
+    "`astrid projects create <slug> --name <Name>` to initialize it"
+)
+
 
 @dataclass(frozen=True)
 class DoctorCheck:
@@ -238,7 +243,7 @@ def _check_sqlite_quick_check(root: Path) -> DoctorCheck:
         return DoctorCheck(
             name="sqlite_quick_check",
             status="fail",
-            detail=f"database missing: {db_path}",
+            detail=f"database missing: {db_path} ({NEW_ROOT_GUIDANCE})",
         )
     try:
         conn = _open_read_only(db_path)
@@ -278,7 +283,7 @@ def _check_fk_integrity(root: Path) -> DoctorCheck:
         return DoctorCheck(
             name="fk_integrity",
             status="fail",
-            detail=f"database missing: {db_path}",
+            detail=f"database missing: {db_path} ({NEW_ROOT_GUIDANCE})",
         )
     try:
         conn = _open_read_only(db_path)
@@ -341,7 +346,7 @@ def _check_schema_versions(root: Path) -> DoctorCheck:
         return DoctorCheck(
             name="schema_versions",
             status="fail",
-            detail=f"database missing: {db_path}",
+            detail=f"database missing: {db_path} ({NEW_ROOT_GUIDANCE})",
         )
     by_pack: dict[str, int] = {}
     for applied in probe.applied:

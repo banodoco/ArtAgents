@@ -160,6 +160,34 @@
     },
     {
       "default": "",
+      "description": "Upscale mode: 'factor' (multiply dimensions) or 'target' (target resolution).",
+      "name": "upscale_mode",
+      "required": false,
+      "type": "string"
+    },
+    {
+      "default": "",
+      "description": "Upscale factor (1-10) when upscale_mode is 'factor'.",
+      "name": "upscale_factor",
+      "required": false,
+      "type": "number"
+    },
+    {
+      "default": "",
+      "description": "Target resolution when upscale_mode is 'target': 720p, 1080p, 1440p, 2160p.",
+      "name": "target_resolution",
+      "required": false,
+      "type": "string"
+    },
+    {
+      "default": "",
+      "description": "Noise scale (0-1) for the upscaler.",
+      "name": "noise_scale",
+      "required": false,
+      "type": "number"
+    },
+    {
+      "default": "",
       "description": "Comma-separated LoRA registry ids and/or path@scale specs (e.g. 'flux-realism,z-realgen-v2' or 'https://...@0.8').",
       "name": "loras",
       "required": false,

@@ -5,6 +5,7 @@ Covers the wired cloud music models:
 
   - stable-audio-3-medium / music / cloud
   - minimax-music-v2.6 / music / cloud
+  - minimax-music-3 / music / cloud
   - ace-step / music / cloud
 
 Uses mocked ``fal_submit_and_poll`` and ``HttpClient.get_bytes`` so no external
@@ -169,6 +170,20 @@ def demo_minimax_music() -> None:
     _assert_manifest(run_dir, "minimax-music-v2.6", "music")
 
 
+def demo_minimax_music_3() -> None:
+    print("demo: minimax-music-3 / music / cloud")
+    run_dir = _call_executor(
+        model="minimax-music-3",
+        mode="music",
+        execution="cloud",
+        prompt="Genre: ethereal synth-pop. BPM: 112.",
+        seed=42,
+        duration=10.0,
+        lyrics_prompt="[verse]\nSoftly the world begins to breathe\n[chorus]\nSing it again",
+    )
+    _assert_manifest(run_dir, "minimax-music-3", "music")
+
+
 def demo_ace_step() -> None:
     print("demo: ace-step / music / cloud")
     run_dir = _call_executor(
@@ -190,6 +205,7 @@ def main(argv: list[str] | None = None) -> int:
     print("Running generate_audio cloud music golden demo...")
     demo_stable_audio_3_medium()
     demo_minimax_music()
+    demo_minimax_music_3()
     demo_ace_step()
     print("All cloud music cells passed.")
     return 0

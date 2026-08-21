@@ -35,6 +35,41 @@ backend accepts it.
 Latest MiniMax music model.  Provide `lyrics_prompt` for vocal tracks, or set
 `--instrumental true` to generate instrumental music.
 
+### `minimax-music-3`
+
+| | |
+|---|---|
+| Endpoint | `minimax/music-3` |
+| Mode | `music` |
+| Price | `$0.002 / second` |
+| Supports | `prompt`, `lyrics_prompt`, `seed`, `count`, `duration`, `guidance_scale`, `steps` |
+| Requires | `prompt`, `lyrics_prompt` |
+| Param map | `lyrics_prompt → lyrics`, `steps → num_inference_steps` |
+
+Current-generation MiniMax song model: complete songs up to five minutes.
+Unlike v2.6, `lyrics` is **required** — every request must supply a
+`--lyrics-prompt`.  Use a structured caption (genre, BPM, key, emotional
+progression, vocal details, arrangement) plus section-tagged lyrics; each
+structure tag (`[verse]`, `[chorus]`, `[bridge]`, `[outro]`, …) goes on its
+own line, and text on the same line as a tag is dropped by the model's input
+contract.  Cost fallback uses the requested `duration` in seconds.
+
+### `minimax-music-3.0` (wavespeed)
+
+| | |
+|---|---|
+| Endpoint | `https://api.wavespeed.ai/api/v3/minimax/music-3.0` |
+| Mode | `music` |
+| Backend | `wavespeed` (Bearer key `WAVESPEED_API_KEY`) |
+| Price | `$0.15 / audio` |
+| Supports | `prompt`, `lyrics_prompt`, `instrumental` |
+| Param map | `lyrics_prompt → lyrics`, `instrumental → is_instrumental` |
+
+MiniMax Music 3.0 hosted on WaveSpeedAI: full songs with vocals/instrumentals,
+structure-tag support, optional auto-lyrics, bitrate/sample-rate knobs.  No
+`duration`/`seed` parameters — track length is model-decided (median ~122s per
+run).  Run with `--execution wavespeed`.
+
 ### `ace-step`
 
 | | |
@@ -129,6 +164,19 @@ python -m astrid.packs.generation.executors.generate_audio.run \
 python -m astrid.packs.generation.executors.generate_audio.run \
   --model minimax-music-v2.6 --mode music --execution cloud \
   --prompt "cinematic orchestral score" --instrumental true --out ./out
+
+# MiniMax Music 3 (lyrics required)
+python -m astrid.packs.generation.executors.generate_audio.run \
+  --model minimax-music-3 --mode music --execution cloud \
+  --prompt "Genre: ethereal synth-pop. BPM: 112." \
+  --lyrics-prompt "[verse]\nSoftly the world begins to breathe" \
+  --duration 180 --out ./out
+
+# MiniMax Music 3.0 via WaveSpeedAI
+python -m astrid.packs.generation.executors.generate_audio.run \
+  --model minimax-music-3.0 --mode music --execution wavespeed \
+  --prompt "Genre: ethereal synth-pop. BPM: 112." \
+  --lyrics-prompt "[verse]\nSoftly the world begins to breathe" --out ./out
 
 # ACE-Step
 python -m astrid.packs.generation.executors.generate_audio.run \

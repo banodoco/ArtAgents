@@ -51,7 +51,7 @@ before the generation loop; unsupported features are dropped-with-warning
 ## Backends
 
 - **cloud**: `FalBackend` drives fal.ai audio endpoints (`stable-audio-3-medium`,
-  `minimax-music-v2.6`, `ace-step`).
+  `minimax-music-v2.6`, `minimax-music-3`, `ace-step`).
 - **local**: Reserved for a follow-up sprint.  VibeComfy ready-templates for
   Stable Audio 3, ACE-Step, and Stable Audio Open will be wired, along with
   `VibeComfyBackend` node-target injection.

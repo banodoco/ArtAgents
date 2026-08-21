@@ -83,6 +83,16 @@ class FalBackend(BackendAdapter):
             "guidance_scale": "guidance_scale",
             "steps": "num_inference_steps",
         },
+        "upscale": {
+            "image_ref": "image_url",
+            "upscale_mode": "upscale_mode",
+            "upscale_factor": "upscale_factor",
+            "target_resolution": "target_resolution",
+            "seed": "seed",
+            "noise_scale": "noise_scale",
+            "enable_safety_checker": "enable_safety_checker",
+            "output_format": "output_format",
+        },
         "i2i": {
             "prompt": "prompt",
             "seed": "seed",

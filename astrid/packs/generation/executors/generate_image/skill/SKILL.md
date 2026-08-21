@@ -58,7 +58,7 @@ Six canonical modes (SD-002).  Three are wired in Sprint 2:
 | `edit` | Instruction-guided edit (prompt = instruction, ref image required). | ✅ | `--prompt`, `--image-ref` (required). NO `negative_prompt`, NO `strength`. |
 | `inpaint` | Masked region replacement (prompt + image + mask → image). | ❌ | Future sprint. |
 | `outpaint` | Boundary extension (prompt + image + direction/extent → image). | ❌ | Future sprint. |
-| `upscale` | Super-resolution (image → larger image). | ❌ | Future sprint. |
+| `upscale` | Super-resolution (image → larger image). | ✅ | `seedvr2-upscaler` (fal, factor/target modes). |
 
 ## Tier-1 model decision tree
 

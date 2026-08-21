@@ -18,6 +18,8 @@ reserved for future sprints.
 |------------------------|-------|-------|-----------------------------------------------------|-------|
 | `stable-audio-3-medium`| music | —     | `fal-ai/stable-audio-3/medium/base/text-to-audio`   | Long-form stereo music; supports `negative_prompt`, `duration`, `guidance_scale`, `steps`, `output_format`. |
 | `minimax-music-v2.6`   | music | —     | `fal-ai/minimax-music/v2.6`                         | Prompt + lyrics; set `instrumental=true` to skip lyrics. |
+| `minimax-music-3`      | music | —     | `minimax/music-3`                                   | Current-gen song model (up to 5 min); **lyrics required**, structured caption + section tags; priced per second. |
+| `minimax-music-3.0`    | music | wavespeed | `https://api.wavespeed.ai/api/v3/minimax/music-3.0` | MiniMax Music 3.0 via WaveSpeedAI; full songs, structure tags, no duration/seed knobs; `$0.15`/song. Requires `WAVESPEED_API_KEY`. |
 | `ace-step`             | music | —     | `fal-ai/ace-step/prompt-to-audio`                   | Style prompt → tags/lyrics; priced per second of duration. |
 
 All entries are registered in `astrid/core/model_catalog/models.yaml` under
@@ -79,6 +81,13 @@ python -m astrid.packs.generation.executors.generate_audio.run \
 python -m astrid.packs.generation.executors.generate_audio.run \
   --model ace-step --mode music --execution cloud \
   --prompt "lo-fi hip hop beat" --duration 30 --steps 50 --out ./out
+
+# MiniMax Music 3 (lyrics required; section tags on their own lines)
+python -m astrid.packs.generation.executors.generate_audio.run \
+  --model minimax-music-3 --mode music --execution cloud \
+  --prompt "Genre: ethereal synth-pop. BPM: 112." \
+  --lyrics-prompt "[verse]\nSoftly the world begins to breathe\n[chorus]\nSing it again" \
+  --duration 180 --out ./out
 ```
 
 ## Prompts file (JSONL)

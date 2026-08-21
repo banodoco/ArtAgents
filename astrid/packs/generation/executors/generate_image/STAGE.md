@@ -19,6 +19,11 @@ and a backend; the executor does the rest.  **`--mode` is required** (SD-005).
 | `seedream-v5-pro`   | edit              | —                             | `bytedance/seedream/v5/pro/edit`      | no |
 | `flux-dev`          | t2i, i2i          | — (no local template per SD-001) | `fal-ai/flux/dev`, `fal-ai/flux/dev/image-to-image` | yes |
 | `flux-schnell`      | t2i               | — (no local template per SD-001) | `fal-ai/flux/schnell`                | yes |
+| `seedvr2-upscaler`  | upscale           | —                             | `fal-ai/seedvr/upscale/image/seamless` | no |
+
+`upscale` mode is prompt-less: it requires `image_ref` plus optional
+`upscale_mode` (`factor`/`target`), `upscale_factor` (1-10), `target_resolution`
+(`720p`/`1080p`/`1440p`/`2160p`), `noise_scale`, `seed`, and `output_format`.
 
 The `codex` backend is also wired for image modes above. It runs
 `codex exec` and forces Codex's built-in `image_generation` tool by prompt

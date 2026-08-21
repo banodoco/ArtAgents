@@ -8,6 +8,7 @@ backend-specific branching.
 from astrid.core.generation.backends.base import BackendAdapter, GenerationResult
 from astrid.core.generation.backends.codex import CodexBackend
 from astrid.core.generation.backends.fal import FalBackend
+from astrid.core.generation.backends.wavespeed import WavespeedBackend
 from astrid.core.generation.backends.registry import (
     GenerationBackendDescriptor,
     GenerationBackendRegistry,
@@ -30,6 +31,7 @@ __all__ = [
     "GenerationResult",
     "load_default_generation_backend_registry",
     "VibeComfyBackend",
+    "WavespeedBackend",
 ]
 
 

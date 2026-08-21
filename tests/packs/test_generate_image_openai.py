@@ -47,29 +47,32 @@ def test_generate_image_rejects_invalid_gpt_image_2_size():
 
 
 def test_load_api_key_reads_env_by_default(monkeypatch, tmp_path):
+    # m4 contract: the canonical loader resolves from process env by default;
+    # env files are consulted only when explicitly named.
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "from-environment")
     (tmp_path / ".env").write_text("OPENAI_API_KEY=from-dot-env", encoding="utf-8")
 
-    assert load_api_key("OPENAI_API_KEY") == "from-dot-env"
+    assert load_api_key("OPENAI_API_KEY") == "from-environment"
 
 
-def test_load_api_key_prefers_env_file_over_process_env(monkeypatch, tmp_path):
-    # Contract: a committed .env takes precedence over an exported env var, so a
-    # stale or empty shell value never shadows the key the repo actually carries.
+def test_load_api_key_prefers_process_env_over_env_file(monkeypatch, tmp_path):
+    # Contract (frozen m4): process env outranks an env file, which is only a
+    # lower-priority convenience consulted when explicitly named.
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("OPENAI_API_KEY", "from-process-env")
     (tmp_path / ".env").write_text("OPENAI_API_KEY=from-dot-env", encoding="utf-8")
 
-    assert load_api_key("OPENAI_API_KEY") == "from-dot-env"
+    assert load_api_key("OPENAI_API_KEY", env_file=tmp_path / ".env") == "from-process-env"
 
 
 def test_llm_client_key_loader_reads_env(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    (tmp_path / ".env").write_text("ANTHROPIC_API_KEY=from-dot-env", encoding="utf-8")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "from-environment")
 
-    assert _load_api_key(None, "ANTHROPIC_API_KEY") == "from-dot-env"
+    assert _load_api_key(None, "ANTHROPIC_API_KEY") == "from-environment"
 
 
 def test_packs_that_used_generate_image_env_helpers_read_shared_env(monkeypatch, tmp_path):
