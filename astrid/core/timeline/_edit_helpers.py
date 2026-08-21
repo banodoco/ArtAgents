@@ -304,6 +304,8 @@ def pack_write_gateway(
     root: str | Path | None = None,
     supabase_options: SupabaseEventLogOptions | None = None,
     writer: DatabaseWriter | None = None,
+    timeline_repository: Any | None = None,
+    timeline_stream_type: str | None = None,
 ) -> PackWriteResult:
     """Centralized append-then-materialize gateway for pack / worker writes.
 
@@ -394,25 +396,23 @@ def pack_write_gateway(
     # are deferred so this core module never imports ``astrid.packs`` at
     # module scope.
     if writer is not None:
+        if timeline_repository is None or not timeline_stream_type:
+            raise TimelineEditError(
+                "pack_write_gateway: a kernel writer requires the injected "
+                "timeline_repository and timeline_stream_type (kernel modules "
+                "must not import astrid.packs)"
+            )
         from astrid.core.events.service import EventAppendService
         from astrid.core.receipts.service import ReceiptService
         from astrid.core.repositories.projects import ProjectRepository
         from astrid.core.store.uow import UnitOfWork
-        from astrid.packs.timeline.repository import (
-            TIMELINE_STREAM_TYPE,
-            TimelineRepository,
-        )
 
         kernel_events = EventAppendService(registry)
         kernel_receipts = ReceiptService()
         kernel_projects = ProjectRepository(
             events=kernel_events, receipts=kernel_receipts
         )
-        kernel_timelines = TimelineRepository(
-            events=kernel_events,
-            receipts=kernel_receipts,
-            projects=kernel_projects,
-        )
+        kernel_timelines = timeline_repository
         project_id = kernel_projects.resolve(writer, project_slug)
 
         def _commit_replace_config(payload: Mapping[str, Any]) -> None:
@@ -422,7 +422,7 @@ def pack_write_gateway(
                 )
                 head = uow.query_one(
                     "SELECT head_seq FROM event_streams WHERE id = ?",
-                    (f"{timeline_id}:{TIMELINE_STREAM_TYPE}",),
+                    (f"{timeline_id}:{timeline_stream_type}",),
                 )
                 if head is None:
                     raise TimelineEditError(

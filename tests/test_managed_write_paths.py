@@ -735,7 +735,21 @@ class ManagedWriteKernelReceiptTest(unittest.TestCase):
         self.assertIsNotNone(found)
         ulid, _tdir = found
 
-        # Managed write through the gateway, with kernel writer access.
+        # Managed write through the gateway, with kernel writer access. The
+        # repository is injected (kernel modules must not import astrid.packs).
+        from astrid.core.events.service import EventAppendService
+        from astrid.core.receipts.service import ReceiptService
+        from astrid.core.repositories.projects import ProjectRepository
+        from astrid.packs.timeline.repository import (
+            TIMELINE_STREAM_TYPE,
+            TimelineRepository,
+        )
+
+        kernel_events = EventAppendService(app.registry)
+        kernel_receipts = ReceiptService()
+        kernel_projects = ProjectRepository(
+            events=kernel_events, receipts=kernel_receipts
+        )
         result = pack_write_gateway(
             project_slug="receipt-proj",
             timeline_slug="receipt-tl",
@@ -747,6 +761,12 @@ class ManagedWriteKernelReceiptTest(unittest.TestCase):
             ),
             root=tmp_root,
             writer=app.writer,
+            timeline_repository=TimelineRepository(
+                events=kernel_events,
+                receipts=kernel_receipts,
+                projects=kernel_projects,
+            ),
+            timeline_stream_type=TIMELINE_STREAM_TYPE,
         )
         self.assertEqual(result.attempts, 1)
         self.assertGreater(result.new_version, 0)
