@@ -1,0 +1,43 @@
+Exploration complete. Findings:
+
+## Ranked findings
+
+**1. Only 2 of the 11 B1b families are registered CLI commands today.** `history` and `diff` are live in the timelines family; the other 9 are library-only. The m6 teardown (commit `8b97d6eb`) deleted the B1b CLI cluster (`cli/timeline.py`, `cli/timeline_events.py`, `cli/usage_counter.py`) and packs/timeline/cli.py:289-293 now *explicitly forbids* `audit/erase/repair/push/pull/migrate-events` verbs as "legacy". `core/timeline/README.md:164` still references the deleted `cli.py` — stale doc.
+
+**2. Single choke point exists: `gateway/dispatch.py:14-23`** — every CLI invocation (console entry `astrid = astrid.core.gateway:main`, pyproject:39) ends in:
+```python
+parser = _build_dispatch_parser()
+parsed, tail = parser.parse_known_args(raw)
+return int(parsed.handler(tail))
+```
+One hook here counts all invocations. Product-family path funnels again through `run_product_family` (`cli/domain_product.py:316`) → `int(handler(parsed))`; every family handler exits via `print_result` (`cli/domain_output.py:137`).
+
+**3. The exact counter pattern B1b needs already existed — deleted.** Commit `f005e36e` added `cli/usage_counter.py`: `count_cli_usage(family)` appends one JSON line `{ts, day, family}` to `$ASTRID_USAGE_LOG` (default `~/.astrid/cli-usage.jsonl`), fire-and-forget, swallows OSError. Recoverable verbatim from git. Other patterns: module-level `logging.getLogger(__name__)` (no basicConfig/dictConfig anywhere); append-only `events_ops.jsonl` ops log via `observability.py:129 read_ops_log`; `[AstridBridge] request/response` timing prints (`integrations/reigh/local_bridge_server.py:208-228`).
+
+**4. Event-log shape (both fixtures):** one JSON object per line; actor field is an **object** `{"display","id","type"}` — type ∈ `agent|human|system` (desert: `reigh-app:local-editor` human, `agent:codex`, `ci:…`, `timeline-edits:…`; park24: `agent:fixture-builder`). Timestamps **present**: `"ts":"2026-08-11T12:00:00Z"` (ISO-8601 UTC) on all 159 desert + 2 park24 lines — windowing-safe. Envelope: `event_id` (ULID), `hash` (sha256 chain), `kind`, `payload`, optional `expected_version`.
+
+**5. Disk layout:** root via `resolve_projects_root()` (`foundation/project_paths.py:32-35`): `ASTRID_PROJECTS_ROOT` → default `<repo>/projects` (checkout) or `~/.astrid/projects`. Timeline home `projects/<slug>/timelines/<ulid>/`; event log = `assembly.jsonl` (`timeline/paths.py:33,41,55`). Synthetic project: dir + `assembly.jsonl` + identity sidecar `assembly.identity.json` (`backend: local_fs`).
+
+## Mapping table
+
+| Family | CLI registration | Library implementation |
+|---|---|---|
+| history | `packs/timeline/cli.py:274` (handler :146) | — |
+| diff | `packs/timeline/cli.py:279` (handler :151) | — |
+| audit | none | `observability.py:27,129`; `eventlog/types.py:194` |
+| who-edited | none | `eventlog/types.py:209` ActorRollupEntry; selector.py |
+| preview | none | `projection.py:788` replay_projection |
+| undo | none | `undo.py:51,156,237` |
+| mass-undo | none | `undo.py` (same) |
+| erase | none | `erasure.py:38,175,220` |
+| recover | none | `repair.py:33` |
+| branch | none | `branch.py:82,309` |
+| push/pull | none | `transfer.py:115,189` |
+| migrate-events | none | `migration.py:94,198,349` |
+
+## Unknowns / risks
+
+- **Scope question**: B1b names 11 families, but 9 are deliberately unregistered. Instrumenting only the choke point counts invocations that *can't happen* for 9 families. Count at `_dispatch` (argv-derived family) without re-adding verbs, or re-add verbs first (bigger scope, needs `recoverability_conformance_worklist.json` snapshot refresh — its 340 findings include historical `timelines push/undo/branch/erase/mass-undo/recover/migrate-events` stderr snapshots with `file: None`).
+- The m6 teardown deleted the prior instrumentation; the `ASTRID_USAGE_LOG` env contract is dead but the name is reusable.
+- `sync` was the 15th instrumented family in f005e36e; B1b's list omits it — decide intentionally.
+0

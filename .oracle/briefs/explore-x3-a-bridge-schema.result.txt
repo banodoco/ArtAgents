@@ -1,0 +1,31 @@
+All seven items verified in the snapshot tree. Findings:
+
+## Ranked findings
+
+1. **All six incident fixes are PRESENT** in the working tree, but **none are in commit 17b2bbb6** — the WIP merge touches zero bridge/schema files; they arrive via main@dd1bbe3a lineage.
+2. **CAS is real and honest**: server never reads `expected_version` itself, but the wire parse enforces integer-only (400) and the repository kernel raises `TimelineVersionConflictError` before any allocation → adapter maps to `409 timeline_version_conflict` carrying `config_version` (`bridge.py:231-233`). No auto-retry loop exists.
+3. **`output` is stripped from canonical writes**; `app` is kept (7-key canonical set).
+4. **GOAL's line cites are wrong**: `_CLIP_ALLOWED` is `banodoco_schema.py:354` (not :389-396, off −35); `_BRIDGE_CANONICAL_TOP_KEYS` is `local_bridge.py:71-77`, **not** in banodoco_schema.py (:43-120 there is `SharedTimelineConfig`/`_materialize_output` region).
+5. **B5 shrink complete**: no `do_PUT`, no sources/checkpoints/audio-video-proxy routes; health/projects/timelines-list/assets remain.
+6. **`--port 0` supported**; default root = env → `~/astrid-projects`.
+7. **Commit count is 37, not 43** (GOAL overstated by 6).
+
+## Fact table
+
+| # | Claim | Verdict | Evidence |
+|---|---|---|---|
+| 1 | Corpus lru_cache + clear hook | ✅ | `registry.py:186` `@lru_cache(maxsize=None)`; `:239-246` `clear_default_registry_cache()` → `:246` `.cache_clear()`; `catalog.py:102-106` `_clear_registry_cache()` clears 3 caches |
+| 2 | Identity-first UUID, no replay | ✅ | `paths.py:198` `load_display_json_with_repair`; fast path `:230-241` returns identity-block match without event replay; replay = repair fallback |
+| 3 | Record-threaded registry | ✅ | `local_bridge.py:577-584` docstring: "6 full resolutions for a 5-asset timeline" → single; threaded at `:318` (load), `:438` (save) |
+| 4 | `app` accepted | ✅ | `banodoco_schema.py:350` top, `:360` clip, `:363` track; `_BRIDGE_CANONICAL_TOP_KEYS` `local_bridge.py:71-77` incl. `app` `:74`; `output` excluded (`:365-370`) |
+| 5 | Route inventory | ✅ | GET: `/health` `:780`, `/projects` `:786`, `/projects/:p/timelines` `:794`, `/:t` `:805`, `/assets/:a` `:823`; HEAD assets `:838`; OPTIONS `:865`; POST `/save` `:872`; else 404. No PUT/sources/checkpoints/proxy |
+| 5b | CAS → 409 | ✅ | parse 400 (`:886-889`); `repository.py:1014/:1293` raise; `bridge.py:231-233` → `BridgeVersionConflictError` 409 + `config_version` |
+| 6 | `serve` | ✅ | `gateway/dispatch.py:128` `_dispatch_serve`; `--port` default 0 `:160`; bound port via `server.server_address` `:214`; root `foundation/project_paths.py:32-35` (env → `~/astrid-projects`) |
+| 7 | Commit split | ✅ | 37 files (not 43), **0 incident-related**; all CLI/model-catalog/generation/sdk/docs/tests WIP |
+
+## Unknowns / risks
+
+- `_clear_registry_cache` has **no production caller** — test-seam only (`tests/timeline/test_timeline_elements_catalog.py:120,126`); hot-reload hook is latent, not wired.
+- 37-vs-43 file discrepancy unexplained; verify GOAL's counting basis.
+- `paths.py` fast path requires byte-equal identity display block; any rewrite diverging (field reorder) falls back to full replay — safe, slower.
+0
