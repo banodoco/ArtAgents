@@ -68,9 +68,11 @@ stream_types:
 event_kinds:
   - timeline.created
   - timeline.saved
+  - timeline.config_replaced
 command_kinds:
   - timeline.create
   - timeline.save
+  - timeline.replace_config
 repositories:
   - TimelineRepository
 conformance:

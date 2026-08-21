@@ -183,8 +183,10 @@ def test_standard_composition_declares_pack_vocabulary_and_mounts() -> None:
     assert frozen.stream_types["timeline.timeline"] == "timeline"
     assert frozen.event_kinds["timeline.created"] == "timeline"
     assert frozen.event_kinds["timeline.saved"] == "timeline"
+    assert frozen.event_kinds["timeline.config_replaced"] == "timeline"
     assert frozen.command_kinds["timeline.create"] == "timeline"
     assert frozen.command_kinds["timeline.save"] == "timeline"
+    assert frozen.command_kinds["timeline.replace_config"] == "timeline"
     assert frozen.event_kinds["shot.item_added"] == "shots"
     assert frozen.command_kinds["shot.add_item"] == "shots"
     assert frozen.event_kinds["reference.primary_changed"] == "references"
@@ -378,8 +380,10 @@ def test_step8_declared_timeline_vocabulary_validates() -> None:
     assert validate_stream_type(frozen, "timeline.timeline") == "timeline.timeline"
     assert validate_event_kind(frozen, "timeline.created") == "timeline.created"
     assert validate_event_kind(frozen, "timeline.saved") == "timeline.saved"
+    assert validate_event_kind(frozen, "timeline.config_replaced") == "timeline.config_replaced"
     assert validate_command_kind(frozen, "timeline.create") == "timeline.create"
     assert validate_command_kind(frozen, "timeline.save") == "timeline.save"
+    assert validate_command_kind(frozen, "timeline.replace_config") == "timeline.replace_config"
 
 
 def test_step8_undeclared_stream_type_is_rejected() -> None:

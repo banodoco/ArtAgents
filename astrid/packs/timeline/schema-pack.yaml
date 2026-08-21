@@ -25,10 +25,12 @@ event_kinds:
   - timeline.created
   - timeline.saved
   - timeline.archived
+  - timeline.config_replaced
 command_kinds:
   - timeline.create
   - timeline.save
   - timeline.archive
+  - timeline.replace_config
 repositories:
   - TimelineRepository
 conformance:

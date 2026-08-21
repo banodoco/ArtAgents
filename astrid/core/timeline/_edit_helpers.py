@@ -39,6 +39,8 @@ from typing import Any
 
 from astrid.core._shared.jsonio import read_json
 from astrid.core.contracts.errors import AstridError
+from astrid.core.events.registry import validate_event_kind
+from astrid.core.schema_packs.registry import FrozenSchemaPackRegistry
 
 from .eventlog import EventLogBackend, select_timeline_backend
 from .eventlog.types import SupabaseEventLogOptions
@@ -48,6 +50,24 @@ from .paths import (
     find_timeline_by_slug,
 )
 from .projection import regenerate_projection
+
+_composed_registry: FrozenSchemaPackRegistry | None = None
+"""Process-wide composed standard registry cache for the pack write gateway.
+
+Built once via the kernel-side composition (``astrid.core.schema_packs.
+standard``) so this core module never imports ``astrid.packs``; validated
+event kinds must be declared by the same composed registry the runtime
+writer uses.
+"""
+
+
+def _composed_registry_or_build() -> FrozenSchemaPackRegistry:
+    global _composed_registry
+    if _composed_registry is None:
+        from astrid.core.schema_packs.standard import build_standard_registry
+
+        _composed_registry = build_standard_registry()
+    return _composed_registry
 
 # ---------------------------------------------------------------------------
 # Shared exception base
@@ -337,8 +357,19 @@ def pack_write_gateway(
     ------
     TimelineEditError
         When the backend cannot be resolved or an append fails.
+    EventVocabularyError
+        When any event kind is not declared by the composed standard
+        registry (raised before any backend or append work).
     """
-    # 0. Resolve the ULID from the slug if the caller did not supply one
+    # 0. Registry vocabulary gate (m8): every emitted kind must be declared
+    # by the composed standard registry before any backend resolution,
+    # bootstrap, or append — an undeclared kind rejects the whole batch
+    # with zero side effects.
+    registry = _composed_registry_or_build()
+    for event_spec in events:
+        validate_event_kind(registry, event_spec["kind"])
+
+    # Resolve the ULID from the slug if the caller did not supply one
     # (packs that only know project+slug from CLI args rely on this).
     effective_ulid = timeline_ulid
     if not effective_ulid:

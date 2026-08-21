@@ -91,6 +91,7 @@ astrid = [
     "packs/**/tests/*",
     "packs/**/golden/*",
     "packs/**/skill/*",
+    "packs/**/build/*",
 ]
 
 [tool.setuptools.package-data]
