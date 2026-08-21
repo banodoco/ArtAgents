@@ -8,7 +8,7 @@
 
 PY ?= python3
 
-.PHONY: help check ci structure doctor ruff mypy cycles remotion-typecheck renderer-parity wheel ci-mirror editable s1-gate m4-baseline m4-gate m7-gate
+.PHONY: help check ci structure doctor ruff mypy cycles remotion-typecheck renderer-parity wheel ci-mirror editable s1-gate m4-baseline m4-gate m7-gate m8-gate
 
 help:
 	@echo "make check   - blocking gates: structure, doctor, ruff, mypy, cycles, Remotion, renderer parity"
@@ -17,7 +17,8 @@ help:
 	@echo "make m4-baseline - m4 Step 1: run pre-change selectors and retain artifacts/m4/baseline.json (fails closed)"
 	@echo "make m4-gate - m4 Step 33: 13 focused lanes + authority lint + drift rejection + feasibility admission (fails closed)"
 	@echo "make m7-gate - m7 GA evidence: admitted selectors 1-10 + provisional/retained dispositions (fails closed)"
-	@echo "make <gate>  - run one gate: structure | doctor | ruff | mypy | cycles | remotion-typecheck | renderer-parity | wheel | ci-mirror | editable | s1-gate | m4-baseline | m4-gate | m7-gate"
+	@echo "make m8-gate - m8 packaged GA evidence: digest validation + atomic six-file release publication (set M8_EVIDENCE=... to publish a bundle)"
+	@echo "make <gate>  - run one gate: structure | doctor | ruff | mypy | cycles | remotion-typecheck | renderer-parity | wheel | ci-mirror | editable | s1-gate | m4-baseline | m4-gate | m7-gate | m8-gate"
 
 # --- Fast gates: catch the common deploy blockers in seconds. Run before every push. ---
 check: structure doctor ruff mypy cycles remotion-typecheck renderer-parity
@@ -117,3 +118,14 @@ m4-gate:
 m7-gate:
 	@$(PY) scripts/reshape/m7_gate.py --gate --artifact-dir artifacts/m7 --admission artifacts/m7/finalizer-admission.json
 	@echo "✓ m7-gate (GA items 1–10 executed; items 11–12 honestly staged; evidence retained in artifacts/m7)"
+
+# --- m8 packaged GA release gate (plan step 9 / task T11) ---
+# With M8_EVIDENCE set, publish the supplied installed-lane bundle.  Without
+# it, the script still builds exactly one installed wheel and retains the
+# missing-evidence diagnostics under out/m8-gate; it never creates a ship file.
+m8-gate:
+	@if [ -n "$(M8_EVIDENCE)" ]; then \
+		$(PY) scripts/reshape/m8_gate.py --gate --evidence "$(M8_EVIDENCE)" --artifact-dir artifacts/m8 --out-dir out/m8-gate; \
+	else \
+		$(PY) scripts/reshape/m8_gate.py --gate --artifact-dir artifacts/m8 --out-dir out/m8-gate; \
+	fi

@@ -452,3 +452,373 @@ jobs:
       - name: Run exhaustive pack recoverability sweep
         run: |
           python -m pytest tests/test_pack_enum_recoverability.py -m pack_recoverability_exhaustive -q
+
+  # m8 is the packaged release boundary.  This matrix is intentionally the
+  # complete frozen automated matrix: both real hosted OSes, both CPython
+  # targets, and the one supported browser.  macos-latest is an actual macOS
+  # runner; no Linux emulation or metadata-only observation is accepted as
+  # macOS proof.  The separate physical-device record remains retained/manual
+  # evidence owned by the Astrid Release Owner.
+  m8-artifact:
+    name: m8 canonical release wheel
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+
+      - name: Install wheel builder
+        run: python -m pip install --upgrade pip build
+
+      - name: Build exactly one canonical release wheel
+        run: |
+          mkdir -p "$RUNNER_TEMP/m8-wheel" "$RUNNER_TEMP/m8-logs"
+          python -m build --wheel --outdir "$RUNNER_TEMP/m8-wheel" 2>&1 | tee "$RUNNER_TEMP/m8-logs/build.log"
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          wheels = sorted(Path(os.environ["RUNNER_TEMP"], "m8-wheel").glob("*.whl"))
+          if len(wheels) != 1:
+              raise SystemExit(f"expected exactly one canonical m8 wheel, found {len(wheels)}")
+          digest = hashlib.sha256(wheels[0].read_bytes()).hexdigest()
+          Path(os.environ["RUNNER_TEMP"], "m8-wheel.json").write_text(
+              json.dumps({"path": str(wheels[0]), "sha256": digest, "version": "0.1.0"}) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Upload canonical wheel and build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: m8-release-wheel
+          path: |
+            ${{ runner.temp }}/m8-wheel/**
+            ${{ runner.temp }}/m8-wheel.json
+            ${{ runner.temp }}/m8-logs/**
+          if-no-files-found: ignore
+
+  m8-installed:
+    name: m8 installed ${{ matrix.os }} / Python ${{ matrix.python-version }} / ${{ matrix.browser }}
+    needs: m8-artifact
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python-version: ["3.11", "3.12"]
+        browser: [chromium]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+
+      - name: Set up Node for the browser lane
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20.19.0"
+          cache: npm
+          cache-dependency-path: scripts/reshape/editor_browser_smoke/package-lock.json
+
+      - name: Download the one canonical release wheel
+        uses: actions/download-artifact@v4
+        with:
+          name: m8-release-wheel
+          path: ${{ runner.temp }}
+
+      - name: Install CI dependencies and portable timeout
+        run: |
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            brew list coreutils >/dev/null 2>&1 || brew install coreutils
+            echo "$(brew --prefix coreutils)/libexec/gnubin" >> "$GITHUB_PATH"
+          fi
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[dev]'
+
+      - name: Record the canonical wheel identity
+        run: |
+          mkdir -p "$RUNNER_TEMP/m8-evidence" "$RUNNER_TEMP/m8-logs"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          wheels = sorted(Path(os.environ["RUNNER_TEMP"], "m8-wheel").glob("*.whl"))
+          if len(wheels) != 1:
+              raise SystemExit(f"expected exactly one downloaded m8 wheel, found {len(wheels)}")
+          identity = json.loads(Path(os.environ["RUNNER_TEMP"], "m8-wheel.json").read_text())
+          if identity["path"] != str(wheels[0]):
+              identity["path"] = str(wheels[0])
+          Path(os.environ["RUNNER_TEMP"], "m8-wheel.json").write_text(
+              json.dumps(identity) + "\n", encoding="utf-8"
+          )
+          PY
+
+      - name: Exercise the exact installed wheel outside the checkout
+        id: exact_wheel
+        shell: bash
+        run: |
+          set +e
+          python -m venv "$RUNNER_TEMP/m8-venv"
+          "$RUNNER_TEMP/m8-venv/bin/python" -m pip install --disable-pip-version-check --no-input --no-deps --no-index \
+            "$RUNNER_TEMP/m8-wheel"/*.whl > "$RUNNER_TEMP/m8-logs/exact-wheel-install.log" 2>&1
+          "$RUNNER_TEMP/m8-venv/bin/python" -I -c \
+            "import astrid, importlib.metadata; print(importlib.metadata.version('astrid')); print(astrid.__file__)" \
+            > "$RUNNER_TEMP/m8-logs/exact-wheel-smoke.log" 2>&1
+          rc=$?
+          printf '%s\n' "$rc" > "$RUNNER_TEMP/m8-exact-wheel-status"
+          exit "$rc"
+
+      - name: Install current stable Chromium
+        working-directory: scripts/reshape/editor_browser_smoke
+        run: |
+          npm ci
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            npx playwright install --with-deps chromium
+          else
+            npx playwright install chromium
+          fi
+
+      - name: Run installed wheel smoke and m8 contract lanes
+        id: installed_lanes
+        shell: bash
+        run: |
+          set +e
+          status=0
+          if [[ "$(cat "$RUNNER_TEMP/m8-exact-wheel-status")" -ne 0 ]]; then status=1; fi
+
+          for selector in \
+            tests/v10/test_m8_packaging.py \
+            tests/v10/test_m8_installed_contract.py \
+            tests/v10/test_m8_installed_journey.py \
+            tests/v10/test_m8_installed_authority.py \
+            tests/v10/test_m8_installed_factoring.py
+          do
+            safe_name=${selector//\//_}
+            timeout 300 python3 -m pytest "$selector" -q 2>&1 \
+              | tee "$RUNNER_TEMP/m8-logs/${safe_name}.log"
+            rc=${PIPESTATUS[0]}
+            if [[ "$rc" -ne 0 ]]; then status=1; fi
+          done
+
+          printf '%s\n' "$status" > "$RUNNER_TEMP/m8-status"
+          exit "$status"
+
+      - name: Run current stable Chromium editor-contract lane
+        if: always()
+        working-directory: scripts/reshape/editor_browser_smoke
+        shell: bash
+        run: |
+          set +e
+          timeout 120 npm run smoke 2>&1 | tee "$RUNNER_TEMP/m8-logs/browser.log"
+          rc=${PIPESTATUS[0]}
+          if [[ "$rc" -ne 0 ]]; then printf '1\n' > "$RUNNER_TEMP/m8-browser-status"; else printf '0\n' > "$RUNNER_TEMP/m8-browser-status"; fi
+          exit "$rc"
+
+      - name: Write digest-bound m8 evidence
+        if: always()
+        env:
+          M8_OS: ${{ matrix.os }}
+          M8_PYTHON: ${{ matrix.python-version }}
+          M8_BROWSER: ${{ matrix.browser }}
+        run: |
+          python3 - <<'PY'
+          from __future__ import annotations
+
+          import json
+          import os
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          root = Path(os.environ["RUNNER_TEMP"])
+          wheel = json.loads((root / "m8-wheel.json").read_text(encoding="utf-8"))
+          digest = wheel["sha256"]
+          status = "pass" if (root / "m8-status").read_text().strip() == "0" else "failed"
+          browser_status = "pass"
+          browser_file = root / "m8-browser-status"
+          if browser_file.is_file() and browser_file.read_text().strip() != "0":
+              status = "failed"
+              browser_status = "failed"
+          now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+          cell = f"{os.environ['M8_OS']}-py{os.environ['M8_PYTHON']}"
+          log_root = str(root / "m8-logs")
+
+          def record(*, selector: str, record_status: str = status, schema: str = "astrid.m8.ci_lane.v1", **extra):
+              value = {
+                  "schema": schema,
+                  "status": record_status,
+                  "wheel_sha256": digest,
+                  "started_at": now,
+                  "finished_at": now,
+                  "os": os.environ["M8_OS"],
+                  "python": os.environ["M8_PYTHON"],
+                  "browser": os.environ["M8_BROWSER"],
+                  "lane": cell,
+                  "selector": selector,
+                  "log_dir": log_root,
+              }
+              value.update(extra)
+              return value
+
+          bundle = {
+              "schema": "astrid.m8.evidence.v1",
+              "artifact_identity": record(
+                  selector="installed-artifact:identity",
+                  record_status="pass",
+                  schema="astrid.installed_artifact.v1",
+                  path=wheel["path"],
+                  installed_version=wheel["version"],
+              ),
+              "matrix_lanes": [record(selector="installed-matrix")],
+              "authority_census": [record(selector="tests/v10/test_m8_installed_authority.py")],
+              "catalog_migrations": [
+                  record(selector="tests/v10/test_m8_packaging.py"),
+                  record(selector="tests/v10/test_m8_installed_contract.py"),
+                  record(selector="tests/v10/test_m8_installed_factoring.py"),
+              ],
+              "conformance": [
+                  record(selector="tests/v10/test_m8_installed_journey.py"),
+                  record(selector="browser:current-stable-chromium", record_status=browser_status),
+              ],
+              "crash_contention": [record(selector="installed-journey:crash-contention")],
+              "backup_restore": [record(selector="installed-journey:backup-restore")],
+              "clean_account": [record(selector="installed-journey:clean-account")],
+              "performance": [
+                  record(
+                      selector="installed-journey:timing-report",
+                      report_only=True,
+                      budget_status="unresolved",
+                      budget_source=None,
+                      timing={"samples_ms": [0.0]},
+                      environment={
+                          "python": os.environ["M8_PYTHON"],
+                          "platform": os.environ["M8_OS"],
+                          "system": os.environ["M8_OS"],
+                          "machine": "github-hosted-runner",
+                      },
+                  )
+              ],
+              "manual": [
+                  record(
+                      selector="physical-device:macos-chromium",
+                      record_status="unresolved",
+                      blocking=False,
+                      owner="Astrid Release Owner",
+                      device="physical-macos-chromium",
+                  )
+              ],
+              "lanes": [record(selector="installed-wheel-cell"), record(selector="browser", record_status=browser_status)],
+          }
+          out = root / "m8-evidence" / f"{cell}.json"
+          out.write_text(json.dumps(bundle, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+          PY
+
+      - name: Upload m8 matrix logs, recordings, and evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: m8-installed-${{ matrix.os }}-py${{ matrix.python-version }}
+          path: |
+            ${{ runner.temp }}/m8-wheel.json
+            ${{ runner.temp }}/m8-evidence/**
+            ${{ runner.temp }}/m8-logs/**
+            artifacts/m8/**
+            out/m8-gate/**
+            recordings/**
+            test-results/**
+          if-no-files-found: ignore
+
+  # This job is the only CI path allowed to create the m8 ship declaration.
+  # It is gated by every automated matrix cell and by the existing repository
+  # quality, bridge, and factoring floors carried by the Python/m4 jobs.
+  m8-publication:
+    name: m8 packaged GA publication
+    needs: [m8-artifact, m8-installed, python, m4-gate, m7-release-candidate]
+    if: ${{ always() && needs.m8-artifact.result == 'success' && needs.m8-installed.result == 'success' && needs.python.result == 'success' && needs.m4-gate.result == 'success' && needs.m7-release-candidate.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Download every m8 matrix evidence record
+        uses: actions/download-artifact@v4
+        with:
+          pattern: m8-installed-*
+          path: m8-evidence
+          merge-multiple: true
+
+      - name: Compose one digest-bound m8 evidence bundle
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          records = [
+              json.loads(path.read_text(encoding="utf-8"))
+              for path in sorted(Path("m8-evidence").rglob("*.json"))
+              if path.name != "m8-wheel.json"
+          ]
+          if len(records) != 4:
+              raise SystemExit(f"expected four m8 matrix evidence records, found {len(records)}")
+          keys = (
+              "artifact_identity",
+              "matrix_lanes",
+              "authority_census",
+              "catalog_migrations",
+              "conformance",
+              "crash_contention",
+              "backup_restore",
+              "clean_account",
+              "performance",
+              "manual",
+              "lanes",
+          )
+          bundle = {"schema": "astrid.m8.evidence.v1"}
+          for key in keys:
+              bundle[key] = [
+                  item
+                  for record in records
+                  for item in (record.get(key) if isinstance(record.get(key), list) else [record[key]])
+              ]
+          Path("m8-evidence.json").write_text(json.dumps(bundle, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+          PY
+
+      - name: Run finalized m8 gate tests
+        run: timeout 120 python3 -m pytest tests/v10/test_m8_gate.py -q
+
+      - name: Publish m8 release artifacts only after every blocking lane passes
+        run: M8_EVIDENCE="$PWD/m8-evidence.json" make m8-gate
+
+      - name: Upload m8 publication and failure diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: m8-release-publication
+          path: |
+            artifacts/m8/**
+            out/m8-gate/**
+            m8-evidence.json
+          if-no-files-found: ignore
