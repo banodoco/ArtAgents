@@ -48,6 +48,8 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+from astrid.core.cli_choices import StaticChoices
+
 from astrid.packs.blender.render_core import (
     DEFAULT_SCENE,
     build_blend_render_script,
@@ -70,7 +72,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--execution",
         required=True,
-        choices=("local", "cloud"),
+        choices=StaticChoices(("local", "cloud")),
         help="local = run blender here; cloud = POST to a Blender render API host.",
     )
     p.add_argument("--engine", default="cycles", help="cycles (default), eevee, or workbench.")

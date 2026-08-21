@@ -6,10 +6,6 @@ For every shipped pack id in ``PORTFOLIO_PACK_IDS`` we prove:
   packs use.
 * Validation through ``validate_pack`` (the :class:`PackValidator` wrapper)
   — same code path user-external packs use.
-* ``packs inspect <id>`` and ``packs inspect <id> --agent`` produce
-  non-empty structured output. Because ``packs inspect`` only sees packs
-  through :class:`InstalledPackStore`, the test installs each pack into a
-  temporary ``ASTRID_HOME`` then invokes the CLI as a subprocess.
 * The pack's representative executor dispatches through
   :func:`_run_external_executor` (the same path external packs
   use), **not** :func:`run_builtin_executor`. We verify this
@@ -17,18 +13,11 @@ For every shipped pack id in ``PORTFOLIO_PACK_IDS`` we prove:
   external one was called.
 * Per-component manifests are v1-compliant: ``schema_version: 1`` is
   present on every per-component manifest with a valid ``kind``.
-
-Step 16.4 — the Phase 8 anchor — exercises the subprocess shift
-end-to-end for the ``training.asset_cache`` executor. The rejection
-rationale for ``transcribe`` and ``validate`` is documented inline; see
-also ``MIGRATION_NOTES.md`` and plan ``§Step 16.4``.
 """
 
 from __future__ import annotations
 
 import json
-import os
-import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -179,86 +168,6 @@ def test_component_manifests_v1_compliant(pack_id: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# packs inspect <id> [--agent]
-# ---------------------------------------------------------------------------
-
-
-def _install_pack_into(astrid_home: Path, pack_id: str) -> None:
-    """Install ``astrid/packs/<pack_id>`` into the given ASTRID_HOME."""
-    # InstalledPackStore writes under ``ASTRID_HOME/packs/<pack_id>/``.
-    from astrid.core.pack.store import InstalledPackStore
-    from astrid.core.pack.install import install_pack
-
-    store = InstalledPackStore(packs_home=astrid_home / "packs")
-    rc = install_pack(
-        PACKS_DIR / pack_id,
-        store=store,
-        skip_confirm=True,
-        trust_acknowledged=True,
-        trust_method="test",
-        trust_actor="test",
-    )
-    assert rc == 0, f"install_pack({pack_id!r}) returned {rc}"
-
-
-@pytest.mark.parametrize("pack_id", PORTFOLIO_PACK_IDS)
-def test_packs_inspect_emits_structured_output(
-    pack_id: str, tmp_path: Path
-) -> None:
-    """``packs inspect`` and ``packs inspect --agent`` both return useful output.
-
-    ``packs inspect`` is gated on InstalledPackStore (it does not see
-    shipped-but-not-installed pack roots), so we install each pack into
-    an isolated ``ASTRID_HOME`` before invoking the CLI.
-    """
-    home = tmp_path / "astrid_home"
-    home.mkdir()
-    env = os.environ.copy()
-    env["ASTRID_HOME"] = str(home)
-    # ``packs`` is in the unbound-allowlist, no session needed.
-    env.pop("ASTRID_SESSION_ID", None)
-
-    with mock.patch.dict(os.environ, {"ASTRID_HOME": str(home)}, clear=False):
-        _install_pack_into(home, pack_id)
-
-    # Full inspect (--json so the assertion is structural).
-    r_full = subprocess.run(
-        [sys.executable, "-m", "astrid", "packs", "inspect", pack_id, "--json"],
-        env=env,
-        capture_output=True,
-        text=True,
-    )
-    assert r_full.returncode == 0, (
-        f"packs inspect {pack_id} failed: rc={r_full.returncode} "
-        f"stderr={r_full.stderr[:400]}"
-    )
-    full = json.loads(r_full.stdout)
-    assert isinstance(full, dict) and full, "full inspect produced empty output"
-    assert full.get("pack_id") == pack_id or full.get("id") == pack_id, (
-        f"full inspect missing pack id field: keys={sorted(full)}"
-    )
-
-    # Agent inspect (also --json).
-    r_agent = subprocess.run(
-        [sys.executable, "-m", "astrid", "packs", "inspect", pack_id, "--agent", "--json"],
-        env=env,
-        capture_output=True,
-        text=True,
-    )
-    assert r_agent.returncode == 0, (
-        f"packs inspect --agent {pack_id} failed: rc={r_agent.returncode} "
-        f"stderr={r_agent.stderr[:400]}"
-    )
-    agent = json.loads(r_agent.stdout)
-    # ``packs inspect --agent`` is allowed to produce an empty dict if a
-    # pack has no ``agent:`` / ``secrets:`` / ``keywords:`` sections —
-    # what matters here is that the command produced parseable structured
-    # output and exited cleanly. Per-pack agent metadata completeness is
-    # tracked separately.
-    assert isinstance(agent, dict), "agent inspect produced non-dict output"
-
-
-# ---------------------------------------------------------------------------
 # Dispatch path parity — every pack's representative executor goes through
 # _run_external_executor, not the in-process builtin path.
 # ---------------------------------------------------------------------------
@@ -280,7 +189,7 @@ def test_representative_executor_dispatches_external(pack_id: str) -> None:
     from astrid.core.execution.executor.runner import ExecutorRunRequest, ExecutorRunResult
 
     executor_id = REPRESENTATIVE_EXECUTORS[pack_id]
-    registry = load_executor_registry()
+    registry = load_executor_registry(include_installed=False)
     executor = registry.get(executor_id)
 
     # The in-process path lives in runner_mod._run_builtin_executor;
@@ -324,6 +233,7 @@ def test_representative_executor_dispatches_external(pack_id: str) -> None:
     request = ExecutorRunRequest(
         executor_id=executor_id,
         out=Path(tempfile.mkdtemp()),
+        project="demo",
         inputs=inputs,
         dry_run=True,
         python_exec=sys.executable,
@@ -360,124 +270,3 @@ def test_representative_executor_dispatches_external(pack_id: str) -> None:
             "run_builtin_executor (the in-process built-in path)"
         )
 
-
-# ---------------------------------------------------------------------------
-# Step 16.4 — end-to-end subprocess shift anchor (asset_cache)
-# ---------------------------------------------------------------------------
-#
-# Why asset_cache and not transcribe or validate:
-#
-# * ``asset_cache`` was chosen because its ``run.py`` exposes a freestanding
-#   stdlib-only argparse interface (``--prune-older-than DAYS``), has no
-#   external SDK imports (the only non-stdlib import is ``filelock``, wrapped
-#   in try/except ImportError), no OPENAI_API_KEY requirement, no
-#   ffmpeg/ffprobe dependency, and an ``HYPE_CACHE_DIR`` env knob that lets
-#   the test point the prune scan at an empty hermetic cache.
-#
-# * ``transcribe`` was rejected: its ``run.py`` unconditionally executes
-#   ``from openai import OpenAI; client = OpenAI(api_key=load_api_key(...))``
-#   before any silence-aware short-circuit, and ``load_api_key`` raises
-#   SystemExit unless ``OPENAI_API_KEY`` is in process env or in a discovered
-#   env file. The test would exit non-zero on any stock CI runner that lacks
-#   an OpenAI key or the ``openai`` package, and transcribe also requires
-#   ffmpeg/ffprobe on PATH for ``probe_duration``.
-#
-# * ``validate`` was rejected: its ``executor.yaml`` declares
-#   ``pipeline_requirements: rendered_video, timeline, transcript`` and its
-#   ``main()`` requires ``--video``, ``--metadata``, ``--timeline`` files
-#   representing rendered hype.mp4 output plus sidecars — it consumes
-#   rendered pipeline output, not a brief manifest, and cannot be exercised
-#   in isolation without first running the hype orchestrator.
-
-
-def _seed_session(astrid_home: Path, projects_root: Path, slug: str) -> str:
-    """Seed a project so parity runs have a project to attach to."""
-    from astrid.core.foundation.project_paths import project_dir
-
-    astrid_home.mkdir(parents=True, exist_ok=True)
-    proj = project_dir(slug)
-    proj.mkdir(parents=True, exist_ok=True)
-    (proj / "project.json").write_text(
-        json.dumps({
-            "created_at": "2026-05-11T00:00:00Z",
-            "name": slug,
-            "schema_version": 1,
-            "slug": slug,
-            "updated_at": "2026-05-11T00:00:00Z",
-            "default_timeline_id": None,
-        }),
-        encoding="utf-8",
-    )
-    return "parity"
-
-
-def test_asset_cache_subprocess_shift_anchor(tmp_path: Path,
-                                             monkeypatch: pytest.MonkeyPatch
-                                             ) -> None:
-    """Step 16.4 anchor: ``training.asset_cache`` runs as a real subprocess.
-
-    Asserts:
-      * exit code 0
-      * stdout contains the canonical empty-cache prune line
-        ``removed=0 freed_bytes=0`` (asset_cache/run.py:501)
-      * stderr contains the runner's joined argv prefix
-        ``-m astrid.packs.training.executors.asset_cache.run --prune-older-than``
-        which is ONLY emitted on the ``_run_external_executor`` path
-        (``_cmd_run`` echoes ``shlex.join(result.command)`` to stderr and the
-        in-process builtin path does NOT populate ``result.command``). The
-        command echo lives on stderr so stdout carries only the JSON payload.
-    """
-    astrid_home = tmp_path / "astrid_home"
-    projects_root = tmp_path / "projects"
-    cache_dir = tmp_path / "cache"
-    out_dir = tmp_path / "out"
-    out_dir.mkdir()
-
-    # Seed identity / Session / project inside an isolated ASTRID_HOME so
-    # the CLI session gate accepts ``executors run``. We mint the records
-    # via the in-process helpers (after pointing the env at our tmpdirs),
-    # then hand the env over to the subprocess.
-    monkeypatch.setenv("ASTRID_HOME", str(astrid_home))
-    monkeypatch.setenv("ASTRID_PROJECTS_ROOT", str(projects_root))
-    sid = _seed_session(astrid_home, projects_root, "parity")
-
-    env = os.environ.copy()
-    env["ASTRID_HOME"] = str(astrid_home)
-    env["ASTRID_PROJECTS_ROOT"] = str(projects_root)
-    env["ASTRID_SESSION_ID"] = sid
-    env["HYPE_CACHE_DIR"] = str(cache_dir)
-
-    r = subprocess.run(
-        [
-            sys.executable, "-m", "astrid", "executors", "run",
-            "training.asset_cache",
-            "--input", "prune_older_than=365",
-            "--input", "prune_days=365",
-            "--python-exec", sys.executable,
-            "--out", str(out_dir),
-        ],
-        env=env,
-        capture_output=True,
-        text=True,
-    )
-
-    assert r.returncode == 0, (
-        f"asset_cache subprocess failed rc={r.returncode}\n"
-        f"STDOUT: {r.stdout}\nSTDERR: {r.stderr[:500]}"
-    )
-    # Canonical empty-cache prune output (asset_cache/run.py:501).
-    assert "removed=0 freed_bytes=0" in r.stdout, (
-        f"missing canonical empty-cache prune output in stdout:\n{r.stdout}"
-    )
-    # Sentinel for the external-dispatch path: _cmd_run echoes
-    # shlex.join(result.command) to stderr only when the runner went through
-    # _run_external_executor (the in-process builtin path returns no
-    # ``command`` on the result). The echo moved off stdout so stdout carries
-    # only the JSON payload.
-    assert (
-        "-m astrid.packs.training.executors.asset_cache.run "
-        "--prune-older-than"
-    ) in r.stderr, (
-        "expected runner to log the external argv prefix (external "
-        "dispatch sentinel) but it was not in stderr:\n" + r.stderr
-    )

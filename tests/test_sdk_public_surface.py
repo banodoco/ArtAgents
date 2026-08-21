@@ -1626,6 +1626,7 @@ def test_generate_image_reconstructs_typed_result_from_generation_payload(
         mode="t2i",
         execution="cloud",
         out=tmp_path,
+        project="demo",
         prompt="a lantern in fog",
     )
 
@@ -1676,6 +1677,7 @@ def test_generate_facade_maps_contract_failures_and_openai_rejection(
             mode="t2v",
             execution="cloud",
             out=tmp_path,
+            project="demo",
         )
 
     def failed_invoke(capability_id: str, **kwargs: Any) -> Any:
@@ -1699,6 +1701,7 @@ def test_generate_facade_maps_contract_failures_and_openai_rejection(
             mode="t2v",
             execution="cloud",
             out=tmp_path,
+            project="demo",
         )
 
 
@@ -1840,6 +1843,7 @@ def test_generate_video_reconstructs_typed_result_from_generation_payload(
         mode="t2v",
         execution="cloud",
         out=tmp_path,
+        project="demo",
         prompt="a cat playing piano",
         duration=5,
     )
@@ -1909,6 +1913,7 @@ def test_generate_facade_rejects_missing_generation_result_key_for_image(
             mode="t2i",
             execution="cloud",
             out=tmp_path,
+            project="demo",
         )
 
 
@@ -1940,6 +1945,7 @@ def test_generate_facade_rejects_non_mapping_payload(
             mode="t2v",
             execution="cloud",
             out=tmp_path,
+            project="demo",
         )
 
 
@@ -1971,6 +1977,7 @@ def test_generate_facade_rejects_non_mapping_generation_payload(
             mode="t2i",
             execution="cloud",
             out=tmp_path,
+            project="demo",
         )
 
 
@@ -2021,6 +2028,7 @@ def test_generate_facade_handles_from_dict_on_minimal_payload(
         mode="t2i",
         execution="cloud",
         out=tmp_path,
+        project="demo",
     )
 
     assert isinstance(result, GenerationResult)
@@ -2075,6 +2083,7 @@ def test_generate_facade_handles_error_generation_result(
         mode="t2v",
         execution="cloud",
         out=tmp_path,
+        project="demo",
     )
 
     assert isinstance(result, GenerationResult)
@@ -2118,6 +2127,7 @@ def test_generate_facade_rejects_str_generation_result_value(
             mode="t2i",
             execution="cloud",
             out=tmp_path,
+            project="demo",
         )
 
 
@@ -2173,6 +2183,7 @@ def test_image_mode_inference_t2i_no_image_ref(
     result = astrid.generate.image(
         model="flux-dev",
         out=tmp_path,
+        project="demo",
         prompt="a test image",
     )
 
@@ -2195,6 +2206,7 @@ def test_image_mode_inference_i2i_with_image_ref(
     result = astrid.generate.image(
         model="flux-dev",
         out=tmp_path,
+        project="demo",
         image_ref="https://example.com/ref.png",
     )
 
@@ -2234,6 +2246,7 @@ def test_image_explicit_mode_validated_against_model(
         mode="edit",
         execution="cloud",
         out=tmp_path,
+        project="demo",
         prompt="test",
     )
 
@@ -2273,6 +2286,7 @@ def test_image_execution_inference_single_backend(
     result = astrid.generate.image(
         model="flux-dev",
         out=tmp_path,
+        project="demo",
     )
 
     assert result.ok is True
@@ -2311,6 +2325,7 @@ def test_image_explicit_execution_validated_against_backends(
         mode="t2i",
         execution="cloud",
         out=tmp_path,
+        project="demo",
     )
 
     assert result.ok is True
@@ -2351,6 +2366,7 @@ def test_video_mode_inference_t2v_no_refs(
     result = astrid.generate.video(
         model="wan-2.2",
         out=tmp_path,
+        project="demo",
         prompt="a test video",
     )
 
@@ -2391,6 +2407,7 @@ def test_video_mode_inference_flf_both_refs(
     result = astrid.generate.video(
         model="wan-2.2",
         out=tmp_path,
+        project="demo",
         image_ref="first.png",
         image_end_ref="last.png",
     )
@@ -2414,6 +2431,7 @@ def test_video_explicit_mode_validated(
         model="wan-2.2",
         mode="t2v",
         out=tmp_path,
+        project="demo",
     )
 
     assert result.ok is True
@@ -2435,6 +2453,7 @@ def test_video_execution_inference_single_backend(
         model="ltx-2.3",
         mode="flf",
         out=tmp_path,
+        project="demo",
     )
 
     assert result.ok is True
@@ -2475,6 +2494,7 @@ def test_lora_and_extra_params_passthrough(
     astrid.generate.image(
         model="flux-dev",
         out=tmp_path,
+        project="demo",
         loras="flux-realism@0.8",
         custom_extra="value",
         another_param=42,
@@ -2556,6 +2576,7 @@ def test_video_explicit_execution_validated_against_backends(
         mode="t2v",
         execution="cloud",
         out=tmp_path,
+        project="demo",
     )
 
     assert result.ok is True
@@ -2749,6 +2770,9 @@ def test_generate_attached_project_resolution_image(
     sdk = importlib.import_module("astrid.sdk")
     fake_invoke, seen = _make_success_invoke_with_seen(astrid, tmp_path)
     monkeypatch.setattr(sdk, "invoke", fake_invoke)
+    # The attached-session project (legacy session seed retired; the env
+    # slot is now the genuine attached-project carrier).
+    monkeypatch.setenv("ASTRID_PROJECT_SLUG", "autouse-session-demo")
 
     result = astrid.generate.image(
         model="flux-dev",
@@ -2769,6 +2793,9 @@ def test_generate_attached_project_resolution_video(
     sdk = importlib.import_module("astrid.sdk")
     fake_invoke, seen = _make_success_invoke_with_seen(astrid, tmp_path)
     monkeypatch.setattr(sdk, "invoke", fake_invoke)
+    # The attached-session project (legacy session seed retired; the env
+    # slot is now the genuine attached-project carrier).
+    monkeypatch.setenv("ASTRID_PROJECT_SLUG", "autouse-session-demo")
 
     result = astrid.generate.video(
         model="wan-2.2",
@@ -2883,6 +2910,7 @@ with patch.object(sdk, "invoke", fake_invoke), \\
         result = getattr(astrid.generate, {method!r})(
             model={model!r},
             out=tmp,
+            project="demo",
         )
     finally:
         sys.stderr = old_stderr
@@ -3018,33 +3046,6 @@ def test_generate_video_no_astrid_session_id_mutation() -> None:
 
 
 # --- gateway failure is explicit and side-effect free -------------------------
-
-
-def test_gateway_missing_project_prints_selection_help() -> None:
-    """Projectless runs print the chooser and never auto-bind."""
-    import os as _os
-
-    worktree_root = str(Path(__file__).resolve().parent.parent)
-    env = {
-        **_os.environ,
-        "PYTHONPATH": worktree_root,
-    }
-    env.pop("ASTRID_SESSION_ID", None)
-
-    completed = subprocess.run(
-        [sys.executable, "-m", "astrid", "executors", "run", "--dry-run", "generation.nonexistent_99"],
-        capture_output=True,
-        text=True,
-        env=env,
-    )
-
-    stderr = completed.stderr
-    assert completed.returncode == 2
-    assert "project required: every executor run" in stderr
-    assert "astrid projects ls" in stderr
-    assert "astrid projects select <project>" in stderr
-    assert "--project <project>" in stderr
-    assert "auto-bound default project" not in stderr
 
 
 def test_gateway_missing_project_does_not_set_session_id() -> None:

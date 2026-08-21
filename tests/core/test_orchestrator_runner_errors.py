@@ -663,28 +663,6 @@ def test_project_orchestrator_rejects_passthrough_out(
         )
 
 
-def test_orchestrator_cli_rejects_project_plus_out(tmp_path: Path) -> None:
-    import argparse
-
-    from astrid.core.execution.orchestrator import cli as cli_mod
-
-    with pytest.raises(ValueError, match="--project cannot be combined with --out"):
-        cli_mod._cmd_run(
-            argparse.Namespace(
-                orchestrator_id="test.command",
-                out=str(tmp_path / "manual-out"),
-                project="demo",
-                input=[],
-                brief=None,
-                orchestrator_args=(),
-                dry_run=False,
-                python_exec=None,
-                verbose=False,
-            ),
-            _registry(_command_orchestrator()),
-        )
-
-
 def test_command_orchestrator_dry_run_uses_placeholder_out_without_ledger(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

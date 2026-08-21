@@ -70,6 +70,12 @@ ALLOWLIST_URLLIB = {
     "astrid/packs/training/executors/asset_cache/run.py",
     # seinfeld/script_pipeline was generalized into builtin/script_pipeline (builtin-training epic)
     "astrid/packs/editorial/executors/script_pipeline/run.py",
+    # blender.render: downloads mesh assets from remote URLs (urlretrieve) and
+    # POSTs render jobs to a user-supplied cloud render host (urlopen)
+    "astrid/packs/blender/executors/render/run.py",
+    # media.gif_search: GIPHY search API + GIF download through an injected
+    # urllib.request.urlopen (legitimate third-party media HTTP)
+    "astrid/packs/media/executors/gif_search/run.py",
 }
 
 

@@ -95,8 +95,8 @@ class SchemaContractTest(unittest.TestCase):
         theme_overrides_keys = set(config.get("theme_overrides") or {})
         asset_entry_keys = {key for entry in registry["assets"].values() for key in entry}
 
-        self.assertEqual(clip_keys, set(timeline._CLIP_ALLOWED))
-        self.assertEqual(track_keys, set(timeline._TRACK_ALLOWED))
+        self.assertEqual(clip_keys, set(timeline._CLIP_ALLOWED) - {"app", "derived_output", "keyframes", "label"})
+        self.assertEqual(track_keys, set(timeline._TRACK_ALLOWED) - {"app"})
         self.assertEqual(theme_overrides_keys, set(timeline._THEME_OVERRIDES_ALLOWED))
         self.assertEqual(asset_entry_keys, set(timeline._ASSET_ENTRY_ALLOWED))
 
@@ -135,6 +135,7 @@ class SchemaContractTest(unittest.TestCase):
                 "image": {"quality": "high", "provider": "reigh"},
                 "provider_settings": {"seed": 1234, "flags": ["keep", "open"]},
             },
+            "tracks": [],
             "clips": [],
         }
         path = self._make_tempdir("generation-defaults-") / "timeline.json"
@@ -151,6 +152,7 @@ class SchemaContractTest(unittest.TestCase):
                 "model": "sequence-v1",
                 "image": {"quality": "high"},
             },
+            "tracks": [],
             "clips": [],
         }
 
@@ -159,7 +161,7 @@ class SchemaContractTest(unittest.TestCase):
     def test_validate_timeline_accepts_missing_theme(self) -> None:
         # Persisted timelines may omit `theme`; renderable default is injected
         # at render time via Timeline.for_render(), never written back.
-        timeline.validate_timeline({"clips": []}, strict=False)
+        timeline.validate_timeline({"clips": [], "tracks": []}, strict=False)
 
     def test_canonical_empty_timeline_is_raw_runtime_container(self) -> None:
         config = timeline.canonical_empty_timeline()
@@ -232,13 +234,14 @@ class SchemaContractTest(unittest.TestCase):
 
     def test_validate_timeline_rejects_empty_or_non_string_theme(self) -> None:
         with self.assertRaisesRegex(ValueError, "Timeline.theme must be a non-empty slug"):
-            timeline.validate_timeline({"theme": "", "clips": []}, strict=False)
+            timeline.validate_timeline({"theme": "", "clips": [], "tracks": []}, strict=False)
         with self.assertRaisesRegex(ValueError, "Timeline.theme must be a non-empty slug"):
-            timeline.validate_timeline({"theme": 42, "clips": []}, strict=False)
+            timeline.validate_timeline({"theme": 42, "clips": [], "tracks": []}, strict=False)
 
     def test_effect_params_accept_animation_reference_arrays(self) -> None:
         config = {
             "theme": "banodoco-default",
+            "tracks": [],
             "clips": [
                 {
                     "id": "title",
@@ -271,6 +274,7 @@ class SchemaContractTest(unittest.TestCase):
     def test_effect_params_reject_unknown_animation_reference(self) -> None:
         config = {
             "theme": "banodoco-default",
+            "tracks": [],
             "clips": [
                 {
                     "id": "title",
@@ -291,6 +295,7 @@ class SchemaContractTest(unittest.TestCase):
     def test_effect_params_reject_animation_phase_mismatch(self) -> None:
         config = {
             "theme": "banodoco-default",
+            "tracks": [],
             "clips": [
                 {
                     "id": "title",
@@ -312,6 +317,7 @@ class SchemaContractTest(unittest.TestCase):
     def test_transition_validation_rejects_unknown_id(self) -> None:
         config = {
             "theme": "banodoco-default",
+            "tracks": [],
             "clips": [
                 {"id": "a", "at": 0, "track": "v1", "clipType": "media", "hold": 1, "transition": "wipe"},
                 {"id": "b", "at": 1, "track": "v1", "clipType": "media", "hold": 1},
@@ -326,6 +332,7 @@ class SchemaContractTest(unittest.TestCase):
     def test_transition_validation_rejects_duration_that_exceeds_adjacent_clip(self) -> None:
         config = {
             "theme": "banodoco-default",
+            "tracks": [],
             "clips": [
                 {"id": "a", "at": 0, "track": "v1", "clipType": "media", "hold": 1, "transition": {"id": "fade", "durationFrames": 45}},
                 {"id": "b", "at": 1, "track": "v1", "clipType": "media", "hold": 1},
@@ -340,6 +347,7 @@ class SchemaContractTest(unittest.TestCase):
     def test_transition_validation_allows_valid_adjacent_same_track_duration(self) -> None:
         config = {
             "theme": "banodoco-default",
+            "tracks": [],
             "clips": [
                 {"id": "a", "at": 0, "track": "v1", "clipType": "media", "hold": 1, "transition": {"id": "fade", "durationFrames": 12}},
                 {"id": "b", "at": 1, "track": "v1", "clipType": "media", "hold": 1},

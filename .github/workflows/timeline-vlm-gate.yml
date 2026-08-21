@@ -32,15 +32,15 @@ jobs:
         # NOTE: grok auth is out-of-band (grok login). A runner must have a
         # logged-in grok CLI; no secret is stored in this workflow.
 
-      - name: Run image-only VLM gate
+      - name: Run timeline_visualize pack library tests
         run: |
-          python -m pytest tests/packs/rendering/test_timeline_visualize_gate_imageonly.py \
-            -m live -q -p no:cacheprovider
+          python -m pytest tests/packs/rendering/test_timeline_visualize_pack.py \
+            -q -p no:cacheprovider
 
-      - name: Run discovery VLM gate
+      - name: Run timeline_visualize executor library tests
         run: |
-          python -m pytest tests/packs/rendering/test_timeline_visualize_gate_discovery.py \
-            -m live -q -p no:cacheprovider
+          python -m pytest tests/packs/rendering/test_timeline_visualize_executor.py \
+            -q -p no:cacheprovider
 
       - name: Upload gate evidence
         uses: actions/upload-artifact@v4

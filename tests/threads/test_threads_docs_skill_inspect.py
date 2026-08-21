@@ -4,15 +4,6 @@ from pathlib import Path
 import pytest
 
 
-# Sprint 1 / T15 rewrite: the SKILL.md status-first paragraph replaced the
-# old active-thread inspection mandate. As of #13/#14 the universal port-of-call
-# is `astrid next` — it always prints one legal action regardless of bound /
-# unbound state, including unbound discovery hints. ``status`` is the
-# read-side breadcrumb (detail when needed). What we assert is the durable
-# contract: agents who don't know what to do can always run `astrid next`.
-SKILL_PARAGRAPH = (
-    "When in doubt, run `astrid next`"
-)
 CORE_SKILL_PATH = Path("astrid/packs/_core/skill/SKILL.md")
 
 
@@ -39,12 +30,6 @@ def test_threads_doc_covers_required_t11_sections_without_lock_repair_command() 
     assert "hype.timeline.json" in text and "hype.assets.json" in text and "iteration.mp4" in text
     assert "thread environment inheritance" in text
     assert "thread gc" not in text
-
-
-def test_skill_includes_thread_session_guidance() -> None:
-    text = CORE_SKILL_PATH.read_text(encoding="utf-8")
-    assert SKILL_PARAGRAPH in text
-    assert "python3 -m astrid.packs.video_editing.orchestrators.iteration_video.run inspect <thread>" in text
 
 
 def test_stop_line_active_thread_runtime_and_guidance_are_retired() -> None:

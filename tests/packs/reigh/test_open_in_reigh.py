@@ -23,7 +23,7 @@ class OpenInReighTest(unittest.TestCase):
     def write_outputs(self, out_dir: Path, *, timeline_bytes: bytes | None = None) -> tuple[bytes, bytes]:
         if timeline_bytes is None:
             timeline_bytes = (
-                b'{"theme":"banodoco-default","clips":[{"id":"c1","at":0,"track":"main","clipType":"text",'
+                b'{"theme":"banodoco-default","tracks":[],"clips":[{"id":"c1","at":0,"track":"main","clipType":"text",'
                 b'"text":{"content":"hi"},"hold":1}]}\n'
             )
         assets_bytes = b'{"assets":{"main":{"file":"/abs/local path.mov","label":"Bob\'s asset"}}}\n'
@@ -121,7 +121,7 @@ class OpenInReighTest(unittest.TestCase):
         out_dir.mkdir()
         self.write_outputs(
             out_dir,
-            timeline_bytes=b'{"title":"Bob\'s cut","theme":"banodoco-default","clips":[]}\n',
+            timeline_bytes=b'{"title":"Bob\'s cut","theme":"banodoco-default","tracks":[],"clips":[]}\n',
         )
 
         code, stdout, _, error = self.run_main(

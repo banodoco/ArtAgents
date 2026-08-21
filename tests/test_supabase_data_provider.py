@@ -18,6 +18,7 @@ from astrid.core.timeline.eventlog.types import EventLogStaleVersionError, Timel
 def _canonical_timeline() -> dict[str, Any]:
     return {
         "theme": "banodoco-default",
+        "tracks": [],
         "clips": [
             {
                 "id": "c1",

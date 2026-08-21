@@ -2,15 +2,11 @@
 
 from __future__ import annotations
 
-import json
 import os
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
-from astrid.core.contracts.errors import AstridError
-from astrid.core import gateway
 
 
 # ---------------------------------------------------------------------------
@@ -222,57 +218,3 @@ def test_list_volumes_passthrough() -> None:
     finally:
         if os.environ.get("RUNPOD_API_KEY") == "test-key-rpa_0000000000000000000000000000000000000000000000":
             del os.environ["RUNPOD_API_KEY"]
-
-
-def test_runpod_volumes_ls_requires_api_key(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    monkeypatch.delenv("RUNPOD_API_KEY", raising=False)
-
-    with pytest.raises(AstridError) as raised:
-        gateway._dispatch_runpod_volumes(None, ["ls"])
-    assert "RUNPOD_API_KEY is not set" in raised.value.cause
-
-
-def test_runpod_volumes_ls_emits_json_and_is_read_only(
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    monkeypatch.setenv("RUNPOD_API_KEY", "test-key-rpa_0000000000000000000000000000000000000000000000")
-    volumes = [{"id": "vol-a", "name": "astrid-a"}]
-
-    with patch("runpod_lifecycle.api.get_network_volumes", return_value=volumes), \
-         patch("runpod_lifecycle.Pod.create_storage", AsyncMock()) as create_storage:
-        rc = gateway._dispatch_runpod_volumes(None, ["ls"])
-
-    assert rc == 0
-    assert json.loads(capsys.readouterr().out) == volumes
-    create_storage.assert_not_called()
-
-
-def test_runpod_ensure_storage_cli_requires_datacenter_when_creation_needed(
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    monkeypatch.setenv("RUNPOD_API_KEY", "test-key-rpa_0000000000000000000000000000000000000000000000")
-
-    with patch("runpod_lifecycle.Pod.get_storage", AsyncMock(return_value=None)), \
-         patch("runpod_lifecycle.Pod.create_storage", AsyncMock()) as create_storage:
-        with pytest.raises(AstridError) as raised:
-            gateway._dispatch_runpod_ensure_storage(None, ["missing-vol"])
-
-    assert "datacenter_id is required" in raised.value.cause
-    create_storage.assert_not_called()
-
-
-def test_runpod_ensure_storage_cli_supports_datacenter_id_alias(
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    monkeypatch.setenv("RUNPOD_API_KEY", "test-key-rpa_0000000000000000000000000000000000000000000000")
-    created = {"id": "vol-new", "name": "new-volume", "size": 50}
-
-    with patch("runpod_lifecycle.Pod.get_storage", AsyncMock(return_value=None)), \
-         patch("runpod_lifecycle.Pod.create_storage", AsyncMock(return_value=created)):
-        rc = gateway._dispatch_runpod_ensure_storage(None, ["new-volume", "--datacenter-id", "US-GA-1"])
-
-    assert rc == 0
-    assert json.loads(capsys.readouterr().out) == created

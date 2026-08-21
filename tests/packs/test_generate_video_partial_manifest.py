@@ -86,6 +86,7 @@ class TestPartialOutputManifestOnVideoLoopFailure:
         args.seed = None
         args.image_ref = None
         args.image_end_ref = None
+        args.video_ref = None
         args.negative_prompt = None
         args.resolution = None
         args.frames = None
@@ -169,6 +170,7 @@ class TestPartialOutputManifestOnVideoLoopFailure:
         args.seed = None
         args.image_ref = None
         args.image_end_ref = None
+        args.video_ref = None
         args.negative_prompt = None
         args.resolution = None
         args.frames = None
@@ -266,6 +268,7 @@ class TestPartialOutputManifestOnVideoLoopFailure:
         args_partial.seed = None
         args_partial.image_ref = None
         args_partial.image_end_ref = None
+        args_partial.video_ref = None
         args_partial.negative_prompt = None
         args_partial.resolution = None
         args_partial.frames = None
@@ -291,6 +294,7 @@ class TestPartialOutputManifestOnVideoLoopFailure:
         args_full.seed = None
         args_full.image_ref = None
         args_full.image_end_ref = None
+        args_full.video_ref = None
         args_full.negative_prompt = None
         args_full.resolution = None
         args_full.frames = None

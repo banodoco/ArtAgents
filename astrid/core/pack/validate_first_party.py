@@ -18,6 +18,7 @@ from astrid.core.pack.validate_layout import LayoutValidationIssue
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _FIRST_PARTY_PACKS_ROOT = _REPO_ROOT / "astrid" / "packs"
 _FIRST_PARTY_PACK_IDS = (
+    "blender",
     "builtin",
     "comfy_wrap",
     "editorial",
@@ -31,14 +32,16 @@ _FIRST_PARTY_PACK_IDS = (
     "rendering",
     "runpod",
     "stream_content",
-    "text_analysis",
     "training",
     "understanding",
     "vibecomfy",
     "video_editing",
     "youtube",
 )
-_FIRST_PARTY_INTERNAL_DIRS = {"_core"}
+# Internal (non-capability) directories that are allowed in the first-party
+# packs root: the ``_core`` skill-only shell plus the v10 schema packs that
+# own domain tables/repositories (not pack.yaml capability packs).
+_FIRST_PARTY_INTERNAL_DIRS = {"_core", "references", "shots", "timeline"}
 _IGNORED_PACKS_ROOT_DIRS = {"__pycache__"}
 
 

@@ -433,7 +433,6 @@ class PacksDataTreeTest(unittest.TestCase):
         for pack_id in (
             "stream_content",
             "comfy_wrap",
-            "text_analysis",
             "_core",
             "builtin",
         ):
@@ -446,7 +445,7 @@ class PacksDataTreeTest(unittest.TestCase):
 
     def test_pack_manifests_exist_in_shipped_packs(self) -> None:
         """Shipped pack directories must each contain a pack manifest."""
-        for pack_id in ("stream_content", "comfy_wrap", "text_analysis"):
+        for pack_id in ("stream_content", "comfy_wrap"):
             pack_dir = self._PACKS_ROOT / pack_id
             if not pack_dir.is_dir():
                 continue

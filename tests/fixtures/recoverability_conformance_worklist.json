@@ -2381,783 +2381,879 @@
       "source": "raise ValueError(\"specify a pack id or pass --all\")"
     }
   ],
-  "expected_parser_surface_count": 64,
+  "expected_parser_surface_count": 72,
   "expected_parser_surfaces": [
     {
+      "module": "astrid.core.backup.cli",
       "builder": "build_parser",
+      "path": "astrid/core/backup/cli.py"
+    },
+    {
       "module": "astrid.core.element.cli",
+      "builder": "build_parser",
       "path": "astrid/core/element/cli.py"
     },
     {
-      "builder": "build_parser",
-      "module": "astrid.core.execution.executor.cli",
-      "path": "astrid/core/executor/cli.py"
-    },
-    {
-      "builder": "_build_parser",
       "module": "astrid.core.model_catalog.cli",
+      "builder": "_build_parser",
       "path": "astrid/core/model_catalog/cli.py"
     },
     {
+      "module": "astrid.core.rendering.cli",
       "builder": "build_parser",
-      "module": "astrid.core.execution.orchestrator.cli",
-      "path": "astrid/core/orchestrator/cli.py"
+      "path": "astrid/core/rendering/cli.py"
     },
     {
+      "module": "astrid.packs.blender.deploy",
       "builder": "build_parser",
-      "module": "astrid.core.project.cli",
-      "path": "astrid/core/project/cli.py"
+      "path": "astrid/packs/blender/deploy.py"
     },
     {
+      "module": "astrid.packs.blender.executors.render.run",
       "builder": "build_parser",
-      "module": "astrid.core.session.cli",
-      "path": "astrid/core/session/cli.py"
+      "path": "astrid/packs/blender/executors/render/run.py"
     },
     {
+      "module": "astrid.packs.comfy_wrap.executors.run.run",
       "builder": "build_parser",
-      "module": "astrid.core.timeline.cli",
-      "path": "astrid/core/timeline/cli.py"
+      "path": "astrid/packs/comfy_wrap/executors/run/run.py"
     },
     {
-      "builder": "build_parser",
-      "module": "astrid.core.doctor",
-      "path": "astrid/core/doctor.py"
-    },
-    {
-      "builder": "_build_parser",
-      "module": "astrid.core.orchestrate.cli",
-      "path": "astrid/core/orchestrate/cli.py"
-    },
-    {
-      "builder": "build_parser",
-      "module": "astrid.core.pack.cli",
-      "path": "astrid/packs/cli.py"
-    },
-    {
-      "builder": "build_parser",
       "module": "astrid.packs.editorial.executors.arrange.run",
+      "builder": "build_parser",
       "path": "astrid/packs/editorial/executors/arrange/run.py"
     },
     {
-      "builder": "build_parser",
       "module": "astrid.packs.editorial.executors.boundary_candidates.run",
+      "builder": "build_parser",
       "path": "astrid/packs/editorial/executors/boundary_candidates/run.py"
     },
     {
-      "builder": "build_parser",
       "module": "astrid.packs.editorial.executors.editor_review.run",
+      "builder": "build_parser",
       "path": "astrid/packs/editorial/executors/editor_review/run.py"
     },
     {
-      "builder": "build_parser",
       "module": "astrid.packs.editorial.executors.human_notes.run",
+      "builder": "build_parser",
       "path": "astrid/packs/editorial/executors/human_notes/run.py"
     },
     {
-      "builder": "build_parser",
       "module": "astrid.packs.editorial.executors.human_review.run",
+      "builder": "build_parser",
       "path": "astrid/packs/editorial/executors/human_review/run.py"
     },
     {
-      "builder": "build_parser",
       "module": "astrid.packs.editorial.executors.inspect_cut.run",
+      "builder": "build_parser",
       "path": "astrid/packs/editorial/executors/inspect_cut/run.py"
     },
     {
-      "builder": "build_parser",
       "module": "astrid.packs.editorial.executors.quality_zones.run",
+      "builder": "build_parser",
       "path": "astrid/packs/editorial/executors/quality_zones/run.py"
     },
     {
-      "builder": "build_parser",
       "module": "astrid.packs.editorial.executors.quote_scout.run",
+      "builder": "build_parser",
       "path": "astrid/packs/editorial/executors/quote_scout/run.py"
     },
     {
-      "builder": "build_parser",
       "module": "astrid.packs.editorial.executors.refine.run",
+      "builder": "build_parser",
       "path": "astrid/packs/editorial/executors/refine/run.py"
     },
     {
-      "builder": "build_parser",
       "module": "astrid.packs.editorial.executors.scenes.run",
+      "builder": "build_parser",
       "path": "astrid/packs/editorial/executors/scenes/run.py"
     },
     {
-      "builder": "build_parser",
       "module": "astrid.packs.editorial.executors.script_pipeline.run",
+      "builder": "build_parser",
       "path": "astrid/packs/editorial/executors/script_pipeline/run.py"
     },
     {
-      "builder": "build_parser",
       "module": "astrid.packs.editorial.executors.shots.run",
+      "builder": "build_parser",
       "path": "astrid/packs/editorial/executors/shots/run.py"
     },
     {
-      "builder": "build_parser",
       "module": "astrid.packs.editorial.executors.transcribe.run",
+      "builder": "build_parser",
       "path": "astrid/packs/editorial/executors/transcribe/run.py"
     },
     {
-      "builder": "build_parser",
       "module": "astrid.packs.editorial.executors.triage.run",
+      "builder": "build_parser",
       "path": "astrid/packs/editorial/executors/triage/run.py"
     },
     {
-      "builder": "build_parser",
       "module": "astrid.packs.fal.executors.fal_foley.run",
+      "builder": "build_parser",
       "path": "astrid/packs/fal/executors/fal_foley/run.py"
     },
     {
-      "builder": "build_parser",
       "module": "astrid.packs.foley.executors.foley_review.run",
+      "builder": "build_parser",
       "path": "astrid/packs/foley/executors/foley_review/run.py"
     },
     {
-      "builder": "build_parser",
       "module": "astrid.packs.foley.executors.tile_video.run",
+      "builder": "build_parser",
       "path": "astrid/packs/foley/executors/tile_video/run.py"
     },
     {
-      "builder": "build_parser",
       "module": "astrid.packs.foley.orchestrators.foley_map.run",
+      "builder": "build_parser",
       "path": "astrid/packs/foley/orchestrators/foley_map/run.py"
     },
     {
+      "module": "astrid.packs.generation.executors.generate_audio.run",
       "builder": "build_parser",
+      "path": "astrid/packs/generation/executors/generate_audio/run.py"
+    },
+    {
       "module": "astrid.packs.generation.executors.generate_image.run",
+      "builder": "build_parser",
       "path": "astrid/packs/generation/executors/generate_image/run.py"
     },
     {
-      "builder": "build_parser",
       "module": "astrid.packs.generation.executors.generate_image_openai.run",
+      "builder": "build_parser",
       "path": "astrid/packs/generation/executors/generate_image_openai/run.py"
     },
     {
-      "builder": "build_parser",
       "module": "astrid.packs.generation.executors.generate_video.run",
+      "builder": "build_parser",
       "path": "astrid/packs/generation/executors/generate_video/run.py"
     },
     {
-      "builder": "build_parser",
       "module": "astrid.packs.iteration.executors.assemble.run",
+      "builder": "build_parser",
       "path": "astrid/packs/iteration/executors/assemble/run.py"
     },
     {
+      "module": "astrid.packs.iteration.executors.experiment_import.run",
       "builder": "build_parser",
+      "path": "astrid/packs/iteration/executors/experiment_import/run.py"
+    },
+    {
+      "module": "astrid.packs.iteration.executors.experiment_prepare.run",
+      "builder": "build_parser",
+      "path": "astrid/packs/iteration/executors/experiment_prepare/run.py"
+    },
+    {
+      "module": "astrid.packs.iteration.executors.experiment_review.run",
+      "builder": "build_parser",
+      "path": "astrid/packs/iteration/executors/experiment_review/run.py"
+    },
+    {
       "module": "astrid.packs.iteration.executors.prepare.run",
+      "builder": "build_parser",
       "path": "astrid/packs/iteration/executors/prepare/run.py"
     },
     {
+      "module": "astrid.packs.iteration.orchestrators.experiment_review_session.run",
       "builder": "build_parser",
+      "path": "astrid/packs/iteration/orchestrators/experiment_review_session/run.py"
+    },
+    {
       "module": "astrid.packs.media.executors.clip_extract.run",
+      "builder": "build_parser",
       "path": "astrid/packs/media/executors/clip_extract/run.py"
     },
     {
+      "module": "astrid.packs.media.executors.gif_search.run",
       "builder": "build_parser",
+      "path": "astrid/packs/media/executors/gif_search/run.py"
+    },
+    {
+      "module": "astrid.packs.media.executors.speech_repair_lavasr.run",
+      "builder": "build_parser",
+      "path": "astrid/packs/media/executors/speech_repair_lavasr/run.py"
+    },
+    {
       "module": "astrid.packs.moirae.executors.moirae.run",
+      "builder": "build_parser",
       "path": "astrid/packs/moirae/executors/moirae/run.py"
     },
     {
-      "builder": "build_parser",
       "module": "astrid.packs.reigh.executors.open_in_reigh.run",
+      "builder": "build_parser",
       "path": "astrid/packs/reigh/executors/open_in_reigh/run.py"
     },
     {
-      "builder": "build_parser",
       "module": "astrid.packs.reigh.executors.publish.run",
+      "builder": "build_parser",
       "path": "astrid/packs/reigh/executors/publish/run.py"
     },
     {
-      "builder": "build_parser",
       "module": "astrid.packs.reigh.executors.reigh_data.run",
+      "builder": "build_parser",
       "path": "astrid/packs/reigh/executors/reigh_data/run.py"
     },
     {
-      "builder": "build_parser",
       "module": "astrid.packs.reigh.executors.spatial_audio_page.run",
+      "builder": "build_parser",
       "path": "astrid/packs/reigh/executors/spatial_audio_page/run.py"
     },
     {
-      "builder": "build_parser",
       "module": "astrid.packs.rendering.executors.html_canvas_effect.run",
+      "builder": "build_parser",
       "path": "astrid/packs/rendering/executors/html_canvas_effect/run.py"
     },
     {
-      "builder": "build_parser",
       "module": "astrid.packs.rendering.executors.sprite_sheet.run",
+      "builder": "build_parser",
       "path": "astrid/packs/rendering/executors/sprite_sheet/run.py"
     },
     {
+      "module": "astrid.packs.rendering.executors.timeline_storyboard.run",
       "builder": "build_parser",
+      "path": "astrid/packs/rendering/executors/timeline_storyboard/run.py"
+    },
+    {
+      "module": "astrid.packs.rendering.executors.timeline_visualize.run",
+      "builder": "build_parser",
+      "path": "astrid/packs/rendering/executors/timeline_visualize/run.py"
+    },
+    {
       "module": "astrid.packs.runpod.executors._common",
+      "builder": "build_parser",
       "path": "astrid/packs/runpod/executors/_common.py"
     },
     {
+      "module": "astrid.packs.stream_content.executors.clip_candidates.run",
       "builder": "build_parser",
+      "path": "astrid/packs/stream_content/executors/clip_candidates/run.py"
+    },
+    {
+      "module": "astrid.packs.stream_content.executors.segment_map.run",
+      "builder": "build_parser",
+      "path": "astrid/packs/stream_content/executors/segment_map/run.py"
+    },
+    {
+      "module": "astrid.packs.stream_content.orchestrators.distill.run",
+      "builder": "build_parser",
+      "path": "astrid/packs/stream_content/orchestrators/distill/run.py"
+    },
+    {
       "module": "astrid.packs.training.executors.pool_build.run",
+      "builder": "build_parser",
       "path": "astrid/packs/training/executors/pool_build/run.py"
     },
     {
-      "builder": "build_parser",
       "module": "astrid.packs.training.executors.pool_merge.run",
+      "builder": "build_parser",
       "path": "astrid/packs/training/executors/pool_merge/run.py"
     },
     {
-      "builder": "build_parser",
       "module": "astrid.packs.training.executors.search_loras.run",
+      "builder": "build_parser",
       "path": "astrid/packs/training/executors/search_loras/run.py"
     },
     {
-      "builder": "build_parser",
       "module": "astrid.packs.training.orchestrators.dataset_build.run",
+      "builder": "build_parser",
       "path": "astrid/packs/training/orchestrators/dataset_build/run.py"
     },
     {
-      "builder": "build_parser",
       "module": "astrid.packs.training.orchestrators.training_run.run",
+      "builder": "build_parser",
       "path": "astrid/packs/training/orchestrators/training_run/run.py"
     },
     {
-      "builder": "build_parser",
       "module": "astrid.packs.understanding.executors.audio_understand.run",
+      "builder": "build_parser",
       "path": "astrid/packs/understanding/executors/audio_understand/run.py"
     },
     {
-      "builder": "build_parser",
       "module": "astrid.packs.understanding.executors.scene_describe.run",
+      "builder": "build_parser",
       "path": "astrid/packs/understanding/executors/scene_describe/run.py"
     },
     {
-      "builder": "build_parser",
       "module": "astrid.packs.understanding.executors.understand.run",
+      "builder": "build_parser",
       "path": "astrid/packs/understanding/executors/understand/run.py"
     },
     {
-      "builder": "build_parser",
       "module": "astrid.packs.understanding.executors.video_understand.run",
+      "builder": "build_parser",
       "path": "astrid/packs/understanding/executors/video_understand/run.py"
     },
     {
-      "builder": "build_parser",
       "module": "astrid.packs.understanding.executors.visual_understand.run",
+      "builder": "build_parser",
       "path": "astrid/packs/understanding/executors/visual_understand/run.py"
     },
     {
-      "builder": "build_parser",
       "module": "astrid.packs.vibecomfy.executors.run.run",
+      "builder": "build_parser",
       "path": "astrid/packs/vibecomfy/executors/run/run.py"
     },
     {
-      "builder": "build_parser",
       "module": "astrid.packs.vibecomfy.executors.validate.run",
+      "builder": "build_parser",
       "path": "astrid/packs/vibecomfy/executors/validate/run.py"
     },
     {
-      "builder": "build_parser",
       "module": "astrid.packs.video_editing.executors.cut.run",
+      "builder": "build_parser",
       "path": "astrid/packs/video_editing/executors/cut/run.py"
     },
     {
-      "builder": "build_parser",
       "module": "astrid.packs.video_editing.orchestrators.animate_image.run",
+      "builder": "build_parser",
       "path": "astrid/packs/video_editing/orchestrators/animate_image/run.py"
     },
     {
-      "builder": "build_parser",
       "module": "astrid.packs.video_editing.orchestrators.event_talks.run",
+      "builder": "build_parser",
       "path": "astrid/packs/video_editing/orchestrators/event_talks/run.py"
     },
     {
+      "module": "astrid.packs.video_editing.orchestrators.hype.parser",
       "builder": "build_parser",
-      "module": "astrid.packs.video_editing.orchestrators.hype.run",
-      "path": "astrid/packs/video_editing/orchestrators/hype/run.py"
+      "path": "astrid/packs/video_editing/orchestrators/hype/parser.py"
     },
     {
-      "builder": "build_parser",
       "module": "astrid.packs.video_editing.orchestrators.logo_ideas.run",
+      "builder": "build_parser",
       "path": "astrid/packs/video_editing/orchestrators/logo_ideas/run.py"
     },
     {
-      "builder": "build_parser",
       "module": "astrid.packs.video_editing.orchestrators.thumbnail_maker.run",
+      "builder": "build_parser",
       "path": "astrid/packs/video_editing/orchestrators/thumbnail_maker/run.py"
     },
     {
-      "builder": "build_parser",
       "module": "astrid.packs.video_editing.orchestrators.vary_grid.run",
+      "builder": "build_parser",
       "path": "astrid/packs/video_editing/orchestrators/vary_grid/run.py"
     },
     {
-      "builder": "build_parser",
       "module": "astrid.packs.youtube.executors.upload.run",
+      "builder": "build_parser",
       "path": "astrid/packs/youtube/executors/upload/run.py"
     },
     {
-      "builder": "build_parser",
-      "module": "astrid.core.gateway.setup",
-      "path": "astrid/core/gateway/setup.py"
-    },
-    {
-      "builder": "build_parser",
       "module": "astrid.skills.cli",
+      "builder": "build_parser",
       "path": "astrid/skills/cli.py"
     }
   ],
   "kind_arg_findings": [],
   "mode": "zero",
   "non_kind_enum_findings": [],
-  "scanned_parser_surface_count": 63,
+  "scanned_parser_surface_count": 72,
   "scanned_parser_surfaces": [
     {
+      "module": "astrid.core.backup.cli",
       "builder": "build_parser",
-      "enum_arg_count": 0,
+      "path": "astrid/core/backup/cli.py",
+      "prog": "astrid backup",
+      "enum_arg_count": 0
+    },
+    {
       "module": "astrid.core.element.cli",
+      "builder": "build_parser",
       "path": "astrid/core/element/cli.py",
-      "prog": "python3 -m astrid elements"
+      "prog": "python3 -m astrid elements",
+      "enum_arg_count": 0
     },
     {
-      "builder": "build_parser",
-      "enum_arg_count": 2,
-      "module": "astrid.core.execution.executor.cli",
-      "path": "astrid/core/executor/cli.py",
-      "prog": "python3 -m astrid executors"
-    },
-    {
-      "builder": "_build_parser",
-      "enum_arg_count": 0,
       "module": "astrid.core.model_catalog.cli",
-      "path": "astrid/core/model_catalog/cli.py",
-      "prog": "astrid models"
-    },
-    {
-      "builder": "build_parser",
-      "enum_arg_count": 2,
-      "module": "astrid.core.execution.orchestrator.cli",
-      "path": "astrid/core/orchestrator/cli.py",
-      "prog": "python3 -m astrid orchestrators"
-    },
-    {
-      "builder": "build_parser",
-      "enum_arg_count": 3,
-      "module": "astrid.core.project.cli",
-      "path": "astrid/core/project/cli.py",
-      "prog": "python3 -m astrid projects"
-    },
-    {
-      "builder": "build_parser",
-      "enum_arg_count": 0,
-      "module": "astrid.core.session.cli",
-      "path": "astrid/core/session/cli.py",
-      "prog": "python3 -m astrid sessions"
-    },
-    {
-      "builder": "build_parser",
-      "enum_arg_count": 8,
-      "module": "astrid.core.timeline.cli",
-      "path": "astrid/core/timeline/cli.py",
-      "prog": "python3 -m astrid timelines"
-    },
-    {
-      "builder": "build_parser",
-      "enum_arg_count": 0,
-      "module": "astrid.core.doctor",
-      "path": "astrid/core/doctor.py",
-      "prog": "python3 -m astrid doctor"
-    },
-    {
       "builder": "_build_parser",
-      "enum_arg_count": 0,
-      "module": "astrid.core.orchestrate.cli",
-      "path": "astrid/core/orchestrate/cli.py",
-      "prog": "astrid author"
+      "path": "astrid/core/model_catalog/cli.py",
+      "prog": "astrid models",
+      "enum_arg_count": 0
     },
     {
+      "module": "astrid.core.rendering.cli",
       "builder": "build_parser",
-      "enum_arg_count": 6,
-      "module": "astrid.core.pack.cli",
-      "path": "astrid/packs/cli.py",
-      "prog": "python3 -m astrid packs"
+      "path": "astrid/core/rendering/cli.py",
+      "prog": "astrid renderers",
+      "enum_arg_count": 0
     },
     {
+      "module": "astrid.packs.blender.deploy",
       "builder": "build_parser",
-      "enum_arg_count": 0,
+      "path": "astrid/packs/blender/deploy.py",
+      "prog": "-c",
+      "enum_arg_count": 3
+    },
+    {
+      "module": "astrid.packs.blender.executors.render.run",
+      "builder": "build_parser",
+      "path": "astrid/packs/blender/executors/render/run.py",
+      "prog": "-c",
+      "enum_arg_count": 1
+    },
+    {
+      "module": "astrid.packs.comfy_wrap.executors.run.run",
+      "builder": "build_parser",
+      "path": "astrid/packs/comfy_wrap/executors/run/run.py",
+      "prog": "comfy_wrap.run",
+      "enum_arg_count": 0
+    },
+    {
       "module": "astrid.packs.editorial.executors.arrange.run",
+      "builder": "build_parser",
       "path": "astrid/packs/editorial/executors/arrange/run.py",
-      "prog": "-c"
+      "prog": "-c",
+      "enum_arg_count": 0
     },
     {
-      "builder": "build_parser",
-      "enum_arg_count": 1,
       "module": "astrid.packs.editorial.executors.boundary_candidates.run",
+      "builder": "build_parser",
       "path": "astrid/packs/editorial/executors/boundary_candidates/run.py",
-      "prog": "-c"
+      "prog": "-c",
+      "enum_arg_count": 1
     },
     {
-      "builder": "build_parser",
-      "enum_arg_count": 0,
       "module": "astrid.packs.editorial.executors.editor_review.run",
+      "builder": "build_parser",
       "path": "astrid/packs/editorial/executors/editor_review/run.py",
-      "prog": "-c"
+      "prog": "-c",
+      "enum_arg_count": 0
     },
     {
-      "builder": "build_parser",
-      "enum_arg_count": 0,
       "module": "astrid.packs.editorial.executors.human_notes.run",
+      "builder": "build_parser",
       "path": "astrid/packs/editorial/executors/human_notes/run.py",
-      "prog": "-c"
+      "prog": "-c",
+      "enum_arg_count": 0
     },
     {
-      "builder": "build_parser",
-      "enum_arg_count": 0,
       "module": "astrid.packs.editorial.executors.human_review.run",
+      "builder": "build_parser",
       "path": "astrid/packs/editorial/executors/human_review/run.py",
-      "prog": "-c"
+      "prog": "-c",
+      "enum_arg_count": 0
     },
     {
-      "builder": "build_parser",
-      "enum_arg_count": 0,
       "module": "astrid.packs.editorial.executors.inspect_cut.run",
+      "builder": "build_parser",
       "path": "astrid/packs/editorial/executors/inspect_cut/run.py",
-      "prog": "-c"
+      "prog": "-c",
+      "enum_arg_count": 0
     },
     {
-      "builder": "build_parser",
-      "enum_arg_count": 0,
       "module": "astrid.packs.editorial.executors.quality_zones.run",
+      "builder": "build_parser",
       "path": "astrid/packs/editorial/executors/quality_zones/run.py",
-      "prog": "-c"
+      "prog": "-c",
+      "enum_arg_count": 0
     },
     {
-      "builder": "build_parser",
-      "enum_arg_count": 0,
       "module": "astrid.packs.editorial.executors.quote_scout.run",
+      "builder": "build_parser",
       "path": "astrid/packs/editorial/executors/quote_scout/run.py",
-      "prog": "-c"
+      "prog": "-c",
+      "enum_arg_count": 0
     },
     {
-      "builder": "build_parser",
-      "enum_arg_count": 0,
       "module": "astrid.packs.editorial.executors.refine.run",
+      "builder": "build_parser",
       "path": "astrid/packs/editorial/executors/refine/run.py",
-      "prog": "-c"
+      "prog": "-c",
+      "enum_arg_count": 0
     },
     {
-      "builder": "build_parser",
-      "enum_arg_count": 0,
       "module": "astrid.packs.editorial.executors.scenes.run",
+      "builder": "build_parser",
       "path": "astrid/packs/editorial/executors/scenes/run.py",
-      "prog": "-c"
+      "prog": "-c",
+      "enum_arg_count": 0
     },
     {
-      "builder": "build_parser",
-      "enum_arg_count": 0,
       "module": "astrid.packs.editorial.executors.script_pipeline.run",
+      "builder": "build_parser",
       "path": "astrid/packs/editorial/executors/script_pipeline/run.py",
-      "prog": "-c"
+      "prog": "-c",
+      "enum_arg_count": 0
     },
     {
-      "builder": "build_parser",
-      "enum_arg_count": 0,
       "module": "astrid.packs.editorial.executors.shots.run",
+      "builder": "build_parser",
       "path": "astrid/packs/editorial/executors/shots/run.py",
-      "prog": "-c"
+      "prog": "-c",
+      "enum_arg_count": 0
     },
     {
-      "builder": "build_parser",
-      "enum_arg_count": 1,
       "module": "astrid.packs.editorial.executors.transcribe.run",
+      "builder": "build_parser",
       "path": "astrid/packs/editorial/executors/transcribe/run.py",
-      "prog": "-c"
+      "prog": "-c",
+      "enum_arg_count": 1
     },
     {
-      "builder": "build_parser",
-      "enum_arg_count": 0,
       "module": "astrid.packs.editorial.executors.triage.run",
+      "builder": "build_parser",
       "path": "astrid/packs/editorial/executors/triage/run.py",
-      "prog": "-c"
+      "prog": "-c",
+      "enum_arg_count": 0
     },
     {
-      "builder": "build_parser",
-      "enum_arg_count": 0,
       "module": "astrid.packs.fal.executors.fal_foley.run",
+      "builder": "build_parser",
       "path": "astrid/packs/fal/executors/fal_foley/run.py",
-      "prog": "-c"
+      "prog": "-c",
+      "enum_arg_count": 0
     },
     {
-      "builder": "build_parser",
-      "enum_arg_count": 0,
       "module": "astrid.packs.foley.executors.foley_review.run",
+      "builder": "build_parser",
       "path": "astrid/packs/foley/executors/foley_review/run.py",
-      "prog": "-c"
+      "prog": "-c",
+      "enum_arg_count": 0
     },
     {
-      "builder": "build_parser",
-      "enum_arg_count": 0,
       "module": "astrid.packs.foley.executors.tile_video.run",
+      "builder": "build_parser",
       "path": "astrid/packs/foley/executors/tile_video/run.py",
-      "prog": "-c"
+      "prog": "-c",
+      "enum_arg_count": 0
     },
     {
-      "builder": "build_parser",
-      "enum_arg_count": 1,
       "module": "astrid.packs.foley.orchestrators.foley_map.run",
+      "builder": "build_parser",
       "path": "astrid/packs/foley/orchestrators/foley_map/run.py",
-      "prog": "-c"
+      "prog": "-c",
+      "enum_arg_count": 1
     },
     {
+      "module": "astrid.packs.generation.executors.generate_audio.run",
       "builder": "build_parser",
-      "enum_arg_count": 3,
+      "path": "astrid/packs/generation/executors/generate_audio/run.py",
+      "prog": "-c",
+      "enum_arg_count": 1
+    },
+    {
       "module": "astrid.packs.generation.executors.generate_image.run",
+      "builder": "build_parser",
       "path": "astrid/packs/generation/executors/generate_image/run.py",
-      "prog": "-c"
+      "prog": "-c",
+      "enum_arg_count": 5
     },
     {
-      "builder": "build_parser",
-      "enum_arg_count": 3,
       "module": "astrid.packs.generation.executors.generate_image_openai.run",
+      "builder": "build_parser",
       "path": "astrid/packs/generation/executors/generate_image_openai/run.py",
-      "prog": "-c"
+      "prog": "-c",
+      "enum_arg_count": 3
     },
     {
-      "builder": "build_parser",
-      "enum_arg_count": 3,
       "module": "astrid.packs.generation.executors.generate_video.run",
+      "builder": "build_parser",
       "path": "astrid/packs/generation/executors/generate_video/run.py",
-      "prog": "-c"
+      "prog": "-c",
+      "enum_arg_count": 5
     },
     {
-      "builder": "build_parser",
-      "enum_arg_count": 0,
       "module": "astrid.packs.iteration.executors.assemble.run",
+      "builder": "build_parser",
       "path": "astrid/packs/iteration/executors/assemble/run.py",
-      "prog": "-c"
+      "prog": "-c",
+      "enum_arg_count": 0
     },
     {
+      "module": "astrid.packs.iteration.executors.experiment_import.run",
       "builder": "build_parser",
-      "enum_arg_count": 0,
+      "path": "astrid/packs/iteration/executors/experiment_import/run.py",
+      "prog": "-c",
+      "enum_arg_count": 0
+    },
+    {
+      "module": "astrid.packs.iteration.executors.experiment_prepare.run",
+      "builder": "build_parser",
+      "path": "astrid/packs/iteration/executors/experiment_prepare/run.py",
+      "prog": "-c",
+      "enum_arg_count": 0
+    },
+    {
+      "module": "astrid.packs.iteration.executors.experiment_review.run",
+      "builder": "build_parser",
+      "path": "astrid/packs/iteration/executors/experiment_review/run.py",
+      "prog": "-c",
+      "enum_arg_count": 0
+    },
+    {
       "module": "astrid.packs.iteration.executors.prepare.run",
+      "builder": "build_parser",
       "path": "astrid/packs/iteration/executors/prepare/run.py",
-      "prog": "-c"
+      "prog": "-c",
+      "enum_arg_count": 0
     },
     {
+      "module": "astrid.packs.iteration.orchestrators.experiment_review_session.run",
       "builder": "build_parser",
-      "enum_arg_count": 0,
+      "path": "astrid/packs/iteration/orchestrators/experiment_review_session/run.py",
+      "prog": "-c",
+      "enum_arg_count": 0
+    },
+    {
       "module": "astrid.packs.media.executors.clip_extract.run",
+      "builder": "build_parser",
       "path": "astrid/packs/media/executors/clip_extract/run.py",
-      "prog": "media.clip_extract"
+      "prog": "media.clip_extract",
+      "enum_arg_count": 0
     },
     {
+      "module": "astrid.packs.media.executors.gif_search.run",
       "builder": "build_parser",
-      "enum_arg_count": 0,
+      "path": "astrid/packs/media/executors/gif_search/run.py",
+      "prog": "media.gif_search",
+      "enum_arg_count": 1
+    },
+    {
+      "module": "astrid.packs.media.executors.speech_repair_lavasr.run",
+      "builder": "build_parser",
+      "path": "astrid/packs/media/executors/speech_repair_lavasr/run.py",
+      "prog": "media.speech_repair_lavasr",
+      "enum_arg_count": 0
+    },
+    {
       "module": "astrid.packs.moirae.executors.moirae.run",
+      "builder": "build_parser",
       "path": "astrid/packs/moirae/executors/moirae/run.py",
-      "prog": "-c"
+      "prog": "-c",
+      "enum_arg_count": 0
     },
     {
-      "builder": "build_parser",
-      "enum_arg_count": 0,
       "module": "astrid.packs.reigh.executors.open_in_reigh.run",
+      "builder": "build_parser",
       "path": "astrid/packs/reigh/executors/open_in_reigh/run.py",
-      "prog": "-c"
+      "prog": "-c",
+      "enum_arg_count": 0
     },
     {
-      "builder": "build_parser",
-      "enum_arg_count": 0,
       "module": "astrid.packs.reigh.executors.publish.run",
+      "builder": "build_parser",
       "path": "astrid/packs/reigh/executors/publish/run.py",
-      "prog": "tools/publish.py"
+      "prog": "tools/publish.py",
+      "enum_arg_count": 0
     },
     {
-      "builder": "build_parser",
-      "enum_arg_count": 0,
       "module": "astrid.packs.reigh.executors.reigh_data.run",
+      "builder": "build_parser",
       "path": "astrid/packs/reigh/executors/reigh_data/run.py",
-      "prog": "-c"
+      "prog": "-c",
+      "enum_arg_count": 0
     },
     {
-      "builder": "build_parser",
-      "enum_arg_count": 0,
       "module": "astrid.packs.reigh.executors.spatial_audio_page.run",
+      "builder": "build_parser",
       "path": "astrid/packs/reigh/executors/spatial_audio_page/run.py",
-      "prog": "-c"
+      "prog": "-c",
+      "enum_arg_count": 0
     },
     {
-      "builder": "build_parser",
-      "enum_arg_count": 0,
       "module": "astrid.packs.rendering.executors.html_canvas_effect.run",
+      "builder": "build_parser",
       "path": "astrid/packs/rendering/executors/html_canvas_effect/run.py",
-      "prog": "-c"
+      "prog": "-c",
+      "enum_arg_count": 0
     },
     {
-      "builder": "build_parser",
-      "enum_arg_count": 2,
       "module": "astrid.packs.rendering.executors.sprite_sheet.run",
+      "builder": "build_parser",
       "path": "astrid/packs/rendering/executors/sprite_sheet/run.py",
-      "prog": "-c"
+      "prog": "-c",
+      "enum_arg_count": 2
     },
     {
+      "module": "astrid.packs.rendering.executors.timeline_storyboard.run",
       "builder": "build_parser",
-      "enum_arg_count": 2,
+      "path": "astrid/packs/rendering/executors/timeline_storyboard/run.py",
+      "prog": "rendering.timeline_storyboard",
+      "enum_arg_count": 0
+    },
+    {
+      "module": "astrid.packs.rendering.executors.timeline_visualize.run",
+      "builder": "build_parser",
+      "path": "astrid/packs/rendering/executors/timeline_visualize/run.py",
+      "prog": "rendering.timeline_visualize",
+      "enum_arg_count": 4
+    },
+    {
       "module": "astrid.packs.runpod.executors._common",
+      "builder": "build_parser",
       "path": "astrid/packs/runpod/executors/_common.py",
-      "prog": "-c"
+      "prog": "-c",
+      "enum_arg_count": 2
     },
     {
+      "module": "astrid.packs.stream_content.executors.clip_candidates.run",
       "builder": "build_parser",
-      "enum_arg_count": 0,
+      "path": "astrid/packs/stream_content/executors/clip_candidates/run.py",
+      "prog": "-c",
+      "enum_arg_count": 0
+    },
+    {
+      "module": "astrid.packs.stream_content.executors.segment_map.run",
+      "builder": "build_parser",
+      "path": "astrid/packs/stream_content/executors/segment_map/run.py",
+      "prog": "-c",
+      "enum_arg_count": 0
+    },
+    {
+      "module": "astrid.packs.stream_content.orchestrators.distill.run",
+      "builder": "build_parser",
+      "path": "astrid/packs/stream_content/orchestrators/distill/run.py",
+      "prog": "-c",
+      "enum_arg_count": 0
+    },
+    {
       "module": "astrid.packs.training.executors.pool_build.run",
+      "builder": "build_parser",
       "path": "astrid/packs/training/executors/pool_build/run.py",
-      "prog": "-c"
+      "prog": "-c",
+      "enum_arg_count": 0
     },
     {
-      "builder": "build_parser",
-      "enum_arg_count": 0,
       "module": "astrid.packs.training.executors.pool_merge.run",
+      "builder": "build_parser",
       "path": "astrid/packs/training/executors/pool_merge/run.py",
-      "prog": "-c"
+      "prog": "-c",
+      "enum_arg_count": 0
     },
     {
-      "builder": "build_parser",
-      "enum_arg_count": 3,
       "module": "astrid.packs.training.executors.search_loras.run",
+      "builder": "build_parser",
       "path": "astrid/packs/training/executors/search_loras/run.py",
-      "prog": "-c"
+      "prog": "-c",
+      "enum_arg_count": 3
     },
     {
-      "builder": "build_parser",
-      "enum_arg_count": 0,
       "module": "astrid.packs.training.orchestrators.dataset_build.run",
+      "builder": "build_parser",
       "path": "astrid/packs/training/orchestrators/dataset_build/run.py",
-      "prog": "-c"
+      "prog": "-c",
+      "enum_arg_count": 0
     },
     {
-      "builder": "build_parser",
-      "enum_arg_count": 0,
       "module": "astrid.packs.training.orchestrators.training_run.run",
+      "builder": "build_parser",
       "path": "astrid/packs/training/orchestrators/training_run/run.py",
-      "prog": "python3 -m astrid.packs.training.orchestrators.training_run.run"
+      "prog": "python3 -m astrid.packs.training.orchestrators.training_run.run",
+      "enum_arg_count": 0
     },
     {
-      "builder": "build_parser",
-      "enum_arg_count": 2,
       "module": "astrid.packs.understanding.executors.audio_understand.run",
+      "builder": "build_parser",
       "path": "astrid/packs/understanding/executors/audio_understand/run.py",
-      "prog": "-c"
+      "prog": "-c",
+      "enum_arg_count": 2
     },
     {
-      "builder": "build_parser",
-      "enum_arg_count": 0,
       "module": "astrid.packs.understanding.executors.scene_describe.run",
+      "builder": "build_parser",
       "path": "astrid/packs/understanding/executors/scene_describe/run.py",
-      "prog": "-c"
+      "prog": "-c",
+      "enum_arg_count": 0
     },
     {
-      "builder": "build_parser",
-      "enum_arg_count": 1,
       "module": "astrid.packs.understanding.executors.understand.run",
+      "builder": "build_parser",
       "path": "astrid/packs/understanding/executors/understand/run.py",
-      "prog": "-c"
+      "prog": "-c",
+      "enum_arg_count": 1
     },
     {
-      "builder": "build_parser",
-      "enum_arg_count": 1,
       "module": "astrid.packs.understanding.executors.video_understand.run",
+      "builder": "build_parser",
       "path": "astrid/packs/understanding/executors/video_understand/run.py",
-      "prog": "-c"
+      "prog": "-c",
+      "enum_arg_count": 1
     },
     {
-      "builder": "build_parser",
-      "enum_arg_count": 2,
       "module": "astrid.packs.understanding.executors.visual_understand.run",
+      "builder": "build_parser",
       "path": "astrid/packs/understanding/executors/visual_understand/run.py",
-      "prog": "-c"
+      "prog": "-c",
+      "enum_arg_count": 2
     },
     {
-      "builder": "build_parser",
-      "enum_arg_count": 1,
       "module": "astrid.packs.vibecomfy.executors.run.run",
+      "builder": "build_parser",
       "path": "astrid/packs/vibecomfy/executors/run/run.py",
-      "prog": "-c"
+      "prog": "-c",
+      "enum_arg_count": 1
     },
     {
-      "builder": "build_parser",
-      "enum_arg_count": 1,
       "module": "astrid.packs.vibecomfy.executors.validate.run",
+      "builder": "build_parser",
       "path": "astrid/packs/vibecomfy/executors/validate/run.py",
-      "prog": "-c"
+      "prog": "-c",
+      "enum_arg_count": 1
     },
     {
-      "builder": "build_parser",
-      "enum_arg_count": 1,
       "module": "astrid.packs.video_editing.executors.cut.run",
+      "builder": "build_parser",
       "path": "astrid/packs/video_editing/executors/cut/run.py",
-      "prog": "-c"
+      "prog": "-c",
+      "enum_arg_count": 1
     },
     {
+      "module": "astrid.packs.video_editing.orchestrators.animate_image.run",
       "builder": "build_parser",
-      "enum_arg_count": 0,
+      "path": "astrid/packs/video_editing/orchestrators/animate_image/run.py",
+      "prog": "-c",
+      "enum_arg_count": 4
+    },
+    {
       "module": "astrid.packs.video_editing.orchestrators.event_talks.run",
+      "builder": "build_parser",
       "path": "astrid/packs/video_editing/orchestrators/event_talks/run.py",
-      "prog": "-c"
+      "prog": "-c",
+      "enum_arg_count": 0
     },
     {
+      "module": "astrid.packs.video_editing.orchestrators.hype.parser",
       "builder": "build_parser",
-      "enum_arg_count": 1,
-      "module": "astrid.packs.video_editing.orchestrators.hype.run",
-      "path": "astrid/packs/video_editing/orchestrators/hype/run.py",
-      "prog": "-c"
+      "path": "astrid/packs/video_editing/orchestrators/hype/parser.py",
+      "prog": "-c",
+      "enum_arg_count": 1
     },
     {
-      "builder": "build_parser",
-      "enum_arg_count": 2,
       "module": "astrid.packs.video_editing.orchestrators.logo_ideas.run",
+      "builder": "build_parser",
       "path": "astrid/packs/video_editing/orchestrators/logo_ideas/run.py",
-      "prog": "-c"
+      "prog": "-c",
+      "enum_arg_count": 2
     },
     {
-      "builder": "build_parser",
-      "enum_arg_count": 4,
       "module": "astrid.packs.video_editing.orchestrators.thumbnail_maker.run",
+      "builder": "build_parser",
       "path": "astrid/packs/video_editing/orchestrators/thumbnail_maker/run.py",
-      "prog": "-c"
+      "prog": "-c",
+      "enum_arg_count": 4
     },
     {
-      "builder": "build_parser",
-      "enum_arg_count": 2,
       "module": "astrid.packs.video_editing.orchestrators.vary_grid.run",
+      "builder": "build_parser",
       "path": "astrid/packs/video_editing/orchestrators/vary_grid/run.py",
-      "prog": "-c"
+      "prog": "-c",
+      "enum_arg_count": 2
     },
     {
-      "builder": "build_parser",
-      "enum_arg_count": 0,
       "module": "astrid.packs.youtube.executors.upload.run",
+      "builder": "build_parser",
       "path": "astrid/packs/youtube/executors/upload/run.py",
-      "prog": "publish-youtube"
+      "prog": "publish-youtube",
+      "enum_arg_count": 0
     },
     {
-      "builder": "build_parser",
-      "enum_arg_count": 0,
-      "module": "astrid.core.gateway.setup",
-      "path": "astrid/core/gateway/setup.py",
-      "prog": "python3 -m astrid setup"
-    },
-    {
-      "builder": "build_parser",
-      "enum_arg_count": 4,
       "module": "astrid.skills.cli",
+      "builder": "build_parser",
       "path": "astrid/skills/cli.py",
-      "prog": "python3 -m astrid skills"
+      "prog": "python3 -m astrid skills",
+      "enum_arg_count": 4
     }
   ],
-  "skipped_parser_surface_count": 1,
-  "skipped_parser_surfaces": [
-    {
-      "builder": "build_parser",
-      "module": "astrid.packs.video_editing.orchestrators.animate_image.run",
-      "path": "astrid/packs/video_editing/orchestrators/animate_image/run.py",
-      "reason": "Traceback (most recent call last):"
-    }
-  ]
+  "skipped_parser_surface_count": 0,
+  "skipped_parser_surfaces": []
 }

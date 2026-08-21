@@ -63,20 +63,6 @@ def test_unknown_top_level_command_renders_structured_recovery() -> None:
     assert "Traceback" not in stderr
 
 
-def test_models_registry_load_failure_flows_through_renderer() -> None:
-    with mock.patch(
-        "astrid.core.model_catalog.registry.ModelRegistry.load_default",
-        side_effect=RuntimeError("catalog exploded"),
-    ):
-        rc, stderr = _capture(["models", "list"])
-
-    assert rc == 2
-    assert "failed to load model registry: catalog exploded" in stderr
-    assert "recovery: astrid models list" in stderr
-    assert '"command": "models list"' in stderr
-    assert "Traceback" not in stderr
-
-
 # ---------------------------------------------------------------------------
 # T17: pipeline renderer edge cases and module-entry proof
 # ---------------------------------------------------------------------------

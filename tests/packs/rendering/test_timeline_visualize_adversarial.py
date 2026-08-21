@@ -818,11 +818,14 @@ def test_default_ci_is_credential_free_and_excludes_live(
     ci_script = (REPO_ROOT / "scripts" / "reshape" / "run_ci_checks.sh").read_text(encoding="utf-8")
     assert '-m "not integration and not opt_in and not live"' in ci_script
 
-    # The default workflow sets no VLM credentials and never enters the live lane.
+    # The default workflow sets no VLM credentials and never selects the live
+    # lane: no pytest invocation passes `-m live` (the broad gate's marker
+    # exclusions live in run_ci_checks.sh / pyproject, asserted above; the m4
+    # gate comment mentioning the "live authority lint" is a lint, not a lane).
     workflow = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     for name in _VLM_CREDENTIAL_ENVS:
         assert name not in workflow
-    assert "live" not in workflow
+    assert "-m live" not in workflow
 
     # Every adversarial/hermetic test carries the hermetic marker.
     pyproject = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")

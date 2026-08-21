@@ -1,7 +1,4 @@
 import json
-import os
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -38,40 +35,6 @@ def test_prepare_refuses_above_cap_before_uncached_dispatch(tmp_path: Path, monk
     assert "ASTRID_ITERATION_MAX" in message
     assert "default cap is 200" in message
     assert calls == []
-
-
-def test_executor_gateway_invocation_enforces_same_cap(tmp_path: Path) -> None:
-    repo = _repo_with_two_run_graph(tmp_path)
-    env = {
-        **os.environ,
-        "ASTRID_REPO_ROOT": str(repo),
-        "ASTRID_THREADS_OFF": "1",
-        "ASTRID_ITERATION_MAX": "1",
-    }
-
-    completed = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "astrid",
-            "executors",
-            "run",
-            "iteration.prepare",
-            "--out",
-            str(repo / "runs" / "prepare"),
-            "--input",
-            f"target_run_id={TARGET_RUN_ID}",
-        ],
-        cwd=Path(__file__).parents[3],
-        env=env,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-
-    assert completed.returncode == 2
-    assert "ASTRID_ITERATION_MAX" in completed.stderr
-    assert not (repo / "runs" / "prepare" / "iteration.manifest.json").exists()
 
 
 def test_summary_cache_key_hits_misses_and_cost_metadata(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

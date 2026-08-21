@@ -279,8 +279,27 @@ if __name__ == "__main__":
         env["ASTRID_PACKS_PATH"] = str(tmp_path)
         env = _with_repo_pythonpath(env)
 
+        # Validate through the surviving in-process APIs, run in a subprocess
+        # so this test file stays free of internal imports (the ``packs`` and
+        # ``executors`` CLI verbs were retired with the legacy runtime).
+        validate_script = tmp_path / "validate.py"
+        validate_script.write_text(
+            "import sys\n"
+            "from pathlib import Path\n"
+            "from astrid.core.pack.validate import validate_pack\n"
+            "from astrid.core.execution.executor.schema import load_executor_manifest_definitions\n"
+            "pack_root = Path(sys.argv[1])\n"
+            "errors, warnings = validate_pack(pack_root)\n"
+            "assert not errors, f'pack validation failed: {errors}'\n"
+            "defs = load_executor_manifest_definitions(\n"
+            "    pack_root / 'executors' / 'echo' / 'executor.yaml'\n"
+            ")\n"
+            f"assert [d.id for d in defs] == ['{pack_id}.echo'], [d.id for d in defs]\n"
+            "print('valid')\n",
+            encoding="utf-8",
+        )
         validate = subprocess.run(
-            [sys.executable, "-m", "astrid", "packs", "validate", str(pack_root)],
+            [sys.executable, str(validate_script), str(pack_root)],
             capture_output=True,
             text=True,
             cwd=str(tmp_path),
@@ -291,22 +310,41 @@ if __name__ == "__main__":
             f"External Python pack failed validation\nSTDOUT:\n{validate.stdout}\nSTDERR:\n{validate.stderr}"
         )
 
-        out_dir = tmp_path / "out"
+        # Run the executor through the project-scoped runner: project runs own
+        # their output directory, so ``out`` stays unset and the run record is
+        # created under an isolated ASTRID_PROJECTS_ROOT.
+        projects_root = tmp_path / "projects"
+        run_script = tmp_path / "run_executor.py"
+        run_script.write_text(
+            "import os, sys\n"
+            "from pathlib import Path\n"
+            "os.environ['ASTRID_PROJECTS_ROOT'] = sys.argv[2]\n"
+            "os.chdir(sys.argv[1])\n"
+            "from astrid.core.project.project import create_project\n"
+            "from astrid.core.timeline.crud import create_timeline\n"
+            "create_project('demo')\n"
+            "create_timeline('demo', 'main', is_default=True)\n"
+            "from astrid.core.execution.executor.registry import load_default_registry\n"
+            "from astrid.core.execution.executor.runner import ExecutorRunRequest, run_executor\n"
+            "registry = load_default_registry(include_installed=False)\n"
+            "result = run_executor(\n"
+            "    ExecutorRunRequest(\n"
+            f"        executor_id='{pack_id}.echo',\n"
+            "        out=None,\n"
+            "        project='demo',\n"
+            "        python_exec=sys.executable,\n"
+            "    ),\n"
+            "    registry,\n"
+            ")\n"
+            "assert result.ok, str(result.error)\n"
+            "run_root = Path(result.run_root) if result.run_root else None\n"
+            "assert run_root is not None, 'run_root not set'\n"
+            "assert (run_root / 'result.json').is_file(), 'result.json not written'\n"
+            "print('ran')\n",
+            encoding="utf-8",
+        )
         run = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "astrid",
-                "executors",
-                "--pack-root",
-                str(tmp_path),
-                "run",
-                f"{pack_id}.echo",
-                "--out",
-                str(out_dir),
-                "--python-exec",
-                sys.executable,
-            ],
+            [sys.executable, str(run_script), str(tmp_path), str(projects_root)],
             capture_output=True,
             text=True,
             cwd=str(tmp_path),
@@ -316,7 +354,10 @@ if __name__ == "__main__":
         assert run.returncode == 0, (
             f"External Python executor failed\nSTDOUT:\n{run.stdout}\nSTDERR:\n{run.stderr}"
         )
-        assert (out_dir / "result.json").is_file()
+        assert any(
+            (run_dir / "result.json").is_file()
+            for run_dir in (projects_root / "demo" / "runs").glob("*")
+        )
 
 
 def test_test_file_itself_avoids_internal_imports() -> None:

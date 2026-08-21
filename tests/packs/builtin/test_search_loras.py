@@ -24,6 +24,9 @@ class _FakeResponse:
 def test_search_loras_queries_base_model_and_normalizes(monkeypatch) -> None:
     seen = {}
 
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    monkeypatch.delenv("HUGGING_FACE_HUB_TOKEN", raising=False)
+
     def fake_urlopen(request, timeout):  # noqa: ANN001
         seen["url"] = request.full_url
         seen["headers"] = dict(request.header_items())
@@ -236,7 +239,7 @@ def test_search_loras_flags_shorthand_base_model(monkeypatch) -> None:
     )
 
     assert any("owner/name" in message for message in payload["guidance"]["messages"])
-    assert any("base_model_match=Z-Image-Turbo" in command for command in payload["guidance"]["next_executor_commands"])
+    assert any("--base-model-match Z-Image-Turbo" in command for command in payload["guidance"]["next_executor_commands"])
 
 
 def test_discover_base_models_counts_non_adapter_tags(monkeypatch) -> None:
@@ -288,7 +291,7 @@ def test_discover_base_models_counts_non_adapter_tags(monkeypatch) -> None:
         for command in payload["guidance"]["next_commands"]
     )
     assert any(
-        "--input match=photo,realism,35mm" in command
+        "--match photo --match realism --match 35mm" in command
         for command in payload["guidance"]["next_executor_commands"]
     )
 

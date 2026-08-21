@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -59,9 +60,12 @@ def test_migration_docs_explain_m1_scope_and_no_compatibility_shim() -> None:
 def test_training_workflow_doc_uses_canonical_builtin_commands() -> None:
     text = TRAINING_WORKFLOW_DOC.read_text(encoding="utf-8")
 
-    assert "python3 -m astrid orchestrators run training.dataset_build --" in text
-    assert "python3 -m astrid orchestrators run training.training_run --" in text
-    assert "python3 -m astrid executors run editorial.script_pipeline --" in text
+    # The workflow doc drives the built-in orchestrators/executors through the
+    # public SDK (astrid.sdk.invoke) — the retired `python3 -m astrid
+    # orchestrators/executors run ...` verbs are gone.
+    assert re.search(r'sdk\.invoke\(\s*"training\.dataset_build"', text)
+    assert re.search(r'sdk\.invoke\(\s*"training\.training_run"', text)
+    assert re.search(r'sdk\.invoke\(\s*"editorial\.script_pipeline"', text)
     assert "review_state.json" in text
     assert "ai-toolkit-ltx.manifest.json" in text
     assert "checkpoints/checkpoint_manifest.json" in text

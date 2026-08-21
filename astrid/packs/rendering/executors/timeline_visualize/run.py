@@ -19,6 +19,7 @@ from typing import Any, Iterable, Mapping
 
 from astrid.core._shared.jsonio import ProjectJsonError, read_json, write_json_atomic
 from astrid.core._shared.result_manifest import build_manifest, write_manifest
+from astrid.core.cli_choices import StaticChoices
 from astrid.core.foundation.project_paths import project_dir
 from astrid.core.project.schema import validate_run_record
 from astrid.core.timeline.resolution import classify_registry
@@ -109,7 +110,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--all", action="store_true", dest="select_all")
     parser.add_argument(
         "--scope",
-        choices=("project", "timeline", "shot", "range", "clip", "asset", "timestamp"),
+        choices=StaticChoices(("project", "timeline", "shot", "range", "clip", "asset", "timestamp")),
         default="timeline",
     )
     parser.add_argument("--shot")
@@ -122,10 +123,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--from-view", type=Path)
     parser.add_argument("--focus")
     parser.add_argument("--refresh-root", action="store_true")
-    parser.add_argument("--layout", choices=(*_LAYOUTS, "both"), default="both")
-    parser.add_argument("--format", action="append", choices=(*sorted(_FORMATS), "all"))
+    parser.add_argument("--layout", choices=StaticChoices((*_LAYOUTS, "both")), default="both")
+    parser.add_argument("--format", action="append", choices=StaticChoices((*sorted(_FORMATS), "all")))
     parser.add_argument(
-        "--filmstrip", choices=("auto", "off", "assets", "rendered"), default="auto"
+        "--filmstrip", choices=StaticChoices(("auto", "off", "assets", "rendered")), default="auto"
     )
     parser.add_argument("--rendered-video", type=Path)
     return parser

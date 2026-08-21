@@ -18,6 +18,34 @@ from astrid.core.execution.orchestrator.schema import OrchestratorDefinition, Ru
 from astrid.core.threads.record import build_run_record, finalize_run_record
 
 
+@pytest.fixture(autouse=True)
+def _isolate_non_project_runner_error_paths(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep this module focused on non-project runner branches.
+
+    Project enforcement has dedicated conformance tests. The thread-runtime
+    scenarios here intentionally construct minimal projectless requests so the
+    runs exercise the plain executor/orchestrator runtime without binding a
+    project (the project-required gate is neutralized exactly as in
+    ``test_orchestrator_runner_errors.py``).
+    """
+
+    from astrid.core.execution.executor import runner as executor_runner
+    from astrid.core.execution.orchestrator import runner as orchestrator_runner
+
+    monkeypatch.setattr(
+        executor_runner,
+        "_resolve_project_request",
+        lambda run_request: run_request,
+    )
+    monkeypatch.setattr(
+        orchestrator_runner,
+        "_resolve_project_request",
+        lambda run_request, _definition: run_request,
+    )
+
+
 THREAD_ID = "01ARZ3NDEKTSV4RRFFQ69G5FW0"
 RUN_ID = "01ARZ3NDEKTSV4RRFFQ69G5FW1"
 

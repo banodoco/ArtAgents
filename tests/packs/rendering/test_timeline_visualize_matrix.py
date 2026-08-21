@@ -26,9 +26,7 @@ import math
 import runpy
 import shutil
 import xml.etree.ElementTree as ET
-from contextlib import redirect_stderr, redirect_stdout
 from copy import deepcopy
-from io import StringIO
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -36,11 +34,9 @@ import pytest
 from PIL import Image
 
 import astrid
-from astrid.core import gateway
 from astrid.core.foundation.project_paths import project_dir
 from astrid.core.project.project import create_project
 from astrid.core.project.run import load_run_record
-from astrid.core.env_vars import ASTRID_SESSION_ID as ASTRID_SESSION_ID_ENV
 from astrid.core.timeline.banodoco_schema import validate_timeline_config_for_container
 from astrid.core.timeline.duration import (
     clip_end_frame,
@@ -98,6 +94,19 @@ _FROZEN_REL_PATHS = (
     "astrid/core/timeline/asset_registry_edits.py",
     "astrid/core/timeline/banodoco_schema.py",
 )
+
+# Legitimate, reviewed updates to frozen files made during the epic (not swept
+# carries): the m8 merge retired the ``timelines visualize`` CLI verb and
+# updated timeline_storyboard/STAGE.md to document the surviving library
+# surface, and retired the session-binding helpers from
+# astrid/core/timeline/_shared.py.  The pre-update ground truth for both files
+# was recorded at commit b768588e (the pre-epic dirty-tree snapshot); their
+# older blobs are allowed to differ, while every LATER epic commit touching
+# the files must still be byte-identical to the current baseline bytes.
+_FROZEN_LEGITIMATE_UPDATES = {
+    "astrid/packs/rendering/executors/timeline_storyboard/STAGE.md": "b768588e",
+    "astrid/core/timeline/_shared.py": "b768588e",
+}
 
 REPO_ROOT = TESTS_ROOT.parent
 
@@ -1784,79 +1793,6 @@ class TestAllMode:
 
 
 # ---------------------------------------------------------------------------
-# Area 14 — stdout purity: one JSON object; errors to stderr
-# ---------------------------------------------------------------------------
-
-
-class TestStdoutPurity:
-    @staticmethod
-    def _run_gateway(argv: list[str]) -> tuple[int, str, str]:
-        stdout, stderr = StringIO(), StringIO()
-        with redirect_stdout(stdout), redirect_stderr(stderr):
-            try:
-                returncode = gateway.main(argv)
-            except SystemExit as exc:
-                returncode = int(exc.code) if isinstance(exc.code, int) else 2
-        return returncode, stdout.getvalue(), stderr.getvalue()
-
-    def test_cli_stdout_is_exactly_one_json_object(
-        self,
-        tmp_projects_root: Path,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        _prepare_project(tmp_projects_root, "matrix-stdout-pure")
-        monkeypatch.setenv("ASTRID_NO_NUDGE", "1")
-        monkeypatch.delenv(ASTRID_SESSION_ID_ENV, raising=False)
-
-        returncode, stdout, _stderr = self._run_gateway(
-            [
-                "timelines",
-                "visualize",
-                "--project",
-                "matrix-stdout-pure",
-                "--layout",
-                "time-scaled",
-                "--format",
-                "md",
-                "--filmstrip",
-                "off",
-            ]
-        )
-
-        assert returncode == 0
-        payload = json.loads(stdout)
-        # stdout is EXACTLY the compact JSON object: no trailing content, no
-        # logs, no nudges, no newline.
-        assert stdout == json.dumps(payload, sort_keys=True, separators=(",", ":"))
-        assert "\n" not in stdout
-        assert Path(payload["manifest_path"]).is_file()
-
-    def test_cli_errors_go_to_stderr_only(
-        self,
-        tmp_projects_root: Path,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        _prepare_project(tmp_projects_root, "matrix-stdout-error")
-        monkeypatch.setenv("ASTRID_NO_NUDGE", "1")
-        monkeypatch.delenv(ASTRID_SESSION_ID_ENV, raising=False)
-
-        returncode, stdout, stderr = self._run_gateway(
-            [
-                "timelines",
-                "visualize",
-                "--project",
-                "matrix-stdout-error",
-                "--focus",
-                "TL01.CL03",
-            ]
-        )
-
-        assert returncode != 0
-        assert stdout == ""
-        assert "--from-view and --focus must be supplied together" in stderr
-
-
-# ---------------------------------------------------------------------------
 # Area 15 — frozen lineage: v159 frozen through append; --refresh-root only
 # transition; old lineage stays valid
 # ---------------------------------------------------------------------------
@@ -1994,12 +1930,19 @@ class TestImmutabilityFence:
                 continue
             # Epic history touches this file: it is a violation UNLESS every
             # touched revision is byte-identical to the carried baseline (a
-            # swept carry, never an epic-authored edit).
+            # swept carry, never an epic-authored edit).  The one documented
+            # exception is _FROZEN_LEGITIMATE_UPDATES: the pre-update ground
+            # truth recorded at that commit legitimately predates a reviewed
+            # epic content edit (m8), and the CURRENT bytes are authoritative
+            # from that commit onward.
             current_bytes = path.read_bytes()
+            legit_update_at = _FROZEN_LEGITIMATE_UPDATES.get(rel)
             commits = [
                 line.split()[0] for line in out.stdout.strip().splitlines() if line.strip()
             ]
             for commit in commits:
+                if commit == legit_update_at:
+                    continue
                 committed = subprocess.run(
                     ["git", "show", f"{commit}:{rel}"],
                     capture_output=True,

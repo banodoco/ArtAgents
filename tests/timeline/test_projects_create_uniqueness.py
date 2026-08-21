@@ -9,35 +9,35 @@ from pathlib import Path
 import pytest
 
 
-def test_second_create_same_slug_exit_code_2(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Running `astrid projects create` with an existing slug returns exit code 2
-    and prints a clear error to stderr."""
+def test_second_create_same_slug_exit_code_1(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Running `astrid projects create` with an existing slug returns exit code 1
+    (product EXIT_FAILURE) and prints a typed conflict error to stderr."""
     from astrid.core.foundation import project_paths as paths
 
     monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(tmp_path))
 
     # First create succeeds.
     result1 = subprocess.run(
-        [sys.executable, "-m", "astrid", "projects", "create", "demo"],
+        [sys.executable, "-m", "astrid", "projects", "create", "demo", "--name", "Demo"],
         capture_output=True,
         text=True,
         cwd=str(Path(__file__).resolve().parent.parent.parent),
     )
     assert result1.returncode == 0, f"first create failed: {result1.stderr}"
 
-    # Second create with the same slug fails.
+    # Second create with the same slug fails (slug conflict, exit 1).
     result2 = subprocess.run(
-        [sys.executable, "-m", "astrid", "projects", "create", "demo"],
+        [sys.executable, "-m", "astrid", "projects", "create", "demo", "--name", "Demo"],
         capture_output=True,
         text=True,
         cwd=str(Path(__file__).resolve().parent.parent.parent),
     )
-    assert result2.returncode == 2, (
-        f"Expected exit code 2, got {result2.returncode}\n"
+    assert result2.returncode == 1, (
+        f"Expected exit code 1, got {result2.returncode}\n"
         f"stdout: {result2.stdout}\nstderr: {result2.stderr}"
     )
-    assert "already exists" in result2.stderr.lower(), (
-        f"Expected 'already exists' in stderr, got: {result2.stderr}"
+    assert "error conflict" in result2.stderr.lower(), (
+        f"Expected 'error conflict' in stderr, got: {result2.stderr}"
     )
 
 
@@ -51,7 +51,7 @@ def test_different_roots_are_independent(tmp_path: Path, monkeypatch: pytest.Mon
     # Create under root A.
     monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(root_a))
     result_a = subprocess.run(
-        [sys.executable, "-m", "astrid", "projects", "create", "demo"],
+        [sys.executable, "-m", "astrid", "projects", "create", "demo", "--name", "Demo"],
         capture_output=True,
         text=True,
         cwd=str(Path(__file__).resolve().parent.parent.parent),
@@ -61,7 +61,7 @@ def test_different_roots_are_independent(tmp_path: Path, monkeypatch: pytest.Mon
     # Create under root B — should succeed since roots are independent.
     monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(root_b))
     result_b = subprocess.run(
-        [sys.executable, "-m", "astrid", "projects", "create", "demo"],
+        [sys.executable, "-m", "astrid", "projects", "create", "demo", "--name", "Demo"],
         capture_output=True,
         text=True,
         cwd=str(Path(__file__).resolve().parent.parent.parent),
@@ -92,63 +92,50 @@ def test_create_project_unique_slug_direct(tmp_path: Path, monkeypatch: pytest.M
 def test_projects_ls_and_default_commands(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from astrid.core.cli import project as cli
+    """The projects family lists created projects and persists a default
+    project preference (create/list/select over the SDK surface)."""
+    from astrid.core import gateway
     from astrid.core.foundation import project_paths as paths
-    from astrid.core.project.project import create_project
-    from astrid.core.session import paths as session_paths
+    from astrid.core.preferences import resolve_default_project
 
     monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(tmp_path / "projects"))
-    monkeypatch.setenv(session_paths.ASTRID_HOME_ENV, str(tmp_path / "home"))
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
-    monkeypatch.chdir(workspace)
-    create_project("demo")
-    create_project("other")
 
-    rc = cli.main(["ls"])
+    for slug in ("demo", "other"):
+        rc = gateway.main(["projects", "create", slug, "--name", slug.capitalize()])
+        captured = capsys.readouterr()
+        assert rc == 0, f"create {slug} failed: {captured.err}"
+
+    rc = gateway.main(["projects", "list", "--json"])
     captured = capsys.readouterr()
     assert rc == 0
-    assert "demo" in captured.out
-    assert "other" in captured.out
+    assert '"slug":"demo"' in captured.out
+    assert '"slug":"other"' in captured.out
 
-    rc = cli.main(["default", "demo"])
+    rc = gateway.main(["projects", "select", "demo"])
     captured = capsys.readouterr()
     assert rc == 0
-    assert "default project (workspace): demo" in captured.out
-    assert "python3 -m astrid attach" in captured.out
-
-    rc = cli.main(["default"])
-    captured = capsys.readouterr()
-    assert rc == 0
-    assert "default project: demo" in captured.out
-
-    rc = cli.main(["default", "--clear"])
-    captured = capsys.readouterr()
-    assert rc == 0
-    assert "cleared default project" in captured.out
+    assert "slug: demo" in captured.out
+    assert resolve_default_project() == "demo"
 
 
-def test_projects_default_warns_when_configured_default_is_missing(
+def test_projects_select_missing_configured_default_fails_clear_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from astrid.core.cli import project as cli
+    """A configured default project that does not exist surfaces a clear
+    typed error when addressed through the projects CLI (select)."""
+    from astrid.core import gateway
     from astrid.core.foundation import project_paths as paths
-    from astrid.core.project.project import create_project
     from astrid.core.session import paths as session_paths
 
     monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(tmp_path / "projects"))
     monkeypatch.setenv(session_paths.ASTRID_HOME_ENV, str(tmp_path / "home"))
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    monkeypatch.chdir(workspace)
     (workspace / ".astrid").mkdir()
     monkeypatch.setenv(session_paths.ASTRID_WORKSPACE_CONFIG_DIR_ENV, str(workspace / ".astrid"))
     (workspace / ".astrid" / "config.json").write_text('{"default_project": "missing"}', encoding="utf-8")
-    create_project("demo")
 
-    rc = cli.main(["default"])
+    rc = gateway.main(["projects", "select", "missing"])
     captured = capsys.readouterr()
-    assert rc == 0
-    assert "default project: missing" in captured.out
-    assert "warning: configured default project is not under the current projects root" in captured.out
-    assert "python3 -m astrid projects default demo" in captured.out
+    assert rc == 1
+    assert "error not_found" in captured.err

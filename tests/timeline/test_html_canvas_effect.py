@@ -114,11 +114,13 @@ class HtmlCanvasEffectExecutorTest(unittest.TestCase):
                 out="runs/html-canvas-effect",
                 inputs={"effect_id": "glass-product-card"},
                 dry_run=True,
+                project="demo",
             ),
             load_executor_registry(),
         )
 
-        self.assertEqual(result.returncode, 0)
+        # Dry runs never execute, so no returncode is produced (v10 runner).
+        self.assertIsNone(result.returncode)
         self.assertIn(
             "astrid.packs.rendering.executors.html_canvas_effect.run",
             " ".join(result.command),

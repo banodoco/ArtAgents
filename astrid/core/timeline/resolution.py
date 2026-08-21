@@ -39,12 +39,13 @@ the URL is ignored (no fallback, no fetch).
 
 from __future__ import annotations
 
-import hashlib
 import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 from urllib.parse import urlparse
+
+from astrid.core.foundation.hash import sha256_file
 
 _READ_CHUNK = 1024 * 1024
 
@@ -92,15 +93,6 @@ class AssetIntegrity:
     reason: str
     source_id: str | None
     source_version: str | None
-
-
-def _sha256_file(path: Path) -> str:
-    """Raw hex SHA-256 of *path* using 1 MB chunked reads (stdlib only)."""
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(_READ_CHUNK), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def _is_uri(value: str) -> str | None:
@@ -512,7 +504,7 @@ def classify_asset(
             source_version=source_version,
         )
     try:
-        observed = _sha256_file(path)
+        observed = sha256_file(path)
     except OSError as exc:  # e.g. permission denied, is-a-directory
         errno = exc.errno if isinstance(exc.errno, int) else None
         return AssetIntegrity(

@@ -9,7 +9,6 @@ that contain no display events.  ``assembly.head.json`` is diagnostic-only.
 
 from __future__ import annotations
 
-import hashlib
 import json
 from copy import deepcopy
 from dataclasses import dataclass
@@ -17,6 +16,7 @@ from pathlib import Path
 from typing import Any, Sequence
 from uuid import UUID
 
+from astrid.core.foundation.hash import sha256_file
 from astrid.core.timeline.eventlog.projector import project_display
 from astrid.core.timeline.events.schema import (
     TimelineEvent,
@@ -405,17 +405,6 @@ def _canonical_digest(value: Any) -> str:
         raise SnapshotIntegrityError(f"value is not canonical JSON: {exc}") from exc
 
 
-def _sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    try:
-        with path.open("rb") as handle:
-            while chunk := handle.read(_READ_CHUNK_SIZE):
-                digest.update(chunk)
-    except OSError as exc:
-        raise SnapshotIntegrityError(f"failed to hash {path}: {exc}") from exc
-    return digest.hexdigest()
-
-
 def _resolve_media_hashes(
     registry: dict[str, Any],
     *,
@@ -482,7 +471,10 @@ def _resolve_media_hashes(
 
         observed = by_path.get(candidate)
         if observed is None:
-            observed = _sha256_file(candidate)
+            try:
+                observed = sha256_file(candidate)
+            except OSError as exc:
+                raise SnapshotIntegrityError(f"failed to hash {candidate}: {exc}") from exc
             by_path[candidate] = observed
         hashes[asset_key] = observed
         expected = entry.get("content_sha256")

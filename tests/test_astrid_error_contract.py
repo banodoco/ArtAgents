@@ -68,7 +68,11 @@ def test_coerce_astrid_error_maps_legacy_exception_fields() -> None:
     assert err.cause == "step is blocked"
     assert err.recovery_command == "astrid projects ls"
     assert err.code == "project_blocked"
-    assert err.source_type == "ProjectError"
+    # ProjectError is now itself an AstridError subclass: coerce_astrid_error
+    # returns the same instance unchanged (no source_type is stamped) when no
+    # merge is required.
+    assert err is legacy
+    assert err.source_type is None
 
 
 def test_error_from_result_converts_non_exception_exec_error_payloads() -> None:

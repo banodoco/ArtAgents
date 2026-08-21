@@ -46,12 +46,25 @@ PRESERVED_ORCHESTRATOR_IDS = [
 
 @pytest.fixture(scope="module")
 def executor_registry():
-    return load_executor_registry()
+    # include_installed=False keeps discovery scoped to the repo's own packs:
+    # the default scan also loads ~/.astrid/packs, which contains an external
+    # hivemind pack whose executor.yaml fails validation (713-char description
+    # > 500 max) — that failure is not this tree's to fix.
+    return load_executor_registry(include_installed=False)
 
 
 @pytest.fixture(scope="module")
 def orchestrator_registry():
-    return load_orchestrator_registry()
+    # Mirror the executor fixture: scope discovery to the repo's own packs.
+    # The orchestrator registry validates child executor references, so it
+    # needs the same scoped executor registry threaded through — otherwise
+    # its validation falls back to the unscoped default, which trips over
+    # the broken installed hivemind pack in ~/.astrid/packs.
+    executor_registry = load_executor_registry(include_installed=False)
+    return load_orchestrator_registry(
+        include_installed=False,
+        executor_registry=executor_registry,
+    )
 
 
 @pytest.mark.parametrize("public_id", PRESERVED_EXECUTOR_IDS)

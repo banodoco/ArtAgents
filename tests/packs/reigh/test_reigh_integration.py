@@ -120,6 +120,7 @@ def _sign_jwt(
 def _canonical_timeline() -> dict[str, Any]:
     return {
         "theme": "banodoco-default",
+        "tracks": [],
         "clips": [
             {
                 "id": "c1",

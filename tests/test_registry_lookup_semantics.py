@@ -1,12 +1,7 @@
 from __future__ import annotations
 
-import argparse
-import contextlib
-import io
-import json
 import tempfile
 import unittest
-from unittest.mock import patch
 
 from astrid.core.pack.alias_resolver import AliasResolver
 from astrid.core.contracts.schema import CommandSpec
@@ -102,11 +97,17 @@ class RegistryLookupSemanticsTest(unittest.TestCase):
 
         executor = registry.get("builtin.legacy_demo")
         assert executor.id == "builtin.demo"
-        assert any(
-            alias.alias == "builtin.legacy_demo"
-            for alias in executor.aliases
-        )
-    def test_orchestrator_cli_paths_use_registry_lookup_for_aliases(self) -> None:
+        assert resolver.is_alias("builtin.legacy_demo")
+        assert resolver.resolve("builtin.legacy_demo") == "builtin.demo"
+
+    def test_orchestrator_registry_lookup_resolves_aliases(self) -> None:
+        """Orchestrator lookup resolves aliases through the registry.
+
+        The ``orchestrators`` CLI verb (``orchestrators_cli``) was retired with
+        the legacy runtime; alias resolution now lives in the
+        ``OrchestratorRegistry`` itself — the same lookup path the retired CLI
+        exercised.
+        """
         resolver = AliasResolver()
         resolver.register_alias("builtin.legacy_demo", "builtin.demo")
         registry = OrchestratorRegistry(
@@ -115,33 +116,10 @@ class RegistryLookupSemanticsTest(unittest.TestCase):
         )
         registry.register(_orchestrator_definition("builtin.demo"))
 
-        inspect_stdout = io.StringIO()
-        with contextlib.redirect_stdout(inspect_stdout):
-            rc = orchestrators_cli._cmd_inspect(
-                argparse.Namespace(
-                    orchestrator_id="builtin.legacy_demo",
-                    json=True,
-                    pack=None,
-                    show_overrides=False,
-                ),
-                registry,
-            )
-        self.assertEqual(rc, 0)
-        inspect_payload = json.loads(inspect_stdout.getvalue())
-        self.assertEqual(inspect_payload["id"], "builtin.demo")
-        self.assertEqual(
-            inspect_payload["_capability"]["aliases"][0]["alias"],
-            "builtin.legacy_demo",
-        )
-
-        validate_stdout = io.StringIO()
-        with contextlib.redirect_stdout(validate_stdout):
-            rc = orchestrators_cli._cmd_validate(
-                argparse.Namespace(orchestrator_id="builtin.legacy_demo"),
-                registry,
-            )
-        self.assertEqual(rc, 0)
-        self.assertIn("builtin.legacy_demo: ok", validate_stdout.getvalue())
+        orchestrator = registry.get("builtin.legacy_demo")
+        assert orchestrator.id == "builtin.demo"
+        assert resolver.is_alias("builtin.legacy_demo")
+        assert resolver.resolve("builtin.legacy_demo") == "builtin.demo"
 
 
 if __name__ == "__main__":

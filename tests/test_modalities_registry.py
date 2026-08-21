@@ -1,18 +1,7 @@
-import contextlib
-import io
 import json
 import pkgutil
 
 from astrid.core import modalities
-from astrid.core import gateway
-
-
-def capture(argv: list[str]) -> tuple[int, str, str]:
-    stdout = io.StringIO()
-    stderr = io.StringIO()
-    with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
-        result = gateway.main(argv)
-    return result, stdout.getvalue(), stderr.getvalue()
 
 
 def test_exact_renderer_modules_and_registration_order() -> None:
@@ -41,26 +30,6 @@ def test_dispatches_by_artifact_kind_with_loud_generic_fallback() -> None:
     assert unknown["diagnostic"] == "no renderer for kind:model_3d"
     assert '<aside class="renderer-fallback">no renderer for kind:model_3d</aside>' == unknown["html_aside"]
     assert unknown["payload"]["diagnostic"] == "no renderer for kind:model_3d"
-
-
-def test_modalities_list_route_reports_exact_renderers() -> None:
-    result, stdout, stderr = capture(["modalities", "list"])
-
-    assert result == 0, stderr
-    lines = stdout.strip().splitlines()
-    assert [line.split("\t", 1)[0] for line in lines] == ["image_grid", "audio_waveform", "generic_card"]
-    assert lines[-1].endswith(" fallback")
-
-
-def test_modalities_inspect_route_reports_fallback_renderer() -> None:
-    result, stdout, stderr = capture(["modalities", "inspect", "generic_card", "--json"])
-
-    assert result == 0, stderr
-    payload = json.loads(stdout)
-    assert payload["id"] == "generic_card"
-    assert payload["fallback"] is True
-    assert payload["loud_fallback"] is True
-    assert payload["diagnostic"] == "no renderer for kind:unknown"
 
 
 def test_modality_declarations_do_not_expose_deferred_preview_modes() -> None:

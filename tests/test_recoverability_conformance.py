@@ -50,32 +50,6 @@ AST_EXTRA_PATHS = {
 
 ALLOWED_BARE_RAISES: dict[tuple[str, int], str] = {
     ('astrid/core/element/cli.py', 282): 'wrapped by element.main() into AstridError before operator output',
-    ('astrid/core/executor/cli.py', 548): 'wrapped by executor.main() into AstridError before operator output',
-    ('astrid/core/executor/cli.py', 609): 'wrapped by executor.main() into AstridError before operator output',
-    ('astrid/core/executor/cli.py', 607): 'wrapped by executor.main() into AstridError before operator output',
-    ('astrid/core/executor/cli.py', 614): 'wrapped by executor.main() into AstridError before operator output',
-    ('astrid/core/executor/cli.py', 616): 'wrapped by executor.main() into AstridError before operator output',
-    ('astrid/core/executor/cli.py', 780): 'wrapped by executor.main() into AstridError before operator output',
-    ('astrid/core/executor/cli.py', 784): 'wrapped by executor.main() into AstridError before operator output',
-    ('astrid/core/executor/cli.py', 802): 'wrapped by executor.main() into AstridError before operator output',
-    ('astrid/core/executor/cli.py', 807): 'wrapped by executor.main() into AstridError before operator output',
-    ('astrid/core/executor/cli.py', 778): 'wrapped by executor.main() into AstridError before operator output',
-    ('astrid/core/executor/cli.py', 782): 'wrapped by executor.main() into AstridError before operator output',
-    ('astrid/core/executor/cli.py', 800): 'wrapped by executor.main() into AstridError before operator output',
-    ('astrid/core/executor/cli.py', 805): 'wrapped by executor.main() into AstridError before operator output',
-    ('astrid/core/orchestrator/cli.py', 606): 'wrapped by orchestrator.main() into AstridError before operator output',
-    ('astrid/core/orchestrator/cli.py', 629): 'wrapped by orchestrator.main() into AstridError before operator output',
-    ('astrid/core/orchestrator/cli.py', 660): 'wrapped by orchestrator.main() into AstridError before operator output',
-    ('astrid/core/orchestrator/cli.py', 664): 'wrapped by orchestrator.main() into AstridError before operator output',
-    ('astrid/core/orchestrator/cli.py', 671): 'wrapped by orchestrator.main() into AstridError before operator output',
-    ('astrid/core/execution/orchestrator/cli.py', 605): 'wrapped by orchestrator.main() into AstridError before operator output',
-    ('astrid/core/execution/orchestrator/cli.py', 627): 'wrapped by orchestrator.main() into AstridError before operator output',
-    ('astrid/core/execution/orchestrator/cli.py', 631): 'wrapped by orchestrator.main() into AstridError before operator output',
-    ('astrid/core/cli/project.py', 244): 'wrapped by project.main() into AstridError before operator output',
-    ('astrid/core/cli/project.py', 432): 'wrapped by project.main() into AstridError before operator output',
-    ('astrid/core/cli/project.py', 434): 'wrapped by project.main() into AstridError before operator output',
-    ('astrid/core/cli/project.py', 443): 'wrapped by project.main() into AstridError before operator output',
-    ('astrid/core/cli/session.py', 94): 'caught by cmd_attach() and rendered as attach guidance nearby',
     ('astrid/core/doctor.py', 284): 'captured by doctor._capture_check and rendered as a structured check result',
     ('astrid/core/doctor.py', 293): 'captured by doctor._capture_check and rendered as a structured check result',
     ('astrid/core/doctor.py', 302): 'captured by doctor._capture_check and rendered as a structured check result',
@@ -151,13 +125,49 @@ ALLOWED_BARE_RAISES: dict[tuple[str, int], str] = {
     ('astrid/packs/understanding/executors/scene_describe/run.py', 111): 'wrapped by scene_describe.main() via run_pack_main before agent-facing output',
     ('astrid/packs/understanding/executors/scene_describe/run.py', 205): 'wrapped by scene_describe.main() via run_pack_main before agent-facing output',
     ('astrid/packs/understanding/executors/scene_describe/run.py', 207): 'wrapped by scene_describe.main() via run_pack_main before agent-facing output',
+    ('astrid/packs/blender/deploy.py', 82): 'wrapped by deploy.main() operator entrypoint before agent-facing output',
+    ('astrid/packs/blender/deploy.py', 178): 'wrapped by deploy.main() operator entrypoint before agent-facing output',
+    ('astrid/packs/blender/deploy.py', 214): 'wrapped by deploy.main() operator entrypoint before agent-facing output',
+    ('astrid/packs/blender/deploy.py', 224): 'wrapped by deploy.main() operator entrypoint before agent-facing output',
+    ('astrid/packs/blender/deploy.py', 267): 'wrapped by deploy.main() operator entrypoint before agent-facing output',
+    ('astrid/packs/blender/deploy.py', 313): 'wrapped by deploy.main() operator entrypoint before agent-facing output',
+    ('astrid/packs/blender/deploy.py', 546): 'wrapped by deploy.main() operator entrypoint before agent-facing output',
+    ('astrid/packs/rendering/executors/timeline_visualize/run.py', 141): 'wrapped by run_sdk() executor boundary — converted to a structured diagnostic before agent-facing output',
+    ('astrid/packs/rendering/executors/timeline_visualize/run.py', 145): 'wrapped by run_sdk() executor boundary — converted to a structured diagnostic before agent-facing output',
+    ('astrid/packs/rendering/executors/timeline_visualize/run.py', 152): 'wrapped by run_sdk() executor boundary — converted to a structured diagnostic before agent-facing output',
+    ('astrid/packs/rendering/executors/timeline_visualize/run.py', 155): 'wrapped by run_sdk() executor boundary — converted to a structured diagnostic before agent-facing output',
+    ('astrid/packs/rendering/executors/timeline_visualize/run.py', 162): 'wrapped by run_sdk() executor boundary — converted to a structured diagnostic before agent-facing output',
+    ('astrid/packs/rendering/executors/timeline_visualize/run.py', 180): 'wrapped by run_sdk() executor boundary — converted to a structured diagnostic before agent-facing output',
+    ('astrid/packs/rendering/executors/timeline_visualize/run.py', 182): 'wrapped by run_sdk() executor boundary — converted to a structured diagnostic before agent-facing output',
+    ('astrid/packs/rendering/executors/timeline_visualize/run.py', 184): 'wrapped by run_sdk() executor boundary — converted to a structured diagnostic before agent-facing output',
+    ('astrid/packs/rendering/executors/timeline_visualize/run.py', 188): 'wrapped by run_sdk() executor boundary — converted to a structured diagnostic before agent-facing output',
+    ('astrid/packs/rendering/executors/timeline_visualize/run.py', 190): 'wrapped by run_sdk() executor boundary — converted to a structured diagnostic before agent-facing output',
+    ('astrid/packs/rendering/executors/timeline_visualize/run.py', 207): 'wrapped by run_sdk() executor boundary — converted to a structured diagnostic before agent-facing output',
+    ('astrid/packs/rendering/executors/timeline_visualize/run.py', 211): 'wrapped by run_sdk() executor boundary — converted to a structured diagnostic before agent-facing output',
+    ('astrid/packs/rendering/executors/timeline_visualize/run.py', 213): 'wrapped by run_sdk() executor boundary — converted to a structured diagnostic before agent-facing output',
+    ('astrid/packs/rendering/executors/timeline_visualize/run.py', 215): 'wrapped by run_sdk() executor boundary — converted to a structured diagnostic before agent-facing output',
+    ('astrid/packs/rendering/executors/timeline_visualize/run.py', 234): 'wrapped by run_sdk() executor boundary — converted to a structured diagnostic before agent-facing output',
+    ('astrid/packs/rendering/executors/timeline_visualize/run.py', 244): 'wrapped by run_sdk() executor boundary — converted to a structured diagnostic before agent-facing output',
+    ('astrid/packs/rendering/executors/timeline_visualize/run.py', 261): 'wrapped by run_sdk() executor boundary — converted to a structured diagnostic before agent-facing output',
+    ('astrid/packs/rendering/executors/timeline_visualize/run.py', 266): 'wrapped by run_sdk() executor boundary — converted to a structured diagnostic before agent-facing output',
+    ('astrid/packs/rendering/executors/timeline_visualize/run.py', 313): 'wrapped by run_sdk() executor boundary — converted to a structured diagnostic before agent-facing output',
+    ('astrid/packs/rendering/executors/timeline_visualize/run.py', 325): 'wrapped by run_sdk() executor boundary — converted to a structured diagnostic before agent-facing output',
+    ('astrid/packs/rendering/executors/timeline_visualize/run.py', 459): 'wrapped by run_sdk() executor boundary — converted to a structured diagnostic before agent-facing output',
+    ('astrid/packs/rendering/executors/timeline_visualize/run.py', 536): 'wrapped by run_sdk() executor boundary — converted to a structured diagnostic before agent-facing output',
+    ('astrid/packs/rendering/executors/timeline_visualize/run.py', 617): 'wrapped by run_sdk() executor boundary — converted to a structured diagnostic before agent-facing output',
+    ('astrid/packs/rendering/executors/timeline_visualize/run.py', 958): 'wrapped by run_sdk() executor boundary — converted to a structured diagnostic before agent-facing output',
+    ('astrid/packs/rendering/executors/timeline_visualize/run.py', 1040): 'wrapped by run_sdk() executor boundary — converted to a structured diagnostic before agent-facing output',
+    ('astrid/packs/rendering/executors/timeline_visualize/run.py', 1043): 'wrapped by run_sdk() executor boundary — converted to a structured diagnostic before agent-facing output',
+    ('astrid/packs/rendering/executors/timeline_visualize/run.py', 1058): 'wrapped by run_sdk() executor boundary — converted to a structured diagnostic before agent-facing output',
+    ('astrid/packs/rendering/executors/timeline_visualize/run.py', 1170): 'wrapped by run_sdk() executor boundary — converted to a structured diagnostic before agent-facing output',
+    ('astrid/packs/rendering/executors/timeline_visualize/run.py', 1182): 'wrapped by run_sdk() executor boundary — converted to a structured diagnostic before agent-facing output',
+    ('astrid/packs/rendering/executors/timeline_visualize/run.py', 1187): 'wrapped by run_sdk() executor boundary — converted to a structured diagnostic before agent-facing output',
+    ('astrid/packs/rendering/executors/timeline_visualize/run.py', 1191): 'wrapped by run_sdk() executor boundary — converted to a structured diagnostic before agent-facing output',
+    ('astrid/packs/rendering/executors/timeline_visualize/run.py', 1196): 'wrapped by run_sdk() executor boundary — converted to a structured diagnostic before agent-facing output',
+    ('astrid/packs/rendering/executors/timeline_visualize/run.py', 1202): 'wrapped by run_sdk() executor boundary — converted to a structured diagnostic before agent-facing output',
 }
 ALLOWED_STDERR_SITES: dict[tuple[str, int], str] = {
     ('astrid/core/element/cli.py', 31): 'shared stderr helper for override diagnostics',
-    ('astrid/core/executor/cli.py', 39): 'shared stderr helper for command previews and override diagnostics',
-    ('astrid/core/orchestrator/cli.py', 42): 'shared stderr helper for command previews and override diagnostics',
-    ('astrid/packs/cli.py', 40): 'shared stderr helper for non-fatal warnings and diagnostics',
-    ('astrid/packs/cli.py', 1676): 'empty search query diagnostic',
     ('astrid/packs/editorial/executors/refine/run.py', 711): 'informational managed-mode diagnostic, not a user-facing error path',
     ('astrid/packs/editorial/executors/script_pipeline/run.py', 133): 'retry progress logging inside DeepSeekClient.complete(); not a user-facing error exit',
     ('astrid/packs/generation/executors/generate_video/run.py', 806): 'non-fatal warning: skipping row in batch loop due to model/backend mismatch',
@@ -189,6 +199,32 @@ ALLOWED_STDERR_SITES: dict[tuple[str, int], str] = {
     ('astrid/packs/understanding/executors/visual_understand/run.py', 476): 'success confirmation: wrote output path — informational post-write summary, not an error exit',
     ('astrid/packs/youtube/executors/youtube_audio/run.py', 99): 'intentional command preview for pack subprocess diagnostics',
     ('astrid/packs/youtube/executors/youtube_audio/run.py', 115): 'intentional success summary for pack subprocess diagnostics',
+    ('astrid/core/backup/cli.py', 72): 'family CLI diagnostic printed before error/usage exit',
+    ('astrid/core/backup/cli.py', 93): 'family CLI diagnostic printed before error/usage exit',
+    ('astrid/core/backup/cli.py', 99): 'family CLI diagnostic printed before error/usage exit',
+    ('astrid/core/rendering/cli.py', 464): 'family CLI diagnostic printed before error/usage exit',
+    ('astrid/core/rendering/cli.py', 465): 'family CLI diagnostic printed before error/usage exit',
+    ('astrid/core/rendering/cli.py', 610): 'family CLI diagnostic printed before error/usage exit',
+    ('astrid/core/rendering/cli.py', 629): 'family CLI diagnostic printed before error/usage exit',
+    ('astrid/core/rendering/cli.py', 661): 'family CLI diagnostic printed before error/usage exit',
+    ('astrid/core/rendering/cli.py', 663): 'family CLI diagnostic printed before error/usage exit',
+    ('astrid/core/rendering/cli.py', 710): 'family CLI diagnostic printed before error/usage exit',
+    ('astrid/core/rendering/cli.py', 836): 'family CLI diagnostic printed before error/usage exit',
+    ('astrid/core/rendering/cli.py', 837): 'family CLI diagnostic printed before error/usage exit',
+    ('astrid/core/rendering/cli.py', 838): 'family CLI diagnostic printed before error/usage exit',
+    ('astrid/core/rendering/cli.py', 840): 'family CLI diagnostic printed before error/usage exit',
+    ('astrid/core/rendering/cli.py', 878): 'family CLI diagnostic printed before error/usage exit',
+    ('astrid/core/rendering/cli.py', 913): 'family CLI diagnostic printed before error/usage exit',
+    ('astrid/core/rendering/cli.py', 931): 'family CLI diagnostic printed before error/usage exit',
+    ('astrid/core/rendering/cli.py', 966): 'family CLI diagnostic printed before error/usage exit',
+    ('astrid/core/rendering/cli.py', 970): 'family CLI diagnostic printed before error/usage exit',
+    ('astrid/core/rendering/cli.py', 981): 'family CLI diagnostic printed before error/usage exit',
+    ('astrid/core/rendering/cli.py', 1033): 'family CLI diagnostic printed before error/usage exit',
+    ('astrid/core/rendering/cli.py', 1037): 'family CLI diagnostic printed before error/usage exit',
+    ('astrid/core/rendering/cli.py', 1053): 'family CLI diagnostic printed before error/usage exit',
+    ('astrid/packs/blender/deploy.py', 341): 'wrapped by deploy.main() operator entrypoint before agent-facing output',
+    ('astrid/packs/blender/deploy.py', 389): 'wrapped by deploy.main() operator entrypoint before agent-facing output',
+    ('astrid/packs/rendering/executors/timeline_visualize/run.py', 1331): 'wrapped by run_sdk() executor boundary — converted to a structured diagnostic before agent-facing output',
 }
 
 ALLOWED_BARE_RAISE_PATHS = {path for path, _line in ALLOWED_BARE_RAISES}
@@ -267,6 +303,18 @@ def _module_name(path: Path) -> str:
 
 
 def _iter_parser_surface_files() -> list[tuple[Path, str]]:
+    def _is_builder(node: ast.AST) -> bool:
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            return False
+        if node.name not in {"build_parser", "_build_parser"}:
+            return False
+        # Gateway-injected mount parsers (build_parser(client)) are not
+        # standalone recoverability surfaces — they cannot be built without a
+        # live client, so they are excluded from the scan entirely.
+        positional = node.args.posonlyargs + node.args.args
+        required = positional[: len(positional) - len(node.args.defaults)]
+        return all(arg.arg in {"self", "cls"} for arg in required)
+
     surfaces: list[tuple[Path, str]] = []
     for path in sorted(ASTRID_ROOT.rglob("*.py")):
         try:
@@ -276,8 +324,7 @@ def _iter_parser_surface_files() -> list[tuple[Path, str]]:
         builders = [
             node.name
             for node in tree.body
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-            and node.name in {"build_parser", "_build_parser"}
+            if _is_builder(node)
         ]
         if not builders:
             continue

@@ -42,6 +42,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from astrid.core.cli_choices import StaticChoices
+
 PACK_DIR = Path(__file__).resolve().parent
 SERVER_DIR = PACK_DIR / "server"
 DEFAULT_PORT = int(os.environ.get("BLENDER_RENDER_PORT", "8778"))
@@ -650,7 +652,7 @@ def build_parser() -> argparse.ArgumentParser:
     ph.add_argument("--ssh-port", default=DEFAULT_HETZNER_PORT, help="SSH port.")
     ph.add_argument("--identity", default=None)
     ph.add_argument("--token", default=os.environ.get("BLENDER_RENDER_TOKEN"))
-    ph.add_argument("--blender-flavor", default="apt", choices=("apt", "official"), help="apt=CPU distro build; official=CUDA/OptiX tarball (GPU).")
+    ph.add_argument("--blender-flavor", default="apt", choices=StaticChoices(("apt", "official")), help="apt=CPU distro build; official=CUDA/OptiX tarball (GPU).")
     ph.add_argument("--blender-version", default="4.0.2")
 
     ps = sub.add_parser("ssh", help="Deploy to any SSH host.")
@@ -660,7 +662,7 @@ def build_parser() -> argparse.ArgumentParser:
     ps.add_argument("--ssh-port", default="22")
     ps.add_argument("--identity", default=None)
     ps.add_argument("--token", default=os.environ.get("BLENDER_RENDER_TOKEN"))
-    ps.add_argument("--blender-flavor", default="apt", choices=("apt", "official"))
+    ps.add_argument("--blender-flavor", default="apt", choices=StaticChoices(("apt", "official")))
     ps.add_argument("--blender-version", default="4.0.2")
 
     pr = sub.add_parser("runpod", help="Spin up a RunPod GPU pod and deploy to it.")
@@ -694,7 +696,7 @@ def build_parser() -> argparse.ArgumentParser:
     prr.add_argument("--frames", type=int, default=1, help="1=still; >1=animation.")
     prr.add_argument("--fps", type=int, default=24)
     prr.add_argument("--render-timeout", dest="render_timeout", type=int, default=1800)
-    prr.add_argument("--teardown", choices=("auto", "never"), default="auto", help="auto=teardown right after render (default); never=keep pod up for manual teardown.")
+    prr.add_argument("--teardown", choices=StaticChoices(("auto", "never")), default="auto", help="auto=teardown right after render (default); never=keep pod up for manual teardown.")
     prr.add_argument("--keep-after-seconds", dest="keep_after_seconds", type=int, default=0, help="Linger N seconds after render before auto-teardown.")
 
     pc = sub.add_parser("health", help="Hit /health on a render host.")

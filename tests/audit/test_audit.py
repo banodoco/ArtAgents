@@ -66,12 +66,14 @@ def test_audit_redacts_secret_like_values(tmp_path: Path) -> None:
 
 def test_pipeline_audit_cli_json(tmp_path: Path, capsys) -> None:
     pytest.importorskip("jsonschema")
-    from astrid.core.gateway import main as pipeline_main  # gateway
+    # The legacy gateway `audit` verb was retired with the 8-family CLI; the
+    # audit CLI now lives at astrid.core.audit.cli.main.
+    from astrid.core.audit.cli import main as audit_main
 
     ctx = AuditContext.for_run(tmp_path / "run")
     asset_id = ctx.register_asset(kind="source", label="Only source")
 
-    assert pipeline_main(["audit", "--run", str(tmp_path / "run"), "--json"]) == 0
+    assert audit_main(["--run", str(tmp_path / "run"), "--json"]) == 0
     payload = json.loads(capsys.readouterr().out)
     assert any(node["id"] == asset_id for node in payload["nodes"])
 

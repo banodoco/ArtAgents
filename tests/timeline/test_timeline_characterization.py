@@ -124,6 +124,7 @@ class TimelineAllSurfaceTest(unittest.TestCase):
             "save_pool",
             "save_registry",
             "save_timeline",
+            "sync_asset_registry",
             "timeline_config_digest",
             "timeline_configs_equal",
             "validate_arrangement",

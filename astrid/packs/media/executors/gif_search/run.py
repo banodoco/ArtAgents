@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from astrid.core._shared.result_manifest import build_manifest, write_manifest
+from astrid.core.cli_choices import StaticChoices
 from astrid.core.util.credentials_scope import CredentialsScope
 
 GIPHY_SEARCH_BASE = "https://api.giphy.com/v1/{kind}/search"
@@ -51,7 +52,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--provider", default="giphy", help="Provider. Only giphy is implemented.")
     parser.add_argument(
         "--media-kind",
-        choices=sorted(SUPPORTED_KINDS),
+        choices=StaticChoices(sorted(SUPPORTED_KINDS), catalog="gif_search.media_kind"),
         default="gif",
         help="Search GIFs or stickers.",
     )

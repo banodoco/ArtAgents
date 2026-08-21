@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from astrid.core.element import load_default_registry
+from astrid.core.element.registry import clear_default_registry_cache
 from astrid.core.generation.backends.registry import (
     load_default_generation_backend_registry,
 )
@@ -34,6 +35,10 @@ def _build_env_packs(tmp_path: Path) -> Path:
 def test_env_discovery_populates_sdk_discovery_dto(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     env_root = _build_env_packs(tmp_path)
     monkeypatch.setenv(ASTRID_PACKS_PATH_ENV, str(env_root))
+    # The element corpus cache is keyed without ASTRID_PACKS_PATH; tests that
+    # repoint pack discovery must drop it so the env-declared element kinds
+    # (e.g. "widgets") are re-parsed instead of served from the repo-only cache.
+    clear_default_registry_cache()
 
     astrid = importlib.import_module("astrid")
     inventory = astrid.discover(include_installed=False)
@@ -122,6 +127,9 @@ def test_env_element_pack_validates_loads_lists_and_reaches_sdk(monkeypatch: pyt
     create_element_only_pack(env_root / "third_party_elements")
     create_element_kind_structure(env_root / "third_party_elements")
     monkeypatch.setenv(ASTRID_PACKS_PATH_ENV, str(env_root))
+    # See test_env_discovery_populates_sdk_discovery_dto: repointing pack
+    # discovery requires dropping the cached element corpus.
+    clear_default_registry_cache()
 
     registry = load_default_registry(include_installed=False)
     widget = registry.get("widget", "glow")

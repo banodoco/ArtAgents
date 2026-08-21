@@ -6,12 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from astrid.core.timeline.crud import create_timeline, rename_timeline, show_timeline
+from astrid.core.timeline.crud import create_timeline, show_timeline
 from astrid.core.timeline.eventlog import LocalFsBackend
 from astrid.core.timeline.eventlog.reigh_events import construct_reigh_timeline_events
 from astrid.core.timeline.eventlog.types import EventLogError, EventLogStaleVersionError
 from astrid.core.timeline.events.schema import TimelineActor, TimelineEvent, canonical_json_bytes
-from astrid.core.timeline.model import Display
 from astrid.core.timeline.paths import (
     assembly_head_path,
     assembly_identity_path,
@@ -419,69 +418,9 @@ def test_load_display_stays_fail_closed_when_eventlog_exists_without_identity(
     assert show_timeline("demo", "after", root=project_tree) is None
 
 
-def test_next_read_repairs_display_after_post_append_projection_failure(
-    project_tree: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    create_timeline("demo", "alpha", root=project_tree)
-    original_write = Display.write
-    state = {"calls": 0}
-
-    def flaky_write(self: Display, path: str | Path) -> None:
-        state["calls"] += 1
-        if state["calls"] == 1:
-            raise OSError("simulated display write failure")
-        original_write(self, path)
-
-    monkeypatch.setattr(Display, "write", flaky_write)
-
-    with pytest.raises(OSError, match="simulated display write failure"):
-        rename_timeline(
-            "demo",
-            "alpha",
-            "beta",
-            actor=TimelineActor(type="agent", id="codex:test"),
-            root=project_tree,
-        )
-
-    repaired = show_timeline("demo", "beta", root=project_tree)
-    assert repaired is not None
-    assert repaired["display"].slug == "beta"
-
-
 # ============================================================================
 # m7 observability — integration/behavior tests (T6)
 # ============================================================================
-
-
-def test_history_formatting_includes_backend_timeline_version_event_actor_kind(
-    project_tree: Path,
-) -> None:
-    """History rows include backend, timeline_id, version, event_id, actor (redacted), kind."""
-    result = create_timeline("demo", "history-tl", root=project_tree)
-    ulid = result["ulid"]
-    identity = json.loads(
-        assembly_identity_path("demo", ulid, root=project_tree).read_text(encoding="utf-8")
-    )
-    home = timeline_dir("demo", ulid, root=project_tree)
-    backend = LocalFsBackend(timeline_id=identity["timeline_id"], timeline_home=home)
-    backend.append_event(
-        identity["timeline_id"],
-        "clip.added",
-        {"clip_id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1", "position": None},
-        actor=TimelineActor(type="agent", id="alice:session-1", display="alice"),
-    )
-
-    from astrid.core.cli.timeline import _format_history_row, _redact_actor
-
-    events = backend.read_events()
-    assert len(events) == 1
-    row = _format_history_row(1, events[0], "local_fs")
-    assert "v1" in row
-    assert events[0].event_id in row
-    assert "kind=clip.added" in row
-    actor_str = _redact_actor(events[0].actor)
-    assert actor_str == "alice"
-    assert "actor=" in row
 
 
 def test_who_edited_actor_rollup_aggregation(project_tree: Path) -> None:

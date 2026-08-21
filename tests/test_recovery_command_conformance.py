@@ -19,18 +19,18 @@ ROOT = Path(__file__).resolve().parents[1]
 # Excludes pack executors (*/executor/cli.py, packs/*) as required by the task.
 # ---------------------------------------------------------------------------
 AGENT_CLI_MODULE_PATHS: list[Path] = [
+    ROOT / "astrid" / "core" / "cli" / "__init__.py",
+    ROOT / "astrid" / "core" / "cli" / "choices_registry.py",
+    ROOT / "astrid" / "core" / "cli" / "domain_media.py",
+    ROOT / "astrid" / "core" / "cli" / "domain_output.py",
+    ROOT / "astrid" / "core" / "cli" / "domain_product.py",
+    ROOT / "astrid" / "core" / "cli" / "domain_projects.py",
+    ROOT / "astrid" / "core" / "cli" / "domain_runs.py",
+    ROOT / "astrid" / "core" / "cli" / "domain_tasks.py",
+    ROOT / "astrid" / "core" / "cli" / "registration.py",
+    ROOT / "astrid" / "core" / "doctor.py",
     ROOT / "astrid" / "core" / "gateway" / "__init__.py",
     ROOT / "astrid" / "core" / "gateway" / "dispatch.py",
-    ROOT / "astrid" / "core" / "cli" / "session.py",
-    ROOT / "astrid" / "core" / "task" / "claim.py",
-    ROOT / "astrid" / "core" / "task" / "lifecycle" / "__init__.py",
-    ROOT / "astrid" / "core" / "task" / "lifecycle" / "ack.py",
-    ROOT / "astrid" / "core" / "task" / "lifecycle" / "skip.py",
-    ROOT / "astrid" / "core" / "task" / "operator" / "view.py",
-    ROOT / "astrid" / "core" / "task" / "run" / "store.py",
-    ROOT / "astrid" / "core" / "task" / "plan" / "builder.py",
-    ROOT / "astrid" / "core" / "task" / "cli_contract.py",
-    ROOT / "astrid" / "core" / "task" / "gate" / "base.py",
 ]
 
 # ---------------------------------------------------------------------------
@@ -198,9 +198,6 @@ def _assert_recovery_command_parses(command: str) -> None:
         ls = sub.add_parser("ls")
         ls.add_argument("--project")
         parser.parse_args(tail)
-    elif verb == "sessions":
-        from astrid.core.cli.session import build_parser
-        build_parser().parse_args(tail)
     elif verb == "status":
         # status takes optional --project and --json
         parser = argparse.ArgumentParser(prog="astrid status")
@@ -246,7 +243,7 @@ def _assert_recovery_command_parses(command: str) -> None:
         pass
     else:
         # Gateway-dispatched verbs that are not part of the explicit
-        # agent-facing lifecycle set (e.g. ``orchestrators``, ``runpod``).
+        # agent-facing lifecycle set (e.g. ``projects``, ``media``).
         # Accept them as well-formed — the gateway's own dispatch will
         # handle further validation at runtime.
         pass

@@ -29,6 +29,10 @@ from pathlib import Path
 from typing import Any, Literal
 
 from astrid.core import timeline
+from astrid.core.env_vars import (
+    ASTRID_GATEWAY_RESOLVED_PROJECT,
+    ASTRID_PROJECT_SLUG,
+)
 from astrid.core.foundation.project_paths import project_dir, resolve_projects_root
 from astrid.core.rendering import asset_cache
 
@@ -90,8 +94,8 @@ def _default_allowed_root(registry_path: Path) -> Path | None:
     """
 
     projects_root = resolve_projects_root().resolve(strict=False)
-    owner = os.environ.get("ASTRID_PROJECT_SLUG") or os.environ.get(
-        "ASTRID_GATEWAY_RESOLVED_PROJECT"
+    owner = os.environ.get(ASTRID_PROJECT_SLUG) or os.environ.get(
+        ASTRID_GATEWAY_RESOLVED_PROJECT
     )
     if owner:
         return project_dir(owner, root=projects_root).resolve(strict=False)

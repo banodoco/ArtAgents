@@ -26,7 +26,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-TUTORIAL_PATH = ROOT / "docs" / "build-your-first-agentic-ux.md"
+TUTORIAL_PATH = ROOT / "docs" / "guides" / "build-your-first-agentic-ux.md"
 FIXTURE_DIR = ROOT / "examples" / "agentic_ux" / "fixtures"
 GOLDEN_EVENTS = FIXTURE_DIR / "golden_events.jsonl"
 
@@ -193,15 +193,13 @@ def test_tutorial_contains_python_code_blocks() -> None:
 
 
 def test_tutorial_complete_script_block_is_present() -> None:
-    """Step 6 must contain the complete assembled script."""
+    """Step 6 must reference the complete assembled example script."""
     content = TUTORIAL_PATH.read_text(encoding="utf-8")
-    blocks = _extract_code_blocks(content)
-    # The complete script block starts with "#!/usr/bin/env python3"
-    complete_blocks = [
-        b for b in blocks if b["content"].strip().startswith("#!/usr/bin/env python3")
-    ]
-    assert len(complete_blocks) >= 1, (
-        "Complete script block (#!/usr/bin/env python3) not found in tutorial"
+    # The tutorial's Step 6 points at the checked-in complete script
+    # (Steps 1-5 bundled into one runnable example) instead of embedding a
+    # shebang block.
+    assert "examples/agentic_ux/agentic_ux.py" in content, (
+        "Complete example script (examples/agentic_ux/agentic_ux.py) not found in tutorial"
     )
 
 
@@ -367,6 +365,7 @@ def test_dry_run_invoke_editorial_arrange_succeeds() -> None:
             kind="executor",
             include_installed=False,
             out=Path(tmp_out),
+            project="demo",
             inputs={
                 "brief": "parity test brief",
                 "pool": "default",
@@ -400,6 +399,7 @@ def test_dry_run_invoke_does_not_require_network() -> None:
             kind="executor",
             include_installed=False,
             out=Path(tmp_out),
+            project="demo",
             inputs={
                 "brief": "no network test",
                 "pool": "default",
@@ -424,6 +424,7 @@ def test_dry_run_invoke_missing_input_raises_capability_missing_input_error() ->
             kind="executor",
             include_installed=False,
             out=Path("/tmp/out"),
+            project="demo",
             dry_run=True,
             verbose=False,
         )
@@ -624,6 +625,7 @@ def test_full_tutorial_path_round_trips(tmp_path: Path) -> None:
             kind="executor",
             include_installed=False,
             out=Path(tmp_out),
+            project="demo",
             inputs={
                 "brief": "full path test brief",
                 "pool": "default",

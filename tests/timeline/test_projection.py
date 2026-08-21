@@ -885,7 +885,6 @@ class TestGoldenFixtures:
     def test_shared_runtime_seeders_use_canonical_empty_timeline(self):
         seeders = [
             ROOT / "tests" / "conftest.py",
-            ROOT / "tests" / "session" / "test_cli_gate.py",
         ]
         forbidden_inline_seeds = (
             'json.dumps({"clips": [], "tracks": []})',
@@ -1378,8 +1377,11 @@ class TestBootstrapBehavior:
             timeline_ulid="",
             timeline_event_stream_id="",
             events=[{
-                "kind": "track.added",
-                "payload": {"track_id": "v1", "kind": "visual", "label": "Video"},
+                # The pack vocabulary gate (m8) accepts only kinds declared
+                # by the composed standard registry; the retired eventlog
+                # kinds (track.added, clip.added, ...) are no longer declared.
+                "kind": "timeline.config_replaced",
+                "payload": {"config": {"clips": [], "tracks": []}},
             }],
             actor=TimelineActor(type="system", id="test:boot", display="Test"),
         )
@@ -1429,8 +1431,10 @@ class TestBootstrapBehavior:
                 timeline_ulid="",
                 timeline_event_stream_id="",
                 events=[{
-                    "kind": "clip.added",
-                    "payload": {"clip_id": "new-clip", "kind": "visual", "track_id": "visual", "asset_id": "a1", "position": None},
+                    # Declared kind so the vocabulary gate passes and the
+                    # legacy-identity check below is what fails closed.
+                    "kind": "timeline.config_replaced",
+                    "payload": {"config": {"clips": [], "tracks": []}},
                 }],
                 actor=TimelineActor(type="system", id="test:legacy", display="Test"),
             )
@@ -1852,7 +1856,6 @@ def test_runtime_sources_do_not_seed_wrapper_assembly_defaults() -> None:
     """Runtime timeline code must not depend on legacy Assembly wrappers."""
     runtime_files = [
         Path("astrid/core/timeline/branch.py"),
-        Path("astrid/core/cli/timeline.py"),
         Path("astrid/core/timeline/crud.py"),
         Path("astrid/core/timeline/eventlog/local_fs.py"),
         Path("astrid/core/timeline/eventlog/projector.py"),

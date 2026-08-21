@@ -35,6 +35,26 @@ from astrid.core.execution.executor.schema import ConditionSpec, ExecutorDefinit
 from astrid.core.pack.resolver import PackResolverError
 from astrid.core.execution.executor.argv import executor_argv, resolve_executor_runtime_module
 
+
+@pytest.fixture(autouse=True)
+def _isolate_non_project_runner_error_paths(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep this module focused on non-project runner branches.
+
+    Project enforcement has dedicated conformance tests. The legacy tests in
+    this module intentionally construct minimal projectless requests to reach
+    lower-level runtime validation branches, so the project-required gate is
+    neutralized exactly as in ``test_orchestrator_runner_errors.py``.
+    """
+
+    monkeypatch.setattr(
+        executor_runner,
+        "_resolve_project_request",
+        lambda run_request: run_request,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Factory helpers
 # ---------------------------------------------------------------------------

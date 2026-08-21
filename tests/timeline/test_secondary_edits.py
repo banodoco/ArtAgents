@@ -353,9 +353,9 @@ def test_reconcile_adjacent_transitions_multi_track(
     """Clips on different tracks are reconciled independently."""
     # Add two clips on the audio track.
     add_clip("demo", "primary", kind="audio", asset_id="audio-1",
-             track_id="audio", actor=_actor(), root=demo_timeline["root"])
+             track_id="audio", duration=2.0, actor=_actor(), root=demo_timeline["root"])
     add_clip("demo", "primary", kind="audio", asset_id="audio-2",
-             track_id="audio", actor=_actor(), root=demo_timeline["root"])
+             track_id="audio", duration=2.0, actor=_actor(), root=demo_timeline["root"])
     # Add three clips on the visual track.
     for asset_id in ("vis-1", "vis-2", "vis-3"):
         add_clip("demo", "primary", kind="visual", asset_id=asset_id,
@@ -572,7 +572,7 @@ def test_track_events_materialize_and_read_back(demo_timeline: dict[str, object]
 
 
 def test_audio_events_materialize_and_read_back(demo_timeline: dict[str, object]) -> None:
-    add_clip("demo", "primary", kind="audio", asset_id="clip-a", actor=_actor(), root=demo_timeline["root"])
+    add_clip("demo", "primary", kind="audio", asset_id="clip-a", duration=2.0, actor=_actor(), root=demo_timeline["root"])
     tdir = _tdir(demo_timeline)
 
     bind_event = audio_bind(
