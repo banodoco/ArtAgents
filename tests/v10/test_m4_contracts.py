@@ -211,7 +211,7 @@ def test_no_per_kind_direction_matrix_invented() -> None:
 
 def test_platform_matrix_frozen_values() -> None:
     text = _doc(PLATFORM_DOC)
-    assert "frozen for milestone m4" in text
+    assert "frozen for the packaged GA gate" in text
     assert "Linux" in text
     assert "3.11 and 3.12" in text
     assert "editable installation" in text

@@ -1,0 +1,256 @@
+
+{
+  "version": 1,
+  "timestamp": "2026-08-20T08:41:56Z",
+  "hash": "sha256:f0b5e400c1bf6161eca98e495c3aa937f4fabe0aeff3eae8e7ac0d6936c829ba",
+  "questions": [
+    "What is the approved representative-fixture and numeric performance-budget source? No m6 baseline is checked in, v10 \u00a76 has no budgets, and v10 \u00a71 explicitly cuts the former exact timing budget. Supplying thresholds requires either the missing frozen artifact or an explicit v10 amendment/replan.",
+    "Will execution receive an authorized checkout of the pinned Reigh editor commit and permission to run its five provider/persistence selectors? Without it, draft recovery and poll-adoption behavior cannot be fully evidenced, so GA item 6 must remain blocked rather than being inferred from the Python bridge substitute.",
+    "Should \u201creal generation/render\u201d for m7 mean the existing deterministic credential-free in-tree adapters that traverse actual repositories/tasks/media, or is a specific local provider required? The plan assumes the credential-free adapters because core acceptance must require no provider secret."
+  ],
+  "success_criteria": [
+    {
+      "criterion": "`make m7-gate` fails closed unless GA items 1\u201310 each have executed green evidence, item 11 is labeled provisional, and item 12 is labeled retained source/test evidence pending m8",
+      "priority": "must",
+      "requires": [
+        "run_shell",
+        "run_tests",
+        "read_build_output",
+        "read_files"
+      ]
+    },
+    {
+      "criterion": "Backup creation killed at every publication boundary leaves either the previous valid backup or the complete new backup; no mixed or incomplete destination is accepted by restore",
+      "priority": "must",
+      "requires": [
+        "run_tests",
+        "observe_runtime_logs",
+        "read_files"
+      ]
+    },
+    {
+      "criterion": "Restore killed at every database/media swap boundary recovers on the next standard composition to an editable, hash-consistent old-or-complete project",
+      "priority": "must",
+      "requires": [
+        "run_tests",
+        "observe_runtime_logs",
+        "read_files"
+      ]
+    },
+    {
+      "criterion": "Corrupt database pages, FK violations, too-new core/pack migrations, missing media, and mutated media produce deterministic failed checks or stable public error/integrity codes without doctor mutating any bytes",
+      "priority": "must",
+      "requires": [
+        "run_tests",
+        "parse_diff",
+        "read_files"
+      ]
+    },
+    {
+      "criterion": "Startup staging GC removes unreferenced staging, preserves live-attempt staging, and never changes the managed SHA-256 tree",
+      "priority": "must",
+      "requires": [
+        "run_tests",
+        "read_files"
+      ]
+    },
+    {
+      "criterion": "Two concurrent same-head bridge saves yield exactly one commit and one 409 with zero loser mutation while concurrent executor and CLI/service writes complete without deadlock or event/receipt corruption",
+      "priority": "must",
+      "requires": [
+        "run_tests",
+        "observe_runtime_logs"
+      ]
+    },
+    {
+      "criterion": "The fresh-project dogfood journey completes project, timeline, media, generation/render, zero-task understanding, fan-out, references, shots, backup/restore, and doctor through supported public surfaces with no account or provider secret",
+      "priority": "must",
+      "requires": [
+        "run_tests",
+        "observe_runtime_logs",
+        "read_files"
+      ]
+    },
+    {
+      "criterion": "Bridge list/load/save/reload, 409, 422, restart, and asset GET/HEAD Range behavior pass against the repository-backed server",
+      "priority": "must",
+      "requires": [
+        "run_tests",
+        "observe_runtime_logs"
+      ]
+    },
+    {
+      "criterion": "The pinned external editor provider/persistence selectors, including draft recovery and pending-local-work protection, pass before GA item 6 is marked complete",
+      "priority": "must",
+      "requires": [
+        "run_tests",
+        "read_build_output"
+      ]
+    },
+    {
+      "criterion": "Performance evidence records fixture identity plus cold and warm samples for bootstrap, gallery, timeline load/save, change feed, and media verify, and gives every approved budget a pass/fail/explained disposition",
+      "priority": "must",
+      "requires": [
+        "run_tests",
+        "read_build_output",
+        "read_files"
+      ]
+    },
+    {
+      "criterion": "Clean-machine documentation examples execute successfully in isolation and contain no removed authority, removed top-level family, cloud account, or provider-secret prerequisite",
+      "priority": "must",
+      "requires": [
+        "run_shell",
+        "run_tests",
+        "read_files"
+      ]
+    },
+    {
+      "criterion": "Authority lint and pack-factoring tests remain green, and the diff adds no schema tables, kernel-to-pack FK, cross-pack table dependency, pack-owned writer, or alternate semantic authority",
+      "priority": "must",
+      "requires": [
+        "run_tests",
+        "parse_diff",
+        "read_files"
+      ]
+    },
+    {
+      "criterion": "No severity-one or severity-two correctness defect remains open in the m7 defect ledger",
+      "priority": "must",
+      "requires": [
+        "read_files",
+        "read_build_output"
+      ]
+    },
+    {
+      "criterion": "All v10 tests and repository-wide regression/lint/typecheck gates pass after restore recovery is wired into standard startup",
+      "priority": "must",
+      "requires": [
+        "run_tests",
+        "run_linter",
+        "read_build_output"
+      ]
+    },
+    {
+      "criterion": "Performance reporting avoids host-sensitive blocking thresholds until the missing normative budget source is resolved",
+      "priority": "should",
+      "requires": [
+        "read_files",
+        "parse_diff",
+        "subjective_judgment"
+      ]
+    },
+    {
+      "criterion": "Final packaged-install and installed-artifact claims remain explicitly deferred to m8",
+      "priority": "info",
+      "requires": []
+    }
+  ],
+  "assumptions": [
+    "The missing m6 fixture/budget artifact is not silently reconstructed from the legacy file-backed `tests/timeline/test_backend_performance.py`; m7 creates a provisional repository-backed fixture and reports measurements until an approved source is supplied.",
+    "Hardening uses true subprocess termination at observable filesystem/transaction boundaries, followed by a fresh process reopen, rather than treating caught exceptions as equivalent to process death.",
+    "Any concrete defect found by the matrix is fixed at its repository or operation boundary with a focused regression; doctor remains read-only and no repair language, schema change, compatibility layer, or second writer is introduced.",
+    "The existing m3 crash/race/conformance and pack-factoring suites and m6 operational tests are retained as evidence inputs instead of being copied wholesale into new tests.",
+    "Final wheel/installed-artifact proof remains m8 scope. M7 may inspect source/build output for item 11 and rerun source-level factoring for item 12, but does not label either installed-artifact complete.",
+    "The supported clean-machine matrix remains the frozen platform contract in `docs/contracts/supported-platforms.md`; unsupported platforms and physical-device testing are outside m7."
+  ],
+  "test_blast_radius": {
+    "strategy": "full",
+    "confidence": "low",
+    "selectors": [
+      {
+        "kind": "path",
+        "value": "tests/v10/test_backup_restore.py",
+        "reason": "Backup publication and restore recovery semantics change directly."
+      },
+      {
+        "kind": "path",
+        "value": "tests/integrations/reigh/test_local_bridge_server.py",
+        "reason": "Real bridge Range, error, restart, and concurrent-save behavior."
+      },
+      {
+        "kind": "path",
+        "value": "tests/v10/test_crash_atomicity.py",
+        "reason": "Existing statement-boundary old-or-complete regression lane."
+      },
+      {
+        "kind": "path",
+        "value": "tests/v10/test_task_races.py",
+        "reason": "Existing terminal immutability and stale-attempt race proof."
+      },
+      {
+        "kind": "path",
+        "value": "tests/v10/test_generation_roundtrip.py",
+        "reason": "GA item 2 real credential-free generation path."
+      },
+      {
+        "kind": "path",
+        "value": "tests/v10/test_understanding_repository.py",
+        "reason": "GA item 3 zero-task understanding evidence."
+      },
+      {
+        "kind": "path",
+        "value": "tests/v10/test_fanout.py",
+        "reason": "GA item 4 direct-child fan-out and dependency behavior."
+      },
+      {
+        "kind": "path",
+        "value": "tests/v10/test_media_pipeline.py",
+        "reason": "Media publication, mutation/missing handling, and staging GC regression coverage."
+      },
+      {
+        "kind": "path",
+        "value": "tests/v10/test_m6_gate.py",
+        "reason": "Serve, backup/restore, doctor, help, and authority baseline."
+      },
+      {
+        "kind": "path",
+        "value": "tests/v10/test_pack_factoring.py",
+        "reason": "Retained m3 GA item 12 source-level factoring proof."
+      },
+      {
+        "kind": "path",
+        "value": "tests/v10",
+        "reason": "All v10 invariants are release-candidate gates and restore startup recovery is cross-cutting."
+      }
+    ],
+    "changed_surfaces": [
+      "astrid/core/backup/operations.py",
+      "astrid/packs/__init__.py",
+      "tests/fixtures/v10/m7_representative.json",
+      "tests/v10/_m7_fixture.py",
+      "tests/v10/test_backup_restore.py",
+      "tests/v10/test_m7_hardening.py",
+      "tests/v10/test_m7_bridge_contention.py",
+      "tests/v10/test_m7_dogfood.py",
+      "tests/v10/test_m7_performance.py",
+      "tests/v10/test_m7_docs.py",
+      "tests/integrations/reigh/test_local_bridge_server.py",
+      "scripts/reshape/m7_gate.py",
+      "Makefile",
+      ".github/workflows/ci.yml",
+      "docs/getting-started.md",
+      "docs/guides/cli-journeys.md",
+      "docs/guides/debugging.md",
+      "artifacts/m7/acceptance.json",
+      "artifacts/m7/performance.json",
+      "artifacts/m7/defects.md"
+    ],
+    "always_run": [],
+    "full_suite_fallback": true,
+    "rationale": "Floor: No Python changes were detected for M1 selector derivation. Success criteria require tests, but the plan did not declare any concrete changed_surfaces; revise must add scoped metadata or explicitly opt into full-suite validation. Candidate: Restore recovery runs before the standard writer opens, while the m7 gate composes every kernel, pack, bridge, CLI, and operational acceptance lane. Focused selectors provide fast feedback, but the standard-composition change and GA evidence scope require the complete v10 and repository-wide regression suites. Dropped nonexistent pytest path(s) from plan-time baseline metadata: tests/v10/test_m7_hardening.py, tests/v10/test_m7_bridge_contention.py, tests/v10/test_m7_dogfood.py, tests/v10/test_m7_performance.py, tests/v10/test_m7_docs.py.",
+    "import_graph": {
+      "degraded": false,
+      "dependent_tests": 0,
+      "unresolved": []
+    },
+    "missing_test_selectors": [
+      "tests/v10/test_m7_hardening.py",
+      "tests/v10/test_m7_bridge_contention.py",
+      "tests/v10/test_m7_dogfood.py",
+      "tests/v10/test_m7_performance.py",
+      "tests/v10/test_m7_docs.py"
+    ]
+  },
+  "structure_warnings": []
+}

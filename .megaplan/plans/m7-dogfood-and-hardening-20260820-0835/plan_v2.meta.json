@@ -1,0 +1,186 @@
+
+{
+  "version": 2,
+  "timestamp": "2026-08-20T08:50:47Z",
+  "hash": "sha256:0792e68f5f92e6a7ab9a3b6052fa02518df7b8148b9a255162b161fbfea1ee49",
+  "changes_summary": "Added a mandatory deterministic, fail-closed finalizer feasibility-admission phase before execution or resume, with atomic probe, collision checks, admission hash propagation, and validation/CI ordering. Preserved the existing m7 scope, external-editor limitation, performance-budget limitation, and m8 deferral.",
+  "flags_addressed": [
+    {
+      "id": "CF-2A102B858E977C123541",
+      "resolution": "addressed",
+      "reason": "Added explicit pre-execution finalizer admission and fail-closed evidence dependency.",
+      "where": "Phase 0 \u2014 Step 1; Execution Order"
+    },
+    {
+      "id": "CF-FE70A0DAE47C5ED82CAB",
+      "resolution": "addressed",
+      "reason": "Admission now checks required inputs, output collisions, and atomic finalizer feasibility before resume.",
+      "where": "Phase 0 \u2014 Step 1"
+    },
+    {
+      "id": "CF-0F009B19EE3DCD2E33D0",
+      "resolution": "addressed",
+      "reason": "Admission status and hash are carried into acceptance evidence and gate completion.",
+      "where": "Phase 3 \u2014 Step 9"
+    },
+    {
+      "id": "CF-A771992C2F9CD8AE3033",
+      "resolution": "addressed",
+      "reason": "Validation order begins with admission integrity and revalidates before finalization.",
+      "where": "Validation Order; Phase 3 \u2014 Step 11"
+    },
+    {
+      "id": "CF-D8A6BAA55DC0823E63EA",
+      "resolution": "addressed",
+      "reason": "The plan states the concrete owner, artifact path, atomic probe, and blocking conditions.",
+      "where": "Phase 0 \u2014 Step 1; scripts/reshape/m7_gate.py"
+    },
+    {
+      "id": "CF-EA8AA9693CAF430A029F",
+      "resolution": "addressed",
+      "reason": "No alternate approach or scope expansion was needed; the existing hardening plan remains aligned and gains the missing custody gate.",
+      "where": "Overview; Execution Order"
+    }
+  ],
+  "questions": [
+    "What is the approved representative-fixture and numeric performance-budget source? Until supplied, m7 records a provisional fixture and report-only measurements.",
+    "Will execution receive an authorized checkout of the pinned Reigh editor commit and permission to run its provider/persistence selectors?",
+    "Should real generation/render continue to mean the existing deterministic credential-free in-tree adapters that traverse repositories, tasks, and media?"
+  ],
+  "success_criteria": [
+    {
+      "criterion": "Finalizer feasibility admission runs before execution or resume, fails closed on missing/stale/conflicting/indeterminate inputs, and its status/hash is present in final m7 evidence.",
+      "priority": "must",
+      "requires": [
+        "run_shell",
+        "read_files",
+        "read_build_output"
+      ]
+    },
+    {
+      "criterion": "`make m7-gate` fails closed unless GA items 1\u201310 have executed green evidence, item 11 is provisional, item 12 is retained source/test evidence pending m8, and finalizer admission is admitted.",
+      "priority": "must",
+      "requires": [
+        "run_shell",
+        "run_tests",
+        "read_build_output",
+        "read_files"
+      ]
+    },
+    {
+      "criterion": "Backup and restore kill-boundary tests recover only prior-valid or complete-new state with no mixed database/media state.",
+      "priority": "must",
+      "requires": [
+        "run_tests",
+        "observe_runtime_logs",
+        "read_files"
+      ]
+    },
+    {
+      "criterion": "Corruption, migration mismatch, media mutation/missingness, staging GC, contention, bridge Range/error behavior, and dogfood journeys meet the stated m7 invariants without doctor mutation or alternate authority.",
+      "priority": "must",
+      "requires": [
+        "run_tests",
+        "parse_diff",
+        "observe_runtime_logs",
+        "read_files"
+      ]
+    },
+    {
+      "criterion": "Performance evidence records fixture identity and cold/warm samples; approved budgets receive dispositions, while unresolved budgets remain non-blocking.",
+      "priority": "must",
+      "requires": [
+        "run_tests",
+        "read_build_output",
+        "read_files"
+      ]
+    },
+    {
+      "criterion": "Clean-machine documentation and repository-wide regression/lint/typecheck gates pass; external editor proof and installed-artifact proof are labeled honestly when unavailable or deferred.",
+      "priority": "must",
+      "requires": [
+        "run_shell",
+        "run_tests",
+        "run_linter",
+        "read_build_output",
+        "read_files"
+      ]
+    },
+    {
+      "criterion": "No severity-one or severity-two correctness defect remains open in the m7 ledger.",
+      "priority": "must",
+      "requires": [
+        "read_files",
+        "read_build_output"
+      ]
+    }
+  ],
+  "assumptions": [
+    "The existing m7 fixture, repository-backed operations, and credential-free adapters remain the intended implementation surfaces.",
+    "Finalizer admission is deterministic and can probe the exact artifact directory without modifying immutable plan ledgers.",
+    "External Reigh proof remains unavailable unless an authorized checkout is supplied; it is never inferred from the in-tree substitute.",
+    "No approved v10 performance budget is silently reconstructed; measurements remain report-only until a normative source exists.",
+    "Packaged-install and installed-artifact proof remains m8 scope."
+  ],
+  "delta_from_previous_percent": 95.51,
+  "north_star_actions_addressed": [
+    {
+      "action_id": "NSA-1",
+      "resolution": "addressed",
+      "reason": "Added a deterministic fail-closed finalizer feasibility-admission gate before execution/resume, requiring atomic artifact feasibility and carrying the admission status/hash into m7 evidence and CI finalization.",
+      "plan_refs": [
+        "Phase 0 \u2014 Step 1",
+        "Phase 3 \u2014 Step 9",
+        "Phase 3 \u2014 Step 11",
+        "Execution Order",
+        "Validation Order",
+        "scripts/reshape/m7_gate.py",
+        "artifacts/m7/acceptance.json"
+      ],
+      "action_type": "add_gate"
+    }
+  ],
+  "test_blast_radius": {
+    "strategy": "scoped",
+    "confidence": "low",
+    "selectors": [
+      {
+        "kind": "path",
+        "value": "tests/v10/test_backup_restore.py",
+        "reason": "covers backup publication and restore recovery"
+      },
+      {
+        "kind": "path",
+        "value": "tests/v10",
+        "reason": "restore startup and gate changes cross-cut all v10 invariants"
+      }
+    ],
+    "changed_surfaces": [
+      "astrid/core/backup/operations.py",
+      "astrid/packs/__init__.py",
+      "scripts/reshape/m7_gate.py",
+      "Makefile",
+      ".github/workflows/ci.yml",
+      "tests/v10",
+      "tests/integrations/reigh/test_local_bridge_server.py"
+    ],
+    "always_run": [],
+    "full_suite_fallback": true,
+    "rationale": "Floor: No Python changes were detected for M1 selector derivation. Success criteria require tests, but the plan did not declare any concrete changed_surfaces; revise must add scoped metadata or explicitly opt into full-suite validation. Candidate: The plan changes backup/restore and standard startup, plus a fail-closed evidence gate that composes kernel, pack, bridge, CLI, and operational surfaces; focused m7 selectors provide fast feedback and the complete repository suite remains the fallback. Dropped nonexistent pytest path(s) from plan-time baseline metadata: tests/v10/test_m7_hardening.py, tests/v10/test_m7_bridge_contention.py, tests/v10/test_m7_dogfood.py, tests/v10/test_m7_performance.py, tests/v10/test_m7_docs.py.",
+    "import_graph": {
+      "degraded": false,
+      "dependent_tests": 0,
+      "unresolved": []
+    },
+    "missing_test_selectors": [
+      "tests/v10/test_m7_hardening.py",
+      "tests/v10/test_m7_bridge_contention.py",
+      "tests/v10/test_m7_dogfood.py",
+      "tests/v10/test_m7_performance.py",
+      "tests/v10/test_m7_docs.py"
+    ]
+  },
+  "structure_warnings": [
+    "Each step section should include at least one numbered substep."
+  ]
+}

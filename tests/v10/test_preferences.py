@@ -66,7 +66,10 @@ def test_resolve_precedence_explicit_over_workspace_over_user(
     assert preferences.resolve_default_project(tmp_path / "other") == "user-pick"
 
 
-def test_resolve_returns_none_when_nothing_configured(home: Path) -> None:
+def test_resolve_returns_none_when_nothing_configured(
+    home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
     assert preferences.resolve_default_project() is None
     assert preferences.resolve_default_timeline() is None
 
@@ -103,7 +106,13 @@ def test_set_default_project_is_restart_durable(home: Path, tmp_path: Path) -> N
     assert preferences.load_workspace_config(ws)["default_project"] == "demo"
 
 
-def test_set_default_project_user_scope(home: Path) -> None:
+def test_set_default_project_user_scope(
+    home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Resolve from a clean cwd so a real workspace config (e.g. the repo's
+    # own .astrid/config.json, gitignored but present on dev machines)
+    # cannot outrank the sandboxed user scope.
+    monkeypatch.chdir(tmp_path)
     written = preferences.set_default_project("user-demo", scope="user")
     assert written == paths.user_config_path()
     assert preferences.resolve_default_project() == "user-demo"

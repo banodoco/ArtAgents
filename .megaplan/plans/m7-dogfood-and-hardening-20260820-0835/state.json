@@ -1,0 +1,2243 @@
+
+{
+  "name": "m7-dogfood-and-hardening-20260820-0835",
+  "idea": "# m7 \u2014 Dogfood and hardening (sprint-plan Sprint 7)\n\nNormative references: `docs/unified-data-model-plan-v10-20260813.md` (\u00a75.3), `docs/astrid-first-sprint-plan-20260813.md` (Sprint 7), `docs/astrid-first-sprint-plan-review-20260813.md` (fix 7 \u2014 S7 proves items 1\u201310 plus provisional item 11; plugin factoring adds item 12).\n\n## Outcome\n\nThe system is exercised like a real product and attacked where it can fail: representative fresh-project journeys (editor project \u2192 timeline save \u2192 media import \u2192 generation/render \u2192 references/shots \u2192 backup/restore) run end to end; failure modes are injected (crash at every transaction boundary, kill during backup/restore, corrupted media, missing media, stale saves, two-tab contention, schema-version mismatch); GA items 1\u201310 pass on an unpackaged release candidate, item 11 has **provisional** source/build proof, and item 12 retains its m3 source/test proof pending the final installed-artifact rerun in m8; performance budgets on the representative fixture are measured; documentation is verified from clean-machine examples.\n\n## Scope\n\nIN:\n- Dogfood journeys (scripted, reproducible): the five-domain + serve/backup/doctor flows from a fresh checkout; editor save/409/draft-recovery/asset-Range through the real bridge.\n- Hardening: crash-injection matrix (statement boundaries, backup, restore, migration), media mutation/missing detection UX, contention (two tabs + executor + CLI), corruption \u2192 doctor codes, orphan staging GC, migration-version mismatch refusal.\n- Performance: representative fixture measurements (bootstrap, gallery, timeline load, save, change feed, media verify) vs the v10 \u00a76 budgets; report cold vs warm.\n- Documentation: clean-machine examples verified; failure UX documented (unavailable/migrating/schema-incompatible states).\n- GA items 1\u201310 + provisional item 11 evidence pack; retain the m3 item 12 factoring evidence for the m8 artifact rerun.\n\nOUT: final packaged-artifact proof (m8).\n\n## Locked decisions\n\n- v10 \u00a75.3 acceptance items 1\u201312 are the target; this milestone proves 1\u201310, carries provisional 11, and retains m3's source/test proof for 12 (review fix 7 plus the plugin factoring addition).\n- Doctor is read-only diagnostics; hardening finds defects, fixes go through repositories with tests.\n\n## Open questions\n\n- Which representative fixtures count as \"representative\" (size/shape) \u2014 freeze from the m6 performance baseline; note any budget that forces a plan change.\n- Any GA item that fails \u2192 record, fix via repository/test change, re-run; escalate to the chain only if the failure is architectural.\n\n## Constraints\n\n- No new features; no schema changes; no scope growth; fixes must not weaken v10 invariants; buffer may close gates, never add deferred scope.\n\n## Done Criteria\n\nAll twelve GA items evidenced at the appropriate stage (1\u201310 fully, 11 provisionally, 12 from m3 source/test proof pending m8 artifact rerun); crash/contention/corruption matrix green with stable codes; performance report meets or explains every budget; clean-machine docs verified; defect count + fixes recorded.\n\n## Touchpoints\n\n- Astrid repo: test harnesses (`tests/`), CLI/SDK, `doctor`, backup/restore; reigh editor provider tests.\n- Docs: v10 \u00a75.3, sprint-plan \u00a73 Sprint 7, review fix 7.\n\n## Anti-scope\n\nNo packaged-install proof (m8); no new features; no legacy; no remote; no editor changes; no schema changes; no deferred subsystems.",
+  "idea_snapshot_path": "idea_snapshot.md",
+  "current_state": "done",
+  "iteration": 2,
+  "created_at": "2026-08-20T08:35:31Z",
+  "config": {
+    "project_dir": "/workspace/astrid-first-ce15b5a3/astrid",
+    "auto_approve": true,
+    "adaptive_critique": true,
+    "strict_adaptive_critique": false,
+    "critic_model": "",
+    "critic_model_explicit": false,
+    "robustness": "full",
+    "mode": "code",
+    "strict_notes": false,
+    "max_tasks_per_batch": 5,
+    "agent": "",
+    "completion_contract_mode": "shadow",
+    "full_suite_backstop_mode": "shadow",
+    "test_command": null,
+    "test_baseline_timeout": 900,
+    "profile": "partnered-codex",
+    "vendor": "codex",
+    "depth": "medium",
+    "phase_model": [
+      "plan=codex:gpt-5.6-sol:medium",
+      "prep=codex:gpt-5.6-terra:medium",
+      "critique=codex:gpt-5.6-terra:medium",
+      "critique_evaluator=codex:gpt-5.6-sol:high",
+      "revise=codex:gpt-5.6-luna:medium",
+      "gate=codex:gpt-5.6-terra:medium",
+      "finalize=codex:gpt-5.6-sol:high",
+      "execute=codex:gpt-5.6-sol:medium",
+      "feedback=codex:gpt-5.6-sol:medium",
+      "loop_plan=codex:gpt-5.6-sol:medium",
+      "loop_execute=codex:gpt-5.6-sol:medium",
+      "review=codex:gpt-5.6-sol:medium",
+      "tiebreaker_researcher=codex:gpt-5.6-sol:medium",
+      "tiebreaker_challenger=codex:gpt-5.6-sol:medium"
+    ],
+    "tier_models": {
+      "execute": {
+        "1": "codex:gpt-5.6-luna:low",
+        "2": "codex:gpt-5.6-luna:medium",
+        "3": "codex:gpt-5.6-luna:high",
+        "4": "codex:gpt-5.6-luna:high",
+        "5": "codex:gpt-5.6-luna:xhigh",
+        "6": "codex:gpt-5.6-luna:max",
+        "7": "codex:gpt-5.6-terra:xhigh",
+        "8": "codex:gpt-5.6-terra:max",
+        "9": "codex:gpt-5.6-sol:xhigh",
+        "10": "codex:gpt-5.6-sol:max"
+      },
+      "critique": {
+        "1": "codex:gpt-5.6-luna:low",
+        "2": "codex:gpt-5.6-terra:medium",
+        "3": "codex:gpt-5.6-terra:high",
+        "4": "codex:gpt-5.6-terra:xhigh",
+        "5": "codex:gpt-5.6-sol:max"
+      }
+    },
+    "prep_models": {
+      "triage": "codex:gpt-5.6-terra:medium",
+      "fanout": "hermes:deepseek:deepseek-v4-pro",
+      "distill": "codex:gpt-5.6-terra:medium"
+    },
+    "prep_model_resolver_trace": {
+      "flat_prep_input": "codex:gpt-5.6-terra:medium",
+      "explicit_prep_models": {},
+      "resolved_stage_models": {
+        "triage": "codex:gpt-5.6-terra:medium",
+        "fanout": "hermes:deepseek:deepseek-v4-pro",
+        "distill": "codex:gpt-5.6-terra:medium"
+      },
+      "canonical_fallback_used": {
+        "triage": false,
+        "fanout": true,
+        "distill": false
+      }
+    },
+    "phase_timeout_seconds": 10800.0
+  },
+  "sessions": {
+    "codex_planner_419255f2": {
+      "id": "01a01e54-2632-7b20-91d8-31acf9031677",
+      "sandbox_fingerprint": "ffaf04520cb123e9",
+      "last_total_tokens": {
+        "input_tokens": 20745,
+        "cached_input_tokens": 11008,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 4775,
+        "reasoning_output_tokens": 227,
+        "total_tokens": 25520
+      }
+    },
+    "codex_planner": {
+      "id": "01a01e5c-3f97-7a82-be12-cecdae54ef25",
+      "mode": "persistent",
+      "created_at": "2026-08-20T08:41:56Z",
+      "last_used_at": "2026-08-20T08:50:47Z",
+      "refreshed": true,
+      "worker_channel": "codex_cli",
+      "auth_metadata": {
+        "wbc_dispatch": {
+          "attempt_id": "39fe22de-77d7-5c1f-ab30-9f84040072b1",
+          "writer_id": "megaplan.worker_dispatch.direct",
+          "surface_name": "megaplan.worker_dispatch.direct",
+          "expected_source_version": "revise:da59c24fb83a4a97:direct:revise:codex:gpt-5.6-luna:medium:0",
+          "start_source_lookup_key": "revise:revise:direct:0:start",
+          "terminal_source_lookup_key": "revise:revise:direct:0:complete",
+          "start_event_sequence": 1,
+          "terminal_event_sequence": 2,
+          "promotion_mode": "action_off",
+          "route_kind": "direct",
+          "selected_spec": "codex:gpt-5.6-luna:medium",
+          "attempt_index": 0,
+          "configured_specs": [],
+          "attempted_specs": [],
+          "failed_attempt_reasons": [],
+          "fallback_trigger": null,
+          "worker_channel": "codex_cli",
+          "auth_channel": null
+        }
+      }
+    },
+    "codex_critique_evaluator_419255f2": {
+      "id": "01a01e5d-c59e-7210-8797-752995c25c6e",
+      "sandbox_fingerprint": "ffaf04520cb123e9",
+      "last_total_tokens": {
+        "input_tokens": 1275517,
+        "cached_input_tokens": 1171968,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 12470,
+        "reasoning_output_tokens": 3752,
+        "total_tokens": 1287987
+      }
+    },
+    "codex_gatekeeper_deda3dc0": {
+      "id": "01a01e62-0e0e-73a3-bb10-19e7969f140a",
+      "sandbox_fingerprint": "ffaf04520cb123e9",
+      "last_total_tokens": {
+        "input_tokens": 216758,
+        "cached_input_tokens": 171776,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 2142,
+        "reasoning_output_tokens": 435,
+        "total_tokens": 218900
+      }
+    },
+    "codex_gatekeeper": {
+      "id": "01a01e62-0e0e-73a3-bb10-19e7969f140a",
+      "mode": "persistent",
+      "created_at": "2026-08-20T08:49:07Z",
+      "last_used_at": "2026-08-20T08:56:29Z",
+      "refreshed": true,
+      "worker_channel": "codex_cli",
+      "auth_metadata": {
+        "wbc_dispatch": {
+          "attempt_id": "96fbc68f-a616-5119-bbb7-fe4ccc26718a",
+          "writer_id": "megaplan.worker_dispatch.direct",
+          "surface_name": "megaplan.worker_dispatch.direct",
+          "expected_source_version": "gate:fe3aebd501fc4846:direct:gate:codex:gpt-5.6-terra:medium:0",
+          "start_source_lookup_key": "gate:gate:direct:0:start",
+          "terminal_source_lookup_key": "gate:gate:direct:0:complete",
+          "start_event_sequence": 1,
+          "terminal_event_sequence": 2,
+          "promotion_mode": "action_off",
+          "route_kind": "direct",
+          "selected_spec": "codex:gpt-5.6-terra:medium",
+          "attempt_index": 0,
+          "configured_specs": [],
+          "attempted_specs": [],
+          "failed_attempt_reasons": [],
+          "fallback_trigger": null,
+          "worker_channel": "codex_cli",
+          "auth_channel": null
+        }
+      }
+    },
+    "codex_planner_e33230db": {
+      "id": "01a01e5c-3f97-7a82-be12-cecdae54ef25",
+      "sandbox_fingerprint": "ffaf04520cb123e9",
+      "last_total_tokens": {
+        "input_tokens": 92305,
+        "cached_input_tokens": 58880,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 4743,
+        "reasoning_output_tokens": 294,
+        "total_tokens": 97048
+      }
+    },
+    "codex_finalizer_419255f2": {
+      "id": "01a01e62-fc08-7363-a46f-e2a6362eee18",
+      "sandbox_fingerprint": "ffaf04520cb123e9",
+      "last_total_tokens": {
+        "input_tokens": 1013679,
+        "cached_input_tokens": 924160,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 20224,
+        "reasoning_output_tokens": 4777,
+        "total_tokens": 1033903
+      }
+    },
+    "codex_finalizer": {
+      "id": "01a01e62-fc08-7363-a46f-e2a6362eee18",
+      "mode": "persistent",
+      "created_at": "2026-08-20T09:10:41Z",
+      "last_used_at": "2026-08-20T09:10:41Z",
+      "refreshed": true,
+      "worker_channel": "codex_cli",
+      "auth_metadata": {
+        "wbc_dispatch": {
+          "attempt_id": "acf79829-67e6-56cc-ac22-8f8d85adddb3",
+          "writer_id": "megaplan.worker_dispatch.direct",
+          "surface_name": "megaplan.worker_dispatch.direct",
+          "expected_source_version": "finalize:8be5ef76fbe94733:direct:finalize:codex:gpt-5.6-sol:high:0",
+          "start_source_lookup_key": "finalize:finalize:direct:0:start",
+          "terminal_source_lookup_key": "finalize:finalize:direct:0:complete",
+          "start_event_sequence": 1,
+          "terminal_event_sequence": 2,
+          "promotion_mode": "action_off",
+          "route_kind": "direct",
+          "selected_spec": "codex:gpt-5.6-sol:high",
+          "attempt_index": 0,
+          "configured_specs": [],
+          "attempted_specs": [],
+          "failed_attempt_reasons": [],
+          "fallback_trigger": null,
+          "worker_channel": "codex_cli",
+          "auth_channel": null
+        }
+      }
+    },
+    "codex_reviewer_419255f2": {
+      "id": "01a020b7-bb38-7380-b06a-6e2284099171",
+      "sandbox_fingerprint": "read-only"
+    },
+    "codex_reviewer": {
+      "id": "01a020b7-bb38-7380-b06a-6e2284099171",
+      "mode": "persistent",
+      "created_at": "2026-08-20T19:32:14Z",
+      "last_used_at": "2026-08-20T19:49:12Z",
+      "refreshed": true
+    },
+    "codex_executor_e33230db": {
+      "id": "01a020a9-36ad-7422-b13f-fa630467907c",
+      "mode": "persistent",
+      "created_at": "2026-08-20T19:40:36Z",
+      "last_used_at": "2026-08-20T19:40:36Z",
+      "refreshed": true,
+      "worker_channel": "codex_cli",
+      "auth_metadata": {
+        "wbc_dispatch": {
+          "attempt_id": "0eba7274-f43c-5f5d-9f42-31079bf9f6cd",
+          "writer_id": "megaplan.execute.dispatch_wbc",
+          "surface_name": "megaplan.execute.dispatch_wbc",
+          "expected_source_version": "execute-batch:1:sha256:0792e68f5f92e6a7ab9a3b6052fa02518df7b8148b9a255162b161fbfea1ee49:30:m7-dogfood-and-hardening-20260820-0835:execute:batch:1:6444dcfddc46",
+          "start_source_lookup_key": "execute-batch:1:start",
+          "terminal_source_lookup_key": "execute-batch:1:complete",
+          "start_event_sequence": 1,
+          "terminal_event_sequence": 2,
+          "promotion_mode": "action_off",
+          "route_kind": null,
+          "selected_spec": null,
+          "attempt_index": null,
+          "configured_specs": [],
+          "attempted_specs": [],
+          "failed_attempt_reasons": [],
+          "fallback_trigger": null,
+          "worker_channel": "codex_cli",
+          "auth_channel": null
+        }
+      },
+      "last_total_tokens": {
+        "input_tokens": 1833739,
+        "cached_input_tokens": 1725184,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 12601,
+        "reasoning_output_tokens": 8118,
+        "total_tokens": 1846340
+      }
+    }
+  },
+  "plan_versions": [
+    {
+      "version": 1,
+      "file": "plan_v1.md",
+      "hash": "sha256:f0b5e400c1bf6161eca98e495c3aa937f4fabe0aeff3eae8e7ac0d6936c829ba",
+      "timestamp": "2026-08-20T08:41:56Z"
+    },
+    {
+      "version": 2,
+      "file": "plan_v2.md",
+      "hash": "sha256:0792e68f5f92e6a7ab9a3b6052fa02518df7b8148b9a255162b161fbfea1ee49",
+      "timestamp": "2026-08-20T08:50:47Z"
+    }
+  ],
+  "history": [
+    {
+      "step": "init",
+      "timestamp": "2026-08-20T08:35:31Z",
+      "duration_ms": 0,
+      "cost_usd": 0.0,
+      "result": "success",
+      "environment": {
+        "claude": true,
+        "codex": true
+      }
+    },
+    {
+      "step": "plan",
+      "timestamp": "2026-08-20T08:41:56Z",
+      "duration_ms": 90081,
+      "cost_usd": 0.0,
+      "result": "success",
+      "prompt_tokens": 20745,
+      "completion_tokens": 5002,
+      "total_tokens": 25747,
+      "session_mode": "persistent",
+      "session_id": "01a01e54-2632-7b20-91d8-31acf9031677",
+      "agent": "codex",
+      "cost_pricing": "unpriced",
+      "configured_specs": [
+        "codex:gpt-5.6-sol:medium"
+      ],
+      "attempted_specs": [
+        "codex:gpt-5.6-sol:medium"
+      ],
+      "selected_spec_index": 0,
+      "selected_spec_total": 1,
+      "fallback_trigger": null,
+      "failed_attempt_reasons": [],
+      "output_file": "plan_v1.md",
+      "artifact_hash": "sha256:f0b5e400c1bf6161eca98e495c3aa937f4fabe0aeff3eae8e7ac0d6936c829ba"
+    },
+    {
+      "step": "critique",
+      "timestamp": "2026-08-20T08:47:54Z",
+      "duration_ms": 1979,
+      "cost_usd": 0.0,
+      "result": "success",
+      "session_mode": "persistent",
+      "session_id": null,
+      "agent": "codex",
+      "configured_specs": [
+        "codex"
+      ],
+      "attempted_specs": [
+        "codex"
+      ],
+      "selected_spec_index": 0,
+      "selected_spec_total": 1,
+      "fallback_trigger": null,
+      "failed_attempt_reasons": [],
+      "output_file": "critique_v1.json",
+      "artifact_hash": "sha256:7bfb851fd43ed017a70e4dffde583eb4380f38c1cfa6e1857c14eae67adc4f5e",
+      "flags_count": 6
+    },
+    {
+      "step": "gate",
+      "timestamp": "2026-08-20T08:49:07Z",
+      "duration_ms": 64656,
+      "cost_usd": 0.0,
+      "result": "success",
+      "prompt_tokens": 134362,
+      "completion_tokens": 4150,
+      "total_tokens": 138512,
+      "session_mode": "persistent",
+      "session_id": "01a01e5b-1f8e-7f93-8485-cbcdff590637",
+      "agent": "codex",
+      "cost_pricing": "unpriced",
+      "configured_specs": [
+        "codex:gpt-5.6-terra:medium"
+      ],
+      "attempted_specs": [
+        "codex:gpt-5.6-terra:medium"
+      ],
+      "selected_spec_index": 0,
+      "selected_spec_total": 1,
+      "fallback_trigger": null,
+      "failed_attempt_reasons": [],
+      "output_file": "gate.json",
+      "artifact_hash": "sha256:6a44c95fad499277cceccfe0cae6fb660bdc593ebb60f844fb4a051b283e2876",
+      "recommendation": "ITERATE"
+    },
+    {
+      "step": "revise",
+      "timestamp": "2026-08-20T08:50:47Z",
+      "duration_ms": 90847,
+      "cost_usd": 0.0,
+      "result": "success",
+      "prompt_tokens": 92305,
+      "completion_tokens": 5037,
+      "total_tokens": 97342,
+      "session_mode": "persistent",
+      "session_id": "01a01e5c-3f97-7a82-be12-cecdae54ef25",
+      "agent": "codex",
+      "cost_pricing": "unpriced",
+      "configured_specs": [
+        "codex:gpt-5.6-luna:medium"
+      ],
+      "attempted_specs": [
+        "codex:gpt-5.6-luna:medium"
+      ],
+      "selected_spec_index": 0,
+      "selected_spec_total": 1,
+      "fallback_trigger": null,
+      "failed_attempt_reasons": [],
+      "output_file": "plan_v2.md",
+      "artifact_hash": "sha256:0792e68f5f92e6a7ab9a3b6052fa02518df7b8148b9a255162b161fbfea1ee49",
+      "flags_addressed": [
+        {
+          "id": "CF-2A102B858E977C123541",
+          "resolution": "addressed",
+          "reason": "Added explicit pre-execution finalizer admission and fail-closed evidence dependency.",
+          "where": "Phase 0 \u2014 Step 1; Execution Order"
+        },
+        {
+          "id": "CF-FE70A0DAE47C5ED82CAB",
+          "resolution": "addressed",
+          "reason": "Admission now checks required inputs, output collisions, and atomic finalizer feasibility before resume.",
+          "where": "Phase 0 \u2014 Step 1"
+        },
+        {
+          "id": "CF-0F009B19EE3DCD2E33D0",
+          "resolution": "addressed",
+          "reason": "Admission status and hash are carried into acceptance evidence and gate completion.",
+          "where": "Phase 3 \u2014 Step 9"
+        },
+        {
+          "id": "CF-A771992C2F9CD8AE3033",
+          "resolution": "addressed",
+          "reason": "Validation order begins with admission integrity and revalidates before finalization.",
+          "where": "Validation Order; Phase 3 \u2014 Step 11"
+        },
+        {
+          "id": "CF-D8A6BAA55DC0823E63EA",
+          "resolution": "addressed",
+          "reason": "The plan states the concrete owner, artifact path, atomic probe, and blocking conditions.",
+          "where": "Phase 0 \u2014 Step 1; scripts/reshape/m7_gate.py"
+        },
+        {
+          "id": "CF-EA8AA9693CAF430A029F",
+          "resolution": "addressed",
+          "reason": "No alternate approach or scope expansion was needed; the existing hardening plan remains aligned and gains the missing custody gate.",
+          "where": "Overview; Execution Order"
+        }
+      ]
+    },
+    {
+      "step": "critique",
+      "timestamp": "2026-08-20T08:55:28Z",
+      "duration_ms": 2062,
+      "cost_usd": 0.0,
+      "result": "success",
+      "session_mode": "persistent",
+      "session_id": null,
+      "agent": "codex",
+      "configured_specs": [
+        "codex"
+      ],
+      "attempted_specs": [
+        "codex"
+      ],
+      "selected_spec_index": 0,
+      "selected_spec_total": 1,
+      "fallback_trigger": null,
+      "failed_attempt_reasons": [],
+      "output_file": "critique_v2.json",
+      "artifact_hash": "sha256:a7e810d76c73ee22091c5c9d7a15aff2a434a3636a8accab75e2356729de71cf",
+      "flags_count": 2
+    },
+    {
+      "step": "gate",
+      "timestamp": "2026-08-20T08:56:29Z",
+      "duration_ms": 51925,
+      "cost_usd": 0.0,
+      "result": "success",
+      "prompt_tokens": 216758,
+      "completion_tokens": 2577,
+      "total_tokens": 219335,
+      "session_mode": "persistent",
+      "session_id": "01a01e62-0e0e-73a3-bb10-19e7969f140a",
+      "agent": "codex",
+      "cost_pricing": "unpriced",
+      "configured_specs": [
+        "codex:gpt-5.6-terra:medium"
+      ],
+      "attempted_specs": [
+        "codex:gpt-5.6-terra:medium"
+      ],
+      "selected_spec_index": 0,
+      "selected_spec_total": 1,
+      "fallback_trigger": null,
+      "failed_attempt_reasons": [],
+      "output_file": "gate.json",
+      "artifact_hash": "sha256:8315bf4ec4c382e1906bb55089964f2d633a101cf99278c72f1f2eaf5fc3edcf",
+      "recommendation": "PROCEED"
+    },
+    {
+      "step": "finalize",
+      "timestamp": "2026-08-20T09:10:41Z",
+      "duration_ms": 605653,
+      "cost_usd": 0.0,
+      "result": "success",
+      "prompt_tokens": 1013679,
+      "completion_tokens": 25001,
+      "total_tokens": 1038680,
+      "session_mode": "persistent",
+      "session_id": "01a01e62-fc08-7363-a46f-e2a6362eee18",
+      "agent": "codex",
+      "cost_pricing": "unpriced",
+      "configured_specs": [
+        "codex:gpt-5.6-sol:high"
+      ],
+      "attempted_specs": [
+        "codex:gpt-5.6-sol:high"
+      ],
+      "selected_spec_index": 0,
+      "selected_spec_total": 1,
+      "fallback_trigger": null,
+      "failed_attempt_reasons": [],
+      "output_file": "finalize.json",
+      "artifact_hash": "sha256:5ee8626672bf0f5cc45fa1a7606d334d85cd2568d89eb8898225982fd5b0d52d"
+    },
+    {
+      "step": "execute",
+      "timestamp": "2026-08-20T10:01:58Z",
+      "duration_ms": 2979613,
+      "cost_usd": 0.0,
+      "result": "blocked",
+      "session_mode": "persistent",
+      "session_id": "01a01e9c-5d75-78d0-bae3-90d99e6596fd",
+      "agent": "codex",
+      "configured_specs": [
+        "codex"
+      ],
+      "attempted_specs": [
+        "codex"
+      ],
+      "selected_spec_index": 0,
+      "selected_spec_total": 1,
+      "fallback_trigger": null,
+      "failed_attempt_reasons": [],
+      "output_file": "execution.json",
+      "artifact_hash": "sha256:5b282bee8745bca7ddf05112141ee0ff7eece58b58a4a33c670355c880b2dec3",
+      "finalize_hash": "sha256:11da10dfa983ba26385a641e682dc580a80b2a641062b9c95fc72f7c10f8154d",
+      "approval_mode": "auto_approve",
+      "batch_to_tier": [
+        {
+          "batch_number": 1,
+          "batch_index": 1,
+          "batch_complexity": 4,
+          "tier_model_spec": "codex:gpt-5.6-luna:high",
+          "resolved_agent": "codex",
+          "resolved_mode": "persistent",
+          "resolved_model": "gpt-5.6-luna",
+          "actual_agent": "codex",
+          "actual_model": "gpt-5.6-luna",
+          "routing_source": "toml",
+          "projected_tier": 4,
+          "counterfactual_tag": null,
+          "low_confidence": false
+        },
+        {
+          "batch_number": 2,
+          "batch_index": 2,
+          "batch_complexity": 3,
+          "tier_model_spec": "codex:gpt-5.6-luna:high",
+          "resolved_agent": "codex",
+          "resolved_mode": "persistent",
+          "resolved_model": "gpt-5.6-luna",
+          "actual_agent": "codex",
+          "actual_model": "gpt-5.6-luna",
+          "routing_source": "toml",
+          "projected_tier": 3,
+          "counterfactual_tag": null,
+          "low_confidence": false
+        },
+        {
+          "batch_number": 3,
+          "batch_index": 3,
+          "batch_complexity": 5,
+          "tier_model_spec": "codex:gpt-5.6-luna:xhigh",
+          "resolved_agent": "codex",
+          "resolved_mode": "persistent",
+          "resolved_model": "gpt-5.6-luna",
+          "actual_agent": "codex",
+          "actual_model": "gpt-5.6-luna",
+          "routing_source": "toml",
+          "projected_tier": 5,
+          "counterfactual_tag": null,
+          "low_confidence": false
+        },
+        {
+          "batch_number": 5,
+          "batch_index": 4,
+          "batch_complexity": 6,
+          "tier_model_spec": "codex:gpt-5.6-luna:max",
+          "resolved_agent": "codex",
+          "resolved_mode": "persistent",
+          "resolved_model": "gpt-5.6-luna",
+          "actual_agent": "codex",
+          "actual_model": "gpt-5.6-luna",
+          "routing_source": "toml",
+          "projected_tier": 6,
+          "counterfactual_tag": null,
+          "low_confidence": false
+        },
+        {
+          "batch_number": 4,
+          "batch_index": 5,
+          "batch_complexity": 4,
+          "tier_model_spec": "codex:gpt-5.6-luna:high",
+          "resolved_agent": "codex",
+          "resolved_mode": "persistent",
+          "resolved_model": "gpt-5.6-luna",
+          "actual_agent": "codex",
+          "actual_model": "gpt-5.6-luna",
+          "routing_source": "toml",
+          "projected_tier": 4,
+          "counterfactual_tag": null,
+          "low_confidence": false
+        },
+        {
+          "batch_number": 7,
+          "batch_index": 6,
+          "batch_complexity": 3,
+          "tier_model_spec": "codex:gpt-5.6-luna:high",
+          "resolved_agent": "codex",
+          "resolved_mode": "persistent",
+          "resolved_model": "gpt-5.6-luna",
+          "actual_agent": "codex",
+          "actual_model": "gpt-5.6-luna",
+          "routing_source": "toml",
+          "projected_tier": 3,
+          "counterfactual_tag": null,
+          "low_confidence": false
+        }
+      ]
+    },
+    {
+      "step": "execute",
+      "timestamp": "2026-08-20T11:12:29Z",
+      "duration_ms": 0,
+      "cost_usd": 0.0,
+      "result": "error",
+      "raw_output_file": "execute_v2_raw.txt",
+      "message": "validation job VJ11 exited 1; expected one of [0]"
+    },
+    {
+      "step": "execute",
+      "timestamp": "2026-08-20T11:28:50Z",
+      "duration_ms": 0,
+      "cost_usd": 0.0,
+      "result": "error",
+      "raw_output_file": "execute_v2_raw.txt",
+      "message": "validation job VJ11 exited 1; expected one of [0]"
+    },
+    {
+      "step": "execute",
+      "timestamp": "2026-08-20T11:33:05Z",
+      "duration_ms": 0,
+      "cost_usd": 0.0,
+      "result": "error",
+      "raw_output_file": "execute_v2_raw.txt",
+      "message": "validation job VJ11 exited 1; expected one of [0]"
+    },
+    {
+      "step": "execute",
+      "timestamp": "2026-08-20T11:36:11Z",
+      "duration_ms": 0,
+      "cost_usd": 0.0,
+      "result": "error",
+      "raw_output_file": "execute_v2_raw.txt",
+      "message": "validation job VJ11 exited 1; expected one of [0]"
+    },
+    {
+      "step": "execute",
+      "timestamp": "2026-08-20T11:40:02Z",
+      "duration_ms": 0,
+      "cost_usd": 0.0,
+      "result": "error",
+      "raw_output_file": "execute_v2_raw.txt",
+      "message": "validation job VJ6 exited 1; expected one of [0]"
+    },
+    {
+      "step": "execute",
+      "timestamp": "2026-08-20T12:58:01Z",
+      "duration_ms": 537405,
+      "cost_usd": 0.0,
+      "result": "blocked",
+      "session_mode": "persistent",
+      "session_id": "01a01f3a-f487-7c62-9bba-f8e1a5f81fa2",
+      "agent": "codex",
+      "configured_specs": [
+        "codex"
+      ],
+      "attempted_specs": [
+        "codex"
+      ],
+      "selected_spec_index": 0,
+      "selected_spec_total": 1,
+      "fallback_trigger": null,
+      "failed_attempt_reasons": [],
+      "output_file": "execution.json",
+      "artifact_hash": "sha256:b4070da9105fef8f6ff98d3c946e12afefa7288ac6ccf035012ba7cae7afeff7",
+      "finalize_hash": "sha256:6d5348d4b1e988f434a5597ccef3780b0bbed57cd518e171af7a6b2fcffbd580",
+      "approval_mode": "auto_approve"
+    },
+    {
+      "step": "execute",
+      "timestamp": "2026-08-20T13:06:54Z",
+      "duration_ms": 0,
+      "cost_usd": 0.0,
+      "result": "error",
+      "raw_output_file": "execute_v2_raw.txt",
+      "message": "runtime root HEAD does not match the manifest pin: expected 4ef83c15d9ce9e5c0e586e598e31615c56125d52, live 1ea6d2b69bbbebfa06a17dd3ff872fd3b473fc3b"
+    },
+    {
+      "step": "execute",
+      "timestamp": "2026-08-20T13:18:52Z",
+      "duration_ms": 0,
+      "cost_usd": 0.0,
+      "result": "error",
+      "raw_output_file": "execute_v2_raw.txt",
+      "message": "Worker launch preflight mismatch: source_ref: expected=4ef83c15d9ce9e5c0e586e598e31615c56125d52 actual=1ea6d2b69bbbebfa06a17dd3ff872fd3b473fc3b; runtime_revision: expected=4ef83c15d9ce9e5c0e586e598e31615c56125d52 actual=1ea6d2b69bbbebfa06a17dd3ff872fd3b473fc3b"
+    },
+    {
+      "step": "execute",
+      "timestamp": "2026-08-20T13:44:59Z",
+      "duration_ms": 0,
+      "cost_usd": 0.0,
+      "result": "error",
+      "raw_output_file": "execute_v2_raw.txt",
+      "message": "validation job VJ14 exited 1; expected one of [0]"
+    },
+    {
+      "step": "execute",
+      "timestamp": "2026-08-20T14:25:56Z",
+      "duration_ms": 0,
+      "cost_usd": 0.0,
+      "result": "error",
+      "raw_output_file": "execute_v2_raw.txt",
+      "message": "Worker launch preflight mismatch: source_ref: expected=1ea6d2b69bbbebfa06a17dd3ff872fd3b473fc3b actual=423ec212c64c0bb5450f81f19229a94494dd9a08; runtime_revision: expected=1ea6d2b69bbbebfa06a17dd3ff872fd3b473fc3b actual=423ec212c64c0bb5450f81f19229a94494dd9a08"
+    },
+    {
+      "step": "execute",
+      "timestamp": "2026-08-20T14:26:13Z",
+      "duration_ms": 0,
+      "cost_usd": 0.0,
+      "result": "error",
+      "raw_output_file": "execute_v2_raw.txt",
+      "message": "Worker launch preflight mismatch: source_ref: expected=1ea6d2b69bbbebfa06a17dd3ff872fd3b473fc3b actual=423ec212c64c0bb5450f81f19229a94494dd9a08; runtime_revision: expected=1ea6d2b69bbbebfa06a17dd3ff872fd3b473fc3b actual=423ec212c64c0bb5450f81f19229a94494dd9a08"
+    },
+    {
+      "step": "execute",
+      "timestamp": "2026-08-20T14:26:29Z",
+      "duration_ms": 0,
+      "cost_usd": 0.0,
+      "result": "error",
+      "raw_output_file": "execute_v2_raw.txt",
+      "message": "Worker launch preflight mismatch: source_ref: expected=1ea6d2b69bbbebfa06a17dd3ff872fd3b473fc3b actual=423ec212c64c0bb5450f81f19229a94494dd9a08; runtime_revision: expected=1ea6d2b69bbbebfa06a17dd3ff872fd3b473fc3b actual=423ec212c64c0bb5450f81f19229a94494dd9a08"
+    },
+    {
+      "step": "execute",
+      "timestamp": "2026-08-20T14:26:45Z",
+      "duration_ms": 0,
+      "cost_usd": 0.0,
+      "result": "error",
+      "raw_output_file": "execute_v2_raw.txt",
+      "message": "Worker launch preflight mismatch: source_ref: expected=1ea6d2b69bbbebfa06a17dd3ff872fd3b473fc3b actual=423ec212c64c0bb5450f81f19229a94494dd9a08; runtime_revision: expected=1ea6d2b69bbbebfa06a17dd3ff872fd3b473fc3b actual=423ec212c64c0bb5450f81f19229a94494dd9a08"
+    },
+    {
+      "step": "execute",
+      "timestamp": "2026-08-20T14:27:02Z",
+      "duration_ms": 0,
+      "cost_usd": 0.0,
+      "result": "error",
+      "raw_output_file": "execute_v2_raw.txt",
+      "message": "Worker launch preflight mismatch: source_ref: expected=1ea6d2b69bbbebfa06a17dd3ff872fd3b473fc3b actual=423ec212c64c0bb5450f81f19229a94494dd9a08; runtime_revision: expected=1ea6d2b69bbbebfa06a17dd3ff872fd3b473fc3b actual=423ec212c64c0bb5450f81f19229a94494dd9a08"
+    },
+    {
+      "step": "execute",
+      "timestamp": "2026-08-20T14:27:19Z",
+      "duration_ms": 0,
+      "cost_usd": 0.0,
+      "result": "error",
+      "raw_output_file": "execute_v2_raw.txt",
+      "message": "Worker launch preflight mismatch: source_ref: expected=1ea6d2b69bbbebfa06a17dd3ff872fd3b473fc3b actual=423ec212c64c0bb5450f81f19229a94494dd9a08; runtime_revision: expected=1ea6d2b69bbbebfa06a17dd3ff872fd3b473fc3b actual=423ec212c64c0bb5450f81f19229a94494dd9a08"
+    },
+    {
+      "step": "execute",
+      "timestamp": "2026-08-20T14:27:36Z",
+      "duration_ms": 0,
+      "cost_usd": 0.0,
+      "result": "error",
+      "raw_output_file": "execute_v2_raw.txt",
+      "message": "Worker launch preflight mismatch: source_ref: expected=1ea6d2b69bbbebfa06a17dd3ff872fd3b473fc3b actual=423ec212c64c0bb5450f81f19229a94494dd9a08; runtime_revision: expected=1ea6d2b69bbbebfa06a17dd3ff872fd3b473fc3b actual=423ec212c64c0bb5450f81f19229a94494dd9a08"
+    },
+    {
+      "step": "execute",
+      "timestamp": "2026-08-20T14:27:52Z",
+      "duration_ms": 0,
+      "cost_usd": 0.0,
+      "result": "error",
+      "raw_output_file": "execute_v2_raw.txt",
+      "message": "Worker launch preflight mismatch: source_ref: expected=1ea6d2b69bbbebfa06a17dd3ff872fd3b473fc3b actual=423ec212c64c0bb5450f81f19229a94494dd9a08; runtime_revision: expected=1ea6d2b69bbbebfa06a17dd3ff872fd3b473fc3b actual=423ec212c64c0bb5450f81f19229a94494dd9a08"
+    },
+    {
+      "step": "execute",
+      "timestamp": "2026-08-20T14:28:09Z",
+      "duration_ms": 0,
+      "cost_usd": 0.0,
+      "result": "error",
+      "raw_output_file": "execute_v2_raw.txt",
+      "message": "Worker launch preflight mismatch: source_ref: expected=1ea6d2b69bbbebfa06a17dd3ff872fd3b473fc3b actual=423ec212c64c0bb5450f81f19229a94494dd9a08; runtime_revision: expected=1ea6d2b69bbbebfa06a17dd3ff872fd3b473fc3b actual=423ec212c64c0bb5450f81f19229a94494dd9a08"
+    },
+    {
+      "step": "execute",
+      "timestamp": "2026-08-20T14:28:26Z",
+      "duration_ms": 0,
+      "cost_usd": 0.0,
+      "result": "error",
+      "raw_output_file": "execute_v2_raw.txt",
+      "message": "Worker launch preflight mismatch: source_ref: expected=1ea6d2b69bbbebfa06a17dd3ff872fd3b473fc3b actual=423ec212c64c0bb5450f81f19229a94494dd9a08; runtime_revision: expected=1ea6d2b69bbbebfa06a17dd3ff872fd3b473fc3b actual=423ec212c64c0bb5450f81f19229a94494dd9a08"
+    },
+    {
+      "step": "execute",
+      "timestamp": "2026-08-20T14:28:43Z",
+      "duration_ms": 0,
+      "cost_usd": 0.0,
+      "result": "error",
+      "raw_output_file": "execute_v2_raw.txt",
+      "message": "Worker launch preflight mismatch: source_ref: expected=1ea6d2b69bbbebfa06a17dd3ff872fd3b473fc3b actual=423ec212c64c0bb5450f81f19229a94494dd9a08; runtime_revision: expected=1ea6d2b69bbbebfa06a17dd3ff872fd3b473fc3b actual=423ec212c64c0bb5450f81f19229a94494dd9a08"
+    },
+    {
+      "step": "execute",
+      "timestamp": "2026-08-20T14:28:59Z",
+      "duration_ms": 0,
+      "cost_usd": 0.0,
+      "result": "error",
+      "raw_output_file": "execute_v2_raw.txt",
+      "message": "Worker launch preflight mismatch: source_ref: expected=1ea6d2b69bbbebfa06a17dd3ff872fd3b473fc3b actual=423ec212c64c0bb5450f81f19229a94494dd9a08; runtime_revision: expected=1ea6d2b69bbbebfa06a17dd3ff872fd3b473fc3b actual=423ec212c64c0bb5450f81f19229a94494dd9a08"
+    },
+    {
+      "step": "execute",
+      "timestamp": "2026-08-20T14:29:16Z",
+      "duration_ms": 0,
+      "cost_usd": 0.0,
+      "result": "error",
+      "raw_output_file": "execute_v2_raw.txt",
+      "message": "Worker launch preflight mismatch: source_ref: expected=1ea6d2b69bbbebfa06a17dd3ff872fd3b473fc3b actual=423ec212c64c0bb5450f81f19229a94494dd9a08; runtime_revision: expected=1ea6d2b69bbbebfa06a17dd3ff872fd3b473fc3b actual=423ec212c64c0bb5450f81f19229a94494dd9a08"
+    },
+    {
+      "step": "execute",
+      "timestamp": "2026-08-20T14:29:32Z",
+      "duration_ms": 0,
+      "cost_usd": 0.0,
+      "result": "error",
+      "raw_output_file": "execute_v2_raw.txt",
+      "message": "Worker launch preflight mismatch: source_ref: expected=1ea6d2b69bbbebfa06a17dd3ff872fd3b473fc3b actual=423ec212c64c0bb5450f81f19229a94494dd9a08; runtime_revision: expected=1ea6d2b69bbbebfa06a17dd3ff872fd3b473fc3b actual=423ec212c64c0bb5450f81f19229a94494dd9a08"
+    },
+    {
+      "step": "execute",
+      "timestamp": "2026-08-20T14:29:49Z",
+      "duration_ms": 0,
+      "cost_usd": 0.0,
+      "result": "error",
+      "raw_output_file": "execute_v2_raw.txt",
+      "message": "Worker launch preflight mismatch: source_ref: expected=1ea6d2b69bbbebfa06a17dd3ff872fd3b473fc3b actual=423ec212c64c0bb5450f81f19229a94494dd9a08; runtime_revision: expected=1ea6d2b69bbbebfa06a17dd3ff872fd3b473fc3b actual=423ec212c64c0bb5450f81f19229a94494dd9a08"
+    },
+    {
+      "step": "execute",
+      "timestamp": "2026-08-20T14:30:06Z",
+      "duration_ms": 0,
+      "cost_usd": 0.0,
+      "result": "error",
+      "raw_output_file": "execute_v2_raw.txt",
+      "message": "Worker launch preflight mismatch: source_ref: expected=1ea6d2b69bbbebfa06a17dd3ff872fd3b473fc3b actual=423ec212c64c0bb5450f81f19229a94494dd9a08; runtime_revision: expected=1ea6d2b69bbbebfa06a17dd3ff872fd3b473fc3b actual=423ec212c64c0bb5450f81f19229a94494dd9a08"
+    },
+    {
+      "step": "execute",
+      "timestamp": "2026-08-20T14:30:23Z",
+      "duration_ms": 0,
+      "cost_usd": 0.0,
+      "result": "error",
+      "raw_output_file": "execute_v2_raw.txt",
+      "message": "Worker launch preflight mismatch: source_ref: expected=1ea6d2b69bbbebfa06a17dd3ff872fd3b473fc3b actual=423ec212c64c0bb5450f81f19229a94494dd9a08; runtime_revision: expected=1ea6d2b69bbbebfa06a17dd3ff872fd3b473fc3b actual=423ec212c64c0bb5450f81f19229a94494dd9a08"
+    },
+    {
+      "step": "execute",
+      "timestamp": "2026-08-20T14:43:44Z",
+      "duration_ms": 0,
+      "cost_usd": 0.0,
+      "result": "error",
+      "raw_output_file": "execute_v2_raw.txt",
+      "message": "validation job VJ14 exited 1; expected one of [0]"
+    },
+    {
+      "step": "execute",
+      "timestamp": "2026-08-20T19:15:55Z",
+      "duration_ms": 239403,
+      "cost_usd": 0.0,
+      "result": "success",
+      "session_mode": "persistent",
+      "session_id": "01a02094-f6c4-7462-a417-971bef5f95a1",
+      "agent": "codex",
+      "configured_specs": [
+        "codex"
+      ],
+      "attempted_specs": [
+        "codex"
+      ],
+      "selected_spec_index": 0,
+      "selected_spec_total": 1,
+      "fallback_trigger": null,
+      "failed_attempt_reasons": [],
+      "output_file": "execution.json",
+      "artifact_hash": "sha256:c56f3e1b46405a6dfb255c349711a12808312401325720b7e5946477706592e0",
+      "finalize_hash": "sha256:b0669cf497479e0b4636a212d46da9b2558448c48b1c2aa45b51b8db520b9d69",
+      "approval_mode": "auto_approve",
+      "batch_to_tier": [
+        {
+          "batch_number": 11,
+          "batch_index": 1,
+          "batch_complexity": 4,
+          "tier_model_spec": "codex:gpt-5.6-luna:high",
+          "resolved_agent": "codex",
+          "resolved_mode": "persistent",
+          "resolved_model": "gpt-5.6-luna",
+          "actual_agent": "codex",
+          "actual_model": "gpt-5.6-luna",
+          "routing_source": "toml",
+          "projected_tier": 4,
+          "counterfactual_tag": null,
+          "low_confidence": false
+        }
+      ]
+    },
+    {
+      "step": "review",
+      "timestamp": "2026-08-20T19:32:14Z",
+      "duration_ms": 71249,
+      "cost_usd": 0.0,
+      "result": "needs_rework",
+      "session_mode": "persistent",
+      "session_id": "01a020a7-c924-7381-bec6-56984f92313c",
+      "agent": "codex",
+      "cost_pricing": "unavailable",
+      "configured_specs": [
+        "codex:gpt-5.6-sol:medium"
+      ],
+      "attempted_specs": [
+        "codex:gpt-5.6-sol:medium"
+      ],
+      "selected_spec_index": 0,
+      "selected_spec_total": 1,
+      "fallback_trigger": null,
+      "failed_attempt_reasons": [],
+      "output_file": "review.json",
+      "artifact_hash": "sha256:b495ce4c33de006be1fcd94e7769f88c81cd8de0f0d33dbccd112c11503775a2",
+      "finalize_hash": "sha256:b0669cf497479e0b4636a212d46da9b2558448c48b1c2aa45b51b8db520b9d69"
+    },
+    {
+      "step": "execute",
+      "timestamp": "2026-08-20T19:40:36Z",
+      "duration_ms": 391453,
+      "cost_usd": 0.0,
+      "result": "success",
+      "session_mode": "persistent",
+      "session_id": "01a020a9-36ad-7422-b13f-fa630467907c",
+      "agent": "codex",
+      "configured_specs": [
+        "codex"
+      ],
+      "attempted_specs": [
+        "codex"
+      ],
+      "selected_spec_index": 0,
+      "selected_spec_total": 1,
+      "fallback_trigger": null,
+      "failed_attempt_reasons": [],
+      "output_file": "execution.json",
+      "artifact_hash": "sha256:725955ce831eabac7154d776f4d1b237e3c1c35ac090eee3c84cfc93bb004ca0",
+      "finalize_hash": "sha256:00c19acde354e8d052019784c16c7c15b1c75f52ed7ef7627430c12e91127e80",
+      "approval_mode": "auto_approve",
+      "batch_to_tier": [
+        {
+          "batch_number": 1,
+          "batch_index": 1,
+          "batch_complexity": 5,
+          "tier_model_spec": "codex:gpt-5.6-luna:xhigh",
+          "resolved_agent": "codex",
+          "resolved_mode": "persistent",
+          "resolved_model": "gpt-5.6-luna",
+          "actual_agent": "codex",
+          "actual_model": "gpt-5.6-luna",
+          "routing_source": "toml",
+          "projected_tier": 5,
+          "counterfactual_tag": null,
+          "low_confidence": false
+        }
+      ]
+    },
+    {
+      "step": "review",
+      "timestamp": "2026-08-20T19:49:12Z",
+      "duration_ms": 44457,
+      "cost_usd": 0.0,
+      "result": "success",
+      "session_mode": "persistent",
+      "session_id": "01a020b7-bb38-7380-b06a-6e2284099171",
+      "agent": "codex",
+      "cost_pricing": "unavailable",
+      "configured_specs": [
+        "codex:gpt-5.6-sol:medium"
+      ],
+      "attempted_specs": [
+        "codex:gpt-5.6-sol:medium"
+      ],
+      "selected_spec_index": 0,
+      "selected_spec_total": 1,
+      "fallback_trigger": null,
+      "failed_attempt_reasons": [],
+      "output_file": "review.json",
+      "artifact_hash": "sha256:515920999782b21fbd8b11b5667791bf3b056d16e3be47a4a7b0ea98b5d25277",
+      "finalize_hash": "sha256:00c19acde354e8d052019784c16c7c15b1c75f52ed7ef7627430c12e91127e80"
+    }
+  ],
+  "meta": {
+    "significant_counts": [
+      0,
+      0
+    ],
+    "weighted_scores": [
+      0,
+      0
+    ],
+    "plan_deltas": [
+      95.51
+    ],
+    "recurring_critiques": [],
+    "adjacent_text_matches": [
+      [],
+      []
+    ],
+    "semantic_recurrence": [
+      false,
+      false
+    ],
+    "total_cost_usd": 0.0,
+    "overrides": [
+      {
+        "action": "recover-blocked",
+        "timestamp": "2026-08-20T19:07:45Z",
+        "reason": "engine BrokenPipe stdout tee guard (0425372ec); same occurrence",
+        "from_state": "blocked",
+        "to_state": "finalized",
+        "resume_cursor": {
+          "phase": "execute",
+          "retry_strategy": "repair_phase_contract"
+        },
+        "blocker_ids": [],
+        "archived_phase_result": "phase_result.recovered-20260820T190745Z.json",
+        "phase_contract_repair": {
+          "failure_kind": "deterministic_phase_failure",
+          "phase": "execute",
+          "repair_commit": "0425372eca588a878dfffc5fbce44cbb2624d2c1",
+          "failure_fingerprint": "1160906d87910bea8dc1be4a6f0063b15290d6de33a5b65d064faa9e2a09f1df",
+          "repair_scope": "engine_runtime",
+          "repair_root": "/workspace/runtime-candidates/astrid-first",
+          "authority": "explicit_repair_commit_bound_to_engine_runtime",
+          "engine_head": "0425372eca588a878dfffc5fbce44cbb2624d2c1"
+        }
+      }
+    ],
+    "notes": [],
+    "admission_controls": {
+      "init": {
+        "schema": "arnold.megaplan.admission_evidence.v1",
+        "writer_id": "megaplan.admission.init",
+        "surface_name": "megaplan.admission.init",
+        "selector": "m7-dogfood-and-hardening-20260820-0835",
+        "source_record": {
+          "schema": "arnold.megaplan.canonical_source_binding.v1",
+          "source_path": "/workspace/astrid-first-ce15b5a3/astrid/.megaplan/initiatives/astrid-first/briefs/m7.md",
+          "project_relative_path": ".megaplan/initiatives/astrid-first/briefs/m7.md",
+          "exists": true,
+          "semantic_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+          "file_sha256": "279a98474d6a1a8dad79a8301fb2e71a33795577b5326320b5a7f93c0ba0b703",
+          "git_revision": "8b97d6eb7898c02e1871db9f8ef2dd401632bdc4",
+          "git_blob": "83dd1cf563a4bc398ab12bca9035477a51782a4a",
+          "git_path": ".megaplan/initiatives/astrid-first/briefs/m7.md",
+          "errors": []
+        },
+        "fences": [
+          {
+            "identity": "plan_dir_absent",
+            "expected": false,
+            "observed": false,
+            "satisfied": true,
+            "detail": "init admission must materialize a new plan directory"
+          }
+        ],
+        "extra": {
+          "project_dir": "/workspace/astrid-first-ce15b5a3/astrid"
+        }
+      },
+      "source_binding.capture": {
+        "schema": "arnold.megaplan.admission_evidence.v1",
+        "writer_id": "megaplan.admission.source_binding",
+        "surface_name": "megaplan.admission.source_binding",
+        "selector": "/workspace/astrid-first-ce15b5a3/astrid/.megaplan/initiatives/astrid-first/briefs/m7.md",
+        "source_record": {
+          "schema": "arnold.megaplan.canonical_source_binding.v1",
+          "source_path": "/workspace/astrid-first-ce15b5a3/astrid/.megaplan/initiatives/astrid-first/briefs/m7.md",
+          "project_relative_path": ".megaplan/initiatives/astrid-first/briefs/m7.md",
+          "exists": true,
+          "semantic_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+          "file_sha256": "279a98474d6a1a8dad79a8301fb2e71a33795577b5326320b5a7f93c0ba0b703",
+          "git_revision": "8b97d6eb7898c02e1871db9f8ef2dd401632bdc4",
+          "git_blob": "83dd1cf563a4bc398ab12bca9035477a51782a4a",
+          "git_path": ".megaplan/initiatives/astrid-first/briefs/m7.md",
+          "errors": []
+        },
+        "fences": [
+          {
+            "identity": "canonical_source_available",
+            "expected": true,
+            "observed": true,
+            "satisfied": true,
+            "detail": "source binding requires an exact readable source record"
+          }
+        ],
+        "extra": {
+          "project_dir": "/workspace/astrid-first-ce15b5a3/astrid"
+        }
+      }
+    },
+    "canonical_source_binding": {
+      "schema": "arnold.megaplan.canonical_source_binding.v1",
+      "bound_at": "2026-08-20T08:35:31Z",
+      "bound": {
+        "schema": "arnold.megaplan.canonical_source_binding.v1",
+        "source_path": "/workspace/astrid-first-ce15b5a3/astrid/.megaplan/initiatives/astrid-first/briefs/m7.md",
+        "project_relative_path": ".megaplan/initiatives/astrid-first/briefs/m7.md",
+        "exists": true,
+        "semantic_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "file_sha256": "279a98474d6a1a8dad79a8301fb2e71a33795577b5326320b5a7f93c0ba0b703",
+        "git_revision": "8b97d6eb7898c02e1871db9f8ef2dd401632bdc4",
+        "git_blob": "83dd1cf563a4bc398ab12bca9035477a51782a4a",
+        "git_path": ".megaplan/initiatives/astrid-first/briefs/m7.md",
+        "errors": []
+      }
+    },
+    "execution_environment": {
+      "schema_version": 1,
+      "created_phase": "init",
+      "last_observed_phase": "review",
+      "project_root": "/workspace/astrid-first-ce15b5a3/astrid",
+      "target_root": "/workspace/astrid-first-ce15b5a3/astrid",
+      "work_dir": "/workspace/astrid-first-ce15b5a3/astrid",
+      "engine_root": "/workspace/runtime-candidates/astrid-first",
+      "target_head": "8b58d29ae157a79a1d63d52df16a2736a7705b14",
+      "target_base": "d3c4b566c1d34dfd92ac81607246b2a18cd21538",
+      "target_base_ref": "origin/main",
+      "target_fallback_reason": null
+    },
+    "chain_policy": {
+      "prerequisite_policy": "none",
+      "validation_policy": "none",
+      "review_policy": {
+        "clean_milestone_pr": "auto"
+      },
+      "driver_auto_approve": true,
+      "source": "chain_yaml",
+      "milestone_label": "m7",
+      "milestone_base_sha": "8b97d6eb7898c02e1871db9f8ef2dd401632bdc4"
+    },
+    "anchors": {
+      "schema_version": 1,
+      "by_type": {
+        "north_star": {
+          "anchor_type": "north_star",
+          "documents": [
+            {
+              "scope": "epic",
+              "source_kind": "chain",
+              "source_path": ".megaplan/initiatives/astrid-first/NORTHSTAR.md",
+              "artifact_path": "anchors/north_star/epic.md",
+              "title": "North Star: Astrid First",
+              "sha256": "a928ba4b112417c58a6aa59ac0a35977b90f5694a0603253acba5252ffa1025e",
+              "size_bytes": 9570,
+              "captured_at": "2026-08-20T08:35:32.796268+00:00",
+              "source_spec_path": ".megaplan/initiatives/astrid-first/chain.yaml"
+            }
+          ],
+          "combined_artifact_path": "anchors/north_star/combined.md"
+        }
+      }
+    },
+    "current_invocation_id": "92d1c1bc90e4467e",
+    "user_action_resolutions": [],
+    "quality_gate_resolutions": [],
+    "critique_unverifiable_checks": [
+      {
+        "iteration": 1,
+        "checks": [
+          {
+            "id": "issue_hints",
+            "question": "Did the work fully address the issue hints, user notes, and approved plan requirements?",
+            "reason": "parallel critique worker failed for check 'issue_hints': Codex response output path already contains evidence; overwriting it is forbidden",
+            "complexity": 6,
+            "attention": "high_complexity_unverifiable"
+          },
+          {
+            "id": "correctness",
+            "question": "Are the proposed changes technically correct?",
+            "reason": "parallel critique worker failed for check 'correctness': Codex response output path already contains evidence; overwriting it is forbidden",
+            "complexity": 9,
+            "attention": "high_complexity_unverifiable"
+          },
+          {
+            "id": "scope",
+            "question": "Search for related code that handles the same concept. Is the reported issue a symptom of something broader \u2014 and is any single step sized to fit one worker turn?",
+            "reason": "parallel critique worker failed for check 'scope': Codex response output path already contains evidence; overwriting it is forbidden",
+            "complexity": 7,
+            "attention": "high_complexity_unverifiable"
+          },
+          {
+            "id": "all_locations",
+            "question": "Does the change touch all locations AND supporting infrastructure?",
+            "reason": "parallel critique worker failed for check 'all_locations': Codex response output path already contains evidence; overwriting it is forbidden",
+            "complexity": 5,
+            "attention": "high_complexity_unverifiable"
+          },
+          {
+            "id": "verification",
+            "question": "Is there convincing verification for the change?",
+            "reason": "parallel critique worker failed for check 'verification': Codex response output path already contains evidence; overwriting it is forbidden",
+            "complexity": 8,
+            "attention": "high_complexity_unverifiable"
+          },
+          {
+            "id": "prerequisite_ordering",
+            "question": "Do tasks that depend on a precondition gracefully handle that precondition only partially holding?",
+            "reason": "parallel critique worker failed for check 'prerequisite_ordering': Codex response output path already contains evidence; overwriting it is forbidden",
+            "complexity": 5,
+            "attention": "high_complexity_unverifiable"
+          }
+        ],
+        "warnings": [
+          "critique degraded: high-complexity check(s) unverifiable (issue_hints, correctness, scope, all_locations, verification, prerequisite_ordering); operator attention required before treating critique as complete."
+        ]
+      },
+      {
+        "iteration": 2,
+        "checks": [
+          {
+            "id": "correctness",
+            "question": "Are the proposed changes technically correct?",
+            "reason": "parallel critique worker failed for check 'correctness': Codex response output path already contains evidence; overwriting it is forbidden",
+            "complexity": 9,
+            "attention": "high_complexity_unverifiable"
+          },
+          {
+            "id": "scope",
+            "question": "Search for related code that handles the same concept. Is the reported issue a symptom of something broader \u2014 and is any single step sized to fit one worker turn?",
+            "reason": "parallel critique worker failed for check 'scope': Codex response output path already contains evidence; overwriting it is forbidden",
+            "complexity": 7,
+            "attention": "high_complexity_unverifiable"
+          },
+          {
+            "id": "verification",
+            "question": "Is there convincing verification for the change?",
+            "reason": "parallel critique worker failed for check 'verification': Codex response output path already contains evidence; overwriting it is forbidden",
+            "complexity": 8,
+            "attention": "high_complexity_unverifiable"
+          },
+          {
+            "id": "criteria_quality",
+            "question": "Are the success criteria well-prioritized and verifiable?",
+            "reason": "parallel critique worker failed for check 'criteria_quality': Codex response output path already contains evidence; overwriting it is forbidden",
+            "complexity": 6,
+            "attention": "high_complexity_unverifiable"
+          },
+          {
+            "id": "prerequisite_ordering",
+            "question": "Do tasks that depend on a precondition gracefully handle that precondition only partially holding?",
+            "reason": "parallel critique worker failed for check 'prerequisite_ordering': Codex response output path already contains evidence; overwriting it is forbidden",
+            "complexity": 6,
+            "attention": "high_complexity_unverifiable"
+          }
+        ],
+        "warnings": [
+          "critique degraded: high-complexity check(s) unverifiable (correctness, scope, verification, criteria_quality, prerequisite_ordering); operator attention required before treating critique as complete."
+        ]
+      }
+    ],
+    "critique_no_progress_streak": 0,
+    "critique_no_progress_iteration": 1,
+    "engine_isolation_verifications": [
+      {
+        "phase": "revise",
+        "timing": "before_worker",
+        "engine_root": "/workspace/runtime-candidates/astrid-first",
+        "proof": {
+          "provider": "trusted_container_probe",
+          "trusted_container": true,
+          "engine_write_denied": false,
+          "target_write_allowed": true,
+          "same_user_chmod_accepted": false,
+          "diagnostic": "probe_failed",
+          "logical_dev_accepted": null,
+          "engine_target_overlap": null,
+          "worker_cwd_is_target": null
+        }
+      },
+      {
+        "phase": "revise",
+        "timing": "after_worker",
+        "engine_root": "/workspace/runtime-candidates/astrid-first"
+      },
+      {
+        "phase": "execute",
+        "timing": "before_worker",
+        "engine_root": "/workspace/runtime-candidates/astrid-first",
+        "proof": {
+          "provider": "trusted_container_probe",
+          "trusted_container": true,
+          "engine_write_denied": false,
+          "target_write_allowed": true,
+          "same_user_chmod_accepted": false,
+          "diagnostic": "probe_failed",
+          "logical_dev_accepted": null,
+          "engine_target_overlap": null,
+          "worker_cwd_is_target": null
+        }
+      },
+      {
+        "phase": "execute",
+        "timing": "after_worker",
+        "engine_root": "/workspace/runtime-candidates/astrid-first"
+      },
+      {
+        "phase": "execute",
+        "timing": "before_worker",
+        "engine_root": "/workspace/runtime-candidates/astrid-first",
+        "proof": {
+          "provider": "trusted_container_probe",
+          "trusted_container": true,
+          "engine_write_denied": false,
+          "target_write_allowed": true,
+          "same_user_chmod_accepted": false,
+          "diagnostic": "probe_failed",
+          "logical_dev_accepted": null,
+          "engine_target_overlap": null,
+          "worker_cwd_is_target": null
+        }
+      },
+      {
+        "phase": "execute",
+        "timing": "after_worker",
+        "engine_root": "/workspace/runtime-candidates/astrid-first"
+      },
+      {
+        "phase": "execute",
+        "timing": "before_worker",
+        "engine_root": "/workspace/runtime-candidates/astrid-first",
+        "proof": {
+          "provider": "trusted_container_probe",
+          "trusted_container": true,
+          "engine_write_denied": false,
+          "target_write_allowed": true,
+          "same_user_chmod_accepted": false,
+          "diagnostic": "probe_failed",
+          "logical_dev_accepted": null,
+          "engine_target_overlap": null,
+          "worker_cwd_is_target": null
+        }
+      },
+      {
+        "phase": "execute",
+        "timing": "after_worker",
+        "engine_root": "/workspace/runtime-candidates/astrid-first"
+      },
+      {
+        "phase": "execute",
+        "timing": "before_worker",
+        "engine_root": "/workspace/runtime-candidates/astrid-first",
+        "proof": {
+          "provider": "trusted_container_probe",
+          "trusted_container": true,
+          "engine_write_denied": false,
+          "target_write_allowed": true,
+          "same_user_chmod_accepted": false,
+          "diagnostic": "probe_failed",
+          "logical_dev_accepted": null,
+          "engine_target_overlap": null,
+          "worker_cwd_is_target": null
+        }
+      },
+      {
+        "phase": "execute",
+        "timing": "after_worker",
+        "engine_root": "/workspace/runtime-candidates/astrid-first"
+      },
+      {
+        "phase": "execute",
+        "timing": "before_worker",
+        "engine_root": "/workspace/runtime-candidates/astrid-first",
+        "proof": {
+          "provider": "trusted_container_probe",
+          "trusted_container": true,
+          "engine_write_denied": false,
+          "target_write_allowed": true,
+          "same_user_chmod_accepted": false,
+          "diagnostic": "probe_failed",
+          "logical_dev_accepted": null,
+          "engine_target_overlap": null,
+          "worker_cwd_is_target": null
+        }
+      },
+      {
+        "phase": "execute",
+        "timing": "after_worker",
+        "engine_root": "/workspace/runtime-candidates/astrid-first"
+      },
+      {
+        "phase": "execute",
+        "timing": "before_worker",
+        "engine_root": "/workspace/runtime-candidates/astrid-first",
+        "proof": {
+          "provider": "trusted_container_probe",
+          "trusted_container": true,
+          "engine_write_denied": false,
+          "target_write_allowed": true,
+          "same_user_chmod_accepted": false,
+          "diagnostic": "probe_failed",
+          "logical_dev_accepted": null,
+          "engine_target_overlap": null,
+          "worker_cwd_is_target": null
+        }
+      },
+      {
+        "phase": "execute",
+        "timing": "after_worker",
+        "engine_root": "/workspace/runtime-candidates/astrid-first"
+      },
+      {
+        "phase": "execute",
+        "timing": "before_worker",
+        "engine_root": "/workspace/runtime-candidates/astrid-first",
+        "proof": {
+          "provider": "trusted_container_probe",
+          "trusted_container": true,
+          "engine_write_denied": false,
+          "target_write_allowed": true,
+          "same_user_chmod_accepted": false,
+          "diagnostic": "probe_failed",
+          "logical_dev_accepted": null,
+          "engine_target_overlap": null,
+          "worker_cwd_is_target": null
+        }
+      },
+      {
+        "phase": "execute",
+        "timing": "after_worker",
+        "engine_root": "/workspace/runtime-candidates/astrid-first"
+      },
+      {
+        "phase": "execute",
+        "timing": "before_worker",
+        "engine_root": "/workspace/runtime-candidates/astrid-first",
+        "proof": {
+          "provider": "trusted_container_probe",
+          "trusted_container": true,
+          "engine_write_denied": false,
+          "target_write_allowed": true,
+          "same_user_chmod_accepted": false,
+          "diagnostic": "probe_failed",
+          "logical_dev_accepted": null,
+          "engine_target_overlap": null,
+          "worker_cwd_is_target": null
+        }
+      },
+      {
+        "phase": "execute",
+        "timing": "after_worker",
+        "engine_root": "/workspace/runtime-candidates/astrid-first"
+      },
+      {
+        "phase": "execute",
+        "timing": "before_worker",
+        "engine_root": "/workspace/runtime-candidates/astrid-first",
+        "proof": {
+          "provider": "trusted_container_probe",
+          "trusted_container": true,
+          "engine_write_denied": false,
+          "target_write_allowed": true,
+          "same_user_chmod_accepted": false,
+          "diagnostic": "probe_failed",
+          "logical_dev_accepted": null,
+          "engine_target_overlap": null,
+          "worker_cwd_is_target": null
+        }
+      },
+      {
+        "phase": "execute",
+        "timing": "after_worker",
+        "engine_root": "/workspace/runtime-candidates/astrid-first"
+      },
+      {
+        "phase": "execute",
+        "timing": "before_worker",
+        "engine_root": "/workspace/runtime-candidates/astrid-first",
+        "proof": {
+          "provider": "trusted_container_probe",
+          "trusted_container": true,
+          "engine_write_denied": false,
+          "target_write_allowed": true,
+          "same_user_chmod_accepted": false,
+          "diagnostic": "probe_failed",
+          "logical_dev_accepted": null,
+          "engine_target_overlap": null,
+          "worker_cwd_is_target": null
+        }
+      },
+      {
+        "phase": "execute",
+        "timing": "after_worker",
+        "engine_root": "/workspace/runtime-candidates/astrid-first"
+      },
+      {
+        "phase": "execute",
+        "timing": "before_worker",
+        "engine_root": "/workspace/runtime-candidates/astrid-first",
+        "proof": {
+          "provider": "trusted_container_probe",
+          "trusted_container": true,
+          "engine_write_denied": false,
+          "target_write_allowed": true,
+          "same_user_chmod_accepted": false,
+          "diagnostic": "probe_failed",
+          "logical_dev_accepted": null,
+          "engine_target_overlap": null,
+          "worker_cwd_is_target": null
+        }
+      },
+      {
+        "phase": "execute",
+        "timing": "after_worker",
+        "engine_root": "/workspace/runtime-candidates/astrid-first"
+      },
+      {
+        "phase": "execute",
+        "timing": "before_worker",
+        "engine_root": "/workspace/runtime-candidates/astrid-first",
+        "proof": {
+          "provider": "trusted_container_probe",
+          "trusted_container": true,
+          "engine_write_denied": false,
+          "target_write_allowed": true,
+          "same_user_chmod_accepted": false,
+          "diagnostic": "probe_failed",
+          "logical_dev_accepted": null,
+          "engine_target_overlap": null,
+          "worker_cwd_is_target": null
+        }
+      },
+      {
+        "phase": "execute",
+        "timing": "after_worker",
+        "engine_root": "/workspace/runtime-candidates/astrid-first"
+      },
+      {
+        "phase": "execute",
+        "timing": "before_worker",
+        "engine_root": "/workspace/runtime-candidates/astrid-first",
+        "proof": {
+          "provider": "trusted_container_probe",
+          "trusted_container": true,
+          "engine_write_denied": false,
+          "target_write_allowed": true,
+          "same_user_chmod_accepted": false,
+          "diagnostic": "probe_failed",
+          "logical_dev_accepted": null,
+          "engine_target_overlap": null,
+          "worker_cwd_is_target": null
+        }
+      },
+      {
+        "phase": "execute",
+        "timing": "after_worker",
+        "engine_root": "/workspace/runtime-candidates/astrid-first"
+      },
+      {
+        "phase": "execute",
+        "timing": "before_worker",
+        "engine_root": "/workspace/runtime-candidates/astrid-first",
+        "proof": {
+          "provider": "trusted_container_probe",
+          "trusted_container": true,
+          "engine_write_denied": false,
+          "target_write_allowed": true,
+          "same_user_chmod_accepted": false,
+          "diagnostic": "probe_failed",
+          "logical_dev_accepted": null,
+          "engine_target_overlap": null,
+          "worker_cwd_is_target": null
+        }
+      },
+      {
+        "phase": "execute",
+        "timing": "after_worker",
+        "engine_root": "/workspace/runtime-candidates/astrid-first"
+      },
+      {
+        "phase": "execute",
+        "timing": "before_worker",
+        "engine_root": "/workspace/runtime-candidates/astrid-first",
+        "proof": {
+          "provider": "trusted_container_probe",
+          "trusted_container": true,
+          "engine_write_denied": false,
+          "target_write_allowed": true,
+          "same_user_chmod_accepted": false,
+          "diagnostic": "probe_failed",
+          "logical_dev_accepted": null,
+          "engine_target_overlap": null,
+          "worker_cwd_is_target": null
+        }
+      },
+      {
+        "phase": "execute",
+        "timing": "after_worker",
+        "engine_root": "/workspace/runtime-candidates/astrid-first"
+      },
+      {
+        "phase": "execute",
+        "timing": "before_worker",
+        "engine_root": "/workspace/runtime-candidates/astrid-first",
+        "proof": {
+          "provider": "trusted_container_probe",
+          "trusted_container": true,
+          "engine_write_denied": false,
+          "target_write_allowed": true,
+          "same_user_chmod_accepted": false,
+          "diagnostic": "probe_failed",
+          "logical_dev_accepted": null,
+          "engine_target_overlap": null,
+          "worker_cwd_is_target": null
+        }
+      },
+      {
+        "phase": "execute",
+        "timing": "after_worker",
+        "engine_root": "/workspace/runtime-candidates/astrid-first"
+      },
+      {
+        "phase": "execute",
+        "timing": "before_worker",
+        "engine_root": "/workspace/runtime-candidates/astrid-first",
+        "proof": {
+          "provider": "trusted_container_probe",
+          "trusted_container": true,
+          "engine_write_denied": false,
+          "target_write_allowed": true,
+          "same_user_chmod_accepted": false,
+          "diagnostic": "probe_failed",
+          "logical_dev_accepted": null,
+          "engine_target_overlap": null,
+          "worker_cwd_is_target": null
+        }
+      },
+      {
+        "phase": "execute",
+        "timing": "after_worker",
+        "engine_root": "/workspace/runtime-candidates/astrid-first"
+      },
+      {
+        "phase": "execute",
+        "timing": "before_worker",
+        "engine_root": "/workspace/runtime-candidates/astrid-first",
+        "proof": {
+          "provider": "trusted_container_probe",
+          "trusted_container": true,
+          "engine_write_denied": false,
+          "target_write_allowed": true,
+          "same_user_chmod_accepted": false,
+          "diagnostic": "probe_failed",
+          "logical_dev_accepted": null,
+          "engine_target_overlap": null,
+          "worker_cwd_is_target": null
+        }
+      },
+      {
+        "phase": "execute",
+        "timing": "after_worker",
+        "engine_root": "/workspace/runtime-candidates/astrid-first"
+      },
+      {
+        "phase": "execute",
+        "timing": "before_worker",
+        "engine_root": "/workspace/runtime-candidates/astrid-first",
+        "proof": {
+          "provider": "trusted_container_probe",
+          "trusted_container": true,
+          "engine_write_denied": false,
+          "target_write_allowed": true,
+          "same_user_chmod_accepted": false,
+          "diagnostic": "probe_failed",
+          "logical_dev_accepted": null,
+          "engine_target_overlap": null,
+          "worker_cwd_is_target": null
+        }
+      },
+      {
+        "phase": "execute",
+        "timing": "after_worker",
+        "engine_root": "/workspace/runtime-candidates/astrid-first"
+      }
+    ],
+    "execution_baseline": {
+      "captured_at": "2026-08-20T09:10:41.885646+00:00",
+      "head": "8b97d6eb7898c02e1871db9f8ef2dd401632bdc4",
+      "paths": {}
+    },
+    "canonical_source_checks": [
+      {
+        "checked_at": "2026-08-20T09:10:50Z",
+        "operation": "finalized plan execution admission",
+        "status": "match",
+        "outcome": "admitted",
+        "bound_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "current_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "reason": ""
+      },
+      {
+        "checked_at": "2026-08-20T10:54:40Z",
+        "operation": "finalized plan execution admission",
+        "status": "match",
+        "outcome": "admitted",
+        "bound_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "current_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "reason": ""
+      },
+      {
+        "checked_at": "2026-08-20T11:10:17Z",
+        "operation": "finalized plan execution admission",
+        "status": "match",
+        "outcome": "admitted",
+        "bound_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "current_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "reason": ""
+      },
+      {
+        "checked_at": "2026-08-20T11:25:54Z",
+        "operation": "finalized plan execution admission",
+        "status": "match",
+        "outcome": "admitted",
+        "bound_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "current_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "reason": ""
+      },
+      {
+        "checked_at": "2026-08-20T11:29:43Z",
+        "operation": "finalized plan execution admission",
+        "status": "match",
+        "outcome": "admitted",
+        "bound_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "current_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "reason": ""
+      },
+      {
+        "checked_at": "2026-08-20T11:33:52Z",
+        "operation": "finalized plan execution admission",
+        "status": "match",
+        "outcome": "admitted",
+        "bound_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "current_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "reason": ""
+      },
+      {
+        "checked_at": "2026-08-20T11:37:57Z",
+        "operation": "finalized plan execution admission",
+        "status": "match",
+        "outcome": "admitted",
+        "bound_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "current_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "reason": ""
+      },
+      {
+        "checked_at": "2026-08-20T12:48:37Z",
+        "operation": "finalized plan execution admission",
+        "status": "match",
+        "outcome": "admitted",
+        "bound_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "current_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "reason": ""
+      },
+      {
+        "checked_at": "2026-08-20T13:06:46Z",
+        "operation": "finalized plan execution admission",
+        "status": "match",
+        "outcome": "admitted",
+        "bound_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "current_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "reason": ""
+      },
+      {
+        "checked_at": "2026-08-20T13:18:50Z",
+        "operation": "finalized plan execution admission",
+        "status": "match",
+        "outcome": "admitted",
+        "bound_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "current_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "reason": ""
+      },
+      {
+        "checked_at": "2026-08-20T13:20:11Z",
+        "operation": "finalized plan execution admission",
+        "status": "match",
+        "outcome": "admitted",
+        "bound_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "current_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "reason": ""
+      },
+      {
+        "checked_at": "2026-08-20T13:30:49Z",
+        "operation": "finalized plan execution admission",
+        "status": "match",
+        "outcome": "admitted",
+        "bound_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "current_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "reason": ""
+      },
+      {
+        "checked_at": "2026-08-20T14:25:33Z",
+        "operation": "finalized plan execution admission",
+        "status": "match",
+        "outcome": "admitted",
+        "bound_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "current_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "reason": ""
+      },
+      {
+        "checked_at": "2026-08-20T14:26:11Z",
+        "operation": "finalized plan execution admission",
+        "status": "match",
+        "outcome": "admitted",
+        "bound_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "current_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "reason": ""
+      },
+      {
+        "checked_at": "2026-08-20T14:26:27Z",
+        "operation": "finalized plan execution admission",
+        "status": "match",
+        "outcome": "admitted",
+        "bound_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "current_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "reason": ""
+      },
+      {
+        "checked_at": "2026-08-20T14:26:43Z",
+        "operation": "finalized plan execution admission",
+        "status": "match",
+        "outcome": "admitted",
+        "bound_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "current_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "reason": ""
+      },
+      {
+        "checked_at": "2026-08-20T14:27:00Z",
+        "operation": "finalized plan execution admission",
+        "status": "match",
+        "outcome": "admitted",
+        "bound_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "current_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "reason": ""
+      },
+      {
+        "checked_at": "2026-08-20T14:27:17Z",
+        "operation": "finalized plan execution admission",
+        "status": "match",
+        "outcome": "admitted",
+        "bound_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "current_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "reason": ""
+      },
+      {
+        "checked_at": "2026-08-20T14:27:34Z",
+        "operation": "finalized plan execution admission",
+        "status": "match",
+        "outcome": "admitted",
+        "bound_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "current_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "reason": ""
+      },
+      {
+        "checked_at": "2026-08-20T14:27:51Z",
+        "operation": "finalized plan execution admission",
+        "status": "match",
+        "outcome": "admitted",
+        "bound_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "current_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "reason": ""
+      },
+      {
+        "checked_at": "2026-08-20T14:28:07Z",
+        "operation": "finalized plan execution admission",
+        "status": "match",
+        "outcome": "admitted",
+        "bound_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "current_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "reason": ""
+      },
+      {
+        "checked_at": "2026-08-20T14:28:24Z",
+        "operation": "finalized plan execution admission",
+        "status": "match",
+        "outcome": "admitted",
+        "bound_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "current_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "reason": ""
+      },
+      {
+        "checked_at": "2026-08-20T14:28:40Z",
+        "operation": "finalized plan execution admission",
+        "status": "match",
+        "outcome": "admitted",
+        "bound_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "current_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "reason": ""
+      },
+      {
+        "checked_at": "2026-08-20T14:28:57Z",
+        "operation": "finalized plan execution admission",
+        "status": "match",
+        "outcome": "admitted",
+        "bound_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "current_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "reason": ""
+      },
+      {
+        "checked_at": "2026-08-20T14:29:14Z",
+        "operation": "finalized plan execution admission",
+        "status": "match",
+        "outcome": "admitted",
+        "bound_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "current_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "reason": ""
+      },
+      {
+        "checked_at": "2026-08-20T14:29:30Z",
+        "operation": "finalized plan execution admission",
+        "status": "match",
+        "outcome": "admitted",
+        "bound_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "current_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "reason": ""
+      },
+      {
+        "checked_at": "2026-08-20T14:29:47Z",
+        "operation": "finalized plan execution admission",
+        "status": "match",
+        "outcome": "admitted",
+        "bound_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "current_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "reason": ""
+      },
+      {
+        "checked_at": "2026-08-20T14:30:04Z",
+        "operation": "finalized plan execution admission",
+        "status": "match",
+        "outcome": "admitted",
+        "bound_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "current_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "reason": ""
+      },
+      {
+        "checked_at": "2026-08-20T14:30:21Z",
+        "operation": "finalized plan execution admission",
+        "status": "match",
+        "outcome": "admitted",
+        "bound_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "current_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "reason": ""
+      },
+      {
+        "checked_at": "2026-08-20T14:41:20Z",
+        "operation": "finalized plan execution admission",
+        "status": "match",
+        "outcome": "admitted",
+        "bound_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "current_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "reason": ""
+      },
+      {
+        "checked_at": "2026-08-20T17:01:20Z",
+        "operation": "finalized plan execution admission",
+        "status": "match",
+        "outcome": "admitted",
+        "bound_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "current_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "reason": ""
+      },
+      {
+        "checked_at": "2026-08-20T17:14:44Z",
+        "operation": "finalized plan execution admission",
+        "status": "match",
+        "outcome": "admitted",
+        "bound_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "current_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "reason": ""
+      },
+      {
+        "checked_at": "2026-08-20T17:15:00Z",
+        "operation": "finalized plan execution admission",
+        "status": "match",
+        "outcome": "admitted",
+        "bound_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "current_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "reason": ""
+      },
+      {
+        "checked_at": "2026-08-20T19:10:26Z",
+        "operation": "finalized plan execution admission",
+        "status": "match",
+        "outcome": "admitted",
+        "bound_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "current_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "reason": ""
+      },
+      {
+        "checked_at": "2026-08-20T19:32:29Z",
+        "operation": "finalized plan execution admission",
+        "status": "match",
+        "outcome": "admitted",
+        "bound_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "current_sha256": "a3e551b6340ac14ad27523d988a3e99f349c1c2cb458d7a04bb28f8543527fd9",
+        "reason": ""
+      }
+    ],
+    "user_approved_gate": true,
+    "fresh_session_execute_recoveries": [
+      {
+        "recorded_at": "2026-08-20T14:25:26.295005+00:00",
+        "reason": "chain relaunch reopened deferred validation retry frontier"
+      },
+      {
+        "recorded_at": "2026-08-20T17:01:13.146663+00:00",
+        "reason": "chain relaunch reopened deferred validation retry frontier"
+      }
+    ],
+    "repair_identity_seed": {
+      "schema": "megaplan.repair_identity_seed.v1",
+      "_non_authoritative": true,
+      "phase": "execute",
+      "invocation_id": "9aad6dac7030442a",
+      "exit_kind": "internal_error",
+      "active_step_cas": "sha256:7a0c7ade9315f37973d4f96b2a167034571392174a2803d772cc24ff87045a0f",
+      "active_step": {
+        "phase": "execute",
+        "agent": "codex",
+        "mode": "persistent",
+        "run_id": "3ef4d6a2-35ca-4c4b-9590-369b1ca9468a",
+        "invocation_id": "9aad6dac7030442a",
+        "worker_pid": 104844,
+        "started_at": "2026-08-20T17:15:01Z",
+        "attempt": 29,
+        "last_activity_at": "2026-08-20T17:15:01Z",
+        "last_activity_kind": "started",
+        "orphan_fence": {
+          "run_id": "3ef4d6a2-35ca-4c4b-9590-369b1ca9468a",
+          "invocation_id": "9aad6dac7030442a"
+        },
+        "runner_incarnation": {
+          "schema": "arnold.megaplan.runner_incarnation.v1",
+          "host_id": "45404872d432",
+          "pid_namespace_id": "pid:[4026532693]",
+          "worker_pid": 104844,
+          "worker_process_start_identity": "ce621a49-56ca-4d09-9df7-001093e67efe:172537601"
+        },
+        "runner_lease": {
+          "schema": "arnold.megaplan.active_step_runner_lease.v1",
+          "session": "astrid-first",
+          "marker_dir": "/workspace/.megaplan/cloud-sessions",
+          "marker_binding": "sha256:d50ccc8dc6446c6034e61a49aeb640cef2ec5611ae870241d30a8cc65c4b9fcb",
+          "lease_id": "3f60344c-89b3-43f6-a0ae-3b1ae004d4ff",
+          "runner_fence": 411,
+          "runner_container_id": "45404872d432",
+          "pid_namespace_id": "pid:[4026532693]",
+          "target_process_start_identity": "ce621a49-56ca-4d09-9df7-001093e67efe:172537601"
+        },
+        "model": "gpt-5.6-luna",
+        "configured_specs": [
+          "codex:gpt-5.6-luna"
+        ],
+        "attempted_specs": [
+          "codex:gpt-5.6-luna"
+        ],
+        "selected_spec_index": 0,
+        "selected_spec_total": 1,
+        "fallback_trigger": null,
+        "failed_attempt_reasons": [],
+        "session_id": "01a0201e-cd3f-76f1-b0cf-5e45e620c1be"
+      },
+      "phase_result_sha256": "sha256:8e9ef284e8313c7bd170b5d9b654230a2efb60bf74500299eabdae2a3650de60",
+      "plan_revision": "",
+      "coordinator_attempt_id": "9aad6dac7030442a",
+      "seeded_at": "2026-08-20T17:15:02.800110Z"
+    },
+    "phase_handoff_receipts": [
+      {
+        "schema_version": 1,
+        "handoff_id": "sha256:7c9d145f1b3023fd4aa2f21c4352161f6ccbe5dcffa43f73476349dcf74efa62",
+        "from_phase": "execute",
+        "from_state": "executed",
+        "to_phase": "review",
+        "status": "crossed",
+        "armed_at": "2026-08-20T19:15:55Z",
+        "source_history_length": 37,
+        "execution_evidence_digest": "sha256:c56f3e1b46405a6dfb255c349711a12808312401325720b7e5946477706592e0",
+        "recovery_action": "resume_review",
+        "owner": "canonical_auto_runner",
+        "_non_authoritative": false,
+        "recovery_reason": "exact local worker process incarnation is alive",
+        "claimed_at": "2026-08-20T19:16:13Z",
+        "claim_run_id": "cfc66647-e29b-4d13-8071-f028abb2082e",
+        "claim_worker_pid": 152654,
+        "crossed_at": "2026-08-20T19:32:14Z",
+        "crossed_to_state": "finalized"
+      },
+      {
+        "schema_version": 1,
+        "handoff_id": "sha256:ca99392f75bab89504f858e4d9f047e065b06d7ff1025d5fb92a0e2f5cd59521",
+        "from_phase": "execute",
+        "from_state": "executed",
+        "to_phase": "review",
+        "status": "crossed",
+        "armed_at": "2026-08-20T19:40:36Z",
+        "source_history_length": 39,
+        "execution_evidence_digest": "sha256:725955ce831eabac7154d776f4d1b237e3c1c35ac090eee3c84cfc93bb004ca0",
+        "recovery_action": "resume_review",
+        "owner": "canonical_auto_runner",
+        "_non_authoritative": false,
+        "recovery_reason": "exact local worker process incarnation is alive",
+        "claimed_at": "2026-08-20T19:40:54Z",
+        "claim_run_id": "c4a7177c-96f8-4723-8468-d4e052bb60dc",
+        "claim_worker_pid": 152654,
+        "crossed_at": "2026-08-20T19:49:12Z",
+        "crossed_to_state": "done"
+      }
+    ],
+    "chain_completion": {
+      "completed_at": "2026-08-20T20:56:10Z",
+      "milestone_label": "m7",
+      "reason": "terminal plan state reconciled from ground truth"
+    }
+  },
+  "last_gate": {
+    "recommendation": "PROCEED",
+    "rationale": "Plan is North-Star aligned, with deterministic fail-closed finalizer admission now required before execution/resume and carried into evidence.",
+    "signals_assessment": "Score is stable at 0; no unresolved or addressed-blocking flags remain; preflight and custody checks passed.",
+    "warnings": [
+      "External Reigh proof requires its authorized pinned checkout.",
+      "Performance remains report-only until a normative budget source exists."
+    ],
+    "settled_decisions": [
+      {
+        "id": "SD1",
+        "decision": "Require finalizer admission before execution, resume, and finalization.",
+        "rationale": "Phase 0 and the gate/CI steps require its admitted hash."
+      },
+      {
+        "id": "SD2",
+        "decision": "Do not substitute in-tree bridge tests for external Reigh proof.",
+        "rationale": "The plan retains them as distinct evidence."
+      },
+      {
+        "id": "SD3",
+        "decision": "Keep performance non-blocking without approved budgets.",
+        "rationale": "The plan records unresolved budget status rather than inventing thresholds."
+      }
+    ],
+    "flag_resolutions": [],
+    "accepted_tradeoffs": [],
+    "tiebreaker_question": "",
+    "tiebreaker_flag_ids": [],
+    "tiebreaker_fuzzy_group_id": "",
+    "north_star_actions": [],
+    "reprompted": false,
+    "passed": true,
+    "preflight_results": {
+      "project_dir_exists": true,
+      "project_dir_writable": true,
+      "success_criteria_present": true,
+      "claude_available": true,
+      "codex_available": true
+    },
+    "orchestrator_guidance": "Plan passed gate and preflight. Proceed to finalize."
+  },
+  "schema_version": 0,
+  "repair_identity": {
+    "schema_version": "megaplan-repair-identity-v1",
+    "occurrence": {
+      "contract_type": "repair_occurrence_key",
+      "schema_version": 1,
+      "target": {
+        "contract_type": "custody_target_key",
+        "schema_version": 1,
+        "environment": "/workspace/astrid-first-ce15b5a3/astrid",
+        "session": "astrid-first",
+        "chain": "/workspace/astrid-first-ce15b5a3/astrid/.megaplan/plans/m7-dogfood-and-hardening-20260820-0835",
+        "plan_revision": "sha256:deac218fbd8feac12ada8f1c7fd28c9f52919f8a2e52c2d1000d475cc0329279",
+        "phase": "execute",
+        "task": "phase:execute",
+        "attempt": "29",
+        "normalized_failure_kind": "deterministic_phase_failure",
+        "blocker_or_phase_result_hash": "sha256:5f27f17d8bfbb4e9f010bc78669333494f124001c7753fde9b9d2b81a05e4077",
+        "fence": "runner-fence:411",
+        "chain_identity": "sha256:d50ccc8dc6446c6034e61a49aeb640cef2ec5611ae870241d30a8cc65c4b9fcb",
+        "dispatch_key": ""
+      },
+      "run_id": "3ef4d6a2-35ca-4c4b-9590-369b1ca9468a",
+      "run_revision": "sha256:deac218fbd8feac12ada8f1c7fd28c9f52919f8a2e52c2d1000d475cc0329279",
+      "coordinator_attempt_id": "9aad6dac7030442a",
+      "fence_token": 411,
+      "wbc_attempt_reference": "9aad6dac7030442a",
+      "occurrence_digest": "sha256:5acd41be4ceafdcbc149bf142f598264a832f64b40306231bb45cbca20a40a9f"
+    },
+    "run_incarnation_id": "sha256:e11d21012a643955b3938b72fe79d2690fedfb6656a74dd6edbda3a8a09fc091",
+    "run_authority_grant_id": "repair-grant:b3e9327a3884943cf82a5d6acb3a6d5546e9d194c39c43e805d480669e8297d2",
+    "lease_id": "repair-custody:b3e9327a3884943cf82a5d6acb3a6d5546e9d194c39c43e805d480669e8297d2",
+    "custody_epoch": 1
+  }
+}
