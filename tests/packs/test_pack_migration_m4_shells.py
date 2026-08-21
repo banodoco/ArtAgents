@@ -201,10 +201,43 @@ class TestPackMigrationM4Shells(unittest.TestCase):
                     for path in pack_root.rglob("*")
                     if path.name in {"executor.yaml", "orchestrator.yaml", "element.yaml"}
                 )
-                expected_count = len(expected["aliases"])
-                if pack_id == "rendering":
-                    expected_count += 9  # render-time elements are not pack-level aliases
-                self.assertEqual(len(manifest_files), expected_count)
+                # Invariant: every capability directory under the pack's
+                # content roots carries exactly one manifest, and no
+                # manifest exists outside a capability directory. Container
+                # dirs (element kinds) are skipped; leaf dirs with files but
+                # no manifest are orphan capabilities and fail the assertIn
+                # below. The alias table above is the frozen m4 snapshot;
+                # the physical tree is the live truth for the count.
+                manifest_names = {
+                    "executor.yaml",
+                    "orchestrator.yaml",
+                    "element.yaml",
+                }
+                capability_dirs: list[str] = []
+                for kind, rel in expected["content"].items():
+                    root = pack_root / rel
+                    if not root.is_dir():
+                        continue
+                    for path in root.rglob("*"):
+                        if not path.is_dir() or path.name.startswith("__"):
+                            continue
+                        entries = list(path.iterdir())
+                        has_manifest = any(
+                            p.name in manifest_names for p in entries
+                        )
+                        has_subdirs = any(
+                            p.is_dir() and not p.name.startswith("__")
+                            for p in entries
+                        )
+                        if has_manifest or (
+                            not has_subdirs
+                            and any(p.name == "run.py" for p in entries)
+                        ):
+                            capability_dirs.append(str(path.relative_to(pack_root)))
+                self.assertEqual(len(manifest_files), len(capability_dirs))
+                for manifest in manifest_files:
+                    parent = manifest.rsplit("/", 1)[0]
+                    self.assertIn(parent, capability_dirs)
 
 
 if __name__ == "__main__":

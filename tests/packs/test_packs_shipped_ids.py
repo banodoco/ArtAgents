@@ -76,26 +76,21 @@ class ShippedPackAlignmentTest(unittest.TestCase):
                 )
 
     def test_cli_lists_do_not_register_seinfeld_pack_ids(self) -> None:
-        commands = [
-            ([sys.executable, "-m", "astrid", "executors", "list", "--json"], "executors"),
-            ([sys.executable, "-m", "astrid", "orchestrators", "list", "--json"], "orchestrators"),
-        ]
-        for argv, key in commands:
-            with self.subTest(command=" ".join(argv)):
-                result = subprocess.run(
-                    argv,
-                    cwd=Path(__file__).resolve().parents[2],
-                    env=os.environ.copy(),
-                    text=True,
-                    capture_output=True,
-                    check=True,
-                )
-                payload = json.loads(result.stdout)
-                ids = [item["id"] for item in payload[key]]
-                self.assertFalse(
-                    any(identifier.startswith("seinfeld.") for identifier in ids),
-                    f"unexpected Seinfeld ids from {' '.join(argv)}: {ids}",
-                )
+        # The 8-family CLI no longer exposes `executors`/`orchestrators`
+        # verbs; enumerate ids from the shipped pack tree instead and
+        # assert no Seinfeld pack leaked into any first-party pack.
+        repo_root = Path(__file__).resolve().parents[2]
+        packs_root = repo_root / "astrid" / "packs"
+        ids: list[str] = []
+        for manifest in packs_root.rglob("executor.yaml"):
+            ids.append(f"{manifest.parent.parent.parent.name}.{manifest.parent.name}")
+        for manifest in packs_root.rglob("orchestrator.yaml"):
+            ids.append(f"{manifest.parent.parent.parent.name}.{manifest.parent.name}")
+        self.assertTrue(ids, "expected at least one capability manifest")
+        self.assertFalse(
+            any(identifier.startswith("seinfeld.") for identifier in ids),
+            f"unexpected Seinfeld ids in the shipped pack tree: {ids}",
+        )
 
 
 if __name__ == "__main__":
