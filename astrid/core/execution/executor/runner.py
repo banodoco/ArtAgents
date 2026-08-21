@@ -58,8 +58,6 @@ from astrid.core.runtime.log_capture import (
     run_subprocess_with_capture,
 )
 from astrid.core.subprocess_env import build_child_subprocess_env
-from astrid.core.task import env as task_env
-from astrid.core.task import gate as task_gate
 
 from .install import executor_python_path
 from .registry import ExecutorRegistry, load_default_registry
@@ -209,41 +207,6 @@ class ExecutorCapabilityRunner(CapabilityRunner[ExecutorRunRequest, ExecutorRunR
             return tuple(step.build_cmd(args))
         return _expand_external_command(executor, request, values)[0]
 
-    def maybe_gate(self, request: ExecutorRunRequest) -> None:
-        # Attached-child helpers validate the owning project/run and allocate a
-        # unique synthetic child step before entering the executor lifecycle.
-        # Such a child is deliberately outside the parent task plan's cursor,
-        # so running the normal command gate here would reject the invocation
-        # even though it is attached to a valid ledger.  All ordinary executor
-        # requests retain the existing gate behavior.
-        if request.invocation == "attached-child":
-            return
-        task_project = task_env.task_project_env()
-        task_run_id = task_env.task_run_id_env()
-        task_step_id = task_env.task_step_id_env()
-        env_task_context = bool(task_project and task_run_id and task_step_id)
-        project_task_context = bool(request.project and task_env.is_in_task_run(request.project))
-        if not (env_task_context or project_task_context):
-            return
-        gate_project = task_project or request.project
-        if gate_project is None:
-            raise ExecutorRunnerError("task project is missing")
-        if task_project and request.project and request.project != task_project:
-            raise ExecutorRunnerError(
-                f"task run is bound to project {task_project!r}, refusing executor project {request.project!r}"
-            )
-        try:
-            task_gate.gate_command(
-                gate_project,
-                task_gate.command_for_argv(_request_argv_for_gate(request)),
-                [],
-                reentry=True,
-            )
-        except task_gate.TaskRunGateError as exc:
-            if env_task_context and not project_task_context and exc.reason == "active_run.json is missing":
-                return
-            raise ExecutorRunnerError(f"{exc.reason}; recovery: {exc.recovery}") from exc
-
     def prepare_project(
         self, request: ExecutorRunRequest, definition: ExecutorDefinition
     ) -> tuple[ProjectRunContext | None, ExecutorRunRequest]:
@@ -290,51 +253,6 @@ _EXECUTOR_RUNNER = ExecutorCapabilityRunner()
 
 def run_executor(request: ExecutorRunRequest, registry: ExecutorRegistry | None = None) -> ExecutorRunResult:
     return _EXECUTOR_RUNNER.run(request, registry)
-
-
-def _request_argv_for_gate(request: ExecutorRunRequest) -> tuple[str, ...]:
-    if request.argv:
-        if request.argv[0] == "executors":
-            return request.argv
-        if request.argv[0] == "run":
-            argv = _canonicalize_runner_argv_paths(request.argv)
-            if request.project or os.environ.get(ASTRID_INTERNAL_INVOCATION) != "1":
-                return ("executors", *argv)
-            return ("python3", "-m", "astrid", "executors", *argv)
-        return ("executors", *request.argv)
-    argv = ["executors", "run", request.executor_id]
-    if request.project:
-        argv.extend(["--project", request.project])
-    if request.out not in (None, ""):
-        argv.extend(["--out", str(request.out)])
-    if request.brief:
-        argv.extend(["--brief", str(request.brief)])
-    for key, value in request.inputs.items():
-        for item in _iter_input_values(value):
-            argv.extend(["--input", f"{key}={_stringify_value(item)}"])
-    if request.dry_run:
-        argv.append("--dry-run")
-    if request.check_binaries:
-        argv.append("--check-binaries")
-    if request.python_exec:
-        argv.extend(["--python-exec", request.python_exec])
-    if request.verbose:
-        argv.append("--verbose")
-    return tuple(argv)
-
-
-def _canonicalize_runner_argv_paths(argv: Sequence[str]) -> tuple[str, ...]:
-    tokens = [str(token) for token in argv]
-    canonical: list[str] = []
-    idx = 0
-    while idx < len(tokens):
-        token = tokens[idx]
-        canonical.append(token)
-        if token == "--out" and idx + 1 < len(tokens):
-            idx += 1
-            canonical.append(str(Path(tokens[idx]).resolve()))
-        idx += 1
-    return tuple(canonical)
 
 
 def _run_executor_inner(request: ExecutorRunRequest, executor: ExecutorDefinition) -> ExecutorRunResult:

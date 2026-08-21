@@ -40,7 +40,7 @@ from astrid.core import gateway
 from astrid.core.foundation.project_paths import project_dir
 from astrid.core.project.project import create_project
 from astrid.core.project.run import load_run_record
-from astrid.core.session.binding import ASTRID_SESSION_ID_ENV
+from astrid.core.env_vars import ASTRID_SESSION_ID as ASTRID_SESSION_ID_ENV
 from astrid.core.timeline.banodoco_schema import validate_timeline_config_for_container
 from astrid.core.timeline.duration import (
     clip_end_frame,

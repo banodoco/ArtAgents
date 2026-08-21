@@ -2,13 +2,31 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
 from astrid.core._shared.jsonio import read_json
+from astrid.core.env_vars import ASTRID_PROJECT_SLUG
 from astrid.core.foundation.project_paths import resolve_projects_root
-from astrid.core.session.config import resolve_default_project
-from astrid.core.session.discovery import discover_projects
+from astrid.core.preferences import resolve_default_project
+
+
+def _discover_projects(*, root: str | Path | None = None) -> list[str]:
+    """Return project slugs under the projects root, sorted by mtime descending."""
+
+    projects_root = resolve_projects_root(root)
+    if not projects_root.exists():
+        return []
+    candidates: list[tuple[float, str]] = []
+    for entry in projects_root.iterdir():
+        if not entry.is_dir():
+            continue
+        if not (entry / "project.json").exists():
+            continue
+        candidates.append((entry.stat().st_mtime, entry.name))
+    candidates.sort(key=lambda pair: pair[0], reverse=True)
+    return [name for _, name in candidates]
 
 
 def project_summaries(
@@ -22,7 +40,7 @@ def project_summaries(
     projects_root = resolve_projects_root(root)
     default = resolve_default_project()
     rows: list[dict[str, Any]] = []
-    for slug in discover_projects(root=projects_root):
+    for slug in _discover_projects(root=projects_root):
         if not include_test_projects and slug.startswith("agentic-"):
             continue
         project_root = projects_root / slug
@@ -112,21 +130,9 @@ def selected_project(explicit_project: str | None) -> tuple[str | None, str]:
 
     if explicit_project:
         return explicit_project, "explicit"
-    try:
-        from astrid.core.session.binding import (
-            resolve_current_session,
-            resolve_current_session_with_fs_fallback,
-        )
-
-        session = resolve_current_session()
-        if session is None:
-            session = resolve_current_session_with_fs_fallback(
-                projects_root=resolve_projects_root(),
-            )
-    except Exception:
-        session = None
-    if session is not None and getattr(session, "project", None):
-        return str(session.project), "attached"
+    attached = os.environ.get(ASTRID_PROJECT_SLUG)
+    if attached:
+        return attached, "attached"
     return None, "missing"
 
 

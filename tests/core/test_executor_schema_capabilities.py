@@ -6,7 +6,6 @@ import io
 import json
 import unittest
 
-from astrid.core.execution.executor import cli as executors_cli
 from astrid.core.execution.executor.registry import ExecutorRegistry
 from astrid.core.execution.executor.schema import ExecutorValidationError, validate_executor_definition
 
@@ -45,17 +44,7 @@ class ExecutorSchemaCapabilityTest(unittest.TestCase):
                 pipeline_requirements=["transcript"],
             )
         )
-        registry = ExecutorRegistry([executor])
-        stdout = io.StringIO()
-
-        with contextlib.redirect_stdout(stdout):
-            result = executors_cli._cmd_inspect(
-                argparse.Namespace(executor_id="builtin.demo", json=True),
-                registry,
-            )
-
-        self.assertEqual(result, 0)
-        payload = json.loads(stdout.getvalue())
+        payload = executor.to_dict()
         self.assertEqual(payload["clip_kinds_supported"], ["audio"])
         self.assertEqual(payload["pipeline_requirements"], ["transcript"])
 

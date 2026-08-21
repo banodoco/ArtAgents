@@ -44,8 +44,6 @@ from astrid.core.runtime.log_capture import (
     run_subprocess_with_capture,
 )
 from astrid.core.subprocess_env import build_child_subprocess_env
-from astrid.core.task import env as task_env
-from astrid.core.task import gate as task_gate
 
 from .registry import OrchestratorRegistry, load_default_registry
 from .schema import (
@@ -172,19 +170,6 @@ class OrchestratorCapabilityRunner(CapabilityRunner[OrchestratorRunRequest, Orch
         active_registry = registry if isinstance(registry, OrchestratorRegistry) else self.load_default_registry()
         return build_orchestrator_command(request, active_registry)
 
-    def maybe_gate(self, request: OrchestratorRunRequest) -> None:
-        if not (request.project and task_env.is_in_task_run(request.project)):
-            return
-        try:
-            task_gate.gate_command(
-                request.project,
-                task_gate.command_for_argv(_request_argv_for_gate(request)),
-                [],
-                reentry=True,
-            )
-        except task_gate.TaskRunGateError as exc:
-            raise OrchestratorRunnerError(exc.recovery) from exc
-
     def prepare_project(
         self, request: OrchestratorRunRequest, definition: OrchestratorDefinition
     ) -> tuple[ProjectRunContext | None, OrchestratorRunRequest]:
@@ -230,12 +215,6 @@ _ORCHESTRATOR_RUNNER = OrchestratorCapabilityRunner()
 def run_orchestrator(request: OrchestratorRunRequest, registry: OrchestratorRegistry | None = None) -> OrchestratorRunResult:
     return _ORCHESTRATOR_RUNNER.run(request, registry)
 
-
-def _request_argv_for_gate(request: OrchestratorRunRequest) -> tuple[str, ...]:
-    argv = ["orchestrators", "run", request.orchestrator_id, *request.orchestrator_args]
-    if request.project:
-        argv.extend(["--project", request.project])
-    return tuple(argv)
 
 
 def _run_orchestrator_inner(request: OrchestratorRunRequest, orchestrator: OrchestratorDefinition) -> OrchestratorRunResult:

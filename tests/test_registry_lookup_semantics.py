@@ -10,11 +10,9 @@ from unittest.mock import patch
 
 from astrid.core.pack.alias_resolver import AliasResolver
 from astrid.core.contracts.schema import CommandSpec
-from astrid.core.execution.executor import cli as executors_cli
 from astrid.core.execution.executor.install import ExecutorInstallPlan, ExecutorInstallResult
 from astrid.core.execution.executor.registry import ExecutorRegistry
 from astrid.core.execution.executor.schema import ExecutorDefinition
-from astrid.core.execution.orchestrator import cli as orchestrators_cli
 from astrid.core.execution.orchestrator.registry import OrchestratorRegistry
 from astrid.core.execution.orchestrator.schema import OrchestratorDefinition, RuntimeSpec
 from astrid.core.pack.override import OverrideStore
@@ -96,69 +94,18 @@ class RegistryLookupSemanticsTest(unittest.TestCase):
         ):
             registry.get("builtin.legacy_hype")
 
-    def test_executor_cli_paths_use_registry_lookup_for_aliases(self) -> None:
+    def test_registry_lookup_resolves_aliases(self) -> None:
         resolver = AliasResolver()
         resolver.register_alias("builtin.legacy_demo", "builtin.demo")
         registry = ExecutorRegistry(alias_resolver=resolver)
         registry.register(_executor_definition("builtin.demo"))
 
-        inspect_stdout = io.StringIO()
-        with contextlib.redirect_stdout(inspect_stdout):
-            rc = executors_cli._cmd_inspect(
-                argparse.Namespace(
-                    executor_id="builtin.legacy_demo",
-                    json=True,
-                    pack=None,
-                    show_overrides=False,
-                ),
-                registry,
-            )
-        self.assertEqual(rc, 0)
-        inspect_payload = json.loads(inspect_stdout.getvalue())
-        self.assertEqual(inspect_payload["id"], "builtin.demo")
-        self.assertEqual(
-            inspect_payload["_capability"]["aliases"][0]["alias"],
-            "builtin.legacy_demo",
+        executor = registry.get("builtin.legacy_demo")
+        assert executor.id == "builtin.demo"
+        assert any(
+            alias.alias == "builtin.legacy_demo"
+            for alias in executor.aliases
         )
-
-        validate_stdout = io.StringIO()
-        with contextlib.redirect_stdout(validate_stdout):
-            rc = executors_cli._cmd_validate(
-                argparse.Namespace(
-                    executor_id="builtin.legacy_demo",
-                    check_binaries=False,
-                ),
-                registry,
-            )
-        self.assertEqual(rc, 0)
-        self.assertIn("builtin.legacy_demo: ok", validate_stdout.getvalue())
-
-        install_result = ExecutorInstallResult(
-            plan=ExecutorInstallPlan(
-                executor_id="builtin.demo",
-                kind="built_in",
-                environment_path=None,
-                python_path=None,
-                noop_reason="built-in executors use the host Python environment",
-            ),
-            dry_run=True,
-            returncode=0,
-        )
-        with patch("astrid.core.execution.executor.install.install_executor", return_value=install_result) as install_mock:
-            install_stdout = io.StringIO()
-            with contextlib.redirect_stdout(install_stdout):
-                rc = executors_cli._cmd_install(
-                    argparse.Namespace(
-                        executor_id="builtin.legacy_demo",
-                        dry_run=True,
-                    ),
-                    registry,
-                )
-        self.assertEqual(rc, 0)
-        installed_executor = install_mock.call_args.args[0]
-        self.assertEqual(installed_executor.id, "builtin.demo")
-        self.assertIn("builtin.demo: no install needed", install_stdout.getvalue())
-
     def test_orchestrator_cli_paths_use_registry_lookup_for_aliases(self) -> None:
         resolver = AliasResolver()
         resolver.register_alias("builtin.legacy_demo", "builtin.demo")

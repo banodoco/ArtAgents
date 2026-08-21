@@ -96,15 +96,24 @@ def discover_projects_for_migration(
 ) -> list[str]:
     """Return project slugs suitable for timeline migration.
 
-    Delegates to ``astrid.core.session.discovery.discover_projects``
-    so that migration discovery stays aligned with the rest of the app.
-
-    Source blobs are never read or written by this function — it only
-    lists directory names.
+    Lists project directories under the projects root, most-recently-used
+    first. Source blobs are never read or written by this function — it
+    only lists directory names.
     """
-    from astrid.core.session.discovery import discover_projects
+    from astrid.core.foundation.project_paths import resolve_projects_root
 
-    return discover_projects(root=root)
+    projects_root = resolve_projects_root(root)
+    if not projects_root.exists():
+        return []
+    candidates: list[tuple[float, str]] = []
+    for entry in projects_root.iterdir():
+        if not entry.is_dir():
+            continue
+        if not (entry / "project.json").exists():
+            continue
+        candidates.append((entry.stat().st_mtime, entry.name))
+    candidates.sort(key=lambda pair: pair[0], reverse=True)
+    return [name for _, name in candidates]
 
 
 def discover_timelines_for_project(

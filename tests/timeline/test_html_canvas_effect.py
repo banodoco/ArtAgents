@@ -7,8 +7,8 @@ from pathlib import Path
 
 from astrid.core.contracts.errors import AstridError
 from astrid.core.element.schema import load_element_definition
-from astrid.core.execution.executor import cli as executors_cli
 from astrid.core.execution.executor.registry import load_default_registry as load_executor_registry
+from astrid.core.execution.executor.runner import ExecutorRunRequest, run_executor
 from astrid.packs.rendering.executors.html_canvas_effect.run import main, scaffold
 
 
@@ -107,26 +107,22 @@ class HtmlCanvasEffectExecutorTest(unittest.TestCase):
                             f"element_root path not found in {output_paths}")
             self.assertIsInstance(manifest["warnings"], list)
 
-    def test_canonical_cli_dry_run_uses_executor_runtime(self) -> None:
-        stdout = io.StringIO()
-        stderr = io.StringIO()
-        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
-            result = executors_cli.main(
-                [
-                    "run",
-                    "rendering.html_canvas_effect",
-                    "--input",
-                    "effect_id=glass-product-card",
-                    "--out",
-                    "runs/html-canvas-effect",
-                    "--dry-run",
-                ]
-            )
+    def test_runner_dry_run_uses_executor_runtime(self) -> None:
+        result = run_executor(
+            ExecutorRunRequest(
+                executor_id="rendering.html_canvas_effect",
+                out="runs/html-canvas-effect",
+                inputs={"effect_id": "glass-product-card"},
+                dry_run=True,
+            ),
+            load_executor_registry(),
+        )
 
-        self.assertEqual(result, 0, stderr.getvalue())
-        # The dry-run command echo goes to stderr; stdout carries the JSON
-        # payload (run echo moved off stdout so `--json` can own the stream).
-        self.assertIn("astrid.packs.rendering.executors.html_canvas_effect.run", stderr.getvalue())
+        self.assertEqual(result.returncode, 0)
+        self.assertIn(
+            "astrid.packs.rendering.executors.html_canvas_effect.run",
+            " ".join(result.command),
+        )
 
 
 if __name__ == "__main__":

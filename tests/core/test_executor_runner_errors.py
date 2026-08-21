@@ -23,7 +23,6 @@ import pytest
 import astrid.packs
 from astrid.core.contracts.schema import CommandInputArg, CommandSpec, IsolationMetadata, Output, Port
 from astrid.core.execution.executor import runner as executor_runner
-from astrid.core.execution.executor.cli import main as executor_cli_main
 from astrid.core.execution.executor.registry import ExecutorRegistry, load_default_registry
 from astrid.core.execution.executor.runner import (
     ExecutorRunnerError,
@@ -437,11 +436,6 @@ def test_executor_argv_resolves_canonical_id_and_bare_pipeline_step() -> None:
 def test_executor_argv_rejects_non_pipeline_bare_name() -> None:
     with pytest.raises(ValueError, match="could not resolve executor step 'upload'"):
         executor_argv("upload", "/opt/python")
-
-
-def test_executors_run_rejects_arbitrary_passthrough_after_double_dash() -> None:
-    with pytest.raises(SystemExit):
-        executor_cli_main(["run", "local.echo", "--", "--surprise"])
 
 
 # ---------------------------------------------------------------------------

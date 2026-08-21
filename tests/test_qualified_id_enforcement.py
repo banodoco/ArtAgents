@@ -5,9 +5,7 @@ import io
 import unittest
 
 from astrid.core.contracts.errors import AstridError, render_astrid_error
-from astrid.core.execution.executor import cli as executors_cli
 from astrid.core.execution.executor.schema import ExecutorValidationError, validate_executor_definition
-from astrid.core.execution.orchestrator import cli as orchestrators_cli
 from astrid.core.execution.orchestrator.schema import OrchestratorValidationError, validate_orchestrator_definition
 
 
@@ -69,25 +67,6 @@ class QualifiedIdEnforcementTest(unittest.TestCase):
                     "child_executors": ["cut"],
                 }
             )
-
-    def test_cli_rejects_bare_executor_lookup_and_accepts_qualified_id(self) -> None:
-        result, _, stderr = _capture(executors_cli.main, ["inspect", "cut"])
-        self.assertEqual(result, 2)
-        self.assertIn("executor id must be qualified", stderr)
-
-        result, stdout, stderr = _capture(executors_cli.main, ["inspect", "video_editing.cut"])
-        self.assertEqual(result, 0, stderr)
-        self.assertIn("id: video_editing.cut", stdout)
-
-    def test_cli_rejects_bare_orchestrator_lookup_and_accepts_qualified_id(self) -> None:
-        result, _, stderr = _capture(orchestrators_cli.main, ["inspect", "hype"])
-        self.assertEqual(result, 2)
-        self.assertIn("orchestrator id must be qualified", stderr)
-
-        result, stdout, stderr = _capture(orchestrators_cli.main, ["inspect", "video_editing.hype"])
-        self.assertEqual(result, 0, stderr)
-        self.assertIn("id: video_editing.hype", stdout)
-
 
 if __name__ == "__main__":
     unittest.main()

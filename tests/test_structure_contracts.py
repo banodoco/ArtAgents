@@ -307,32 +307,32 @@ def test_validate_repo_structure_allows_pack_declared_custom_element_kind(tmp_pa
     assert report.errors == ()
 
 
-def test_validate_import_layering_allows_core_orchestrate_but_flags_pack_imports(tmp_path: Path) -> None:
+def test_validate_import_layering_allows_core_imports_but_flags_pack_imports(tmp_path: Path) -> None:
     _write(
         tmp_path,
-        "astrid/core/task/lifecycle/__init__.py",
-        "from astrid.core.orchestrate.compile import DEFAULT_PACKS_ROOT\n",
+        "astrid/core/somewhere/leaf.py",
+        "from astrid.core.contracts.errors import AstridError\n",
     )
     _write(
         tmp_path,
-        "astrid/core/task/orchestrator_resolver.py",
-        "from astrid.core.orchestrate.compile import DEFAULT_PACKS_ROOT\n",
+        "astrid/core/somewhere/other.py",
+        "from astrid.core.util.time import utc_now_seconds\n",
     )
     _write(
         tmp_path,
-        "astrid/core/task/plan/builder.py",
+        "astrid/core/somewhere/builder.py",
         "from astrid.packs.video_editing.orchestrators.hype.plan_template import build_plan_v2\n",
     )
     _write(
         tmp_path,
-        "astrid/core/task/not_lifecycle.py",
-        "from astrid.core.orchestrate.compile import DEFAULT_PACKS_ROOT\n",
+        "astrid/core/somewhere/not_lifecycle.py",
+        "from astrid.core.contracts.errors import AstridError\n",
     )
 
     violations = validate_import_layering(tmp_path)
 
     assert set(violations) == {
-        "astrid/core/task/plan/builder.py:1 imports forbidden module 'astrid.packs.video_editing.orchestrators.hype.plan_template'",
+        "astrid/core/somewhere/builder.py:1 imports forbidden module 'astrid.packs.video_editing.orchestrators.hype.plan_template'",
     }
 
 
@@ -472,33 +472,33 @@ def test_validate_repo_structure_flags_non_exempt_compatibility_shim_as_error(tm
     )
 
 
-def test_validate_migration_completion_exempts_only_compile_sys_modules_pattern(
+def test_validate_migration_completion_exempts_only_in_process_sys_modules_pattern(
     tmp_path: Path,
 ) -> None:
     _write(
         tmp_path,
-        "astrid/core/orchestrate/compile.py",
+        "astrid/core/runtime/in_process.py",
         "import sys\n"
         "sys.modules['temp'] = object()\n",
     )
     _write(
         tmp_path,
-        "astrid/core/not_compile.py",
+        "astrid/core/not_in_process.py",
         "import sys\n"
         "sys.modules['temp'] = object()\n",
     )
 
     advisories = validate_migration_completion(tmp_path)
 
-    assert "astrid/core/orchestrate/compile.py: sys.modules injection remains outside tests" not in advisories
-    assert "astrid/core/not_compile.py: sys.modules injection remains outside tests" in advisories
+    assert "astrid/core/runtime/in_process.py: sys.modules injection remains outside tests" not in advisories
+    assert "astrid/core/not_in_process.py: sys.modules injection remains outside tests" in advisories
 
 
-def test_validate_repo_structure_keeps_compile_sys_modules_exemption_green(tmp_path: Path) -> None:
+def test_validate_repo_structure_keeps_in_process_sys_modules_exemption_green(tmp_path: Path) -> None:
     _bootstrap_structure_root(tmp_path)
     _write(
         tmp_path,
-        "astrid/core/orchestrate/compile.py",
+        "astrid/core/runtime/in_process.py",
         "import sys\n"
         "sys.modules['temp'] = object()\n",
     )
@@ -1361,9 +1361,11 @@ stream_types:
 event_kinds:
   - timeline.created
   - timeline.saved
+  - timeline.config_replaced
 command_kinds:
   - timeline.create
   - timeline.save
+  - timeline.replace_config
 repositories:
   - TimelineRepository
 conformance:

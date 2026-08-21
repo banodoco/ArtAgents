@@ -14,8 +14,7 @@ from astrid.core.contracts.errors import AstridError
 from astrid.core.contracts.run_status import RunStatus
 from astrid.core.env_vars import ASTRID_PROJECT_SLUG, ASTRID_SESSION_ID
 from astrid.core.foundation import project_paths as paths
-from astrid.core.task import env as task_env
-from astrid.core.task.plan import step_dir_for
+from astrid.core.subprocess_env import TASK_PROJECT_ENV, TASK_RUN_ID_ENV, TASK_STEP_ID_ENV
 from astrid.core.threads.ids import generate_run_id
 from astrid.core.util.time import utc_now_seconds
 
@@ -71,6 +70,30 @@ HYPE_ARTIFACTS = {
 
 class ProjectRunError(AstridError):
     """Raised when a project run cannot be prepared or finalized."""
+
+
+def step_dir_for(
+    slug: str,
+    run_id: str,
+    plan_step_id: str,
+    *,
+    step_version: int = 1,
+    root: str | Path | None = None,
+) -> Path:
+    """Return the legacy step directory for a task-run step.
+
+    Retained for attached-child callers (``rendering.attached`` and task-bound
+    ``prepare_project_run``) that bind a run record under the parent task
+    run's step directory. The kernel no longer executes task plans; the path
+    layout is preserved only for artifact placement.
+    """
+
+    paths.validate_project_slug(slug)
+    paths.validate_run_id(run_id)
+    paths.validate_run_id(plan_step_id)
+    if not isinstance(step_version, int) or isinstance(step_version, bool) or step_version < 1:
+        raise ProjectRunError("step_dir_for: step_version must be an int >= 1")
+    return paths.project_dir(slug, root=root) / "runs" / run_id / "steps" / plan_step_id / f"v{step_version}"
 
 
 @dataclass(frozen=True)
@@ -195,12 +218,12 @@ def prepare_project_run(
     effective_session_id = session_id or os.environ.get(ASTRID_SESSION_ID)
     if auto_bound is not None:
         base_metadata.pop("project_was_auto_resolved", None)
-    parent_run_id = task_env.task_run_id_env()
+    parent_run_id = os.environ.get(TASK_RUN_ID_ENV)
     if parent_run_id:
-        task_project = task_env.task_project_env()
+        task_project = os.environ.get(TASK_PROJECT_ENV)
         if task_project != project_slug:
             raise ProjectRunError(f"task run is bound to project {task_project!r}, refusing to prepare run for {project_slug!r}")
-        step_id = task_env.task_step_id_env()
+        step_id = os.environ.get(TASK_STEP_ID_ENV)
         if not step_id:
             raise ProjectRunError("ASTRID_TASK_STEP_ID must be set when ASTRID_TASK_RUN_ID is set")
         if timeline_id is None and requires_timeline:

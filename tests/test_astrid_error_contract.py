@@ -13,8 +13,6 @@ from astrid.core.contracts.errors import (
 from astrid.core.contracts.exec_error import ExecError
 from astrid.core.project.project import ProjectError
 from astrid.core.project.schema import ProjectValidationError
-from astrid.core.session.binding import SessionBindingError
-from astrid.core.task.gate.base import TaskRunGateError
 from astrid.core.timeline._edit_helpers import TimelineEditError
 
 
@@ -59,18 +57,18 @@ def test_normalize_valid_options_and_state_snapshot_helpers() -> None:
 
 
 def test_coerce_astrid_error_maps_legacy_exception_fields() -> None:
-    legacy = TaskRunGateError(
-        reason="step is blocked",
-        recovery="astrid next --project demo",
-        code="gate_rejected",
+    legacy = ProjectError(
+        cause="step is blocked",
+        recovery_command="astrid projects ls",
+        code="project_blocked",
     )
 
     err = coerce_astrid_error(legacy)
 
     assert err.cause == "step is blocked"
-    assert err.recovery_command == "astrid next --project demo"
-    assert err.code == "gate_rejected"
-    assert err.source_type == "TaskRunGateError"
+    assert err.recovery_command == "astrid projects ls"
+    assert err.code == "project_blocked"
+    assert err.source_type == "ProjectError"
 
 
 def test_error_from_result_converts_non_exception_exec_error_payloads() -> None:
@@ -324,22 +322,22 @@ def test_coerce_astrid_error_degraded_merge() -> None:
 # ============================================================================
 
 
-def test_task_run_gate_error_is_astrid_error() -> None:
-    err = TaskRunGateError(reason="blocked", recovery="astrid next --project demo")
+def test_project_error_is_astrid_error() -> None:
+    err = ProjectError(cause="blocked", recovery_command="astrid projects ls")
     assert isinstance(err, AstridError)
     # Legacy fields preserved per T18 migration contract.
     assert err.reason == "blocked"
-    assert err.recovery == "astrid next --project demo"
+    assert err.recovery == "astrid projects ls"
     assert err.cause == "blocked"
     assert err.message == "blocked"
 
 
-def test_session_binding_error_is_astrid_error() -> None:
-    err = SessionBindingError("no session file at /tmp/sessions/X.json")
+def test_project_validation_error_is_astrid_error() -> None:
+    err = ProjectValidationError("no project file at /tmp/projects/X.json")
     assert isinstance(err, AstridError)
-    assert err.cause == "no session file at /tmp/sessions/X.json"
-    assert err.message == "no session file at /tmp/sessions/X.json"
-    assert err.reason == "no session file at /tmp/sessions/X.json"
+    assert err.cause == "no project file at /tmp/projects/X.json"
+    assert err.message == "no project file at /tmp/projects/X.json"
+    assert err.reason == "no project file at /tmp/projects/X.json"
     assert err.degraded is False
 
 
@@ -374,8 +372,6 @@ def test_project_validation_error_is_astrid_error() -> None:
 def test_all_migrated_errors_coerce_to_canonical_envelope() -> None:
     """Every migrated error class round-trips through coerce_astrid_error."""
     cases: list[tuple[AstridError, str]] = [
-        (TaskRunGateError(reason="blocked", recovery="astrid next --project demo", code="x"), "blocked"),
-        (SessionBindingError("no session file"), "no session file"),
         (TimelineEditError("clip not found"), "clip not found"),
         (ProjectError("project exists"), "project exists"),
         (ProjectValidationError("invalid field"), "invalid field"),

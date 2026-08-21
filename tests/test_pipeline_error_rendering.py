@@ -11,8 +11,6 @@ from astrid.core import gateway
 from astrid.core.contracts.errors import AstridError
 from astrid.core.project.project import ProjectError
 from astrid.core.project.schema import ProjectValidationError
-from astrid.core.session.binding import SessionBindingError
-from astrid.core.task.gate.base import TaskRunGateError
 from astrid.core.timeline._edit_helpers import TimelineEditError
 
 pipeline = gateway
@@ -76,31 +74,6 @@ def test_models_registry_load_failure_flows_through_renderer() -> None:
     assert "failed to load model registry: catalog exploded" in stderr
     assert "recovery: astrid models list" in stderr
     assert '"command": "models list"' in stderr
-    assert "Traceback" not in stderr
-
-
-def test_task_gate_rejection_flows_through_universal_renderer() -> None:
-    with (
-        mock.patch(
-            "astrid.core.session.binding.resolve_current_session_with_fs_fallback",
-            return_value=object(),
-        ),
-        mock.patch(
-            "astrid.core.task.gate.gate_command",
-            side_effect=TaskRunGateError(
-                reason="step is blocked",
-                recovery="astrid next --project demo",
-                code="gate_rejected",
-            ),
-        ),
-    ):
-        rc, stderr = _capture(["executors", "list", "--project", "demo"])
-
-    assert rc == 2
-    assert "step is blocked" in stderr
-    assert "recovery: astrid next --project demo" in stderr
-    assert '"gate": "task-mode"' in stderr
-    assert "task-mode gate rejected:" not in stderr
     assert "Traceback" not in stderr
 
 
@@ -205,14 +178,14 @@ def test_subprocess_degraded_bug_envelope_no_traceback() -> None:
 # ============================================================================
 
 
-def test_session_binding_error_renders_via_envelope() -> None:
-    """SessionBindingError routed through pipeline.main() → envelope, no bespoke prefix."""
-    err = SessionBindingError("no session file at /tmp/X.json")
+def test_project_validation_error_renders_via_envelope_no_prefix() -> None:
+    """ProjectValidationError routed through pipeline.main() → envelope, no bespoke prefix."""
+    err = ProjectValidationError("no project file at /tmp/X.json")
     with mock.patch.object(pipeline, "_dispatch", side_effect=err):
-        rc, stderr = _capture(["executors", "list"])
+        rc, stderr = _capture(["projects", "show"])
     assert rc == 2
-    assert "no session file at /tmp/X.json" in stderr
-    assert "session:" not in stderr  # no bespoke prefix
+    assert "no project file at /tmp/X.json" in stderr
+    assert "project:" not in stderr  # no bespoke prefix
     assert "Traceback" not in stderr
 
 

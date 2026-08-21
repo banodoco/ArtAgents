@@ -12,7 +12,7 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-from astrid.core.task.managed_binding import is_managed_mode
+from astrid.core.managed_binding import is_managed_mode
 from astrid.packs.video_editing.executors.cut.run import build_parser as cut_build_parser
 from astrid.packs.editorial.executors.refine.run import build_parser as refine_build_parser
 from astrid.packs.iteration.executors.assemble.run import build_parser as assemble_build_parser

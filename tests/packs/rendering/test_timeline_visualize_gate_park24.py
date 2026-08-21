@@ -38,7 +38,7 @@ import pytest
 from astrid.core import gateway
 from astrid.core.foundation.project_paths import project_dir
 from astrid.core.project.project import create_project
-from astrid.core.session.binding import ASTRID_SESSION_ID_ENV
+from astrid.core.env_vars import ASTRID_SESSION_ID as ASTRID_SESSION_ID_ENV
 from astrid.core.timeline.events.schema.serialize import with_event_hash
 from astrid.core.timeline.events.schema.types import TimelineEvent
 from astrid.core.timeline.resolution import classify_registry

@@ -147,10 +147,6 @@ def validate_cli_domain_boundary(root: str | Path = REPO_ROOT) -> list[str]:
 _TODO_MILESTONE_RE = re.compile(r"TODO\(m\d+[ab]?\)", re.IGNORECASE)
 _SYS_MODULES_INJECTION_EXEMPTIONS = frozenset(
     {
-        # SD2: compile.py temporarily registers a UUID-namespaced module for
-        # importlib relative imports and pops it in finally; keep the guard
-        # narrow so only this approved register-then-pop pattern is exempt.
-        "astrid/core/orchestrate/compile.py",
         # The in-process runtime invoker reloads pack modules fresh on each
         # invocation via importlib.util + sys.modules pop/assign.  This is
         # a controlled, necessary pattern to guarantee source-level freshness
@@ -164,11 +160,10 @@ _PACK_RUNTIME_BRIDGE_EXEMPT_REL = frozenset(
         # These files are the sanctioned pack-runtime/registry bridge layer.
         # They may resolve manifest-declared pack runtime modules without
         # weakening the general core -> packs boundary.
-        "astrid/core/executor/runner.py",
-        "astrid/core/orchestrator/runner.py",
+        "astrid/core/execution/executor/runner.py",
+        "astrid/core/execution/orchestrator/runner.py",
         "astrid/core/pack/resolver.py",
         "astrid/core/runtime/in_process.py",
-        "astrid/core/task/plan/builder.py",
     }
 )
 _PACK_SYSTEM_TOP_LEVEL_MODULES = frozenset(

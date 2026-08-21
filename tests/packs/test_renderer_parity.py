@@ -36,8 +36,7 @@ from astrid.core.rendering.registry import load_default_registries
 from astrid.core.rendering.service import LegacyRenderRoutingWarning, RenderService
 from astrid.core.rendering.transport import CommandTransport
 from astrid.core.subprocess_env import TASK_PROJECT_ENV, TASK_RUN_ID_ENV, TASK_STEP_ID_ENV
-from astrid.core.task import gate as task_gate
-from astrid.core.task.plan import step_dir_for
+from astrid.core.project.run import step_dir_for
 from astrid.core.timeline.crud import create_timeline
 
 
@@ -610,7 +609,6 @@ def test_public_facade_standalone_and_attached_run_ownership(
         monkeypatch.setenv(TASK_PROJECT_ENV, "demo")
         monkeypatch.setenv(TASK_RUN_ID_ENV, PARENT_RUN_ID)
         monkeypatch.setenv(TASK_STEP_ID_ENV, TASK_STEP_ID)
-        monkeypatch.setattr(task_gate, "gate_command", lambda *_args, **_kwargs: None)
 
     result = run_executor(
         ExecutorRunRequest(

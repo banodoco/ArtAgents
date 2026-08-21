@@ -493,16 +493,6 @@ class TestScratchRun:
         - Gateway return code matches subprocess (0)
         """
         projects_root, _ = _setup_project_env(tmp_path, monkeypatch, "default")
-        from astrid.core.session.lifecycle import create_session
-        from astrid.core.session.paths import sessions_dir
-
-        create_session(
-            project_slug="default",
-            agent_id="test-agent",
-            projects_root=projects_root,
-            session_root=sessions_dir(),
-            session_id="S-SCRATCH-OK",
-        )
 
         script = tmp_path / "success.py"
         script.write_text("import sys; print('ok'); sys.exit(0)", encoding="utf-8")

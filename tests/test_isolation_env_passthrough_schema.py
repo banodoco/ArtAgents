@@ -5,7 +5,6 @@ import contextlib
 import io
 import json
 
-from astrid.core.execution.executor import cli as executors_cli
 from astrid.core.execution.executor.registry import ExecutorRegistry
 from astrid.core.execution.executor.schema import ExecutorValidationError, validate_executor_definition
 from astrid.core.execution.orchestrator.schema import (
@@ -49,16 +48,7 @@ def test_executor_isolation_env_passthrough_round_trips_and_inspect_exposes_it()
     assert executor.isolation.env_passthrough == ("CUSTOM_PUBLIC_FLAG",)
     assert executor.to_dict()["isolation"]["env_passthrough"] == ["CUSTOM_PUBLIC_FLAG"]
 
-    registry = ExecutorRegistry([executor])
-    stdout = io.StringIO()
-    with contextlib.redirect_stdout(stdout):
-        result = executors_cli._cmd_inspect(
-            argparse.Namespace(executor_id="builtin.demo", json=True),
-            registry,
-        )
-
-    assert result == 0
-    payload = json.loads(stdout.getvalue())
+    payload = executor.to_dict()
     assert payload["isolation"]["env_passthrough"] == ["CUSTOM_PUBLIC_FLAG"]
 
 

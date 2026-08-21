@@ -1,10 +1,19 @@
-"""Stable non-task home for managed timeline binding helpers.
+"""Managed timeline binding helpers for pack entrypoints.
 
-Release N keeps ``astrid.core.task.managed_binding`` as the implementation and
-fallback surface. This module provides the long-lived import path for
-non-task and pack consumers while the behavioral core is being retired.
+The former task-mode implementation lived in the retired task runtime's
+managed-binding module; the single helper is inlined here for the pack
+executors that still honor managed timeline binding.
 """
 
-from astrid.core.task.managed_binding import is_managed_mode
+from __future__ import annotations
+
+from typing import Any
+
+
+def is_managed_mode(args: Any) -> bool:
+    """Return True when both managed timeline binding flags are present."""
+
+    return bool(getattr(args, "project", None) and getattr(args, "timeline_slug", None))
+
 
 __all__ = ["is_managed_mode"]

@@ -17,7 +17,7 @@ import shutil
 import pytest
 
 from astrid.core import gateway
-from astrid.core.session.binding import ASTRID_SESSION_ID_ENV
+from astrid.core.env_vars import ASTRID_SESSION_ID as ASTRID_SESSION_ID_ENV
 from contextlib import redirect_stdout, redirect_stderr
 from io import StringIO
 

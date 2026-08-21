@@ -391,25 +391,10 @@ def test_representative_executor_dispatches_external(pack_id: str) -> None:
 
 
 def _seed_session(astrid_home: Path, projects_root: Path, slug: str) -> str:
-    """Mint identity + Session + project so the CLI gate accepts the run."""
+    """Seed a project so parity runs have a project to attach to."""
     from astrid.core.foundation.project_paths import project_dir
-    from astrid.core.session.identity import Identity, write_identity
-    from astrid.core.session.paths import session_path
-    from astrid.core.threads.ids import generate_ulid
 
     astrid_home.mkdir(parents=True, exist_ok=True)
-    write_identity(Identity(agent_id="claude-1",
-                            created_at="2026-05-11T00:00:00Z"))
-    sid = generate_ulid()
-    from tests.conftest import make_session
-
-    sess = make_session(
-        id=sid,
-        project=slug,
-        run_id=None,
-    )
-    sess.to_json(session_path(sid))
-
     proj = project_dir(slug)
     proj.mkdir(parents=True, exist_ok=True)
     (proj / "project.json").write_text(
@@ -423,7 +408,7 @@ def _seed_session(astrid_home: Path, projects_root: Path, slug: str) -> str:
         }),
         encoding="utf-8",
     )
-    return sid
+    return "parity"
 
 
 def test_asset_cache_subprocess_shift_anchor(tmp_path: Path,

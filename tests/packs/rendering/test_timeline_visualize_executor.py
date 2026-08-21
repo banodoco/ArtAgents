@@ -18,7 +18,6 @@ from astrid.core.execution.executor.schema import load_executor_manifest
 from astrid.core.foundation.project_paths import project_dir
 from astrid.core.project.project import create_project
 from astrid.core.project.run import load_run_record
-from astrid.core.task.run.gc import cmd_runs_gc, select_runs_for_gc
 
 TESTS_ROOT = Path(__file__).resolve().parents[2]
 REPO_ROOT = TESTS_ROOT.parent
@@ -292,74 +291,6 @@ def test_multi_timeline_selection_writes_sorted_run_owned_metadata(
     assert manifest["timeline_ids"] == record["metadata"]["timeline_ids"]
     assert manifest["reading_order"] == ["TL01/manifest.json", "TL02/manifest.json"]
     assert all((Path(result.outputs["pack_root"]) / item).is_file() for item in manifest["reading_order"])
-
-
-def test_gc_preserves_evidence_by_default_and_explicit_lifecycle_deletes_it(
-    tmp_projects_root: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    slug = "timeline-visualize-gc"
-    create_project(slug, root=tmp_projects_root)
-    root = project_dir(slug, root=tmp_projects_root)
-    run_id = "01AAA111111111111111111111"
-    run_root = root / "runs" / run_id
-    run_root.mkdir(parents=True)
-    (run_root / "evidence.bin").write_bytes(b"owned evidence")
-    (run_root / "run.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "project_slug": slug,
-                "run_id": run_id,
-                "status": "completed",
-                "auto_bound": False,
-                "invocation": "sdk",
-                "created_at": "2020-01-01T00:00:00Z",
-                "updated_at": "2020-01-01T00:00:00Z",
-                "metadata": {"evidence": True},
-                "artifacts": {},
-            },
-            sort_keys=True,
-        ),
-        encoding="utf-8",
-    )
-
-    default = select_runs_for_gc(slug, older_than_days=1, root=tmp_projects_root)
-    assert default.evidence_run_ids == frozenset({run_id})
-    assert default.deletion_candidates == ()
-    assert next(entry for entry in default.runs if entry.run_id == run_id).protected
-
-    capsys.readouterr()
-    assert (
-        cmd_runs_gc(
-            ["--project", slug, "--older-than-days", "1", "--apply"],
-            projects_root=tmp_projects_root,
-        )
-        == 0
-    )
-    assert run_root.is_dir()
-
-    capsys.readouterr()
-    assert (
-        cmd_runs_gc(
-            [
-                "--project",
-                slug,
-                "--older-than-days",
-                "1",
-                "--include-evidence",
-                "--apply",
-            ],
-            projects_root=tmp_projects_root,
-        )
-        == 0
-    )
-    assert not run_root.exists()
-
-
-# ---------------------------------------------------------------------------
-# R13: rendered-video sampling + hard per-page budget at executor scope level.
-# ---------------------------------------------------------------------------
 
 
 def _rewrite_registry_event(

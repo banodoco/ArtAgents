@@ -16,10 +16,9 @@ from typing import Any
 import pytest
 
 from astrid.core.contracts.event_log_error import EventLogError
+from astrid.core.events import NotWriterError, StaleEpochError, StaleTailError
 from astrid.core.execution.executor.schema import ExecutorValidationError
 from astrid.core.execution.orchestrator.runner import OrchestratorRunError
-from astrid.core.session.lease import LeaseError
-from astrid.core.task.events import NotWriterError, StaleEpochError, StaleTailError
 from tests._sdk_contract import EXPECTED_PUBLIC_NAMES
 
 SDK_MODULE_MISSING = importlib.util.find_spec("astrid.sdk") is None
@@ -33,7 +32,6 @@ pytestmark = pytest.mark.skipif(
 REPRESENTATIVE_SUBMODULES = (
     "astrid.core.gateway",
     "astrid.core.doctor",
-    "astrid.core.gateway.setup",
 )
 
 RETIRED_COMPATIBILITY_SUBMODULES = (
@@ -1251,7 +1249,6 @@ def test_invoke_maps_typed_sdk_exceptions_from_internal_failures(
     cases = (
         (ExecutorValidationError("bad manifest"), astrid.CapabilityValidationError),
         (ValueError("missing required input(s): brief"), astrid.CapabilityInvocationError),
-        (LeaseError("missing lease"), astrid.CapabilityLeaseError),
         (NotWriterError(session_id="S-1", writer_id="S-2"), astrid.CapabilityLeaseError),
         (StaleEpochError(expected=1, actual=2), astrid.CapabilityLeaseError),
         (StaleTailError(expected="sha256:abc", actual="sha256:def"), astrid.CapabilityEventLogError),
@@ -3093,67 +3090,6 @@ print(f"EXIT_CODE={exit_code}")
     assert "EXIT_CODE=2" in stdout
 
 
-def test_gateway_run_passes_bound_project_via_request_metadata(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import types
-    from unittest.mock import MagicMock, patch
-
-    from astrid.core.foundation import project_paths
-    from astrid.core.project.project import create_project
-    from astrid.core.session.binding import ASTRID_SESSION_ID_ENV
-    from astrid.core.session.lifecycle import create_session
-    from astrid.core.session.paths import sessions_dir
-    from astrid.core.timeline.crud import create_timeline
-    from astrid.core.gateway import main
-
-    projects_root = tmp_path / "projects"
-    monkeypatch.setenv(project_paths.PROJECTS_ROOT_ENV, str(projects_root))
-    monkeypatch.setenv("ASTRID_HOME", str(tmp_path / "astrid-home"))
-    create_project("demo")
-    create_timeline("demo", "main", is_default=True)
-    session = create_session(
-        project_slug="demo",
-        agent_id="tester",
-        projects_root=projects_root,
-        session_root=sessions_dir(),
-        write_project_pointer=True,
-    )
-    monkeypatch.setenv(ASTRID_SESSION_ID_ENV, session.id)
-
-    captured: dict[str, Any] = {}
-    fake_result = types.SimpleNamespace(
-        missing_binaries=(),
-        skipped=False,
-        command=(),
-        payload=None,
-        returncode=0,
-        ok=True,
-        error=None,
-    )
-    fake_registry = MagicMock()
-    fake_registry.get.return_value = MagicMock()
-
-    def _capture(request, registry):
-        captured["request"] = request
-        return fake_result
-
-    out_dir = tmp_path / "bound-out"
-
-    with patch("astrid.core.execution.executor.cli.load_default_registry", return_value=fake_registry), \
-         patch("astrid.core.execution.executor.runner.run_executor", side_effect=_capture):
-        rc = main(["executors", "run", "test.executor", "--out", str(out_dir)])
-
-    request = captured["request"]
-    assert rc == 0
-    assert request.project == "demo"
-    assert request.project_was_auto_resolved is True
-    assert "--project" not in request.argv
-    assert os.environ.get(ASTRID_SESSION_ID_ENV) == session.id
-
-
-# ============================================================================
 # Verb registry tests (T19)
 # ============================================================================
 

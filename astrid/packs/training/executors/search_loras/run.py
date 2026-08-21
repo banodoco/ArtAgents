@@ -68,12 +68,12 @@ def _executor_search_command(
 ) -> str:
     return " ".join(
         [
-            "python3 -m astrid.core.execution.executor.cli run training.search_loras",
-            f"--input base_model={base_model}",
-            f"--input match={','.join(terms)}",
-            f"--input match_mode={match_mode}",
-            f"--input limit={limit}",
-            f"--input fetch_limit={fetch_limit}",
+            "python3 -m astrid.packs.training.executors.search_loras.run",
+            f"--base-model {base_model}",
+            *[f"--match {term}" for term in terms],
+            f"--match-mode {match_mode}",
+            f"--limit {limit}",
+            f"--fetch-limit {fetch_limit}",
             f"--out {out}",
         ]
     )
@@ -87,10 +87,10 @@ def _executor_base_models_command(
 ) -> str:
     return " ".join(
         [
-            "python3 -m astrid.core.execution.executor.cli run training.search_loras",
-            "--input mode=base-models",
-            f"--input base_model_match={base_model_match}",
-            f"--input fetch_limit={fetch_limit}",
+            "python3 -m astrid.packs.training.executors.search_loras.run",
+            "--list-base-models",
+            f"--base-model-match {base_model_match}",
+            f"--fetch-limit {fetch_limit}",
             f"--out {out}",
         ]
     )
@@ -321,9 +321,9 @@ def _guidance_for_base_model_discovery(
         next_executor_commands.append(
             " ".join(
                 [
-                    "python3 -m astrid.core.execution.executor.cli run training.search_loras",
-                    "--input mode=base-models",
-                    f"--input fetch_limit={max(limit * 2, 1000)}",
+                    "python3 -m astrid.packs.training.executors.search_loras.run",
+                    "--list-base-models",
+                    f"--fetch-limit {max(limit * 2, 1000)}",
                     "--out /tmp/astrid-search-loras-base-models",
                 ]
             )

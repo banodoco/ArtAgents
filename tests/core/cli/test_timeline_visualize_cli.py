@@ -8,8 +8,6 @@ from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock
-
 import pytest
 
 import astrid
@@ -17,14 +15,7 @@ from astrid.core import gateway
 from astrid.core.foundation.project_paths import project_dir
 from astrid.core.project.project import create_project
 from astrid.core.project.run import load_run_record
-from astrid.core.session.binding import ASTRID_SESSION_ID_ENV
-from astrid.core.session.paths import session_path
-from astrid.core.subprocess_env import (
-    TASK_PROJECT_ENV,
-    TASK_RUN_ID_ENV,
-    TASK_STEP_ID_ENV,
-)
-from tests.conftest import make_session
+from astrid.core.env_vars import ASTRID_SESSION_ID as ASTRID_SESSION_ID_ENV
 
 TESTS_ROOT = Path(__file__).resolve().parents[2]
 SLICE_DIR = TESTS_ROOT / "fixtures" / "timeline_visualize" / "desert_slice"
@@ -342,99 +333,3 @@ def test_full_command_stdout_has_no_logs_nudges_or_trailing_content(
     assert returncode == 0
     _compact_payload(stdout)
     assert "\n" not in stdout
-
-
-def test_attached_invocation_resolves_project_and_hits_gateway_gate_once(
-    tmp_projects_root: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    slug = "visualize-cli-attached"
-    _prepare_project(tmp_projects_root, slug)
-    session = make_session(id="S-VISUALIZE", project=slug)
-    session_file = session_path(session.id)
-    session_file.parent.mkdir(parents=True, exist_ok=True)
-    session.to_json(session_file)
-    monkeypatch.setenv(ASTRID_SESSION_ID_ENV, session.id)
-
-    from astrid.core import gate as stable_gate
-
-    gate_mock = Mock(return_value=stable_gate.GateDecision(active=False))
-    monkeypatch.setattr(stable_gate, "gate_command", gate_mock)
-
-    returncode, stdout, _stderr = _run_gateway(
-        ["timelines", "visualize", *_fast_flags()]
-    )
-
-    assert returncode == 0
-    _compact_payload(stdout)
-    assert gate_mock.call_count == 1
-    assert gate_mock.call_args.args[0] == slug
-
-
-def test_active_task_gates_once_then_sdk_reentry_executes_once(
-    tmp_projects_root: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    slug = "visualize-cli-task-reentry"
-    _prepare_project(tmp_projects_root, slug)
-    session = make_session(id="S-VISUALIZE-TASK", project=slug)
-    session_file = session_path(session.id)
-    session_file.parent.mkdir(parents=True, exist_ok=True)
-    session.to_json(session_file)
-    monkeypatch.setenv(ASTRID_SESSION_ID_ENV, session.id)
-    monkeypatch.setenv(TASK_PROJECT_ENV, slug)
-    monkeypatch.setenv(TASK_RUN_ID_ENV, "R-VISUALIZE-TASK")
-    monkeypatch.setenv(TASK_STEP_ID_ENV, "render")
-
-    from astrid.core import gate as stable_gate
-    from astrid.core.task import gate as task_gate
-
-    outer_decision = stable_gate.GateDecision(
-        active=True,
-        run_id="R-VISUALIZE-TASK",
-        plan_step_id="render",
-        step_kind="code",
-        slug=slug,
-    )
-    reentry_decision = task_gate.GateDecision(
-        active=True,
-        run_id="R-VISUALIZE-TASK",
-        plan_step_id="render",
-        reentry=True,
-        step_kind="code",
-        slug=slug,
-    )
-    gate_mock = Mock(
-        side_effect=lambda *_args, **kwargs: (
-            reentry_decision if kwargs.get("reentry") else outer_decision
-        )
-    )
-    completion = Mock()
-    monkeypatch.setattr(task_gate, "gate_command", gate_mock)
-    monkeypatch.setattr(task_gate, "record_dispatch_complete", completion)
-
-    invoke_count = 0
-    real_invoke = astrid.invoke
-
-    def counted_invoke(capability_id: str, **kwargs):
-        nonlocal invoke_count
-        invoke_count += 1
-        return real_invoke(capability_id, **kwargs)
-
-    monkeypatch.setattr(astrid, "invoke", counted_invoke)
-
-    returncode, stdout, _stderr = _run_gateway(
-        ["timelines", "visualize", *_fast_flags()]
-    )
-
-    assert returncode == 0
-    _compact_payload(stdout)
-    assert invoke_count == 1
-    outer_calls = [call for call in gate_mock.call_args_list if not call.kwargs.get("reentry")]
-    reentry_calls = [call for call in gate_mock.call_args_list if call.kwargs.get("reentry")]
-    assert len(outer_calls) == 1
-    assert len(reentry_calls) == 1
-    assert reentry_calls[0].kwargs == {"reentry": True}
-    assert reentry_calls[0].args[0] == slug
-    assert reentry_calls[0].args[1].startswith("timelines visualize")
-    completion.assert_called_once()

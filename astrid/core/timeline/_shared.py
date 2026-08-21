@@ -1,4 +1,4 @@
-"""Shared session/version helpers for the timeline CLI.
+"""Shared version helpers for the timeline CLI.
 
 Extracted from ``astrid/core/timeline/cli.py`` to break the circular-facade
 dependency: the command-handler leaf modules (``cli_crud``, ``cli_output``,
@@ -6,62 +6,46 @@ dependency: the command-handler leaf modules (``cli_crud``, ``cli_output``,
 ``cli`` via in-function imports to obtain these shared helpers, while ``cli``
 re-exports the leaves' handlers at module level — a genuine import cycle.
 
-This module is a **leaf**: it may import from ``session``/``contracts`` but must
-never import from ``timeline.cli`` or any of the handler leaves.  ``cli`` imports
-these names from here and re-exports them, so the legacy monkeypatch seam
-``astrid.core.timeline.cli._require_session`` (et al.) keeps resolving.
+The legacy session-binding helpers were retired with the task-mode session
+layer; the timeline CLI now resolves project context from ``--project`` only
+and derives a stable request-scoped actor.
 """
 
 from __future__ import annotations
 
 import argparse
-from typing import Any
 
 from astrid.core.contracts.errors import AstridError
-from astrid.core.session.binding import (
-    SessionBindingError,
-    resolve_current_session,
-)
 
 from .events.schema import TimelineActor
 
-_SESSION_GATE_HINT = (
-    "A timeline command requires a bound session. "
-    "Run 'astrid attach <project>' first."
-)
+
+def _resolve_optional_session(args: argparse.Namespace) -> None:
+    """Retired session resolver — timeline commands no longer bind sessions."""
+    return None
 
 
-def _resolve_optional_session(args: argparse.Namespace) -> Any:
-    """Resolve a session if possible, but don't raise when not found.
-
-    Used by commands that accept --project as an alternative to session binding.
-    """
-    try:
-        return resolve_current_session(slug=getattr(args, "project", None) or None)
-    except Exception:
-        return None
-
-
-def _resolve_project_slug(args: argparse.Namespace, session: Any) -> str:
-    """Resolve a project slug from args or session."""
+def _resolve_project_slug(args: argparse.Namespace, session: object | None = None) -> str:
+    """Resolve a project slug from args (session parameter retained for compat)."""
     project_slug = getattr(args, "project", None)
     if project_slug:
         return project_slug
-    if session is not None:
-        return session.project
     raise AstridError(
-        "no project specified; use --project <slug> or bind a session with 'astrid attach'",
-        recovery_command="astrid attach <project>",
+        "no project specified; use --project <slug>",
+        recovery_command="astrid timelines <verb> --project <slug>",
     )
 
 
-def _require_session(slug: str | None = None) -> Any:
-    # T9 / FLAG-S1-003: optional slug for file-bound fallback; env-only when
-    # caller has no --project context to plumb.
-    session = resolve_current_session(slug=slug)
-    if session is None:
-        raise SessionBindingError(_SESSION_GATE_HINT)
-    return session
+def _require_session(slug: str | None = None) -> None:
+    """Retired session gate — sessions are no longer bound or required.
+
+    Kept as the monkeypatch seam for the legacy timeline CLI tests; timeline
+    commands resolve project context from ``--project`` instead.
+    """
+    raise AstridError(
+        "a timeline command requires --project (sessions are retired)",
+        recovery_command="re-run with --project <slug>",
+    )
 
 
 def _expected_version_kwargs(args: argparse.Namespace) -> dict[str, int]:
@@ -71,40 +55,20 @@ def _expected_version_kwargs(args: argparse.Namespace) -> dict[str, int]:
     return {"expected_version": expected_version}
 
 
-def _timeline_actor_from_session(session: Any) -> TimelineActor:
-    agent_id = getattr(session, "agent_id", "") or "unknown-agent"
-    session_id = getattr(session, "id", "") or "unknown-session"
-    return TimelineActor(
-        type="agent",
-        id=f"{agent_id}:{session_id}",
-        display=agent_id,
-    )
-
-
 def _resolve_edit_context(
     project_slug: str,
     args: argparse.Namespace,
 ) -> tuple[TimelineActor, str]:
-    """Resolve an actor + project for timeline edit handlers.
+    """Resolve a stable request-scoped actor + project for edit handlers.
 
-    When a bound session is available, the actor derives from the session.
-    Otherwise a STABLE request-scoped actor is constructed with a
-    deterministic identity based on the project slug — no session binding
-    required.  The resolved project slug is returned alongside the actor
-    so callers do not need a second lookup.
+    The actor identity is deterministic per project slug; timeline edits no
+    longer require a bound session.
     """
-    session = _resolve_optional_session(args)
-    if session is not None:
-        actor = _timeline_actor_from_session(session)
-        resolved_project = _resolve_project_slug(args, session)
-        return actor, resolved_project
-
-    # Sessionless: stable request-scoped actor keyed on project slug.
     resolved_project = project_slug or getattr(args, "project", None)
     if not resolved_project:
         raise AstridError(
-            "no project specified; use --project <slug> or bind a session with 'astrid attach'",
-            recovery_command="astrid attach <project>",
+            "no project specified; use --project <slug>",
+            recovery_command="astrid timelines <verb> --project <slug>",
         )
 
     actor = TimelineActor(

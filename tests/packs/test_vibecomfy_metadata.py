@@ -7,20 +7,14 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from astrid.core.execution.executor import cli as executors_cli
 from astrid.core.execution.executor.folder import load_folder_executors
 from astrid.core.execution.executor.registry import load_default_registry
 
 
 class VibeComfyStructuredMetadataTest(unittest.TestCase):
     def test_executor_inspect_exposes_structured_vibecomfy_metadata(self) -> None:
-        stdout = io.StringIO()
-        stderr = io.StringIO()
-        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
-            result = executors_cli.main(["inspect", "vibecomfy.run", "--json"])
-
-        self.assertEqual(result, 0, stderr.getvalue())
-        payload = json.loads(stdout.getvalue())
+        executor = load_default_registry().get("vibecomfy.run")
+        payload = executor.to_dict()
         metadata = payload["metadata"]
 
         self.assertEqual(payload["id"], "vibecomfy.run")

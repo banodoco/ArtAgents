@@ -40,8 +40,7 @@ from astrid.core.foundation import project_paths as paths
 from astrid.core.project.project import create_project
 from astrid.core.project.run import resolve_record_path, write_run_record
 from astrid.core.subprocess_env import TASK_PROJECT_ENV, TASK_RUN_ID_ENV, TASK_STEP_ID_ENV
-from astrid.core.task import gate as task_gate
-from astrid.core.task.plan import step_dir_for
+from astrid.core.project.run import step_dir_for
 from astrid.core.timeline.crud import create_timeline
 
 PARENT_RUN_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAT"
@@ -270,13 +269,9 @@ def test_facade_task_attached_reuses_run_context_without_new_run_json(
     orchestrator's run: no NEW ``run.json`` is written (the parent run record
     is the only one) and the render argv targets the task step root.
 
-    The task gate itself (``astrid/core/task/gate``) demands an active
-    ``active_run.json`` for real task runs; that gate is separately
-    characterized by the task-run suites, so here it is stubbed to pass.
-    """
+"""
     projects_root, timeline = _setup_project(tmp_path, monkeypatch)
     _attach_task_run(monkeypatch, projects_root, timeline)
-    monkeypatch.setattr(task_gate, "gate_command", lambda *args, **kwargs: None)
     inputs = _write_project_inputs(projects_root)
     commands: list = []
     _noop_render_subprocess(monkeypatch, commands)

@@ -17,6 +17,4 @@ agent:
   purpose: "Historical core namespace retained only for backward-compatible aliases (builtin.*). It ships no live components of its own."
   do_not_use_for: "Anything real — pick the pack that now owns the capability (editorial for cut/transcript work, foley for spatial audio, generation for image/video synthesis, fal for fal.ai)."
   normal_entrypoints: []
-content:
-  orchestrators: orchestrators
 metadata: {}

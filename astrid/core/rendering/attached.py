@@ -30,9 +30,8 @@ from astrid.core.foundation.project_paths import (
     validate_run_id,
 )
 from astrid.core.io.cas import link_into_produces
-from astrid.core.project.run import load_run_record
+from astrid.core.project.run import load_run_record, step_dir_for
 from astrid.core.subprocess_env import TASK_PROJECT_ENV, TASK_RUN_ID_ENV, TASK_STEP_ID_ENV
-from astrid.core.task.plan import step_dir_for
 
 from .service import RenderService
 

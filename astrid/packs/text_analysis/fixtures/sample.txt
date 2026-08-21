@@ -1,4 +1,0 @@
-The quick brown fox jumps over the lazy dog.
-This is a sample text file used for testing the text_analysis.summarize orchestrator.
-It contains multiple lines of text to demonstrate the reading, summarization, and verdict capabilities.
-The orchestrator will count words, characters, and lines.

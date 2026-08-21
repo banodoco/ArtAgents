@@ -6,10 +6,8 @@ import os
 import shutil
 import sys
 import tempfile
-from collections.abc import Callable
-from dataclasses import dataclass
+from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import Any
 
 import pytest
 
@@ -22,7 +20,7 @@ if sys.pycache_prefix is None:
     atexit.register(lambda: shutil.rmtree(_pycache_prefix, ignore_errors=True))
 
 from astrid.core.foundation import project_paths as paths
-from astrid.core.task.env import (
+from astrid.core.subprocess_env import (
     TASK_ITEM_ID_ENV,
     TASK_ITERATION_ENV,
     TASK_PROJECT_ENV,
@@ -46,69 +44,9 @@ if "ASTRID_TIMELINE_COMPOSITION_SRC" not in os.environ:
 os.environ.setdefault("ASTRID_INTERNAL_INVOCATION", "1")
 
 
-def make_session(**overrides: Any) -> Any:
-    """Create a :class:`Session` dataclass with sensible test defaults.
-
-    Use ``**overrides`` to customize any field. The defaults produce::
-
-        id="S-TEST", project="demo", agent_id="claude-1",
-        attached_at="2026-05-11T00:00:00Z", last_used_at="2026-05-11T00:00:00Z",
-        role="writer", timeline=None, timeline_id=None, run_id=None
-
-    Callers that also need on-disk persistence typically follow with
-    ``sess.to_json(session_path(sess.id))`` or use the ``mint_session``
-    fixture which writes the session file for you.
-    """
-    from astrid.core.session.model import Session
-
-    defaults: dict[str, Any] = dict(
-        id="S-TEST",
-        project="demo",
-        agent_id="claude-1",
-        attached_at="2026-05-11T00:00:00Z",
-        last_used_at="2026-05-11T00:00:00Z",
-        role="writer",
-        timeline=None,
-        timeline_id=None,
-        run_id=None,
-    )
-    defaults.update(overrides)
-    return Session(**defaults)
-
-
-@pytest.fixture
-def mint_session() -> Callable[..., Any]:
-    """Return a callable that writes an explicit session fixture to disk."""
-
-    def _mint_session(
-        astrid_home: Path,
-        sid: str = "S-TEST",
-        *,
-        project: str = "demo",
-        run_id: str | None = None,
-        role: str = "writer",
-        timeline: str | None = None,
-        agent_id: str = "claude-1",
-    ) -> Any:
-        sessions = astrid_home / "sessions"
-        sessions.mkdir(parents=True, exist_ok=True)
-        sess = make_session(
-            id=sid,
-            project=project,
-            run_id=run_id,
-            agent_id=agent_id,
-            timeline=timeline,
-            role=role,
-        )
-        sess.to_json(sessions / f"{sid}.json")
-        return sess
-
-    return _mint_session
-
-
 @pytest.fixture
 def seed_project() -> Callable[[Path, str], Path]:
-    """Return a callable that seeds the shared session project fixture shape."""
+    """Return a callable that seeds a filesystem project with a timeline."""
 
     def _seed_project(projects_root: Path, slug: str) -> Path:
         from astrid.core import timeline as timeline_contract
@@ -163,118 +101,6 @@ def seed_project() -> Callable[[Path, str], Path]:
     return _seed_project
 
 
-@pytest.fixture
-def seed_project_run(seed_project: Callable[[Path, str], Path]) -> Callable[..., Path]:
-    """Return a callable that seeds a project run with writer lease state."""
-
-    def _seed_project_run(
-        projects_root: Path,
-        slug: str = "demo",
-        run_id: str = "01RUN",
-        *,
-        writer_session_id: str,
-    ) -> Path:
-        from astrid.core.project.current_run import write_current_run
-        from astrid.core.session.lease import write_lease_init
-
-        project = seed_project(projects_root, slug)
-        run_dir = project / "runs" / run_id
-        run_dir.mkdir(parents=True, exist_ok=True)
-        (run_dir / "events.jsonl").touch()
-        write_lease_init(run_dir, session_id=writer_session_id, plan_hash="")
-        write_current_run(slug, run_id)
-        return run_dir
-
-    return _seed_project_run
-
-
-# ---------------------------------------------------------------------------
-# Sprint 1 / T10: session-bootstrap autouse + attached_session fixture
-# ---------------------------------------------------------------------------
-#
-# The CLI gate (T8) rejects every non-allowlisted verb when
-# ``ASTRID_SESSION_ID`` is unset. Pre-Sprint-1 tests that exercise
-# ``pipeline.main`` did not know to seed a session — this autouse fixture
-# mints a tmp ASTRID_HOME with an identity + a default Session and exports
-# ``ASTRID_SESSION_ID`` so the gate passes for tests that don't care about
-# the session layer. Tests that need to assert the unbound path (the gate
-# tests themselves) call ``monkeypatch.delenv('ASTRID_SESSION_ID')`` to
-# re-enter the unbound state.
-
-
-@dataclass
-class SessionContext:
-    """Returned by the ``attached_session`` fixture."""
-
-    session: Any  # astrid.core.session.model.Session
-    project_root: Path
-    run_dir: Path | None
-
-    def refresh(self) -> Any:
-        """Re-load the session from disk after a potential auto-rebind."""
-
-        from astrid.core.session.model import Session
-        from astrid.core.session.paths import session_path
-
-        self.session = Session.from_json(session_path(self.session.id))
-        return self.session
-
-
-def _seed_identity_and_session(
-    astrid_home: Path,
-    *,
-    project: str = "autouse-session-demo",
-    run_id: str | None = None,
-) -> tuple[Any, Path]:
-    """Mint identity + session + project. Returns (Session, project_root)."""
-
-    from astrid.core.project.current_run import write_current_run
-    from astrid.core.foundation.project_paths import project_dir
-    from astrid.core.session.identity import Identity, write_identity
-    from astrid.core.session.lease import write_lease_init
-    from astrid.core.session.paths import session_path
-    from astrid.core.threads.ids import generate_ulid
-
-    astrid_home.mkdir(parents=True, exist_ok=True)
-    write_identity(Identity(agent_id="claude-1", created_at="2026-05-11T00:00:00Z"))
-
-    sid = generate_ulid()
-    proj_root = project_dir(project)
-    proj_root.mkdir(parents=True, exist_ok=True)
-    (proj_root / "project.json").write_text(
-        json.dumps(
-            {
-                "created_at": "2026-05-11T00:00:00Z",
-                "name": project,
-                "schema_version": 1,
-                "slug": project,
-                "updated_at": "2026-05-11T00:00:00Z",
-                "default_timeline_id": None,
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    run_path: Path | None = None
-    if run_id is not None:
-        run_path = proj_root / "runs" / run_id
-        run_path.mkdir(parents=True, exist_ok=True)
-        (run_path / "events.jsonl").touch()
-        # Seed the lease with the session id so the legacy append_event
-        # wrapper sees a matching attached_session_id (the wrapper itself
-        # doesn't do writer-auth, but WriterContext-aware callers do).
-        write_lease_init(run_path, session_id=sid, plan_hash="")
-        write_current_run(project, run_id)
-
-    sess = make_session(
-        id=sid,
-        project=project,
-        run_id=run_id,
-    )
-    sess.to_json(session_path(sid))
-    return sess, proj_root
-
-
 def _clear_task_env() -> None:
     """Scrub raw task-run env that tests may mutate outside monkeypatch."""
 
@@ -289,16 +115,16 @@ def _clear_task_env() -> None:
 
 
 @pytest.fixture(autouse=True)
-def _autouse_session_seed(
+def _sandboxed_home_and_projects(
     tmp_path_factory: pytest.TempPathFactory,
     monkeypatch: pytest.MonkeyPatch,
-) -> Path:
-    """Seed ASTRID_HOME + identity + a default Session for every test.
+) -> Iterator[None]:
+    """Sandbox ``ASTRID_HOME``, workspace config, and the projects root.
 
-    Tests that explicitly need the unbound state should
-    ``monkeypatch.delenv('ASTRID_SESSION_ID')`` (and optionally also delete
-    the identity / sessions dir). This fixture is autouse so legacy
-    pipeline-dispatch tests pass the CLI gate without per-file migration.
+    Every test gets tmp-backed state roots so no test writes into the real
+    ``~/.astrid`` or the user's projects directory. The legacy session
+    autouse seed (identity + session + ``ASTRID_SESSION_ID``) was retired
+    with the task-mode session layer.
     """
 
     _clear_task_env()
@@ -307,51 +133,16 @@ def _autouse_session_seed(
     workspace_config_dir = tmp_path_factory.mktemp("astrid_workspace_config_autouse")
     monkeypatch.setenv("ASTRID_HOME", str(astrid_home))
     monkeypatch.setenv("ASTRID_WORKSPACE_CONFIG_DIR", str(workspace_config_dir))
-    # Seed PROJECTS_ROOT to a tmp dir so the autouse seed-project does NOT
-    # write into the user's real ~/Documents/.../astrid-projects/. Tests
-    # that need their own projects-root (via tmp_projects_root) override
-    # this with their own monkeypatch.setenv on the same env var.
+    # Seed PROJECTS_ROOT to a tmp dir so tests never touch the real
+    # projects root. Tests that need their own projects-root (via
+    # tmp_projects_root) override this with their own monkeypatch.setenv.
     monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(projects_root))
-    sess, _ = _seed_identity_and_session(astrid_home)
-    monkeypatch.setenv("ASTRID_SESSION_ID", sess.id)
-    yield astrid_home
+    yield
     _clear_task_env()
 
 
 @pytest.fixture
-def attached_session(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> SessionContext:
-    """Explicit fixture for tests that need full control over the session.
-
-    Re-seeds ASTRID_HOME under ``tmp_path`` (overriding the autouse seed),
-    mints identity + a Session bound to a fresh ``demo`` project + run,
-    and seeds ``runs/<run_id>/lease.json`` with the session id so legacy
-    append_event wrappers don't trip ``NotWriterError``. The returned
-    :class:`SessionContext` exposes ``refresh()`` to re-read the session
-    file after a potential WriterContext auto-rebind.
-    """
-
-    from astrid.core.threads.ids import generate_ulid
-
-    astrid_home = tmp_path / "astrid_home"
-    monkeypatch.setenv("ASTRID_HOME", str(astrid_home))
-    monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(tmp_path / "projects"))
-    run_id = generate_ulid()
-    sess, proj_root = _seed_identity_and_session(
-        astrid_home, project="demo", run_id=run_id
-    )
-    monkeypatch.setenv("ASTRID_SESSION_ID", sess.id)
-    return SessionContext(
-        session=sess,
-        project_root=proj_root,
-        run_dir=proj_root / "runs" / run_id,
-    )
-
-
-@pytest.fixture
-def tmp_projects_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+def tmp_projects_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(tmp_path))
     for name in (
         TASK_RUN_ID_ENV,
@@ -370,43 +161,3 @@ def tmp_projects_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         TASK_ITERATION_ENV,
     ):
         monkeypatch.delenv(name, raising=False)
-
-
-# Test-only event seeding helper.
-# Replaces the removed astrid.core.task.events.append_event() legacy wrapper.
-# Usage: seed_event(events_path, event_dict) -> stored_event_dict
-
-def seed_event(events_path, event):
-    """Test-only: append an event via append_event_locked with auto-read epoch/tail.
-
-    Reads ``lease.json`` from the parent directory for ``writer_epoch`` and
-    re-reads the tail hash from ``events.jsonl``, then calls
-    ``append_event_locked``.  This is the test-only replacement for the
-    removed ``append_event()`` legacy wrapper.
-    """
-    import json
-    from pathlib import Path
-
-    from astrid.core.task.events import ZERO_HASH, append_event_locked, read_events
-
-    events_path = Path(events_path)
-    run_dir = events_path.parent
-    lease_path = run_dir / "lease.json"
-
-    # epoch
-    try:
-        lease_data = json.loads(lease_path.read_text(encoding="utf-8"))
-        expected_writer_epoch = lease_data["writer_epoch"]
-    except Exception:
-        expected_writer_epoch = None
-
-    # prev hash
-    existing = read_events(events_path)
-    expected_prev_hash = existing[-1]["hash"] if existing else ZERO_HASH
-
-    return append_event_locked(
-        run_dir,
-        event,
-        expected_writer_epoch=expected_writer_epoch,
-        expected_prev_hash=expected_prev_hash,
-    )

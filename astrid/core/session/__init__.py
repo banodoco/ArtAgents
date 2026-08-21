@@ -1,7 +1,7 @@
-"""Session package — Sprint 1 binding/lease/identity layer.
+"""Session-layer package — retained config/paths only.
 
-Verb contract: verb functions accept a ``session: Session`` argument; the
-pipeline ``main()`` resolves the current session via
-:func:`astrid.core.session.binding.resolve_current_session` and passes it in.
-Tests use the ``attached_session`` fixture (see ``tests/conftest.py``).
+The task-mode session machinery (binding, lease, identity, lifecycle, writer)
+was retired with the legacy task runtime. This package now holds only the
+long-lived config facade (``config``) and filesystem path helpers (``paths``),
+which the kernel's preferences layer and the v10 suite still import.
 """

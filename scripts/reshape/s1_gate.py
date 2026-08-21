@@ -214,32 +214,6 @@ def _child_env(repo_root: Path, work_dir: Path) -> dict[str, str]:
     return env
 
 
-def _seed_identity(python: str, env: dict[str, str], repo_root: Path) -> None:
-    """Pre-seed a default agent identity into the fresh ASTRID_HOME.
-
-    Mirrors ``run_ci_checks.sh`` so first-run bootstrap never fires inside
-    a lane subprocess.
-    """
-    code = (
-        "from astrid.core.session.identity import Identity, write_identity;"
-        'write_identity(Identity(agent_id="s1-gate",'
-        ' created_at="2026-01-01T00:00:00Z"))'
-    )
-    completed = subprocess.run(
-        [python, "-c", code],
-        cwd=repo_root,
-        env=env,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    if completed.returncode != 0:
-        raise SystemExit(
-            "ERROR: failed to seed agent identity into fresh ASTRID_HOME "
-            f"(exit {completed.returncode})\n{completed.stderr}"
-        )
-
-
 def _run_lane(
     lane: Lane,
     *,
@@ -323,7 +297,6 @@ def run_gate(
     root.mkdir(parents=True, exist_ok=True)
 
     env = _child_env(repo_root, root)
-    _seed_identity(python_bin, env, repo_root)
 
     gate_log_path = out / "s1-gate.log"
     gate_log_lines: list[str] = []

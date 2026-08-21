@@ -24,7 +24,7 @@ from PIL import Image
 
 import os
 from astrid.core import gateway
-from astrid.core.session.binding import ASTRID_SESSION_ID_ENV
+from astrid.core.env_vars import ASTRID_SESSION_ID as ASTRID_SESSION_ID_ENV
 
 def _sessionless_gateway(argv):
     os.environ.pop(ASTRID_SESSION_ID_ENV, None)

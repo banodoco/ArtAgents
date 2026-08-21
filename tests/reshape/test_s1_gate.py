@@ -92,10 +92,8 @@ def _env_probe_test(tmp_path: Path) -> Path:
         "    assert Path(root).is_dir()\n"
         "    assert Path(home).is_dir()\n"
         "    assert \"ASTRID_SESSION_ID\" not in os.environ\n"
-        "    from astrid.core.session.identity import read_identity\n"
-        "    identity = read_identity()\n"
-        "    assert identity is not None\n"
-        "    assert identity.agent_id == \"s1-gate\"\n",
+        "    from astrid.core.preferences import load_user_config\n"
+        "    assert load_user_config() == {}\n",
     )
 
 
