@@ -323,10 +323,13 @@ def _zero_child_path(
     files_map: dict[str, dict],
 ) -> dict:
     """Zero-child run + evidence (no materializable outputs)."""
+    from astrid.core.repositories.runs import RunAlreadyExistsError
     from astrid.core.store.uow import UnitOfWork
 
     key = run_key(slug, run["run_id"])
     created_at = str(run_json.get("created_at") or "")
+    close_key = f"v10-migrate:run-close:{slug}:{run['run_id']}"
+    run_id = run["run_id"]
     try:
         UnitOfWork(client.app.writer).run(
             lambda uow: client.app.runs.create(
@@ -340,9 +343,33 @@ def _zero_child_path(
                 title=f"{run.get('tool_id') or 'legacy.tool'} ({run['run_id']})",
                 input=dict(run_json),
                 created_at=created_at or None,
-                run_id=run["run_id"],
+                run_id=run_id,
             )
         )
+    except RunAlreadyExistsError:
+        # Cross-project run-id copy: deterministic derived identity (same
+        # convention as the fenced path).
+        run_id = derive_ulid(f"run-id:{slug}:{run['run_id']}")
+        key = f"{key}:id2"
+        close_key = f"{close_key}:id2"
+        try:
+            UnitOfWork(client.app.writer).run(
+                lambda uow: client.app.runs.create(
+                    uow,
+                    project_id=project_id,
+                    children=[],
+                    evidence=_evidence(run, run_json_path),
+                    idempotency_key=key,
+                    actor_kind="system",
+                    kind="tool_id",
+                    title=f"{run.get('tool_id') or 'legacy.tool'} ({run['run_id']})",
+                    input=dict(run_json),
+                    created_at=created_at or None,
+                    run_id=run_id,
+                )
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise SystemExit(f"run {run['run_id']}: zero-child run failed: {exc}")
     except Exception as exc:  # noqa: BLE001
         raise SystemExit(f"run {run['run_id']}: zero-child run failed: {exc}")
 
@@ -353,13 +380,12 @@ def _zero_child_path(
     # ``close_key``) with zero new rows.
     started_at = _started_at(run_json, run, created_at)
     finished_at = _finished_at(run_json, run, started_at)
-    close_key = f"v10-migrate:run-close:{slug}:{run['run_id']}"
     try:
         UnitOfWork(client.app.writer).run(
             lambda uow: client.app.runs.close(
                 uow,
                 project_id=project_id,
-                run_id=run["run_id"],
+                run_id=run_id,
                 outcome="succeeded",
                 idempotency_key=close_key,
                 actor_kind="system",

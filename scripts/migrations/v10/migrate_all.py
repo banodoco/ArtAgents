@@ -57,7 +57,14 @@ def _load_inventory(root: Path, inventory_path: Path) -> dict:
 
 
 def _guard_db_empty(root: Path) -> None:
-    """The kernel DB must have zero project rows before ANY apply."""
+    """Warn when the kernel DB already has project rows.
+
+    The migration is receipt-idempotent (``v10-migrate:*`` keys gate every
+    command), so a re-run after an interrupted apply resumes safely: every
+    completed row/event/receipt replays with zero new rows and the
+    remainder continues. The guard is a warning now, not a hard stop — an
+    interrupted run must be resumable.
+    """
     db = root / ".astrid" / "astrid.sqlite3"
     if not db.is_file():
         return
@@ -71,9 +78,9 @@ def _guard_db_empty(root: Path) -> None:
         return
     count = int(row[0]) if row else 0
     if count > 0:
-        raise SystemExit(
+        print(
             f"migrate_all: kernel DB already has {count} project rows — "
-            "refusing to re-apply. STOP per design (should not happen)."
+            "resuming (receipts gate replay; no double-apply)."
         )
 
 
@@ -84,10 +91,13 @@ def _backup_db(root: Path) -> Path:
         print("migrate_all: no existing kernel DB to back up (fresh root)")
         return backup
     if backup.exists():
-        raise SystemExit(
-            f"migrate_all: backup already exists: {backup} — refusing to "
-            "clobber it. Remove it only after reviewing the migration."
+        # Resume after an interrupted apply: the existing backup is the
+        # pre-migration snapshot — never clobber it with a mid-state DB.
+        print(
+            f"migrate_all: backup already exists: {backup} — retaining the "
+            "pre-migration snapshot (resume)."
         )
+        return backup
     shutil.copy2(db, backup)
     print(f"migrate_all: backed up {db} -> {backup}")
     return backup

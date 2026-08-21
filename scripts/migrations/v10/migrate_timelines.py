@@ -112,12 +112,16 @@ def migrate_timelines(
     project_filter: set[str],
     root: Path,
 ) -> list[dict]:
+    from astrid.core.receipts.service import ReceiptService
     from astrid.core.store.uow import UnitOfWork
     from astrid.packs.timeline.repository import (
+        TimelineAlreadyExistsError,
         TimelineSlugConflictError,
         TimelineUlidConflictError,
     )
     from astrid.sdk.client import AstridClient
+
+    receipts = ReceiptService()
 
     if MEDIA_MAP_PATH.is_file():
         media_map = json.loads(MEDIA_MAP_PATH.read_text(encoding="utf-8"))
@@ -170,6 +174,24 @@ def migrate_timelines(
                     )
                     continue
 
+                def _committed(use_key: str) -> bool:
+                    with client.app.writer.read_only_connection() as conn:
+                        return (
+                            receipts.lookup_committed(
+                                conn,
+                                project_id=project_id,
+                                idempotency_key=use_key,
+                            )
+                            is not None
+                        )
+
+                def _suffixed_slug() -> str:
+                    suffix = timeline_ulid[:8].lower()
+                    suffixed = f"{timeline['slug'][:40]}-{suffix}"
+                    if not _SLUG_RE.fullmatch(suffixed):
+                        suffixed = f"tl-{suffix}"
+                    return suffixed
+
                 def create_timeline(use_slug: str, use_key: str):
                     return UnitOfWork(client.app.writer).run(
                         lambda uow: client.app.timelines.create(
@@ -187,25 +209,71 @@ def migrate_timelines(
                         )
                     )
 
-                try:
-                    create_timeline(timeline["slug"], key)
-                except TimelineSlugConflictError:
-                    # Deterministic suffix + suffixed key: the original slug
-                    # is taken by an earlier-created legacy doc. Replays of
-                    # the suffixed create hit its own receipt gate.
-                    suffix = timeline_ulid[:8].lower()
-                    suffixed_slug = f"{timeline['slug'][:40]}-{suffix}"
-                    if not _SLUG_RE.fullmatch(suffixed_slug):
-                        suffixed_slug = f"tl-{suffix}"
-                    create_timeline(suffixed_slug, f"{key}:slug2")
-                except TimelineUlidConflictError as exc:
-                    raise SystemExit(
-                        f"timeline {timeline['dir']}: ULID alias conflict: {exc}"
+                def create_timeline_with_ulid(
+                    use_ulid: str, use_slug: str, use_key: str
+                ):
+                    return UnitOfWork(client.app.writer).run(
+                        lambda uow: client.app.timelines.create(
+                            uow,
+                            project_id=project_id,
+                            slug=use_slug,
+                            name=timeline["name"],
+                            config=config,
+                            registry=registry,
+                            idempotency_key=use_key,
+                            actor_kind="system",
+                            timeline_id=use_ulid,
+                            timeline_ulid=use_ulid,
+                            set_default=set_default,
+                        )
                     )
-                except Exception as exc:  # noqa: BLE001 - typed conflicts surface
-                    raise SystemExit(
-                        f"timeline {timeline['dir']}: create failed: {exc}"
-                    )
+
+                if _committed(key):
+                    action = "replay"
+                else:
+                    try:
+                        create_timeline(timeline["slug"], key)
+                        action = "created"
+                    except TimelineSlugConflictError:
+                        # Deterministic suffix + suffixed key: the original
+                        # slug is taken by an earlier-created legacy doc.
+                        suffixed_slug = _suffixed_slug()
+                        s2 = f"{key}:slug2"
+                        if _committed(s2):
+                            action = "replay"
+                        else:
+                            create_timeline(suffixed_slug, s2)
+                            action = "created"
+                    except TimelineAlreadyExistsError:
+                        # Same ULID appears in two legacy locations (e.g. a
+                        # container and a copied run-level doc): derive a
+                        # deterministic alternate ULID + suffixed key, and
+                        # tolerate a taken slug on the derived identity too.
+                        derived_ulid = derive_ulid(
+                            f"timeline-ulid:{slug}:{timeline_ulid}"
+                        )
+                        d2 = f"{key}:id2"
+                        if _committed(d2):
+                            action = "replay"
+                        else:
+                            try:
+                                create_timeline_with_ulid(
+                                    derived_ulid, timeline["slug"], d2
+                                )
+                                action = "created"
+                            except TimelineSlugConflictError:
+                                create_timeline_with_ulid(
+                                    derived_ulid, _suffixed_slug(), f"{d2}:slug2"
+                                )
+                                action = "created"
+                    except TimelineUlidConflictError as exc:
+                        raise SystemExit(
+                            f"timeline {timeline['dir']}: ULID alias conflict: {exc}"
+                        )
+                    except Exception as exc:  # noqa: BLE001 - typed conflicts surface
+                        raise SystemExit(
+                            f"timeline {timeline['dir']}: create failed: {exc}"
+                        )
                 results.append(
                     {
                         "slug": slug,
@@ -215,7 +283,7 @@ def migrate_timelines(
                         "config_slug": timeline["slug"],
                         "set_default": set_default,
                         "kind": timeline["kind"],
-                        "action": "created",
+                        "action": action,
                         "key": key,
                     }
                 )
