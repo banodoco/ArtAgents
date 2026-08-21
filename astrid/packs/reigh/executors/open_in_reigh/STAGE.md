@@ -13,19 +13,20 @@ This is a **local-only operation** — it does not require Reigh credentials
 or network access. The executor copies the timeline JSON (and optionally
 the assets JSON) to a staging location suitable for import.
 
-## CLI quick-start
+## Quick-start
 
-```bash
-python -m astrid executors run reigh.open_in_reigh -- \
-  --timeline ./out/hype.timeline.json
+```python
+import astrid.sdk as sdk
+result = sdk.invoke("reigh.open_in_reigh", inputs={"timeline": "./out/hype.timeline.json"})
 ```
 
 With explicit assets file:
 
-```bash
-python -m astrid executors run reigh.open_in_reigh -- \
-  --timeline ./out/hype.timeline.json \
-  --assets ./out/hype.assets.json
+```python
+result = sdk.invoke("reigh.open_in_reigh", inputs={
+    "timeline": "./out/hype.timeline.json",
+    "assets": "./out/hype.assets.json",
+})
 ```
 
 ## Inputs

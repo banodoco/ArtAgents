@@ -39,14 +39,19 @@ executor that guarantees cleanup.
 |---|---|
 | `RUNPOD_API_KEY` | All runpod executors (RunPod GraphQL API) |
 
-## CLI quick-start
+## Quick-start
 
-```bash
+```python
 # One-shot session with guaranteed cleanup
-python3 -m astrid executors run runpod.session -- --script ./train.py --gpu-type "NVIDIA RTX 4090" --out ./out
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "runpod.session",
+    inputs={"script": "./train.py", "gpu_type": "NVIDIA RTX 4090"},
+    out="./out",
+)
 
 # Manual lifecycle
-python3 -m astrid executors run runpod.provision -- --gpu-type "NVIDIA RTX 4090" --out ./pod_handle.json
-python3 -m astrid executors run runpod.exec -- --pod-id <id> --script ./train.py --out ./artifacts
-python3 -m astrid executors run runpod.teardown -- --pod-id <id>
+result = sdk.invoke("runpod.provision", inputs={"gpu_type": "NVIDIA RTX 4090"}, out="./pod_handle.json")
+result = sdk.invoke("runpod.exec", inputs={"pod_id": "<id>", "script": "./train.py"}, out="./artifacts")
+result = sdk.invoke("runpod.teardown", inputs={"pod_id": "<id>"})
 ```

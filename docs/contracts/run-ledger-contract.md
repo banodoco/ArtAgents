@@ -36,9 +36,9 @@ absent — otherwise executor runs appear "in-flight" forever.
 
 | `kind` | Produced by | `tool_id` | Timeline required? | Status vocabulary |
 |---|---|---|---|---|
-| *(absent/legacy)* | Executor runs via `executors run` | Qualified executor id (e.g. `generation.generate_image`) | Per-executor metadata flag | `running`, `completed`, `failed` |
-| `"orchestrator"` (convention) | Orchestrator runs via `orchestrators run` | Qualified orchestrator id | Yes | `running`, `completed`, `failed` |
-| `"scratch"` | `scratch run` subprocess invocations | `"scratch.run"` | **No** (`requires_timeline=False`) | `running`, `completed`, `failed` |
+| *(absent/legacy)* | Executor runs via the SDK (`astrid.sdk.invoke`) | Qualified executor id (e.g. `generation.generate_image`) | Per-executor metadata flag | `running`, `completed`, `failed` |
+| `"orchestrator"` (convention) | Orchestrator runs via the SDK (`astrid.sdk.invoke`) | Qualified orchestrator id | Yes | `running`, `completed`, `failed` |
+| `"scratch"` | (retired with the task-mode CLI) | `"scratch.run"` | **No** (`requires_timeline=False`) | `running`, `completed`, `failed` |
 
 Status values are the canonical `RunStatus` enum tokens: `running`, `completed`,
 `failed`, `blocked`, `aborted`, `skipped`. The `run.json` record persists the
@@ -69,9 +69,9 @@ is intentionally not created.
 ### 2. Direct out-of-band `python -m pack...run` invocation
 
 When a generation executor's `main()` is called directly (without the harness
-environment marker `ASTRID_PROJECT_RUN`), it emits a one-line stderr warning:
-
-> `[astrid] running unledgered — invoke through executors run or the SDK to persist a run record`
+environment marker `ASTRID_PROJECT_RUN`), it emits a one-line stderr warning
+pointing at the SDK for a ledgered invocation (the frozen wording still names
+the retired CLI surface of the pre-v10 runner).
 
 This is **warning-only**. No ledger entry is created, and no further policing
 is attempted. The invocation is inherently out-of-band.
@@ -312,20 +312,15 @@ contributing run:
 
 ---
 
-## Session discovery — default-project preference (M2)
+## Session discovery — retired
 
-When `astrid next` (via `_most_recent_session_slug`) encounters more than one
-`.astrid-session` pointer in the projects root, it no longer fails immediately.
-Instead:
-
-1. If a **configured default project** (`astrid projects default`) is among the
-   candidate slugs, it is selected with a stderr notice:
-   > `_most_recent_session_slug: N projects have a bound session on disk — preferring configured default project '<slug>'.`
-
-2. Otherwise, the hardened fail-closed refusal is retained — an enumerated list
-   of `--project <slug>` suggestions is printed to stderr.
-
-Single-candidate resolution is unchanged: one `.astrid-session` → auto-resolve.
+The session-bound `astrid next` flow (`_most_recent_session_slug`,
+`.astrid-session` pointers, default-project preference at `next` time) was
+retired with the task-mode CLI. There is no session binding and no `next`
+verb; the default-project preference lives on `projects select`, and runs
+resolve their project explicitly (`--project`) or through the SDK's
+default-project resolution. The `auto_bound` run-record marker survives as a
+legacy field on old records.
 
 ---
 
@@ -364,14 +359,13 @@ Every in-band invocation surface that must produce a ledger entry:
 
 | Surface | Entry point | Ledger status (M2 target) |
 |---|---|---|
-| `executors run [--project <p>]` | `astrid/core/executor/cli.py` → `runner.py` → `CapabilityRunner.run()` | **Ledgered** — project required or auto-resolved |
-| `executors run --out <dir>` (no `--project`) | Same | **Ledgered** — default project auto-resolved; `run.json.out` set |
-| `orchestrators run [--project <p>]` | `astrid/core/orchestrator/cli.py` → `runner.py` → `CapabilityRunner.run()` | **Ledgered** — project required or auto-resolved |
-| `scratch run <script>` | `astrid/core/gateway/dispatch.py` → `astrid/core/project/run.py` | **Ledgered** — `kind: "scratch"`, `tool_id: "scratch.run"`, `invocation: "scratch"`, `auto_bound: true`, status from subprocess return code |
-| SDK `astrid.generate.image(..., project=...)` | `astrid/sdk.py` → `invoke()` → `CapabilityRunner.run()` | **Ledgered** — `invocation: "sdk"` |
-| SDK `astrid.generate.image(..., out=...)` | `astrid/sdk.py` → `invoke()` → `CapabilityRunner.run()` | **Ledgered** — default project auto-resolved; `run.json.out` set; `invocation: "sdk"` |
+| SDK `astrid.sdk.invoke(<id>, ..., project=<p>)` | `astrid/sdk/invocation.py` → `astrid/core/execution/executor/runner.py` → `CapabilityRunner.run()` | **Ledgered** — project required or auto-resolved |
+| SDK `astrid.sdk.invoke(<id>, ..., out=<dir>)` (no project) | Same | **Ledgered** — default project auto-resolved; `run.json.out` set |
+| SDK orchestrator `astrid.sdk.invoke(<orch>, ...)` | `astrid/sdk/invocation.py` → `astrid/core/execution/orchestrator/runner.py` → `CapabilityRunner.run()` | **Ledgered** — project required or auto-resolved |
+| SDK `astrid.generate.image(..., project=...)` | `astrid/sdk/generation.py` → `invoke()` → `CapabilityRunner.run()` | **Ledgered** — `invocation: "sdk"` |
+| SDK `astrid.generate.image(..., out=...)` | Same | **Ledgered** — default project auto-resolved; `run.json.out` set; `invocation: "sdk"` |
 | SDK `astrid.generate.video(..., out=...)` | Same as image | **Ledgered** (same semantics) |
-| Gateway auto-bind (no `--project`) | `astrid/core/gateway/` → request construction → `CapabilityRunner.run()` | **Ledgered** — resolved project passed at request/lifecycle level, not raw argv injection |
+| Gateway product CLI (`--json` mutations) | `astrid/core/gateway/` → `astrid/core/cli/domain_*` → one SDK call | **Ledgered** — kernel receipts; not a `run.json` surface |
 
 ---
 

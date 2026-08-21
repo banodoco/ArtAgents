@@ -3,23 +3,33 @@
 Use `rendering.sprite_sheet` to create animation sprite sheets and sliced frame
 previews from a subject plus animation description.
 
-Dry-run or inspect first:
+Dry-run first:
 
-```bash
-python3 -m astrid executors inspect rendering.sprite_sheet
-python3 -m astrid executors run rendering.sprite_sheet --out runs/sprites/wave --input animation=wave --input subject="neon courier" --dry-run
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "rendering.sprite_sheet",
+    inputs={"animation": "wave", "subject": "neon courier"},
+    out="runs/sprites/wave",
+    dry_run=True,
+)
 ```
 
 To preserve a specific character or object, pass a reference image. The
 executor sends the reference image to the image-edit endpoint, keeps grid
 instructions in the prompt, then uses the existing slice/preview/export path:
 
-```bash
-python3 -m astrid executors run rendering.sprite_sheet \
-  --out runs/sprites/crab-pincer \
-  --input animation="right claw pincer open-close snap loop" \
-  --input subject="blue circuit crab mascot" \
-  --input reference_image=refs/crab.png
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "rendering.sprite_sheet",
+    inputs={
+        "animation": "right claw pincer open-close snap loop",
+        "subject": "blue circuit crab mascot",
+        "reference_image": "refs/crab.png",
+    },
+    out="runs/sprites/crab-pincer",
+)
 ```
 
 Requires image API credentials for generation and `ffmpeg` for slicing/preview

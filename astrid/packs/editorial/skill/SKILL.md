@@ -98,70 +98,130 @@ These executors are not part of the numbered 0–14 pipeline. They have no
 | `OPENAI_API_KEY` | transcribe (Whisper API), arrange (LLM), refine (LLM), editor_review (Claude vision), script_pipeline (DeepSeek) |
 | `ANTHROPIC_API_KEY` | editor_review (Claude vision model for frame sampling) |
 
-## CLI quick-start
+## SDK quick-start
 
-```bash
+```python
 # Transcribe (step 0)
-python3 -m astrid executors run editorial.transcribe -- \
-  --audio ./source.mp3 --out ./out
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "editorial.transcribe",
+    inputs={"audio": "./source.mp3"},
+    out="./out",
+)
 
 # Detect scenes (step 1)
-python3 -m astrid executors run editorial.scenes -- \
-  --video ./source.mp4 --out ./out
+result = sdk.invoke(
+    "editorial.scenes",
+    inputs={"video": "./source.mp4"},
+    out="./out",
+)
 
 # Quality zones (step 2)
-python3 -m astrid executors run editorial.quality_zones -- \
-  --video ./source.mp4 --out ./out
+result = sdk.invoke(
+    "editorial.quality_zones",
+    inputs={"video": "./source.mp4"},
+    out="./out",
+)
 
 # Shots (step 3)
-python3 -m astrid executors run editorial.shots -- \
-  --video ./source.mp4 --scenes ./out/scenes.json --out ./out
+result = sdk.invoke(
+    "editorial.shots",
+    inputs={"video": "./source.mp4", "scenes": "./out/scenes.json"},
+    out="./out",
+)
 
 # Triage (step 4) — quality gate before pool building
-python3 -m astrid executors run editorial.triage -- \
-  --scenes ./out/scenes.json --shots ./out/shots.json --out ./out
+result = sdk.invoke(
+    "editorial.triage",
+    inputs={"scenes": "./out/scenes.json", "shots": "./out/shots.json"},
+    out="./out",
+)
 
 # Quote scout (step 6) — find quotable lines
-python3 -m astrid executors run editorial.quote_scout -- \
-  --transcript ./out/transcript.json --out ./out
+result = sdk.invoke(
+    "editorial.quote_scout",
+    inputs={"transcript": "./out/transcript.json"},
+    out="./out",
+)
 
 # Arrange (step 9) — compose shot arrangement
-python3 -m astrid executors run editorial.arrange -- \
-  --pool ./out/unified_pool.json --brief ./briefs/my-hype.md \
-  --theme ./themes/default.json --out ./out
+result = sdk.invoke(
+    "editorial.arrange",
+    inputs={
+        "pool": "./out/unified_pool.json",
+        "brief": "./briefs/my-hype.md",
+        "theme": "./themes/default.json",
+    },
+    out="./out",
+)
 
 # Refine (step 11) — last editorial pass before cut
-python3 -m astrid executors run editorial.refine -- \
-  --arrangement ./out/arrangement.json --pool ./out/unified_pool.json \
-  --timeline ./out/hype.timeline.json --assets ./out/hype.assets.json \
-  --out ./out
+result = sdk.invoke(
+    "editorial.refine",
+    inputs={
+        "arrangement": "./out/arrangement.json",
+        "pool": "./out/unified_pool.json",
+        "timeline": "./out/hype.timeline.json",
+        "assets": "./out/hype.assets.json",
+    },
+    out="./out",
+)
 
 # Editor review (step 13) — human-in-loop gate
-python3 -m astrid executors run editorial.editor_review -- \
-  --brief-dir ./out --run-dir ./runs/my-run --out ./out
+result = sdk.invoke(
+    "editorial.editor_review",
+    inputs={"brief_dir": "./out", "run_dir": "./runs/my-run"},
+    out="./out",
+)
 
 # Validate (step 14) — schema + Whisper validation
-python3 -m astrid executors run editorial.validate -- \
-  --video ./out/hype.mp4 --timeline ./out/hype.timeline.json \
-  --metadata ./out/hype.metadata.json --out ./out
+result = sdk.invoke(
+    "editorial.validate",
+    inputs={
+        "video": "./out/hype.mp4",
+        "timeline": "./out/hype.timeline.json",
+        "metadata": "./out/hype.metadata.json",
+    },
+    out="./out",
+)
 
 # Human notes (auxiliary) — convert feedback to structured inputs
-python3 -m astrid executors run editorial.human_notes -- \
-  --notes ./my-notes.md --out ./out
+result = sdk.invoke(
+    "editorial.human_notes",
+    inputs={"notes": "./my-notes.md"},
+    out="./out",
+)
 
 # Inspect cut (auxiliary) — debug a cut run directory
-python3 -m astrid executors run editorial.inspect_cut -- \
-  ./runs/my-run --json
+result = sdk.invoke(
+    "editorial.inspect_cut",
+    inputs={"run_dir": "./runs/my-run", "json": True},
+)
 
 # Human review (auxiliary) — serve review page
-python3 -m astrid executors run editorial.human_review -- \
-  --html ./review-page.html --data ./data.json --out ./out
+result = sdk.invoke(
+    "editorial.human_review",
+    inputs={"html": "./review-page.html", "data": "./data.json"},
+    out="./out",
+)
 
 # Boundary candidates (auxiliary) — package frames for review
-python3 -m astrid executors run editorial.boundary_candidates -- \
-  --video ./source.mp4 --manifest ./boundary_manifest.json --out ./out
+result = sdk.invoke(
+    "editorial.boundary_candidates",
+    inputs={
+        "video": "./source.mp4",
+        "manifest": "./boundary_manifest.json",
+    },
+    out="./out",
+)
 
 # Script pipeline (auxiliary) — generate creative scripts
-python3 -m astrid executors run editorial.script_pipeline -- \
-  --preset hype-intro --prompt "A dramatic opening scene" --out ./out
+result = sdk.invoke(
+    "editorial.script_pipeline",
+    inputs={
+        "preset": "hype-intro",
+        "prompt": "A dramatic opening scene",
+    },
+    out="./out",
+)
 ```

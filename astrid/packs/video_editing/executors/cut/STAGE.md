@@ -24,25 +24,38 @@ The `hype.timeline.json` and `hype.assets.json` pair is the canonical input to
 `rendering.render`. Cache uses a three-sentinel gate: all three files must be
 present to satisfy the cache hit.
 
-## CLI quick-start
+## Quick-start
 
-```bash
-python -m astrid executors run video_editing.cut -- \
-  --pool ./out/pool.json \
-  --arrangement ./out/arrangement.json \
-  --brief ./brief.json \
-  --theme ./themes/my-theme --out ./out
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "video_editing.cut",
+    inputs={
+        "pool": "./out/pool.json",
+        "arrangement": "./out/arrangement.json",
+        "brief": "./brief.json",
+        "theme": "./themes/my-theme",
+    },
+    out="./out",
+)
 ```
 
 With optional video/audio sources:
 
-```bash
-python -m astrid executors run video_editing.cut -- \
-  --pool ./out/pool.json \
-  --arrangement ./out/arrangement.json \
-  --brief ./brief.json \
-  --video ./source.mp4 --audio ./source.mp3 \
-  --theme ./themes/my-theme --out ./out
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "video_editing.cut",
+    inputs={
+        "pool": "./out/pool.json",
+        "arrangement": "./out/arrangement.json",
+        "brief": "./brief.json",
+        "video": "./source.mp4",
+        "audio": "./source.mp3",
+        "theme": "./themes/my-theme",
+    },
+    out="./out",
+)
 ```
 
 ## Inputs

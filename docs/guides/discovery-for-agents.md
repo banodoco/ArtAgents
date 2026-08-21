@@ -4,22 +4,27 @@ How a cold agent discovers what Astrid can do — no source grep required.
 
 ## The Contract
 
-Agents discover capabilities exclusively through CLI surfaces that read pack
-manifests. Never inspect `astrid/packs/` directory trees, guess ids from
-filenames, or import Python modules directly. The pack system owns discovery;
-agents consume it.
+Agents discover capabilities through the SDK (`astrid.sdk.discover`,
+`astrid.sdk.get_capability`), which reads pack manifests. Never inspect
+`astrid/packs/` directory trees, guess ids from filenames, or import Python
+modules directly. The pack system owns discovery; agents consume it.
 
-Capability discovery is session-gated. From a cold shell, run
-`python3 -m astrid next` for exactly one legal action, or `python3 -m astrid
-status` for the read-side breadcrumb. Attach before running `skills list`,
-capability `list`, `search`, or `inspect` commands. The unbound CLI surface is
-intentionally narrow: help/version, `status`, `next`, `attach`, `packs ...`,
-`projects ls`, `projects create`, `projects default`, `sessions ls`, and
-`sessions takeover`.
+There is no session binding and no `next`/`status`/`attach` bootstrap: the
+gateway CLI (`python3 -m astrid`) owns exactly the eight families (projects,
+timelines, media, tasks, runs, serve, doctor, backup), and capability
+discovery is an SDK call. `--json` on the product families is the machine
+surface for kernel data (projects, timelines, media, tasks, runs); capability
+metadata comes from `astrid.sdk.discover()`.
+
+```python
+import astrid.sdk as sdk
+
+inventory = sdk.discover()                       # every capability, pack by pack
+cap = sdk.get_capability("rendering.render")     # typed lookup of one capability
+```
 
 Every discoverable capability (executor, orchestrator, element) belongs to a
-pack and is exposed through a consistent list/search/inspect surface with a
-`--json` flag for machine consumption.
+pack and is exposed through a consistent discovery surface.
 
 See the formal vocabulary in
 [docs/packs/contract.md](../packs/contract.md).
@@ -30,73 +35,50 @@ see [docs/packs/pack-taxonomy.md](../packs/pack-taxonomy.md).
 
 ## Three Capability Kinds
 
-| Kind | CLI path | Purpose | Example |
+| Kind | SDK surface | Purpose | Example |
 |---|---|---|---|
-| Executor | `executors` | Single-step tool (render, transcribe, generate) | `rendering.render` |
-| Orchestrator | `orchestrators` | Multi-step pipeline (plan → execute → verify) | `video_editing.hype` |
-| Element | `elements` | Reusable render building block (effect, animation) | `effects/text-card` |
+| Executor | `sdk.get_capability` / `sdk.invoke` | Single-step tool (render, transcribe, generate) | `rendering.render` |
+| Orchestrator | `sdk.get_capability` / `sdk.invoke` | Multi-step pipeline | `video_editing.hype` |
+| Element | `sdk.get_capability` / `sdk.invoke` | Reusable render building block (effect, animation) | `effects/text-card` |
 
 ## Step-by-Step Discovery Flow
 
-If the session is not already bound, bootstrap first:
+### 1. Get the full catalog
 
-```bash
-python3 -m astrid next
-python3 -m astrid status
-python3 -m astrid attach <project>
+```python
+import astrid.sdk as sdk
+inventory = sdk.discover()
 ```
 
-### 1. List available skills (optional bootstrap)
+`discover()` returns a `DiscoveryResult`: the discovered pack inventory, each
+pack's capabilities (executors, orchestrators, elements), and per-capability
+metadata. There is no separate "skills list" step — pack skills are the
+`SKILL.md` files the pack ships (see the core skill at
+`astrid/packs/_core/skill/SKILL.md`).
 
-```bash
-python3 -m astrid skills list --json
+### 2. Look up one capability
+
+```python
+cap = sdk.get_capability("generation.generate_image")
 ```
 
-Returns packs with installable skill descriptors and harness support. This is
-the entry point for agents that need to install new capability packs.
+`get_capability` resolves the qualified id (aliases included) and raises the
+typed `CapabilityNotFoundError` / `CapabilityAmbiguousError` on failure.
 
-### 2. Search for capabilities
+### 3. Inspect the capability definition
 
-```bash
-# Find executors matching a term
-python3 -m astrid executors search image --json
+The resolved capability carries the `_capability` identity block plus the full
+definition (inputs, outputs, isolation, graph, metadata) — see below.
 
-# Find orchestrators matching a term
-python3 -m astrid orchestrators search hype --json
+### 4. Run it
+
+```python
+result = sdk.invoke("video_editing.hype", inputs={"brief": "brief.txt"}, out="runs/out")
 ```
 
-Each search returns `{"hits": [{"id": "...", "kind": "...", "score": N, "short_description": "..."}]}`.
-Scores are BM25-ranked; higher is better.
-
-Filter by pack with `--pack <pack_id>`. Limit results with `--limit N`.
-
-### 3. List all capabilities (when you need the full catalog)
-
-```bash
-python3 -m astrid executors list --json
-python3 -m astrid orchestrators list --json
-python3 -m astrid elements list --json [--kind effects|animations|transitions]
-```
-
-The `--json` flag emits structured output. Without it, output is human-readable
-tables.
-
-### 4. Inspect a capability
-
-```bash
-# The inspect shape reveals the _capability identity block + full definition
-python3 -m astrid executors inspect generation.generate_image --json
-python3 -m astrid orchestrators inspect video_editing.hype --json
-python3 -m astrid elements inspect effects text-card --json
-```
-
-The JSON output merges `_capability` (identity, provenance, deprecation,
-aliases, edit state) with the full capability definition (inputs, outputs,
-isolation, graph, metadata).
-
-Use `--show-overrides` to see if an override is active for this capability.
-Use `--pack <pack_id>` to require the resolved capability to belong to a
-specific pack.
+`invoke` returns an `InvocationResult` with the produced outputs and
+provenance. Input names map to the executor's declared inputs and flags
+(`--input name=value` style).
 
 ## The `_capability` Identity Block
 

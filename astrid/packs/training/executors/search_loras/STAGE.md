@@ -9,27 +9,27 @@ The executor calls the Hugging Face Hub model search endpoint with:
 - `filter=base_model:<base-model>`
 - `full=true` so returned repository file names and tags can be inspected
 
-Inspect first:
+Dry-run through the SDK:
 
-```bash
-python3 -m astrid executors inspect training.search_loras --json
-```
-
-Dry-run through the canonical executor CLI:
-
-```bash
-python3 -m astrid executors run training.search_loras \
-  --input base_model=stabilityai/stable-diffusion-xl-base-1.0 \
-  --out runs/search-loras \
-  --dry-run
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "training.search_loras",
+    inputs={"base_model": "stabilityai/stable-diffusion-xl-base-1.0"},
+    out="runs/search-loras",
+    dry_run=True,
+)
 ```
 
 Run:
 
-```bash
-python3 -m astrid executors run training.search_loras \
-  --input base_model=stabilityai/stable-diffusion-xl-base-1.0 \
-  --out runs/search-loras
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "training.search_loras",
+    inputs={"base_model": "stabilityai/stable-diffusion-xl-base-1.0"},
+    out="runs/search-loras",
+)
 ```
 
 Direct run with additional options:
@@ -98,7 +98,7 @@ The JSON output contains the normalized search request, result count, a
 `guidance` object, and a `results` array. `guidance.messages`,
 `guidance.next_commands`, and `guidance.next_executor_commands` are intended for
 agents: they explain sparse searches, fallback behavior, direct-module query
-fragments, and full canonical `executors run` commands to try next. Each result
+fragments, and full `astrid.sdk.invoke` calls to try next. Each result
 includes repo id, URL, downloads, likes, dates, pipeline/library metadata,
 base-model tags, license tags, `.safetensors` file names when present, and
 match diagnostics when local matching was used.

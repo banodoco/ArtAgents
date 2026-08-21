@@ -16,8 +16,9 @@ byte-identical; a missing timeline manifest remains missing.
 
 The managed run ledger owns operational identity and retention. Its metadata
 contains sorted `timeline_ids`, `evidence: true`, and the executor contract
-digest. Default run GC preserves evidence runs; an operator must explicitly
-combine `astrid runs gc --include-evidence` with `--apply` to remove them.
+digest. Run GC preserves evidence runs by default; removing them requires an
+explicit evidence-inclusive GC pass with `--apply` (ledger-level tooling, not
+a gateway command).
 
 ## Pack layout
 
@@ -35,7 +36,7 @@ clock time are excluded from pack content identity.
 
 ## Inputs and navigation
 
-Cold selectors mirror the `astrid timelines visualize` façade: optional
+Cold selectors mirror the timeline-navigation façade of the executor: optional
 timeline slug, `--all`, `--shot`, `--range`, `--at`, `--clip`, `--asset`,
 `--context`, `--neighbors`, `--layout`, repeatable `--format`, `--filmstrip`,
 and `--rendered-video`. `project_slug` is the executor-level project identity;

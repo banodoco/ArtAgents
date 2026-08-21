@@ -23,25 +23,42 @@ An optional `--apply` flag chains the full revise pipeline: it re-runs
 arrange (in revise mode), cut, refine, and render with the generated
 editor_review.json, enabling a human-notes → rendered-video round-trip.
 
-## CLI quick-start
+## SDK quick-start
 
 Translate human notes into structured editor_review.json:
 
-```bash
-python -m astrid executors run editorial.human_notes -- \
-  --instructions ./notes.txt --arrangement ./out/arrangement.json \
-  --pool ./out/pool.json --out ./out
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "editorial.human_notes",
+    inputs={
+        "instructions": "./notes.txt",
+        "arrangement": "./out/arrangement.json",
+        "pool": "./out/pool.json",
+    },
+    out="./out",
+)
 ```
 
 With full pipeline application after translation:
 
-```bash
-python -m astrid executors run editorial.human_notes -- \
-  --instructions ./notes.txt --arrangement ./out/arrangement.json \
-  --pool ./out/pool.json --out ./out --apply \
-  --brief ./briefs/my-hype.md --brief-dir ./out \
-  --run-dir ./runs/my-run --video ./source.mp4 \
-  --env-file .env.local
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "editorial.human_notes",
+    inputs={
+        "instructions": "./notes.txt",
+        "arrangement": "./out/arrangement.json",
+        "pool": "./out/pool.json",
+        "apply": True,
+        "brief": "./briefs/my-hype.md",
+        "brief_dir": "./out",
+        "run_dir": "./runs/my-run",
+        "video": "./source.mp4",
+        "env_file": ".env.local",
+    },
+    out="./out",
+)
 ```
 
 ## Inputs

@@ -3,7 +3,7 @@
 Astrid installs its prompt content as "skills" into three agent harnesses: **Claude Code**, **Codex**, and **Hermes**. One canonical command:
 
 ```bash
-python3 -m astrid skills install --all
+python3 -m astrid.skills.cli install --all
 ```
 
 `--all` only writes to harnesses whose home directory exists; missing harnesses are skipped silently.
@@ -69,7 +69,7 @@ When Astrid discovers a skill it builds a `SkillDescriptor`:
   - `` !`shell` `` — Hermes inline-shell substitution
 - If a pack genuinely needs Hermes-only dynamic content, put it in `astrid/packs/<pack>/skill/references/hermes-only.md` and reference it via `metadata.hermes.references`.
 
-Run the lint check via `python3 -m astrid skills doctor`. Findings are non-zero exit code.
+Run the lint check via `python3 -m astrid.skills.cli doctor`. Findings are non-zero exit code.
 
 ## `metadata.hermes.*` block
 

@@ -19,7 +19,6 @@ guard_canonical_entrypoint('video_editing.hype')
 import os
 import sys
 
-from astrid.core.orchestrate import attested, code, orchestrator
 from astrid.core.project.run import (
     METADATA_KEY_TIMELINE_EVENT_STREAM_ID,
     METADATA_KEY_TIMELINE_SLUG,
@@ -28,9 +27,6 @@ from astrid.core.project.run import (
     prepare_project_run,
     reject_project_with_out,
 )
-from astrid.core.task import env as task_env
-from astrid.core.task import gate as task_gate
-from astrid.core.verify import json_file
 from astrid.packs.training.executors.asset_cache import run as asset_cache
 
 # Extracted modules (M4 T62)
@@ -110,54 +106,6 @@ from astrid.packs.video_editing.orchestrators.hype.steps import (  # noqa: F401 
 )
 
 
-def _json_verdict_step(step_id: str, filename: str, verdict: str) -> object:
-    return attested(
-        step_id,
-        command=f"echo '{{\"verdict\": \"{verdict}\"}}' > {filename}",
-        instructions=(
-            f"Write a one-line JSON verdict to {filename} with a single "
-            f'"verdict" key (e.g. {{"verdict": "{verdict}"}}), then ack to finish.'
-        ),
-        ack="human",
-        produces={"verdict": (json_file(), filename)},
-    )
-
-
-def _text_verdict_step(step_id: str, filename: str, verdict: str) -> object:
-    return attested(
-        step_id,
-        command=f"echo '{verdict}' > {filename}",
-        instructions=(
-            f"Write a one-line verdict to {filename} (e.g. '{verdict}'), then ack to finish."
-        ),
-        ack="human",
-    )
-
-
-@orchestrator("video_editing.hype")
-def author_test_plan() -> list[object]:
-    return [
-        code("noop", argv=["python3", "-c", "print('ok')"]),
-        attested(
-            "review",
-            command="echo review",
-            instructions="approve to finish",
-            ack="human",
-        ),
-        _json_verdict_step("verdict", "verdict.json", "ship"),
-        _json_verdict_step("final_verdict", "final_verdict.json", "ship"),
-        _text_verdict_step("closing_verdict", "verdict.txt", "ship"),
-        _text_verdict_step("end_verdict", "end_verdict.txt", "ready"),
-        _json_verdict_step("terminal_verdict", "terminal_verdict.json", "complete"),
-        _json_verdict_step("ultimate_verdict", "ultimate_verdict.json", "done"),
-        _text_verdict_step("concluding_verdict", "concluding_verdict.txt", "done"),
-        _json_verdict_step("final_review", "final_review.json", "complete"),
-        _json_verdict_step("wrap_verdict", "wrap_verdict.json", "ship"),
-        _text_verdict_step("attested_final", "verdict.txt", "ship"),
-        _json_verdict_step("agentic_append_verdict", "agentic_append_verdict.json", "ship"),
-    ]
-
-
 # === Main entry point (kept in run.py facade) ===
 # Project/gate adapter helpers imported from .project_adapter (M4 T66)
 def main(argv: list[str] | None = None) -> int:
@@ -165,20 +113,6 @@ def main(argv: list[str] | None = None) -> int:
     project_env: dict[str, str | None] = {}
     effective_argv = list(sys.argv[1:] if argv is None else argv)
     try:
-        project_slug = _project_slug_for_gate(effective_argv)
-        if project_slug and task_env.is_in_task_run(project_slug):
-            try:
-                task_gate.gate_command(
-                    project_slug,
-                    task_gate.command_for_argv(["python3", "-m", "astrid", "hype", *effective_argv]),
-                    effective_argv,
-                    reentry=True,
-                )
-            except task_gate.TaskRunGateError as exc:
-                raise AstridError(
-                    exc.recovery,
-                    recovery_command=exc.recovery or "astrid status",
-                ) from exc
         try:
             project_context, effective_argv = _prepare_project_main(effective_argv)
         except ProjectRunError as exc:
@@ -223,7 +157,7 @@ def main(argv: list[str] | None = None) -> int:
             if not hasattr(args, "actor_via") or args.actor_via is None:
                 from astrid.core.timeline.events.schema import TimelineActor as _HypeActor
 
-                _hype_actor_type = "agent" if task_env.is_in_task_run(project_context.project_slug) else "human"
+                _hype_actor_type = "agent" if os.environ.get("ASTRID_INTERNAL_INVOCATION") else "human"
                 args.actor_via = _HypeActor(
                     type=_hype_actor_type,
                     id=f"hype:{project_context.project_slug}",

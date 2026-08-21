@@ -9,25 +9,22 @@ switch over the three underlying executors:
 - `--mode video` → `understanding.video_understand`
 
 All arguments after `--mode <modality>` are forwarded unchanged to the
-selected executor. Inspect the underlying executors for their input flags:
-
-```bash
-python3 -m astrid executors inspect understanding.audio_understand
-python3 -m astrid executors inspect understanding.visual_understand
-python3 -m astrid executors inspect understanding.video_understand
-```
+selected executor. Inspect the underlying executors' inputs through the SDK.
 
 ## Examples
 
-The gateway form passes only the `mode` selector through the executor
-registry. Modality-specific flags (`--video`, `--image`, `--at`, `--query`,
+The SDK form passes only the `mode` selector through the executor registry.
+Modality-specific flags (`--video`, `--image`, `--at`, `--query`,
 …) are not declared as registry inputs, so for any non-trivial call invoke
 the dispatcher module directly:
 
-```bash
-# Gateway form — useful for `--dry-run`, scripting, and CI shape checks.
-python3 -m astrid executors run understanding.understand --input mode=video --dry-run
+```python
+# SDK form — useful for dry runs, scripting, and CI shape checks.
+import astrid.sdk as sdk
+result = sdk.invoke("understanding.understand", inputs={"mode": "video"}, dry_run=True)
+```
 
+```bash
 # Canonical form — full modality-specific flag passthrough.
 python3 -m astrid.packs.understanding.executors.understand.run --mode image --image frame.jpg
 python3 -m astrid.packs.understanding.executors.understand.run --mode audio --audio clip.wav

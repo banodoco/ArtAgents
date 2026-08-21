@@ -24,13 +24,15 @@ Both must be resolvable via the candidate-env-file walk
 (`astrid/core/util/secrets.py`). The executor makes authenticated HTTP
 calls to the Reigh API — it requires network access (`isolation.network: true`).
 
-## CLI quick-start
+## Quick-start
 
-```bash
-python -m astrid executors run reigh.publish -- \
-  --project-id "abc123-def456" \
-  --timeline-id "ghi789-jkl012" \
-  --timeline-file ./out/hype.timeline.json
+```python
+import astrid.sdk as sdk
+result = sdk.invoke("reigh.publish", inputs={
+    "project_id": "abc123-def456",
+    "timeline_id": "ghi789-jkl012",
+    "timeline_file": "./out/hype.timeline.json",
+})
 ```
 
 ## Inputs

@@ -7,11 +7,20 @@ without re-encoding. The pack provides a single ffmpeg stream-copy executor.
 
 ## Entrypoints
 
-This pack has no orchestrators. Agents should invoke the executor directly:
+This pack has no orchestrators. Agents should invoke the executor directly via
+the SDK:
 
-```bash
-python3 -m astrid executors run media.clip_extract \
-  -- --input <video> --start <seconds> --dur <seconds> --output <clip.mp4>
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "media.clip_extract",
+    inputs={
+        "input": "<video>",
+        "start": "<seconds>",
+        "dur": "<seconds>",
+        "output": "<clip.mp4>",
+    },
+)
 ```
 
 ## Executors

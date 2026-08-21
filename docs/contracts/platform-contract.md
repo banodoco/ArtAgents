@@ -384,7 +384,7 @@ Consumers must not reconstruct this data independently.
 
 ## Validation Boundary
 
-`python3 -m astrid packs validate` performs static manifest validation. In v1 it
+`python3 -m astrid.core.pack.cli validate` performs static manifest validation. In v1 it
 checks schema/shape validity, not runtime behavior. Validation does not promise
 that a pack behaves safely or only does what its declarations describe.
 

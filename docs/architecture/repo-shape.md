@@ -189,11 +189,14 @@ contain:
 
 The shipped packs are: `rendering`, `understanding`, `generation`, `editorial`,
 `video_editing`, `foley`, `training`, `reigh`, `youtube`, `fal`, `vibecomfy`,
-`runpod`, `moirae`, `iteration`, `media`, `stream_content`, `comfy_wrap`, and
-`text_analysis`.
+`runpod`, `moirae`, `iteration`, `media`, `stream_content`, and `comfy_wrap`.
 
-A gitignored `local` pack at `astrid/packs/local/` is created on first
-`elements fork` and holds user-editable copies.
+A gitignored `local` pack at `astrid/packs/local/` is created on first use and
+holds user-editable copies: forking a capability copies its manifest,
+entrypoint, and supporting files into the local pack under the `local`
+namespace, overriding redirects a capability id to a fork via
+`astrid/packs/local/.overrides.json`, and dirty detection reports local edits
+to forked copies.
 
 The `builtin` pack is hidden and deprecated. It remains only for legacy test
 fixtures and historical pack-level aliases; new capability work should use the

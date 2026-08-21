@@ -5,19 +5,20 @@ video (per-region Foley, per-region understanding, per-region edits). Pure
 ffmpeg, no network. Output is a `tiles.json` manifest plus N tile clips and N
 first-frame PNGs under `{out}/tiles/` and `{out}/frames/`.
 
-Inspect first:
+Run through the SDK:
 
-```bash
-python3 -m astrid executors inspect foley.tile_video --json
-```
-
-Run:
-
-```bash
-python3 -m astrid executors run foley.tile_video \
-  --input video=path/to/source.mp4 \
-  --out runs/tile_video/example \
-  -- --grid 4x4 --overlap 0.25 --trim 15
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "foley.tile_video",
+    inputs={
+        "video": "path/to/source.mp4",
+        "grid": "4x4",
+        "overlap": "0.25",
+        "trim": "15",
+    },
+    out="runs/tile_video/example",
+)
 ```
 
 Direct invocation:

@@ -7,47 +7,43 @@ Astrid has three canonical public concepts:
 - **Elements** are render/custom building blocks such as effects, animations, and transitions.
 
 Canonical packages and commands are first-class. `python3 -m astrid` is the
-executable package gateway; every runnable tool is reached via
-`python3 -m astrid [executors|orchestrators|elements] …`.
+executable package gateway for the eight families (projects, timelines, media,
+tasks, runs, serve, doctor, backup) and the two nested mounts (`timelines
+shots`, `media references`). Capabilities (executors, orchestrators, elements)
+are not gateway commands; they run through the SDK
+(`astrid.sdk.invoke` / `astrid.sdk.client.AstridClient`).
 
 ## Onboarding Commands
 
-Start with session-aware verbs before exploring the registry:
+From a cold checkout the gateway census and health check come first:
 
 ```bash
-python3 -m astrid status          # list sessions and projects
-python3 -m astrid next            # get the next legal action
-python3 -m astrid attach <project>  # bind to a project (only when instructed)
+python3 -m astrid --help          # the complete eight-family census
+python3 -m astrid doctor --json   # read-only health check
+python3 -m astrid projects list --json
 ```
 
-After binding, deeper discovery commands become available:
+There is no session-binding step and no `setup` command: product commands run
+directly against the local SQLite kernel at
+`$ASTRID_PROJECTS_ROOT/.astrid/astrid.sqlite3` (created lazily by the first
+product command).
 
-```bash
-python3 -m astrid orchestrators list
-python3 -m astrid executors list
-python3 -m astrid elements list
-python3 -m astrid doctor
-python3 -m astrid setup
+Canonical discovery is the SDK; the `--json` CLI reads are the shell
+equivalents:
+
+```python
+import astrid.sdk as sdk
+result = sdk.discover()                       # every capability, pack by pack
+cap = sdk.get_capability("rendering.render")  # typed lookup of one capability
 ```
 
-`setup` is dry-run by default. `python3 -m astrid setup --apply` is the explicit local mutation path and delegates to element sync/install helpers.
+Folder-backed orchestrators and executors include metadata such as
+`orchestrator_root`, `executor_root`, and `stage_file`; agents should load the
+top-level Astrid skill first, then open only the specific folder-level
+`STAGE.md` needed for the selected registry item. Do not package every
+executor and orchestrator stage into one merged runtime prompt.
 
-Canonical discovery commands are:
-
-```bash
-python3 -m astrid orchestrators inspect video_editing.hype --json
-python3 -m astrid executors inspect rendering.render --json
-python3 -m astrid elements inspect effects text-card --json
-```
-
-These JSON commands are the runtime index for agents. Folder-backed
-orchestrators and executors include metadata such as `orchestrator_root`,
-`executor_root`, and `stage_file`; agents should load the top-level Astrid
-skill first, then open only the specific folder-level `STAGE.md` needed for the
-selected registry item. Do not package every executor and orchestrator stage
-into one merged runtime prompt.
-
-Content ships in **packs** at `astrid/packs/<pack>/`. Each pack carries a `pack.yaml` with `id`, `name`, and `version`, and contains executor folders, orchestrator folders, and an `elements/<kind>/<id>/` tree. The shipped packs are `rendering`, `understanding`, `generation`, `editorial`, `video_editing`, `foley`, `training`, `reigh`, `youtube`, `fal`, `vibecomfy`, `runpod`, `moirae`, `iteration`, `media`, `stream_content`, `comfy_wrap`, and `text_analysis`. The deprecated `builtin` pack is a thin shell; legacy `external` and `upload` pack definitions were removed, and backward compatibility is via pack-level aliases declared in the canonical packs. A gitignored `local` pack at `astrid/packs/local/` is created on the first `elements fork` and holds user-editable copies. Default orchestrators include `video_editing.hype`, `video_editing.event_talks`, and `video_editing.thumbnail_maker` (legacy aliases: `builtin.hype`, `builtin.event_talks`, `builtin.thumbnail_maker`). Default executors include every `STEP_ORDER` capability, upload/action executors, `understanding.understand` (audio/visual/video dispatcher), `generation.generate_image_openai` (with a `saint-peter-of-banodoco` onboarding preset), `moirae.moirae`, and `vibecomfy.run`/`vibecomfy.validate`.
+Content ships in **packs** at `astrid/packs/<pack>/`. Each pack carries a `pack.yaml` with `id`, `name`, and `version`, and contains executor folders, orchestrator folders, and an `elements/<kind>/<id>/` tree. The shipped packs are `rendering`, `understanding`, `generation`, `editorial`, `video_editing`, `foley`, `training`, `reigh`, `youtube`, `fal`, `vibecomfy`, `runpod`, `moirae`, `iteration`, `media`, `stream_content`, `comfy_wrap`, `blender`, `discord_local`, and `seedance_local`. The deprecated `builtin` pack is a thin shell; legacy `external` and `upload` pack definitions were removed, and backward compatibility is via pack-level aliases declared in the canonical packs. A gitignored `local` pack at `astrid/packs/local/` holds user-edited element forks. Default orchestrators include `video_editing.hype`, `video_editing.event_talks`, and `video_editing.thumbnail_maker` (legacy aliases: `builtin.hype`, `builtin.event_talks`, `builtin.thumbnail_maker`). Default executors include every `STEP_ORDER` capability, upload/action executors, `understanding.understand` (audio/visual/video dispatcher), `generation.generate_image_openai` (with a `saint-peter-of-banodoco` onboarding preset), `moirae.moirae`, and `vibecomfy.run`/`vibecomfy.validate`.
 
 Executor and orchestrator ids are always qualified — `<pack>.<name>` (for example `video_editing.cut`, `vibecomfy.run`). Bare lookups such as `cut` are rejected at the schema and CLI boundaries. Element ids stay bare and are scoped by `kind`, so `animation/fade` and `transition/fade` coexist without collision.
 
@@ -75,12 +71,12 @@ For a step-by-step tutorial on building your first agentic UX, see
 
 | Module or entry point | Classification | Notes |
 | --- | --- | --- |
-| `python3 -m astrid`, `astrid/__main__.py` | System entry point | Executable package gateway for all canonical commands. |
-| `astrid/core/gateway/` | System command and dispatcher | Subcommand router; falls through to `video_editing.hype` via the orchestrator registry's `runtime_module` metadata. |
+| `python3 -m astrid`, `astrid/__main__.py` | System entry point | Executable package gateway for the eight CLI families. |
+| `astrid/core/gateway/` | System command and dispatcher | Routes the eight families and the two nested mounts; one verb = one SDK call. No capability dispatch. |
 | `astrid/packs/video_editing/orchestrators/hype/` | Orchestrator | Canonical hype video editing orchestrator. |
 | `astrid/packs/video_editing/orchestrators/event_talks/` | Orchestrator | Canonical event-talk discovery and rendering workflow. |
 | `astrid/packs/video_editing/orchestrators/thumbnail_maker/` | Orchestrator | Canonical source-evidence thumbnail workflow. |
-| `astrid/core/orchestrator/{registry,runner,cli,schema,folder}.py` | Orchestrator framework | Pack-discovery registry, runner that reads `metadata.requires_output_path`, qualified-id CLI, schema, and folder loader. |
+| `astrid/core/execution/orchestrator/{runner,registry,schema,folder}.py` | Orchestrator framework | SDK-invoked runner (subprocess, `ASTRID_INTERNAL_INVOCATION=1`), pack-discovery registry, schema, and folder loader. |
 
 ## Executors
 
@@ -104,7 +100,7 @@ Executor-owned complexity stays in the executor folder, usually under optional l
 | `astrid/core/element/schema.py` | Element support | `element.yaml` schema (`id`, singular `kind`, `pack_id`, `metadata`, `schema`, `defaults`, `dependencies`) and dependency dataclasses. |
 | `astrid/core/element/registry.py` | Element support | Pack-driven resolution: active theme → `pack:local` (priority 10) → `pack:builtin` (priority 30). Fork copies into the local pack and rewrites `pack_id`. |
 | `astrid/packs/rendering/elements/{effects,animations,transitions}` | Element support | Default elements shipped in the rendering pack; `kind`-scoped folders so `animations/fade` and `transitions/fade` coexist. |
-| `astrid/packs/local/elements/<kind>/<id>` | Element support | Gitignored scratch pack where `elements fork` lands edited copies (auto-creates `astrid/packs/local/pack.yaml`). |
+| `astrid/packs/local/elements/<kind>/<id>` | Element support | Gitignored scratch pack where forked element copies land (auto-creates `astrid/packs/local/pack.yaml`). |
 | `astrid/core/element/catalog.py` | Element support | Effect, animation, and transition catalog support used by render validation. |
 | `scripts/gen_effect_registry.py` | Element support | Generates Remotion registries from the element registry; emits `@pack-<pack>-elements-<kind>/...` imports. |
 | `scripts/gen_capability_index.py` | Capability discovery | Regenerates the capability index block in `astrid/packs/_core/skill/SKILL.md` from executor, orchestrator, and element manifests. |
@@ -133,6 +129,15 @@ the `validate_repo_structure()` machinery are documented in
 [docs/architecture/repo-shape.md](../architecture/repo-shape.md).
 
 ## Retired Concepts
+
+**Task-mode CLI** is retired. The legacy `attach` / `next` / `start` / `ack`
+verbs, the `executors run` / `orchestrators run` invocation surface, and the
+old filesystem task-run store no longer exist; the eight-family CLI and the
+SDK are the whole surface. The `astrid/core/task/` runtime and the
+`text_analysis.summarize` and `builtin.agent_probe` orchestrators were
+removed with it. Kernel task execution now lives in
+`astrid/core/task_executor/` (the injected `TaskHandler` boundary for
+pack-owned task-mode adapters).
 
 **Threads** are retired as a user-facing concept. The `astrid thread` CLI
 surface no longer exists. Threads are retained only as an internal lineage

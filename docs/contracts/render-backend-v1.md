@@ -61,18 +61,23 @@ host's sanitized environment and invocation staging.
 
 ### Public entry points
 
-Normal callers invoke the stable executor capability:
+Normal callers invoke the stable executor capability through the SDK:
 
-```bash
-python3 -m astrid executors run rendering.render \
-  --out ./out \
-  --input timeline=./out/hype.timeline.json \
-  --input assets_registry=./out/hype.assets.json \
-  --input backend=video_tool.renderer
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "rendering.render",
+    inputs={
+        "timeline": "./out/hype.timeline.json",
+        "assets_registry": "./out/hype.assets.json",
+        "backend": "video_tool.renderer",
+    },
+    out="./out",
+)
 ```
 
 The facade is `astrid/packs/rendering/executors/render/run.py`. It validates
-the legacy-compatible command surface, converts it into a neutral
+the command surface, converts it into a neutral
 `RenderRequest`, and delegates selection and the entire lifecycle to
 `astrid/core/rendering/service.py::RenderService`. Embedding code may call
 `RenderService` directly. Neither entry point imports a concrete renderer;
@@ -649,10 +654,10 @@ requests retention. V1 defines no cleanup daemon or TTL service.
 
 ## The `replay` verb
 
-`python3 -m astrid renderers replay <bundle-dir>` (top-level alias:
-`python3 -m astrid replay <bundle-dir>`) re-runs a captured bundle's pinned
-command with its localized `request.json` and inputs in a fresh temporary
-workspace. It refuses bundle tampering and silent backend substitution:
+`python3 -m astrid.core.rendering.cli replay <bundle-dir>` re-runs a captured
+bundle's pinned command with its localized `request.json` and inputs in a
+fresh temporary workspace. It refuses bundle tampering and silent backend
+substitution:
 
 - a `request.json` whose digest no longer matches the pinned
   `request_digest` is refused as tampering and can never be acknowledged;
@@ -675,18 +680,22 @@ Worked example (capture → replay → acknowledge drift):
 #    output, or the configured replay root). It contains bundle.json,
 #    request.json, inputs/<sha256> copies, and partial/<sha256> when the
 #    backend wrote a partial result.
-python3 -m astrid executors run rendering.render \
-  --out ./out --input timeline=./out/hype.timeline.json --input backend=acme_wave.wave
+python3 -c "
+import astrid.sdk as sdk
+sdk.invoke('rendering.render',
+    inputs={'timeline': './out/hype.timeline.json', 'backend': 'acme_wave.wave'},
+    out='./out')
+"
 #    -> fails; bundle retained at e.g. ./.out.mp4.replay/replay-20260813T...-acme_wave.wave-<digest12>/
 
-# 2. Replay the captured bundle (bind a session first, like the other
-#    renderer-authoring verbs):
-python3 -m astrid renderers replay ./.out.mp4.replay/replay-20260813T103000-123456-acme_wave.wave-0123456789ab
+# 2. Replay the captured bundle (renderer-authoring verbs live on the
+#    internal rendering CLI):
+python3 -m astrid.core.rendering.cli replay ./.out.mp4.replay/replay-20260813T103000-123456-acme_wave.wave-0123456789ab
 #    -> request_digest_verified: true, drift: none, output: <bundle-dir>.replay-output/<name>.mp4
 
 # 3. After a legitimate fixture correction the manifest digest drifts; the
 #    replay is refused until the drift is acknowledged:
-python3 -m astrid renderers replay <bundle-dir> --acknowledge-drift
+python3 -m astrid.core.rendering.cli replay <bundle-dir> --acknowledge-drift
 #    -> manifest_digest_match: false, drift: acknowledged, output persisted
 ```
 
@@ -849,14 +858,18 @@ destination itself.
 
 After installing or placing the pack in an eligible pack root:
 
-```bash
-python3 -m astrid packs validate ./video_tool
-python3 -m astrid executors run rendering.render \
-  --out ./out \
-  --input timeline=./out/hype.timeline.json \
-  --input assets_registry=./out/hype.assets.json \
-  --input backend=video_tool.renderer \
-  --input 'backend_config={"video_tool.renderer":{"preset":"high"}}'
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "rendering.render",
+    inputs={
+        "timeline": "./out/hype.timeline.json",
+        "assets_registry": "./out/hype.assets.json",
+        "backend": "video_tool.renderer",
+        "backend_config": '{"video_tool.renderer":{"preset":"high"}}',
+    },
+    out="./out",
+)
 ```
 
 Astrid resolves the qualified id and any renderer alias/override, checks trust,
@@ -876,40 +889,40 @@ whole path can be exercised end to end before you replace `render.py` with a
 real implementation.
 
 ```bash
-# 0. Bind a session first — renderer-authoring verbs are session-gated like
-#    other tool-creation verbs (packs ... itself is unbound-legal):
-#    python3 -m astrid next   # or: status / attach <project>
-
 # 1. Create the four-file scaffold: pack.yaml renderer.yaml render.py test_renderer.py
-python3 -m astrid renderers create wave acme_wave
+python3 -m astrid.core.rendering.cli create wave acme_wave
 cd acme_wave
 
 # 2. Run the generated test (deterministic render + hash + result-shape checks)
 python3 -m pytest -q test_renderer.py
 
 # 3. Statically validate the pack (manifest schemas, content roots, rendering extensions)
-python3 -m astrid renderers validate .
+python3 -m astrid.core.rendering.cli validate .
 
 # 4. Preview the trust summary, then trusted-install the pack
-python3 -m astrid packs install . --dry-run
-python3 -m astrid packs install . --trust --yes
+python3 -m astrid.core.pack.cli install . --dry-run
+python3 -m astrid.core.pack.cli install . --trust --yes
 
 # 5. Confirm discovery and inspect the installed revision
-python3 -m astrid renderers list
-python3 -m astrid renderers inspect acme_wave.wave
+python3 -m astrid.core.rendering.cli list
+python3 -m astrid.core.rendering.cli inspect acme_wave.wave
 
 # 6. Deterministic smoke render through the public service
-python3 -m astrid renderers smoke acme_wave.wave --out ./out/smoke.mp4
+python3 -m astrid.core.rendering.cli smoke acme_wave.wave --out ./out/smoke.mp4
 
 # 7. Debug a captured failure bundle (see "The replay verb" above)
-python3 -m astrid renderers replay <bundle-dir>
+python3 -m astrid.core.rendering.cli replay <bundle-dir>
 ```
 
 The destination directory name becomes the pack id (`acme_wave`) and the
 qualified renderer id becomes `<dest>.<name>` (`acme_wave.wave`) unless
 `--id` overrides it; the pack prefix must match the directory name because
-`packs install` requires `root.name == pack id`. `astrid renderers create`
-refuses to overwrite existing files unless `--force` is passed, and refuses
+`packs install` requires `root.name == pack id`. The renderer-authoring verbs
+(`create`, `list`, `inspect`, `validate`, `smoke`, `replay`) live on the
+internal module CLI `python3 -m astrid.core.rendering.cli` — not on the
+eight-family gateway — and `pack install` on
+`python3 -m astrid.core.pack.cli`. `renderers create` refuses to overwrite
+existing files unless `--force` is passed, and refuses
 the first-party `rendering` pack id to avoid colliding with the built-in
 pack. `renderers list` prints every discovered renderer/planner/finalizer
 qualified id, `renderers inspect <id>` shows one candidate's manifest fields,
@@ -932,11 +945,13 @@ deterministic and ignores timeline content, so the smoke never needs a real
 timeline. To render a real timeline through the stable facade instead (the
 pipeline path), use:
 
-```bash
-python3 -m astrid executors run rendering.render \
-  --out ./out \
-  --input timeline=./out/hype.timeline.json \
-  --input backend=acme_wave.wave
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "rendering.render",
+    inputs={"timeline": "./out/hype.timeline.json", "backend": "acme_wave.wave"},
+    out="./out",
+)
 ```
 
 Astrid resolves `acme_wave.wave`, checks trust/permissions/binaries/protocol

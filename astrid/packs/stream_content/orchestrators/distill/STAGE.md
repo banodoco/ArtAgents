@@ -3,12 +3,17 @@
 Use this orchestrator for long recordings from events, streams, panels, demos,
 or webinars that need to become reviewable publishing material.
 
-```bash
-python3 -m astrid orchestrators run stream_content.distill -- \
-  --video sources/event.mp4 \
-  --transcript runs/transcript.json \
-  --brief brief.md \
-  --out runs/stream-content
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "stream_content.distill",
+    inputs={
+        "video": "sources/event.mp4",
+        "transcript": "runs/transcript.json",
+        "brief": "brief.md",
+    },
+    out="runs/stream-content",
+)
 ```
 
 Outputs:

@@ -47,6 +47,7 @@ _REMOVED_MARKER_IMPORT_PATHS = (
 # Every immediate subdirectory of astrid/packs/ that contains a pack
 # manifest is a "shipped pack".  The set of ids must not regress.
 _SHIPPED_PACK_IDS = frozenset({
+    "blender",
     "builtin",
     "comfy_wrap",
     "editorial",
@@ -60,7 +61,6 @@ _SHIPPED_PACK_IDS = frozenset({
     "rendering",
     "runpod",
     "stream_content",
-    "text_analysis",
     "training",
     "understanding",
     "vibecomfy",
@@ -394,7 +394,6 @@ def test_external_origin_packs_are_discoverable() -> None:
     """Packs marked ``origin: external`` in their pack.yaml must still be
     discoverable via ``discover_packs``."""
     external_origin_ids = {
-        "text_analysis",
         "fal",
         "moirae",
         "runpod",

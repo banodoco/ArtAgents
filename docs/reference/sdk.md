@@ -374,9 +374,9 @@ never from timeline shape.
 
 ### `replay` — re-run a captured failure bundle
 
-The CLI verb `python3 -m astrid renderers replay <bundle-dir>` (top-level
-alias `python3 -m astrid replay <bundle-dir>`) re-runs a captured replay
-bundle's pinned command with its localized `request.json` and `inputs/`
+The internal rendering CLI verb
+`python3 -m astrid.core.rendering.cli replay <bundle-dir>` re-runs a captured
+replay bundle's pinned command with its localized `request.json` and `inputs/`
 copies in a fresh temporary workspace. It verifies the pinned
 `request_digest` against the on-disk localized request, refuses manifest or
 localized-input drift unless `--acknowledge-drift` is passed, refuses an

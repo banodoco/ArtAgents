@@ -5,13 +5,18 @@ for visual review after transcript, scene, shot, or quality-zone analysis.
 
 ## Run
 
-All executor inputs are passed with `--input NAME=VALUE`:
+Run it through the SDK; each executor input maps 1:1 to an `inputs` entry:
 
-```bash
-python3 -m astrid executors run editorial.boundary_candidates \
-  --out runs/boundary-review \
-  --input video=source.mp4 \
-  --input manifest=runs/boundary-review/boundary_manifest.json
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "editorial.boundary_candidates",
+    inputs={
+        "video": "source.mp4",
+        "manifest": "runs/boundary-review/boundary_manifest.json",
+    },
+    out="runs/boundary-review",
+)
 ```
 
 The manifest must contain a `talks` array. Each talk should provide enough

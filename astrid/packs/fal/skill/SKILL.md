@@ -38,14 +38,24 @@ The fal pack provides focused executors for hunyuan-video-foley and MiniMax H3.
 |---|---|
 | `FAL_KEY` | fal.fal_foley, fal.h3_video |
 
-## CLI quick-start
+## SDK quick-start
 
-```bash
-python3 -m astrid executors run fal.fal_foley -- --clip ./short_clip.mp4 --out ./foley_audio.mp3
-```
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "fal.fal_foley",
+    inputs={"clip": "./short_clip.mp4"},
+    out="./foley_audio.mp3",
+)
 
-```bash
-python3 -m astrid executors run fal.h3_video --project <slug> \
-  --input mode=text-to-video --input prompt_file=./prompt.txt \
-  --input duration=15 --input aspect_ratio=16:9
+result = sdk.invoke(
+    "fal.h3_video",
+    inputs={
+        "project": "<slug>",
+        "mode": "text-to-video",
+        "prompt_file": "./prompt.txt",
+        "duration": "15",
+        "aspect_ratio": "16:9",
+    },
+)
 ```

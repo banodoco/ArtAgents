@@ -55,15 +55,20 @@ experiment_import  →  experiment_prepare  →  experiment_review_session
                                                        (or experiment_review for a static page)
 ```
 
-The import executor wires its options through the registry; pass any via
-`--input NAME=VALUE`:
+The import executor wires its options through the registry; each option maps
+1:1 to an `inputs` entry:
 
-```bash
-python3 -m astrid executors run iteration.experiment_import \
-  --out ./import-out \
-  --input root=./runs/discord-command-poc \
-  --input title="Discord POC retrospective" \
-  --input question="Which submissions produced usable output?"
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "iteration.experiment_import",
+    inputs={
+        "root": "./runs/discord-command-poc",
+        "title": "Discord POC retrospective",
+        "question": "Which submissions produced usable output?",
+    },
+    out="./import-out",
+)
 ```
 
 ## When to use
@@ -82,16 +87,29 @@ python3 -m astrid executors run iteration.experiment_import \
 - Do not use the experiment executors to execute provider runs — they are
   read-only over evidence and never invoke a provider.
 
-## CLI quick-start
+## SDK quick-start
 
-```bash
+```python
+import astrid.sdk as sdk
+
 # Prepare iteration data from a thread run
-python3 -m astrid executors run iteration.prepare -- --run-id <run_id> --out ./out
+result = sdk.invoke(
+    "iteration.prepare",
+    inputs={"run_id": "<run_id>"},
+    out="./out",
+)
 
 # Assemble into render-ready hype inputs
-python3 -m astrid executors run iteration.assemble -- --prepare-dir ./out --out ./out
+result = sdk.invoke(
+    "iteration.assemble",
+    inputs={"prepare_dir": "./out"},
+    out="./out",
+)
 
 # Import a legacy run root into an experiment
-python3 -m astrid executors run iteration.experiment_import \
-  --out ./import-out --input root=<run_root>
+result = sdk.invoke(
+    "iteration.experiment_import",
+    inputs={"root": "<run_root>"},
+    out="./import-out",
+)
 ```

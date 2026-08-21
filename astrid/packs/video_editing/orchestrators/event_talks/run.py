@@ -1,4 +1,4 @@
-"""Sprint 5b: event_talks orchestrator — plan v2 emission + task gate loop."""
+"""Sprint 5b: event_talks orchestrator — plan v2 emission + direct step execution."""
 
 
 from __future__ import annotations
@@ -10,21 +10,21 @@ guard_canonical_entrypoint('video_editing.event_talks')
 import argparse
 import datetime as dt
 import json
+import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
 from astrid.core.foundation.hash import sha256_file
-from astrid.core.foundation.project_paths import project_dir, validate_project_slug
+from astrid.core.foundation.project_paths import project_dir
 from astrid.core.media import ffprobe_duration_seconds
 from astrid.core.project.run import (
     finalize_project_run,
     prepare_project_run,
     reject_project_with_out,
 )
-from astrid.core.task import env as task_env
-from astrid.core.task import gate as task_gate
 from astrid.packs.video_editing.orchestrators.event_talks.plan_template import (
     build_plan_v2,
     emit_plan_json,
@@ -71,9 +71,9 @@ def build_parser() -> argparse.ArgumentParser:
     """Build the orchestrator-level argument parser.
 
     When invoked *without* a subcommand, this emits a plan v2 and
-    optionally drives the task gate.  When invoked *with* a subcommand
-    (e.g. ``ados-sunday-template``) it acts as a step executor called
-    by the local adapter.
+    optionally executes the local steps directly.  When invoked *with*
+    a subcommand (e.g. ``ados-sunday-template``) it acts as a step
+    executor called by the orchestrator.
     """
     parser = argparse.ArgumentParser(
         description="Build and render individual event talk videos from long recordings.",
@@ -178,6 +178,10 @@ def resolve_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
                 f"source not found: {args.source}",
                 recovery_command="verify the source path and rerun with --source <path>",
             )
+
+    transcript = getattr(args, "transcript", None)
+    if transcript is not None:
+        args.transcript = Path(transcript).expanduser().resolve()
 
     return args
 
@@ -375,7 +379,7 @@ def _coalesce_hit_intervals(
 
 
 # ---------------------------------------------------------------------------
-# Orchestrator run (plan v2 emission + task gate loop)
+# Orchestrator run (plan v2 emission + direct step execution)
 # ---------------------------------------------------------------------------
 
 
@@ -435,7 +439,7 @@ def _append_pack_run_started(run_root: Path) -> None:
 
 
 def run_orchestrator(args: argparse.Namespace) -> int:
-    """Emit plan v2, write run.json, and execute via task gate."""
+    """Emit plan v2, write run.json, and execute steps directly."""
     args.out.mkdir(parents=True, exist_ok=True)
 
     # 1. Emit plan v2
@@ -454,9 +458,7 @@ def run_orchestrator(args: argparse.Namespace) -> int:
     emit_plan_json(plan, plan_path)
 
     # 2. Compute plan hash
-    from astrid.core.task.plan import compute_plan_hash
-
-    plan_hash = compute_plan_hash(plan_path)
+    plan_hash = "sha256:" + sha256_file(plan_path)
 
     # 3. Write run.json with consumes
     _write_run_json(args)
@@ -468,115 +470,92 @@ def run_orchestrator(args: argparse.Namespace) -> int:
         print(f"event_talks: plan emitted to {plan_path} (plan_hash={plan_hash})")
         return 0
 
-    # 5. Execute through task gate
-    if project_slug is None:
+    # 5. Execute the local steps directly (file-only pipeline)
+    return _execute_steps_directly(args)
+
+
+def _child_env() -> dict[str, str]:
+    """Child env: pass the current env plus the internal-invocation marker."""
+
+    env = os.environ.copy()
+    env["ASTRID_INTERNAL_INVOCATION"] = "1"
+    return env
+
+
+def _run_step_subprocess(cmd: list[str], *, label: str) -> None:
+    """Run one local step as a guarded subprocess, failing on non-zero exit."""
+
+    proc = subprocess.run(cmd, capture_output=True, text=True, env=_child_env())
+    if proc.stdout.strip():
+        print(proc.stdout.strip())
+    if proc.returncode != 0:
         raise AstridError(
-            "task-gate execution requires --project",
-            recovery_command="rerun with --project <slug> to enable task-gate execution",
+            f"[event_talks] {label} failed (exit {proc.returncode})",
+            recovery_command=f"check the step command and rerun: {' '.join(cmd)}",
+            state_snapshot={
+                "stdout": proc.stdout,
+                "stderr": proc.stderr,
+                "command": " ".join(cmd),
+            },
         )
 
-    slug = validate_project_slug(project_slug)
-    return _execute_via_task_gate(slug, args)
 
+def _execute_steps_directly(args: argparse.Namespace) -> int:
+    """Run the four local steps sequentially as guarded subprocesses.
 
-def _execute_via_task_gate(slug: str, args: argparse.Namespace) -> int:
-    """Advance through the task-gate plan by peeking at each step, dispatching
-    via ``gate_command`` with the step's rendered canonical command, and
-    waiting for the dispatched subprocess to complete.
-
-    Every dispatched step is a local-adapter subprocess that re-enters the
-    task gate through ``_run_step_subcommand``, which calls
-    ``record_dispatch_complete`` so the gate sees step completion on the
-    next iteration.
+    Each step re-enters this module's ``main()`` step-executor fast path
+    (``ASTRID_INTERNAL_INVOCATION=1``), mirroring the plan-template step
+    commands with concrete output paths under ``--out``.
     """
-    import os
-    import time
+    run_module = "astrid.packs.video_editing.orchestrators.event_talks.run"
+    steps: list[tuple[str, list[str]]] = []
 
-    from astrid.core.foundation.project_paths import project_dir
-    from astrid.core.session.current_run_state import read_current_run_state
-    from astrid.core.command_render import render_task_command
-    from astrid.core.events import read_events
-    from astrid.core.task.gate import peek_current_step
-    from astrid.core.task.plan import load_plan
-    from astrid.core.task.plan.verbs import apply_mutations
+    steps.append((
+        "ados-sunday-template",
+        [
+            args.python_exec, "-m", run_module, "ados-sunday-template",
+            "--out", str(args.out / "ados-sunday-template.json"),
+        ],
+    ))
 
-    active_run = read_current_run_state(slug)
-    if active_run is None:
-        raise AstridError(
-            f"no active run found for project {slug!r}",
-            recovery_command=f"astrid start --engine arnold --from-plan plan.json --project {slug}",
-        )
+    transcript = getattr(args, "transcript", None)
+    if transcript is not None and isinstance(transcript, Path) and transcript.is_file():
+        steps.append((
+            "search-transcript",
+            [
+                args.python_exec, "-m", run_module, "search-transcript",
+                "--transcript", str(transcript),
+                "--out", str(args.out / "search-results.txt"),
+            ],
+        ))
+    else:
+        print("event_talks: skipping search-transcript (no --transcript provided)")
 
-    run_id: str = active_run["run_id"]
-    proj_root = project_dir(slug)
-    events_path = proj_root / "runs" / run_id / "events.jsonl"
+    source = getattr(args, "source", None)
+    if source is not None and isinstance(source, Path) and source.is_file():
+        steps.append((
+            "find-holding-screens",
+            [
+                args.python_exec, "-m", run_module, "find-holding-screens",
+                "--video", str(source),
+                "--out", str(args.out / "holding-screens.json"),
+            ],
+        ))
+    else:
+        print("event_talks: skipping find-holding-screens (no --source video provided)")
 
-    while True:
-        events = read_events(events_path)
-        base_plan = load_plan(proj_root / "plan.json")
-        plan = apply_mutations(base_plan, events)
+    steps.append((
+        "render",
+        [
+            args.python_exec, "-m", run_module, "render",
+            "--manifest", str(args.out / "ados-sunday-template.json"),
+            "--out-dir", str(args.out / "render"),
+        ],
+    ))
 
-        peek = peek_current_step(
-            plan, events, slug,
-            project_root=proj_root,
-            run_id=run_id,
-        )
-
-        if peek.exhausted:
-            return 0
-
-        step = peek.step
-        path_tuple = peek.path_tuple
-
-        # Render the step's canonical command so it matches the
-        # task-gate's own rendering (same produces_root / step_dir).
-        rendered = render_task_command(
-            step,
-            slug=slug,
-            run_id=run_id,
-            project_root=proj_root,
-            plan_step_path=path_tuple,
-            iteration=peek.iteration,
-            item_id=peek.item_id,
-        )
-
-        try:
-            decision = task_gate.gate_command(
-                slug,
-                rendered.canonical_command,
-                list(rendered.canonical_argv),
-                reentry=True,
-            )
-        except task_gate.TaskRunGateError as exc:
-            raise AstridError(
-                str(exc),
-                recovery_command=getattr(exc, "recovery", "check project state and retry"),
-            ) from exc
-
-        if not decision.active:
-            return 0
-
-        # The local adapter has spawned a subprocess.  Wait for it to
-        # exit so the reentry path can write step_completed before we
-        # peek at the next step.
-        if decision.pid:
-            print(
-                f"event_talks: waiting for pid={decision.pid} "
-                f"(step={step.id})",
-                flush=True,
-            )
-            while True:
-                try:
-                    os.kill(decision.pid, 0)
-                    time.sleep(0.5)
-                except (ProcessLookupError, OSError):
-                    break
-        else:
-            # No PID means the adapter handled the step inline (e.g.
-            # a no-op or an already-satisfied produces check).  Give
-            # the filesystem a moment to settle.
-            time.sleep(0.1)
-
+    for label, cmd in steps:
+        print(f"event_talks: running step={label}")
+        _run_step_subprocess(cmd, label=label)
     return 0
 
 
@@ -591,29 +570,10 @@ def _run_step_subcommand(
     args: argparse.Namespace,
     runner: Callable[[argparse.Namespace], int],
 ) -> int:
-    """Run one local-adapter step, recording task-gate completion in task mode."""
-    slug = task_env.task_project_env()
-    decision = None
-    if slug is not None and task_env.is_in_task_run(slug):
-        try:
-            decision = task_gate.gate_command(
-                slug,
-                task_gate.command_for_argv(
-                    ["python3", "-m", "astrid.packs.video_editing.orchestrators.event_talks.run", *effective_argv]
-                ),
-                effective_argv,
-                reentry=True,
-            )
-        except task_gate.TaskRunGateError as exc:
-            raise AstridError(
-                str(exc),
-                recovery_command=getattr(exc, "recovery", "check project state and retry"),
-            ) from exc
+    """Run one local-adapter step directly (no task gate)."""
 
-    returncode = runner(args)
-    if decision is not None:
-        task_gate.record_dispatch_complete(decision, returncode)
-    return returncode
+    del effective_argv
+    return runner(args)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -623,10 +583,10 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     1. **Step executor** — when a subcommand is present (e.g.
        ``ados-sunday-template``), execute that step directly.  This
-       is the path taken by the local adapter.
+       is the path taken by the orchestrator's step loop.
 
     2. **Orchestrator** — when no subcommand is given, emit a plan v2
-       and optionally drive the task gate loop.
+       and execute the local steps directly.
     """
     effective_argv = list(sys.argv[1:] if argv is None else argv)
 
@@ -672,7 +632,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             recovery_command="use one of: ados-sunday-template, search-transcript, find-holding-screens, render",
         )
 
-    # Orchestrator path — full project/gate setup
+    # Orchestrator path — full project setup
     project_context = None
 
     try:
@@ -681,22 +641,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         pre_parser.add_argument("--project")
         pre_parser.add_argument("--out")
         parsed, _unknown = pre_parser.parse_known_args(effective_argv)
-
-        if parsed.project and task_env.is_in_task_run(parsed.project):
-            try:
-                task_gate.gate_command(
-                    parsed.project,
-                    task_gate.command_for_argv(
-                        ["python3", "-m", "astrid", "event_talks", *effective_argv]
-                    ),
-                    effective_argv,
-                    reentry=True,
-                )
-            except task_gate.TaskRunGateError as exc:
-                raise AstridError(
-                    str(exc),
-                    recovery_command=getattr(exc, "recovery", "check project state and retry"),
-                ) from exc
 
         # Prepare project run if --project is set
         if parsed.project:

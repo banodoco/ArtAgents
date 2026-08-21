@@ -12,26 +12,37 @@ Official endpoint constraints:
 - reference mode: up to nine images, three videos, three audio clips, and
   twelve files total; audio cannot be the only reference modality.
 
-Run through the canonical gateway:
+Run through the SDK:
 
-```bash
-astrid executors run fal.h3_video --project <slug> \
-  --input mode=text-to-video \
-  --input prompt_file=./prompt.txt \
-  --input duration=15 \
-  --input aspect_ratio=16:9
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "fal.h3_video",
+    inputs={
+        "project": "<slug>",
+        "mode": "text-to-video",
+        "prompt_file": "./prompt.txt",
+        "duration": "15",
+        "aspect_ratio": "16:9",
+    },
+)
 ```
 
 For reference mode, repeat ordered inputs:
 
-```bash
-astrid executors run fal.h3_video --project <slug> \
-  --input mode=reference-to-video \
-  --input prompt_file=./prompt.txt \
-  --input image_ref=./image1.png \
-  --input image_ref=./image2.png \
-  --input duration=15 \
-  --input aspect_ratio=16:9
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "fal.h3_video",
+    inputs={
+        "project": "<slug>",
+        "mode": "reference-to-video",
+        "prompt_file": "./prompt.txt",
+        "image_ref": ["./image1.png", "./image2.png"],
+        "duration": "15",
+        "aspect_ratio": "16:9",
+    },
+)
 ```
 
 Every non-dry run is paid. Make one explicit attempt per prompt. Preserve the

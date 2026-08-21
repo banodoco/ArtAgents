@@ -15,7 +15,7 @@ JSON: inject a text prompt, execute via vibecomfy, and collect the output image.
 
 | Executor | What it does |
 |---|---|
-| `comfy_wrap.run` | Load a ComfyUI workflow JSON from `/tmp/example_comfy.json`, inject a user prompt into the positive CLIPTextEncode node, execute through vibecomfy, and copy the result to `--out`. |
+| `comfy_wrap.run` | Load a ComfyUI workflow JSON from `/tmp/example_comfy.json`, inject a user prompt into the positive CLIPTextEncode node, execute through vibecomfy, and copy the result to the `out` directory. |
 
 ## When to use
 
@@ -31,10 +31,11 @@ JSON: inject a text prompt, execute via vibecomfy, and collect the output image.
 - Do not use for LoRAs, IP-adapter, ControlNet, or custom samplers — use
   `vibecomfy.run` directly (the escape hatch).
 
-## CLI quick-start
+## Quick-start
 
-```bash
-python3 -m astrid executors run comfy_wrap.run -- --prompt "a serene mountain lake at dawn" --out ./output.png
+```python
+import astrid.sdk as sdk
+result = sdk.invoke("comfy_wrap.run", inputs={"prompt": "a serene mountain lake at dawn"}, out="./output.png")
 ```
 
 ## Requirements

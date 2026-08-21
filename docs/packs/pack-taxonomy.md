@@ -3,7 +3,8 @@
 Every Astrid pack carries six first-class taxonomy fields that classify what it
 is, where it comes from, how it is shipped, and how stable it is. These fields
 are defined in the pack manifest (`pack.yaml`) and exposed through every
-discovery surface: `packs list`, `packs status`, and `packs inspect`.
+discovery surface: `python3 -m astrid.core.pack.cli list`, `status`, and
+`inspect`.
 
 ## Why Taxonomy?
 
@@ -68,7 +69,7 @@ Current shipped domains:
 | `editorial` | `editorial` — transcript-to-cut editorial pipeline |
 | `generation` | `generation`, `comfy_wrap` — image/video generation |
 | `integration` | `reigh`, `youtube`, `fal`, `vibecomfy`, `moirae` — connections to external services |
-| `development` | `iteration`, `training`, `text_analysis` — author-test-iterate tooling and model training |
+| `development` | `iteration`, `training` — author-test-iterate tooling and model training |
 | `infrastructure` | `runpod` — GPU provisioning and execution |
 | `system` | `builtin` (compatibility shell, hidden) — legacy namespace shell that preserves backward-compatible pack-level aliases; `_core` is a skill-only shell (no `pack.yaml`, no capabilities) classified under §Shells and Hidden Packs |
 | `general` | scaffolded packs, local scratch pack |
@@ -77,7 +78,7 @@ Current shipped domains:
 `video_editing` pack (domain `media`). An orchestrator id like `video_editing.hype`
 identifies a *capability*, not a pack taxonomy category. If you find yourself
 wanting a `hype` domain, stop — what you really want is a capability filter
-(`executors search hype` or `orchestrators search hype`). The legacy id
+(`astrid.sdk.discover()` can filter capabilities by id or keyword). The legacy id
 `builtin.hype` is preserved as a deprecated pack-level alias.
 
 ### `stability`
@@ -153,7 +154,8 @@ Every pack payload includes both top-level taxonomy fields and a nested
 }
 ```
 
-The flat `packs` array in `packs list --json` and `packs status --json` is
+The flat `packs` array in `python3 -m astrid.core.pack.cli list --json` and
+`status --json` is
 preserved for backward compatibility. A new top-level `groups` key provides
 domain-grouped views:
 
@@ -173,7 +175,7 @@ domain-grouped views:
 
 ### Plain-Text Output
 
-Plain-text `packs list` and `packs status` group output by domain:
+Plain-text `list` and `status` group output by domain:
 
 ```text
 taxonomy: domain=development
@@ -183,7 +185,7 @@ taxonomy: domain=system
 builtin Astrid Built-in        1.0.0   origin=builtin  tier=core       type=capability  stability=stable       support=core
 ```
 
-`packs inspect` adds a dedicated taxonomy block:
+`python3 -m astrid.core.pack.cli inspect` adds a dedicated taxonomy block:
 
 ```text
 id: builtin
@@ -204,23 +206,23 @@ All six taxonomy fields have corresponding CLI flags:
 
 ```bash
 # Filter by domain (most common)
-python3 -m astrid packs list --domain system
-python3 -m astrid packs status --domain media
+python3 -m astrid.core.pack.cli list --domain system
+python3 -m astrid.core.pack.cli status --domain media
 
 # Filter by origin
-python3 -m astrid packs list --origin builtin
+python3 -m astrid.core.pack.cli list --origin builtin
 
 # Filter by install tier
-python3 -m astrid packs list --install-tier core
+python3 -m astrid.core.pack.cli list --install-tier core
 
 # Filter by pack type
-python3 -m astrid packs list --pack-type capability
+python3 -m astrid.core.pack.cli list --pack-type capability
 
 # Filter by stability
-python3 -m astrid packs list --stability stable
+python3 -m astrid.core.pack.cli list --stability stable
 
 # Filter by support level
-python3 -m astrid packs list --support core
+python3 -m astrid.core.pack.cli list --support core
 ```
 
 Multiple filters can be combined. The `--category` flag remains separate and
@@ -228,8 +230,8 @@ filters on `metadata.category` only — it is not a taxonomy filter.
 
 ```bash
 # These are different filters with different semantics:
-python3 -m astrid packs list --domain system      # taxonomy.domain
-python3 -m astrid packs list --category system     # metadata.category
+python3 -m astrid.core.pack.cli list --domain system      # taxonomy.domain
+python3 -m astrid.core.pack.cli list --category system     # metadata.category
 ```
 
 ## Visibility and Hidden Packs
@@ -240,27 +242,27 @@ from `packs list` and `packs status` unless `--show-hidden` is passed.
 
 ```bash
 # Default discovery excludes hidden packs
-python3 -m astrid packs list
+python3 -m astrid.core.pack.cli list
 
 # Include hidden packs
-python3 -m astrid packs list --show-hidden
+python3 -m astrid.core.pack.cli list --show-hidden
 
 # Status respects visibility too
-python3 -m astrid packs status --show-hidden
+python3 -m astrid.core.pack.cli status --show-hidden
 
 # Inspect always works for any pack (hidden or visible)
-python3 -m astrid packs inspect builtin
+python3 -m astrid.core.pack.cli inspect builtin
 ```
 
 ### Example Packs vs. Runtime Packs
 
 Not every pack directory in the repository is a runtime-discovered pack:
 
-- **`astrid/packs/`** — Runtime packs. Discovered by `packs list`, `packs status`,
-  and capability searches. Currently: `rendering`, `understanding`, `generation`,
+- **`astrid/packs/`** — Runtime packs. Discovered by `python3 -m astrid.core.pack.cli list`,
+  `status`, and capability searches. Currently: `rendering`, `understanding`, `generation`,
   `editorial`, `video_editing`, `foley`, `training`, `reigh`, `youtube`, `fal`,
   `vibecomfy`, `runpod`, `moirae`, `iteration`, `media`, `comfy_wrap`,
-  `stream_content`, `text_analysis`, plus the dynamically-created `local` scratch
+  `stream_content`, plus the dynamically-created `local` scratch
   pack. The legacy `builtin` pack is a hidden compatibility shell that preserves the
   `builtin` namespace for backward compatibility (see §Shells and Hidden Packs). The
   `_core` directory is a skill-only shell — it contains only `skill/SKILL.md`
@@ -269,12 +271,12 @@ Not every pack directory in the repository is a runtime-discovered pack:
 - **`examples/packs/`** — Teaching packs. These are committed reference examples
   that demonstrate pack authoring patterns (multi-step pipelines, agent-attested
   workflows, element components). They are **not** runtime-discovered — you will
-  not see them in `packs list` output even with `--show-hidden`. Validate them
-  with `packs validate`:
+  not see them in `list` output even with `--show-hidden`. Validate them
+  with `python3 -m astrid.core.pack.cli validate`:
 
   ```bash
-  python3 -m astrid packs validate examples/packs/minimal
-  python3 -m astrid packs validate examples/packs/file_summarizer
+  python3 -m astrid.core.pack.cli validate examples/packs/minimal
+  python3 -m astrid.core.pack.cli validate examples/packs/file_summarizer
   ```
 
   The example packs are: `minimal` (canonical external-pack contract),
@@ -340,16 +342,15 @@ The `builtin` pack is **not** moved under `_shells/` in M2. Its
 classification as a visible compatibility shell preserves the pack id
 `builtin` and the test references to `builtin.agent_probe`.
 
-#### `stream_content`, `comfy_wrap`, `text_analysis` — Real Shipped Packs
+#### `stream_content`, `comfy_wrap` — Real Shipped Packs
 
-These three packs are **real shipped pack data** with stable pack and
+These two packs are **real shipped pack data** with stable pack and
 capability IDs:
 
 | Pack | Type | Capabilities | Taxonomy |
 |---|---|---|---|
 | `stream_content` | Mixed executor+orchestrator | `stream_content.clip_candidates`, `stream_content.segment_map`, `stream_content.distill` | origin=`builtin`, domain=`media`, install_tier=`default` |
 | `comfy_wrap` | Executor pack | `comfy_wrap.run` | origin=`external`, domain=`generation`, install_tier=`default` |
-| `text_analysis` | Orchestrator pack | `text_analysis.summarize` | origin=`external`, domain=`development`, install_tier=`default` |
 
 They are discovered, listed, and inspected through the normal pack CLI
 surface. Their pack ids and capability ids are **stable** across M2.
@@ -360,8 +361,12 @@ The canonical product clip extraction executor is `media.clip_extract`. It
 lives in `astrid/packs/media/executors/clip_extract/` and appears in runtime
 discovery as `media.clip_extract`:
 
-```bash
-python3 -m astrid executors search clip_extract
+```python
+import astrid.sdk as sdk
+
+for capability in sdk.discover().capabilities:
+    if "clip_extract" in capability.id:
+        print(capability)
 ```
 
 The former scaffold-only packs `clip_tools` and `video_tools` (which contained

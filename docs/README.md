@@ -3,6 +3,10 @@
 Astrid is a Python SDK and harness toolkit for building and running agentic UXes —
 pipelines where agents and humans collaborate to make art.
 
+**Where to start:** agents begin at [AGENTS.md](../AGENTS.md) +
+[`astrid/packs/_core/skill/SKILL.md`](../astrid/packs/_core/skill/SKILL.md);
+humans begin at [Getting Started](getting-started.md).
+
 ## Which journey matches you?
 
 ### I'm new here
@@ -54,7 +58,7 @@ Contributor-facing architecture docs live under
   pluggable renderer contract and the renderer-author golden path.
 - **[Skills Install](guides/skills-install.md)** — Installing Astrid prompt content as
   skills into Claude Code, Codex, and Hermes.
-- **[HOOKS](guides/hooks.md)** — Claude Code stop hook for re-injecting task-mode rules.
+- **[HOOKS](guides/hooks.md)** — Retired task-mode stop hook (documented as a retired notice).
 - **[Ideas](guides/ideas.md)** — Suggestions for what to make or learn with Astrid.
 
 ## Examples

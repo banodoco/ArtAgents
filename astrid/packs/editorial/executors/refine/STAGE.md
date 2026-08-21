@@ -16,23 +16,40 @@ overlay edits, effect parameter tweaks, and transition refinements.
 Output includes a `refine.json` record of applied changes, plus mutated
 copies of the timeline, assets, and metadata files ready for rendering.
 
-## CLI quick-start
+## SDK quick-start
 
-```bash
-python -m astrid executors run editorial.refine -- \
-  --arrangement ./out/arrangement.json --pool ./out/unified_pool.json \
-  --timeline ./out/hype.timeline.json --assets ./out/hype.assets.json \
-  --metadata ./out/hype.metadata.json --transcript ./out/transcript.json \
-  --out ./out
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "editorial.refine",
+    inputs={
+        "arrangement": "./out/arrangement.json",
+        "pool": "./out/unified_pool.json",
+        "timeline": "./out/hype.timeline.json",
+        "assets": "./out/hype.assets.json",
+        "metadata": "./out/hype.metadata.json",
+        "transcript": "./out/transcript.json",
+    },
+    out="./out",
+)
 ```
 
 With an explicit env file for API credentials:
 
-```bash
-python -m astrid executors run editorial.refine -- \
-  --arrangement ./out/arrangement.json --pool ./out/unified_pool.json \
-  --timeline ./out/hype.timeline.json --assets ./out/hype.assets.json \
-  --metadata ./out/hype.metadata.json --env-file .env.local --out ./out
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "editorial.refine",
+    inputs={
+        "arrangement": "./out/arrangement.json",
+        "pool": "./out/unified_pool.json",
+        "timeline": "./out/hype.timeline.json",
+        "assets": "./out/hype.assets.json",
+        "metadata": "./out/hype.metadata.json",
+        "env_file": ".env.local",
+    },
+    out="./out",
+)
 ```
 
 ## Inputs

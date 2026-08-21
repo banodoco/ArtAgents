@@ -7,20 +7,16 @@ This executor scaffolds the element. It does not render the final video and it
 does not replace `rendering.render`; timelines should still render through the
 normal Remotion timeline compositor.
 
-Inspect first:
+Dry-run through the SDK:
 
-```bash
-python3 -m astrid executors inspect rendering.html_canvas_effect --json
-```
-
-Dry-run through the canonical executor CLI:
-
-```bash
-python3 -m astrid executors run rendering.html_canvas_effect \
-  --input effect_id=glass-product-card \
-  --input label="Glass Product Card" \
-  --out runs/html-canvas-effect \
-  --dry-run
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "rendering.html_canvas_effect",
+    inputs={"effect_id": "glass-product-card", "label": "Glass Product Card"},
+    out="runs/html-canvas-effect",
+    dry_run=True,
+)
 ```
 
 Run directly:

@@ -28,18 +28,26 @@ Requires an **OpenAI API key** resolvable via the candidate-env-file walk
 (`astrid/core/util/secrets.py`). The executor makes HTTP calls to the
 OpenAI GPT Audio endpoint — no local model installation is required.
 
-## CLI quick-start
+## Quick-start
 
-```bash
-python -m astrid executors run understanding.audio_understand -- \
-  --audio ./clip.mp3 --out ./out
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "understanding.audio_understand",
+    inputs={"audio": "./clip.mp3"},
+    out="./out",
+)
 ```
 
 With explicit model selection:
 
-```bash
-python -m astrid executors run understanding.audio_understand -- \
-  --audio ./clip.mp3 --model gpt-4o-audio-preview --out ./out
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "understanding.audio_understand",
+    inputs={"audio": "./clip.mp3", "model": "gpt-4o-audio-preview"},
+    out="./out",
+)
 ```
 
 ## Inputs

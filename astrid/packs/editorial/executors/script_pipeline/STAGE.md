@@ -10,14 +10,19 @@ shape while moving topic-specific prompt rules into config:
 
 Use fake mode for no-network smoke tests:
 
-```bash
-python3 -m astrid executors run editorial.script_pipeline -- \
-  --preset seinfeld \
-  --produces-dir runs/script-pipeline/produces \
-  --fake \
-  --candidates 2 \
-  --rough-attempts 3 \
-  --select-best
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "editorial.script_pipeline",
+    inputs={
+        "preset": "seinfeld",
+        "produces_dir": "runs/script-pipeline/produces",
+        "fake": True,
+        "candidates": "2",
+        "rough_attempts": "3",
+        "select_best": True,
+    },
+)
 ```
 
 Live DeepSeek runs read provider/model data from the preset and require the

@@ -22,12 +22,20 @@ nonzero on ffmpeg failure or validation errors.
 
 ## Canonical Command
 
-```bash
-# Via the Astrid runner (recommended):
-python3 -m astrid executors run media.clip_extract \
-  --input source.mp4 --start 10 --dur 5 --out runs/my_clip
+Via the Astrid SDK (recommended):
 
-# Or via ASTRID_INTERNAL_INVOCATION for testing:
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "media.clip_extract",
+    inputs={"input": "source.mp4", "start": "10", "dur": "5"},
+    out="runs/my_clip",
+)
+```
+
+Or via `ASTRID_INTERNAL_INVOCATION` for testing:
+
+```bash
 ASTRID_INTERNAL_INVOCATION=1 python3 -m astrid.packs.media.executors.clip_extract.run \
   --input source.mp4 --start 10 --dur 5 --output runs/my_clip/clip.mp4
 ```

@@ -76,8 +76,11 @@ prepare/review path never branches on provider.
 
 ## Invocation
 
-```bash
-python3 -m astrid executors run iteration.experiment_import \
-  --out ./out \
-  --input root=path/to/discord-command-poc
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "iteration.experiment_import",
+    inputs={"root": "path/to/discord-command-poc"},
+    out="./out",
+)
 ```

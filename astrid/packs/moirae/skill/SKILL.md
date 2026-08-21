@@ -33,8 +33,9 @@ video with typewriter text, simulated agent Q&A, and camera moves.
 - `moirae` package installed
 - `asciinema`, `agg`, and `ffmpeg` binaries on PATH
 
-## CLI quick-start
+## Quick-start
 
-```bash
-python3 -m astrid executors run moirae.moirae -- --screenplay ./demo.yaml --out ./out
+```python
+import astrid.sdk as sdk
+result = sdk.invoke("moirae.moirae", inputs={"screenplay": "./demo.yaml"}, out="./out")
 ```

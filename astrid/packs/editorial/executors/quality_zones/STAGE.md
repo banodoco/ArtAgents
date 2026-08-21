@@ -14,11 +14,15 @@ while low-grade zones are deprioritized or excluded.
 Runs locally via ffmpeg — no network or API required. The `quality_zones.json`
 sentinel gates cache invalidation.
 
-## CLI quick-start
+## SDK quick-start
 
-```bash
-python -m astrid executors run editorial.quality_zones -- \
-  --video ./source.mp4 --out ./out
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "editorial.quality_zones",
+    inputs={"video": "./source.mp4"},
+    out="./out",
+)
 ```
 
 ## Inputs

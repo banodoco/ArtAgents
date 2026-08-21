@@ -69,18 +69,29 @@ tile_video → (per-tile Foley generation via fal.fal_foley) → foley_review �
 | `FAL_KEY` | `fal.fal_foley` (called by foley_map orchestrator) |
 | `OPENAI_API_KEY` | VLM scene description step in foley_map |
 
-## CLI quick-start
+## SDK quick-start
 
-```bash
+```python
+import astrid.sdk as sdk
+
 # Run tile_video standalone
-python3 -m astrid executors run foley.tile_video -- \
-  --video ./input.mp4 --out ./tiles
+result = sdk.invoke(
+    "foley.tile_video",
+    inputs={"video": "./input.mp4"},
+    out="./tiles",
+)
 
 # Run foley_review standalone
-python3 -m astrid executors run foley.foley_review -- \
-  --manifest ./tiles/tiles.json --out ./review
+result = sdk.invoke(
+    "foley.foley_review",
+    inputs={"manifest": "./tiles/tiles.json"},
+    out="./review",
+)
 
 # Run the full spatial Foley pipeline (orchestrator)
-python3 -m astrid orchestrators run foley.foley_map -- \
-  --video ./input.mp4 --out ./foley-run
+result = sdk.invoke(
+    "foley.foley_map",
+    inputs={"video": "./input.mp4"},
+    out="./foley-run",
+)
 ```

@@ -106,26 +106,16 @@ they don't alter execution. Use a fork or override for behavioral changes.
 
 **What:** A complete local copy of a capability that you own and can modify.
 
-**How it works:** The fork command copies the capability's manifest, entrypoint,
-and supporting files into your local pack. The forked copy gets a new qualified
+**How it works:** Forking a capability copies its manifest, entrypoint, and
+supporting files into your local pack, giving the forked copy a new qualified
 id under the `local` pack namespace. Provenance metadata tracks the original
 source.
 
-### Fork Commands
-
-```bash
-# Shallow fork — copy just this capability
-python3 -m astrid executors fork rendering.render
-python3 -m astrid orchestrators fork video_editing.hype
-python3 -m astrid elements fork effects text-card
-
-# Deep fork — recursively fork all child executors/orchestrators too
-python3 -m astrid executors fork generation.generate_image --deep
-python3 -m astrid orchestrators fork video_editing.hype --deep
-
-# Overwrite an existing fork
-python3 -m astrid executors fork rendering.render --overwrite
-```
+- **Shallow fork** — copy just the named capability. Its child references
+  still point to the original shipped executors/orchestrators.
+- **Deep fork** — recursively fork all child executors and orchestrators
+  referenced by an orchestrator's graph. Elements only support shallow forks.
+- **Overwrite** — re-fork over an existing fork, replacing it.
 
 ### Fork Provenance
 
@@ -136,13 +126,6 @@ Each forked capability records:
   `.astrid_fork_state.json`)
 
 This provenance powers dirty detection (see [fork-and-update.md](fork-and-update.md)).
-
-### Shallow vs Deep
-
-- **Shallow** (`--deep` not set): Copy only the named capability. Its child
-  references still point to the original builtin executors/orchestrators.
-- **Deep** (`--deep`): Recursively fork all child executors and orchestrators
-  referenced by an orchestrator's graph. Elements only support shallow forks.
 
 **When to use:** You want to customize a capability's behavior without affecting
 the original. The fork becomes your copy — edit freely.
@@ -170,29 +153,25 @@ checks the override store for `("executor", "rendering.render")`. This means
 one override covers all aliases that point to the same canonical target — you
 do not need to set separate overrides for each alias.
 
-### Override Commands
+### Override Mechanisms
 
-```bash
-# Route all requests for rendering.render to your local fork
-python3 -m astrid executors override set rendering.render local.render
+Overrides are managed by editing `astrid/packs/local/.overrides.json`, which
+maps canonical ids to their replacement ids per capability kind:
 
-# Route an element to a replacement
-python3 -m astrid elements override set effects text-card effects my-text-card
-
-# List all active overrides
-python3 -m astrid executors override list
-python3 -m astrid orchestrators override list
-python3 -m astrid elements override list
-
-# Remove an override
-python3 -m astrid executors override remove rendering.render
-```
+- Route all requests for `rendering.render` to your local fork — add
+  `{"executor": {"rendering.render": "local.render"}}`.
+- Route an element to a replacement — add an entry under the element kind
+  key, mapping the element id to its replacement (e.g.
+  `{"effects": {"text-card": "my-text-card"}}`).
+- List all active overrides — read the same file.
+- Remove an override — delete its entry from the file.
 
 ### Common Override Pattern: Fork + Override
 
-1. Fork the capability: `python3 -m astrid executors fork rendering.render`
-2. Edit the local copy at `astrid/packs/local/executors/render/`
-3. Set the override: `python3 -m astrid executors override set rendering.render local.render`
+1. Fork the capability into the local pack (see Forks above).
+2. Edit the local copy at `astrid/packs/local/executors/render/`.
+3. Add the override to `astrid/packs/local/.overrides.json`:
+   `{"executor": {"rendering.render": "local.render"}}`.
 
 Now every consumer that references `rendering.render` (or its legacy alias
 `builtin.render`) gets your customized version transparently.
@@ -274,12 +253,14 @@ backend override file or backend-specific override format. Pack manifests may
 declare aliases of `kind: renderer`, `kind: planner`, and `kind: finalizer`;
 their extension manifests are registered through
 `extensions.rendering.renderers`, `.planners`, and `.finalizers` respectively.
-The current CLI exposes override management for executors, orchestrators, and
-elements only; do not invent `astrid renderers override ...` commands. Rendering
+Override management for executor, orchestrator, and element ids happens
+through the project-local `OverrideStore` and its
+`astrid/packs/local/.overrides.json` file; do not invent
+`astrid renderers override ...` commands. Rendering
 hosts and tests set these typed mappings through `OverrideStore` until a public
 rendering-registry CLI is added.
 
-The `renderers` CLI surface today is `python3 -m astrid renderers
+The `renderers` CLI surface today is `python3 -m astrid.core.rendering.cli
 create|list|inspect|validate|smoke|replay`: `create <name> <dest>` scaffolds the
 four-file renderer pack, `list` prints every discovered
 renderer/planner/finalizer qualified id, `inspect <id>` shows one candidate's
@@ -287,10 +268,9 @@ manifest fields and trust eligibility, `validate <path>` statically validates
 a pack directory, `smoke <id>` runs a deterministic direct-service render
 against an execution-eligible candidate, and `replay <bundle-dir>` re-runs a
 captured failure bundle with its pinned digests (refusing silent backend
-substitution and bundle tampering unless `--acknowledge-drift` is passed; the
-top-level alias `python3 -m astrid replay <bundle-dir>` routes to the same
-verb). A trusted install uses
-`packs install --trust --yes`, and a failed invocation is debugged from its
+substitution and bundle tampering unless `--acknowledge-drift` is passed). A
+trusted install uses `python3 -m astrid.core.pack.cli install --trust --yes`,
+and a failed invocation is debugged from its
 retained replay bundle. See the golden path in
 [render-backend-v1.md](../contracts/render-backend-v1.md#renderer-author-golden-path)
 and the worked `replay` example in

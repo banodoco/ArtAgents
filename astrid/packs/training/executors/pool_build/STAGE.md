@@ -15,16 +15,21 @@ The pool is the central data structure for the back half of the pipeline:
 `cut` assembles the final timeline from the arrangement. The `pool.json`
 sentinel gates cache invalidation.
 
-## CLI quick-start
+## Quick-start
 
-```bash
-python -m astrid executors run training.pool_build -- \
-  --triage ./out/triage.json \
-  --scene_descriptions ./out/scene_descriptions.json \
-  --quote_candidates ./out/quote_candidates.json \
-  --transcript ./out/transcript.json \
-  --scenes ./out/scenes.json \
-  --out ./out
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "training.pool_build",
+    inputs={
+        "triage": "./out/triage.json",
+        "scene_descriptions": "./out/scene_descriptions.json",
+        "quote_candidates": "./out/quote_candidates.json",
+        "transcript": "./out/transcript.json",
+        "scenes": "./out/scenes.json",
+    },
+    out="./out",
+)
 ```
 
 ## Inputs

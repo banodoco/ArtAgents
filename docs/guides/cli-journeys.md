@@ -273,10 +273,11 @@ python3 -m astrid timelines list --project demo --json
 # show — by UUID, ULID, or slug
 python3 -m astrid timelines show --project demo primary --json
 
-# save — whole-document CAS save (config and registry both required)
+# save — whole-document CAS save (config and registry both required);
+# create sets config_version 1, so a fresh timeline saves with --expected-version 1
 python3 -m astrid timelines save --project demo primary \
   --config '{"width": 1920, "height": 1080}' \
-  --registry '{"assets": {}}' --expected-version 0 --json
+  --registry '{"assets": {}}' --expected-version 1 --json
 
 # archive — event-backed terminal mutation
 python3 -m astrid timelines archive --project demo primary --json

@@ -13,9 +13,13 @@ query into person/scene/text/emotion needs and emits evidence stubs.
 
 ## Invocation
 
-```bash
-python3 -m astrid orchestrators run video_editing.thumbnail_maker \
-  -- --video source.mp4 --query "intense reaction moment" --out runs/thumbs
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "video_editing.thumbnail_maker",
+    inputs={"video": "source.mp4", "query": "intense reaction moment"},
+    out="runs/thumbs",
+)
 ```
 
 Key flags: `--video`, `--query` (default `"auto"`), `--out` (required for full

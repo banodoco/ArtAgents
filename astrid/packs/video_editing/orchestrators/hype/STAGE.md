@@ -11,9 +11,13 @@ Remotion-rendered hype video with cache-aware step resume.
 
 ## Invocation
 
-```bash
-python3 -m astrid orchestrators run video_editing.hype \
-  -- --video source.mp4 --brief brief.txt --out runs/my_hype
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "video_editing.hype",
+    inputs={"video": "source.mp4", "brief": "brief.txt"},
+    out="runs/my_hype",
+)
 ```
 
 Key flags: `--video`, `--brief`, `--out` (all required). Optional: `--theme`,

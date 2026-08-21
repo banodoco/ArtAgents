@@ -17,50 +17,60 @@ coextensive audio clip can be compiled by the FFmpeg renderer to its dedicated
 representation; service selection and request-sensitive support evidence
 choose the implementation.
 
-Normal Astrid usage goes through the first-class executor CLI. The direct
-`run.py` entrypoint is a lower-level debug surface for reproducing runner
-behavior outside the Astrid executor wrapper.
+Normal Astrid usage goes through the SDK (`astrid.sdk.invoke(...)`). The
+direct `run.py` entrypoint is a lower-level debug surface for reproducing
+runner behavior outside the Astrid executor wrapper.
 
-## CLI quick-start
+## Quick-start
 
 Render a timeline with no external media registry:
 
-```bash
-python3 -m astrid executors run rendering.render \
-  --out ./out \
-  --input timeline=./out/hype.timeline.json
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "rendering.render",
+    inputs={"timeline": "./out/hype.timeline.json"},
+    out="./out",
+)
 ```
 
 Render a timeline with the optional media asset registry produced by
 `video_editing.cut`:
 
-```bash
-python3 -m astrid executors run rendering.render \
-  --out ./out \
-  --input timeline=./out/hype.timeline.json \
-  --input assets_registry=./out/hype.assets.json
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "rendering.render",
+    inputs={"timeline": "./out/hype.timeline.json", "assets_registry": "./out/hype.assets.json"},
+    out="./out",
+)
 ```
 
 With a custom theme and strict qualified renderer:
 
-```bash
-python3 -m astrid executors run rendering.render \
-  --out ./out \
-  --input timeline=./out/hype.timeline.json \
-  --input assets_registry=./out/hype.assets.json \
-  --input theme=./themes/my-theme \
-  --input backend=rendering.remotion
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "rendering.render",
+    inputs={
+        "timeline": "./out/hype.timeline.json",
+        "assets_registry": "./out/hype.assets.json",
+        "theme": "./themes/my-theme",
+        "backend": "rendering.remotion",
+    },
+    out="./out",
+)
 ```
 
-The executor writes `./out/hype.mp4` and
+The SDK invocation writes `./out/hype.mp4` and
 `./out/hype.mp4.provenance.json`.
 
 ## Inputs
 
 | Name            | Type   | Required | Description |
 |-----------------|--------|----------|-------------|
-| timeline        | file   | yes      | Hype timeline JSON. Pass as `--input timeline=<path>`. |
-| assets_registry | file   | no       | Optional Hype media asset registry JSON. Pass as `--input assets_registry=<path>` when the timeline references media assets. If omitted, the runner supplies an empty registry. |
+| timeline        | file   | yes      | Hype timeline JSON. Pass as the `timeline` input. |
+| assets_registry | file   | no       | Optional Hype media asset registry JSON. Pass as the `assets_registry` input when the timeline references media assets. If omitted, the runner supplies an empty registry. |
 | theme           | file   | no       | Optional theme configuration. |
 | engine          | string | no       | Compatibility selector. Accepts legacy `remotion`, `ffmpeg`, `hybrid`, or a qualified renderer id. Legacy `remotion` preserves support-based FFmpeg auto-routing; `hybrid` selects `rendering.legacy_hybrid`. Do not combine with `backend`. |
 | backend         | string | no       | Neutral selector synonym. Prefer a qualified id such as `rendering.remotion` for strict renderer selection. Do not combine with `engine`. |
@@ -150,9 +160,10 @@ The facade never changes when a new backend appears: a pack contributes a
 qualified renderer/planner/finalizer through
 `extensions.rendering.{renderers,planners,finalizers}` and `RenderService`
 discovers and invokes it. To author one, scaffold the canonical four-file pack
-with `python3 -m astrid renderers create <name> <dest>`, implement
-`render.py`, run the generated `test_renderer.py`, then `renderers validate` →
-trusted `packs install` → `renderers smoke` → `renderers replay <bundle-dir>`
+with the internal rendering CLI (`python3 -m astrid.core.rendering.cli create <name> <dest>`), implement
+`render.py`, run the generated `test_renderer.py`, then `validate` →
+trusted `install` via the internal pack CLI (`python3 -m astrid.core.pack.cli`)
+→ `smoke` → `replay <bundle-dir>`
 for captured failure bundles (the golden
 path in `docs/contracts/render-backend-v1.md`). `render.py` may parse the raw
 v1 file protocol or use the public rendering SDK (`astrid.renderer_main` as

@@ -31,19 +31,29 @@ but the source video should be preserved.
 
 ## Canonical Command
 
-```bash
-python3 -m astrid executors run media.speech_repair_lavasr \
-  --input source.mp4 --start 578.64 --dur 151.0 \
-  --out runs/laurent-first-speech-repair
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "media.speech_repair_lavasr",
+    inputs={"input": "source.mp4", "start": "578.64", "dur": "151.0"},
+    out="runs/laurent-first-speech-repair",
+)
 ```
 
 With the DeepFilterNet3 post-pass:
 
-```bash
-python3 -m astrid executors run media.speech_repair_lavasr \
-  --input source.mp4 --start 578.64 --dur 151.0 \
-  --input deepfilternet3=true \
-  --out runs/laurent-first-speech-repair-deepfilter
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "media.speech_repair_lavasr",
+    inputs={
+        "input": "source.mp4",
+        "start": "578.64",
+        "dur": "151.0",
+        "deepfilternet3": "true",
+    },
+    out="runs/laurent-first-speech-repair-deepfilter",
+)
 ```
 
 ## Dependencies

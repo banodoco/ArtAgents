@@ -7,10 +7,13 @@ discarding completed work.
 
 ## Run
 
-```bash
-python3 -m astrid orchestrators run training.dataset_build -- \
-  --config <config.json-or-yaml> \
-  --out runs/<dataset-run>
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "training.dataset_build",
+    inputs={"config": "<config.json-or-yaml>"},
+    out="runs/<dataset-run>",
+)
 ```
 
 Optional inputs:
@@ -166,12 +169,6 @@ No-spend configs should set budgets to zero and use fixture sidecars:
 Use `--dry-run` for preflight-only checks. Use fixture configs plus
 `--review-decisions`, `--skip-review`, or `--review-only` for offline runtime
 tests.
-
-## Inspect
-
-```bash
-python3 -m astrid orchestrators inspect training.dataset_build --json
-```
 
 ## Package Layout
 

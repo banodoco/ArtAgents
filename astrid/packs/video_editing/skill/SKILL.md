@@ -64,36 +64,60 @@ and `hype.metadata.json` — the three-file input to rendering.render.
 | `FAL_KEY` | logo_ideas, animate_image, vary_grid |
 | `FIREWORKS_API_KEY` | logo_ideas, vary_grid |
 
-## CLI quick-start
+## Quick-start
 
-```bash
+```python
 # Full hype pipeline (orchestrator)
-python3 -m astrid orchestrators run video_editing.hype -- \
-  --video ./source.mp4 --brief ./briefs/my-hype.md \
-  --theme ./themes/default.json --out ./runs/my-run
-
-# Event talk video
-python3 -m astrid orchestrators run video_editing.event_talks -- \
-  ados-sunday-template --out ./talk-output
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "video_editing.hype",
+    inputs={"video": "./source.mp4", "brief": "./briefs/my-hype.md", "theme": "./themes/default.json"},
+    out="./runs/my-run",
+)
 
 # Thumbnail candidates
-python3 -m astrid orchestrators run video_editing.thumbnail_maker -- \
-  --video ./source.mp4 --query "epic moment" --out ./thumbs
+result = sdk.invoke(
+    "video_editing.thumbnail_maker",
+    inputs={"video": "./source.mp4", "query": "epic moment"},
+    out="./thumbs",
+)
 
 # Logo concept grid
-python3 -m astrid orchestrators run video_editing.logo_ideas -- \
-  --prompt "a bold tech startup logo" --out ./logos
+result = sdk.invoke(
+    "video_editing.logo_ideas",
+    inputs={"prompt": "a bold tech startup logo"},
+    out="./logos",
+)
 
 # Animate an image with a reference video
-python3 -m astrid orchestrators run video_editing.animate_image -- \
-  --image ./still.png --reference-video ./motion.mp4 --out ./animated
+result = sdk.invoke(
+    "video_editing.animate_image",
+    inputs={"image": "./still.png", "reference_video": "./motion.mp4"},
+    out="./animated",
+)
 
 # Grid variation editing
-python3 -m astrid orchestrators run video_editing.vary_grid -- \
-  --grid ./grid.png --cells 0,3 --out ./variations
+result = sdk.invoke(
+    "video_editing.vary_grid",
+    inputs={"grid": "./grid.png", "cells": "0,3"},
+    out="./variations",
+)
 
 # Cut (executor) — assemble timeline from arrangement
-python3 -m astrid executors run video_editing.cut -- \
-  --arrangement ./out/arrangement.json --pool ./out/unified_pool.json \
-  --brief ./briefs/my-hype.md --out ./out
+result = sdk.invoke(
+    "video_editing.cut",
+    inputs={
+        "arrangement": "./out/arrangement.json",
+        "pool": "./out/unified_pool.json",
+        "brief": "./briefs/my-hype.md",
+    },
+    out="./out",
+)
+```
+
+Event talk videos run their step subcommands through the orchestrator module:
+
+```bash
+python3 -m astrid.packs.video_editing.orchestrators.event_talks.run \
+  ados-sunday-template --out ./talk-output
 ```

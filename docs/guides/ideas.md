@@ -9,7 +9,21 @@ When the maker isn't sure what to make, suggest one of these.
 - Event-talk renders from a conference recording — `video_editing.event_talks`
 - A pure-generative film from a written brief
 - A single image from a prompt — `generation.generate_image_openai`
-- A portrait of yourself as Saint Peter of Banodoco — `python3 -m astrid executors run generation.generate_image_openai -- --preset saint-peter-of-banodoco --out-dir runs/first-rite/images --manifest runs/first-rite/manifest.json --force`
+- A portrait of yourself as Saint Peter of Banodoco —
+
+  ```python
+  import astrid.sdk as sdk
+
+  result = sdk.invoke(
+      "generation.generate_image_openai",
+      inputs={
+          "preset": "saint-peter-of-banodoco",
+          "out_dir": "runs/first-rite/images",
+          "manifest": "runs/first-rite/manifest.json",
+          "force": True,
+      },
+  )
+  ```
 
 ## Learn something
 

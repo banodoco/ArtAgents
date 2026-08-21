@@ -15,11 +15,17 @@ holding-screen detection, and render.
 
 ## Invocation
 
-```bash
+```python
 # Full orchestrator run (plan v2 emission + task gate):
-python3 -m astrid orchestrators run video_editing.event_talks \
-  -- --source long_recording.mp4 --out runs/event_talks
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "video_editing.event_talks",
+    inputs={"source": "long_recording.mp4"},
+    out="runs/event_talks",
+)
+```
 
+```bash
 # Individual subcommand (step executor mode):
 python3 -m astrid.packs.video_editing.orchestrators.event_talks.run \
   ados-sunday-template --out runs/talks/template.json

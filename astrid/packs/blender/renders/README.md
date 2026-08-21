@@ -52,11 +52,18 @@ def build(settings):
 
 ## Run a render
 
-```bash
+```python
+import astrid.sdk as sdk
+
 # Via the Astrid executor (cloud host):
-astrid executors run blender.render --out ./out \
-  --input execution=cloud --input cloud_url=http://<host>:8778 --input cloud_token=<tok> \
-  --input preset=wink_turn --input sketchfab_uid=<uid> --input frames=60
+result = sdk.invoke("blender.render", out="./out", inputs={
+    "execution": "cloud",
+    "cloud_url": "http://<host>:8778",
+    "cloud_token": "<tok>",
+    "preset": "wink_turn",
+    "sketchfab_uid": "<uid>",
+    "frames": "60",
+})
 
 # Or directly (bypassing the executor), see deploy.render_via_http.
 ```

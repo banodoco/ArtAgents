@@ -14,19 +14,18 @@ what would be changed before applying real mutations. Passes the
 `HYPE_CACHE_DIR` environment variable through to the subprocess so the
 cache location is consistent with other training-pack executors.
 
-## CLI quick-start
+## Quick-start
 
-```bash
+```python
 # List cached assets (read-only, safe)
-python -m astrid executors run training.asset_cache -- --list
+import astrid.sdk as sdk
+result = sdk.invoke("training.asset_cache", inputs={"list": True})
 
 # Dry-run a prune of entries older than 30 days
-python -m astrid executors run training.asset_cache -- \
-  --prune-older-than 30 --dry-run
+result = sdk.invoke("training.asset_cache", inputs={"prune_older_than": "30"}, dry_run=True)
 
 # Apply the prune (mutating — review dry-run output first)
-python -m astrid executors run training.asset_cache -- \
-  --prune-older-than 30
+result = sdk.invoke("training.asset_cache", inputs={"prune_older_than": "30"})
 ```
 
 ## Inputs

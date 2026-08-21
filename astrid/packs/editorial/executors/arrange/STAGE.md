@@ -18,20 +18,35 @@ structural requirements. Output is `arrangement.json` — a structured
 shot-by-shot plan that feeds directly into video_editing.cut for
 timeline assembly.
 
-## CLI quick-start
+## SDK quick-start
 
-```bash
-python -m astrid executors run editorial.arrange -- \
-  --pool ./out/unified_pool.json --brief ./briefs/my-hype.md \
-  --theme ./themes/default.json --target-duration 60 --out ./out
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "editorial.arrange",
+    inputs={
+        "pool": "./out/unified_pool.json",
+        "brief": "./briefs/my-hype.md",
+        "theme": "./themes/default.json",
+        "target_duration": "60",
+    },
+    out="./out",
+)
 ```
 
 With an explicit env file for API credentials:
 
-```bash
-python -m astrid executors run editorial.arrange -- \
-  --pool ./out/unified_pool.json --brief ./briefs/my-hype.md \
-  --env-file .env.local --out ./out
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "editorial.arrange",
+    inputs={
+        "pool": "./out/unified_pool.json",
+        "brief": "./briefs/my-hype.md",
+        "env_file": ".env.local",
+    },
+    out="./out",
+)
 ```
 
 ## Inputs

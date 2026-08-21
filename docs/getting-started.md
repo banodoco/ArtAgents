@@ -26,11 +26,22 @@ python3 -m astrid doctor --json   # read-only health check
 python3 -m astrid projects list --json
 ```
 
-`doctor --json` is the first diagnostic on a clean machine. It reports
+There is no configuration file and no hosted service. The projects root is
+`ASTRID_PROJECTS_ROOT` (default `<repo>/projects` from a checkout), and the
+first product command lazily creates the kernel store at
+`$ASTRID_PROJECTS_ROOT/.astrid/astrid.sqlite3` — the SQLite database that the
+product families read and write. `doctor --json` is the first diagnostic on a
+clean machine. It reports
 `schema_versions`, media paths, SQLite quick-check, and foreign-key status
 without repairing or rewriting data. A failing `schema_versions` check means
 the database is newer or incompatible with this checkout; preserve the
 database, use a compatible checkout, or restore a known-good backup.
+
+**Migrating legacy data.** Pre-kernel project trees under `projects/` are not
+read by the product families directly. Migration scripts live in
+`scripts/migrations/v10/` (start with its `MIGRATION.md`); they replay the
+legacy tree into the kernel database using only the SDK, with per-phase
+dry-runs and receipted idempotency.
 
 The local bridge is optional. If its process or owner lock is unavailable,
 keep the local project and use the typed `unavailable` error plus the doctor

@@ -15,19 +15,30 @@ Triage is the last quality checkpoint before the pool-building phase
 clip pool; conditionally-accepted scenes carry notes for downstream
 arrangement and refinement.
 
-## CLI quick-start
+## SDK quick-start
 
-```bash
-python -m astrid executors run editorial.triage -- \
-  --scenes ./out/scenes.json --shots ./out/shots.json --out ./out
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "editorial.triage",
+    inputs={"scenes": "./out/scenes.json", "shots": "./out/shots.json"},
+    out="./out",
+)
 ```
 
 With an explicit env file for API credentials:
 
-```bash
-python -m astrid executors run editorial.triage -- \
-  --scenes ./out/scenes.json --shots ./out/shots.json \
-  --env-file .env.local --out ./out
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "editorial.triage",
+    inputs={
+        "scenes": "./out/scenes.json",
+        "shots": "./out/shots.json",
+        "env_file": ".env.local",
+    },
+    out="./out",
+)
 ```
 
 ## Inputs

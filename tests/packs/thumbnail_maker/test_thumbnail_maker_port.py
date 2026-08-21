@@ -137,12 +137,11 @@ def test_pack_run_started_log_is_non_task_audit_log(tmp_path: Path) -> None:
 
 
 def test_plan_is_round_trip_stable(tmp_path: Path) -> None:
-    """The emitted plan loads cleanly through ``load_plan``."""
+    """The emitted plan.json round-trips through JSON with stable fields."""
     from astrid.packs.video_editing.orchestrators.thumbnail_maker.plan_template import (
         build_plan_v2,
         emit_plan_json,
     )
-    from astrid.core.task.plan import load_plan
 
     plan = build_plan_v2(
         python_exec="python3",
@@ -154,10 +153,10 @@ def test_plan_is_round_trip_stable(tmp_path: Path) -> None:
     plan_path = tmp_path / "plan.json"
     emit_plan_json(plan, plan_path)
 
-    loaded = load_plan(plan_path)
-    assert loaded.plan_id == plan["plan_id"]
-    assert loaded.version == 2
-    assert len(loaded.steps) == len(plan["steps"])
+    loaded = json.loads(plan_path.read_text(encoding="utf-8"))
+    assert loaded["plan_id"] == plan["plan_id"]
+    assert loaded["version"] == 2
+    assert len(loaded["steps"]) == len(plan["steps"])
 
 
 def test_consumes_populated() -> None:

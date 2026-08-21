@@ -36,12 +36,14 @@ not covered by the opinionated `generation.generate_image` path.
 - Do not use to understand existing media (use `understanding`) or to
   cut/render timelines (use `video_editing`).
 
-## CLI quick-start
+## Quick-start
 
-```bash
+```python
+import astrid.sdk as sdk
+
 # Run a workflow
-python3 -m astrid executors run vibecomfy.run -- --workflow ./my_workflow.json --out ./out
+result = sdk.invoke("vibecomfy.run", inputs={"workflow": "./my_workflow.json"}, out="./out")
 
 # Validate a workflow
-python3 -m astrid executors run vibecomfy.validate -- --workflow ./my_workflow.json
+result = sdk.invoke("vibecomfy.validate", inputs={"workflow": "./my_workflow.json"})
 ```

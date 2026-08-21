@@ -14,18 +14,26 @@ boundary defines a candidate clip start/end point that the pool-building
 stage uses to construct the candidate clip pool. The `shots.json` sentinel
 gates cache invalidation.
 
-## CLI quick-start
+## SDK quick-start
 
-```bash
-python -m astrid executors run editorial.shots -- \
-  --video ./source.mp4 --out ./out
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "editorial.shots",
+    inputs={"video": "./source.mp4"},
+    out="./out",
+)
 ```
 
 Optionally provide a pre-existing scenes file:
 
-```bash
-python -m astrid executors run editorial.shots -- \
-  --video ./source.mp4 --scenes ./out/scenes.json --out ./out
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "editorial.shots",
+    inputs={"video": "./source.mp4", "scenes": "./out/scenes.json"},
+    out="./out",
+)
 ```
 
 ## Inputs

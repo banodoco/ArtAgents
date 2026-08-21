@@ -30,15 +30,27 @@ publish.
 - Do not use to analyze content — use `understanding`.
 - This pack only ingests and publishes.
 
-## CLI quick-start
+## Quick-start
 
-```bash
+```python
 # Download audio by search query
-python3 -m astrid executors run youtube.youtube_audio -- --query "cool synthwave mix" --out ./audio.mp3
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "youtube.youtube_audio",
+    inputs={"query": "cool synthwave mix"},
+    out="./audio.mp3",
+)
 
 # Download audio by URL
-python3 -m astrid executors run youtube.youtube_audio -- --url "https://youtube.com/watch?v=..." --out ./audio.mp3
+result = sdk.invoke(
+    "youtube.youtube_audio",
+    inputs={"url": "https://youtube.com/watch?v=..."},
+    out="./audio.mp3",
+)
 
 # Upload a finished video
-python3 -m astrid executors run youtube.upload -- --video ./hype.mp4 --title "My Hype Video"
+result = sdk.invoke(
+    "youtube.upload",
+    inputs={"video": "./hype.mp4", "title": "My Hype Video"},
+)
 ```

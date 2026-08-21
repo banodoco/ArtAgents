@@ -7,10 +7,10 @@ own capability id.
 
 ```bash
 # List all effects (or transitions, animations) — the kind you registered
-python3 -m astrid elements list --kind effects
+python3 -m astrid.core.element.cli list --kind effects
 
 # Inspect your new element manifest
-python3 -m astrid elements inspect effects example-card --json
+python3 -m astrid.core.element.cli inspect effects example-card --json
 ```
 
 ---

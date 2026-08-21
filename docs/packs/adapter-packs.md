@@ -91,11 +91,8 @@ Key manifest conventions for adapters:
 Same workflow as any pack, with these conventions:
 
 ```bash
-# Scaffold
-python3 -m astrid packs new my_adapter
-
-# Add an executor
-python3 -m astrid executors new my_adapter.tool_name
+# Scaffold (internal pack CLI — not a gateway family)
+python3 -m astrid.core.pack.cli new my_adapter
 ```
 
 In the executor manifest, set `kind: external` and configure isolation

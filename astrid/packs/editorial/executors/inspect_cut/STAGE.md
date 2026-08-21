@@ -26,33 +26,46 @@ transcript segments), builds a visual text report with three sections:
 Supports `--json` for machine-readable output (useful in scripts),
 `--no-color` for plain-text, and `--clip` to zoom into a single clip.
 
-## CLI quick-start
+## SDK quick-start
 
 Inspect a run directory:
 
-```bash
-python -m astrid executors run editorial.inspect_cut -- ./runs/my-run
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "editorial.inspect_cut",
+    inputs={"run_dir": "./runs/my-run"},
+)
 ```
 
 Inspect a specific clip (by arrangement order):
 
-```bash
-python -m astrid executors run editorial.inspect_cut -- \
-  ./runs/my-run --clip 3
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "editorial.inspect_cut",
+    inputs={"run_dir": "./runs/my-run", "clip": "3"},
+)
 ```
 
 Machine-readable JSON output:
 
-```bash
-python -m astrid executors run editorial.inspect_cut -- \
-  ./runs/my-run --json
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "editorial.inspect_cut",
+    inputs={"run_dir": "./runs/my-run", "json": True},
+)
 ```
 
 Inspect a brief output directory (post-cut):
 
-```bash
-python -m astrid executors run editorial.inspect_cut -- \
-  ./out --no-color
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "editorial.inspect_cut",
+    inputs={"run_dir": "./out", "no_color": True},
+)
 ```
 
 ## Inputs

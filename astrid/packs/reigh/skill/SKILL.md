@@ -51,23 +51,25 @@ export REIGH_USER_TOKEN="..."
 export SUPABASE_URL="https://<project>.supabase.co"
 ```
 
-## CLI quick-start
+## Quick-start
 
-```bash
+```python
+import astrid.sdk as sdk
+
 # Publish a timeline to Reigh
-python3 -m astrid executors run reigh.publish -- \
-  --project-id <uuid> --timeline-id <uuid> \
-  --timeline-file ./hype.timeline.json
+result = sdk.invoke("reigh.publish", inputs={
+    "project_id": "<uuid>", "timeline_id": "<uuid>",
+    "timeline_file": "./hype.timeline.json",
+})
 
 # Stage outputs locally for Reigh import
-python3 -m astrid executors run reigh.open_in_reigh -- \
-  --timeline ./hype.timeline.json --assets ./hype.assets.json
+result = sdk.invoke("reigh.open_in_reigh", inputs={
+    "timeline": "./hype.timeline.json", "assets": "./hype.assets.json",
+})
 
 # Fetch Reigh project data
-python3 -m astrid executors run reigh.reigh_data -- \
-  --project-id <uuid> --out ./reigh-data.json
+result = sdk.invoke("reigh.reigh_data", inputs={"project_id": "<uuid>"}, out="./reigh-data.json")
 
 # Build spatial audio viewer (requires tiles.json from foley pipeline)
-python3 -m astrid executors run reigh.spatial_audio_page -- \
-  --manifest ./tiles.json --out ./viewer
+result = sdk.invoke("reigh.spatial_audio_page", inputs={"manifest": "./tiles.json"}, out="./viewer")
 ```

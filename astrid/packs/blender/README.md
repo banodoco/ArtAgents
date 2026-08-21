@@ -23,14 +23,22 @@ run on a host **without an Astrid install** — `deploy.py` copies them over.
 
 ## Run a render (the Astrid executor)
 
-```bash
+```python
+import astrid.sdk as sdk
+
 # LOCAL — runs blender on this machine
-astrid executors run blender.render --out ./out \
-  --input execution=local --input samples=64 --input resolution=1280x720
+result = sdk.invoke("blender.render", out="./out", inputs={
+    "execution": "local",
+    "samples": "64",
+    "resolution": "1280x720",
+})
 
 # CLOUD — POSTs to any host running the render API (Hetzner box, a RunPod pod, …)
-astrid executors run blender.render --out ./out \
-  --input execution=cloud --input cloud_url=http://<host>:8778 --input cloud_token=<token>
+result = sdk.invoke("blender.render", out="./out", inputs={
+    "execution": "cloud",
+    "cloud_url": "http://<host>:8778",
+    "cloud_token": "<token>",
+})
 ```
 
 Inputs: `scene` (declarative spec JSON; a pleasant default scene is used if

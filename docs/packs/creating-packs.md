@@ -13,19 +13,20 @@ the current authoring workflow.
 
 ```bash
 # 1. Scaffold a new pack
-python3 -m astrid packs new my_video_tools
+python3 -m astrid.core.pack.cli new my_video_tools
 
 # 2. Enter the pack directory
 cd my_video_tools
 
-# 3. Add an executor
-python3 -m astrid executors new my_video_tools.transcribe
+# 3. Add an executor — create `executors/transcribe/` with `executor.yaml`
+#    and `run.py` following the layout below (there is no scaffold verb for
+#    individual components; `packs validate` checks the result).
 
-# 4. Add an orchestrator
-python3 -m astrid orchestrators new my_video_tools.make_highlight_reel
+# 4. Add an orchestrator — create `orchestrators/make_highlight_reel/` with
+#    `orchestrator.yaml` and `run.py` the same way.
 
 # 5. Validate everything
-python3 -m astrid packs validate .
+python3 -m astrid.core.pack.cli validate .
 # valid: /path/to/my_video_tools
 ```
 
@@ -67,31 +68,31 @@ Pack discovery commands:
 
 ```bash
 # List all discovered packs (grouped by taxonomy domain in plain text)
-python3 -m astrid packs list
-python3 -m astrid packs list --json
+python3 -m astrid.core.pack.cli list
+python3 -m astrid.core.pack.cli list --json
 
 # Filter by taxonomy fields
-python3 -m astrid packs list --domain system
-python3 -m astrid packs list --origin builtin
-python3 -m astrid packs list --stability stable
-python3 -m astrid packs list --install-tier core
+python3 -m astrid.core.pack.cli list --domain system
+python3 -m astrid.core.pack.cli list --origin builtin
+python3 -m astrid.core.pack.cli list --stability stable
+python3 -m astrid.core.pack.cli list --install-tier core
 
 # Filter by category (metadata.category only — not a taxonomy filter)
-python3 -m astrid packs list --category media
-python3 -m astrid packs list --status stub
-python3 -m astrid packs list --visibility hidden
+python3 -m astrid.core.pack.cli list --category media
+python3 -m astrid.core.pack.cli list --status stub
+python3 -m astrid.core.pack.cli list --visibility hidden
 
 # Include packs marked visibility: hidden (excluded by default)
-python3 -m astrid packs list --show-hidden
+python3 -m astrid.core.pack.cli list --show-hidden
 
 # Inspect a specific pack (always includes hidden packs)
-python3 -m astrid packs inspect my_video_tools
-python3 -m astrid packs inspect my_video_tools --json
+python3 -m astrid.core.pack.cli inspect my_video_tools
+python3 -m astrid.core.pack.cli inspect my_video_tools --json
 
 # Validate every discovered pack and show effective status (grouped by domain)
-python3 -m astrid packs status
-python3 -m astrid packs status --json
-python3 -m astrid packs status --show-hidden
+python3 -m astrid.core.pack.cli status
+python3 -m astrid.core.pack.cli status --json
+python3 -m astrid.core.pack.cli status --show-hidden
 ```
 
 `packs status` annotates packs whose `agent.purpose` is
@@ -344,9 +345,10 @@ artifact, profile, audio, finalization, and provenance contract in
 
 To author a renderer without hand-writing the pack layout, scaffold the
 canonical four-file pack (`pack.yaml`, `renderer.yaml`, `render.py`,
-`test_renderer.py`) with `python3 -m astrid renderers create <name> <dest>`,
+`test_renderer.py`) with `python3 -m astrid.core.rendering.cli create <name> <dest>`,
 then follow the golden path — generated test → `renderers validate` → trusted
-`packs install` → `renderers list`/`inspect` → `renderers smoke` → provenance
+`python3 -m astrid.core.pack.cli install` → `renderers list`/`inspect` →
+`renderers smoke` → provenance
 sidecar — in
 [render-backend-v1.md](../contracts/render-backend-v1.md#renderer-author-golden-path).
 The scaffold destination directory name becomes the pack id (and must match
@@ -381,37 +383,39 @@ Refer to `orchestrator.json` for the full field list.
 
 The recommended workflow for creating a pack:
 
-1. **`packs new <id>`** — Creates the pack skeleton: `pack.yaml`,
-   `README.md`, `skill/SKILL.md`, and empty `executors/`,
-   `orchestrators/`, `elements/` directories. The scaffolded pack
-   passes `packs validate` immediately.
+1. **`python3 -m astrid.core.pack.cli new <id>`** — Creates the pack
+   skeleton: `pack.yaml`, `README.md`, `skill/SKILL.md`, and empty
+   `executors/`, `orchestrators/`, `elements/` directories. The scaffolded
+   pack passes `python3 -m astrid.core.pack.cli validate` immediately.
 
-2. **`executors new <pack>.<slug>`** — Scaffolds a new executor
-   component: `executor.yaml`, `run.py` stub, and `STAGE.md` inside
-   the executor content root. Must be run from inside the pack
-   directory. The scaffolded component is validated against the v1
-   schema before declaring success.
+2. **Author executor components** — Create
+   `executors/<slug>/executor.yaml`, `run.py`, and `STAGE.md` inside the
+   executor content root (there is no scaffold verb for individual
+   components). Each scaffolded component is validated against the v1 schema
+   by `packs validate`.
 
-3. **`orchestrators new <pack>.<slug>`** — Same as above for
-   orchestrator components.
+3. **Author orchestrator components** — Same as above under
+   `orchestrators/<slug>/`.
 
-4. **`packs validate <path>`** — Validates the entire pack statically:
-   checks that all manifests parse, conform to their JSON Schemas,
-   have known `schema_version` values, and that declared content
-   roots, docs, runtime entrypoint files, and rendering extension manifests
-   exist on disk.
+4. **`python3 -m astrid.core.pack.cli validate <path>`** — Validates the
+   entire pack statically: checks that all manifests parse, conform to their
+   JSON Schemas, have known `schema_version` values, and that declared
+   content roots, docs, runtime entrypoint files, and rendering extension
+   manifests exist on disk.
 
 For a pack that contributes a timeline renderer (rather than an executor),
-use `python3 -m astrid renderers create <name> <dest>` instead of
-`executors new`; the scaffold writes the four-file renderer pack and is
-installable as-is. Validate with `renderers validate <path>`, discover with
-`renderers list`/`renderers inspect <id>`, and smoke with
-`renderers smoke <id>`. See the golden path in
+use `python3 -m astrid.core.rendering.cli create <name> <dest>` instead of
+authoring an executor component; the scaffold writes the four-file renderer
+pack and is installable as-is. Validate with
+`python3 -m astrid.core.rendering.cli validate <path>`, discover with
+`python3 -m astrid.core.rendering.cli list` / `inspect <id>`, and smoke with
+`python3 -m astrid.core.rendering.cli smoke <id>`. See the golden path in
 [render-backend-v1.md](../contracts/render-backend-v1.md#renderer-author-golden-path).
 
 All scaffold commands validate their output. A round-trip of
-`packs new` → `executors new` → `orchestrators new` →
-`packs validate` should succeed with zero errors.
+`python3 -m astrid.core.pack.cli new` → authored executor → authored
+orchestrator → `python3 -m astrid.core.pack.cli validate` should succeed with
+zero errors.
 
 ## Validation
 
@@ -464,8 +468,8 @@ agent verdict), and `media` (pack with elements and schemas).
 Validate any example pack with:
 
 ```bash
-python3 -m astrid packs validate examples/packs/minimal
-python3 -m astrid packs validate examples/packs/file_summarizer
+python3 -m astrid.core.pack.cli validate examples/packs/minimal
+python3 -m astrid.core.pack.cli validate examples/packs/file_summarizer
 ```
 
 ## Legacy Templates
@@ -491,8 +495,8 @@ these for the topics they cover:
   definitions for pack identity, capability identity, aliases, forks,
   overrides, and the unified layout contract.
 - [discovery-for-agents.md](../guides/discovery-for-agents.md) — How a cold agent
-  discovers capabilities via `skills list`, `executors search`, and
-  `inspect --json`.
+  discovers capabilities (e.g., via `astrid.sdk.discover()` and
+  `astrid.sdk.get_capability()`).
 - [aliases-vs-forks-vs-overrides.md](aliases-vs-forks-vs-overrides.md) —
   Decision table and CLI examples for the three customization mechanisms.
 - [fork-and-update.md](fork-and-update.md) — Scaffolding and managing

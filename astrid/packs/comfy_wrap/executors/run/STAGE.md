@@ -8,7 +8,8 @@ running it via vibecomfy.
 This executor is a narrow wrapper: it takes a user prompt, loads a ComfyUI
 workflow JSON from `/tmp/example_comfy.json` at run-time, injects the prompt
 into the positive CLIPTextEncode node (node id `6`, field `text`), executes
-the workflow through vibecomfy, and copies the first output image to `--out`.
+the workflow through vibecomfy, and copies the first output image to the
+`out` directory.
 
 ## Inputs
 
@@ -20,7 +21,7 @@ the workflow through vibecomfy, and copies the first output image to `--out`.
 
 | Output | Type | Description |
 |---|---|---|
-| `generated_image` | file | The generated image, written to `--out` |
+| `generated_image` | file | The generated image, written to the `out` directory |
 
 ## Dependencies
 
@@ -28,10 +29,11 @@ the workflow through vibecomfy, and copies the first output image to `--out`.
 - A ComfyUI workflow JSON at `/tmp/example_comfy.json` with node `6` as a
   `CLIPTextEncode` carrying a `text` input field
 
-## CLI
+## Run via SDK
 
-```bash
-python3 -m astrid executors run comfy_wrap.run -- --prompt "your prompt" --out path/to/output.png
+```python
+import astrid.sdk as sdk
+result = sdk.invoke("comfy_wrap.run", inputs={"prompt": "your prompt"}, out="path/to/output.png")
 ```
 
 ## Error recovery

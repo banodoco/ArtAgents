@@ -14,18 +14,29 @@ Output is `quote_candidates.json` — a structured list of quote snippets
 with metadata. Downstream arrangement and refinement steps use these
 candidates to select and sequence spoken-word clips in the final cut.
 
-## CLI quick-start
+## SDK quick-start
 
-```bash
-python -m astrid executors run editorial.quote_scout -- \
-  --transcript ./out/transcript.json --out ./out
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "editorial.quote_scout",
+    inputs={"transcript": "./out/transcript.json"},
+    out="./out",
+)
 ```
 
 With an explicit env file for API credentials:
 
-```bash
-python -m astrid executors run editorial.quote_scout -- \
-  --transcript ./out/transcript.json --env-file .env.local --out ./out
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "editorial.quote_scout",
+    inputs={
+        "transcript": "./out/transcript.json",
+        "env_file": ".env.local",
+    },
+    out="./out",
+)
 ```
 
 ## Inputs

@@ -8,16 +8,20 @@ buttons; pressing a button writes a per-tile flag to `flagged.json` next to
 
 Inspect first:
 
-```bash
-python3 -m astrid executors inspect foley.foley_review --json
+```python
+import astrid.sdk as sdk
+cap = sdk.get_capability("foley.foley_review")
 ```
 
 Run:
 
-```bash
-python3 -m astrid.packs.foley.executors.foley_review.run \
-  --manifest runs/foley_map/example/tiles.json \
-  --out runs/foley_map/example/review.html
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "foley.foley_review",
+    inputs={"manifest": "runs/foley_map/example/tiles.json"},
+    out="runs/foley_map/example/review.html",
+)
 ```
 
 Open `runs/foley_map/example/review.html` in your browser. Audio paths in the

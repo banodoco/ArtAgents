@@ -14,18 +14,26 @@ Requires an OpenAI API key (resolved via the candidate-env-file walk in
 `astrid/core/util/secrets.py`). Whisper is called through the OpenAI API;
 no local model installation is required.
 
-## CLI quick-start
+## SDK quick-start
 
-```bash
-python -m astrid executors run editorial.transcribe -- \
-  --audio ./source.mp3 --out ./out
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "editorial.transcribe",
+    inputs={"audio": "./source.mp3"},
+    out="./out",
+)
 ```
 
 With an explicit env file for API credentials:
 
-```bash
-python -m astrid executors run editorial.transcribe -- \
-  --audio ./source.mp3 --env-file .env.local --out ./out
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "editorial.transcribe",
+    inputs={"audio": "./source.mp3", "env_file": ".env.local"},
+    out="./out",
+)
 ```
 
 ## Inputs

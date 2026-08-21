@@ -8,7 +8,7 @@ gitignored by convention — they're yours, not Astrid's.
 
 ```bash
 # Create a new local pack (gitignored by convention)
-python3 -m astrid packs new my_tools
+python3 -m astrid.core.pack.cli new my_tools
 
 # The pack is created at astrid/packs/my_tools/ with:
 #   pack.yaml          — pack manifest
@@ -24,37 +24,21 @@ named personal pack for organized collections.
 
 ## Forking Capabilities Into Your Personal Pack
 
-Copy any shipped capability into your pack for customization:
+Copy any shipped capability into your pack for customization. Forking copies
+the capability's manifest, entrypoint, and supporting files into the local
+pack — executors and orchestrators fork into `astrid/packs/local/` under
+their kind directory, elements fork under their kind as well. The forked copy
+lands with its id rewritten to `local.<name>`. Provenance is tracked in
+`.astrid_fork_state.json` so you can detect local edits later.
 
-```bash
-# Fork an executor into your local pack
-python3 -m astrid executors fork rendering.render
-
-# Fork an orchestrator
-python3 -m astrid orchestrators fork video_editing.hype
-
-# Fork an element
-python3 -m astrid elements fork effects text-card
-```
-
-The forked copy lands in `astrid/packs/local/` with its id rewritten to
-`local.<name>`. Provenance is tracked in `.astrid_fork_state.json` so you can
-detect local edits later.
-
-Use `--deep` on orchestrator forks to recursively copy all child executors and
+Use a deep fork on orchestrators to recursively copy all child executors and
 orchestrators:
 
-```bash
-# Shallow fork — copy just this capability
-python3 -m astrid executors fork rendering.render
-
-# Deep fork — recursively fork all child executors/orchestrators too
-python3 -m astrid executors fork generation.generate_image --deep
-python3 -m astrid orchestrators fork video_editing.hype --deep
-
-# Overwrite an existing fork
-python3 -m astrid executors fork rendering.render --overwrite
-```
+- **Shallow fork** — copy just the named capability. Its child references
+  still point to the original shipped executors/orchestrators.
+- **Deep fork** — recursively fork all child executors and orchestrators
+  referenced by an orchestrator's graph. Elements only support shallow forks.
+- **Overwrite** — re-fork over an existing fork, replacing it.
 
 ### Fork Provenance
 
@@ -66,32 +50,18 @@ Each forked capability records in `.astrid_fork_state.json`:
 
 This provenance powers dirty detection (see below).
 
-### Shallow vs Deep
-
-- **Shallow** (`--deep` not set): Copy only the named capability. Its child
-  references still point to the original builtin executors/orchestrators.
-- **Deep** (`--deep`): Recursively fork all child executors and orchestrators
-  referenced by an orchestrator's graph. Elements only support shallow forks.
-
 ## Overriding Without Editing Originals
 
-Once you have a fork, you can redirect all consumers to use your version:
+Once you have a fork, you can redirect all consumers to use your version.
+Overrides are managed by editing `astrid/packs/local/.overrides.json`:
 
-```bash
-# Set the override
-python3 -m astrid executors override set rendering.render local.render
-
-# Route an element to a replacement
-python3 -m astrid elements override set effects text-card effects my-text-card
-
-# List active overrides
-python3 -m astrid executors override list
-python3 -m astrid orchestrators override list
-python3 -m astrid elements override list
-
-# Remove when done
-python3 -m astrid executors override remove rendering.render
-```
+- Set the override — route all requests for `rendering.render` to your local
+  fork with `{"executor": {"rendering.render": "local.render"}}`.
+- Route an element to a replacement — add an entry under the element kind
+  key, mapping the element id to its replacement (e.g.
+  `{"effects": {"text-card": "my-text-card"}}`).
+- List active overrides — read the same file.
+- Remove when done — delete the entry.
 
 Now any code, orchestrator, or agent that asks for `rendering.render` (or its
 legacy alias `builtin.render`) gets `local.render` instead. The original is
@@ -107,35 +77,22 @@ override covers all aliases that point to the same canonical target.
 
 ## Common Pattern: Fork + Override
 
-1. Fork the capability: `python3 -m astrid executors fork rendering.render`
-2. Edit the local copy at `astrid/packs/local/executors/render/`
-3. Set the override: `python3 -m astrid executors override set rendering.render local.render`
+1. Fork the capability into the local pack (see Forking above).
+2. Edit the local copy at `astrid/packs/local/executors/render/`.
+3. Add the override to `astrid/packs/local/.overrides.json`:
+   `{"executor": {"rendering.render": "local.render"}}`.
 
 Now every consumer that references `rendering.render` (or its legacy alias
 `builtin.render`) gets your customized version transparently.
 
 ## Detecting Local Edits (Dirty Check)
 
-Astrid tracks whether a forked capability has been modified since fork time:
-
-```bash
-# Check one capability
-python3 -m astrid executors dirty check local.render
-python3 -m astrid orchestrators dirty check local.hype
-python3 -m astrid elements dirty check effects my-text-card
-
-# List all dirty capabilities
-python3 -m astrid executors dirty list
-python3 -m astrid orchestrators dirty list
-python3 -m astrid elements dirty list
-```
-
-The inspect commands also expose edit state in the `_capability` block:
-
-```bash
-python3 -m astrid executors inspect local.render --json
-# → "_capability": { "local_edit_state": "dirty", ... }
-```
+Astrid tracks whether a forked capability has been modified since fork time.
+Local edit state is computed per capability: any forked copy whose files
+differ from the fork-time snapshot reports as dirty, and all dirty
+capabilities can be listed in one pass. The inspect output also exposes edit
+state in the `_capability` block — for example, JSON inspection of a local
+fork shows `"_capability": { "local_edit_state": "dirty", ... }`.
 
 ## Clean vs Dirty vs Forked States
 
@@ -165,8 +122,8 @@ If the capability directory lives inside a git worktree, Astrid runs
 
 If git is not available (or fails), Astrid falls back to comparing current
 file SHA-256 hashes against those stored in `.astrid_fork_state.json` at fork
-time. This file is written by the fork command and lives in the capability's
-root directory.
+time. This file is written when a capability is forked and lives in the
+capability's root directory.
 
 The fallback:
 - Walks all regular files in the capability directory (excluding `.git` and
@@ -181,47 +138,30 @@ manually, not via fork), the state defaults to `"clean"`.
 ## Promoting In-Place Edits to Forks
 
 If you've edited a shipped capability in place (not recommended, but it
-happens), you can promote those edits to a proper fork:
-
-```bash
-# Fork the edited capability into your local pack, preserving changes
-python3 -m astrid executors fork rendering.render --overwrite
-```
-
-The `--overwrite` flag replaces any existing fork. Without it, the fork command
-refuses to overwrite.
+happens), you can promote those edits to a proper fork: re-fork the edited
+capability into your local pack with overwrite semantics, which copies the
+current state — edits included — into the fork and replaces any existing
+fork. Without overwrite, the re-fork refuses to replace an existing fork.
 
 **Better workflow:** Fork first, then edit the fork. This keeps the original
 pristine and makes dirty detection meaningful.
 
 ## Workflow: Review Before Promote
 
-```bash
-# 1. Check what's dirty
-python3 -m astrid executors dirty list
-
-# 2. Inspect the changes
-python3 -m astrid executors inspect local.render --json | python3 -m json.tool
-
-# 3. If happy, set the override to make it the default
-python3 -m astrid executors override set rendering.render local.render
-
-# 4. Verify the override is active
-python3 -m astrid executors override list
-```
+1. Check which forked capabilities are dirty (see Detecting Local Edits).
+2. Inspect the changes — review the edited files in the fork directory (or
+   the fork's `_capability.local_edit_state` in inspect output).
+3. If happy, add the override to `astrid/packs/local/.overrides.json` to make
+   your fork the default resolution for the id.
+4. Verify the override is active by reading `.overrides.json` (or resolving
+   the id again and confirming it returns the fork).
 
 ## Workflow: Revert a Dirty Fork
 
-```bash
-# 1. Remove the override (if set)
-python3 -m astrid executors override remove rendering.render
-
-# 2. Delete the fork directory
-rm -rf astrid/packs/local/executors/render/
-
-# 3. Re-fork from the original
-python3 -m astrid executors fork rendering.render
-```
+1. Remove the override entry (if set) from `astrid/packs/local/.overrides.json`.
+2. Delete the fork directory: `rm -rf astrid/packs/local/executors/render/`.
+3. Re-fork from the original — copy the shipped capability into the local
+   pack again.
 
 ## Convention: Gitignore
 
@@ -250,7 +190,7 @@ The following are not yet implemented:
 - **No remote registry:** Fork state is local-only. No sharing or syncing of
   forks between machines.
 - **No dependency isolation:** Forking an orchestrator does not automatically
-  isolate its child capabilities from upstream changes unless you use `--deep`.
+  isolate its child capabilities from upstream changes unless you deep-fork it.
 - **No semantic merge:** If upstream changes after you fork, there's no tooling
   to merge those changes into your fork. The `conflict` edit state exists in
   the schema but is not computed.

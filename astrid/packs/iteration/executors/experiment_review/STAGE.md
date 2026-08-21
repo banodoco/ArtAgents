@@ -60,9 +60,14 @@ whether they come from Fal, OpenAI, ComfyUI, Discord, or local generators.
 
 ## Invocation
 
-```bash
-python3 -m astrid executors run iteration.experiment_review \
-  --review path/to/review.json \
-  --runs-dir projects/my-project/runs \
-  --out ./out
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "iteration.experiment_review",
+    inputs={
+        "review": "path/to/review.json",
+        "runs_dir": "projects/my-project/runs",
+    },
+    out="./out",
+)
 ```

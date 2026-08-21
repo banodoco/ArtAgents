@@ -21,10 +21,15 @@ The OQ-6 quality score is:
 cap is 200 and can be changed with `--max-iterations` or
 `ASTRID_ITERATION_MAX`.
 
-Gateway form:
+SDK form:
 
-```bash
-python3 -m astrid executors run iteration.prepare --out runs/prepare --input target_run_id=<run-id>
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "iteration.prepare",
+    inputs={"target_run_id": "<run-id>"},
+    out="runs/prepare",
+)
 ```
 
 Direct form:

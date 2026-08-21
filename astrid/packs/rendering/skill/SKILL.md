@@ -161,34 +161,42 @@ Requires `OPENAI_API_KEY` and `ffmpeg` on the system path.
 |---|---|
 | `OPENAI_API_KEY` | sprite_sheet (GPT Image API) |
 
-## CLI quick-start
+## Quick-start
 
-```bash
+```python
 # Render a timeline to video
-python3 -m astrid executors run rendering.render \
-  --out ./out \
-  --input timeline=./out/hype.timeline.json
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "rendering.render",
+    inputs={"timeline": "./out/hype.timeline.json"},
+    out="./out",
+)
 
 # Render a timeline with a media asset registry
-python3 -m astrid executors run rendering.render \
-  --out ./out \
-  --input timeline=./out/hype.timeline.json \
-  --input assets_registry=./out/hype.assets.json
+result = sdk.invoke(
+    "rendering.render",
+    inputs={"timeline": "./out/hype.timeline.json", "assets_registry": "./out/hype.assets.json"},
+    out="./out",
+)
 
 # Render with a custom theme and strict qualified renderer
-python3 -m astrid executors run rendering.render \
-  --out ./out \
-  --input timeline=./out/hype.timeline.json \
-  --input assets_registry=./out/hype.assets.json \
-  --input theme=./themes/my-theme \
-  --input backend=rendering.remotion
+result = sdk.invoke(
+    "rendering.render",
+    inputs={
+        "timeline": "./out/hype.timeline.json",
+        "assets_registry": "./out/hype.assets.json",
+        "theme": "./themes/my-theme",
+        "backend": "rendering.remotion",
+    },
+    out="./out",
+)
 ```
 
-Use `--input engine=hybrid` only when compatibility with the legacy hybrid
+Use an `engine` input of `hybrid` only when compatibility with the legacy hybrid
 planning policy is required. Legacy `engine=remotion` preserves its historical
 support-based FFmpeg auto-route; `backend=rendering.remotion` is strict.
 
-The normal executor CLI writes `./out/hype.mp4` and
+The normal SDK invocation writes `./out/hype.mp4` and
 `./out/hype.mp4.provenance.json`. The sidecar records the resolved plan,
 renderer/planner/finalizer identities, aliases and overrides, manifest and input
 hashes, trust/support evidence, artifact profiles, audio ownership,
@@ -213,17 +221,25 @@ python3 -m astrid.packs.rendering.executors.render.run \
   --out ./out/hype.mp4
 ```
 
-```bash
+```python
 # Generate a sprite sheet
-python3 -m astrid executors run rendering.sprite_sheet -- \
-  --animation "a character waving" \
-  --subject "cartoon robot" \
-  --reference-image ./robot_ref.png \
-  --out-dir ./sprites
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "rendering.sprite_sheet",
+    inputs={
+        "animation": "a character waving",
+        "subject": "cartoon robot",
+        "reference_image": "./robot_ref.png",
+        "out_dir": "./sprites",
+    },
+)
 
 # Scaffold a custom HTML canvas effect
-python3 -m astrid executors run rendering.html_canvas_effect -- \
-  --effect-id glass-product-card --out ./out
+result = sdk.invoke(
+    "rendering.html_canvas_effect",
+    inputs={"effect_id": "glass-product-card"},
+    out="./out",
+)
 ```
 
 ## Dependencies
@@ -249,15 +265,15 @@ golden path — the destination directory name becomes the pack id and the
 renderer id becomes `<dest>.<name>`:
 
 ```bash
-python3 -m astrid renderers create wave acme_wave
+python3 -m astrid.core.rendering.cli create wave acme_wave
 cd acme_wave
 python3 -m pytest -q test_renderer.py     # generated deterministic test
-python3 -m astrid renderers validate .    # static validation
-python3 -m astrid packs install . --trust --yes   # trusted install
-python3 -m astrid renderers list          # discovery from installed revision
-python3 -m astrid renderers inspect acme_wave.wave
-python3 -m astrid renderers smoke acme_wave.wave --out ./out/smoke.mp4  # smoke
-python3 -m astrid renderers replay <bundle-dir>   # replay a captured failure bundle
+python3 -m astrid.core.rendering.cli validate .    # static validation
+python3 -m astrid.core.pack.cli install . --trust --yes   # trusted install
+python3 -m astrid.core.rendering.cli list          # discovery from installed revision
+python3 -m astrid.core.rendering.cli inspect acme_wave.wave
+python3 -m astrid.core.rendering.cli smoke acme_wave.wave --out ./out/smoke.mp4  # smoke
+python3 -m astrid.core.rendering.cli replay <bundle-dir>   # replay a captured failure bundle
 ```
 
 V1 is synchronous local execution only; asynchronous job scheduling, remote
@@ -267,8 +283,7 @@ and are NOT part of the V1 renderer contract.
 The smoke verb runs a deterministic direct-service render (fresh temp
 workspace, no ledger/project mutation) and prints the output path plus its
 provenance sidecar path. A real-timeline render goes through the facade:
-`python3 -m astrid executors run rendering.render --out ./out --input
-timeline=./out/hype.timeline.json --input backend=acme_wave.wave`, which
+`astrid.sdk.invoke("rendering.render", inputs={"timeline": "./out/hype.timeline.json", "backend": "acme_wave.wave"}, out="./out")`, which
 writes `./out/hype.mp4` plus `./out/hype.mp4.provenance.json`; the sidecar
 records resolution/trust/support evidence, artifact hashes and profiles, audio
 ownership, normalization, attachments, and your namespaced

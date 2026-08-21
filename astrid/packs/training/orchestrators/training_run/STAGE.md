@@ -9,12 +9,6 @@ This stage intentionally keeps provider-specific work behind backends and
 executor dependencies. Generic code must not call RunPod helper functions
 directly.
 
-## Inspect
-
-```bash
-python3 -m astrid orchestrators inspect training.training_run --json
-```
-
 ## Dry Run
 
 Use dry-run before any live operation. It validates the config, reports missing
@@ -22,10 +16,13 @@ declared secrets, writes the normalized manifest, builds the ai-toolkit config,
 writes `planned_cost.json`, and persists local planning state. It performs no
 RunPod, network, or GPU calls.
 
-```bash
-python3 -m astrid orchestrators run training.training_run -- \
-  --config configs/training-run.json \
-  --dry-run
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "training.training_run",
+    inputs={"config": "configs/training-run.json"},
+    dry_run=True,
+)
 ```
 
 ## Smoke
@@ -33,10 +30,12 @@ python3 -m astrid orchestrators run training.training_run -- \
 Smoke mode performs the same local-only artifact generation as dry-run, with a
 state mode that distinguishes CI/smoke validation from an operator dry-run.
 
-```bash
-python3 -m astrid orchestrators run training.training_run -- \
-  --config configs/training-run.json \
-  --smoke
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "training.training_run",
+    inputs={"config": "configs/training-run.json", "smoke": True},
+)
 ```
 
 Direct module form:
@@ -63,11 +62,13 @@ compatibility alias. After successful training and local sample download, live
 mode pauses at the checkpoint review gate and keeps the pod teardown guard in
 state for resume or explicit follow-up.
 
-```bash
-RUNPOD_API_KEY=... HF_TOKEN=... \
-python3 -m astrid orchestrators run training.training_run -- \
-  --config configs/training-run.json \
-  --confirm-spend
+```python
+# requires RUNPOD_API_KEY, HF_TOKEN
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "training.training_run",
+    inputs={"config": "configs/training-run.json", "confirm_spend": True},
+)
 ```
 
 ## Resume
@@ -79,8 +80,7 @@ teardown, and records the final registration metadata. Use `--skip-teardown`
 only when you intentionally want to keep the pod alive after registration.
 
 ```bash
-python3 -m astrid orchestrators run training.training_run -- \
-  resume \
+python3 -m astrid.packs.training.orchestrators.training_run.run resume \
   --out runs/training/my-run \
   --pick final \
   --notes "best checkpoint"

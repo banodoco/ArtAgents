@@ -14,11 +14,15 @@ this executor processes **synchronized audio and video together**, enabling
 the model to reason about speech-to-action alignment, on-screen speaker
 identification, and the interplay between visual and auditory content.
 
-## CLI quick-start
+## Quick-start
 
-```bash
-python -m astrid executors run understanding.video_understand -- \
-  --video ./source.mp4 --out ./out
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "understanding.video_understand",
+    inputs={"video": "./source.mp4"},
+    out="./out",
+)
 ```
 
 ## Inputs

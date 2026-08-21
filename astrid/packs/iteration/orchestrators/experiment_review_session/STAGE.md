@@ -68,9 +68,16 @@ then re-validated semantically against the experiment rubric.
 
 ## Invocation
 
-```bash
-python3 -m astrid orchestrators run iteration.experiment_review_session -- \
-  --experiment path/to/experiment.json \
-  --runs-dir projects/my-project/runs \
-  --out ./session --reviewer-id peter --no-open
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "iteration.experiment_review_session",
+    inputs={
+        "experiment": "path/to/experiment.json",
+        "runs_dir": "projects/my-project/runs",
+        "reviewer_id": "peter",
+        "no_open": True,
+    },
+    out="./session",
+)
 ```

@@ -3,7 +3,7 @@ name: generation
 description: >
   Generate images and videos from text prompts using the elegant
   `astrid.generate` facade.  Image and video generation route through
-  the same executor code path (CLI, project-bound, or ad-hoc output
+  the same executor code path (SDK, project-bound, or ad-hoc output
   directory).  Covers generate_image, generate_video, and
   generate_image_openai (executor-only).
 ---
@@ -11,8 +11,8 @@ description: >
 # Generation
 
 The generation pack provides a first-class **library facade** for image and
-video generation and also exposes the underlying executors for CLI/automation
-use.
+video generation and also exposes the underlying executors for direct (SDK)
+and automation use.
 
 ## Quick-start — the `astrid.generate` facade
 
@@ -156,11 +156,11 @@ Read the embedded fields with `PIL.Image.open(path).text` or any PNG tEXt reader
 
 ## Scratchpad convention
 
-For quick experiments and throwaway scripts, drop a `.py` file and run it with
-`astrid scratch run`.  The scratch runner wires project context automatically,
-so you can use the facade with zero boilerplate:
+For quick experiments and throwaway scripts, drop a `.py` file that calls the
+`astrid.generate` facade and run it with plain Python — the facade resolves
+the configured default project automatically, so there is zero boilerplate:
 
-```bash
+```python
 # my_experiment.py
 import astrid
 
@@ -173,12 +173,11 @@ print(img.seed_used)
 ```
 
 ```bash
-astrid scratch run my_experiment.py
+python my_experiment.py
 ```
 
-The scratch runner inherits the session's default project and provides the
-same `astrid.generate` surface.  No `attach`, no `--out`, no manual context
-management.
+The facade resolves the configured default project itself and provides the
+same `astrid.generate` surface — no manual context management.
 
 ## Plugin verbs
 
@@ -196,54 +195,59 @@ astrid.generate.animate(model="...", prompt="...")
 The built-in `image` and `video` methods always take priority over plugin
 verbs.
 
-## Executors (CLI / direct access)
+## Executors (direct access)
 
-The pack's three executors remain available for direct CLI use and
-subprocess/cron automation.
+The pack's three executors remain available for direct use through the SDK
+(`astrid.sdk.invoke(...)`) and for subprocess/cron automation.
 
 | Executor | What it does |
 |---|---|
-| `generation.generate_image` | Generate images from text prompts via local (vibecomfy) or cloud (fal) backends. v2: model→mode→backend taxonomy with required `--mode`. Supports t2i, i2i, and edit modes. |
+| `generation.generate_image` | Generate images from text prompts via local (vibecomfy) or cloud (fal) backends. v2: model→mode→backend taxonomy with a required `mode` input. Supports t2i, i2i, and edit modes. |
 | `generation.generate_video` | Generate videos from text prompts via local or cloud backends. v2: model→mode→backend with t2v, i2v, and flf (first-last-frame) modes. |
 | `generation.generate_image_openai` | Generate image files with OpenAI GPT Image models from a prompt file. Requires `OPENAI_API_KEY`. |
 
-> **⚠️  `generate_image_openai` is CLI/executor-only for this sprint.**
+> **⚠️  `generate_image_openai` is executor-only for this sprint.**
 > The `astrid.generate.image()` facade explicitly rejects
 > `execution="openai"` with a diagnostic pointing to
-> `generation.generate_image_openai`.  Direct executor access is the
-> supported path for OpenAI image generation.
+> `generation.generate_image_openai`.  Direct executor access via the SDK is
+> the supported path for OpenAI image generation.
 
 For detailed image generation guidance — mode selection (t2i/i2i/edit),
 model decision tree, drop-with-warning behavior, and escape hatches — see
 the executor-level skill at
 `astrid/packs/generation/executors/generate_image/skill/SKILL.md`.
 
-### CLI quick-start
+### Quick-start (SDK)
 
-Pass every declared input with `--input NAME=VALUE` (snake_case names; the
-runner forwards them to the executor as `--kebab-case` flags). `--out` is a
-top-level run flag, not an input. The CLI does not accept arbitrary passthrough
-arguments after `--`.
+Pass every declared input as a snake_case entry in `inputs` (each is forwarded
+to the executor's `run.py` as a `--kebab-case` flag); pass the output
+directory as the `out` kwarg, not inside `inputs`.
 
-```bash
+```python
+import astrid.sdk as sdk
+
 # Image from text (cloud, fast)
-python3 -m astrid executors run generation.generate_image \
-  --input model=flux-schnell --input mode=t2i --input execution=cloud \
-  --input prompt="a serene mountain lake at dawn" --out ./out
+result = sdk.invoke("generation.generate_image", inputs={
+    "model": "flux-schnell", "mode": "t2i", "execution": "cloud",
+    "prompt": "a serene mountain lake at dawn",
+}, out="./out")
 
 # Image from text (local, open model)
-python3 -m astrid executors run generation.generate_image \
-  --input model=z-image --input mode=t2i --input execution=local \
-  --input prompt="a serene mountain lake at dawn" --out ./out
+result = sdk.invoke("generation.generate_image", inputs={
+    "model": "z-image", "mode": "t2i", "execution": "local",
+    "prompt": "a serene mountain lake at dawn",
+}, out="./out")
 
 # Video from text (cloud)
-python3 -m astrid executors run generation.generate_video \
-  --input model=wan-2.2 --input mode=t2v --input execution=cloud \
-  --input prompt="a wave crashing on rocks" --out ./out
+result = sdk.invoke("generation.generate_video", inputs={
+    "model": "wan-2.2", "mode": "t2v", "execution": "cloud",
+    "prompt": "a wave crashing on rocks",
+}, out="./out")
 
 # OpenAI image generation from a prompt file
-python3 -m astrid executors run generation.generate_image_openai \
-  --input prompts_file=./prompts.jsonl --out ./out
+result = sdk.invoke("generation.generate_image_openai", inputs={
+    "prompts_file": "./prompts.jsonl",
+}, out="./out")
 ```
 
 ## When to use
@@ -252,8 +256,9 @@ python3 -m astrid executors run generation.generate_image_openai \
   prompts (the recommended primary entry point).
 - Use `astrid.generate.video(...)` for video generation from text or image
   prompts.
-- Use `generation.generate_image_openai` via CLI/direct executor access when
-  you specifically need OpenAI GPT Image models and have a prompt file ready.
+- Use `generation.generate_image_openai` via direct executor access (the
+  SDK) when you specifically need OpenAI GPT Image models and have a prompt
+  file ready.
 
 For LoRAs, IP-adapter, controlnet, custom samplers, or graph composition,
 use the `vibecomfy` skill instead (escape hatch).

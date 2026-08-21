@@ -188,7 +188,8 @@ The current system has two related but different pack paths:
   schema-version checks, declared content-root checks, doc/entrypoint existence
   checks, and clear builder-facing errors without importing or running pack
   code.
-- `python3 -m astrid packs new`: scaffolded manifest production. It should
+- `python3 -m astrid.core.pack.cli new` (the internal pack CLI): scaffolded
+  manifest production. It should
   create packs that satisfy the authoring schema and include the target fields
   as they become implemented, while keeping generated skeletons small.
 

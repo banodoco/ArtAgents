@@ -9,15 +9,18 @@ Use `youtube.youtube_audio` to fetch one YouTube result as either an MP3
 (audio-extracted) or an MP4 (raw video), by free-text search or direct URL.
 
 The executor id is `youtube_audio` for historical reasons — it now handles
-video too. Treat it as "youtube download" and pass `--mode video` when you
-want the video file.
+video too. Treat it as "youtube download" and pass a `mode` input of `"video"`
+when you want the video file.
 
 ## Quick reference
 
-```bash
-python3 -m astrid executors run youtube.youtube_audio \
-  --input query="Moby Extreme Ways official audio" \
-  --out runs/audio/extreme-ways
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "youtube.youtube_audio",
+    inputs={"query": "Moby Extreme Ways official audio"},
+    out="runs/audio/extreme-ways",
+)
 ```
 
 Output is `runs/audio/extreme-ways.mp3` (the executor appends `.mp3`
@@ -39,22 +42,26 @@ automatically when no extension is given).
 
 ## Video mode
 
-```bash
-python3 -m astrid executors run youtube.youtube_audio \
-  --input query="seinfeld jerry kramer apartment scene" \
-  --input mode=video \
-  --out runs/seinfeld/clip-01
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "youtube.youtube_audio",
+    inputs={"query": "seinfeld jerry kramer apartment scene", "mode": "video"},
+    out="runs/seinfeld/clip-01",
+)
 ```
 
 Output is `runs/seinfeld/clip-01.mp4`. No ffmpeg needed in video mode.
 
 ## Direct URL
 
-```bash
-python3 -m astrid executors run youtube.youtube_audio \
-  --input url="https://www.youtube.com/watch?v=..." \
-  --input mode=video \
-  --out runs/seinfeld/clip-02
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "youtube.youtube_audio",
+    inputs={"url": "https://www.youtube.com/watch?v=...", "mode": "video"},
+    out="runs/seinfeld/clip-02",
+)
 ```
 
 ## Requirements
@@ -69,11 +76,17 @@ if either is missing.
 
 Most useful as a one-shot before a render:
 
-```bash
+```python
 # 1. Download a track
-python3 -m astrid executors run youtube.youtube_audio \
-  --input query="lo-fi study beat" --out runs/audio/lofi
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "youtube.youtube_audio",
+    inputs={"query": "lo-fi study beat"},
+    out="runs/audio/lofi",
+)
+```
 
+```bash
 # 2. Mux it under a rendered composite (start at 4s, fade out last 2.5s)
 ffmpeg -y -i composed.mp4 -i runs/audio/lofi.mp3 \
   -filter_complex "[1:a]atrim=0:DURATION,asetpts=PTS-STARTPTS,adelay=4000|4000,afade=t=out:st=FADE_START:d=2.5[a]" \

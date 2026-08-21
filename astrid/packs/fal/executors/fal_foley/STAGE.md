@@ -4,19 +4,18 @@ Use `fal.fal_foley` to score one short video clip with a Foley track via
 fal.ai's `fal-ai/hunyuan-video-foley` model. Network-bound. One clip in, one
 audio file out, prompt-conditioned.
 
-Inspect first:
+Run through the SDK:
 
-```bash
-python3 -m astrid executors inspect fal.fal_foley --json
-```
-
-Run:
-
-```bash
-python3 -m astrid executors run fal.fal_foley \
-  --input clip=runs/tile_video/example/tiles/0_0.mp4 \
-  --out runs/foley/0_0.wav \
-  -- --prompt "underwater turbulence, dense bubbles, organic motion"
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "fal.fal_foley",
+    inputs={
+        "clip": "runs/tile_video/example/tiles/0_0.mp4",
+        "prompt": "underwater turbulence, dense bubbles, organic motion",
+    },
+    out="runs/foley/0_0.wav",
+)
 ```
 
 Direct invocation:

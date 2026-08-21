@@ -50,24 +50,45 @@ asset cache, and orchestrates end-to-end training runs on RunPod GPUs.
 | `RUNPOD_API_KEY` | training_run orchestrator (GPU provisioning) |
 | `HF_TOKEN` | search_loras (Hugging Face Hub API, optional) |
 
-## CLI quick-start
+## Quick-start
 
-```bash
+```python
 # Build a clip pool (pipeline step 7)
-python3 -m astrid executors run training.pool_build -- --scenes ./out/scenes.json --triage ./out/scene_triage.json --out ./out
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "training.pool_build",
+    inputs={"scenes": "./out/scenes.json", "triage": "./out/scene_triage.json"},
+    out="./out",
+)
 
 # Merge pools (pipeline step 8)
-python3 -m astrid executors run training.pool_merge -- --pools ./pool1.json ./pool2.json --out ./out/unified_pool.json
+result = sdk.invoke(
+    "training.pool_merge",
+    inputs={"pools": ["./pool1.json", "./pool2.json"]},
+    out="./out/unified_pool.json",
+)
 
 # Search Hugging Face for LoRAs
-python3 -m astrid executors run training.search_loras -- --base-model "black-forest-labs/FLUX.1-dev" --out ./loras.json
+result = sdk.invoke(
+    "training.search_loras",
+    inputs={"base_model": "black-forest-labs/FLUX.1-dev"},
+    out="./loras.json",
+)
 
 # Manage asset cache
-python3 -m astrid executors run training.asset_cache -- --action list
+result = sdk.invoke("training.asset_cache", inputs={"action": "list"})
 
 # Build a training dataset
-python3 -m astrid orchestrators run training.dataset_build -- --sources ./sources.json --out ./dataset
+result = sdk.invoke(
+    "training.dataset_build",
+    inputs={"sources": "./sources.json"},
+    out="./dataset",
+)
 
 # Run a LoRA training job
-python3 -m astrid orchestrators run training.training_run -- --dataset ./dataset/manifest.json --out ./training_output
+result = sdk.invoke(
+    "training.training_run",
+    inputs={"dataset": "./dataset/manifest.json"},
+    out="./training_output",
+)
 ```

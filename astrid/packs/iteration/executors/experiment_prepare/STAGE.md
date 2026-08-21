@@ -56,9 +56,14 @@ model using schema-aware normalization.
 
 ## Invocation
 
-```bash
-python3 -m astrid executors run iteration.experiment_prepare \
-  --experiment path/to/experiment.json \
-  --runs-dir projects/my-project/runs \
-  --out ./out
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "iteration.experiment_prepare",
+    inputs={
+        "experiment": "path/to/experiment.json",
+        "runs_dir": "projects/my-project/runs",
+    },
+    out="./out",
+)
 ```

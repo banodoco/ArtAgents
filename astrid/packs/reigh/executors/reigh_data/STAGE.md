@@ -28,33 +28,35 @@ and `.env` files, including the sibling `reigh-app` checkout.
 
 Fetch a whole project payload:
 
-```bash
-python3 -m astrid reigh-data --project-id <PROJECT_UUID> --out runs/reigh/project.json
+```python
+import astrid.sdk as sdk
+result = sdk.invoke("reigh.reigh_data", inputs={"project_id": "<PROJECT_UUID>"}, out="runs/reigh/project.json")
 ```
 
 Fetch one shot's app-shaped media and positions:
 
-```bash
-python3 -m astrid reigh-data \
-  --project-id <PROJECT_UUID> \
-  --shot-id <SHOT_UUID> \
-  --out runs/reigh/shot.json
+```python
+result = sdk.invoke("reigh.reigh_data", inputs={
+    "project_id": "<PROJECT_UUID>",
+    "shot_id": "<SHOT_UUID>",
+}, out="runs/reigh/shot.json")
 ```
 
 Fetch task params/settings/output and timeline config/assets in the same
 payload:
 
-```bash
-python3 -m astrid reigh-data \
-  --project-id <PROJECT_UUID> \
-  --task-id <TASK_UUID> \
-  --timeline-id <TIMELINE_UUID>
+```python
+result = sdk.invoke("reigh.reigh_data", inputs={
+    "project_id": "<PROJECT_UUID>",
+    "task_id": "<TASK_UUID>",
+    "timeline_id": "<TIMELINE_UUID>",
+})
 ```
 
 The canonical executor entry point can also run it directly:
 
-```bash
-python3 -m astrid executors run reigh.reigh_data --out runs/reigh --input project_id=<PROJECT_UUID>
+```python
+result = sdk.invoke("reigh.reigh_data", inputs={"project_id": "<PROJECT_UUID>"}, out="runs/reigh")
 ```
 
 ## Payload Contract

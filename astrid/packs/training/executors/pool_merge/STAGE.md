@@ -15,11 +15,15 @@ composition depends on upstream pool contents, which cannot be predicted from
 sentinels alone. The output pool is written via `mode: mutate` (in-place update
 of the existing pool file).
 
-## CLI quick-start
+## Quick-start
 
-```bash
-python -m astrid executors run training.pool_merge -- \
-  --pool ./out/pool.json --theme ./theme.json --out ./out
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "training.pool_merge",
+    inputs={"pool": "./out/pool.json", "theme": "./theme.json"},
+    out="./out",
+)
 ```
 
 ## Inputs

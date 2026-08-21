@@ -5,41 +5,31 @@ agentic consumers (both human operators and AI agents).  It covers stream
 discipline, output modes, error signaling, and the behavioral guarantees
 that agents can rely on when invoking Astrid subcommands.
 
+The gateway owns **exactly eight families** — the five product families
+(`projects`, `timelines`, `media`, `tasks`, `runs`) and the three
+operational families (`serve`, `doctor`, `backup`) — plus the two
+manifest-declared nested mounts (`timelines shots`, `media references`).
+One verb = one SDK call. No other top-level command exists; see
+[the CLI census](../getting-started.md) and
+[CLI journeys](../guides/cli-journeys.md).
+
 ## Stream Discipline
 
 Every Astrid CLI invocation observes strict stdout/stderr separation:
 
 | Stream | Content | Purpose |
 |---|---|---|
-| **stdout** | Agent-facing instruction surface | Preamble, status text, actionable prose, and (in `--json` mode) exactly one JSON document.  Agents read stdout for next-step instructions. |
-| **stderr** | Diagnostics and structured errors | Error envelopes, `valid options:` / `recovery:` lines, timeline/default notices in JSON mode, and pure diagnostics (produces-check failures, cursor-rewind errors).  Agents parse stderr for structured recovery guidance. |
+| **stdout** | Command result surface | The human-readable result line, or (in `--json` mode) exactly one JSON document.  Agents read stdout for the command outcome. |
+| **stderr** | Diagnostics and structured errors | Error envelopes, `valid options:` / `recovery:` lines, and pure diagnostics.  Agents parse stderr for structured recovery guidance. |
 
 ### Default Mode (Human-Readable)
 
-In default mode (no `--json`), stdout carries agent-facing prose:
+In default mode (no `--json`), stdout carries the command result: for a
+mutation, one concise identity line (e.g. the created project slug and id);
+for a read, the requested listing or detail in plain text.
 
-- `astrid next`: prints the prohibition preamble, a blank separator line, and
-  exactly one actionable instruction block.  Example output:
-  ```
-  ASTRID TASK RUN — PROHIBITIONS
-  - You are inside a frozen plan...
-  ...
-  - Use `astrid abort --project <slug>` ...
-
-  Step: step_a
-  Run: astrid element run step_a -- ...
-  ```
-- `astrid status --project <slug>`: prints run-id, plan-hash, progress,
-  current step, owner, inbox pending count, and recent events.
-- `astrid attach <project>`: prints `session created`, the `export
-  ASTRID_SESSION_ID=...` line, and timeline/run/role metadata.
-- `astrid attach <project>` (reader takeover): prints a takeover hint
-  block on stdout — this is an actionable recovery instruction, not a
-  diagnostic (see SD2 below).
-
-Stderr in default mode carries only true diagnostics: produces-check
-failures, cursor-rewind errors, auto-resolve notices, and structured
-error envelopes from `AstridError` (exit code 2).
+Stderr in default mode carries only true diagnostics: typed error envelopes
+and recovery guidance.
 
 ### JSON Mode (`--json`)
 
@@ -48,58 +38,87 @@ one line, one object, terminated by a single `\n`.  No preamble, no prose,
 no separator.  This is the sole machine-contract path.  Agents reading JSON
 must parse stdout as a single JSON object.
 
-The JSON payload carries shared lifecycle fields first:
+The JSON payload is the frozen five-key envelope:
 
 ```json
-{"project": "my-project", "run_id": "01J...", "schema_version": 1, "state": "started", ...}
+{
+  "ok": true,
+  "data": {"id": "…", "slug": "demo"},
+  "error": null,
+  "receipt": {
+    "receipt_id": "…",
+    "command_kind": "…",
+    "idempotency_key": "…",
+    "request_hash": "…",
+    "project_id": "…",
+    "project_seq": [1, 1],
+    "event_ids": ["…"],
+    "result": {"…": "…"},
+    "created_at": "…"
+  },
+  "idempotency_key": "…"
+}
 ```
 
-Key fields common to all lifecycle JSON payloads:
+| Key               | Meaning                                                            |
+| ----------------- | ------------------------------------------------------------------ |
+| `ok`              | `true` on success, `false` on a typed SDK error                    |
+| `data`            | the command's result payload (`null` on failure)                   |
+| `error`           | a frozen error object (`{code, message, details}`) or `null`       |
+| `receipt`         | the committed command receipt on mutations, `null` on reads/failure|
+| `idempotency_key` | caller-supplied key, or the key the SDK generated before mutation  |
 
-| Field | Type | Description |
-|---|---|---|
-| `schema_version` | `int` | Always `1`.  Version of the JSON payload schema. |
-| `project` | `string` or `null` | Project slug, or `null` when not applicable (e.g., unbound session). |
-| `run_id` | `string` or `null` | Active run ULID, or `null` when no run is active. |
-| `state` | `string` | Machine-readable state: `started`, `aborted`, `no_active_run`, `acknowledged`, `retry_queued`, `iteration_failed`, `skipped`, `attached`, `session_bound`, `lease_error`, `reader`, `unbound`, etc. |
-
-Verb-specific fields follow the shared fields; see the verb reference below.
-
-Stderr in JSON mode may carry `valid options:` / `recovery:` lines,
-timeline/default notices, and the structured `AstridError` envelope.
-Agents should parse `recovery:` from stderr as the canonical next command
-(see [Recovery-Command Expectations](error-model.md#recovery-command-expectations)).
+Stderr in JSON mode may carry `valid options:` / `recovery:` lines and the
+structured error envelope. Agents should parse `recovery:` from stderr as
+the canonical next command.
 
 ### Design Decisions (Settled)
 
 These decisions are locked and must not be re-litigated:
 
-- **SD1**: The `next` prohibition preamble stays on **stdout** in default
-  mode.  `--quiet` suppresses only the preamble and separator line, leaving
-  actionable prose intact.  `--json` is the sole machine-contract path and
-  never includes the preamble.  Moving the preamble to stderr would break
-  agents that read stdout as the instruction surface.
-
-- **SD2**: Default-mode session takeover hints (e.g., "attached as reader —
-  another session holds the writer lease") remain on **stdout** as actionable
-  recovery content, not pure diagnostics.  These hints are instructions for
-  session resolution, not error diagnostics.  JSON mode provides the
-  machine-readable alternative.
-
-- **SD3**: Exit-code taxonomy is `0`=success, `1`=degraded/internal bug,
-  `2`=expected recoverable user/environment issue.  See
-  [Canonical Exit-Code Taxonomy](error-model.md#canonical-exit-code-taxonomy).
+- **SD1**: `--json` is the sole machine-contract path.  It never includes
+  preamble or prose — exactly one JSON object on stdout.
+- **SD2**: Recovery guidance (`valid options:` / `recovery:`) lives on
+  stderr in both modes, so the stdout contract stays parseable.
+- **SD3**: Exit-code taxonomy is `0`=success (envelope `ok=true`), `1`=typed
+  SDK error (envelope `ok=false`), `2`=usage/parse error (argparse).
 
 ## Verb Reference
 
-- **`astrid next`** — universal port-of-call; always prints exactly one legal action on stdout.  Supports `--quiet`, `--json`, and `--skip`.  JSON states: `unbound`, `no_active_run`, `reader`, `active`, `exhausted`, `blocked`.
-- **`astrid status`** — human-readable or JSON status block (session or task-scoped via `--project <slug>`).
-- **`astrid start`** — creates a new task run; JSON payload includes `orchestrator_id`, `timeline_slug`, `plan_hash`, `next_command`.
-- **`astrid abort`** — clears the active run and releases the writer lease; idempotent.
-- **`astrid ack`** — approves, retries, or iterates the current step.  `--decision abort` forwards to `cmd_abort`.
-- **`astrid skip`** — skips an optional step; JSON payload includes `step_path`, `kind`, `actor_kind`, `actor_id`, `next_command`.
-- **`astrid attach`** — binds a session to a project.  `--json` is non-prompting: missing timeline raises `AstridError` with `valid_options` + `recovery_command`.
-- **`astrid sessions status`** — JSON payload includes `session_id`, `agent_id`, `project`, `run_id`, `role`, `state`, `run_status`, `recent_events`.
+The gateway families and their verbs:
+
+- **`projects`** — `create`, `list`, `show`, `update`, `select`.  `select`
+  persists a non-authoritative default-project preference (file-side only; no
+  receipt, no DB mutation).
+- **`timelines`** — `create`, `list`, `show`, `save`, `archive`, `history`,
+  `diff`.  `save` is a whole-document compare-and-swap; a stale
+  `--expected-version` is the typed `stale_version` and changes nothing.
+- **`media`** — `import`, `list`, `show`, `verify`, `relocate`, `relate`.
+  `verify`/`relocate` require `--realm`; `relate` has the frozen five-kind
+  `--kind` (`derived_from`, `variant_of`, `uses_as_input`, `mask_for`,
+  `audio_for`).
+- **`tasks`** — `create`, `list`, `show`, `cancel`, `retry`, `events`.
+  `create` admits one immutable task (`--capability` + JSON `--spec`).
+- **`runs`** — `list`, `show`, `cancel`, `retry-failed`, `events`.
+  `retry-failed` is the batch-retry surface (all-failed-children by default,
+  explicit repeatable `--task` subset otherwise).
+- **`serve`** — start the HTTP editor bridge (`--host`, `--port`,
+  `--projects-root`, `--editor-path`, `--no-open-editor`).
+- **`doctor`** — read-only health check (`schema_versions`, media paths,
+  SQLite quick-check, FK status).  `--projects-root` selects the root.
+- **`backup`** — `create` (staged, validated, `--out`) and `restore`
+  (journaled, idempotent).
+
+Nested mounts (manifest-declared, never top-level):
+
+- **`media references`** — `create`, `update`, `archive`, `associate`,
+  `link`, `set-primary`, `list`, `show`.
+- **`timelines shots`** — `list`, `create`, `add`, `remove`, `reorder`.
+
+There is no `next` / `status` / `attach` / `start` / `ack` surface: the
+legacy task-mode CLI was retired with the filesystem task-run store.  Pack
+capabilities are not gateway commands either — they run through the SDK
+(`astrid.sdk.invoke`, `astrid.sdk.client.AstridClient`).
 
 ## Error Contract
 
@@ -109,10 +128,11 @@ the full taxonomy, envelope fields, rendering contract, and authoring rules.
 
 Key points for agents:
 
-- **Exit code 2** means the failure is recoverable.  Parse `recovery:` from
-  stderr and execute it as the next command.
-- **Exit code 1** means a degraded/internal bug.  The operator sees
-  `unstructured - this is a bug.` on stderr.  Report the failure; do not retry.
+- **Exit code 1** means a typed SDK error (`ok=false` in JSON mode).  Parse
+  the `error` envelope for the `code`; retry only when the error contract
+  says the operation is retryable.
+- **Exit code 2** means a usage/parse error.  `valid options:` lists the
+  accepted values and `recovery:` suggests the correct invocation.
 - **Parser errors** (`AstridArgumentError`) are converted to `AstridError`
   envelopes with `valid_options` listing the accepted values and a
   `recovery_command` suggesting the correct invocation.
@@ -122,5 +142,5 @@ Key points for agents:
 - [Error Model](error-model.md) — canonical exit-code taxonomy, error envelope contract, recovery-command expectations.
 - [Run Ledger Contract](run-ledger-contract.md) — event log append semantics and hash-chain integrity.
 - [Platform Contract](platform-contract.md) — cross-backend primitives and gateway-level guarantees.
-- [Discovery for Agents](../guides/discovery-for-agents.md) — how agents discover available projects, timelines, orchestrators, and elements.
-- [Output Result Contract](output-result-contract.md) — how element and executor outputs are surfaced.
+- [Discovery for Agents](../guides/discovery-for-agents.md) — how agents discover available capabilities through the SDK.
+- [Output Result Contract](output-result-contract.md) — how executor outputs are surfaced.

@@ -33,13 +33,18 @@ Exactly one of `download_index` or `download_id` may be provided.
 
 ## Canonical Command
 
-```bash
-python3 -m astrid executors run media.gif_search \
-  --query "dramatic zoom" \
-  --media-kind gif \
-  --limit 12 \
-  --rating pg-13 \
-  --out runs/gifs/dramatic-zoom
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "media.gif_search",
+    inputs={
+        "query": "dramatic zoom",
+        "media_kind": "gif",
+        "limit": "12",
+        "rating": "pg-13",
+    },
+    out="runs/gifs/dramatic-zoom",
+)
 ```
 
 For direct runtime testing:

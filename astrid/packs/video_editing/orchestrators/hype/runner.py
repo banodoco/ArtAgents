@@ -26,6 +26,12 @@ from astrid.packs.training.executors.asset_cache import run as asset_cache
 from .config import STEP_ORDER
 
 
+def _compute_plan_hash(plan_path: str | Path) -> str:
+    """Return the canonical ``sha256:<hex>`` digest of an emitted plan file."""
+
+    return "sha256:" + sha256_file(plan_path)
+
+
 def _write_run_json(args: argparse.Namespace, plan_hash: str) -> None:
     """Write or update ``run.json`` in the run directory with hype metadata.
 
@@ -591,9 +597,7 @@ def pool_main(args: argparse.Namespace) -> int:
             )
             emit_plan_json(plan, plan_path)
 
-            from astrid.core.task.plan import compute_plan_hash
-
-            _plan_hash = compute_plan_hash(plan_path)
+            _plan_hash = _compute_plan_hash(plan_path)
         except Exception as exc:
             logging.warning("hype: plan emission failed: %s", exc)
             # Continue with empty plan_hash; the run can still proceed via
@@ -604,9 +608,7 @@ def pool_main(args: argparse.Namespace) -> int:
         plan_json = args.out / "plan.json"
         if plan_json.is_file():
             try:
-                from astrid.core.task.plan import compute_plan_hash
-
-                _plan_hash = compute_plan_hash(plan_json)
+                _plan_hash = _compute_plan_hash(plan_json)
             except Exception:
                 _plan_hash = ""
     _write_run_json(args, _plan_hash)

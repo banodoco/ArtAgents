@@ -13,11 +13,15 @@ canonical scene list with start/end timestamps) and `scene_items.json`
 Does not require an internet connection — all analysis runs locally via
 ffmpeg. The `scenes.json` sentinel gates cache invalidation for this step.
 
-## CLI quick-start
+## SDK quick-start
 
-```bash
-python -m astrid executors run editorial.scenes -- \
-  --video ./source.mp4 --out ./out
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "editorial.scenes",
+    inputs={"video": "./source.mp4"},
+    out="./out",
+)
 ```
 
 ## Inputs

@@ -41,13 +41,9 @@ run without it. When a caller passes `--storage-name`, or marks the path as
 storage-required with `--require-storage` / `RUNPOD_REQUIRE_STORAGE`, Astrid
 checks that the named RunPod network volume already exists before provisioning.
 The executor never creates a volume implicitly. If storage is required but not
-configured or the named volume is missing, run:
-
-```bash
-python3 -m astrid runpod ensure-storage <storage-name> --size <GB> --datacenter <id>
-```
-
-Then retry with `--storage-name <storage-name>`.
+configured or the named volume is missing, create the named volume first with
+the storage helper (`ensure_storage` in `astrid/core/integrations/runpod/storage.py`),
+then retry with `--storage-name <storage-name>`.
 
 ## Artifacts and cost
 
@@ -64,15 +60,20 @@ local diagnostic `basis` string for auditability.
 
 The task adapter stays provider-neutral. A RunPod smoke step should use the
 generic `remote-artifact` subprocess-plus-manifest contract and put the RunPod
-executor behind the command:
+executor behind the call:
 
-```bash
-python3 -m astrid executors run runpod.session \
-  --out "$ASTRID_TASK_PRODUCES_ROOT" \
-  --input gpu_type=NVIDIA_L40S \
-  --input local_root=. \
-  --input remote_root=/workspace \
-  --input remote_script=smoke.sh
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "runpod.session",
+    inputs={
+        "gpu_type": "NVIDIA_L40S",
+        "local_root": ".",
+        "remote_root": "/workspace",
+        "remote_script": "smoke.sh",
+    },
+    out="$ASTRID_TASK_PRODUCES_ROOT",
+)
 ```
 
 Expected manifest/fetch shape:
@@ -92,8 +93,8 @@ Expected manifest/fetch shape:
 local fetched file, and `sha256` is verified before the task can complete.
 The fetch state records `fetched`, `missing`, `mismatched`, and computed
 `checksums`; retries are idempotent. If a smoke keeps a pod alive and uses
-`runpod.pull`, repeated `remote_path` values must be supplied as
-separate `--input remote_path=...` values so the downstream command emits
+`runpod.pull`, repeated `remote_path` values must be supplied as separate
+`remote_path` entries in the `inputs` dict so the downstream command emits
 ordered repeated `--remote-path` flags.
 
 Live RunPod validation is opt-in only. Run it only when `RUNPOD_API_KEY` and
@@ -107,12 +108,6 @@ python3 -m pytest tests/packs/runpod/test_manifest_contract.py
 Without those variables, CI runs the mocked smoke only: command rendering,
 manifest checksum/fetch behavior, repeated pull paths, and cleanup contract
 documentation are verified without contacting RunPod.
-
-## Safety net
-
-Run `astrid runpod sweep` to clean up orphaned pods. Default mode is safe
-(skips pods with live sessions or in-flight exec). `--hard` mode bypasses
-those checks.
 
 ## Requirements
 

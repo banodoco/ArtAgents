@@ -18,46 +18,66 @@ Pipeline:
    here, eyeball the tracks, optionally re-run with `--retry-flagged`.
 6. **`reigh.spatial_audio_page`** → final viewer page.
 
-Inspect first:
-
-```bash
-python3 -m astrid orchestrators inspect foley.foley_map --json
-```
-
 Dry-run (no API calls; writes the plan + tile crops + frames):
 
-```bash
-python3 -m astrid orchestrators run foley.foley_map -- \
-  --video ~/Downloads/DeepSeaBaby_444_TurbulentDisplace.mp4 \
-  --out runs/foley_map/deepsea \
-  --grid 4x4 --overlap 0.25 --trim 15 \
-  --dry-run
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "foley.foley_map",
+    inputs={
+        "video": "~/Downloads/DeepSeaBaby_444_TurbulentDisplace.mp4",
+        "grid": "4x4",
+        "overlap": "0.25",
+        "trim": "15",
+    },
+    out="runs/foley_map/deepsea",
+    dry_run=True,
+)
 ```
 
 Run end-to-end:
 
-```bash
-python3 -m astrid orchestrators run foley.foley_map -- \
-  --video ~/Downloads/DeepSeaBaby_444_TurbulentDisplace.mp4 \
-  --out runs/foley_map/deepsea \
-  --grid 4x4 --overlap 0.25 --trim 15 \
-  --env-file .env
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "foley.foley_map",
+    inputs={
+        "video": "~/Downloads/DeepSeaBaby_444_TurbulentDisplace.mp4",
+        "grid": "4x4",
+        "overlap": "0.25",
+        "trim": "15",
+        "env_file": ".env",
+    },
+    out="runs/foley_map/deepsea",
+)
 ```
 
 Stop after Foley + review (skip the final viewer):
 
-```bash
-python3 -m astrid orchestrators run foley.foley_map -- \
-  --video ... --out runs/foley_map/deepsea \
-  --stop-after review
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "foley.foley_map",
+    inputs={
+        "video": "...",
+        "stop_after": "review",
+    },
+    out="runs/foley_map/deepsea",
+)
 ```
 
 Re-roll only tiles flagged in `flagged.json` (downloaded from `review.html`):
 
-```bash
-python3 -m astrid orchestrators run foley.foley_map -- \
-  --video ... --out runs/foley_map/deepsea \
-  --retry-flagged runs/foley_map/deepsea/flagged.json
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "foley.foley_map",
+    inputs={
+        "video": "...",
+        "retry_flagged": "runs/foley_map/deepsea/flagged.json",
+    },
+    out="runs/foley_map/deepsea",
+)
 ```
 
 Cost: 16 tiles × ~$0.10 per 10s ≈ ~$30/pass at trim=15, plus 17 cheap VLM

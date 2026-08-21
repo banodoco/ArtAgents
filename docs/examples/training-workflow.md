@@ -10,28 +10,44 @@ training config vocabulary path.
 Start from a strict dataset config. The checked-in examples are lightweight
 templates with placeholder licensed sources and ignored `runs/` outputs.
 
-```bash
-python3 -m astrid orchestrators run training.dataset_build -- \
-  --config examples/configs/dataset/seinfeld-dataset.yaml \
-  --out runs/seinfeld-dataset
+```python
+import astrid.sdk as sdk
+
+result = sdk.invoke(
+    "training.dataset_build",
+    inputs={"config": "examples/configs/dataset/seinfeld-dataset.yaml"},
+    out="runs/seinfeld-dataset",
+)
 ```
 
 For a CI or fixture-style run, pass review decisions explicitly:
 
-```bash
-python3 -m astrid orchestrators run training.dataset_build -- \
-  --config examples/configs/dataset/seinfeld-dataset.yaml \
-  --out runs/seinfeld-dataset \
-  --review-decisions path/to/your/review-decisions.json
+```python
+import astrid.sdk as sdk
+
+result = sdk.invoke(
+    "training.dataset_build",
+    inputs={
+        "config": "examples/configs/dataset/seinfeld-dataset.yaml",
+        "review_decisions": "path/to/your/review-decisions.json",
+    },
+    out="runs/seinfeld-dataset",
+)
 ```
 
 A smoke path with no-network fixtures:
 
-```bash
-python3 -m astrid orchestrators run training.dataset_build -- \
-  --config path/to/your/dataset-config.json \
-  --out runs/builtin-training-fixture \
-  --review-decisions path/to/your/review-decisions.json
+```python
+import astrid.sdk as sdk
+
+result = sdk.invoke(
+    "training.dataset_build",
+    inputs={
+        "config": "path/to/your/dataset-config.json",
+        "review_decisions": "path/to/your/review-decisions.json",
+    },
+    out="runs/builtin-training-fixture",
+)
 ```
 
 For unattended runs, pass `--review-decisions <json>`. Without that flag, the
@@ -95,20 +111,30 @@ declared secrets, normalizes the manifest into the training run directory,
 builds the ai-toolkit config, writes `planned_cost.json`, and performs no
 network, GPU, or RunPod calls.
 
-```bash
-python3 -m astrid orchestrators run training.training_run -- \
-  --config examples/configs/training/seinfeld-training.yaml \
-  --dry-run
+```python
+import astrid.sdk as sdk
+
+result = sdk.invoke(
+    "training.training_run",
+    inputs={"config": "examples/configs/training/seinfeld-training.yaml"},
+    dry_run=True,
+)
 ```
 
 To use an existing finalized dataset run explicitly:
 
-```bash
-python3 -m astrid orchestrators run training.training_run -- \
-  --config examples/configs/training/seinfeld-training.yaml \
-  --manifest runs/seinfeld-dataset/ai-toolkit-ltx.manifest.json \
-  --out runs/seinfeld-lora \
-  --dry-run
+```python
+import astrid.sdk as sdk
+
+result = sdk.invoke(
+    "training.training_run",
+    inputs={
+        "config": "examples/configs/training/seinfeld-training.yaml",
+        "manifest": "runs/seinfeld-dataset/ai-toolkit-ltx.manifest.json",
+    },
+    out="runs/seinfeld-lora",
+    dry_run=True,
+)
 ```
 
 ## 4. Live Training
@@ -116,11 +142,17 @@ python3 -m astrid orchestrators run training.training_run -- \
 Live training fails closed if declared secrets are missing. Review the dry-run
 artifacts and spend cap first, then confirm spend for the live run.
 
-```bash
-RUNPOD_API_KEY=... HF_TOKEN=... \
-python3 -m astrid orchestrators run training.training_run -- \
-  --config examples/configs/training/seinfeld-training.yaml \
-  --confirm-spend
+```python
+import astrid.sdk as sdk
+
+# requires RUNPOD_API_KEY and HF_TOKEN in the environment
+result = sdk.invoke(
+    "training.training_run",
+    inputs={
+        "config": "examples/configs/training/seinfeld-training.yaml",
+        "confirm_spend": True,
+    },
+)
 ```
 
 The run provisions compute, stages the normalized manifest and ai-toolkit
@@ -140,23 +172,28 @@ Resume with the chosen checkpoint. Registration pulls the selected
 `.safetensors` file, writes `registered/registered_lora.json`, then tears down
 the pod unless `--skip-teardown` is supplied intentionally.
 
-```bash
-python3 -m astrid orchestrators run training.training_run -- \
-  resume \
-  --out runs/seinfeld-lora \
-  --pick final \
-  --notes "best checkpoint"
+```python
+import astrid.sdk as sdk
+
+result = sdk.invoke(
+    "training.training_run",
+    inputs={"out": "runs/seinfeld-lora", "pick": "final", "notes": "best checkpoint"},
+    argv=("resume",),
+)
 ```
 
 Use `--dry-run` with `resume` to inspect persisted state without mutating
 remote resources:
 
-```bash
-python3 -m astrid orchestrators run training.training_run -- \
-  resume \
-  --out runs/seinfeld-lora \
-  --dry-run \
-  --json
+```python
+import astrid.sdk as sdk
+
+result = sdk.invoke(
+    "training.training_run",
+    inputs={"out": "runs/seinfeld-lora"},
+    argv=("resume",),
+    dry_run=True,
+)
 ```
 
 ## 7. Script Presets
@@ -165,8 +202,14 @@ For script generation, use the built-in script pipeline with a preset. The
 Seinfeld and Always Sunny styles are data under
 `astrid/packs/editorial/executors/script_pipeline/presets/`.
 
-```bash
-python3 -m astrid executors run editorial.script_pipeline -- \
-  --preset seinfeld \
-  --produces-dir runs/seinfeld-script/produces
+```python
+import astrid.sdk as sdk
+
+result = sdk.invoke(
+    "editorial.script_pipeline",
+    inputs={
+        "preset": "seinfeld",
+        "produces_dir": "runs/seinfeld-script/produces",
+    },
+)
 ```

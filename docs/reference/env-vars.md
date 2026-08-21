@@ -25,7 +25,7 @@ falls back to the legacy key with a deprecation warning.  Use
 | Constant | Env var | Who sets | Who reads | Effect |
 |---|---|---|---|---|
 | `ASTRID_HOME` | `ASTRID_HOME` | User / CI | `session/paths.py` | Overrides the per-user Astrid state directory (default `~/.astrid`). |
-| `ASTRID_SESSION_ID` | `ASTRID_SESSION_ID` | `astrid attach` | Gateway, session binding, task harness | Active session UUID.  Propagated into subprocess env. |
+| `ASTRID_SESSION_ID` | `ASTRID_SESSION_ID` | (retired) | Gateway, session binding, task harness | Active session UUID.  Propagated into subprocess env. |
 | `ASTRID_PROJECTS_ROOT` | `ASTRID_PROJECTS_ROOT` | Tests / CI | `project/paths.py` | Overrides the projects root directory. |
 | `ASTRID_GATEWAY_RESOLVED_PROJECT` | `ASTRID_GATEWAY_RESOLVED_PROJECT` | `gateway._dispatch_with_resolved_project` | `executor/cli.py`, `orchestrator/cli.py` | Project slug resolved for the current request; injected as `--project` when omitted by the user. |
 

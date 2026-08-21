@@ -11,12 +11,17 @@ recording needs to become reviewable publishing material.
 
 ## Quick Start
 
-```bash
-python3 -m astrid orchestrators run stream_content.distill -- \
-  --video sources/event.mp4 \
-  --transcript runs/transcript.json \
-  --brief brief.md \
-  --out runs/stream-content
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "stream_content.distill",
+    inputs={
+        "video": "sources/event.mp4",
+        "transcript": "runs/transcript.json",
+        "brief": "brief.md",
+    },
+    out="runs/stream-content",
+)
 ```
 
 Omit `--transcript` to run `editorial.transcribe` first. Use `--no-scenes` to

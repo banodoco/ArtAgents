@@ -11,16 +11,20 @@ video and all per-tile audio files. Open `index.html` directly in a browser
 
 Inspect first:
 
-```bash
-python3 -m astrid executors inspect reigh.spatial_audio_page --json
+```python
+import astrid.sdk as sdk
+cap = sdk.get_capability("reigh.spatial_audio_page")
 ```
 
 Run:
 
-```bash
-python3 -m astrid.packs.reigh.executors.spatial_audio_page.run \
-  --manifest runs/foley_map/example/tiles.json \
-  --out runs/foley_map/example/page
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "reigh.spatial_audio_page",
+    inputs={"manifest": "runs/foley_map/example/tiles.json"},
+    out="runs/foley_map/example/page",
+)
 ```
 
 Manifest must contain a `foley_audio` path on each tile. The executor copies

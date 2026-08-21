@@ -13,11 +13,12 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from astrid.core.execution.orchestrator.plan_template import (
+from astrid.packs.video_editing.orchestrators._plan_v2 import (
     build_group_template,
     build_leaf_template,
     build_plan_template,
     cost_entry,
+    emit_plan_json,
     file_output,
     repeat_for_each_from,
     repeat_until,

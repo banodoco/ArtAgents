@@ -24,36 +24,66 @@ For fully interactive human review (web-based clip-by-clip approval),
 use `editorial.human_review` — editor_review is the automated heuristic
 pass, not the interactive web UI.
 
-## CLI quick-start
+## SDK quick-start
 
-```bash
-python -m astrid executors run editorial.editor_review -- \
-  --brief-dir ./out --run-dir ./runs/my-run --out ./out
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "editorial.editor_review",
+    inputs={
+        "brief_dir": "./out",
+        "run_dir": "./runs/my-run",
+    },
+    out="./out",
+)
 ```
 
 With custom model and frame sampling:
 
-```bash
-python -m astrid executors run editorial.editor_review -- \
-  --brief-dir ./out --run-dir ./runs/my-run --out ./out \
-  --model claude-sonnet-4-6 --max-frames 30 --cadence-sec 2.0 \
-  --env-file .env.local
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "editorial.editor_review",
+    inputs={
+        "brief_dir": "./out",
+        "run_dir": "./runs/my-run",
+        "model": "claude-sonnet-4-6",
+        "max_frames": "30",
+        "cadence_sec": "2.0",
+        "env_file": ".env.local",
+    },
+    out="./out",
+)
 ```
 
 Skip the LLM call for a default ship verdict:
 
-```bash
-python -m astrid executors run editorial.editor_review -- \
-  --brief-dir ./out --run-dir ./runs/my-run --out ./out \
-  --skip-llm
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "editorial.editor_review",
+    inputs={
+        "brief_dir": "./out",
+        "run_dir": "./runs/my-run",
+        "skip_llm": True,
+    },
+    out="./out",
+)
 ```
 
 Second-iteration review:
 
-```bash
-python -m astrid executors run editorial.editor_review -- \
-  --brief-dir ./out --run-dir ./runs/my-run --out ./out \
-  --iteration 2
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "editorial.editor_review",
+    inputs={
+        "brief_dir": "./out",
+        "run_dir": "./runs/my-run",
+        "iteration": "2",
+    },
+    out="./out",
+)
 ```
 
 ## Inputs

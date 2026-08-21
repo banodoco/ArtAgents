@@ -7,18 +7,33 @@ one result artifact.
 
 Inspect first:
 
-```bash
-python3 -m astrid executors inspect editorial.arrange --json
+```python
+import astrid.sdk as sdk
+
+cap = sdk.get_capability("editorial.arrange")
 ```
 
 Dry-run:
 
-```bash
-python3 -m astrid executors run editorial.arrange --input input=path/to/input.json --out runs/example --dry-run
+```python
+import astrid.sdk as sdk
+
+result = sdk.invoke(
+    "editorial.arrange",
+    inputs={"input": "path/to/input.json"},
+    out="runs/example",
+    dry_run=True,
+)
 ```
 
 Run:
 
-```bash
-python3 -m astrid executors run editorial.arrange --input input=path/to/input.json --out runs/example
+```python
+import astrid.sdk as sdk
+
+result = sdk.invoke(
+    "editorial.arrange",
+    inputs={"input": "path/to/input.json"},
+    out="runs/example",
+)
 ```

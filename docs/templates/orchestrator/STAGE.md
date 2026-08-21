@@ -7,18 +7,24 @@ executors or orchestrators.
 
 Inspect first:
 
-```bash
-python3 -m astrid orchestrators inspect video_editing.hype --json
+```python
+import astrid.sdk as sdk
+
+cap = sdk.get_capability("video_editing.hype")
 ```
 
 Dry-run:
 
-```bash
-python3 -m astrid orchestrators run video_editing.hype --dry-run
+```python
+import astrid.sdk as sdk
+
+result = sdk.invoke("video_editing.hype", dry_run=True)
 ```
 
 Run:
 
-```bash
-python3 -m astrid orchestrators run video_editing.hype
+```python
+import astrid.sdk as sdk
+
+result = sdk.invoke("video_editing.hype")
 ```

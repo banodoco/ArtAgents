@@ -219,8 +219,8 @@ The `manifest_path` is discovered through a two-step fallback:
 2. **Output-directory fallback**: Otherwise, the SDK checks whether
    `{out}/manifest.json` exists on disk.
 
-The CLI `executors run --json` mirrors this behaviour and serialises the
-same `InvocationResult` envelope.
+The SDK `invoke` result and the `--json` product CLI mirror this behaviour and
+serialise the same `InvocationResult` envelope.
 
 ## Writing a result manifest (implementation reference)
 

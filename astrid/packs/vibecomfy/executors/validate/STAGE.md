@@ -1,18 +1,16 @@
 ---
 name: vibecomfy
 description: >-
-  Escape hatch. For standard image generation use the generate-image skill and
-  astrid start generation.generate_image. Reach for vibecomfy directly when you
-  need LoRAs, IP-adapter, controlnet, custom samplers, graph composition, or
-  any path the registry does not cover.
+  Escape hatch. For standard image generation use the generate-image skill.
+  Reach for vibecomfy directly when you need LoRAs, IP-adapter, controlnet,
+  custom samplers, graph composition, or any path the registry does not cover.
 ---
 
 # VibeComfy — the escape hatch
 
-For standard image generation use the `generate-image` skill and
-`astrid start generation.generate_image`.  Reach for this skill when you need
-LoRAs, IP-adapter, controlnet, custom samplers, graph composition, or any
-path the registry doesn't cover.
+For standard image generation use the `generate-image` skill.  Reach for this
+skill when you need LoRAs, IP-adapter, controlnet, custom samplers, graph
+composition, or any path the registry doesn't cover.
 
 `vibecomfy.run` is the **escape hatch** for generation features that fall
 outside the basic happy-path contracts of `generation.generate_image` and
@@ -35,9 +33,8 @@ beyond those modes — LoRAs, IP-adapter, ControlNet, custom samplers — belong
 - `vibecomfy.run` maps to `python -m vibecomfy.cli run {workflow}`
 - `vibecomfy.validate` maps to `python -m vibecomfy.cli validate {workflow}`
 
-Install the executor package through the explicit Astrid executor install flow before
-running these actions. Both executors share the `vibecomfy` package environment via
-the folder-level `PACKAGE_ID`.
+Install the executor packages before running these actions. Both executors
+share the `vibecomfy` package environment via the folder-level `PACKAGE_ID`.
 
 ## Cross-links
 

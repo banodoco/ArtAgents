@@ -7,319 +7,246 @@ description: "Use for the Astrid repo: a file-based toolkit for agents to make a
 # Astrid
 
 Astrid is a file-based toolkit for making video, image, and audio art alongside
-a human. `python3 -m astrid` is the only executable gateway.
+a human. There are exactly two surfaces:
 
-## When in doubt, run `astrid next`
+- **The CLI gateway** — `python3 -m astrid` owns the eight families: five
+  product families (`projects`, `timelines`, `media`, `tasks`, `runs`) and
+  three operational families (`serve`, `doctor`, `backup`), plus the two
+  manifest-declared nested mounts (`timelines shots`, `media references`).
+  One verb = one SDK call.
+- **The SDK** — `import astrid` (`astrid.sdk.client.AstridClient`,
+  `astrid.sdk.discover` / `get_capability` / `invoke`) is the sanctioned
+  programmatic surface; every pack capability runs through it.
 
-`astrid next` is the universal port-of-call. **It always prints exactly one
-legal action to take, regardless of where you are.** Type it whenever you're
-lost, when you forget what you were doing, or when you need to know what
-to do *first*:
+Nothing else is a command. `next`, `status`, `attach`, `setup`, `start`,
+`ack`, `executors`, `orchestrators`, `elements`, `sessions`, `packs`, and
+`skills` are not gateway verbs — the legacy task-mode CLI (attach/next/start/
+ack) and the old filesystem task-run store are gone; use the eight-family CLI
+and the SDK.
 
-| Where you are | What `astrid next` tells you |
-|---|---|
-| No session bound | One legal bootstrap action, usually `astrid attach <slug>` or `astrid projects create <slug>` |
-| Session bound, no active run | `astrid start <orchestrator-id> --project <slug>` (suggests top orchestrators) |
-| In a run, mid-step | The exact `run: …` command or `astrid ack …` template to type |
-| Run rejected by verifier | The rejection reason + the retry command |
-| Run complete | "Run complete. Nothing to do." |
+## When in doubt, run the census
 
-Run it without flags. It derives the project from the bound session; if
-nothing is bound, it still prints one legal bootstrap action. **You don't need
-to remember which other verb to run** — `astrid next` is always the answer.
+```bash
+python3 -m astrid --help          # the complete eight-family census
+python3 -m astrid help            # same census, plus mounts and exit codes
+python3 -m astrid --version       # the app name (importlib.metadata)
+python3 -m astrid projects --help # inspect one family's verbs
+```
 
-For deeper context (recent events, run state, inbox count) `astrid status`
-remains the read-side breadcrumb; `next` is the action verb.
+`--help` prints exactly the eight families and the two nested mounts. There
+is no other CLI surface to discover; when you do not know which family a
+question belongs to, read the census first.
+
+## Bootstrap and the store
+
+- `ASTRID_PROJECTS_ROOT` selects the projects root (default `<repo>/projects`
+  from a checkout).
+- The first product command lazily creates
+  `$ASTRID_PROJECTS_ROOT/.astrid/astrid.sqlite3` — the SQLite kernel: 14 core
+  tables plus the timeline/shots/references pack tables, WAL mode, one
+  exclusive-owner lock.
+- `python3 -m astrid doctor --json` is the read-only health check. It reports
+  `schema_versions`, media paths, a SQLite quick-check, and foreign-key status
+  without repairing or rewriting data. A failing `schema_versions` check means
+  the database is newer or incompatible with this checkout.
 
 ## Start Here
 
-Astrid is session-gated. From the repository root, the canonical entry is
-`astrid next` (see above). When you need detail beyond the next action,
-`astrid status` prints the session breadcrumb and the exact recovery action.
+The canonical clean-machine flow is:
 
 ```bash
-git status --short
-python3 -m astrid --help
-python3 -m astrid next     # always-correct next action
-python3 -m astrid status   # detail breadcrumb when you need it
+python3 -m astrid doctor --json
+python3 -m astrid projects create demo --name "Demo" --json
+python3 -m astrid projects list --json
+python3 -m astrid timelines create primary --project demo --name "Primary" --default --json
+python3 -m astrid media import ./shot.png --project demo --json
+python3 -m astrid tasks create --project demo --capability rendering.timeline_visualize \
+  --spec '{"timeline_source": "..."}' --json
+python3 -m astrid runs list --project demo --json
 ```
 
-If status says `no session bound`, attach before running doctor, registry
-list/search/inspect, executor, orchestrator, element, or task-mode commands.
-The only legal unbound commands are help/version, `status`, `next`, `attach`,
-`packs ...`, `projects ls`, `projects create`, `projects default`,
-`sessions ls`, and `sessions takeover`. After binding, use `status` when you
-need to re-orient, not before every command.
+Product commands need no configuration file, credentials, or hosted service.
+`serve` is only needed when an HTTP editor client is used. `--json` is the
+stable machine surface: exactly one five-key envelope
+(`ok` / `data` / `error` / `receipt` / `idempotency_key`). Exit codes are
+stable: `0` success, `1` typed SDK error, `2` usage/parse error.
+
+## Product families
+
+| Family | Verbs | Notes |
+| --- | --- | --- |
+| `projects` | `create`, `list`, `show`, `update`, `select` | `select` is a file-side preference only; the slug is immutable |
+| `timelines` | `create`, `list`, `show`, `save`, `archive`, `history`, `diff` | `save` is a whole-document CAS save (`--expected-version`) |
+| `media` | `import`, `list`, `show`, `verify`, `relocate`, `relate` | `verify`/`relocate` require `--realm`; `relate` has the frozen five-kind `--kind` |
+| `tasks` | `create`, `list`, `show`, `cancel`, `retry`, `events` | `create` admits one immutable task (`--capability` + JSON `--spec`) |
+| `runs` | `list`, `show`, `cancel`, `retry-failed`, `events` | `retry-failed` is the batch-retry surface (all-failed-children or explicit `--task` subset) |
+
+Nested mounts (reachable only beneath their parent family, never top-level):
 
 ```bash
-python3 -m astrid attach [<project>] [--default] [--timeline <slug>] [--session <id>] [--as agent:<id>]
-python3 -m astrid status
+python3 -m astrid media references ...      # create/update/archive/associate/link/set-primary/list/show
+python3 -m astrid timelines shots ...       # list/create/add/remove/reorder
 ```
 
-Only after a session is bound should you run the usual registry and setup
-checks:
+## Operational families
 
 ```bash
-python3 -m astrid doctor
-python3 -m astrid orchestrators list
-python3 -m astrid executors list
-python3 -m astrid elements list
-python3 -m astrid setup
+python3 -m astrid serve [--host HOST] [--port PORT] [--projects-root PATH]  # HTTP editor bridge
+python3 -m astrid doctor [--json]                                           # read-only health check
+python3 -m astrid backup create [--out PATH]                                # staged, validated backup
+python3 -m astrid backup restore <BACKUP_PATH>                              # journaled restore
 ```
 
-`setup` is dry-run by default; pass `--apply` to mutate.
+## The SDK is the pack surface
 
-## Projects
+Packs ship capabilities (executors, orchestrators, elements). They are not
+gateway commands. Run them through the SDK:
 
-A project is the durable workspace for timelines, experiments, task runs,
-events, and generated artifacts. Every executor, orchestrator, scratch run,
-SDK generation, and timeline creation requires either an attached session or
-an explicit `--project <slug>`. This includes read-only executors and dry runs.
-Configured defaults are attach-time conveniences; they are never silently
-selected when a capability runs.
+```python
+import astrid.sdk as sdk
 
-Use `status` first: when no session is bound, it lists discovered projects and
-prints the exact attach and default-project commands to run.
-
-```bash
-python3 -m astrid status
-python3 -m astrid projects ls                   # names, descriptions, activity
-python3 -m astrid projects default
-python3 -m astrid projects default <slug>
-python3 -m astrid projects select <slug>
-python3 -m astrid attach [<project>] [--default]
-python3 -m astrid projects create <slug> --description "..." --attach
-python3 -m astrid timelines create <timeline> --project <slug> --default
+result = sdk.discover()                      # inventory + metadata (--json equivalent)
+cap = sdk.get_capability("editorial.transcribe")
+result = sdk.invoke(
+    "editorial.transcribe",
+    inputs={"audio": "voiceover.wav"},
+    out="runs/transcribe",
+)
 ```
 
-If `attach` has no project argument, it uses the configured default project.
-That is an explicit attach action: the default is never selected merely because
-an executor, orchestrator, or timeline command was invoked.
-Use `projects create` only when the work needs a new durable project, not just a
-new run inside an existing project.
+or through a bound client:
 
-## Choose The Mode
+```python
+from astrid.sdk.client import AstridClient
 
-- Use an **executor** for one concrete, independently runnable unit of work.
-- Use an **orchestrator** for a workflow that coordinates executors or child orchestrators.
-- Use an **element** for a reusable render building block: effect, animation, or transition.
-- Use task-mode verbs to continue a started plan: `status`, `next`, then the exact command or `ack` that `next` prints.
-- When creating new capability, search and compose existing tools first; only add new executors/elements/orchestrators for real gaps.
-
-## Pack-Specific Guidance
-
-This `_core` skill is the baseline. Custom packs can add their own guidance at
-`astrid/packs/<pack>/skill/SKILL.md`. When a task is clearly about one pack,
-read that pack skill after `_core` and before editing or running that pack's
-tools.
-
-To find every Astrid skill and what it does, attach to a project first, then
-list skills. The table shows each installable pack skill, its short
-description, and whether it is installed in Claude Code, Codex, and Hermes.
-Use `--json` when another agent or script needs to consume the list.
-
-```bash
-python3 -m astrid status
-python3 -m astrid attach [<project>]
-python3 -m astrid skills list
-python3 -m astrid skills list --json
+with AstridClient.open() as client:          # composes the standard application
+    result = client.invoke("rendering.render", inputs={...}, out="runs/out")
 ```
 
-If you create a custom pack whose conventions agents need to remember, add
-`astrid/packs/<pack>/skill/SKILL.md` and follow `docs/guides/skills-install.md`.
+Typed facades exist for the most common surfaces: `astrid.generate.*`
+(image/audio/video generation), `astrid.render` / `astrid.support` /
+`astrid.renderer_main` / `astrid.RenderContext` (rendering), and
+`client.tasks` / `client.timelines` / `client.media` / … (the seven typed
+services). See [docs/reference/sdk.md](../../../../docs/reference/sdk.md).
+
+### Task-mode adapters vs direct-mode executors
+
+Packs integrate with the kernel in one of two ways:
+
+- **Task-mode adapters** — a pack ships a `task_adapter.py` implementing the
+  kernel `TaskHandler` protocol (`astrid.core.task_executor`). The capability
+  then runs as a fenced kernel task: admit it with
+  `python3 -m astrid tasks create --project <p> --capability <id> --spec '{...}'`
+  and track it through the `tasks`/`runs` families. Today:
+  `rendering.timeline_visualize` and `generation.generate_image`.
+- **Direct-mode executors** — a file-only `run.py` invoked through the SDK
+  runner (subprocess, `ASTRID_INTERNAL_INVOCATION=1`). Every executor with a
+  `runtime_module` works this way; outputs are file-based and returned in the
+  `InvocationResult` manifest. Do not invoke `run.py` modules directly — the
+  canonical-entrypoint guard refuses it; `astrid.sdk.invoke` is the entry.
+
+## Retired legacy surface
+
+The legacy task-mode CLI (`attach`/`next`/`start`/`ack`, plus the retired
+`executors`/`orchestrators` verb families) and the old filesystem task-run
+store are gone — use the eight-family CLI and the SDK.
+`text_analysis.summarize` and `builtin.agent_probe` were removed with the
+task-mode runtime. Legacy pre-kernel data under `projects/` migrates with the
+scripts in `scripts/migrations/v10/` (see its `MIGRATION.md`).
+
+## Per-project plan.md
+
+Every project has a `plan.md` at its root — a per-project markdown doc for
+live, human/agent-readable working notes (current focus, open threads, key
+decisions, scratch notes).
+
+- **Read on create/show.** After `projects create` or `projects show`, read
+  `<project>/plan.md` alongside the project row as part of orienting. New
+  projects ship with an empty skeleton; that's fine.
+- **Update when project-level state changes.** A new focus, a closed thread, a
+  settled decision, a fresh open question. Don't log ephemeral per-run state.
+- **Refactor when it grows tangled.** Promote stale items to an `## Archive`
+  section, keep `## Current focus` short, and trim `## Open threads` past ~10
+  entries. Treat it as a living doc, not an append-only log.
 
 ## Shared Knowledge With Hivemind
 
-Hivemind is Astrid's default shared knowledge pack. Use `hivemind.search`
-before researching community best practices, model behavior, settings, known
-failures, or workflow precedents. Use `hivemind.get_item` when a search result
-needs its full body or citation context.
+Hivemind is Astrid's shared knowledge pack. Use `hivemind.search` before
+researching community best practices, model behavior, settings, known
+failures, or workflow precedents; use `hivemind.get_item` when a search result
+needs its full body or citation context. Run them through the SDK:
+
+```python
+import astrid.sdk as sdk
+result = sdk.invoke("hivemind.search", inputs={"query": "wan 2.2 best settings"})
+```
 
 Astrid project files remain the source of truth for raw runs, experiment
 reviews, and `conclusions.json`. Hivemind is the cross-project publication and
-retrieval layer for generalizable learnings:
+retrieval layer for generalizable learnings. Hivemind writes are public
+publication, including pending distillations. Never publish automatically:
+dry-run or preview the payload, remove private paths, prompts, media, and
+URLs, and obtain explicit user confirmation before calling
+`hivemind.contribute`.
 
-1. Record observations and evidence-backed inferences locally.
-2. Search Hivemind for an existing equivalent learning.
-3. Contribute a concise experiment report as a resource.
-4. Submit the reusable learning as a distillation citing that resource.
-5. Preserve the returned Hivemind IDs beside the local experiment.
+## Pack Model
 
-Hivemind writes are public publication, including pending distillations. Never
-publish automatically: dry-run or preview the payload, remove private paths,
-prompts, media, and URLs, and obtain explicit user confirmation before calling
-`hivemind.contribute`. If Hivemind is unavailable, install its pack and shared
-skill:
-
-```bash
-python3 -m astrid packs install https://github.com/banodoco/hivemind.git
-python3 -m astrid skills install hivemind --harness all
-```
-
-Read the Hivemind pack skill for its search, citation, contribution, and
-curation rules before using those executors.
-
-## Run A Tool
-
-Find an id before you run anything.
-
-```bash
-python3 -m astrid [executors|orchestrators|elements] list
-python3 -m astrid [executors|orchestrators|elements] search <terms>
-```
-
-If you don't know which tool to use, run `python3 -m astrid <kind> search
-<terms>` first. Do not guess from id alone.
-
-Inspect to see inputs, outputs, intent, folder root, and the relevant
-`STAGE.md`.
-
-```bash
-python3 -m astrid [executors|orchestrators|elements] inspect <id> --json
-```
-
-Read only that one `STAGE.md`; it is the source of truth for invocation details.
-Then run:
-
-```bash
-python3 -m astrid [executors|orchestrators] run <id> --project <slug> -- <args>
-```
-
-## Continue A Task Run
-
-Task lists are orchestrator plans tracked inside a project. Do not freelance:
-`next` is the control surface.
-
-```bash
-python3 -m astrid status
-python3 -m astrid next --project <slug>
-```
-
-Then do exactly what `next` prints:
-
-- If it prints `run: ...`, run that command exactly.
-- If it prints an attested/manual step, acknowledge with the printed `ack` form.
-- If the run is stuck and another writer owns it, use the takeover hint from `status`.
-
-Common task commands:
-
-```bash
-python3 -m astrid start <orchestrator-id> --project <slug>
-python3 -m astrid next --project <slug>
-python3 -m astrid ack <step> --project <slug> --decision approve [--agent <id> | --human <name>]
-python3 -m astrid status --project <slug>
-python3 -m astrid abort --project <slug>
-python3 -m astrid sessions {ls, detach, takeover} ...
-```
-
-`astrid sessions takeover` atomically increments the run's `writer_epoch` and swaps the lease writer; any other tab that was writing to the run gets a `StaleEpochError` on its next mutating verb.
-Takeover from an unbound shell is allowed, but it first bootstraps a concrete
-caller session through the same identity and file-binding path as `attach`;
-anonymous takeover is not a valid state. Lease helpers preserve unknown
-metadata fields while updating only the owned writer fields, so future
-per-run metadata survives takeover, orphan claim, and release.
-
-Normal task-run mutations must go through the writer-owned task APIs; do not
-edit `plan.json`, `events.jsonl`, `current_run.json`, or `lease.json` by hand.
-The low-level event append helpers are transport internals, not agent-facing
-escape hatches.
-
-Sprint 3 task plans use one collapsed step shape: leaves have `command`, groups
-have `children`, and both share `adapter`, `requires_ack`, `assignee`,
-`produces`, `repeat`, and `version`. Do not author legacy `kind: code`,
-`kind: attested`, `kind: nested`, or inline `plan` step payloads. If you find a
-v1 plan, run `scripts/migrations/sprint-3/migrate_plans.py` rather than relying
-on runtime auto-migration.
-
-The first event in each run is `plan_initialized`. Treat `plan.json` as a
-cached projection replayed from `plan_initialized` plus `plan_mutated`, not as
-the source of truth. Use plan mutation verbs for edits.
-
-`repeat.until` now accepts expression strings such as
-`review.produces.verdict.status == "approved"`. Repeated group steps may expose
-descendant produces through `re_export`; missing artifacts or malformed JSON
-fail closed. Legacy conditions such as `user_approves` exist only for migrated
-read compatibility.
-
-`remote-artifact` is available for task leaves that dispatch remote work through
-the generic subprocess-plus-manifest contract. Use `local` or `manual` when the
-step does not need asynchronous artifact fetch/retry behavior.
-
-## Create Something New
-
-Read `docs/guides/creating-tools.md`, then follow this build order. Complete every
-step before falling back to the next.
-
-1. **Search and compose existing executors first.** If existing executors can
-   be wired together, build only an orchestrator that calls them.
-2. **Create missing executors next.** Each new executor does one concrete,
-   focused, independently runnable unit of work.
-3. **Then write the orchestrator.** It composes existing and newly created
-   executors into the workflow.
-4. **Add elements only for reusable render building blocks.** Effects,
-   animations, and transitions belong in the element tree, not in ad hoc
-   timeline code.
-
-Do not start by writing a god-orchestrator. If a `run.py` grows past a couple
-hundred lines while doing network calls, asset processing, and workflow logic,
-split it into executors plus an orchestrator.
-
-Before creating:
-
-```bash
-python3 -m astrid status
-python3 -m astrid executors search <terms>
-python3 -m astrid orchestrators search <terms>
-python3 -m astrid elements list
-python3 -m astrid [executors|orchestrators|elements] inspect <id> --json
-```
-
-Templates:
-
-- `docs/templates/executor/` — one concrete unit of work
-- `docs/templates/orchestrator/` — a workflow that combines executors
-- `docs/templates/element/` — a reusable render building block
-
-For custom pack behavior that agents should remember, add
-`astrid/packs/<pack>/skill/SKILL.md`. Keep pack-specific conventions there
-rather than expanding `_core`.
-
-Content lives under packs at `astrid/packs/<pack>/`. Executor folders use
-`astrid/packs/<pack>/executors/<slug>/{executor.yaml,STAGE.md,run.py}` and
+Packs are namespace and distribution containers for capabilities (executors,
+orchestrators, elements). Every capability lives in exactly one pack under
+`astrid/packs/<pack>/`, declared in a `pack.yaml` manifest. Capability ids are
+always qualified as `<pack>.<name>`; bare ids are rejected. Executor folders
+use `astrid/packs/<pack>/executors/<slug>/{executor.yaml,STAGE.md,run.py}` and
 orchestrator folders use
 `astrid/packs/<pack>/orchestrators/<slug>/{orchestrator.yaml,STAGE.md,run.py}`,
 with optional local `src/` modules. Element folders live at
 `astrid/packs/<pack>/elements/<kind>/<id>/{component.tsx,element.yaml}` where
-kind is `effects`, `animations`, or `transitions`.
+kind is `effects`, `animations`, or `transitions`. A gitignored `local` pack
+at `astrid/packs/local/` holds user-edited element forks.
 
-Executor and orchestrator ids are always qualified as `<pack>.<name>`. Bare ids
-are rejected. Top-level `astrid/*.py` files are shared libraries or system
-commands, not alternate runnable implementations.
+- **Executor** — one concrete, independently runnable unit of work.
+- **Orchestrator** — a workflow that coordinates executors or child
+  orchestrators.
+- **Element** — a reusable render building block: effect, animation, or
+  transition.
 
-Do not chain pipeline internals by hand unless debugging one specific stage. If
-the user gives a topic instead of a brief, use a brief-generation executor
-coordinated by an orchestrator; do not fake source media just to enter a
-source-video path. Render requires the `hype.timeline.json` and
-`hype.assets.json` pair produced by cut; do not skip cut unless both files
-already exist.
+Timeline renderers, planners, and finalizers are a fourth surface but not
+executor kinds: protocol commands registered by a pack through
+`extensions.rendering.{renderers,planners,finalizers}` behind the stable
+`rendering.render` facade (see `docs/contracts/render-backend-v1.md`).
+
+### Discovery
+
+Discover capabilities through the SDK, not by grepping source:
+
+```python
+import astrid.sdk as sdk
+result = sdk.discover()                       # full inventory, pack by pack
+caps = sdk.get_capability("editorial.arrange")  # typed lookup (raises on missing/ambiguous)
+```
+
+Read the relevant `STAGE.md` before running a capability; it is the source of
+truth for invocation details. Do not package every STAGE.md into one merged
+prompt — open only the folder-level `STAGE.md` for the selected capability.
+
+### Aliases, Forks, and Overrides
+
+Three mechanisms customize capabilities without editing originals: **aliases**
+(old ids mapped to current capabilities, declared in `pack.yaml`),
+**forks** (a copy into the local pack with provenance back to the source),
+and **overrides** (redirect an id to a preferred fork). Full details:
+[docs/packs/aliases-vs-forks-vs-overrides.md](../../../../docs/packs/aliases-vs-forks-vs-overrides.md).
 
 ## Safety Rules
 
 - Generated files live under `runs/` or another ignored output directory.
 - Do not commit source media, rendered videos, local dependency envs, or secrets.
 - Do not print or hardcode API keys; use `--env-file` or nearby `.env` files.
-- Do not edit `plan.json` or `events.jsonl` by hand during task-mode runs.
+- Do not edit `$ASTRID_PROJECTS_ROOT/.astrid/astrid.sqlite3` or the event
+  streams by hand; mutate through the CLI and SDK only.
 - Treat curated tool stages as protected unless explicitly asked to edit them,
   notably `astrid/packs/moirae/executors/moirae/STAGE.md` and
   `astrid/packs/vibecomfy/executors/run/STAGE.md`.
 - Orchestrators may call declared child orchestrators; executors must not call orchestrators.
-
-After adding or renaming effects, animations, transitions, or theme elements:
-
-```bash
-python3 scripts/gen_effect_registry.py
-cd remotion && npm run gen-types
-```
 
 After editing `short_description` / `keywords` on any executor, orchestrator,
 or element manifest, refresh the capability index in this file:
@@ -334,10 +261,10 @@ Built-in orchestrators: `video_editing.hype`, `video_editing.event_talks`,
 `video_editing.thumbnail_maker`.
 
 Built-in executors include `editorial.transcribe`, `video_editing.cut`,
-`rendering.render`, `editorial.validate`, `understanding.understand` (audio/visual/video
-dispatcher; pass `--mode {audio,visual,video}`), `generation.generate_image_openai`, and
-the rest of the pipeline. External executors include `moirae.moirae` and
-`vibecomfy.run` (executor only, not an orchestrator).
+`rendering.render`, `editorial.validate`, `understanding.understand`
+(audio/visual/video dispatcher; pass `--mode {audio,visual,video}`), and
+`generation.generate_image_openai`. External executors include `moirae.moirae`
+and `vibecomfy.run` (executor only, not an orchestrator).
 
 Element source priority: active theme →
 `astrid/packs/local/elements/<kind>/<id>` (gitignored scratch pack) →
@@ -345,106 +272,128 @@ Element source priority: active theme →
 into `astrid/packs/local/`, auto-creating `astrid/packs/local/pack.yaml` and
 rewriting the element's `pack_id` to `local`.
 
-```bash
-python3 -m astrid elements fork effects text-card
+## Adding overlays to a rendered video
+
+Quick recipe: take any `.mp4` and overlay text captions / a wordmark via the
+timeline + Remotion path.
+
+### The timeline and optional asset registry
+
+- `timeline.json` — defines tracks and clips. Schema: `@banodoco/timeline-schema`
+  (see `remotion/node_modules/@banodoco/timeline-schema/typescript/src/schemas.ts`).
+  Top level: `{theme, theme_overrides?, tracks, clips}`. Each clip has
+  `id, at (seconds), track, clipType, asset?, hold? | from/to, text?, params?,
+  effects?, x?/y?/width?/height?`.
+- `assets.json` — optional media registry:
+  `{"assets": {"<id>": {file?: <relative-or-absolute-path>, url?,
+  content_sha256?, type?, resolution?, fps?, duration?}}}`. Include it when
+  clips reference media assets.
+
+### Layering rule (gotcha)
+
+Visual tracks render in **reversed** array order (`TimelineComposition.tsx`:
+`[...getVisualTracks(timeline)].reverse()`). To put overlays on top, list the
+overlay track **first** in `timeline.tracks`.
+
+### Timeline design conventions
+
+Use one track per editing concern, not one catch-all overlay track. A
+maintainable visual stack usually reads top-to-bottom as `brand` or persistent
+CTA, `captions`, moment-specific `fx` or text callouts, `broll`, then
+`source`; audio tracks follow visual tracks. Because visual tracks render in
+reversed order, the first visual track in `tracks` is the top layer. Keep clip
+ids prefixed by concern (`brand_`, `cap_`, `fx_`, `broll_`, `src_`, `audio_`)
+so later patches can target the right layer without re-reading every clip. The
+canonical small fixture is `examples/hype.timeline.json`; read it before
+hand-authoring a timeline.
+
+### Rendering
+
+```python
+import astrid.sdk as sdk
+
+result = sdk.invoke(
+    "rendering.render",
+    inputs={
+        "timeline": "runs/<my-run>/timeline.json",
+        "assets_registry": "runs/<my-run>/assets.json",
+    },
+    out="runs/<my-run>",
+)
 ```
 
-Before rendering an iteration video, run `python3 -m astrid.packs.video_editing.orchestrators.iteration_video.run inspect <thread>` to see modalities, renderers, quality, cache counts, and estimated cost without rendering. Note: the pack-level `--thread <id>` argument identifies a non-binding variant lineage WITHIN a pack and is UNRELATED to the removed `astrid thread` CLI verb or to session binding. Threads as a generic user-facing runtime concept were retired in Sprint 1 (DEC-001); the internal `astrid.core.threads` library is retained for pack lineage utilities.
+For timelines with no media registry entries, omit `assets_registry`. The
+normal render writes `runs/<my-run>/hype.mp4` and
+`runs/<my-run>/hype.mp4.provenance.json`. Renderer authors use the typed
+`astrid.render` / `astrid.support` / `astrid.renderer_main` /
+`astrid.RenderContext` surface (see `docs/reference/sdk.md`).
 
-## Pack Model
+### Local effect assets
 
-Packs are **namespace and distribution containers** for capabilities
-(executors, orchestrators, elements). Every capability lives in exactly one
-pack. The pack declares its identity (`id`, `version`), content roots
-(`executors`, `orchestrators`, `elements`), and agent-facing metadata in a
-`pack.yaml` manifest.
+Effect, animation, and transition manifests may declare static files with
+optional top-level syntax:
 
-### Discovery for Agents
-
-Agents discover capabilities through the CLI, not by grepping source:
-
-```bash
-python3 -m astrid skills list              # installed pack skills
-python3 -m astrid executors search <term>  # find executors by keyword
-python3 -m astrid orchestrators search <term>
-python3 -m astrid elements list
+```yaml
+assets:
+  badge: assets/badge.png
+  palette: assets/palette.json
 ```
 
-Search and list support `--json` for machine consumption.
+Values are paths relative to the element root, must stay inside that root, and
+must point to files. During render, Astrid stages only declared assets for
+elements used by the timeline under
+`remotion/public/astrid-effects/<render-hash>/<effect-id>/`, injects their
+static-file-relative paths into `params.__astridAssets`, and cleans the staging
+directory after Remotion exits.
 
-### Inspect Before Running
+### Where the schemas and render boundary live (authoritative)
 
-Always inspect a capability before running it. The `--json` output includes
-the `_capability` identity block (id, kind, pack, version) plus the full
-definition (inputs, outputs, dependencies, entrypoint):
+- Timeline + clip Zod schemas: `remotion/node_modules/@banodoco/timeline-schema/typescript/src/schemas.ts`
+- Composition (clip → component dispatch, layering): `remotion/node_modules/@banodoco/timeline-composition/typescript/src/TimelineComposition.tsx`
+- Effect / animation registries: generated by `scripts/gen_effect_registry.py`
+- Python timeline IO + validation: `astrid/core/timeline/`
+- Stable facade: `astrid/packs/rendering/executors/render/run.py`
+- Backend-neutral lifecycle: `astrid/core/rendering/service.py`
+- Rendering protocol schemas: `astrid/core/rendering/schemas/v1/`
+- Public pack-author contract: `docs/contracts/render-backend-v1.md`
+- Render provenance: `<video-output>.provenance.json`
 
-```bash
-python3 -m astrid executors inspect <id> --json
-python3 -m astrid orchestrators inspect <id> --json
-python3 -m astrid elements inspect <kind> <id> --json
-```
+### Available elements
 
-### Capability Kinds
+Discover elements through the SDK (`sdk.discover()` / `get_capability` with an
+element id), or read the index below. At time of writing: effects `text-card`
+(the built-in component is `() => null` — it expects a theme override to do
+the real DOM rendering; fork into the local pack and regenerate with
+`scripts/gen_effect_registry.py` to customize), `sliding-media`,
+`neon-orbit-card`, `model-trends`, `audio-reactive-colour`, `vibe-comfy-*`;
+animations `fade`, `fade-up`, `scale-in`, `slide-left`, `slide-up`, `type-on`;
+transitions `cross-fade`, `fade`.
 
-| Kind | Use when |
-|------|---------|
-| **Executor** | One concrete, independently runnable unit of work |
-| **Orchestrator** | A workflow that coordinates executors or child orchestrators |
-| **Element** | A reusable render building block: effect, animation, or transition |
+### 5-minute "add a caption" recipe
 
-Timeline **renderers, planners, and finalizers** are a fourth surface but not
-executor kinds: they are protocol commands registered by a pack through
-`extensions.rendering.{renderers,planners,finalizers}` behind the stable
-`rendering.render` facade. Scaffold a renderer with
-`python3 -m astrid renderers create <name> <dest>`, then follow the golden
-path in `docs/contracts/render-backend-v1.md` (generated test → `renderers
-validate` → trusted `packs install` → `renderers smoke` → provenance sidecar).
-SDK authors use `astrid.render`/`astrid.support`/`astrid.renderer_main`/
-`astrid.RenderContext` (see `docs/reference/sdk.md`).
+1. Drop your source `.mp4` into `runs/<name>/`.
+2. Write `runs/<name>/{timeline,assets}.json` per the shapes above. Adjust
+   `at`, `hold`, `text.content`, and `params.anchor`; add a new track when the
+   new clip is a new concern, not just another caption.
+3. Render with the SDK snippet above.
+4. ffprobe / open the `hype.mp4`.
+5. If captions don't appear after editing the local-pack component, blow away
+   `remotion/node_modules/.cache` — Remotion's webpack caches aggressively
+   across renders.
 
-### Aliases, Forks, and Overrides
+## Further Reading
 
-Three mechanisms let you customize without editing originals:
-
-- **Aliases** — Map old or alternate ids to current capabilities. Declared in
-  `pack.yaml` under `aliases`. Resolved transparently at lookup time.
-- **Forks** — Copy a capability into a local pack for independent editing.
-  Forks carry provenance back to the source. Use `executor fork <id>` or
-  `orchestrator fork <id>`.
-- **Overrides** — Redirect a capability id to a preferred fork without
-  modifying manifests. Use `executor override set <from> <to>`.
-
-Full details:
-[aliases-vs-forks-vs-overrides.md](../../../../docs/packs/aliases-vs-forks-vs-overrides.md).
-
-### Further Reading
-
-- [docs/discovery-for-agents.md](../../../../docs/guides/discovery-for-agents.md) — Agent-facing
-  CLI contract
-- [docs/creating-packs.md](../../../../docs/packs/creating-packs.md) — Pack authoring workflow
-- [docs/creating-tools.md](../../../../docs/guides/creating-tools.md) — When to create each
-  capability kind
-- [docs/adapter-packs.md](../../../../docs/packs/adapter-packs.md) — Adapter pack conventions
-- [docs/contract.md](../../../../docs/packs/contract.md) — Formal pack-system definitions
-- [docs/fork-and-update.md](../../../../docs/packs/fork-and-update.md) — Personal forks,
-  dirty detection, and update management
-- [docs/render-backend-v1.md](../../../../docs/contracts/render-backend-v1.md) — Protocol-v1
-  renderer contract and the renderer-author golden path (`astrid renderers create` → test →
-  validate → trusted install → smoke → provenance)
-- [docs/sdk.md](../../../../docs/reference/sdk.md) — Python SDK, including the rendering SDK
-  (`render`, `support`, `renderer_main`, `RenderContext`)
+- [docs/getting-started.md](../../../../docs/getting-started.md) — the canonical human setup doc
+- [docs/guides/cli-journeys.md](../../../../docs/guides/cli-journeys.md) — the eight families, journeys, recovery
+- [docs/reference/sdk.md](../../../../docs/reference/sdk.md) — Python SDK (DTOs, exceptions, typed facades)
+- [docs/contracts/cli-contract.md](../../../../docs/contracts/cli-contract.md) — CLI stream/exit-code discipline
+- [docs/guides/creating-tools.md](../../../../docs/guides/creating-tools.md) — when to create each capability kind
+- [docs/packs/creating-packs.md](../../../../docs/packs/creating-packs.md) — pack authoring workflow
+- [docs/contracts/render-backend-v1.md](../../../../docs/contracts/render-backend-v1.md) — renderer-author contract
 
 The capability index below is **auto-generated** by
 `scripts/gen_capability_index.py`. Re-run it after editing executor,
 orchestrator, or element manifests.
-
-## Per-project plan.md
-
-Every project has a `plan.md` at its root — a per-project markdown doc for live, human/agent-readable working notes (current focus, open threads, key decisions, scratch notes). This is distinct from `<project>/runs/<run-id>/plan.json`, which is the executable runtime step tree.
-
-- **Read on attach.** After `astrid attach <project>`, read `<project>/plan.md` alongside `project.json` as part of orienting. New projects ship with an empty skeleton; that's fine.
-- **Update when project-level state changes.** A new focus, a closed thread, a settled decision, a fresh open question. Don't log ephemeral per-run state — that belongs in `events.jsonl` and step produces.
-- **Refactor when it grows tangled.** If `plan.md` becomes overly long, repetitive, or contradictory, rewrite it: promote stale items to a `## Archive` section or remove them, keep `## Current focus` short, and trim `## Open threads` if it grows past ~10 entries. Treat it as a living doc, not an append-only log. The signal: finding the relevant section takes more than a glance.
 
 <!-- BEGIN CAPABILITY INDEX (auto-generated by scripts/gen_capability_index.py) -->
 
@@ -478,13 +427,6 @@ Every project has a `plan.md` at its root — a per-project markdown doc for liv
 | `generation.generate_image` | Generate images from text prompts via local, cloud, or Codex backends. v2: model→mode→backend. |
 | `generation.generate_image_openai` | Generate image files with OpenAI GPT Image models from a prompt file. |
 | `generation.generate_video` | Generate videos from text prompts via local or cloud backends. v2: model→mode→backend with t2v/i2v/flf/v2v modes. |
-| `hivemind.contribute` | Submit a resource or distillation to the Hivemind corpus via the contribute edge function. |
-| `hivemind.get_item` | Fetch a single full row from the Hivemind corpus by kind and id. |
-| `hivemind.ingest_article` | Fetch a web article, extract readable text, and submit as a resource. |
-| `hivemind.ingest_workflow` | Parse a ComfyUI workflow JSON and submit as a resource with model metadata. |
-| `hivemind.ingest_youtube` | Extract YouTube captions via yt-dlp and submit as a transcript resource. |
-| `hivemind.refresh_media` | Refresh expiring Discord CDN attachment URLs for a message. |
-| `hivemind.search` | Search the Hivemind unified corpus with distillations-first merging. |
 | `iteration.assemble` | Adapt prepared iteration data into canonical iteration artifacts and render-ready hype inputs. |
 | `iteration.experiment_import` | Import an unmanaged run root into an experiment without rewriting history or guessing ambiguous associations. |
 | `iteration.experiment_prepare` | Normalize an experiment's provider manifests into a provider-independent review model with diagnostics. |
@@ -499,7 +441,7 @@ Every project has a `plan.md` at its root — a per-project markdown doc for liv
 | `reigh.reigh_data` | Fetch canonical Reigh project data through the reigh-data Edge Function. |
 | `reigh.spatial_audio_page` | Build a static page that mixes Foley tracks anchored to spatial rectangles via Web Audio. |
 | `rendering.html_canvas_effect` | Scaffold a local Remotion HTML-in-canvas effect element. |
-| `rendering.render` | Render a hype timeline through the neutral facade using a qualified renderer or planner. |
+| `rendering.render` | Render a hype timeline to an .mp4 output through the selected backend. |
 | `rendering.sprite_sheet` | Generate, slice, and preview GPT Image sprite sheets for batch image work. |
 | `rendering.timeline_storyboard` | Build a static visual storyboard of image inputs associated with timeline shots. |
 | `rendering.timeline_visualize` | Build a deterministic, agent-navigable evidence pack from managed timeline event logs. |
@@ -508,7 +450,7 @@ Every project has a `plan.md` at its root — a per-project markdown doc for liv
 | `runpod.pull` | Pull artifacts from an existing RunPod pod into local storage. |
 | `runpod.session` | Composite provision → exec → teardown session with guaranteed cleanup. |
 | `runpod.teardown` | Terminate a RunPod pod. Idempotent. |
-| `seedance_local.reference_video` | Generate one Seedance 2.0 video using a local clip as its motion and camera reference. |
+| `seedance_local.reference_video` | Generate one Seedance 2.0 video from ordered local image references and/or a reference clip. |
 | `stream_content.clip_candidates` | Score transcript windows as publishable stream clip candidates. |
 | `stream_content.segment_map` | Fuse OCR, transcript density, and scene cuts into a complete stream timeline. |
 | `training.asset_cache` | Manage the repo-local hype asset cache (download, prune, list). |
@@ -530,11 +472,9 @@ Every project has a `plan.md` at its root — a per-project markdown doc for liv
 
 | id | short_description |
 | --- | --- |
-| `builtin.agent_probe` | Legacy task-mode probe orchestrator used by regression tests. |
 | `foley.foley_map` | Spatial Foley pipeline: tile a video, prompt a VLM, score Foley per tile, and emit a viewer. |
 | `iteration.experiment_review_session` | Interactive rubric review session over a prepared experiment, reusing editorial.human_review with safe mounted media. |
 | `stream_content.distill` | Distill a long event stream into segments, extracted blocks, candidates, and a review page. |
-| `text_analysis.summarize` | Summarize the bundled sample text fixture into content, summary, and verdict JSON outputs. |
 | `training.dataset_build` | Build a generic reviewed video training dataset from configured sources. |
 | `training.training_run` | Run a generic LoRA training job from a prepared dataset manifest. |
 | `video_editing.animate_image` | Two-stage Fal pipeline: edit a reference image with GPT Image 2, then animate it with WAN 2.2. |
@@ -567,240 +507,20 @@ Every project has a `plan.md` at its root — a per-project markdown doc for liv
 
 <!-- END CAPABILITY INDEX -->
 
-## Installing into agent harnesses
-
-Astrid ships its own skills layer for the three supported agent harnesses (Claude Code, Codex, Hermes). One command installs the `_core` skill plus any per-pack skills into every harness it detects on the machine:
-
-```bash
-python3 -m astrid skills list                 # show installable packs and current per-harness state
-python3 -m astrid skills install --all        # install every pack into every detected harness
-python3 -m astrid skills doctor               # verify symlinks resolve and AGENTS.md block parses
-python3 -m astrid skills uninstall _core      # remove from all harnesses
-```
-
-Default mechanism is per-pack symlinks under `~/.claude/skills/`, `~/.codex/skills/`, and `${HERMES_HOME:-~/.hermes}/skills/`. Codex additionally maintains an idempotent fenced block in `~/.codex/AGENTS.md` listing each installed pack. Hermes accepts an opt-in `--mechanism external-dir` that registers the whole `astrid/packs` tree via `~/.hermes/config.yaml` `skills.external_dirs` instead of per-pack symlinks.
-
-If no harness is installed, Astrid prints a one-line nudge to stderr at most once every seven days when you run a non-`skills` subcommand. Suppress with `ASTRID_NO_NUDGE=1` or `--quiet`.
-
-See `docs/guides/skills-install.md` for the SkillDescriptor contract and the `metadata.hermes.*` extension block.
-
-## Adding overlays to a rendered video
-
-Quick recipe: take any `.mp4` and overlay text captions / a wordmark via the timeline + Remotion path.
-
-### The timeline and optional asset registry
-
-- `timeline.json` — defines tracks and clips. Schema: `@banodoco/timeline-schema` (see `remotion/node_modules/@banodoco/timeline-schema/typescript/src/schemas.ts`). Top level: `{theme, theme_overrides?, tracks, clips}`. Each clip has `id, at (seconds), track, clipType, asset?, hold? | from/to, text?, params?, effects?, x?/y?/width?/height?`.
-- `assets.json` — optional media registry: `{"assets": {"<id>": {file?: <relative-or-absolute-path>, url?, content_sha256?, type?, resolution?, fps?, duration?}}}`. Include it when clips reference media assets. Relative paths resolve from the registry directory. The render host stages local/cached files into an invocation directory, so source files do not need a common parent.
-
-### Layering rule (gotcha)
-
-Visual tracks render in **reversed** array order (`TimelineComposition.tsx`: `[...getVisualTracks(timeline)].reverse()`). To put overlays on top, list the overlay track **first** in `timeline.tracks`.
-
-### Timeline design conventions
-
-Use one track per editing concern, not one catch-all overlay track. A maintainable visual stack usually reads top-to-bottom as `brand` or persistent CTA, `captions`, moment-specific `fx` or text callouts, `broll`, then `source`; audio tracks follow visual tracks. Because visual tracks render in reversed order, the first visual track in `tracks` is the top layer. Keep clip ids prefixed by concern (`brand_`, `cap_`, `fx_`, `broll_`, `src_`, `audio_`) so later patches can target the right layer without re-reading every clip. Split a track as soon as clips have different lifetimes, ownership, or review criteria; for example, do not mix persistent branding, subtitles, and transient emphasis cards on one track.
-
-The canonical small fixture is `examples/hype.timeline.json`. Read it before hand-authoring a timeline; `examples/hype.timeline.full.json` is for schema coverage, not design guidance.
-
-### Minimal maintainable example: video + caption + wordmark
-
-```jsonc
-// assets.json
-{
-  "assets": {
-    "src": {"file": "video.mp4", "type": "video/mp4", "resolution": "1920x1080", "fps": 30, "duration": 49.5}
-  }
-}
-```
-
-```jsonc
-// timeline.json
-{
-  "theme": "banodoco-default",
-  "theme_overrides": {"visual": {"canvas": {"width": 1920, "height": 1080, "fps": 30}}},
-  "tracks": [
-    {"id": "brand", "kind": "visual", "label": "Brand"},
-    {"id": "captions", "kind": "visual", "label": "Captions"},
-    {"id": "source", "kind": "visual", "label": "Source"}
-  ],
-  "clips": [
-    {"id": "src_main", "at": 0, "track": "source", "clipType": "media", "asset": "src", "from": 0, "to": 49.5},
-    {
-      "id": "brand_wordmark", "at": 0, "track": "brand", "clipType": "text", "hold": 49.5,
-      "text": {"content": "REIGH", "fontSize": 24, "color": "#ffffff", "align": "right"},
-      "params": {"anchor": "top-right", "offsetX": 64, "offsetY": 48, "weight": 700,
-                 "textShadow": "0 2px 10px rgba(0,0,0,0.75)"}
-    },
-    {
-      "id": "cap_search", "at": 3, "track": "captions", "clipType": "text", "hold": 10,
-      "effects": {"fade_in": 0.4, "fade_out": 0.4},
-      "text": {"content": "search 1.2 million messages", "fontSize": 38, "color": "#ffffff", "align": "right"},
-      "params": {"anchor": "bottom-right", "offsetX": 80, "offsetY": 140, "maxWidth": 720, "weight": 600,
-                 "textShadow": "0 2px 12px rgba(0,0,0,0.85)"}
-    }
-  ]
-}
-```
-
-### Adding music or another audio track
-
-Audio is a first-class track kind. On the Remotion path, declare an `audio`
-track, register the file as an asset, and add a `media` clip on the audio track;
-Remotion renders that audio into the MP4. At the generic backend boundary,
-renderers explicitly declare `rendered`, `passthrough`, or `none` ownership,
-and Astrid/finalizers own any required passthrough, muxing, or normalization.
-
-```jsonc
-// assets.json — add a music asset alongside your video
-{
-  "assets": {
-    "src":   {"file": "video.mp4", "type": "video/mp4", "duration": 47.6},
-    "music": {"file": "music.mp3", "type": "audio/mpeg"}
-  }
-}
-```
-
-```jsonc
-// timeline.json — add an audio track and a media clip on it
-"tracks": [
-  {"id": "source", "kind": "visual", "label": "Source"},
-  {"id": "a1",     "kind": "audio",  "label": "Music"}
-],
-"clips": [
-  {"id": "src_main", "at": 0, "track": "source", "clipType": "media", "asset": "src", "from": 0, "to": 47.6},
-  {
-    "id": "audio_music",
-    "at": 0,                 // timeline time the clip starts playing
-    "track": "a1",
-    "clipType": "media",     // audio uses the same `media` clipType as video
-    "asset": "music",
-    "from": 5,               // trim: start the source 5s in
-    "to": 52.6,              // trim end in source time (clip plays for to-from = 47.6s)
-    "volume": 1.0,           // 0..1 scalar, multiplies track volume
-    "params": {"fadeIn": 0, "fadeOut": 2.5}
-  }
-]
-```
-
-Field semantics (the parts that aren't obvious from `types.ts`):
-
-- `from` / `to` are in **source-media time, seconds** — they trim the asset, they don't move the clip on the timeline. The clip's timeline duration is `to - from`. To start the music *later* in the video, raise `clip.at`, not `from`.
-- `volume` is a scalar 0..1; track and clip volume multiply. `track.muted: true` forces silence regardless.
-- `params.fadeIn` / `params.fadeOut` are in seconds, taper at the clip's local start/end. Implemented inside `AudioTrack.tsx` as a per-frame volume function — no afade pre-bake needed.
-- Local audio paths in `assets.json` resolve like local video: the shared asset
-  layer resolves from the registry directory, stages the file, and the Remotion
-  backend exposes the invocation stage over loopback. Remotion's `<Audio src>`
-  consumes that URL natively.
-
-You should not need ffmpeg's `atrim` / `afade` / `amix` for any normal "music under the video" use case. Reach for ffmpeg only for things Remotion genuinely doesn't model (offline loudness normalization, sample-accurate cross-fades between two music beds, etc.).
-
-### Rendering
-
-```bash
-python3 -m astrid executors run rendering.render \
-  --out runs/<my-run> \
-  --input timeline=runs/<my-run>/timeline.json \
-  --input assets_registry=runs/<my-run>/assets.json
-```
-
-For timelines with no media registry entries, omit the asset input:
-
-```bash
-python3 -m astrid executors run rendering.render \
-  --out runs/<my-run> \
-  --input timeline=runs/<my-run>/timeline.json
-```
-
-The normal executor CLI writes `runs/<my-run>/hype.mp4` and
-`runs/<my-run>/hype.mp4.provenance.json`. The lower-level direct runner is for
-debugging facade behavior only; it still delegates to the public
-`RenderService`:
-
-```bash
-python3 -m astrid.packs.rendering.executors.render.run \
-  --timeline runs/<my-run>/timeline.json \
-  --assets runs/<my-run>/assets.json \
-  --out runs/<my-run>/composed.mp4
-```
-
-Direct debug runs may omit `--assets` for asset-free timelines; the runner
-synthesizes a temporary empty registry.
-
-### Local effect assets
-
-Effect, animation, and transition manifests may declare static files with
-optional top-level syntax:
-
-```yaml
-assets:
-  badge: assets/badge.png
-  palette: assets/palette.json
-```
-
-Values are paths relative to the element root, must stay inside that root, and
-must point to files. During render, Astrid stages only declared assets for
-elements used by the timeline under
-`remotion/public/astrid-effects/<render-hash>/<effect-id>/`, injects their
-static-file-relative paths into `params.__astridAssets`, and cleans the staging
-directory after Remotion exits.
-
-### Where the schemas and render boundary live (authoritative)
-
-- Timeline + clip Zod schemas: `remotion/node_modules/@banodoco/timeline-schema/typescript/src/schemas.ts`
-- Composition (clip → component dispatch, layering): `remotion/node_modules/@banodoco/timeline-composition/typescript/src/TimelineComposition.tsx`
-- Effect / animation registries: generated by `scripts/gen_effect_registry.py` into `effects.generated.ts` etc. inside the `@banodoco/timeline-composition` package
-- Python timeline IO + validation: `astrid/core/timeline/`
-- Stable facade: `astrid/packs/rendering/executors/render/run.py`
-- Backend-neutral lifecycle: `astrid/core/rendering/service.py`
-- Rendering protocol schemas: `astrid/core/rendering/schemas/v1/`
-- Built-in protocol commands: `astrid/packs/rendering/backends/`,
-  `planners/`, and `finalizers/`
-- Public pack-author contract: `docs/contracts/render-backend-v1.md`
-- Render provenance: `<video-output>.provenance.json` records the validated
-  plan, renderer/planner/finalizer resolution and trust/support evidence,
-  hashes and artifact profiles, audio/finalization state, backend fragments,
-  plus the retained v1 element/theme/staging projections.
-
-### Available elements
-
-Run `python3 -m astrid elements list` (or `inspect <kind> <id> --json` for a single element). At time of writing:
-
-- effects: `text-card` (text rendering — see note below)
-- animations: `fade`, `fade-up`, `scale-in`, `slide-left`, `slide-up`, `type-on`
-- transitions: `cross-fade`, `fade`
-
-### Text rendering note (important)
-
-The built-in `text-card` component is `() => null` — it expects a theme override to do the real DOM rendering. If your theme doesn't ship one, fork into the local pack:
-
-```bash
-python3 -m astrid elements fork effects text-card
-# edit astrid/packs/local/elements/effects/text-card/component.tsx
-python3 scripts/gen_effect_registry.py     # regenerates registry
-```
-
-The local-pack TextCard in this repo already supports anchored positioning (`params.anchor` ∈ {top-left, top, top-right, left, center, right, bottom-left, bottom, bottom-right}, plus `offsetX/offsetY/maxWidth/background/padding/borderRadius/lineHeight/weight/letterSpacing/textShadow`) and reads `clip.effects.{fade_in,fade_out}` (seconds) for entry/exit fades.
-
-### 5-minute "add a caption" recipe
-
-1. Drop your source `.mp4` into `runs/<name>/`.
-2. Copy the JSON snippets above into `runs/<name>/{timeline,assets}.json`. Adjust `at`, `hold`, `text.content`, and `params.anchor`; add a new track when the new clip is a new concern, not just another caption.
-3. Render with the command above.
-4. ffprobe / open the `composed.mp4`.
-5. If captions don't appear after editing the local-pack component, blow away `remotion/node_modules/.cache` — Remotion's webpack caches aggressively across renders.
-
 ## Validate
 
 ```bash
-pytest tests/test_doctor_setup.py tests/test_canonical_cli.py
+pytest tests/v10/test_docs_cli_alignment.py -x -q
 pytest --tb=no -q --no-header
 ```
 
 ## Upstream friction
 
-When a workflow is awkward, brittle, or undocumented, tell the user directly. Suggest the smallest durable fix; if the issue belongs upstream, recommend a PR there.
+When a workflow is awkward, brittle, or undocumented, tell the user directly.
+Suggest the smallest durable fix; if the issue belongs upstream, recommend a
+PR there.
 
 ## Begin
 
-Ask the maker what they want to make or learn. If they want ideas, see `docs/guides/ideas.md`.
+Ask the maker what they want to make or learn. If they want ideas, see
+`docs/guides/ideas.md`.

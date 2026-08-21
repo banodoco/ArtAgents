@@ -26,7 +26,7 @@ media with LLMs. Each executor targets a specific modality.
 |---|---|---|
 | `understanding.understand` | **Legacy** | Dispatches to audio, visual, or video understanding based on `--mode`. Prefer using the specific executors above for new work — they offer clearer modality contracts and better model preset defaults. |
 
-The `understand` executor accepts `--mode audio|image|visual|video` and
+The `understand` executor accepts a `mode` input of `audio|image|visual|video` and
 routes to the corresponding underlying executor. It exists for backward
 compatibility; direct executor invocation gives you access to
 modality-specific flags and model presets.
@@ -49,26 +49,42 @@ modality-specific flags and model presets.
 |---|---|
 | `OPENAI_API_KEY` | All understanding executors (OpenAI API) |
 
-## CLI quick-start
+## Quick-start
 
-```bash
+```python
 # Audio understanding (fast preset)
-python3 -m astrid executors run understanding.audio_understand -- \
-  --audio ./clip.mp3 --preset fast --out ./out
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "understanding.audio_understand",
+    inputs={"audio": "./clip.mp3", "preset": "fast"},
+    out="./out",
+)
 
 # Visual understanding with structured output
-python3 -m astrid executors run understanding.visual_understand -- \
-  --image ./frame.png --query "Describe the scene" --out ./out
+result = sdk.invoke(
+    "understanding.visual_understand",
+    inputs={"image": "./frame.png", "query": "Describe the scene"},
+    out="./out",
+)
 
 # Video understanding (synchronized audio+video window)
-python3 -m astrid executors run understanding.video_understand -- \
-  --video ./clip.mp4 --out ./out
+result = sdk.invoke(
+    "understanding.video_understand",
+    inputs={"video": "./clip.mp4"},
+    out="./out",
+)
 
 # Scene captioning (pipeline step 5)
-python3 -m astrid executors run understanding.scene_describe -- \
-  --video ./source.mp4 --scenes ./out/scenes.json --out ./out
+result = sdk.invoke(
+    "understanding.scene_describe",
+    inputs={"video": "./source.mp4", "scenes": "./out/scenes.json"},
+    out="./out",
+)
 
 # Legacy dispatcher (prefer specific executors)
-python3 -m astrid executors run understanding.understand -- \
-  --mode audio --audio ./clip.mp3 --out ./out
+result = sdk.invoke(
+    "understanding.understand",
+    inputs={"mode": "audio", "audio": "./clip.mp3"},
+    out="./out",
+)
 ```

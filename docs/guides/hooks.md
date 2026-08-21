@@ -1,68 +1,18 @@
-# Claude Code Stop hook — `astrid hook stop`
+# HOOKS — retired
 
-## Why
+> **Retired.** This document described the Claude Code Stop hook that
+> re-injected task-mode rules (`astrid next` preamble + current step) into
+> Claude's next turn. The task-mode runtime it served was removed with the
+> v10 cutover: session binding, `next`/`ack`, and the filesystem task-run
+> store are gone, so there is no task-mode rule stream to re-inject.
 
-Long Claude Code sessions decay context: the prohibition preamble printed at
-run start is gradually pushed out of the model's working context, and the
-agent forgets the task-mode rules. SD-023 requires re-injecting the preamble
-on every "stop" boundary so the rules stay live for the entire run. The
-mechanism is a [Claude Code Stop hook](https://docs.claude.com/en/docs/claude-code/hooks)
-that re-prints `astrid next` (preamble + current step) into the stream
-Claude reads back on its next turn.
+Agents orient through the eight-family CLI census and the core skill, not a
+stop hook:
 
-## Setup
-
-Add the following snippet to your project's `.claude/settings.json` (create
-the file if it does not exist). No matcher is needed — Stop hooks always fire
-when Claude finishes a turn:
-
-```json
-{
-  "hooks": {
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "astrid hook stop"
-          }
-        ]
-      }
-    ]
-  }
-}
+```bash
+python3 -m astrid --help          # the eight-family census
+python3 -m astrid doctor --json   # read-only health check
 ```
 
-## Behavior
-
-`astrid hook stop` is a no-op unless an active run exists somewhere it can
-discover. Discovery runs in two tiers:
-
-1. **session-bound resolution** (Sprint 1) — if ``ASTRID_SESSION_ID`` is
-   set and resolves to a session record whose ``project`` has a live
-   ``current_run.json`` + ``lease.json`` pair, that's the active run. This is
-   the normal path; it preserves writer ownership and lets `astrid next`
-   print the one legal action for the bound run.
-2. **cwd-ancestor walk** — climb from the current working directory up
-   through its parents; if any ancestor `D` is a direct child of the
-   projects root and contains `current_run.json` (the Sprint 1
-   replacement for the legacy `active_run.json`), treat `D.name` as the
-   project slug. The legacy `active_run.json` filename is no longer
-   written; Sprint 1's `scripts/migrations/sprint-1/migrate_active_run_to_current_run.py`
-   converts on-disk state.
-3. **(deferred)** the previous projects-root scan was retired in Sprint 1
-   — it surprised users who happened to have unrelated projects with
-   stale state. The session-bound + cwd-ancestor paths together cover
-   every supported workflow.
-
-For each discovered slug (sorted), the hook re-prints `astrid next`
-output (the Sprint 1 preamble plus the current legal action) so Claude Code
-re-injects it into the next turn. The hook is read-side guidance: it does not
-claim writer ownership, advance epochs, or append task events. If no slugs are
-discovered the hook exits silently with status 0 — your normal Claude Code
-sessions are unaffected.
-
-When the agent is running with `ASTRID_SESSION_ID` exported, the hook works
-from any cwd because session-bound resolution wins regardless of working
-directory. Without a session bound, the cwd-ancestor walk is the only
-fallback — running from an unrelated repo checkout silently no-ops.
+The agent-facing guidance lives in `astrid/packs/_core/skill/SKILL.md`;
+human-facing setup lives in [getting-started.md](../getting-started.md).

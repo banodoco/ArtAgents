@@ -16,29 +16,30 @@ registry. It resolves inputs in this order:
 `asset:<id>` and bare registry ids are both accepted. Broken references remain
 visible as missing-image placeholders.
 
-Inspect first:
-
-```bash
-python3 -m astrid executors inspect rendering.timeline_storyboard --json
-```
-
 Build all pinned shots:
 
-```bash
-python3 -m astrid executors run rendering.timeline_storyboard \
-  --out runs/timeline-storyboard \
-  --input timeline=path/to/timeline.json \
-  --input assets_registry=path/to/assets.json
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "rendering.timeline_storyboard",
+    inputs={"timeline": "path/to/timeline.json", "assets_registry": "path/to/assets.json"},
+    out="runs/timeline-storyboard",
+)
 ```
 
 Build one shot:
 
-```bash
-python3 -m astrid executors run rendering.timeline_storyboard \
-  --out runs/timeline-storyboard \
-  --input timeline=path/to/timeline.json \
-  --input assets_registry=path/to/assets.json \
-  --input shot_id=shot-1
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "rendering.timeline_storyboard",
+    inputs={
+        "timeline": "path/to/timeline.json",
+        "assets_registry": "path/to/assets.json",
+        "shot_id": "shot-1",
+    },
+    out="runs/timeline-storyboard",
+)
 ```
 
 Outputs:

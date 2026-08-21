@@ -1,4 +1,4 @@
-"""Sprint 5b: thumbnail_maker orchestrator — plan v2 emission + task gate loop."""
+"""Sprint 5b: thumbnail_maker orchestrator — plan v2 emission + direct step execution."""
 
 
 from __future__ import annotations
@@ -10,21 +10,21 @@ guard_canonical_entrypoint('video_editing.thumbnail_maker')
 import argparse
 import datetime as dt
 import json
+import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
 from astrid.core.cli_choices import add_choice_arg
 from astrid.core.foundation.hash import sha256_file
-from astrid.core.foundation.project_paths import project_dir, validate_project_slug
+from astrid.core.foundation.project_paths import project_dir
 from astrid.core.project.run import (
     finalize_project_run,
     prepare_project_run,
     reject_project_with_out,
 )
-from astrid.core.task import env as task_env
-from astrid.core.task import gate as task_gate
 from astrid.packs.training.executors.asset_cache import run as asset_cache
 from astrid.packs.video_editing.orchestrators.thumbnail_maker.plan_template import (
     build_plan_v2,
@@ -185,7 +185,7 @@ def resolve_video_for_analysis(video: str, *, dry_run: bool) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# Orchestrator (plan v2 + task gate)
+# Orchestrator (plan v2 + direct step execution)
 # ---------------------------------------------------------------------------
 
 
@@ -363,8 +363,7 @@ def run_orchestrator(args: argparse.Namespace) -> int:
     )
     emit_plan_json(plan, plan_path)
 
-    from astrid.core.task.plan import compute_plan_hash
-    plan_hash = compute_plan_hash(plan_path)
+    plan_hash = "sha256:" + sha256_file(plan_path)
 
     _write_run_json(args)
     _append_pack_run_started(args.out)
@@ -373,113 +372,104 @@ def run_orchestrator(args: argparse.Namespace) -> int:
         print(f"thumbnail_maker: plan emitted to {plan_path} (plan_hash={plan_hash})")
         return 0
 
-    if project_slug is None:
+    return _execute_steps_directly(args)
+
+
+def _child_env() -> dict[str, str]:
+    """Child env: pass the current env plus the internal-invocation marker."""
+
+    env = os.environ.copy()
+    env["ASTRID_INTERNAL_INVOCATION"] = "1"
+    return env
+
+
+def _run_step_subprocess(cmd: list[str], *, label: str) -> None:
+    """Run one local step as a guarded subprocess, failing on non-zero exit."""
+
+    proc = subprocess.run(cmd, capture_output=True, text=True, env=_child_env())
+    if proc.stdout.strip():
+        print(proc.stdout.strip())
+    if proc.returncode != 0:
         raise AstridError(
-            "thumbnail_maker: --project required for task-gate execution",
-            recovery_command="add --project <slug> to your command",
+            f"[thumbnail_maker] {label} failed (exit {proc.returncode})",
+            recovery_command=f"check the step command and rerun: {' '.join(cmd)}",
+            state_snapshot={
+                "stdout": proc.stdout,
+                "stderr": proc.stderr,
+                "command": " ".join(cmd),
+            },
         )
 
-    slug = validate_project_slug(project_slug)
-    return _execute_via_task_gate(slug, args)
 
+def _execute_steps_directly(args: argparse.Namespace) -> int:
+    """Run the five local steps sequentially as guarded subprocesses.
 
-def _execute_via_task_gate(slug: str, args: argparse.Namespace) -> int:
-    """Advance through the task-gate plan by peeking at each step, dispatching
-    via ``gate_command`` with the step's rendered canonical command, and
-    waiting for the dispatched subprocess to complete.
-
-    Every dispatched step is a local-adapter subprocess that re-enters the
-    task gate through ``_run_step_subcommand``, which calls
-    ``record_dispatch_complete`` so the gate sees step completion on the
-    next iteration.
+    Each step re-enters this module's ``main()`` step-executor fast path
+    (``ASTRID_INTERNAL_INVOCATION=1``), mirroring the plan-template step
+    commands with concrete output paths under ``--out``.
     """
-    import os
-    import time
+    run_module = "astrid.packs.video_editing.orchestrators.thumbnail_maker.run"
+    steps: list[tuple[str, list[str]]] = []
 
-    from astrid.core.foundation.project_paths import project_dir
-    from astrid.core.session.current_run_state import read_current_run_state
-    from astrid.core.command_render import render_task_command
-    from astrid.core.events import read_events
-    from astrid.core.task.gate import peek_current_step
-    from astrid.core.task.plan import load_plan
-    from astrid.core.task.plan.verbs import apply_mutations
+    video = getattr(args, "video", None)
+    if video is not None:
+        steps.append((
+            "resolve-video",
+            [
+                args.python_exec, "-m", run_module, "resolve-video",
+                "--video", str(video),
+                "--out", str(args.out / "video-resolution.json"),
+            ],
+        ))
+    else:
+        print("thumbnail_maker: skipping resolve-video (no --video provided)")
 
-    active_run = read_current_run_state(slug)
-    if active_run is None:
-        raise AstridError(
-            f"no active run found for project {slug!r}",
-            recovery_command=f"astrid start --engine arnold --from-plan plan.json --project {slug}",
-        )
+    query = getattr(args, "query", "auto")
+    steps.append((
+        "plan-evidence",
+        [
+            args.python_exec, "-m", run_module, "plan-evidence",
+            "--query", str(query),
+            "--out", str(args.out / "evidence" / "evidence-plan.json"),
+        ],
+    ))
 
-    run_id: str = active_run["run_id"]
-    proj_root = project_dir(slug)
-    events_path = proj_root / "runs" / run_id / "events.jsonl"
+    steps.append((
+        "discover-video-evidence",
+        [
+            args.python_exec, "-m", run_module, "discover-video-evidence",
+            "--query", str(query),
+            "--out", str(args.out / "evidence" / "candidates.json"),
+            "--previous-manifest", str(args.out / "evidence" / "evidence-plan.json"),
+        ],
+    ))
 
-    while True:
-        events = read_events(events_path)
-        base_plan = load_plan(proj_root / "plan.json")
-        plan = apply_mutations(base_plan, events)
+    steps.append((
+        "build-reference-pack",
+        [
+            args.python_exec, "-m", run_module, "build-reference-pack",
+            "--query", str(query),
+            "--out", str(args.out / "evidence" / "reference-pack.json"),
+            "--previous-manifest", str(args.out / "evidence" / "candidates.json"),
+        ],
+    ))
 
-        peek = peek_current_step(
-            plan, events, slug,
-            project_root=proj_root,
-            run_id=run_id,
-        )
+    steps.append((
+        "generate-thumbnails",
+        [
+            args.python_exec, "-m", run_module, "generate-thumbnails",
+            "--query", str(query),
+            "--out", str(args.out / "thumbnail-manifest.json"),
+            "--previous-manifest", str(args.out / "evidence" / "reference-pack.json"),
+            "--count", str(getattr(args, "count", 1)),
+            "--size", str(getattr(args, "size", DEFAULT_SIZE)),
+        ],
+    ))
 
-        if peek.exhausted:
-            return 0
-
-        step = peek.step
-        path_tuple = peek.path_tuple
-
-        # Render the step's canonical command so it matches the
-        # task-gate's own rendering (same produces_root / step_dir).
-        rendered = render_task_command(
-            step,
-            slug=slug,
-            run_id=run_id,
-            project_root=proj_root,
-            plan_step_path=path_tuple,
-            iteration=peek.iteration,
-            item_id=peek.item_id,
-        )
-
-        try:
-            decision = task_gate.gate_command(
-                slug,
-                rendered.canonical_command,
-                list(rendered.canonical_argv),
-                reentry=True,
-            )
-        except task_gate.TaskRunGateError as exc:
-            raise AstridError(
-                str(exc),
-                recovery_command=getattr(exc, "recovery", "check project state and retry"),
-            ) from exc
-
-        if not decision.active:
-            return 0
-
-        # The local adapter has spawned a subprocess.  Wait for it to
-        # exit so the reentry path can write step_completed before we
-        # peek at the next step.
-        if decision.pid:
-            print(
-                f"thumbnail_maker: waiting for pid={decision.pid} "
-                f"(step={step.id})",
-                flush=True,
-            )
-            while True:
-                try:
-                    os.kill(decision.pid, 0)
-                    time.sleep(0.5)
-                except (ProcessLookupError, OSError):
-                    break
-        else:
-            # No PID means the adapter handled the step inline (e.g.
-            # a no-op or an already-satisfied produces check).  Give
-            # the filesystem a moment to settle.
-            time.sleep(0.1)
+    for label, cmd in steps:
+        print(f"thumbnail_maker: running step={label}")
+        _run_step_subprocess(cmd, label=label)
+    return 0
 
 
 # ---------------------------------------------------------------------------
@@ -493,29 +483,10 @@ def _run_step_subcommand(
     args: argparse.Namespace,
     runner: Callable[[argparse.Namespace], int],
 ) -> int:
-    """Run one local-adapter step, recording task-gate completion in task mode."""
-    slug = task_env.task_project_env()
-    decision = None
-    if slug is not None and task_env.is_in_task_run(slug):
-        try:
-            decision = task_gate.gate_command(
-                slug,
-                task_gate.command_for_argv(
-                    ["python3", "-m", "astrid.packs.video_editing.orchestrators.thumbnail_maker.run", *effective_argv]
-                ),
-                effective_argv,
-                reentry=True,
-            )
-        except task_gate.TaskRunGateError as exc:
-            raise AstridError(
-                str(exc),
-                recovery_command="check project status with 'astrid status' and retry",
-            ) from exc
+    """Run one local-adapter step directly (no task gate)."""
 
-    returncode = runner(args)
-    if decision is not None:
-        task_gate.record_dispatch_complete(decision, returncode)
-    return returncode
+    del effective_argv
+    return runner(args)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -573,22 +544,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.add_argument("--project")
         parser.add_argument("--out")
         parsed, _unknown = parser.parse_known_args(effective_argv)
-
-        if parsed.project and task_env.is_in_task_run(parsed.project):
-            try:
-                task_gate.gate_command(
-                    parsed.project,
-                    task_gate.command_for_argv(
-                        ["python3", "-m", "astrid", "thumbnail_maker", *effective_argv]
-                    ),
-                    effective_argv,
-                    reentry=True,
-                )
-            except task_gate.TaskRunGateError as exc:
-                raise AstridError(
-                    str(exc),
-                    recovery_command="check project status with 'astrid status' and retry",
-                ) from exc
 
         if parsed.project:
             reject_project_with_out(parsed.project, parsed.out)

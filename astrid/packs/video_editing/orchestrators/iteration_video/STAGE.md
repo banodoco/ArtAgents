@@ -10,11 +10,16 @@ Inspect first when provenance quality is uncertain:
 python3 -m astrid.packs.video_editing.orchestrators.iteration_video.run inspect @active --no-content
 ```
 
-Run through the canonical gateway. The pack-level `--thread` is a lineage
-selector passed after `--`; it is not a generic Astrid session binding flag.
+Run through the SDK. The pack-level `--thread` is a lineage
+selector passed as an input; it is not a generic Astrid session binding flag.
 
-```bash
-python3 -m astrid orchestrators run video_editing.iteration_video --out runs/iteration_video -- --thread @active --max-iterations 20
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "video_editing.iteration_video",
+    inputs={"thread": "@active", "max_iterations": "20"},
+    out="runs/iteration_video",
+)
 ```
 
 V1 supports chaptered mode only. `--direction` is a label, `--renderers` and `--clip-mode` are recorded as requested planning hints, and no generated music is created.

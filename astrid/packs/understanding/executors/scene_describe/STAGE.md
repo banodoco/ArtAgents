@@ -14,20 +14,31 @@ These descriptions feed into `pool_build` and `quote_scout`, enabling
 semantic clip search ("find all scenes with a person walking") and smart
 arrangement. The `scene_descriptions.json` sentinel gates cache invalidation.
 
-## CLI quick-start
+## Quick-start
 
-```bash
-python -m astrid executors run understanding.scene_describe -- \
-  --video ./source.mp4 --scenes ./out/scenes.json \
-  --triage ./out/triage.json --out ./out
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "understanding.scene_describe",
+    inputs={"video": "./source.mp4", "scenes": "./out/scenes.json", "triage": "./out/triage.json"},
+    out="./out",
+)
 ```
 
 With explicit API credentials:
 
-```bash
-python -m astrid executors run understanding.scene_describe -- \
-  --video ./source.mp4 --scenes ./out/scenes.json \
-  --triage ./out/triage.json --env-file .env.local --out ./out
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "understanding.scene_describe",
+    inputs={
+        "video": "./source.mp4",
+        "scenes": "./out/scenes.json",
+        "triage": "./out/triage.json",
+        "env_file": ".env.local",
+    },
+    out="./out",
+)
 ```
 
 ## Inputs

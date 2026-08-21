@@ -367,25 +367,29 @@ an adjacent transcript file, or a lower-quality media fallback.
 
 ### Direct executor surface
 
-The executor remains independently discoverable and runnable:
+The executor remains independently discoverable and runnable through the SDK:
 
-```bash
-astrid executors inspect rendering.timeline_visualize --json
+```python
+import astrid.sdk as sdk
 
-astrid executors run rendering.timeline_visualize \
-  --project desert-plant-growth \
-  --input timeline_source=projects/desert-plant-growth/timelines/<timeline-ulid> \
-  --input layout=both \
-  --input formats=png \
-  --input formats=svg \
-  --input formats=md \
-  --input scope=timeline
+result = sdk.invoke(
+    "rendering.timeline_visualize",
+    project="desert-plant-growth",
+    inputs={
+        "timeline_source": [
+            "projects/desert-plant-growth/timelines/<timeline-ulid>",
+        ],
+        "layout": "both",
+        "formats": ["png", "svg", "md"],
+        "scope": "timeline",
+    },
+)
 ```
 
 `timeline_source` is repeatable and points to a managed timeline directory,
 not merely `assembly.json`. That directory gives the executor the projected
 assembly, asset registry, display metadata, and identity without parallel
-lists that can become misaligned. The CLI passes one directory for
+lists that can become misaligned. The SDK passes one directory for
 shot/range/timeline scope and all selected directories for project scope.
 
 For standalone use, allow an explicit `timeline` file plus optional
@@ -1049,9 +1053,15 @@ python3 -m pytest \
   tests/packs/rendering/test_timeline_visualize_layout.py \
   tests/packs/rendering/test_timeline_visualize_outputs.py \
   tests/core/cli/test_timeline_visualize.py -v
+```
 
-python3 -m astrid executors inspect rendering.timeline_visualize --json
+```python
+import astrid.sdk as sdk
 
+print(sdk.get_capability("rendering.timeline_visualize"))
+```
+
+```bash
 python3 -m astrid timelines audit plant-growth-storyboard \
   --project desert-plant-growth
 

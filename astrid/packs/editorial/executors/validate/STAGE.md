@@ -18,27 +18,46 @@ The validator also detects caption misalignment: if expected text appears
 elsewhere in the full transcript but not within the clip's time window, it
 flags the clip with a `note` indicating likely misalignment.
 
-## CLI quick-start
+## SDK quick-start
 
-```bash
-python -m astrid executors run editorial.validate -- \
-  --video ./out/hype.mp4 --out ./out
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "editorial.validate",
+    inputs={"video": "./out/hype.mp4"},
+    out="./out",
+)
 ```
 
 With explicit timeline and metadata paths:
 
-```bash
-python -m astrid executors run editorial.validate -- \
-  --video ./out/hype.mp4 --timeline ./out/hype.timeline.json \
-  --metadata ./out/hype.metadata.json --threshold 0.6 --out ./out
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "editorial.validate",
+    inputs={
+        "video": "./out/hype.mp4",
+        "timeline": "./out/hype.timeline.json",
+        "metadata": "./out/hype.metadata.json",
+        "threshold": "0.6",
+    },
+    out="./out",
+)
 ```
 
 With an env file for the Whisper API key and skipping re-transcription:
 
-```bash
-python -m astrid executors run editorial.validate -- \
-  --video ./out/hype.mp4 --env-file .env.local \
-  --skip-transcribe --out ./out
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "editorial.validate",
+    inputs={
+        "video": "./out/hype.mp4",
+        "env_file": ".env.local",
+        "skip_transcribe": True,
+    },
+    out="./out",
+)
 ```
 
 ## Inputs
