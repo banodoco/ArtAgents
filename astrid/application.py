@@ -353,9 +353,11 @@ def compose_standard_application(
         # single timeline service before it commits through the one writer.
         timeline_save_calls = _instrument_timeline_save(timelines_service)
         media_service = MediaService(writer, projects, media, receipts)
-        tasks_service = TasksService(writer, tasks, receipts, event_log)
+        tasks_service = TasksService(
+            writer, projects, tasks, receipts, event_log
+        )
         runs_service = RunsService(
-            writer, runs, receipts, evidence, event_log
+            writer, projects, runs, receipts, evidence, event_log
         )
         references_service = ReferencesService(
             writer, projects, references, receipts

@@ -88,6 +88,31 @@ python3 -m astrid media references ...      # create/update/archive/associate/li
 python3 -m astrid timelines shots ...       # list/create/add/remove/reorder
 ```
 
+## Runs & tasks
+
+There is no `runs create` verb anywhere: a run comes into existence through
+the kernel, never by hand. `RunRepository.create` is the fan-out root — one
+transaction commits the `core.run` event stream, the `runs` row, its ordered
+child tasks, and evidence together. You rarely call it directly: pack
+capabilities invoked through the SDK create their own runs (e.g.
+`astrid.sdk.invoke("understanding.understand", ...)` commits one zero-task
+run plus evidence via the understanding adapter), while
+`client.tasks.create` admits standalone tasks that belong to no run. The
+CLI `tasks`/`runs` families then list and drive that work — `--project`
+takes the project slug or id:
+
+```bash
+python3 -m astrid tasks list --project demo --json
+python3 -m astrid runs show <run_id> --project demo --json --evidence
+python3 -m astrid runs cancel <run_id> --project demo --json
+python3 -m astrid runs retry-failed <run_id> --project demo --json
+```
+
+A run with zero children (or all children terminal) never leaves `running`
+on its own; terminalize it through the SDK:
+`client.runs.close(project, run_id)` (the kernel `core.run.close`
+transition).
+
 ## Operational families
 
 ```bash
@@ -105,14 +130,21 @@ gateway commands. Run them through the SDK:
 ```python
 import astrid.sdk as sdk
 
-result = sdk.discover()                      # inventory + metadata (--json equivalent)
-cap = sdk.get_capability("editorial.transcribe")
+result = sdk.discover(include_installed=False)   # in-tree pack inventory
+cap = sdk.get_capability(
+    "editorial.transcribe", kind="executor", include_installed=False,
+)
 result = sdk.invoke(
-    "editorial.transcribe",
-    inputs={"audio": "voiceover.wav"},
-    out="runs/transcribe",
+    "iteration.experiment_review",
+    kind="executor",
+    include_installed=False,
+    inputs={"review": "experiments/prompt-brevity/review.json"},
+    project="demo",          # every executor run belongs to exactly one project
 )
 ```
+
+`kind` is required; pass `project=<slug>` and omit `out` — project-scoped
+runs write inside the project's own `runs/<run-id>/` tree.
 
 or through a bound client:
 
@@ -120,7 +152,12 @@ or through a bound client:
 from astrid.sdk.client import AstridClient
 
 with AstridClient.open() as client:          # composes the standard application
-    result = client.invoke("rendering.render", inputs={...}, out="runs/out")
+    result = client.invoke(
+        "rendering.render",
+        kind="executor",
+        inputs={...},
+        project="demo",
+    )
 ```
 
 Typed facades exist for the most common surfaces: `astrid.generate.*`
@@ -178,7 +215,7 @@ needs its full body or citation context. Run them through the SDK:
 
 ```python
 import astrid.sdk as sdk
-result = sdk.invoke("hivemind.search", inputs={"query": "wan 2.2 best settings"})
+result = sdk.invoke("hivemind.search", kind="executor", inputs={"query": "wan 2.2 best settings"})
 ```
 
 Astrid project files remain the source of truth for raw runs, experiment
@@ -220,8 +257,10 @@ Discover capabilities through the SDK, not by grepping source:
 
 ```python
 import astrid.sdk as sdk
-result = sdk.discover()                       # full inventory, pack by pack
-caps = sdk.get_capability("editorial.arrange")  # typed lookup (raises on missing/ambiguous)
+result = sdk.discover(include_installed=False)   # full in-tree inventory, pack by pack
+caps = sdk.get_capability(                       # typed lookup (raises on missing/ambiguous)
+    "editorial.arrange", kind="executor", include_installed=False,
+)
 ```
 
 Read the relevant `STAGE.md` before running a capability; it is the source of
@@ -314,17 +353,20 @@ import astrid.sdk as sdk
 
 result = sdk.invoke(
     "rendering.render",
+    kind="executor",
+    include_installed=False,
     inputs={
         "timeline": "runs/<my-run>/timeline.json",
         "assets_registry": "runs/<my-run>/assets.json",
     },
-    out="runs/<my-run>",
+    project="demo",
 )
 ```
 
 For timelines with no media registry entries, omit `assets_registry`. The
-normal render writes `runs/<my-run>/hype.mp4` and
-`runs/<my-run>/hype.mp4.provenance.json`. Renderer authors use the typed
+project-scoped render writes `hype.mp4` (plus its `.provenance.json`
+sidecar) into the run's output directory under `demo/runs/<run-id>/`.
+Renderer authors use the typed
 `astrid.render` / `astrid.support` / `astrid.renderer_main` /
 `astrid.RenderContext` surface (see `docs/reference/sdk.md`).
 

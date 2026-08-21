@@ -73,7 +73,7 @@ def env(tmp_path: Path):
             tasks=tasks,
             receipts=receipts,
             event_log=event_log,
-            service=TasksService(writer, tasks, receipts, event_log),
+            service=TasksService(writer, projects, tasks, receipts, event_log),
         )
     finally:
         writer.close()
@@ -313,7 +313,7 @@ def test_show_missing_returns_not_found(env: SimpleNamespace) -> None:
     assert result.error.code == "not_found"
 
 
-def test_create_requires_existing_project_returns_validation_error(
+def test_create_unknown_project_fails_loudly_with_not_found(
     env: SimpleNamespace,
 ) -> None:
     result = env.service.create(
@@ -321,7 +321,8 @@ def test_create_requires_existing_project_returns_validation_error(
     )
     assert result.ok is False
     assert result.error is not None
-    assert result.error.code == "validation_error"
+    assert result.error.code == "not_found"
+    assert _task_count(env) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -443,3 +444,46 @@ def test_events_returns_ordered_stream_events(env: SimpleNamespace) -> None:
         "core.task.created",
         "core.task.cancelled",
     ]
+
+
+# ---------------------------------------------------------------------------
+# Project slug resolution (CLI parity with projects/media families)
+# ---------------------------------------------------------------------------
+
+
+def test_create_and_list_accept_project_slug(env: SimpleNamespace) -> None:
+    project_id = _create_project(env, slug="myproj")
+    by_slug = env.service.create(
+        project_id="myproj", capability="cap.a", spec={"x": 1}
+    )
+    assert by_slug.ok is True, by_slug.error
+    # The canonical id scopes the derived task id, so a retry addressed by
+    # id replays instead of admitting a second task.
+    by_id = env.service.create(
+        project_id=project_id,
+        capability="cap.a",
+        spec={"x": 1},
+        idempotency_key=by_slug.idempotency_key,
+    )
+    assert by_id.ok is True
+    assert by_id.data["id"] == by_slug.data["id"]
+    listed = env.service.list("myproj")
+    assert listed.ok is True
+    assert [row["id"] for row in listed.data] == [by_slug.data["id"]]
+    assert listed.data[0]["project_id"] == project_id
+
+
+def test_unknown_project_slug_fails_loudly_not_silently_empty(
+    env: SimpleNamespace,
+) -> None:
+    created = env.service.create(
+        project_id="nope", capability="cap.a", spec={"x": 1}
+    )
+    assert created.ok is False
+    assert created.error is not None
+    assert created.error.code in ("not_found", "validation_error")
+    listed = env.service.list("nope")
+    assert listed.ok is False
+    assert listed.error is not None
+    assert listed.error.code in ("not_found", "validation_error")
+    assert _task_count(env) == 0

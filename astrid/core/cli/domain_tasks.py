@@ -12,7 +12,8 @@ contract.
 Verbs (exactly these six, one SDK call each):
 
 - ``create`` — one ``client.tasks.create`` call; accepts ``--project`` (the
-  owning project id), ``--capability``, ``--spec`` (a JSON object), and the
+  owning project id or immutable slug), ``--capability``, ``--spec`` (a JSON
+  object), and the
   optional admission controls ``--input-manifest`` (JSON array),
   ``--priority``, ``--available-at``, ``--max-attempts``, and
   ``--dependencies`` (JSON array), plus ``--idempotency-key`` (a fresh key is
@@ -101,7 +102,7 @@ def _add_project_arg(subparser: argparse.ArgumentParser) -> None:
     subparser.add_argument(
         "--project",
         required=True,
-        help="Owning project id (task ids are project-scoped).",
+        help="Owning project id or slug (task ids are project-scoped).",
     )
 
 

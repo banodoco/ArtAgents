@@ -19,9 +19,15 @@ metadata comes from `astrid.sdk.discover()`.
 ```python
 import astrid.sdk as sdk
 
-inventory = sdk.discover()                       # every capability, pack by pack
-cap = sdk.get_capability("rendering.render")     # typed lookup of one capability
+inventory = sdk.discover(include_installed=False)  # in-tree packs, pack by pack
+cap = sdk.get_capability(
+    "rendering.render", kind="executor", include_installed=False
+)  # typed lookup of one capability
 ```
+
+Pin `include_installed=False` in scripted/agent workflows: externally
+installed packs load with the registry by default, and one broken installed
+manifest fails the whole discovery call.
 
 Every discoverable capability (executor, orchestrator, element) belongs to a
 pack and is exposed through a consistent discovery surface.
@@ -47,7 +53,7 @@ see [docs/packs/pack-taxonomy.md](../packs/pack-taxonomy.md).
 
 ```python
 import astrid.sdk as sdk
-inventory = sdk.discover()
+inventory = sdk.discover(include_installed=False)
 ```
 
 `discover()` returns a `DiscoveryResult`: the discovered pack inventory, each
@@ -59,9 +65,10 @@ metadata. There is no separate "skills list" step — pack skills are the
 ### 2. Look up one capability
 
 ```python
-cap = sdk.get_capability("generation.generate_image")
+cap = sdk.get_capability(
+    "generation.generate_image", kind="executor", include_installed=False
+)
 ```
-
 `get_capability` resolves the qualified id (aliases included) and raises the
 typed `CapabilityNotFoundError` / `CapabilityAmbiguousError` on failure.
 
@@ -73,12 +80,20 @@ definition (inputs, outputs, isolation, graph, metadata) — see below.
 ### 4. Run it
 
 ```python
-result = sdk.invoke("video_editing.hype", inputs={"brief": "brief.txt"}, out="runs/out")
+result = sdk.invoke(
+    "iteration.experiment_review",
+    kind="executor",
+    include_installed=False,
+    inputs={"review": "experiments/prompt-brevity/review.json"},
+    project="my-project",
+)
 ```
 
 `invoke` returns an `InvocationResult` with the produced outputs and
-provenance. Input names map to the executor's declared inputs and flags
-(`--input name=value` style).
+provenance. `kind` is required, and every executor run belongs to exactly
+one project: pass `project=<slug>` and omit `out` — project-scoped runs
+write inside the project's own `runs/<run-id>/` tree. Input names map to
+the executor's declared inputs and flags (`--input name=value` style).
 
 ## The `_capability` Identity Block
 

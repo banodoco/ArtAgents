@@ -1013,6 +1013,54 @@ def test_runs_retry_failed_help_is_executable(capsys) -> None:
     assert "--idempotency-key" in out
 
 
+
+# ---------------------------------------------------------------------------
+# Project slug pass-through and loud unknown-address failure (v10 sensecheck)
+# ---------------------------------------------------------------------------
+
+
+def test_tasks_and_runs_forward_project_slug_untouched(capsys) -> None:
+    """The CLI hands the slug string straight to the SDK service; slug ->
+    id resolution lives in ``TasksService``/``RunsService`` (the same
+    repository-driven resolution the media family relies on)."""
+    client = _FakeClient()
+    rc = _run("tasks", ["list", "--project", "my-slug"], client=client)
+    assert rc == 0
+    rc = _run("runs", ["list", "--project", "my-slug"], client=client)
+    assert rc == 0
+    assert client.calls == [
+        ("tasks.list", {"project_id": "my-slug"}),
+        ("runs.list", {"project_id": "my-slug"}),
+    ]
+
+
+def test_unknown_project_slug_is_a_loud_not_found_exit_one(capsys) -> None:
+    """``runs list --project nope`` must fail loudly (typed ``not_found``,
+    stderr error line, exit 1) — never a silently empty ``ok`` envelope."""
+
+    class _NotFoundListRuns(_RecordingRuns):
+        def list(self, project_id):
+            return DomainResult.failure(
+                ErrorObject(
+                    code="not_found",
+                    message=f"project address {project_id!r} not found",
+                    details={},
+                )
+            )
+
+    class _Client(_FakeClient):
+        def __init__(self) -> None:
+            super().__init__()
+            self.runs = _NotFoundListRuns(self)
+
+    client = _Client()
+    rc = _run("runs", ["list", "--project", "nope", "--json"], client=client)
+    assert rc == 1
+    envelope = json.loads(capsys.readouterr().out)
+    assert set(envelope) == ENVELOPE_KEYS
+    assert envelope["ok"] is False
+    assert envelope["error"]["code"] == "not_found"
+
 # ---------------------------------------------------------------------------
 # Gateway dispatch cutover for the tasks/runs families (m6)
 # ---------------------------------------------------------------------------

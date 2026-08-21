@@ -52,6 +52,7 @@ from astrid.core.receipts.canonical import parse_json
 from astrid.core.receipts.service import CommandReceipt, ReceiptService
 from astrid.core.repositories.events import EventRepository
 from astrid.core.repositories.evidence import EvidenceRepository
+from astrid.core.repositories.projects import ProjectRepository
 from astrid.core.repositories.runs import (
     CORE_RUN_STREAM_TYPE,
     RunNotFoundError,
@@ -97,19 +98,22 @@ class RunsService:
 
     Stateless: a single instance is safe to share across concurrent callers.
     The constructor receives the shared :class:`DatabaseWriter` (one writer
-    queue), the run repository, the receipt service, the evidence repository,
-    and the read-only ordered event repository.
+    queue), the project repository (for project id/slug resolution), the run
+    repository, the receipt service, the evidence repository, and the
+    read-only ordered event repository.
     """
 
     def __init__(
         self,
         writer: DatabaseWriter,
+        projects: ProjectRepository,
         runs: RunRepository,
         receipts: ReceiptService,
         evidence: EvidenceRepository,
         event_log: EventRepository,
     ) -> None:
         self._writer = writer
+        self._projects = projects
         self._runs = runs
         self._receipts = receipts
         self._evidence = evidence
@@ -120,9 +124,12 @@ class RunsService:
     def list(self, project_id: str) -> DomainResult[list[dict[str, Any]]]:
         """Return one lightweight read model per run in a project.
 
-        Ordered by ``started_at`` then id (deterministic, stable).
+        ``project_id`` accepts the canonical project id or the immutable
+        slug; an unknown address is a typed ``not_found`` (never a silently
+        empty list). Ordered by ``started_at`` then id (deterministic).
         """
         try:
+            project_id = self._projects.resolve(self._writer, project_id)
             rows = UnitOfWork(self._writer).run(
                 lambda uow: uow.query(
                     _RUN_ROW_SELECT + " WHERE project_id = ? "
@@ -145,12 +152,15 @@ class RunsService:
     ) -> DomainResult[dict[str, Any]]:
         """Return one run's read model, derived child progress, and evidence.
 
-        Progress is derived fresh from the child task rows (never a cursor);
-        when ``include_evidence`` is true the run's ordered evidence items
-        are appended under the ``evidence`` key. A missing or foreign run is
-        a typed ``not_found``.
+        ``project_id`` accepts the canonical project id or the immutable
+        slug; an unknown address is a typed ``not_found``. Progress is
+        derived fresh from the child task rows (never a cursor); when
+        ``include_evidence`` is true the run's ordered evidence items are
+        appended under the ``evidence`` key. A missing or foreign run is a
+        typed ``not_found``.
         """
         try:
+            project_id = self._projects.resolve(self._writer, project_id)
             data = UnitOfWork(self._writer).run(
                 lambda uow: self._show_read(uow, project_id, run_id)
             )
@@ -194,14 +204,21 @@ class RunsService:
     ) -> DomainResult[dict[str, Any]]:
         """Cancel every eligible child of one running run and return receipt.
 
-        Reuses the repository's shared task-cancel predicate and recomputed
-        run projection; running children (whose owned attempt fence a group
+        ``project_id`` accepts the canonical project id or the immutable
+        slug; an unknown address is a typed ``not_found``. Reuses the
+        repository's shared task-cancel predicate and recomputed run
+        projection; running children (whose owned attempt fence a group
         command cannot present) and already-terminal children are skipped
         untouched, and a terminal run is a typed ``terminal_state``.
         """
         try:
             key = self._resolve_key(idempotency_key)
+            project_id = self._projects.resolve(self._writer, project_id)
         except ServiceValidationError as exc:
+            return DomainResult.failure(
+                map_error(exc), idempotency_key=idempotency_key or ""
+            )
+        except Exception as exc:  # noqa: BLE001 - centralized bounded mapping
             return DomainResult.failure(
                 map_error(exc), idempotency_key=idempotency_key or ""
             )
@@ -242,7 +259,12 @@ class RunsService:
         """
         try:
             key = self._resolve_key(idempotency_key)
+            project_id = self._projects.resolve(self._writer, project_id)
         except ServiceValidationError as exc:
+            return DomainResult.failure(
+                map_error(exc), idempotency_key=idempotency_key or ""
+            )
+        except Exception as exc:  # noqa: BLE001 - centralized bounded mapping
             return DomainResult.failure(
                 map_error(exc), idempotency_key=idempotency_key or ""
             )
@@ -287,7 +309,12 @@ class RunsService:
         """
         try:
             key = self._resolve_key(idempotency_key)
+            project_id = self._projects.resolve(self._writer, project_id)
         except ServiceValidationError as exc:
+            return DomainResult.failure(
+                map_error(exc), idempotency_key=idempotency_key or ""
+            )
+        except Exception as exc:  # noqa: BLE001 - centralized bounded mapping
             return DomainResult.failure(
                 map_error(exc), idempotency_key=idempotency_key or ""
             )
@@ -316,10 +343,13 @@ class RunsService:
     ) -> DomainResult[list[dict[str, Any]]]:
         """Return the run's ordered ``core.run`` stream events.
 
-        Verifies the run exists and belongs to ``project_id`` (typed
-        ``not_found`` otherwise), then returns the ordered stream events.
+        ``project_id`` accepts the canonical project id or the immutable
+        slug; an unknown address is a typed ``not_found``. Verifies the run
+        exists and belongs to the project (typed ``not_found`` otherwise),
+        then returns the ordered stream events.
         """
         try:
+            project_id = self._projects.resolve(self._writer, project_id)
             row = UnitOfWork(self._writer).run(
                 lambda uow: uow.query_one(
                     "SELECT id FROM runs WHERE id = ? AND project_id = ?",
