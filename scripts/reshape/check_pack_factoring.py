@@ -70,6 +70,7 @@ uninstalled.
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import json
 import os
 import re
@@ -774,19 +775,26 @@ def check_artifact_factoring(
                 raise ValueError(f"artifact root is missing the astrid package: {source}")
             shutil.copytree(source, base_root, symlinks=False)
 
-        removals = tuple(
-            check_artifact_removal(
-                pack,
-                wheel=wheel,
-                artifact_root=base_root,
-                python=python,
-                base_dir=base_work,
-                keep_temp=keep_temp,
-                kernel_timeout=kernel_timeout,
-                catalog_timeout=catalog_timeout,
-            )
-            for pack in requested
-        )
+        # Each reduced artifact is an isolated copy and its catalog/kernel
+        # probes run in subprocesses.  Keep the declared result order while
+        # running independent pack removals concurrently so the complete T9
+        # selector fits its aggregate verification budget.
+        with ThreadPoolExecutor(max_workers=len(requested)) as executor:
+            futures = [
+                executor.submit(
+                    check_artifact_removal,
+                    pack,
+                    wheel=wheel,
+                    artifact_root=base_root,
+                    python=python,
+                    base_dir=base_work,
+                    keep_temp=keep_temp,
+                    kernel_timeout=kernel_timeout,
+                    catalog_timeout=catalog_timeout,
+                )
+                for pack in requested
+            ]
+            removals = tuple(future.result() for future in futures)
         return ArtifactFactoringResult(
             removals=removals,
             sketch_summary=verify_sketch_kernel_inventory(),
