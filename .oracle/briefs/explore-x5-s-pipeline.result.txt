@@ -1,0 +1,51 @@
+## Ranked findings
+
+1. **Schema is a real v2 artifact, not the 265-byte degenerate.** 11,482 bytes. Root closed (`"additionalProperties": false`, line 134), `"required": ["clips","tracks"]` (130–133), `clip_order` = `"integer", "exclusiveMinimum": 0` (374–377), `keyframes` + `derived_output` defined as opaque objects (378–385), `app` opaque (`"type":"object","additionalProperties":{}`) at root (122–125) and on clips (364–367). TimelineClip requires `id, at, track` (387–391).
+
+2. **Zod source gone; codegen is schema→TS.** `typescript/src/schemas.ts` does not exist — only `index.ts`, `generated.ts`, `resolveTheme.ts`. `generated.ts` (221 ln) regenerated via `emit-ts-types.mjs` (`gen:types`). `json-schema-to-typescript` pinned **15.0.4**, TS 5.9.3, @types/node 20.14.0. Zero `zod`/`zod-to-json-schema` hits repo-wide; `datamodel-code-generator` appears only in stale Makefile line 8 + a comment.
+
+3. **Python fallback removed by design.** `__init__.py` docstring: "no silent fallback mirror — if generated.py is missing, importing fails loudly." `generated.py` = committed hand-maintained TypedDicts (clip keys incl. `clip_order`, `keyframes`, `derived_output`, `app`), checked by `gen_python_types.py`.
+
+4. **check-codegen.sh gates** (all in `scripts/check-codegen.sh`): min-size ≥1000 (23–30), meta-schema validity (32–58), required 5 definitions (39–49), root non-degenerate (50–53), TS re-emit byte-identity vs committed (60–62), Python mirror check (65), truncation guard emulation (64–85). **Stable `$id`: ABSENT — no `$id` in script or artifact.** Parse implicit via `json.load`/emit; two-generation identity is actually reemit-vs-committed (not emit-twice).
+
+5. **OpenAPI has all routes but zero `operationId`s** — nothing to quote. GET timeline, POST save (CAS), GET/HEAD assets; `config_version` opaque min 0; SaveRequest requires `expected_version`; 409 `error: timeline_version_conflict` (no silent retry per description); 422 `error: schema_incompatible` with `issues[]` requiring `pointer,code,message`.
+
+6. **Tests:** `test_contract_v2.py` — opaque app round-trips (incl. `com.reigh.scene-phase-markers`), tracks-required rejection, `clip_order: 0` rejection, real-project replay via `skipUnless`. No 123-event count; no in-repo parity corpus. `test_materialize_output.py` — 2rp theme resolution, background carry, missing-canvas/pacing-fps rejection.
+
+7. **Workflow exists**: `.github/workflows/timeline-schema.yml` (codegen + TS build/test; Python step is broken, see risks).
+
+## Checklist
+
+| GOAL item | Present/Absent | Evidence |
+|---|---|---|
+| artifact >1000 B non-degenerate | present | timeline.schema.json (11,482 B; root :1–135) |
+| requires tracks | present | timeline.schema.json:130–133 |
+| clip_order > 0 | present | timeline.schema.json:374–377 |
+| keyframes + derived_output | present | timeline.schema.json:378–385 |
+| closed core keys | present | timeline.schema.json:134 (+392, 74, 482) |
+| app opaque object | present | timeline.schema.json:122–125, 364–367 |
+| zod source removed | present | no schemas.ts; only index/generated/resolveTheme |
+| generated.ts from emit-ts-types.mjs | present | package.json `gen:types` |
+| json-schema-to-typescript pinned | present | package.json devDeps `15.0.4` |
+| zod / zod-to-json-schema / datamodel refs | absent | 0 hits (Makefile:8 stale) |
+| min-size gate | present | check-codegen.sh:23–30 |
+| required-definitions gate | present | check-codegen.sh:39–49 |
+| meta-schema validity gate | present | check-codegen.sh:32–58 |
+| stable $id gate | **absent** | no `$id` in script or schema |
+| parse gate | present (implicit) | check-codegen.sh:35, 60 |
+| two-generation byte-identity | present (reemit-vs-committed) | check-codegen.sh:60–62 |
+| truncation-must-fail | present | check-codegen.sh:64–85 |
+| python fallback removed | present | `__init__.py:1–12` loud-fail |
+| generated.py TypedDicts committed | present | generated.py:1–100 |
+| openapi GET timeline / POST save / GET+HEAD assets | present | bridge.openapi.json (no operationId) |
+| config_version / expected_version echo | present | TimelinePayload / SaveRequest |
+| 409 timeline_version_conflict | present | components.responses.VersionConflict |
+| 422 schema_incompatible issues[{pointer,code,message}] | present | ErrorBody.issues |
+| workflow dir | present | .github/workflows/timeline-schema.yml |
+
+## Unknowns / risks
+- **No operationIds anywhere** in bridge.openapi.json — consumers must key by method+path; the ask's "quote operationIds" has no target.
+- **Replay test silently skipped here**: its path computes `repos/reigh-workspace/Astrid/projects/desert-plant-growth/...`; this checkout has `repos/Astrid` (no `reigh-workspace`) → `skipUnless` skips. Available corpus is `Astrid/tests/fixtures/timeline_visualize/desert_slice/assembly.jsonl` (159 ln, **37** config_replaced events — docstring says 36), which the S test does *not* point at.
+- **CI never runs S's Python tests**: workflow step `python -m unittest discover -s python/tests -p 'test_*.py' || true` targets nonexistent `python/tests/` (tests live at `tests/`) and `|| true` swallows the failure.
+- Stale text: `validate.py` docstring "artifact emitted by Zod"; Makefile installs datamodel-code-generator; check-codegen.sh:66–72 first `node -e` block is a dead no-op probe.
+0
