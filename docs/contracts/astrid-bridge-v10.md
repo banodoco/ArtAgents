@@ -12,19 +12,19 @@
 
 ## 1. Routes and methods
 
+The bridge exposes exactly three routes (the B5 trim removed `/health`,
+`/projects`, the timeline list `/projects/:slug/timelines`, and the `OPTIONS`
+preflight route):
+
 | Route | Method(s) | Purpose |
 |---|---|---|
-| `/health` | `GET` | liveness + resolved projects root |
-| `/projects` | `GET` | sorted project list |
-| `/projects/:slug/timelines` | `GET` | timeline discovery list for one project |
 | `/projects/:slug/timelines/:ref` | `GET` | load one timeline (config + registry + version) |
 | `/projects/:slug/timelines/:ref/save` | `POST` | whole-document CAS save |
 | `/projects/:slug/timelines/:ref/assets/:key` | `GET`, `HEAD` | asset byte serving with Range support |
-| any path | `OPTIONS` | CORS preflight (204) |
 
-`:slug` is a validated project slug. `:ref` is a timeline address: canonical UUID, lowercase 26-character ULID, or immutable slug (see §8). `:key` is an asset key resolved from the persisted timeline asset registry.
+`:slug` is a validated project slug. `:ref` is a timeline address: canonical UUID, lowercase 26-character ULID, or immutable slug (see §6). `:key` is an asset key resolved from the persisted timeline asset registry.
 
-Route grammar: exactly the segments above. Any other path returns 404 with the `not_found` envelope.
+Route grammar: exactly the segments above. Any other path returns `404` with the `not_found` envelope (`GET`/`POST` return the JSON envelope; `HEAD` of an unknown route returns `404` with no body). Unsupported methods (`OPTIONS`, `PATCH`, …) are not registered and fall through to the server's `501` default. There is no discovery surface: `/health`, `/projects`, and `/projects/:slug/timelines` are unknown routes (`404 not_found`).
 
 ## 2. Common behavior
 
@@ -45,11 +45,11 @@ Status-specific additions:
 - `409 timeline_version_conflict` adds `"config_version": <integer current head>`.
 - `422 schema_incompatible` adds `"issues": [{"pointer": "", "code": "schema_incompatible", "message": "<detail>"}]`.
 
-Internal receipt fields — `txn_id`, `request_hash`, `idempotency_key`, `project_seq` range, `event_ids_json`, `result_json`, and any event or sequence data — are **never** serialized into any response (receipt secrecy, §7).
+Internal receipt fields — `txn_id`, `request_hash`, `idempotency_key`, `project_seq` range, `event_ids_json`, `result_json`, and any event or sequence data — are **never** serialized into any response (receipt secrecy, §5).
 
 ### 2.3 CORS
 
-Only for an allowed `Origin` (exact match):
+CORS is response-header-only; there is **no `OPTIONS` preflight route** (an `OPTIONS` request is an unsupported method → `501`). The retained helper emits CORS headers on every response of the three routes — JSON success and error responses included — when the request carries an allowed `Origin` (exact match):
 
 - Allowed origins: `http://localhost:2222`, `http://localhost:3000`, `http://localhost:5173`, `http://127.0.0.1:2222`, `http://127.0.0.1:3000`, `http://127.0.0.1:5173`.
 - Response headers when the origin matches:
@@ -67,39 +67,7 @@ Only for an allowed `Origin` (exact match):
 - Asset routes: `Cache-Control: private, no-cache`.
 - `304` responses carry `ETag`, `Last-Modified`, and `Cache-Control: private, no-cache`.
 
-## 3. `GET /health`
-
-- `200`:
-
-```json
-{"ok": true, "projects_root": "<resolved absolute projects root>"}
-```
-
-## 4. `GET /projects`
-
-- `200`:
-
-```json
-{"projects": [{"slug": "<slug>", "name": "<name>"}]}
-```
-
-- Rows are sorted by `slug` ascending; a root with no projects returns `{"projects": []}`.
-
-## 5. Project and timeline reads
-
-### 5.1 `GET /projects/:slug/timelines`
-
-- `200`:
-
-```json
-{"timelines": [{"timeline_id": "<uuid>", "timeline_ulid": "<ulid>", "slug": "<slug>", "name": "<name>", "is_default": <bool>}]}
-```
-
-- Rows are sorted deterministically; a project with no timelines returns `{"timelines": []}`.
-- `400 invalid_project` — `:slug` fails slug validation.
-- `404 project_not_found` — the project does not exist (never an empty authority-dependent view).
-
-### 5.2 `GET /projects/:slug/timelines/:ref`
+## 3. `GET /projects/:slug/timelines/:ref`
 
 - `200` — the full load payload:
 
@@ -116,13 +84,13 @@ Only for an allowed `Origin` (exact match):
 }
 ```
 
-- `config_version` is the numeric timeline stream head (see §6). `config` is a loose object (the editor's config is a superset); `registry.assets` is an object.
+- `config_version` is the numeric timeline stream head (see §4). `config` is a loose object (the editor's config is a superset); `registry.assets` is an object.
 - `400 invalid_project`, `400 invalid_timeline` — invalid `:slug` or `:ref` grammar.
 - `404 project_not_found`, `404 timeline_not_found` — missing project or timeline.
 
-## 6. `POST /projects/:slug/timelines/:ref/save`
+## 4. `POST /projects/:slug/timelines/:ref/save`
 
-### 6.1 Request body
+### 4.1 Request body
 
 ```json
 {
@@ -134,11 +102,11 @@ Only for an allowed `Origin` (exact match):
 
 - `config` must be a JSON **object**; `registry` must be a JSON **object**; `expected_version` must be a JSON **integer**.
 - **Numeric version rule:** `expected_version` is integer-only. JSON booleans are rejected (a boolean is not a version). The integer is opaque to the editor, but on the server it equals the timeline stream head (`event_streams.head_seq`); a successful save advances the head by exactly one and returns the new head as `config_version`.
-- No `idempotency_key` field exists on this route. The bridge derives an internal idempotency key from timeline identity, `expected_version`, and the canonical save payload, and commits the normal internal receipt; no new receipt field is returned (receipt secrecy, §7).
+- No `idempotency_key` field exists on this route. The bridge derives an internal idempotency key from timeline identity, `expected_version`, and the canonical save payload, and commits the normal internal receipt; no new receipt field is returned (receipt secrecy, §5).
 
-### 6.2 Responses
+### 4.2 Responses
 
-- `200` — the committed payload, same shape as the load payload (§5.2) with the **new** `config_version`.
+- `200` — the committed payload, same shape as the load payload (§3) with the **new** `config_version`.
 - `400 invalid_body` — body is not valid JSON or not an object.
 - `400 invalid_config` — `config` missing or not an object.
 - `400 invalid_registry` — `registry` missing or not an object.
@@ -149,19 +117,19 @@ Only for an allowed `Origin` (exact match):
 - `409 timeline_version_conflict` — `expected_version` is stale; response adds `"config_version": <current head>`. Zero database mutation occurs (document, registry, events, heads, receipts all unchanged).
 - `422 schema_incompatible` — config/registry validation fails; response adds `issues[]` (see §2.2). A schema rejection is a typed 422, never a connection-close 500.
 
-### 6.3 Atomicity
+### 4.3 Atomicity
 
 A successful save atomically updates `document_json` + `asset_registry_json`, appends one `timeline.saved` event, advances the timeline stream head (and project head), and writes the internal receipt in one `BEGIN IMMEDIATE` transaction (v10 §2.3). Concurrent saves from one expected head yield exactly one success and one `409`; no SQLite busy error or losing receipt is exposed.
 
-## 7. Receipt secrecy
+## 5. Receipt secrecy
 
 Internal command receipts are never exposed on any route:
 
-- Not in save responses (which return only the frozen load shape), not in error bodies, not in headers, not in `OPTIONS`.
+- Not in save responses (which return only the frozen load shape), not in error bodies, not in any response header.
 - Prohibited in responses: `txn_id`, `request_hash`, `idempotency_key`, `first_project_seq`, `last_project_seq`, `event_ids_json`, `result_json`, and any event/stream sequence data.
 - Explicit keys and receipts are CLI/SDK behavior only (v10 §4.2).
 
-## 8. Timeline addresses
+## 6. Timeline addresses
 
 `:ref` accepts, in order of validation:
 
@@ -171,20 +139,20 @@ Internal command receipts are never exposed on any route:
 
 Resolution is repository-driven (UUID/ULID/slug within the project); a `:ref` matching none of the forms yields `400 invalid_timeline`.
 
-## 9. Asset serving: `GET`/`HEAD /projects/:slug/timelines/:ref/assets/:key`
+## 7. Asset serving: `GET`/`HEAD /projects/:slug/timelines/:ref/assets/:key`
 
 Asset keys resolve **only** from the persisted timeline asset registry; a locator is a locator, never media identity. Local paths are served only after safe-path checks.
 
-### 9.1 Headers
+### 7.1 Headers
 
-Every asset response (200/206/304/416) emits CORS headers when allowed, plus:
+Every asset response (200/206/304/416) emits CORS headers when allowed (see §2.3), plus:
 
 - `Content-Type` (from the file, defaulting to `application/octet-stream`),
 - `Accept-Ranges: bytes`,
 - `Cache-Control: private, no-cache`,
 - `ETag` and `Last-Modified` derived from file identity.
 
-### 9.2 Status codes
+### 7.2 Status codes
 
 | Condition | Status | Notes |
 |---|---|---|
@@ -196,18 +164,14 @@ Every asset response (200/206/304/416) emits CORS headers when allowed, plus:
 | Unsatisfiable range (start ≥ size, end < start, suffix ≤ 0) | `416` | `Content-Range: bytes */<size>`, `Content-Length: 0` |
 | Missing registry key, missing file, or HTTP-only asset | `404` | `asset_not_found` (missing/unresolvable) or `asset_not_local` (HTTP-only) |
 
-### 9.3 Range grammar
+### 7.3 Range grammar
 
 - Single range only: `bytes=<start>-<end>`, `bytes=<start>-` (open-ended), `bytes=-<N>` (suffix, last N bytes).
 - `end` values beyond the file size clamp to `file_size - 1`.
 - Multiple ranges, non-`bytes` units, and empty ranges are malformed → `400`.
 - `HEAD` behaves exactly like `GET` for status and headers, with no response body.
 
-## 10. `OPTIONS`
-
-- `204` with CORS headers (§2.3) and `Content-Length: 0`; no body.
-
-## 11. Reserved route — `POST /projects/:slug/timelines/:ref/copy` (planned m6, NOT implemented in m4)
+## 8. Reserved route — `POST /projects/:slug/timelines/:ref/copy` (planned m6, NOT implemented in m4)
 
 **Status: reserved contract only.** The save-as-copy route is documented in m4
 (`docs/astrid-v10-implementation-decisions.md` §16, CF-08C82BBD608F2CCF8A7E /
@@ -232,9 +196,9 @@ CF-F0DB9D4F2A612C886B3B) and **implemented in m6**. In m4:
 - **Error mapping:** 404/409/422 per the frozen bridge error vocabulary
   (§2.2).
 - **Receipt secrecy:** the response never exposes a receipt or idempotency key
-  (§7).
+  (§5).
 
-## 12. In-tree provider-contract client — m1 substitute
+## 9. In-tree provider-contract client — m1 substitute
 
 - m1 ships an in-tree, field-for-field client matching the recorded `AstridBridgeDataProvider` list/load/save/reload contract, including stale-save `409` observation and save retention across HTTP server and database restart.
 - The in-tree client is an **m1 substitute**, not editor-source parity. The real out-of-tree TypeScript `AstridBridgeDataProvider` suite is a hard named follow-up gate (NSA-1; `docs/astrid-v10-implementation-decisions.md` §3, §11, and §14). Nothing in this contract claims browser or provider-source parity for the substitute.

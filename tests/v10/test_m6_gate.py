@@ -3,9 +3,9 @@
 Proves every must/should done criterion of the m6 sprint plan against the
 live tree, end to end:
 
-- ``serve`` boots a clean project: ``compose_standard_bridge`` on a fresh
+- ``serve`` boots a clean project: ``compose_standard_bridge`` over a seeded
   ``tmp_path`` registers exactly the three in-tree schema packs and the
-  local bridge HTTP server answers ``GET /health``;
+  local bridge HTTP server answers timeline GET on the survivor surface;
 - ``backup create`` -> destroy live data -> ``backup restore`` reopens with
   matching state: table count (20), event-stream heads, and pack migration
   state (core + timeline/shots/references) are byte-identical;
@@ -127,6 +127,7 @@ def _stop_server(server, thread: threading.Thread) -> None:
 
 
 def test_serve_boots_clean_project_end_to_end(tmp_path: Path) -> None:
+    _seed_project_and_timeline(tmp_path)
     composition = compose_standard_bridge(tmp_path)
     try:
         # Exactly the three in-tree schema packs are registered.
@@ -137,11 +138,15 @@ def test_serve_boots_clean_project_end_to_end(tmp_path: Path) -> None:
 
         server, thread, base = _start_server(composition)
         try:
-            with urlopen(f"{base}/health", timeout=10) as response:  # noqa: S310
+            # Survivor surface: the repository-backed timeline GET is the
+            # liveness + read probe (the /health route was trimmed in B5).
+            with urlopen(
+                f"{base}/projects/demo/timelines/main", timeout=10
+            ) as response:  # noqa: S310 - localhost test server only
                 assert response.status == 200
-                body = json.loads(response.read().decode("utf-8"))
-            assert body["ok"] is True
-            assert Path(body["projects_root"]) == tmp_path
+                timeline = json.loads(response.read().decode("utf-8"))
+            assert timeline["slug"] == "main"
+            assert timeline["config_version"] == 1  # one timeline.created event
         finally:
             _stop_server(server, thread)
     finally:

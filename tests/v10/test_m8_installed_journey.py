@@ -654,9 +654,8 @@ try:
             thread.start()
             base_url = f"http://{server.server_address[0]}:{server.server_address[1]}"
             try:
-                health_status, health = http_json(f"{base_url}/health")
-                assert health_status == 200
-                assert health["ok"] is True
+                # Survivor surface: timeline GET is the liveness probe (the
+                # /health route was trimmed in B5).
                 initial_status, initial = http_json(
                     f"{base_url}/projects/{project_slug}/timelines/main"
                 )
@@ -702,7 +701,7 @@ try:
                 assert bridge._writer is app.writer
                 assert len(app.timeline_save_calls) == 2
                 return {
-                    "health_status": health_status,
+                    "initial_status": initial_status,
                     "save_statuses": sorted(status for status, _payload in responses),
                     "loser_error": loser["error"],
                     "shared_writer": True,
@@ -964,10 +963,14 @@ try:
             thread = threading.Thread(target=server.serve_forever, daemon=True)
             thread.start()
             try:
-                status, health = http_json(
-                    f"http://{server.server_address[0]}:{server.server_address[1]}/health"
+                # Survivor surface: timeline GET proves the reinstalled
+                # bridge reads the restored database (the /health route was
+                # trimmed in B5).
+                status, loaded = http_json(
+                    f"http://{server.server_address[0]}:{server.server_address[1]}/projects/{project_slug}/timelines/main"
                 )
-                assert status == 200 and health["ok"] is True
+                assert status == 200
+                assert loaded["config_version"] >= 1
                 assert server.bridge_writer is final_app.writer
             finally:
                 server.shutdown()
@@ -1383,16 +1386,18 @@ def test_one_installed_wheel_completes_the_local_first_run(
         "expected_version": 1,
     }
     with _installed_bridge(harness) as bridge:
-        health_status, _, health_body = _http_request(bridge, "GET", "/health")
-        assert health_status == 200
-        health = _json_body(health_body)
-        assert health == {
-            "ok": True,
-            "projects_root": str(harness.roots.project),
-        }
+        # Survivor surface: timeline GET proves the installed bridge is up
+        # and routed (the /health route was trimmed in B5); the head is
+        # still the created head because no save has run yet.
+        load_status, _, load_body = _http_request(
+            bridge, "GET", "/projects/journey-project/timelines/main"
+        )
+        assert load_status == 200
+        loaded = _json_body(load_body)
+        assert loaded["config_version"] == 1
 
         bad_status, _, bad_body = _http_request(
-            bridge, "GET", "/projects/bad_slug!/timelines"
+            bridge, "GET", "/projects/bad_slug!/timelines/main"
         )
         assert bad_status == 400
         bad_error = _json_body(bad_body)

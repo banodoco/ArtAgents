@@ -403,12 +403,24 @@ def test_m7_dogfood_empty_root_survives_full_public_journey(tmp_path, monkeypatc
     try:
         server, thread, base = _start_server(bridge_composition)
         try:
-            with urlopen(f"{base}/health", timeout=10) as response:  # noqa: S310 - localhost only
+            # Survivor surface: timeline GET is the serve-reopen probe (the
+            # /health route was trimmed in B5). The GET is read-only, so the
+            # GA 10 snapshot comparison below stays exact.
+            with urlopen(
+                f"{base}/projects/{project_slug}/timelines/main", timeout=10
+            ) as response:  # noqa: S310 - localhost only
                 assert response.status == 200
-                health = json.loads(response.read().decode("utf-8"))
-            assert health["ok"] is True
-            assert Path(health["projects_root"]) == root
-            record("serve-health", status=200, ok=health["ok"])
+                reopened = json.loads(response.read().decode("utf-8"))
+            # The restored bridge read must equal the pre-destructive head.
+            assert (
+                reopened["config_version"]
+                == before["dynamic"]["timeline"]["config_version"]
+            )
+            record(
+                "serve-timeline-load",
+                status=200,
+                config_version=reopened["config_version"],
+            )
         finally:
             _close_server(server, thread)
     finally:
