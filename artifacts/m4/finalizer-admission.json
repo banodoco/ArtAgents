@@ -110,7 +110,7 @@
       "product timeline verbs [] != ['archive', 'create', 'diff', 'history', 'list', 'save', 'show']"
     ]
   },
-  "duration_seconds": 226.896,
+  "duration_seconds": 252.341,
   "exit": 1,
   "feasibility": {
     "path": "/workspace/reigh-phase-a-20260822/exec-track-S/.megaplan/plans/m4-bridge-sdk-and-cli-domains-20260818-0642/task_feasibility.json",
@@ -136,7 +136,7 @@
   ],
   "lanes": {
     "authority_lint": {
-      "duration_seconds": 0.834,
+      "duration_seconds": 0.775,
       "failed": 0,
       "junit": "out/m4-gate/latest/authority_lint-junit.xml",
       "log": "out/m4-gate/latest/authority_lint.log",
@@ -149,7 +149,7 @@
       "status": "pass"
     },
     "bridge": {
-      "duration_seconds": 35.041,
+      "duration_seconds": 35.003,
       "failed": 0,
       "junit": "out/m4-gate/latest/bridge-junit.xml",
       "log": "out/m4-gate/latest/bridge.log",
@@ -164,7 +164,7 @@
       "status": "pass"
     },
     "cli": {
-      "duration_seconds": 3.037,
+      "duration_seconds": 3.091,
       "failed": 0,
       "junit": "out/m4-gate/latest/cli-junit.xml",
       "log": "out/m4-gate/latest/cli.log",
@@ -183,21 +183,21 @@
       "status": "pass"
     },
     "composition": {
-      "duration_seconds": 69.055,
-      "failed": 3,
+      "duration_seconds": 95.698,
+      "failed": 0,
       "junit": "out/m4-gate/latest/composition-junit.xml",
       "log": "out/m4-gate/latest/composition.log",
-      "passed": 27,
-      "returncode": 1,
+      "passed": 30,
+      "returncode": 0,
       "selectors": [
         "tests/v10/test_standard_application.py",
         "tests/v10/test_pack_factoring.py"
       ],
       "skipped": 0,
-      "status": "fail"
+      "status": "pass"
     },
     "contracts": {
-      "duration_seconds": 1.723,
+      "duration_seconds": 2.134,
       "failed": 0,
       "junit": "out/m4-gate/latest/contracts-junit.xml",
       "log": "out/m4-gate/latest/contracts.log",
@@ -211,7 +211,7 @@
       "status": "pass"
     },
     "crash_contention": {
-      "duration_seconds": 53.459,
+      "duration_seconds": 51.047,
       "failed": 0,
       "junit": "out/m4-gate/latest/crash_contention-junit.xml",
       "log": "out/m4-gate/latest/crash_contention.log",
@@ -225,7 +225,7 @@
       "status": "pass"
     },
     "media_conformance": {
-      "duration_seconds": 2.813,
+      "duration_seconds": 3.069,
       "failed": 0,
       "junit": "out/m4-gate/latest/media_conformance-junit.xml",
       "log": "out/m4-gate/latest/media_conformance.log",
@@ -239,7 +239,7 @@
       "status": "pass"
     },
     "owner_lock": {
-      "duration_seconds": 1.852,
+      "duration_seconds": 1.828,
       "failed": 0,
       "junit": "out/m4-gate/latest/owner_lock-junit.xml",
       "log": "out/m4-gate/latest/owner_lock.log",
@@ -252,7 +252,7 @@
       "status": "pass"
     },
     "pack_conformance": {
-      "duration_seconds": 14.783,
+      "duration_seconds": 14.787,
       "failed": 0,
       "junit": "out/m4-gate/latest/pack_conformance-junit.xml",
       "log": "out/m4-gate/latest/pack_conformance.log",
@@ -266,7 +266,7 @@
       "status": "pass"
     },
     "platform": {
-      "duration_seconds": 31.622,
+      "duration_seconds": 31.869,
       "failed": 0,
       "junit": "out/m4-gate/latest/platform-junit.xml",
       "log": "out/m4-gate/latest/platform.log",
@@ -281,7 +281,7 @@
       "status": "pass"
     },
     "secrets": {
-      "duration_seconds": 2.083,
+      "duration_seconds": 1.992,
       "failed": 0,
       "junit": "out/m4-gate/latest/secrets-junit.xml",
       "log": "out/m4-gate/latest/secrets.log",
@@ -296,7 +296,7 @@
       "status": "pass"
     },
     "services": {
-      "duration_seconds": 7.122,
+      "duration_seconds": 7.413,
       "failed": 0,
       "junit": "out/m4-gate/latest/services-junit.xml",
       "log": "out/m4-gate/latest/services.log",
@@ -315,7 +315,7 @@
       "status": "pass"
     },
     "task_run_conformance": {
-      "duration_seconds": 2.295,
+      "duration_seconds": 2.39,
       "failed": 0,
       "junit": "out/m4-gate/latest/task_run_conformance-junit.xml",
       "log": "out/m4-gate/latest/task_run_conformance.log",
@@ -346,8 +346,8 @@
     }
   },
   "repo": {
-    "git_sha": "0afffd29f5fea5d128d8509cca3a31d8cdfe174e",
-    "git_short_sha": "0afffd29f5fe",
+    "git_sha": "da2080d32cdd9f8416d5d5c37a915e06edefc472",
+    "git_short_sha": "da2080d32cdd",
     "root": "/workspace/reigh-phase-a-20260822/exec-track-S"
   },
   "retained_reference": {
@@ -370,7 +370,7 @@
   },
   "schema": "astrid.m4_finalizer_admission.v1",
   "timestamp": {
-    "finished_at": "2026-08-22T01:20:42Z",
-    "started_at": "2026-08-22T01:16:55Z"
+    "finished_at": "2026-08-22T01:53:02Z",
+    "started_at": "2026-08-22T01:48:50Z"
   }
 }
