@@ -707,6 +707,20 @@ class ManagedWriteKernelReceiptTest(unittest.TestCase):
         env.start()
         self.addCleanup(env.stop)
 
+        # Eventlog side first: the managed filesystem project/timeline
+        # binding must exist BEFORE the kernel create, which now
+        # materializes the workspace skeleton (existing files are never
+        # overwritten, so the fs project survives).
+        from astrid.core.project.project import create_project as fs_create_project
+        from astrid.core.timeline.crud import create_timeline as fs_create_timeline
+        from astrid.core.timeline.paths import find_timeline_by_slug
+
+        fs_create_project("receipt-proj")
+        fs_create_timeline("receipt-proj", "receipt-tl")
+        found = find_timeline_by_slug("receipt-proj", "receipt-tl")
+        self.assertIsNotNone(found)
+        ulid, _tdir = found
+
         # Kernel side: standard application with the kernel project + timeline.
         app = compose_standard_application(projects_root=str(tmp_root))
         self.addCleanup(app.close)
@@ -723,17 +737,6 @@ class ManagedWriteKernelReceiptTest(unittest.TestCase):
         self.assertIsNotNone(created.data, created.error)
         timeline_id = created.data["timeline_id"]
         project_id = app.projects.resolve(app.writer, "receipt-proj")
-
-        # Eventlog side: the managed filesystem project/timeline binding.
-        from astrid.core.project.project import create_project as fs_create_project
-        from astrid.core.timeline.crud import create_timeline as fs_create_timeline
-        from astrid.core.timeline.paths import find_timeline_by_slug
-
-        fs_create_project("receipt-proj")
-        fs_create_timeline("receipt-proj", "receipt-tl")
-        found = find_timeline_by_slug("receipt-proj", "receipt-tl")
-        self.assertIsNotNone(found)
-        ulid, _tdir = found
 
         # Managed write through the gateway, with kernel writer access. The
         # repository is injected (kernel modules must not import astrid.packs).
