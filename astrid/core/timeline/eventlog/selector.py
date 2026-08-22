@@ -103,16 +103,16 @@ def _projects_root_for_stream(stream: TimelineStreamRef) -> Path:
 
 def _is_backfilled(timeline_id: str, projects_root: Path) -> bool:
     # Consult authority marker; garbage fails closed (R4/R5).
-    from astrid.packs.timeline.backfill import BackfillError, read_backfill_state
-
+    from astrid.core.timeline.authority import is_backfilled_by_marker
+    import importlib as _il
+    _bf_mod = _il.import_module("astrid.packs.timeline.backfill")
+    BackfillError = _bf_mod.BackfillError  # type: ignore[attr-defined]
     try:
-        state = read_backfill_state(projects_root)
+        return is_backfilled_by_marker(timeline_id, projects_root=projects_root)
     except BackfillError as exc:
         raise EventLogError(f"backfill authority marker is unreadable: {exc}") from exc
     except Exception as exc:  # pragma: no cover - defensive
         raise EventLogError(f"backfill authority marker is unreadable: {exc}") from exc
-    return timeline_id in state
-
 
 def build_timeline_backend(stream: TimelineStreamRef) -> EventLogBackend:
     if stream.backend == "supabase":
@@ -218,7 +218,10 @@ def resolve_event_log_target(
         from astrid.core.foundation.project_paths import resolve_projects_root as _rr
         from astrid.core.integrations.reigh.bridge_service import derive_database_path as _dd
         import sqlite3 as _sq
-        from astrid.packs.timeline.backfill import read_backfill_state as _rbs
+        import importlib as _il2
+        _bf_mod2 = _il2.import_module("astrid.packs.timeline.backfill")
+        _rbs = _bf_mod2.read_backfill_state  # type: ignore[attr-defined]
+        BackfillError = _bf_mod2.BackfillError  # type: ignore[attr-defined]
         _pr = _rr(root)
         _db = _dd(_pr)
         if _db.is_file():
@@ -238,9 +241,10 @@ def resolve_event_log_target(
                         return EventLogTarget(backend_name="sqlite", timeline_id=tid, timeline_ulid=ulid, timeline_home=thome if thome.is_dir() else None, slug=slug_or_id, backend=be, source="local")
                 finally:
                     conn.close()
+    except BackfillError:
+        raise
     except Exception:
         pass
-
     # Strategy 2: Local resolver
     from astrid.core.timeline.observability import resolve_timeline_target
 

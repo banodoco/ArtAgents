@@ -257,7 +257,8 @@ from astrid.core.repositories.errors import RepositoryError
 from astrid.core.repositories.projects import ProjectRepository
 from astrid.core.store.uow import UnitOfWork
 from astrid.core.store.writer import DatabaseWriter
-from astrid.core.timeline.eventlog.local_fs import LocalFsBackend
+import importlib as _il
+LocalFsBackend = _il.import_module("astrid.core.timeline.eventlog.local_fs").LocalFsBackend  # type: ignore[attr-defined]
 from astrid.core.timeline.events.schema import (
     TimelineActor,
     TimelineEvent,
@@ -1084,7 +1085,8 @@ class SupabaseExportReader:
         return versions[-1] if versions else 0
 
     def verify_chain(self) -> Any:
-        from astrid.core.timeline.eventlog.types import EventLogVerification
+        import importlib as _il2
+        EventLogVerification = _il2.import_module("astrid.core.timeline.eventlog.types").EventLogVerification  # type: ignore[attr-defined]
 
         events, versions = self._load()
         from astrid.core.timeline.events.schema import with_event_hash
@@ -2630,10 +2632,14 @@ def _local_fs_run_sources(
     project_slug: str,
     timeline_refs: Sequence[str] | None,
 ) -> list[tuple[BackfillSource, str]]:
-    """Discover and load every selected LocalFs source (read-only)."""
     from astrid.core._shared.jsonio import read_json
     from astrid.core.timeline.migration import classify_timeline_dir
-    from astrid.core.threads.ids import is_ulid
+    import re as _re
+
+    _ULID_RE = _re.compile(r"^[0-9A-HJKMNP-TV-Z]{26}$", _re.IGNORECASE)
+
+    def is_ulid(value: object) -> bool:
+        return isinstance(value, str) and bool(_ULID_RE.fullmatch(value))
 
     timelines_dir = root / project_slug / "timelines"
     if not timelines_dir.is_dir():

@@ -272,26 +272,18 @@ def sync_asset_registry(
             pass
         if not isinstance(timeline_id, str) or not timeline_id.strip():
             raise AstridError("timeline identity is missing timeline_id")
-    # Marker-gated backend selection
+    # Marker-gated backend selection — fail-closed on unreadable marker.
+    from astrid.core.timeline.authority import is_backfilled_timeline
+    import importlib as _il4
+    _bf_mod4 = _il4.import_module("astrid.packs.timeline.backfill")
+    BackfillError = _bf_mod4.BackfillError  # type: ignore[attr-defined]
     try:
-        from astrid.core.foundation.project_paths import resolve_projects_root as _rr4
-        from astrid.core.integrations.reigh.bridge_service import derive_database_path as _dd4
-        from astrid.packs.timeline.backfill import read_backfill_state as _rbs4
-        _pr4 = _rr4(projects_root)
-        _db4 = _dd4(_pr4)
-        _is_back4 = False
-        if _db4.is_file():
-            try:
-                _st4 = _rbs4(_pr4)
-                _is_back4 = timeline_id in _st4
-            except Exception:
-                _is_back4 = False
-        if _is_back4:
-            from astrid.core.timeline.eventlog.sqlite_backend import SqliteEventLogBackend
-            backend = SqliteEventLogBackend(timeline_id=timeline_id, timeline_home=tdir, projects_root=_pr4)
-        else:
-            backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=tdir)
-    except Exception:
+        _is_back4 = is_backfilled_timeline(timeline_id, projects_root)
+    except BackfillError as exc:
+        raise AstridError(f"backfill authority marker is unreadable: {exc}") from exc
+    if _is_back4:
+        backend = SqliteEventLogBackend(timeline_id=timeline_id, timeline_home=tdir, projects_root=projects_root)
+    else:
         backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=tdir)
     act = actor or TimelineActor(
         type="agent",

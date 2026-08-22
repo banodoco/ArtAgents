@@ -298,11 +298,20 @@ def _dispatch_serve(args: list[str]) -> int:
         finally:
             server.server_close()
     finally:
-        composition.writer.close()
-
+        try:
+            composition.writer.close()
+        finally:
+            try:
+                from astrid.packs import _unregister_active_writer
+                _unregister_active_writer(composition.database_path)
+            except Exception:
+                pass
+            try:
+                if composition.owner_lock is not None:
+                    composition.owner_lock.release()
+            except Exception:
+                pass
     return 0
-
-
 def _dispatch_product(args: list[str]) -> int:
     """Run one product-family command with one composed ``AstridClient``.
 

@@ -51,9 +51,49 @@ def _actor_kind_from_actor(actor: TimelineActor) -> str:
     if isinstance(kind, str) and kind in ACTOR_KINDS:
         return kind
     return "system"
+_SHARED_WRITERS: dict[str, tuple[DatabaseWriter, Any]] = {}
+_SHARED_WRITERS_GUARD = __import__("threading").Lock()
 
 
-def _projects_root_from_timeline_home(timeline_home: str | Path | None) -> Path:
+def _shared_key(db_path: Path) -> str:
+    try:
+        return str(Path(db_path).resolve())
+    except Exception:
+        return str(db_path)
+
+
+def _get_shared_writer(db_path: Path) -> DatabaseWriter | None:
+    key = _shared_key(db_path)
+    with _SHARED_WRITERS_GUARD:
+        entry = _SHARED_WRITERS.get(key)
+        if entry is not None:
+            return entry[0]
+    # Also check composition registration via packs (serve owns outside this registry).
+    try:
+        import importlib as _il
+        mod = _il.import_module("astrid.packs")
+        gaw = getattr(mod, "get_active_writer", None)
+        if gaw is not None:
+            w = gaw(db_path)
+            if w is not None:
+                return w
+    except Exception:
+        pass
+    return None
+
+def _register_shared_writer(db_path: Path, writer: DatabaseWriter, lock: Any) -> None:
+    key = _shared_key(db_path)
+    with _SHARED_WRITERS_GUARD:
+        if key not in _SHARED_WRITERS:
+            _SHARED_WRITERS[key] = (writer, lock)
+
+
+def _unregister_shared_writer(db_path: Path) -> None:
+    key = _shared_key(db_path)
+    with _SHARED_WRITERS_GUARD:
+        _SHARED_WRITERS.pop(key, None)
+
+
     if timeline_home is not None:
         p = Path(timeline_home)
         try:
@@ -69,9 +109,14 @@ class SqliteEventLogBackend:
     """Kernel-backed eventlog for one timeline.
 
     Writes go through the kernel EventAppendService/UoW discipline.
-    When no writer is injected, construction uses DatabaseOwnerLock
-    so a second owner fails with typed unavailable error.
+    Ownership: when a process-level standard writer is already registered
+    (compose_standard_bridge), the backend REUSES it and does not own/close
+    it. Otherwise the backend opens-and-owns under DatabaseOwnerLock and
+    must be closed (context-manager or explicit close) to release the lock.
     Reads use read-only connections (exempt from one-writer rule).
+    Repeated appends through live seams must never raise "already owned"
+    when the writer is already held in this process — the shared writer is
+    reused.
     """
 
     def __init__(
@@ -91,7 +136,10 @@ class SqliteEventLogBackend:
         else:
             self._projects_root = resolve_projects_root(None)
         self._writer: DatabaseWriter | None = writer
+        # Injected writer is borrowed, never owned.
         self._owns_writer = writer is None
+        # Track whether this instance registered the shared writer.
+        self._owns_shared = False
         self._owner_lock = None
         self._project_id: str | None = None
 
@@ -101,21 +149,48 @@ class SqliteEventLogBackend:
     def _ensure_writer(self) -> DatabaseWriter:
         if self._writer is not None:
             return self._writer
-        from astrid.core.store.ownership import DatabaseOwnerLock, OwnerLockError
-        from astrid.packs import open_standard_writer
-
+        # Reuse process-level standard writer if already registered (composition root or prior lazy owner).
         db_path = derive_database_path(self._projects_root)
         db_path.parent.mkdir(parents=True, exist_ok=True)
-        # Fail closed if another owner holds the DB (serve owns it).
+        # Check shared registry first (both composition and lazy singletons).
+        shared = _get_shared_writer(db_path)
+        if shared is not None:
+            self._writer = shared
+            self._owns_writer = False
+            self._owns_shared = False
+            self._owner_lock = None
+            return self._writer
+        from astrid.core.store.ownership import DatabaseOwnerLock, OwnerLockError
+
         try:
             self._owner_lock = DatabaseOwnerLock(db_path)
         except OwnerLockError as exc:
-
+            # Check again for shared writer that may have been registered concurrently.
+            shared2 = _get_shared_writer(db_path)
+            if shared2 is not None:
+                self._writer = shared2
+                self._owns_writer = False
+                self._owns_shared = False
+                self._owner_lock = None
+                return self._writer
             raise EventLogError(f"database is already owned: {exc}") from exc
-        # Also need to handle WriterBusy etc: open_standard_writer will open writer queue
-        self._writer = open_standard_writer(db_path)
+        try:
+            import importlib as _ilw
+            _packs_mod = _ilw.import_module("astrid.packs")
+            _open_writer = _packs_mod.open_standard_writer  # type: ignore[attr-defined]
+            self._writer = _open_writer(db_path)
+        except Exception:
+            try:
+                self._owner_lock.release()
+            except Exception:
+                pass
+            self._owner_lock = None
+            raise
+        # Register as shared so subsequent backends reuse it within this process.
+        _register_shared_writer(db_path, self._writer, self._owner_lock)
+        self._owns_shared = True
+        # _owns_writer remains True for the registering instance (owns close).
         return self._writer
-
     def _resolve_project_id(self, writer: DatabaseWriter) -> str:
         if self._project_id is not None:
             return self._project_id
@@ -232,7 +307,7 @@ class SqliteEventLogBackend:
         self,
         timeline_id: str,
         kind: str,
-        payload: dict[str, object],
+        payload: Any,
         *,
         actor: TimelineActor,
         expected_version: int | None = None,
@@ -240,6 +315,23 @@ class SqliteEventLogBackend:
     ) -> TimelineEvent:
         if timeline_id != self.timeline_id:
             raise EventLogError(f"timeline_id mismatch: {timeline_id!r} != {self.timeline_id!r}")
+        if kind in ("timeline.saved", "timeline.config_replaced"):
+            raise EventLogError(f"kind {kind!r} must not be appended via generic append_event; use TimelineRepository.save/replace_config")
+        # Serialize payload: typed payloads expose to_json_obj(), else require mapping.
+        if hasattr(payload, "to_json_obj"):
+            try:
+                payload_dict = payload.to_json_obj()  # type: ignore[union-attr]
+                if not isinstance(payload_dict, dict):
+                    raise EventLogError(f"payload to_json_obj() must return a mapping, got {type(payload_dict).__name__}")
+                payload_dict = dict(payload_dict)
+            except EventLogError:
+                raise
+            except Exception as exc:
+                raise EventLogError(f"payload serialization failed: {exc}") from exc
+        elif isinstance(payload, dict):
+            payload_dict = dict(payload)
+        else:
+            raise EventLogError(f"payload must be a mapping or typed payload with to_json_obj(), got {type(payload).__name__}")
         writer = self._ensure_writer()
         project_id = self._resolve_project_id(writer)
         sid = _stream_id(self.timeline_id)
@@ -279,7 +371,7 @@ class SqliteEventLogBackend:
                 from astrid.core.events.service import payload_event_hash
 
                 prev_hash = payload_event_hash(tail_payload)
-            envelope, event_hash = build_integrity_envelope(dict(payload), prev_hash)
+            envelope, event_hash = build_integrity_envelope(payload_dict, prev_hash)
             payload_json = canonical_json(envelope)
             changes_json = canonical_json([kind])
             project_seq, stream_seq = uow.append_event(
@@ -337,7 +429,7 @@ class SqliteEventLogBackend:
             prev_hash=prev_hash,
             hash=event_hash,
             kind=kind,
-            payload=dict(payload),
+            payload=dict(payload_dict),
             expected_version=expected_version,
             txn_id=txn_id_actual,
         )
@@ -561,11 +653,32 @@ class SqliteEventLogBackend:
             conn.close()
         return result
     def close(self) -> None:
+        # If this instance registered the shared writer, unregister and close it.
+        if self._owns_shared and self._writer is not None:
+            db_path = derive_database_path(self._projects_root)
+            _unregister_shared_writer(db_path)
+            try:
+                self._writer.close()
+            except (OSError, RuntimeError, sqlite3.Error):
+                pass
+            self._writer = None
+            if self._owner_lock is not None:
+                try:
+                    self._owner_lock.release()
+                except (OSError, RuntimeError):
+                    pass
+                self._owner_lock = None
+            self._owns_shared = False
+            self._owns_writer = False
+            return
         if self._owns_writer and self._writer is not None:
             try:
                 self._writer.close()
             except (OSError, RuntimeError, sqlite3.Error):
                 pass
+            self._writer = None
+        elif self._writer is not None:
+            # Borrowed (shared or injected) — drop reference without closing.
             self._writer = None
         if self._owner_lock is not None:
             try:
@@ -573,3 +686,8 @@ class SqliteEventLogBackend:
             except (OSError, RuntimeError):
                 pass
             self._owner_lock = None
+    def __enter__(self) -> "SqliteEventLogBackend":
+        return self
+
+    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+        self.close()

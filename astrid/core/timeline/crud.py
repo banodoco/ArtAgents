@@ -242,13 +242,17 @@ def show_timeline(
     if found is None:
         return None
     ulid, tdir = found
-    # Marker-gated single-authority read: backfilled timelines read through selected backend, not file-first replay.
-    from astrid.core.foundation.project_paths import resolve_projects_root as _rr
-    from astrid.core.integrations.reigh.bridge_service import derive_database_path as _dd
-    from astrid.packs.timeline.backfill import read_backfill_state as _rbs
+    # Marker-gated single-authority read: backfilled timelines read through SQLite, not file-first.
+    from astrid.core.timeline.authority import is_backfilled_timeline
+    import importlib as _il3
+    _bf_mod3 = _il3.import_module("astrid.packs.timeline.backfill")
+    BackfillError = _bf_mod3.BackfillError  # type: ignore[attr-defined]
     _is_back = False
     _tid_for_check = None
+    _pr = None
     try:
+        from astrid.core.foundation.project_paths import resolve_projects_root as _rr
+        from astrid.core.integrations.reigh.bridge_service import derive_database_path as _dd
         _pr = _rr(root)
         th_par = tdir.parent
         if th_par.name == "timelines" and th_par.parent.is_dir():
@@ -263,8 +267,7 @@ def show_timeline(
                     _tid_for_check = _raw.get("timeline_id") if isinstance(_raw, dict) else None
                 except Exception:
                     _tid_for_check = None
-            if _tid_for_check is None:
-                _tid_for_check = None
+            if not isinstance(_tid_for_check, str) or not _tid_for_check:
                 import sqlite3 as _sq
                 try:
                     c = _sq.connect(f"file:{_db}?mode=ro", uri=True)
@@ -275,23 +278,27 @@ def show_timeline(
                     c.close()
                 except Exception:
                     pass
-            if _tid_for_check:
-                try:
-                    _st = _rbs(_pr)
-                    _is_back = _tid_for_check in _st
-                except Exception:
-                    _is_back = False
+            if isinstance(_tid_for_check, str) and _tid_for_check:
+                _is_back = is_backfilled_timeline(_tid_for_check, _pr)
+    except BackfillError as exc:
+        raise TimelineCrudError(f"backfill authority marker is unreadable: {exc}") from exc
+    except TimelineCrudError:
+        raise
     except Exception:
         _is_back = False
-    if _is_back and not verify:
+    if _is_back:
+        # Marked timeline: derive assembly from event-log authority; sidecars are caches.
         try:
             from astrid.core.timeline.eventlog.sqlite_backend import SqliteEventLogBackend as _SBE
             from astrid.core.timeline.projection import project_to_assembly as _pta
             _be = _SBE(timeline_id=_tid_for_check, timeline_home=tdir, projects_root=_pr)
             evs = _be.read_events()
             raw_assembly = _pta(evs)
-        except Exception:
-            raw_assembly = load_assembly_json_with_repair(tdir)
+        except BackfillError as exc:
+            raise TimelineCrudError(f"backfill marker error: {exc}") from exc
+        except Exception as exc:
+            # Fail-closed for marked timelines: do not fall back to stale file.
+            raise TimelineCrudError(f"failed to load assembly from SQLite authority: {exc}") from exc
     else:
         raw_assembly = (
             read_timeline_config_json(tdir / "assembly.json")
@@ -302,11 +309,18 @@ def show_timeline(
         return None
     assembly = validate_timeline_config_json(raw_assembly)
     manifest = Manifest.from_json(tdir / "manifest.json")
-    raw_display = (
-        read_json(tdir / "display.json")
-        if verify
-        else load_display_json_with_repair(tdir)
-    )
+    if _is_back:
+        # For marked timelines, display also from authority (load_display already gates, but ensure fail-closed)
+        try:
+            raw_display = load_display_json_with_repair(tdir)
+        except BackfillError as exc:
+            raise TimelineCrudError(f"backfill marker error: {exc}") from exc
+    else:
+        raw_display = (
+            read_json(tdir / "display.json")
+            if verify
+            else load_display_json_with_repair(tdir)
+        )
     if raw_display is None:
         return None
     display = Display.from_dict(raw_display)
@@ -319,7 +333,6 @@ def show_timeline(
     if verify:
         result["verification"] = _verify_timeline_read_only(tdir)
     return result
-
 
 def _verify_timeline_read_only(tdir: Path) -> dict[str, Any]:
     events_file = tdir / "assembly.jsonl"

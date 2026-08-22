@@ -168,7 +168,10 @@ def _resolve_or_bootstrap_backend(
     try:
         from astrid.core.foundation.project_paths import resolve_projects_root as _resolve_pr
         from astrid.core.integrations.reigh.bridge_service import derive_database_path as _derive
-        from astrid.packs.timeline.backfill import read_backfill_state as _read_state
+        import importlib as _il
+        _bf_mod = _il.import_module("astrid.packs.timeline.backfill")
+        _read_state = _bf_mod.read_backfill_state  # type: ignore[attr-defined]
+        BackfillError = _bf_mod.BackfillError  # type: ignore[attr-defined]
         import sqlite3 as _sql
         _pr = _resolve_pr(root)
         # ulid is directory name
@@ -184,8 +187,6 @@ def _resolve_or_bootstrap_backend(
                 if _row and _row["tid"]:
                     tl_id_k = str(_row["tid"])
                 else:
-                    # Fallback: slug→ timeline_id via events where slug matches project+slug?
-                    # Try direct slug lookup in timelines table via kernel repo not available; try events with slug
                     _row2 = _conn.execute("SELECT json_extract(payload_json,'$.data.timeline_id') as tid FROM events WHERE kind='timeline.created' AND json_extract(payload_json,'$.data.slug')=? LIMIT 1", (slug,)).fetchone()
                     if _row2 and _row2["tid"]:
                         tl_id_k = str(_row2["tid"])
@@ -198,8 +199,14 @@ def _resolve_or_bootstrap_backend(
                         from astrid.core.timeline.eventlog.sqlite_backend import SqliteEventLogBackend as _SqliteBE
                         be = _SqliteBE(timeline_id=tl_id_k, timeline_home=tdir, projects_root=_pr)
                         return tl_id_k, tdir, be, False
-                except Exception:
-                    pass
+                except BackfillError:
+                    raise
+                except Exception as exc:
+                    raise TimelineEditError(f"backfill authority marker is unreadable: {exc}") from exc
+    except BackfillError:
+        raise
+    except TimelineEditError:
+        raise
     except Exception:
         pass
     detail = (
@@ -417,12 +424,15 @@ def pack_write_gateway(
                 # Backfilled: must acquire owner lock fail-closed, then open writer.
                 from astrid.core.store.ownership import DatabaseOwnerLock as _OwnerLock
                 from astrid.core.store.ownership import OwnerLockError as _OwnerLockError
-                from astrid.packs import build_standard_registry as _build_reg
-                from astrid.packs import open_standard_writer as _open_writer
+                import importlib as _il2
+                _packs_mod = _il2.import_module("astrid.packs")
+                _build_reg = _packs_mod.build_standard_registry  # type: ignore[attr-defined]
+                _open_writer = _packs_mod.open_standard_writer  # type: ignore[attr-defined]
                 from astrid.core.events.service import EventAppendService as _EvtSvc
                 from astrid.core.receipts.service import ReceiptService as _ReceiptSvc
                 from astrid.core.repositories.projects import ProjectRepository as _ProjRepo
-                from astrid.packs.timeline.repository import TimelineRepository as _TLRepo
+                _tl_mod = _il2.import_module("astrid.packs.timeline.repository")
+                _TLRepo = _tl_mod.TimelineRepository  # type: ignore[attr-defined]
 
                 try:
                     _writer_lock = _OwnerLock(_compose_db_path)

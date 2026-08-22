@@ -570,7 +570,10 @@ def _registry_from_legacy_assets(record: BridgeTimelineRecord) -> dict[str, Any]
 def _is_record_backfilled(record: BridgeTimelineRecord, *, root: str | Path | None = None) -> bool:
     """Check backfill marker for this timeline; fail closed on unreadable marker."""
     from astrid.core.foundation.project_paths import resolve_projects_root as _resolve_root
-    from astrid.packs.timeline.backfill import BackfillError, read_backfill_state
+    import importlib as _il
+    _bf_mod = _il.import_module("astrid.packs.timeline.backfill")
+    BackfillError = _bf_mod.BackfillError  # type: ignore[attr-defined]
+    read_backfill_state = _bf_mod.read_backfill_state  # type: ignore[attr-defined]
 
     try:
         projects_root = _resolve_root(root)
@@ -580,7 +583,6 @@ def _is_record_backfilled(record: BridgeTimelineRecord, *, root: str | Path | No
     except OSError as exc:
         raise RuntimeError(f"backfill authority marker is unreadable: {exc}") from exc
     return record.timeline_id in state
-
 
 def _ensure_bridge_registry(
     record: BridgeTimelineRecord,

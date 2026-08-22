@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading as _threading
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -62,6 +63,32 @@ from astrid.core.store.writer import DatabaseWriter
 from astrid.packs.timeline.bridge import TimelineBridgeAdapter
 from astrid.packs.timeline.repository import TimelineRepository
 from astrid.sdk.projects import ProjectsService
+
+_ACTIVE_WRITERS: dict = {}
+_ACTIVE_WRITERS_GUARD = _threading.Lock()
+
+
+def _active_key(db_path: str | Path) -> str:
+    try:
+        return str(Path(db_path).resolve())
+    except Exception:
+        return str(db_path)
+
+
+def _register_active_writer(db_path: str | Path, writer: DatabaseWriter) -> None:
+    with _ACTIVE_WRITERS_GUARD:
+        _ACTIVE_WRITERS[_active_key(db_path)] = writer
+
+
+def _unregister_active_writer(db_path: str | Path) -> None:
+    with _ACTIVE_WRITERS_GUARD:
+        _ACTIVE_WRITERS.pop(_active_key(db_path), None)
+
+
+def get_active_writer(db_path: str | Path) -> DatabaseWriter | None:
+    """Return the process-level standard writer for *db_path* if registered."""
+    with _ACTIVE_WRITERS_GUARD:
+        return _ACTIVE_WRITERS.get(_active_key(db_path))
 
 STANDARD_SCHEMA_PACKS: tuple[str, ...] = ("timeline", "shots", "references")
 """Exactly the in-tree schema packs the standard composition registers.
@@ -234,17 +261,20 @@ def compose_standard_bridge(
         raise ServiceUnavailableError("the database is already owned by another process") from exc
     writer: DatabaseWriter | None = None
     try:
-        writer = open_standard_writer(database_path, registry)
+        writer = open_standard_writer(database_path, registry=registry)
     except Exception as exc:
         try:
             owner_lock.release()
         except Exception:
             pass
         raise ServiceUnavailableError(f"failed to open writer: {exc}") from exc
+    # Register process-level writer so lazy SqliteEventLogBackends reuse it (F2).
+    _register_active_writer(database_path, writer)
     # Startup staging GC through the single writer just constructed.
     run_startup_staging_gc(root, writer)
     events = EventAppendService(registry)
     receipts = ReceiptService()
+    projects = ProjectRepository(events=events, receipts=receipts)
     timelines = TimelineRepository(
         events=events, receipts=receipts, projects=projects
     )

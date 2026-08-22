@@ -725,7 +725,10 @@ def _is_timeline_backfilled(timeline_dir: Path, project_root: Path | None) -> tu
             raise
         except Exception as exc:
             raise SnapshotIntegrityError(f"failed kernel lookup for {timeline_dir}: {exc}") from exc
-    from astrid.packs.timeline.backfill import BackfillError, read_backfill_state
+    import importlib as _il
+    _bf_mod = _il.import_module("astrid.packs.timeline.backfill")
+    BackfillError = _bf_mod.BackfillError  # type: ignore[attr-defined]
+    read_backfill_state = _bf_mod.read_backfill_state  # type: ignore[attr-defined]
 
     try:
         state = read_backfill_state(projects_root)

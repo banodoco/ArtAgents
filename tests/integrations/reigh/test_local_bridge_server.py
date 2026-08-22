@@ -221,8 +221,20 @@ def repository_server(
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
-        composition.writer.close()
+        try:
+            composition.writer.close()
+        finally:
+            try:
+                from astrid.packs import _unregister_active_writer
 
+                _unregister_active_writer(composition.database_path)
+            except Exception:
+                pass
+            try:
+                if composition.owner_lock is not None:
+                    composition.owner_lock.release()
+            except Exception:
+                pass
 
 def test_timeline_load_endpoint_repository_backed(
     tmp_bridge_root: Path,
