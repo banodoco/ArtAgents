@@ -59,10 +59,7 @@ from astrid.core.integrations.reigh.bridge_service import (
     BridgeSchemaIncompatibleError,
     BridgeTimelineNotFoundError,
     BridgeVersionConflictError,
-    HealthStatus,
-    ProjectRow,
     TimelineLoad,
-    TimelineRow,
     TimelineSaveRequest,
 )
 from astrid.core.receipts import ReceiptMismatchError
@@ -134,54 +131,7 @@ class TimelineBridgeAdapter:
             timelines, TimelinesService
         )
 
-    # -- health / projects -------------------------------------------------
-
-    def health(self, projects_root: str) -> HealthStatus:
-        """``GET /health``: liveness plus the resolved projects root."""
-        return HealthStatus(ok=True, projects_root=projects_root)
-
-    def list_projects(self) -> list[ProjectRow]:
-        """``GET /projects``: sorted project rows (slug ascending)."""
-        if self._service_mode:
-            result = self._projects.list()
-            self._raise_service_failure(result)
-            return [
-                ProjectRow(slug=row["slug"], name=row["name"])
-                for row in result.data
-            ]
-        return [
-            ProjectRow(slug=row.slug, name=row.name)
-            for row in self._projects.list(self._writer)
-        ]
-
     # -- timeline reads ----------------------------------------------------
-
-    def list_timelines(self, project_slug: str) -> list[TimelineRow]:
-        """``GET /projects/:slug/timelines`` (contract §5.1)."""
-        project_id = self._resolve_project_id(project_slug)
-        if self._service_mode:
-            result = self._timelines.list(project_slug)
-            self._raise_service_failure(result, timeline=True)
-            return [
-                TimelineRow(
-                    timeline_id=row["timeline_id"],
-                    timeline_ulid=row["timeline_ulid"],
-                    slug=row["slug"],
-                    name=row["name"],
-                    is_default=row["is_default"],
-                )
-                for row in result.data
-            ]
-        return [
-            TimelineRow(
-                timeline_id=row.timeline_id,
-                timeline_ulid=row.timeline_ulid,
-                slug=row.slug,
-                name=row.name,
-                is_default=row.is_default,
-            )
-            for row in self._timelines.list(self._writer, project_id)
-        ]
 
     def load_timeline(self, project_slug: str, ref: str) -> TimelineLoad:
         """``GET /projects/:slug/timelines/:ref`` (contract §5.2)."""

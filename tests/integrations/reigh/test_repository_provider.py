@@ -292,49 +292,6 @@ def test_database_path_derivation(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_adapter_health_and_sorted_project_list(
-    adapter, writer: DatabaseWriter
-) -> None:
-    _create_project(adapter, writer, slug="z-last", key="proj-z")
-    _create_project(adapter, writer, slug="a-first", key="proj-a")
-
-    health = adapter.health("/projects")
-    assert health.to_dict() == {"ok": True, "projects_root": "/projects"}
-
-    rows = adapter.list_projects()
-    assert [row.to_dict() for row in rows] == [
-        {"slug": "a-first", "name": "a-first"},
-        {"slug": "z-last", "name": "z-last"},
-    ]
-
-
-def test_adapter_timeline_list_rows_sorted_by_slug(
-    adapter, writer: DatabaseWriter
-) -> None:
-    project = _create_project(adapter, writer, slug="proj", key="proj-1")
-    _create_timeline(
-        adapter, writer, project_id=project.id, slug="zeta",
-        key="tl-1", timeline_id="11111111-1111-1111-1111-111111111111",
-        timeline_ulid="01jm4k5n7p0000000000000001",
-        registry={"assets": {"hero": {"file": "hero.png"}}},
-    )
-    _create_timeline(
-        adapter, writer, project_id=project.id, slug="alpha",
-        key="tl-2", timeline_id="22222222-2222-2222-2222-222222222222",
-        timeline_ulid="01jm4k5n7p0000000000000002",
-        registry={"assets": {}},
-    )
-    rows = adapter.list_timelines(project.slug)
-    assert [row.slug for row in rows] == ["alpha", "zeta"]
-    assert rows[0].to_dict() == {
-        "timeline_id": "22222222-2222-2222-2222-222222222222",
-        "timeline_ulid": "01jm4k5n7p0000000000000002",
-        "slug": "alpha",
-        "name": "Alpha",
-        "is_default": False,
-    }
-
-
 def test_adapter_load_by_all_three_address_forms(
     adapter, writer: DatabaseWriter
 ) -> None:

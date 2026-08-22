@@ -21,6 +21,9 @@ from astrid.core.backup.operations import (
     recover_restore_staging,
 )
 from astrid.core.doctor import run_checks
+from astrid.core.integrations.reigh.bridge_service import (
+    BridgeTimelineNotFoundError,
+)
 from astrid.core.migrations.runner import MigrationTooNewError
 from astrid.core.repositories.media import (
     EXTERNAL_LOCAL_REALM,
@@ -142,8 +145,11 @@ def test_restore_kill_matrix_reopens_old_or_complete_editable_state(
 
         composition = compose_standard_bridge(old_root)
         try:
-            projects = composition.bridge.list_projects()
-            assert projects
+            # The bridge read path works on the recovered pair: project
+            # resolution succeeds (typed not-found for the missing timeline,
+            # never an internal error) and the writer rows are readable.
+            with pytest.raises(BridgeTimelineNotFoundError):
+                composition.bridge.load_timeline("old", "old")
             with composition.writer.read_only_connection() as connection:
                 assert connection.execute("SELECT COUNT(*) FROM projects").fetchone()[0]
         finally:
