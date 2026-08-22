@@ -38,6 +38,7 @@ from astrid.core.repositories.errors import RepositoryError
 from astrid.core.repositories.projects import ProjectNotFoundError
 from astrid.core.store.uow import UnitOfWork
 from astrid.core.store.writer import DatabaseWriter
+from astrid.core.util.paging import decode_keyset_cursor, encode_keyset_cursor
 from astrid.core.util.time import utc_now_iso
 
 GENERATION_TYPES: tuple[str, ...] = ("image", "video", "audio", "other")
@@ -48,6 +49,12 @@ ORIGINAL_VARIANT_TYPE = "original"
 
 DEFAULT_LIST_LIMIT = 1000
 """The bounded default page size for the gallery list read."""
+
+DEFAULT_PAGE_LIMIT = 50
+"""The gallery route's default page size (doc 27 §4.1)."""
+
+MAX_PAGE_LIMIT = 200
+"""The gallery route's hard upper bound on one page."""
 
 
 # ---------------------------------------------------------------------------
@@ -239,7 +246,16 @@ class GenerationListRow:
     created_at: str
     updated_at: str
     primary_media_id: str | None
+    primary_variant_type: str | None
     variant_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class GenerationPage:
+    """One bounded gallery page plus its opaque next-page cursor."""
+
+    rows: tuple[GenerationListRow, ...]
+    next_cursor: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -260,6 +276,12 @@ def _require_non_empty_string(name: str, value: Any) -> str:
     if not isinstance(value, str) or not value:
         raise GenerationValidationError(f"{name} must be a non-empty string")
     return value
+
+
+def _decode_generation_cursor(cursor: str) -> tuple[str, str]:
+    """Decode one opaque page cursor, or raise the typed validation error."""
+    created_at, generation_id = decode_keyset_cursor(cursor, width=2)
+    return created_at, generation_id
 
 
 def _canonical_params(params: Mapping[str, Any] | None, label: str) -> str:
@@ -755,6 +777,10 @@ class GenerationRepository:
                 " WHERE v.generation_id = g.id AND v.is_primary = 1 "
                 " ORDER BY v.created_at ASC, v.id ASC LIMIT 1) "
                 "AS primary_media_id, "
+                "(SELECT v.variant_type FROM generation_variants v "
+                " WHERE v.generation_id = g.id AND v.is_primary = 1 "
+                " ORDER BY v.created_at ASC, v.id ASC LIMIT 1) "
+                "AS primary_variant_type, "
                 "(SELECT COUNT(*) FROM generation_variants v "
                 " WHERE v.generation_id = g.id) AS variant_count "
                 f"FROM generations g WHERE {where} "
@@ -777,9 +803,108 @@ class GenerationRepository:
                     else None
                 ),
                 variant_count=int(row["variant_count"]),
+                primary_variant_type=(
+                    str(row["primary_variant_type"])
+                    if row["primary_variant_type"] is not None
+                    else None
+                ),
             )
             for row in rows
         ]
+
+    def page(
+        self,
+        writer: DatabaseWriter,
+        project_id: str,
+        *,
+        limit: int = DEFAULT_PAGE_LIMIT,
+        cursor: str | None = None,
+        starred_only: bool = False,
+    ) -> GenerationPage:
+        """One keyset-paged gallery slice, ``created_at DESC, id ASC``.
+
+        Deleted generations are always hidden. Each row carries the
+        primary variant's ``media_id``/``variant_type`` (or ``None``
+        when the generation has no primary) and its variant head-count.
+        The opaque *cursor* anchors the next slice after the previous
+        page's last row; an invalid cursor raises
+        :class:`GenerationValidationError`. A missing project raises
+        :class:`ProjectNotFoundError`.
+        """
+        if isinstance(limit, bool) or not isinstance(limit, int):
+            raise GenerationValidationError("limit must be an integer")
+        if limit < 1 or limit > MAX_PAGE_LIMIT:
+            raise GenerationValidationError(
+                f"limit must be between 1 and {MAX_PAGE_LIMIT}"
+            )
+        if cursor is not None and (not isinstance(cursor, str) or not cursor):
+            raise GenerationValidationError("cursor must be a non-empty string")
+        filters = ["g.project_id = ?", "g.deleted_at IS NULL"]
+        parameters: list[Any] = [project_id]
+        if starred_only:
+            filters.append("g.starred = 1")
+        if cursor is not None:
+            cursor_created_at, cursor_id = _decode_generation_cursor(cursor)
+            filters.append(
+                "(g.created_at < ? OR (g.created_at = ? AND g.id > ?))"
+            )
+            parameters.extend([cursor_created_at, cursor_created_at, cursor_id])
+        where = " AND ".join(filters)
+        with writer.read_only_connection() as conn:
+            conn.row_factory = sqlite3.Row
+            self._require_project(conn, project_id)
+            rows = conn.execute(
+                "SELECT g.*, "
+                "(SELECT v.media_id FROM generation_variants v "
+                " WHERE v.generation_id = g.id AND v.is_primary = 1 "
+                " ORDER BY v.created_at ASC, v.id ASC LIMIT 1) "
+                "AS primary_media_id, "
+                "(SELECT v.variant_type FROM generation_variants v "
+                " WHERE v.generation_id = g.id AND v.is_primary = 1 "
+                " ORDER BY v.created_at ASC, v.id ASC LIMIT 1) "
+                "AS primary_variant_type, "
+                "(SELECT COUNT(*) FROM generation_variants v "
+                " WHERE v.generation_id = g.id) AS variant_count "
+                f"FROM generations g WHERE {where} "
+                "ORDER BY g.created_at DESC, g.id ASC LIMIT ?",
+                (*parameters, limit + 1),
+            ).fetchall()
+        has_more = len(rows) > limit
+        rows = rows[:limit]
+        next_cursor = (
+            encode_keyset_cursor(
+                str(rows[-1]["created_at"]), str(rows[-1]["id"])
+            )
+            if has_more
+            else None
+        )
+        return GenerationPage(
+            rows=tuple(
+                GenerationListRow(
+                    id=str(row["id"]),
+                    project_id=str(row["project_id"]),
+                    task_id=row["task_id"],
+                    type=str(row["type"]),
+                    name=row["name"],
+                    starred=bool(row["starred"]),
+                    created_at=str(row["created_at"]),
+                    updated_at=str(row["updated_at"]),
+                    primary_media_id=(
+                        str(row["primary_media_id"])
+                        if row["primary_media_id"] is not None
+                        else None
+                    ),
+                    variant_count=int(row["variant_count"]),
+                    primary_variant_type=(
+                        str(row["primary_variant_type"])
+                        if row["primary_variant_type"] is not None
+                        else None
+                    ),
+                )
+                for row in rows
+            ),
+            next_cursor=next_cursor,
+        )
 
     # -- internal -------------------------------------------------------------
 
@@ -820,13 +945,16 @@ class GenerationRepository:
 
 __all__ = [
     "DEFAULT_LIST_LIMIT",
+    "DEFAULT_PAGE_LIMIT",
     "GENERATION_TYPES",
+    "MAX_PAGE_LIMIT",
     "ORIGINAL_VARIANT_TYPE",
     "GenerationAlreadyExistsError",
     "GenerationDeletedError",
     "GenerationListRow",
     "GenerationMediaError",
     "GenerationNotFoundError",
+    "GenerationPage",
     "GenerationPrimaryChangeReadModel",
     "GenerationPrimaryError",
     "GenerationReadModel",

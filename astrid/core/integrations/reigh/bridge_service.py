@@ -273,6 +273,13 @@ class BridgeTimelineNotFoundError(BridgeError):
     code = "timeline_not_found"
 
 
+class BridgeGenerationNotFoundError(BridgeError):
+    """``404 generation_not_found`` — unknown, foreign, or deleted id."""
+
+    status_code = 404
+    code = "generation_not_found"
+
+
 class BridgeVersionConflictError(BridgeError):
     """``409 timeline_version_conflict`` — stale expected head.
 
@@ -1420,6 +1427,168 @@ class ReighTaskBridge:
         detail["outputs"] = outputs
         return {"task": detail}
 
+    # -- Gallery reads (doc 27 §4.1) -----------------------------------------
+
+    def _generation_repository(self) -> Any:
+        """The pack generation repository composed at the serve root."""
+        if self._generation_repo_factory is None:
+            raise BridgeInternalError(
+                "the generation repository factory is not composed on this "
+                "bridge"
+            )
+        return self._generation_repo_factory()
+
+    def list_generations(
+        self,
+        *,
+        slug: str,
+        limit: int = 50,
+        cursor: str | None = None,
+        starred: bool | None = None,
+    ) -> dict[str, Any]:
+        """One bounded gallery page with primary-variant summaries.
+
+        Ordered ``created_at DESC, id ASC``; deleted generations are
+        hidden; ``next_cursor`` is ``None`` at the end of the project.
+        """
+        from astrid.core.util.paging import decode_keyset_cursor
+
+        limit = max(1, min(int(limit), 200))
+        if cursor is not None:
+            if not isinstance(cursor, str) or not cursor:
+                raise BridgeBodyError("cursor must be a non-empty string")
+            try:
+                decode_keyset_cursor(cursor, width=2)
+            except ValueError as exc:
+                raise BridgeBodyError(str(exc)) from None
+        page = self._generation_repository().page(
+            self._writer,
+            self.resolve_project_id(slug),
+            limit=limit,
+            cursor=cursor,
+            starred_only=bool(starred),
+        )
+        generations = [
+            {
+                "generation_id": row.id,
+                "name": row.name,
+                "type": row.type,
+                "starred": row.starred,
+                "created_at": row.created_at,
+                "updated_at": row.updated_at,
+                "primary": (
+                    {
+                        "media_id": row.primary_media_id,
+                        "variant_type": row.primary_variant_type,
+                    }
+                    if row.primary_media_id is not None
+                    else None
+                ),
+                "variant_count": row.variant_count,
+            }
+            for row in page.rows
+        ]
+        return {"generations": generations, "next_cursor": page.next_cursor}
+
+    def generation_detail(
+        self, *, slug: str, generation_id: str
+    ) -> dict[str, Any]:
+        """Full generation detail: row, variants, and shot placements."""
+        from astrid.core.repositories.errors import RepositoryError
+
+        project_id = self.resolve_project_id(slug)
+        try:
+            model = self._generation_repository().show(
+                self._writer, project_id, generation_id
+            )
+        except RepositoryError as exc:
+            # Plugin law: the kernel adapter cannot name pack exception
+            # classes, so the miss family is narrowed by its stable class
+            # names under the kernel repository-error base.
+            if type(exc).__name__ in (
+                "GenerationNotFoundError",
+                "GenerationDeletedError",
+            ):
+                raise BridgeGenerationNotFoundError(
+                    f"generation {generation_id!r} was not found"
+                ) from None
+            raise
+        # Wire order is recency-first (doc 27 §4.1 gallery posture):
+        # created_at DESC with id ASC as the deterministic tiebreak.
+        by_id = sorted(model.variants, key=lambda variant: variant.id)
+        variants = sorted(
+            by_id, key=lambda variant: variant.created_at, reverse=True
+        )
+        return {
+            "generation": {
+                "generation_id": model.id,
+                "project_id": model.project_id,
+                "task_id": model.task_id,
+                "type": model.type,
+                "name": model.name,
+                "based_on_generation_id": model.based_on_generation_id,
+                "parent_generation_id": model.parent_generation_id,
+                "child_order": model.child_order,
+                "params": dict(model.params),
+                "starred": model.starred,
+                "deleted_at": model.deleted_at,
+                "created_at": model.created_at,
+                "updated_at": model.updated_at,
+                "variants": [variant.to_dict() for variant in variants],
+                "items": self._generation_placements(
+                    project_id, model.id
+                ),
+            }
+        }
+
+    def _generation_placements(
+        self, project_id: str, generation_id: str
+    ) -> list[dict[str, Any]]:
+        """Document-native shot placements of one generation.
+
+        Placement state lives in the CAS-versioned timeline documents
+        (doc 17 §8.3), never in relational rows; this read-only scan
+        walks each project timeline's parsed ``document_json`` and
+        collects every placement node naming the generation.
+        """
+        import json
+
+        placements: list[dict[str, Any]] = []
+
+        def walk(node: Any) -> None:
+            if isinstance(node, Mapping):
+                if (
+                    node.get("generation_id") == generation_id
+                    and isinstance(node.get("shot_id"), str)
+                    and node["shot_id"]
+                ):
+                    placements.append(
+                        {
+                            "shot_id": node["shot_id"],
+                            "timeline_frame": node.get("timeline_frame"),
+                        }
+                    )
+                for value in node.values():
+                    walk(value)
+            elif isinstance(node, list):
+                for value in node:
+                    walk(value)
+
+        with self._writer.read_only_connection() as conn:
+            conn.row_factory = _sqlite_row_factory
+            rows = conn.execute(
+                "SELECT document_json FROM timelines WHERE project_id = ? "
+                "ORDER BY created_at ASC, id ASC",
+                (project_id,),
+            ).fetchall()
+        for row in rows:
+            try:
+                document = json.loads(str(row["document_json"]))
+            except ValueError:
+                continue
+            walk(document)
+        return placements
+
     @staticmethod
     def _task_summary(row: Mapping[str, Any]) -> dict[str, Any]:
         summary = {
@@ -1466,6 +1635,7 @@ __all__ = [
     "ASTROID_DIR_NAME",
     "BRIDGE_ERROR_ENVELOPE_KEYS",
     "BridgeBodyError",
+    "BridgeGenerationNotFoundError",
     "BridgeCapabilityUnavailableError",
     "BridgeChildAdmissionForbiddenError",
     "BridgeConfigError",

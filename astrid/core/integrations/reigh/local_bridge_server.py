@@ -641,6 +641,86 @@ def make_local_bridge_handler(
                 raise MediaNotFoundError(media_id=locator)
             raise last_error
 
+        def _serve_media_content(
+            self,
+            project_slug: str,
+            media_id: str,
+            *,
+            head_only: bool = False,
+        ) -> None:
+            """Serve one managed-media object by ULID id (doc 27 §4.1).
+
+            The media row must resolve inside the route project — a
+            foreign or unknown id is ``404 media_not_found`` with no
+            existence leak — and its bytes must verify against the row's
+            content SHA-256 at a local location, otherwise
+            ``404 media_bytes_missing``. Content-Type comes from the
+            stored ``mime_type``; validators are stat-derived; Range /
+            ``If-None-Match`` semantics are the shared asset wire rules.
+            """
+            import sqlite3
+
+            from astrid.core.repositories.media import MediaNotFoundError
+            from astrid.core.repositories.projects import ProjectNotFoundError
+
+            try:
+                writer = self._bridge_writer()
+            except BridgeError as exc:
+                self._send_bridge_error(exc)
+                return
+            try:
+                project_id = self._projects_repository().resolve(
+                    writer, project_slug
+                )
+            except ProjectNotFoundError:
+                self._send_error(
+                    404,
+                    "project_not_found",
+                    f"project {project_slug!r} was not found",
+                )
+                return
+
+            media = self._media_repository()
+            try:
+                with writer.read_only_connection() as conn:
+                    conn.row_factory = sqlite3.Row
+                    resolved_media_id = media.resolve_media(
+                        conn,
+                        project_id=project_id,
+                        media_id=media_id,
+                    )
+            except MediaNotFoundError:
+                self._send_error(
+                    404,
+                    "media_not_found",
+                    f"media {media_id!r} was not found in project "
+                    f"{project_slug!r}",
+                )
+                return
+
+            media_model = media.show(writer, resolved_media_id)
+            verified = self._resolve_verified_local_location(media_model)
+            if verified is None:
+                self._send_error(
+                    404,
+                    "media_bytes_missing",
+                    f"media {resolved_media_id!r} has no verified local bytes",
+                )
+                return
+
+            local_path, file_size = verified
+            stat = local_path.stat()
+            etag = f'"{stat.st_mtime_ns:x}-{file_size:x}"'
+            last_modified = formatdate(stat.st_mtime, usegmt=True)
+            self._serve_resolved_asset(
+                local_path,
+                file_size,
+                media_model.mime_type,
+                etag,
+                last_modified,
+                head_only=head_only,
+            )
+
         def _projects_repository(self) -> ProjectRepository:
             """Read-only project resolution over the injected single writer.
 
@@ -1106,6 +1186,73 @@ def make_local_bridge_handler(
                 self._send_json(200, payload)
                 return
 
+            # ---- Gallery reads (doc 27 §4.1) ----
+            if (
+                len(parts) == 3
+                and parts[0] == "projects"
+                and parts[2] == "generations"
+            ):
+                try:
+                    query = urlparse(self.path).query
+                    params = dict(
+                        part.split("=", 1)
+                        for part in query.split("&")
+                        if "=" in part
+                    )
+                    starred_raw = params.get("starred")
+                    if starred_raw is None:
+                        starred = None
+                    elif starred_raw.lower() in ("true", "1"):
+                        starred = True
+                    elif starred_raw.lower() in ("false", "0"):
+                        starred = False
+                    else:
+                        self._send_error(
+                            400,
+                            "invalid_body",
+                            "starred must be true or false",
+                        )
+                        return
+                    payload = self._task_bridge().list_generations(
+                        slug=parts[1],
+                        limit=int(params.get("limit", "50")),
+                        cursor=params.get("cursor"),
+                        starred=starred,
+                    )
+                except BridgeError as exc:
+                    self._send_bridge_error(exc)
+                    return
+                except ValueError:
+                    self._send_error(400, "invalid_body", "bad paging param")
+                    return
+                self._send_json(200, payload)
+                return
+
+            if (
+                len(parts) == 4
+                and parts[0] == "projects"
+                and parts[2] == "generations"
+            ):
+                try:
+                    payload = self._task_bridge().generation_detail(
+                        slug=parts[1], generation_id=parts[3]
+                    )
+                except BridgeError as exc:
+                    self._send_bridge_error(exc)
+                    return
+                self._send_json(200, payload)
+                return
+
+            # ---- Managed-media content (doc 27 §4.1) ----
+            if (
+                len(parts) == 5
+                and parts[0] == "projects"
+                and parts[2] == "media"
+                and parts[4] == "content"
+            ):
+                self._serve_media_content(parts[1], parts[3])
+                return
+
             self._send_error(404, "not_found", f"unknown route: {path}")
 
         def do_HEAD(self) -> None:  # noqa: N802
@@ -1120,6 +1267,17 @@ def make_local_bridge_handler(
             ):
                 self._serve_asset(
                     parts[1], parts[3], parts[5], head_only=True
+                )
+                return
+
+            if (
+                len(parts) == 5
+                and parts[0] == "projects"
+                and parts[2] == "media"
+                and parts[4] == "content"
+            ):
+                self._serve_media_content(
+                    parts[1], parts[3], head_only=True
                 )
                 return
 
