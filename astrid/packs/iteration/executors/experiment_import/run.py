@@ -524,11 +524,47 @@ def main(argv: list[str] | None = None) -> int:
             )
             run_record["manifest_path"] = f"runs/{run_id}/manifest.json"
             run_record = validate_run_record(run_record)
+            # Kernel-first: imported runs are not kernel ledger entries — this
+            # run.json is non-authority import storage, not a status authority.
+            # If a kernel run exists for this project/run_id, stamp as derived
+            # projection (authority: kernel); otherwise stamp as import storage
+            # (authority: import). Never an authoritative ledger write.
+            # Keep load_run_record for historical dirs (read path unchanged).
+            _kernel_run_id: str | None = None
+            _kernel_task_id: str | None = None
+            try:
+                from astrid.core.foundation.project_paths import resolve_projects_root as _resolve_root  # noqa: E402
+                _root = _resolve_root(None)
+                _db = _root / "kernel.sqlite3"
+                if _db.is_file():
+                    import sqlite3 as _sqlite  # noqa: E402
+                    with _sqlite.connect(str(_db)) as _conn:
+                        _conn.row_factory = _sqlite.Row
+                        _row = _conn.execute("SELECT id FROM runs WHERE id = ? AND project_id = ?", (run_id, project_slug)).fetchone()
+                        if _row is not None:
+                            _kernel_run_id = str(_row["id"])
+                            _trow = _conn.execute("SELECT id FROM tasks WHERE run_id = ? AND project_id = ? ORDER BY run_ordinal ASC LIMIT 1", (run_id, project_slug)).fetchone()
+                            if _trow is not None:
+                                _kernel_task_id = str(_trow["id"])
+            except Exception:
+                pass
+            if _kernel_run_id is not None:
+                run_record["authority"] = "kernel"
+                run_record["kernel_run_id"] = _kernel_run_id
+                if _kernel_task_id is not None:
+                    run_record["kernel_task_id"] = _kernel_task_id
+            else:
+                run_record["authority"] = "import"
+                # Explicit non-authority marker for readers: this file is storage
+                # for legacy evidence, not the kernel status source.
+                run_record.setdefault("metadata", {})  # type: ignore[attr-defined]
+                if isinstance(run_record.get("metadata"), dict):
+                    run_record["metadata"]["non_authority"] = True  # type: ignore[index]
+                    run_record["metadata"]["storage_kind"] = "legacy_import"
             (run_dir / "run.json").write_text(
                 json.dumps(run_record, indent=2, sort_keys=True) + "\n",
                 encoding="utf-8",
             )
-
         # Manifest pins were added only after their final bytes existed.
         experiment = validate_experiment(experiment)
 

@@ -316,6 +316,8 @@ def run_full(args: argparse.Namespace) -> int:
                 "transcript": str(transcript) if transcript else None,
                 "brief": str(brief) if brief else None,
                 "plan_hash": plan_hash,
+                "authority": "local",
+                "note": "non-authority local orchestrator metadata; kernel is status authority",
             },
             indent=2,
             sort_keys=True,
@@ -326,7 +328,6 @@ def run_full(args: argparse.Namespace) -> int:
     if args.dry_run:
         print(f"stream_content.distill: plan emitted to {plan_path} (plan_hash={plan_hash})")
         return 0
-
     transcript_path = transcript or (out / "transcript.json")
     if transcript is None:
         _run_subprocess(

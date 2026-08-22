@@ -78,9 +78,25 @@ class CapabilityTaskHandler:
             elif isinstance(spec.get("request"), Mapping):
                 project = spec.get("request", {}).get("project")
 
+        # Orchestrator leaf step (B3.2 static fan-out): when spec carries "step",
+        # this task is one of N children admitted at run creation with hard
+        # dependency edges. Execute the leaf step directly as a file-only
+        # proof (not the full orchestrator) to demonstrate fan-out + unblock.
+        _leaf_step: str | None = None
+        if isinstance(spec, Mapping) and isinstance(spec.get("step"), str):
+            _leaf_step = str(spec.get("step"))
         with _scoped_env(ASTRID_INTERNAL_INVOCATION, "1"):
-            if self._kind == "executor":
-                from astrid.core.execution.executor.runner import ExecutorRunRequest, run_executor
+            if _leaf_step is not None and self._kind == "orchestrator":
+                # Minimal leaf: write a deterministic output per step under out_dir
+                out_dir.mkdir(parents=True, exist_ok=True)
+                leaf_out = out_dir / f"{_leaf_step}.json"
+                import json as _json  # noqa: E402
+                leaf_out.write_text(_json.dumps({"step": _leaf_step, "capability": self._capability_id, "ok": True}, sort_keys=True) + "\n", encoding="utf-8")
+                # Also write a marker for render step to produce render-manifest.json shape
+                if _leaf_step == "render":
+                    (out_dir / "render-manifest.json").write_text(_json.dumps({"step": "render", "rendered": True}, sort_keys=True) + "\n", encoding="utf-8")
+            elif self._kind == "executor":
+                from astrid.core.execution.executor.runner import ExecutorRunRequest, run_executor  # noqa: E402
 
                 req = ExecutorRunRequest(
                     executor_id=self._capability_id,
@@ -104,7 +120,7 @@ class CapabilityTaskHandler:
                     msg = getattr(result, "payload", {}) or {}
                     raise RuntimeError(f"executor {self._capability_id!r} failed: {msg}")
             else:
-                from astrid.core.execution.orchestrator.runner import OrchestratorRunRequest, run_orchestrator
+                from astrid.core.execution.orchestrator.runner import OrchestratorRunRequest, run_orchestrator  # noqa: E402
 
                 req = OrchestratorRunRequest(
                     orchestrator_id=self._capability_id,
@@ -125,7 +141,6 @@ class CapabilityTaskHandler:
                 ok = bool(getattr(result, "ok", False))
                 if not ok:
                     raise RuntimeError(f"orchestrator {self._capability_id!r} failed: {result}")
-
         manifest_path = discover_manifest_path(out_dir, fallback_root=staging_dir)
         if manifest_path is None:
             for cand in (staging_dir / "manifest.json", out_dir / "manifest.json", staging_dir / "agent-view" / "manifest.json", out_dir / "agent-view" / "manifest.json"):

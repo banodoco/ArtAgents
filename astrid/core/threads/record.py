@@ -1,4 +1,12 @@
-"""Build and finalize v1 run.json records."""
+"""Build and finalize v1 run.json records — legacy threads-era storage.
+
+This module is historical: threads-era run.json files are non-authority
+storage for repo-root runs/ directories. The kernel (RunRepository +
+TaskRepository) is the status authority; this writer never claims
+authority. When a kernel run exists for a given run_id, callers should
+prefer a derived projection (authority: kernel) or skip authoritative
+semantics entirely. ``load_run_record`` is retained for historical dirs.
+"""
 
 from __future__ import annotations
 
@@ -22,7 +30,6 @@ from .schema import SCHEMA_VERSION, utc_now, validate_run_record
 
 SECRET_KEY_RE = re.compile(r"(KEY|TOKEN|SECRET|PASSWORD|PASSPHRASE|API_KEY|BEARER)", re.IGNORECASE)
 RUN_RECORD_NAME = "run.json"
-
 
 def build_run_record(
     *,
@@ -100,7 +107,19 @@ def finalize_run_record(
 
 
 def write_run_record(record: Mapping[str, Any], path: Path) -> None:
+    """Write a threads-era run.json as non-authority storage.
+
+    Kernel-first: if a kernel run exists for this run_id, callers should
+    prefer a derived projection (authority: kernel) instead of this writer.
+    This function writes legacy storage only (authority: threads-legacy),
+    never a status authority. Kept for historical repo-root runs/ dirs;
+    new project runs use the kernel projection path.
+    """
     normalized = validate_run_record(record)
+    # Mark legacy storage explicitly so readers never treat it as authority.
+    if "authority" not in normalized:
+        normalized = dict(normalized)
+        normalized["authority"] = "threads-legacy"
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     with tmp.open("w", encoding="utf-8") as handle:

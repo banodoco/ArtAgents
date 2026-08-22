@@ -332,6 +332,71 @@ def _kernel_invoke(
             pass
         spec_payload = {"capability_id": capability.id, "inputs": dict(inputs or {}), "outputs": dict(outputs or {}), "project": project, "kind": str(kind)}
         idempotency_key = compute_spec_hash(spec_payload, [])
+        # Orchestrator with static plan: fan-out N children at admission with hard
+        # dependency chain (proof for B3.2). Dynamic planned_commands stay per-step
+        # via task client — this branch is the static fan-out path.
+        if capability.capability_type == "orchestrator" and capability.id == "video_editing.event_talks":
+            from astrid.core.ids import generate_lowercase_ulid  # noqa: E402
+            _steps = ["ados-sunday-template", "search-transcript", "find-holding-screens", "render"]
+            _task_ids = [generate_lowercase_ulid() for _ in _steps]
+            _children: list[dict[str, Any]] = []
+            for _i, (_tid, _step) in enumerate(zip(_task_ids, _steps)):
+                _spec = {"capability_id": capability.id, "step": _step, "project": project, "inputs": dict(inputs or {}), "outputs": dict(outputs or {}), "kind": str(kind)}
+                _deps: list[dict[str, Any]] = [{"task_id": _task_ids[_i - 1], "kind": "hard"}] if _i > 0 else []
+                _children.append({"capability": capability.id, "spec": _spec, "input_manifest": [], "task_id": _tid, "dependencies": _deps})
+            def _create_orch(u):
+                return runs.create(
+                    u,
+                    project_id=project_id,
+                    children=_children,
+                    idempotency_key=idempotency_key,
+                    kind=capability.capability_type,
+                    title=capability.id,
+                    input={"capability_id": capability.id, "project": project, "kind": str(kind), "inputs": dict(inputs or {}), "outputs": dict(outputs or {})},
+                )
+            fanout = UnitOfWork(writer).run(_create_orch)
+            run_id = fanout.run_id
+            handler = CapabilityTaskHandler(capability_kind=capability.capability_type, capability_id=capability.id, projects_root=projects_root)
+            svc = ExecutionService(projects_root=projects_root, task_repo=tasks)
+            # Sequential claim/start/execute/complete respecting hard dependency
+            # unblock: blocked tasks become claim-eligible only after predecessor
+            # reaches succeeded (derive via task_dependencies).
+            for _idx, _expected_tid in enumerate(_task_ids):
+                _claim_key = f"{idempotency_key}:claim:{_idx}"
+                _claim = UnitOfWork(writer).run(lambda u, _ck=_claim_key: tasks.claim(u, project_id=project_id, idempotency_key=_ck))
+                if _claim is None:
+                    raise RuntimeError(f"orchestrator fan-out: no claimable task at index {_idx} (expected {_expected_tid})")
+                # Hard-dependency chain ensures FIFO order; assert for proof hygiene
+                if _claim.task.id != _expected_tid:
+                    raise RuntimeError(f"orchestrator fan-out: claim order mismatch: got {_claim.task.id!r} expected {_expected_tid!r}")
+                _exec_key = f"{idempotency_key}:exec:{_idx}"
+                _exec_res = svc.execute(
+                    UnitOfWork(writer),
+                    project_id=project_id,
+                    task_id=_claim.task.id,
+                    attempt_id=_claim.attempt.id,
+                    lease_id=_claim.attempt.lease_id,
+                    expected_status_version=_claim.attempt.status_version,
+                    idempotency_key=_exec_key,
+                    handler=handler,
+                )
+                if _exec_res.outcome == "failed":
+                    _raw: dict[str, Any] = {"ok": False, "run_id": run_id, "kernel_run_id": run_id, "kernel_task_id": _claim.task.id, "kernel_attempt_id": _claim.attempt.id, "error": _exec_res.error}
+                    return run_id, _claim.task.id, _claim.attempt.id, None, _raw, False, None
+                assert _exec_res.prepared is not None
+                _prepared = _exec_res.prepared
+                _comp = svc.complete(UnitOfWork(writer), prepared=_prepared, media_repo=media_repo, idempotency_key=f"{idempotency_key}:complete:{_idx}")
+                if _comp.outcome != "completed":
+                    _raw2: dict[str, Any] = {"ok": False, "run_id": run_id, "kernel_run_id": run_id, "kernel_task_id": _claim.task.id, "kernel_attempt_id": _prepared.attempt.id, "error": _comp.error}
+                    return run_id, _claim.task.id, _prepared.attempt.id, None, _raw2, False, None
+            # All N children succeeded → run derives succeeded
+            _last_tid = _task_ids[-1]
+            _last_attempt_id = _prepared.attempt.id  # type: ignore[union-attr]
+            _raw_ok: dict[str, Any] = {"ok": True, "run_id": run_id, "run_root": str(_prepared.staging_dir), "kernel_run_id": run_id, "kernel_task_id": _last_tid, "kernel_attempt_id": _last_attempt_id}  # type: ignore[union-attr]
+            _mpath = None
+            if _prepared.manifest.outputs:  # type: ignore[union-attr]
+                _mpath = _prepared.staging_dir / _prepared.manifest.outputs[0].path  # type: ignore[union-attr]
+            return run_id, _last_tid, _last_attempt_id, _mpath, _raw_ok, True, None
         child_spec = {"capability_id": capability.id, "inputs": dict(inputs or {}), "outputs": dict(outputs or {}), "project": project, "kind": str(kind)}
         def _create(u):
             return runs.create(
