@@ -743,3 +743,76 @@ class TestTravelFamilyJourney:
         assert journey.parent_status() == "succeeded"
         journey.assert_invariants(planned, expect_terminal=True)
         journey.assert_no_orphaned_running_children()
+
+
+# ---------------------------------------------------------------------------
+# edit_video_orchestrator — the childless single-attempt family (T4.2
+# reading, doc 27 §3.1): derive_children yields (), so the parent settles
+# with one explicit terminal and ZERO gated admissions.
+# ---------------------------------------------------------------------------
+
+EDIT_SPEC = {
+    "family": "edit_video_orchestrator",
+    "params": {"clip_source": "clips", "clips": ["a"]},
+}
+
+
+class TestEditFamilyJourney:
+    def test_single_attempt_parent_settles_explicitly(
+        self, env: dict[str, Any], coordinator: OrchestratorCoordinator
+    ) -> None:
+        parent_id = _admit_parent(
+            coordinator, key="k-edit-parent", spec=EDIT_SPEC
+        )
+        journey = FamilyJourney(env, parent_id)
+        planned = derive_children(EDIT_SPEC)
+        assert planned == ()  # childless by contract, not by omission
+
+        claim = _claim_parent(coordinator, "edit_video_orchestrator")
+        # The coordinator's fan-out admits nothing — there is no gate
+        # traffic at all for this family.
+        assert coordinator.fan_out(claim, executor_id=EXEC_1) == {}
+        journey.assert_invariants(planned, expect_terminal=False)
+
+        settlement = coordinator.settle_success(
+            claim,
+            settlement_key="k-edit-done",
+            receipt={},
+        )
+        assert settlement["task"]["status"] == "succeeded"
+        assert journey.parent_status() == "succeeded"
+        journey.assert_invariants(planned, expect_terminal=True)
+        journey.assert_no_orphaned_running_children()
+
+    def test_settlement_replay_stays_exactly_one_terminal(
+        self, env: dict[str, Any], coordinator: OrchestratorCoordinator
+    ) -> None:
+        parent_id = _admit_parent(
+            coordinator, key="k-edit-parent", spec=EDIT_SPEC
+        )
+        journey = FamilyJourney(env, parent_id)
+
+        claim = _claim_parent(coordinator, "edit_video_orchestrator")
+        first = coordinator.settle_success(
+            claim, settlement_key="k-edit-done", receipt={}
+        )
+        replay = coordinator.settle_success(
+            claim, settlement_key="k-edit-done", receipt={}
+        )
+        assert first["task"]["status"] == replay["task"]["status"]
+        assert journey.parent_status() == "succeeded"
+        assert journey.child_rows() == {}
+        assert journey.terminal_receipt_count() == 1
+
+    def test_edit_child_families_are_not_in_the_allowlist(
+        self, env: dict[str, Any], coordinator: OrchestratorCoordinator
+    ) -> None:
+        """No edit_* name is an executor-child capability (§3.1)."""
+        from astrid.core.integrations.reigh.capabilities import (
+            ChildAdmissionForbidden,
+            resolve_child_capability,
+        )
+
+        for name in ("edit_video_segment", "edit_travel_flux"):
+            with pytest.raises(ChildAdmissionForbidden):
+                resolve_child_capability(name)
