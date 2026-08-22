@@ -917,36 +917,6 @@ def _validate_project_owned_inputs(
             )
 
 
-def _validate_project_owned_inputs(
-    request: ExecutorRunRequest,
-    executor: ExecutorDefinition,
-) -> None:
-    """Fail closed for declared timeline/experiment inputs outside the project."""
-
-    if not request.project:
-        return
-    for port in getattr(executor, "inputs", ()):
-        artifact_type = port.artifact_type
-        if not isinstance(artifact_type, str):
-            continue
-        normalized = artifact_type.strip().lower().replace("-", "_")
-        if not (
-            normalized == "timeline"
-            or normalized.startswith("timeline/")
-            or normalized == "experiment"
-            or normalized.startswith("experiment/")
-            or normalized in {"project_runs", "experiment_runs"}
-        ):
-            continue
-        value = request.inputs.get(port.name)
-        if not _has_value(value):
-            continue
-        for item in _iter_input_values(value):
-            require_project_owned_artifact(
-                request.project,
-                normalized,
-                _stringify_value(item),
-            )
 
 
 def _project_argv(request: ExecutorRunRequest) -> list[str]:

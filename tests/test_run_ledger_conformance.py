@@ -610,6 +610,8 @@ def _admit_and_complete_one(
         receipts = ReceiptService()
         tasks = TaskRepository(events=events, receipts=receipts)
         projects = ProjectRepository(events=events, receipts=receipts)
+        from astrid.core.repositories.media import MediaRepository
+        media_repo = MediaRepository(events=events, receipts=receipts, projects_root=projects_root)
         spec_payload = spec or {"prompt": "hello", "seed": 1}
         idempotency_key = compute_spec_hash({"capability": capability, "spec": spec_payload}, [])
         task_id = generate_lowercase_ulid()
@@ -623,33 +625,67 @@ def _admit_and_complete_one(
         # Admit task
         UnitOfWork(writer).run(lambda u: tasks.create(u, project_id=kernel_project_id, capability=capability, spec=spec_payload, input_manifest=[], idempotency_key=idempotency_key, task_id=task_id))
         tid = task_id
-        # Claim -> start -> complete
-        claim = UnitOfWork(writer).run(lambda u: tasks.claim(u, project_id=kernel_project_id, idempotency_key=f"claim-{tid}", executor_id="test-exec", now="2026-08-22T00:00:00+00:00"))
-        attempt_id = claim.attempt_id if hasattr(claim, "attempt_id") else claim["attempt_id"] if isinstance(claim, dict) else str(claim)
-        import sqlite3
-        with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as conn:
-            conn.row_factory = sqlite3.Row
-            row = conn.execute("SELECT status_version FROM execution_attempts WHERE id=?", (attempt_id,)).fetchone()
-            if row is None:
-                row = conn.execute("SELECT status_version FROM execution_attempts WHERE task_id=? ORDER BY created_at DESC LIMIT 1", (tid,)).fetchone()
-            sv = int(row["status_version"]) if row and row["status_version"] is not None else 1
-        try:
-            UnitOfWork(writer).run(lambda u: tasks.start(u, project_id=kernel_project_id, task_id=tid, attempt_id=attempt_id, expected_status_version=sv, idempotency_key=f"start-{tid}", now="2026-08-22T00:01:00+00:00"))
-        except Exception:
-            pass
-        try:
-            UnitOfWork(writer).run(lambda u: tasks.complete(u, project_id=kernel_project_id, task_id=tid, attempt_id=attempt_id, idempotency_key=f"complete-{tid}", now="2026-08-22T00:02:00+00:00", result_manifest={"outputs": []}))
-        except Exception:
-            try:
-                UnitOfWork(writer).run(lambda u: tasks.complete(u, project_id=kernel_project_id, task_id=tid, attempt_id=attempt_id, idempotency_key=f"complete-{tid}", now="2026-08-22T00:02:00+00:00"))
-            except Exception:
-                pass
+        # Claim -> start -> complete (proper lease/status_version handling)
+        claim = UnitOfWork(writer).run(lambda u: tasks.claim(u, project_id=kernel_project_id, idempotency_key=f"claim-{tid}", executor_id="test-exec"))
+        if claim is None:
+            return kernel_project_id, tid
+        # Extract attempt fields from claim model (TaskClaimReadModel)
+        attempt = claim.attempt  # type: ignore[attr-defined]
+        task_obj = claim.task  # type: ignore[attr-defined]
+        # Fallback for dict replay
+        if isinstance(claim, dict):
+            attempt = claim.get("attempt") or claim  # type: ignore
+            task_obj = claim.get("task") or {"id": tid}  # type: ignore
+        attempt_id = attempt.id if hasattr(attempt, "id") else attempt.get("id", tid)  # type: ignore
+        lease_id = attempt.lease_id if hasattr(attempt, "lease_id") else attempt.get("lease_id")  # type: ignore
+        sv = int(attempt.status_version if hasattr(attempt, "status_version") else attempt.get("status_version", 1))  # type: ignore
+        # Start
+        started = UnitOfWork(writer).run(lambda u: tasks.start(u, project_id=kernel_project_id, task_id=task_obj.id if hasattr(task_obj, "id") else task_obj.get("id", tid), attempt_id=attempt_id, expected_status_version=sv, lease_id=lease_id, idempotency_key=f"start-{tid}"))  # type: ignore
+        sv2 = int(started.status_version if hasattr(started, "status_version") else started.get("status_version", sv + 1))  # type: ignore
+        # Complete — requires outputs or result; provide empty outputs + result summary + media_repo
+        UnitOfWork(writer).run(lambda u: tasks.complete(u, project_id=kernel_project_id, task_id=task_obj.id if hasattr(task_obj, "id") else task_obj.get("id", tid), attempt_id=attempt_id, expected_status_version=sv2, lease_id=lease_id, idempotency_key=f"complete-{tid}", outputs=[], result={"outputs": []}, media_repo=media_repo))  # type: ignore
         return kernel_project_id, tid
     finally:
         try:
             writer.close()
         except Exception:
             pass
+def _drive_orchestrator_chain(projects_root: Path, project_slug: str) -> None:
+    """Drive orchestrator hard-chain (4 tasks) to terminal via TaskRepository."""
+    from astrid.core.events.registry import core_only_registry
+    from astrid.core.events.service import EventAppendService
+    from astrid.core.receipts import ReceiptService
+    from astrid.core.repositories.media import MediaRepository
+    from astrid.core.repositories.tasks import TaskRepository
+    from astrid.core.store.uow import UnitOfWork
+    from astrid.core.store.writer import DatabaseWriter
+
+    registry = core_only_registry()
+    db_path = projects_root / "kernel.sqlite3"
+    writer = DatabaseWriter(db_path, registry)
+    try:
+        events = EventAppendService(registry)
+        receipts = ReceiptService()
+        tasks_repo = TaskRepository(events=events, receipts=receipts)
+        media_repo = MediaRepository(events=events, receipts=receipts, projects_root=projects_root)
+        for idx in range(8):
+            claim = UnitOfWork(writer).run(lambda u, _ck=f"drive-claim-{project_slug}-{idx}": tasks_repo.claim(u, project_id=project_slug, idempotency_key=_ck))
+            if claim is None:
+                break
+            task_id = claim.task.id  # type: ignore[attr-defined]
+            attempt = claim.attempt  # type: ignore[attr-defined]
+            attempt_id = attempt.id  # type: ignore[attr-defined]
+            lease_id = attempt.lease_id  # type: ignore[attr-defined]
+            sv = int(attempt.status_version)  # type: ignore[attr-defined]
+            started = UnitOfWork(writer).run(lambda u, _tid=task_id, _aid=attempt_id, _lease=lease_id, _sv=sv, _ck=f"drive-start-{project_slug}-{idx}": tasks_repo.start(u, project_id=project_slug, task_id=_tid, attempt_id=_aid, lease_id=_lease, expected_status_version=_sv, idempotency_key=_ck))
+            sv2 = int(started.status_version)  # type: ignore[attr-defined]
+            UnitOfWork(writer).run(lambda u, _tid=task_id, _aid=attempt_id, _lease=lease_id, _sv=sv2, _ck=f"drive-complete-{project_slug}-{idx}": tasks_repo.complete(u, project_id=project_slug, task_id=_tid, attempt_id=_aid, lease_id=_lease, expected_status_version=_sv, idempotency_key=_ck, outputs=[], result={"step": f"step-{idx}"}, media_repo=media_repo))
+    finally:
+        try:
+            writer.close()
+        except Exception:
+            pass
+
 
 class TestSingleLedgerHarness:
     """B4.2 empirical harness: each cap is kernel run+task with events/receipts and zero authoritative run.json."""
@@ -674,10 +710,8 @@ class TestSingleLedgerHarness:
             records = _project_run_records(projects_root)
             # Zero authoritative run.json projection only; kernel is authority
             assert records == [] or all(r.get("authority") in ("kernel", "import", "threads-legacy") for r in records), f"{cap} leaked authoritative run.json: {records}"
-            runs, tasks, events, receipts = _kernel_counts(projects_root)
-            assert runs >= 1 or tasks >= 1, f"{cap} kernel empty runs={runs} tasks={tasks}"
-            assert events >= 2, f"{cap} events {events} < 2"
-            assert receipts >= 1, f"{cap} receipts {receipts} < 1"
+            # Harness honesty: 6 caps via _assert_kernel_single_ledger (events>=4 receipts>=2, terminal)
+            _assert_kernel_single_ledger(projects_root, expected_runs=0, expected_tasks=1, min_events=4, min_receipts=2)
 
     def test_orchestrator_with_children_hard_chain(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         from astrid.core.project.kernel_admission import admit_orchestrator_project_run
@@ -688,14 +722,13 @@ class TestSingleLedgerHarness:
         create_project("demo-orch")
         ctx = admit_orchestrator_project_run(project="demo-orch", tool_id="test.orch", argv=["--project", "demo-orch"], projects_root=projects_root)
         assert ctx.run_id
-        runs, tasks, events, receipts = _kernel_counts(projects_root)
-        # After R3.1 fan-out, orchestrator should have 1 run +4 tasks hard chain
-        assert runs >= 1, f"orch runs {runs} <1"
-        if tasks >= 4:
-            assert events >= 6, f"orch events {events} <6 for 4 tasks"
-            assert receipts >= 2, f"orch receipts {receipts} <2"
+        # Drive hard chain to terminal (admit is create-only; harness drives)
+        _drive_orchestrator_chain(projects_root, "demo-orch")
+        # After R3.1 fan-out, orchestrator should have 1 run +4 tasks hard chain, events>=12 receipts>=4
+        _assert_kernel_single_ledger(projects_root, expected_runs=1, expected_tasks=4, min_events=12, min_receipts=4)
         # Zero authoritative run.json
         assert _project_run_records(projects_root) == [] or all(r.get("authority") != "authoritative" for r in _project_run_records(projects_root))
+
 
     def test_banodoco_worker_single_write_projection(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         from astrid.core.integrations.worker.banodoco_worker import _write_baseline_snapshot

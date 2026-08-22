@@ -5,6 +5,9 @@ directly (second ledger). This shim routes through the kernel admission
 path — creating a real kernel run+task via ``RunRepository.create`` when
 the kernel database is available, otherwise falling back to a
 projects_root-staged directory. Never writes authoritative run.json.
+
+Admission is create-only; driving the hard-chain to terminal status is
+the caller's responsibility (harness/orchestrator).
 """
 
 from __future__ import annotations
@@ -12,6 +15,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+from astrid.core.receipts.service import ReceiptMismatchError  # noqa: F401 — needed for outer except
 
 
 @dataclass(frozen=True)
@@ -28,36 +33,43 @@ def admit_orchestrator_project_run(
     argv: list[str],
     projects_root: str | Path | None = None,
 ) -> KernelAdmissionContext:
-    """Admit via kernel — projects_root threaded, no authoritative run.json write."""
+    """Admit via kernel — projects_root threaded, no authoritative run.json write.
+
+    Create-only: admits 1 run + 4 tasks (hard chain) via ``RunRepository``.
+    Returns the reconciled kernel ``run_id`` on idempotent replay (no orphan
+    ULID). Raises ``ReceiptMismatchError`` on idempotency-key reuse with a
+    different request hash; does not swallow it. Drive (claim/start/complete)
+    is the caller's responsibility.
+    """
     from astrid.core.foundation.project_paths import resolve_projects_root
     from astrid.core.ids import generate_lowercase_ulid
 
     root = resolve_projects_root(projects_root)
-    run_id = generate_lowercase_ulid()
-    run_root = root / project / "runs" / run_id
 
-    # Real kernel admission: create a zero-child orchestrator run via RunRepository.
-    # Idempotency key derived from tool+argv only (no run_id) via canonical
-    # compute_spec_hash so repeated calls with same args are idempotent.
+    # Idempotency key derived from tool+argv only (no run_id) so replay is stable.
+    # Compute early so we can return reconciled run_id without allocating orphan.
+    spec_payload: dict[str, Any] = {"tool_id": tool_id, "argv": list(argv)}
+    reconciled_run_id: str | None = None
     try:
+        from astrid.core.events.registry import core_only_registry
         from astrid.core.events.service import EventAppendService
-        from astrid.core.receipts.service import ReceiptService, ReceiptMismatchError
+        from astrid.core.receipts.service import ReceiptService
         from astrid.core.repositories.projects import ProjectRepository
         from astrid.core.repositories.runs import RunRepository
         from astrid.core.repositories.tasks import compute_spec_hash
-        from astrid.core.events.registry import core_only_registry
         from astrid.core.store.uow import UnitOfWork
         from astrid.core.store.writer import DatabaseWriter
-        import json
+
+        idempotency_key = compute_spec_hash(spec_payload, [])
 
         registry = core_only_registry()
         db_path = Path(root) / "kernel.sqlite3"
         writer = DatabaseWriter(db_path, registry)
         try:
-            events = EventAppendService(registry)
+            events = EventAppendService(registry)  # type: ignore[arg-type]
             receipts = ReceiptService()
-            runs = RunRepository(events=events, receipts=receipts)
-            projects = ProjectRepository(events=events, receipts=receipts)
+            runs = RunRepository(events=events, receipts=receipts)  # type: ignore[arg-type]
+            projects = ProjectRepository(events=events, receipts=receipts)  # type: ignore[arg-type]
             try:
                 UnitOfWork(writer).run(
                     lambda u: projects.create(
@@ -69,16 +81,17 @@ def admit_orchestrator_project_run(
                         project_id=project,
                     )
                 )
+            except ReceiptMismatchError:
+                raise
             except Exception:
                 pass
 
-            spec_payload = {"tool_id": tool_id, "argv": list(argv)}
-            idempotency_key = compute_spec_hash(spec_payload, [])
-
-            # B3 P0: fan-out N=4 hard chain (plan, fetch, render, publish)
-            # Stable task_ids for hard dependency edges; run_ordinal is index.
             _steps = ["plan", "fetch", "render", "publish"]
-            _task_ids = [generate_lowercase_ulid() for _ in _steps]
+            import hashlib
+            # Deterministic ids for idempotent replay (no orphan mismatch):
+            # run_id and child task_ids derived from idempotency_key.
+            deterministic_run_id = hashlib.sha256(f"run:{idempotency_key}".encode()).hexdigest()[:26]
+            _task_ids = [hashlib.sha256(f"{idempotency_key}:{step}".encode()).hexdigest()[:26] for step in _steps]
             _children: list[dict[str, Any]] = []
             for _idx, (_tid, _step) in enumerate(zip(_task_ids, _steps)):
                 _spec: dict[str, Any] = {"tool_id": tool_id, "step": _step, "argv": list(argv), "project": project}
@@ -102,65 +115,32 @@ def admit_orchestrator_project_run(
                     kind="orchestrator",
                     title=tool_id,
                     input={"tool_id": tool_id, "argv": list(argv)},
+                    run_id=deterministic_run_id,
                 )
-            try:
-                fanout = UnitOfWork(writer).run(_create)
-                # Use kernel-assigned id (idempotent replay returns stored id)
-                try:
-                    run_id = fanout.run_id
-                    run_root = root / project / "runs" / run_id
-                except Exception:
-                    pass
-                # Drive hard chain to succeeded so events/receipts per task exist (R3.1 verify)
-                try:
-                    from astrid.core.repositories.media import MediaRepository
-                    from astrid.core.repositories.tasks import TaskRepository
 
-                    _tasks = TaskRepository(events=events, receipts=receipts)
-                    _media = MediaRepository(events=events, receipts=receipts, projects_root=root)
-                    for _idx, _expected_tid in enumerate(_task_ids):
-                        _claim = UnitOfWork(writer).run(
-                            lambda u, _ck=f"{idempotency_key}:claim:{_idx}": _tasks.claim(u, project_id=project, idempotency_key=_ck)
-                        )
-                        if _claim is None:
-                            break
-                        _sv_claim = int(_claim.attempt.status_version)
-                        _lease = str(_claim.attempt.lease_id)
-                        _started = UnitOfWork(writer).run(
-                            lambda u, _tid=_claim.task.id, _aid=_claim.attempt.id, _sv=_sv_claim, _lease=_lease, _ck=f"{idempotency_key}:start:{_idx}": _tasks.start(
-                                u, project_id=project, task_id=_tid, attempt_id=_aid, lease_id=_lease, expected_status_version=_sv_claim, idempotency_key=_ck
-                            )
-                        )
-                        _sv_started = int(_started.status_version)
-                        UnitOfWork(writer).run(
-                            lambda u, _tid=_claim.task.id, _aid=_claim.attempt.id, _lease=_lease, _sv=_sv_started, _ck=f"{idempotency_key}:complete:{_idx}": _tasks.complete(
-                                u, project_id=project, task_id=_tid, attempt_id=_aid, lease_id=_lease, expected_status_version=_sv_started, idempotency_key=_ck, outputs=[], result={"step": _steps[_idx]}, media_repo=_media
-                            )
-                        )
-                except Exception:
-                    pass
-                try:
-                    def _fetch(u):
-                        rec = u.find_receipt(project, idempotency_key)
-                        if rec is None:
-                            return None
-                        return json.loads(rec["result_json"])
-
-                    stored = UnitOfWork(writer).run(_fetch)
-                    if stored and isinstance(stored, dict) and stored.get("run_id"):
-                        run_id = str(stored["run_id"])
-                        run_root = root / project / "runs" / run_id
-                except Exception:
-                    pass
-            except Exception:
-                pass
+            # ReceiptMismatch must not be swallowed — it indicates key reuse with different hash.
+            # On identical replay, runs.create returns stored fan-out via receipt check (no exception).
+            fanout = UnitOfWork(writer).run(_create)
+            reconciled_run_id = str(fanout.run_id)
         finally:
             try:
                 writer.close()
             except Exception:
                 pass
+    except ReceiptMismatchError:
+        raise
     except Exception:
+        # Kernel unavailable or other non-mismatch error — fall back to orphan fallback below.
         pass
 
+    if reconciled_run_id is not None:
+        run_id = reconciled_run_id
+        run_root = root / project / "runs" / run_id
+        run_root.mkdir(parents=True, exist_ok=True)
+        return KernelAdmissionContext(run_id=run_id, run_root=run_root, project_slug=project)
+
+    # Fallback when kernel not available: allocate single ULID (no orphan on replay because replay would have taken early return above)
+    run_id = generate_lowercase_ulid()
+    run_root = root / project / "runs" / run_id
     run_root.mkdir(parents=True, exist_ok=True)
     return KernelAdmissionContext(run_id=run_id, run_root=run_root, project_slug=project)
