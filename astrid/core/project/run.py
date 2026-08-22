@@ -570,16 +570,42 @@ def bind_managed_timeline(
         else:
             ulid = result["ulid"]
 
-    # 3. Read the identity sidecar for the event-stream UUID.
-    identity_path = assembly_identity_path(project_slug, ulid, root=root)
-    identity = read_json(identity_path)
-    timeline_event_stream_id = identity.get("timeline_id")
-    if not isinstance(timeline_event_stream_id, str) or not timeline_event_stream_id:
-        raise ProjectRunError(
-            f"timeline {ulid!r} in project {project_slug!r} is missing a valid "
-            f"timeline_id in its identity sidecar"
-        )
-
+    # 3. Kernel-first authoritative timeline_id for marked timelines (sidecar ONLY for legacy).
+    import importlib as _il_run
+    _bf_run = _il_run.import_module("astrid.packs.timeline.backfill")
+    BackfillErrorRun = _bf_run.BackfillError  # type: ignore[attr-defined]
+    from astrid.core.timeline.authority import resolve_authoritative_timeline_id as _res_auth_run
+    _tdir_path = _tdir if isinstance(_tdir, Path) else Path(_tdir)  # type: ignore[arg-type]
+    _pr_run = None
+    try:
+        from astrid.core.foundation.project_paths import resolve_projects_root as _rr_run
+        _pr_run = _rr_run(root)
+        _par_run = _tdir_path.parent
+        if _par_run.name == "timelines" and _par_run.parent.is_dir():
+            _pr_run = _par_run.parent.parent
+    except Exception:
+        try:
+            from astrid.core.foundation.project_paths import resolve_projects_root as _rr_run2
+            _pr_run = _rr_run2(None)
+        except Exception:
+            _pr_run = None
+    _auth_run: str | None = None
+    try:
+        _auth_run = _res_auth_run(_tdir_path, _pr_run)
+    except BackfillErrorRun as exc:
+        raise ProjectRunError(f"backfill authority marker is unreadable: {exc}") from exc
+    if isinstance(_auth_run, str) and _auth_run.strip():
+        timeline_event_stream_id = _auth_run.strip()
+    else:
+        identity_path = assembly_identity_path(project_slug, ulid, root=root)
+        identity = read_json(identity_path)
+        timeline_event_stream_id = identity.get("timeline_id") if isinstance(identity, dict) else None
+        if not isinstance(timeline_event_stream_id, str) or not timeline_event_stream_id:
+            raise ProjectRunError(
+                f"timeline {ulid!r} in project {project_slug!r} is missing a valid "
+                f"timeline_id in its identity sidecar"
+            )
+        timeline_event_stream_id = str(timeline_event_stream_id)
     return (ulid, slug, str(timeline_event_stream_id))
 
 

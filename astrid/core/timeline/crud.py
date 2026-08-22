@@ -490,38 +490,172 @@ def rename_timeline(
             f"timeline slug '{new_slug}' already exists in project '{project_slug}'"
         )
 
-    identity = read_json(assembly_identity_path(project_slug, ulid, root=root))
-    if not isinstance(identity, dict):
-        raise TimelineCrudError("timeline identity sidecar is malformed")
-    timeline_id = identity.get("timeline_id")
-    if not isinstance(timeline_id, str) or not timeline_id:
-        raise TimelineCrudError("timeline identity sidecar is missing timeline_id")
-    preferred_backend = identity.get("backend")
-    if preferred_backend is not None and not isinstance(preferred_backend, str):
-        raise TimelineCrudError("timeline identity sidecar has malformed backend")
+    # J1 kernel-first authoritative timeline_id (BackfillError fail-closed).
+    import importlib as _il_ren
 
-    select_kwargs: dict[str, Any] = {
-        "timeline_id": timeline_id,
-        "timeline_home": tdir,
-        "preferred_backend": preferred_backend,
-    }
-    if supabase_options is not None:
-        select_kwargs["supabase_options"] = supabase_options
-    stream, backend = select_timeline_backend(**select_kwargs)
+    _bf_ren = _il_ren.import_module("astrid.packs.timeline.backfill")
+    BackfillErrorRen = _bf_ren.BackfillError  # type: ignore[attr-defined]
+    from astrid.core.foundation.project_paths import resolve_projects_root as _rr_ren
+    from astrid.core.timeline.authority import (
+        is_backfilled_timeline as _isbf_ren,
+    )
+    from astrid.core.timeline.authority import (
+        resolve_authoritative_timeline_id as _res_auth_ren,
+    )
+
+    # Derive projects_root for authority (layout-derived first).
+    _pr_ren: Path | None = None
+    try:
+        _pr_ren = _rr_ren(root)
+        _par_ren = tdir.parent
+        if _par_ren.name == "timelines" and _par_ren.parent.is_dir():
+            _pr_ren = _par_ren.parent.parent
+    except Exception:
+        try:
+            _pr_ren = _rr_ren(None)
+        except Exception:
+            _pr_ren = None
+    _auth_tid: str | None = None
+    try:
+        _auth_tid = _res_auth_ren(tdir, _pr_ren)
+    except BackfillErrorRen as exc:
+        raise TimelineCrudError(f"backfill authority marker is unreadable: {exc}") from exc
+    if not isinstance(_auth_tid, str) or not _auth_tid.strip():
+        raise TimelineCrudError("timeline identity sidecar is missing timeline_id")
+    _is_back_ren = False
+    try:
+        _is_back_ren = _isbf_ren(_auth_tid, _pr_ren)
+    except BackfillErrorRen as exc:
+        raise TimelineCrudError(f"backfill authority marker is unreadable: {exc}") from exc
+    except Exception:
+        _is_back_ren = False
+    # Select backend: marked -> SQLite authority (zero JSONL), legacy -> file authority.
+    backend: Any = None
+    _is_sqlite_ren = bool(_is_back_ren)
+    if _is_back_ren:
+        from astrid.core.timeline.eventlog.sqlite_backend import (
+            SqliteEventLogBackend as _SBERen,
+        )
+
+        backend = _SBERen(timeline_id=_auth_tid, timeline_home=tdir, projects_root=_pr_ren)
+    else:
+        # Legacy unbackfilled: sidecar-preferred backend via select_timeline_backend.
+        _pref_ren = None
+        try:
+            _raw_side_ren = read_json(assembly_identity_path(project_slug, ulid, root=root))
+            if isinstance(_raw_side_ren, dict):
+                _cand = _raw_side_ren.get("backend")
+                if isinstance(_cand, str):
+                    _pref_ren = _cand
+                elif _cand is not None:
+                    raise TimelineCrudError("timeline identity sidecar has malformed backend")
+        except TimelineCrudError:
+            raise
+        except Exception:
+            _pref_ren = None
+        select_kwargs: dict[str, Any] = {
+            "timeline_id": _auth_tid,
+            "timeline_home": tdir,
+            "preferred_backend": _pref_ren,
+        }
+        if supabase_options is not None:
+            select_kwargs["supabase_options"] = supabase_options
+        _stream, backend = select_timeline_backend(**select_kwargs)
     rename_actor = actor or TimelineActor(
         type="system",
         id="timeline-crud:rename",
         display="timeline-crud",
     )
-    backend.append_event(
-        timeline_id,
-        "timeline.renamed",
-        {"old_slug": old_slug, "new_slug": new_slug},
-        actor=rename_actor,
-        expected_version=expected_version,
-        txn_id=txn_id,
-    )
+    # H1 single-writer discipline: OWNED backends closed in finally, borrowed never closed.
+    try:
+        backend.append_event(
+            _auth_tid,
+            "timeline.renamed",
+            {"old_slug": old_slug, "new_slug": new_slug},
+            actor=rename_actor,
+            expected_version=expected_version,
+            txn_id=txn_id,
+        )
+    finally:
+        # For sqlite path ensure borrowed writers are not closed (shared registry).
+        if _is_sqlite_ren and backend is not None:
+            try:
+                owns = bool(getattr(backend, "_owns_shared", False) or getattr(backend, "_owns_writer", False))
+                if owns:
+                    try:
+                        backend.close()
+                    except Exception:
+                        pass
+                else:
+                    try:
+                        backend._writer = None  # type: ignore[attr-defined]
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+    if _is_back_ren:
+        # Disposable projection: derive display from SQLite authority and cache (best-effort).
+        try:
+            from astrid.core.timeline.eventlog import project_display as _pd_ren
+            from astrid.core.timeline.eventlog.sqlite_backend import (
+                SqliteEventLogBackend as _SBERen2,
+            )
 
+            _be2 = _SBERen2(timeline_id=_auth_tid, timeline_home=tdir, projects_root=_pr_ren)
+            try:
+                _evs2 = _be2.read_events()
+                _fallback_ren = None
+                try:
+                    _raw_id_ren = read_json(tdir / "assembly.identity.json")
+                    _disp_raw_ren = _raw_id_ren.get("display") if isinstance(_raw_id_ren, dict) else None
+                    if isinstance(_disp_raw_ren, dict):
+                        _fallback_ren = Display.from_dict(_disp_raw_ren)
+                except Exception:
+                    _fallback_ren = None
+                _proj2 = _pd_ren(_evs2, fallback_display=_fallback_ren)
+                if _proj2.display is not None:
+                    try:
+                        _proj2.display.write(tdir / "display.json")
+                    except Exception:
+                        pass
+                    return {"ulid": ulid, "slug": new_slug, "display": _proj2.display}
+            finally:
+                try:
+                    # Read-only backend: close only if it owns a writer (unlikely for read)
+                    if getattr(_be2, "_owns_shared", False) or getattr(_be2, "_owns_writer", False):
+                        _be2.close()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        # Fallback: construct display from new_slug (still derived, not parallel authority)
+        # Use name/is_default from previous display if available.
+        try:
+            raw_display_fb = load_display_json_with_repair(tdir)
+            if isinstance(raw_display_fb, dict):
+                disp_fb = Display.from_dict(raw_display_fb)
+                updated_fb = Display(
+                    schema_version=TIMELINE_SCHEMA_VERSION,
+                    slug=new_slug,
+                    name=disp_fb.name,
+                    is_default=disp_fb.is_default,
+                )
+                try:
+                    updated_fb.write(tdir / "display.json")
+                except Exception:
+                    pass
+                return {"ulid": ulid, "slug": new_slug, "display": updated_fb}
+        except Exception:
+            pass
+        # Minimal fallback
+        updated_min = Display(
+            schema_version=TIMELINE_SCHEMA_VERSION,
+            slug=new_slug,
+            name=new_slug,
+            is_default=False,
+        )
+        return {"ulid": ulid, "slug": new_slug, "display": updated_min}
+    # Legacy path: display.json is authority — rewrite it.
     dp = tdir / "display.json"
     raw_display = load_display_json_with_repair(tdir)
     if raw_display is None:

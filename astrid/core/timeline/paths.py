@@ -154,7 +154,15 @@ def find_timeline_by_slug(
                                 if cand.is_dir():
                                     if not include_tombstoned and _timeline_home_is_tombstoned(cand):
                                         continue
-                                    return (cand.name, cand)
+                                    # Verify current slug matches target (handles renames) — don't trust created slug alone.
+                                    try:
+                                        _disp_early = load_display_json_with_repair(cand)
+                                    except BackfillError:
+                                        raise
+                                    except Exception:
+                                        continue
+                                    if isinstance(_disp_early, dict) and _disp_early.get("slug") == target:
+                                        return (cand.name, cand)
                 finally:
                     conn.close()
     except BackfillError:
@@ -168,21 +176,31 @@ def find_timeline_by_slug(
         if not include_tombstoned and _timeline_home_is_tombstoned(child):
             continue
         # H2: skip backfilled timelines in file scan via authoritative resolver (kernel-first)
+        # For marked timelines, check current projected slug (handles renames) instead of stale file.
+        _is_marked = False
         try:
             from astrid.core.timeline.authority import (
                 resolve_authoritative_timeline_id as _res_auth_excl,
             )
             _tid_candidate = _res_auth_excl(child, root)
-            _skip = False
             if _tid_candidate and isinstance(_tid_candidate, str):
                 try:
                     if is_backfilled_timeline(_tid_candidate, root):
-                        _skip = True
+                        _is_marked = True
                 except BackfillError:
                     raise
                 except Exception:
                     pass
-            if _skip:
+            if _is_marked:
+                # Marked: derive current slug from SQLite authority (project_display) via repair helper.
+                try:
+                    _data_marked = load_display_json_with_repair(child)
+                except BackfillError:
+                    raise
+                except (ProjectJsonError, OSError, ValueError):
+                    _data_marked = None
+                if isinstance(_data_marked, dict) and _data_marked.get("slug") == target:
+                    return (child.name, child)
                 continue
         except BackfillError:
             raise
@@ -196,7 +214,6 @@ def find_timeline_by_slug(
             data = None
         if isinstance(data, dict) and data.get("slug") == target:
             return (child.name, child)
-    return None
 
 
 def _timeline_home_is_tombstoned(timeline_home: str | Path) -> bool:
