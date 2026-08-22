@@ -1014,35 +1014,6 @@ class LocalFsBackend:
         except OSError as exc:
             raise EventLogError(f"failed to read {self.events_path}: {exc}") from exc
 
-    def repair_erasure(
-        self,
-        target_event_ids: list[str],
-        *,
-        reason: str,
-        erased_by: str,
-        policy_ref: str | None = None,
-    ) -> dict[str, object]:
-        """Replace payloads of selected historical events with ErasedPayload envelope.
-
-        This is a backend-level operation that:
-        1. Replaces specified event payloads with canonical ErasedPayload.
-        2. Recomputes downstream prev_hash/hash for all affected events.
-        3. Atomically replaces the event log under the existing file lock.
-        4. Rebuilds head and deletes stale compatibility projections.
-
-        Returns a dict with replaced_count, downstream_count, head_event_count,
-        head_version, last_event_id, last_hash.
-        """
-        from astrid.core.timeline.repair import repair_erasure_local_fs
-        return repair_erasure_local_fs(
-            timeline_home=self.timeline_home,
-            events_path=self.events_path,
-            head_path=self.head_path,
-            target_event_ids=target_event_ids,
-            reason=reason,
-            erased_by=erased_by,
-            policy_ref=policy_ref,
-        )
 
     def _summarize_event(self, event: TimelineEvent | None) -> str | None:
         if event is None:

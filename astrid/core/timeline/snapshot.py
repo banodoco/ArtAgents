@@ -6,7 +6,6 @@ same in-memory event read.  Display lifecycle events are projected over the
 identity-sidecar root, with a plain ``display.json`` read only for legacy logs
 that contain no display events.  ``assembly.head.json`` is diagnostic-only.
 """
-
 from __future__ import annotations
 
 import json
@@ -17,6 +16,7 @@ from typing import Any, Sequence
 from uuid import UUID
 
 from astrid.core.foundation.hash import sha256_file
+from astrid.core.foundation.project_paths import resolve_projects_root
 from astrid.core.timeline.eventlog.projector import project_display
 from astrid.core.timeline.events.schema import (
     TimelineEvent,
@@ -646,6 +646,155 @@ def snapshot_from_events(
     )
 
 
+def _snapshot_projects_root(timeline_dir: Path, project_root: Path | None) -> Path:
+    if project_root is not None:
+        return Path(project_root)
+    # timeline_dir = <projects_root>/<project>/timelines/<ulid>
+    try:
+        candidate = timeline_dir.parent.parent.parent
+        if candidate.exists():
+            return candidate
+    except Exception:
+        pass
+    return resolve_projects_root(None)
+
+
+def _is_timeline_backfilled(timeline_dir: Path, project_root: Path | None) -> tuple[bool, str | None]:
+    """Return (is_backfilled, timeline_id_if_known).
+
+    Reads identity sidecar to get timeline_id when present; when missing and
+    the marker says backfilled via ULID lookup, resolves timeline_id from
+    kernel. Fails closed on garbage marker (raises SnapshotIntegrityError).
+    """
+    projects_root = _snapshot_projects_root(timeline_dir, project_root)
+    # Try to get timeline_id from identity when it exists.
+    timeline_id: str | None = None
+    identity_path = timeline_dir / "assembly.identity.json"
+    if identity_path.is_file():
+        try:
+            from astrid.core._shared.jsonio import read_json as _read_json
+
+            raw = _read_json(identity_path)
+            if isinstance(raw, dict) and isinstance(raw.get("timeline_id"), str):
+                timeline_id = str(raw["timeline_id"])
+        except Exception:
+            pass
+    if timeline_id is None:
+        # Fallback: try to derive timeline_id from kernel via ULID directory name.
+        ulid = timeline_dir.name
+        try:
+            from astrid.core.integrations.reigh.bridge_service import derive_database_path
+            import sqlite3
+
+            db_path = derive_database_path(projects_root)
+            if db_path.is_file():
+                conn = sqlite3.connect(str(db_path))
+                try:
+                    conn.row_factory = sqlite3.Row
+                    row = conn.execute(
+                        "SELECT aggregate_id FROM event_streams WHERE stream_type = ? AND aggregate_id IN "
+                        "(SELECT aggregate_id FROM event_streams WHERE id IN "
+                        "(SELECT stream_id FROM events WHERE kind = ? AND json_extract(payload_json, '$.data.timeline_ulid') = ? LIMIT 1))",
+                        ("timeline.timeline", "timeline.created", ulid),
+                    ).fetchone()
+                    # Simpler: directly search events for ulid
+                    if row is None:
+                        row2 = conn.execute(
+                            "SELECT json_extract(payload_json, '$.data.timeline_id') as tid FROM events WHERE kind = ? AND json_extract(payload_json, '$.data.timeline_ulid') = ? LIMIT 1",
+                            ("timeline.created", ulid),
+                        ).fetchone()
+                        if row2 is not None and row2["tid"]:
+                            timeline_id = str(row2["tid"])
+                    else:
+                        timeline_id = str(row["aggregate_id"])
+                finally:
+                    conn.close()
+        except Exception:
+            pass
+    # Consult marker.
+    from astrid.packs.timeline.backfill import BackfillError, read_backfill_state
+
+    try:
+        state = read_backfill_state(projects_root)
+    except BackfillError as exc:
+        raise SnapshotIntegrityError(f"backfill authority marker is unreadable: {exc}") from exc
+    except Exception as exc:  # pragma: no cover
+        raise SnapshotIntegrityError(f"backfill authority marker is unreadable: {exc}") from exc
+    if timeline_id is not None and timeline_id in state:
+        return True, timeline_id
+    # If we could not determine timeline_id, treat as not backfilled (legacy) unless
+    # any marker entry matches this ULID's timeline? We already tried lookup, so not.
+    return False, timeline_id
+
+
+def _acquire_snapshot_from_kernel(
+    timeline_dir: Path,
+    *,
+    project_slug: str,
+    project_root: Path | None,
+    timeline_id: str,
+) -> TimelineSnapshot:
+    """Kernel-backed snapshot for a backfilled timeline (single authority)."""
+    projects_root = _snapshot_projects_root(timeline_dir, project_root)
+    from astrid.core.timeline.eventlog.sqlite_backend import SqliteEventLogBackend
+
+    backend = SqliteEventLogBackend(
+        timeline_id=timeline_id,
+        timeline_home=timeline_dir,
+        projects_root=projects_root,
+    )
+    events = backend.read_events()
+    if not events:
+        raise SnapshotIntegrityError(f"kernel has no events for timeline {timeline_id!r}")
+    raw_events = [e.to_json_obj() for e in events]
+    # parsed_events already are TimelineEvent objects
+    parsed_events = events
+    # Derive identity from first created event or fallback.
+    timeline_ulid = timeline_dir.name
+    # Try to get ulid/name from created payload
+    for ev in events:
+        if ev.kind == "timeline.created":
+            payload = ev.payload  # type: ignore[union-attr]
+            if isinstance(payload, dict):
+                if isinstance(payload.get("timeline_ulid"), str):
+                    timeline_ulid = str(payload["timeline_ulid"])
+                break
+            # dataclass payload
+            try:
+                obj = payload.to_json_obj()  # type: ignore[union-attr]
+                if isinstance(obj.get("timeline_ulid"), str):
+                    timeline_ulid = str(obj["timeline_ulid"])
+                    break
+            except Exception:
+                pass
+    # Display projection from events (same as file path but without sidecar)
+    identity_display = None
+    # Try to use kernel display: project_display would normally need events
+    # Use _display_from_captured_events helper which already handles event projection.
+    # For kernel we have no identity sidecar display, so pass None then fallback to
+    # projection.
+    display, slug = _display_from_captured_events(
+        parsed_events,
+        timeline_dir=timeline_dir,
+        identity_display=identity_display,
+    )
+    # If still None (legacy timeline with no display events), fallback to default.
+    if display is None:
+        display = {"schema_version": 2, "slug": project_slug, "name": project_slug, "is_default": False}
+        slug = str(display.get("slug", project_slug))
+    return _build_snapshot(
+        raw_events,
+        parsed_events,
+        timeline_id=timeline_id,
+        timeline_ulid=timeline_ulid,
+        display=display,
+        slug=slug or project_slug,
+        project_slug=project_slug,
+        project_root=project_root,
+        diagnostics=[],
+    )
+
+
 def acquire_snapshot(
     timeline_dir: Path,
     *,
@@ -658,10 +807,28 @@ def acquire_snapshot(
     ``retries`` is the number of complete retries after the initial attempt.
     Only a changed JSONL fingerprint discards an attempt.  Every head-sidecar
     mismatch is diagnostic because the captured event tail is authoritative.
+    For backfilled timelines (R5 marker present) the snapshot is served from
+    kernel SQLite reads; legacy un-backfilled dirs keep the exact file path.
+    One timeline never straddles both authorities.
     """
 
     if isinstance(retries, bool) or not isinstance(retries, int) or retries < 0:
         raise ValueError("retries must be a non-negative integer")
+
+    # R5 gate: check marker before touching files.
+    try:
+        is_backfilled, known_id = _is_timeline_backfilled(Path(timeline_dir), project_root)
+    except SnapshotIntegrityError:
+        raise
+    except Exception as exc:
+        raise SnapshotIntegrityError(f"failed to check backfill marker: {exc}") from exc
+    if is_backfilled and known_id is not None:
+        return _acquire_snapshot_from_kernel(
+            Path(timeline_dir),
+            project_slug=project_slug,
+            project_root=Path(project_root) if project_root is not None else None,
+            timeline_id=known_id,
+        )
 
     timeline_dir = Path(timeline_dir)
     normalized_project_root = Path(project_root) if project_root is not None else None

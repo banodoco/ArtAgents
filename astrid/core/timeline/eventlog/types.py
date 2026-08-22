@@ -9,7 +9,7 @@ from typing import Literal
 from astrid.core.contracts.event_log_error import EventLogError as _EventLogErrorBase
 from astrid.core.timeline.events.schema import TimelineActor
 
-BackendName = Literal["local_fs", "supabase"]
+BackendName = Literal["local_fs", "supabase", "sqlite"]
 
 
 class EventLogError(_EventLogErrorBase):

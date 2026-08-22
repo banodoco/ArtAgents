@@ -13,6 +13,26 @@ Provides:
   creates a local home when needed, writes ``assembly.identity.json`` plus a
   raw empty TimelineConfig, and refuses ambiguous destinations before
   performing any writes.
+
+Dual-read / single-authority policy (R5)
+-----------------------------------------
+Each timeline has exactly one authority for reads and writes, decided by the
+backfill marker ``<projects_root>/.astrid/backfill-state.json`` consulted via
+``read_backfill_state``. When resolving a LOCAL stream (no explicit
+``preferred_backend="supabase"``):
+
+* marker present AND readable for the resolved ``timeline_id`` → the SQLite
+  kernel backend is authoritative (``SqliteEventLogBackend``); files are not
+  consulted.
+* marker absent (``{}`` or no entry for this id) → ``LocalFsBackend`` remains
+  authoritative for never-backfilled legacy directories.
+* marker unreadable / garbage (``BackfillError``) → FAIL CLOSED (raise
+  ``EventLogError``), never silently falling back to files. Silent authority
+  mixing is the anti-pattern this batch kills.
+
+``preferred_backend="supabase"`` bypasses the marker and always builds a
+Supabase backend. One request never mixes both authorities for the same
+timeline_id.
 """
 
 from __future__ import annotations
@@ -20,15 +40,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from astrid.core.foundation.project_paths import resolve_projects_root
+
 from .local_fs import LocalFsBackend
 from .protocol import EventLogBackend
 from .supabase import SupabaseBackend
 from .types import (
     BackendName,
+    EventLogError,
     SupabaseEventLogOptions,
     TimelineStreamRef,
 )
-
 # ============================================================================
 # Low-level stream/backend construction
 # ============================================================================
@@ -67,6 +89,35 @@ def select_timeline_stream(
     )
 
 
+def _projects_root_for_stream(stream: TimelineStreamRef) -> Path:
+    if stream.home is not None:
+        # timeline_home = <projects_root>/<project>/timelines/<ulid>
+        # Parent chain: timelines -> project_slug -> projects_root
+        p = Path(stream.home)
+        # Best-effort: 3 levels up when it looks like a timeline home.
+        candidate = p.parent.parent.parent
+        # If candidate contains .astrid or exists, use it; else fallback to env.
+        try:
+            if candidate.exists():
+                return candidate
+        except Exception:
+            pass
+    return resolve_projects_root(None)
+
+
+def _is_backfilled(timeline_id: str, projects_root: Path) -> bool:
+    # Consult authority marker; garbage fails closed (R4/R5).
+    from astrid.packs.timeline.backfill import BackfillError, read_backfill_state
+
+    try:
+        state = read_backfill_state(projects_root)
+    except BackfillError as exc:
+        raise EventLogError(f"backfill authority marker is unreadable: {exc}") from exc
+    except Exception as exc:  # pragma: no cover - defensive
+        raise EventLogError(f"backfill authority marker is unreadable: {exc}") from exc
+    return timeline_id in state
+
+
 def build_timeline_backend(stream: TimelineStreamRef) -> EventLogBackend:
     if stream.backend == "supabase":
         options = stream.supabase_options
@@ -84,6 +135,17 @@ def build_timeline_backend(stream: TimelineStreamRef) -> EventLogBackend:
         }
         return SupabaseBackend(
             **backend_kwargs,
+        )
+    # Local stream: R5 single-authority gate. Consult marker before touching files.
+    projects_root = _projects_root_for_stream(stream)
+    if _is_backfilled(stream.timeline_id, projects_root):
+        # Backfilled → SQLite kernel is the sole authority; never mix.
+        from .sqlite_backend import SqliteEventLogBackend
+
+        return SqliteEventLogBackend(
+            timeline_id=stream.timeline_id,
+            timeline_home=stream.home,
+            projects_root=projects_root,
         )
     if stream.home is None:
         raise ValueError("local_fs timeline stream requires a timeline home")
