@@ -112,7 +112,7 @@ def test_restore_rejects_corrupt_backup_without_mutating_live(tmp_path: Path) ->
     live_db = tmp_path / ".astrid" / "astrid.sqlite3"
     before = live_db.read_bytes()
     with pytest.raises(RestoreValidationError):
-        restore_backup(dest, projects_root=tmp_path)
+        restore_backup(dest, projects_root=tmp_path, allow_overwrite=True)
     assert live_db.read_bytes() == before
 
 
@@ -139,8 +139,74 @@ def test_restore_rejects_foreign_key_violation_without_mutating_live(
     live_db = tmp_path / ".astrid" / "astrid.sqlite3"
     before = live_db.read_bytes()
     with pytest.raises(RestoreValidationError, match="foreign_key_check"):
+        restore_backup(dest, projects_root=tmp_path, allow_overwrite=True)
+    assert live_db.read_bytes() == before
+
+
+def test_restore_refuses_to_overwrite_live_data_by_default(
+    tmp_path: Path,
+) -> None:
+    """A restore into a root that already holds data is refused, untouched."""
+    _seed_project(tmp_path)
+    dest = tmp_path / "backup"
+    create_backup(projects_root=tmp_path, dest_path=dest)
+
+    live_db = tmp_path / ".astrid" / "astrid.sqlite3"
+    before = live_db.read_bytes()
+    with pytest.raises(RestoreValidationError, match="allow_overwrite"):
         restore_backup(dest, projects_root=tmp_path)
     assert live_db.read_bytes() == before
+
+
+def test_restore_allow_overwrite_replaces_live_data(tmp_path: Path) -> None:
+    """With allow_overwrite=True the restore deliberately replaces live data."""
+    _seed_project(tmp_path)
+    dest = tmp_path / "backup"
+    create_backup(projects_root=tmp_path, dest_path=dest)
+
+    # Mutate live state past the backup point: one extra project row.
+    with compose_standard_application(projects_root=tmp_path) as app:
+        extra = app.projects_service.create(
+            slug="extra", name="Extra", idempotency_key="p2"
+        )
+        assert extra.ok, extra.error
+
+    restored = restore_backup(dest, projects_root=tmp_path, allow_overwrite=True)
+    assert restored.database_path.is_file()
+    with compose_standard_application(projects_root=tmp_path) as app:
+        with app.writer.read_only_connection() as conn:
+            count = conn.execute("SELECT COUNT(*) FROM projects").fetchone()[0]
+    assert count == 1
+
+
+def test_cli_restore_requires_force_over_live_data(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The CLI refuses over live data without --force and succeeds with it."""
+    _seed_project(tmp_path)
+    dest = tmp_path / "backup"
+    create_backup(projects_root=tmp_path, dest_path=dest)
+
+    code = backup_cli.main(
+        ["restore", str(dest), "--projects-root", str(tmp_path), "--json"]
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert code == 1
+    assert payload["ok"] is False
+
+    code = backup_cli.main(
+        [
+            "restore",
+            str(dest),
+            "--projects-root",
+            str(tmp_path),
+            "--force",
+            "--json",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert code == 0
+    assert payload["ok"] is True
 
 
 # ---------------------------------------------------------------------------

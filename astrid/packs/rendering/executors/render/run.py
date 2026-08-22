@@ -231,6 +231,26 @@ def render(
     )
 
 
+_DEFAULT_THEME_PATH = REPO_ROOT / "themes" / "banodoco-default" / "theme.json"
+"""Historical default theme, kept when present but never required.
+
+The legacy hybrid/remotion pipeline treats a missing theme as optional: the
+planner falls back to the timeline's own theme (or the built-in canvas), so
+the CLI only injects this path when it actually exists on disk.
+"""
+
+
+def _resolve_default_theme(explicit: Path | None) -> Path | None:
+    """Return *explicit*, or the historical default theme when it exists.
+
+    A ``None`` result is valid: ffmpeg direct renders and timelines that
+    carry their own theme need no ``--theme`` at all.
+    """
+    if explicit is not None:
+        return explicit
+    return _DEFAULT_THEME_PATH if _DEFAULT_THEME_PATH.exists() else None
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--timeline", type=Path, required=True)
@@ -270,9 +290,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--theme",
         type=Path,
-        default=REPO_ROOT / "themes" / "banodoco-default" / "theme.json",
+        default=None,
+        help=(
+            "Theme path or themes/<slug> directory (optional; defaults to "
+            "themes/banodoco-default/theme.json when present, otherwise the "
+            "timeline's own theme or the built-in canvas is used)."
+        ),
     )
     args = parser.parse_args(argv)
+    args.theme = _resolve_default_theme(args.theme)
     try:
         if args.output_name is not None:
             validate_output_name(args.output_name)

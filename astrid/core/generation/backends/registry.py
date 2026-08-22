@@ -19,6 +19,7 @@ from astrid.core.model_catalog.taxonomy import (
     CLOUD_BACKEND_ID,
     CODEX_BACKEND_ID,
     LOCAL_BACKEND_ID,
+    WAVESPEED_BACKEND_ID,
 )
 from astrid.core.pack import PackDefinition, discover_packs
 from astrid.core.pack.discovery import discover_pack_metadata
@@ -201,6 +202,12 @@ def _builtin_generation_backend_descriptors() -> tuple[GenerationBackendDescript
             module="astrid.core.generation.backends.vibecomfy",
             class_name="VibeComfyBackend",
             label="Local (vibecomfy)",
+        ),
+        GenerationBackendDescriptor(
+            backend_id=WAVESPEED_BACKEND_ID,
+            module="astrid.core.generation.backends.wavespeed",
+            class_name="WavespeedBackend",
+            label="Cloud (wavespeed)",
         ),
     )
 

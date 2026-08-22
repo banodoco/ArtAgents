@@ -388,3 +388,80 @@ def fal_submit_and_poll(
     if "request_id" not in result and "request_id" in submission:
         result["request_id"] = submission["request_id"]
     return result
+
+
+WAVESPEED_API_URL = "https://api.wavespeed.ai"
+
+
+def wavespeed_submit_and_poll(
+    client: HttpClient,
+    endpoint: str,
+    payload: dict[str, Any],
+    api_key: str,
+    *,
+    max_wait_sec: int = 600,
+) -> dict[str, Any]:
+    """Submit a prediction to a WaveSpeedAI endpoint, poll until completion.
+
+    ``endpoint`` is the full submission URL (e.g.
+    ``https://api.wavespeed.ai/api/v3/minimax/music-3.0``) or a path under
+    :data:`WAVESPEED_API_URL`.  Submissions use ``Authorization: Bearer``.
+    Returns the completed prediction result dictionary with the prediction
+    id merged in as ``request_id``.
+    """
+    submit_url = (
+        endpoint
+        if endpoint.startswith("http://") or endpoint.startswith("https://")
+        else f"{WAVESPEED_API_URL}/{endpoint.lstrip('/')}"
+    )
+    headers = {"authorization": f"Bearer {api_key}"}
+    submission = client.post_json(submit_url, payload, headers=headers)
+
+    task = submission.get("data") if isinstance(submission.get("data"), dict) else submission
+    prediction_id = task.get("id")
+    if not prediction_id:
+        raise AstridError(
+            client.scrub_secret(
+                f"wavespeed submission missing prediction id: "
+                f"{json.dumps(submission)}"
+            ),
+            recovery_command="retry; the wavespeed submission response was malformed",
+        )
+    result_url = task.get("urls", {}).get("get") or (
+        f"{WAVESPEED_API_URL}/api/v3/predictions/{prediction_id}/result"
+    )
+
+    deadline = time.monotonic() + max_wait_sec
+    delay = 2.0
+    while time.monotonic() < deadline:
+        status_body = client.get_json(result_url, headers=headers)
+        result = status_body.get("data") if isinstance(status_body.get("data"), dict) else status_body
+        state = str(result.get("status") or "").lower()
+        if state == "completed":
+            if "request_id" not in result and prediction_id:
+                result["request_id"] = prediction_id
+            return result
+        if state in {"failed", "cancelled", "timeout"}:
+            raise AstridError(
+                client.scrub_secret(
+                    f"wavespeed prediction {state}: {json.dumps(result)}"
+                ),
+                recovery_command="inspect the wavespeed prediction and retry",
+            )
+        if state not in {"created", "processing"}:
+            raise AstridError(
+                client.scrub_secret(
+                    f"wavespeed prediction unexpected status {state!r}: "
+                    f"{json.dumps(result)}"
+                ),
+                recovery_command="inspect the wavespeed prediction and retry",
+            )
+        time.sleep(delay)
+        delay = min(delay * 1.4, 8.0)
+    raise AstridError(
+        client.scrub_secret(
+            f"wavespeed prediction timed out after {max_wait_sec}s; "
+            f"prediction id={prediction_id}"
+        ),
+        recovery_command="retry; if it persists, raise max_wait_sec",
+    )

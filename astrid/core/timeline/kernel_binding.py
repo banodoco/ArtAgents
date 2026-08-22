@@ -19,10 +19,12 @@ Resolution outcomes:
   process (e.g. a running bridge/server) so composition is unavailable.
   Callers keep the documented eventlog-only escape and log a warning.
 
-This module lives under ``astrid.packs`` because resolving the binding needs
-:class:`~astrid.packs.timeline.repository.TimelineRepository` internals
-(kernel modules must not import ``astrid.packs``); callers pass plain values
-through the gateway's existing writer/repository/stream-type injection seam.
+This module lives under ``astrid.core`` and never imports ``astrid.packs``:
+the timeline repository is reached structurally through the composed
+application (``app.timelines``) and the pack stream type is a mirrored
+protocol constant (``TIMELINE_STREAM_TYPE``, pinned equal to the pack's by a
+sync test). Callers pass plain values through the gateway's existing
+writer/repository/stream-type injection seam.
 """
 
 from __future__ import annotations
@@ -35,8 +37,14 @@ from typing import Any
 
 from astrid.application import StandardApplication, compose_standard_application
 
+TIMELINE_STREAM_TYPE = "timeline.timeline"
+"""The timeline pack's stream type, mirrored here as the kernel-side
+protocol constant. The pack declares the same value in its schema-pack /
+repository; a sync test pins the two equal."""
+
 __all__ = [
     "KernelTimelineBinding",
+    "TIMELINE_STREAM_TYPE",
     "close_kernel_binding",
     "gateway_kernel_kwargs",
     "kernel_timeline_writer_for",
@@ -93,6 +101,7 @@ def kernel_timeline_writer_for(
     project_slug: str,
     timeline_slug: str,
     *,
+    stream_type: str = TIMELINE_STREAM_TYPE,
     projects_root: str | Path | None = None,
 ) -> KernelTimelineBinding | None:
     """Resolve the kernel write path for one project/timeline pair.
@@ -105,10 +114,6 @@ def kernel_timeline_writer_for(
     ambiguous failure must not silently downgrade to eventlog-only.
     """
     from astrid.core.repositories.projects import ProjectNotFoundError
-    from astrid.packs.timeline.repository import (
-        TIMELINE_STREAM_TYPE,
-        TimelineNotFoundError,
-    )
     from astrid.sdk.exceptions import ServiceUnavailableError
 
     try:
@@ -146,11 +151,13 @@ def kernel_timeline_writer_for(
                 )
                 head = conn.execute(
                     "SELECT head_seq FROM event_streams WHERE id = ?",
-                    (f"{timeline_id}:{TIMELINE_STREAM_TYPE}",),
+                    (f"{timeline_id}:{stream_type}",),
                 ).fetchone()
-        except TimelineNotFoundError:
-            _unbound("no kernel timeline")
-            return None
+        except Exception as exc:  # noqa: BLE001 - pack error caught structurally
+            if type(exc).__name__ == "TimelineNotFoundError":
+                _unbound("no kernel timeline")
+                return None
+            raise
         if head is None:
             _unbound("kernel timeline has no event stream yet")
             return None
@@ -158,7 +165,7 @@ def kernel_timeline_writer_for(
             app=app,
             writer=app.writer,
             repository=app.timelines,
-            stream_type=TIMELINE_STREAM_TYPE,
+            stream_type=stream_type,
         )
     except BaseException:
         app.close()

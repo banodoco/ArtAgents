@@ -360,8 +360,8 @@ python3 -m astrid timelines save --project demo primary \
 ```
 
 For missing or byte-mutated media, run verification again with the recorded
-realm. The service rejects the read without rewriting the media; the current
-public envelope uses `internal_error` for this unmapped integrity failure.
+realm. The service rejects the read without rewriting the media; the public
+envelope reports the typed `integrity_error` code for this failure.
 
 ```bash
 python3 -m astrid media verify M_01ABC --project demo \
@@ -376,4 +376,5 @@ only the previous complete state or the complete restored state:
 ```bash
 python3 -m astrid backup create --projects-root ./projects --out ./backup
 python3 -m astrid backup restore ./backup --projects-root ./projects
+python3 -m astrid backup restore ./backup --projects-root ./projects --force  # only when the target root already holds data
 ```

@@ -15,34 +15,35 @@ Primary entry point for standard image generation via the Astrid model
 registry.  Dispatches through `BackendAdapter` (SD-004) — local goes to
 vibecomfy ready-templates, cloud goes to fal.ai endpoints.
 
-## CLI quick-start
+## Quick-start
+
+There is no executor CLI.  Run `generation.generate_image` through the SDK, or
+admit it as a kernel task (the pack ships a task adapter) and track it through
+the `tasks` / `runs` families:
+
+```python
+import astrid.sdk as sdk
+
+result = sdk.invoke(
+    "generation.generate_image",
+    kind="executor",
+    inputs={
+        "model": "flux-schnell",   # fast, cheap cloud t2i
+        "mode": "t2i",
+        "execution": "cloud",
+        "prompt": "a serene mountain lake at dawn",
+    },
+    project="demo",                # every executor run belongs to exactly one project
+)
+print(result.ok, result.manifest_path)
+```
 
 ```bash
-# Cloud text-to-image (fast, cheap)
-astrid start generation.generate_image --model flux-schnell --mode t2i --execution cloud \
-  --prompt "a serene mountain lake at dawn" --out ./out
-
-# Cloud text-to-image (best quality)
-astrid start generation.generate_image --model flux-dev --mode t2i --execution cloud \
-  --prompt "a serene mountain lake at dawn" --out ./out
-
-# Local text-to-image (best open quality)
-astrid start generation.generate_image --model z-image --mode t2i --execution local \
-  --prompt "a serene mountain lake at dawn" --out ./out
-
-# Image-to-image
-astrid start generation.generate_image --model flux-dev --mode i2i --execution cloud \
-  --prompt "turn this into a watercolor painting" \
-  --image-ref ./input.png --out ./out
-
-# Instruction-guided edit
-astrid start generation.generate_image --model qwen-image-edit --mode edit --execution cloud \
-  --prompt "replace the background with a forest" \
-  --image-ref ./input.png --out ./out
-
-# Multiple images with seed
-astrid start generation.generate_image --model flux-schnell --mode t2i --execution cloud \
-  --prompt "cyberpunk city" --count 3 --seed 42 --out ./out
+# Task-mode equivalent: admit one immutable task, then watch it run
+python3 -m astrid tasks create --project demo \
+  --capability generation.generate_image \
+  --spec '{"model":"flux-dev","mode":"t2i","execution":"cloud","prompt":"a serene mountain lake at dawn"}' --json
+python3 -m astrid runs list --project demo --json
 ```
 
 **`--mode` is required** (SD-005).  No auto-inference from inputs.
@@ -58,7 +59,7 @@ Six canonical modes (SD-002).  Three are wired in Sprint 2:
 | `edit` | Instruction-guided edit (prompt = instruction, ref image required). | ✅ | `--prompt`, `--image-ref` (required). NO `negative_prompt`, NO `strength`. |
 | `inpaint` | Masked region replacement (prompt + image + mask → image). | ❌ | Future sprint. |
 | `outpaint` | Boundary extension (prompt + image + direction/extent → image). | ❌ | Future sprint. |
-| `upscale` | Super-resolution (image → larger image). | ❌ | Future sprint. |
+| `upscale` | Super-resolution (image → larger image). | ✅ | `seedvr2-upscaler` (fal, factor/target modes). |
 
 ## Tier-1 model decision tree
 
@@ -101,9 +102,10 @@ What do you need?
       - Same as cloud but via ComfyUI
 ```
 
-Model list: `astrid models list` shows all registered models with mode
-and backend columns.  `astrid models show <id>` shows per-mode supports,
-requires, and per-backend templates/endpoints.
+Model list: inspect the registry through Python —
+`ModelRegistry.load_default().list_all()` returns registered models (pass
+`include_closed=True` for closed-weight entries), and `.get("<model-id>")`
+returns per-mode supports/requires and per-backend templates/endpoints.
 
 ## Drop-with-warning behavior
 

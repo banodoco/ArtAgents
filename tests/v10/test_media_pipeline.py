@@ -589,9 +589,14 @@ def test_gc_removes_only_unreferenced_staging_directories(tmp_path: Path) -> Non
     live = _stage_dir(tmp_path, TXN_A, "live.bin", b"live")
     unreferenced_b = _stage_dir(tmp_path, TXN_B, "dead.bin", b"dead")
     unreferenced_c = _stage_dir(tmp_path, TXN_C, "sub/old.bin", b"old")
-    # A published managed digest must survive GC untouched.
+    # A published managed digest must survive GC untouched. Publishing also
+    # drains its own per-transaction staging directory immediately (the
+    # success-path prune), so a *referenced-but-unpublished* staging dir is
+    # what startup GC keeps.
     published = publish_prepared_media(tmp_path, TXN_A, prepare_media_file(tmp_path / "src" / "live.bin", root=tmp_path / "src"))
     managed_before = set(p for p in (tmp_path / ".astrid" / "media" / "sha256").rglob("*") if p.is_file())
+    assert not staging_path(tmp_path, TXN_A).exists()
+    live = _stage_dir(tmp_path, TXN_A, "pending.bin", b"pending")
 
     result = gc_unreferenced_staging(tmp_path, live_txn_ids={TXN_A})
     assert isinstance(result, StagingGcResult)

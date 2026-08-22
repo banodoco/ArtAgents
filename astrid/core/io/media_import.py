@@ -881,6 +881,33 @@ def _remove_staged_file(staged: StagedMedia) -> None:
         ) from exc
 
 
+def _prune_staging_txn_dir(
+    projects_root: str | Path, staged: StagedMedia
+) -> None:
+    """Remove the now-empty per-transaction staging tree after publication.
+
+    Called only from :func:`publish_staged_media` **success** paths, after
+    the staged bytes are safely published (renamed) or verified-reused, so
+    a failed import keeps its quarantine for forensics. The walk removes
+    empty directories from the staged file's parent up to (and including)
+    the ``<txn_id>`` directory, never the shared ``.staging`` root and
+    never a directory that still holds another transaction's bytes. A
+    failure here is best-effort: the managed publication is already
+    complete, and startup GC (:func:`gc_unreferenced_staging`) still
+    removes anything a crash leaves behind.
+    """
+    staging_root = Path(projects_root) / MANAGED_ROOT_DIRNAME / STAGING_RELATIVE
+    current = staged.staged_path.parent
+    while current != staging_root and staging_root in current.parents:
+        try:
+            if any(current.iterdir()):
+                break
+            current.rmdir()
+        except OSError:
+            break
+        current = current.parent
+
+
 def publish_staged_media(
     projects_root: str | Path,
     staged: StagedMedia,
@@ -909,6 +936,7 @@ def publish_staged_media(
         verify_media_bytes(managed, staged.digest)
         _remove_staged_file(staged)
         media_crash_point("reused")
+        _prune_staging_txn_dir(projects_root, staged)
         return PublishedMedia(
             digest=staged.digest,
             managed_path=managed,
@@ -927,6 +955,7 @@ def publish_staged_media(
             f"{exc}"
         ) from exc
     media_crash_point("published")
+    _prune_staging_txn_dir(projects_root, staged)
     return PublishedMedia(
         digest=staged.digest,
         managed_path=managed,

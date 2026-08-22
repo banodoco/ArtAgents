@@ -2,8 +2,7 @@
 
 Exposes::
 
-    astrid backup create [--out PATH] [--projects-root PATH] [--json]
-    astrid backup restore <BACKUP_PATH> [--projects-root PATH] [--json]
+    astrid backup restore <BACKUP_PATH> [--projects-root PATH] [--force] [--json]
 
 The ``--json`` flag (accepted in any position) switches to machine-readable
 output and, on restore failure, a non-zero exit code with a typed error
@@ -42,6 +41,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     restore = sub.add_parser("restore", help="Restore a backup.")
     restore.add_argument("backup_path", help="Path to the backup directory.")
+    restore.add_argument(
+        "--force",
+        action="store_true",
+        help=(
+            "Replace an existing live database that already holds data "
+            "(refused without this flag)."
+        ),
+    )
     restore.add_argument(
         "--projects-root",
         default=None,
@@ -82,7 +89,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "restore":
         try:
             result = restore_backup(
-                args.backup_path, projects_root=args.projects_root
+                args.backup_path,
+                projects_root=args.projects_root,
+                allow_overwrite=args.force,
             )
         except RestoreValidationError as exc:
             if json_mode:

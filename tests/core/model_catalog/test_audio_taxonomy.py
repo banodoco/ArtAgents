@@ -184,7 +184,7 @@ class TestShippedAudioRegistry:
         registry = ModelRegistry.load_default()
         audio_models = registry.list_by_modality("audio")
         ids = {m.id for m in audio_models}
-        assert ids == {"minimax-music-v2.6", "stable-audio-3-medium", "ace-step"}
+        assert ids == {"minimax-music-v2.6", "minimax-music-3", "minimax-music-3.0", "stable-audio-3-medium", "ace-step"}
 
     def test_minimax_music_price(self) -> None:
         registry = ModelRegistry.load_default()

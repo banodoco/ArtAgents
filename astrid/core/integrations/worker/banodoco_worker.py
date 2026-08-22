@@ -204,7 +204,7 @@ def _write_baseline_snapshot(
 def _default_kernel_binding_factory(project_slug: str, timeline_slug: str):
     """Lazily resolve the kernel timeline binding (packs seam, import-time free)."""
 
-    from astrid.packs.timeline.kernel_binding import kernel_timeline_writer_for
+    from astrid.core.timeline.kernel_binding import kernel_timeline_writer_for
 
     return kernel_timeline_writer_for(project_slug, timeline_slug)
 
@@ -233,7 +233,7 @@ def _worker_append_events(
 
     *kernel_binding_factory* resolves the kernel timeline write path
     (default: the lazy
-    :func:`astrid.packs.timeline.kernel_binding.kernel_timeline_writer_for`
+    :func:`astrid.core.timeline.kernel_binding.kernel_timeline_writer_for`
     wrapper). When it binds, the gateway commits the kernel
     ``timeline.replace_config`` receipt BEFORE the eventlog append (no
     kernel/eventlog divergence); when it returns ``None`` (no kernel
@@ -254,7 +254,7 @@ def _worker_append_events(
     from astrid.core.timeline._edit_helpers import pack_write_gateway
     from astrid.core.timeline.events.schema import TimelineActor
     from astrid.core.timeline.paths import find_timeline_by_event_stream_id
-    from astrid.packs.timeline.kernel_binding import (
+    from astrid.core.timeline.kernel_binding import (
         close_kernel_binding as _close_kernel_binding,
         gateway_kernel_kwargs as _gateway_kernel_kwargs,
     )

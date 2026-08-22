@@ -80,7 +80,8 @@ def _restore_child() -> str:
         "import sys; "
         "from pathlib import Path; "
         "from astrid.core.backup.operations import restore_backup; "
-        "restore_backup(Path(sys.argv[1]), projects_root=Path(sys.argv[2]))"
+        "restore_backup(Path(sys.argv[1]), projects_root=Path(sys.argv[2]), "
+        "allow_overwrite=True)"
     )
 
 
@@ -239,9 +240,10 @@ def test_corruption_matrix_has_stable_public_failures_and_is_read_only(
             assert not result.ok
             assert result.error is not None
             mutated_codes.append(result.error.code)
-    # The public SDK taxonomy deliberately bounds an unmapped integrity
-    # exception to internal_error; repeated rejects must not drift or write.
-    assert mutated_codes == ["internal_error", "internal_error"]
+    # Mutated managed bytes surface as the typed integrity_error verdict
+    # (mapped from MediaVerificationError); repeated rejects must not drift
+    # or write.
+    assert mutated_codes == ["integrity_error", "integrity_error"]
     assert _tree_snapshot(mutated_root) == before_mutated
 
     corrupt_root = tmp_path / "corrupt-sqlite"

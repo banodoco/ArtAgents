@@ -6,11 +6,11 @@ import os
 import signal
 import subprocess
 import sys
+import threading
 from pathlib import Path
 from typing import Any
 
 from astrid.core.contracts.errors import AstridError
-
 
 def _dispatch(raw: list[str]) -> int:
     from . import _print_entrypoint_help
@@ -242,7 +242,16 @@ def _dispatch_serve(args: list[str]) -> int:
 
         def _shutdown(_signum: int, _frame: Any) -> None:
             print("\nShutting down...", flush=True)
-            server.shutdown()
+            # http.server contract: ``shutdown()`` blocks until the
+            # ``serve_forever()`` loop exits, so calling it from the signal
+            # handler on the serving thread deadlocks. Run it on a helper
+            # thread instead; the main thread then falls out of
+            # ``serve_forever()`` and closes the server normally.
+            threading.Thread(
+                target=server.shutdown,
+                name="astrid-serve-shutdown",
+                daemon=True,
+            ).start()
 
         signal.signal(signal.SIGINT, _shutdown)
         signal.signal(signal.SIGTERM, _shutdown)

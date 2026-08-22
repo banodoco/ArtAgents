@@ -776,6 +776,7 @@ class TestShippedRegistry:
     """Verify the shipped models.yaml loads correctly with all expected entries."""
 
     EXPECTED_SHIPPED_IDS = {
+        "seedvr2-upscaler",
         "z-image",
         "qwen-image-2512",
         "qwen-image-edit",
@@ -790,6 +791,8 @@ class TestShippedRegistry:
         "ltx-2.3-pro",
         "scail-2",
         "minimax-music-v2.6",
+        "minimax-music-3",
+        "minimax-music-3.0",
         "stable-audio-3-medium",
         "ace-step",
     }
@@ -910,6 +913,7 @@ class TestListByModalityV2:
 
         ids = {m.id for m in image_models}
         assert ids == {
+            "seedvr2-upscaler",
             "z-image",
             "qwen-image-2512",
             "qwen-image-edit",
@@ -936,6 +940,8 @@ class TestListByModalityV2:
         audio_models = registry.list_by_modality("audio")
         assert {m.id for m in audio_models} == {
             "minimax-music-v2.6",
+            "minimax-music-3",
+            "minimax-music-3.0",
             "stable-audio-3-medium",
             "ace-step",
         }

@@ -73,6 +73,10 @@ _IMAGE_CLI_FEATURES: tuple[str, ...] = (
     "strength",
     "guidance_scale",
     "steps",
+    "upscale_mode",
+    "upscale_factor",
+    "target_resolution",
+    "noise_scale",
 )
 
 _IMAGE_ARGV_FLAG_NAMES: tuple[str, ...] = (
@@ -92,6 +96,10 @@ _IMAGE_ARGV_FLAG_NAMES: tuple[str, ...] = (
     "strength",
     "guidance_scale",
     "steps",
+    "upscale_mode",
+    "upscale_factor",
+    "target_resolution",
+    "noise_scale",
     "env_file",
     "loras",
 )
@@ -300,6 +308,34 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Number of sampling steps.",
     )
+    add_choice_arg(
+        p,
+        "--upscale-mode",
+        values=("factor", "target"),
+        catalog="generation-upscale-mode",
+        default=None,
+        help="Upscale mode: 'factor' (multiply dimensions) or 'target' (target resolution).",
+    )
+    p.add_argument(
+        "--upscale-factor",
+        type=float,
+        default=None,
+        help="Upscale factor (1-10) when --upscale-mode is 'factor' (e.g. 4 for 4x).",
+    )
+    add_choice_arg(
+        p,
+        "--target-resolution",
+        values=("720p", "1080p", "1440p", "2160p"),
+        catalog="generation-target-resolution",
+        default=None,
+        help="Target resolution when --upscale-mode is 'target'.",
+    )
+    p.add_argument(
+        "--noise-scale",
+        type=float,
+        default=None,
+        help="Noise scale (0-1) for the upscaler.",
+    )
     p.add_argument(
         "--out",
         type=Path,
@@ -384,7 +420,9 @@ def generate_core(
     if args.prompts_file:
         prompts = _load_prompts(args.prompts_file, args.model, mode_name)
     else:
-        if not args.prompt:
+        # Prompt-less modes (e.g. upscale) do not require --prompt; the
+        # model entry declares that via its `requires` list.
+        if not args.prompt and "prompt" in mode_spec.requires:
             raise AstridError(
                 "either --prompt or --prompts-file is required",
                 recovery_command="provide --prompt 'your text' or --prompts-file path/to/prompts.jsonl",

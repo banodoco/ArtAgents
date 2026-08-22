@@ -45,6 +45,7 @@ def test_registry_lists_builtins_without_importing_third_party_modules(
         "codex",
         "local",
         "third-party",
+        "wavespeed",
     ]
     assert module_name not in sys.modules
 
@@ -58,13 +59,17 @@ def test_registry_creates_builtin_backends_via_standard_factory_signature(
     local_backend = registry.create("local", env_file=env_file)
     cloud_backend = registry.create("cloud", env_file=env_file)
     codex_backend = registry.create("codex", env_file=env_file)
+    wavespeed_backend = registry.create("wavespeed", env_file=env_file)
 
     assert isinstance(local_backend, VibeComfyBackend)
     assert isinstance(cloud_backend, FalBackend)
     from astrid.core.generation.backends.codex import CodexBackend
+    from astrid.core.generation.backends.wavespeed import WavespeedBackend
 
     assert isinstance(codex_backend, CodexBackend)
+    assert isinstance(wavespeed_backend, WavespeedBackend)
     assert cloud_backend._env_file == env_file
+    assert wavespeed_backend._env_file == env_file
 
 
 def test_registry_rejects_duplicate_backend_ids() -> None:
@@ -168,6 +173,10 @@ def test_builtin_descriptors_have_correct_metadata() -> None:
             assert descriptor.module == "astrid.core.generation.backends.vibecomfy"
             assert descriptor.class_name == "VibeComfyBackend"
             assert descriptor.label == "Local (vibecomfy)"
+        elif descriptor.backend_id == "wavespeed":
+            assert descriptor.module == "astrid.core.generation.backends.wavespeed"
+            assert descriptor.class_name == "WavespeedBackend"
+            assert descriptor.label == "Cloud (wavespeed)"
 
     assert seen == builtin_ids, f"built-in descriptors missing: {builtin_ids - seen}"
 

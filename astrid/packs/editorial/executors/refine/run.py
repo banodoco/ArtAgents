@@ -583,7 +583,7 @@ def _emit_refine_managed_events(
     provenance on the emitted events.
 
     *kernel_binding_factory* resolves the kernel timeline write path
-    (default: :func:`astrid.packs.timeline.kernel_binding.kernel_timeline_writer_for`).
+    (default: :func:`astrid.core.timeline.kernel_binding.kernel_timeline_writer_for`).
     When it binds, the gateway commits the kernel ``timeline.replace_config``
     receipt BEFORE the eventlog append (no kernel/eventlog divergence);
     when it returns ``None`` the context is genuinely kernel-less and the
@@ -593,13 +593,13 @@ def _emit_refine_managed_events(
 
     from astrid.core.timeline._edit_helpers import pack_write_gateway
     from astrid.core.timeline.events.schema import TimelineActor
-    from astrid.packs.timeline.kernel_binding import (
+    from astrid.core.timeline.kernel_binding import (
         close_kernel_binding,
         gateway_kernel_kwargs,
     )
 
     if kernel_binding_factory is None:
-        from astrid.packs.timeline.kernel_binding import (
+        from astrid.core.timeline.kernel_binding import (
             kernel_timeline_writer_for as kernel_binding_factory,
         )
 

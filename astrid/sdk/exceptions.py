@@ -394,6 +394,7 @@ def _service_error_from_exception(exc: BaseException) -> ServiceError | None:
         StreamVocabularyError,
     )
     from astrid.core.repositories.evidence import EvidenceValidationError
+    from astrid.core.io.media_import import MediaIntegrityError
     from astrid.core.repositories.media import (
         MediaAlreadyExistsError,
         MediaConflictError,
@@ -401,6 +402,7 @@ def _service_error_from_exception(exc: BaseException) -> ServiceError | None:
         MediaNotFoundError,
         MediaRelationError,
         MediaValidationError,
+        MediaVerificationError,
     )
     from astrid.core.repositories.projects import (
         ProjectAlreadyExistsError,
@@ -533,7 +535,7 @@ def _service_error_from_exception(exc: BaseException) -> ServiceError | None:
         WriterShutdownError,
         TransactionControlError,
     )
-    integrity = (EventChainError,)
+    integrity = (EventChainError, MediaVerificationError, MediaIntegrityError)
 
     for error_type, code in (
         (not_found, "not_found"),

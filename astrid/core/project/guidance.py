@@ -78,13 +78,13 @@ def format_project_required_guidance(*, operation: str) -> str:
         "No project is attached, and this command did not include --project.",
         "",
         "Choose how to continue:",
-        "  astrid projects ls",
+        "  astrid projects list",
         "  astrid projects select <project>         # select for this session",
         "  re-run this command with --project <project>  # select for this run",
-        '  astrid projects create <slug> --description "…" --attach',
+        '  astrid projects create <slug> --name "Display Name"',
         "",
         "Check the current selection at any time:",
-        "  astrid status",
+        "  astrid projects list",
     ]
     if default:
         lines.extend(
@@ -116,7 +116,7 @@ def format_project_required_guidance(*, operation: str) -> str:
             [
                 "",
                 "No projects exist yet.",
-                '  astrid projects create <slug> --description "…" --attach',
+                '  astrid projects create <slug> --name "Display Name"',
             ]
         )
     return "\n".join(lines)

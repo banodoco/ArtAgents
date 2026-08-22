@@ -353,9 +353,13 @@ class MediaReadModel:
     """Immutable media read model (m2 plan step 4).
 
     A frozen projection of one ``media`` row plus its parsed
-    ``metadata_json`` and the ordered ``media_locations`` projections.
-    ``content_hash`` is the byte SHA-256 — the sole identity. Read models
-    are never mutated in place; repository commands return new instances.
+    ``metadata_json``, the ordered ``media_locations`` projections, and the
+    ``media_relations`` edges touching the media in **both** directions
+    (``from_media_id`` or ``to_media_id``), deterministic order. Populated
+    by the ``show``/``list`` read paths; command-path models carry the
+    default empty tuple. ``content_hash`` is the byte SHA-256 — the sole
+    identity. Read models are never mutated in place; repository commands
+    return new instances.
     """
 
     id: str
@@ -367,6 +371,7 @@ class MediaReadModel:
     metadata: Mapping[str, Any]
     created_at: str
     locations: tuple[MediaLocationReadModel, ...] = ()
+    relations: tuple["MediaRelationReadModel", ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         """Return the JSON-safe dict persisted as the receipt result."""
@@ -380,6 +385,7 @@ class MediaReadModel:
             "metadata": dict(self.metadata),
             "created_at": self.created_at,
             "locations": [location.to_dict() for location in self.locations],
+            "relations": [relation.to_dict() for relation in self.relations],
         }
 
     @classmethod
@@ -397,6 +403,10 @@ class MediaReadModel:
             locations=tuple(
                 MediaLocationReadModel.from_mapping(loc)
                 for loc in (value.get("locations") or [])
+            ),
+            relations=tuple(
+                MediaRelationReadModel.from_mapping(rel)
+                for rel in (value.get("relations") or [])
             ),
         )
 
@@ -2346,6 +2356,7 @@ class MediaRepository:
     def _row_to_read_model(
         row: Mapping[str, Any],
         locations: Sequence[Mapping[str, Any]],
+        relations: Sequence[MediaRelationReadModel] = (),
     ) -> MediaReadModel:
         """Build the frozen read model from one ``media`` join row."""
         return MediaReadModel(
@@ -2360,16 +2371,35 @@ class MediaRepository:
             locations=tuple(
                 MediaLocationReadModel.from_mapping(loc) for loc in locations
             ),
+            relations=tuple(relations),
         )
+
+    @staticmethod
+    def _relation_rows_to_models(
+        rows: Sequence[Mapping[str, Any]],
+    ) -> list[MediaRelationReadModel]:
+        """Build ordered relation edge models from ``media_relations`` rows."""
+        return [
+            MediaRelationReadModel(
+                from_media_id=str(rel["from_media_id"]),
+                to_media_id=str(rel["to_media_id"]),
+                kind=str(rel["kind"]),
+                ordinal=int(rel["ordinal"]),
+                metadata=parse_json(str(rel["metadata_json"])),
+                created_at=str(rel["created_at"]),
+            )
+            for rel in rows
+        ]
 
     def show(self, writer: DatabaseWriter, media_id: str) -> MediaReadModel:
         """Typed show query: one media's full immutable read model.
 
         A transaction-free read on a separate read-only connection (no
         writer transaction is opened and no row is mutated). Returns the
-        frozen :class:`MediaReadModel` including the ordered locations;
-        raises :class:`MediaNotFoundError` when no ``media`` row exists for
-        *media_id*.
+        frozen :class:`MediaReadModel` including the ordered locations and
+        every ``media_relations`` edge touching the media in either
+        direction (deterministic order); raises :class:`MediaNotFoundError`
+        when no ``media`` row exists for *media_id*.
         """
         _require_non_empty_string("media_id", media_id)
         with writer.read_only_connection() as conn:
@@ -2385,14 +2415,27 @@ class MediaRepository:
                 "ORDER BY created_at ASC, id ASC",
                 (media_id,),
             ).fetchall()
-        return self._row_to_read_model(row, [dict(loc) for loc in location_rows])
+            relation_rows = conn.execute(
+                "SELECT from_media_id, to_media_id, kind, ordinal, "
+                "metadata_json, created_at FROM media_relations "
+                "WHERE from_media_id = ? OR to_media_id = ? "
+                "ORDER BY created_at ASC, from_media_id ASC, "
+                "to_media_id ASC, kind ASC, ordinal ASC",
+                (media_id, media_id),
+            ).fetchall()
+        return self._row_to_read_model(
+            row,
+            [dict(loc) for loc in location_rows],
+            self._relation_rows_to_models([dict(rel) for rel in relation_rows]),
+        )
 
     def list(self, writer: DatabaseWriter, project_id: str) -> list[MediaReadModel]:
         """Sorted read-only list query: every media row in one project.
 
         A transaction-free read on a separate read-only connection, ordered
         by ``created_at`` then id (deterministic, stable). Returns one
-        :class:`MediaReadModel` per media row including its locations; a
+        :class:`MediaReadModel` per media row including its locations and
+        every ``media_relations`` edge touching it in either direction; a
         project with no media returns ``[]``.
         """
         _require_non_empty_string("project_id", project_id)
@@ -2407,6 +2450,9 @@ class MediaRepository:
             locations_by_media: dict[str, list[dict[str, Any]]] = {
                 media_id: [] for media_id in media_ids
             }
+            relations_by_media: dict[str, list[dict[str, Any]]] = {
+                media_id: [] for media_id in media_ids
+            }
             if media_ids:
                 placeholders = ", ".join("?" * len(media_ids))
                 location_rows = conn.execute(
@@ -2417,8 +2463,33 @@ class MediaRepository:
                 ).fetchall()
                 for loc in location_rows:
                     locations_by_media[str(loc["media_id"])].append(dict(loc))
+                relation_rows = conn.execute(
+                    "SELECT from_media_id, to_media_id, kind, ordinal, "
+                    "metadata_json, created_at FROM media_relations "
+                    "WHERE from_media_id IN (" + placeholders + ") "
+                    "OR to_media_id IN (" + placeholders + ") "
+                    "ORDER BY created_at ASC, from_media_id ASC, "
+                    "to_media_id ASC, kind ASC, ordinal ASC",
+                    (*media_ids, *media_ids),
+                ).fetchall()
+                # Edges are same-project by construction, so an edge can be
+                # attached to both of its in-list endpoints.
+                for rel in relation_rows:
+                    record = dict(rel)
+                    for endpoint in (
+                        str(rel["from_media_id"]),
+                        str(rel["to_media_id"]),
+                    ):
+                        if endpoint in relations_by_media:
+                            relations_by_media[endpoint].append(record)
         return [
-            self._row_to_read_model(row, locations_by_media[str(row["id"])])
+            self._row_to_read_model(
+                row,
+                locations_by_media[str(row["id"])],
+                self._relation_rows_to_models(
+                    relations_by_media[str(row["id"])]
+                ),
+            )
             for row in rows
         ]
 

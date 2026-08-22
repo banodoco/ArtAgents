@@ -67,7 +67,7 @@
       "artifact_type": "prompt"
     },
     {
-      "description": "Model ID from the generation model registry (e.g. 'stable-audio-3-medium', 'minimax-music-v2.6', 'ace-step').",
+      "description": "Model ID from the generation model registry (e.g. 'stable-audio-3-medium', 'minimax-music-3', 'ace-step').",
       "name": "model",
       "required": true,
       "type": "string"
@@ -164,7 +164,8 @@
     "requires_timeline": false,
     "api_provider": "multi",
     "env": [
-      "FAL_KEY"
+      "FAL_KEY",
+      "WAVESPEED_API_KEY"
     ],
     "runtime_entrypoint": "run_sdk",
     "runtime_entrypoint_note": "run_sdk is the in-process entrypoint returning a JSON-safe payload dict; subprocess / CLI compatibility remains via main() and the __main__ guard at the bottom of run.py.",
@@ -190,7 +191,7 @@
       "artifact_type": null
     }
   ],
-  "scoped_configs": ["credentials.fal"],
+  "scoped_configs": ["credentials.fal", "credentials.wavespeed"],
   "short_description": "Generate audio from text prompts via local or cloud backends. v2: model\u2192mode\u2192backend with music mode.",
   "version": "2.0"
 }

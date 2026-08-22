@@ -1152,9 +1152,56 @@ def _atomic_swap(
     _finish_restore_transaction(state)
 
 
+_LIVE_DATA_PROBE_TABLES = (
+    "projects",
+    "event_streams",
+    "events",
+    "media",
+    "command_receipts",
+)
+"""Tables whose non-emptiness means the live database holds real content."""
+
+
+def _live_database_holds_data(live_db: str | Path) -> bool:
+    """Return True when an existing live database holds real content.
+
+    An absent database is empty by definition. A present database counts as
+    holding data when any content table has rows — i.e. anything beyond a
+    freshly initialized root, whose tables are all empty. A present database
+    that cannot be probed read-only (corrupt bytes, foreign schema, missing
+    migration rows, unreadable WAL) **also** counts as holding data:
+    restore must never silently discard bytes it cannot inspect.
+    """
+    path = Path(live_db)
+    if not _restore_is_file(path):
+        return False
+    try:
+        conn = sqlite3.connect(read_only_uri(path), uri=True)
+    except sqlite3.Error:
+        return True
+    try:
+        try:
+            if not read_schema_migrations(conn):
+                return True
+        except sqlite3.Error:
+            return True
+        for table in _LIVE_DATA_PROBE_TABLES:
+            try:
+                row = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()
+            except sqlite3.Error:
+                return True
+            if row is not None and int(row[0]) > 0:
+                return True
+        return False
+    finally:
+        conn.close()
+
+
 def restore_backup(
     backup_path: str | Path,
     projects_root: str | Path | None = None,
+    *,
+    allow_overwrite: bool = False,
 ) -> RestoreResult:
     """Restore a backup into the managed database and media tree atomically.
 
@@ -1162,6 +1209,11 @@ def restore_backup(
     database read-only (quick_check + foreign_key_check + schema-version), and
     only then swaps it into place. A corrupt or incompatible backup raises
     :class:`RestoreValidationError` and leaves live data untouched.
+
+    Safety default: when the target root already holds a live database with
+    content, the restore refuses with :class:`RestoreValidationError` unless
+    ``allow_overwrite=True`` (CLI ``--force``) is passed — a restore is a
+    deliberate replacement of the live tree, never a silent overwrite.
     """
     root = resolve_projects_root(projects_root)
     backup = Path(backup_path)
@@ -1178,6 +1230,13 @@ def restore_backup(
 
     lock = DatabaseOwnerLock(live_db)
     try:
+        if not allow_overwrite and _live_database_holds_data(live_db):
+            raise RestoreValidationError(
+                f"refusing to restore over live data at {live_db}: the "
+                "existing database already holds projects/events/media. "
+                "Re-run with allow_overwrite=True (CLI: --force) to replace "
+                "it deliberately."
+            )
         try:
             recover_restore_staging(root)
         except BackupError as exc:

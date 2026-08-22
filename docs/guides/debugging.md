@@ -21,8 +21,8 @@ reload the current version, merge the draft, and retry the compare-and-swap
 save.
 
 For media integrity failures, `media verify` is a read-only check. Missing or
-mutated bytes are rejected consistently and currently surface as
-`internal_error` in the public envelope; restore or re-import the exact bytes
+mutated bytes are rejected consistently and surface as the typed
+`integrity_error` code in the public envelope; restore or re-import the exact bytes
 instead of editing the digest path. For an interrupted restore, repeat the
 restore command or restart the bridge. The durable restore journal is read
 before writer construction, so recovery publishes only a complete old or new
@@ -31,7 +31,7 @@ state.
 ```bash
 python3 -m astrid media verify M_01ABC --project demo \
   --realm managed_local --json
-python3 -m astrid backup restore ./backup --projects-root ./projects
+python3 -m astrid backup restore ./backup --projects-root ./projects --force  # only when the target root already holds data
 python3 -m astrid serve --projects-root ./projects --no-open-editor
 ```
 
