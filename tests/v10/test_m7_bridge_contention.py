@@ -24,8 +24,14 @@ def _post_save(
     *,
     ready: threading.Barrier,
     log_path: Path,
+    token: str,
 ) -> tuple[int, dict[str, Any]]:
-    """One independent HTTP client, with a durable actor runtime log."""
+    """One independent HTTP client, with a durable actor runtime log.
+
+    *token* is the server's per-boot request token (doc 27 §4.7): the
+    local-trust gate rejects token-less mutations with 403, so each
+    contender presents the launcher-delivered boot token.
+    """
     started = time.monotonic_ns()
     log_path.write_text(
         json.dumps({"actor": "http", "phase": "ready", "started_ns": started}) + "\n",
@@ -35,8 +41,10 @@ def _post_save(
     request = Request(
         url,
         data=json.dumps(body, sort_keys=True).encode("utf-8"),
-        method="POST",
-        headers={"Content-Type": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            "X-Astrid-Request-Token": token,
+        },
     )
     try:
         with urlopen(request, timeout=10) as response:  # noqa: S310 - localhost
@@ -213,6 +221,7 @@ def test_real_bridge_contention_has_one_cas_winner_and_shared_queue_progress(
                     },
                     ready=ready,
                     log_path=log_root / f"http-{index}.jsonl",
+                    token=server.request_token,
                 )
             except BaseException as exc:
                 errors.append(exc)
