@@ -333,7 +333,7 @@ def test_fresh_saves_from_each_surface_commit_equivalent_receipts(
 
             # Bridge saves its timeline (derived key).
             status, body = _post_json(
-                f"{base}/projects/demo/timelines/alpha/save", payload
+                f"{base}/projects/demo/timelines/alpha/save", payload, token=server.request_token
             )
             assert status == 200, body
             bridge_key = adapter._derive_bridge_save_key(  # noqa: SLF001
