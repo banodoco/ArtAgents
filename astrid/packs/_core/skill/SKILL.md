@@ -175,7 +175,7 @@ Packs integrate with the kernel in one of two ways:
 - **Task-mode adapters** — a pack ships a `task_adapter.py` implementing the
   kernel `TaskHandler` protocol (`astrid.core.task_executor`). Kernel task
   admission exists (the `tasks` CLI family and SDK `client.tasks.create`) and
-  admitted tasks are tracked through the kernel `tasks`/`runs`/`events`
+  admitted tasks are tracked through the kernel `tasks`/`events` rows
   tables, but execution is driven by a task-mode adapter, and today only the
   test suites wire adapters (`rendering.timeline_visualize`,
   `generation.generate_image`) — no shipped command executes an admitted

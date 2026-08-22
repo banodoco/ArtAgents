@@ -49,8 +49,7 @@ absent — otherwise executor runs appear "in-flight" forever.
 ## Kernel ledger
 
 A second, independent ledger lives in the kernel database as `runs`,
-`tasks`, and `events` rows. Rows are created only through the kernel
-fan-out path:
+`tasks`, and `events` rows. Rows are created through:
 
 - **Kernel fan-out**: `RunRepository.create` registers a kernel run row
   (plus task/event rows where applicable).
@@ -69,9 +68,12 @@ mirrored into, or synchronized with any `run.json`.
 - Direct-mode invokes (`astrid.sdk.invoke`, typed facades such as
   `astrid.generate.*`) write **only** the FS ledger. They do not create
   kernel rows.
-- Kernel rows exist **only** via kernel fan-out (`RunRepository.create`),
-  task-mode adapter execution, or migration import. They never produce a
-  `run.json`.
+- Kernel rows exist via kernel fan-out (`RunRepository.create`),
+  task-mode adapter execution, migration import, or **standalone task
+  admission** — `client.tasks.create` persists a `tasks` row, a
+  `core.task` event stream, event, and receipt with **no run**
+  (`TaskRepository.create` is the direct kernel surface). Kernel rows
+  never produce a `run.json`.
 - There is **no automatic bridge**: no reconciler copies statuses, ids, or
   artifacts between the ledgers, and nothing enforces agreement between
   them.
@@ -88,7 +90,7 @@ mirrored into, or synchronized with any `run.json`.
 
 | `kind` | Produced by | `tool_id` | Timeline required? | Status vocabulary |
 |---|---|---|---|---|
-| *(absent/legacy)* | Executor runs via the SDK (`astrid.sdk.invoke`) | Qualified executor id (e.g. `generation.generate_image`) | Per-executor metadata flag | `running`, `completed`, `failed` |
+| `"executor"` | Executor runs via the SDK (`astrid.sdk.invoke`) | Qualified executor id (e.g. `generation.generate_image`) | Per-executor metadata flag | `running`, `completed`, `failed` |
 | `"orchestrator"` (convention) | Orchestrator runs via the SDK (`astrid.sdk.invoke`) | Qualified orchestrator id | Yes | `running`, `completed`, `failed` |
 | `"scratch"` | (retired with the task-mode CLI) | `"scratch.run"` | **No** (`requires_timeline=False`) | `running`, `completed`, `failed` |
 
@@ -148,12 +150,12 @@ surfaced by `test_run_ledger_conformance.py`.)*
 
 | Limit | Explanation |
 |---|---|
-| **SIGKILL = repair, not prevention** | A `SIGKILL` during execution leaves `run.json` stuck `RUNNING`. `astrid doctor` detects this (dead process + stale RUNNING record) and marks it `FAILED` with a repair note. The contract does _not_ guarantee that every run reaches a terminal status before process death — only that doctor can repair the known cases. |
+| **SIGKILL leaves `run.json` RUNNING** | A `SIGKILL` during execution leaves `run.json` stuck `RUNNING`. The contract does _not_ guarantee that every run reaches a terminal status before process death. `astrid doctor` is **strictly read-only diagnostics** — it reports the stuck record and the platform liveness check outcome but performs **no repair** (it never marks or rewrites ledger state; see astrid/core/doctor.py). |
 | **In-band secrets=*** risk** | Secrets passed on the command line (e.g. `--api-key`) are redacted in `run.json.argv`. Redaction uses normalized key matching (kebab-case, snake_case, `name=value`, `--flag=value`, and two-token flag forms). It does **not** search prompt content. |
 | **Captured logs are not stream-redacted** | stdout/stderr captured to `logs/stdout.log` and `logs/stderr.log` are written verbatim. The argv redaction described above applies only to `run.json.argv` — captured log streams may contain secrets that appear in command output or prompts echoed by the executor. This is a documented, accepted risk. |
 | **Prompt embedding remains unredacted** | PNG tEXt metadata and manifest.json outputs may embed the full prompt text. Self-describing outputs are deliberate; no redaction is applied to prompt content embedded in output artifacts. |
 | **Threads-era run.json dialect = tolerated, not unified** | Threads-runner code (`astrid/core/threads/record.py`) writes `thread_id` and `output_artifacts` into the run record; the project-run schema (`astrid/core/project/schema.py`) writes `artifacts`. Both dialects coexist under `schema_version: 1`. New readers must tolerate both shapes; the threads dialect is contract-locked and will not be refactored in M2. |
-| **Doctor repair is conservative** | `astrid doctor` only marks a RUNNING record FAILED when it can _confidently_ determine the process is dead (platform-specific liveness check). Unknown/ambiguous liveness cases are left untouched to avoid false repairs. |
+| **Doctor never repairs** | `astrid doctor` never marks a RUNNING record FAILED or rewrites any ledger state — it is read-only and reports (including platform liveness checks) for operators to act on. Repair tooling, if any, lives outside the doctor family. |
 | **Plugin-loaded generation verbs = M2 coverage gap** | Only built-in SDK generation methods (`generate.image`, `generate.video`) are covered by the SDK out= ledger fix. Dynamically plugin-loaded generation verbs are documented as an M2 static coverage gap. |
 | **In-process log capture is process-global and serialized** | In-process execution (`invoke_in_process_command`) uses Python's `redirect_stdout` / `redirect_stderr` context managers, which mutate process-global state. This is safe only for Astrid's serialized execution model — concurrent in-process runs in the same interpreter would produce interleaved or garbled log output. The contract does _not_ promise concurrent in-process safety. |
 | **Captured logs are line-buffered; carriage-return progress bars degrade** | Subprocess capture drains pipes via `readline()`, so carriage-return (`\r`) progress indicators (e.g. tqdm bars) are faithfully recorded but appear as repeated lines rather than an animated bar. This is a known limitation of line-oriented log capture; no ANSI-terminal-aware rewriter is applied. |
