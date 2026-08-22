@@ -33,6 +33,7 @@ from astrid.packs.timeline.repository import (
     TimelineArchivedError,
     TimelineNotFoundError,
     TimelineRepository,
+    TimelineVersionConflictError,
 )
 
 TS = "2026-08-22T00:00:00.000000+00:00"
@@ -227,14 +228,9 @@ def test_merged_head_is_the_next_editor_save_version(env) -> None:
 
     # The frozen load shape's config_version equals the merged head, and an
     # optimistic editor save at the stale pre-merge version conflicts.
-    from astrid.packs.timeline.repository import (
-        TimelineVersionConflictError,
-    )
 
     loaded = env.repo.show(env.writer, env.project.id, "main")
     assert loaded.config_version == new_head
-    from astrid.packs.timeline.repository import TimelineVersionConflictError
-
     with pytest.raises(TimelineVersionConflictError):
         UnitOfWork(env.writer).run(
             lambda u: env.repo.save(
