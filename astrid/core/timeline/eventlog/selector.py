@@ -51,6 +51,7 @@ from .types import (
     SupabaseEventLogOptions,
     TimelineStreamRef,
 )
+
 # ============================================================================
 # Low-level stream/backend construction
 # ============================================================================
@@ -103,8 +104,9 @@ def _projects_root_for_stream(stream: TimelineStreamRef) -> Path:
 
 def _is_backfilled(timeline_id: str, projects_root: Path) -> bool:
     # Consult authority marker; garbage fails closed (R4/R5).
-    from astrid.core.timeline.authority import is_backfilled_by_marker
     import importlib as _il
+
+    from astrid.core.timeline.authority import is_backfilled_by_marker
     _bf_mod = _il.import_module("astrid.packs.timeline.backfill")
     BackfillError = _bf_mod.BackfillError  # type: ignore[attr-defined]
     try:
@@ -213,12 +215,19 @@ def resolve_event_log_target(
     if preferred_backend == "supabase":
         return _resolve_supabase_target(project_slug, slug_or_id, root=root)
 
-    # Strategy 1b: Marker-first for backfilled timelines — stale identity/display must not choose LocalFs.
+    # Strategy 1b: Marker-first for backfilled timelines — kernel-first for ALL key forms (K1).
+    # Covers creation slug, CURRENT slug (latest timeline.renamed), ULID and UUID, all from kernel events.
     try:
+        import importlib as _il2
+        import re as _re_sel
+        import sqlite3 as _sq
+
         from astrid.core.foundation.project_paths import resolve_projects_root as _rr
         from astrid.core.integrations.reigh.bridge_service import derive_database_path as _dd
-        import sqlite3 as _sq
-        import importlib as _il2
+        from astrid.core.threads.ids import is_ulid as _is_ulid_sel
+        _UUID_RE_SEL = _re_sel.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+        def _looks_like_uuid_sel(v: str) -> bool:
+            return bool(_UUID_RE_SEL.match(v))
         _bf_mod2 = _il2.import_module("astrid.packs.timeline.backfill")
         _rbs = _bf_mod2.read_backfill_state  # type: ignore[attr-defined]
         BackfillError = _bf_mod2.BackfillError  # type: ignore[attr-defined]
@@ -230,22 +239,57 @@ def resolve_event_log_target(
                 conn = _sq.connect(f"file:{_db}?mode=ro", uri=True)
                 try:
                     conn.row_factory = _sq.Row
-                    r = conn.execute("SELECT json_extract(payload_json,'$.data.timeline_id') as tid, json_extract(payload_json,'$.data.timeline_ulid') as ulid FROM events WHERE kind='timeline.created' AND json_extract(payload_json,'$.data.slug')=? LIMIT 1", (slug_or_id,)).fetchone()
-                    if r and r["tid"] and str(r["tid"]) in _st:
-                        tid = str(r["tid"])
-                        ulid = str(r["ulid"]) if r["ulid"] else None
+                    _key = str(slug_or_id)
+                    _tid: str | None = None
+                    _ulid: str | None = None
+                    _is_ulid_key = _is_ulid_sel(_key) or _is_ulid_sel(_key.upper()) or _is_ulid_sel(_key.lower())
+                    if _is_ulid_key:
+                        r = conn.execute("SELECT json_extract(payload_json,'$.data.timeline_id') as tid, json_extract(payload_json,'$.data.timeline_ulid') as ulid FROM events WHERE kind='timeline.created' AND lower(json_extract(payload_json,'$.data.timeline_ulid'))=lower(?) LIMIT 1", (_key,)).fetchone()
+                        if r and r["tid"] and str(r["tid"]) in _st:
+                            _tid = str(r["tid"])
+                            _ulid = str(r["ulid"]) if r["ulid"] else _key
+                    elif _looks_like_uuid_sel(_key):
+                        r = conn.execute("SELECT json_extract(payload_json,'$.data.timeline_id') as tid, json_extract(payload_json,'$.data.timeline_ulid') as ulid FROM events WHERE kind='timeline.created' AND json_extract(payload_json,'$.data.timeline_id')=? LIMIT 1", (_key,)).fetchone()
+                        if r and r["tid"] and str(r["tid"]) in _st:
+                            _tid = str(r["tid"])
+                            _ulid = str(r["ulid"]) if r["ulid"] else None
+                    else:
+                        # Slug: try creation slug first
+                        r = conn.execute("SELECT json_extract(payload_json,'$.data.timeline_id') as tid, json_extract(payload_json,'$.data.timeline_ulid') as ulid FROM events WHERE kind='timeline.created' AND json_extract(payload_json,'$.data.slug')=? LIMIT 1", (_key,)).fetchone()
+                        if r and r["tid"] and str(r["tid"]) in _st:
+                            _tid = str(r["tid"])
+                            _ulid = str(r["ulid"]) if r["ulid"] else None
+                        else:
+                            for _cand_tid in list(_st.keys()):
+                                # Derive current slug via stream_id (payload lacks timeline_id for renames)
+                                _sid = f"{_cand_tid}:timeline.timeline"
+                                _cur_row = conn.execute("SELECT COALESCE(json_extract(payload_json,'$.data.new_slug'), json_extract(payload_json,'$.data.slug')) as cur FROM events WHERE kind='timeline.renamed' AND stream_id=? ORDER BY seq DESC LIMIT 1", (_sid,)).fetchone()
+                                _cur_slug: str | None = None
+                                if _cur_row and _cur_row["cur"]:
+                                    _cur_slug = str(_cur_row["cur"])
+                                else:
+                                    _cr = conn.execute("SELECT json_extract(payload_json,'$.data.slug') as cs FROM events WHERE kind='timeline.created' AND json_extract(payload_json,'$.data.timeline_id')=? LIMIT 1", (_cand_tid,)).fetchone()
+                                    if _cr and _cr["cs"]:
+                                        _cur_slug = str(_cr["cs"])
+                                if _cur_slug == _key:
+                                    _cr2 = conn.execute("SELECT json_extract(payload_json,'$.data.timeline_ulid') as ulid2 FROM events WHERE kind='timeline.created' AND json_extract(payload_json,'$.data.timeline_id')=? LIMIT 1", (_cand_tid,)).fetchone()
+                                    _tid = _cand_tid
+                                    _ulid = str(_cr2["ulid2"]) if _cr2 and _cr2["ulid2"] else None
+                                    break
+                    if _tid and _tid in _st:
                         from astrid.core.timeline.paths import timelines_dir as _td
-                        thome = _td(project_slug, root=_pr) / (ulid or "")
+                        thome = _td(project_slug, root=_pr) / (_ulid or "") if _ulid else None
+                        if thome is not None and not thome.is_dir():
+                            thome = None
                         from .sqlite_backend import SqliteEventLogBackend as _SBE
-                        be = _SBE(timeline_id=tid, timeline_home=thome if thome.is_dir() else None, projects_root=_pr)
-                        return EventLogTarget(backend_name="sqlite", timeline_id=tid, timeline_ulid=ulid, timeline_home=thome if thome.is_dir() else None, slug=slug_or_id, backend=be, source="local")
+                        be = _SBE(timeline_id=_tid, timeline_home=thome, projects_root=_pr)
+                        return EventLogTarget(backend_name="sqlite", timeline_id=_tid, timeline_ulid=_ulid, timeline_home=thome, slug=_key, backend=be, source="local")
                 finally:
                     conn.close()
     except BackfillError:
         raise
     except Exception:
         pass
-    # Strategy 2: Local resolver
     from astrid.core.timeline.observability import resolve_timeline_target
 
     target = resolve_timeline_target(project_slug, slug_or_id, root=root)
@@ -260,7 +304,8 @@ def resolve_event_log_target(
             timeline_home=target.timeline_home,
         )
 
-    # Default: marker-aware Local vs SQLite (R5)
+    # Default: marker-aware Local vs SQLite (R5) — kernel-first classification via authority (K1).
+    # Before ANY LocalFsBackend construction, classify the resolved DIRECTORY through authority.
     # Determine projects_root for marker probe
     if target.timeline_home is not None:
         th = Path(target.timeline_home)
@@ -270,6 +315,42 @@ def resolve_event_log_target(
             projects_root = resolve_projects_root(root)
     else:
         projects_root = resolve_projects_root(root)
+    # Kernel-first authority resolution for the directory (fail-closed on corrupt marker)
+    _auth_id: str | None = None
+    if target.timeline_home is not None:
+        try:
+            from astrid.core.timeline.authority import (
+                resolve_authoritative_timeline_id as _res_auth_sel,
+            )
+            _auth_id = _res_auth_sel(target.timeline_home, projects_root)
+        except Exception as _ae:
+            import importlib as _il_auth
+            _bf_mod_a = _il_auth.import_module("astrid.packs.timeline.backfill")
+            if isinstance(_ae, _bf_mod_a.BackfillError):  # type: ignore[attr-defined]
+                raise
+            # Non-marker errors: fall through to sidecar logic
+            _auth_id = None
+    # Propagate corrupt marker wrapped as EventLogError via _is_backfilled will also fail closed below
+    if isinstance(_auth_id, str) and _auth_id.strip():
+        # Classify authoritative id through marker
+        if _is_backfilled(_auth_id.strip(), projects_root):
+            from .sqlite_backend import SqliteEventLogBackend
+            _kid = _auth_id.strip()
+            backend = SqliteEventLogBackend(
+                timeline_id=_kid,
+                timeline_home=target.timeline_home,
+                projects_root=projects_root,
+            )
+            return EventLogTarget(
+                backend_name="sqlite",  # type: ignore[typeddict-item]
+                timeline_id=_kid,
+                timeline_ulid=target.timeline_ulid,
+                timeline_home=target.timeline_home,
+                slug=target.slug,
+                backend=backend,
+                source="local",
+            )
+        # Unbackfilled -> fall through to LocalFS with sidecar semantics (unchanged)
     if _is_backfilled(target.timeline_id, projects_root):
         from .sqlite_backend import SqliteEventLogBackend
 
@@ -351,13 +432,8 @@ def resolve_pull_destination(
         ValueError: When destination is ambiguous or invalid.
     """
 
-    from astrid.core.timeline.paths import (
-        find_timeline_by_slug,
-        timelines_dir,
-        validate_timeline_slug,
-    )
+    from astrid.core.timeline.paths import find_timeline_by_slug, validate_timeline_slug
 
-    td = timelines_dir(project_slug, root=root)
 
     # Priority 1: --into <existing-slug>
     if into is not None:

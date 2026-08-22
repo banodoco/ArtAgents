@@ -558,7 +558,6 @@ def bind_managed_timeline(
     if found is not None:
         ulid, _tdir = found
     else:
-        # 2. Not found — create a fresh managed container.
         try:
             result = create_timeline(project_slug, slug, root=root)
         except TimelineCrudError:
@@ -569,7 +568,9 @@ def bind_managed_timeline(
             ulid, _tdir = found
         else:
             ulid = result["ulid"]
-
+            # Fresh create: materialize _tdir from result (fallback reconstruct)
+            from astrid.core.timeline.paths import timelines_dir as _tdir_for_bind
+            _tdir = _tdir_for_bind(project_slug, root=root) / ulid
     # 3. Kernel-first authoritative timeline_id for marked timelines (sidecar ONLY for legacy).
     import importlib as _il_run
     _bf_run = _il_run.import_module("astrid.packs.timeline.backfill")

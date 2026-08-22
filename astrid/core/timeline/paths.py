@@ -258,13 +258,105 @@ def find_timeline_by_event_stream_id(
 
     Scans ``timelines/*/assembly.identity.json`` and returns
     ``(timeline_ulid, timeline_slug)`` for the first match, or ``None``.
+    For marked (SQLite-authority) timelines, kernel/marker resolution
+    precedes any file scan; the file scan remains only for unbackfilled
+    legacy dirs. Corrupt authority markers fail closed (BackfillError).
     """
+    import importlib as _il_fes
+    _bf_fes = _il_fes.import_module("astrid.packs.timeline.backfill")
+    BackfillErrorFes = _bf_fes.BackfillError  # type: ignore[attr-defined]
+    # Fail-closed on corrupt marker even when timelines dir absent
+    try:
+        from astrid.core.foundation.project_paths import resolve_projects_root as _rr_fes
+        from astrid.core.integrations.reigh.bridge_service import derive_database_path as _dd_fes
+        _pr_fes = _rr_fes(root)
+        _db_fes = _dd_fes(_pr_fes)
+        if _db_fes.is_file():
+            _bf_fes.read_backfill_state(_pr_fes)
+    except BackfillErrorFes:
+        raise
+    except Exception:
+        pass
+    # Kernel-first for marked timelines: UUID -> ULID via kernel
+    try:
+        import sqlite3 as _sq_fes
+
+        from astrid.core.foundation.project_paths import resolve_projects_root as _rr2
+        from astrid.core.integrations.reigh.bridge_service import derive_database_path as _dd2
+        _pr2 = _rr2(root)
+        _db2 = _dd2(_pr2)
+        if _db2.is_file():
+            _state2 = None
+            try:
+                _state2 = _bf_fes.read_backfill_state(_pr2)  # type: ignore[attr-defined]
+            except BackfillErrorFes:
+                raise
+            except Exception as exc:
+                raise BackfillErrorFes(f"backfill authority marker is unreadable: {exc}") from exc
+            if _state2 and event_stream_id in _state2:
+                conn = _sq_fes.connect(f"file:{_db2}?mode=ro", uri=True)
+                try:
+                    conn.row_factory = _sq_fes.Row
+                    row = conn.execute("SELECT json_extract(payload_json,'$.data.timeline_ulid') as ulid FROM events WHERE kind='timeline.created' AND json_extract(payload_json,'$.data.timeline_id')=? LIMIT 1", (event_stream_id,)).fetchone()
+                    if row and row["ulid"]:
+                        ulid = str(row["ulid"])
+                        td = timelines_dir(project_slug, root=root)
+                        cand = td / ulid
+                        # Also handle case-insensitive ULID dir (upper)
+                        if not cand.is_dir():
+                            cand = td / ulid.upper()
+                        if not cand.is_dir():
+                            cand = td / ulid.lower()
+                        if cand.is_dir():
+                            # Derive current slug from kernel authority (latest renamed via stream_id)
+                            _sid = f"{event_stream_id}:timeline.timeline"
+                            _cur = conn.execute("SELECT COALESCE(json_extract(payload_json,'$.data.new_slug'), json_extract(payload_json,'$.data.slug')) as cur FROM events WHERE kind='timeline.renamed' AND stream_id=? ORDER BY seq DESC LIMIT 1", (_sid,)).fetchone()
+                            if _cur and _cur["cur"]:
+                                return (cand.name, str(_cur["cur"]))
+                            _cr = conn.execute("SELECT json_extract(payload_json,'$.data.slug') as cs FROM events WHERE kind='timeline.created' AND json_extract(payload_json,'$.data.timeline_id')=? LIMIT 1", (event_stream_id,)).fetchone()
+                            if _cr and _cr["cs"]:
+                                return (cand.name, str(_cr["cs"]))
+                            # Fallback to display repair
+                            try:
+                                data = load_display_json_with_repair(cand)
+                                slug = data.get("slug") if isinstance(data, dict) else None
+                                if isinstance(slug, str):
+                                    return (cand.name, slug)
+                            except BackfillErrorFes:
+                                raise
+                            except Exception:
+                                pass
+                finally:
+                    conn.close()
+    except BackfillErrorFes:
+        raise
+    except Exception:
+        pass
     td = timelines_dir(project_slug, root=root)
     if not td.is_dir():
         return None
     for child in sorted(td.iterdir()):
         if not child.is_dir():
             continue
+        # Skip backfilled timelines in file scan — kernel path already handled; sidecar may be stale
+        try:
+            from astrid.core.timeline.authority import is_backfilled_timeline as _is_bf_fes
+            from astrid.core.timeline.authority import (
+                resolve_authoritative_timeline_id as _res_auth_fes,
+            )
+            _tid_cand = _res_auth_fes(child, root)
+            if _tid_cand and isinstance(_tid_cand, str):
+                try:
+                    if _is_bf_fes(_tid_cand, root):
+                        continue
+                except BackfillErrorFes:
+                    raise
+                except Exception:
+                    pass
+        except BackfillErrorFes:
+            raise
+        except Exception:
+            pass
         identity_path = child / "assembly.identity.json"
         if not identity_path.is_file():
             continue
@@ -292,7 +384,6 @@ def find_timeline_by_event_stream_id(
             if isinstance(slug, str):
                 return (child.name, slug)
     return None
-
 
 def load_display_json_with_repair(timeline_home: str | Path) -> dict[str, object] | None:
     import importlib as _il2
