@@ -63,9 +63,12 @@ def env(tmp_path: Path):
         receipts = ReceiptService()
         projects = ProjectRepository(events=events, receipts=receipts)
         yield SimpleNamespace(
-            service=ProjectsService(writer, projects, receipts),
+            service=ProjectsService(
+                writer, projects, receipts, projects_root=tmp_path / "projects"
+            ),
             writer=writer,
             root=tmp_path,
+            projects_root=tmp_path / "projects",
         )
     finally:
         writer.close()
@@ -280,24 +283,33 @@ def test_duplicate_slug_returns_conflict(env: SimpleNamespace) -> None:
     assert _project_count(env) == 1
 
 
-def test_create_performs_no_filesystem_project_writes(
+def test_repository_writes_no_files_service_materializes_workspace(
     env: SimpleNamespace,
 ) -> None:
+    # The repository alone never touches the filesystem: a repo-scoped
+    # create leaves the projects root absent (v10 conformance).
+    from astrid.core.store.uow import UnitOfWork
+
+    UnitOfWork(env.writer).run(
+        lambda u: env.service._projects.create(
+            u,
+            slug="repo-only",
+            name="Repo Only",
+            settings={},
+            idempotency_key="repo-1",
+        )
+    )
+    assert not env.projects_root.exists()
+
+    # The service composes the binding workspace on top of the committed
+    # kernel row: exactly plan.md and project.json under <root>/<slug>.
     result = env.service.create(slug="demo", name="Demo")
     assert result.ok is True
-    project_id = result.data["id"]
-    # The project lives only in the kernel database: no project directory
-    # and no project.json authority appear under the projects root.
-    assert not (env.root / "demo").exists()
-    assert not (env.root / project_id).exists()
-    assert list(env.root.rglob("project.json")) == []
-
-
-# ---------------------------------------------------------------------------
-# Select: non-authoritative preference (m4 plan step 5, task T6B)
-# ---------------------------------------------------------------------------
-
-
+    project_dir = env.projects_root / "demo"
+    assert sorted(path.name for path in project_dir.iterdir()) == [
+        "plan.md",
+        "project.json",
+    ]
 @pytest.fixture
 def sandboxed_home(env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Sandbox ASTRID_HOME so select's preference writes never leave tmp."""

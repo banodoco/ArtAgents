@@ -1544,11 +1544,21 @@ def test_one_installed_wheel_completes_the_local_first_run(
     assert {check["status"] for check in doctor["checks"]} == {"ok"}
 
     # Repository-backed state is the only semantic authority in this journey:
-    # no project/timeline JSONL or sidecar files were produced beside it.
-    assert not any(
-        path.is_file() and path.suffix in {".json", ".jsonl"}
+    # no project/timeline JSONL or sidecar files were produced beside it. The
+    # one allowed JSON shape is the service-materialized binding workspace
+    # ``<slug>/project.json`` (kernel_authority marker; the kernel row stays
+    # authoritative) — every other .json/.jsonl under the root is a leftover
+    # authority file.
+    authority_files = [
+        str(path)
         for path in harness.roots.project.rglob("*")
-    )
+        if path.is_file()
+        and (
+            path.suffix == ".jsonl"
+            or (path.suffix == ".json" and path.name != "project.json")
+        )
+    ]
+    assert authority_files == []
     assert not any(
         marker in (retained_stdout + retained_stderr).lower()
         for marker in ("sidecar", "legacy authority", "second writer")

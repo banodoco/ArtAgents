@@ -22,21 +22,33 @@ the frozen SDK envelope (``docs/contracts/astrid-sdk-v10.md`` section 1):
   ``conflict``, validation → ``validation_error``, mismatch →
   ``idempotency_mismatch``).
 
-This module contains **no SQL** and performs **no filesystem project writes**;
-every read and mutation is delegated to the project repository (the read model
-lives only in the kernel database). The service holds a reference to the
-shared writer solely to open one unit of work per mutation and to run
-transaction-free reads; it never opens its own writer or connection.
+This module contains **no SQL**; every read and mutation is delegated to the
+project repository (the read model lives only in the kernel database), and the
+repository itself performs **no filesystem writes** (v10 conformance). The
+*service* composes one bounded filesystem side effect on top of a committed
+create: it materializes the per-project workspace binding skeleton
+(``<root>/<slug>/plan.md`` plus a lightweight ``project.json`` binding file)
+so direct-mode executors can resolve the project. The kernel row stays the
+sole authority; the skeleton is best-effort (a materialization failure logs a
+warning and never fails the committed create) and never overwrites existing
+files. The service holds a reference to the shared writer solely to open one
+unit of work per mutation and to run transaction-free reads; it never opens
+its own writer or connection.
 """
 
-from __future__ import annotations
+import logging
 
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from astrid.core.foundation.atomic_io import write_json_atomic, write_text_atomic
+from astrid.core.foundation.project_paths import project_dir, project_json_path
 from astrid.core.preferences import set_default_project
+from astrid.core.project.project import PLAN_MD_SKELETON
+from astrid.core.project.schema import build_project
 from astrid.core.receipts.service import CommandReceipt, ReceiptService
+
 from astrid.core.repositories.projects import (
     CORE_PROJECT_CREATE_COMMAND_KIND,
     ProjectRepository,
@@ -49,13 +61,47 @@ from astrid.sdk.contracts import (
     resolve_idempotency_key,
 )
 from astrid.sdk.exceptions import ServiceValidationError, map_error
+from astrid.core.util.log_and_swallow import swallowing
 
 __all__ = ["ProjectsService"]
+
+_LOGGER = logging.getLogger(__name__)
 
 _PROJECT_GLOBAL_SCOPE = "global"
 """The scope for project creation: projects are top-level, so their
 deterministic ids derive from ``(command kind, "global", key)`` (SDK contract
 section 4.4 — project/global scope)."""
+
+
+def _materialize_workspace(
+    *,
+    slug: str,
+    name: str,
+    project_id: str,
+    projects_root: str | Path | None,
+) -> None:
+    """Materialize the per-project filesystem binding skeleton.
+
+    Creates ``<root>/<slug>/`` with ``plan.md`` (the documented empty
+    skeleton) and a lightweight ``project.json`` binding file carrying the
+    kernel project id and ``kernel_authority: true``. The binding file is
+    **not** an authority — the kernel row is; it exists only so direct-mode
+    executors (:func:`astrid.core.project.project.require_project` and
+    ``require_project_owned_artifact``) resolve the project and land runs
+    under ``<root>/<slug>/runs/``. Existing files are never overwritten:
+    ``plan.md`` may carry human edits and ``project.json`` may carry fields
+    enriched by other flows (e.g. ``default_timeline_id``).
+    """
+    project_root = project_dir(slug, root=projects_root)
+    project_root.mkdir(parents=True, exist_ok=True)
+    plan_path = project_root / "plan.md"
+    if not plan_path.exists():
+        write_text_atomic(plan_path, PLAN_MD_SKELETON.format(slug=slug))
+    binding_path = project_json_path(slug, root=projects_root)
+    if not binding_path.exists():
+        payload = build_project(slug, name=name, project_id=project_id)
+        payload["kernel_authority"] = True
+        write_json_atomic(binding_path, payload)
 
 
 class ProjectsService:
@@ -72,10 +118,16 @@ class ProjectsService:
         writer: DatabaseWriter,
         projects: ProjectRepository,
         receipts: ReceiptService,
+        *,
+        projects_root: str | Path | None = None,
     ) -> None:
         self._writer = writer
         self._projects = projects
         self._receipts = receipts
+        # Root of the binding workspace materialized on create (``None``
+        # resolves the standard precedence — arg, ASTRID_PROJECTS_ROOT,
+        # default — at materialization time).
+        self._projects_root = projects_root
 
     # -- create ------------------------------------------------------------
 
@@ -120,6 +172,24 @@ class ProjectsService:
             )
         except Exception as exc:  # noqa: BLE001 - centralized bounded mapping
             return DomainResult.failure(map_error(exc), idempotency_key=key)
+        # The kernel row is committed and authoritative. Materialize the
+        # binding workspace (plan.md + project.json skeleton) so direct-mode
+        # executors resolve the project. Best-effort: a materialization
+        # failure logs a warning and never fails the committed create.
+        with swallowing(
+            (
+                f"projects.create: workspace materialization for {slug!r} "
+                f"failed (kernel row {model.id} remains authoritative)"
+            ),
+            level=logging.WARNING,
+            logger=_LOGGER,
+        ):
+            _materialize_workspace(
+                slug=slug,
+                name=name,
+                project_id=model.id,
+                projects_root=self._projects_root,
+            )
         return DomainResult.success(
             model.to_dict(),
             receipt=self._committed_receipt(model.id, key),

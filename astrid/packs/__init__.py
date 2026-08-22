@@ -246,7 +246,9 @@ def compose_standard_bridge(
     # the service's caller-key slot.
     from astrid.sdk.timelines import TimelinesService  # lazy: pack-owned (m4)
 
-    projects_service = ProjectsService(writer, projects, receipts)
+    projects_service = ProjectsService(
+        writer, projects, receipts, projects_root=root
+    )
     timelines_service = TimelinesService(
         writer, projects, timelines, receipts
     )

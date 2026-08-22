@@ -29,7 +29,7 @@ from .schema import build_project, build_source, validate_project
 # doc at the project root.  This is DISTINCT from <project>/runs/<run-id>/plan.json
 # which is the executable runtime step tree; plan.md is project-level prose for
 # current focus, open threads, key decisions, and scratch notes.
-_PLAN_MD_SKELETON = """# {slug} — Plan
+PLAN_MD_SKELETON = """# {slug} — Plan
 
 _Live working notes for this project. Read on attach; keep updated as the plan evolves._
 
@@ -120,7 +120,7 @@ def create_project(
     # Idempotent — if it already exists, leave it alone.
     plan_path = project_root / "plan.md"
     if not plan_path.exists():
-        write_text_atomic(plan_path, _PLAN_MD_SKELETON.format(slug=slug))
+        write_text_atomic(plan_path, PLAN_MD_SKELETON.format(slug=slug))
     return payload
 
 

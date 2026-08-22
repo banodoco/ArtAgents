@@ -344,7 +344,9 @@ def compose_standard_application(
         # The seven typed services, wired over the shared repositories and
         # the single writer queue. Services contain no SQL and never open a
         # writer of their own (plan step 17).
-        projects_service = ProjectsService(writer, projects, receipts)
+        projects_service = ProjectsService(
+            writer, projects, receipts, projects_root=root
+        )
         timelines_service = TimelinesService(
             writer, projects, timelines, receipts
         )
