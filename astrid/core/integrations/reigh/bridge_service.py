@@ -1705,11 +1705,24 @@ class ReighTaskBridge:
 
     @staticmethod
     def _task_summary(row: Mapping[str, Any]) -> dict[str, Any]:
+        import json as _json
+
+        try:
+            spec = _json.loads(str(row["spec_json"]))
+        except (ValueError, TypeError):
+            spec = {}
+        if not isinstance(spec, dict):
+            spec = {}
         summary = {
             "task_id": str(row["id"]),
             "project_id": str(row["project_id"]),
             "capability": str(row["capability"]),
             "status": str(row["status"]),
+            # The admitted spec rides the polling read (doc 27 §4.1) so
+            # a restarted executor re-derives its orchestration plan
+            # from persisted state alone — crash replay never trusts
+            # crashed-process memory.
+            "spec": spec,
             "priority": int(row["priority"]),
             "max_attempts": int(row["max_attempts"]),
             "created_at": str(row["created_at"]),
