@@ -293,7 +293,11 @@ python3 -m astrid timelines diff --project demo primary --json
 # Migrates the project's immutable JSONL timeline exports into the kernel
 # database 1:1 (zero-loss invariants; authority marker at
 # <projects_root>/.astrid/backfill-state.json written only after every check
-# passes). --dry-run validates and reports WITHOUT writing anything.
+# passes). --dry-run validates the source and reports WITHOUT writing
+# anything: target-side checks (count/head/content/kinds/projections) are
+# null with evaluated=false unless a kernel stream already exists for the
+# timeline, in which case they are re-verified read-only and reported
+# truthfully.
 python3 -m astrid timelines backfill --project demo --dry-run --json
 python3 -m astrid timelines backfill --project demo --json
 

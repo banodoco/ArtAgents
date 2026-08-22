@@ -214,3 +214,133 @@ def test_interrupted_resume_converges_with_uninterrupted(
         assert m_resumed[tid]["events_sha256"] == m_ctrl[tid]["events_sha256"]
     assert state_resumed["B"]["head"] == 5
     assert state_resumed["B"]["count"] == 5
+
+
+def test_resume_fails_closed_on_source_drift(tmp_path: Path) -> None:
+    """W2: appending one event to a completed timeline's source and resuming
+    fails closed with NAMED drift — no new kernel rows, marker unchanged."""
+    from astrid.core.timeline.eventlog.local_fs import LocalFsBackend
+    from astrid.core.timeline.events.schema import TimelineActor
+    from astrid.packs.timeline.backfill import BackfillDiscrepancyError
+
+    root1, db1, tid_a, tid_b, home_a, _home_b = _build_root(tmp_path, "root1")
+    # Fresh database gets its project row once.
+    w = make_writer(db1)
+    try:
+        make_project(w)
+    finally:
+        w.close()
+    # One complete uninterrupted run: A and B both commit, checkpoint marks
+    # A as the last completed timeline.
+    writer, projects, receipts = _open(root1, db1)
+    try:
+        reports = backfill_project(
+            writer=writer,
+            projects=projects,
+            receipts=receipts,
+            project_slug="proj",
+            projects_root=root1,
+            run_ts=RUN_TS,
+        )
+        assert set(reports) == {tid_a, tid_b}
+    finally:
+        writer.close()
+    a_stream = f"{tid_a}:{TIMELINE_STREAM_TYPE}"
+    marker_before = marker_state(root1)
+
+    # Drift A's source: append one config_replaced event (head 3 -> 4).
+    backend = LocalFsBackend(timeline_id=tid_a, timeline_home=home_a)
+    backend.append_event(
+        tid_a,
+        "timeline.config_replaced",
+        {"config": {"tracks": [], "clips": []}},
+        actor=TimelineActor(type="human", id="actor:human"),
+    )
+
+    # Resume with the same checkpoint: the completed prefix is revalidated
+    # (W2) and the drifted source fails the resume closed with named drift.
+    writer2, projects2, receipts2 = _open(root1, db1)
+    try:
+        with pytest.raises(BackfillDiscrepancyError) as excinfo:
+            backfill_project(
+                writer=writer2,
+                projects=projects2,
+                receipts=receipts2,
+                project_slug="proj",
+                projects_root=root1,
+                run_ts=RUN_TS,
+            )
+        message = str(excinfo.value)
+        assert tid_a in message
+        assert "events_sha256" in message
+        assert "drifted" in message or "drift" in message
+        # No new kernel rows for either timeline.
+        assert head_seq(writer2, a_stream) == 3
+        assert len(kernel_event_rows(writer2, a_stream)) == 3
+        b_stream = f"{tid_b}:{TIMELINE_STREAM_TYPE}"
+        assert head_seq(writer2, b_stream) == 5
+        assert len(kernel_event_rows(writer2, b_stream)) == 5
+        # Marker unchanged: the drift never touched the authority claim.
+        assert marker_state(root1) == marker_before
+    finally:
+        writer2.close()
+
+
+def test_resume_completes_missing_marker_after_crash(tmp_path: Path) -> None:
+    """W1.3/W2: a checkpoint-completed timeline whose marker never landed
+    (crash-after-commit) is re-imported on resume and the marker converges —
+    zero new rows, receipt replay."""
+    import json as _json
+
+    root1, db1, tid_a, tid_b, _home_a, _home_b = _build_root(tmp_path, "root1")
+    w = make_writer(db1)
+    try:
+        make_project(w)
+    finally:
+        w.close()
+    writer, projects, receipts = _open(root1, db1)
+    try:
+        reports = backfill_project(
+            writer=writer,
+            projects=projects,
+            receipts=receipts,
+            project_slug="proj",
+            projects_root=root1,
+            run_ts=RUN_TS,
+        )
+        assert set(reports) == {tid_a, tid_b}
+    finally:
+        writer.close()
+    a_stream = f"{tid_a}:{TIMELINE_STREAM_TYPE}"
+    assert marker_state(root1)[tid_a]["source_head_version"] == 3
+    # Simulate the crash-after-commit-before-marker for A: committed
+    # receipt/events exist, the marker entry never landed.
+    state_path = root1 / ".astrid" / "backfill-state.json"
+    state = _json.loads(state_path.read_text())
+    del state[tid_a]
+    state_path.write_text(_json.dumps(state))
+
+    # Resume: A is re-imported (receipt replay) and its marker completes;
+    # B is untouched; zero new rows anywhere.
+    writer2, projects2, receipts2 = _open(root1, db1)
+    try:
+        reports2 = backfill_project(
+            writer=writer2,
+            projects=projects2,
+            receipts=receipts2,
+            project_slug="proj",
+            projects_root=root1,
+            run_ts=RUN_TS,
+        )
+        assert set(reports2) == {tid_a}  # only A needed marker completion
+        assert reports2[tid_a].replayed is True
+        assert reports2[tid_a].marker_written is True
+        assert reports2[tid_a].to_dict()["checks"]["count"] is True
+        assert head_seq(writer2, a_stream) == 3
+        assert len(kernel_event_rows(writer2, a_stream)) == 3
+        b_stream = f"{tid_b}:{TIMELINE_STREAM_TYPE}"
+        assert head_seq(writer2, b_stream) == 5
+        assert marker_state(root1)[tid_a]["source_head_version"] == 3
+        assert marker_state(root1)[tid_a]["events_sha256"]
+    finally:
+        writer2.close()

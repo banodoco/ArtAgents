@@ -28,41 +28,91 @@ authority marker at ``<projects_root>/.astrid/backfill-state.json``.
 
 Authority marker (R5) — schema documented here as the contract:
 
-    ``<projects_root>/.astrid/backfill-state.json`` (atomic write via
-    ``astrid.core.foundation.atomic_io.write_json_atomic``)::
+    ``<projects_root>/.astrid/backfill-state.json`` (read-modify-write
+    serialized by an ``flock`` on
+    ``<projects_root>/.astrid/backfill-state.lock``, then an atomic replace
+    via ``astrid.core.foundation.atomic_io.write_json_atomic``)::
 
         {
           "<timeline_id>": {
             "backfilled_at": "<iso-8601-utc>",
             "source": "local_fs" | "supabase_export",
             "source_head_version": <int>,
-            "events_sha256": "<sha256 hex of the canonical source events>"
+            "events_sha256": "<sha256 hex of the canonical source events>",
+            "synthesized_bootstrap": <bool>
           }
         }
+
+``synthesized_bootstrap`` records whether the import synthesized a
+``timeline.created`` bootstrap event (W3: sources without one get exactly
+one deterministic bootstrap event at kernel position 0). The key is always
+present (shape extended additively; R5 semantics preserved).
 
 The marker is written ONLY after every zero-loss invariant passes (see
 :func:`verify_backfill`). A failed import writes NO marker and leaves NO
 authority claim. Any later request whose source/head/sha disagree with the
 marker for the same timeline is refused with :class:`BackfillAuthorityError`
-(no authority mixing per timeline).
+(no authority mixing per timeline). A request whose source identity
+MATCHES an existing marker is not refused: it re-verifies and idempotently
+refreshes the marker (crash-convergent "complete-the-marker", W1.3).
 
 Zero-loss invariants (each backfilled timeline fails closed unless ALL hold;
 the checker is reusable — :func:`verify_backfill`):
 
-a. source event count == kernel event count for the mapped stream;
-b. head continuity: source ``assembly.head.json`` version ==
-   ``event_streams.head_seq`` after import;
-c. content projection: for every source event the preserved fields
-   (``kind``, payload ``data``, ``actor_kind``, ``created_at``, ``event_id``)
-   are canonically equal to the kernel row; see :func:`map_source_event` for
-   the exact field mapping and the documented drops/additions;
+a. expected event count == kernel event count for the mapped stream
+   (``len(source.events) + synthesized_count``);
+b. head continuity: ``event_streams.head_seq`` == source head version +
+   ``synthesized_count`` (synthesized bootstrap occupies kernel position 0,
+   so a slice without ``timeline.created`` ends at ``source_version + 1``);
+c. content projection: for every expected event (synthesized bootstrap
+   first, then each source event) the preserved fields (``kind``, payload
+   ``data``, ``actor_kind``, ``created_at``, ``event_id``) plus the
+   mapper-derived ``txn_id`` and ``changes_json`` are canonically equal to
+   the kernel row; see :func:`map_source_event` for the exact field mapping
+   and the documented drops/additions;
 d. idempotency: running the same import twice yields ZERO new kernel events
    and an unchanged head (kernel identical-replay semantic: the per-timeline
    command receipt replays the stored result);
 e. unknown-kind pass-through: per-kind counts are preserved, including kinds
    the timeline schema does not register (raw-dict payloads);
 f. the marker is written only after (a)-(e) hold; a failed import writes no
-   marker.
+   marker;
+g. projections: stored ``timelines.document_json`` == canonical
+   ``source.projected_config`` and stored ``asset_registry_json`` ==
+   canonical ``source.projected_registry["assets"]`` (verify what you
+   serve, W4).
+
+Verification placement (W1): the full verifier runs TWICE per fresh import —
+once INSIDE the ``BEGIN IMMEDIATE`` unit of work against the transaction
+connection (any mismatch rolls the whole timeline back: zero
+events/receipts/projections), and once read-only after commit before the
+marker write. Verification reads the stream via a COUNT query plus paged
+iteration (keyset on ``seq``, page 1000), so there is no 10k repository
+hard-cap in this path. A retry that finds an existing kernel stream + a
+matching backfill receipt fully re-verifies read-only and then idempotently
+writes/refreshes the marker — after ANY interruption the state converges to
+exactly ``{nothing written}`` or ``{events + receipt + marker, fully
+verified}``.
+
+Bootstrap synthesis (W3): when a source has no ``timeline.created`` event,
+the import synthesizes ONE deterministic bootstrap event inside the same
+transaction before the source events — kind ``timeline.created``,
+deterministic event id via :func:`derive_timeline_ulid`, data
+``{timeline_id, slug, name}`` enriched per :func:`_enrich_created_data`
+conventions (the enriched ``timeline_ulid`` follows the existing identity
+rules: the identity sidecar ULID for local_fs, the deterministic
+:func:`derive_timeline_ulid` derivation for supabase-export sources, so
+the editor's ULID addressability is unchanged), actor_kind ``system``,
+created_at = the first source event's ts. The synthesis is deterministic,
+so retries produce the identical kernel row and the content check treats
+it as the expected position-0 row.
+
+Contract notes (W7d): the frozen ``events`` table carries only
+``actor_kind``, so ``actor.id`` / ``actor.display`` / ``actor.via`` are
+intentionally not preserved (documented drop); the legacy undo/erasure
+selector surfaces are retired and never emitted; transfer provenance rides
+the receipts and the marker (``events_sha256`` + per-timeline source
+identity), never hidden columns.
 
 Field mapping ``LocalFs/Supabase TimelineEvent -> kernel events`` (invariant
 c), derived from the conversion in ``astrid/core/timeline/migration.py`` and
@@ -160,7 +210,6 @@ from astrid.core.receipts.canonical import (
 )
 from astrid.core.receipts.service import ReceiptService
 from astrid.core.repositories.errors import RepositoryError
-from astrid.core.repositories.events import EventRepository
 from astrid.core.repositories.projects import ProjectRepository
 from astrid.core.store.uow import UnitOfWork
 from astrid.core.store.writer import DatabaseWriter
@@ -250,6 +299,7 @@ class BackfillSource:
     timeline_id: str
     timeline_ulid: str
     name: str | None
+    slug: str | None  # immutable alias slug (identity display for local_fs)
     events: tuple[TimelineEvent, ...]  # ordered 1..head_version
     head_version: int
     events_sha256: str
@@ -280,7 +330,11 @@ class BackfillVerification:
 
     ``mismatches`` carries one human-readable detail per failing invariant so
     a discrepancy is actionable; ``ok`` is False unless (a) count, (b) head,
-    (c) content, and (e) per-kind preservation all hold.
+    (c) content, (e) per-kind preservation, and (g) projection checks all
+    hold. ``synthesized_count`` is the number of synthesized bootstrap
+    events the expected stream carries (0 or 1; W3), and
+    ``projection_mismatches`` carries the W4 column/index details separately
+    so the report can distinguish them.
     """
 
     source_event_count: int
@@ -290,14 +344,26 @@ class BackfillVerification:
     source_kinds: dict[str, int]
     kernel_kinds: dict[str, int]
     mismatches: tuple[str, ...] = ()
+    synthesized_count: int = 0
+    projection_mismatches: tuple[str, ...] = ()
+
+    @property
+    def expected_event_count(self) -> int:
+        """The expected kernel event count (source + synthesized bootstrap)."""
+        return self.source_event_count + self.synthesized_count
+
+    @property
+    def expected_head(self) -> int:
+        """The expected kernel head (source version + synthesized count)."""
+        return self.source_head_version + self.synthesized_count
 
     @property
     def count_ok(self) -> bool:
-        return self.source_event_count == self.kernel_event_count
+        return self.expected_event_count == self.kernel_event_count
 
     @property
     def head_ok(self) -> bool:
-        return self.source_head_version == self.kernel_head_seq
+        return self.expected_head == self.kernel_head_seq
 
     @property
     def content_ok(self) -> bool:
@@ -308,12 +374,21 @@ class BackfillVerification:
         return self.source_kinds == self.kernel_kinds
 
     @property
+    def projection_ok(self) -> bool:
+        return not self.projection_mismatches
+
+    @property
+    def synthesized_bootstrap(self) -> bool:
+        return self.synthesized_count > 0
+
+    @property
     def ok(self) -> bool:
         return (
             self.count_ok
             and self.head_ok
             and self.content_ok
             and self.kinds_ok
+            and self.projection_ok
             and not self.mismatches
         )
 
@@ -323,6 +398,7 @@ class BackfillVerification:
             "head": self.head_ok,
             "content": self.content_ok,
             "kinds": self.kinds_ok,
+            "projections": self.projection_ok,
         }
 
     def to_dict(self) -> dict[str, Any]:
@@ -335,6 +411,7 @@ class BackfillVerification:
             "kernel_kinds": self.kernel_kinds,
             "checks": self.checks_dict(),
             "mismatches": list(self.mismatches),
+            "synthesized_bootstrap": self.synthesized_bootstrap,
         }
 
 
@@ -363,6 +440,8 @@ class BackfillReport:
     written: bool
     replayed: bool
     dry_run: bool
+    synthesized_bootstrap: bool
+    evaluated: bool
     projected_config_sha256: str
     projected_registry_sha256: str
     detail: str = ""
@@ -385,6 +464,8 @@ class BackfillReport:
             "written": self.written,
             "replayed": self.replayed,
             "dry_run": self.dry_run,
+            "synthesized_bootstrap": self.synthesized_bootstrap,
+            "evaluated": self.evaluated,
             "projected_config_sha256": self.projected_config_sha256,
             "projected_registry_sha256": self.projected_registry_sha256,
             "detail": self.detail,
@@ -601,15 +682,19 @@ def _read_head_version(home: Path, event_count: int) -> int:
     return version
 
 
-def _identity_ulid_and_name(identity: dict[str, Any], timeline_id: str) -> tuple[str, str | None]:
+def _identity_ulid_and_name(identity: dict[str, Any], timeline_id: str) -> tuple[str, str | None, str | None]:
     timeline_ulid = identity.get("timeline_ulid")
     if not isinstance(timeline_ulid, str) or not timeline_ulid:
         timeline_ulid = derive_timeline_ulid(timeline_id)
     display = identity.get("display")
     name = None
-    if isinstance(display, dict) and isinstance(display.get("name"), str):
-        name = display["name"]
-    return timeline_ulid, name
+    slug = None
+    if isinstance(display, dict):
+        if isinstance(display.get("name"), str):
+            name = display["name"]
+        if isinstance(display.get("slug"), str) and display["slug"]:
+            slug = display["slug"]
+    return timeline_ulid, name, slug
 
 
 # ---------------------------------------------------------------------------
@@ -651,7 +736,9 @@ def load_local_fs_source(
                 f"the identity in {home.name}"
             )
     head_version = _read_head_version(home, len(events))
-    timeline_ulid, name = _identity_ulid_and_name(identity, source_timeline_id)
+    timeline_ulid, name, slug = _identity_ulid_and_name(
+        identity, source_timeline_id
+    )
     projected_config = replay_projection(backend)
     registry = _project_registry(events)
     if registry is None:
@@ -661,6 +748,7 @@ def load_local_fs_source(
         timeline_id=source_timeline_id,
         timeline_ulid=timeline_ulid,
         name=name,
+        slug=slug,
         events=events,
         head_version=head_version,
         events_sha256=source_events_sha256(events),
@@ -759,6 +847,10 @@ class SupabaseExportReader:
                 f"supabase export file is unreadable: {self.path.name}"
             ) from exc
         raw_items = self._parse_items(text)
+        if not raw_items:
+            raise BackfillSourceError(
+                f"supabase export contains no rows: {self.path.name}"
+            )
         rows: list[tuple[int, TimelineEvent]] = []
         for index, raw in enumerate(raw_items):
             if not isinstance(raw, dict):
@@ -770,8 +862,12 @@ class SupabaseExportReader:
                 raise BackfillSourceError(
                     f"supabase export item {index} has no positive version"
                 )
-            timeline_id = raw.get("timeline_id")
-            if timeline_id != self.timeline_id:
+            raw_timeline_id = raw.get("timeline_id")
+            if not isinstance(raw_timeline_id, str) or not raw_timeline_id:
+                raise BackfillSourceError(
+                    f"supabase export item {index} has no timeline_id"
+                )
+            if raw_timeline_id != self.timeline_id:
                 continue
             try:
                 event = TimelineEvent.from_dict(raw)
@@ -815,7 +911,7 @@ class SupabaseExportReader:
     def verify_chain(self) -> Any:
         from astrid.core.timeline.eventlog.types import EventLogVerification
 
-        events, _ = self._load()
+        events, versions = self._load()
         from astrid.core.timeline.events.schema import with_event_hash
 
         prev_hash: str | None = None
@@ -827,11 +923,15 @@ class SupabaseExportReader:
                 prev_hash=prev_hash,
             )
             if event.prev_hash != prev_hash or event.hash != expected.hash:
+                version = versions[index] if index < len(versions) else index + 1
                 return EventLogVerification(
                     ok=False,
                     checked_events=index,
                     last_event_id=None,
-                    error=f"export event {event.event_id} chain link broken",
+                    error=(
+                        f"chain link broken at version {version} "
+                        f"(event {event.event_id})"
+                    ),
                 )
             prev_hash = event.hash
         return EventLogVerification(
@@ -849,10 +949,23 @@ def _build_supabase_source(
     head_version: int,
     reader: Any,
 ) -> BackfillSource:
-    """Shared source construction for the Supabase leg (file or transport)."""
+    """Shared source construction for the Supabase leg (file or transport).
+
+    Fail-closed envelope (W5): the chain is verified BEFORE the source is
+    built — a broken chain raises :class:`BackfillSourceError` naming the
+    failing version — an empty export is rejected, and every malformed row
+    rejects the whole export naming its index (no silent skips).
+    """
     if not events:
         raise BackfillSourceError(
-            f"supabase export contains no events for timeline {timeline_id!r}"
+            f"supabase export contains no rows for timeline {timeline_id!r}"
+        )
+    chain = reader.verify_chain() if hasattr(reader, "verify_chain") else None
+    if chain is not None and not chain.ok:
+        detail = chain.error or "unknown chain error"
+        raise BackfillSourceError(
+            f"supabase export chain verification failed for timeline "
+            f"{timeline_id!r}: {detail}"
         )
     for event in events:
         if event.timeline_id != timeline_id:
@@ -865,7 +978,7 @@ def _build_supabase_source(
             f"supabase export head version {head_version} disagrees with "
             f"{len(events)} events for timeline {timeline_id!r}"
         )
-    timeline_ulid, name = _export_identity(events, timeline_id)
+    timeline_ulid, name, slug = _export_identity(events, timeline_id)
     projected_config = replay_projection(reader)
     registry = _project_registry(events)
     if registry is None:
@@ -875,6 +988,7 @@ def _build_supabase_source(
         timeline_id=timeline_id,
         timeline_ulid=timeline_ulid,
         name=name,
+        slug=slug,
         events=tuple(events),
         head_version=head_version,
         events_sha256=source_events_sha256(events),
@@ -930,14 +1044,18 @@ def load_supabase_backend_source(
 
 def _export_identity(
     events: Sequence[TimelineEvent], timeline_id: str
-) -> tuple[str, str | None]:
-    """Derive the ULID alias and display name from an export's created event.
+) -> tuple[str, str | None, str | None]:
+    """Derive the ULID alias, display name, and slug from an export's
+    created event.
 
     The created event data carries ``timeline_id``/``slug``/``name``; the
     ULID alias is derived deterministically (the export envelope has no
-    identity sidecar).
+    identity sidecar). A source without a created event yields ``None``
+    name/slug — the bootstrap synthesis then derives deterministic
+    fallbacks.
     """
     name: str | None = None
+    slug: str | None = None
     for event in events:
         if event.kind != _TIMELINE_CREATED_KIND:
             continue
@@ -945,13 +1063,42 @@ def _export_identity(
         candidate = data.get("name")
         if isinstance(candidate, str) and candidate:
             name = candidate
+        candidate_slug = data.get("slug")
+        if isinstance(candidate_slug, str) and candidate_slug:
+            slug = candidate_slug
         break
-    return derive_timeline_ulid(timeline_id), name
+    return derive_timeline_ulid(timeline_id), name, slug
 
 
 # ---------------------------------------------------------------------------
 # Authority marker (R5)
 # ---------------------------------------------------------------------------
+
+
+BACKFILL_STATE_LOCK_FILENAME = "backfill-state.lock"
+"""Advisory flock file serializing marker read-modify-write (W7a)."""
+
+
+def _state_lock_path(projects_root: str | Path) -> Path:
+    """Return ``<projects_root>/.astrid/backfill-state.lock`` (W7a)."""
+    return Path(projects_root) / ASTROID_DIR_NAME / BACKFILL_STATE_LOCK_FILENAME
+
+
+def _state_lock(projects_root: str | Path) -> Any:
+    """Acquire the exclusive marker-write flock (W7a).
+
+    The lock file lives beside the marker (same ``.astrid`` directory) and
+    is created on demand; the flock serializes concurrent backfill runs'
+    read-modify-write of ``backfill-state.json`` while the atomic replace
+    (``write_json_atomic``) preserves the write itself.
+    """
+    import fcntl
+
+    path = _state_lock_path(projects_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle = path.open("a+")
+    fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+    return handle
 
 
 def backfill_state_path(projects_root: str | Path) -> Path:
@@ -1001,23 +1148,28 @@ def write_backfill_state(
     source: str,
     source_head_version: int,
     events_sha256: str,
+    synthesized_bootstrap: bool = False,
     backfilled_at: str | None = None,
 ) -> dict[str, Any]:
     """Atomically record one timeline's authority state (R5).
 
     Read-modify-write of the whole marker file through
-    ``foundation.atomic_io.write_json_atomic``; the schema is documented in
-    the module docstring.
+    ``foundation.atomic_io.write_json_atomic``, serialized by the
+    ``backfill-state.lock`` flock (W7a); the schema is documented in the
+    module docstring. ``synthesized_bootstrap`` is always recorded (shape
+    extended additively).
     """
-    state = read_backfill_state(projects_root)
-    entry = {
-        "backfilled_at": backfilled_at or utc_now_iso(),
-        "source": source,
-        "source_head_version": source_head_version,
-        "events_sha256": events_sha256,
-    }
-    state[str(timeline_id)] = entry
-    write_json_atomic(backfill_state_path(projects_root), state)
+    with _state_lock(projects_root):
+        state = read_backfill_state(projects_root)
+        entry = {
+            "backfilled_at": backfilled_at or utc_now_iso(),
+            "source": source,
+            "source_head_version": source_head_version,
+            "events_sha256": events_sha256,
+            "synthesized_bootstrap": bool(synthesized_bootstrap),
+        }
+        state[str(timeline_id)] = entry
+        write_json_atomic(backfill_state_path(projects_root), state)
     return entry
 
 
@@ -1025,58 +1177,133 @@ def write_backfill_state(
 # The reusable zero-loss checker
 # ---------------------------------------------------------------------------
 
+_VERIFY_PAGE_SIZE = 1000
+"""Keyset page size for verification reads (W1.2: no repository hard-cap)."""
 
-def verify_backfill(
+_STREAM_EVENT_SELECT = (
+    "SELECT event_id, project_id, project_seq, stream_id, seq, subject_type, "
+    "subject_id, changes_json, kind, schema_version, idempotency_key, txn_id, "
+    "actor_kind, payload_json, created_at FROM events"
+)
+
+
+class _ConnectionReader:
+    """Thin query adapter over a raw ``sqlite3.Connection`` (read-only)."""
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self._conn = conn
+        self._conn.row_factory = sqlite3.Row
+
+    def query(self, sql: str, parameters: Sequence[Any] = ()) -> list[Any]:
+        return list(self._conn.execute(sql, tuple(parameters)).fetchall())
+
+    def query_one(self, sql: str, parameters: Sequence[Any] = ()) -> Any:
+        return self._conn.execute(sql, tuple(parameters)).fetchone()
+
+
+def _stream_count(reader: Any, stream_id: str) -> int:
+    """Return the event COUNT for one stream (W1.2 COUNT query)."""
+    row = reader.query_one(
+        "SELECT COUNT(*) AS n FROM events WHERE stream_id = ?", (stream_id,)
+    )
+    return int(row["n"]) if row is not None else 0
+
+
+def _paged_stream_models(
+    reader: Any, stream_id: str, *, page_size: int = _VERIFY_PAGE_SIZE
+) -> list[Any]:
+    """Read one stream's full event list, keyset-paged on ``seq``.
+
+    Reads ``page_size`` rows per page using ``seq > last`` (the stream's
+    ``UNIQUE (stream_id, seq)`` index), so verification never hits the
+    repository's 10k single-read cap (W1.2). The reader must expose
+    ``query(sql, parameters)`` returning rows addressable by column name —
+    a :class:`~astrid.core.store.uow.UnitOfWork` (transaction connection)
+    or a read-only connection adapter both qualify.
+    """
+    from astrid.core.repositories.events import _read_model_from_row
+
+    models: list[Any] = []
+    after_seq = 0
+    while True:
+        rows = reader.query(
+            _STREAM_EVENT_SELECT
+            + " WHERE stream_id = ? AND seq > ? ORDER BY seq ASC LIMIT ?",
+            (stream_id, after_seq, page_size),
+        )
+        if not rows:
+            break
+        for row in rows:
+            models.append(_read_model_from_row(row))
+        after_seq = int(rows[-1]["seq"])
+    return models
+
+
+def _verify_on(
+    reader: Any,
     source: BackfillSource,
     *,
     stream_id: str,
-    writer: DatabaseWriter,
+    synthesized_events: Sequence[TimelineEvent] = (),
 ) -> BackfillVerification:
-    """Run the zero-loss invariants (a),(b),(c),(e) against the kernel.
+    """Run the zero-loss invariants (a),(b),(c),(e),(g) against *reader*.
 
-    Read-only: runs on the writer's transaction-free read-only connection
-    and never mutates state. ``mismatches`` names every failed check.
+    *reader* may be a :class:`~astrid.core.store.uow.UnitOfWork` (inside
+    the import transaction, W1) or a read-only connection adapter (public
+    :func:`verify_backfill`). The expected stream is the synthesized
+    bootstrap event(s) followed by every source event; expected head is
+    ``source.head_version + synthesized_count`` (invariant b, W3).
+    ``mismatches`` names every failed check, ``projection_mismatches`` the
+    W4 stored-projection diffs (column + timeline id).
     """
     mismatches: list[str] = []
-    with writer.read_only_connection() as conn:
-        conn.row_factory = sqlite3.Row
-        row = conn.execute(
-            "SELECT head_seq FROM event_streams WHERE id = ?", (stream_id,)
-        ).fetchone()
-    kernel_head_seq = int(row["head_seq"]) if row is not None else 0
-    events_repo = EventRepository(writer)
-    kernel_models = events_repo.list_events(
-        stream_id=stream_id, limit=10_000
-    )
-    kernel_event_count = len(kernel_models)
-    kernel_kinds = dict(
-        Counter(model.kind for model in kernel_models)
-    )
+    projection_mismatches: list[str] = []
+    synthesized_events = tuple(synthesized_events)
+    expected_events = synthesized_events + source.events
 
-    if source.head_version != kernel_head_seq:
+    row = reader.query_one(
+        "SELECT head_seq FROM event_streams WHERE id = ?", (stream_id,)
+    )
+    kernel_head_seq = int(row["head_seq"]) if row is not None else 0
+    kernel_event_count = _stream_count(reader, stream_id)
+    kernel_models = _paged_stream_models(reader, stream_id)
+
+    expected_head = source.head_version + len(synthesized_events)
+    expected_count = len(source.events) + len(synthesized_events)
+
+    if expected_head != kernel_head_seq:
         mismatches.append(
-            f"head: source {source.head_version} != kernel head_seq "
+            f"head: expected {expected_head} (source {source.head_version} "
+            f"+ {len(synthesized_events)} synthesized) != kernel head_seq "
             f"{kernel_head_seq}"
         )
-    if len(source.events) != kernel_event_count:
+    if expected_count != kernel_event_count:
         mismatches.append(
-            f"count: source {len(source.events)} != kernel "
+            f"count: expected {expected_count} (source {len(source.events)} "
+            f"+ {len(synthesized_events)} synthesized) != kernel "
             f"{kernel_event_count}"
         )
-    if source.kind_counts != kernel_kinds:
+    kernel_kinds = dict(Counter(model.kind for model in kernel_models))
+    expected_kinds = dict(
+        Counter(event.kind for event in expected_events)
+    )
+    if expected_kinds != kernel_kinds:
         mismatches.append(
-            f"kinds: source {source.kind_counts} != kernel {kernel_kinds}"
+            f"kinds: expected {expected_kinds} != kernel {kernel_kinds}"
         )
 
-    # (c) content projection, position by position (kernel seq == source
-    # version == 1-based index).
-    for index, (source_event, model) in enumerate(
-        zip(source.events, kernel_models), start=1
+    # (c) content projection, position by position (kernel seq == expected
+    # stream position == 1-based index), plus the mapper-derived txn_id and
+    # changes_json (W4).
+    for index, (expected_event, model) in enumerate(
+        zip(expected_events, kernel_models), start=1
     ):
         if model.seq != index:
             mismatches.append(f"content: kernel seq {model.seq} != {index}")
             continue
-        mapped = map_source_event(source_event, timeline_ulid=source.timeline_ulid)
+        mapped = map_source_event(
+            expected_event, timeline_ulid=source.timeline_ulid
+        )
         if model.kind != mapped.kind:
             mismatches.append(
                 f"content: event {index} kind {model.kind!r} != "
@@ -1099,9 +1326,53 @@ def verify_backfill(
             mismatches.append(
                 f"content: event {index} created_at differs from source ts"
             )
-        if model.event_id != source_event.event_id:
+        if model.event_id != expected_event.event_id:
             mismatches.append(
                 f"content: event {index} event_id not preserved"
+            )
+        if model.txn_id != mapped.txn_id:
+            mismatches.append(
+                f"content: event {index} txn_id {model.txn_id!r} != "
+                f"mapped {mapped.txn_id!r}"
+            )
+        if list(model.changes) != list(mapped.changes):
+            mismatches.append(
+                f"content: event {index} changes_json differs from "
+                "mapper-derived changes"
+            )
+
+    # (g) verify what you serve (W4): stored whole-document projections vs
+    # the source-side projected config/registry, naming column + timeline id.
+    timeline_row = reader.query_one(
+        "SELECT document_json, asset_registry_json FROM timelines WHERE id = ?",
+        (source.timeline_id,),
+    )
+    if timeline_row is None:
+        projection_mismatches.append(
+            f"projection: timelines row missing for index {source.timeline_id}"
+        )
+    else:
+        try:
+            stored_document = parse_json(str(timeline_row["document_json"]))
+        except CanonicalizationError:
+            stored_document = None
+        if canonical_json(stored_document) != canonical_json(source.projected_config):
+            projection_mismatches.append(
+                f"projection: document_json (index {source.timeline_id}) "
+                "differs from source.projected_config"
+            )
+        try:
+            stored_registry = parse_json(
+                str(timeline_row["asset_registry_json"])
+            )
+        except CanonicalizationError:
+            stored_registry = None
+        if canonical_json(stored_registry) != canonical_json(
+            source.projected_registry["assets"]
+        ):
+            projection_mismatches.append(
+                f"projection: asset_registry_json (index {source.timeline_id}) "
+                "differs from source.projected_registry.assets"
             )
 
     return BackfillVerification(
@@ -1109,10 +1380,38 @@ def verify_backfill(
         kernel_event_count=kernel_event_count,
         source_head_version=source.head_version,
         kernel_head_seq=kernel_head_seq,
-        source_kinds=source.kind_counts,
+        source_kinds=expected_kinds,
         kernel_kinds=kernel_kinds,
         mismatches=tuple(mismatches),
+        synthesized_count=len(synthesized_events),
+        projection_mismatches=tuple(projection_mismatches),
     )
+
+
+def verify_backfill(
+    source: BackfillSource,
+    *,
+    stream_id: str,
+    writer: DatabaseWriter,
+    synthesized_events: Sequence[TimelineEvent] = (),
+) -> BackfillVerification:
+    """Run the zero-loss invariants (a),(b),(c),(e),(g) against the kernel.
+
+    Read-only: runs on the writer's transaction-free read-only connection
+    and never mutates state. ``mismatches`` names every failed check;
+    ``projection_mismatches`` names the W4 stored-projection diffs.
+    ``synthesized_events`` carries the deterministic bootstrap event(s) the
+    expected stream prepends (W3); verification reads the stream via a
+    COUNT query plus keyset paging, so there is no 10k cap in this path.
+    """
+    with writer.read_only_connection() as conn:
+        reader = _ConnectionReader(conn)
+        return _verify_on(
+            reader,
+            source,
+            stream_id=stream_id,
+            synthesized_events=synthesized_events,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1122,6 +1421,77 @@ def verify_backfill(
 
 def _stream_id(timeline_id: str) -> str:
     return f"{timeline_id}:{_TIMELINE_STREAM_TYPE}"
+
+
+def _bootstrap_fallback_slug(source: BackfillSource) -> str:
+    """Deterministic slug fallback for a source with no identity slug.
+
+    ``timeline-<8 hex>`` is always a valid immutable slug (lowercase hex +
+    hyphen); used only when the source carries no slug at all (a Supabase
+    export without a created event). Local-FS sources always carry the
+    identity ``display.slug``.
+    """
+    return f"timeline-{source.timeline_id[:8]}"
+
+
+def _synthesize_created_event(source: BackfillSource) -> TimelineEvent:
+    """Deterministic bootstrap ``timeline.created`` event (W3).
+
+    Built for a source that has no ``timeline.created`` event: kind
+    ``timeline.created``, deterministic event id via
+    :func:`derive_timeline_ulid`, data ``{timeline_id, slug, name}``
+    enriched per :func:`_enrich_created_data` conventions (the enriched
+    ``timeline_ulid`` follows the existing identity rules — the identity
+    sidecar ULID for local_fs, the deterministic derivation for
+    supabase-export sources, so the editor's ULID addressability is
+    unchanged), actor_kind ``system``, created_at = the first source
+    event's ts. Deterministic, so every retry produces the identical kernel
+    row and the content check treats it as the expected position-0 row.
+    """
+    if not source.events:
+        raise BackfillSourceError(
+            f"cannot synthesize a bootstrap event for empty timeline "
+            f"{source.timeline_id!r}"
+        )
+    return TimelineEvent(
+        event_id=derive_timeline_ulid(source.timeline_id).upper(),
+        timeline_id=source.timeline_id,
+        ts=source.events[0].ts,
+        actor=TimelineActor(type="system", id="system:backfill-bootstrap"),
+        prev_hash=None,
+        hash=None,
+        kind=_TIMELINE_CREATED_KIND,
+        payload={
+            "timeline_id": source.timeline_id,
+            "slug": source.slug or _bootstrap_fallback_slug(source),
+            "name": source.name or f"timeline-{source.timeline_id[:8]}",
+        },
+        expected_version=None,
+        schema_version=1,
+        txn_id=None,
+    )
+
+
+def _expected_stream(
+    source: BackfillSource,
+) -> tuple[tuple[TimelineEvent, ...], tuple[MappedEvent, ...]]:
+    """Return ``(synthesized_events, mapped_events)`` for one source.
+
+    When the source has no ``timeline.created`` event, exactly one
+    deterministic bootstrap event is synthesized FIRST (W3); every expected
+    event is then mapped to its kernel append parameters. Deterministic and
+    shared by the import, the resume revalidation, and the content check.
+    """
+    synthesized: tuple[TimelineEvent, ...] = ()
+    if not any(
+        event.kind == _TIMELINE_CREATED_KIND for event in source.events
+    ):
+        synthesized = (_synthesize_created_event(source),)
+    mapped = tuple(
+        map_source_event(event, timeline_ulid=source.timeline_ulid)
+        for event in synthesized + source.events
+    )
+    return synthesized, mapped
 
 
 def _append_timeline_events(
@@ -1218,103 +1588,127 @@ def backfill_timeline(
     Order of operations (``dry_run`` stops before any write):
 
     1. resolve the project (must exist in the kernel database);
-    2. authority-marker guard (R5): an existing marker that disagrees with
-       this source is refused before any write;
-    3. receipt idempotency gate: an identical earlier import replays its
-       stored result with zero new rows;
-    4. one ``BEGIN IMMEDIATE`` unit of work: insert the timeline stream and
-       the whole-document projection, append every source event 1:1
-       (hash-chained SD2 envelopes), record the complete receipt;
-    5. verify the zero-loss invariants (a),(b),(c),(e) read-only;
-    6. write the authority marker (f) — only after every check passes.
+    2. bootstrap synthesis (W3): a source without ``timeline.created`` gets
+       exactly one deterministic synthesized event, prepended inside the
+       same transaction (invariant b becomes ``head_seq == source_version +
+       synthesized_count``);
+    3. authority-marker guard (R5): an existing marker that DISAGREES with
+       this source (different source identity for the same timeline) is
+       refused before any write — a MATCHING marker is not refused;
+    4. one ``BEGIN IMMEDIATE`` unit of work: receipt idempotency gate
+       first (an identical earlier import replays its stored result with
+       zero new rows; a stream that exists WITHOUT a matching receipt is
+       foreign kernel state and fences); then insert the timeline stream
+       and the whole-document projection, append every expected event 1:1
+       (hash-chained SD2 envelopes), and run the FULL verifier AGAINST THE
+       TRANSACTION CONNECTION (W1) — any mismatch raises
+       :class:`BackfillDiscrepancyError` and the whole timeline rolls back:
+       zero events, zero receipts, zero projections;
+    5. after commit, re-verify every invariant read-only (W1.3) and then
+       idempotently write/refresh the authority marker (f) — matching
+       retries converge the marker instead of raising, so a crash between
+       commit and marker-write is healed on the next run.
 
-    Any discrepancy raises :class:`BackfillDiscrepancyError` and the whole
-    timeline rolls back: no events, no receipt, no marker (no partial
-    authority claim).
+    After ANY interruption the state converges to exactly ``{nothing
+    written}`` or ``{events + receipt + marker, fully verified}``.
     """
     root = resolve_projects_root(projects_root)
     project_slug = validate_project_slug(project_slug)
     project_id = projects.resolve(writer, project_slug)
     marker_path = str(backfill_state_path(root))
-    marker_matches = False
+
+    synthesized_events, mapped_events = _expected_stream(source)
+    synthesized_count = len(synthesized_events)
+    expected_head = source.head_version + synthesized_count
+
+    # Authority-marker guard (R5): only a MISMATCH fences as foreign
+    # authority; a matching marker is convergence territory (W1.3).
     if not dry_run:
         state = read_backfill_state(root)
         existing = state.get(source.timeline_id)
-        if existing is not None:
-            if (
-                existing.get("source") != source.source_name
-                or existing.get("source_head_version") != source.head_version
-                or existing.get("events_sha256") != source.events_sha256
-            ):
-                raise BackfillAuthorityError(
-                    f"timeline {source.timeline_id} is already backfilled from "
-                    f"{existing.get('source')} at head "
-                    f"{existing.get('source_head_version')}; refusing to mix "
-                    f"authorities with {source.source_name} at head "
-                    f"{source.head_version}"
-                )
-            marker_matches = True
+        if existing is not None and (
+            existing.get("source") != source.source_name
+            or existing.get("source_head_version") != source.head_version
+            or existing.get("events_sha256") != source.events_sha256
+        ):
+            raise BackfillAuthorityError(
+                f"timeline {source.timeline_id} is already backfilled from "
+                f"{existing.get('source')} at head "
+                f"{existing.get('source_head_version')}; refusing to mix "
+                f"authorities with {source.source_name} at head "
+                f"{source.head_version}"
+            )
 
     stream_id = _stream_id(source.timeline_id)
     head_seq, stream_exists = _current_stream_state(writer, source.timeline_id)
 
-    # The conversion itself is a check: mapping every event must succeed
-    # (actor mapping, payload canonicalization, created-event enrichment)
-    # before any write.
-    mapped_events = tuple(
-        map_source_event(event, timeline_ulid=source.timeline_ulid)
-        for event in source.events
-    )
-    source_consistent = (
-        len(source.events) == source.head_version
-        and source.kind_counts == source.kind_counts
-    )
-    source_checks = {
-        "count": source_consistent,
-        "head": source_consistent,
-        "content": True,
-        "kinds": True,
-    }
-
     if dry_run:
+        # Honest dry-run (W6): source-side consistency only. When a kernel
+        # stream exists, run the REAL read-only verifier against it and
+        # report those numbers truthfully; otherwise the target-side checks
+        # are None with ``evaluated`` false — never hardcoded trues.
+        if stream_exists:
+            verification = verify_backfill(
+                source,
+                stream_id=stream_id,
+                writer=writer,
+                synthesized_events=synthesized_events,
+            )
+            return BackfillReport(
+                project=project_slug,
+                timeline_id=source.timeline_id,
+                timeline_ulid=source.timeline_ulid,
+                source=source.source_name,
+                source_event_count=len(source.events),
+                kernel_event_count=verification.kernel_event_count,
+                source_head_version=source.head_version,
+                kernel_head_seq=verification.kernel_head_seq,
+                events_sha256=source.events_sha256,
+                kinds=verification.kernel_kinds,
+                checks=verification.checks_dict(),
+                marker_path=marker_path,
+                marker_written=False,
+                written=False,
+                replayed=False,
+                dry_run=True,
+                synthesized_bootstrap=synthesized_count > 0,
+                evaluated=True,
+                projected_config_sha256=sha256_hex(source.projected_config),
+                projected_registry_sha256=sha256_hex(source.projected_registry),
+                detail=(
+                    f"dry-run: stream exists at head {head_seq}; "
+                    "re-verified read-only, no writes performed"
+                ),
+            )
         return BackfillReport(
             project=project_slug,
             timeline_id=source.timeline_id,
             timeline_ulid=source.timeline_ulid,
             source=source.source_name,
             source_event_count=len(source.events),
-            kernel_event_count=head_seq if stream_exists else 0,
+            kernel_event_count=0,
             source_head_version=source.head_version,
-            kernel_head_seq=head_seq if stream_exists else 0,
+            kernel_head_seq=0,
             events_sha256=source.events_sha256,
-            kinds=source.kind_counts,
-            checks=source_checks,
+            kinds={},
+            checks={
+                "count": None,
+                "head": None,
+                "content": None,
+                "kinds": None,
+                "projections": None,
+            },
             marker_path=marker_path,
             marker_written=False,
             written=False,
             replayed=False,
             dry_run=True,
+            synthesized_bootstrap=synthesized_count > 0,
+            evaluated=False,
             projected_config_sha256=sha256_hex(source.projected_config),
             projected_registry_sha256=sha256_hex(source.projected_registry),
-            detail=(
-                "dry-run: no events, receipts, or markers written"
-                if not stream_exists
-                else f"dry-run: stream already exists at head {head_seq}; "
-                "no writes performed"
-            ),
+            detail="dry-run: no events, receipts, or markers written",
         )
-
-    if stream_exists:
-        # The stream exists: either this timeline was already backfilled
-        # (marker matches -> receipt replay below) or it is foreign kernel
-        # state with no matching marker — fail closed rather than append to
-        # an unknown authority.
-        if head_seq != 0 and not marker_matches:
-            raise BackfillAuthorityError(
-                f"timeline {source.timeline_id} already has a kernel stream "
-                f"at head {head_seq} with no matching backfill marker; "
-                "refusing to append backfill events to non-empty state"
-            )
 
     request = {
         "timeline_id": source.timeline_id,
@@ -1333,7 +1727,8 @@ def backfill_timeline(
     )
 
     def _command(uow: UnitOfWork) -> BackfillReport:
-        # Idempotency gate first: identical retry replays the stored result.
+        # Idempotency gate first: identical retry replays the stored result
+        # (crash-after-commit convergence — W1.3).
         replayed = receipts.check(
             uow,
             project_id=project_id,
@@ -1343,6 +1738,20 @@ def backfill_timeline(
         )
         if replayed is not None:
             return _report_from_mapping(replayed, replayed=True)
+
+        # No receipt: an existing kernel stream here is foreign state (the
+        # backfill never committed it) — fail closed rather than append to
+        # an unknown authority.
+        stream_row = uow.query_one(
+            "SELECT head_seq FROM event_streams WHERE id = ?", (stream_id,)
+        )
+        if stream_row is not None:
+            raise BackfillAuthorityError(
+                f"timeline {source.timeline_id} already has a kernel stream "
+                f"at head {int(stream_row['head_seq'])} with no matching "
+                "backfill receipt; refusing to append backfill events to "
+                "non-empty state"
+            )
 
         stamp = utc_now_iso()
         # 1. The timeline.timeline stream (head_seq starts at 0; the appends
@@ -1379,8 +1788,8 @@ def backfill_timeline(
                 stamp,
             ),
         )
-        # 3. The source events, 1:1, hash-chained (head advances to
-        #    source.head_version).
+        # 3. The expected events (synthesized bootstrap first, then every
+        #    source event), 1:1, hash-chained.
         event_ids, first_seq, last_seq, resulting_seq = _append_timeline_events(
             uow,
             project_id=project_id,
@@ -1390,7 +1799,23 @@ def backfill_timeline(
             created_at=stamp,
             on_before_append=on_before_append,
         )
-        # 4. The complete receipt (raw numbers; checks are re-verified
+        # 4. W1: run the FULL verifier AGAINST THE TRANSACTION CONNECTION
+        #    before commit — any mismatch raises here and the rollback
+        #    leaves zero events/receipts/projections.
+        verification = _verify_on(
+            uow,
+            source,
+            stream_id=stream_id,
+            synthesized_events=synthesized_events,
+        )
+        if not verification.ok:
+            raise BackfillDiscrepancyError(
+                "backfill verification failed: "
+                + "; ".join(
+                    (*verification.mismatches, *verification.projection_mismatches)
+                )
+            )
+        # 5. The complete receipt (raw numbers; checks are re-verified
         #    read-only after commit, so replay never trusts stored checks).
         report = BackfillReport(
             project=project_slug,
@@ -1398,17 +1823,19 @@ def backfill_timeline(
             timeline_ulid=source.timeline_ulid,
             source=source.source_name,
             source_event_count=len(source.events),
-            kernel_event_count=len(source.events),
+            kernel_event_count=verification.kernel_event_count,
             source_head_version=source.head_version,
-            kernel_head_seq=source.head_version,
+            kernel_head_seq=verification.kernel_head_seq,
             events_sha256=source.events_sha256,
-            kinds=source.kind_counts,
-            checks=source_checks,
+            kinds=verification.kernel_kinds,
+            checks=verification.checks_dict(),
             marker_path=marker_path,
             marker_written=False,
             written=False,
             replayed=False,
             dry_run=False,
+            synthesized_bootstrap=synthesized_count > 0,
+            evaluated=True,
             projected_config_sha256=sha256_hex(source.projected_config),
             projected_registry_sha256=sha256_hex(source.projected_registry),
             detail="imported",
@@ -1432,15 +1859,27 @@ def backfill_timeline(
 
     report = UnitOfWork(writer).run(_command)
     replayed = report.replayed
-    # Fresh import or identical retry: verify every invariant (a)-(e)
-    # read-only, then the marker (f). No new rows are written on replay.
-    verification = verify_backfill(source, stream_id=stream_id, writer=writer)
+    # Fresh import or identical retry: re-verify every invariant (a)-(g)
+    # read-only (W1.3 full re-verify), then idempotently write/refresh the
+    # marker (f). No new rows are written on replay.
+    verification = verify_backfill(
+        source,
+        stream_id=stream_id,
+        writer=writer,
+        synthesized_events=synthesized_events,
+    )
     if not verification.ok:
         raise BackfillDiscrepancyError(
             "backfill verification failed: "
-            + "; ".join(verification.mismatches)
+            + "; ".join(
+                (*verification.mismatches, *verification.projection_mismatches)
+            )
         )
-    marker_written = _write_marker_if_absent(root, source)
+    marker_written = _write_marker(
+        root,
+        source,
+        synthesized_bootstrap=synthesized_count > 0,
+    )
     return _final_report(
         report,
         verification=verification,
@@ -1484,28 +1923,42 @@ def _final_report(
         written=written,
         replayed=replayed,
         dry_run=dry_run,
+        synthesized_bootstrap=base.synthesized_bootstrap,
+        evaluated=True,
         projected_config_sha256=base.projected_config_sha256,
         projected_registry_sha256=base.projected_registry_sha256,
         detail=detail,
     )
 
 
-def _write_marker_if_absent(
-    root: Path, source: BackfillSource
+def _write_marker(
+    root: Path,
+    source: BackfillSource,
+    *,
+    synthesized_bootstrap: bool = False,
 ) -> bool:
-    """Write the authority marker entry when none exists; return written."""
-    state = read_backfill_state(root)
-    existing = state.get(source.timeline_id)
-    if existing is not None:
-        return False
-    write_backfill_state(
-        root,
-        timeline_id=source.timeline_id,
-        source=source.source_name,
-        source_head_version=source.head_version,
-        events_sha256=source.events_sha256,
-    )
-    return True
+    """Idempotently write or refresh one timeline's authority marker.
+
+    Returns whether a marker entry was written by THIS call (``True`` when
+    the entry did not exist before). A matching existing entry is refreshed
+    (same source identity, fresh ``backfilled_at``) rather than refused —
+    crash-after-commit convergence (W1.3). The read-modify-write runs under
+    ONE acquisition of the ``backfill-state.lock`` flock (W7a); the atomic
+    replace is preserved.
+    """
+    with _state_lock(root):
+        state = read_backfill_state(root)
+        existing = state.get(source.timeline_id)
+        entry = {
+            "backfilled_at": utc_now_iso(),
+            "source": source.source_name,
+            "source_head_version": source.head_version,
+            "events_sha256": source.events_sha256,
+            "synthesized_bootstrap": synthesized_bootstrap,
+        }
+        state[source.timeline_id] = entry
+        write_json_atomic(backfill_state_path(root), state)
+        return existing is None
 
 
 # -- BackfillReport replay helper -------------------------------------------
@@ -1529,6 +1982,8 @@ def _report_from_mapping(value: Mapping[str, Any], *, replayed: bool) -> Backfil
         written=bool(value.get("written", False)),
         replayed=replayed,
         dry_run=bool(value.get("dry_run", False)),
+        synthesized_bootstrap=bool(value.get("synthesized_bootstrap", False)),
+        evaluated=bool(value.get("evaluated", True)),
         projected_config_sha256=str(value.get("projected_config_sha256", "")),
         projected_registry_sha256=str(value.get("projected_registry_sha256", "")),
         detail=str(value.get("detail", "")),
@@ -1565,9 +2020,14 @@ def backfill_project(
     (``checkpoint_path_for_run`` / ``write_resumable_checkpoint`` /
     ``read_resumable_checkpoint``): after each successful timeline the
     checkpoint records progress under ``<project>/runs/migrations/<ts>/``,
-    and a resumed run (same ``run_ts``) skips the completed prefix. A
-    timeline failure aborts the run (fail closed) with the checkpoint left
-    at the last completed timeline.
+    and a resumed run (same ``run_ts``) revalidates the completed prefix
+    instead of skipping it blindly (W2): the CURRENT source
+    ``events_sha256`` + head are recomputed for every timeline — a marker
+    disagreeing with either fails the resume closed with named drift (the
+    operator reruns fresh), a matching marker is re-verified read-only, and
+    a marker-missing timeline converges through W1.3 (idempotent
+    marker completion). A timeline failure aborts the run (fail closed)
+    with the checkpoint left at the last completed timeline.
     """
     from astrid.core.timeline.migration import (
         checkpoint_path_for_run,
@@ -1613,10 +2073,23 @@ def backfill_project(
             continue
         if index < completed_prefix:
             # Resumed run: this timeline already committed in the
-            # interrupted run (checkpoint records it as completed). Skipping
-            # is safe because its receipt, events, projection, and marker
-            # are durable; an identical re-import would replay anyway.
-            continue
+            # interrupted run (checkpoint records it as completed). W2:
+            # NEVER skip blindly — recompute the CURRENT source identity
+            # (events_sha256 + head). A marker that disagrees with either is
+            # named drift and fails the resume closed (the operator reruns
+            # fresh); a matching marker is re-verified read-only; a missing
+            # marker means the commit landed but the marker never did
+            # (crash-after-commit) — the import below converges it through
+            # W1.3 (receipt replay + idempotent marker completion).
+            if _revalidate_resumed(
+                writer=writer,
+                projects=projects,
+                receipts=receipts,
+                project_slug=project_slug,
+                source=source,
+                root=root,
+            ):
+                continue
         report = backfill_timeline(
             writer=writer,
             projects=projects,
@@ -1644,6 +2117,66 @@ def backfill_project(
             f"skipped {sorted(skipped.values())}"
         )
     return reports
+
+
+def _revalidate_resumed(
+    *,
+    writer: DatabaseWriter,
+    projects: ProjectRepository,
+    receipts: ReceiptService,
+    project_slug: str,
+    source: BackfillSource,
+    root: Path,
+) -> bool:
+    """W2 resume revalidation for one checkpoint-completed timeline.
+
+    Recomputes the CURRENT source ``events_sha256`` + head (already carried
+    by the freshly loaded *source*) and compares them with the recorded
+    marker for the same timeline:
+
+    - a marker whose source identity differs in EITHER value is named drift
+      (``BackfillDiscrepancyError`` naming the timeline and both values —
+      the operator reruns fresh); the resume fails closed before any write;
+    - a matching marker is fully re-verified read-only (a failed
+      re-verification also fails closed) and the timeline can be skipped;
+    - no marker: the timeline committed but the marker never landed
+      (crash-after-commit) — returns ``False`` so the caller imports it and
+      W1.3 converges the marker idempotently.
+
+    Returns ``True`` when the timeline was revalidated and can be skipped,
+    ``False`` when no marker exists (the caller must converge via import).
+    """
+    state = read_backfill_state(root)
+    existing = state.get(source.timeline_id)
+    if existing is None:
+        return False
+    if (
+        existing.get("events_sha256") != source.events_sha256
+        or existing.get("source_head_version") != source.head_version
+    ):
+        raise BackfillDiscrepancyError(
+            f"timeline {source.timeline_id} source drifted since backfill: "
+            f"events_sha256 {existing.get('events_sha256')} (marker) != "
+            f"{source.events_sha256} (current), head "
+            f"{existing.get('source_head_version')} (marker) != "
+            f"{source.head_version} (current); operator reruns fresh"
+        )
+    synthesized_events, _mapped = _expected_stream(source)
+    verification = verify_backfill(
+        source,
+        stream_id=_stream_id(source.timeline_id),
+        writer=writer,
+        synthesized_events=synthesized_events,
+    )
+    if not verification.ok:
+        raise BackfillDiscrepancyError(
+            f"timeline {source.timeline_id} failed read-only re-verification "
+            "on resume: "
+            + "; ".join(
+                (*verification.mismatches, *verification.projection_mismatches)
+            )
+        )
+    return True
 
 
 def _local_fs_run_sources(
@@ -1704,7 +2237,13 @@ def _supabase_run_sources(
     path: str | Path,
     timeline_refs: Sequence[str] | None,
 ) -> list[tuple[BackfillSource, str]]:
-    """Load every selected timeline from one version-ordered export file."""
+    """Load every selected timeline from one version-ordered export file.
+
+    Fail-closed scanner (W5): an empty export is rejected, and every
+    malformed row (non-object, missing ``timeline_id``, non-positive or
+    gapped version) rejects the WHOLE export naming its index — no silent
+    skips anywhere in the scanner.
+    """
     export = Path(path)
     if not export.is_file():
         raise BackfillSourceError(
@@ -1717,13 +2256,22 @@ def _supabase_run_sources(
             f"supabase export file is unreadable: {export.name}"
         ) from exc
     parsed = parse_export_items(text, label=export.name)
+    if not parsed:
+        raise BackfillSourceError(
+            f"supabase export contains no rows: {export.name}"
+        )
     timeline_ids: set[str] = set()
-    for raw in parsed:
+    for index, raw in enumerate(parsed):
         if not isinstance(raw, dict):
-            continue
+            raise BackfillSourceError(
+                f"supabase export item {index} is not a JSON object"
+            )
         tid = raw.get("timeline_id")
-        if isinstance(tid, str) and tid:
-            timeline_ids.add(tid)
+        if not isinstance(tid, str) or not tid:
+            raise BackfillSourceError(
+                f"supabase export item {index} has no timeline_id"
+            )
+        timeline_ids.add(tid)
     refs = set(timeline_refs or ())
     if refs:
         timeline_ids = {tid for tid in timeline_ids if tid in refs}
@@ -1743,6 +2291,7 @@ __all__ = [
     "BACKFILL_MARKER_SOURCE_LOCAL_FS",
     "BACKFILL_MARKER_SOURCE_SUPABASE",
     "BACKFILL_STATE_FILENAME",
+    "BACKFILL_STATE_LOCK_FILENAME",
     "BackfillAuthorityError",
     "BackfillDiscrepancyError",
     "BackfillError",

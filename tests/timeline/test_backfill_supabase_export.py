@@ -86,7 +86,9 @@ class _StaticSupabaseTransport:
     """Static mock of the SupabaseEventLogTransport read surface.
 
     Returns a fixed event list (the export events) — the test_transfer
-    mocked-transport pattern, restricted to the reads the import uses.
+    mocked-transport pattern, restricted to the reads the import uses,
+    including ``verify_chain`` (the W5 fail-closed envelope requires the
+    transport seam to verify its chain before a source is built).
     """
 
     def __init__(self, events) -> None:
@@ -100,6 +102,37 @@ class _StaticSupabaseTransport:
         limit: int | None = None,
     ) -> object:
         return list(self._events)
+
+    def verify_chain(self, *, timeline_id: str | None = None) -> object:
+        from astrid.core.timeline.eventlog.types import EventLogVerification
+        from astrid.core.timeline.events.schema import with_event_hash
+
+        events = self._events
+        prev_hash: str | None = None
+        for index, event in enumerate(events):
+            expected = with_event_hash(
+                type(event).from_dict(
+                    {**event.to_json_obj(), "hash": None}
+                ),
+                prev_hash=prev_hash,
+            )
+            if event.prev_hash != prev_hash or event.hash != expected.hash:
+                return EventLogVerification(
+                    ok=False,
+                    checked_events=index,
+                    last_event_id=None,
+                    error=(
+                        f"chain link broken at version {index + 1} "
+                        f"(event {event.event_id})"
+                    ),
+                )
+            prev_hash = event.hash
+        return EventLogVerification(
+            ok=True,
+            checked_events=len(events),
+            last_event_id=events[-1].event_id if events else None,
+            error=None,
+        )
 
 
 def _import_source(tmp_path: Path, source, *, project_slug: str = "proj"):
@@ -140,6 +173,7 @@ def test_supabase_export_file_invariants(tmp_path: Path) -> None:
             "head": True,
             "content": True,
             "kinds": True,
+            "projections": True,
         }
         assert body["kinds"]["timeline.custom_marker"] == 1
         assert body["kinds"]["timeline.config_replaced"] == 1
@@ -196,6 +230,7 @@ def test_supabase_export_mocked_transport(tmp_path: Path) -> None:
             "head": True,
             "content": True,
             "kinds": True,
+            "projections": True,
         }
         assert body["kinds"]["timeline.custom_marker"] == 1
         assert marker_state(projects_root)[timeline_id]["source"] == (
@@ -306,10 +341,146 @@ def test_supabase_export_project_run_cli_path(tmp_path: Path) -> None:
             "head": True,
             "content": True,
             "kinds": True,
+            "projections": True,
         }
         assert body["kinds"]["timeline.custom_marker"] == 1
         assert marker_state(projects_root)[timeline_id]["source"] == (
             "supabase_export"
         )
+    finally:
+        writer.close()
+
+
+# ---------------------------------------------------------------------------
+# W5 — fail-closed export envelope
+# ---------------------------------------------------------------------------
+
+
+def test_supabase_export_rejects_empty_export(tmp_path: Path) -> None:
+    """W5: an export with no rows is rejected, never silently imported."""
+    timeline_id = "77777777-7777-7777-7777-777777777777"
+    export = tmp_path / "empty-export.jsonl"
+    export.write_text("")
+    with pytest.raises(
+        BackfillSourceError, match="export contains no rows"
+    ):
+        load_supabase_export_source(export, timeline_id=timeline_id)
+
+
+def test_supabase_export_project_scan_rejects_empty_export(
+    tmp_path: Path,
+) -> None:
+    """W5: the project-run scanner rejects an empty export the same way."""
+    timeline_id = "88888888-8888-8888-8888-888888888888"
+    export = tmp_path / "empty-export.jsonl"
+    export.write_text("")
+    projects_root = tmp_path / "projects"
+    projects_root.mkdir(parents=True, exist_ok=True)
+    db_path = projects_root / ".astrid" / "astrid.sqlite3"
+    writer = make_writer(db_path)
+    try:
+        make_project(writer)
+        projects, receipts, _ = make_backfill_deps(writer)
+        with pytest.raises(
+            BackfillSourceError, match="export contains no rows"
+        ):
+            backfill_project(
+                writer=writer,
+                projects=projects,
+                receipts=receipts,
+                project_slug="proj",
+                from_supabase_export=str(export),
+                projects_root=projects_root,
+            )
+    finally:
+        writer.close()
+
+
+def test_supabase_export_rejects_broken_chain_naming_version(
+    tmp_path: Path,
+) -> None:
+    """W5: a broken hash chain rejects the WHOLE export naming the failing
+    version, before any source is built."""
+    timeline_id = "99999999-9999-9999-9999-999999999999"
+    export = tmp_path / "export.jsonl"
+    _write_export(export, timeline_id)
+    lines = export.read_text().splitlines()
+    broken = json.loads(lines[1])  # version 2
+    broken["hash"] = "0" * 64
+    lines[1] = json.dumps(broken)
+    export.write_text("\n".join(lines) + "\n")
+    with pytest.raises(
+        BackfillSourceError,
+        match="chain verification failed",
+    ) as excinfo:
+        load_supabase_export_source(export, timeline_id=timeline_id)
+    message = str(excinfo.value)
+    assert "version 2" in message
+    assert timeline_id in message
+
+
+def test_supabase_export_rejects_malformed_row_naming_index(
+    tmp_path: Path,
+) -> None:
+    """W5: a non-object row rejects the whole export naming its index."""
+    timeline_id = "aaaaaa11-1111-1111-1111-111111111111"
+    export = tmp_path / "export.jsonl"
+    _write_export(export, timeline_id)
+    export.write_text(export.read_text() + "42\n")
+    with pytest.raises(
+        BackfillSourceError, match="not a JSON object"
+    ) as excinfo:
+        load_supabase_export_source(export, timeline_id=timeline_id)
+    assert "item 4" in str(excinfo.value)
+
+
+def test_supabase_export_rejects_row_missing_timeline_id_naming_index(
+    tmp_path: Path,
+) -> None:
+    """W5: a row missing timeline_id rejects the whole export (no silent
+    skip in the scanner)."""
+    timeline_id = "aaaaaa22-2222-2222-2222-222222222222"
+    export = tmp_path / "export.jsonl"
+    _write_export(export, timeline_id)
+    lines = export.read_text().splitlines()
+    broken = json.loads(lines[0])
+    del broken["timeline_id"]
+    lines[0] = json.dumps(broken)
+    export.write_text("\n".join(lines) + "\n")
+    with pytest.raises(
+        BackfillSourceError, match="has no timeline_id"
+    ) as excinfo:
+        load_supabase_export_source(export, timeline_id=timeline_id)
+    assert "item 0" in str(excinfo.value)
+
+
+def test_supabase_export_project_scan_rejects_malformed_row(
+    tmp_path: Path,
+) -> None:
+    """W5: the project-run scanner rejects a malformed row for the whole
+    export naming its index — no silent skips anywhere in the scanner."""
+    timeline_id = "aaaaaa33-3333-3333-3333-333333333333"
+    export = tmp_path / "export.jsonl"
+    _write_export(export, timeline_id)
+    export.write_text(export.read_text() + '"not-an-object"\n')
+    projects_root = tmp_path / "projects"
+    projects_root.mkdir(parents=True, exist_ok=True)
+    db_path = projects_root / ".astrid" / "astrid.sqlite3"
+    writer = make_writer(db_path)
+    try:
+        make_project(writer)
+        projects, receipts, _ = make_backfill_deps(writer)
+        with pytest.raises(
+            BackfillSourceError, match="not a JSON object"
+        ) as excinfo:
+            backfill_project(
+                writer=writer,
+                projects=projects,
+                receipts=receipts,
+                project_slug="proj",
+                from_supabase_export=str(export),
+                projects_root=projects_root,
+            )
+        assert "item 4" in str(excinfo.value)
     finally:
         writer.close()

@@ -311,8 +311,12 @@ def _configure_backfill(subparser: argparse.ArgumentParser) -> None:
     subparser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Validate the source and report every check WITHOUT writing "
-        "events, receipts, or the authority marker.",
+        help="Validate the source and report WITHOUT writing events, "
+        "receipts, or the authority marker. Target-side checks "
+        "(count/head/content/kinds/projections) are reported as null with "
+        "evaluated=false unless a kernel stream already exists for the "
+        "timeline — then they are re-verified read-only and reported "
+        "truthfully (never hardcoded).",
     )
     _add_json_flag(subparser)
     subparser.set_defaults(

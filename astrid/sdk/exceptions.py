@@ -446,6 +446,11 @@ def _service_error_from_exception(exc: BaseException) -> ServiceError | None:
         ShotReorderError,
         ShotValidationError,
     )
+    from astrid.packs.timeline.backfill import (
+        BackfillAuthorityError,
+        BackfillDiscrepancyError,
+        BackfillSourceError,
+    )
     from astrid.packs.timeline.repository import (
         TimelineAlreadyExistsError,
         TimelineNotFoundError,
@@ -492,6 +497,9 @@ def _service_error_from_exception(exc: BaseException) -> ServiceError | None:
         EventIdempotencyError,
         StaleEpochError,
         StaleTailError,
+        # Backfill authority mixing (R5): a request would mix authorities
+        # for one timeline — the conflict class (W7b).
+        BackfillAuthorityError,
     )
     stale_version = (
         TimelineVersionConflictError,
@@ -526,6 +534,9 @@ def _service_error_from_exception(exc: BaseException) -> ServiceError | None:
         EventVocabularyError,
         CommandVocabularyError,
         StreamAgreementError,
+        # Backfill source envelope violations (malformed/empty exports,
+        # broken chains) — the validation class (W7b).
+        BackfillSourceError,
     )
     unavailable = (
         NotWriterError,
@@ -533,7 +544,12 @@ def _service_error_from_exception(exc: BaseException) -> ServiceError | None:
         WriterShutdownError,
         TransactionControlError,
     )
-    integrity = (EventChainError,)
+    integrity = (
+        EventChainError,
+        # Backfill zero-loss invariant failures (count/head/content/kinds/
+        # projections or resume drift) — the integrity class (W7b).
+        BackfillDiscrepancyError,
+    )
 
     for error_type, code in (
         (not_found, "not_found"),
