@@ -209,7 +209,11 @@ def _load_canonical_timeline_id(timeline_home: Path, timeline_ulid: str) -> str:
     from the directory ULID via the backfill marker/kernel binding FIRST;
     the identity sidecar is consulted ONLY for unbackfilled legacy dirs.
     """
-    # Kernel-first authoritative resolution
+    # Kernel-first authoritative resolution — BackfillError must propagate (fail-closed).
+    import importlib as _il_lb
+
+    _bf_lb = _il_lb.import_module("astrid.packs.timeline.backfill")
+    BackfillErrorLb = _bf_lb.BackfillError  # type: ignore[attr-defined]
     try:
         from pathlib import Path as _P
 
@@ -234,10 +238,14 @@ def _load_canonical_timeline_id(timeline_home: Path, timeline_ulid: str) -> str:
             try:
                 if is_backfilled_timeline(_auth, _pr_lb):
                     return _auth
+            except BackfillErrorLb:
+                raise
             except Exception:
                 pass
             # Not backfilled but auth exists (legacy sidecar fallback) — return it
             return _auth
+    except BackfillErrorLb:
+        raise
     except Exception:
         pass
     identity_path = timeline_home / "assembly.identity.json"

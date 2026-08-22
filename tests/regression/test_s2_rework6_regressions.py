@@ -72,7 +72,7 @@ def test_h1_standalone_sync_recompose():
     tmp = Path(tempfile.mkdtemp(prefix="h1-standalone-"))
     try:
         app = compose_standard_application(projects_root=str(tmp))
-        proj = app.projects_service.create(slug="proj-h1b", name="Proj H1B")
+        app.projects_service.create(slug="proj-h1b", name="Proj H1B")
         created = app.timelines_service.create(project="proj-h1b", slug="tl-h1b", name="TL H1B", idempotency_key="k1")
         tid = created.data["timeline_id"]
         ulid = created.data["timeline_ulid"]
@@ -116,7 +116,7 @@ def test_h2_stale_sidecar_sync_hits_sqlite_zero_jsonl():
     tmp = Path(tempfile.mkdtemp(prefix="h2-stale-"))
     try:
         app = compose_standard_application(projects_root=str(tmp))
-        proj = app.projects_service.create(slug="proj-h2", name="Proj H2")
+        app.projects_service.create(slug="proj-h2", name="Proj H2")
         created = app.timelines_service.create(project="proj-h2", slug="tl-h2", name="TL H2", idempotency_key="k1")
         tid_real = created.data["timeline_id"]
         ulid = created.data["timeline_ulid"]
@@ -174,7 +174,7 @@ def test_h2_stale_sidecar_edit_helper_hits_sqlite():
     tmp = Path(tempfile.mkdtemp(prefix="h2-edit-"))
     try:
         app = compose_standard_application(projects_root=str(tmp))
-        proj = app.projects_service.create(slug="proj-h2e", name="Proj H2E")
+        app.projects_service.create(slug="proj-h2e", name="Proj H2E")
         created = app.timelines_service.create(project="proj-h2e", slug="tl-h2e", name="TL H2E", idempotency_key="k1")
         tid_real = created.data["timeline_id"]
         ulid = created.data["timeline_ulid"]

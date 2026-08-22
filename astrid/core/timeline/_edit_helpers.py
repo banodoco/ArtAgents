@@ -141,10 +141,17 @@ def _resolve_or_bootstrap_backend(
     """
     ulid, tdir = _locate_timeline(project_slug, slug, root=root)
     # H2 kernel-first authoritative resolution: ULID/dir -> marker/kernel binding FIRST;
-    # sidecar consulted ONLY for unbackfilled legacy. This subsumes is_backfilled usage.
+    # sidecar consulted ONLY for unbackfilled legacy. Fail-closed on corrupt marker.
+    import importlib as _il_bf_outer
+
+    _bfm_outer = _il_bf_outer.import_module("astrid.packs.timeline.backfill")
+    BackfillErrorOuter = _bfm_outer.BackfillError  # type: ignore[attr-defined]
     from astrid.core.timeline.authority import resolve_authoritative_timeline_id
 
-    auth_tid = resolve_authoritative_timeline_id(tdir, root)
+    try:
+        auth_tid = resolve_authoritative_timeline_id(tdir, root)
+    except BackfillErrorOuter:
+        raise
     if isinstance(auth_tid, str) and auth_tid:
         # Authoritative id found — check if backfilled to force SQLite authority.
         try:
@@ -174,9 +181,10 @@ def _resolve_or_bootstrap_backend(
                 raise
             except Exception:
                 pass
+        except BackfillErrorOuter:
+            raise
         except Exception:
             pass
-        # If not backfilled or check failed, fall through to sidecar-driven selection
         # but still use auth_tid as preferred (for legacy unbackfilled sidecarless case, auth_tid is sidecar id)
         # For legacy backfilled==False, we still need preferred_backend from sidecar if present.
         # Use select_timeline_backend with auth_tid to ensure legacy path still works.

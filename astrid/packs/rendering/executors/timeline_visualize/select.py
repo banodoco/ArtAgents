@@ -449,12 +449,15 @@ def _discover(project_dir: Path) -> tuple[list[ManagedTimeline], list[str]]:
         if problem is not None:
             diagnostics.append(f"skipped {child.name}: {problem}")
             continue
-        # H2 kernel-first: for marked timelines, authoritative id overrides stale sidecar.
+        # H2 kernel-first: for marked timelines, authoritative id overrides stale sidecar. Fail-closed on corrupt marker.
+        _auth_failed = False
+        _auth_exc_msg: str | None = None
         try:
             from astrid.core.timeline.authority import is_backfilled_timeline as _isbf_vis
             from astrid.core.timeline.authority import (
                 resolve_authoritative_timeline_id as _res_auth_vis,
             )
+            from astrid.packs.timeline.backfill import BackfillError as _BackfillErrorVis
             # Derive projects_root from project_dir (<root>/<slug>)
             _pr_vis = None
             try:
@@ -467,8 +470,16 @@ def _discover(project_dir: Path) -> tuple[list[ManagedTimeline], list[str]]:
                     _pr_vis = _rr_vis(None)
             except Exception:
                 _pr_vis = None
-            _auth_vis = _res_auth_vis(child, _pr_vis)
-            if isinstance(_auth_vis, str) and _auth_vis:
+            _auth_vis: str | None = None
+            try:
+                _auth_vis = _res_auth_vis(child, _pr_vis)
+            except _BackfillErrorVis as _be:
+                _auth_failed = True
+                _auth_exc_msg = str(_be)
+                diagnostics.append(f"skipped {child.name}: backfill authority marker is unreadable: {_be}")
+            except Exception:
+                _auth_vis = None
+            if not _auth_failed and isinstance(_auth_vis, str) and _auth_vis:
                 try:
                     if _isbf_vis(_auth_vis, _pr_vis):
                         # Marked: authoritative id is kernel id; build timeline with it if different
@@ -488,10 +499,20 @@ def _discover(project_dir: Path) -> tuple[list[ManagedTimeline], list[str]]:
                                 is_tombstoned=_is_tombstoned(child),
                             ))
                             continue
+                except _BackfillErrorVis as _be2:
+                    _auth_failed = True
+                    _auth_exc_msg = str(_be2)
+                    diagnostics.append(f"skipped {child.name}: backfill authority marker is unreadable: {_be2}")
                 except Exception:
                     pass
+        except _BackfillErrorVis as _be_outer:
+            diagnostics.append(f"skipped {child.name}: backfill authority marker is unreadable: {_be_outer}")
+            _auth_failed = True
         except Exception:
             pass
+        if _auth_failed:
+            # Corrupt marker: fail closed — do not fall through to stale sidecar identity.
+            continue
         timelines.append(_timeline_from_identity(child, identity))
     return timelines, diagnostics
 

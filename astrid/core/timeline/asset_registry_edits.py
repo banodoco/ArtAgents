@@ -30,7 +30,6 @@ from astrid.core.timeline.events.schema import (
     TimelineActor,
     TimelineEvent,
 )
-from astrid.core.timeline.paths import assembly_identity_path
 
 
 def _entry_from_source_ref(

@@ -94,15 +94,17 @@ def resolve_authoritative_timeline_id(
                 finally:
                     conn.close()
         except Exception as exc:
-            # Propagate BackfillError fail-closed
-            import importlib as _il2
-
+            # Propagate BackfillError fail-closed — MUST be outside any swallowing handler.
+            _is_bf = False
             try:
+                import importlib as _il2
+
                 _bf = _il2.import_module("astrid.packs.timeline.backfill")
-                if isinstance(exc, _bf.BackfillError):  # type: ignore[attr-defined]
-                    raise
+                _is_bf = isinstance(exc, _bf.BackfillError)  # type: ignore[attr-defined]
             except Exception:
-                pass
+                _is_bf = False
+            if _is_bf:
+                raise
             # Non-marker errors are best-effort fallback to sidecar
             pass
     # 2) Legacy fallback: sidecar ONLY for unbackfilled dirs

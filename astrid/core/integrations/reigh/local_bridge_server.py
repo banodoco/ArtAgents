@@ -790,6 +790,17 @@ def make_local_bridge_handler(*, projects_root: Path):
                 ) as exc:
                     self._send_bridge_error(exc)
                     return
+                except BridgeError as exc:
+                    self._send_bridge_error(exc)
+                    return
+                except Exception as exc:
+                    # Fail-closed on corrupt marker (BackfillError/RepositoryError) — typed 500 internal.
+                    msg = str(exc)
+                    if "backfill" in msg.lower() or "authority marker" in msg.lower():
+                        self._send_error(500, "internal", f"backfill authority marker is unreadable: {exc}")
+                        return
+                    self._send_error(500, "internal", f"unexpected failure while loading timeline: {exc}")
+                    return
                 self._send_json(200, payload)
                 return
 
@@ -875,6 +886,10 @@ def make_local_bridge_handler(*, projects_root: Path):
                     self._send_bridge_error(exc)
                     return
                 except Exception as _exc:  # noqa: BLE001 - defensive 500
+                    msg = str(_exc)
+                    if "backfill" in msg.lower() or "authority marker" in msg.lower():
+                        self._send_error(500, "internal", f"backfill authority marker is unreadable: {_exc}")
+                        return
                     self._send_error(
                         500,
                         "internal",
