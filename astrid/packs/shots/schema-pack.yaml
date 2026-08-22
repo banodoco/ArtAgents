@@ -44,6 +44,7 @@ command_kinds:
   - shot.reorder
 repositories:
   - ShotRepository
+  - GenerationRepository
 conformance:
   - replay
   - mismatch_before_mutation
