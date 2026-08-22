@@ -254,6 +254,7 @@ def _dispatch_serve(args: list[str]) -> int:
         finally:
             server.server_close()
     finally:
+        composition.expiry_sweeper.stop()
         composition.writer.close()
 
     return 0

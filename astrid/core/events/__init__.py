@@ -25,8 +25,8 @@ backends may use the raw helpers when explicitly allowlisted.
 
 Approved transport use:
   * Normal task-run mutations: ``WriterContext.append()`` only.
-  * Raw locked helper: this module's transport, ``WriterContext.append()``,
-    and the RunPod sweeper's documented hard-mode exception.
+  * Raw locked helper: this module's transport and
+    ``WriterContext.append()``.
   * In-handle helper: same-flock lease takeover/orphan recovery only.
   * Test event seeding: use ``seed_event()`` from ``tests/conftest.py``.
 """

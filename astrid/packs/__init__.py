@@ -31,12 +31,22 @@ writer's read-only connection and extracts each attempt's reserved
 ``gc_unreferenced_staging`` so only staging directories unreferenced by live
 attempts are removed. No second writer, no new write authority, and the
 managed ``media/sha256`` digest tree is never touched (SD5).
+
+(BC3 ops-lens gap 1.) :func:`compose_standard_bridge` also starts the daemon
+:class:`LeaseExpirySweeper`: a background thread that, on a fixed tick,
+enumerates projects read-only and submits one receipt-protected
+``core.task.expire`` command per project through the single shared writer
+queue so a crashed executor's expired lease is transitioned (attempt
+``expired``, task requeued or failed terminally) instead of wedging forever.
+It stops cleanly when the writer closes or :meth:`LeaseExpirySweeper.stop`
+is called at the serve composition root.
 """
 
 from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -44,6 +54,7 @@ from astrid.core.backup.operations import recover_restore_staging
 from astrid.core.events.registry import register_core_vocabulary
 from astrid.core.events.service import EventAppendService
 from astrid.core.foundation.project_paths import resolve_projects_root
+from astrid.core.ids import generate_lowercase_ulid
 from astrid.core.integrations.reigh.bridge_service import derive_database_path
 from astrid.core.io.media_import import (
     MediaPreparationError,
@@ -53,12 +64,14 @@ from astrid.core.io.media_import import (
 )
 from astrid.core.receipts import ReceiptService
 from astrid.core.repositories.projects import ProjectRepository
+from astrid.core.repositories.tasks import TaskRepository
 from astrid.core.schema_packs.manifest import load_schema_pack_manifest
 from astrid.core.schema_packs.registry import (
     FrozenSchemaPackRegistry,
     SchemaPackRegistry,
 )
-from astrid.core.store.writer import DatabaseWriter
+from astrid.core.store.uow import UnitOfWork
+from astrid.core.store.writer import DatabaseWriter, WriterShutdownError
 from astrid.packs.timeline.bridge import TimelineBridgeAdapter
 from astrid.packs.timeline.repository import TimelineRepository
 from astrid.sdk.projects import ProjectsService
@@ -183,6 +196,85 @@ def run_startup_staging_gc(
     return gc_unreferenced_staging(projects_root, live_txn_ids)
 
 
+DEFAULT_LEASE_SWEEP_INTERVAL_SECONDS = 15.0
+"""Seconds between lease-expiry sweeps (the crashed-executor recovery tick)."""
+
+
+class LeaseExpirySweeper:
+    """Daemon background thread that expires overdue attempt leases.
+
+    A crashed executor leaves its attempt live forever: heartbeat rejects an
+    already-expired lease without transitioning it, and the retry predicates
+    require a prior expired attempt — a dead end until something expires the
+    attempt. This sweeper closes that wedge by driving
+    :meth:`TaskRepository.expire_overdue` through the single shared writer
+    queue with one fresh ULID idempotency key per project per sweep (the
+    expiry request hash is empty, so a repeated key would replay the stored
+    receipt instead of sweeping again).
+
+    Projects are enumerated read-only on a separate read-only connection;
+    only the expiry commands themselves enter the writer FIFO. The thread is
+    a daemon: it stops cleanly when :meth:`stop` is called or when the writer
+    closes (the next submission raises ``WriterShutdownError``).
+    """
+
+    def __init__(
+        self,
+        writer: DatabaseWriter,
+        tasks: TaskRepository,
+        *,
+        interval_seconds: float = DEFAULT_LEASE_SWEEP_INTERVAL_SECONDS,
+    ) -> None:
+        self._writer = writer
+        self._tasks = tasks
+        self._interval_seconds = interval_seconds
+        self._stop_requested = threading.Event()
+        self._thread = threading.Thread(
+            target=self._run,
+            name="astrid-lease-expiry-sweeper",
+            daemon=True,
+        )
+        self._thread.start()
+
+    def stop(self) -> None:
+        """Signal stop and join the sweep thread (idempotent)."""
+        self._stop_requested.set()
+        if self._thread.is_alive():
+            self._thread.join()
+
+    def _run(self) -> None:
+        while not self._stop_requested.wait(self._interval_seconds):
+            if not self._sweep_once():
+                return
+
+    def _sweep_once(self) -> bool:
+        """Run one full sweep; return ``False`` only after writer close."""
+        try:
+            with self._writer.read_only_connection() as connection:
+                rows = connection.execute(
+                    "SELECT id FROM projects ORDER BY slug ASC"
+                ).fetchall()
+        except sqlite3.Error:
+            # Transient read failure (e.g. mid-checkpoint); retry next tick.
+            return True
+        for row in rows:
+            project_id = str(row[0])
+            key = generate_lowercase_ulid()
+            try:
+                UnitOfWork(self._writer).run(
+                    lambda uow, project_id=project_id, key=key: (
+                        self._tasks.expire_overdue(
+                            uow, project_id=project_id, idempotency_key=key
+                        )
+                    )
+                )
+            except WriterShutdownError:
+                return False
+            except Exception:  # noqa: BLE001 - best-effort per project
+                continue
+        return True
+
+
 @dataclass(frozen=True, slots=True)
 class StandardBridgeComposition:
     """Everything the gateway serve root constructed for the bridge."""
@@ -194,6 +286,7 @@ class StandardBridgeComposition:
     projects: ProjectRepository
     timelines: TimelineRepository
     bridge: TimelineBridgeAdapter
+    expiry_sweeper: LeaseExpirySweeper
 
 
 def compose_standard_bridge(
@@ -214,7 +307,9 @@ def compose_standard_bridge(
     its own.
 
     Must be called only from the gateway serve composition root. The caller
-    owns the writer lifecycle (``close()`` on shutdown).
+    owns the writer lifecycle (``close()`` on shutdown) and the lease-expiry
+    sweeper lifecycle (:meth:`LeaseExpirySweeper.stop` before close; the
+    sweeper also self-stops on writer shutdown).
     """
     root = resolve_projects_root(projects_root)
     # Restore recovery is a read-before-write filesystem decision. It must
@@ -237,6 +332,14 @@ def compose_standard_bridge(
     projects = ProjectRepository(events=events, receipts=receipts)
     timelines = TimelineRepository(
         events=events, receipts=receipts, projects=projects
+    )
+    # Lease-expiry sweeper (BC3 ops-lens gap 1): a crashed executor must not
+    # wedge its attempt live forever. The daemon enumerates projects
+    # read-only and submits one receipt-protected ``core.task.expire``
+    # command per project per tick through the single shared writer queue,
+    # with a fresh ULID idempotency key per invocation.
+    expiry_sweeper = LeaseExpirySweeper(
+        writer, TaskRepository(events=events, receipts=receipts)
     )
     # The bridge adapter is composed over the **typed SDK services**
     # (m4 plan step 20, task T21) — the same project/timeline services the
@@ -263,13 +366,16 @@ def compose_standard_bridge(
         projects=projects,
         timelines=timelines,
         bridge=bridge,
+        expiry_sweeper=expiry_sweeper,
     )
 
 
 __all__: list[str] = [
+    "DEFAULT_LEASE_SWEEP_INTERVAL_SECONDS",
     "FrozenSchemaPackRegistry",
     "LIVE_ATTEMPT_STAGING_KEY",
     "LIVE_ATTEMPT_STATUSES",
+    "LeaseExpirySweeper",
     "STANDARD_SCHEMA_PACKS",
     "SchemaPackRegistry",
     "StandardBridgeComposition",
