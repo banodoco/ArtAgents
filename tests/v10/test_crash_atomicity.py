@@ -1588,6 +1588,305 @@ def _emit_diagnostics(command_kind: str, rows: list[dict[str, Any]]) -> None:
     )
 
 
+
+# ---------------------------------------------------------------------------
+# Doc 27 section 5 spike: bytes durable BEFORE BEGIN IMMEDIATE (track K)
+# ---------------------------------------------------------------------------
+#
+# The amendment premise: verified bytes can be made durable in the SHA-256
+# tree *before* the writer transaction opens — same-filesystem temp copy
+# with file fsync (:func:`stage_prepared_media`), then atomic ``os.replace``
+# onto the frozen hash path followed by file and parent-directory fsyncs
+# (:func:`publish_staged_media`) — so a process death at any later point,
+# including inside ``BEGIN IMMEDIATE``, finds the bytes fully durable or
+# absent at the hash path, never partial, while SQLite reopens old or
+# complete. This matrix crashes the exact sequence
+#
+#   stage -> publish -> BEGIN IMMEDIATE -> import statements -> COMMIT
+#
+# in a child process (``os._exit(137)``) at every unified boundary and
+# reopens both authorities after each crash. Ordinary power-loss reordering
+# is out of scope here (no test harness can force a power fail); what is
+# proven is abrupt-process-death atomicity on this filesystem, the same
+# standard every other matrix in this module uses.
+
+_SPIKE_PROJECT_ID = "spike-proj"
+_SPIKE_MEDIA_ID = "media-spike-out-a"
+_SPIKE_TXN_ID = "dededededededededededededededede"
+_SPIKE_REL = "fixtures/spike.svg"
+_SPIKE_BYTES = b"<svg xmlns='http://www.w3.org/2000/svg'/>track-k-spike"
+_SPIKE_KEY = "spike-import-k"
+
+
+def _write_spike_fixture(managed_root: Path) -> Path:
+    """Write the spike's prepared-bytes fixture under the managed root."""
+    path = managed_root / _SPIKE_REL
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(_SPIKE_BYTES)
+    return path
+
+
+def _seed_spike_template(template_path: Path, template_root: Path) -> None:
+    """One clean template database holding exactly the spike project."""
+    ctx = _build_context(template_path, managed_root=template_root)
+    try:
+        UnitOfWork(ctx.writer).run(
+            lambda u: ctx.projects.create(
+                u,
+                slug=_SPIKE_PROJECT_ID,
+                name="Spike Project",
+                settings={},
+                idempotency_key="spike-seed-project",
+                project_id=_SPIKE_PROJECT_ID,
+                created_at=TS,
+            )
+        )
+        _write_spike_fixture(template_root)
+    finally:
+        ctx.writer.close()
+
+
+def _run_spike_flow(
+    ctx: ConformanceContext,
+    *,
+    on_boundary: Any = None,
+) -> Any:
+    """Run the amended section 5 sequence against *ctx*.
+
+    Publication (stage + fsync, then atomic replace + fsyncs) completes
+    strictly before the unit of work opens ``BEGIN IMMEDIATE``; the
+    optional *on_boundary* callback observes each filesystem hook point
+    and SQL statement in real order (the crash child terminates at exactly
+    one of them).
+    """
+    from astrid.core.io.media_import import (
+        prepare_media_file,
+        publish_staged_media,
+        set_media_crash_hook,
+        stage_prepared_media,
+    )
+
+    fixture = _write_spike_fixture(ctx.managed_root)
+    prepared = prepare_media_file(fixture, root=ctx.managed_root)
+
+    if on_boundary is not None:
+        set_media_crash_hook(lambda point: on_boundary("hook", point))
+
+    def observer(kind: str, sql: str, params: tuple[Any, ...]) -> None:
+        if on_boundary is not None:
+            on_boundary(kind, sql)
+
+    try:
+        # 1. Outside any transaction: make the bytes durable at the frozen
+        #    hash path (temp copy + fsync, atomic rename, dir fsyncs).
+        staged = stage_prepared_media(ctx.managed_root, _SPIKE_TXN_ID, prepared)
+        published = publish_staged_media(ctx.managed_root, staged)
+        assert published.reused is False, published
+        # 2. Only now does BEGIN IMMEDIATE open.
+        return UnitOfWork(ctx.writer, on_statement=observer).run(
+            lambda u: ctx.media.import_prepared(
+                u,
+                project_id=_SPIKE_PROJECT_ID,
+                prepared=prepared,
+                idempotency_key=_SPIKE_KEY,
+                media_id=_SPIKE_MEDIA_ID,
+                created_at=TS,
+            )
+        )
+    finally:
+        set_media_crash_hook(None)
+
+
+def _digest_file_state(managed_root: Path, digest: str, byte_size: int) -> str:
+    """Classify the managed digest object: absent/durable/partial/mutated."""
+    from astrid.core.io.media_import import (
+        managed_media_path,
+        sha256_file_bytes,
+    )
+
+    path = managed_media_path(managed_root, digest)
+    if not path.exists():
+        return "absent"
+    data = path.read_bytes()
+    if len(data) != byte_size:
+        return "partial"
+    if sha256_file_bytes(path) != digest:
+        return "mutated"
+    return "durable"
+
+
+def _spike_child_main(argv: list[str]) -> int:
+    """Child entry: re-run the section 5 flow, crash abruptly at one boundary."""
+    db_path = Path(argv[0])
+    managed_root = Path(argv[1])
+    boundary = int(argv[2])
+    sys.path.insert(0, str(_REPO_ROOT))
+
+    ctx = _build_context(db_path, managed_root=managed_root)
+    seen = {"count": 0}
+
+    def on_boundary(kind: str, label: str) -> None:
+        if seen["count"] == boundary:
+            os._exit(_CRASH_EXIT_CODE)  # noqa: PLR1722 - the point of the test
+        seen["count"] += 1
+
+    try:
+        _run_spike_flow(ctx, on_boundary=on_boundary)
+    except BaseException:
+        # The boundary index was out of range (or the flow failed); never
+        # mask it with a success exit.
+        os._exit(2)
+    os._exit(0)
+
+
+def _spike_crash_matrix(tmp: Path) -> list[dict[str, Any]]:
+    """Crash the pre-lock publication flow at every unified boundary.
+
+    Each row records the SQL verdict (old-or-complete, via the SQLite-only
+    snapshot because unreferenced published digests are allowed orphans)
+    and the byte verdict for the managed digest object.
+    """
+    template = tmp / "seed.sqlite3"
+    template_root = tmp / "seed-managed"
+    template_root.mkdir(parents=True, exist_ok=True)
+    _seed_spike_template(template, template_root)
+
+    def _copy_run(name: str) -> tuple[Path, Path]:
+        db = tmp / f"{name}.sqlite3"
+        _copy_seed(template, db)
+        run_root = tmp / f"{name}-managed"
+        shutil.copytree(template_root, run_root)
+        return db, run_root
+
+    # Learn the boundary set from two deterministic full runs.
+    learned: list[tuple[str, str]] | None = None
+    for name in ("learn-1", "learn-2"):
+        db, run_root = _copy_run(name)
+        ctx = _build_context(db, managed_root=run_root)
+        trace: list[tuple[str, str]] = []
+        try:
+            _run_spike_flow(
+                ctx, on_boundary=lambda kind, label: trace.append((kind, label))
+            )
+        finally:
+            ctx.writer.close()
+        if learned is None:
+            learned = trace
+        elif trace != learned:
+            raise AssertionError(
+                f"spike flow not deterministic: {learned} then {trace}"
+            )
+    assert learned is not None and learned, "learned boundary set is empty"
+    if learned[-1][0] != "commit":
+        raise AssertionError(f"spike flow never committed: {learned}")
+    published_index = learned.index(("hook", "published"))
+    begin_index = learned.index(("begin_immediate", "BEGIN IMMEDIATE"))
+    # The core ordering claim, checked on the trace itself: publication is
+    # strictly before BEGIN IMMEDIATE.
+    assert published_index < begin_index, learned
+
+    from astrid.core.io.media_import import prepare_media_file
+
+    reference = prepare_media_file(
+        template_root / _SPIKE_REL, root=template_root
+    )
+
+    # Complete reference state on its own seeded copy.
+    complete_db, complete_root = _copy_run("complete")
+    complete_ctx = _build_context(complete_db, managed_root=complete_root)
+    try:
+        _run_spike_flow(complete_ctx)
+        complete_state = _sql_only(_snapshot_state(complete_ctx, complete_db))
+        if not _integrity_checks_pass(complete_ctx, complete_db):
+            raise AssertionError("complete spike run failed quick/FK checks")
+    finally:
+        complete_ctx.writer.close()
+
+    rows: list[dict[str, Any]] = []
+    for index, (kind, label) in enumerate(learned):
+        crash_db, crash_root = _copy_run(f"crash-{index}")
+        old_ctx = _build_context(crash_db, managed_root=crash_root)
+        try:
+            old_state = _sql_only(_snapshot_state(old_ctx, crash_db))
+        finally:
+            old_ctx.writer.close()
+        if not _integrity_checks_pass(old_ctx, crash_db):
+            raise AssertionError(
+                f"seed copy for boundary {index} failed quick/FK checks"
+            )
+
+        argv = [
+            sys.executable,
+            str(Path(__file__).resolve()),
+            "--spike-child",
+            str(crash_db),
+            str(crash_root),
+            str(index),
+        ]
+        proc = subprocess.run(
+            argv,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            cwd=str(_REPO_ROOT),
+            check=False,
+            env={**os.environ, "PYTHONPATH": str(_REPO_ROOT)},
+        )
+        if proc.returncode != _CRASH_EXIT_CODE:
+            raise AssertionError(
+                f"boundary {index} ({kind}:{label}) child exited "
+                f"{proc.returncode} instead of {_CRASH_EXIT_CODE}: "
+                f"{proc.stdout[-500:]}{proc.stderr[-500:]}"
+            )
+
+        reopen_ctx = _build_context(crash_db, managed_root=crash_root)
+        try:
+            if not _integrity_checks_pass(reopen_ctx, crash_db):
+                raise AssertionError(
+                    f"boundary {index} ({kind}:{label}) left quick/FK failures"
+                )
+            chains = _verify_all_stream_chains(reopen_ctx, crash_db)
+            reopened = _sql_only(_snapshot_state(reopen_ctx, crash_db))
+        finally:
+            reopen_ctx.writer.close()
+
+        is_post_commit = index == len(learned) - 1
+        expected = "complete" if is_post_commit else "old"
+        actual = (
+            "complete" if reopened == complete_state else
+            "old" if reopened == old_state else "partial"
+        )
+        if actual != expected:
+            raise AssertionError(
+                f"boundary {index} ({kind}:{label}) SQL verdict {actual}, "
+                f"expected {expected}"
+            )
+
+        bytes_state = _digest_file_state(
+            crash_root, reference.digest, reference.byte_size
+        )
+        if bytes_state in ("partial", "mutated"):
+            raise AssertionError(
+                f"boundary {index} ({kind}:{label}) left "
+                f"{bytes_state} digest bytes"
+            )
+        expected_bytes = "durable" if index >= published_index else "absent"
+        rows.append(
+            {
+                "index": index,
+                "kind": kind,
+                "sql": label,
+                "exit": proc.returncode,
+                "expected": expected,
+                "actual": actual,
+                "bytes": bytes_state,
+                "expected_bytes": expected_bytes,
+                "chains": chains,
+            }
+        )
+    return rows
+
+
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
@@ -1811,7 +2110,52 @@ def test_task_completion_crashes_at_every_boundary_to_old_or_complete() -> None:
     assert rows[-1]["orphan_digests"] == [], rows[-1]
 
 
+def test_publication_is_durable_before_begin_immediate_at_every_boundary(
+    tmp_path: Path,
+) -> None:
+    """Section 5 spike: pre-lock publication survives process death.
+
+    The managed digest object becomes durable (temp fsync, atomic
+    ``os.replace`` onto the frozen hash path, directory fsyncs) strictly
+    before ``BEGIN IMMEDIATE``; crashing a child at every boundary from
+    staged-copy through COMMIT reopens with byte-correct-or-absent digest
+    bytes — never partial — and SQLite old-or-complete. Every boundary at
+    or after the publication hook finds the bytes fully durable, which is
+    exactly the amended ordering premise the completion route builds on.
+    """
+    rows = _spike_crash_matrix(tmp_path)
+    assert len(rows) >= 4, f"expected several boundaries, got {len(rows)}"
+    assert all(row["exit"] == _CRASH_EXIT_CODE for row in rows), rows
+    assert all(
+        row["actual"] == row["expected"] for row in rows
+    ), [row for row in rows if row["actual"] != row["expected"]]
+    # No boundary ever left partial or mutated digest bytes.
+    assert all(
+        row["bytes"] in ("absent", "durable") for row in rows
+    ), [row for row in rows if row["bytes"] not in ("absent", "durable")]
+    # From the publication boundary onward — including every crash inside
+    # BEGIN IMMEDIATE, mid-transaction, and at COMMIT — the bytes are fully
+    # durable at the hash path before any SQL authority exists for them.
+    published = next(
+        row["index"] for row in rows if row["kind"] == "hook"
+        and row["sql"] == "published"
+    )
+    begin = next(
+        row["index"] for row in rows if row["kind"] == "begin_immediate"
+    )
+    assert published < begin, rows
+    for row in rows:
+        if row["index"] >= published:
+            assert row["bytes"] == "durable", row
+        else:
+            assert row["bytes"] == "absent", row
+    assert rows[-1]["chains"], rows[-1]
+    _emit_diagnostics("spike.pre_lock_publish", rows)
+
+
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "--child":
         raise SystemExit(_child_main(sys.argv[2:]))
+    if len(sys.argv) > 1 and sys.argv[1] == "--spike-child":
+        raise SystemExit(_spike_child_main(sys.argv[2:]))
     raise SystemExit(2)
