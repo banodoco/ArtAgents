@@ -1,0 +1,26 @@
+{
+  "id": "review-b5-r11-a-20260822-055529-8f04ab",
+  "ts_utc": "2026-08-22T05:55:29Z",
+  "label": "review-b5-r11-a",
+  "model": "deepseek:deepseek-v4-flash",
+  "brief": {
+    "path": "/workspace/goalmd-20260822/repos/reigh-timeline-main/.oracle/briefs/review-b5-r11-a.md",
+    "sha256": "0ea366522bc85518190630fdf2769ee0cd648846864f6b9fabab8b0e636f73d4"
+  },
+  "result": {
+    "path": "/workspace/goalmd-20260822/repos/reigh-timeline-main/.oracle/briefs/review-b5-r11-a.result.txt",
+    "sha256": "5b79b0a183338bc3c37b1b5387202fa99442723c98f15aaa98f14fd75943d590"
+  },
+  "command": [
+    "python3",
+    "/root/.codex/skills/subagent-launcher/launch_hermes_agent.py",
+    "--model=deepseek:deepseek-v4-flash",
+    "--query-file=.oracle/briefs/review-b5-r11-a.md",
+    "--project-dir=/workspace/goalmd-20260822/repos/Astrid",
+    "--timeout=1500",
+    "--toolsets=file,web,terminal"
+  ],
+  "project_dir": "/workspace/goalmd-20260822/repos/Astrid",
+  "duration_s": 308.8,
+  "exit": 0
+}
