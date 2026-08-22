@@ -8,7 +8,7 @@ import pytest
 
 
 def test_f1_compose_lifecycle():
-    from astrid.packs import compose_standard_bridge, _unregister_active_writer
+    from astrid.packs import _unregister_active_writer, compose_standard_bridge
     tmp = Path(tempfile.mkdtemp(prefix="f1-"))
     try:
         comp1 = compose_standard_bridge(tmp)
@@ -34,7 +34,7 @@ def test_f1_compose_lifecycle():
 
 def test_f2_lock_release_and_reuse():
     from astrid.core.timeline.eventlog.sqlite_backend import SqliteEventLogBackend
-    from astrid.packs import compose_standard_bridge, _unregister_active_writer
+    from astrid.packs import _unregister_active_writer, compose_standard_bridge
     tmp = Path(tempfile.mkdtemp(prefix="f2-"))
     try:
         comp = compose_standard_bridge(tmp)
@@ -87,8 +87,8 @@ def test_f3_stale_alias_corrupt_marker():
 
 def test_f4_typed_payload():
     from astrid.application import compose_standard_application
-    from astrid.core.timeline.events.schema import TimelineActor, AssetRegistryReplacedPayload
     from astrid.core.timeline.eventlog.sqlite_backend import SqliteEventLogBackend
+    from astrid.core.timeline.events.schema import AssetRegistryReplacedPayload, TimelineActor
     tmp = Path(tempfile.mkdtemp(prefix="f4-"))
     try:
         app = compose_standard_application(projects_root=str(tmp))
@@ -114,9 +114,9 @@ def test_f4_typed_payload():
 
 def test_f5_reject_saved():
     from astrid.application import compose_standard_application
-    from astrid.core.timeline.events.schema import TimelineActor
     from astrid.core.timeline.eventlog.sqlite_backend import SqliteEventLogBackend
     from astrid.core.timeline.eventlog.types import EventLogError
+    from astrid.core.timeline.events.schema import TimelineActor, TimelineConfigReplacedPayload
     tmp = Path(tempfile.mkdtemp(prefix="f5-"))
     try:
         app = compose_standard_application(projects_root=str(tmp))
@@ -129,10 +129,37 @@ def test_f5_reject_saved():
         tdir = tmp / "proj-f5" / "timelines" / ulid.upper()
         backend = SqliteEventLogBackend(timeline_id=tid, timeline_home=tdir, projects_root=tmp, writer=app.writer)
         actor = TimelineActor(type="system", id="test:f5", display="test")
-        with pytest.raises(EventLogError):
-            backend.append_event(tid, "timeline.saved", {"foo": "bar"}, actor=actor)
-        with pytest.raises(EventLogError):
-            backend.append_event(tid, "timeline.config_replaced", {"foo": "bar"}, actor=actor)
+        # Schema-valid config-bearing payload that must be rejected by the guard
+        # (not by schema validation). Reverting the guard should let this commit.
+        valid_payload = TimelineConfigReplacedPayload(
+            config={"tracks": [], "clips": []},
+            registry={"assets": {}},
+            source="other",
+        )
+        # Capture head + documents row before
+        head_before = backend.head()
+        import sqlite3
+
+        from astrid.core.integrations.reigh.bridge_service import derive_database_path
+        db_path = derive_database_path(tmp)
+        with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute("SELECT document_json, asset_registry_json FROM timelines WHERE id = ?", (tid,)).fetchone()
+            doc_before = row["document_json"] if row else None
+            reg_before = row["asset_registry_json"] if row else None
+        with pytest.raises(EventLogError, match="must not be appended via generic append_event"):
+            backend.append_event(tid, "timeline.saved", valid_payload, actor=actor)
+        with pytest.raises(EventLogError, match="must not be appended via generic append_event"):
+            backend.append_event(tid, "timeline.config_replaced", valid_payload, actor=actor)
+        # Typed rejection must keep head and documents row intact
+        head_after = backend.head()
+        assert head_after.version == head_before.version, f"head changed {head_before.version} -> {head_after.version}"
+        assert head_after.last_event_id == head_before.last_event_id
+        with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as conn:
+            conn.row_factory = sqlite3.Row
+            row2 = conn.execute("SELECT document_json, asset_registry_json FROM timelines WHERE id = ?", (tid,)).fetchone()
+            assert row2["document_json"] == doc_before
+            assert row2["asset_registry_json"] == reg_before
         backend.close()
         app.close()
     finally:

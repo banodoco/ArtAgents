@@ -243,8 +243,9 @@ def show_timeline(
         return None
     ulid, tdir = found
     # Marker-gated single-authority read: backfilled timelines read through SQLite, not file-first.
-    from astrid.core.timeline.authority import is_backfilled_timeline
     import importlib as _il3
+
+    from astrid.core.timeline.authority import is_backfilled_timeline
     _bf_mod3 = _il3.import_module("astrid.packs.timeline.backfill")
     BackfillError = _bf_mod3.BackfillError  # type: ignore[attr-defined]
     _is_back = False
@@ -272,7 +273,7 @@ def show_timeline(
                 try:
                     c = _sq.connect(f"file:{_db}?mode=ro", uri=True)
                     c.row_factory = _sq.Row
-                    r = c.execute("SELECT json_extract(payload_json,'$.data.timeline_id') as tid FROM events WHERE kind='timeline.created' AND json_extract(payload_json,'$.data.timeline_ulid')=? LIMIT 1", (ulid,)).fetchone()
+                    r = c.execute("SELECT json_extract(payload_json,'$.data.timeline_id') as tid FROM events WHERE kind='timeline.created' AND lower(json_extract(payload_json,'$.data.timeline_ulid'))=lower(?) LIMIT 1", (ulid,)).fetchone()
                     if r and r["tid"]:
                         _tid_for_check = str(r["tid"])
                     c.close()
@@ -308,7 +309,22 @@ def show_timeline(
     if raw_assembly is None:
         return None
     assembly = validate_timeline_config_json(raw_assembly)
-    manifest = Manifest.from_json(tdir / "manifest.json")
+    if _is_back:
+        # Marked timelines: sidecars are disposable caches; synthesize manifest if missing.
+        try:
+            manifest = Manifest.from_json(tdir / "manifest.json")
+        except FileNotFoundError:
+            from astrid.core.timeline.model import TIMELINE_SCHEMA_VERSION
+            manifest = Manifest(
+                schema_version=TIMELINE_SCHEMA_VERSION,
+                contributing_runs=[],
+                final_outputs=[],
+                tombstoned_at=None,
+            )
+        except Exception as exc:
+            raise TimelineCrudError(f"failed to load manifest for marked timeline: {exc}") from exc
+    else:
+        manifest = Manifest.from_json(tdir / "manifest.json")
     if _is_back:
         # For marked timelines, display also from authority (load_display already gates, but ensure fail-closed)
         try:
@@ -335,6 +351,78 @@ def show_timeline(
     return result
 
 def _verify_timeline_read_only(tdir: Path) -> dict[str, Any]:
+    # G4: for marked (SQLite-authority) timelines, verify the marked event stream
+    # directly (absent JSONL does not mean healthy; sidecars are caches).
+    # Derive timeline_id via identity sidecar or kernel lookup, then check marker.
+    _is_back_v = False
+    _tid_v: str | None = None
+    try:
+        import importlib as _ilv
+
+        from astrid.core.timeline.authority import is_backfilled_timeline
+        _bfv = _ilv.import_module("astrid.packs.timeline.backfill")
+        BackfillErrorV = _bfv.BackfillError  # type: ignore[attr-defined]
+        _id_file = tdir / "assembly.identity.json"
+        if _id_file.is_file():
+            try:
+                _rawv = read_json(_id_file)
+                _tid_v = _rawv.get("timeline_id") if isinstance(_rawv, dict) else None
+            except Exception:
+                _tid_v = None
+        if not isinstance(_tid_v, str) or not _tid_v:
+            # Kernel lookup by ULID for sidecarless marked
+            try:
+                import sqlite3 as _sqv
+
+                from astrid.core.foundation.project_paths import resolve_projects_root as _rrv
+                from astrid.core.integrations.reigh.bridge_service import (
+                    derive_database_path as _ddv,
+                )
+                _prv = _rrv(None)
+                td_parv = tdir.parent
+                if td_parv.name == "timelines" and td_parv.parent.is_dir():
+                    _prv = td_parv.parent.parent
+                _dbv = _ddv(_prv)
+                if _dbv.is_file():
+                    _ulidv = tdir.name
+                    _connv = _sqv.connect(f"file:{_dbv}?mode=ro", uri=True)
+                    try:
+                        _connv.row_factory = _sqv.Row
+                        _rv = _connv.execute("SELECT json_extract(payload_json,'$.data.timeline_id') as tid FROM events WHERE kind='timeline.created' AND lower(json_extract(payload_json,'$.data.timeline_ulid'))=lower(?) LIMIT 1", (_ulidv,)).fetchone()
+                        if _rv and _rv["tid"]:
+                            _tid_v = str(_rv["tid"])
+                    finally:
+                        _connv.close()
+            except Exception:
+                pass
+        if isinstance(_tid_v, str) and _tid_v:
+            # Check marker; propagate corrupt marker fail-closed
+            try:
+                _is_back_v = is_backfilled_timeline(_tid_v, None)
+                # Re-resolve projects_root from tdir if possible for accurate check
+                try:
+                    from astrid.core.foundation.project_paths import resolve_projects_root as _rrv2
+                    _prv2 = _rrv2(None)
+                    td_parv2 = tdir.parent
+                    if td_parv2.name == "timelines" and td_parv2.parent.is_dir():
+                        _prv2 = td_parv2.parent.parent
+                    _is_back_v = is_backfilled_timeline(_tid_v, _prv2)
+                except Exception:
+                    pass
+            except BackfillErrorV:
+                return {"event_log": "present", "ok": False, "checked_events": 0, "error": "backfill marker unreadable"}
+            except Exception:
+                _is_back_v = False
+        if _is_back_v and isinstance(_tid_v, str) and _tid_v:
+            from .eventlog import select_timeline_backend
+            try:
+                _stream, backend = select_timeline_backend(timeline_id=_tid_v, timeline_home=tdir, preferred_backend=None)
+            except Exception as exc:
+                return {"event_log": "present", "ok": False, "checked_events": 0, "error": f"backend selection failed: {exc}"}
+            verification = backend.verify_chain()
+            return {"event_log": "present", "ok": verification.ok, "checked_events": verification.checked_events, "last_event_id": verification.last_event_id, "error": verification.error}
+    except Exception:
+        pass
     events_file = tdir / "assembly.jsonl"
     identity_file = tdir / "assembly.identity.json"
     if not events_file.is_file():

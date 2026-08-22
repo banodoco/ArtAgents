@@ -94,6 +94,7 @@ def _unregister_shared_writer(db_path: Path) -> None:
         _SHARED_WRITERS.pop(key, None)
 
 
+def _projects_root_from_timeline_home(timeline_home: str | Path | None) -> Path:
     if timeline_home is not None:
         p = Path(timeline_home)
         try:
@@ -317,6 +318,7 @@ class SqliteEventLogBackend:
             raise EventLogError(f"timeline_id mismatch: {timeline_id!r} != {self.timeline_id!r}")
         if kind in ("timeline.saved", "timeline.config_replaced"):
             raise EventLogError(f"kind {kind!r} must not be appended via generic append_event; use TimelineRepository.save/replace_config")
+        _is_asset_registry = kind == "timeline.asset_registry_replaced"
         # Serialize payload: typed payloads expose to_json_obj(), else require mapping.
         if hasattr(payload, "to_json_obj"):
             try:
@@ -374,6 +376,30 @@ class SqliteEventLogBackend:
             envelope, event_hash = build_integrity_envelope(payload_dict, prev_hash)
             payload_json = canonical_json(envelope)
             changes_json = canonical_json([kind])
+            # G5: for registry-bearing kind, update asset_registry_json atomically in same txn
+            if _is_asset_registry:
+                # Extract registry -> assets, validate shape, canonicalize for storage.
+                reg = payload_dict.get("registry")
+                if not isinstance(reg, dict):
+                    raise EventLogError("asset_registry_replaced payload must contain a 'registry' object")
+                assets = reg.get("assets", {})
+                if not isinstance(assets, dict):
+                    raise EventLogError("registry.assets must be an object")
+                try:
+                    assets_json = canonical_json(dict(assets))
+                except Exception as exc:
+                    raise EventLogError(f"cannot canonicalize registry assets: {exc}") from exc
+                from astrid.core.util.time import utc_now_iso as _now
+                _stamp = _now()
+                # Update timelines projection; fail-closed if timeline row missing.
+                uow.execute(
+                    "UPDATE timelines SET asset_registry_json = ?, updated_at = ? WHERE id = ?",
+                    (assets_json, _stamp, timeline_id),
+                )
+                # cursor rowcount check via query: ensure row existed
+                chk = uow.query_one("SELECT 1 FROM timelines WHERE id = ?", (timeline_id,))
+                if chk is None:
+                    raise EventLogError(f"timeline {timeline_id!r} not found for asset_registry update")
             project_seq, stream_seq = uow.append_event(
                 stream_id=sid,
                 project_id=project_id,
@@ -653,10 +679,9 @@ class SqliteEventLogBackend:
             conn.close()
         return result
     def close(self) -> None:
-        # If this instance registered the shared writer, unregister and close it.
+        # Exception-safe order per G1 adjudication: writer.close → lock.release → unregister.
+        # Each step guarded so failure of one never skips the rest.
         if self._owns_shared and self._writer is not None:
-            db_path = derive_database_path(self._projects_root)
-            _unregister_shared_writer(db_path)
             try:
                 self._writer.close()
             except (OSError, RuntimeError, sqlite3.Error):
@@ -668,6 +693,11 @@ class SqliteEventLogBackend:
                 except (OSError, RuntimeError):
                     pass
                 self._owner_lock = None
+            try:
+                db_path = derive_database_path(self._projects_root)
+                _unregister_shared_writer(db_path)
+            except Exception:
+                pass
             self._owns_shared = False
             self._owns_writer = False
             return

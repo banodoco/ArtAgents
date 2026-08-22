@@ -22,7 +22,9 @@ from astrid.core.foundation.project_paths import (
     sources_dir,
     validate_project_slug,
 )
+from astrid.core.timeline.authority import is_backfilled_timeline
 from astrid.core.timeline.eventlog import LocalFsBackend
+from astrid.core.timeline.eventlog.sqlite_backend import SqliteEventLogBackend
 from astrid.core.timeline.events.schema import (
     AssetRegistryReplacedPayload,
     TimelineActor,
@@ -256,15 +258,16 @@ def sync_asset_registry(
     if not isinstance(timeline_id, str) or not timeline_id.strip():
         # Try kernel fallback for sidecarless backfilled
         try:
+            import sqlite3 as _sq3
+
             from astrid.core.foundation.project_paths import resolve_projects_root as _rr3
             from astrid.core.integrations.reigh.bridge_service import derive_database_path as _dd3
-            import sqlite3 as _sq3
             _pr3 = _rr3(projects_root)
             _db3 = _dd3(_pr3)
             if _db3.is_file():
                 c = _sq3.connect(f"file:{_db3}?mode=ro", uri=True)
                 c.row_factory = _sq3.Row
-                r = c.execute("SELECT json_extract(payload_json,'$.data.timeline_id') as tid FROM events WHERE kind='timeline.created' AND json_extract(payload_json,'$.data.timeline_ulid')=? LIMIT 1", (tdir.name,)).fetchone()
+                r = c.execute("SELECT json_extract(payload_json,'$.data.timeline_id') as tid FROM events WHERE kind='timeline.created' AND lower(json_extract(payload_json,'$.data.timeline_ulid'))=lower(?) LIMIT 1", (tdir.name,)).fetchone()
                 if r and r["tid"]:
                     timeline_id = str(r["tid"])
                 c.close()
@@ -272,8 +275,7 @@ def sync_asset_registry(
             pass
         if not isinstance(timeline_id, str) or not timeline_id.strip():
             raise AstridError("timeline identity is missing timeline_id")
-    # Marker-gated backend selection — fail-closed on unreadable marker.
-    from astrid.core.timeline.authority import is_backfilled_timeline
+    # Marker-gated backend selection — fail-closed on unreadable marker (shared authority helper).
     import importlib as _il4
     _bf_mod4 = _il4.import_module("astrid.packs.timeline.backfill")
     BackfillError = _bf_mod4.BackfillError  # type: ignore[attr-defined]
