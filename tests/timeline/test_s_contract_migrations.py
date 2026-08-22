@@ -34,6 +34,7 @@ from astrid.core.migrations.runner import (
     read_schema_migrations,
     sha256_bytes,
 )
+from astrid.core.schema_packs.manifest import load_schema_pack_manifest
 from astrid.core.store.database import open_database
 from astrid.packs import build_standard_registry
 
@@ -112,6 +113,35 @@ class TestSContractConsistency:
         # The descriptor path must resolve to the vendored bytes.
         assert (pack_resource_root("timeline") / migration.path).resolve() == VENDORED.resolve()
         assert registry.tables["timeline_contract_canary"] == "timeline"
+
+
+# ---------------------------------------------------------------------------
+# Manifest invariants (A-local, no S checkout required)
+# ---------------------------------------------------------------------------
+
+
+def test_timeline_pack_version_tracks_highest_migration() -> None:
+    """Pack ``version`` is independent forward-only pack versioning (decision
+    artifact section 4, field 2): it must equal the highest declared migration
+    version. The timeline pack declares migrations through v2
+    (timeline_contract_canary), so its pack version must be >= 2.
+    """
+    manifest = load_schema_pack_manifest(
+        REPO_ROOT / "astrid" / "packs" / "timeline" / "schema-pack.yaml"
+    )
+    highest_migration = max(
+        descriptor.version for descriptor in manifest.migrations
+    )
+    assert manifest.version == highest_migration, (
+        f"timeline schema-pack version {manifest.version} != highest migration"
+        f" version {highest_migration}: forward-only pack versioning requires"
+        " the pack version to track the newest migration"
+    )
+    assert manifest.version >= 2, (
+        f"timeline schema-pack version {manifest.version} is < 2: the pack"
+        " declares migrations through v2 (timeline_contract_canary), so the"
+        " pack version must be at least 2"
+    )
 
 
 # ---------------------------------------------------------------------------

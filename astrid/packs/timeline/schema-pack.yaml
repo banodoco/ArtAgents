@@ -4,13 +4,13 @@
 # exactly the 11 snake_case top-level fields of the frozen schema-pack
 # contract and is validated by astrid.core.schema_packs.manifest.
 #
-# The timeline pack owns exactly one table (timelines) and declares the
-# namespaced timeline vocabulary. Timeline identity (slug, lowercase ULID,
-# default) is NOT stored in convenience columns (SD1): immutable slug and ULID
-# address metadata live in timeline.created event payloads and the default
-# timeline id lives in projects.settings_json.
+# The timeline pack owns two tables (timelines, timeline_contract_canary) and
+# declares the namespaced timeline vocabulary. Timeline identity (slug,
+# lowercase ULID, default) is NOT stored in convenience columns (SD1):
+# immutable slug and ULID address metadata live in timeline.created event
+# payloads and the default timeline id lives in projects.settings_json.
 id: timeline
-version: 1
+version: 2
 depends_on:
   - core >= 1
 migrations:
