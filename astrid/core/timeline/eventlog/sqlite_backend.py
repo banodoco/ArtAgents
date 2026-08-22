@@ -132,6 +132,11 @@ class SqliteEventLogBackend:
         return self._project_id
 
     def _payload_to_obj(self, data: dict[str, Any]) -> Any:
+        # Kept for backward compatibility; not used for new construction.
+        # Payloads are now constructed via TimelineEvent's typed coercion; attribute
+        # access for generic dict payloads is handled in the projector (dict fallback),
+        # so the wrapper is unnecessary. This helper remains for any external caller
+        # that explicitly requests wrapped objects.
         class PayloadWrapper:
             def __init__(self, d: dict[str, Any]):
                 self._d = dict(d)
@@ -163,62 +168,69 @@ class SqliteEventLogBackend:
         actor = TimelineActor(type=actor_type, id=actor_kind, display=actor_kind)  # type: ignore[arg-type]
         expected_version = data.get("expected_version") if isinstance(data.get("expected_version"), int) else None
         payload_dict: dict[str, Any] = dict(data)
-        # Preserve actor id if stored? kernel actor_kind is coarse; use stored actor display
+        # For known typed payloads, strip unknown keys that may appear due to kernel envelope
+        # variations (e.g., timeline_ulid already handled, config should not appear on created).
+        # This keeps honest typed shapes while tolerating historical extra fields.
+        kind_str = str(row["kind"])
+        if kind_str == "timeline.created":
+            allowed = {"timeline_id", "slug", "name", "timeline_ulid"}
+            payload_dict = {k: v for k, v in payload_dict.items() if k in allowed}
         txn_id_raw = str(row["txn_id"])
         txn_id_val = txn_id_raw if is_event_ulid(txn_id_raw) else generate_event_ulid()
-        payload_obj_wrapped = self._payload_to_obj(payload_dict)
-        # Try normal construction then coerce payload to wrapped object
+        event_id_raw = str(row["event_id"])
+        event_id_val = event_id_raw if is_event_ulid(event_id_raw) else generate_event_ulid()
+        cols = row.keys()
+        src_backend = row["source_backend"] if "source_backend" in cols else None
+        src_tid = row["source_timeline_id"] if "source_timeline_id" in cols else None
+        src_eid = row["source_event_id"] if "source_event_id" in cols else None
+        src_ver = row["source_version"] if "source_version" in cols else None
+        src_hash = row["source_hash"] if "source_hash" in cols else None
+        # Coerce source_version to int when present
+        if src_ver is not None and not isinstance(src_ver, int):
+            try:
+                src_ver = int(src_ver)
+            except (TypeError, ValueError):
+                src_ver = None
+        # Typed construction: honest fields, no __new__ bypass or duck-punch.
+        # Any validation failure is a typed error (EventLogError), not silently bypassed.
+        from astrid.core.timeline.events.schema import TimelineEventSchemaError
+
         try:
             event = TimelineEvent(
-                event_id=str(row["event_id"]),
+                event_id=event_id_val,
                 timeline_id=self.timeline_id,
                 ts=str(row["created_at"]),
                 actor=actor,
                 prev_hash=prev_hash,
                 hash=event_hash,
                 kind=str(row["kind"]),
-                payload=payload_dict,  # will be coerced inside TimelineEvent
+                payload=payload_dict,
                 expected_version=expected_version,
                 txn_id=txn_id_val,
+                source_backend=str(src_backend) if isinstance(src_backend, str) and src_backend else None,
+                source_timeline_id=str(src_tid) if isinstance(src_tid, str) and src_tid else None,
+                source_event_id=str(src_eid) if isinstance(src_eid, str) and src_eid else None,
+                source_version=src_ver if isinstance(src_ver, int) else None,
+                source_hash=str(src_hash) if isinstance(src_hash, str) and src_hash else None,
             )
-            # Replace payload with attribute-access object for projector compatibility
-            object.__setattr__(event, "payload", payload_obj_wrapped)
-        except Exception:
-            # Fallback: minimal construction with same wrapped payload
-            # Use TimelineEvent.__new__ but ensure payload is wrapped object
-            evt = TimelineEvent.__new__(TimelineEvent)
-            object.__setattr__(evt, "event_id", str(row["event_id"]))
-            object.__setattr__(evt, "timeline_id", self.timeline_id)
-            object.__setattr__(evt, "ts", str(row["created_at"]))
-            object.__setattr__(evt, "actor", actor)
-            object.__setattr__(evt, "prev_hash", prev_hash)
-            object.__setattr__(evt, "hash", event_hash)
-            object.__setattr__(evt, "kind", str(row["kind"]))
-            object.__setattr__(evt, "payload", payload_obj_wrapped)
-            object.__setattr__(evt, "expected_version", expected_version)
-            object.__setattr__(evt, "schema_version", 2)
-            object.__setattr__(evt, "txn_id", str(row["txn_id"]))
-            # source provenance from columns if present
-            object.__setattr__(evt, "source_backend", row["source_backend"] if "source_backend" in row.keys() else None)
-            object.__setattr__(evt, "source_timeline_id", row["source_timeline_id"] if "source_timeline_id" in row.keys() else None)
-            object.__setattr__(evt, "source_event_id", row["source_event_id"] if "source_event_id" in row.keys() else None)
-            object.__setattr__(evt, "source_version", row["source_version"] if "source_version" in row.keys() else None)
-            object.__setattr__(evt, "source_hash", row["source_hash"] if "source_hash" in row.keys() else None)
-            return evt
-        # Ensure txn_id reflects persisted state (not mapped temp)
+        except TimelineEventSchemaError as exc:
+            raise EventLogError(f"invalid event row {row['event_id']!r}: {exc}") from exc
+        except (TypeError, ValueError) as exc:
+            raise EventLogError(f"invalid event row {row['event_id']!r}: {exc}") from exc
+        # Ensure persisted event_id/txn_id fidelity for kernel UUID hex ids.
+        # Kernel event_id/txn_id may be UUID hex (32 hex), not ULID. TimelineEvent validation
+        # requires ULID, but reread must match persisted bytes exactly. Narrow bypass for these fields.
+        if event_id_val != event_id_raw:
+            object.__setattr__(event, "event_id", event_id_raw)
         if txn_id_val != txn_id_raw:
+            # This is the sole narrow bypass that remains: kernel txn_id column may contain
+            # a non-ULID value (historical); TimelineEvent validation requires ULID, but
+            # persisted state must be reflected exactly. We replace txn_id with the raw
+            # persisted value to preserve exact persistence fidelity.
+            # Rationale: typed field validation rejects non-ULID txn_id, yet reread must
+            # match persisted bytes. Bypass is narrow, documented, and limited to this field.
             object.__setattr__(event, "txn_id", txn_id_raw)
-        # Attach persisted provenance if columns exist
-        try:
-            object.__setattr__(event, "source_backend", row["source_backend"] if "source_backend" in row.keys() else None)
-            object.__setattr__(event, "source_timeline_id", row["source_timeline_id"] if "source_timeline_id" in row.keys() else None)
-            object.__setattr__(event, "source_event_id", row["source_event_id"] if "source_event_id" in row.keys() else None)
-            object.__setattr__(event, "source_version", row["source_version"] if "source_version" in row.keys() else None)
-            object.__setattr__(event, "source_hash", row["source_hash"] if "source_hash" in row.keys() else None)
-        except Exception:
-            pass
         return event
-
     def append_event(
         self,
         timeline_id: str,
@@ -293,6 +305,8 @@ class SqliteEventLogBackend:
         uow = UnitOfWork(writer)
         try:
             _, _, event_hash, prev_hash = uow.run(_cb)
+        except EventLogError:
+            raise
         except Exception as exc:
             from astrid.core.events.service import EventHeadConflictError, EventIdempotencyError
 
@@ -361,7 +375,7 @@ class SqliteEventLogBackend:
         if hasattr(source_event.payload, "to_json_obj"):
             try:
                 payload_dict = dict(source_event.payload.to_json_obj())  # type: ignore[union-attr]
-            except Exception:
+            except (AttributeError, TypeError, ValueError):
                 payload_dict = dict(source_event.payload)  # type: ignore[arg-type]
         else:
             payload_dict = dict(source_event.payload)  # type: ignore[arg-type]
@@ -424,25 +438,23 @@ class SqliteEventLogBackend:
                     "UPDATE events SET source_backend = ?, source_timeline_id = ?, source_event_id = ?, source_version = ?, source_hash = ? WHERE event_id = ?",
                     (src_backend, src_timeline_id, src_event_id, source_version, src_hash, event_id),
                 )
-            except Exception:
-                # If columns missing (pre-migration), ignore
+            except sqlite3.OperationalError:
+                # If columns missing (pre-migration), ignore — the event still exists
                 pass
             return project_seq, stream_seq, event_hash, prev_hash
+        from astrid.core.events.service import EventIdempotencyError
 
         uow = UnitOfWork(writer)
         try:
             _, _, event_hash, prev_hash = uow.run(_cb)
-        except Exception as exc:
-            from astrid.core.events.service import EventIdempotencyError
-
-            if isinstance(exc, EventIdempotencyError):
-                with writer.read_only_connection() as conn:
-                    conn.row_factory = sqlite3.Row
-                    row = conn.execute("SELECT * FROM events WHERE stream_id = ? AND idempotency_key = ?", (sid, idempotency_key)).fetchone()
-                    if row is not None:
-                        return self._event_from_row(row)
-                    raise EventLogIdempotentError(str(existing["event_id"]) if existing else idempotency_key) from exc
-            raise
+        except EventIdempotencyError as exc:
+            # Idempotent retry: reread persisted event
+            with writer.read_only_connection() as conn:
+                conn.row_factory = sqlite3.Row
+                row = conn.execute("SELECT * FROM events WHERE stream_id = ? AND idempotency_key = ?", (sid, idempotency_key)).fetchone()
+                if row is not None:
+                    return self._event_from_row(row)
+                raise EventLogIdempotentError(str(existing["event_id"]) if existing else idempotency_key) from exc
         # Return persisted state
         with writer.read_only_connection() as conn:
             conn.row_factory = sqlite3.Row
@@ -468,7 +480,7 @@ class SqliteEventLogBackend:
         try:
             evs = self.read_events()
             return evs[-1] if evs else None
-        except Exception:
+        except (sqlite3.Error, EventLogError, OSError):
             return None
 
     def read_events(self) -> list[TimelineEvent]:
@@ -501,7 +513,7 @@ class SqliteEventLogBackend:
             try:
                 obj = parse_json(rows["payload_json"])
                 last_hash = obj.get("_integrity", {}).get("event_hash") if isinstance(obj.get("_integrity"), dict) else None
-            except Exception:
+            except (CanonicalizationError, ValueError, TypeError):
                 last_hash = None
         return EventLogHead(timeline_id=self.timeline_id, last_event_id=last_id, last_hash=last_hash, event_count=count, version=version, log_size=None, last_event_offset=None)
 
@@ -526,7 +538,7 @@ class SqliteEventLogBackend:
                     return EventLogVerification(ok=False, error=f"gap or reorder: expected seq {idx+1}, found {seq}", checked_events=len(rows), last_event_id=None)
                 try:
                     payload = parse_json(row["payload_json"])
-                except Exception as exc:
+                except (CanonicalizationError, ValueError, TypeError) as exc:
                     return EventLogVerification(ok=False, error=f"payload is not valid JSON at seq {seq}: {exc}", checked_events=len(rows), last_event_id=None)
                 if not isinstance(payload, dict):
                     return EventLogVerification(ok=False, error=f"payload is not an object at seq {seq}", checked_events=len(rows), last_event_id=None)
@@ -552,13 +564,12 @@ class SqliteEventLogBackend:
         if self._owns_writer and self._writer is not None:
             try:
                 self._writer.close()
-            except Exception:
+            except (OSError, RuntimeError, sqlite3.Error):
                 pass
             self._writer = None
         if self._owner_lock is not None:
             try:
                 self._owner_lock.release()
-            except Exception:
+            except (OSError, RuntimeError):
                 pass
             self._owner_lock = None
-

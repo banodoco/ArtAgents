@@ -293,9 +293,23 @@ def _verify_timeline_read_only(tdir: Path) -> dict[str, Any]:
             "checked_events": 0,
             "error": "timeline identity sidecar missing timeline_id",
         }
-    from .eventlog import LocalFsBackend
+    preferred_backend = identity.get("backend") if isinstance(identity, dict) else None
+    if preferred_backend is not None and not isinstance(preferred_backend, str):
+        preferred_backend = None
+    from .eventlog import select_timeline_backend
 
-    verification = LocalFsBackend(timeline_id=timeline_id, timeline_home=tdir).verify_chain()
+    try:
+        _stream, backend = select_timeline_backend(
+            timeline_id=timeline_id, timeline_home=tdir, preferred_backend=preferred_backend
+        )
+    except Exception as exc:
+        return {
+            "event_log": "present",
+            "ok": False,
+            "checked_events": 0,
+            "error": f"backend selection failed: {exc}",
+        }
+    verification = backend.verify_chain()
     return {
         "event_log": "present",
         "ok": verification.ok,

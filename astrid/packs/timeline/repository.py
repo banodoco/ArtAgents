@@ -1558,6 +1558,17 @@ class TimelineRepository:
             conn.row_factory = sqlite3.Row
             return self._resolve_id(conn, project_id, ref)
 
+    def resolve_id(
+        self, reader: Any, project_id: str, ref: str
+    ) -> str:
+        """Public UoW-aware resolver: resolve *ref* to timeline id through *reader*.
+
+        *reader* is a :class:`UnitOfWork` or raw connection exposing
+        ``query_one`` / ``execute``. Same project-scoped, order-fixed
+        resolution as :meth:`resolve` but usable inside a command transaction.
+        """
+        return self._resolve_id(reader, project_id, ref)
+
     def _resolve_id(
         self, reader: Any, project_id: str, ref: str
     ) -> str:

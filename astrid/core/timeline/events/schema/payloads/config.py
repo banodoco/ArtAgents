@@ -22,15 +22,20 @@ class TimelineCreatedPayload:
     timeline_id: str
     slug: str
     name: str
+    timeline_ulid: str | None = None
 
     def __post_init__(self) -> None:
         _require_uuid_str(self.timeline_id, "payload.timeline_id")
         _require_nonempty_str(self.slug, "payload.slug")
         _require_nonempty_str(self.name, "payload.name")
+        if self.timeline_ulid is not None:
+            _require_nonempty_str(self.timeline_ulid, "payload.timeline_ulid")
 
     def to_json_obj(self) -> dict[str, Any]:
-        return {"timeline_id": self.timeline_id, "slug": self.slug, "name": self.name}
-
+        result: dict[str, Any] = {"timeline_id": self.timeline_id, "slug": self.slug, "name": self.name}
+        if self.timeline_ulid is not None:
+            result["timeline_ulid"] = self.timeline_ulid
+        return result
 
 @dataclass(frozen=True)
 class TimelineRenamedPayload:
@@ -92,25 +97,42 @@ class TimelineImportedPayload:
 @dataclass(frozen=True)
 class TimelineConfigReplacedPayload:
     config: dict[str, Any]
+    registry: dict[str, Any] | None = None
     source: str | None = None
+    timeline_id: str | None = None
+    expected_version: int | None = None
 
     def __post_init__(self) -> None:
         if self.source is not None:
             _require_nonempty_str(self.source, "payload.source")
+        if self.timeline_id is not None:
+            _require_uuid_str(self.timeline_id, "payload.timeline_id")
+        if self.expected_version is not None:
+            if not isinstance(self.expected_version, int) or isinstance(self.expected_version, bool):
+                raise TimelineEventSchemaError("payload.expected_version must be an integer")
         try:
             config = validate_timeline_config_for_container(self.config)
         except Exception as exc:
             raise TimelineEventSchemaError(str(exc)) from exc
         object.__setattr__(self, "config", config)
+        if self.registry is not None:
+            if not isinstance(self.registry, dict):
+                raise TimelineEventSchemaError("payload.registry must be an object")
+            _validate_jsonable(self.registry, "payload.registry")
         if self.source is not None:
             _require_nonempty_str(self.source, "payload.source")
 
     def to_json_obj(self) -> dict[str, Any]:
         payload: dict[str, Any] = {"config": deepcopy(self.config)}
+        if self.registry is not None:
+            payload["registry"] = deepcopy(self.registry)
         if self.source is not None:
             payload["source"] = self.source
+        if self.timeline_id is not None:
+            payload["timeline_id"] = self.timeline_id
+        if self.expected_version is not None:
+            payload["expected_version"] = self.expected_version
         return payload
-
 
 @dataclass(frozen=True)
 class TimelineAssetRegistryReplacedPayload:

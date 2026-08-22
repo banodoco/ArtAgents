@@ -310,14 +310,12 @@ def _discover(project_dir: Path) -> tuple[list[ManagedTimeline], list[str]]:
     """Scan ``project_dir/timelines/*`` for managed timelines.
 
     Each managed timeline is a directory (ULID-named by convention) holding
-    ``assembly.identity.json``.  Directories without a valid identity file —
-    and directories whose identity carries a non-canonical UUID/ULID or a ULID
-    that does not match the directory name — are skipped and recorded in the
-    diagnostics list.  Symlink containment: any child whose ``Path.resolve()``
-    escapes ``project_dir/timelines/`` (a symlink pointing outside the root)
-    is skipped with a diagnostic; symlinks resolving to another directory
-    inside the root are allowed.  The result is sorted deterministically by
-    ULID.
+    ``assembly.identity.json``.  When the sidecar is missing/unreadable the
+    authority marker ``<projects_root>/.astrid/backfill-state.json`` is
+    consulted via the kernel (ULID dir → timeline row) — the timeline is
+    included when backfilled (binding from kernel), skipped with a diagnostic
+    only when genuinely un-backfilled. Legacy identity validation is unchanged
+    otherwise.
     """
     timelines_root = Path(project_dir) / "timelines"
     timelines: list[ManagedTimeline] = []
@@ -325,6 +323,74 @@ def _discover(project_dir: Path) -> tuple[list[ManagedTimeline], list[str]]:
     if not timelines_root.is_dir():
         return timelines, diagnostics
     timelines_root_resolved = timelines_root.resolve()
+    # Projects root for backfill marker/ kernel lookup: project_dir parent
+    # when layout matches <projects_root>/<project_slug>, else resolve_projects_root.
+    try:
+        from astrid.core.foundation.project_paths import resolve_projects_root as _resolve_pr
+        from astrid.core.integrations.reigh.bridge_service import derive_database_path as _derive_db
+        from astrid.packs.timeline.backfill import BackfillError, read_backfill_state as _read_state
+        import sqlite3 as _sql
+    except Exception:
+        _resolve_pr = None  # type: ignore
+        _derive_db = None  # type: ignore
+        _read_state = None  # type: ignore
+        _sql = None  # type: ignore
+    def _check_backfilled_ulid(ulid: str) -> tuple[bool, str | None, str | None]:
+        """Return (is_backfilled, timeline_id, slug) or (False, None, None). Fails closed on marker error."""
+        if _resolve_pr is None or _derive_db is None or _read_state is None or _sql is None:
+            return False, None, None
+        # Derive projects_root
+        projects_root: Path | None = None
+        try:
+            # project_dir is <projects_root>/<project_slug>
+            cand = Path(project_dir).resolve()
+            # Expect <projects_root>/<slug>/timelines/<ulid> -> project_dir is parent of timelines
+            pr_cand = cand.parent if cand.name != "timelines" else cand.parent.parent
+            # If pr_cand contains projects, use it; else resolve
+            if pr_cand.is_dir():
+                # Heuristic: if project_dir exists and its parent contains project_dir name, treat parent as root
+                projects_root = Path(project_dir).parent
+                if not projects_root.is_dir():
+                    projects_root = _resolve_pr(None)
+            else:
+                projects_root = _resolve_pr(None)
+        except Exception:
+            try:
+                projects_root = _resolve_pr(None)
+            except Exception:
+                return False, None, None
+        if projects_root is None:
+            return False, None, None
+        # Marker read - typed failure if unreadable
+        try:
+            state = _read_state(projects_root)
+        except BackfillError as exc:
+            # Marker unreadable is a typed condition - signal via exception for caller to diagnostic
+            raise RuntimeError(f"backfill marker unreadable: {exc}") from exc
+        except Exception as exc:
+            raise RuntimeError(f"backfill marker unreadable: {exc}") from exc
+        # Kernel lookup by ULID
+        timeline_id = None
+        slug = None
+        try:
+            db_path = _derive_db(projects_root)
+            if db_path.is_file():
+                conn = _sql.connect(str(db_path))
+                try:
+                    conn.row_factory = _sql.Row
+                    row = conn.execute("SELECT json_extract(payload_json,'$.data.timeline_id') as tid, json_extract(payload_json,'$.data.slug') as s FROM events WHERE kind='timeline.created' AND json_extract(payload_json,'$.data.timeline_ulid')=? LIMIT 1", (ulid,)).fetchone()
+                    if row is not None and row["tid"]:
+                        timeline_id = str(row["tid"])
+                        slug = str(row["s"]) if row["s"] else None
+                finally:
+                    conn.close()
+        except RuntimeError:
+            raise
+        except Exception:
+            return False, None, None
+        if timeline_id is not None and timeline_id in state:
+            return True, timeline_id, slug
+        return False, timeline_id, slug
     for child in sorted(timelines_root.iterdir(), key=lambda p: p.name):
         if not child.is_dir() or child.name.startswith("."):
             continue
@@ -338,6 +404,43 @@ def _discover(project_dir: Path) -> tuple[list[ManagedTimeline], list[str]]:
             continue
         identity = read_identity(child)
         if identity is None:
+            # Sidecar missing/unreadable: consult marker+kernel for backfilled binding.
+            ulid = child.name
+            # Only attempt backfilled lookup when dir name looks like ULID
+            if _canonical_ulid(ulid) is None:
+                diagnostics.append(f"skipped {child.name}: no valid assembly.identity.json")
+                continue
+            try:
+                is_backfilled, tid, kslug = _check_backfilled_ulid(ulid.upper())
+            except RuntimeError as exc:
+                diagnostics.append(f"skipped {child.name}: {exc}")
+                continue
+            if is_backfilled and tid is not None:
+                # Build ManagedTimeline from kernel binding (sidecarless backfilled)
+                ulid_canonical = _canonical_ulid(ulid) or ulid.upper()
+                tid_canonical = _canonical_uuid(tid) or tid
+                # Derive slug/is_default: prefer display.json live state, else kernel slug
+                slug = None
+                is_default = False
+                # Try display.json live state with a minimal identity stub
+                try:
+                    slug_disp, is_default_disp = _read_display_state(child, {"display": {"slug": kslug}} if kslug else {})
+                    if slug_disp is not None:
+                        slug = slug_disp
+                        is_default = is_default_disp
+                    elif kslug is not None:
+                        slug = kslug
+                except Exception:
+                    slug = kslug
+                timelines.append(ManagedTimeline(
+                    timeline_dir=Path(child),
+                    timeline_id=tid_canonical,
+                    timeline_ulid=ulid_canonical,
+                    slug=slug,
+                    is_default=is_default,
+                    is_tombstoned=_is_tombstoned(child),
+                ))
+                continue
             diagnostics.append(f"skipped {child.name}: no valid assembly.identity.json")
             continue
         problem = _identity_problem(child, identity)

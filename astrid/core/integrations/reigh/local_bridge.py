@@ -513,6 +513,53 @@ def _registry_from_event_stream(record: BridgeTimelineRecord) -> dict[str, Any] 
     return None
 
 
+def _registry_from_sqlite(record: BridgeTimelineRecord, *, root: str | Path | None = None) -> dict[str, Any] | None:
+    """Recover registry for a backfilled timeline from kernel SQLite (single authority)."""
+    try:
+        projects_root = resolve_projects_root(root)
+        from astrid.core.integrations.reigh.bridge_service import derive_database_path as _derive_db
+        import sqlite3
+        db_path = _derive_db(projects_root)
+        if not db_path.is_file():
+            return None
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        try:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute("SELECT asset_registry_json FROM timelines WHERE id = ?", (record.timeline_id,)).fetchone()
+            if row is not None and row["asset_registry_json"]:
+                import json as _json
+                try:
+                    payload = _json.loads(row["asset_registry_json"])
+                except Exception:
+                    payload = None
+                if isinstance(payload, dict) and isinstance(payload.get("assets"), dict):
+                    return {"assets": dict(payload["assets"])}
+                if isinstance(payload, dict):
+                    # Fallback: empty assets wrapper
+                    return {"assets": dict(payload.get("assets", {}))} if "assets" in payload else None
+            # Fallback: scan latest registry-bearing event
+            sid = f"{record.timeline_id}:timeline.timeline"
+            erow = conn.execute("SELECT payload_json FROM events WHERE stream_id = ? AND kind IN ('timeline.asset_registry_replaced','timeline.saved','timeline.config_replaced') ORDER BY seq DESC LIMIT 1", (sid,)).fetchone()
+            if erow is not None:
+                from astrid.core.receipts.canonical import parse_json as _parse
+                try:
+                    obj = _parse(erow["payload_json"])
+                except Exception:
+                    obj = None
+                if isinstance(obj, dict):
+                    data = obj.get("data") if isinstance(obj.get("data"), dict) else obj
+                    reg = data.get("registry") if isinstance(data, dict) else None
+                    if isinstance(reg, dict) and isinstance(reg.get("assets"), dict):
+                        return {"assets": dict(reg["assets"])}
+        finally:
+            conn.close()
+    except (OSError, RuntimeError, ValueError):
+        raise
+    except Exception:
+        return None
+    return None
+
+
 def _registry_from_legacy_assets(record: BridgeTimelineRecord) -> dict[str, Any] | None:
     """Legacy fallback: the pre-bridge ``assets.json`` sidecar written by
     project-migration tooling (its entries carry absolute source paths)."""
@@ -523,6 +570,21 @@ def _registry_from_legacy_assets(record: BridgeTimelineRecord) -> dict[str, Any]
     return None
 
 
+def _is_record_backfilled(record: BridgeTimelineRecord, *, root: str | Path | None = None) -> bool:
+    """Check backfill marker for this timeline; fail closed on unreadable marker."""
+    from astrid.core.foundation.project_paths import resolve_projects_root as _resolve_root
+    from astrid.packs.timeline.backfill import BackfillError, read_backfill_state
+
+    try:
+        projects_root = _resolve_root(root)
+        state = read_backfill_state(projects_root)
+    except BackfillError as exc:
+        raise RuntimeError(f"backfill authority marker is unreadable: {exc}") from exc
+    except OSError as exc:
+        raise RuntimeError(f"backfill authority marker is unreadable: {exc}") from exc
+    return record.timeline_id in state
+
+
 def _ensure_bridge_registry(
     record: BridgeTimelineRecord,
     *,
@@ -531,15 +593,30 @@ def _ensure_bridge_registry(
     """Return the registry payload, recovering and persisting it when the
     sidecar is missing.
 
-    Recovery order: ``registry.json`` sidecar → canonical event stream →
-    legacy ``assets.json`` → defensive source-file derivation. The sidecar is
-    written back when recovery succeeds so that every downstream reader
-    (including byte-range asset serving) sees the same authoritative assets
-    instead of re-deriving junk on each request.
+    Backfilled timelines recover registry from SQLite exclusively (single
+    authority). Marker read failure is a typed failure, never a silent legacy
+    fallback. Un-backfilled timelines keep the legacy recovery order:
+    event stream → assets.json → source derivation.
     """
     raw = _read_registry_payload(record.timeline_home / "registry.json")
     if "assets" in raw:
         return raw
+    # Marker-gated path: backfilled vs legacy.
+    try:
+        backfilled = _is_record_backfilled(record, root=root)
+    except Exception as exc:
+        # Typed failure on marker unreadable — never silently degrade.
+        raise RuntimeError(f"backfill marker failure for {record.timeline_id}: {exc}") from exc
+    if backfilled:
+        recovered = _registry_from_sqlite(record, root=root)
+        if recovered is not None:
+            write_json_atomic(record.timeline_home / "registry.json", recovered)
+            return recovered
+        # Backfilled but no registry in kernel: return empty assets, not stale JSONL.
+        empty: dict[str, Any] = {"assets": {}}
+        write_json_atomic(record.timeline_home / "registry.json", empty)
+        return empty
+    # Legacy un-backfilled path only: stale JSONL / assets.json / source derivation.
     recovered = _registry_from_event_stream(record)
     if recovered is None:
         recovered = _registry_from_legacy_assets(record)
@@ -547,7 +624,6 @@ def _ensure_bridge_registry(
         write_json_atomic(record.timeline_home / "registry.json", recovered)
         return recovered
     return _derive_registry_from_sources(record, root=root)
-
 
 def _bridge_asset_resolvable_from_record(
     record: BridgeTimelineRecord,
