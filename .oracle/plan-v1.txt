@@ -1,0 +1,75 @@
+[launch_hermes_agent] model=stealth/ox-alpha → resolved=stealth/ox-alpha toolsets=['file', 'web'] max_tokens=65536 context_budget_tokens=(auto)
+[launch_hermes_agent] NOTE: omp gives the full toolset (Bash, Read, Edit, web, …); the file/web/terminal subset is a superset here.
+[launch_hermes_agent] cwd=/workspace/reigh-phase-a-20260822/Astrid
+Working...
+# Phase B Build Plan — megado run
+
+**Grounding note (material):** the brief's cited inputs `docs-corpus/31-forward-map.md`, `27-build-spec.md`, `16-capability-map.md`, `29-ground-truth-sensecheck.md`, and `grok/worker-wgp-report.md` **do not exist anywhere in this repo or its git history** (checked all local and remote branches). `.oracle/agent_goal.md` (frozen contract) carries the B-1..B-6 summary and is used as the workstream authority; tasks below are grounded in actual HEAD code. See §3.
+
+### 1. Tasklist covering the ENTIRE agent goal
+
+Ordered. "DC" = done-criterion # from `agent_goal.md`. Existing seams every task builds on: registry `astrid/core/integrations/reigh/capabilities.py` (24 entries, bindings `wgp`/`vibecomfy`/`astrid_remotion`, `CapabilityEntry.template: tuple[path, sha256]` field already declared); admission/fences in `bridge_service.py` (`admit` R1, `admit_child` T8 envelope, fenced claim `/queue/claim`, heartbeat, completion via `multipart.py`); routes in `local_bridge_server.py`; generic executor seam `astrid/core/task_executor.py` (handler-outside-transaction, staging IDs, media descriptors); persistence `astrid/packs/shots/generation_repository.py` + migrations 0001/0002; probes table `AVAILABILITY_PROBES` (currently only `always_available`).
+
+| # | ID / title | Files | DC | Deps | Acceptance check |
+|---|---|---|---|---|---|
+| 1 | **B-0 Baseline lock**: record suite state incl. the two documented collection errors on phase-b HEAD | none (run only) | 6 | – | `python3 -m pytest tests -q` output archived to batch notes; failures ledger established |
+| 2 | **B-1a VibeComfy binding handler**: generic handler behind `task_executor` that loads a declared Comfy workflow template, verifies its SHA-256 against `entry.template[1]`, injects typed ports (prompt/image/mask/seed/size) per `required_inputs`, runs subprocess, collects outputs | new `astrid/core/integrations/reigh/bindings/vibecomfy_binding.py`; wire in `astrid/core/task_executor.py` handler registration; reuse `core/generation/backends/vibecomfy.py` port-injection logic | 1 | 1 | unit tests with deterministic stub workflow (CPU): digest mismatch refuses to run; typed-port injection covers t2i/i2i/edit shapes |
+| 3 | **B-1b Digest pinning enforcement**: template path+digest resolution at admission time; digest stamped into attempt params so replay uses identical bytes | `capabilities.py` (populate `template` tuples), `bridge_service.admit`, `generation_repository.record_completion` provenance | 1 | 2 | test: tampered workflow file ⇒ execution fails closed before any byte write |
+| 4 | **B-1c End-to-end journey**: one non-Wan capability (`reigh.qwen_image` or `z_image_turbo`) admitted via R1 → claimed → executed through real VibeComfy subprocess binding → completed via multipart route → generation row + managed-media bytes atomic | `tests/v10/test_multi_task_journey.py` pattern; `local_bridge_server.py` | 1 | 2–3 | journey test green; DC-1 satisfied |
+| 5 | **B-2 Capability fan-out**: validators + conformance fixtures for remaining ~15 capabilities (qwen family ×3, z_image+i2i, upscale, video_enhance, animate_character, flux_klein_edit, inpaint/annotated, render_export) | `capabilities.py` (validators already partly present in `FAMILY_VALIDATORS`), new fixtures under `tests/v10/` + `astrid/packs/shots/conformance.py` extensions | 2 | 4 | fixture per capability green; registry import-time validation still compiler-enforced (**review boundary after this task**) |
+| 6 | **B-3a Leased parent orchestration**: parent executors (`travel_orchestrator`, `join_clips_orchestrator`, `edit_video_orchestrator`) hold leases and admit children via T8 `child_admission` envelope with attempt-independent deterministic keys (`parent_attempt_id` excluded from child idempotency key) | `bridge_service.py` (`admit_child`), new orchestrator runner module, `tests/v10/test_fanout.py`/`test_contention.py` extensions | 3 | 5 | child keys stable across parent attempt retries; duplicate child replay returns same task |
+| 7 | **B-3b Transition table + interleaving suite**: checked parent/child state transitions; adversary scheduler proving zero duplicates and exactly-one parent-terminal | new `tests/v10/test_orchestrator_interleaving.py` | 3 | 6 | DC-3; suite enumerates crash/retry/race schedules deterministically |
+| 8 | **B-3c Port travel/join/edit families onto orchestrator children** end-to-end through gated R1 | orchestrator runner + bridge routes | 3 | 7 | journey tests per family; exactly-one terminal per parent |
+| 9 | **B-4 Wan2GP binding**: implement BINDING_WGP handler driving Wan2GP headless (mechanics from the missing WGP report — see §3), five-gate upgrade pipeline (fetch→verify→smoke→activate→proven), rollback drill N+1 accepted ⇒ roll back to N proven | new `bindings/wgp_binding.py`; pipeline driver; drill script/test | 4 | 4 | pipeline runs mechanically with stub/tiny model on CPU; rollback drill passes (**review boundary after B-3**) |
+| 10 | **B-5 Setup journal**: state machine (discovered→downloading→verifying→installed→advertised) journaled for crash-mid-download resume; signed version-pinned manifest; tier discovery; disk preflight; doctor repair of corrupt artifact; truthful advertisement wired into `AVAILABILITY_PROBES` | new `astrid/core/model_setup/` (journal, manifest, preflight); extend `astrid/core/doctor.py`; probe registrations in `capabilities.py` | 5 | 2 | journal resume test kills mid-download; doctor repairs corrupt artifact; uninstalled capability advertises unavailable and 422s (**review boundary after B-5**) |
+| 11 | **B-6 Conformance completion**: conformance hash computed over shipped fixtures, stamped into boot manifest at serve startup; startup fails closed on registry-digest disagreement | `packs/shots/conformance.py`, serve bootstrap in application composition, `local_bridge_server.boot` path | 6 | 5, 9, 10 | boot manifest carries hash; mutated registry ⇒ startup refuses |
+| 12 | **Phase exit verification**: full `python3 -m pytest tests -q` green minus baseline ledger; commit checkpoints pushed to `origin/phase-b` | none | 6 | 11 | DC-6; never merged to main |
+
+### 2. Additional areas to explore
+
+1. **VibeComfy scratchpad format + digest pinning mechanics.** `vibecomfy` is an external pip dependency (`comfy_wrap` requirements pin a GitHub URL). What exactly gets digested — ready-template YAML, resolved workflow JSON, or both — and whether templates live inside this repo or in the external package, determines whether B-1b pins can be verified offline.
+2. **ComfyUI CPU-mode viability on this box.** The machine is CPU-only (EPYC, no CUDA per non-goals). Must confirm which tiny/deterministic workflows actually complete under ComfyUI CPU mode versus needing a stub executor shim — this decides whether DC-1 is satisfiable "through the real subprocess binding" or needs a recorded exception.
+3. **Wan2GP headless driving contract.** `grok/worker-wgp-report.md` is absent; no WGP code exists beyond the `BINDING_WGP` constant. Gate order, CLI/API surface of Wan2GP, checkpoint layout, and rollback semantics are all ungrounded — B-4 cannot be estimated tightly without recovering or reconstructing this report.
+4. **Orchestrator child admission envelope shape.** `admit_child` validates `parent_task_id/parent_attempt_id/executor_id/lease_id/status_version/role/index` but the deterministic-key rule (which fields enter the idempotency key, and how `attempt_no` is excluded) is not yet pinned in code or available docs — B-3a must decide and test it first.
+5. **Setup-journal placement vs product SQLite.** North Star says one SQLite file is the only structured truth. Decide whether the setup journal lives in the product DB (new migration) or as a sidecar journal file treated as replay log, not authority — this is a North-Star-sensitive design choice before B-5.
+6. **Boot manifest ownership.** No "boot manifest" exists today (grep confirms). B-6 must define who emits it (application composition vs `local_bridge_server`), where it lives under the managed root, and what "registry digest" covers (`REGISTRY` entries? fixtures? both).
+7. **Availability probe truthfulness vs CPU reality.** `AVAILABILITY_PROBES` currently trivially true. B-5's "truthful advertisement" must define per-binding probe predicates that stay honest on a GPU-less box without permanently disabling the catalog.
+
+### 3. Open questions (plan-changing only)
+
+1. **Missing authoritative inputs.** `docs-corpus/*` and `grok/*` are referenced by the frozen contract but absent from every branch. Are they meant to be fetched from elsewhere (another workspace, an artifact store), or does `agent_goal.md` supersede them? This changes B-2/B-4 detail level; planning proceeded on `agent_goal.md` alone.
+2. **Does DC-1 permit a deterministic stub workflow inside the real VibeComfy subprocess**, or must it be a real model graph? Agent goal says "deterministic workflow acceptable on CPU" — confirm a synthetic SaveImage-only workflow qualifies.
+3. **WGP five gates:** are the five gates defined in the missing doc 27 §7-equivalent, or is the gate decomposition itself part of B-4 deliverable? Plan assumes we define them.
+
+### 4. Effort estimate
+
+Human-equivalent implementation effort, grounded in existing-code leverage:
+
+- B-1 (tasks 2–4): ~3–4 days. Binding handler + pinning + one E2E journey; heavy reuse of `backends/vibecomfy.py` injection logic and existing journey tests.
+- B-2 (task 5): ~3 days. Registry entries exist; work is validators, fixtures, conformance wiring across ~15 capabilities.
+- B-3 (tasks 6–8): ~5–7 days. Distributed-systems seam: leased parents, key discipline, adversarial interleaving suite — hardest correctness work.
+- B-4 (task 9): ~3–5 days plus external unknowns (Wan2GP behavior unverified here).
+- B-5 (task 10): ~4–5 days including crash/resume matrix and doctor repair.
+- B-6 + exit (tasks 11–12): ~2–3 days.
+
+Total ≈ **20–27 focused engineering-days (~4–5.5 weeks single-human)**, comfortably above the >2-week threshold ⇒ **huge-run determination: YES**, consistent with doc-30 predeclaration and the review boundaries after B-2, B-3, B-5. Risk concentration: B-4 (missing upstream report) and CPU-mode viability could each add days or force a `blocked` record per stop conditions.
+
+### 5. North Star check
+
+**Principles advanced:**
+- *One authority*: B-5 explicitly forces the setup-journal-vs-SQLite decision toward the single-authority rule (area 5); completion stays atomic through existing `record_completion` UoW.
+- *Correctness by primitives*: B-1b reuses receipts/CAS/digest fences (named tests per primitive); B-3 builds directly on existing lease/status_version fences rather than new machinery.
+- *Invisible failure*: B-3b's adversary suite and B-5's crash-mid-download resume are exactly orphan-or-replay proofs; B-1c proves no partial authority on the full path.
+- *Growth by declaration*: all ~15 B-2 capabilities land as data in the existing `REGISTRY` + validator tables — zero runtime plugins, zero schema churn beyond at most one migration.
+- *Honest latency*: unchanged polling/claim loop; no transport-coupled correctness introduced.
+
+**Anti-patterns avoided:**
+- No second placement authority: children admitted through the one `admit_child` gate; no mirror tables.
+- No cloud fallbacks/silent swaps: availability probes (B-5) make unavailability explicit 422, never silent rerouting; B-6 fails startup closed.
+- No plugin-law cosplay: bindings are three concrete constants, not an extension framework; B-1 adds a handler, not a handler *registry abstraction*.
+- No just-in-case multi-user machinery: worker-child allowlist and executor-only gate already bound the surface; nothing added beyond it.
+- Every abstraction names its option: the only new seam (binding handler) preserves the option to swap VibeComfy↔WGP implementations, which B-4 immediately exercises.
+
+Aligned-progress cadence honored: small batches, writer-queue-only mutations, docs-of-record updated at each review boundary (post-B-2/B-3/B-5), commits at checkpoints, push only at phase completion, never merge to main.
+[launch_hermes_agent] done in 323.6s (exit=0)
+0

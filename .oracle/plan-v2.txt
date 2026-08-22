@@ -1,3 +1,7 @@
+[launch_hermes_agent] model=stealth/ox-alpha → resolved=stealth/ox-alpha toolsets=['file', 'web'] max_tokens=65536 context_budget_tokens=(auto)
+[launch_hermes_agent] NOTE: omp gives the full toolset (Bash, Read, Edit, web, …); the file/web/terminal subset is a superset here.
+[launch_hermes_agent] cwd=/workspace/reigh-phase-a-20260822/Astrid
+Working...
 # Phase B Build Plan — megado run (v2, revised against explorer evidence)
 
 **Grounding note (updated, material):** v1 reported the cited inputs missing. They are now present: `docs-corpus/` (01–30) exists on this branch; **`docs-corpus/31-forward-map.md` and `grok/*` remain absent** — `agent_goal.md` (B-1..B-6 summary) + `docs-corpus/27-build-spec.md` (now including §9 Phase-B scope, line 343–349, which carries the five-gate definition verbatim) serve as the workstream authority. Seven explorer findings (`.oracle/findings/e1..e7`) resolve every open design question from v1 §2/§3. One v1 error corrected: the executor seam is the package **`astrid/core/task_executor/`** (`service.py`, `TaskHandler` protocol), not a flat `task_executor.py`.
@@ -93,9 +97,3 @@ Total ≈ **21–27 focused engineering-days (~4.5–5.5 weeks single-human)** �
 Cadence unchanged: small batches, writer-queue-only mutations, commits at checkpoints, push `phase-b` at phase completion, docs-of-record updated at each review boundary.
 [launch_hermes_agent] done in 360.2s (exit=0)
 0
-
-## v3 folds (STABLE - applied)
-- N1 receipt premise false: every completion UoW appends core.task.completed + >=1 core.media.imported unconditionally -> receipts always valid; registry merge conditional (skip legal).
-- CPU-mode DC-1 path: synthetic SaveImage-only workflow through the real subprocess binding.
-- WGP five gates defined: hermetic rebase build, contract tests, platform resolution, conversion fixtures, seeded corpus + semantic diff.
-- Setup journal = sidecar replay log NOT product SQLite; boot manifest emitted at serve composition root covering REGISTRY + fixtures digest.

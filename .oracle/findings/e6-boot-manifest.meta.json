@@ -1,0 +1,21 @@
+{
+  "brief": "/workspace/reigh-phase-a-20260822/Astrid/.oracle/briefs/explore/e6-boot-manifest.md",
+  "elapsed_s": 154.688,
+  "error": null,
+  "error_class": null,
+  "finish_reason": null,
+  "finished_at": "2026-08-22T13:19:27Z",
+  "meta_file": "/workspace/reigh-phase-a-20260822/Astrid/.oracle/findings/e6-boot-manifest.meta.json",
+  "model": "stealth/ox-alpha",
+  "pid": 452129,
+  "raw_result_keys": [
+    "stdout"
+  ],
+  "response_chars": 2380,
+  "response_file": "/workspace/reigh-phase-a-20260822/Astrid/.oracle/findings/e6-boot-manifest.txt",
+  "started_at": "2026-08-22T13:16:53Z",
+  "status": "ok",
+  "stem": "e6-boot-manifest",
+  "task_timeout_s": 1800,
+  "tool_calls": 0
+}

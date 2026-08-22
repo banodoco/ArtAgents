@@ -1,0 +1,17 @@
+[launch_hermes_agent] model=stealth/ox-alpha → resolved=stealth/ox-alpha toolsets=['file', 'web'] max_tokens=65536 context_budget_tokens=(auto)
+[launch_hermes_agent] NOTE: omp gives the full toolset (Bash, Read, Edit, web, …); the file/web/terminal subset is a superset here.
+[launch_hermes_agent] cwd=/workspace/reigh-phase-a-20260822/Astrid
+Working...
+STABLE
+
+Verification basis: all four recorded folds were checked line-by-line against `.oracle/plan.md` v2 (rows 2–12, §2, §3, §5) plus `.oracle/findings/e3-wgp-contract.md` and `docs-corpus/27-build-spec.md` §9:349. Folds (2) and (4) are already verbatim in task rows 4, 10, 11; fold (3)'s substance is already enumerated mechanically in task 9. Only three residue deltas survive, none structural:
+
+- **Task 3 (B-1b) acceptance row** — the E2 residual hazards are asserted in §2 prose ("folded into task 3 acceptance") but absent from the actual row. Fold: append to the row's acceptance check: torch/torchvision version-matched from the `+cpu` index (mixed installs fail `nms does not exist`), `comfyui==0.260` AppMana pin honored, harmless audio-node import noise filtered from subprocess logs.
+- **Task 10 (B-5) row** — resolves v2 §2 new-area #5, the last unassigned E-verdict residue: verification stamps live **in journal records only** (single probe-read location; no sibling stamp files — avoids a second authority surface); boot fast-path reads stored stamp + size, `doctor` deep re-hashes and rewrites the journal. Probes read exactly one place.
+- **Grounding correction (affects fold 3's citation)** — `grok-reports/worker-wgp-report.md` **does not exist in this repo** (`grok-reports/` contains only `second-opinion-decisions.md`; repo-wide glob confirms). The concrete five-gate definitions remain anchored to 27 §9:349 operationalized in `.oracle/findings/e3-wgp-contract.md` §Five gates (which carries the surviving `wgp-report §3` mechanics: two-level entry points, cwd/sys.argv spoof boundary, preset mapping, checkpoint layout). Update the v3 grounding note and open-question #1 accordingly; no gate content changes.
+
+Confirmed already-present (no delta): DC-1 vehicle = synthetic weightless `EmptyImage→SaveImage` through the real subprocess binding with digest verification (task 4, "zero exceptions"); setup journal = fsync'd sidecar JSONL replay log at `<root>/.astrid/setup/journal.jsonl`, never product SQLite, replayed pre-`derive_database_path` (task 10 + North Star §One authority); boot manifest emitted by `_dispatch_serve` at the serve composition root after `compose_standard_bridge()`, dual-scope digest over REGISTRY derived fields **plus** per-capability fixture digests, fail-closed startup (task 11).
+
+Effort band, review boundaries (post-B-2/B-3/B-5), huge-run determination, and anti-pattern ledger unchanged.
+[launch_hermes_agent] done in 155.7s (exit=0)
+0

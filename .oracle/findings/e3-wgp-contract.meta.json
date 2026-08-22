@@ -1,0 +1,21 @@
+{
+  "brief": "/workspace/reigh-phase-a-20260822/Astrid/.oracle/briefs/explore/e3-wgp-contract.md",
+  "elapsed_s": 273.667,
+  "error": null,
+  "error_class": null,
+  "finish_reason": null,
+  "finished_at": "2026-08-22T13:21:26Z",
+  "meta_file": "/workspace/reigh-phase-a-20260822/Astrid/.oracle/findings/e3-wgp-contract.meta.json",
+  "model": "stealth/ox-alpha",
+  "pid": 452128,
+  "raw_result_keys": [
+    "stdout"
+  ],
+  "response_chars": 2213,
+  "response_file": "/workspace/reigh-phase-a-20260822/Astrid/.oracle/findings/e3-wgp-contract.txt",
+  "started_at": "2026-08-22T13:16:53Z",
+  "status": "ok",
+  "stem": "e3-wgp-contract",
+  "task_timeout_s": 1800,
+  "tool_calls": 0
+}

@@ -1,0 +1,26 @@
+## Findings
+
+**Deterministic child key** — `bridge_service.py:674`: `expected_key = f"reigh.orch:v1:{parent_task_id}:{role}:{index}"`. Exactly three variable fields: parent task ULID, `role` (non-empty str), `index` (non-negative int, bool-excluded). Attempt number is deliberately absent, so a parent retry (new attempt of the same task) recomputes the identical key → kernel-level replay instead of duplicate child. Header mismatch ⇒ `403 child_admission_forbidden` (`:675-679`).
+
+**Envelope spec (live today)** — `body.child_admission` requires: `parent_task_id`, `parent_attempt_id`, `executor_id`, `lease_id`, `role` (non-empty strs), `status_version` (positive int), `index` (non-negative int) (`:639-673`). Gate order: envelope present → field types → key equality → `resolve_child_capability(family)` against `WORKER_CHILD_ALLOWLIST` (`capabilities.py:83-91`, `:573-593`; non-child ⇒ 403) → live parent fence (`:693-738`): parent exists + slug/project match (404), `parent.status == "running"` (else 409), attempt row matches `task_id`, status ∈ {claimed, running}, `executor_id`, `lease_id`, `status_version` all equal caller's (403), lease not expired (409, `:734`). Child created with `actor_kind="executor"`, `input_manifest=[]`, hard deps from `input.dependant_on` (`:759-770`).
+
+**Coverage today** — only `tests/integrations/reigh/test_task_routes.py::TestChildGate` (5 tests: valid admit, forged executor/lease, stale `status_version`, arbitrary key, public-only family through gate) plus `test_child_family_via_browser_path_is_forbidden`.
+
+## Gaps B-3 must close
+
+1. **Replay coordinator untested**: no 201→200 same-key replay, no proof that parent re-claim (attempt N+1) maps to the *same* child row, no zero-duplicates check.
+2. **Fence branches unexercised**: expired lease (409), non-running parent (409), wrong slug (404), unknown parent/attempt.
+3. **No deterministic-interleaving suite**: concurrent duplicate `(role,index)` admissions, adversary schedules, exactly-one-parent-terminal invariant — nothing exists.
+4. **Family coverage**: allowlist covers travel/join (`travel_segment`, `travel_stitch`, `join_clips_segment`, `join_final_stitch`, `join_clips_orchestrator`) but **edit has no child entries** — no child-only capability under `edit_video_orchestrator`. Also `travel_stitch`/`join_clips_orchestrator` are allowlisted yet not `child_only=True` in `REGISTRY` (`capabilities.py:320,376`) — inconsistent vs `:414-433`.
+5. **Dependency wiring** (`dependant_on` → hard deps) untested.
+
+## Envelope to implement/test
+
+```
+POST /projects/{slug}/tasks   Idempotency-Key: reigh.orch:v1:{parent_task_id}:{role}:{index}
+{"family": <child-family>, "input": {..., "dependant_on": [task_id...]},
+ "child_admission": {parent_task_id, parent_attempt_id, executor_id,
+                     lease_id, status_version>0, role, index>=0}}
+```
+Tests required per B-3: key-replay determinism across attempts, every fence-failure branch, cross-parent/cross-role key isolation, duplicate-admission single-row, and an interleaving suite proving zero duplicates + one parent-terminal.
+0

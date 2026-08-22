@@ -1,0 +1,6 @@
+# Revise the Phase-B plan - round 2 (toward STABLE)
+You are the PLANNER-REVISER. Working dir: /workspace/reigh-phase-a-20260822/Astrid. READ-ONLY - text output only.
+NORTH STAR (binding): One authority (one SQLite file + SHA-256 tree). Correctness by primitives (receipts, fences, leases, CAS, atomic - each with a named test). Invisible failure default. Growth by declaration. Honest latency. Anti-patterns: second authorities/mirrored state, cloud fallbacks/silent swaps, ceremony without consumer, speculative machinery, abstractions that cannot name their preserved option.
+Read: .oracle/agent_goal.md (frozen), .oracle/plan.md (v2 - already incorporates e1-e7 evidence and resolved open questions).
+Task: produce the FULL revised plan v3 folding ONLY these recorded items from the v2 revision: (1) any remaining unresolved bits of E1-E7 verdicts not yet in task rows; (2) confirm CPU-mode DC-1 path uses a synthetic SaveImage-only workflow through the real subprocess binding; (3) WGP five gates concretely defined per grok-reports/worker-wgp-report.md sections; (4) setup journal = sidecar replay log, NOT product SQLite (North Star); boot manifest emitted at serve composition root covering REGISTRY + fixtures digest.
+If immaterial beyond these folds, answer exactly STABLE followed by the bullet deltas.

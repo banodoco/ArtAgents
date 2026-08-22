@@ -1,0 +1,23 @@
+[launch_hermes_agent] model=stealth/ox-alpha → resolved=stealth/ox-alpha toolsets=['file', 'web'] max_tokens=65536 context_budget_tokens=(auto)
+[launch_hermes_agent] NOTE: omp gives the full toolset (Bash, Read, Edit, web, …); the file/web/terminal subset is a superset here.
+[launch_hermes_agent] cwd=/workspace/reigh-phase-a-20260822/Astrid
+Working...
+**Verdict: PASS with one blocking fix** — otherwise ready to freeze.
+
+## Blocking finding
+
+**(4) Acceptance commands not runnable as written.** Every batch validation line runs `python3 -m pytest tests/v10 tests/integrations/reigh tests/packs/shots -x -q`, but **`tests/packs/shots` does not exist** (`tests/packs/` has no `shots/` subdir; verified by filesystem listing). Pytest exits with usage error 4 ("file or directory not found") before running any test, so the per-batch checkpoint gate fails mechanically every time. The path was inherited verbatim from `agent_goal.md:40`, but the tasklist's own standard is "oracle-verified exactly." **Fix:** replace `tests/packs/shots` → `tests/packs` in all 10 validation lines and the B3 scoped command (`tests/packs/shots -q -k conformance` → `tests/packs -q -k conformance`). Module references are fine — `astrid/packs/shots/conformance.py` exists. Other referenced paths verified present: `tests/v10/test_multi_task_journey.py`, `tests/integrations/reigh/test_task_routes.py`; new files (`test_orchestrator_interleaving.py`) are batch-created, acceptable.
+
+## Checks that pass
+
+1. **Completeness:** DC-1→B2, DC-2→B3, DC-3→B4+T5.1+B6, DC-4→B7, DC-5→B8, DC-6→T1.1 baseline + B10 diff-vs-ledger. All six covered by ≥1 named acceptance.
+2. **Alignment:** every batch maps to North Star principles and names rejected anti-patterns (digest-the-code, SQLite journal as second authority, CUDA probes, receipt extension). Journal-as-replay-log preserves one-authority correctly.
+3. **Dependencies honest:** B1 pin-before-vendor ordering constraint explicit; fan-out (B3) strictly after journey-green B2; probe `(ok, missing)` signature produced in B3, consumed B8; T7.1 vendoring gates T7.2 internally; B9 terminal consumer of registry/fixtures/manifest/probes. Graph acyclic, matches sync points.
+4. *(fix above)*
+5. **[XHARD]:** five tags (T2.1, T5.1, T7.2, T8.1, T9.1), each with justification plus concrete evidence deliverables (named fail-closed paths, enumerated schedules, rollback drill, kill-mid fixtures, both drift directions). No demotions needed.
+6. **Boundaries:** R1/R2/R3 land exactly at B-2/B-3/B-4+B-5 workstream completions with seam rationale matching the goal's predeclared determination.
+7. **Sync authorization:** phase-b only, commit per batch checkpoint, push at exit, never merge main — encoded in header and B10 acceptance (`origin/phase-b` up to date, `main` untouched).
+
+Apply the path fix, then freeze.
+[launch_hermes_agent] done in 146.0s (exit=0)
+0
