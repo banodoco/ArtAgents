@@ -38,4 +38,4 @@ jobs:
       - name: Python tests
         run: |
           pip install -e python
-          python -m unittest discover -s python/tests -p 'test_*.py' || true
+          python -m unittest discover -s tests -p 'test_*.py'
