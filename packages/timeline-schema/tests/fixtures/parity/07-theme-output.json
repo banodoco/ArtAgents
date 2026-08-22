@@ -1,0 +1,8 @@
+{
+  "theme": "2rp",
+  "theme_overrides": {"visual": {"canvas": {"width": 1280, "height": 720, "fps": 24}}},
+  "generation_defaults": {"voice": {"model": "default"}},
+  "output": {"resolution": "1280x720", "fps": 24, "file": "out.mp4", "background": "#000000", "background_scale": 1.0},
+  "clips": [],
+  "tracks": []
+}

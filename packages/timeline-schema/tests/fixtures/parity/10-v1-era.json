@@ -1,0 +1,7 @@
+{
+  "theme": "banodoco-default",
+  "clips": [
+    {"id": "legacy1", "at": 0.0, "track": "V1", "clipType": "hold", "hold": 1.0}
+  ],
+  "output": {"resolution": "1920x1080", "fps": 30, "file": "legacy.mp4"}
+}

@@ -1,0 +1,12 @@
+{
+  "clips": [
+    {
+      "id": "a1", "at": 0.0, "track": "V1", "clipType": "hold", "hold": 1.0,
+      "app": {"com.reigh.scene-phase-markers": {"phase": "mid", "markers": [1.0, 2.0]}}
+    }
+  ],
+  "tracks": [
+    {"id": "V1", "kind": "visual", "label": "V1", "app": {"com.reigh.track-notes": {"note": "wide shot"}}}
+  ],
+  "app": {"com.reigh.project-meta": {"owner": "orchestrator", "tags": ["b3", "parity"]}}
+}

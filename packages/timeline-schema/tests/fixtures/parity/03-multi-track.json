@@ -1,0 +1,10 @@
+{
+  "clips": [
+    {"id": "c1", "at": 0.0, "track": "V1", "clipType": "hold", "hold": 1.5},
+    {"id": "c2", "at": 0.0, "track": "A1", "clipType": "audio", "asset": "a-song", "from": 0.0, "to": 3.0, "volume": 0.8}
+  ],
+  "tracks": [
+    {"id": "V1", "kind": "visual", "label": "V1"},
+    {"id": "A1", "kind": "audio", "label": "A1", "volume": 1.0}
+  ]
+}

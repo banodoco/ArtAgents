@@ -1,0 +1,9 @@
+{
+  "theme": "banodoco-default",
+  "clips": [
+    {"id": "c1", "at": 0.0, "track": "V1", "clipType": "hold", "hold": 2.0}
+  ],
+  "tracks": [
+    {"id": "V1", "kind": "visual", "label": "V1"}
+  ]
+}

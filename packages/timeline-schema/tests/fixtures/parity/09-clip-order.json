@@ -1,0 +1,10 @@
+{
+  "clips": [
+    {"id": "o1", "at": 0.0, "track": "V1", "clipType": "hold", "hold": 1.0, "clip_order": 1, "effects": {"fade_in": 0.2}},
+    {"id": "o2", "at": 1.0, "track": "V1", "clipType": "hold", "hold": 1.0, "clip_order": 2, "transition": {"type": "crossfade", "duration": 0.3}},
+    {"id": "o3", "at": 2.0, "track": "V1", "clipType": "hold", "hold": 1.0, "clip_order": 3}
+  ],
+  "tracks": [
+    {"id": "V1", "kind": "visual", "label": "V1"}
+  ]
+}

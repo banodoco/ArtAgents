@@ -1,0 +1,11 @@
+{
+  "clips": [
+    {
+      "id": "d1", "at": 0.0, "track": "V1", "clipType": "video", "asset": "src-clip", "from": 0.0, "to": 4.0,
+      "derived_output": {"render": {"file": "render/d1.mp4", "status": "done"}}
+    }
+  ],
+  "tracks": [
+    {"id": "V1", "kind": "visual", "label": "V1"}
+  ]
+}

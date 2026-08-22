@@ -1,0 +1,12 @@
+{
+  "clips": [
+    {"id": "p1", "at": 0.0, "track": "V1", "clipType": "video", "asset": "shot-a", "from": 0.0, "to": 2.0},
+    {"id": "p2", "at": 2.0, "track": "V1", "clipType": "video", "asset": "shot-b", "from": 0.0, "to": 2.0}
+  ],
+  "tracks": [
+    {"id": "V1", "kind": "visual", "label": "V1"}
+  ],
+  "pinnedShotGroups": [
+    {"shotId": "shot-1", "trackId": "V1", "clipIds": ["p1", "p2"], "mode": "images"}
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "clips": [
+    {
+      "id": "k1", "at": 0.0, "track": "V1", "clipType": "hold", "hold": 3.0,
+      "keyframes": {"opacity": [{"time": 0.0, "value": 0.0}, {"time": 3.0, "value": 1.0}]}
+    }
+  ],
+  "tracks": [
+    {"id": "V1", "kind": "visual", "label": "V1"}
+  ]
+}
