@@ -392,6 +392,7 @@ def _append_pack_run_started(run_root: Path) -> None:
         handle.write(json.dumps(ev, sort_keys=True, separators=(",", ":")) + "\n")
 
 
+
 def run_orchestrator(args: argparse.Namespace) -> int:
     """Emit plan v2 and execute steps directly (kernel is authority, no run.json)."""
     args.out.mkdir(parents=True, exist_ok=True)
