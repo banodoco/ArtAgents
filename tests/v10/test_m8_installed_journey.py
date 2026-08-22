@@ -209,12 +209,17 @@ class DeterministicUnderstandingProvider:
         }
 
 
-def http_json(url, method="GET", body=None):
+def http_json(url, method="GET", body=None, token=None):
+    headers = {"Content-Type": "application/json"} if body is not None else {}
+    if token is not None:
+        # Local-trust posture (doc 27 §4.7): mutations carry the per-boot
+        # request token the launcher delivers out of band.
+        headers["X-Astrid-Request-Token"] = token
     request = Request(
         url,
         data=(json.dumps(body, sort_keys=True).encode() if body is not None else None),
         method=method,
-        headers={"Content-Type": "application/json"} if body is not None else {},
+        headers=headers,
     )
     try:
         with urlopen(request, timeout=10) as response:
@@ -681,6 +686,7 @@ try:
                                 **body_base,
                                 "config": {"fps": 24, "contender": index},
                             },
+                            token=server.request_token,
                         )
                         with lock:
                             responses.append((status, payload))
