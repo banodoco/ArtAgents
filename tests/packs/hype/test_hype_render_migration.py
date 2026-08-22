@@ -46,20 +46,23 @@ def test_hype_render_step_uses_qualified_facade_and_declares_pair(
     assert render_step.build_cmd(args) == [
         "/opt/python",
         "-m",
-        "astrid",
-        "executors",
-        "run",
-        "rendering.render",
+        "astrid.packs.rendering.executors.render.run",
+        "--timeline",
+        str(args.brief_out / "hype.timeline.json"),
+        "--assets",
+        str(args.brief_out / "hype.assets.json"),
         "--out",
         str(args.brief_out),
-        "--input",
-        f"timeline={args.brief_out / 'hype.timeline.json'}",
-        "--input",
-        f"assets_registry={args.brief_out / 'hype.assets.json'}",
-        "--input",
-        f"theme={args.theme}",
     ]
-    assert "astrid.packs.rendering" not in " ".join(render_step.build_cmd(args))
+    # The child reaches the neutral render facade (never a concrete
+    # backend), matching the pack-orchestrator child convention after the
+    # gateway `executors run` family was retired.
+    assert "astrid.packs.rendering.executors.render.run" in " ".join(
+        render_step.build_cmd(args)
+    )
+    assert "astrid.packs.rendering.backends" not in " ".join(
+        render_step.build_cmd(args)
+    )
 
     calls: list[dict[str, object]] = []
     monkeypatch.setattr(

@@ -81,6 +81,13 @@ _ALLOWED_FILES: dict[str, str] = {
         "render facade: neutral adapter that delegates all dispatch to "
         "RenderService"
     ),
+    "astrid/packs/video_editing/orchestrators/hype/steps.py": (
+        "hype render step: orchestrator child invocation of the neutral "
+        "render facade (the gateway `executors run` family was retired with "
+        "the task-mode runtime; pack orchestrators invoke capability run "
+        "modules directly under ASTRID_INTERNAL_INVOCATION, same as the "
+        "editorial children). Reaches only the facade, never a backend."
+    ),
     "astrid/packs/rendering/executors/render/__init__.py": (
         "render facade package marker"
     ),
