@@ -37,23 +37,34 @@ def main() -> int:
     generated = GENERATED.read_text(encoding="utf-8")
 
     failures: list[str] = []
-    for name, definition in definitions.items():
+    # The document root is itself a type: emit-ts-types.mjs compiles it under
+    # its `title` (TimelineConfig), and the mirror declares it as a TypedDict
+    # of that name. Check its properties too, so root drift (e.g. a removed
+    # `theme` property) cannot pass silently.
+    checks: list[tuple[str, dict]] = list(definitions.items())
+    root_title = schema.get("title")
+    if root_title:
+        checks.append((root_title, schema))
+
+    for name, definition in checks:
         # The generated file must declare a TypedDict with this name, either
         # `Name = TypedDict(...)` or `class Name(TypedDict, ...)`.
-        if not re.search(
+        match = re.search(
             rf"^(?:class )?{re.escape(name)}(?:\(TypedDict|\s*=\s*TypedDict)",
             generated,
             re.MULTILINE,
-        ):
+        )
+        if match is None:
             failures.append(f"generated.py missing TypedDict for definition '{name}'")
             continue
+        # Slice the TypedDict body at the next top-level `class` declaration:
+        # a key line from a LATER class must not satisfy this class's keys.
+        tail = generated[match.end():]
+        next_class = re.search(r"^class ", tail, re.MULTILINE)
+        body = tail if next_class is None else tail[:next_class.start()]
         # Every schema property must appear as a key line in the TypedDict
         # body (Python keyword `from` is written `from_`).
         properties = definition.get("properties", {})
-        match = re.search(rf"^(?:class )?{re.escape(name)}(?:\(TypedDict|\s*=\s*TypedDict)", generated, re.MULTILINE)
-        if match is None:
-            continue  # already reported above
-        body = generated[match.end():]
         for key in properties:
             key_alias = "from_" if key == "from" else key
             if not re.search(rf"^\s+{re.escape(key_alias)}:", body, re.MULTILINE):
@@ -65,7 +76,8 @@ def main() -> int:
             print(f"  - {failure}", file=sys.stderr)
         return 1
 
-    print(f"generated.py consistent with {len(definitions)} definitions")
+    root_note = f" and document root '{root_title}'" if root_title else ""
+    print(f"generated.py consistent with {len(definitions)} definitions{root_note}")
     return 0
 
 

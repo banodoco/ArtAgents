@@ -1,1 +1,0 @@
-https://banodoco.dev/schemas/timeline/v2.json

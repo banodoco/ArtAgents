@@ -33,7 +33,7 @@ fi
 # 1b. Stable-$id gate: the artifact must carry a stable $id that stays
 # unchanged against the committed expectation. Renaming the schema's
 # identity silently breaks downstream $ref bases and version tooling.
-EXPECTED_ID=$(cat scripts/expected-schema-id.txt)
+EXPECTED_ID='https://banodoco.dev/schemas/timeline/v2.json'
 ACTUAL_ID=$("$PYTHON" - "$SCHEMA" <<'EOF'
 import json
 import sys
@@ -46,7 +46,7 @@ if [ -z "$ACTUAL_ID" ]; then
     fail "$SCHEMA lacks a stable \$id (expected '$EXPECTED_ID')"
 fi
 if [ "$ACTUAL_ID" != "$EXPECTED_ID" ]; then
-    fail "$SCHEMA \$id changed: expected '$EXPECTED_ID', got '$ACTUAL_ID' — update scripts/expected-schema-id.txt only if intentional"
+    fail "$SCHEMA \$id changed: expected '$EXPECTED_ID', got '$ACTUAL_ID' — bump EXPECTED_ID in scripts/check-codegen.sh only if intentional"
 fi
 echo "artifact: stable \$id '$ACTUAL_ID'"
 
