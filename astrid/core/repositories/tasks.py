@@ -745,18 +745,19 @@ class TaskRetryReadModel:
 class TaskOutputReadModel:
     """One immutable ordered task output (m2 plan step 10, T18).
 
-    A frozen projection of one ``task_outputs`` row: the deterministic
-    ``ordinal`` within the completing task, the ``role`` (``"result"`` for
-    the primary result output), the materialized ``media_id`` (project-scoped
-    byte-identity), the ``is_primary`` flag, and the caller-supplied output
-    ``params`` (label, staging-relative path, digest evidence). ``to_dict``
-    is the JSON-safe persisted shape and ``from_mapping`` rebuilds it for
-    exact replay.
+        A frozen projection of one ordered completion output: the deterministic
+        ``ordinal`` within the completing task, the ``role`` (``"result"`` for
+        the primary output), the materialized ``media_id`` (project-scoped
+        byte-identity; ``None`` for an evidence output, which declares no
+        media identity), the ``is_primary`` flag, and the caller-supplied
+        output ``params`` (label, staging-relative path, digest evidence).
+        ``to_dict`` is the JSON-safe persisted shape and ``from_mapping``
+        rebuilds it for exact replay.
     """
 
     ordinal: int
     role: str
-    media_id: str
+    media_id: str | None
     is_primary: bool
     params: Mapping[str, Any]
     created_at: str
@@ -773,10 +774,12 @@ class TaskOutputReadModel:
             raise TaskValidationError(
                 f"output role must be a non-empty string, got {self.role!r}"
             )
-        if not isinstance(self.media_id, str) or not self.media_id:
+        if self.media_id is not None and (
+            not isinstance(self.media_id, str) or not self.media_id
+        ):
             raise TaskValidationError(
-                f"output media_id must be a non-empty string, "
-                f"got {self.media_id!r}"
+                f"output media_id must be a non-empty string or None "
+                f"(evidence output), got {self.media_id!r}"
             )
         if self.role != "result" and self.is_primary:
             raise TaskValidationError(
@@ -801,7 +804,10 @@ class TaskOutputReadModel:
         return cls(
             ordinal=int(value["ordinal"]),
             role=str(value["role"]),
-            media_id=str(value["media_id"]),
+            media_id=(
+                None if value.get("media_id") is None
+                else str(value["media_id"])
+            ),
             is_primary=bool(value["is_primary"]),
             params=dict(value.get("params") or {}),
             created_at=str(value["created_at"]),
@@ -818,7 +824,9 @@ class TaskCompleteReadModel:
     ``finished_at`` set), the ordered materialized outputs, every ordered
     event id the completion appended (media imported/related events in
     ordinal order followed by the ``core.task.completed`` event), and —
-    when the task belongs to a run — the refreshed run projection mapping.
+    when the task belongs to a run — the refreshed run projection mapping,
+    plus the optional caller-supplied ``result`` summary when one rode with
+    the completion.
     ``to_dict`` is the JSON-safe persisted shape and ``from_mapping``
     rebuilds it for exact replay.
     """
@@ -828,6 +836,7 @@ class TaskCompleteReadModel:
     outputs: tuple[TaskOutputReadModel, ...]
     event_ids: tuple[str, ...]
     run: Mapping[str, Any] | None
+    result: Mapping[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Return the JSON-safe dict persisted as the receipt result."""
@@ -837,6 +846,7 @@ class TaskCompleteReadModel:
             "outputs": [output.to_dict() for output in self.outputs],
             "event_ids": list(self.event_ids),
             "run": dict(self.run) if self.run is not None else None,
+            "result": dict(self.result) if self.result is not None else None,
         }
 
     @classmethod
@@ -851,6 +861,10 @@ class TaskCompleteReadModel:
             ),
             event_ids=tuple(str(event_id) for event_id in (value.get("event_ids") or [])),
             run=dict(value["run"]) if value.get("run") is not None else None,
+            result=(
+                dict(value["result"]) if value.get("result") is not None
+                else None
+            ),
         )
 
 
@@ -3525,6 +3539,7 @@ class TaskRepository:
         expected_status_version: int,
         idempotency_key: str,
         outputs: Sequence[Mapping[str, Any]],
+        result: Mapping[str, Any] | None = None,
         media_repo: Any,
         actor_kind: str = "local",
         now: str | None = None,
@@ -3557,17 +3572,25 @@ class TaskRepository:
         predicates select exactly one winning attempt, and a losing or
         stale completion materializes no media, no output, and no receipt.
 
-        *outputs* is the ordered list of validated prepared outputs; each
-        entry is a mapping of ``ordinal`` (non-negative int), ``is_primary``
-        (bool — exactly one per task), ``role`` (``"result"`` for the
-        primary; the DDL CHECK forbids ``is_primary`` on other roles),
-        ``label``/``path`` (optional metadata persisted in ``params_json``),
-        and ``prepared`` (the immutable :class:`PreparedMedia` record, byte
-        identity). Optional ``media_id``/``realm``/``locator``/``relations``
-        keys are passed through to the media materialization. ``media_repo``
-        is the caller's media repository (duck-typed on
-        ``materialize_prepared``); the kernel never constructs a second
-        writer.
+        *outputs* is the ordered list of validated outputs of two kinds.
+        Prepared-media entries carry ``ordinal`` (non-negative int),
+        ``is_primary`` (bool — exactly one across the whole list), ``role``
+        (``"result"`` for the primary; the DDL CHECK forbids ``is_primary``
+        on other roles), optional ``label``/``path`` metadata persisted in
+        ``params_json``, and the immutable :class:`PreparedMedia` record
+        (byte identity); optional ``media_id``/``realm``/``locator``/
+        ``relations`` keys pass through to the media materialization.
+        Evidence entries carry no ``prepared`` record — only optional
+        ``path``/``label``/``digest`` facts and a ``byte_size`` count — and
+        persist with a NULL ``media_id`` (their facts ride in the completed
+        event payload and the receipt's result_json), because
+        ``task_outputs.media_id`` stays NOT NULL. ``media_repo`` is the
+        caller's media repository (duck-typed on ``materialize_prepared``);
+        the kernel never constructs a second writer. *result* is an
+        optional non-empty mapping of caller-supplied summary facts that
+        rides in the ``core.task.completed`` event payload and the receipt's
+        result_json; a completion needs at least one output or such a
+        summary — zero-output completions without one stay rejected.
 
         Idempotency: the receipt gate runs first. An identical retry under
         the same key returns exactly the stored completion with zero new
@@ -3600,7 +3623,20 @@ class TaskRepository:
                 "in-UoW media primitive (T17), got "
                 f"{type(media_repo).__name__}"
             )
+        if result is not None and (
+            isinstance(result, (str, bytes)) or not isinstance(result, Mapping)
+        ):
+            raise TaskValidationError(
+                "result must be a mapping of JSON-safe summary facts when "
+                f"provided, got {type(result).__name__}"
+            )
         normalized_outputs = self._normalize_completion_outputs(outputs)
+        result_summary = dict(result) if result else None
+        if not normalized_outputs and result_summary is None:
+            raise TaskValidationError(
+                "complete requires at least one materialized output or a "
+                "non-empty result summary"
+            )
 
         # Semantic request identity: the fenced transition plus every
         # caller-supplied output fact. Generated state (media/location ids,
@@ -3608,7 +3644,9 @@ class TaskRepository:
         # prepared record's filesystem source path is excluded — media
         # identity is byte SHA-256 alone (SD2), so a re-execution after a
         # crash that re-prepares identical bytes at a fresh staging path
-        # replays instead of mismatching.
+        # replays instead of mismatching. A result summary joins the
+        # identity only when present, so receipts recorded before summaries
+        # existed still replay unchanged.
         request: dict[str, Any] = {
             "task_id": task_id,
             "attempt_id": attempt_id,
@@ -3618,6 +3656,8 @@ class TaskRepository:
                 self._output_request_identity(entry) for entry in normalized_outputs
             ],
         }
+        if result_summary is not None:
+            request["result"] = result_summary
         try:
             request_digest = request_hash(command_kind, request)
         except CanonicalizationError as exc:
@@ -3713,6 +3753,11 @@ class TaskRepository:
         #    receipt is written by the primitive.
         materialized: list[dict[str, Any]] = []
         for index, entry in enumerate(normalized_outputs):
+            if "prepared" not in entry:
+                # Evidence output: no media identity exists, so nothing is
+                # materialized; its declared facts ride in the completed
+                # event payload and receipt below.
+                continue
             materialize_args: dict[str, Any] = {
                 "project_id": project_id,
                 "prepared": entry["prepared"],
@@ -3728,7 +3773,9 @@ class TaskRepository:
                 materialize_args["locator"] = entry["locator"]
             if entry.get("relations") is not None:
                 materialize_args["relations"] = entry["relations"]
-            result = media_repo.materialize_prepared(uow, **materialize_args)
+            materialized_media = media_repo.materialize_prepared(
+                uow, **materialize_args
+            )
             materialized.append(
                 {
                     "ordinal": entry["ordinal"],
@@ -3737,7 +3784,7 @@ class TaskRepository:
                     "label": entry.get("label"),
                     "path": entry.get("path"),
                     "prepared": entry["prepared"],
-                    "media_id": result.media_id,
+                    "media_id": materialized_media.media_id,
                 }
             )
 
@@ -3781,6 +3828,29 @@ class TaskRepository:
                     created_at=stamp,
                 )
             )
+
+        # Evidence outputs persist outside task_outputs (its media_id stays
+        # NOT NULL): read-model entries with a NULL media_id whose params
+        # carry the declared facts, kept in one ordinal-ordered list.
+        for entry in normalized_outputs:
+            if "prepared" in entry:
+                continue
+            params = {
+                key: entry[key]
+                for key in ("path", "digest", "byte_size", "label")
+                if key in entry
+            }
+            output_models.append(
+                TaskOutputReadModel(
+                    ordinal=entry["ordinal"],
+                    role=entry["role"],
+                    media_id=None,
+                    is_primary=entry["is_primary"],
+                    params=params,
+                    created_at=stamp,
+                )
+            )
+        output_models.sort(key=lambda model: model.ordinal)
 
         # 3. The attempt terminates succeeded: version +1, finished_at set,
         #    fenced on the exact live status and version so a concurrent
@@ -3842,24 +3912,36 @@ class TaskRepository:
             )
 
         # 7. The hash-chained core.task.completed event on the task stream.
+        media_id_by_ordinal = {
+            entry["ordinal"]: entry["media_id"] for entry in materialized
+        }
+        event_outputs: list[dict[str, Any]] = []
+        for entry in normalized_outputs:
+            item: dict[str, Any] = {
+                "ordinal": entry["ordinal"],
+                "role": entry["role"],
+                "is_primary": entry["is_primary"],
+            }
+            if "prepared" in entry:
+                item["media_id"] = media_id_by_ordinal[entry["ordinal"]]
+                item["content_hash"] = entry["prepared"].digest
+            else:
+                item["media_id"] = None
+                for key in ("path", "digest", "byte_size", "label"):
+                    if key in entry:
+                        item[key] = entry[key]
+            event_outputs.append(item)
         event_data: dict[str, Any] = {
             "task_id": task_id,
             "attempt_id": attempt_id,
             "attempt_no": int(attempt_row["attempt_no"]),
             "status_version": next_version,
             "winning_attempt_id": attempt_id,
-            "outputs": [
-                {
-                    "ordinal": entry["ordinal"],
-                    "role": entry["role"],
-                    "media_id": entry["media_id"],
-                    "is_primary": entry["is_primary"],
-                    "content_hash": entry["prepared"].digest,
-                }
-                for entry in materialized
-            ],
+            "outputs": event_outputs,
             "unblocked_dependents": unblocked,
         }
+        if result_summary is not None:
+            event_data["result"] = dict(result_summary)
         changes: list[str] = [
             "attempt_status",
             "task_status",
@@ -3869,6 +3951,8 @@ class TaskRepository:
             "outputs",
             "unblocked_dependents",
         ]
+        if result_summary is not None:
+            changes.append("result")
         append = self._events.append(
             uow,
             stream_id=stream_id,
@@ -3911,12 +3995,13 @@ class TaskRepository:
         )
         if fresh is None:  # pragma: no cover - deleted rows cannot reappear
             raise TaskAttemptNotFoundError(attempt_id=attempt_id)
-        result = TaskCompleteReadModel(
+        completed = TaskCompleteReadModel(
             task=task_model,
             attempt=self._attempt_read_model(fresh),
             outputs=tuple(output_models),
             event_ids=event_ids,
             run=run_projection,
+            result=result_summary,
         )
         self._receipts.record(
             uow,
@@ -3928,12 +4013,12 @@ class TaskRepository:
             first_project_seq=first_seq,
             last_project_seq=last_seq,
             event_ids=list(event_ids),
-            result=result.to_dict(),
+            result=completed.to_dict(),
             primary_stream_id=stream_id,
             resulting_stream_seq=append.stream_seq,
             created_at=stamp,
         )
-        return result
+        return completed
 
     # -- completion helpers ------------------------------------------------
 
@@ -3944,23 +4029,27 @@ class TaskRepository:
         """Validate and order one completion command's output list.
 
         Every rule that can be decided from the request alone runs here,
-        before hashing and before any SQL: the output list is non-empty,
-        each entry is a mapping with a unique non-negative ``ordinal``, a
-        boolean ``is_primary`` (exactly one per task), a role string
-        (``"result"`` for the primary; the DDL CHECK forbids primary on
-        other roles), and an immutable :class:`PreparedMedia` record.
-        Returns the entries ordered by ordinal (ties impossible after the
-        uniqueness check).
+        before hashing and before any SQL: each entry is a mapping with a
+        unique non-negative ``ordinal``, a boolean ``is_primary`` (exactly
+        one across the whole list), and a role string (``"result"`` for the
+        primary; the DDL CHECK forbids primary on other roles). Two entry
+        kinds are accepted: a prepared-media entry carries the immutable
+        :class:`PreparedMedia` ``prepared`` record (byte identity) plus
+        optional ``label``/``path`` metadata and optional
+        ``media_id``/``realm``/``locator``/``relations`` passthrough keys;
+        an evidence entry carries no ``prepared`` record — only optional
+        ``path``/``label``/``digest`` strings and a non-negative
+        ``byte_size`` — and must not declare media materialization keys. An
+        empty list is legal here; whether a completion may ship zero
+        outputs at all (at least one output or a non-empty result summary)
+        is :meth:`complete`'s decision. Returns the entries ordered by
+        ordinal (ties impossible after the uniqueness check).
         """
         if isinstance(outputs, (str, bytes)) or not isinstance(
             outputs, Sequence
         ):
             raise TaskValidationError(
-                "outputs must be a non-empty sequence of output mappings"
-            )
-        if not outputs:
-            raise TaskValidationError(
-                "complete requires at least one materialized output"
+                "outputs must be a sequence of output mappings"
             )
         normalized: list[dict[str, Any]] = []
         seen_ordinals: set[int] = set()
@@ -4003,37 +4092,76 @@ class TaskRepository:
                     "primary (DDL CHECK role = 'result' OR is_primary = 0)"
                 )
             prepared = raw.get("prepared")
-            if not isinstance(prepared, PreparedMedia):
-                raise TaskValidationError(
-                    f"outputs[{index}].prepared must be a PreparedMedia "
-                    f"record, got {type(prepared).__name__}"
-                )
-            entry: dict[str, Any] = {
-                "ordinal": ordinal,
-                "is_primary": is_primary,
-                "role": role,
-                "prepared": prepared,
-            }
-            for key in ("label", "path", "media_id", "realm", "locator"):
-                if raw.get(key) is not None:
-                    value = raw[key]
-                    if not isinstance(value, str) or not value:
-                        raise TaskValidationError(
-                            f"outputs[{index}].{key} must be a non-empty "
-                            f"string, got {value!r}"
-                        )
-                    entry[key] = value
-            if raw.get("relations") is not None:
-                relations = raw["relations"]
-                if not isinstance(relations, Sequence) or isinstance(
-                    relations, (str, bytes)
-                ):
+            if prepared is not None:
+                if not isinstance(prepared, PreparedMedia):
                     raise TaskValidationError(
-                        f"outputs[{index}].relations must be a sequence"
+                        f"outputs[{index}].prepared must be a PreparedMedia "
+                        f"record, got {type(prepared).__name__}"
                     )
-                entry["relations"] = list(relations)
+                entry: dict[str, Any] = {
+                    "ordinal": ordinal,
+                    "is_primary": is_primary,
+                    "role": role,
+                    "prepared": prepared,
+                }
+                for key in ("label", "path", "media_id", "realm", "locator"):
+                    if raw.get(key) is not None:
+                        value = raw[key]
+                        if not isinstance(value, str) or not value:
+                            raise TaskValidationError(
+                                f"outputs[{index}].{key} must be a non-empty "
+                                f"string, got {value!r}"
+                            )
+                        entry[key] = value
+                if raw.get("relations") is not None:
+                    relations = raw["relations"]
+                    if not isinstance(relations, Sequence) or isinstance(
+                        relations, (str, bytes)
+                    ):
+                        raise TaskValidationError(
+                            f"outputs[{index}].relations must be a sequence"
+                        )
+                    entry["relations"] = list(relations)
+            else:
+                declared = [
+                    key
+                    for key in ("media_id", "realm", "locator", "relations")
+                    if raw.get(key) is not None
+                ]
+                if declared:
+                    raise TaskValidationError(
+                        f"outputs[{index}]: an evidence output (no prepared "
+                        "record) must not declare media materialization "
+                        f"keys {declared}"
+                    )
+                entry = {
+                    "ordinal": ordinal,
+                    "is_primary": is_primary,
+                    "role": role,
+                }
+                for key in ("label", "path", "digest"):
+                    if raw.get(key) is not None:
+                        value = raw[key]
+                        if not isinstance(value, str) or not value:
+                            raise TaskValidationError(
+                                f"outputs[{index}].{key} must be a non-empty "
+                                f"string, got {value!r}"
+                            )
+                        entry[key] = value
+                byte_size = raw.get("byte_size")
+                if byte_size is not None:
+                    if isinstance(byte_size, bool) or not isinstance(
+                        byte_size, int
+                    ) or byte_size < 0:
+                        raise TaskValidationError(
+                            f"outputs[{index}].byte_size must be a "
+                            f"non-negative integer, got {byte_size!r}"
+                        )
+                    entry["byte_size"] = byte_size
             normalized.append(entry)
-        if sum(1 for entry in normalized if entry["is_primary"]) != 1:
+        if normalized and sum(
+            1 for entry in normalized if entry["is_primary"]
+        ) != 1:
             raise TaskValidationError(
                 "complete requires exactly one primary output "
                 f"(got {sum(1 for e in normalized if e['is_primary'])})"
@@ -4043,15 +4171,26 @@ class TaskRepository:
 
     @staticmethod
     def _output_request_identity(entry: Mapping[str, Any]) -> dict[str, Any]:
-        """The canonical request-identity mapping for one prepared output.
+        """The canonical request-identity mapping for one completion output.
 
         Media identity is byte SHA-256 alone (SD2): the filesystem
         ``source_path`` of the prepared record is excluded so a
         re-execution that re-prepares identical bytes under a fresh staging
-        directory replays instead of mismatching.
+        directory replays instead of mismatching. An evidence output (no
+        ``prepared`` record) contributes its declared facts verbatim.
         """
-        prepared = entry["prepared"]
-        identity: dict[str, Any] = {
+        prepared = entry.get("prepared")
+        if prepared is None:
+            identity: dict[str, Any] = {
+                "ordinal": entry["ordinal"],
+                "is_primary": entry["is_primary"],
+                "role": entry["role"],
+            }
+            for key in ("path", "digest", "byte_size", "label"):
+                if key in entry:
+                    identity[key] = entry[key]
+            return identity
+        identity = {
             "ordinal": entry["ordinal"],
             "is_primary": entry["is_primary"],
             "role": entry["role"],

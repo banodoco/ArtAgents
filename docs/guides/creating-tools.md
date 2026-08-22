@@ -66,18 +66,17 @@ previous one cannot satisfy the request.
    (existing + new) and may call other orchestrators. Executors must not call
    orchestrators.
 
-When an orchestrator needs child work, use one of two supported shapes.
-**Direct-mode child invocation**: call the capability through
-`astrid.sdk.invoke` — it runs via the executor runner and records the
-filesystem `run.json` ledger; this is the path every shipped surface uses
-today. **Task-mode adapter**: ship an `astrid.core.task_executor`
-`TaskHandler` so the capability can be admitted into the kernel
-(`python3 -m astrid tasks create --project <p> --capability <id> --spec '{...}'`);
-that adapter path is wired only by the test suites today — there is no
-shipped driver that executes an admitted task. The legacy task-mode plan schema
-(`plan.json`, `plan_initialized`, `plan_mutated`, step adapters, `repeat`
-loops, `remote-artifact` leaves) was retired with the task-mode runtime and
-must not be authored.
+When an orchestrator needs child work, call the capability through
+`astrid.sdk.invoke`: the invocation is admitted into the kernel as a run +
+task and executed through the kernel lifecycle (admit → claim → start →
+execute → complete|fail), and the finalize-time `run.json` projection
+lands under the project's `runs/<run-id>/` tree. Code that needs to drive
+an admitted task with its own loop implements the
+`astrid.core.task_executor` `TaskHandler` protocol instead of hand-rolling
+state tracking. The legacy task-mode plan schema (`plan.json`,
+`plan_initialized`, `plan_mutated`, step adapters, `repeat` loops,
+`remote-artifact` leaves) was retired with the task-mode runtime and must
+not be authored.
 
 Anti-pattern: a single orchestrator `run.py` that opens HTTP sockets, parses
 model output, downloads files, and assembles grids — all inline. That is three

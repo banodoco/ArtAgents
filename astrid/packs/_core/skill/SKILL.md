@@ -91,17 +91,20 @@ python3 -m astrid timelines shots ...       # list/create/add/remove/reorder
 ## Runs & tasks
 
 There is no `runs create` verb anywhere: a run comes into existence through
-the kernel, never by hand. `RunRepository.create` is the fan-out root — one
-transaction commits the `core.run` event stream, the `runs` row, its ordered
-child tasks, and evidence together. You rarely call it directly. Kernel
-runs are created when a task-mode adapter drives a capability (today
-`generation.generate_image` and `rendering.timeline_visualize`); most
-`astrid.sdk.invoke(...)` calls run in direct mode, which writes the
-filesystem run ledger (`<project>/runs/<id>/run.json`) and creates no
-kernel rows — see docs/contracts/run-ledger-contract.md for the two-surface
-contract. `client.tasks.create` admits standalone tasks that belong to no
-run. The CLI `tasks`/`runs` families then list and drive that work —
-`--project` takes the project slug or id:
+the kernel, never by hand. Every capability invocation — including
+`sdk.invoke(...)` and the typed facades — is admitted into the kernel as a
+run with its ordered child tasks (`RunRepository.create` fan-out) and
+executes through one lifecycle: admit → claim → start → execute →
+complete|fail, with hash-chained events, receipts, attempts, and leases
+recording each transition. Status is derived once, in the kernel:
+`derive_run_progress_counts` recomputes a run's progress from its child
+task rows at read time. The filesystem `<project>/runs/<id>/run.json` is a
+write-once finalize-time projection of that state, stamped
+`"authority": "kernel"` with `kernel_task_id` / `kernel_run_id` — never an
+authority itself; see docs/contracts/run-ledger-contract.md for the
+single-ledger contract. `client.tasks.create` admits standalone tasks that
+belong to no run. The CLI `tasks`/`runs` families then list and drive that
+work — `--project` takes the project slug or id:
 
 ```bash
 python3 -m astrid tasks list --project demo --json
@@ -168,24 +171,25 @@ Typed facades exist for the most common surfaces: `astrid.generate.*`
 `client.tasks` / `client.timelines` / `client.media` / … (the seven typed
 services). See [docs/reference/sdk.md](../../../../docs/reference/sdk.md).
 
-### Task-mode adapters vs direct-mode executors
+### How capabilities execute
 
-Packs integrate with the kernel in one of two ways:
+Every capability executes through one kernel path:
 
-- **Task-mode adapters** — a pack ships a `task_adapter.py` implementing the
-  kernel `TaskHandler` protocol (`astrid.core.task_executor`). Kernel task
-  admission exists (the `tasks` CLI family and SDK `client.tasks.create`) and
-  admitted tasks are tracked through the kernel `tasks`/`events` rows
-  tables, but execution is driven by a task-mode adapter, and today only the
-  test suites wire adapters (`rendering.timeline_visualize`,
-  `generation.generate_image`) — no shipped command executes an admitted
-  task. Direct capability runs go through the executor runner below and are
-  recorded in the filesystem `run.json` ledger.
-- **Direct-mode executors** — a file-only `run.py` invoked through the SDK
-  runner (subprocess, `ASTRID_INTERNAL_INVOCATION=1`). Every executor with a
-  `runtime_module` works this way; outputs are file-based and returned in the
-  `InvocationResult` manifest. Do not invoke `run.py` modules directly — the
-  canonical-entrypoint guard refuses it; `astrid.sdk.invoke` is the entry.
+- **Admission + execution** — `sdk.invoke(...)` and the typed facades admit
+  the invocation into the kernel (run + child task) and drive it through
+  claim/start/execute to complete|fail. The pack's `run.py` executor remains
+  the unit of work: the runner invokes it as a subprocess
+  (`ASTRID_INTERNAL_INVOCATION=1`); every executor with a `runtime_module`
+  works this way, outputs are file-based and returned in the
+  `InvocationResult` manifest, and the finalize-time `run.json` projection
+  lands under the project's `runs/<run-id>/` tree.
+- **Custom drivers** — code that drives an admitted task with its own loop
+  implements the kernel `TaskHandler` protocol (`astrid.core.task_executor`,
+  `execute(task, staging_dir)`); the executor service wraps it with the
+  same fences — status versions, leases, receipts — every other execution
+  uses.
+- **Never invoke `run.py` modules directly** — the canonical-entrypoint
+  guard refuses it; `astrid.sdk.invoke` is the entry.
 
 ## Retired legacy surface
 

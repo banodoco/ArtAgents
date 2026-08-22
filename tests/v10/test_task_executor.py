@@ -703,6 +703,21 @@ def _prepare_output(env, *, name: str, content: bytes, **overrides):
     return entry
 
 
+def _evidence_output(**overrides):
+    """One evidence output entry: declared facts, no prepared media."""
+    entry = {
+        "ordinal": 0,
+        "is_primary": True,
+        "role": "result",
+        "path": "report.json",
+        "digest": "sha256:" + "a" * 64,
+        "byte_size": 128,
+        "label": "report",
+    }
+    entry.update(overrides)
+    return entry
+
+
 def _started_attempt(env, *, project_id: str, idempotency_key: str = "t18-claim-k"):
     """Admit, claim, and start one task; return (task, claim, started)."""
     task = _admit(env, project_id=project_id, max_attempts=2)
@@ -1197,6 +1212,257 @@ def test_complete_enforces_one_primary_and_unique_ordinals(env) -> None:
     assert "only a 'result' output may be primary" in str(excinfo.value)
     assert _receipt_count(env.writer, project.id) == baseline
     assert _task_row(env.writer, task.id)["status"] == "running"
+
+
+def test_complete_zero_outputs_with_result_succeeds_and_replays(env) -> None:
+    from astrid.core.receipts import ReceiptMismatchError
+    from astrid.core.repositories.tasks import TaskValidationError
+
+    project = _create_project(env)
+    task, claim, started = _started_attempt(env, project_id=project.id)
+    receipts_before = _receipt_count(env.writer, project.id)
+    head_before = _project_head(env.writer, project.id)
+    summary = {"headline": "42 scenes cut", "counts": {"scenes": 42}}
+
+    # Zero outputs with no summary stays the current error: nothing written.
+    with pytest.raises(TaskValidationError) as excinfo:
+        _complete(
+            env, project_id=project.id, task_id=task.id,
+            attempt_id=claim.attempt.id, lease_id=claim.attempt.lease_id,
+            status_version=started.status_version, outputs=[],
+            key="t18-empty-k",
+        )
+    assert (
+        "at least one materialized output or a non-empty result"
+        in str(excinfo.value)
+    )
+    assert _task_row(env.writer, task.id)["status"] == "running"
+    assert _project_head(env.writer, project.id) == head_before
+
+    # Zero outputs plus a non-empty result summary completes cleanly.
+    completed = _complete(
+        env, project_id=project.id, task_id=task.id,
+        attempt_id=claim.attempt.id, lease_id=claim.attempt.lease_id,
+        status_version=started.status_version, outputs=[], result=summary,
+        key="t18-result-only-k",
+    )
+    assert completed.task.status == "succeeded"
+    assert completed.task.winning_attempt_id == claim.attempt.id
+    assert completed.outputs == ()
+    assert completed.result == summary
+    assert _task_output_rows(env.writer, task.id) == []
+    assert _media_count(env.writer, project.id) == 0
+    assert len(completed.event_ids) == 1
+    assert _receipt_count(env.writer, project.id) == receipts_before + 1
+    assert _project_head(env.writer, project.id) == head_before + 1
+
+    # The summary rides in the completed event payload.
+    stream_id = f"{task.id}:{CORE_TASK_STREAM_TYPE}"
+    events = _event_rows(env.writer, stream_id)
+    assert events[-1]["kind"] == CORE_TASK_COMPLETED_EVENT_KIND
+    data = json.loads(events[-1]["payload_json"])["data"]
+    assert data["result"] == summary
+    assert data["outputs"] == []
+
+    # An identical retry replays the stored result with zero new rows.
+    replayed = _complete(
+        env, project_id=project.id, task_id=task.id,
+        attempt_id=claim.attempt.id, lease_id=claim.attempt.lease_id,
+        status_version=started.status_version, outputs=[], result=summary,
+        key="t18-result-only-k",
+    )
+    assert replayed.to_dict() == completed.to_dict()
+    assert replayed.result == summary
+    assert _receipt_count(env.writer, project.id) == receipts_before + 1
+    assert _project_head(env.writer, project.id) == head_before + 1
+
+    # A changed summary under the same key mismatches before any mutation.
+    with pytest.raises(ReceiptMismatchError):
+        _complete(
+            env, project_id=project.id, task_id=task.id,
+            attempt_id=claim.attempt.id, lease_id=claim.attempt.lease_id,
+            status_version=started.status_version, outputs=[],
+            result={"headline": "different"}, key="t18-result-only-k",
+        )
+    assert _receipt_count(env.writer, project.id) == receipts_before + 1
+
+
+def test_complete_evidence_only_primary_persists_null_media_id_facts(
+    env,
+) -> None:
+    from astrid.core.repositories.tasks import TaskValidationError
+
+    project = _create_project(env)
+    task, claim, started = _started_attempt(env, project_id=project.id)
+    receipts_before = _receipt_count(env.writer, project.id)
+    head_before = _project_head(env.writer, project.id)
+    digest = "sha256:" + "a" * 64
+
+    primary = _evidence_output()
+    secondary = _evidence_output(
+        ordinal=1, is_primary=False, role="evidence",
+        path="notes.txt", digest=None, byte_size=None, label="notes",
+    )
+    completed = _complete(
+        env, project_id=project.id, task_id=task.id,
+        attempt_id=claim.attempt.id, lease_id=claim.attempt.lease_id,
+        status_version=started.status_version,
+        outputs=[primary, secondary], key="t18-evidence-k",
+    )
+    assert completed.task.status == "succeeded"
+    assert completed.task.winning_attempt_id == claim.attempt.id
+
+    # Evidence persists outside media/task_outputs (media_id stays NOT
+    # NULL): no rows there, one receipt, one completed event.
+    assert _task_output_rows(env.writer, task.id) == []
+    assert _media_count(env.writer, project.id) == 0
+    assert len(completed.event_ids) == 1
+    assert _receipt_count(env.writer, project.id) == receipts_before + 1
+    assert _project_head(env.writer, project.id) == head_before + 1
+
+    # Read model: NULL media_id, declared facts in params, ordinal order.
+    assert [output.ordinal for output in completed.outputs] == [0, 1]
+    assert completed.outputs[0].media_id is None
+    assert completed.outputs[0].role == "result"
+    assert completed.outputs[0].is_primary is True
+    assert completed.outputs[0].params == {
+        "path": "report.json", "digest": digest,
+        "byte_size": 128, "label": "report",
+    }
+    assert completed.outputs[1].media_id is None
+    assert completed.outputs[1].role == "evidence"
+    assert completed.outputs[1].params == {
+        "path": "notes.txt", "label": "notes",
+    }
+
+    # The event payload mirrors the evidence facts with a null media_id.
+    events = _event_rows(env.writer, f"{task.id}:{CORE_TASK_STREAM_TYPE}")
+    data = json.loads(events[-1]["payload_json"])["data"]
+    assert [item["ordinal"] for item in data["outputs"]] == [0, 1]
+    assert data["outputs"][0]["media_id"] is None
+    assert data["outputs"][0]["digest"] == digest
+    assert data["outputs"][0]["byte_size"] == 128
+    assert data["outputs"][1]["role"] == "evidence"
+
+    # An evidence primary must keep role 'result' (DDL CHECK mirror).
+    with pytest.raises(TaskValidationError) as excinfo:
+        _complete(
+            env, project_id=project.id, task_id=task.id,
+            attempt_id=claim.attempt.id, lease_id=claim.attempt.lease_id,
+            status_version=started.status_version,
+            outputs=[_evidence_output(role="output")],
+            key="t18-evidence-bad-role-k",
+        )
+    assert "only a 'result' output may be primary" in str(excinfo.value)
+
+    # An evidence entry must not declare media materialization keys.
+    with pytest.raises(TaskValidationError) as excinfo:
+        _complete(
+            env, project_id=project.id, task_id=task.id,
+            attempt_id=claim.attempt.id, lease_id=claim.attempt.lease_id,
+            status_version=started.status_version,
+            outputs=[
+                _evidence_output(media_id=generate_lowercase_ulid()),
+            ],
+            key="t18-evidence-media-key-k",
+        )
+    assert "must not declare media materialization keys" in str(excinfo.value)
+
+
+def test_complete_mixed_media_and_evidence_ordinals_unique(env) -> None:
+    from astrid.core.repositories.tasks import TaskValidationError
+
+    project = _create_project(env)
+    task, claim, started = _started_attempt(env, project_id=project.id)
+
+    media_a = _prepare_output(env, name="frame.svg", content=b"<svg/>")
+    media_b = _prepare_output(
+        env, name="story.md", content=b"# story",
+        ordinal=2, is_primary=False, role="output", label="story",
+    )
+    evidence = _evidence_output(
+        ordinal=1, is_primary=False, role="evidence",
+        path="cut_report.json", digest="sha256:" + "b" * 64,
+        byte_size=7, label=None,
+    )
+    completed = _complete(
+        env, project_id=project.id, task_id=task.id,
+        attempt_id=claim.attempt.id, lease_id=claim.attempt.lease_id,
+        status_version=started.status_version,
+        outputs=[media_a, evidence, media_b], key="t18-mixed-k",
+    )
+    assert completed.task.status == "succeeded"
+
+    # One global ordinal order across both kinds; only media entries occupy
+    # task_outputs/media state.
+    assert [output.ordinal for output in completed.outputs] == [0, 1, 2]
+    assert completed.outputs[1].media_id is None
+    assert completed.outputs[1].params["path"] == "cut_report.json"
+    rows = _task_output_rows(env.writer, task.id)
+    assert [row["ordinal"] for row in rows] == [0, 2]
+    assert rows[0]["media_id"] == completed.outputs[0].media_id
+    assert rows[1]["media_id"] == completed.outputs[2].media_id
+    assert _media_count(env.writer, project.id) == 2
+
+    # The event payload carries all three entries in ordinal order.
+    events = _event_rows(env.writer, f"{task.id}:{CORE_TASK_STREAM_TYPE}")
+    data = json.loads(events[-1]["payload_json"])["data"]
+    assert [item["ordinal"] for item in data["outputs"]] == [0, 1, 2]
+    assert data["outputs"][0]["content_hash"] == media_a["prepared"].digest
+    assert data["outputs"][2]["media_id"] == completed.outputs[2].media_id
+    assert data["outputs"][1]["media_id"] is None
+
+    # An evidence ordinal duplicating a media ordinal is rejected.
+    dup = [
+        _prepare_output(env, name="frame2.svg", content=b"<svg2/>"),
+        _evidence_output(ordinal=0, is_primary=False, role="evidence"),
+    ]
+    with pytest.raises(TaskValidationError) as excinfo:
+        _complete(
+            env, project_id=project.id, task_id=task.id,
+            attempt_id=claim.attempt.id, lease_id=claim.attempt.lease_id,
+            status_version=started.status_version, outputs=dup,
+            key="t18-mixed-dup-k",
+        )
+    assert "duplicated" in str(excinfo.value)
+
+
+def test_complete_evidence_or_result_stale_fence_writes_nothing(env) -> None:
+    from astrid.core.repositories.tasks import TaskTransitionError
+
+    project = _create_project(env)
+    task, claim, started = _started_attempt(env, project_id=project.id)
+    baseline = {
+        "receipts": _receipt_count(env.writer, project.id),
+        "head": _project_head(env.writer, project.id),
+    }
+
+    # Stale version with an evidence-only output set: typed outcome.
+    with pytest.raises(TaskTransitionError) as excinfo:
+        _complete(
+            env, project_id=project.id, task_id=task.id,
+            attempt_id=claim.attempt.id, lease_id=claim.attempt.lease_id,
+            status_version=started.status_version + 5,
+            outputs=[_evidence_output()],
+            key="t18-evidence-stale-k",
+        )
+    assert excinfo.value.reason == "stale_status_version"
+
+    # Wrong lease with a bare result summary: typed outcome.
+    with pytest.raises(TaskTransitionError) as excinfo:
+        _complete(
+            env, project_id=project.id, task_id=task.id,
+            attempt_id=claim.attempt.id, lease_id="not-the-lease",
+            status_version=started.status_version, outputs=[],
+            result={"headline": "nope"},
+            key="t18-result-stale-k",
+        )
+    assert excinfo.value.reason == "lease_mismatch"
+
+    assert _receipt_count(env.writer, project.id) == baseline["receipts"]
+    assert _project_head(env.writer, project.id) == baseline["head"]
+    assert _task_output_rows(env.writer, task.id) == []
+    assert _media_count(env.writer, project.id) == 0
 
 
 # ---------------------------------------------------------------------------
