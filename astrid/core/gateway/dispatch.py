@@ -23,10 +23,11 @@ def _count_usage(raw: list[str]) -> None:
     path is acceptable; heavy CLI use means the DB should be
     Python-owned. One JSON line per invocation is appended to
     ``$ASTRID_USAGE_LOG`` (default ``~/.astrid/cli-usage.jsonl``).
-    Counting is fire-and-forget: any OSError is swallowed so
+    Counting is fire-and-forget: any exception is swallowed so
     instrumentation never breaks a command. ``family`` is the first CLI
     argument after the program name (``argv[1]`` in ``sys.argv`` terms),
-    or ``"none"`` for a bare invocation.
+    or ``"none"`` for a bare invocation. Log schema invariant: future
+    fields are append-only; never rename or remove ``ts``/``day``/``family``.
 
     Read after a week:
         wc -l ~/.astrid/cli-usage.jsonl
@@ -45,8 +46,12 @@ def _count_usage(raw: list[str]) -> None:
         })
         with log_path.open("a", encoding="utf-8") as handle:
             handle.write(line + "\n")
-    except OSError:
-        # Instrumentation must never break a command.
+    except Exception:  # noqa: BLE001
+        # Instrumentation must never break dispatch, so NO exception may
+        # escape this body — Path.home() raises RuntimeError on a
+        # $HOME-less box, json.dumps can raise on odd families, etc.
+        # Breadth is correct: counting is best-effort by design; any
+        # failure here only loses one log line, never the command.
         pass
 
 
