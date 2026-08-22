@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
 from astrid.core.receipts.service import CommandReceipt, ReceiptService
@@ -99,12 +100,18 @@ class TimelinesService:
         projects: ProjectRepository,
         timelines: TimelineRepository,
         receipts: ReceiptService,
+        projects_root: str | Path | None = None,
     ) -> None:
         self._writer = writer
         self._projects = projects
         self._timelines = timelines
         self._receipts = receipts
-
+        # Bound projects root for backfill (I): when a client is opened with
+        # an explicit root, the backfill must honor that binding and never
+        # fall back to the ambient ASTRID_PROJECTS_ROOT.
+        self._projects_root: Path | None = (
+            Path(projects_root).expanduser().resolve() if projects_root is not None else None
+        )
     # -- create ------------------------------------------------------------
 
     def create(
@@ -342,16 +349,37 @@ class TimelinesService:
             backfill_project,
         )
 
+        _RUN_TS_RE = __import__("re").compile(r"^\d+-[0-9a-f]{32}$")
+
+        def _validate_run_ts(value: str | None) -> None:
+            if value is None:
+                return
+            if not _RUN_TS_RE.match(value):
+                raise ServiceValidationError(
+                    f"invalid --run-ts {value!r}: expected '<epoch>-<32 lowercase hex>' "
+                    f"(e.g. '1750000000-{'a'*32}')"
+                )
+
         try:
+            _validate_run_ts(run_ts)
             project_id = self._projects.resolve(self._writer, project)
         except Exception as exc:  # noqa: BLE001 - centralized bounded mapping
             return DomainResult.failure(map_error(exc))
+        # Resolve the effective projects root (I): the bound root wins; when
+        # bound, there is NO ambient fallback. If no root is bound, fall back
+        # to the ambient/default resolution inside the backfill seam.
+        if self._projects_root is not None:
+            effective_root: str | Path | None = self._projects_root
+        else:
+            effective_root = None
         try:
             active_run_ts = run_ts
             if active_run_ts is None and not dry_run:
                 # Fresh run: allocate the checkpoint dir EXCLUSIVELY up
                 # front so the operator can resume this exact run later.
-                active_run_ts = allocate_run_checkpoint_id(project)
+                # I: thread the bound root into allocation (no ambient fallback
+                # when a root is bound).
+                active_run_ts = allocate_run_checkpoint_id(project, root=effective_root)
             reports = backfill_project(
                 writer=self._writer,
                 projects=self._projects,
@@ -359,6 +387,7 @@ class TimelinesService:
                 project_slug=project,
                 timeline_refs=[timeline] if timeline is not None else None,
                 from_supabase_export=from_supabase_export,
+                projects_root=effective_root,
                 dry_run=dry_run,
                 run_ts=active_run_ts,
             )

@@ -199,7 +199,6 @@ supabase-export <path>``. No credentials are needed on this box and none are
 read by this module.
 
 Honesty boundary (round-3 P2#1, part 3): the LocalFs identity sidecar and
-the fallback ``registry.json`` are NOT part of the event hash chain. A
 FIRST-import tamper of an unanchored sidecar — one with no
 ``timeline.created`` event to cross-check (slice-shaped sources), or of a
 sidecar field the created event does not carry (e.g. the ULID, which today
@@ -210,8 +209,15 @@ close that window; they make every LATER import (resume/re-import) fail
 closed with named drift, and the created-event cross-check closes the name
 leg for full-lifecycle sources. This is the same accepted limit as rehashed
 event tampering: the export is trusted on first import. Do not oversell the
-guarantee.
-
+guarantee. Crash-after-commit replay also validates the sidecar digests
+against the receipt's persisted digests: before a replay completes or
+refreshes the marker, any ``identity_sha256``/``registry_sha256`` mismatch
+fails closed with :class:`BackfillDiscrepancyError` and zero marker
+mutation (G). A bridge save against a corrupted stream identity
+(``event_streams.project_id``/``stream_type``/``aggregate_id`` drifting
+from the backfilled source) maps to 400 ``invalid_timeline`` via the
+pre-existing taxonomy (``bridge.py:251``) — corruption is surfaced, not
+silently served.
 How to read results: each timeline yields a JSON report (see
 :func:`backfill_timeline`) with the source/kernel counts, head versions,
 per-kind counts, ``events_sha256``, every check outcome, the marker path and
@@ -2053,7 +2059,11 @@ def backfill_timeline(
 
     def _command(uow: UnitOfWork) -> BackfillReport:
         # Idempotency gate first: identical retry replays the stored result
-        # (crash-after-commit convergence — W1.3).
+        # (crash-after-commit convergence — W1.3). Before replay succeeds,
+        # validate the sidecar digests against the receipt's persisted
+        # values (G): a post-commit sidecar edit must fail closed with
+        # BackfillDiscrepancyError and zero marker mutation, not silently
+        # re-anchor the marker from drifted bytes.
         replayed = receipts.check(
             uow,
             project_id=project_id,
@@ -2062,8 +2072,30 @@ def backfill_timeline(
             command_kind=BACKFILL_COMMAND_KIND,
         )
         if replayed is not None:
+            # G: digest binding — compare receipt-persisted digests against
+            # the freshly loaded source before replay converges.
+            receipt_identity = str(replayed.get("identity_sha256", ""))
+            receipt_registry = str(replayed.get("registry_sha256", ""))
+            source_registry = source.registry_sha256 or ""
+            drift_parts: list[str] = []
+            if receipt_identity != source.identity_sha256:
+                drift_parts.append(
+                    f"identity_sha256 {receipt_identity} (receipt) != "
+                    f"{source.identity_sha256} (current)"
+                )
+            if receipt_registry != source_registry:
+                drift_parts.append(
+                    f"registry_sha256 {receipt_registry} (receipt) != "
+                    f"{source_registry} (current)"
+                )
+            if drift_parts:
+                raise BackfillDiscrepancyError(
+                    f"timeline {source.timeline_id} sidecar drifted since "
+                    f"backfill (receipt vs current): "
+                    + ", ".join(drift_parts)
+                    + "; operator reruns fresh"
+                )
             return _report_from_mapping(replayed, replayed=True)
-
         # No receipt: an existing kernel stream here is foreign state (the
         # backfill never committed it) — fail closed rather than append to
         # an unknown authority.
@@ -2187,6 +2219,32 @@ def backfill_timeline(
 
     report = UnitOfWork(writer).run(_command)
     replayed = report.replayed
+    # G: crash-after-commit replay that bypassed the in-UoW drift gate
+    # (e.g. future path without receipt digests) still fails closed before
+    # any marker mutation — compare the replayed report's persisted digests
+    # against the freshly loaded source.
+    if replayed:
+        receipt_identity = report.identity_sha256
+        receipt_registry = report.registry_sha256
+        source_registry = source.registry_sha256 or ""
+        drift_parts: list[str] = []
+        if receipt_identity != source.identity_sha256:
+            drift_parts.append(
+                f"identity_sha256 {receipt_identity} (receipt) != "
+                f"{source.identity_sha256} (current)"
+            )
+        if receipt_registry != source_registry:
+            drift_parts.append(
+                f"registry_sha256 {receipt_registry} (receipt) != "
+                f"{source_registry} (current)"
+            )
+        if drift_parts:
+            raise BackfillDiscrepancyError(
+                f"timeline {source.timeline_id} sidecar drifted since "
+                f"backfill (receipt vs current): "
+                + ", ".join(drift_parts)
+                + "; operator reruns fresh"
+            )
     # Fresh import or identical retry: re-verify every invariant (a)-(g)
     # read-only (W1.3 full re-verify), then idempotently write/refresh the
     # marker (f). No new rows are written on replay.
@@ -2222,7 +2280,6 @@ def backfill_timeline(
             else "imported and verified"
         ),
     )
-
 
 def _final_report(
     base: BackfillReport,

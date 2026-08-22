@@ -169,6 +169,14 @@ def _cmd_diff(parsed: argparse.Namespace) -> int:
 
 
 def _cmd_backfill(parsed: argparse.Namespace) -> int:
+    import re as _re
+
+    _RUN_TS_RE = _re.compile(r"^\d+-[0-9a-f]{32}$")
+    if parsed.run_ts is not None and not _RUN_TS_RE.match(parsed.run_ts):
+        parsed.parser.error(
+            f"invalid --run-ts {parsed.run_ts!r}: expected '<epoch>-<32 lowercase hex>' "
+            f"(e.g. '1750000000-{'a'*32}')"
+        )
     from_source = None
     if parsed.from_source is not None:
         kind, path = parsed.from_source
@@ -178,22 +186,50 @@ def _cmd_backfill(parsed: argparse.Namespace) -> int:
                 "'supabase-export' is accepted"
             )
         from_source = path
+    # H: echo the ACTIVE run_ts BEFORE the SDK call so a SIGKILL mid-run
+    # leaves an echoed id on stdout (flush). Keep the completion line after.
+    early_run_ts: str | None = parsed.run_ts
+    early_allocated = False
+    if early_run_ts is None and not parsed.dry_run:
+        try:
+            from astrid.packs.timeline.backfill import allocate_run_checkpoint_id
+
+            bound_root = getattr(getattr(parsed.client, "app", None), "projects_root", None)
+            early_run_ts = allocate_run_checkpoint_id(parsed.project, root=bound_root)
+            early_allocated = True
+        except SystemExit:
+            raise
+        except Exception:
+            # Allocation failed (project missing, etc.); no early echo — let
+            # the SDK surface the typed failure.
+            early_run_ts = None
+            early_allocated = False
+    if early_run_ts is not None:
+        print(f"backfill run_ts: {early_run_ts}", flush=True)
+    # Pass the early-allocated id to the SDK so it does not allocate a
+    # second dir; when early allocation failed, pass original parsed.run_ts
+    # (None) so SDK will allocate/report failure.
+    run_ts_for_sdk = early_run_ts if early_allocated else parsed.run_ts
+    if early_run_ts is not None and not early_allocated:
+        run_ts_for_sdk = early_run_ts
     result = parsed.client.timelines.backfill(
         parsed.project,
         timeline=parsed.timeline,
         from_supabase_export=from_source,
         dry_run=parsed.dry_run,
-        run_ts=parsed.run_ts,
+        run_ts=run_ts_for_sdk,
     )
-    # Round-3 P3#2: echo the ACTIVE run id so an interrupted fresh run can
-    # be resumed verbatim with ``--run-ts`` (the SDK response carries it;
-    # the JSON envelope exposes it machine-readably).
-    if not parsed.json and isinstance(result.data, dict):
+    # Completion line (keep it): if the SDK returned a different or only
+    # run_ts, print it; when we already echoed the same id, the early line
+    # already satisfies the completion semantics — printing again would
+    # duplicate, so suppress duplicate.
+    if isinstance(result.data, dict):
         active_run_ts = result.data.get("run_ts")
-        if active_run_ts:
+        if active_run_ts and active_run_ts != early_run_ts:
+            # Either we had no early id, or SDK allocated a different one
+            # (e.g. early allocation failed and SDK succeeded).
             print(f"backfill run_ts: {active_run_ts}")
     return print_result(result, as_json=parsed.json)
-
 
 # -- parser ----------------------------------------------------------------
 

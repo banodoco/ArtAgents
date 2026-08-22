@@ -74,19 +74,41 @@ def _run(*args: str) -> tuple[int, _RecordingBackfillClient]:
 def test_backfill_dispatch_default_source() -> None:
     code, client = _run("backfill", "--project", "demo")
     assert code == 0
-    assert client.calls == [
-        (
-            "timelines.backfill",
-            {
-                "project": "demo",
-                "timeline": None,
-                "from_supabase_export": None,
-                "dry_run": False,
-                "run_ts": None,
-            },
-        )
-    ]
+    # H: the CLI now allocates the ACTIVE run_ts BEFORE the SDK call so a
+    # SIGKILL mid-run leaves an id on stdout. The dispatched run_ts is the
+    # freshly allocated "<epoch>-<32 hex>" (not None), and the SDK will not
+    # allocate a second dir.
+    assert len(client.calls) == 1
+    assert client.calls[0][0] == "timelines.backfill"
+    assert client.calls[0][1]["project"] == "demo"
+    assert client.calls[0][1]["timeline"] is None
+    assert client.calls[0][1]["from_supabase_export"] is None
+    assert client.calls[0][1]["dry_run"] is False
+    import re as _re
 
+    dispatched = client.calls[0][1]["run_ts"] or ""
+    assert _re.match(r"^\d+-[0-9a-f]{32}$", dispatched)
+    # Clean up the early-allocated checkpoint dir so the test leaves no
+    # filesystem artifact (the fake client does not have a real project).
+    try:
+        from pathlib import Path as _Path
+
+        from astrid.core.foundation.project_paths import resolve_projects_root as _resolve
+        from astrid.core.timeline.migration import checkpoint_path_for_run as _cp
+
+        _cp_path = _cp("demo", root=_resolve(None), run_ts=dispatched)
+        _run_dir = _cp_path.parent
+        if _run_dir.is_dir():
+            import shutil as _shutil
+
+            _shutil.rmtree(_run_dir, ignore_errors=True)
+            # Also clean demo/runs if empty
+            try:
+                (_run_dir.parent).rmdir()
+            except Exception:
+                pass
+    except Exception:
+        pass
 
 def test_backfill_dispatch_timeline_ref() -> None:
     code, client = _run(

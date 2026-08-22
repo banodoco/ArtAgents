@@ -1021,6 +1021,13 @@ def _assert_stream_identity_tamper_fails_closed(
     column, force re-verification -> named mismatch, assert the re-import
     fails closed naming the column, and assert the marker is NOT rewritten
     (the drift never refreshes the authority claim)."""
+    import hashlib as _hashlib
+
+    marker_path = projects_root / ".astrid" / "backfill-state.json"
+    # Capture raw file bytes for byte-identity (not parsed dict equality) so
+    # serialization changes trip the assertion.
+    before_bytes = marker_path.read_bytes() if marker_path.is_file() else b""
+    before_hash = _hashlib.sha256(before_bytes).hexdigest()
     marker_before = marker_state(projects_root)
     verification = verify_backfill(
         source,
@@ -1045,9 +1052,11 @@ def _assert_stream_identity_tamper_fails_closed(
         )
     assert column in str(excinfo.value)
     # No marker write on the failed re-import: the authority claim is
-    # byte-identical before and after.
+    # byte-identical before and after (raw-file sha256).
+    after_bytes = marker_path.read_bytes() if marker_path.is_file() else b""
+    assert _hashlib.sha256(after_bytes).hexdigest() == before_hash
+    # Also ensure parsed dict unchanged (defense in depth).
     assert marker_state(projects_root) == marker_before
-
 
 def test_tampered_stream_project_id_probe_reports_identity_mismatch(
     tmp_path: Path,

@@ -346,7 +346,7 @@ def compose_standard_application(
         # writer of their own (plan step 17).
         projects_service = ProjectsService(writer, projects, receipts)
         timelines_service = TimelinesService(
-            writer, projects, timelines, receipts
+            writer, projects, timelines, receipts, projects_root=root
         )
         # One shared service-authority instrumentation point (plan step 30):
         # every timeline save — bridge, SDK, or CLI — is recorded on the
