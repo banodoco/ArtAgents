@@ -201,6 +201,14 @@ def _write_baseline_snapshot(
 # Worker event-append adapter (m3.5)
 # ---------------------------------------------------------------------------
 
+def _default_kernel_binding_factory(project_slug: str, timeline_slug: str):
+    """Lazily resolve the kernel timeline binding (packs seam, import-time free)."""
+
+    from astrid.packs.timeline.kernel_binding import kernel_timeline_writer_for
+
+    return kernel_timeline_writer_for(project_slug, timeline_slug)
+
+
 def _worker_append_events(
     *,
     project_slug: str | None,
@@ -211,6 +219,7 @@ def _worker_append_events(
     mutator,
     snapshot_payload: Any,
     verified_user_id: str | None = None,
+    kernel_binding_factory: Any | None = None,
 ) -> int:
     """Append worker-generated timeline mutations through the local event gateway.
 
@@ -218,13 +227,18 @@ def _worker_append_events(
     timeline.  When successful, appends ``timeline.config_replaced`` events via
     ``pack_write_gateway`` and returns the new event-stream version.
 
-    Remote-only claims (no local project_slug, or no matching local timeline)
-    raise ``RuntimeError`` as controlled failures — the actual Supabase
-    write-back is deferred to m6.
-
     When *verified_user_id* is provided (from the JWKS-verified user JWT),
     it is chained as ``actor.via`` on the emitted events to preserve
     initiator provenance.
+
+    *kernel_binding_factory* resolves the kernel timeline write path
+    (default: the lazy
+    :func:`astrid.packs.timeline.kernel_binding.kernel_timeline_writer_for`
+    wrapper). When it binds, the gateway commits the kernel
+    ``timeline.replace_config`` receipt BEFORE the eventlog append (no
+    kernel/eventlog divergence); when it returns ``None`` (no kernel
+    project/timeline, or the kernel DB is owned by another process) the
+    documented eventlog-only escape applies.
 
     Returns:
         int: Event-stream version after appends (used as ``config_version``
@@ -240,6 +254,10 @@ def _worker_append_events(
     from astrid.core.timeline._edit_helpers import pack_write_gateway
     from astrid.core.timeline.events.schema import TimelineActor
     from astrid.core.timeline.paths import find_timeline_by_event_stream_id
+    from astrid.packs.timeline.kernel_binding import (
+        close_kernel_binding as _close_kernel_binding,
+        gateway_kernel_kwargs as _gateway_kernel_kwargs,
+    )
 
     # Resolve a local timeline slug from the remote timeline_id (event-stream UUID).
     found = find_timeline_by_event_stream_id(project_slug, timeline_id)
@@ -281,14 +299,21 @@ def _worker_append_events(
         }
     ]
 
-    result = pack_write_gateway(
-        project_slug=project_slug,
-        timeline_slug=timeline_slug,
-        timeline_ulid=timeline_ulid,
-        timeline_event_stream_id=timeline_id,
-        events=events,
-        actor=actor,
-    )
+    if kernel_binding_factory is None:
+        kernel_binding_factory = _default_kernel_binding_factory
+    binding = kernel_binding_factory(project_slug, timeline_slug)
+    try:
+        result = pack_write_gateway(
+            project_slug=project_slug,
+            timeline_slug=timeline_slug,
+            timeline_ulid=timeline_ulid,
+            timeline_event_stream_id=timeline_id,
+            events=events,
+            actor=actor,
+            **_gateway_kernel_kwargs(binding),
+        )
+    finally:
+        _close_kernel_binding(binding)
 
     return result.new_version
 

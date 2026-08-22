@@ -6,11 +6,19 @@ roots, and installed packs). The duplication made it easy for the layers or
 their ordering to drift apart. This module centralizes the walk and exposes a
 ``DiscoveredPack`` metadata shape so every registry — and, ahead of Step 13,
 skills discovery — consumes one ordered list with identical priority semantics.
+
+Fault tolerance: the ``extra`` / ``env`` / ``installed`` layers are
+external by definition. A root whose pack manifest fails to load — or an
+installed pack that fails validation — is skipped with a logged warning so
+one broken external pack cannot abort the whole walk. The source-tree scan
+stays strict: first-party packs must always load.
 """
 
 from __future__ import annotations
 
+import logging
 import os
+
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -112,6 +120,25 @@ def discover_pack_metadata(
             )
         )
 
+    _LOGGER = logging.getLogger(__name__)
+
+    def _scan_external_root(raw_root: str | Path, source_kind: str) -> None:
+        """Scan one external root, skipping it wholesale when it cannot be read."""
+        resolved = _resolve_pack_root(raw_root)
+        if not resolved.is_dir():
+            return
+        try:
+            packs = scan(resolved)
+        except Exception as exc:  # noqa: BLE001 - external roots are fault-tolerant
+            _LOGGER.warning(
+                "skipping %s pack root %s: %s", source_kind, resolved, exc
+            )
+            return
+        for pack in packs:
+            if pack.id == "local":
+                continue
+            _add(pack, source_kind)
+
     for pack in scan():
         if pack.id == "local":
             continue
@@ -131,35 +158,34 @@ def discover_pack_metadata(
     raw_env_roots = os.environ.get(ASTRID_PACKS_PATH_ENV, "")
     if extra_pack_roots or raw_env_roots or include_installed:
         for extra_root in extra_pack_roots:
-            extra_path = _resolve_pack_root(extra_root)
-            if extra_path.is_dir():
-                for pack in scan(extra_path):
-                    if pack.id == "local":
-                        continue
-                    _add(pack, "extra")
+            _scan_external_root(extra_root, "extra")
         for env_root in raw_env_roots.split(os.pathsep):
             if env_root == "":
                 continue
-            resolved_env_root = _resolve_pack_root(env_root)
-            if not resolved_env_root.is_dir():
-                continue
-            for pack in scan(resolved_env_root):
-                if pack.id == "local":
-                    continue
-                _add(pack, "env")
+            _scan_external_root(env_root, "env")
         if include_installed:
             from astrid.core.pack import load_pack_manifest
             from astrid.core.pack import pack_manifest_path as _pmp
             from astrid.core.pack.store import installed_pack_roots
 
             for installed_root in installed_pack_roots():
-                if installed_root.is_dir():
-                    mp = _pmp(installed_root)
-                    if mp is not None:
-                        pack = load_pack_manifest(mp)
-                        if pack.id == "local":
-                            continue
-                        _add(pack, "installed")
+                if not installed_root.is_dir():
+                    continue
+                mp = _pmp(installed_root)
+                if mp is None:
+                    continue
+                try:
+                    pack = load_pack_manifest(mp)
+                except Exception as exc:  # noqa: BLE001 - installed packs are fault-tolerant
+                    _LOGGER.warning(
+                        "skipping installed pack %s: manifest failed to load: %s",
+                        installed_root,
+                        exc,
+                    )
+                    continue
+                if pack.id == "local":
+                    continue
+                _add(pack, "installed")
 
     return tuple(discovered)
 

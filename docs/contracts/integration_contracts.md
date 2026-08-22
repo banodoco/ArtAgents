@@ -378,9 +378,7 @@ container. In managed mode:
   wins; upstream human/agent provenance goes in `actor.via`.
 
 Managed mode is the only path that closes the write-side bypasses targeted
-by milestone m3.5. The `astrid timelines audit` command only checks
-managed-path mutations; it does not flag compatibility blob writes that
-follow an event append.
+by milestone m3.5.
 
 ### Unmanaged mode (file-only artifact generation)
 
@@ -467,8 +465,8 @@ Each serves a different purpose:
 - **Event-stream UUID** — Stored in `run.metadata.timeline_event_stream_id`.
   This is the RFC 9562 UUID v7 from the timeline's `assembly.identity.json`.
   It is the `timeline_id` used by backend append/read operations.
-- **Remote executor routing** — Used by the executor CLI (`astrid executor run`)
-  in UUID handoff mode. The executor completes locally, emits bridge metadata,
+- **Remote executor routing** — Used by the retired executor CLI in UUID
+  handoff mode. The executor completes locally, emits bridge metadata,
   and does NOT push to Supabase. Actual Supabase replay is deferred to m6
   (`open_in_reigh` bridge).
 

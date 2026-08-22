@@ -615,6 +615,11 @@ class ManagedEventMultipleKindsTest(unittest.TestCase):
         self.assertEqual(len(kinds), 3)
 
 
+def _null_kernel_binding(project_slug: str, timeline_slug: str):
+    """Factory standing in for "genuinely kernel-less context" (eventlog-only)."""
+    return None
+
+
 class ManagedPackConfigReplacementSurfaceTest(unittest.TestCase):
     """Pack-managed full writes use validated timeline.config_replaced configs."""
 
@@ -633,6 +638,7 @@ class ManagedPackConfigReplacementSurfaceTest(unittest.TestCase):
         self.assertIsInstance(payload, dict)
         config = payload["config"]
         self.assertEqual(timeline_contract.validate_timeline_config_for_container(config), config)
+
 
     def test_cut_refine_and_assemble_emit_config_replaced_payloads(self):
         from astrid.core.timeline import _edit_helpers
@@ -655,15 +661,81 @@ class ManagedPackConfigReplacementSurfaceTest(unittest.TestCase):
         args = SimpleNamespace(project="demo", timeline_slug="primary")
 
         for emit in (
-            lambda: cut_run._emit_cut_managed_events(args, config),
-            lambda: refine_run._emit_refine_managed_events(args, config),
-            lambda: assemble_run._emit_assemble_managed_events("demo", "primary", config),
+            lambda: cut_run._emit_cut_managed_events(
+                args, config, kernel_binding_factory=_null_kernel_binding,
+            ),
+            lambda: refine_run._emit_refine_managed_events(
+                args, config, kernel_binding_factory=_null_kernel_binding,
+            ),
+            lambda: assemble_run._emit_assemble_managed_events(
+                "demo", "primary", config, kernel_binding_factory=_null_kernel_binding,
+            ),
         ):
             captured, fake_gateway = self._capture_gateway_events()
             with patch.object(_edit_helpers, "pack_write_gateway", fake_gateway):
                 self.assertEqual(emit(), 17)
             self.assertEqual(len(captured), 1)
             self._assert_single_valid_config_replaced_event(captured[0])
+
+    def test_emit_functions_pass_resolved_kernel_binding_to_gateway(self):
+        """A bound factory flows writer/repository/stream_type into the gateway
+        and the binding's application is closed after the gateway returns."""
+        from types import SimpleNamespace as NS
+        from astrid.core.timeline import _edit_helpers
+        from astrid.packs.video_editing.executors.cut import run as cut_run
+        from astrid.packs.editorial.executors.refine import run as refine_run
+        from astrid.packs.iteration.executors.assemble import run as assemble_run
+
+        config = {
+            "tracks": [{"id": "v1", "kind": "visual", "label": "Video"}],
+            "clips": [
+                {
+                    "id": "clip-1",
+                    "at": 0,
+                    "track": "v1",
+                    "clipType": "media",
+                    "asset": "asset-1",
+                }
+            ],
+        }
+        args = NS(project="demo", timeline_slug="primary")
+        closed: list[str] = []
+
+        def fake_gateway(*args_, **kwargs):
+            captured.append(
+                (
+                    kwargs.get("writer"),
+                    kwargs.get("timeline_repository"),
+                    kwargs.get("timeline_stream_type"),
+                )
+            )
+            return NS(new_version=42)
+
+        for name, emit in (
+            ("cut", lambda: cut_run._emit_cut_managed_events(args, config, kernel_binding_factory=_binding_factory)),
+            ("refine", lambda: refine_run._emit_refine_managed_events(args, config, kernel_binding_factory=_binding_factory)),
+            ("assemble", lambda: assemble_run._emit_assemble_managed_events("demo", "primary", config, kernel_binding_factory=_binding_factory)),
+        ):
+            captured = []
+
+            class _FakeBinding:
+                pass
+
+            def _binding_factory(project_slug, timeline_slug):
+                binding = _FakeBinding()
+                binding.writer = object()
+                binding.repository = object()
+                binding.stream_type = f"stream:{name}"
+                binding.app = NS(close=lambda n=name: closed.append(n))
+                return binding
+
+            with patch.object(_edit_helpers, "pack_write_gateway", fake_gateway):
+                self.assertEqual(emit(), 42)
+            writer, repository, stream_type = captured[0]
+            self.assertIsNotNone(writer, name)
+            self.assertIsNotNone(repository, name)
+            self.assertEqual(stream_type, f"stream:{name}")
+            self.assertIn(name, closed)
 
     def test_named_managed_sources_do_not_emit_arrangement_replaced(self):
         managed_sources = [
@@ -842,6 +914,186 @@ class ManagedWriteKernelReceiptTest(unittest.TestCase):
             root=tmp_root,
         )
         self.assertEqual(result.attempts, 1)
+
+
+class ManagedWriteWiredProductionPathTest(unittest.TestCase):
+    """Prove the WIRED production path commits kernel receipts (m2 fix).
+
+    ``editorial.refine``'s managed emit resolves a kernel timeline binding by
+    default and passes it into ``pack_write_gateway``, so a managed
+    ``timeline.config_replaced`` write lands in BOTH stores: the kernel
+    ``timeline.replace_config`` receipt first, then the eventlog append.
+    """
+
+    def test_emit_functions_pass_resolved_kernel_binding_to_gateway(self):
+        """A bound factory flows writer/repository/stream_type into the
+        gateway and the binding's application is closed afterwards."""
+        from types import SimpleNamespace as NS
+
+        from astrid.core.timeline import _edit_helpers
+        from astrid.packs.video_editing.executors.cut import run as cut_run
+        from astrid.packs.editorial.executors.refine import run as refine_run
+        from astrid.packs.iteration.executors.assemble import run as assemble_run
+
+        config = {
+            "tracks": [{"id": "v1", "kind": "visual", "label": "Video"}],
+            "clips": [
+                {
+                    "id": "clip-1",
+                    "at": 0,
+                    "track": "v1",
+                    "clipType": "media",
+                    "asset": "asset-1",
+                }
+            ],
+        }
+        args = NS(project="demo", timeline_slug="primary")
+        closed: list[str] = []
+        captured: list[tuple[Any, Any, Any]] = []
+
+        class _FakeBinding:
+            pass
+
+        def fake_gateway(*args_, **kwargs):
+            captured.append(
+                (
+                    kwargs.get("writer"),
+                    kwargs.get("timeline_repository"),
+                    kwargs.get("timeline_stream_type"),
+                )
+            )
+            return NS(new_version=42)
+
+        def make_factory(name):
+            def _factory(project_slug, timeline_slug):
+                binding = _FakeBinding()
+                binding.writer = object()
+                binding.repository = object()
+                binding.stream_type = f"stream:{name}"
+                binding.app = NS(close=lambda: closed.append(name))
+                return binding
+
+            return _factory
+
+        for name, emit in (
+            ("cut", lambda f: cut_run._emit_cut_managed_events(args, config, kernel_binding_factory=f)),
+            ("refine", lambda f: refine_run._emit_refine_managed_events(args, config, kernel_binding_factory=f)),
+            ("assemble", lambda f: assemble_run._emit_assemble_managed_events("demo", "primary", config, kernel_binding_factory=f)),
+        ):
+            captured.clear()
+            with patch.object(_edit_helpers, "pack_write_gateway", fake_gateway):
+                self.assertEqual(emit(make_factory(name)), 42)
+            writer, repository, stream_type = captured[0]
+            self.assertIsNotNone(writer, name)
+            self.assertIsNotNone(repository, name)
+            self.assertEqual(stream_type, f"stream:{name}")
+            self.assertIn(name, closed)
+
+    def test_refine_managed_emit_commits_kernel_receipt_and_projection(self):
+        import sqlite3
+        from types import SimpleNamespace
+
+        from astrid.application import compose_standard_application
+        from astrid.packs.editorial.executors.refine import run as refine_run
+        from astrid.packs.timeline.repository import (
+            TIMELINE_CONFIG_REPLACED_EVENT_KIND,
+            TIMELINE_REPLACE_CONFIG_COMMAND_KIND,
+            TIMELINE_STREAM_TYPE,
+        )
+
+        tmp_root = Path(tempfile.mkdtemp(prefix="mgt-wired-", dir=ROOT))
+        self.addCleanup(shutil.rmtree, tmp_root, ignore_errors=True)
+        env = patch.dict(
+            "os.environ",
+            {project_paths.PROJECTS_ROOT_ENV: str(tmp_root)},
+        )
+        env.start()
+        self.addCleanup(env.stop)
+
+        # Eventlog side first: the managed filesystem project/timeline
+        # binding must exist before the kernel create.
+        from astrid.core.project.project import create_project as fs_create_project
+        from astrid.core.timeline.crud import create_timeline as fs_create_timeline
+
+        fs_create_project("wired-proj")
+        fs_create_timeline("wired-proj", "wired-tl")
+
+        # Kernel side: create project + timeline, then release the owner lock
+        # so the production emit can compose its own application.
+        app = compose_standard_application(projects_root=str(tmp_root))
+        created_project = app.projects_service.create(slug="wired-proj", name="Wired")
+        self.assertIsNotNone(created_project.data, created_project.error)
+        created = app.timelines_service.create(
+            project="wired-proj",
+            slug="wired-tl",
+            name="Wired Timeline",
+            idempotency_key="wired-tl-create",
+        )
+        self.assertIsNotNone(created.data, created.error)
+        timeline_id = created.data["timeline_id"]
+        project_id = app.projects.resolve(app.writer, "wired-proj")
+        app.close()
+
+        config = {
+            "tracks": [{"id": "v1", "kind": "visual", "label": "Video"}],
+            "clips": [
+                {
+                    "id": "clip-1",
+                    "at": 0,
+                    "track": "v1",
+                    "clipType": "media",
+                    "asset": "asset-1",
+                }
+            ],
+        }
+        args = SimpleNamespace(project="wired-proj", timeline_slug="wired-tl")
+        version = refine_run._emit_refine_managed_events(args, config)
+        # Eventlog head advanced by the append (the fresh container had no
+        # bootstrap event; the kernel stream separately counts its create).
+        self.assertGreaterEqual(version, 1)
+
+        # Kernel receipts/events/projection reflect the wired write.
+        verify_app = compose_standard_application(projects_root=str(tmp_root))
+        try:
+            with verify_app.writer.read_only_connection() as conn:
+                conn.row_factory = sqlite3.Row
+                receipt = conn.execute(
+                    "SELECT * FROM command_receipts WHERE project_id = ? "
+                    "AND idempotency_key = ?",
+                    (
+                        project_id,
+                        f"timeline.replace_config:{timeline_id}:1",
+                    ),
+                ).fetchone()
+                self.assertIsNotNone(receipt, "kernel replace_config receipt missing")
+                self.assertEqual(
+                    receipt["command_kind"], TIMELINE_REPLACE_CONFIG_COMMAND_KIND
+                )
+                self.assertEqual(receipt["resulting_stream_seq"], 2)
+                kernel_event = conn.execute(
+                    "SELECT * FROM events WHERE stream_id = ? AND kind = ?",
+                    (
+                        f"{timeline_id}:{TIMELINE_STREAM_TYPE}",
+                        TIMELINE_CONFIG_REPLACED_EVENT_KIND,
+                    ),
+                ).fetchone()
+            self.assertIsNotNone(kernel_event)
+            self.assertEqual(kernel_event["seq"], 2)
+            shown = verify_app.timelines_service.show("wired-proj", "wired-tl")
+            self.assertIsNotNone(shown.data, shown.error)
+            self.assertEqual(shown.data["config_version"], 2)
+            self.assertEqual(shown.data["config"]["clips"][0]["id"], "clip-1")
+
+            # The eventlog side was appended and re-projected too.
+            from astrid.core.timeline.paths import find_timeline_by_slug
+
+            found = find_timeline_by_slug("wired-proj", "wired-tl")
+            self.assertIsNotNone(found)
+            _ulid, tdir = found
+            assembly = json.loads((tdir / "assembly.json").read_text())
+            self.assertTrue(assembly, "eventlog projection should be regenerated")
+        finally:
+            verify_app.close()
 
 
 if __name__ == "__main__":

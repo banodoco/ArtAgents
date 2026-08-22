@@ -158,34 +158,47 @@ class AstridClient:
 
     # -- lazy capability APIs ------------------------------------------------
 
+    def _bound_root(self) -> str:
+        """The client's bound projects root (resolved by the application)."""
+        return str(self._app.projects_root)
+
     def discover(self, **kwargs: Any) -> Any:
-        """Lazy ``astrid.sdk.discover``: capability inventory and metadata.
+        """Lazy ``astrid.sdk.discover`` bound to the client's projects root.
 
         The discovery machinery (registries, pack inventory) is imported
-        only when this method is actually called.
+        only when this method is actually called. An explicit
+        ``project_root`` keyword wins over the bound root.
         """
         from astrid.sdk import discover
 
+        kwargs.setdefault("project_root", self._bound_root())
         return discover(**kwargs)
 
     def get_capability(self, capability_id: str, **kwargs: Any) -> Any:
-        """Lazy ``astrid.sdk.get_capability``: typed capability lookup.
+        """Lazy ``astrid.sdk.get_capability`` bound to the client's root.
 
         Raises the typed ``CapabilityNotFoundError`` /
         ``CapabilityAmbiguousError`` family for failed lookups.
         """
         from astrid.sdk import get_capability
 
+        kwargs.setdefault("project_root", self._bound_root())
         return get_capability(capability_id, **kwargs)
 
     def invoke(self, capability_id: str, **kwargs: Any) -> Any:
-        """Lazy typed ``astrid.sdk.invoke``: run one capability.
+        """Lazy typed ``astrid.sdk.invoke`` bound to the client's root.
 
-        Returns an :class:`~astrid.sdk.results.InvocationResult` whose
-        result IDs (``run_id``/``run_root``) and outputs are preserved.
+        Capability resolution AND run placement happen against the bound
+        application's projects root — a run ledger (``run.json`` under the
+        resolved project's ``runs/`` directory) lands beneath it, never
+        under the process default. An explicit ``project_root`` keyword
+        wins over the bound root. Returns an
+        :class:`~astrid.sdk.results.InvocationResult` whose result IDs
+        (``run_id``/``run_root``) and outputs are preserved.
         """
         from astrid.sdk import invoke
 
+        kwargs.setdefault("project_root", self._bound_root())
         return invoke(capability_id, **kwargs)
 
     @property

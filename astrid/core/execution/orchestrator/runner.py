@@ -66,14 +66,17 @@ class OrchestratorRunRequest:
     inputs: Mapping[str, Any] = field(default_factory=dict)
     outputs: Mapping[str, Any] = field(default_factory=dict)
     brief: Path | str | None = None
-    orchestrator_args: tuple[str, ...] = ()
     dry_run: bool = False
     python_exec: str | None = None
     verbose: bool = False
     execution_mode: Literal["subprocess", "in_process"] = "subprocess"
     project_was_auto_resolved: bool = False
     invocation: str = "cli"
+    projects_root: Path | str | None = None
     run_root: Path | str | None = None
+    run_id: str | None = None
+    project_run_metadata: Mapping[str, Any] = field(default_factory=dict)
+    orchestrator_args: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -600,6 +603,7 @@ def _prepare_project_request(
                 "attached" if request.project_was_auto_resolved else "explicit"
             ),
         },
+        root=request.projects_root,
         auto_bound=False,
         record_out=record_out,
         requires_timeline=False if request.project_was_auto_resolved else None,

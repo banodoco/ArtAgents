@@ -140,6 +140,7 @@ class ExecutorRunRequest:
     execution_mode: Literal["subprocess", "in_process"] = "subprocess"
     project_was_auto_resolved: bool = False
     invocation: str = "cli"
+    projects_root: Path | str | None = None
     run_root: Path | str | None = None
     run_id: str | None = None
     project_run_metadata: Mapping[str, Any] = field(default_factory=dict)
@@ -878,6 +879,7 @@ def _prepare_project_request(
         kind="executor",
         argv=_project_argv(request),
         metadata=run_metadata,
+        root=request.projects_root,
         auto_bound=False,
         record_out=record_out,
         requires_timeline=requires_timeline,

@@ -17,6 +17,7 @@ from ._module import _sdk_module
 from .exceptions import (
     AstridSDKError,
     CapabilityInvocationError,
+    CapabilityValidationError,
     UnsupportedCapabilityError,
     _error_payload_from_internal_error,
     _internal_error_from_result,
@@ -45,6 +46,7 @@ def discover(
     banodoco_config: Any | None = None,
     active_theme: str | Path | None = None,
     include_missing_roots: bool = False,
+    kind: str | None = None,
 ) -> DiscoveryResult:
     sdk_module = _sdk_module()
     discovered_packs = sdk_module._discover_pack_inventory(
@@ -112,6 +114,14 @@ def discover(
             sdk_module._capability_from_element(definition)
             for definition in element_registry.list()
         )
+    if kind is not None and kind not in ("executor", "orchestrator", "element"):
+        raise CapabilityValidationError(
+            f"discover(kind=...) must be one of 'executor', 'orchestrator', "
+            f"'element' — got {kind!r}"
+        )
+    executors = executors if kind in (None, "executor") else ()
+    orchestrators = orchestrators if kind in (None, "orchestrator") else ()
+    elements = elements if kind in (None, "element") else ()
     return DiscoveryResult(
         executors=executors,
         orchestrators=orchestrators,
@@ -342,6 +352,9 @@ def invoke(
                 execution_mode=execution_mode,
                 argv=tuple(argv),
                 invocation="sdk",
+                # The bound root drives both capability resolution and run
+                # placement (the FS run ledger lands under it).
+                projects_root=project_root,
             )
             # SDK callers own stdout (the timeline CLI emits one JSON object).
             # Executor stdout remains available in managed run logs.
@@ -365,6 +378,7 @@ def invoke(
                 verbose=verbose,
                 execution_mode=execution_mode,
                 invocation="sdk",
+                projects_root=project_root,
             )
             with redirect_stdout(StringIO()):
                 result = sdk_module.run_orchestrator(request, orchestrator_registry)

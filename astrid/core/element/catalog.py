@@ -49,14 +49,16 @@ def _resolve_theme_dir(theme: str | Path | None) -> Path | None:
     return resolve_theme_dir(theme)
 
 
-def resolve_active_theme(project_slug: str | None = None) -> Path | None:
+def resolve_active_theme(
+    project_slug: str | None = None, *, root: str | Path | None = None
+) -> Path | None:
     raw = os.environ.get(ACTIVE_THEME_ENV)
     if raw:
         return resolve_theme_dir(raw)
     if project_slug:
         from astrid.core.project.project import get_project_theme
 
-        theme = get_project_theme(project_slug)
+        theme = get_project_theme(project_slug, root=root)
         if theme:
             return resolve_theme_dir(theme)
     return None

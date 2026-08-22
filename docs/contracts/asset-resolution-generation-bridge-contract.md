@@ -538,44 +538,22 @@ sends ONE combined POST on save; `registerAsset` uses the guarded PUT. A `409`
 is mapped to `TimelineVersionConflictError` → reload-and-retry with the fresh
 `config_version`.
 
-### 14.2 `astrid projects source add --file` Imports
-
-`--file` copies the source atomically into `sources/<source_id>/<source_id><ext>`
-(copy2 → `.importing` sibling → `os.replace` → atomic `source.json`), recording the
-in-project absolute path. Outside-root files are therefore servable by the bridge.
-Collisions fail unless `--force` (maps to `exist_ok`). `--url` never copies.
-`asset.duration` is validated as finite and positive.
-
-### 14.3 `astrid timelines registry sync`
-
-```bash
-astrid timelines registry sync <slug> --manifest manifest.json --expected-version N --project <slug>
-```
-
-Manifest: `{"assets": {"<asset-key>": {"source_id": "<id>"} | {"file": "<path-under-sources/>"}}}`
-— exactly one of `source_id` / `file` per entry; unresolved or outside-root refs
-fail with an import hint. The verb merges into the RAW registry (unrelated and
-temporarily-missing entries are never pruned), appends
-`timeline.asset_registry_replaced(source="other")` under `--expected-version` CAS,
-updates the `registry.json` sidecar, and skips no-op writes. The served registry
-still filters entries whose media file is unresolvable.
-
-### 14.4 Clip Timing Invariant
+### 14.2 Clip Timing Invariant
 
 `clip.added` carries optional validated `start` (≥ 0) and `duration` (> 0),
 projected to `at`/`hold`. `clip add --kind audio` without `--duration` uses the
 registry asset `duration` if present, else FAILS ("probe or pass --duration") —
 no silent zero-length clips, no automatic ffprobe.
 
-### 14.5 Sessionless Project-Scoped Edits
+### 14.3 Sessionless Project-Scoped Edits
 
 All project-scoped mutation verbs (clip/track/effect/transition/theme/audio/
-arrangement/pool/registry, `projects source`) work with an explicit `--project`
+arrangement/pool/registry) work with an explicit `--project`
 and no bound session; the actor is the stable request-scoped
 `agent:project:<slug>`. Unconditional allowlist and `.astrid-session` behavior
 are unchanged.
 
-### 14.6 Invariants Preserved (Do Not Regress)
+### 14.4 Invariants Preserved (Do Not Regress)
 
 - Doubled source layout `sources/<name>.<ext>/<name>.<ext>` is intentional and tested.
 - Outside-root file rejection is deliberate (traversal guard).

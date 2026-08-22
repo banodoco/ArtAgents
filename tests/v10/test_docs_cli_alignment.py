@@ -2,7 +2,8 @@
 
 Every ``astrid ...`` / ``python3 -m astrid ...`` command documented in the
 agent-facing docs (AGENTS.md, _core/SKILL.md, getting-started.md,
-cli-journeys.md, and every pack STAGE.md / skill/SKILL.md) must be a real
+cli-journeys.md, every pack STAGE.md / skill/SKILL.md, and every
+docs/contracts/*.md / docs/packs/*.md guide) must be a real
 command on the shipped eight-family gateway:
 
 - the first token must be one of the eight families, ``help``, ``--help``,
@@ -92,8 +93,16 @@ def _is_excluded(path: Path) -> bool:
     return any(path.is_relative_to(root) for root in _IN_FLIGHT_EXCLUDED)
 
 
+def _contract_docs() -> list[Path]:
+    """Contract + pack-guide docs — historically a ghost-verb hiding spot."""
+    files: list[Path] = []
+    for rel in ("docs/contracts", "docs/packs"):
+        files.extend(sorted((_ROOT / rel).rglob("*.md")))
+    return files
+
+
 def _all_docs() -> list[Path]:
-    return list(_CORE_DOCS) + _pack_docs()
+    return list(_CORE_DOCS) + _pack_docs() + _contract_docs()
 
 
 def _commands_from_line(raw_line: str) -> list[list[str]]:
@@ -124,15 +133,44 @@ def _commands_from_line(raw_line: str) -> list[list[str]]:
     return [tokens]
 
 
+_FENCE_RE = re.compile(
+    r"^```([A-Za-z0-9_+-]*)[ \t]*\n(.*?)^```[ \t]*$",
+    re.DOTALL | re.MULTILINE,
+)
+_FENCE_LANGS = frozenset({"", "bash", "sh"})
+
+
 def _extract_commands(text: str) -> list[list[str]]:
-    """Every ``astrid`` command in fenced bash blocks and inline backticks."""
+    """Every ``astrid`` command in fenced bash blocks and inline backticks.
+
+    Fences are matched line-anchored so a closing fence delimiter cannot be
+    re-paired as an opening fence, and fenced bodies are stripped before the
+    inline-backtick pass — otherwise every bash block leaked back in as one
+    giant inline "span" whose lines shlex'd into a single bogus command.
+    """
     commands: list[list[str]] = []
-    for block in re.findall(r"```(?:bash|sh)?\n(.*?)```", text, flags=re.DOTALL):
+
+    def _scan(block: str) -> None:
+        # Join backslash continuations first: a command split across lines is
+        # one documented invocation and must be validated as a whole, not
+        # silently dropped by shlex's dangling-backslash error.
+        pending = ""
         for line in block.splitlines():
-            commands.extend(_commands_from_line(line))
-    for span in re.findall(r"`([^`]*)`", text):
+            candidate = f"{pending} {line}".strip() if pending else line
+            if candidate.endswith("\\"):
+                pending = candidate[:-1].strip()
+                continue
+            pending = ""
+            commands.extend(_commands_from_line(candidate))
+        if pending:
+            commands.extend(_commands_from_line(pending))
+
+    for match in _FENCE_RE.finditer(text):
+        if match.group(1) in _FENCE_LANGS:
+            _scan(match.group(2))
+    for span in re.findall(r"`([^`]*)`", _FENCE_RE.sub("", text)):
         if re.search(r"(?:^|\s)astrid(?=\s|$)", span):
-            commands.extend(_commands_from_line(span))
+            _scan(span)
     return commands
 
 
@@ -199,16 +237,32 @@ def _validate_command(tokens: list[str], where: str) -> list[str]:
             f"{where}: verb {verb!r} not in {sorted(_subcommands(parser))}: {tokens!r}"
         )
         return errors
-    # Belt and braces: the full documented command must parse (surface-level
-    # failures only; missing-required-arg and value-validation errors on a
-    # known verb are argument-level data, out of scope here).
+    # Belt and braces: the full documented command must parse. A nonzero
+    # ``SystemExit`` whose argparse stderr reports a usage-surface defect —
+    # unknown verb, unknown flag, missing argument — invalidates a documented
+    # command. (``str(SystemExit)`` is just the exit code, never argparse's
+    # message, so the captured stderr carries the detail.) Value-level data
+    # errors on an otherwise real command — JSON decoding of a ``{...}``
+    # shorthand placeholder, filesystem existence checks on example paths,
+    # range/int conversion of placeholder values — are argument-level data
+    # and out of scope here.
+    stderr = io.StringIO()
     try:
-        with contextlib.redirect_stderr(io.StringIO()):
+        with contextlib.redirect_stderr(stderr):
             parser.parse_args(tokens[1:])
-    except SystemExit as exc:  # argparse exits 2 on any parse error
-        message = str(exc) if exc.code != 0 else ""
-        if "invalid choice" in message or "unrecognized arguments" in message:
-            errors.append(f"{where}: documented command does not parse: {tokens!r} ({message})")
+    except SystemExit as exc:  # argparse exits nonzero on any parse error
+        detail = stderr.getvalue()
+        usage_error = (
+            "invalid choice" in detail
+            or "unrecognized arguments" in detail
+            or "arguments are required" in detail
+        )
+        if exc.code != 0 and usage_error:
+            last = detail.strip().splitlines()
+            errors.append(
+                f"{where}: documented command does not parse: {tokens!r} "
+                f"(exit {exc.code}: {last[-1] if last else 'no stderr'})"
+            )
     return errors
 
 
@@ -223,6 +277,35 @@ def test_documented_commands_are_real_gateway_commands() -> None:
             errors.extend(_validate_command(tokens, f"{path.relative_to(_ROOT)}"))
     assert count >= 40, f"extracted surprisingly few commands: {count}"
     assert not errors, "\n".join(errors)
+
+
+def test_validator_rejects_invalid_verb_and_flag() -> None:
+    """Regression (R2-B): invalid commands FAIL the validator.
+
+    The old implementation inspected ``str(SystemExit)`` — which is just the
+    exit code, never argparse's message — so a known verb with an unknown
+    flag passed the gate silently.
+    """
+    # Unknown verb beneath a real family.
+    assert _validate_command(["runs", "vacuum"], "regression")
+    # Known verb with an unrecognized flag (the exact Sol finding).
+    assert _validate_command(
+        ["projects", "list", "--definitely-invalid"], "regression"
+    )
+    # Unknown verb beneath a nested mount.
+    assert _validate_command(["media", "references", "frobnicate"], "regression")
+    # The well-formed counterparts stay clean.
+    assert _validate_command(["projects", "list", "--json"], "regression") == []
+    # Value-level data errors on an otherwise real command stay out of scope:
+    # `media import` rejects nonexistent paths at parse time, but that is
+    # argument data, not a usage defect — the documented shape is real.
+    assert (
+        _validate_command(
+            ["media", "import", "./no-such-input.png", "--project", "demo"],
+            "regression",
+        )
+        == []
+    )
 
 
 def test_core_docs_have_no_retired_invocation_strings() -> None:

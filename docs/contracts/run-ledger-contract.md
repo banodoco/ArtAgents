@@ -241,52 +241,6 @@ This uses process-global Python redirection, so it is intended only for Astrid's
 
 ---
 
-## Cleanup verbs (M2)
-
-### `astrid sessions prune`
-
-Prunes stale session records from `~/.astrid/sessions/`. A session is stale
-when its `last_used_at` timestamp is older than `--older-than-days` (default 30).
-
-- **Dry-run by default**: lists deletion candidates without modifying the filesystem
-- `--apply` flag enables actual deletion
-- Unparseable timestamps are treated as stale (safety-first)
-- Stable output format: oldest-first sorted listing with `session_id`, `project`,
-  age, path, and action (`would delete` / `deleting`)
-- Dry-run footer: `"Dry run — no sessions were deleted."` and re-run hint
-- Apply mode reports deleted count and any errors
-
-**CLI**:
-```
-astrid sessions prune [--older-than-days N] [--apply]
-```
-
-### `astrid runs gc`
-
-Garbage-collects stale run directories from a project.
-
-- `--project` (required): project slug
-- `--older-than-days` (default 30): age threshold for deletion candidates
-- `--keep-last` (optional): retain at least this many newest runs regardless of age
-- `--apply` (default false): actually delete; dry-run otherwise
-
-**Protection invariants**:
-- Runs referenced by any timeline `manifest.json` `contributing_runs` field are
-  **never** deleted — they are listed as `(protected)`
-- Age is derived from `run.json` timestamps (`updated_at`, `created_at`) when valid;
-  falls back to directory `mtime` when `run.json` is missing or unparseable
-- `--keep-last` provides a newest-N retention floor on top of the age filter
-
-**CLI**:
-```
-astrid runs gc --project <slug> [--older-than-days N] [--keep-last N] [--apply]
-```
-
-Both verbs default to dry-run so operators always see what _would_ happen before
-any destructive action.
-
----
-
 ## Export improvements (M2)
 
 ### Timeline repair visibility
@@ -314,7 +268,7 @@ contributing run:
 
 ## Session discovery — retired
 
-The session-bound `astrid next` flow (`_most_recent_session_slug`,
+The session-bound `next` flow (`_most_recent_session_slug`,
 `.astrid-session` pointers, default-project preference at `next` time) was
 retired with the task-mode CLI. There is no session binding and no `next`
 verb; the default-project preference lives on `projects select`, and runs

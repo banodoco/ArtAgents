@@ -476,10 +476,25 @@ def _load_pack_orchestrators_from_packs(
 ) -> tuple[OrchestratorDefinition, ...]:
     orchestrators: list[OrchestratorDefinition] = []
     for pack in packs:
-        for root in iter_orchestrator_roots(pack):
-            for orchestrator in load_folder_orchestrators(root):
-                validate_content_id_in_pack(orchestrator.id, pack, content_type="orchestrator")
-                orchestrators.append(_attach_pack_metadata(orchestrator, pack.id, content_root=root))
+        # Per-pack fault tolerance: one broken content manifest (e.g. an
+        # installed external pack whose orchestrator.yaml fails schema
+        # validation) must not abort the whole discovery/invoke. The pack is
+        # skipped with a warning; pack-alignment failures
+        # (``PackValidationError`` from ``validate_content_id_in_pack``)
+        # still propagate — a misplaced id is a packaging contract breach,
+        # not a bad manifest.
+        try:
+            for root in iter_orchestrator_roots(pack):
+                for orchestrator in load_folder_orchestrators(root):
+                    validate_content_id_in_pack(orchestrator.id, pack, content_type="orchestrator")
+                    orchestrators.append(_attach_pack_metadata(orchestrator, pack.id, content_root=root))
+        except (OrchestratorValidationError, ManifestParseError) as exc:
+            logger.warning(
+                "skipping pack %r: orchestrator manifests failed validation: %s",
+                getattr(pack, "id", pack),
+                exc,
+            )
+            continue
     return tuple(orchestrators)
 
 

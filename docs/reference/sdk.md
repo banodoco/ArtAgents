@@ -76,10 +76,14 @@ json.dumps(inventory.to_dict())
 ```
 
 `include_installed=False` scopes discovery to the in-tree packs. Externally
-installed packs load with the registry by default; a single broken installed
-manifest fails the whole discovery call, so scripted and agent workflows
-should pin `include_installed=False` unless they explicitly need installed
-packs.
+installed packs load with the registry by default. Installed/external pack
+roots are fault-tolerant: a pack whose manifests fail validation is skipped
+with a logged warning instead of failing the whole discovery call, so
+scripted and agent workflows keep working when one external pack is broken.
+
+`kind="executor"` (or `"orchestrator"` / `"element"`) filters the returned
+inventory to that capability type — `capabilities` then carries only those
+entries; an invalid kind raises `CapabilityValidationError`.
 
 `discover()` loads the executor, orchestrator, and element registries in
 dependency order (executor first, then orchestrator, then elements). Element

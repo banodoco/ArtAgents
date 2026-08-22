@@ -155,7 +155,7 @@ models:
 | `id` | `string` | yes | Unique model identifier (e.g. `"z-image"`). |
 | `modality` | `string` | yes | `"image"`, `"video"`, or `"audio"`. |
 | `modes` | `dict<string, ModeSpec>` | yes | Map from canonical mode name to its specification. |
-| `closed` | `boolean` | no | If `true`, the model is closed-weight and hidden from default `astrid models list` (shown only with `--include-closed`). |
+| `closed` | `boolean` | no | If `true`, the model is closed-weight and hidden from default registry listings (`ModelRegistry.list_all()`; shown only with `include_closed=True`). |
 
 ### ModeSpec
 
@@ -205,10 +205,10 @@ for future sprints.
 
 ## `closed: true` flag (SD-008)
 
-Models marked `closed: true` are hidden from the default `astrid models list`
-output.  They appear only with `--include-closed`.  Sprint 2 ships the
-flag and CLI behavior; no closed-weight entries are registered yet (Sprint 3
-may add Recraft, Ideogram, etc.).
+Models marked `closed: true` are hidden from default registry listings:
+`ModelRegistry.load_default().list_all()` skips them unless called with
+`include_closed=True`.  No closed-weight entries are registered yet (future
+sprints may add Recraft, Ideogram, etc.).
 
 ## Validation rules
 

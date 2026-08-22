@@ -12,7 +12,11 @@ from typing import Any, Iterable, Mapping
 from astrid.core._shared.jsonio import read_json, write_json_atomic
 from astrid.core.contracts.errors import AstridError
 from astrid.core.contracts.run_status import RunStatus
-from astrid.core.env_vars import ASTRID_PROJECT_SLUG, ASTRID_SESSION_ID
+from astrid.core.env_vars import (
+    ASTRID_PROJECT_SLUG,
+    ASTRID_PROJECTS_ROOT,
+    ASTRID_SESSION_ID,
+)
 from astrid.core.foundation import project_paths as paths
 from astrid.core.subprocess_env import TASK_PROJECT_ENV, TASK_RUN_ID_ENV, TASK_STEP_ID_ENV
 from astrid.core.threads.ids import generate_run_id
@@ -111,14 +115,16 @@ def reject_project_with_out(project: str | None, out: str | Path | None) -> None
         raise ProjectRunError("--project cannot be combined with --out; project runs own their output directory")
 
 
-def project_run_env(project_slug: str | None = None) -> dict[str, str]:
+def project_run_env(
+    project_slug: str | None = None, *, root: str | Path | None = None
+) -> dict[str, str]:
     env = {PROJECT_RUN_ENV: "1"}
     if project_slug:
         env[ASTRID_PROJECT_SLUG] = project_slug
         from astrid.core.element.catalog import resolve_active_theme
         from astrid.core.theme import ACTIVE_THEME_ENV
 
-        theme_dir = resolve_active_theme(project_slug=project_slug)
+        theme_dir = resolve_active_theme(project_slug=project_slug, root=root)
         if theme_dir is not None:
             env[ACTIVE_THEME_ENV] = str(theme_dir)
     return env
@@ -127,10 +133,21 @@ def project_run_env(project_slug: str | None = None) -> dict[str, str]:
 def _project_subprocess_env(request: Any) -> dict[str, str]:
     """Return the project-scoped subprocess environment for *request*.
 
-    *request* must have a ``.project`` attribute (``str | None``).
-    Byte-identical in executor/runner.py and orchestrator/runner.py.
+    *request* must have a ``.project`` attribute (``str | None``) and may
+    carry an explicit ``.projects_root`` (the SDK/client bound root). When
+    set, ``ASTRID_PROJECTS_ROOT`` is pinned to it so a child executor
+    process composes its kernel application against the same bound root the
+    parent used for run placement.
     """
-    return project_run_env(request.project) if request.project else {}
+    env = (
+        project_run_env(request.project, root=getattr(request, "projects_root", None))
+        if request.project
+        else {}
+    )
+    projects_root = getattr(request, "projects_root", None)
+    if projects_root:
+        env[ASTRID_PROJECTS_ROOT] = str(Path(projects_root).expanduser().resolve())
+    return env
 
 
 def record_path_value(

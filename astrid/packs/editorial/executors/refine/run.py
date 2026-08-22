@@ -570,6 +570,7 @@ def _flag_entry(finding: enriched_arrangement.ReviewerFinding) -> dict[str, Any]
 def _emit_refine_managed_events(
     args: argparse.Namespace, config: dict[str, Any],
     *, actor_via: Any | None = None,
+    kernel_binding_factory: Any | None = None,
 ) -> int:
     """Emit timeline.config_replaced event through the pack write gateway.
 
@@ -580,11 +581,27 @@ def _emit_refine_managed_events(
     When *actor_via* is provided (e.g. from ``--actor-via`` JSON), it is
     chained as ``actor.via`` to preserve upstream human/agent/orchestrator
     provenance on the emitted events.
+
+    *kernel_binding_factory* resolves the kernel timeline write path
+    (default: :func:`astrid.packs.timeline.kernel_binding.kernel_timeline_writer_for`).
+    When it binds, the gateway commits the kernel ``timeline.replace_config``
+    receipt BEFORE the eventlog append (no kernel/eventlog divergence);
+    when it returns ``None`` the context is genuinely kernel-less and the
+    documented eventlog-only escape applies.
     """
     import time as _time
 
     from astrid.core.timeline._edit_helpers import pack_write_gateway
     from astrid.core.timeline.events.schema import TimelineActor
+    from astrid.packs.timeline.kernel_binding import (
+        close_kernel_binding,
+        gateway_kernel_kwargs,
+    )
+
+    if kernel_binding_factory is None:
+        from astrid.packs.timeline.kernel_binding import (
+            kernel_timeline_writer_for as kernel_binding_factory,
+        )
 
     actor = TimelineActor(
         type="system",
@@ -599,14 +616,19 @@ def _emit_refine_managed_events(
             "payload": {"config": validated_config},
         }
     ]
-    result = pack_write_gateway(
-        project_slug=args.project,
-        timeline_slug=args.timeline_slug,
-        timeline_ulid="",
-        timeline_event_stream_id="",
-        events=events,
-        actor=actor,
-    )
+    binding = kernel_binding_factory(args.project, args.timeline_slug)
+    try:
+        result = pack_write_gateway(
+            project_slug=args.project,
+            timeline_slug=args.timeline_slug,
+            timeline_ulid="",
+            timeline_event_stream_id="",
+            events=events,
+            actor=actor,
+            **gateway_kernel_kwargs(binding),
+        )
+    finally:
+        close_kernel_binding(binding)
     return result.new_version
 
 

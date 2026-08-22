@@ -256,7 +256,7 @@ their extension manifests are registered through
 Override management for executor, orchestrator, and element ids happens
 through the project-local `OverrideStore` and its
 `astrid/packs/local/.overrides.json` file; do not invent
-`astrid renderers override ...` commands. Rendering
+astrid renderers override gateway commands. Rendering
 hosts and tests set these typed mappings through `OverrideStore` until a public
 rendering-registry CLI is added.
 

@@ -3,7 +3,7 @@
 Pipeline (each phase is a module above; all writes go through
 AstridClient + the SDK/repositories — no raw SQL, no importer tables)::
 
-    inventory -> projects -> media -> timelines -> generations -> verify
+    inventory -> projects -> workspaces -> media -> timelines -> generations -> verify
 
 - Dry-run by default: builds the inventory (read-only), prints the plan
   (counts per family, fence vs zero-child split) and exits without
@@ -205,12 +205,18 @@ def main() -> int:
     print(f"migrate_all: backup at {backup}")
 
     from migrate_projects import migrate_projects
+    from migrate_workspaces import migrate_workspaces
     from migrate_media import migrate_media
     from migrate_timelines import migrate_timelines
     from migrate_generations import migrate_generations
 
     print("migrate_all: phase projects")
     migrate_projects(inventory, apply=True, project_filter=project_filter, root=root)
+    print("migrate_all: phase workspaces")
+    workspace_results = migrate_workspaces(
+        apply=True, root=root, project_filter=project_filter
+    )
+    print(f"migrate_all: workspaces {len(workspace_results)}")
     print("migrate_all: phase media")
     from migrate_media import set_media_map_path as set_media_map
 

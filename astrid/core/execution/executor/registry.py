@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import shutil
 from dataclasses import replace
 from pathlib import Path
@@ -55,9 +56,11 @@ BUILTIN_STEP_ORDER: tuple[str, ...] = (
     "validate",
 )
 
-
 class ExecutorRegistryError(ExecutorValidationError):
     """Raised when a executor registry is inconsistent."""
+
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class ExecutorRegistry(CapabilityRegistry[str, ExecutorDefinition]):
@@ -305,10 +308,25 @@ def _load_pack_executors_from_packs(
 ) -> tuple[ExecutorDefinition, ...]:
     executors: list[ExecutorDefinition] = []
     for pack in packs:
-        for root in iter_executor_roots(pack):
-            for executor in load_folder_executors(root):
-                validate_content_id_in_pack(executor.id, pack, content_type="executor")
-                executors.append(_attach_pack_metadata(executor, pack.id, pack_root=pack.root, content_root=root))
+        # Per-pack fault tolerance: one broken content manifest (e.g. an
+        # installed external pack whose executor.yaml fails schema
+        # validation) must not abort the whole discovery/invoke. The pack is
+        # skipped with a warning; pack-alignment failures
+        # (``PackValidationError`` from ``validate_content_id_in_pack``)
+        # still propagate — a misplaced id is a packaging contract breach,
+        # not a bad manifest.
+        try:
+            for root in iter_executor_roots(pack):
+                for executor in load_folder_executors(root):
+                    validate_content_id_in_pack(executor.id, pack, content_type="executor")
+                    executors.append(_attach_pack_metadata(executor, pack.id, pack_root=pack.root, content_root=root))
+        except (ExecutorValidationError, ManifestParseError) as exc:
+            _LOGGER.warning(
+                "skipping pack %r: executor manifests failed validation: %s",
+                getattr(pack, "id", pack),
+                exc,
+            )
+            continue
     return tuple(executors)
 
 

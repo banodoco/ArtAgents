@@ -1,7 +1,6 @@
 """Element registry and source precedence."""
 
-from __future__ import annotations
-
+import logging
 import os
 import sys
 from dataclasses import dataclass
@@ -44,6 +43,7 @@ class ElementRegistryError(ElementValidationError):
     """Raised when element registry state is inconsistent."""
 
 
+_LOGGER = logging.getLogger(__name__)
 @dataclass(frozen=True)
 class ElementSource:
     name: str
@@ -372,22 +372,35 @@ def _load_pack_elements_from_packs(
     elements: list[ElementDefinition] = []
     for pack in packs:
         priority = 10 if pack.id == "local" else 30
-        for kind, root in iter_element_roots(
-            pack,
-            element_kind_registry=element_kind_registry,
-        ):
-            if not any((root / name).is_file() for name in ELEMENT_MANIFEST_NAMES):
-                continue
-            element = load_element_definition(
-                root,
-                kind=kind,
-                source=f"pack:{pack.id}",
-                editable=pack.id == "local",
-                priority=priority,
+        # Per-pack fault tolerance: one broken element manifest (e.g. from an
+        # installed external pack) must not abort the whole discovery/invoke.
+        # The pack is skipped with a warning; pack-alignment failures
+        # (``PackValidationError`` from ``validate_element_pack_id``) still
+        # propagate — a misplaced pack_id is a packaging contract breach.
+        try:
+            for kind, root in iter_element_roots(
+                pack,
                 element_kind_registry=element_kind_registry,
+            ):
+                if not any((root / name).is_file() for name in ELEMENT_MANIFEST_NAMES):
+                    continue
+                element = load_element_definition(
+                    root,
+                    kind=kind,
+                    source=f"pack:{pack.id}",
+                    editable=pack.id == "local",
+                    priority=priority,
+                    element_kind_registry=element_kind_registry,
+                )
+                validate_element_pack_id(element.metadata.get("pack_id"), pack, element_root=root)
+                elements.append(element)
+        except ElementValidationError as exc:
+            _LOGGER.warning(
+                "skipping pack %r: element definitions failed validation: %s",
+                pack.id,
+                exc,
             )
-            validate_element_pack_id(element.metadata.get("pack_id"), pack, element_root=root)
-            elements.append(element)
+            continue
     return tuple(elements)
 
 
