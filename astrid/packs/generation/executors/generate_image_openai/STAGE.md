@@ -14,29 +14,24 @@ This executor wraps `astrid.packs.generation.executors.generate_image_openai.run
 prompt file. Put one prompt per line, or provide a JSON/JSONL list accepted by the
 underlying CLI.
 
-## Commands
-
-Inspect:
-
-```bash
-python3 -m astrid executors inspect generation.generate_image_openai
-```
+## Usage
 
 Dry-run:
 
-```bash
-python3 -m astrid executors run generation.generate_image_openai \
-  --out runs/example-images \
-  --input prompts_file=runs/example-images/prompts.txt \
-  --dry-run
+```python
+import astrid.sdk as sdk
+result = sdk.invoke("generation.generate_image_openai",
+    inputs={"prompts_file": "runs/example-images/prompts.txt"},
+    out="runs/example-images",
+    dry_run=True)
 ```
 
 Run:
 
-```bash
-python3 -m astrid executors run generation.generate_image_openai \
-  --out runs/example-images \
-  --input prompts_file=runs/example-images/prompts.txt
+```python
+result = sdk.invoke("generation.generate_image_openai",
+    inputs={"prompts_file": "runs/example-images/prompts.txt"},
+    out="runs/example-images")
 ```
 
 ## Outputs
