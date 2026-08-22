@@ -476,6 +476,7 @@ def load_display_json_with_repair(timeline_home: str | Path) -> dict[str, object
         _bf_side_mod = _il_side.import_module("astrid.packs.timeline.backfill")
         _BackfillError_side = _bf_side_mod.BackfillError  # type: ignore[attr-defined]
         _tid_side = None
+        _pr_side = None
         try:
             import sqlite3 as _sq_side
 
@@ -490,12 +491,19 @@ def load_display_json_with_repair(timeline_home: str | Path) -> dict[str, object
             _db_side = _dd_side(_pr_side)
             if _db_side.is_file():
                 _ulid_side = timeline_dir_path.name
+                # Derive owning project slug from layout <root>/<project>/timelines/<ulid>
+                _proj_slug_side = td_par_side.parent.name if td_par_side.name == "timelines" and td_par_side.parent.is_dir() else None
                 _conn_side = _sq_side.connect(f"file:{_db_side}?mode=ro", uri=True)
                 try:
                     _conn_side.row_factory = _sq_side.Row
-                    _r_side = _conn_side.execute("SELECT json_extract(payload_json,'$.data.timeline_id') as tid FROM events WHERE kind='timeline.created' AND lower(json_extract(payload_json,'$.data.timeline_ulid'))=lower(?) LIMIT 1", (_ulid_side,)).fetchone()
-                    if _r_side and _r_side["tid"]:
-                        _tid_side = str(_r_side["tid"])
+                    # Project-scoped lookup (M1): ULIDs are only project-unique.
+                    if _proj_slug_side:
+                        _proj_row_side = _conn_side.execute("SELECT id FROM projects WHERE slug=?", (_proj_slug_side,)).fetchone()
+                        if _proj_row_side is not None:
+                            _pid_side = str(_proj_row_side["id"])
+                            _r_side = _conn_side.execute("SELECT json_extract(payload_json,'$.data.timeline_id') as tid FROM events WHERE kind='timeline.created' AND project_id=? AND lower(json_extract(payload_json,'$.data.timeline_ulid'))=lower(?) LIMIT 1", (_pid_side, _ulid_side,)).fetchone()
+                            if _r_side and _r_side["tid"]:
+                                _tid_side = str(_r_side["tid"])
                 finally:
                     _conn_side.close()
         except Exception:
@@ -531,7 +539,6 @@ def load_display_json_with_repair(timeline_home: str | Path) -> dict[str, object
             except Exception:
                 pass
         return None
-
     identity = read_json(identity_file)
     if not isinstance(identity, dict):
         return None
@@ -687,11 +694,12 @@ def load_assembly_json_with_repair(
 
     # Event log exists but no identity → can't resolve backend.
     if not identity_file.is_file():
-        # Sidecarless marked timeline but events_file exists: derive tid via ULID lookup, then use SQLite authority.
+        # Sidecarless marked timeline but events_file exists: derive tid via ULID lookup (project-scoped), then return canonical TimelineConfig from SQLite authority (M1+M2).
         import importlib as _il_side
         _bf_side_mod = _il_side.import_module("astrid.packs.timeline.backfill")
         _BackfillError_side = _bf_side_mod.BackfillError  # type: ignore[attr-defined]
         _tid_side = None
+        _pr_side = None
         try:
             import sqlite3 as _sq_side
 
@@ -706,12 +714,17 @@ def load_assembly_json_with_repair(
             _db_side = _dd_side(_pr_side)
             if _db_side.is_file():
                 _ulid_side = timeline_dir_path.name
+                _proj_slug_side = td_par_side.parent.name if td_par_side.name == "timelines" and td_par_side.parent.is_dir() else None
                 _conn_side = _sq_side.connect(f"file:{_db_side}?mode=ro", uri=True)
                 try:
                     _conn_side.row_factory = _sq_side.Row
-                    _r_side = _conn_side.execute("SELECT json_extract(payload_json,'$.data.timeline_id') as tid FROM events WHERE kind='timeline.created' AND lower(json_extract(payload_json,'$.data.timeline_ulid'))=lower(?) LIMIT 1", (_ulid_side,)).fetchone()
-                    if _r_side and _r_side["tid"]:
-                        _tid_side = str(_r_side["tid"])
+                    if _proj_slug_side:
+                        _proj_row_side = _conn_side.execute("SELECT id FROM projects WHERE slug=?", (_proj_slug_side,)).fetchone()
+                        if _proj_row_side is not None:
+                            _pid_side = str(_proj_row_side["id"])
+                            _r_side = _conn_side.execute("SELECT json_extract(payload_json,'$.data.timeline_id') as tid FROM events WHERE kind='timeline.created' AND project_id=? AND lower(json_extract(payload_json,'$.data.timeline_ulid'))=lower(?) LIMIT 1", (_pid_side, _ulid_side,)).fetchone()
+                            if _r_side and _r_side["tid"]:
+                                _tid_side = str(_r_side["tid"])
                 finally:
                     _conn_side.close()
         except Exception:
@@ -721,23 +734,17 @@ def load_assembly_json_with_repair(
                 from astrid.core.timeline.authority import is_backfilled_timeline as _isbf_side
                 _pr_side2 = _pr_side
                 if _isbf_side(_tid_side, _pr_side2):
-                    # Derive display via SQLite for marked sidecarless
+                    # Derive canonical config via SQLite authority (M2: never return display object)
                     try:
-                        from astrid.core.timeline.eventlog import project_display as _pd_side
                         from astrid.core.timeline.eventlog.sqlite_backend import (
                             SqliteEventLogBackend as _SBE_side,
                         )
+                        from astrid.core.timeline.projection import (
+                            regenerate_projection as _regen_side,
+                        )
                         _be_side = _SBE_side(timeline_id=_tid_side, timeline_home=timeline_dir_path, projects_root=_pr_side)
-                        _proj_side = _pd_side(_be_side.read_events(), fallback_display=None)
-                        if _proj_side.deleted or _proj_side.display is None:
-                            return None
-                        # Write cache and return
-                        _proj_disp = _proj_side.display.to_json_obj()
-                        try:
-                            _proj_side.display.write(timeline_dir_path / "display.json")
-                        except Exception:
-                            pass
-                        return _proj_disp
+                        _inner = _regen_side(_tid_side, _be_side, timeline_home=timeline_dir_path)
+                        return validate_timeline_config_json(_inner)
                     except _BackfillError_side:
                         raise
                     except Exception:
@@ -747,7 +754,6 @@ def load_assembly_json_with_repair(
             except Exception:
                 pass
         return None
-
     identity = read_json(identity_file)
     if not isinstance(identity, dict):
         return None
