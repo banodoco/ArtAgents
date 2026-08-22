@@ -583,6 +583,10 @@ def _prepare_project_request(
     request: OrchestratorRunRequest,
     orchestrator: OrchestratorDefinition,
 ) -> tuple[ProjectRunContext | None, OrchestratorRunRequest]:
+    # Single-ledger cut: project runs are kernel-owned (RunRepository fan-out).
+    # The runner retains output as staging only; no run.json is written here.
+    # The kernel admission path (sdk.invoke / CapabilityTaskHandler) owns the
+    # authoritative run/task ledger.
     if not request.project:
         return None, request
     if not request.project_was_auto_resolved:
@@ -591,27 +595,7 @@ def _prepare_project_request(
         raise OrchestratorRunnerError(
             f"--project cannot be combined with passthrough --out for {orchestrator.id}"
         )
-    record_out = request.out if request.out not in (None, "") else None
-    context = prepare_project_run(
-        request.project,
-        tool_id=orchestrator.id,
-        kind="orchestrator",
-        argv=_project_argv(request),
-        metadata={
-            "dry_run": bool(request.dry_run),
-            "project_resolution": (
-                "attached" if request.project_was_auto_resolved else "explicit"
-            ),
-        },
-        root=request.projects_root,
-        auto_bound=False,
-        record_out=record_out,
-        requires_timeline=False if request.project_was_auto_resolved else None,
-        invocation=request.invocation,
-    )
-    effective_out = request.out if record_out is not None else context.run_root
-    updated = _request_with_effective_out(request, orchestrator, effective_out)
-    return context, replace(updated, run_root=context.run_root)
+    return None, request
 
 
 def _orchestrator_requires_output_path(orchestrator: OrchestratorDefinition) -> bool:
@@ -666,15 +650,10 @@ def _finalize_project_orchestrator(
     returncode: int | None,
     error: BaseException | str | None = None,
 ) -> None:
-    metadata = {"dry_run": bool(request.dry_run)}
-    finalize_project_run(
-        context,
-        status=status,
-        returncode=returncode,
-        error=error,
-        metadata=metadata,
-        artifact_roots=[context.run_root],
-    )
+    # Single-ledger cut: no authoritative run.json finalize here. The kernel
+    # owns terminal status; this remains as a derived-projection hook (no-op
+    # when called with a None context, which is the normal path).
+    return
 
 
 def _resolve_project_request(

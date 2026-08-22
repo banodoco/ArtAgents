@@ -285,15 +285,6 @@ def _invocation_outputs(
     return _json_safe_mapping(outputs)
 
 
-def _kernel_ids_for_invoke(capability_id: str, inputs: Mapping[str, Any] | None, project: str | None) -> tuple[str, str, str]:
-    # Deprecated helper kept for backward compat; real ids come from kernel admission.
-    import uuid
-    from astrid.core.ids import generate_lowercase_ulid
-    run_id = generate_lowercase_ulid()
-    task_id = generate_lowercase_ulid()
-    attempt_id = uuid.uuid4().hex
-    return run_id, task_id, attempt_id
-
 def _resolve_projects_root(project_root: str | Path | None, project: str | None) -> Path:
     from astrid.core.foundation.project_paths import resolve_projects_root
     if project_root is not None:
@@ -516,15 +507,19 @@ def invoke(
             kernel_attempt_id=None,
         )
 
-    # Real kernel admission path
+    # Real kernel admission path — no fallback; failures raise CapabilityInvocationError.
+    # Project is required: mirror runner's selected_project check so missing
+    # project maps to CapabilityValidationError (not silent default).
+    from astrid.core.project.guidance import format_project_required_guidance, selected_project
+
+    resolved_project, _src = selected_project(project)
+    if resolved_project is None:
+        raise CapabilityValidationError(format_project_required_guidance(operation=f"{capability.capability_type} run"))
+    # Use resolved project (handles auto-resolved via selected_project)
+    project = resolved_project
     projects_root = _resolve_projects_root(project_root, project)
     try:
         kr, kt, ka, mpath, raw_result, ok, _ = _kernel_invoke(capability, kind=kind, project=project, projects_root=projects_root, inputs=inputs, outputs=outputs)
-        # Check skipped after kernel run — if handler indicated skipped, treat as non-admitted? Keep ids anyway.
-        is_skipped = bool(raw_result.get("skipped")) if isinstance(raw_result, dict) else False
-        if is_skipped:
-            # For skipped, kernel still created but oracle says not admitted — we keep ids None to preserve exemption? But we already admitted.
-            pass
         executor_version_raw = raw_result.get("executor_version") if isinstance(raw_result, dict) else None
         run_id_raw = raw_result.get("run_id") if isinstance(raw_result, dict) else None
         run_root_raw = raw_result.get("run_root") if isinstance(raw_result, dict) else None
@@ -549,98 +544,10 @@ def invoke(
             kernel_task_id=kt,
             kernel_attempt_id=ka,
         )
-    except Exception:
-        pass
-
-    try:
-        if capability.capability_type == "executor":
-            from astrid.core.execution.executor.runner import ExecutorRunRequest
-
-            executor_registry, _, _ = registries
-            request = ExecutorRunRequest(
-                executor_id=capability.id,
-                out=out,
-                project=project,
-                inputs=dict(inputs or {}),
-                outputs=dict(outputs or {}),
-                brief=brief,
-                dry_run=dry_run,
-                check_binaries=check_binaries,
-                python_exec=python_exec,
-                verbose=verbose,
-                execution_mode=execution_mode,
-                argv=tuple(argv),
-                invocation="sdk",
-                projects_root=project_root,
-            )
-            with redirect_stdout(StringIO()):
-                result = sdk_module.run_executor(request, executor_registry)
-            raw_result = _normalize_executor_result(result)
-        else:
-            from astrid.core.execution.orchestrator.runner import OrchestratorRunRequest
-
-            _, orchestrator_registry, _ = registries
-            request = OrchestratorRunRequest(
-                orchestrator_id=capability.id,
-                out=out,
-                project=project,
-                inputs=dict(inputs or {}),
-                outputs=dict(outputs or {}),
-                brief=brief,
-                orchestrator_args=tuple(orchestrator_args),
-                dry_run=dry_run,
-                python_exec=python_exec,
-                verbose=verbose,
-                execution_mode=execution_mode,
-                invocation="sdk",
-                projects_root=project_root,
-            )
-            with redirect_stdout(StringIO()):
-                result = sdk_module.run_orchestrator(request, orchestrator_registry)
-            raw_result = _normalize_orchestrator_result(result)
     except AstridSDKError:
         raise
     except Exception as exc:
         mapped = _sdk_error_from_exception(exc)
         if mapped is not None:
             raise mapped from exc
-        raise CapabilityInvocationError(
-            f"failed to invoke {capability.capability_type} {capability.id!r}"
-        ) from exc
-
-    internal_error = _internal_error_from_result(result)
-    error = (
-        _error_payload_from_internal_error(internal_error, json_safe=_json_safe)
-        if internal_error is not None
-        else None
-    )
-    manifest_path = _discover_invocation_manifest_path(raw_result, out=out)
-    run_id_raw = raw_result.get("run_id")
-    run_root_raw = raw_result.get("run_root")
-    executor_version_raw = raw_result.get("executor_version")
-    is_skipped = bool(raw_result.get("skipped")) or bool((raw_result.get("payload") or {}).get("skipped") if isinstance(raw_result.get("payload"), dict) else False)
-    kernel_run_id = kernel_task_id = kernel_attempt_id = None
-    return InvocationResult(
-        capability_id=capability.id,
-        capability_type=capability.capability_type,
-        native_kind=capability.native_kind,
-        ok=bool(getattr(result, "ok", False)),
-        error=error,
-        manifest_path=manifest_path,
-        raw_result=raw_result,
-        run_id=run_id_raw if isinstance(run_id_raw, str) and run_id_raw else None,
-        run_root=(
-            str(Path(run_root_raw).expanduser().resolve())
-            if isinstance(run_root_raw, str) and run_root_raw
-            else None
-        ),
-        outputs=_invocation_outputs(raw_result, manifest_path=manifest_path),
-        executor_version=(
-            executor_version_raw
-            if isinstance(executor_version_raw, str) and executor_version_raw
-            else None
-        ),
-        kernel_run_id=kernel_run_id,
-        kernel_task_id=kernel_task_id,
-        kernel_attempt_id=kernel_attempt_id,
-    )
+        raise CapabilityInvocationError(f"failed to invoke {capability.capability_type} {capability.id!r}") from exc

@@ -37,37 +37,43 @@ def admit_orchestrator_project_run(
     run_root = root / project / "runs" / run_id
 
     # Real kernel admission: create a zero-child orchestrator run via RunRepository.
-    # Idempotency key derived from tool+argv only (no run_id) via spec-hash-like
-    # digest so repeated calls with same args are idempotent.
+    # Idempotency key derived from tool+argv only (no run_id) via canonical
+    # compute_spec_hash so repeated calls with same args are idempotent.
     try:
+        from astrid.core.events.service import EventAppendService
+        from astrid.core.receipts.service import ReceiptService, ReceiptMismatchError
+        from astrid.core.repositories.projects import ProjectRepository
         from astrid.core.repositories.runs import RunRepository
+        from astrid.core.repositories.tasks import compute_spec_hash
+        from astrid.core.events.registry import core_only_registry
         from astrid.core.store.uow import UnitOfWork
         from astrid.core.store.writer import DatabaseWriter
-        from astrid.core.schema_packs.registry import load_default_registry
-        from astrid.core.store.database import ensure_database
+        import json
 
-        registry = load_default_registry()
-        ensure_database(root, registry)
-        writer = DatabaseWriter(root)
+        registry = core_only_registry()
+        db_path = Path(root) / "kernel.sqlite3"
+        writer = DatabaseWriter(db_path, registry)
         try:
-            from astrid.core.events.registry import EventAppendService
-            from astrid.core.receipts.service import ReceiptService
-            from astrid.core.repositories.projects import ProjectRepository
-
             events = EventAppendService(registry)
             receipts = ReceiptService()
             runs = RunRepository(events=events, receipts=receipts)
             projects = ProjectRepository(events=events, receipts=receipts)
             try:
-                UnitOfWork(writer).run(lambda u: projects.create(u, slug=project))
+                UnitOfWork(writer).run(
+                    lambda u: projects.create(
+                        u,
+                        slug=project,
+                        name=project,
+                        settings={},
+                        idempotency_key=f"proj:{project}",
+                        project_id=project,
+                    )
+                )
             except Exception:
                 pass
-            # Use compute_spec_hash-style idempotency: hash tool_id+argv (spec)
-            import hashlib
-            import json
-            # Canonical idempotency key — deterministic, no run_id
+
             spec_payload = {"tool_id": tool_id, "argv": list(argv)}
-            idempotency_key = hashlib.sha256(json.dumps(spec_payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()[:32]
+            idempotency_key = compute_spec_hash(spec_payload, [])
 
             def _create(u):
                 return runs.create(
@@ -75,14 +81,33 @@ def admit_orchestrator_project_run(
                     project_id=project,
                     children=[],
                     idempotency_key=idempotency_key,
-                    run_id=run_id,
                     kind="orchestrator",
                     title=tool_id,
                     input={"tool_id": tool_id, "argv": list(argv)},
                 )
-
             try:
-                UnitOfWork(writer).run(_create)
+                fanout = UnitOfWork(writer).run(_create)
+                # Use kernel-assigned id (idempotent replay returns stored id)
+                try:
+                    run_id = fanout.run_id
+                    run_root = root / project / "runs" / run_id
+                except Exception:
+                    pass
+            except ReceiptMismatchError:
+                # Request hash included random run_id — fetch stored receipt's run_id
+                try:
+                    def _fetch(u):
+                        rec = u.find_receipt(project, idempotency_key)
+                        if rec is None:
+                            return None
+                        return json.loads(rec["result_json"])
+
+                    stored = UnitOfWork(writer).run(_fetch)
+                    if stored and isinstance(stored, dict) and stored.get("run_id"):
+                        run_id = str(stored["run_id"])
+                        run_root = root / project / "runs" / run_id
+                except Exception:
+                    pass
             except Exception:
                 pass
         finally:
