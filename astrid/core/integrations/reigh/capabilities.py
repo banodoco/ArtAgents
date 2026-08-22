@@ -543,6 +543,13 @@ def resolve_family_capability(
         )
     derivation = FAMILY_DERIVATIONS.get(family_key)
     if derivation is None:
+        normalized = normalize_capability_name(family_key)
+        direct = REGISTRY.get(f"reigh.{normalized}")
+        if direct is not None and direct.child_only:
+            raise ChildAdmissionForbidden(
+                f"family {family_key!r} is executor-only; child families "
+                "are admitted only by the live fenced parent executor"
+            )
         raise CapabilityUnavailable(
             family_key,
             "unknown family; supported families are the code-declared "
@@ -550,7 +557,9 @@ def resolve_family_capability(
         )
     if not isinstance(input, dict):
         raise CapabilityInputError("input must be a JSON object")
-    FAMILY_VALIDATORS[family_key](input)
+    validator = FAMILY_VALIDATORS.get(family_key)
+    if validator is not None:
+        validator(input)
     capability_id = derivation(input)
     entry = REGISTRY.get(capability_id)
     if entry is None:
