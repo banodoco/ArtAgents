@@ -397,3 +397,149 @@ def test_two_runs_same_second_distinct_checkpoint_paths(
     assert {d.split("-", 1)[0] for d in checkpoint_dirs} == {"1750000000"}
     for name in checkpoint_dirs:
         assert (migrations_root / name / "checkpoint.json").is_file()
+
+
+def test_exclusive_allocation_retries_on_forced_collision(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P3#1: allocation is EXCLUSIVE — the run checkpoint dir is created
+    with fail-if-exists semantics and a bounded retry. A forced collision
+    (same pinned epoch second AND same uuid4 value on the first attempt)
+    is retried with fresh entropy, and both allocations land in distinct
+    EXISTING dirs — a filesystem guarantee, not a probability."""
+    import astrid.packs.timeline.backfill as backfill_mod
+    from astrid.packs.timeline.backfill import allocate_run_checkpoint_id
+
+    monkeypatch.setattr(backfill_mod.time, "time", lambda: 1750000000.5)
+
+    class _FakeUuid:
+        def __init__(self, value: str) -> None:
+            self.hex = value
+
+    values = iter(
+        [
+            "a" * 32,  # first allocation creates <epoch>-aaa...
+            "a" * 32,  # second allocation COLLIDES with the first dir
+            "b" * 32,  # bounded retry: fresh entropy lands here
+        ]
+    )
+    monkeypatch.setattr(
+        backfill_mod.uuid, "uuid4", lambda: _FakeUuid(next(values))
+    )
+    root = tmp_path / "proj-root"
+    (root / "proj").mkdir(parents=True)
+    ts1 = allocate_run_checkpoint_id("proj", root=root)
+    ts2 = allocate_run_checkpoint_id("proj", root=root)
+    assert ts1 != ts2
+    assert ts1 == f"1750000000-{'a' * 32}"
+    assert ts2 == f"1750000000-{'b' * 32}"
+    migrations_root = root / "proj" / "runs" / "migrations"
+    dirs = sorted(p.name for p in migrations_root.iterdir())
+    assert len(dirs) == 2
+    for name in dirs:
+        assert (migrations_root / name).is_dir()
+
+
+def test_exclusive_allocation_hard_errors_after_five_collisions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P3#1: allocation fails CLOSED after 5 collisions (hard error naming
+    the bound) — it never silently shares a dir and never loops forever."""
+    import astrid.packs.timeline.backfill as backfill_mod
+    from astrid.packs.timeline.backfill import (
+        BackfillError,
+        allocate_run_checkpoint_id,
+    )
+
+    monkeypatch.setattr(backfill_mod.time, "time", lambda: 1750000000.5)
+    monkeypatch.setattr(
+        backfill_mod.uuid,
+        "uuid4",
+        lambda: type("U", (), {"hex": "a" * 32})(),
+    )
+    root = tmp_path / "proj-root"
+    # Pre-create the exact dir the fixed uuid4 keeps proposing, so every
+    # one of the 5 bounded attempts collides.
+    migrations = root / "proj" / "runs" / "migrations"
+    (migrations / f"1750000000-{'a' * 32}").mkdir(parents=True)
+    with pytest.raises(BackfillError, match="after 5 attempts"):
+        allocate_run_checkpoint_id("proj", root=root)
+
+
+def test_crashed_fresh_run_resumable_via_checkpoint_run_ts(
+    tmp_path: Path,
+) -> None:
+    """P3#1/#2: a crashed FRESH run (no explicit run_ts) is resumable
+    through the operator surface. The checkpoint JSON round-trips the
+    ACTIVE run_ts (writer + reader), and a resume with that run_ts (the
+    exact value the CLI ``--run-ts`` passes) reuses the SAME checkpoint dir
+    and completes only the unfinished prefix."""
+    import json as _json
+
+    root1, db1, tid_a, tid_b, _home_a, _home_b = _build_root(tmp_path, "root1")
+    w = make_writer(db1)
+    try:
+        make_project(w)
+    finally:
+        w.close()
+    writer, projects, receipts = _open(root1, db1)
+    exploded = False
+    try:
+        def _kill_mid_import(index: int) -> None:
+            if index == 4:
+                raise RuntimeError("simulated process kill mid-transaction")
+
+        with pytest.raises(RuntimeError, match="simulated process kill"):
+            backfill_project(
+                writer=writer,
+                projects=projects,
+                receipts=receipts,
+                project_slug="proj",
+                projects_root=root1,
+                on_before_append=_kill_mid_import,
+            )
+        exploded = True
+    finally:
+        writer.close()
+    assert exploded
+    migrations_root = root1 / "proj" / "runs" / "migrations"
+    run_dirs = sorted(p.name for p in migrations_root.iterdir())
+    assert len(run_dirs) == 1, run_dirs
+    active_run_ts = run_dirs[0]
+    # A committed; B rolled back; the checkpoint carries the ACTIVE run_ts.
+    status = _json.loads(
+        (migrations_root / active_run_ts / "checkpoint.json").read_text()
+    )
+    assert status["run_ts"] == active_run_ts  # round-trips in the JSON
+    assert status["last_completed_timeline_ulid"] == (
+        "01J00000000000000000000001"
+    )
+    a_stream = f"{tid_a}:{TIMELINE_STREAM_TYPE}"
+    b_stream = f"{tid_b}:{TIMELINE_STREAM_TYPE}"
+    writer1b, _p, _r = _open(root1, db1)
+    try:
+        assert head_seq(writer1b, a_stream) == 3
+        assert head_seq(writer1b, b_stream) == 0
+    finally:
+        writer1b.close()
+
+    # Resume with the checkpoint's run_ts (CLI --run-ts passes it verbatim):
+    # SAME dir reused, only the unfinished prefix (B) completes.
+    writer2, projects2, receipts2 = _open(root1, db1)
+    try:
+        reports = backfill_project(
+            writer=writer2,
+            projects=projects2,
+            receipts=receipts2,
+            project_slug="proj",
+            projects_root=root1,
+            run_ts=active_run_ts,
+        )
+        assert set(reports) == {tid_b}  # A skipped via checkpoint
+        assert len(sorted(p.name for p in migrations_root.iterdir())) == 1
+        assert (migrations_root / active_run_ts / "checkpoint.json").is_file()
+        assert head_seq(writer2, a_stream) == 3  # zero new rows for A
+        assert head_seq(writer2, b_stream) == 5
+        assert len(kernel_event_rows(writer2, b_stream)) == 5
+    finally:
+        writer2.close()

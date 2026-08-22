@@ -39,7 +39,10 @@ Authority marker (R5) — schema documented here as the contract:
             "source": "local_fs" | "supabase_export",
             "source_head_version": <int>,
             "events_sha256": "<sha256 hex of the canonical source events>",
-            "synthesized_bootstrap": <bool>
+            "synthesized_bootstrap": <bool>,
+            "identity_sha256": "<sha256 of the identity-sidecar file bytes>",
+            "registry_sha256": "<sha256 of registry.json bytes when the
+                                fallback supplied the projection, else ''>"
           }
         }
 
@@ -47,6 +50,15 @@ Authority marker (R5) — schema documented here as the contract:
 ``timeline.created`` bootstrap event (W3: sources without one get exactly
 one deterministic bootstrap event at kernel position 0). The key is always
 present (shape extended additively; R5 semantics preserved).
+
+``identity_sha256`` / ``registry_sha256`` (round-3 P2#1) bind the LocalFs
+sidecars that sit OUTSIDE the event hash chain: the sha256 of the
+``assembly.identity.json`` file bytes (always; ``""`` for supabase_export
+sources, which have no sidecar), and of the ``registry.json`` file bytes
+when the fallback supplied the projection (else ``""``). Resume
+revalidation and re-import recompute them from the CURRENT sidecar bytes
+and fail closed with the named digest on mismatch (W2 machinery); a
+matching digest refreshes the marker unchanged.
 
 The marker is written ONLY after every zero-loss invariant passes (see
 :func:`verify_backfill`). A failed import writes NO marker and leaves NO
@@ -84,7 +96,13 @@ g. projections: stored ``timelines.document_json`` == canonical
    import values — ``project_id`` == the project the import targets,
    ``event_stream_id`` == the mapped stream id, ``name`` == the
    source-side identity name (fallback ``timeline_ulid``) (verify what
-   you serve, W4; round-2 P2#1).
+   you serve, W4; round-2 P2#1); AND the stream row's OWN identity
+   columns equal their expected import values — ``event_streams.project_id``
+   == the import-target project (alias resolution, repository.py:1588),
+   ``.stream_type`` == the pack ``TIMELINE_STREAM_TYPE`` constant imported
+   from ``astrid.packs.timeline.repository`` (save agreement check,
+   service.py:372), ``.aggregate_id`` == ``source.timeline_id`` (save
+   subject authority) (round-3 P1#1).
 
 Verification placement (W1): the full verifier runs TWICE per fresh import —
 once INSIDE the ``BEGIN IMMEDIATE`` unit of work against the transaction
@@ -180,6 +198,20 @@ timeline) to a file and run ``astrid timelines backfill --from
 supabase-export <path>``. No credentials are needed on this box and none are
 read by this module.
 
+Honesty boundary (round-3 P2#1, part 3): the LocalFs identity sidecar and
+the fallback ``registry.json`` are NOT part of the event hash chain. A
+FIRST-import tamper of an unanchored sidecar — one with no
+``timeline.created`` event to cross-check (slice-shaped sources), or of a
+sidecar field the created event does not carry (e.g. the ULID, which today
+lives only in the sidecar) — is undetectable in a trustless file export,
+exactly like any correctly-rehashed event tamper: the import receives a
+consistent, digestable source and certifies it. The sidecar digests do NOT
+close that window; they make every LATER import (resume/re-import) fail
+closed with named drift, and the created-event cross-check closes the name
+leg for full-lifecycle sources. This is the same accepted limit as rehashed
+event tampering: the export is trusted on first import. Do not oversell the
+guarantee.
+
 How to read results: each timeline yields a JSON report (see
 :func:`backfill_timeline`) with the source/kernel counts, head versions,
 per-kind counts, ``events_sha256``, every check outcome, the marker path and
@@ -226,6 +258,7 @@ from astrid.core.timeline.events.schema import (
 )
 from astrid.core.timeline.projection import replay_projection
 from astrid.core.util.time import utc_now_iso
+from astrid.packs.timeline.repository import TIMELINE_STREAM_TYPE
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -244,7 +277,10 @@ BACKFILL_STATE_FILENAME = "backfill-state.json"
 BACKFILL_MARKER_SOURCE_LOCAL_FS = "local_fs"
 BACKFILL_MARKER_SOURCE_SUPABASE = "supabase_export"
 
-_TIMELINE_STREAM_TYPE = "timeline.timeline"
+_TIMELINE_STREAM_TYPE = TIMELINE_STREAM_TYPE
+"""Pack stream type (single source of truth: ``packs/timeline/repository.py``
+``TIMELINE_STREAM_TYPE`` — never a second literal, round-3 P1#1)."""
+
 _TIMELINE_CREATED_KIND = "timeline.created"
 _TIMELINE_ASSET_REGISTRY_REPLACED_KIND = "timeline.asset_registry_replaced"
 _ACTOR_KIND_MAP: Mapping[str, str] = {
@@ -310,6 +346,16 @@ class BackfillSource:
     events_sha256: str
     projected_config: dict[str, Any]
     projected_registry: dict[str, Any]  # {"assets": {...}}
+    # Round-3 P2#1: sha256 of the identity-sidecar FILE BYTES (raw bytes,
+    # never canonical re-serialization) for local_fs sources; "" for
+    # supabase_export sources (no identity sidecar exists — identity is
+    # derived from chained events). ``registry_sha256`` is the sha256 of
+    # the ``registry.json`` sidecar file bytes when the fallback supplied
+    # the projection (no asset_registry_replaced event), None when the
+    # registry came from events. Both bind post-import sidecar drift on
+    # resume/re-import (W2 machinery).
+    identity_sha256: str = ""
+    registry_sha256: str | None = None
 
     @property
     def kind_counts(self) -> dict[str, int]:
@@ -326,6 +372,8 @@ class BackfillSource:
             "kinds": self.kind_counts,
             "projected_config_sha256": sha256_hex(self.projected_config),
             "projected_registry_sha256": sha256_hex(self.projected_registry),
+            "identity_sha256": self.identity_sha256,
+            "registry_sha256": self.registry_sha256 or "",
         }
 
 
@@ -452,6 +500,12 @@ class BackfillReport:
     projected_config_sha256: str
     projected_registry_sha256: str
     detail: str = ""
+    # Round-3 P2#1: identity/registry sidecar file digests ("" when no
+    # sidecar applies — supabase_export sources have none). Carried by the
+    # report so the receipt and the authority marker bind post-import
+    # sidecar drift on resume/re-import.
+    identity_sha256: str = ""
+    registry_sha256: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -476,6 +530,8 @@ class BackfillReport:
             "projected_config_sha256": self.projected_config_sha256,
             "projected_registry_sha256": self.projected_registry_sha256,
             "detail": self.detail,
+            "identity_sha256": self.identity_sha256,
+            "registry_sha256": self.registry_sha256,
         }
 
 
@@ -721,10 +777,29 @@ def load_local_fs_source(
     any event is read, round-2 P3#5), events are read through
     ``LocalFsBackend.read_events`` and the head sidecar is parsed directly
     (see :func:`_read_head_version`). Fail closed on any inconsistency.
+
+    Round-3 P2#1: the identity sidecar and the fallback ``registry.json``
+    are load-bearing but UNANCHORED (outside the event hash chain), so:
+
+    - when the events contain ``timeline.created``, the sidecar name and
+      timeline_ulid must equal the event-derived values (the created event
+      carries ``name`` and — when present — ``timeline_ulid``); any
+      disagreement raises :class:`BackfillSourceError` naming it. The
+      Supabase-export leg needs no such check: it derives identity from
+      chained events (``_export_identity``), so there is no sidecar to
+      launder through;
+    - the sha256 of the identity-sidecar FILE BYTES (and of the
+      ``registry.json`` bytes when the fallback supplies the projection) is
+      carried by the source, recorded in the receipt AND the authority
+      marker, and recomputed on resume/re-import — drift fails closed with
+      the named digest (W2 machinery).
     """
     home = Path(timeline_home)
     identity = _read_identity(home)
     source_timeline_id = str(identity["timeline_id"])
+    identity_sha256 = hashlib.sha256(
+        (home / "assembly.identity.json").read_bytes()
+    ).hexdigest()
     if timeline_id is not None and timeline_id != source_timeline_id:
         raise BackfillSourceError(
             f"requested timeline {timeline_id!r} does not match the source "
@@ -759,10 +834,27 @@ def load_local_fs_source(
     timeline_ulid, name, slug = _identity_ulid_and_name(
         identity, source_timeline_id
     )
+    # Round-3 P2#1 (part 1): derivable cross-checks fail closed at load.
+    # When the events carry ``timeline.created``, the sidecar name (and
+    # timeline_ulid when the created event carries one) must equal the
+    # event-derived values — a sidecar tamper can no longer launder through
+    # with ``chain_ok=True``. The created event today carries
+    # ``{timeline_id, slug, name}`` (no ULID), so the ULID leg is checked
+    # only when an event-derived ULID exists; the honesty boundary in the
+    # module docstring states the residual first-import limit.
+    _cross_check_identity_sidecar(
+        events,
+        timeline_id=source_timeline_id,
+        timeline_ulid=timeline_ulid,
+        name=name,
+        home_name=home.name,
+    )
     projected_config = replay_projection(backend)
     registry = _project_registry(events)
+    registry_sha256: str | None = None
     if registry is None:
-        registry = _read_registry_sidecar(home)
+        registry, registry_bytes = _read_registry_sidecar_with_digest(home)
+        registry_sha256 = hashlib.sha256(registry_bytes).hexdigest()
     return BackfillSource(
         source_name=BACKFILL_MARKER_SOURCE_LOCAL_FS,
         timeline_id=source_timeline_id,
@@ -774,23 +866,79 @@ def load_local_fs_source(
         events_sha256=source_events_sha256(events),
         projected_config=dict(projected_config),
         projected_registry=registry,
+        identity_sha256=identity_sha256,
+        registry_sha256=registry_sha256,
     )
 
 
-def _read_registry_sidecar(home: Path) -> dict[str, Any]:
+def _cross_check_identity_sidecar(
+    events: Sequence[TimelineEvent],
+    *,
+    timeline_id: str,
+    timeline_ulid: str,
+    name: str | None,
+    home_name: str,
+) -> None:
+    """Fail closed when a ``timeline.created`` event disagrees with the
+    identity sidecar (round-3 P2#1 part 1).
+
+    The created event's payload carries the event-derived ``name`` (and,
+    when present, ``timeline_ulid``); the sidecar's claims must equal them
+    or the source is internally inconsistent — an unanchored sidecar tamper
+    must not launder into the kernel chain with ``chain_ok=True``. The
+    created event has no other identity fields today, so nothing else is
+    derivable; the module docstring records the honest first-import limit.
+    """
+    created = next(
+        (event for event in events if event.kind == _TIMELINE_CREATED_KIND),
+        None,
+    )
+    if created is None:
+        return
+    data = _payload_dict(created)
+    event_name = data.get("name")
+    if isinstance(event_name, str) and event_name:
+        if name != event_name:
+            raise BackfillSourceError(
+                f"timeline source identity name {name!r} disagrees with the "
+                f"timeline.created event name {event_name!r} in {home_name}"
+            )
+    event_ulid = data.get("timeline_ulid")
+    if isinstance(event_ulid, str) and event_ulid:
+        if timeline_ulid != event_ulid:
+            raise BackfillSourceError(
+                f"timeline source identity timeline_ulid {timeline_ulid!r} "
+                f"disagrees with the timeline.created event timeline_ulid "
+                f"{event_ulid!r} in {home_name}"
+            )
+    # The event timeline_id is already enforced per-event above; slug is
+    # carried by the created event but not load-bearing for the sidecar
+    # (the kernel alias comes from the created event, enriched from the
+    # sidecar ULID only).
+
+
+def _read_registry_sidecar_with_digest(home: Path) -> tuple[dict[str, Any], bytes]:
+    """Read the fallback ``registry.json`` sidecar and its RAW file bytes.
+
+    Returns ``(projection, bytes)`` — the bytes feed the digest that binds
+    post-import sidecar drift (round-3 P2#1 part 2); an absent file yields
+    the empty projection with empty bytes (digest of ``b""``), since the
+    fallback still "supplied" the projection.
+    """
     from astrid.core._shared.jsonio import read_json
 
     registry_path = home / "registry.json"
     if not registry_path.is_file():
-        return {"assets": {}}
+        return {"assets": {}}, b""
     try:
+        raw_bytes = registry_path.read_bytes()
         raw = read_json(registry_path)
     except Exception:
         raise BackfillSourceError(
             f"timeline source registry.json is unreadable in {home.name}"
         ) from None
     if isinstance(raw, dict) and isinstance(raw.get("assets"), dict):
-        return {"assets": raw["assets"]}
+        return {"assets": raw["assets"]}, raw_bytes
     raise BackfillSourceError(
         f"timeline source registry.json is malformed in {home.name}"
     )
@@ -1014,6 +1162,12 @@ def _build_supabase_source(
         events_sha256=source_events_sha256(events),
         projected_config=dict(projected_config),
         projected_registry=registry,
+        # No identity/registry sidecars exist for supabase exports —
+        # identity is derived from chained events (``_export_identity``) and
+        # the registry from events; no sidecar digests apply (round-3
+        # P2#1: stated explicitly — no change to this leg).
+        identity_sha256="",
+        registry_sha256=None,
     )
 
 
@@ -1278,15 +1432,28 @@ def _verify_on(
     W4 stored-projection diffs (column + timeline id) — including the
     bridge-served identity columns ``project_id`` / ``event_stream_id`` /
     ``name``, each compared against the expected value the import wrote
-    (round-2 P2#1).
+    (round-2 P2#1), and the ``event_streams`` stream-identity columns
+    ``project_id`` / ``stream_type`` / ``aggregate_id`` the bridge/save
+    surface keys on (round-3 P1#1): expected values are the threaded
+    import-target project, the pack ``TIMELINE_STREAM_TYPE`` constant
+    imported from ``astrid.packs.timeline.repository``, and
+    ``source.timeline_id``.
     """
     mismatches: list[str] = []
     projection_mismatches: list[str] = []
     synthesized_events = tuple(synthesized_events)
     expected_events = synthesized_events + source.events
 
+    # Round-3 P1#1: the bridge/save surface ALSO keys on the stream's
+    # identity columns, so the SELECT carries them alongside ``head_seq`` —
+    # ``project_id`` (alias resolution, repository.py:1588), ``stream_type``
+    # (save agreement check, service.py:372) and ``aggregate_id`` (save
+    # subject authority). A tampered value must fail certification here, not
+    # merely mis-serve the bridge later.
     row = reader.query_one(
-        "SELECT head_seq FROM event_streams WHERE id = ?", (stream_id,)
+        "SELECT head_seq, project_id, stream_type, aggregate_id "
+        "FROM event_streams WHERE id = ?",
+        (stream_id,),
     )
     kernel_head_seq = int(row["head_seq"]) if row is not None else 0
     kernel_event_count = _stream_count(reader, stream_id)
@@ -1425,6 +1592,38 @@ def _verify_on(
                 "differs from source.projected_registry.assets"
             )
 
+    # Round-3 P1#1: the stream row's OWN identity columns are bridge/save
+    # surface too — ``event_streams.project_id`` (alias resolution,
+    # repository.py:1588), ``.stream_type`` (save agreement check,
+    # service.py:372) and ``.aggregate_id`` (save subject authority). Each
+    # is compared against the value the import wrote and each mismatch names
+    # the column (the ``identity: …`` style above). ``stream_type`` is
+    # compared against the pack constant imported from
+    # ``astrid.packs.timeline.repository`` — never a second literal.
+    if row is None:
+        projection_mismatches.append(
+            f"identity: event_streams row missing (index {source.timeline_id})"
+        )
+    else:
+        if str(row["project_id"]) != project_id:
+            projection_mismatches.append(
+                f"identity: event_streams.project_id (index "
+                f"{source.timeline_id}) {row['project_id']!r} != expected "
+                f"{project_id!r}"
+            )
+        if str(row["stream_type"]) != TIMELINE_STREAM_TYPE:
+            projection_mismatches.append(
+                f"identity: event_streams.stream_type (index "
+                f"{source.timeline_id}) {row['stream_type']!r} != expected "
+                f"{TIMELINE_STREAM_TYPE!r}"
+            )
+        if str(row["aggregate_id"]) != source.timeline_id:
+            projection_mismatches.append(
+                f"identity: event_streams.aggregate_id (index "
+                f"{source.timeline_id}) {row['aggregate_id']!r} != expected "
+                f"{source.timeline_id!r}"
+            )
+
     return BackfillVerification(
         source_event_count=len(source.events),
         kernel_event_count=kernel_event_count,
@@ -1451,7 +1650,8 @@ def verify_backfill(
     Read-only: runs on the writer's transaction-free read-only connection
     and never mutates state. ``mismatches`` names every failed check;
     ``projection_mismatches`` names the W4 stored-projection diffs
-    (including the bridge-served identity columns, round-2 P2#1).
+    (including the bridge-served identity columns, round-2 P2#1, and the
+    ``event_streams`` stream-identity columns, round-3 P1#1).
     ``synthesized_events`` carries the deterministic bootstrap event(s) the
     expected stream prepends (W3); verification reads the stream via a
     COUNT query plus keyset paging, so there is no 10k cap in this path.
@@ -1612,6 +1812,47 @@ def _append_timeline_events(
     )
 
 
+def allocate_run_checkpoint_id(
+    project_slug: str, *, root: str | Path | None = None
+) -> str:
+    """Exclusively allocate one fresh run checkpoint id (round-3 P3#1).
+
+    Creates ``<project>/runs/migrations/<epoch>-<uuid4().hex>/`` with
+    fail-if-exists semantics (``mkdir(parents=True, exist_ok=False)``) and
+    a bounded retry on collision: each attempt uses a FRESH full-length
+    ``uuid4().hex`` and a hard error surfaces after 5 attempts. Uniqueness
+    becomes a filesystem guarantee — two runs started in the same second
+    can never share one checkpoint dir. The explicit-resume path (caller
+    passes ``run_ts``) never allocates; it reuses the interrupted run's
+    dir. Public surface for the SDK/CLI to return the ACTIVE run id so an
+    interrupted fresh run is resumable verbatim (round-3 P3#2).
+    """
+    root_path = resolve_projects_root(root)
+    slug = validate_project_slug(project_slug)
+    return _allocate_run_checkpoint_id(slug, root=root_path)
+
+
+def _allocate_run_checkpoint_id(project_slug: str, *, root: Path) -> str:
+    """Bounded-retry exclusive allocation (see :func:`allocate_run_checkpoint_id`)."""
+    from astrid.core.timeline.migration import checkpoint_path_for_run
+
+    for attempt in range(5):
+        candidate = f"{int(time.time())}-{uuid.uuid4().hex}"
+        checkpoint_file = checkpoint_path_for_run(
+            project_slug, root=root, run_ts=candidate
+        )
+        run_dir = checkpoint_file.parent
+        try:
+            run_dir.mkdir(parents=True, exist_ok=False)
+        except FileExistsError:
+            continue
+        return candidate
+    raise BackfillError(
+        "could not allocate a fresh backfill run checkpoint directory for "
+        f"project {project_slug!r} after 5 attempts"
+    )
+
+
 def _current_stream_state(
     writer: DatabaseWriter, timeline_id: str
 ) -> tuple[int, bool]:
@@ -1693,6 +1934,30 @@ def backfill_timeline(
                 f"authorities with {source.source_name} at head "
                 f"{source.head_version}"
             )
+        # Round-3 P2#1 (part 2): the sidecar digests are part of the source
+        # identity for local_fs — a post-import sidecar edit must fail
+        # closed with NAMED digest drift (never silently refresh the marker
+        # with the new bytes). Supabase sources record "" and compare
+        # trivially (no sidecar exists).
+        if existing is not None and existing.get(
+            "identity_sha256", ""
+        ) != source.identity_sha256:
+            raise BackfillDiscrepancyError(
+                f"timeline {source.timeline_id} identity sidecar drifted "
+                f"since backfill: identity_sha256 "
+                f"{existing.get('identity_sha256', '')} (marker) != "
+                f"{source.identity_sha256} (current); operator reruns fresh"
+            )
+        if existing is not None and existing.get(
+            "registry_sha256", ""
+        ) != (source.registry_sha256 or ""):
+            raise BackfillDiscrepancyError(
+                f"timeline {source.timeline_id} registry sidecar drifted "
+                f"since backfill: registry_sha256 "
+                f"{existing.get('registry_sha256', '')} (marker) != "
+                f"{source.registry_sha256 or ''} (current); operator reruns "
+                "fresh"
+            )
 
     stream_id = _stream_id(source.timeline_id)
     head_seq, stream_exists = _current_stream_state(writer, source.timeline_id)
@@ -1735,6 +2000,8 @@ def backfill_timeline(
                     f"dry-run: stream exists at head {head_seq}; "
                     "re-verified read-only, no writes performed"
                 ),
+                identity_sha256=source.identity_sha256,
+                registry_sha256=source.registry_sha256 or "",
             )
         return BackfillReport(
             project=project_slug,
@@ -1764,6 +2031,8 @@ def backfill_timeline(
             projected_config_sha256=sha256_hex(source.projected_config),
             projected_registry_sha256=sha256_hex(source.projected_registry),
             detail="dry-run: no events, receipts, or markers written",
+            identity_sha256=source.identity_sha256,
+            registry_sha256=source.registry_sha256 or "",
         )
 
     request = {
@@ -1896,6 +2165,8 @@ def backfill_timeline(
             projected_config_sha256=sha256_hex(source.projected_config),
             projected_registry_sha256=sha256_hex(source.projected_registry),
             detail="imported",
+            identity_sha256=source.identity_sha256,
+            registry_sha256=source.registry_sha256 or "",
         )
         receipts.record(
             uow,
@@ -1986,6 +2257,8 @@ def _final_report(
         projected_config_sha256=base.projected_config_sha256,
         projected_registry_sha256=base.projected_registry_sha256,
         detail=detail,
+        identity_sha256=base.identity_sha256,
+        registry_sha256=base.registry_sha256,
     )
 
 
@@ -2013,6 +2286,12 @@ def _write_marker(
             "source_head_version": source.head_version,
             "events_sha256": source.events_sha256,
             "synthesized_bootstrap": synthesized_bootstrap,
+            # Round-3 P2#1 (part 2): identity/registry sidecar file digests
+            # ("" when no sidecar applies). Resume/re-import recomputes them
+            # from the CURRENT sidecar bytes and fails closed with named
+            # drift on mismatch (W2 machinery).
+            "identity_sha256": source.identity_sha256,
+            "registry_sha256": source.registry_sha256 or "",
         }
         state[source.timeline_id] = entry
         write_json_atomic(backfill_state_path(root), state)
@@ -2045,6 +2324,8 @@ def _report_from_mapping(value: Mapping[str, Any], *, replayed: bool) -> Backfil
         projected_config_sha256=str(value.get("projected_config_sha256", "")),
         projected_registry_sha256=str(value.get("projected_registry_sha256", "")),
         detail=str(value.get("detail", "")),
+        identity_sha256=str(value.get("identity_sha256", "")),
+        registry_sha256=str(value.get("registry_sha256", "")),
     )
 
 
@@ -2086,10 +2367,13 @@ def backfill_project(
     a marker-missing timeline converges through W1.3 (idempotent
     marker completion). A timeline failure aborts the run (fail closed)
     with the checkpoint left at the last completed timeline. When
-    ``run_ts`` is omitted the run gets a collision-safe id (epoch second +
-    short unique suffix, round-2 P3#2) so two runs started in the same
-    second never share one checkpoint dir; pass the same explicit
-    ``run_ts`` to resume a run.
+    ``run_ts`` is omitted the run gets an EXCLUSIVELY allocated id (epoch
+    second + full-length ``uuid4().hex``; the run dir is created with
+    fail-if-exists semantics and a bounded retry, round-3 P3#1) so two runs
+    started in the same second can never share one checkpoint dir; pass the
+    same explicit ``run_ts`` to resume a run (round-3 P3#2: the checkpoint
+    JSON also carries the active ``run_ts`` so an interrupted fresh run is
+    resumable through the SDK response / CLI ``--run-ts``).
     """
     from astrid.core.timeline.migration import (
         checkpoint_path_for_run,
@@ -2115,19 +2399,21 @@ def backfill_project(
 
     checkpoint_file = None
     if not dry_run:
-        # Round-2 P3#2: a fresh run (no explicit run_ts) gets a
-        # collision-safe id — epoch second + short unique suffix — so two
-        # runs started in the same second never share one checkpoint dir.
-        # Shared dirs let a changed source of the SECOND run enter
+        # Round-3 P3#1: a fresh run (no explicit run_ts) gets an EXCLUSIVELY
+        # allocated id — the run checkpoint dir is created with
+        # fail-if-exists semantics and a bounded retry on collision (fresh
+        # full-length uuid4().hex each attempt; hard error after 5), so
+        # uniqueness is a filesystem guarantee, not a probability. Shared
+        # dirs would let a changed source of the SECOND run enter
         # resume-drift handling and report the wrong failure class. An
         # explicit run_ts (resume) is preserved verbatim so the resumed run
-        # reuses its checkpoint. The legacy ``migration.py`` default is
+        # reuses its checkpoint dir. The legacy ``migration.py`` default is
         # intentionally untouched (zero impact on legacy callers).
-        effective_run_ts = (
-            run_ts
-            if run_ts is not None
-            else f"{int(time.time())}-{uuid.uuid4().hex[:8]}"
-        )
+        effective_run_ts = run_ts
+        if effective_run_ts is None:
+            effective_run_ts = _allocate_run_checkpoint_id(
+                project_slug, root=root
+            )
         checkpoint_file = checkpoint_path_for_run(
             project_slug, root=root, run_ts=effective_run_ts
         )
@@ -2183,6 +2469,11 @@ def backfill_project(
                     last_completed_timeline_ulid=source.timeline_ulid,
                     imported_count=len(reports),
                     skipped_count=len(skipped),
+                    # Round-3 P3#2: the ACTIVE run id is persisted in the
+                    # checkpoint JSON itself (writer+reader), so an
+                    # interrupted fresh run is resumable through the
+                    # operator surface, not only the dir name.
+                    run_ts=effective_run_ts,
                 ),
                 checkpoint_file,
             )
@@ -2205,9 +2496,10 @@ def _revalidate_resumed(
 ) -> bool:
     """W2 resume revalidation for one checkpoint-completed timeline.
 
-    Recomputes the CURRENT source ``events_sha256`` + head (already carried
-    by the freshly loaded *source*) and compares them with the recorded
-    marker for the same timeline:
+    Recomputes the CURRENT source ``events_sha256`` + head + sidecar
+    digests (``identity_sha256`` / ``registry_sha256``, round-3 P2#1 — all
+    already carried by the freshly loaded *source*) and compares them with
+    the recorded marker for the same timeline:
 
     - a marker whose source identity differs in EITHER value is named drift
       (``BackfillDiscrepancyError`` naming the timeline and both values —
@@ -2225,16 +2517,36 @@ def _revalidate_resumed(
     existing = state.get(source.timeline_id)
     if existing is None:
         return False
-    if (
-        existing.get("events_sha256") != source.events_sha256
-        or existing.get("source_head_version") != source.head_version
-    ):
+    # W2 drift naming (round-3 P2#1 part 2): the identity/registry sidecar
+    # digests are recomputed from the CURRENT source (freshly loaded above)
+    # and compared with the marker — a sidecar edit fails the resume closed
+    # with the named digest, exactly like event drift.
+    drift_parts: list[str] = []
+    if existing.get("events_sha256") != source.events_sha256:
+        drift_parts.append(
+            f"events_sha256 {existing.get('events_sha256')} (marker) != "
+            f"{source.events_sha256} (current)"
+        )
+    if existing.get("source_head_version") != source.head_version:
+        drift_parts.append(
+            f"head {existing.get('source_head_version')} (marker) != "
+            f"{source.head_version} (current)"
+        )
+    if existing.get("identity_sha256", "") != source.identity_sha256:
+        drift_parts.append(
+            f"identity_sha256 {existing.get('identity_sha256', '')} "
+            f"(marker) != {source.identity_sha256} (current)"
+        )
+    if existing.get("registry_sha256", "") != (source.registry_sha256 or ""):
+        drift_parts.append(
+            f"registry_sha256 {existing.get('registry_sha256', '')} "
+            f"(marker) != {source.registry_sha256 or ''} (current)"
+        )
+    if drift_parts:
         raise BackfillDiscrepancyError(
             f"timeline {source.timeline_id} source drifted since backfill: "
-            f"events_sha256 {existing.get('events_sha256')} (marker) != "
-            f"{source.events_sha256} (current), head "
-            f"{existing.get('source_head_version')} (marker) != "
-            f"{source.head_version} (current); operator reruns fresh"
+            + ", ".join(drift_parts)
+            + "; operator reruns fresh"
         )
     synthesized_events, _mapped = _expected_stream(source)
     verification = verify_backfill(
@@ -2377,6 +2689,7 @@ __all__ = [
     "BackfillVerification",
     "MappedEvent",
     "SupabaseExportReader",
+    "allocate_run_checkpoint_id",
     "backfill_project",
     "backfill_state_path",
     "backfill_timeline",

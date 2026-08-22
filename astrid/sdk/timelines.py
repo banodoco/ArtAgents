@@ -307,6 +307,7 @@ class TimelinesService:
         timeline: str | None = None,
         from_supabase_export: str | None = None,
         dry_run: bool = False,
+        run_ts: str | None = None,
     ) -> DomainResult[dict[str, Any]]:
         """Backfill project timelines into the kernel database (cutover).
 
@@ -322,21 +323,35 @@ class TimelinesService:
         reads a version-ordered Supabase export file (the documented
         ``VersionedTimelineEvent.to_append_json_obj()`` envelope) instead of
         the project's LocalFs timeline directories; ``dry_run`` reports the
-        source checks without writing events, receipts, or markers.
+        source checks without writing events, receipts, or markers;
+        ``run_ts`` is the explicit resume id (round-3 P3#2): pass the
+        ``run_ts`` returned by an earlier interrupted run to reuse its
+        checkpoint dir and complete only the unfinished prefix. When
+        omitted (and not dry-run), the run gets an EXCLUSIVELY allocated id
+        (fail-if-exists run dir, round-3 P3#1) which the response returns.
 
         Returns ``data`` = ``{"project", "project_id", "dry_run",
-        "timelines": {timeline_id: report}}`` where each report carries the
-        source/kernel counts, head versions, per-kind counts,
-        ``events_sha256``, every check outcome, and the marker state (see
-        the backfill module docstring for how to read results).
+        "run_ts", "timelines": {timeline_id: report}}`` where ``run_ts`` is
+        the ACTIVE run id (resume it verbatim with ``--run-ts``) and each
+        report carries the source/kernel counts, head versions, per-kind
+        counts, ``events_sha256``, every check outcome, and the marker
+        state (see the backfill module docstring for how to read results).
         """
-        from astrid.packs.timeline.backfill import backfill_project
+        from astrid.packs.timeline.backfill import (
+            allocate_run_checkpoint_id,
+            backfill_project,
+        )
 
         try:
             project_id = self._projects.resolve(self._writer, project)
         except Exception as exc:  # noqa: BLE001 - centralized bounded mapping
             return DomainResult.failure(map_error(exc))
         try:
+            active_run_ts = run_ts
+            if active_run_ts is None and not dry_run:
+                # Fresh run: allocate the checkpoint dir EXCLUSIVELY up
+                # front so the operator can resume this exact run later.
+                active_run_ts = allocate_run_checkpoint_id(project)
             reports = backfill_project(
                 writer=self._writer,
                 projects=self._projects,
@@ -345,6 +360,7 @@ class TimelinesService:
                 timeline_refs=[timeline] if timeline is not None else None,
                 from_supabase_export=from_supabase_export,
                 dry_run=dry_run,
+                run_ts=active_run_ts,
             )
         except Exception as exc:  # noqa: BLE001 - centralized bounded mapping
             return DomainResult.failure(map_error(exc))
@@ -353,6 +369,7 @@ class TimelinesService:
                 "project": project,
                 "project_id": project_id,
                 "dry_run": bool(dry_run),
+                "run_ts": active_run_ts or "",
                 "timelines": {
                     timeline_id: report.to_dict()
                     for timeline_id, report in sorted(reports.items())

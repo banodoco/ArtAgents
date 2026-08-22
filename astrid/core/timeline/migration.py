@@ -61,12 +61,20 @@ class ParityFailure:
 
 @dataclass(frozen=True)
 class ResumableStatus:
-    """Checkpoint-able progress so a migration can be paused and resumed."""
+    """Checkpoint-able progress so a migration can be paused and resumed.
+
+    ``run_ts`` (round-3 P3#2) is the ACTIVE run timestamp/id: persisted by
+    the writer and read back by the reader so an interrupted run's identity
+    survives in the checkpoint JSON itself, not only in the parent
+    directory name. Additive — legacy callers and older checkpoints (no
+    ``run_ts`` key) keep working unchanged.
+    """
 
     last_completed_project: str | None = None
     last_completed_timeline_ulid: str | None = None
     imported_count: int = 0
     skipped_count: int = 0
+    run_ts: str | None = None
 
 
 @dataclass(frozen=True)
@@ -571,6 +579,7 @@ def write_resumable_checkpoint(
             "last_completed_timeline_ulid": status.last_completed_timeline_ulid,
             "imported_count": status.imported_count,
             "skipped_count": status.skipped_count,
+            "run_ts": status.run_ts,
         },
     )
 
@@ -592,6 +601,7 @@ def read_resumable_checkpoint(checkpoint_file: Path) -> ResumableStatus | None:
         last_completed_timeline_ulid=data.get("last_completed_timeline_ulid"),
         imported_count=data.get("imported_count", 0),
         skipped_count=data.get("skipped_count", 0),
+        run_ts=data.get("run_ts"),
     )
 
 

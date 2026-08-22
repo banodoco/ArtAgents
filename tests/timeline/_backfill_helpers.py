@@ -174,8 +174,15 @@ def make_source_timeline(
     spec = events_spec if events_spec is not None else source_events_spec()
     for kind, payload, actor_type in spec:
         if kind == "timeline.created":
+            # Round-3 P2#1: the created event is the load-time anchor for
+            # the identity sidecar, so the synthetic source must be
+            # self-consistent — the event carries the same timeline_id /
+            # slug / name the sidecar claims (a real creation writes both
+            # from the same act).
             payload = dict(payload)
             payload["timeline_id"] = timeline_id
+            payload["slug"] = slug
+            payload["name"] = name
         backend.append_event(
             timeline_id,
             kind,

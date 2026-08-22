@@ -250,12 +250,20 @@ def test_marker_written_only_after_checks_pass(tmp_path: Path) -> None:
     )
     assert report.marker_written is True
     state = marker_state(projects_root)
+    # Round-3 P2#1 strictly-stronger rewrite (new verify input threaded:
+    # the LocalFs sidecar file digests are now part of the marker contract):
+    # the exact entry now ALSO pins identity_sha256 (the identity-sidecar
+    # file bytes) and registry_sha256 ("": the registry came from events,
+    # no fallback sidecar). The whole-dict and key-set assertions remain
+    # exact — no key is dropped, two are added.
     assert state[timeline_id] == {
         "backfilled_at": state[timeline_id]["backfilled_at"],
         "source": "local_fs",
         "source_head_version": 6,
         "events_sha256": source.events_sha256,
         "synthesized_bootstrap": False,
+        "identity_sha256": source.identity_sha256,
+        "registry_sha256": "",
     }
     assert set(state[timeline_id].keys()) == {
         "backfilled_at",
@@ -263,7 +271,21 @@ def test_marker_written_only_after_checks_pass(tmp_path: Path) -> None:
         "source_head_version",
         "events_sha256",
         "synthesized_bootstrap",
+        "identity_sha256",
+        "registry_sha256",
     }
+    # The identity digest is the sha256 of the ACTUAL sidecar file bytes.
+    import hashlib as _hashlib
+
+    assert source.identity_sha256 == _hashlib.sha256(
+        (
+            projects_root
+            / "proj"
+            / "timelines"
+            / source.timeline_ulid
+            / "assembly.identity.json"
+        ).read_bytes()
+    ).hexdigest()
     _writer.close()
 
 
@@ -987,6 +1009,125 @@ def test_tampered_project_id_probe_reports_identity_mismatch(
 
 
 # ---------------------------------------------------------------------------
+# P1#1 (round 3) — event_streams stream-identity columns (project_id /
+# stream_type / aggregate_id), the bridge/save surface keys
+# ---------------------------------------------------------------------------
+
+
+def _assert_stream_identity_tamper_fails_closed(
+    writer, source, stream_id, projects_root, column: str
+) -> None:
+    """Shared round-3 P1#1 probe body: tamper one committed stream-identity
+    column, force re-verification -> named mismatch, assert the re-import
+    fails closed naming the column, and assert the marker is NOT rewritten
+    (the drift never refreshes the authority claim)."""
+    marker_before = marker_state(projects_root)
+    verification = verify_backfill(
+        source,
+        stream_id=stream_id,
+        project_id=resolve_project_id(writer),
+        writer=writer,
+    )
+    assert verification.ok is False
+    assert any(
+        column in item and source.timeline_id in item
+        for item in verification.projection_mismatches
+    ), (column, verification.projection_mismatches)
+    projects, receipts, _ = make_backfill_deps(writer)
+    with pytest.raises(BackfillDiscrepancyError) as excinfo:
+        backfill_timeline(
+            writer=writer,
+            projects=projects,
+            receipts=receipts,
+            project_slug="proj",
+            source=source,
+            projects_root=projects_root,
+        )
+    assert column in str(excinfo.value)
+    # No marker write on the failed re-import: the authority claim is
+    # byte-identical before and after.
+    assert marker_state(projects_root) == marker_before
+
+
+def test_tampered_stream_project_id_probe_reports_identity_mismatch(
+    tmp_path: Path,
+) -> None:
+    """P1#1 probe: tamper the committed ``event_streams.project_id`` post-hoc
+    (alias resolution keys on it via repository.py:1588); the verifier names
+    the column and the import fails closed. The tamper value is a second
+    real project row, so the kernel FK constraint stays satisfied and the
+    check is exercised, not SQLite."""
+    report, source, writer, projects_root, stream_id, _tid = _import(tmp_path)
+    other_project_id, _other_projects = make_project(
+        writer, slug="other", key="proj-2"
+    )
+    assert other_project_id != resolve_project_id(writer)
+    writer.submit(
+        lambda session: session.execute(
+            "UPDATE event_streams SET project_id = ? WHERE id = ?",
+            (other_project_id, stream_id),
+        )
+    )
+    try:
+        _assert_stream_identity_tamper_fails_closed(
+            writer, source, stream_id, projects_root, "project_id"
+        )
+    finally:
+        writer.close()
+
+
+def test_tampered_stream_type_probe_reports_identity_mismatch(
+    tmp_path: Path,
+) -> None:
+    """P1#1 probe: tamper the committed ``event_streams.stream_type``
+    post-hoc (the save agreement check reads it via service.py:372); the
+    verifier names the column and the import fails closed. The tamper value
+    is the project's own ``core.project`` stream type — a real stream type
+    in the database, so the disagreement is semantic, not a stray value."""
+    report, source, writer, projects_root, stream_id, _tid = _import(tmp_path)
+    assert stream_id.endswith(f":{TIMELINE_STREAM_TYPE}")
+    writer.submit(
+        lambda session: session.execute(
+            "UPDATE event_streams SET stream_type = 'core.project' "
+            "WHERE id = ?",
+            (stream_id,),
+        )
+    )
+    try:
+        _assert_stream_identity_tamper_fails_closed(
+            writer, source, stream_id, projects_root, "stream_type"
+        )
+    finally:
+        writer.close()
+
+
+def test_tampered_stream_aggregate_id_probe_reports_identity_mismatch(
+    tmp_path: Path,
+) -> None:
+    """P1#1 probe: tamper the committed ``event_streams.aggregate_id``
+    post-hoc (the save subject authority — a tampered value makes save
+    return 200 writing a NEW event against the WRONG aggregate); the
+    verifier names the column and the import fails closed. The tamper value
+    is the project id — the real aggregate of the project's own
+    ``core.project`` stream."""
+    report, source, writer, projects_root, stream_id, _tid = _import(tmp_path)
+    project_id = resolve_project_id(writer)
+    assert project_id != source.timeline_id
+    writer.submit(
+        lambda session: session.execute(
+            "UPDATE event_streams SET aggregate_id = ? WHERE id = ?",
+            (project_id, stream_id),
+        )
+    )
+    try:
+        _assert_stream_identity_tamper_fails_closed(
+            writer, source, stream_id, projects_root, "aggregate_id"
+        )
+    finally:
+        writer.close()
+
+
+# ---------------------------------------------------------------------------
 # P3#5 — LocalFs sources pass chain verification before ANY use
 # ---------------------------------------------------------------------------
 
@@ -1055,6 +1196,207 @@ def test_local_fs_chain_tamper_rejected_slice_shaped(tmp_path: Path) -> None:
     assert "source chain invalid" in message
     assert tampered_id in message
     assert "hash mismatch" in message
+
+
+# ---------------------------------------------------------------------------
+# P2#1 (round 3) — LocalFS sidecars bound into source integrity
+# ---------------------------------------------------------------------------
+
+
+def test_sidecar_name_tamper_rejected_full_lifecycle(tmp_path: Path) -> None:
+    """P2#1 (round 3) (a): a full-lifecycle source (``timeline.created``
+    present) with the identity sidecar name tampered is rejected AT LOAD
+    with a ``BackfillSourceError`` naming the disagreement — the round-3
+    laundering scenario (``chain_ok=True``, CLI exit 0, success marker) is
+    closed: the created event is the load-time anchor for the sidecar name."""
+    from astrid.core._shared.jsonio import read_json, write_json_atomic
+    from astrid.core.timeline.eventlog.local_fs import LocalFsBackend
+    from astrid.packs.timeline.backfill import (
+        BackfillSourceError,
+        load_local_fs_source,
+    )
+
+    projects_root, home, _timeline_id, _ulid = project_root_with_timeline(
+        tmp_path
+    )
+    identity_path = home / "assembly.identity.json"
+    identity = read_json(identity_path)
+    assert identity["display"]["name"] == "Main"
+    identity["display"]["name"] = "LAUNDERED-SIDECAR-NAME"
+    write_json_atomic(identity_path, identity)
+    # Prove the event chain is intact: only the sidecar changed, so the
+    # rejection below is the identity cross-check, not the chain gate.
+    backend = LocalFsBackend(
+        timeline_id=str(identity["timeline_id"]), timeline_home=home
+    )
+    chain = backend.verify_chain()
+    assert chain.ok is True
+    assert chain.checked_events == 6
+    with pytest.raises(BackfillSourceError) as excinfo:
+        load_local_fs_source(home)
+    message = str(excinfo.value)
+    assert "LAUNDERED-SIDECAR-NAME" in message
+    assert "disagrees" in message
+    assert "timeline.created" in message
+
+
+def test_slice_sidecar_digest_drift_rejected_on_resume(tmp_path: Path) -> None:
+    """P2#1 (round 3) (b): a slice-shaped source (no ``timeline.created`` —
+    identity sidecar unanchored at first import) imports SUCCESSFULLY with
+    the identity-sidecar file digest recorded in the marker AND the receipt;
+    a POST-import sidecar edit is then rejected on resume with NAMED digest
+    drift (``identity_sha256``), fail closed, zero new rows, marker
+    unchanged."""
+    import hashlib as _hashlib
+    import json as _json
+
+    from astrid.core._shared.jsonio import read_json, write_json_atomic
+    from astrid.packs.timeline.backfill import (
+        BackfillDiscrepancyError,
+        backfill_project,
+    )
+
+    run_ts = "20260822T130000Z"
+    projects_root = tmp_path / "projects"
+    timelines_dir = projects_root / "proj" / "timelines"
+    timelines_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(
+        DESERT_SLICE, timelines_dir / "01KYPVKMW5STB4W6FE05ED8242"
+    )
+    (projects_root / "proj" / "project.json").write_text("{}")
+    writer = make_writer(projects_root / ".astrid" / "astrid.sqlite3")
+    make_project(writer)
+    projects, receipts, _ = make_backfill_deps(writer)
+    try:
+        reports = backfill_project(
+            writer=writer,
+            projects=projects,
+            receipts=receipts,
+            project_slug="proj",
+            projects_root=projects_root,
+            run_ts=run_ts,
+        )
+        assert len(reports) == 1
+        timeline_id = next(iter(reports))
+        home = timelines_dir / "01KYPVKMW5STB4W6FE05ED8242"
+        identity_path = home / "assembly.identity.json"
+        expected = _hashlib.sha256(identity_path.read_bytes()).hexdigest()
+        # Marker carries the identity digest.
+        marker = marker_state(projects_root)[timeline_id]
+        assert marker["identity_sha256"] == expected
+        assert marker["registry_sha256"] == ""  # registry came from events
+        # Receipt carries the identity digest (the report to_dict).
+        import sqlite3
+
+        with writer.read_only_connection() as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT result_json FROM command_receipts "
+                "WHERE command_kind = 'timeline.backfill' LIMIT 1"
+            ).fetchone()
+        assert row is not None
+        receipt = _json.loads(row["result_json"])
+        assert receipt["identity_sha256"] == expected
+        assert receipt["registry_sha256"] == ""
+
+        # Post-import sidecar edit (name; events untouched).
+        identity = read_json(identity_path)
+        identity["display"]["name"] = "POST-IMPORT-TAMPER"
+        write_json_atomic(identity_path, identity)
+        stream_id = f"{timeline_id}:{TIMELINE_STREAM_TYPE}"
+        with pytest.raises(BackfillDiscrepancyError) as excinfo:
+            backfill_project(
+                writer=writer,
+                projects=projects,
+                receipts=receipts,
+                project_slug="proj",
+                projects_root=projects_root,
+                run_ts=run_ts,
+            )
+        message = str(excinfo.value)
+        assert "identity_sha256" in message
+        assert "drifted" in message
+        # Zero new rows, marker unchanged.
+        assert head_seq(writer, stream_id) == 160
+        assert len(kernel_event_rows(writer, stream_id)) == 160
+        assert marker_state(projects_root)[timeline_id]["identity_sha256"] == (
+            expected
+        )
+    finally:
+        writer.close()
+
+
+def test_slice_registry_fallback_digest_drift_rejected_on_resume(
+    tmp_path: Path,
+) -> None:
+    """P2#1 (round 3) (c): when the fallback ``registry.json`` supplies the
+    projection (slice-shaped source with NO ``asset_registry_replaced``
+    event), its file digest is recorded in the marker and a POST-import
+    ``registry.json`` creation/edit fails the resume closed with
+    ``registry_sha256`` named."""
+    import hashlib as _hashlib
+
+    from astrid.core._shared.jsonio import write_json_atomic
+    from astrid.packs.timeline.backfill import (
+        BackfillDiscrepancyError,
+        backfill_project,
+    )
+
+    run_ts = "20260822T130001Z"
+    projects_root, home, timeline_id, timeline_ulid = project_root_with_timeline(
+        tmp_path,
+        project_slug="slice-reg",
+        name="Slice",
+        timeline_ulid="01J0000000000000000000000A",
+        events_spec=[
+            (
+                "timeline.config_replaced",
+                {"config": {"tracks": [], "clips": []}},
+                "human",
+            )
+        ],
+    )
+    writer = make_writer(projects_root / ".astrid" / "astrid.sqlite3")
+    make_project(writer, slug="slice-reg")
+    projects, receipts, _ = make_backfill_deps(writer)
+    try:
+        reports = backfill_project(
+            writer=writer,
+            projects=projects,
+            receipts=receipts,
+            project_slug="slice-reg",
+            projects_root=projects_root,
+            run_ts=run_ts,
+        )
+        assert len(reports) == 1
+        marker = marker_state(projects_root)[timeline_id]
+        # No registry.json existed: the fallback supplied {"assets": {}} and
+        # the digest is the sha256 of the empty byte string.
+        assert marker["registry_sha256"] == _hashlib.sha256(b"").hexdigest()
+        assert marker["identity_sha256"]
+
+        # Post-import registry.json edit: the fallback projection changes.
+        write_json_atomic(
+            home / "registry.json",
+            {"assets": {"hero": {"file": "hero.png"}}},
+        )
+        with pytest.raises(BackfillDiscrepancyError) as excinfo:
+            backfill_project(
+                writer=writer,
+                projects=projects,
+                receipts=receipts,
+                project_slug="slice-reg",
+                projects_root=projects_root,
+                run_ts=run_ts,
+            )
+        message = str(excinfo.value)
+        assert "registry_sha256" in message
+        assert "drifted" in message
+        assert marker_state(projects_root)[timeline_id]["registry_sha256"] == (
+            _hashlib.sha256(b"").hexdigest()
+        )
+    finally:
+        writer.close()
 
 
 # ---------------------------------------------------------------------------

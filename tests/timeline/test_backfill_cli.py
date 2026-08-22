@@ -35,6 +35,7 @@ class _RecordingBackfillClient:
             timeline: str | None = None,
             from_supabase_export: str | None = None,
             dry_run: bool = False,
+            run_ts: str | None = None,
         ) -> DomainResult:
             self._owner.calls.append(
                 (
@@ -44,6 +45,7 @@ class _RecordingBackfillClient:
                         "timeline": timeline,
                         "from_supabase_export": from_supabase_export,
                         "dry_run": dry_run,
+                        "run_ts": run_ts,
                     },
                 )
             )
@@ -51,6 +53,7 @@ class _RecordingBackfillClient:
                 {
                     "project": project,
                     "dry_run": dry_run,
+                    "run_ts": run_ts or "",
                     "timelines": {},
                 }
             )
@@ -79,6 +82,7 @@ def test_backfill_dispatch_default_source() -> None:
                 "timeline": None,
                 "from_supabase_export": None,
                 "dry_run": False,
+                "run_ts": None,
             },
         )
     ]
@@ -112,6 +116,39 @@ def test_backfill_dispatch_dry_run() -> None:
     assert client.calls[0][1]["dry_run"] is True
 
 
+def test_backfill_dispatch_run_ts_resume_flag() -> None:
+    """P3#2: the CLI accepts ``--run-ts`` and passes it through as the
+    explicit resume id — an interrupted run is resumable verbatim."""
+    code, client = _run(
+        "backfill",
+        "--project",
+        "demo",
+        "--run-ts",
+        "1750000000-0123456789abcdef0123456789abcdef",
+    )
+    assert code == 0
+    assert client.calls[0][1]["run_ts"] == (
+        "1750000000-0123456789abcdef0123456789abcdef"
+    )
+    assert client.calls[0][1]["timeline"] is None
+    assert client.calls[0][1]["dry_run"] is False
+
+
+def test_backfill_echoes_active_run_ts(capsys: pytest.CaptureFixture) -> None:
+    """P3#2: the CLI echoes the ACTIVE run_ts from the SDK response so an
+    interrupted fresh run can be resumed verbatim."""
+    code, client = _run(
+        "backfill",
+        "--project",
+        "demo",
+        "--run-ts",
+        "1750000000-0123456789abcdef0123456789abcdef",
+    )
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "backfill run_ts: 1750000000-0123456789abcdef0123456789abcdef" in out
+
+
 def test_backfill_rejects_unknown_source() -> None:
     with pytest.raises(SystemExit) as excinfo:
         _run("backfill", "--project", "demo", "--from", "local", "/tmp/x.jsonl")
@@ -139,6 +176,7 @@ def test_backfill_help_names_cutover_and_legacy_distinction() -> None:
             assert "--dry-run" in sub_help
             assert "supabase-export" in sub_help
             assert "--timeline" in sub_help
+            assert "--run-ts" in sub_help  # P3#2: explicit resume id
             # The legacy verbs stay absent from this product parser.
             for legacy in ("migration", "push", "pull", "sync", "audit",
                            "erase", "repair"):

@@ -183,7 +183,15 @@ def _cmd_backfill(parsed: argparse.Namespace) -> int:
         timeline=parsed.timeline,
         from_supabase_export=from_source,
         dry_run=parsed.dry_run,
+        run_ts=parsed.run_ts,
     )
+    # Round-3 P3#2: echo the ACTIVE run id so an interrupted fresh run can
+    # be resumed verbatim with ``--run-ts`` (the SDK response carries it;
+    # the JSON envelope exposes it machine-readably).
+    if not parsed.json and isinstance(result.data, dict):
+        active_run_ts = result.data.get("run_ts")
+        if active_run_ts:
+            print(f"backfill run_ts: {active_run_ts}")
     return print_result(result, as_json=parsed.json)
 
 
@@ -317,6 +325,16 @@ def _configure_backfill(subparser: argparse.ArgumentParser) -> None:
         "evaluated=false unless a kernel stream already exists for the "
         "timeline — then they are re-verified read-only and reported "
         "truthfully (never hardcoded).",
+    )
+    subparser.add_argument(
+        "--run-ts",
+        default=None,
+        help="Resume an interrupted backfill run: pass the run_ts echoed "
+        "by the earlier run (e.g. '1750000000-abcd...'). The resume reuses "
+        "that run's checkpoint dir and completes only the unfinished "
+        "prefix, revalidating every completed timeline first (W2). A fresh "
+        "run's ACTIVE run_ts is echoed at the start of its output so an "
+        "interrupted run can be resumed verbatim.",
     )
     _add_json_flag(subparser)
     subparser.set_defaults(
