@@ -223,6 +223,25 @@ def _require_non_empty_list(*fields: str) -> Callable[[dict[str, Any]], None]:
     return _validate
 
 
+def _require_non_empty_str_or_dict(
+    *fields: str,
+) -> Callable[[dict[str, Any]], None]:
+    def _validate(input: dict[str, Any]) -> None:
+        for name in fields:
+            value = input.get(name)
+            if isinstance(value, dict):
+                if not value:
+                    raise CapabilityInputError(
+                        f"{name} must be a non-empty object"
+                    )
+            elif not isinstance(value, str) or not value:
+                raise CapabilityInputError(
+                    f"{name} must be a non-empty string or object"
+                )
+
+    return _validate
+
+
 def _validate_video_enhance(input: dict[str, Any]) -> None:
     if input.get("enable_interpolation") is not True and (
         input.get("enable_upscale") is not True
@@ -236,10 +255,12 @@ def _validate_video_enhance(input: dict[str, Any]) -> None:
 #: ``required_inputs`` table; doc 16 §3 resolver detail).
 FAMILY_VALIDATORS: dict[str, Callable[[dict[str, Any]], None]] = {
     FAMILY_IMAGE_GENERATION: _require_prompts,
+    FAMILY_IMAGE_UPSCALE: _require_non_empty_str("image_url"),
     FAMILY_TRAVEL_BETWEEN_IMAGES: _require_non_empty_list("image_urls"),
     FAMILY_INDIVIDUAL_TRAVEL_SEGMENT: _require_non_empty_str("start_image_url"),
     FAMILY_CROSSFADE_JOIN: _require_non_empty_list("image_urls"),
     FAMILY_VIDEO_ENHANCE: _validate_video_enhance,
+    FAMILY_JOIN_CLIPS: _require_non_empty_str_or_dict("clip_source"),
     FAMILY_Z_IMAGE_TURBO_I2I: _require_non_empty_str("image_url"),
     FAMILY_MAGIC_EDIT: _require_non_empty_str("prompt", "image_url"),
     FAMILY_MASKED_EDIT: _require_non_empty_str("image_url", "mask_url", "prompt"),
