@@ -135,15 +135,40 @@ def discover_pack_metadata(
         resolved = _resolve_pack_root(raw_root)
         if not resolved.is_dir():
             return
+        try:
+            children = sorted(resolved.iterdir(), key=lambda path: path.name)
+        except OSError as exc:
+            # An unreadable external root (e.g. chmod 000) is skipped
+            # wholesale with a warning — one dead root must not abort
+            # discovery and hide every valid neighbor.
+            _LOGGER.warning(
+                "skipping unreadable %s root %s: %s",
+                source_kind,
+                resolved,
+                exc,
+            )
+            return
         seen: dict[str, Path] = {}
-        for child in sorted(resolved.iterdir(), key=lambda path: path.name):
-            if (
-                not child.is_dir()
-                or child.name.startswith(".")
-                or child.name == "__pycache__"
-            ):
+        for child in children:
+            try:
+                if (
+                    not child.is_dir()
+                    or child.name.startswith(".")
+                    or child.name == "__pycache__"
+                ):
+                    continue
+                manifest_path = pack_manifest_path(child)
+            except OSError as exc:
+                # Per-child pre-scan failures (e.g. an unreadable pack
+                # directory) skip only that child, matching the
+                # per-manifest isolation below.
+                _LOGGER.warning(
+                    "skipping unreadable %s pack %s: %s",
+                    source_kind,
+                    child,
+                    exc,
+                )
                 continue
-            manifest_path = pack_manifest_path(child)
             if manifest_path is None:
                 continue
             try:

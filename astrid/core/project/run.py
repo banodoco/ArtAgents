@@ -523,7 +523,7 @@ def require_run_record(project_slug: str, run_id: str, *, root: str | Path | Non
     if not run_path.exists():
         raise AstridError(
             f"run not found: {run_id}",
-            recovery_command=f"python3 -m astrid projects show --project {project_slug}",
+            recovery_command=f"python3 -m astrid projects show {project_slug}",
         )
     return validate_run_record(read_json(run_path))
 

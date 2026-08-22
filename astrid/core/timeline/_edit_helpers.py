@@ -429,6 +429,18 @@ def pack_write_gateway(
         )
     effective_stream_id = resolved_timeline_id
 
+    # 2.5 Append-capability preflight: prove the resolved backend can
+    #     actually append BEFORE any kernel mutation. Resolution alone does
+    #     not imply capability — e.g. a Supabase-preferred identity without
+    #     Supabase options resolves cleanly and then fails at append time
+    #     with ``EventLogMissingConfigError``, which would orphan an
+    #     already-committed kernel receipt. The preflight runs the same
+    #     deterministic checks the append path runs (config/transport,
+    #     identity sidecar, tombstone, writability, live-transport kind
+    #     support) with zero side effects, so an append-incapable backend
+    #     raises here with zero mutation on either side.
+    backend.preflight_append(actor=actor, kinds=[spec["kind"] for spec in events])
+
     # 3. Kernel replace_config commit (m2): when the caller supplies a
     # kernel writer, every timeline.config_replaced event is additionally
     # committed to the kernel timeline store through the repository command

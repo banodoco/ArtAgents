@@ -88,6 +88,13 @@ class _TimelineTailState:
     next_event_version: int
 
 
+_LIVE_APPEND_SUPPORTED_KINDS: tuple[str, ...] = (
+    "timeline.config_replaced",
+    "timeline.asset_registry_replaced",
+)
+"""Event kinds the live Reigh append RPC accepts; preflight mirrors this."""
+
+
 class LiveSupabaseAppendTransport:
     """Live transport for Reigh config/asset-registry appends via Supabase RPC."""
 
@@ -139,10 +146,11 @@ class LiveSupabaseAppendTransport:
                 expected_version=expected_version,
                 txn_id=txn_id,
             ).primary_event
-        raise EventLogUnsupportedRpcError(
-            f"{self.rpc_append_name} only supports "
-            "timeline.config_replaced and timeline.asset_registry_replaced"
-        )
+        if kind not in _LIVE_APPEND_SUPPORTED_KINDS:
+            raise EventLogUnsupportedRpcError(
+                f"{self.rpc_append_name} only supports "
+                f"{' and '.join(_LIVE_APPEND_SUPPORTED_KINDS)}"
+            )
 
     def append_config_replaced(
         self,
@@ -785,6 +793,35 @@ class SupabaseBackend:
 
     def backend_name(self) -> str:
         return "supabase"
+
+    def preflight_append(
+        self,
+        *,
+        actor: TimelineActor,
+        kinds: list[str] | None = None,
+    ) -> None:
+        """Prove append capability without network or storage effects.
+
+        Runs exactly the deterministic checks :meth:`append_event` runs
+        before its RPC — the verified-human-subject rule and append
+        transport resolution (typed ``EventLogMissingConfigError`` when
+        configured with neither options nor a mocked transport) plus
+        live-transport kind support — so a gateway can fail closed before
+        committing anything outside this eventlog.
+        """
+        self._require_verified_human_subject(actor)
+        transport = self._resolve_append_transport()
+        if isinstance(transport, LiveSupabaseAppendTransport):
+            unsupported = [
+                kind
+                for kind in (kinds or ())
+                if kind not in _LIVE_APPEND_SUPPORTED_KINDS
+            ]
+            if unsupported:
+                raise EventLogUnsupportedRpcError(
+                    f"{self.rpc_append_name} only supports "
+                    f"{' and '.join(_LIVE_APPEND_SUPPORTED_KINDS)}"
+                )
 
     def append_event(
         self,

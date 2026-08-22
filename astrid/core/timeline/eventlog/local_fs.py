@@ -133,6 +133,47 @@ class LocalFsBackend:
             _fsync_dir(self.timeline_home)
         return event
 
+    def preflight_append(
+        self,
+        *,
+        actor: TimelineActor,
+        kinds: list[str] | None = None,
+    ) -> None:
+        """Prove append capability without mutating any state.
+
+        Read-only probe used by write gateways BEFORE any non-eventlog
+        commit (e.g. the kernel ``replace_config`` receipt): runs the same
+        deterministic checks :meth:`append_event` runs — identity sidecar
+        presence, post-delete tombstone, and log writability — while
+        creating nothing, writing nothing, and taking no lock. Transient
+        failures (races, lock contention, disk-full at write time) remain
+        the append path's to report. *actor* and *kinds* carry no local
+        preconditions; they exist so every backend shares one preflight
+        signature.
+        """
+        identity = self._load_identity_locked()
+        if identity is None:
+            raise EventLogError(
+                "timeline identity sidecar is missing; runtime "
+                "legacy bootstrap is disabled. Run the Sprint 2 "
+                "migration script before appending events."
+            )
+        if self.events_path.exists():
+            if not os.access(self.events_path, os.W_OK):
+                raise EventLogError(
+                    f"event log {self.events_path} is not writable"
+                )
+            with self.events_path.open("rb") as handle:
+                tail = self._read_tail_event_locked(handle)
+            if tail is not None and tail.kind == "timeline.deleted":
+                raise EventLogError(
+                    f"timeline {identity['timeline_ulid']} rejects appends after timeline.deleted"
+                )
+        elif not os.access(self.timeline_home, os.W_OK):
+            raise EventLogError(
+                f"timeline home {self.timeline_home} is not writable"
+            )
+
     def append_prebuilt_events(
         self,
         timeline_id: str,

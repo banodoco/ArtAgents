@@ -83,8 +83,8 @@ def format_project_required_guidance(*, operation: str) -> str:
         "  re-run this command with --project <project>  # attach for this run",
         '  astrid projects create <slug> --name "Display Name"',
         "",
-        "Check the current selection at any time:",
-        "  astrid projects list",
+        "Nothing is auto-selected: pass --project <project> on each command",
+        "(a configured default is a suggestion only, never a selection).",
     ]
     if default:
         lines.extend(

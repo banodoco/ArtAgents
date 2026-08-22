@@ -180,6 +180,23 @@ class EventLogBackend(Protocol):
         """
         ...
 
+    def preflight_append(
+        self,
+        *,
+        actor: TimelineActor,
+        kinds: list[str] | None = None,
+    ) -> None:
+        """Prove append capability without mutating any state.
+
+        Runs the deterministic preconditions :meth:`append_event` checks
+        (backend config/transport availability, stream identity, kind
+        support) and raises the same typed errors, while performing no
+        writes and no network I/O. Write gateways call this before
+        committing anything outside the eventlog so an append-incapable
+        backend fails with zero mutation on either side.
+        """
+        ...
+
     def read_events(
         self,
         *,

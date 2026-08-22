@@ -14,14 +14,15 @@ Resolution outcomes:
   :attr:`stream_type` into ``pack_write_gateway``, which then commits the
   kernel command (receipt key ``timeline.replace_config:{id}:{version}``)
   *before* the eventlog append — no divergence path.
-- **None** — genuinely kernel-less context: the kernel project/timeline does
-  not exist (nothing to diverge from), or the database is owned by another
-  process (e.g. a running bridge/server) so composition is unavailable.
-  Callers keep the documented eventlog-only escape and log a warning.
-- **raise** — the kernel project and timeline rows exist but the event
-  stream row is missing (stream head ``None``): an inconsistent kernel
-  state fails closed with :class:`TimelineEditError` instead of silently
-  diverging through the eventlog-only escape.
+- **None** — genuinely kernel-less context: the kernel has no database at
+  the resolved projects root, or the kernel project/timeline rows do not
+  exist (nothing to diverge from). Callers keep the documented
+  eventlog-only escape and log a warning.
+- **raise** — fail-closed states that must not downgrade to eventlog-only:
+  the kernel DB file exists but another process owns it (composition is
+  unavailable — e.g. a running bridge/server), or the kernel project and
+  timeline rows exist but the event stream row is missing (stream head
+  ``None``). Both raise :class:`TimelineEditError`.
 
 This module lives under ``astrid.core`` and never imports ``astrid.packs``:
 the timeline repository is reached structurally through the composed
@@ -117,19 +118,26 @@ def kernel_timeline_writer_for(
     """Resolve the kernel write path for one project/timeline pair.
 
     Returns a bound :class:`KernelTimelineBinding`, or ``None`` when this is
-    a genuinely kernel-less context: the kernel has no such project or
-    timeline (nothing to diverge from — eventlog-only is correct), or the
-    kernel DB is owned by another process (composition fails closed with the
-    typed unavailable error). Any other resolution error propagates: an
-    ambiguous failure must not silently downgrade to eventlog-only.
+    a genuinely kernel-less context: the kernel has no database at the
+    resolved projects root, or it has no such project or timeline (nothing
+    to diverge from — eventlog-only is correct). Any other resolution error
+    propagates: an ambiguous failure must not silently downgrade to
+    eventlog-only.
 
     Raises
     ------
     TimelineEditError
-        When the kernel project and timeline exist but the event stream row
-        is missing (head ``None``) — an inconsistent kernel state that must
-        fail closed instead of unbounding into eventlog-only writes.
+        When the kernel DB file exists but another process owns it
+        (composition reports unavailable — binding refuses to silently
+        downgrade an existing kernel timeline), or when the kernel project
+        and timeline exist but the event stream row is missing (head
+        ``None``) — both inconsistent states that must fail closed instead
+        of unbounding into eventlog-only writes.
     """
+    from astrid.core.foundation.project_paths import resolve_projects_root
+    from astrid.core.integrations.reigh.bridge_service import (
+        derive_database_path,
+    )
     from astrid.core.repositories.projects import ProjectNotFoundError
     from astrid.sdk.exceptions import ServiceUnavailableError
 
@@ -138,14 +146,29 @@ def kernel_timeline_writer_for(
     try:
         app = compose_standard_application(projects_root)
     except ServiceUnavailableError as exc:
-        _LOGGER.warning(
-            "kernel timeline binding for %s/%s unavailable (%s); "
-            "keeping the documented eventlog-only escape",
-            project_slug,
-            timeline_slug,
-            exc,
-        )
-        return None
+        db_path = derive_database_path(resolve_projects_root(projects_root))
+        if not db_path.exists():
+            # Genuinely kernel-less: with no database file there are no
+            # kernel rows to diverge from; keep the documented escape.
+            _LOGGER.warning(
+                "kernel timeline binding for %s/%s skipped: no kernel "
+                "database at %s (%s); keeping the documented "
+                "eventlog-only escape",
+                project_slug,
+                timeline_slug,
+                db_path,
+                exc,
+            )
+            return None
+        # The database exists but another process owns it (e.g. a running
+        # bridge/server). A kernel timeline may live in there; silently
+        # downgrading this managed write to eventlog-only would diverge it.
+        # Fail closed and let the caller abort the managed write.
+        raise TimelineEditError(
+            f"kernel database {db_path} exists but is owned by another "
+            f"process ({exc}); refusing to downgrade the kernel timeline "
+            f"{project_slug!r}/{timeline_slug!r} to eventlog-only writes"
+        ) from exc
 
     def _unbound(reason: str) -> None:
         _LOGGER.debug(
