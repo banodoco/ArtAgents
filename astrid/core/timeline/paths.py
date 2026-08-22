@@ -122,7 +122,7 @@ def find_timeline_by_slug(
         pass
     if not td.is_dir():
         return None
-    # Marker-first kernel resolution for backfilled timelines.
+    # Marker-first kernel resolution for backfilled timelines (project-scoped).
     # Must precede file scan to avoid stale display.json alias.
     try:
         import sqlite3 as _sq
@@ -145,24 +145,27 @@ def find_timeline_by_slug(
                 conn = _sq.connect(f"file:{_db}?mode=ro", uri=True)
                 try:
                     conn.row_factory = _sq.Row
-                    row = conn.execute("SELECT json_extract(payload_json,'$.data.timeline_id') as tid, json_extract(payload_json,'$.data.timeline_ulid') as ulid FROM events WHERE kind='timeline.created' AND json_extract(payload_json,'$.data.slug')=? LIMIT 1", (target,)).fetchone()
-                    if row and row["tid"] and str(row["tid"]) in _state:
-                        ulid = str(row["ulid"]) if row["ulid"] else None
-                        if ulid:
-                            for cand_ulid in (ulid, ulid.upper(), ulid.lower()):
-                                cand = td / cand_ulid
-                                if cand.is_dir():
-                                    if not include_tombstoned and _timeline_home_is_tombstoned(cand):
-                                        continue
-                                    # Verify current slug matches target (handles renames) — don't trust created slug alone.
-                                    try:
-                                        _disp_early = load_display_json_with_repair(cand)
-                                    except BackfillError:
-                                        raise
-                                    except Exception:
-                                        continue
-                                    if isinstance(_disp_early, dict) and _disp_early.get("slug") == target:
-                                        return (cand.name, cand)
+                    _proj_row = conn.execute("SELECT id FROM projects WHERE slug=?", (project_slug,)).fetchone()
+                    if _proj_row is not None:
+                        _pid = str(_proj_row["id"])
+                        row = conn.execute("SELECT json_extract(payload_json,'$.data.timeline_id') as tid, json_extract(payload_json,'$.data.timeline_ulid') as ulid FROM events WHERE kind='timeline.created' AND project_id=? AND json_extract(payload_json,'$.data.slug')=? LIMIT 1", (_pid, target,)).fetchone()
+                        if row and row["tid"] and str(row["tid"]) in _state:
+                            ulid = str(row["ulid"]) if row["ulid"] else None
+                            if ulid:
+                                for cand_ulid in (ulid, ulid.upper(), ulid.lower()):
+                                    cand = td / cand_ulid
+                                    if cand.is_dir():
+                                        if not include_tombstoned and _timeline_home_is_tombstoned(cand):
+                                            continue
+                                        # Verify current slug matches target (handles renames) — don't trust created slug alone.
+                                        try:
+                                            _disp_early = load_display_json_with_repair(cand)
+                                        except BackfillError:
+                                            raise
+                                        except Exception:
+                                            continue
+                                        if isinstance(_disp_early, dict) and _disp_early.get("slug") == target:
+                                            return (cand.name, cand)
                 finally:
                     conn.close()
     except BackfillError:
@@ -277,7 +280,7 @@ def find_timeline_by_event_stream_id(
         raise
     except Exception:
         pass
-    # Kernel-first for marked timelines: UUID -> ULID via kernel
+    # Kernel-first for marked timelines: UUID -> ULID via kernel (project-scoped)
     try:
         import sqlite3 as _sq_fes
 
@@ -297,35 +300,38 @@ def find_timeline_by_event_stream_id(
                 conn = _sq_fes.connect(f"file:{_db2}?mode=ro", uri=True)
                 try:
                     conn.row_factory = _sq_fes.Row
-                    row = conn.execute("SELECT json_extract(payload_json,'$.data.timeline_ulid') as ulid FROM events WHERE kind='timeline.created' AND json_extract(payload_json,'$.data.timeline_id')=? LIMIT 1", (event_stream_id,)).fetchone()
-                    if row and row["ulid"]:
-                        ulid = str(row["ulid"])
-                        td = timelines_dir(project_slug, root=root)
-                        cand = td / ulid
-                        # Also handle case-insensitive ULID dir (upper)
-                        if not cand.is_dir():
-                            cand = td / ulid.upper()
-                        if not cand.is_dir():
-                            cand = td / ulid.lower()
-                        if cand.is_dir():
-                            # Derive current slug from kernel authority (latest renamed via stream_id)
-                            _sid = f"{event_stream_id}:timeline.timeline"
-                            _cur = conn.execute("SELECT COALESCE(json_extract(payload_json,'$.data.new_slug'), json_extract(payload_json,'$.data.slug')) as cur FROM events WHERE kind='timeline.renamed' AND stream_id=? ORDER BY seq DESC LIMIT 1", (_sid,)).fetchone()
-                            if _cur and _cur["cur"]:
-                                return (cand.name, str(_cur["cur"]))
-                            _cr = conn.execute("SELECT json_extract(payload_json,'$.data.slug') as cs FROM events WHERE kind='timeline.created' AND json_extract(payload_json,'$.data.timeline_id')=? LIMIT 1", (event_stream_id,)).fetchone()
-                            if _cr and _cr["cs"]:
-                                return (cand.name, str(_cr["cs"]))
-                            # Fallback to display repair
-                            try:
-                                data = load_display_json_with_repair(cand)
-                                slug = data.get("slug") if isinstance(data, dict) else None
-                                if isinstance(slug, str):
-                                    return (cand.name, slug)
-                            except BackfillErrorFes:
-                                raise
-                            except Exception:
-                                pass
+                    _proj2 = conn.execute("SELECT id FROM projects WHERE slug=?", (project_slug,)).fetchone()
+                    if _proj2 is not None:
+                        _pid2 = str(_proj2["id"])
+                        row = conn.execute("SELECT json_extract(payload_json,'$.data.timeline_ulid') as ulid FROM events WHERE kind='timeline.created' AND project_id=? AND json_extract(payload_json,'$.data.timeline_id')=? LIMIT 1", (_pid2, event_stream_id,)).fetchone()
+                        if row and row["ulid"]:
+                            ulid = str(row["ulid"])
+                            td = timelines_dir(project_slug, root=root)
+                            cand = td / ulid
+                            # Also handle case-insensitive ULID dir (upper)
+                            if not cand.is_dir():
+                                cand = td / ulid.upper()
+                            if not cand.is_dir():
+                                cand = td / ulid.lower()
+                            if cand.is_dir():
+                                # Derive current slug from kernel authority (latest renamed via stream_id) — project-scoped
+                                _sid = f"{event_stream_id}:timeline.timeline"
+                                _cur = conn.execute("SELECT COALESCE(json_extract(payload_json,'$.data.new_slug'), json_extract(payload_json,'$.data.slug')) as cur FROM events WHERE kind='timeline.renamed' AND project_id=? AND stream_id=? ORDER BY seq DESC LIMIT 1", (_pid2, _sid,)).fetchone()
+                                if _cur and _cur["cur"]:
+                                    return (cand.name, str(_cur["cur"]))
+                                _cr = conn.execute("SELECT json_extract(payload_json,'$.data.slug') as cs FROM events WHERE kind='timeline.created' AND project_id=? AND json_extract(payload_json,'$.data.timeline_id')=? LIMIT 1", (_pid2, event_stream_id,)).fetchone()
+                                if _cr and _cr["cs"]:
+                                    return (cand.name, str(_cr["cs"]))
+                                # Fallback to display repair
+                                try:
+                                    data = load_display_json_with_repair(cand)
+                                    slug = data.get("slug") if isinstance(data, dict) else None
+                                    if isinstance(slug, str):
+                                        return (cand.name, slug)
+                                except BackfillErrorFes:
+                                    raise
+                                except Exception:
+                                    pass
                 finally:
                     conn.close()
     except BackfillErrorFes:

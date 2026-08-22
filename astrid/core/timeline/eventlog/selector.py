@@ -239,51 +239,62 @@ def resolve_event_log_target(
                 conn = _sq.connect(f"file:{_db}?mode=ro", uri=True)
                 try:
                     conn.row_factory = _sq.Row
-                    _key = str(slug_or_id)
-                    _tid: str | None = None
-                    _ulid: str | None = None
-                    _is_ulid_key = _is_ulid_sel(_key) or _is_ulid_sel(_key.upper()) or _is_ulid_sel(_key.lower())
-                    if _is_ulid_key:
-                        r = conn.execute("SELECT json_extract(payload_json,'$.data.timeline_id') as tid, json_extract(payload_json,'$.data.timeline_ulid') as ulid FROM events WHERE kind='timeline.created' AND lower(json_extract(payload_json,'$.data.timeline_ulid'))=lower(?) LIMIT 1", (_key,)).fetchone()
-                        if r and r["tid"] and str(r["tid"]) in _st:
-                            _tid = str(r["tid"])
-                            _ulid = str(r["ulid"]) if r["ulid"] else _key
-                    elif _looks_like_uuid_sel(_key):
-                        r = conn.execute("SELECT json_extract(payload_json,'$.data.timeline_id') as tid, json_extract(payload_json,'$.data.timeline_ulid') as ulid FROM events WHERE kind='timeline.created' AND json_extract(payload_json,'$.data.timeline_id')=? LIMIT 1", (_key,)).fetchone()
-                        if r and r["tid"] and str(r["tid"]) in _st:
-                            _tid = str(r["tid"])
-                            _ulid = str(r["ulid"]) if r["ulid"] else None
+                    # Resolve project_slug → kernel project id for scoping; unknown project → no marker match (fall through).
+                    _proj_row = conn.execute("SELECT id FROM projects WHERE slug=?", (project_slug,)).fetchone()
+                    if _proj_row is None:
+                        pass
                     else:
-                        # Slug: try creation slug first
-                        r = conn.execute("SELECT json_extract(payload_json,'$.data.timeline_id') as tid, json_extract(payload_json,'$.data.timeline_ulid') as ulid FROM events WHERE kind='timeline.created' AND json_extract(payload_json,'$.data.slug')=? LIMIT 1", (_key,)).fetchone()
-                        if r and r["tid"] and str(r["tid"]) in _st:
-                            _tid = str(r["tid"])
-                            _ulid = str(r["ulid"]) if r["ulid"] else None
+                        _project_id = str(_proj_row["id"])
+                        _key = str(slug_or_id)
+                        _tid: str | None = None
+                        _ulid: str | None = None
+                        _is_ulid_key = _is_ulid_sel(_key) or _is_ulid_sel(_key.upper()) or _is_ulid_sel(_key.lower())
+                        if _is_ulid_key:
+                            r = conn.execute("SELECT json_extract(payload_json,'$.data.timeline_id') as tid, json_extract(payload_json,'$.data.timeline_ulid') as ulid FROM events WHERE kind='timeline.created' AND project_id=? AND lower(json_extract(payload_json,'$.data.timeline_ulid'))=lower(?) LIMIT 1", (_project_id, _key,)).fetchone()
+                            if r and r["tid"] and str(r["tid"]) in _st:
+                                _tid = str(r["tid"])
+                                _ulid = str(r["ulid"]) if r["ulid"] else _key
+                        elif _looks_like_uuid_sel(_key):
+                            r = conn.execute("SELECT json_extract(payload_json,'$.data.timeline_id') as tid, json_extract(payload_json,'$.data.timeline_ulid') as ulid FROM events WHERE kind='timeline.created' AND project_id=? AND json_extract(payload_json,'$.data.timeline_id')=? LIMIT 1", (_project_id, _key,)).fetchone()
+                            if r and r["tid"] and str(r["tid"]) in _st:
+                                _tid = str(r["tid"])
+                                _ulid = str(r["ulid"]) if r["ulid"] else None
                         else:
-                            for _cand_tid in list(_st.keys()):
-                                # Derive current slug via stream_id (payload lacks timeline_id for renames)
-                                _sid = f"{_cand_tid}:timeline.timeline"
-                                _cur_row = conn.execute("SELECT COALESCE(json_extract(payload_json,'$.data.new_slug'), json_extract(payload_json,'$.data.slug')) as cur FROM events WHERE kind='timeline.renamed' AND stream_id=? ORDER BY seq DESC LIMIT 1", (_sid,)).fetchone()
-                                _cur_slug: str | None = None
-                                if _cur_row and _cur_row["cur"]:
-                                    _cur_slug = str(_cur_row["cur"])
-                                else:
-                                    _cr = conn.execute("SELECT json_extract(payload_json,'$.data.slug') as cs FROM events WHERE kind='timeline.created' AND json_extract(payload_json,'$.data.timeline_id')=? LIMIT 1", (_cand_tid,)).fetchone()
-                                    if _cr and _cr["cs"]:
-                                        _cur_slug = str(_cr["cs"])
-                                if _cur_slug == _key:
-                                    _cr2 = conn.execute("SELECT json_extract(payload_json,'$.data.timeline_ulid') as ulid2 FROM events WHERE kind='timeline.created' AND json_extract(payload_json,'$.data.timeline_id')=? LIMIT 1", (_cand_tid,)).fetchone()
-                                    _tid = _cand_tid
-                                    _ulid = str(_cr2["ulid2"]) if _cr2 and _cr2["ulid2"] else None
-                                    break
-                    if _tid and _tid in _st:
-                        from astrid.core.timeline.paths import timelines_dir as _td
-                        thome = _td(project_slug, root=_pr) / (_ulid or "") if _ulid else None
-                        if thome is not None and not thome.is_dir():
-                            thome = None
-                        from .sqlite_backend import SqliteEventLogBackend as _SBE
-                        be = _SBE(timeline_id=_tid, timeline_home=thome, projects_root=_pr)
-                        return EventLogTarget(backend_name="sqlite", timeline_id=_tid, timeline_ulid=_ulid, timeline_home=thome, slug=_key, backend=be, source="local")
+                            # Slug: try creation slug first (project-scoped)
+                            r = conn.execute("SELECT json_extract(payload_json,'$.data.timeline_id') as tid, json_extract(payload_json,'$.data.timeline_ulid') as ulid FROM events WHERE kind='timeline.created' AND project_id=? AND json_extract(payload_json,'$.data.slug')=? LIMIT 1", (_project_id, _key,)).fetchone()
+                            if r and r["tid"] and str(r["tid"]) in _st:
+                                _tid = str(r["tid"])
+                                _ulid = str(r["ulid"]) if r["ulid"] else None
+                            else:
+                                for _cand_tid in list(_st.keys()):
+                                    # Derive current slug via stream_id (payload lacks timeline_id for renames) — project-scoped.
+                                    _sid = f"{_cand_tid}:timeline.timeline"
+                                    _cur_row = conn.execute("SELECT COALESCE(json_extract(payload_json,'$.data.new_slug'), json_extract(payload_json,'$.data.slug')) as cur FROM events WHERE kind='timeline.renamed' AND project_id=? AND stream_id=? ORDER BY seq DESC LIMIT 1", (_project_id, _sid,)).fetchone()
+                                    _cur_slug: str | None = None
+                                    if _cur_row and _cur_row["cur"]:
+                                        _cur_slug = str(_cur_row["cur"])
+                                    else:
+                                        _cr = conn.execute("SELECT json_extract(payload_json,'$.data.slug') as cs FROM events WHERE kind='timeline.created' AND project_id=? AND json_extract(payload_json,'$.data.timeline_id')=? LIMIT 1", (_project_id, _cand_tid,)).fetchone()
+                                        if _cr and _cr["cs"]:
+                                            _cur_slug = str(_cr["cs"])
+                                    if _cur_slug == _key:
+                                        _cr2 = conn.execute("SELECT json_extract(payload_json,'$.data.timeline_ulid') as ulid2 FROM events WHERE kind='timeline.created' AND project_id=? AND json_extract(payload_json,'$.data.timeline_id')=? LIMIT 1", (_project_id, _cand_tid,)).fetchone()
+                                        _tid = _cand_tid
+                                        _ulid = str(_cr2["ulid2"]) if _cr2 and _cr2["ulid2"] else None
+                                        break
+                        if _tid and _tid in _st:
+                            # Verify the resolved tid actually belongs to the requested project (defense in depth).
+                            _chk = conn.execute("SELECT 1 FROM events WHERE kind='timeline.created' AND project_id=? AND json_extract(payload_json,'$.data.timeline_id')=? LIMIT 1", (_project_id, _tid,)).fetchone()
+                            if _chk is None:
+                                _tid = None
+                            else:
+                                from astrid.core.timeline.paths import timelines_dir as _td
+                                thome = _td(project_slug, root=_pr) / (_ulid or "") if _ulid else None
+                                if thome is not None and not thome.is_dir():
+                                    thome = None
+                                from .sqlite_backend import SqliteEventLogBackend as _SBE
+                                be = _SBE(timeline_id=_tid, timeline_home=thome, projects_root=_pr)
+                                return EventLogTarget(backend_name="sqlite", timeline_id=_tid, timeline_ulid=_ulid, timeline_home=thome, slug=_key, backend=be, source="local")
                 finally:
                     conn.close()
     except BackfillError:

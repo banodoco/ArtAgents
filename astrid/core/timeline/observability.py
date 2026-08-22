@@ -55,14 +55,23 @@ def resolve_timeline_target(
         _ulid_norm = slug_or_id.upper() if is_ulid(slug_or_id.upper()) else slug_or_id
         tdir = timeline_dir(project_slug, _ulid_norm, root=root)
         if not tdir.is_dir():
-            # Try alternate case
-            tdir_alt = timeline_dir(project_slug, slug_or_id.lower(), root=root) if _ulid_norm != slug_or_id.lower() else None
+            # Try alternate case — guard invalid ULID casing (lower) that fails validation.
+            tdir_alt = None
+            try:
+                if _ulid_norm != slug_or_id.lower():
+                    tdir_alt = timeline_dir(project_slug, slug_or_id.lower(), root=root)
+            except Exception:
+                tdir_alt = None
             if tdir_alt is not None and tdir_alt.is_dir():
                 tdir = tdir_alt
             elif not tdir.is_dir():
-                # Fallback try original
-                tdir_orig = timeline_dir(project_slug, slug_or_id, root=root)
-                if tdir_orig.is_dir():
+                # Fallback try original — also guarded.
+                tdir_orig = None
+                try:
+                    tdir_orig = timeline_dir(project_slug, slug_or_id, root=root)
+                except Exception:
+                    tdir_orig = None
+                if tdir_orig is not None and tdir_orig.is_dir():
                     tdir = tdir_orig
         if tdir.is_dir():
             # Kernel-first: authoritative id via directory binding
@@ -132,7 +141,7 @@ def resolve_timeline_target(
     # --- Strategy 2: event-stream UUID (kernel-first for marked timelines) ---
     _is_uuid = _looks_like_uuid(slug_or_id)
     if _is_uuid:
-        # Kernel-first: try to locate marked timeline by UUID via kernel/authority
+        # Kernel-first: try to locate marked timeline by UUID via kernel/authority (project-scoped)
         try:
             import importlib as _il_uuid
             import sqlite3 as _sq_uuid
@@ -152,31 +161,34 @@ def resolve_timeline_target(
                     conn = _sq_uuid.connect(f"file:{_db_uuid}?mode=ro", uri=True)
                     try:
                         conn.row_factory = _sq_uuid.Row
-                        r = conn.execute("SELECT json_extract(payload_json,'$.data.timeline_ulid') as ulid FROM events WHERE kind='timeline.created' AND json_extract(payload_json,'$.data.timeline_id')=? LIMIT 1", (slug_or_id,)).fetchone()
-                        if r and r["ulid"]:
-                            ulid = str(r["ulid"])
-                            tdir = timeline_dir(project_slug, ulid, root=root)
-                            if tdir.is_dir():
-                                slug = _read_slug(tdir)
-                                # Verify directory is indeed marked via authority (fail-closed)
-                                try:
-                                    from astrid.core.timeline.authority import (
-                                        resolve_authoritative_timeline_id as _res_uuid,
-                                    )
-                                    _chk = _res_uuid(tdir, _pr_uuid)
-                                    if _chk == slug_or_id:
-                                        return ResolvedTarget(
-                                            backend="local_fs",
-                                            timeline_id=slug_or_id,
-                                            timeline_ulid=ulid,
-                                            timeline_home=tdir,
-                                            slug=slug if slug is not None else ulid,
-                                            backend_name_display="local_fs",
+                        _proj_uuid = conn.execute("SELECT id FROM projects WHERE slug=?", (project_slug,)).fetchone()
+                        if _proj_uuid is not None:
+                            _pid_uuid = str(_proj_uuid["id"])
+                            r = conn.execute("SELECT json_extract(payload_json,'$.data.timeline_ulid') as ulid FROM events WHERE kind='timeline.created' AND project_id=? AND json_extract(payload_json,'$.data.timeline_id')=? LIMIT 1", (_pid_uuid, slug_or_id,)).fetchone()
+                            if r and r["ulid"]:
+                                ulid = str(r["ulid"])
+                                tdir = timeline_dir(project_slug, ulid, root=root)
+                                if tdir.is_dir():
+                                    slug = _read_slug(tdir)
+                                    # Verify directory is indeed marked via authority (fail-closed)
+                                    try:
+                                        from astrid.core.timeline.authority import (
+                                            resolve_authoritative_timeline_id as _res_uuid,
                                         )
-                                except BackfillErrorUuid:
-                                    raise
-                                except Exception:
-                                    pass
+                                        _chk = _res_uuid(tdir, _pr_uuid)
+                                        if _chk == slug_or_id:
+                                            return ResolvedTarget(
+                                                backend="local_fs",
+                                                timeline_id=slug_or_id,
+                                                timeline_ulid=ulid,
+                                                timeline_home=tdir,
+                                                slug=slug if slug is not None else ulid,
+                                                backend_name_display="local_fs",
+                                            )
+                                    except BackfillErrorUuid:
+                                        raise
+                                    except Exception:
+                                        pass
                     finally:
                         conn.close()
         except BackfillErrorUuid:
