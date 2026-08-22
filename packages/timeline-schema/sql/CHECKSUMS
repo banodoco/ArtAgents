@@ -1,1 +1,2 @@
 sha256=f9b95337092ff5e569887688839e06e9edd3e50ba8202ab9004b8af9490cc83b  0002_add_history_kind_index.sql
+sha256=e8ef51e9350455093f0cdc05a46a42cceb5a3f0caeb3ede67abe2a8ab7ecd9b7  0003_add_source_provenance.sql

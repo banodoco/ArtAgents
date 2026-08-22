@@ -168,7 +168,18 @@ path = sys.argv[1]
 conn = sqlite3.connect(":memory:")
 try:
     with open(path, encoding="utf-8") as handle:
-        conn.executescript(handle.read())
+        sql_text = handle.read()
+    # Cross-pack ALTER: timeline pack may ALTER kernel events table.
+    # An empty DB has no such table, so pre-create a minimal stub when
+    # the migration targets events — this keeps the parse hermetic while
+    # the real runner applies core before timeline.
+    if "ALTER TABLE events" in sql_text:
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS events ("
+            "event_id TEXT PRIMARY KEY, payload_json TEXT, stream_id TEXT, seq INTEGER"
+            ")"
+        )
+    conn.executescript(sql_text)
 except Exception as exc:
     print(f"{path}: {exc}")
     raise SystemExit(1)
