@@ -993,6 +993,10 @@ try:
         }
 
     run_item(10, "clean credential-free dogfood", item_10, lambda: ROOT.stat().st_mtime_ns)
+    # Item 9's backup is journey scratch, not product output: remove it so
+    # the shared module-scoped harness project root stays free of JSON
+    # artifacts for later lanes that assert repository-only files.
+    shutil.rmtree(backup_path, ignore_errors=True)
     evidence = make_evidence()
     assert set(evidence["ga_items"]) == {str(index) for index in range(1, 11)}
     print(json.dumps(evidence, sort_keys=True))
