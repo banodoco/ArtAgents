@@ -695,7 +695,11 @@ class ReighTaskBridge:
             raise BridgeChildAdmissionForbiddenError(
                 "child_admission.index must be a non-negative integer"
             )
-        expected_key = f"reigh.orch:v1:{parent_task_id}:{role}:{index}"
+        from astrid.core.integrations.reigh.orchestrator_transitions import (
+            orch_child_key,
+        )
+
+        expected_key = orch_child_key(parent_task_id, str(role), index)
         if idempotency_key != expected_key:
             raise BridgeChildAdmissionForbiddenError(
                 f"child admission requires the deterministic key "
@@ -750,44 +754,64 @@ class ReighTaskBridge:
 
         if replay is None:
             # Live parent fence (doc 27 §3.5.1): only NEW admissions pay
-            # this gate; the caller's attempt must be the parent's live,
-            # unexpired leased attempt owned by this executor.
-            if str(parent["status"]) != "running":
+            # this gate. Collect the observable facts, then arbitrate
+            # EXCLUSIVELY through the checked transition table — no
+            # inline verdict logic beside it.
+            parent_running = str(parent["status"]) == "running"
+            attempt = self._attempt_row(parent_attempt_id)
+            fence_valid = (
+                attempt is not None
+                and str(attempt["task_id"]) == parent_task_id
+                and str(attempt["status"]) in ("claimed", "running")
+                and str(attempt["executor_id"] or "") == executor_id
+                and str(attempt["lease_id"] or "") == lease_id
+                and int(attempt["status_version"]) == status_version
+            )
+            lease_unexpired = False
+            if fence_valid:
+                from datetime import datetime, timezone
+
+                expires = str(attempt["lease_expires_at"])
+                now_dt = datetime.now(timezone.utc)
+                try:
+                    expiry_dt = datetime.fromisoformat(expires)
+                except ValueError:
+                    expiry_dt = None
+                if expiry_dt is None or expiry_dt.tzinfo is None:
+                    expiry_dt = (
+                        expiry_dt.replace(tzinfo=timezone.utc)
+                        if expiry_dt is not None
+                        else now_dt
+                    )
+                lease_unexpired = expiry_dt > now_dt
+            from astrid.core.integrations.reigh.orchestrator_transitions import (
+                FenceFacts,
+                Verdict,
+                classify_admission,
+            )
+
+            verdict = classify_admission(
+                FenceFacts(
+                    already_receipted=False,
+                    parent_running=parent_running,
+                    fence_valid=fence_valid,
+                    lease_unexpired=lease_unexpired,
+                )
+            )
+            if verdict is Verdict.CONFLICT_PARENT_NOT_RUNNING:
                 raise BridgeConflictError(
                     "parent task is not running",
                     attempt=self._current_attempt_extra(parent_attempt_id),
                 )
-            attempt = self._attempt_row(parent_attempt_id)
-            if (
-                attempt is None
-                or str(attempt["task_id"]) != parent_task_id
-                or str(attempt["status"]) not in ("claimed", "running")
-                or str(attempt["executor_id"] or "") != executor_id
-                or str(attempt["lease_id"] or "") != lease_id
-                or int(attempt["status_version"]) != status_version
-            ):
-                raise BridgeChildAdmissionForbiddenError(
-                    "the parent fence does not match the caller's live "
-                    "attempt"
-                )
-            from datetime import datetime, timezone
-
-            expires = str(attempt["lease_expires_at"])
-            now_dt = datetime.now(timezone.utc)
-            try:
-                expiry_dt = datetime.fromisoformat(expires)
-            except ValueError:
-                expiry_dt = None
-            if expiry_dt is None or expiry_dt.tzinfo is None:
-                expiry_dt = (
-                    expiry_dt.replace(tzinfo=timezone.utc)
-                    if expiry_dt is not None
-                    else now_dt
-                )
-            if expiry_dt <= now_dt:
+            if verdict is Verdict.CONFLICT_LEASE_EXPIRED:
                 raise BridgeConflictError(
                     "parent lease has expired",
                     attempt=_attempt_wire_shape(attempt),
+                )
+            if verdict is not Verdict.ADMIT_NEW:
+                raise BridgeChildAdmissionForbiddenError(
+                    "the parent fence does not match the caller's live "
+                    "attempt"
                 )
 
         task_input = body.get("input")
@@ -845,7 +869,8 @@ class ReighTaskBridge:
     def _existing_child_receipt(self, idempotency_key: str) -> dict | None:
         """Read-only probe: has this deterministic key admitted already?
 
-        The ``reigh.orch:v1:<parent>:<role>:<index>`` key space is owned
+        The deterministic child-key namespace (see
+        ``orchestrator_transitions.orch_child_key``) is owned
         exclusively by child admission, so the create-kind receipt keyed
         by this string alone identifies the prior admission; the
         in-unit-of-work join in :meth:`admit_child` still scopes by
