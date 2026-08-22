@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import hmac
 import json
 import mimetypes
 import os
 import re
+import secrets
 import time
 from collections.abc import Mapping
 from email.utils import formatdate
@@ -57,6 +59,17 @@ _RANGELESS_INITIAL_CHUNK_BYTES = 1024 * 1024
 _OPEN_ENDED_RANGE_CHUNK_BYTES = 4 * 1024 * 1024
 _DIAGNOSTICS_ENABLED = os.environ.get("ASTRID_BRIDGE_DIAGNOSTICS", "0") != "0"
 
+_TRUST_TOKEN_HEADER = "X-Astrid-Request-Token"
+"""Non-simple custom header every mutation must carry (doc 27 §4.7.3).
+
+A foreign browser origin cannot send it without passing the strict CORS
+preflight, so this one header is both the custom-header control and the
+bearer of the per-boot request token."""
+
+_TRUST_TOKEN_FILENAME = "request-token"
+_PRIVATE_DIR_MODE = 0o700
+_SECRET_FILE_MODE = 0o600
+
 
 def _classify_persisted_registry_locator(locator: str) -> str:
     """Classify a persisted-registry locator: ``http``, ``unsafe``, ``local``.
@@ -85,7 +98,7 @@ class LocalBridgeHTTPServer(ThreadingHTTPServer):
     # ``serve_forever`` has started would create a second write authority,
     # so it is rejected at runtime.
     _BRIDGE_AUTHORITY_ATTRIBUTES = frozenset(
-        {"bridge", "bridge_writer", "bridge_database_path"}
+        {"bridge", "bridge_writer", "bridge_database_path", "task_bridge"}
     )
 
     def __init__(
@@ -133,6 +146,52 @@ class LocalBridgeHTTPServer(ThreadingHTTPServer):
             self._serving = False
 
 
+def _enforce_private_directory_modes(projects_root: Path) -> None:
+    """Best-effort ``0700`` on the managed data directories (doc 27 §4.7.4).
+
+    Application, SQLite, managed-media, and quarantine directories are
+    private to the owning user. Missing directories are skipped (they are
+    created by the composition root or first use); failures never block
+    serving — this is defense in depth, not an authority.
+    """
+    managed_root = projects_root / ".astrid"
+    candidates = (
+        projects_root,
+        managed_root,
+        managed_root / "media",
+        managed_root / "media" / ".staging",
+    )
+    for directory in candidates:
+        try:
+            if directory.is_dir():
+                os.chmod(directory, _PRIVATE_DIR_MODE)
+        except OSError:
+            continue
+
+
+def mint_boot_request_token(projects_root: str | Path) -> str:
+    """Mint one per-boot request token and deliver it out of band.
+
+    The token is a local request capability (doc 27 §4.7): it is required
+    on every mutation and executor-only route, and it is delivered out of
+    band through a mode-``0600`` file under the managed root so the app
+    and the same-host worker can read it without any HTTP surface.
+    """
+    token = secrets.token_urlsafe(32)
+    managed_root = Path(projects_root) / ".astrid"
+    try:
+        managed_root.mkdir(parents=True, exist_ok=True)
+        os.chmod(managed_root, _PRIVATE_DIR_MODE)
+        token_path = managed_root / _TRUST_TOKEN_FILENAME
+        token_path.write_text(token, encoding="utf-8")
+        os.chmod(token_path, _SECRET_FILE_MODE)
+    except OSError:
+        # A read-only root cannot host the out-of-band file; the in-memory
+        # token still guards every mutation for this process.
+        pass
+    return token
+
+
 def create_local_bridge_server(
     *,
     projects_root: str | Path | None = None,
@@ -141,6 +200,8 @@ def create_local_bridge_server(
     bridge: Any | None = None,
     writer: Any | None = None,
     database_path: str | Path | None = None,
+    task_bridge: Any | None = None,
+    request_token: str | None = None,
 ) -> ThreadingHTTPServer:
     """Create a bridge HTTP server bound to the requested host/port.
 
@@ -156,20 +217,51 @@ def create_local_bridge_server(
     route — including asset serving (m4 plan step 22 removed the legacy
     sidecar/FSA asset fallback) — answers the typed ``500 internal``
     envelope.
+
+    Local trust posture (build spec doc 27 §4.7): when *request_token*
+    is not supplied, a fresh per-boot token is minted at serve boot,
+    delivered out of band via ``<root>/.astrid/request-token``, and
+    required on every mutation; ``Host`` is validated against the bound
+    loopback literal on every request. The task/executor routes answer
+    only when *task_bridge* is composed; without it they fail closed with
+    the typed ``500 internal`` envelope.
     """
     resolved_root = resolve_bridge_projects_root(projects_root)
-    handler = make_local_bridge_handler(projects_root=resolved_root)
-    return LocalBridgeHTTPServer(
+    resolved_token = (
+        request_token
+        if request_token is not None
+        else mint_boot_request_token(resolved_root)
+    )
+    _enforce_private_directory_modes(Path(resolved_root))
+    handler = make_local_bridge_handler(
+        projects_root=resolved_root,
+        request_token=resolved_token,
+        task_bridge=task_bridge,
+    )
+    server = LocalBridgeHTTPServer(
         (host, port),
         handler,
         bridge=bridge,
         bridge_writer=writer,
         bridge_database_path=database_path,
     )
+    server.task_bridge = task_bridge
+    server.request_token = resolved_token
+    return server
 
 
-def make_local_bridge_handler(*, projects_root: Path):
-    """Build a request handler bound to one resolved projects root."""
+def make_local_bridge_handler(
+    *,
+    projects_root: Path,
+    request_token: str | None = None,
+    task_bridge: Any | None = None,
+):
+    """Build a request handler bound to one resolved projects root.
+    *request_token* enables the local-trust gate (doc 27 §4.7): exact
+    ``Host`` matching plus token-checked mutations; ``None`` disables the
+    gate entirely (frozen test composition only).
+    """
+
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, _fmt: str, *_args: Any) -> None:
@@ -189,7 +281,58 @@ def make_local_bridge_handler(*, projects_root: Path):
             parsed = super().parse_request()
             if parsed:
                 self._diag_begin_request()
+                # Local-trust gate (build spec doc 27 §4.7): exact loopback
+                # ``Host`` on every request, per-boot token + non-simple
+                # custom header on every mutation. Runs after ``super()``
+                # so the request line and headers are parsed; a rejection
+                # answers the typed 403 envelope and drops the connection.
+                if not self._local_trust_gate():
+                    self.close_connection = True
+                    return False
             return parsed
+
+        def _local_trust_gate(self) -> bool:
+            if request_token is None:
+                return True
+            command = getattr(self, "command", "") or ""
+            if command == "OPTIONS":
+                # CORS preflight is exempt (doc 27 §4.7.3): it carries no
+                # token and must stay answerable for allowed origins.
+                return True
+            expected_host = self._expected_loopback_host()
+            host = self.headers.get("Host")
+            if host is None or not hmac.compare_digest(
+                host.strip().encode("utf-8"),
+                expected_host.encode("utf-8"),
+            ):
+                self._trust_reject(
+                    "host header does not match the bound loopback address; "
+                    "DNS-rebinding and spoofed hosts are rejected"
+                )
+                return False
+            if command in ("GET", "HEAD"):
+                return True
+            token = self.headers.get(_TRUST_TOKEN_HEADER)
+            if token is None or not hmac.compare_digest(
+                token.strip().encode("utf-8"),
+                request_token.encode("utf-8"),
+            ):
+                self._trust_reject(
+                    f"mutation requires the {_TRUST_TOKEN_HEADER} header "
+                    "carrying this boot's request token"
+                )
+                return False
+            return True
+
+        def _expected_loopback_host(self) -> str:
+            host, port = self.server.server_address[:2]
+            return f"{host}:{port}"
+
+        def _trust_reject(self, detail: str) -> None:
+            try:
+                self._send_error(403, "forbidden", detail)
+            except (BrokenPipeError, ConnectionResetError):
+                return
 
         def send_response(self, code: int, message: str | None = None) -> None:
             self._diag_response_status = code
@@ -249,7 +392,10 @@ def make_local_bridge_handler(*, projects_root: Path):
             "http://127.0.0.1:5173",
         )
         _ALLOWED_METHODS = "GET, HEAD, POST, OPTIONS"
-        _ALLOWED_HEADERS = "Content-Type, Range, If-None-Match, If-Modified-Since"
+        _ALLOWED_HEADERS = (
+            "Content-Type, Range, If-None-Match, If-Modified-Since, "
+            "Idempotency-Key, X-Astrid-Request-Token"
+        )
         _EXPOSED_HEADERS = "Accept-Ranges, Content-Length, Content-Range, Content-Type, ETag, Last-Modified"
 
         def _set_cors_headers(self) -> None:

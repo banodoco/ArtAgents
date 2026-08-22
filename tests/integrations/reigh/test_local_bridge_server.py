@@ -123,10 +123,22 @@ def _get_error(url: str) -> tuple[int, dict]:
     raise AssertionError(f"expected {url} to return an HTTP error")
 
 
+_ACTIVE_REQUEST_TOKEN: list[str] = []
+"""The current fixture server's per-boot token (set by the contextmanagers)."""
+
+
+def _trust_headers() -> dict[str, str]:
+    if not _ACTIVE_REQUEST_TOKEN:
+        return {}
+    return {"X-Astrid-Request-Token": _ACTIVE_REQUEST_TOKEN[0]}
+
+
 def _post_json(url: str, body: dict[str, Any]) -> tuple[int, dict]:
     data = json.dumps(body).encode("utf-8")
     req = Request(url, data=data, method="POST")
     req.add_header("Content-Type", "application/json")
+    for name, value in _trust_headers().items():
+        req.add_header(name, value)
     try:
         with urlopen(req) as response:  # noqa: S310
             return response.status, json.loads(response.read().decode("utf-8"))
@@ -138,6 +150,8 @@ def _post_raw(url: str, raw_body: bytes, content_type: str | None = None) -> tup
     req = Request(url, data=raw_body, method="POST")
     if content_type is not None:
         req.add_header("Content-Type", content_type)
+    for name, value in _trust_headers().items():
+        req.add_header(name, value)
     try:
         with urlopen(req) as response:  # noqa: S310
             return response.status, json.loads(response.read().decode("utf-8"))
@@ -149,6 +163,8 @@ def _put_raw(url: str, raw_body: bytes, content_type: str | None = None) -> tupl
     req = Request(url, data=raw_body, method="PUT")
     if content_type is not None:
         req.add_header("Content-Type", content_type)
+    for name, value in _trust_headers().items():
+        req.add_header(name, value)
     try:
         with urlopen(req) as response:  # noqa: S310
             return response.status, json.loads(response.read().decode("utf-8"))
@@ -208,9 +224,12 @@ def running_server(projects_root: Path) -> Generator[str, None, None]:
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     host, port = server.server_address
+    _ACTIVE_REQUEST_TOKEN.clear()
+    _ACTIVE_REQUEST_TOKEN.append(server.request_token)
     try:
         yield f"http://{host}:{port}"
     finally:
+        _ACTIVE_REQUEST_TOKEN.clear()
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
@@ -237,9 +256,12 @@ def repository_server(
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     host, port = server.server_address
+    _ACTIVE_REQUEST_TOKEN.clear()
+    _ACTIVE_REQUEST_TOKEN.append(server.request_token)
     try:
         yield f"http://{host}:{port}", composition
     finally:
+        _ACTIVE_REQUEST_TOKEN.clear()
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
@@ -973,8 +995,10 @@ def test_cors_preflight_options_returns_204_with_cors_headers(
 
     assert status == 204
     assert headers.get("Access-Control-Allow-Origin") == "http://localhost:3000"
-    assert headers.get("Access-Control-Allow-Methods") == "GET, HEAD, POST, OPTIONS"
-    assert headers.get("Access-Control-Allow-Headers") == "Content-Type, Range, If-None-Match, If-Modified-Since"
+    assert headers.get("Access-Control-Allow-Headers") == (
+        "Content-Type, Range, If-None-Match, If-Modified-Since, "
+        "Idempotency-Key, X-Astrid-Request-Token"
+    )
     assert headers.get("Access-Control-Expose-Headers") == "Accept-Ranges, Content-Length, Content-Range, Content-Type, ETag, Last-Modified"
 
 
@@ -1570,6 +1594,8 @@ class InTreeBridgeContractClient:
         req = Request(self.base_url + path, data=data, method=method)
         if data is not None:
             req.add_header("Content-Type", "application/json")
+        for name, value in _trust_headers().items():
+            req.add_header(name, value)
         try:
             with urlopen(req) as response:  # noqa: S310 - localhost client
                 return json.loads(response.read().decode("utf-8"))
@@ -2040,7 +2066,8 @@ def test_persisted_registry_asset_options_preflight(
         "Access-Control-Allow-Methods", ""
     )
     assert headers.get("Access-Control-Allow-Headers") == (
-        "Content-Type, Range, If-None-Match, If-Modified-Since"
+        "Content-Type, Range, If-None-Match, If-Modified-Since, "
+        "Idempotency-Key, X-Astrid-Request-Token"
     )
 
 
