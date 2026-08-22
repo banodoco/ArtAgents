@@ -58,7 +58,7 @@ def project_summaries(
                 "theme": str(payload.get("theme") or ""),
                 "updated_at": str(payload.get("updated_at") or ""),
                 "is_default": slug == default,
-                "runs": _count_children(project_root / "runs", marker="run.json"),
+                "runs": _kernel_or_fs_run_count(slug, projects_root, project_root),
                 "timelines": _count_children(project_root / "timelines"),
                 "experiments": _count_children(project_root / "experiments"),
             }
@@ -150,6 +150,26 @@ def _count_children(path: Path, *, marker: str | None = None) -> int:
     except OSError:
         return 0
 
+
+def _kernel_or_fs_run_count(slug: str, projects_root: Path, project_root: Path) -> int:
+    # Kernel-first: count kernel runs for this project if DB present; FS fallback for historical dirs.
+    try:
+        import sqlite3
+
+        db_path = projects_root / "kernel.sqlite3"
+        if db_path.is_file():
+            conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+            try:
+                prow = conn.execute("SELECT id FROM projects WHERE slug = ?", (slug,)).fetchone()
+                project_id = prow[0] if prow is not None else slug
+                row = conn.execute("SELECT COUNT(*) FROM runs WHERE project_id = ?", (project_id,)).fetchone()
+                if row is not None:
+                    return int(row[0])
+            finally:
+                conn.close()
+    except Exception:
+        pass
+    return _count_children(project_root / "runs", marker="run.json")
 
 __all__ = [
     "format_project_required_guidance",

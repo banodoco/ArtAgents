@@ -34,16 +34,12 @@ from astrid.core.contracts.run_status import RunStatus
 from astrid.core.contracts.scoped_config import SCOPE_REGISTRY, ScopeRequest
 from astrid.core.env_vars import ASTRID_INTERNAL_INVOCATION, HYPE_ACTIVE_THEME
 from astrid.core.foundation.paths import REPO_ROOT
-from astrid.core.pack.resolver import resolve_callable_from_metadata
 from astrid.core.project.run import (
     ProjectRunContext,
     _project_subprocess_env,
-    finalize_project_run,
-    prepare_project_run,
     project_run_env,
     reject_project_with_out,
 )
-from astrid.core.project.ownership import require_project_owned_artifact
 from astrid.core.project.guidance import (
     format_project_required_guidance,
     selected_project,
@@ -989,24 +985,11 @@ def _finalize_project_executor(
     returncode: int | None,
     error: BaseException | str | None = None,
 ) -> None:
-    artifact_roots = [request.out, context.run_root] if request.out not in (None, "") else [context.run_root]
-    metadata = dict(request.project_run_metadata)
-    metadata.update(
-        {
-            "dry_run": bool(request.dry_run),
-            "project_resolution": (
-                "attached" if request.project_was_auto_resolved else "explicit"
-            ),
-        }
-    )
-    finalize_project_run(
-        context,
-        status=status,
-        returncode=returncode,
-        error=error,
-        metadata=metadata,
-        artifact_roots=artifact_roots,
-    )
+    # Single-ledger cut: no authoritative run.json finalize here. The kernel
+    # owns terminal status; this remains as a derived-projection hook (no-op
+    # when called with a None context, which is the normal path). Run
+    # directories are storage only.
+    return
 
 
 def _resolve_project_request(request: ExecutorRunRequest) -> ExecutorRunRequest:
@@ -1020,7 +1003,6 @@ def _resolve_project_request(request: ExecutorRunRequest) -> ExecutorRunRequest:
             project_was_auto_resolved=True,
         )
     raise ExecutorRunnerError(format_project_required_guidance(operation="executor run"))
-
 
 def _prepare_dry_run_request(request: ExecutorRunRequest) -> ExecutorRunRequest:
     if request.out not in (None, ""):

@@ -24,8 +24,6 @@ from astrid.core.contracts.run_status import RunStatus
 from astrid.core.project.run import (
     ProjectRunContext,
     _project_subprocess_env,
-    finalize_project_run,
-    prepare_project_run,
     project_run_env,
     reject_project_with_out,
 )
@@ -586,7 +584,7 @@ def _prepare_project_request(
     # Single-ledger cut: project runs are kernel-owned (RunRepository fan-out).
     # The runner retains output as staging only; no run.json is written here.
     # The kernel admission path (sdk.invoke / CapabilityTaskHandler) owns the
-    # authoritative run/task ledger.
+    # authoritative run/task ledger. Keep run directory as storage only.
     if not request.project:
         return None, request
     if not request.project_was_auto_resolved:
@@ -595,8 +593,17 @@ def _prepare_project_request(
         raise OrchestratorRunnerError(
             f"--project cannot be combined with passthrough --out for {orchestrator.id}"
         )
-    return None, request
+    # Storage-only: ensure an output directory exists for the run's artifacts
+    if request.out in (None, ""):
+        from astrid.core.foundation.project_paths import resolve_projects_root
+        from astrid.core.ids import generate_lowercase_ulid
 
+        projects_root = resolve_projects_root(request.projects_root)
+        run_id = generate_lowercase_ulid()
+        run_root = projects_root / request.project / "runs" / run_id
+        run_root.mkdir(parents=True, exist_ok=True)
+        return None, _request_with_effective_out(request, orchestrator, run_root)
+    return None, request
 
 def _orchestrator_requires_output_path(orchestrator: OrchestratorDefinition) -> bool:
     return bool(orchestrator.metadata.get("requires_output_path"))

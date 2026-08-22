@@ -369,7 +369,7 @@ class TestExecutorCLIProject:
 
 
 class TestOrchestratorCLIProject:
-    """orchestrators run --project <p> → one run.json."""
+    """orchestrators run --project <p> → storage-only (kernel ledger)."""
 
     def test_creates_exactly_one_run_json(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         from astrid.core.execution.orchestrator.registry import OrchestratorRegistry
@@ -384,13 +384,10 @@ class TestOrchestratorCLIProject:
         assert result.returncode == 0
 
         records = _project_run_records(projects_root)
-        assert len(records) == 1, (
-            f"Expected exactly 1 run.json, found {len(records)}"
+        # Single-ledger contract (B4): orchestrator runner is storage-only; kernel owns ledger
+        assert len(records) == 0, (
+            f"Expected zero authoritative run.json (kernel-owned), found {len(records)}"
         )
-        record = records[0]
-        assert record.get("status") == "completed"
-        assert record.get("tool_id") == "test.orch"
-
 
 class TestOrchestratorCLIOut:
     """Orchestrator output paths do not imply project ownership."""

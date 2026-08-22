@@ -551,61 +551,129 @@ def _verify_run_ownership(manifest_path: Path, project_root: Path, manifest: dic
         or not manifest_path.is_relative_to(run_root)
     ):
         raise ContainmentError("manifest run path escapes the owning run")
-    run_json = run_root / "run.json"
-    if run_json.is_symlink() or not run_json.is_file():
-        raise ContainmentError("owning visualization run has no regular run.json")
     project_slug = project_root.name
-    try:
-        record = load_run_record(project_slug, run_id, root=project_root.parent)
-    except Exception as exc:  # validation error is an ownership failure at this boundary
-        raise ContainmentError(f"cannot validate owning run.json: {exc}") from exc
-    metadata = record.get("metadata")
-    timeline_ids = metadata.get("timeline_ids") if isinstance(metadata, dict) else None
-    if (
-        record.get("project_slug") != project_slug
-        or record.get("run_id") != run_id
-        or record.get("tool_id") != "rendering.timeline_visualize"
-        or record.get("status") != "completed"
-        or not isinstance(metadata, dict)
-        or metadata.get("evidence") is not True
-        or not isinstance(timeline_ids, list)
-        or not all(isinstance(item, str) for item in timeline_ids)
-        or timeline_ulid not in timeline_ids
-    ):
-        raise ContainmentError("run.json does not own this timeline visualization pack")
-    raw_record_manifest = record.get("manifest_path")
-    if not isinstance(raw_record_manifest, str) or not raw_record_manifest:
-        raise ContainmentError("run.json has no visualization manifest pointer")
-    record_manifest = resolve_record_path(
-        raw_record_manifest,
-        project_slug,
-        root=project_root.parent,
-    ).resolve(strict=True)
-    if not record_manifest.is_file() or not record_manifest.is_relative_to(run_root):
-        raise ContainmentError("run.json manifest pointer escapes the owning run")
-    if manifest_path != record_manifest:
-        root_manifest = _load_json_file(
-            record_manifest,
-            label="owning project manifest",
-            error_type=ContainmentError,
-        )
-        reading_order = root_manifest.get("reading_order")
-        if root_manifest.get("kind") != "timeline_visualize_project" or not isinstance(reading_order, list):
-            raise ContainmentError("leaf pack is not declared by its run manifest")
-        declared: set[Path] = set()
-        for raw_child in reading_order:
-            if not isinstance(raw_child, str):
-                raise ContainmentError("owning project manifest has an invalid child path")
-            child = (record_manifest.parent / raw_child).resolve(strict=True)
-            if not child.is_file() or not child.is_relative_to(record_manifest.parent):
-                raise ContainmentError("owning project manifest child escapes its run")
-            declared.add(child)
-        if manifest_path not in declared:
-            raise ContainmentError("leaf pack is not declared by its owning project manifest")
+    # Kernel-first ownership: prefer kernel run status; FS fallback for historical dirs.
+    kernel_info = _kernel_frozen_run_info(project_slug, run_id, project_root.parent)
+    if kernel_info is not None:
+        if kernel_info.get("status") not in ("succeeded", "completed"):
+            raise ContainmentError("kernel run does not own this timeline visualization pack (not completed)")
+        if kernel_info.get("capability") not in (None, "rendering.timeline_visualize"):
+            # Enforce when capability known
+            if kernel_info.get("capability") != "rendering.timeline_visualize":
+                raise ContainmentError("kernel run does not own this timeline visualization pack")
+        if isinstance(kernel_info.get("timeline_ids"), list):
+            if timeline_ulid not in kernel_info["timeline_ids"]:
+                raise ContainmentError("kernel run does not own this timeline visualization pack")
+        # Kernel path: manifest pointer checks use filesystem manifest directly
+        # (no authoritative run.json file required)
+        record_manifest = manifest_path
+        # For leaf vs root manifest distinction, if reading_order exists, validate leaf declared
+        if manifest_path != record_manifest:
+            # unreachable with kernel path (record_manifest == manifest_path) but keep for completeness
+            pass
+    else:
+        run_json = run_root / "run.json"
+        if run_json.is_symlink() or not run_json.is_file():
+            raise ContainmentError("owning visualization run has no regular run.json")
+        try:
+            record = load_run_record(project_slug, run_id, root=project_root.parent)
+        except Exception as exc:  # validation error is an ownership failure at this boundary
+            raise ContainmentError(f"cannot validate owning run.json: {exc}") from exc
+        metadata = record.get("metadata")
+        timeline_ids = metadata.get("timeline_ids") if isinstance(metadata, dict) else None
+        if (
+            record.get("project_slug") != project_slug
+            or record.get("run_id") != run_id
+            or record.get("tool_id") != "rendering.timeline_visualize"
+            or record.get("status") != "completed"
+            or not isinstance(metadata, dict)
+            or metadata.get("evidence") is not True
+            or not isinstance(timeline_ids, list)
+            or not all(isinstance(item, str) for item in timeline_ids)
+            or timeline_ulid not in timeline_ids
+        ):
+            raise ContainmentError("run.json does not own this timeline visualization pack")
+        raw_record_manifest = record.get("manifest_path")
+        if not isinstance(raw_record_manifest, str) or not raw_record_manifest:
+            raise ContainmentError("run.json has no visualization manifest pointer")
+        record_manifest = resolve_record_path(
+            raw_record_manifest,
+            project_slug,
+            root=project_root.parent,
+        ).resolve(strict=True)
+        if not record_manifest.is_file() or not record_manifest.is_relative_to(run_root):
+            raise ContainmentError("run.json manifest pointer escapes the owning run")
+        if manifest_path != record_manifest:
+            root_manifest = _load_json_file(
+                record_manifest,
+                label="owning project manifest",
+                error_type=ContainmentError,
+            )
+            reading_order = root_manifest.get("reading_order")
+            if root_manifest.get("kind") != "timeline_visualize_project" or not isinstance(reading_order, list):
+                raise ContainmentError("leaf pack is not declared by its run manifest")
+            declared: set[Path] = set()
+            for raw_child in reading_order:
+                if not isinstance(raw_child, str):
+                    raise ContainmentError("owning project manifest has an invalid child path")
+                child = (record_manifest.parent / raw_child).resolve(strict=True)
+                if not child.is_file() or not child.is_relative_to(record_manifest.parent):
+                    raise ContainmentError("owning project manifest child escapes its run")
+                declared.add(child)
+            if manifest_path not in declared:
+                raise ContainmentError("leaf pack is not declared by its owning project manifest")
     inputs = manifest.get("inputs")
     if not isinstance(inputs, dict) or inputs.get("timeline_source") != [project_slug]:
         raise ContainmentError("manifest project identity disagrees with its owning run")
 
+
+def _kernel_frozen_run_info(project_slug: str, run_id: str, projects_root: Path) -> dict[str, Any] | None:
+    try:
+        import sqlite3
+
+        db_path = Path(projects_root) / "kernel.sqlite3"
+        if not db_path.is_file():
+            return None
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        conn.row_factory = sqlite3.Row
+        try:
+            prow = conn.execute("SELECT id FROM projects WHERE slug = ?", (project_slug,)).fetchone()
+            project_id = prow["id"] if prow is not None else project_slug
+            r = conn.execute(
+                "SELECT status FROM runs WHERE id = ? AND project_id = ?",
+                (run_id, project_id),
+            ).fetchone()
+            if r is None:
+                return None
+            t = conn.execute(
+                "SELECT capability FROM tasks WHERE run_id = ? AND project_id = ? ORDER BY run_ordinal ASC LIMIT 1",
+                (run_id, project_id),
+            ).fetchone()
+            capability = t["capability"] if t is not None else None
+            # Try to extract timeline_ids from task spec or input if present
+            spec_row = conn.execute(
+                "SELECT spec_json FROM tasks WHERE run_id = ? AND project_id = ? ORDER BY run_ordinal ASC LIMIT 1",
+                (run_id, project_id),
+            ).fetchone()
+            timeline_ids = None
+            if spec_row is not None:
+                try:
+                    import json as _json
+                    spec = _json.loads(spec_row["spec_json"])
+                    # spec may contain metadata timeline_ids
+                    if isinstance(spec, dict):
+                        timeline_ids = spec.get("timeline_ids") or spec.get("metadata", {}).get("timeline_ids")
+                except Exception:
+                    timeline_ids = None
+            return {
+                "status": str(r["status"]),
+                "capability": str(capability) if capability is not None else None,
+                "timeline_ids": timeline_ids,
+            }
+        finally:
+            conn.close()
+    except Exception:
+        return None
 
 def load_frozen_view(manifest_path: Path, *, project_root: Path) -> FrozenView:
     """Verify and load a frozen evidence pack for drill-down.

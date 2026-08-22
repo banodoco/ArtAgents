@@ -193,6 +193,19 @@ def _validate_parent_run(
 ) -> dict[str, Any]:
     project = validate_project_slug(project_slug)
     run_id = validate_run_id(parent_run_id)
+    # Kernel-first: prefer kernel run status; FS fallback for historical dirs.
+    kernel_info = _kernel_parent_run_info(project, run_id, root)
+    if kernel_info is not None:
+        if kernel_info.get("project_slug") != project or kernel_info.get("run_id") != run_id:
+            raise AttachedRenderError("parent run record identity does not match its ledger path")
+        if kernel_info.get("status") != RunStatus.RUNNING.value and kernel_info.get("status") != "running":
+            raise AttachedRenderError(
+                f"parent run {run_id!r} is not running (status={kernel_info.get('status')!r})"
+            )
+        run_root = project_dir(project, root=root) / "runs" / run_id
+        if not run_root.is_dir():
+            raise AttachedRenderError(f"parent run directory is missing: {run_root}")
+        return kernel_info
     try:
         record = load_run_record(project, run_id, root=root)
     except Exception as exc:
@@ -210,6 +223,36 @@ def _validate_parent_run(
         raise AttachedRenderError(f"parent run directory is missing: {run_root}")
     return record
 
+
+def _kernel_parent_run_info(project_slug: str, run_id: str, root: Path) -> dict[str, Any] | None:
+    try:
+        import sqlite3
+
+        projects_root = Path(root).resolve()
+        db_path = projects_root / "kernel.sqlite3"
+        if not db_path.is_file():
+            return None
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        conn.row_factory = sqlite3.Row
+        try:
+            prow = conn.execute("SELECT id FROM projects WHERE slug = ?", (project_slug,)).fetchone()
+            project_id = prow["id"] if prow is not None else project_slug
+            r = conn.execute(
+                "SELECT id, project_id, status FROM runs WHERE id = ? AND project_id = ?",
+                (run_id, project_id),
+            ).fetchone()
+            if r is None:
+                return None
+            return {
+                "project_slug": project_slug,
+                "run_id": run_id,
+                "status": str(r["status"]),
+                "project_id": str(r["project_id"]),
+            }
+        finally:
+            conn.close()
+    except Exception:
+        return None
 
 @contextmanager
 def _scoped_task_env(

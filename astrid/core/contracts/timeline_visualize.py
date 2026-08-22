@@ -133,57 +133,71 @@ def _validated_timeline_visualize_view_context(
             or relative.parts[3] != "agent-view"
         ):
             return None
-
         project_slug, run_id = relative.parts[0], relative.parts[2]
         run_root = (projects_root / project_slug / "runs" / run_id).resolve(strict=True)
         if not run_root.is_dir() or not manifest_path.is_relative_to(run_root):
             return None
-        run_json_path = (run_root / "run.json").resolve(strict=True)
-        if run_json_path.parent != run_root or not run_json_path.is_file():
-            return None
+        # Kernel-first ownership: prefer kernel run status; FS fallback for historical dirs.
+        kernel_info = _kernel_visualize_run_info(project_slug, run_id, projects_root)
+        if kernel_info is not None:
+            if kernel_info.get("status") not in ("succeeded", "completed"):
+                return None
+            if kernel_info.get("tool_id") not in (None, "rendering.timeline_visualize"):
+                # When kernel task capability is available, enforce it; otherwise rely on manifest checks below
+                if kernel_info.get("capability") not in (None, "rendering.timeline_visualize"):
+                    return None
+            # Kernel run has no authoritative run.json; skip FS manifest pointer checks
+            record_manifest = manifest_path
+        else:
+            run_json_path = (run_root / "run.json").resolve(strict=True)
+            if run_json_path.parent != run_root or not run_json_path.is_file():
+                return None
 
-        record = load_run_record(project_slug, run_id, root=projects_root)
-        metadata = record.get("metadata")
-        if (
-            record.get("project_slug") != project_slug
-            or record.get("run_id") != run_id
-            or record.get("tool_id") != "rendering.timeline_visualize"
-            or record.get("status") != "completed"
-            or not isinstance(metadata, dict)
-            or metadata.get("evidence") is not True
-        ):
-            return None
-
-        record_manifest_raw = record.get("manifest_path")
-        if not isinstance(record_manifest_raw, str) or not record_manifest_raw:
-            return None
-        record_manifest = resolve_record_path(
-            record_manifest_raw,
-            project_slug,
-            root=projects_root,
-        ).resolve(strict=True)
-        if not record_manifest.is_file() or not record_manifest.is_relative_to(run_root):
-            return None
-        if manifest_path != record_manifest:
-            root_manifest = json.loads(record_manifest.read_text(encoding="utf-8"))
+            record = load_run_record(project_slug, run_id, root=projects_root)
+            metadata = record.get("metadata")
             if (
-                not isinstance(root_manifest, dict)
-                or root_manifest.get("kind") != "timeline_visualize_project"
+                record.get("project_slug") != project_slug
+                or record.get("run_id") != run_id
+                or record.get("tool_id") != "rendering.timeline_visualize"
+                or record.get("status") != "completed"
+                or not isinstance(metadata, dict)
+                or metadata.get("evidence") is not True
             ):
                 return None
-            reading_order = root_manifest.get("reading_order")
-            if not isinstance(reading_order, list):
+
+            record_manifest_raw = record.get("manifest_path")
+            if not isinstance(record_manifest_raw, str) or not record_manifest_raw:
                 return None
-            declared_children: set[Path] = set()
-            for raw_child in reading_order:
-                if not isinstance(raw_child, str) or not raw_child:
-                    return None
-                child = (record_manifest.parent / raw_child).resolve(strict=True)
-                if not child.is_file() or not child.is_relative_to(record_manifest.parent):
-                    return None
-                declared_children.add(child)
-            if manifest_path not in declared_children:
+            record_manifest = resolve_record_path(
+                record_manifest_raw,
+                project_slug,
+                root=projects_root,
+            ).resolve(strict=True)
+            if not record_manifest.is_file() or not record_manifest.is_relative_to(run_root):
                 return None
+            if manifest_path != record_manifest:
+                root_manifest = json.loads(record_manifest.read_text(encoding="utf-8"))
+                if (
+                    not isinstance(root_manifest, dict)
+                    or root_manifest.get("kind") != "timeline_visualize_project"
+                ):
+                    return None
+                reading_order = root_manifest.get("reading_order")
+                if not isinstance(reading_order, list):
+                    return None
+                declared_children: set[Path] = set()
+                for raw_child in reading_order:
+                    if not isinstance(raw_child, str) or not raw_child:
+                        return None
+                    child = (record_manifest.parent / raw_child).resolve(strict=True)
+                    if not child.is_file() or not child.is_relative_to(record_manifest.parent):
+                        return None
+                    declared_children.add(child)
+                if manifest_path not in declared_children:
+                    return None
+        # Record_manifest resolved (kernel path uses manifest_path itself)
+        if "record_manifest" not in locals():
+            return None
 
         hashes_path = (manifest_path.parent / "pack-hashes.json").resolve(strict=True)
         if hashes_path.parent != manifest_path.parent or not hashes_path.is_file():
@@ -241,3 +255,39 @@ def _validated_timeline_visualize_view_context(
         run_root=run_root,
         manifest_path=manifest_path,
     )
+
+def _kernel_visualize_run_info(project_slug: str, run_id: str, projects_root: Path) -> dict[str, Any] | None:
+    try:
+        import sqlite3
+
+        db_path = projects_root / "kernel.sqlite3"
+        if not db_path.is_file():
+            return None
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        conn.row_factory = sqlite3.Row
+        try:
+            prow = conn.execute("SELECT id FROM projects WHERE slug = ?", (project_slug,)).fetchone()
+            project_id = prow["id"] if prow is not None else project_slug
+            r = conn.execute(
+                "SELECT id, project_id, status, kind, title FROM runs WHERE id = ? AND project_id = ?",
+                (run_id, project_id),
+            ).fetchone()
+            if r is None:
+                return None
+            # Capability from tasks for this run
+            t = conn.execute(
+                "SELECT capability FROM tasks WHERE run_id = ? AND project_id = ? ORDER BY run_ordinal ASC LIMIT 1",
+                (run_id, project_id),
+            ).fetchone()
+            capability = t["capability"] if t is not None else None
+            return {
+                "status": str(r["status"]),
+                "kind": str(r["kind"]),
+                "title": r["title"],
+                "capability": str(capability) if capability is not None else None,
+                "tool_id": str(capability) if capability is not None else None,
+            }
+        finally:
+            conn.close()
+    except Exception:
+        return None
