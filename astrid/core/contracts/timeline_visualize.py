@@ -259,35 +259,17 @@ def _validated_timeline_visualize_view_context(
 def _kernel_visualize_run_info(project_slug: str, run_id: str, projects_root: Path) -> dict[str, Any] | None:
     try:
         import sqlite3
+        from astrid.core.kernel.read import kernel_run_info
 
-        db_path = projects_root / "kernel.sqlite3"
-        if not db_path.is_file():
+        info = kernel_run_info(project_slug, run_id, projects_root=projects_root)
+        if info is None:
             return None
-        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-        conn.row_factory = sqlite3.Row
-        try:
-            prow = conn.execute("SELECT id FROM projects WHERE slug = ?", (project_slug,)).fetchone()
-            project_id = prow["id"] if prow is not None else project_slug
-            r = conn.execute(
-                "SELECT id, project_id, status, kind, title FROM runs WHERE id = ? AND project_id = ?",
-                (run_id, project_id),
-            ).fetchone()
-            if r is None:
-                return None
-            # Capability from tasks for this run
-            t = conn.execute(
-                "SELECT capability FROM tasks WHERE run_id = ? AND project_id = ? ORDER BY run_ordinal ASC LIMIT 1",
-                (run_id, project_id),
-            ).fetchone()
-            capability = t["capability"] if t is not None else None
-            return {
-                "status": str(r["status"]),
-                "kind": str(r["kind"]),
-                "title": r["title"],
-                "capability": str(capability) if capability is not None else None,
-                "tool_id": str(capability) if capability is not None else None,
-            }
-        finally:
-            conn.close()
-    except Exception:
+        return {
+            "status": str(info["status"]),
+            "kind": str(info["kind"]) if info.get("kind") is not None else None,
+            "title": info.get("title"),
+            "capability": str(info["capability"]) if info.get("capability") is not None else None,
+            "tool_id": str(info["capability"]) if info.get("capability") is not None else None,
+        }
+    except sqlite3.Error:
         return None

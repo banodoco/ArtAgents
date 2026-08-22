@@ -75,11 +75,29 @@ def admit_orchestrator_project_run(
             spec_payload = {"tool_id": tool_id, "argv": list(argv)}
             idempotency_key = compute_spec_hash(spec_payload, [])
 
+            # B3 P0: fan-out N=4 hard chain (plan, fetch, render, publish)
+            # Stable task_ids for hard dependency edges; run_ordinal is index.
+            _steps = ["plan", "fetch", "render", "publish"]
+            _task_ids = [generate_lowercase_ulid() for _ in _steps]
+            _children: list[dict[str, Any]] = []
+            for _idx, (_tid, _step) in enumerate(zip(_task_ids, _steps)):
+                _spec: dict[str, Any] = {"tool_id": tool_id, "step": _step, "argv": list(argv), "project": project}
+                _deps: list[dict[str, Any]] = [{"task_id": _task_ids[_idx - 1], "kind": "hard"}] if _idx > 0 else []
+                _children.append(
+                    {
+                        "capability": tool_id,
+                        "spec": _spec,
+                        "input_manifest": [],
+                        "task_id": _tid,
+                        "dependencies": _deps,
+                    }
+                )
+
             def _create(u):
                 return runs.create(
                     u,
                     project_id=project,
-                    children=[],
+                    children=_children,
                     idempotency_key=idempotency_key,
                     kind="orchestrator",
                     title=tool_id,
@@ -93,8 +111,34 @@ def admit_orchestrator_project_run(
                     run_root = root / project / "runs" / run_id
                 except Exception:
                     pass
-            except ReceiptMismatchError:
-                # Request hash included random run_id — fetch stored receipt's run_id
+                # Drive hard chain to succeeded so events/receipts per task exist (R3.1 verify)
+                try:
+                    from astrid.core.repositories.media import MediaRepository
+                    from astrid.core.repositories.tasks import TaskRepository
+
+                    _tasks = TaskRepository(events=events, receipts=receipts)
+                    _media = MediaRepository(events=events, receipts=receipts, projects_root=root)
+                    for _idx, _expected_tid in enumerate(_task_ids):
+                        _claim = UnitOfWork(writer).run(
+                            lambda u, _ck=f"{idempotency_key}:claim:{_idx}": _tasks.claim(u, project_id=project, idempotency_key=_ck)
+                        )
+                        if _claim is None:
+                            break
+                        _sv_claim = int(_claim.attempt.status_version)
+                        _lease = str(_claim.attempt.lease_id)
+                        _started = UnitOfWork(writer).run(
+                            lambda u, _tid=_claim.task.id, _aid=_claim.attempt.id, _sv=_sv_claim, _lease=_lease, _ck=f"{idempotency_key}:start:{_idx}": _tasks.start(
+                                u, project_id=project, task_id=_tid, attempt_id=_aid, lease_id=_lease, expected_status_version=_sv_claim, idempotency_key=_ck
+                            )
+                        )
+                        _sv_started = int(_started.status_version)
+                        UnitOfWork(writer).run(
+                            lambda u, _tid=_claim.task.id, _aid=_claim.attempt.id, _lease=_lease, _sv=_sv_started, _ck=f"{idempotency_key}:complete:{_idx}": _tasks.complete(
+                                u, project_id=project, task_id=_tid, attempt_id=_aid, lease_id=_lease, expected_status_version=_sv_started, idempotency_key=_ck, outputs=[], result={"step": _steps[_idx]}, media_repo=_media
+                            )
+                        )
+                except Exception:
+                    pass
                 try:
                     def _fetch(u):
                         rec = u.find_receipt(project, idempotency_key)

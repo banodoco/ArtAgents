@@ -162,36 +162,22 @@ def show_project(slug: str, *, root: str | Path | None = None) -> dict[str, Any]
 
 
 def _kernel_or_fs_runs(slug: str, *, root: str | Path | None = None) -> list[str]:
+    import astrid.core.foundation.project_paths as paths
+
     try:
         import sqlite3
+        from astrid.core.kernel.read import kernel_runs_for_project
 
         projects_root = paths.resolve_projects_root(root)
-        db_path = projects_root / "kernel.sqlite3"
-        if db_path.is_file():
-            conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-            try:
-                prow = conn.execute("SELECT id FROM projects WHERE slug = ?", (slug,)).fetchone()
-                project_id = prow[0] if prow is not None else slug
-                rows = conn.execute(
-                    "SELECT id FROM runs WHERE project_id = ? ORDER BY id ASC", (project_id,)
-                ).fetchall()
-                if rows:
-                    return [str(r[0]) for r in rows]
-                # Fall through to FS if kernel has zero runs (historical)
-                # but still return empty if kernel exists and has no runs
-                # to avoid counting stale FS leftovers as authoritative
-                try:
-                    # If kernel DB exists but no runs, return empty (kernel is authority)
-                    return []
-                except Exception:
-                    pass
-            finally:
-                conn.close()
-    except Exception:
+        db_candidates = [projects_root / "kernel.sqlite3", projects_root / ".astrid" / "astrid.sqlite3", projects_root / ".astrid" / "kernel.sqlite3"]
+        has_db = any(p.is_file() for p in db_candidates)
+        if has_db:
+            ids = kernel_runs_for_project(slug, projects_root=projects_root)
+            return ids
+    except sqlite3.Error:
         pass
     run_root = paths.runs_dir(slug, root=root)
     return sorted(path.name for path in run_root.iterdir() if (path / "run.json").exists()) if run_root.exists() else []
-
 def update_project_details(
     slug: str,
     *,

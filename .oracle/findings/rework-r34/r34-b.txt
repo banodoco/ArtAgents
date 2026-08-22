@@ -1,0 +1,17 @@
+**R3.3 banodoco single-write** + **R3.4 harness honesty** — done (basetemp `/tmp/r34-b`, no commit).
+
+**B3 P1 — `astrid/core/project/run.py`**
+- `write_run_record` now pops `authority/kernel_run_id/kernel_task_id` before `build_run_record`, injects them atomically into payload, re-validates, single `write_json_atomic`. Previously banodoco did `write` + read-modify `write`.
+
+**B3 P1 — `astrid/core/integrations/worker/banodoco_worker.py::_write_baseline_snapshot`**
+- Import `sqlite3` at top of function for narrow `except _sqlite.Error`.
+- Kernel lookup: single RO connection, `try: _row/_prow/_trow` inside `except _sqlite.Error: pass`, outer `except _sqlite.Error: pass` + `except Exception: pass` (non-sqlite falls through as `import` authority).
+- Collapsed write+patch (two `write_json_atomic` + `json` re-read) to one atomic `write_run_record(..., authority="kernel"/"import", kernel_run_id=..., kernel_task_id=..., metadata={baseline_snapshot, non_authority/storage_kind})`. Zero second write, narrow except, `project_id` ULID vs slug fallback preserved.
+
+**B4 — `tests/test_run_ledger_conformance.py`**
+- Added kernel helpers: `_kernel_db_path/_kernel_counts/_kernel_tasks/_assert_kernel_single_ledger`.
+- Added `_admit_and_complete_one` (ProjectRepository+TaskRepository claim/start/complete via `UnitOfWork(DatabaseWriter(core_only_registry))`, slug `demo-capN` hyphen-only to satisfy kernel slug validation).
+- New harness `TestSingleLedgerHarness` (≥6 caps): `test_six_caps_kernel_ledger` drives 6 caps (`generation.generate_image`, `test.file_only_executor`, `rendering.timeline_visualize`, `rendering.attached_render`, `generation.generate_video`, `test.orchestrator_child`) each asserts `kernel runs>=1||tasks>=1`, `events>=2`, `receipts>=1`, `run.json==[] ∨ authority∈{kernel,import,threads-legacy}`. `test_orchestrator_with_children_hard_chain` via `admit_orchestrator_project_run` asserts 1 run+4 tasks (R3.1 fan-out) with `events>=6 receipts>=2` zero authoritative run.json. `test_banodoco_worker_single_write_projection` asserts `import` single-write (no kernel) vs `kernel` single-write (with kernel) authority stamp, `baseline_snapshot` round-trips, `non_authority` flag.
+
+Verification: `TMPDIR=/tmp/r34-b pytest tests/test_run_ledger_conformance.py` → **17 passed** (3 new harness); `TestSingleLedgerHarness` 3/3 passed; `tests/v10/test_task_lifecycle.py` + conformance 62 passed. Worktree `oracle-unified-execution` dirty 10 files (includes R3.1/R3.2 from parallel `r34-a` agent).
+0

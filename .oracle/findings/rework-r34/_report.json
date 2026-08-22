@@ -1,0 +1,66 @@
+{
+  "briefs_dir": null,
+  "default_model": "openrouter:meta/muse-spark-1.2-contributor",
+  "failed_count": 0,
+  "isolation": "threads",
+  "max_tokens": 65536,
+  "max_workers": 2,
+  "model_map": [],
+  "output_dir": "/Users/peteromalley/Documents/reigh-workspace/Astrid-unified-oracle/.oracle/findings/rework-r34",
+  "project_dir": "/Users/peteromalley/Documents/reigh-workspace/Astrid-unified-oracle",
+  "stopped_by_signal": false,
+  "succeeded_count": 2,
+  "sum_agent_seconds": 1159.494,
+  "task_timeout_s": 1800,
+  "tasks": [
+    {
+      "brief": "/private/tmp/r34-a.md",
+      "elapsed_s": 764.809,
+      "error": null,
+      "error_class": null,
+      "finish_reason": null,
+      "finished_at": "2026-08-22T16:32:47Z",
+      "meta_file": "/Users/peteromalley/Documents/reigh-workspace/Astrid-unified-oracle/.oracle/findings/rework-r34/r34-a.meta.json",
+      "model": "openrouter:meta/muse-spark-1.2-contributor",
+      "pid": 67395,
+      "raw_result_keys": [
+        "stdout"
+      ],
+      "response_chars": 2306,
+      "response_file": "/Users/peteromalley/Documents/reigh-workspace/Astrid-unified-oracle/.oracle/findings/rework-r34/r34-a.txt",
+      "started_at": "2026-08-22T16:20:02Z",
+      "status": "ok",
+      "stem": "r34-a",
+      "task_timeout_s": 1800,
+      "tool_calls": 0
+    },
+    {
+      "brief": "/private/tmp/r34-b.md",
+      "elapsed_s": 394.685,
+      "error": null,
+      "error_class": null,
+      "finish_reason": null,
+      "finished_at": "2026-08-22T16:26:37Z",
+      "meta_file": "/Users/peteromalley/Documents/reigh-workspace/Astrid-unified-oracle/.oracle/findings/rework-r34/r34-b.meta.json",
+      "model": "openrouter:meta/muse-spark-1.2-contributor",
+      "pid": 67394,
+      "raw_result_keys": [
+        "stdout"
+      ],
+      "response_chars": 2509,
+      "response_file": "/Users/peteromalley/Documents/reigh-workspace/Astrid-unified-oracle/.oracle/findings/rework-r34/r34-b.txt",
+      "started_at": "2026-08-22T16:20:02Z",
+      "status": "ok",
+      "stem": "r34-b",
+      "task_timeout_s": 1800,
+      "tool_calls": 0
+    }
+  ],
+  "toolsets": [
+    "('file'",
+    "'web'",
+    "'terminal')"
+  ],
+  "total_count": 2,
+  "wall_clock_s": 764.816
+}

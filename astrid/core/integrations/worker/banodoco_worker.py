@@ -183,84 +183,45 @@ def _write_baseline_snapshot(
     projection (authority: kernel); otherwise stamp as import storage
     (authority: import). Never an authoritative ledger write. Load path retains
     FS fallback for historical dirs.
-    """
 
+    Single-write: authority + kernel ids determined before the write and
+    passed atomically to ``write_run_record`` — no read-modify-write patch.
+    """
     digest = sha256_hex(canonical_json(payload))
     if not project_slug:
-        # None reserved ONLY for "no project slug configured" — failures
-        # below must propagate so the claim loop can mark the task Failed
-        # rather than silently recording a success-shaped digest.
         return None
-    # Kernel-first check for existing run to determine authority stamp
     _kernel_run_id: str | None = None
     _kernel_task_id: str | None = None
     try:
-        from astrid.core.foundation.project_paths import resolve_projects_root as _resolve_root
+        import sqlite3 as _sqlite
+        from astrid.core.kernel.read import kernel_run_info
 
-        _root = _resolve_root(None)
-        _db = _root / "kernel.sqlite3"
-        if _db.is_file():
-            import sqlite3 as _sqlite
-
-            with _sqlite.connect(f"file:{_db}?mode=ro", uri=True) as _conn:
-                _conn.row_factory = _sqlite.Row
-                _row = _conn.execute(
-                    "SELECT id FROM runs WHERE id = ? AND project_id = ?",
-                    (run_id, project_slug),
-                ).fetchone()
-                # Fallback to slug lookup if project_id mismatch
-                if _row is None:
-                    _prow = _conn.execute("SELECT id FROM projects WHERE slug = ?", (project_slug,)).fetchone()
-                    _pid = _prow["id"] if _prow is not None else project_slug
-                    _row = _conn.execute(
-                        "SELECT id FROM runs WHERE id = ? AND project_id = ?",
-                        (run_id, _pid),
-                    ).fetchone()
-                if _row is not None:
-                    _kernel_run_id = str(_row["id"])
-                    _trow = _conn.execute(
-                        "SELECT id FROM tasks WHERE run_id = ? AND project_id = ? ORDER BY run_ordinal ASC LIMIT 1",
-                        (run_id, project_slug),
-                    ).fetchone()
-                    if _trow is None:
-                        # try resolved project_id
-                        _trow = _conn.execute(
-                            "SELECT id FROM tasks WHERE run_id = ? ORDER BY run_ordinal ASC LIMIT 1",
-                            (run_id,),
-                        ).fetchone()
-                    if _trow is not None:
-                        _kernel_task_id = str(_trow["id"])
-    except Exception:
+        _info = kernel_run_info(project_slug, run_id)
+        if _info is not None:
+            _kernel_run_id = str(_info["run_id"])
+            _kernel_task_id = str(_info["task_id"]) if _info.get("task_id") else None
+    except _sqlite.Error:
         pass
-    # Still write FS storage for artifact placement; stamp non-authority
-    run_record = write_run_record(
-        project_slug,
-        run_id,
-        tool_id="astrid.core.integrations.worker.banodoco_worker",
-        kind="banodoco_timeline_generate",
-        metadata={"baseline_snapshot": digest},
-    )
-    # Stamp authority after write (write_run_record validates, so patch file)
-    try:
-        from astrid.core.foundation.project_paths import resolve_projects_root as _rr
-        import json as _json
-
-        _proj_root = _rr(None) / project_slug / "runs" / run_id / "run.json"
-        if _proj_root.is_file():
-            _data = _json.loads(_proj_root.read_text(encoding="utf-8"))
-            if _kernel_run_id is not None:
-                _data["authority"] = "kernel"
-                _data["kernel_run_id"] = _kernel_run_id
-                if _kernel_task_id is not None:
-                    _data["kernel_task_id"] = _kernel_task_id
-            else:
-                _data["authority"] = "import"
-                _data.setdefault("metadata", {})["non_authority"] = True
-                _data["metadata"]["storage_kind"] = "legacy_import"
-            _proj_root.write_text(_json.dumps(_data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-            run_record = _data
-    except Exception:
-        pass
+    if _kernel_run_id is not None:
+        run_record = write_run_record(
+            project_slug,
+            run_id,
+            tool_id="astrid.core.integrations.worker.banodoco_worker",
+            kind="banodoco_timeline_generate",
+            metadata={"baseline_snapshot": digest},
+            authority="kernel",
+            kernel_run_id=_kernel_run_id,
+            **({"kernel_task_id": _kernel_task_id} if _kernel_task_id is not None else {}),
+        )
+    else:
+        run_record = write_run_record(
+            project_slug,
+            run_id,
+            tool_id="astrid.core.integrations.worker.banodoco_worker",
+            kind="banodoco_timeline_generate",
+            metadata={"baseline_snapshot": digest, "non_authority": True, "storage_kind": "legacy_import"},
+            authority="import",
+        )
     if not isinstance(run_record.get("metadata"), dict) or run_record["metadata"].get("baseline_snapshot") != digest:
         logger.warning("baseline_snapshot did not round-trip into run record for %s", run_id)
     return digest

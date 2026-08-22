@@ -152,24 +152,23 @@ def _count_children(path: Path, *, marker: str | None = None) -> int:
 
 
 def _kernel_or_fs_run_count(slug: str, projects_root: Path, project_root: Path) -> int:
-    # Kernel-first: count kernel runs for this project if DB present; FS fallback for historical dirs.
+    # Kernel-first via single helper; FS fallback for historical dirs.
     try:
         import sqlite3
+        from astrid.core.kernel.read import kernel_runs_for_project
 
-        db_path = projects_root / "kernel.sqlite3"
-        if db_path.is_file():
-            conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-            try:
-                prow = conn.execute("SELECT id FROM projects WHERE slug = ?", (slug,)).fetchone()
-                project_id = prow[0] if prow is not None else slug
-                row = conn.execute("SELECT COUNT(*) FROM runs WHERE project_id = ?", (project_id,)).fetchone()
-                if row is not None:
-                    return int(row[0])
-            finally:
-                conn.close()
-    except Exception:
-        pass
-    return _count_children(project_root / "runs", marker="run.json")
+        ids = kernel_runs_for_project(slug, projects_root=projects_root)
+        # kernel_runs_for_project returns [] when DB exists but zero runs (authority)
+        # — do not count stale FS leftovers in that case. Fall through only when no DB.
+        from pathlib import Path as _P
+        db_candidates = [projects_root / "kernel.sqlite3", projects_root / ".astrid" / "astrid.sqlite3", projects_root / ".astrid" / "kernel.sqlite3"]
+        has_db = any(p.is_file() for p in db_candidates)
+        if has_db:
+            return len(ids)
+        # No DB → FS count
+        return _count_children(project_root / "runs", marker="run.json")
+    except sqlite3.Error:
+        return _count_children(project_root / "runs", marker="run.json")
 
 __all__ = [
     "format_project_required_guidance",

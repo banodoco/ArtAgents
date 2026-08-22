@@ -227,31 +227,18 @@ def _validate_parent_run(
 def _kernel_parent_run_info(project_slug: str, run_id: str, root: Path) -> dict[str, Any] | None:
     try:
         import sqlite3
+        from astrid.core.kernel.read import kernel_run_info
 
-        projects_root = Path(root).resolve()
-        db_path = projects_root / "kernel.sqlite3"
-        if not db_path.is_file():
+        info = kernel_run_info(project_slug, run_id, projects_root=Path(root).resolve())
+        if info is None:
             return None
-        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-        conn.row_factory = sqlite3.Row
-        try:
-            prow = conn.execute("SELECT id FROM projects WHERE slug = ?", (project_slug,)).fetchone()
-            project_id = prow["id"] if prow is not None else project_slug
-            r = conn.execute(
-                "SELECT id, project_id, status FROM runs WHERE id = ? AND project_id = ?",
-                (run_id, project_id),
-            ).fetchone()
-            if r is None:
-                return None
-            return {
-                "project_slug": project_slug,
-                "run_id": run_id,
-                "status": str(r["status"]),
-                "project_id": str(r["project_id"]),
-            }
-        finally:
-            conn.close()
-    except Exception:
+        return {
+            "project_slug": project_slug,
+            "run_id": run_id,
+            "status": str(info["status"]),
+            "project_id": str(info["project_id"]),
+        }
+    except sqlite3.Error:
         return None
 
 @contextmanager

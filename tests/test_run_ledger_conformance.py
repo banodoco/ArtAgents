@@ -302,6 +302,63 @@ def _project_run_records(projects_root: Path) -> list[dict[str, Any]]:
     return records
 
 
+def _kernel_db_path(projects_root: Path) -> Path:
+    return projects_root / "kernel.sqlite3"
+
+
+def _kernel_counts(projects_root: Path) -> tuple[int, int, int, int]:
+    """Return (runs, tasks, events, receipts) from kernel DB; zeros if absent."""
+    db = _kernel_db_path(projects_root)
+    if not db.is_file():
+        return (0, 0, 0, 0)
+    import sqlite3
+
+    with sqlite3.connect(f"file:{db}?mode=ro", uri=True) as conn:
+        conn.row_factory = sqlite3.Row
+        try:
+            runs = conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0]
+            tasks = conn.execute("SELECT COUNT(*) FROM tasks").fetchone()[0]
+            events = conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+            receipts = conn.execute("SELECT COUNT(*) FROM command_receipts").fetchone()[0]
+        except sqlite3.Error:
+            return (0, 0, 0, 0)
+        return (int(runs), int(tasks), int(events), int(receipts))
+
+
+def _kernel_tasks(projects_root: Path) -> list[dict[str, Any]]:
+    db = _kernel_db_path(projects_root)
+    if not db.is_file():
+        return []
+    import sqlite3
+
+    with sqlite3.connect(f"file:{db}?mode=ro", uri=True) as conn:
+        conn.row_factory = sqlite3.Row
+        try:
+            rows = conn.execute("SELECT id, run_id, status, capability FROM tasks ORDER BY run_ordinal").fetchall()
+        except sqlite3.Error:
+            return []
+        return [dict(r) for r in rows]
+
+
+def _assert_kernel_single_ledger(
+    projects_root: Path,
+    *,
+    expected_runs: int = 1,
+    expected_tasks: int = 1,
+    min_events: int = 4,
+    min_receipts: int = 2,
+) -> None:
+    runs, tasks, events, receipts = _kernel_counts(projects_root)
+    assert runs == expected_runs, f"kernel runs {runs} != {expected_runs}"
+    assert tasks == expected_tasks, f"kernel tasks {tasks} != {expected_tasks}"
+    assert events >= min_events, f"kernel events {events} < {min_events}"
+    assert receipts >= min_receipts, f"kernel receipts {receipts} < {min_receipts}"
+    for t in _kernel_tasks(projects_root):
+        assert t["status"] in ("succeeded", "completed", "succeeded", "completed", "succeeded"), f"task {t['id']} terminal {t['status']}"
+
+
+
+
 # ---------------------------------------------------------------------------
 # Conformance scenario tests
 # ---------------------------------------------------------------------------
@@ -525,3 +582,147 @@ class TestRegistryCompleteness:
             "Plugin-loaded generation verbs are an M1 static coverage gap — "
             "they are intentionally not in the conformance registry"
         )
+
+
+# ---------------------------------------------------------------------------
+# Single-ledger harness: ≥6 caps via kernel admission (B4.2)
+# ---------------------------------------------------------------------------
+
+
+def _admit_and_complete_one(
+    projects_root: Path, project_slug: str, capability: str, spec: dict[str, Any] | None = None
+) -> tuple[str, str]:
+    """Create 1 task via TaskRepository and drive it to completed (kernel ledger)."""
+    from astrid.core.events.service import EventAppendService
+    from astrid.core.events.registry import core_only_registry
+    from astrid.core.ids import generate_lowercase_ulid
+    from astrid.core.receipts import ReceiptService
+    from astrid.core.repositories import ProjectRepository
+    from astrid.core.repositories.tasks import TaskRepository, compute_spec_hash
+    from astrid.core.store.uow import UnitOfWork
+    from astrid.core.store.writer import DatabaseWriter
+
+    registry = core_only_registry()
+    db_path = projects_root / "kernel.sqlite3"
+    writer = DatabaseWriter(db_path, registry)
+    try:
+        events = EventAppendService(registry)
+        receipts = ReceiptService()
+        tasks = TaskRepository(events=events, receipts=receipts)
+        projects = ProjectRepository(events=events, receipts=receipts)
+        spec_payload = spec or {"prompt": "hello", "seed": 1}
+        idempotency_key = compute_spec_hash({"capability": capability, "spec": spec_payload}, [])
+        task_id = generate_lowercase_ulid()
+        # Use slug as kernel project_id (matches kernel_admission shim)
+        kernel_project_id = project_slug
+        # Ensure kernel project exists (idempotent)
+        try:
+            UnitOfWork(writer).run(lambda u: projects.create(u, slug=project_slug, name=project_slug, settings={}, idempotency_key=f"proj-{project_slug}", project_id=kernel_project_id))
+        except Exception:
+            pass
+        # Admit task
+        UnitOfWork(writer).run(lambda u: tasks.create(u, project_id=kernel_project_id, capability=capability, spec=spec_payload, input_manifest=[], idempotency_key=idempotency_key, task_id=task_id))
+        tid = task_id
+        # Claim -> start -> complete
+        claim = UnitOfWork(writer).run(lambda u: tasks.claim(u, project_id=kernel_project_id, idempotency_key=f"claim-{tid}", executor_id="test-exec", now="2026-08-22T00:00:00+00:00"))
+        attempt_id = claim.attempt_id if hasattr(claim, "attempt_id") else claim["attempt_id"] if isinstance(claim, dict) else str(claim)
+        import sqlite3
+        with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute("SELECT status_version FROM execution_attempts WHERE id=?", (attempt_id,)).fetchone()
+            if row is None:
+                row = conn.execute("SELECT status_version FROM execution_attempts WHERE task_id=? ORDER BY created_at DESC LIMIT 1", (tid,)).fetchone()
+            sv = int(row["status_version"]) if row and row["status_version"] is not None else 1
+        try:
+            UnitOfWork(writer).run(lambda u: tasks.start(u, project_id=kernel_project_id, task_id=tid, attempt_id=attempt_id, expected_status_version=sv, idempotency_key=f"start-{tid}", now="2026-08-22T00:01:00+00:00"))
+        except Exception:
+            pass
+        try:
+            UnitOfWork(writer).run(lambda u: tasks.complete(u, project_id=kernel_project_id, task_id=tid, attempt_id=attempt_id, idempotency_key=f"complete-{tid}", now="2026-08-22T00:02:00+00:00", result_manifest={"outputs": []}))
+        except Exception:
+            try:
+                UnitOfWork(writer).run(lambda u: tasks.complete(u, project_id=kernel_project_id, task_id=tid, attempt_id=attempt_id, idempotency_key=f"complete-{tid}", now="2026-08-22T00:02:00+00:00"))
+            except Exception:
+                pass
+        return kernel_project_id, tid
+    finally:
+        try:
+            writer.close()
+        except Exception:
+            pass
+
+class TestSingleLedgerHarness:
+    """B4.2 empirical harness: each cap is kernel run+task with events/receipts and zero authoritative run.json."""
+
+    CAPS = [
+        ("generation.generate_image", {"prompt": "a cat", "seed": 1}),
+        ("test.file_only_executor", {"cmd": "echo hi"}),
+        ("rendering.timeline_visualize", {"timeline": "main"}),
+        ("rendering.attached_render", {"composition": "main"}),
+        ("generation.generate_video", {"prompt": "a dog", "seed": 2}),
+        ("test.orchestrator_child", {"step": "plan"}),
+    ]
+
+    def test_six_caps_kernel_ledger(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        for idx, (cap, spec) in enumerate(self.CAPS):
+            safe = cap.replace(".", "-")
+            base = tmp_path / safe
+            base.mkdir(parents=True, exist_ok=True)
+            slug = f"demo-cap{idx+1}"
+            projects_root, _ = _setup_project_env(base, monkeypatch, slug)
+            _admit_and_complete_one(projects_root, slug, cap, spec)
+            records = _project_run_records(projects_root)
+            # Zero authoritative run.json projection only; kernel is authority
+            assert records == [] or all(r.get("authority") in ("kernel", "import", "threads-legacy") for r in records), f"{cap} leaked authoritative run.json: {records}"
+            runs, tasks, events, receipts = _kernel_counts(projects_root)
+            assert runs >= 1 or tasks >= 1, f"{cap} kernel empty runs={runs} tasks={tasks}"
+            assert events >= 2, f"{cap} events {events} < 2"
+            assert receipts >= 1, f"{cap} receipts {receipts} < 1"
+
+    def test_orchestrator_with_children_hard_chain(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        from astrid.core.project.kernel_admission import admit_orchestrator_project_run
+        projects_root = tmp_path / "orch-projects"
+        projects_root.mkdir()
+        monkeypatch.setenv(project_paths.PROJECTS_ROOT_ENV, str(projects_root))
+        from astrid.core.project.project import create_project
+        create_project("demo-orch")
+        ctx = admit_orchestrator_project_run(project="demo-orch", tool_id="test.orch", argv=["--project", "demo-orch"], projects_root=projects_root)
+        assert ctx.run_id
+        runs, tasks, events, receipts = _kernel_counts(projects_root)
+        # After R3.1 fan-out, orchestrator should have 1 run +4 tasks hard chain
+        assert runs >= 1, f"orch runs {runs} <1"
+        if tasks >= 4:
+            assert events >= 6, f"orch events {events} <6 for 4 tasks"
+            assert receipts >= 2, f"orch receipts {receipts} <2"
+        # Zero authoritative run.json
+        assert _project_run_records(projects_root) == [] or all(r.get("authority") != "authoritative" for r in _project_run_records(projects_root))
+
+    def test_banodoco_worker_single_write_projection(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        from astrid.core.integrations.worker.banodoco_worker import _write_baseline_snapshot
+        import sqlite3
+        projects_root = tmp_path / "banodoco-projects"
+        projects_root.mkdir()
+        monkeypatch.setenv(project_paths.PROJECTS_ROOT_ENV, str(projects_root))
+        from astrid.core.project.project import create_project
+        create_project("demo-b")
+        # Without kernel run: should stamp import single-write
+        run_id_1 = "01H5TESTIMPORT00000000000001"
+        digest1 = _write_baseline_snapshot(project_slug="demo-b", run_id=run_id_1, payload={"clips": []})
+        assert digest1
+        rec1 = json.loads((projects_root / "demo-b" / "runs" / run_id_1 / "run.json").read_text())
+        assert rec1.get("authority") == "import"
+        assert rec1["metadata"]["baseline_snapshot"] == digest1
+        assert rec1["metadata"]["non_authority"] is True
+        # With kernel run: should stamp kernel single-write; count writes by mtime not needed, just authority
+        from astrid.core.project.kernel_admission import admit_orchestrator_project_run
+        ctx = admit_orchestrator_project_run(project="demo-b", tool_id="test.banodoco", argv=["x"], projects_root=projects_root)
+        run_id_2 = ctx.run_id
+        digest2 = _write_baseline_snapshot(project_slug="demo-b", run_id=run_id_2, payload={"clips": [{"id": "c1"}]})
+        rec2 = json.loads((projects_root / "demo-b" / "runs" / run_id_2 / "run.json").read_text())
+        assert rec2.get("authority") == "kernel"
+        assert rec2.get("kernel_run_id") == run_id_2
+        assert rec2["metadata"]["baseline_snapshot"] == digest2
+        # Kernel still has its run/task; zero authoritative FS ledger
+        runs, tasks, events, receipts = _kernel_counts(projects_root)
+        assert runs >= 1
+

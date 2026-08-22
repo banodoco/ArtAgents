@@ -504,12 +504,26 @@ def write_run_record(
         fields["out"] = record_path_value(fields["out"], project_slug, root=root)
     if "manifest_path" in fields and fields["manifest_path"] is not None:
         fields["manifest_path"] = record_path_value(fields["manifest_path"], project_slug, root=root)
+    # Authority projection fields: single-write contract for banodoco worker / import paths.
+    # Pop before build_run_record so they are not rejected as unknown kwargs, then
+    # inject atomically into payload before the single write.
+    _authority = fields.pop("authority", None)
+    _kernel_run_id = fields.pop("kernel_run_id", None)
+    _kernel_task_id = fields.pop("kernel_task_id", None)
     payload = build_run_record(
         project_slug,
         run_id,
         out=fields.pop("out", record_path_value(run_root, project_slug, root=root)),
         **fields,
     )
+    if _authority is not None:
+        payload["authority"] = _authority
+    if _kernel_run_id is not None:
+        payload["kernel_run_id"] = _kernel_run_id
+    if _kernel_task_id is not None:
+        payload["kernel_task_id"] = _kernel_task_id
+    # Re-validate to keep payload canonical while preserving injected authority fields.
+    payload = validate_run_record(payload)
     write_json_atomic(paths.run_json_path(project_slug, run_id, root=root), payload)
     return payload
 

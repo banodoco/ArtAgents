@@ -630,49 +630,17 @@ def _verify_run_ownership(manifest_path: Path, project_root: Path, manifest: dic
 def _kernel_frozen_run_info(project_slug: str, run_id: str, projects_root: Path) -> dict[str, Any] | None:
     try:
         import sqlite3
+        from astrid.core.kernel.read import kernel_run_info
 
-        db_path = Path(projects_root) / "kernel.sqlite3"
-        if not db_path.is_file():
+        info = kernel_run_info(project_slug, run_id, projects_root=projects_root)
+        if info is None:
             return None
-        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-        conn.row_factory = sqlite3.Row
-        try:
-            prow = conn.execute("SELECT id FROM projects WHERE slug = ?", (project_slug,)).fetchone()
-            project_id = prow["id"] if prow is not None else project_slug
-            r = conn.execute(
-                "SELECT status FROM runs WHERE id = ? AND project_id = ?",
-                (run_id, project_id),
-            ).fetchone()
-            if r is None:
-                return None
-            t = conn.execute(
-                "SELECT capability FROM tasks WHERE run_id = ? AND project_id = ? ORDER BY run_ordinal ASC LIMIT 1",
-                (run_id, project_id),
-            ).fetchone()
-            capability = t["capability"] if t is not None else None
-            # Try to extract timeline_ids from task spec or input if present
-            spec_row = conn.execute(
-                "SELECT spec_json FROM tasks WHERE run_id = ? AND project_id = ? ORDER BY run_ordinal ASC LIMIT 1",
-                (run_id, project_id),
-            ).fetchone()
-            timeline_ids = None
-            if spec_row is not None:
-                try:
-                    import json as _json
-                    spec = _json.loads(spec_row["spec_json"])
-                    # spec may contain metadata timeline_ids
-                    if isinstance(spec, dict):
-                        timeline_ids = spec.get("timeline_ids") or spec.get("metadata", {}).get("timeline_ids")
-                except Exception:
-                    timeline_ids = None
-            return {
-                "status": str(r["status"]),
-                "capability": str(capability) if capability is not None else None,
-                "timeline_ids": timeline_ids,
-            }
-        finally:
-            conn.close()
-    except Exception:
+        return {
+            "status": str(info["status"]),
+            "capability": str(info["capability"]) if info.get("capability") is not None else None,
+            "timeline_ids": info.get("timeline_ids"),
+        }
+    except sqlite3.Error:
         return None
 
 def load_frozen_view(manifest_path: Path, *, project_root: Path) -> FrozenView:
