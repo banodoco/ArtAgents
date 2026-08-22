@@ -777,30 +777,6 @@ def make_local_bridge_handler(*, projects_root: Path):
             path = urlparse(self.path).path
             parts = [part for part in unquote(path).split("/") if part]
 
-            if parts == ["health"]:
-                status = self._bridge().health(str(projects_root))
-                self._send_json(200, status.to_dict())
-                return
-
-            if parts == ["projects"]:
-                rows = [
-                    row.to_dict() for row in self._bridge().list_projects()
-                ]
-                self._send_json(200, {"projects": rows})
-                return
-
-            if len(parts) == 3 and parts[0] == "projects" and parts[2] == "timelines":
-                try:
-                    rows = [
-                        row.to_dict()
-                        for row in self._bridge().list_timelines(parts[1])
-                    ]
-                except (BridgeInvalidProjectError, BridgeProjectNotFoundError) as exc:
-                    self._send_bridge_error(exc)
-                    return
-                self._send_json(200, {"timelines": rows})
-                return
-
             if len(parts) == 4 and parts[0] == "projects" and parts[2] == "timelines":
                 try:
                     payload = self._bridge().load_timeline(
@@ -845,16 +821,6 @@ def make_local_bridge_handler(*, projects_root: Path):
                 return
 
             self.send_response(404)
-            self._set_cors_headers()
-            self.send_header("Content-Length", "0")
-            self.end_headers()
-
-        # ------------------------------------------------------------------
-        # OPTIONS (CORS preflight)
-        # ------------------------------------------------------------------
-
-        def do_OPTIONS(self) -> None:  # noqa: N802
-            self.send_response(204)
             self._set_cors_headers()
             self.send_header("Content-Length", "0")
             self.end_headers()
@@ -935,23 +901,6 @@ def make_local_bridge_handler(*, projects_root: Path):
                 return None
             if length <= 0:
                 return None
-            raw = self.rfile.read(length)
-            try:
-                payload = json.loads(raw.decode("utf-8"))
-            except (json.JSONDecodeError, UnicodeDecodeError):
-                return None
-            return payload if isinstance(payload, dict) else None
-
-        def _read_optional_request_body(self) -> dict[str, Any] | None:
-            content_length = self.headers.get("Content-Length")
-            if content_length is None:
-                return {}
-            try:
-                length = int(content_length)
-            except (ValueError, TypeError):
-                return None
-            if length <= 0:
-                return {}
             raw = self.rfile.read(length)
             try:
                 payload = json.loads(raw.decode("utf-8"))

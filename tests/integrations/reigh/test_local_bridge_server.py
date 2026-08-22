@@ -145,28 +145,6 @@ def _post_raw(url: str, raw_body: bytes, content_type: str | None = None) -> tup
         return error.code, json.loads(error.read().decode("utf-8"))
 
 
-def _put_raw(url: str, raw_body: bytes, content_type: str | None = None) -> tuple[int, dict]:
-    req = Request(url, data=raw_body, method="PUT")
-    if content_type is not None:
-        req.add_header("Content-Type", content_type)
-    try:
-        with urlopen(req) as response:  # noqa: S310
-            return response.status, json.loads(response.read().decode("utf-8"))
-    except HTTPError as error:
-        return error.code, json.loads(error.read().decode("utf-8"))
-
-
-def _options(url: str, origin: str | None = None) -> tuple[int, dict[str, str]]:
-    req = Request(url, method="OPTIONS")
-    if origin is not None:
-        req.add_header("Origin", origin)
-    try:
-        with urlopen(req) as response:  # noqa: S310
-            return response.status, dict(response.headers)
-    except HTTPError as error:
-        return error.code, dict(error.headers)
-
-
 def _get_bytes(
     url: str,
     *,
@@ -246,10 +224,10 @@ def repository_server(
         composition.writer.close()
 
 
-def test_health_and_timeline_endpoints_repository_backed(
+def test_timeline_load_endpoint_repository_backed(
     tmp_bridge_root: Path,
 ) -> None:
-    """Health, timeline detail, and discovery list through the bridge."""
+    """Timeline detail through the repository-backed bridge."""
     timeline_id = "11111111-1111-1111-1111-111111111111"
     timeline_ulid = "01jm4k5n7p0000000000000001"
     with repository_server(tmp_bridge_root) as (base_url, composition):
@@ -266,129 +244,15 @@ def test_health_and_timeline_endpoints_repository_backed(
             name="Intro Cut",
             is_default=True,
         )
-        health_status, health = _get_json(f"{base_url}/health")
         timeline_status, timeline = _get_json(
             f"{base_url}/projects/ados-talks/timelines/{timeline_id}",
         )
-        projects_status, projects = _get_json(f"{base_url}/projects")
-        timelines_status, timelines = _get_json(
-            f"{base_url}/projects/ados-talks/timelines"
-        )
-
-    assert health_status == 200
-    assert health == {"ok": True, "projects_root": str(tmp_bridge_root.resolve())}
 
     assert timeline_status == 200
     assert timeline["timeline_id"] == timeline_id
     assert timeline["timeline_ulid"] == timeline_ulid
     assert timeline["slug"] == "intro-cut"
     assert timeline["config_version"] == 1  # one timeline.created event
-
-    assert projects_status == 200
-    assert projects == {"projects": [{"slug": "ados-talks", "name": "ados-talks"}]}
-
-    assert timelines_status == 200
-    assert timelines == {
-        "timelines": [{
-            "timeline_id": timeline_id,
-            "timeline_ulid": timeline_ulid,
-            "slug": "intro-cut",
-            "name": "Intro Cut",
-            "is_default": True,
-        }],
-    }
-
-
-def test_projects_list_route_empty_root_returns_empty_envelope(
-    tmp_bridge_root: Path,
-) -> None:
-    with repository_server(tmp_bridge_root) as (base_url, _composition):
-        status, body = _get_json(f"{base_url}/projects")
-
-    assert status == 200
-    assert body == {"projects": []}
-
-
-def test_projects_list_route_returns_sorted_rows(
-    tmp_bridge_root: Path,
-) -> None:
-    with repository_server(tmp_bridge_root) as (base_url, composition):
-        _repo_create_project(composition, slug="z-last", key="proj-z")
-        _repo_create_project(composition, slug="a-first", key="proj-a")
-        status, body = _get_json(f"{base_url}/projects")
-
-    assert status == 200
-    assert body == {
-        "projects": [
-            {"slug": "a-first", "name": "a-first"},
-            {"slug": "z-last", "name": "z-last"},
-        ],
-    }
-
-
-def test_projects_timelines_list_route_envelope(
-    tmp_bridge_root: Path,
-) -> None:
-    timeline_id = "44444444-4444-4444-4444-444444444444"
-    timeline_ulid = "01jm4k5n7p0000000000000004"
-    with repository_server(tmp_bridge_root) as (base_url, composition):
-        project = _repo_create_project(
-            composition, slug="listed-proj", key="proj-1"
-        )
-        _repo_create_timeline(
-            composition,
-            project_id=project.id,
-            slug="primary",
-            key="tl-1",
-            timeline_id=timeline_id,
-            timeline_ulid=timeline_ulid,
-            is_default=True,
-        )
-        status, body = _get_json(f"{base_url}/projects/listed-proj/timelines")
-
-    assert status == 200
-    assert body == {
-        "timelines": [{
-            "timeline_id": timeline_id,
-            "timeline_ulid": timeline_ulid,
-            "slug": "primary",
-            "name": "Primary",
-            "is_default": True,
-        }],
-    }
-
-
-def test_projects_timelines_list_route_empty_for_project_without_timelines(
-    tmp_bridge_root: Path,
-) -> None:
-    with repository_server(tmp_bridge_root) as (base_url, composition):
-        _repo_create_project(composition, slug="empty-proj", key="proj-1")
-        status, body = _get_json(f"{base_url}/projects/empty-proj/timelines")
-
-    assert status == 200
-    assert body == {"timelines": []}
-
-
-def test_projects_timelines_list_route_unknown_project_returns_404(
-    tmp_bridge_root: Path,
-) -> None:
-    with repository_server(tmp_bridge_root) as (base_url, _composition):
-        status, error = _get_error(
-            f"{base_url}/projects/no-such-project/timelines"
-        )
-
-    assert status == 404
-    assert error["error"] == "project_not_found"
-
-
-def test_projects_timelines_list_route_invalid_slug_returns_400(
-    tmp_bridge_root: Path,
-) -> None:
-    with repository_server(tmp_bridge_root) as (base_url, _composition):
-        status, error = _get_error(f"{base_url}/projects/%2E%2E/timelines")
-
-    assert status == 400
-    assert error["error"] == "invalid_project"
 
 
 def test_projects_timeline_load_missing_project_returns_project_not_found(
@@ -432,9 +296,6 @@ def test_server_returns_normal_http_errors_for_unknown_or_invalid_resources(
         unknown_route_status, unknown_route = _get_error(
             f"{base_url}/projects/ados-talks/assets/bad-key",
         )
-        removed_list_status, removed_list = _get_error(
-            f"{base_url}/projects/missing-project/timelines",
-        )
 
     assert missing_timeline_status == 404
     assert missing_timeline["error"] == "timeline_not_found"
@@ -444,11 +305,6 @@ def test_server_returns_normal_http_errors_for_unknown_or_invalid_resources(
 
     assert unknown_route_status == 404
     assert unknown_route["error"] == "not_found"
-
-    # The timelines-list route validates the project first; a missing project
-    # is a project_not_found 404 (never an empty authority-dependent view).
-    assert removed_list_status == 404
-    assert removed_list["error"] == "project_not_found"
 
 
 # ---------------------------------------------------------------------------
@@ -942,73 +798,6 @@ def test_save_endpoint_404_for_unknown_project(
 
 
 # ---------------------------------------------------------------------------
-# Registry endpoint tests (PUT /projects/:project/timelines/:timeline/registry)
-# ---------------------------------------------------------------------------
-
-
-
-
-
-
-
-
-
-
-# ---------------------------------------------------------------------------
-# CORS preflight tests (OPTIONS)
-# ---------------------------------------------------------------------------
-
-
-def test_cors_preflight_options_returns_204_with_cors_headers(
-    seed_bridge_project, tmp_bridge_root: Path,
-) -> None:
-    """OPTIONS request returns 204 with correct CORS headers for allowed origins."""
-    timeline_id = "11111111-1111-1111-1111-1111cors01"
-    seed_bridge_project(slug="cors-proj", timeline_id=timeline_id)
-
-    with running_server(tmp_bridge_root) as base_url:
-        # OPTIONS on a save endpoint with allowed origin
-        url = f"{base_url}/projects/cors-proj/timelines/{timeline_id}/save"
-        status, headers = _options(url, origin="http://localhost:3000")
-
-    assert status == 204
-    assert headers.get("Access-Control-Allow-Origin") == "http://localhost:3000"
-    assert headers.get("Access-Control-Allow-Methods") == "GET, HEAD, POST, OPTIONS"
-    assert headers.get("Access-Control-Allow-Headers") == "Content-Type, Range, If-None-Match, If-Modified-Since"
-    assert headers.get("Access-Control-Expose-Headers") == "Accept-Ranges, Content-Length, Content-Range, Content-Type, ETag, Last-Modified"
-
-
-def test_cors_preflight_no_origin_omits_cors_headers(
-    seed_bridge_project, tmp_bridge_root: Path,
-) -> None:
-    """OPTIONS without an Origin header omits CORS response headers."""
-    timeline_id = "22222222-2222-2222-2222-2222cors02"
-    seed_bridge_project(slug="no-origin-proj", timeline_id=timeline_id)
-
-    with running_server(tmp_bridge_root) as base_url:
-        url = f"{base_url}/projects/no-origin-proj/timelines/{timeline_id}/save"
-        status, headers = _options(url)
-
-    assert status == 204
-    assert headers.get("Access-Control-Allow-Origin") is None
-
-
-def test_cors_preflight_disallowed_origin_omits_cors_headers(
-    seed_bridge_project, tmp_bridge_root: Path,
-) -> None:
-    """OPTIONS from a non-whitelisted origin omits CORS response headers."""
-    timeline_id = "33333333-3333-3333-3333-3333cors03"
-    seed_bridge_project(slug="bad-origin-proj", timeline_id=timeline_id)
-
-    with running_server(tmp_bridge_root) as base_url:
-        url = f"{base_url}/projects/bad-origin-proj/timelines/{timeline_id}/save"
-        status, headers = _options(url, origin="https://evil.com")
-
-    assert status == 204
-    assert headers.get("Access-Control-Allow-Origin") is None
-
-
-# ---------------------------------------------------------------------------
 # Read-after-registry-write asset lookup
 # ---------------------------------------------------------------------------
 
@@ -1260,14 +1049,13 @@ def test_serve_command_is_registered_in_top_level_handlers() -> None:
     assert "serve" in commands
 
 
-def test_serve_dispatcher_starts_and_serves_health(
-    seed_bridge_project, tmp_bridge_root: Path,
+def test_serve_dispatcher_starts_and_serves_timeline_load(
+    tmp_bridge_root: Path,
 ) -> None:
-    """_dispatch_serve creates a working server that responds to /health."""
-
+    """_dispatch_serve creates a working server that serves timeline GET."""
 
     timeline_id = "11111111-1111-1111-1111-111111111111"
-    seed_bridge_project(slug="ados-talks", timeline_id=timeline_id)
+    timeline_ulid = "01jm4k5n7p0000000000000001"
 
     # Start the serve command in a daemon thread so it doesn't block the test.
     server_started = threading.Event()
@@ -1288,6 +1076,17 @@ def test_serve_dispatcher_starts_and_serves_health(
                 projects_root=tmp_bridge_root,
             )
             composition = compose_standard_bridge(tmp_bridge_root)
+            project = _repo_create_project(
+                composition, slug="ados-talks", key="proj-1"
+            )
+            _repo_create_timeline(
+                composition,
+                project_id=project.id,
+                slug="primary",
+                key="tl-1",
+                timeline_id=timeline_id,
+                timeline_ulid=timeline_ulid,
+            )
             srv.bridge = composition.bridge
             srv.bridge_writer = composition.writer
             srv.bridge_database_path = composition.database_path
@@ -1314,11 +1113,13 @@ def test_serve_dispatcher_starts_and_serves_health(
     host, port = server_address
     base_url = f"http://{host}:{port}"
 
-    # Hit the health endpoint.
-    health_status, health = _get_json(f"{base_url}/health")
-    assert health_status == 200
-    assert health["ok"] is True
-    assert health["projects_root"] == str(tmp_bridge_root.resolve())
+    # Hit the timeline-load endpoint.
+    timeline_status, timeline = _get_json(
+        f"{base_url}/projects/ados-talks/timelines/{timeline_id}"
+    )
+    assert timeline_status == 200
+    assert timeline["timeline_id"] == timeline_id
+    assert timeline["config_version"] >= 1
 
     # Shut down cleanly.
     # Send SIGTERM-like shutdown by directly shutting down the server.
@@ -1510,8 +1311,8 @@ class BridgeClientHTTPError(RuntimeError):
 class InTreeBridgeContractClient:
     """m1 in-tree substitute for the editor's ``AstridBridgeDataProvider``.
 
-    Field-for-field against the frozen wire contract (§1-§6): list, load,
-    save, and reload over plain HTTP with typed status handling. It is an
+    Field-for-field against the frozen wire contract (§1-§6): load, save,
+    and reload over plain HTTP with typed status handling. It is an
     m1 substitute that exercises the same wire contract without claiming
     browser or provider-source parity (SD3, contract §11; the real
     TypeScript suite remains the NSA-1 follow-up gate).
@@ -1519,17 +1320,6 @@ class InTreeBridgeContractClient:
 
     def __init__(self, base_url: str) -> None:
         self.base_url = base_url.rstrip("/")
-
-    def health(self) -> dict[str, Any]:
-        return self._request_json("GET", "/health")
-
-    def list_projects(self) -> list[dict[str, Any]]:
-        return self._request_json("GET", "/projects")["projects"]
-
-    def list_timelines(self, project_slug: str) -> list[dict[str, Any]]:
-        return self._request_json(
-            "GET", f"/projects/{project_slug}/timelines"
-        )["timelines"]
 
     def load_timeline(self, project_slug: str, ref: str) -> dict[str, Any]:
         return self._request_json(
@@ -2017,33 +1807,6 @@ def test_persisted_registry_asset_project_and_timeline_errors(
         assert (status, error["error"]) == (404, "timeline_not_found")
 
 
-def test_persisted_registry_asset_options_preflight(
-    tmp_bridge_root: Path,
-) -> None:
-    """OPTIONS on the asset route returns 204 with CORS headers."""
-    timeline_id = "aaaaaab3-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
-    timeline_ulid = "01jm4k5n7p0000000000000pb3"
-    with repository_server(tmp_bridge_root) as (base_url, composition):
-        _repo_seed_asset_timeline(
-            composition,
-            slug="opt-proj",
-            timeline_id=timeline_id,
-            timeline_ulid=timeline_ulid,
-            registry={"assets": {}},
-        )
-        url = f"{base_url}/projects/opt-proj/timelines/{timeline_id}/assets/k"
-        status, headers = _options(url, origin="http://localhost:3000")
-
-    assert status == 204
-    assert headers.get("Access-Control-Allow-Origin") == "http://localhost:3000"
-    assert "GET, HEAD, POST, OPTIONS" in headers.get(
-        "Access-Control-Allow-Methods", ""
-    )
-    assert headers.get("Access-Control-Allow-Headers") == (
-        "Content-Type, Range, If-None-Match, If-Modified-Since"
-    )
-
-
 def test_persisted_registry_asset_serves_registered_media_id(
     tmp_bridge_root: Path,
 ) -> None:
@@ -2234,7 +1997,7 @@ def test_in_tree_client_completes_provider_restart_journey(
 ) -> None:
     """The in-tree contract client proves the complete HTTP journey.
 
-    list → load → save → reload → stale 409 → two writers → server and
+    load → save → reload → stale 409 → two writers → server and
     database restart, with runtime diagnostics recorded per request. The
     substitute exercises the frozen wire contract only (SD3 / §11); it
     never claims browser or provider-source parity.
@@ -2251,9 +2014,6 @@ def test_in_tree_client_completes_provider_restart_journey(
     with repository_server(tmp_bridge_root) as (base_url, composition):
         client = InTreeBridgeContractClient(base_url)
 
-        # Fresh database: empty project list.
-        assert client.list_projects() == []
-
         project = _repo_create_project(
             composition, slug="journey-proj", key="proj-1"
         )
@@ -2266,14 +2026,6 @@ def test_in_tree_client_completes_provider_restart_journey(
             timeline_ulid=timeline_ulid,
             name="Primary",
         )
-
-        # list: project and timeline discovery rows.
-        assert [row["slug"] for row in client.list_projects()] == [
-            "journey-proj"
-        ]
-        timeline_rows = client.list_timelines("journey-proj")
-        assert [row["timeline_id"] for row in timeline_rows] == [timeline_id]
-        assert timeline_rows[0]["is_default"] is False
 
         # load: the seeded head 1 with the created registry.
         loaded = client.load_timeline("journey-proj", timeline_id)
@@ -2376,9 +2128,6 @@ def test_in_tree_client_completes_provider_restart_journey(
     # save (finding CF-F7D02052E469F1116F83 durability evidence).
     with repository_server(tmp_bridge_root) as (base_url2, _composition2):
         client2 = InTreeBridgeContractClient(base_url2)
-        assert [row["slug"] for row in client2.list_projects()] == [
-            "journey-proj"
-        ]
         reloaded_after_restart = client2.load_timeline(
             "journey-proj", timeline_id
         )
