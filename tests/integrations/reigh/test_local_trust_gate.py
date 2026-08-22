@@ -12,7 +12,7 @@ import json
 import threading
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Generator
+from typing import Any, Generator
 
 from astrid.core.integrations.reigh.local_bridge_server import (
     create_local_bridge_server,
@@ -51,7 +51,7 @@ def _raw(
     host_header: str | None = None,
     headers: dict[str, str] | None = None,
     body: bytes | None = None,
-) -> tuple[int, dict[str, Any_] if False else dict, bytes]:
+) -> tuple[int, dict[str, Any], bytes]:
     """One raw request with full header control (no urllib auto-Host)."""
     host, port = authority.split(":")
     conn = http.client.HTTPConnection(host, int(port), timeout=5)

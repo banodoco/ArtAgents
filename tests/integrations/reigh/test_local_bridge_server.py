@@ -915,7 +915,6 @@ def test_save_endpoint_404_for_unknown_timeline(
     tmp_bridge_root: Path,
 ) -> None:
     """POST /save for a timeline that does not exist returns 404 timeline_not_found."""
-    timeline_id = "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"
     with repository_server(tmp_bridge_root) as (base_url, composition):
         _repo_create_project(composition, slug="known-proj", key="proj-1")
         url = f"{base_url}/projects/known-proj/timelines/ffffffff-ffff-ffff-ffff-ffffffffffff/save"
@@ -1322,7 +1321,7 @@ def test_serve_dispatcher_starts_and_serves_health(
                 srv.serve_forever()
             finally:
                 composition.writer.close()
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - captured for assertion
             server_error = exc
             server_started.set()
 
