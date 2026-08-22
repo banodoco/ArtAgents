@@ -612,3 +612,134 @@ class TestJoinFamilyJourney:
         assert journey.parent_status() == "succeeded"
         journey.assert_invariants(planned, expect_terminal=True)
         journey.assert_no_orphaned_running_children()
+
+
+# ---------------------------------------------------------------------------
+# travel_between_images — N travel segments + crossfade stitch (non-turbo
+# derivation resolves the parent to reigh.travel_orchestrator, doc 16 §3.9)
+# ---------------------------------------------------------------------------
+
+TRAVEL_SPEC = {
+    "family": "travel_between_images",
+    "params": {"image_urls": ["a.png", "b.png", "c.png"]},
+}
+
+
+class TestTravelFamilyJourney:
+    def test_end_to_end_through_gated_admission(
+        self, env: dict[str, Any], coordinator: OrchestratorCoordinator
+    ) -> None:
+        parent_id = _admit_parent(
+            coordinator, key="k-travel-parent", spec=TRAVEL_SPEC
+        )
+        journey = FamilyJourney(env, parent_id)
+        planned = derive_children(TRAVEL_SPEC)
+        assert planned == (
+            ("segment", 0),
+            ("segment", 1),
+            ("segment", 2),
+            ("stitch", 0),
+        )
+
+        claim = coordinator.claim(
+            slug=SLUG,
+            executor_id=EXEC_1,
+            capabilities=[PARENT_CAPABILITY["travel_between_images"]],
+        )
+        assert claim is not None and claim.task_id == parent_id
+        assert claim.capability == "reigh.travel_orchestrator"
+        admitted = coordinator.fan_out(claim, executor_id=EXEC_1)
+        assert set(admitted) == set(planned)
+        # Every admitted child is an allowlisted executor-child row —
+        # no family bypassed the gate.
+        for slot, child_id in admitted.items():
+            row = [
+                r
+                for r in journey.child_rows().values()
+                if str(r["task_id"]) == child_id
+            ][0]
+            assert slot in journey.child_rows()
+        journey.assert_invariants(planned, expect_terminal=False)
+
+        assert (
+            _drain_children(coordinator, key_prefix="k-travel-child")
+            == len(planned)
+        )
+        coordinator.settle_success(
+            claim, settlement_key="k-travel-done", receipt=admitted
+        )
+        assert journey.parent_status() == "succeeded"
+        journey.assert_invariants(planned, expect_terminal=True)
+        journey.assert_no_orphaned_running_children()
+
+    def test_child_family_is_never_publicly_admissible(
+        self, env: dict[str, Any], coordinator: OrchestratorCoordinator
+    ) -> None:
+        """A browser-shaped request for a child family is forbidden."""
+        status, body = coordinator._transport.post_json(
+            f"/projects/{SLUG}/tasks",
+            {
+                "family": "travel_segment",
+                "input": {"start_image_url": "a.png"},
+            },
+            key="k-browser-child",
+        )
+        assert status == 403, body
+        assert body["error"] == "child_admission_forbidden"
+        # And nothing was written: zero orchestrator children exist.
+        with env["composition"].writer.read_only_connection() as conn:
+            count = conn.execute(
+                "SELECT COUNT(*) FROM command_receipts WHERE "
+                "idempotency_key = 'k-browser-child'"
+            ).fetchone()[0]
+        assert int(count) == 0
+
+    def test_lost_lease_mid_fan_out_replays_same_children(
+        self, env: dict[str, Any], coordinator: OrchestratorCoordinator
+    ) -> None:
+        composition = env["composition"]
+        parent_id = _admit_parent(
+            coordinator, key="k-travel-parent", spec=TRAVEL_SPEC
+        )
+        journey = FamilyJourney(env, parent_id)
+        planned = derive_children(TRAVEL_SPEC)
+
+        claim = _claim_parent(coordinator, "travel_between_images")
+        plans = plan_children(parent_id, TRAVEL_SPEC)
+        transport = coordinator._transport
+        # Admit only the first segment before the lease dies.
+        first = plans[0]
+        status, body = transport.post_json(
+            f"/projects/{SLUG}/tasks",
+            {
+                "family": first.capability,
+                "input": child_input(TRAVEL_SPEC, first),
+                "child_admission": claim.envelope(
+                    executor_id=EXEC_1, role=first.role, index=first.index
+                ),
+            },
+            key=first.idempotency_key,
+        )
+        assert status == 201, body
+        pre_crash_child_id = journey.child_rows()[
+            (first.role, first.index)
+        ]["task_id"]
+
+        _expire_and_sweep(composition, parent_id)
+        resumed = coordinator.claim(
+            slug=SLUG,
+            executor_id=EXEC_2,
+            capabilities=[PARENT_CAPABILITY["travel_between_images"]],
+        )
+        assert resumed is not None and resumed.attempt_no == 2
+        admitted = coordinator.fan_out(resumed, executor_id=EXEC_2)
+        assert admitted[(first.role, first.index)] == pre_crash_child_id
+        assert set(admitted) == set(planned)
+
+        _drain_children(coordinator, key_prefix="k-travel-crash")
+        coordinator.settle_success(
+            resumed, settlement_key="k-travel-crash-done", receipt=admitted
+        )
+        assert journey.parent_status() == "succeeded"
+        journey.assert_invariants(planned, expect_terminal=True)
+        journey.assert_no_orphaned_running_children()
