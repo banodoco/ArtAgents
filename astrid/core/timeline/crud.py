@@ -242,13 +242,62 @@ def show_timeline(
     if found is None:
         return None
     ulid, tdir = found
-    # Normal reads repair stale projections from the event log. Verification
-    # reads are intentionally read-only and inspect assembly.json as-is.
-    raw_assembly = (
-        read_timeline_config_json(tdir / "assembly.json")
-        if verify
-        else load_assembly_json_with_repair(tdir)
-    )
+    # Marker-gated single-authority read: backfilled timelines read through selected backend, not file-first replay.
+    from astrid.core.foundation.project_paths import resolve_projects_root as _rr
+    from astrid.core.integrations.reigh.bridge_service import derive_database_path as _dd
+    from astrid.packs.timeline.backfill import read_backfill_state as _rbs
+    _is_back = False
+    _tid_for_check = None
+    try:
+        _pr = _rr(root)
+        th_par = tdir.parent
+        if th_par.name == "timelines" and th_par.parent.is_dir():
+            _pr = th_par.parent.parent
+        _db = _dd(_pr)
+        if _db.is_file():
+            _ip = tdir / "assembly.identity.json"
+            if _ip.is_file():
+                import json as _j
+                try:
+                    _raw = _j.loads(_ip.read_text())
+                    _tid_for_check = _raw.get("timeline_id") if isinstance(_raw, dict) else None
+                except Exception:
+                    _tid_for_check = None
+            if _tid_for_check is None:
+                _tid_for_check = None
+                import sqlite3 as _sq
+                try:
+                    c = _sq.connect(f"file:{_db}?mode=ro", uri=True)
+                    c.row_factory = _sq.Row
+                    r = c.execute("SELECT json_extract(payload_json,'$.data.timeline_id') as tid FROM events WHERE kind='timeline.created' AND json_extract(payload_json,'$.data.timeline_ulid')=? LIMIT 1", (ulid,)).fetchone()
+                    if r and r["tid"]:
+                        _tid_for_check = str(r["tid"])
+                    c.close()
+                except Exception:
+                    pass
+            if _tid_for_check:
+                try:
+                    _st = _rbs(_pr)
+                    _is_back = _tid_for_check in _st
+                except Exception:
+                    _is_back = False
+    except Exception:
+        _is_back = False
+    if _is_back and not verify:
+        try:
+            from astrid.core.timeline.eventlog.sqlite_backend import SqliteEventLogBackend as _SBE
+            from astrid.core.timeline.projection import project_to_assembly as _pta
+            _be = _SBE(timeline_id=_tid_for_check, timeline_home=tdir, projects_root=_pr)
+            evs = _be.read_events()
+            raw_assembly = _pta(evs)
+        except Exception:
+            raw_assembly = load_assembly_json_with_repair(tdir)
+    else:
+        raw_assembly = (
+            read_timeline_config_json(tdir / "assembly.json")
+            if verify
+            else load_assembly_json_with_repair(tdir)
+        )
     if raw_assembly is None:
         return None
     assembly = validate_timeline_config_json(raw_assembly)

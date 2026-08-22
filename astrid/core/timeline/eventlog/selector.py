@@ -97,8 +97,8 @@ def _projects_root_for_stream(stream: TimelineStreamRef) -> Path:
             candidate = p.parent.parent.parent
             if candidate.is_dir():
                 return candidate
-        # For non-conforming test harnesses (e.g. /tmp/timeline-home), fall back to ambient
-        return resolve_projects_root(None)
+            raise EventLogError(f"timeline home layout has no projects root: {p}")
+        raise EventLogError(f"timeline home must be .../timelines/<ulid>, got {p}")
     return resolve_projects_root(None)
 
 def _is_backfilled(timeline_id: str, projects_root: Path) -> bool:
@@ -212,6 +212,34 @@ def resolve_event_log_target(
     # Strategy 1: Explicit Supabase backend
     if preferred_backend == "supabase":
         return _resolve_supabase_target(project_slug, slug_or_id, root=root)
+
+    # Strategy 1b: Marker-first for backfilled timelines — stale identity/display must not choose LocalFs.
+    try:
+        from astrid.core.foundation.project_paths import resolve_projects_root as _rr
+        from astrid.core.integrations.reigh.bridge_service import derive_database_path as _dd
+        import sqlite3 as _sq
+        from astrid.packs.timeline.backfill import read_backfill_state as _rbs
+        _pr = _rr(root)
+        _db = _dd(_pr)
+        if _db.is_file():
+            _st = _rbs(_pr)
+            if _st:
+                conn = _sq.connect(f"file:{_db}?mode=ro", uri=True)
+                try:
+                    conn.row_factory = _sq.Row
+                    r = conn.execute("SELECT json_extract(payload_json,'$.data.timeline_id') as tid, json_extract(payload_json,'$.data.timeline_ulid') as ulid FROM events WHERE kind='timeline.created' AND json_extract(payload_json,'$.data.slug')=? LIMIT 1", (slug_or_id,)).fetchone()
+                    if r and r["tid"] and str(r["tid"]) in _st:
+                        tid = str(r["tid"])
+                        ulid = str(r["ulid"]) if r["ulid"] else None
+                        from astrid.core.timeline.paths import timelines_dir as _td
+                        thome = _td(project_slug, root=_pr) / (ulid or "")
+                        from .sqlite_backend import SqliteEventLogBackend as _SBE
+                        be = _SBE(timeline_id=tid, timeline_home=thome if thome.is_dir() else None, projects_root=_pr)
+                        return EventLogTarget(backend_name="sqlite", timeline_id=tid, timeline_ulid=ulid, timeline_home=thome if thome.is_dir() else None, slug=slug_or_id, backend=be, source="local")
+                finally:
+                    conn.close()
+    except Exception:
+        pass
 
     # Strategy 2: Local resolver
     from astrid.core.timeline.observability import resolve_timeline_target

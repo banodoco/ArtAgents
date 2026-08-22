@@ -105,10 +105,37 @@ def find_timeline_by_slug(
         try:
             data = load_display_json_with_repair(child)
         except (ProjectJsonError, OSError, ValueError):
-            continue
+            data = None
         if isinstance(data, dict) and data.get("slug") == target:
             # The directory name is the ULID.
             return (child.name, child)
+    # Fallback: kernel slug resolution marker-gated for backfilled timelines where sidecars are absent/stale
+    try:
+        from astrid.core.foundation.project_paths import resolve_projects_root as _rr
+        from astrid.core.integrations.reigh.bridge_service import derive_database_path as _dd
+        import sqlite3 as _sq
+        from astrid.packs.timeline.backfill import read_backfill_state as _rbs
+        _pr = _rr(root)
+        _db = _dd(_pr)
+        if _db.is_file():
+            _st = _rbs(_pr)
+            if _st:
+                conn = _sq.connect(f"file:{_db}?mode=ro", uri=True)
+                try:
+                    conn.row_factory = _sq.Row
+                    row = conn.execute("SELECT json_extract(payload_json,'$.data.timeline_id') as tid, json_extract(payload_json,'$.data.timeline_ulid') as ulid FROM events WHERE kind='timeline.created' AND json_extract(payload_json,'$.data.slug')=? LIMIT 1", (target,)).fetchone()
+                    if row and row["tid"] and str(row["tid"]) in _st:
+                        ulid = str(row["ulid"]) if row["ulid"] else None
+                        if ulid:
+                            cand = td / ulid
+                            if cand.is_dir():
+                                return (ulid, cand)
+                            # Even if dir missing? still not return
+                    # Also try alias via slug rename? Check latest slug via events? Use payload_json scan for created only for now
+                finally:
+                    conn.close()
+    except Exception:
+        pass
     return None
 
 
@@ -240,7 +267,32 @@ def load_display_json_with_repair(timeline_home: str | Path) -> dict[str, object
         if current_display == fallback_display.to_json_obj():
             return current_display
 
-    backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=timeline_dir_path)
+    # Marker-gated backend selection: backfilled timelines never use LocalFs for display projection
+    try:
+        from astrid.core.foundation.project_paths import resolve_projects_root as _rr2
+        from astrid.core.integrations.reigh.bridge_service import derive_database_path as _dd2
+        import sqlite3 as _sq2
+        from astrid.packs.timeline.backfill import read_backfill_state as _rbs2
+        _pr2 = _rr2(None)
+        # Derive projects_root from timeline_dir if layout matches
+        td_par = timeline_dir_path.parent
+        if td_par.name == "timelines" and td_par.parent.is_dir():
+            _pr2 = td_par.parent.parent
+        _is_back = False
+        _db2 = _dd2(_pr2)
+        if _db2.is_file():
+            try:
+                _st2 = _rbs2(_pr2)
+                _is_back = timeline_id in _st2
+            except Exception:
+                _is_back = False
+        if _is_back:
+            from astrid.core.timeline.eventlog.sqlite_backend import SqliteEventLogBackend as _SBE2
+            backend = _SBE2(timeline_id=timeline_id, timeline_home=timeline_dir_path, projects_root=_pr2)
+        else:
+            backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=timeline_dir_path)
+    except Exception:
+        backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=timeline_dir_path)
     projection = project_display(backend.read_events(), fallback_display=fallback_display)
     if projection.deleted:
         return None

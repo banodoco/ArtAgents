@@ -177,7 +177,7 @@ def _resolve_or_bootstrap_backend(
         _db = _derive(_pr)
         tl_id_k = None
         if _db.is_file():
-            _conn = _sql.connect(str(_db))
+            _conn = _sql.connect(f"file:{_db}?mode=ro", uri=True)
             try:
                 _conn.row_factory = _sql.Row
                 _row = _conn.execute("SELECT json_extract(payload_json,'$.data.timeline_id') as tid FROM events WHERE kind='timeline.created' AND json_extract(payload_json,'$.data.timeline_ulid')=? LIMIT 1", (ulid_try,)).fetchone()
@@ -497,15 +497,47 @@ def pack_write_gateway(
                     head = uow.query_one("SELECT head_seq FROM event_streams WHERE id = ?", (f"{timeline_id}:{effective_stream_type}",))
                     if head is None:
                         raise TimelineEditError(f"timeline {timeline_slug!r} in project {project_slug!r} has no kernel event stream")
+                    current_head = int(head["head_seq"])
+                    raw_expected = payload.get("expected_version")
+                    if isinstance(raw_expected, bool):
+                        raise TimelineEditError("payload.expected_version must be an integer")
+                    if raw_expected is not None:
+                        if not isinstance(raw_expected, int):
+                            raise TimelineEditError("payload.expected_version must be an integer")
+                        if raw_expected != current_head:
+                            from astrid.core.timeline.eventlog.types import EventLogStaleVersionError, TimelineVersionConflict
+                            raise EventLogStaleVersionError(TimelineVersionConflict(timeline_id=timeline_id, expected_version=raw_expected, current_version=current_head, last_event_id=None, last_event_kind=None, last_event_summary=None))
+                        expected_version = raw_expected
+                    else:
+                        expected_version = current_head
                     config = payload.get("config", {})
-                    reg = payload.get("asset_registry")
+                    if "registry" in payload:
+                        reg = payload.get("registry")
+                        if reg is None:
+                            raise TimelineEditError("config_replaced payload.registry must be an object when present")
+                    elif "asset_registry" in payload:
+                        reg = payload.get("asset_registry")
+                    else:
+                        reg = None
                     if reg is None:
-                        reg = {"assets": {}}
+                        cur = uow.query_one("SELECT asset_registry_json FROM timelines WHERE id = ?", (timeline_id,))
+                        if cur is not None and cur["asset_registry_json"]:
+                            try:
+                                from astrid.core.receipts.canonical import parse_json as _parse
+                                cur_reg = _parse(cur["asset_registry_json"])
+                                if isinstance(cur_reg, dict):
+                                    reg = {"assets": dict(cur_reg)}
+                                else:
+                                    reg = {"assets": {}}
+                            except Exception:
+                                reg = {"assets": {}}
+                        else:
+                            reg = {"assets": {}}
                     if not isinstance(config, Mapping):
                         raise TimelineEditError("config_replaced payload.config must be a JSON object")
                     if not isinstance(reg, Mapping):
-                        raise TimelineEditError("config_replaced payload.asset_registry must be a JSON object")
-                    kernel_timelines.replace_config(uow, project_id=project_id, ref=timeline_slug, config=dict(config), registry=dict(reg), expected_version=int(head["head_seq"]), idempotency_key=f"timeline.replace_config:{timeline_id}:{head['head_seq']}")
+                        raise TimelineEditError("config_replaced payload.registry must be a JSON object")
+                    kernel_timelines.replace_config(uow, project_id=project_id, ref=timeline_slug, config=dict(config), registry=dict(reg), expected_version=expected_version, idempotency_key=f"timeline.replace_config:{timeline_id}:{expected_version}")
                 UnitOfWork(effective_writer).run(run)
             try:
                 for event_spec in events:

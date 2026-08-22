@@ -6,10 +6,7 @@ import hashlib
 import json
 import mimetypes
 import os
-import shutil
-import subprocess
 import threading
-from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -34,10 +31,8 @@ from astrid.core.timeline.paths import (
     validate_timeline_ulid,
 )
 from astrid.core.timeline.projection import regenerate_projection
-from astrid.core.util.time import utc_now_seconds as utc_now_iso
 
 from .event_construction import (
-    asset_registry_to_events,
     config_to_events,
     construct_reigh_timeline_events,
 )
@@ -532,11 +527,11 @@ def _registry_from_sqlite(record: BridgeTimelineRecord, *, root: str | Path | No
                     payload = _json.loads(row["asset_registry_json"])
                 except Exception:
                     payload = None
-                if isinstance(payload, dict) and isinstance(payload.get("assets"), dict):
-                    return {"assets": dict(payload["assets"])}
                 if isinstance(payload, dict):
-                    # Fallback: empty assets wrapper
-                    return {"assets": dict(payload.get("assets", {}))} if "assets" in payload else None
+                    if isinstance(payload.get("assets"), dict):
+                        return {"assets": dict(payload["assets"])}
+                    # repository stores INNER assets map (canonical_json(dict(assets)))
+                    return {"assets": dict(payload)}
             # Fallback: scan latest registry-bearing event
             sid = f"{record.timeline_id}:timeline.timeline"
             erow = conn.execute("SELECT payload_json FROM events WHERE stream_id = ? AND kind IN ('timeline.asset_registry_replaced','timeline.saved','timeline.config_replaced') ORDER BY seq DESC LIMIT 1", (sid,)).fetchone()
@@ -551,6 +546,8 @@ def _registry_from_sqlite(record: BridgeTimelineRecord, *, root: str | Path | No
                     reg = data.get("registry") if isinstance(data, dict) else None
                     if isinstance(reg, dict) and isinstance(reg.get("assets"), dict):
                         return {"assets": dict(reg["assets"])}
+                    if isinstance(reg, dict):
+                        return {"assets": dict(reg)}
         finally:
             conn.close()
     except (OSError, RuntimeError, ValueError):
@@ -598,24 +595,22 @@ def _ensure_bridge_registry(
     fallback. Un-backfilled timelines keep the legacy recovery order:
     event stream → assets.json → source derivation.
     """
-    raw = _read_registry_payload(record.timeline_home / "registry.json")
-    if "assets" in raw:
-        return raw
-    # Marker-gated path: backfilled vs legacy.
+    # Marker-gated: backfilled timelines read registry from SQLite exclusively.
     try:
         backfilled = _is_record_backfilled(record, root=root)
     except Exception as exc:
-        # Typed failure on marker unreadable — never silently degrade.
         raise RuntimeError(f"backfill marker failure for {record.timeline_id}: {exc}") from exc
     if backfilled:
         recovered = _registry_from_sqlite(record, root=root)
         if recovered is not None:
             write_json_atomic(record.timeline_home / "registry.json", recovered)
             return recovered
-        # Backfilled but no registry in kernel: return empty assets, not stale JSONL.
         empty: dict[str, Any] = {"assets": {}}
         write_json_atomic(record.timeline_home / "registry.json", empty)
         return empty
+    raw = _read_registry_payload(record.timeline_home / "registry.json")
+    if "assets" in raw:
+        return raw
     # Legacy un-backfilled path only: stale JSONL / assets.json / source derivation.
     recovered = _registry_from_event_stream(record)
     if recovered is None:

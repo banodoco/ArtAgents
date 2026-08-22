@@ -223,6 +223,7 @@ PROJECTOR_EVENT_CLASSIFICATION: dict[str, ProjectionKindClassification] = {
     "timeline.erased": "metadata_noop",
     "timeline.imported": "migration_only_legacy",
     "timeline.recovered": "validated_full_config_replacement",
+    "timeline.saved": "validated_full_config_replacement",
     "clip.added": "timeline_config_mutation",
     "clip.removed": "timeline_config_mutation",
     "clip.moved": "timeline_config_mutation",
@@ -660,14 +661,16 @@ def apply_event_to_assembly(
     if classification in {"metadata_noop", "non_container_read_model"}:
         return state
 
-    # timeline.config_replaced — replace projected assembly with a validated
-    # raw TimelineConfig container. This event is the lossless runtime full
-    # replacement surface; legacy wrappers are rejected by payload validation.
-    if event.kind == "timeline.config_replaced":
+    # timeline.config_replaced / timeline.saved — replace projected assembly with a validated
+    # raw TimelineConfig container. Both carry payload.config (typed or raw dict).
+    if event.kind in ("timeline.config_replaced", "timeline.saved"):
         payload = event.payload
         if isinstance(payload, TimelineConfigReplacedPayload):
             return validate_timeline_config_for_container(payload.config)
+        if isinstance(payload, dict) and isinstance(payload.get("config"), dict):
+            return validate_timeline_config_for_container(payload["config"])
         return state
+
 
     # timeline.recovered — replace projected assembly with anchor projection
     if event.kind == "timeline.recovered":

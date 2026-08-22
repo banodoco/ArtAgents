@@ -228,14 +228,32 @@ class TimelineEventSchemaTest(unittest.TestCase):
 
     def test_timeline_backend_selector_builds_local_fs_from_timeline_home(self) -> None:
         timeline_id = str(uuid4())
-        stream, backend = select_timeline_backend(
-            timeline_id=timeline_id,
-            timeline_home="/tmp/timeline-home",
-        )
-        self.assertEqual(stream.backend, "local_fs")
-        self.assertEqual(stream.source, "timeline_home")
-        self.assertIsInstance(backend, LocalFsBackend)
-        self.assertEqual(backend.backend_name(), "local_fs")
+        # Low selector now fail-closes on malformed layout (E8); conforming layout required.
+        from astrid.core.timeline.eventlog.types import EventLogError
+        with self.assertRaises(EventLogError):
+            select_timeline_backend(
+                timeline_id=timeline_id,
+                timeline_home="/tmp/timeline-home",
+            )
+        # Conforming layout still builds LocalFs when not backfilled
+        import tempfile
+        from pathlib import Path
+        from astrid.core.timeline.paths import timelines_dir
+        with tempfile.TemporaryDirectory() as tmp:
+            from astrid.core.foundation.project_paths import resolve_projects_root as _rr
+            # Build a conforming <root>/proj/timelines/<ulid> dir
+            from astrid.core.threads.ids import generate_ulid
+            ulid = generate_ulid()
+            tdir = Path(tmp) / "proj" / "timelines" / ulid
+            tdir.mkdir(parents=True)
+            stream2, backend2 = select_timeline_backend(
+                timeline_id=timeline_id,
+                timeline_home=str(tdir),
+            )
+            self.assertEqual(stream2.backend, "local_fs")
+            self.assertEqual(stream2.source, "timeline_home")
+            self.assertIsInstance(backend2, LocalFsBackend)
+            self.assertEqual(backend2.backend_name(), "local_fs")
 
     def test_timeline_backend_selector_builds_supabase_backend_from_options(self) -> None:
         timeline_id = str(uuid4())

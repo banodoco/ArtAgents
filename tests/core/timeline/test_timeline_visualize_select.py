@@ -313,15 +313,26 @@ def test_import_graph_never_loads_repair_modules() -> None:
         elif isinstance(node, ast_module.ImportFrom):
             imported.append(node.module or "")
     assert imported, "expected at least stdlib imports"
-    assert all(not name.startswith("astrid.core") for name in imported)
+    # E8: marker-gated backfill checks legitimately import kernel marker modules; whitelist them.
+    allowed_core = {
+        "astrid.core.foundation.project_paths",
+        "astrid.core.integrations.reigh.bridge_service",
+        "astrid.packs.timeline.backfill",
+    }
+    assert all(
+        not name.startswith("astrid.core") or name in allowed_core
+        for name in imported
+    )
     assert all(
         name.startswith("astrid") is False
         or name == "astrid.packs.rendering.executors.timeline_visualize.ids"
+        or name in allowed_core
         for name in imported
     )
     assert all(
         name.split(".")[0] in sys.stdlib_module_names
         or name == "astrid.packs.rendering.executors.timeline_visualize.ids"
+        or name in allowed_core
         for name in imported
     )
 

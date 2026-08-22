@@ -22,15 +22,13 @@ from astrid.core.foundation.project_paths import (
     sources_dir,
     validate_project_slug,
 )
-from astrid.core.timeline._shared import _expected_version_kwargs
 from astrid.core.timeline.eventlog import LocalFsBackend
 from astrid.core.timeline.events.schema import (
     AssetRegistryReplacedPayload,
     TimelineActor,
     TimelineEvent,
-    TimelineEventSchemaError,
 )
-from astrid.core.timeline.paths import assembly_identity_path, timeline_dir
+from astrid.core.timeline.paths import assembly_identity_path
 
 
 def _entry_from_source_ref(
@@ -251,14 +249,50 @@ def sync_asset_registry(
     # Build the new registry
     new_registry: dict[str, Any] = {"assets": merged_assets}
 
-    # Use local_fs backend to append the event with CAS
+    # Use selected backend (sqlite for marked) — single-authority writer.
     identity_path = assembly_identity_path(project_slug, tdir.name, root=projects_root)
     identity = read_json(identity_path) if identity_path.is_file() else {}
     timeline_id = identity.get("timeline_id")
     if not isinstance(timeline_id, str) or not timeline_id.strip():
-        raise AstridError("timeline identity is missing timeline_id")
-
-    backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=tdir)
+        # Try kernel fallback for sidecarless backfilled
+        try:
+            from astrid.core.foundation.project_paths import resolve_projects_root as _rr3
+            from astrid.core.integrations.reigh.bridge_service import derive_database_path as _dd3
+            import sqlite3 as _sq3
+            _pr3 = _rr3(projects_root)
+            _db3 = _dd3(_pr3)
+            if _db3.is_file():
+                c = _sq3.connect(f"file:{_db3}?mode=ro", uri=True)
+                c.row_factory = _sq3.Row
+                r = c.execute("SELECT json_extract(payload_json,'$.data.timeline_id') as tid FROM events WHERE kind='timeline.created' AND json_extract(payload_json,'$.data.timeline_ulid')=? LIMIT 1", (tdir.name,)).fetchone()
+                if r and r["tid"]:
+                    timeline_id = str(r["tid"])
+                c.close()
+        except Exception:
+            pass
+        if not isinstance(timeline_id, str) or not timeline_id.strip():
+            raise AstridError("timeline identity is missing timeline_id")
+    # Marker-gated backend selection
+    try:
+        from astrid.core.foundation.project_paths import resolve_projects_root as _rr4
+        from astrid.core.integrations.reigh.bridge_service import derive_database_path as _dd4
+        from astrid.packs.timeline.backfill import read_backfill_state as _rbs4
+        _pr4 = _rr4(projects_root)
+        _db4 = _dd4(_pr4)
+        _is_back4 = False
+        if _db4.is_file():
+            try:
+                _st4 = _rbs4(_pr4)
+                _is_back4 = timeline_id in _st4
+            except Exception:
+                _is_back4 = False
+        if _is_back4:
+            from astrid.core.timeline.eventlog.sqlite_backend import SqliteEventLogBackend
+            backend = SqliteEventLogBackend(timeline_id=timeline_id, timeline_home=tdir, projects_root=_pr4)
+        else:
+            backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=tdir)
+    except Exception:
+        backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=tdir)
     act = actor or TimelineActor(
         type="agent",
         id="agent:project:" + project_slug,

@@ -191,10 +191,10 @@ class StandardBridgeComposition:
     database_path: Path
     registry: FrozenSchemaPackRegistry
     writer: DatabaseWriter
-    projects: ProjectRepository
-    timelines: TimelineRepository
+    projects: Any
+    timelines: Any
     bridge: TimelineBridgeAdapter
-
+    owner_lock: Any = None
 
 def compose_standard_bridge(
     projects_root: str | Path | None = None,
@@ -225,16 +225,26 @@ def compose_standard_bridge(
     database_path.parent.mkdir(parents=True, exist_ok=True)
     if registry is None:
         registry = build_standard_registry()
-    writer = DatabaseWriter(database_path, registry)
-    # Startup staging GC (m2 plan step 3/4): through the single writer just
-    # constructed, collect live-attempt staging references and remove only
-    # staging directories no live attempt references. No second writer or
-    # write authority is opened; best-effort cleanup never touches the
-    # managed digest tree.
+    from astrid.core.store.ownership import DatabaseOwnerLock, OwnerLockError
+    from astrid.sdk.exceptions import ServiceUnavailableError
+
+    try:
+        owner_lock = DatabaseOwnerLock(database_path)
+    except OwnerLockError as exc:
+        raise ServiceUnavailableError("the database is already owned by another process") from exc
+    writer: DatabaseWriter | None = None
+    try:
+        writer = open_standard_writer(database_path, registry)
+    except Exception as exc:
+        try:
+            owner_lock.release()
+        except Exception:
+            pass
+        raise ServiceUnavailableError(f"failed to open writer: {exc}") from exc
+    # Startup staging GC through the single writer just constructed.
     run_startup_staging_gc(root, writer)
     events = EventAppendService(registry)
     receipts = ReceiptService()
-    projects = ProjectRepository(events=events, receipts=receipts)
     timelines = TimelineRepository(
         events=events, receipts=receipts, projects=projects
     )
@@ -263,7 +273,9 @@ def compose_standard_bridge(
         projects=projects,
         timelines=timelines,
         bridge=bridge,
+        owner_lock=owner_lock,
     )
+
 
 
 __all__: list[str] = [

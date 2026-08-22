@@ -375,7 +375,7 @@ def _discover(project_dir: Path) -> tuple[list[ManagedTimeline], list[str]]:
         try:
             db_path = _derive_db(projects_root)
             if db_path.is_file():
-                conn = _sql.connect(str(db_path))
+                conn = _sql.connect(f"file:{db_path}?mode=ro", uri=True)
                 try:
                     conn.row_factory = _sql.Row
                     row = conn.execute("SELECT json_extract(payload_json,'$.data.timeline_id') as tid, json_extract(payload_json,'$.data.slug') as s FROM events WHERE kind='timeline.created' AND json_extract(payload_json,'$.data.timeline_ulid')=? LIMIT 1", (ulid,)).fetchone()

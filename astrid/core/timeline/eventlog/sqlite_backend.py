@@ -11,8 +11,7 @@ from __future__ import annotations
 import sqlite3
 import uuid
 from pathlib import Path
-from typing import Any, Mapping
-from types import SimpleNamespace
+from typing import Any
 
 from astrid.core.foundation.project_paths import resolve_projects_root
 from astrid.core.integrations.reigh.bridge_service import derive_database_path
@@ -25,7 +24,6 @@ from astrid.core.timeline.events.schema import (
     TimelineEvent,
     generate_event_ulid,
     is_event_ulid,
-    with_event_hash,
 )
 
 from .types import (
@@ -112,7 +110,6 @@ class SqliteEventLogBackend:
         try:
             self._owner_lock = DatabaseOwnerLock(db_path)
         except OwnerLockError as exc:
-            from astrid.sdk.exceptions import ServiceUnavailableError
 
             raise EventLogError(f"database is already owned: {exc}") from exc
         # Also need to handle WriterBusy etc: open_standard_writer will open writer queue
@@ -433,14 +430,11 @@ class SqliteEventLogBackend:
                 created_at=created_at,
             )
             # Persist source provenance in same transaction (W6 columns)
-            try:
-                uow.execute(
-                    "UPDATE events SET source_backend = ?, source_timeline_id = ?, source_event_id = ?, source_version = ?, source_hash = ? WHERE event_id = ?",
-                    (src_backend, src_timeline_id, src_event_id, source_version, src_hash, event_id),
-                )
-            except sqlite3.OperationalError:
-                # If columns missing (pre-migration), ignore — the event still exists
-                pass
+            # Source provenance columns are contractual (migration v3); absence fails closed.
+            uow.execute(
+                "UPDATE events SET source_backend = ?, source_timeline_id = ?, source_event_id = ?, source_version = ?, source_hash = ? WHERE event_id = ?",
+                (src_backend, src_timeline_id, src_event_id, source_version, src_hash, event_id),
+            )
             return project_seq, stream_seq, event_hash, prev_hash
         from astrid.core.events.service import EventIdempotencyError
 
@@ -483,7 +477,7 @@ class SqliteEventLogBackend:
         except (sqlite3.Error, EventLogError, OSError):
             return None
 
-    def read_events(self) -> list[TimelineEvent]:
+    def read_events(self, *, after: str | None = None, limit: int | None = None) -> list[TimelineEvent]:
         sid = _stream_id(self.timeline_id)
         db_path = derive_database_path(self._projects_root)
         conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
@@ -492,8 +486,15 @@ class SqliteEventLogBackend:
             rows = conn.execute("SELECT * FROM events WHERE stream_id = ? ORDER BY seq ASC", (sid,)).fetchall()
         finally:
             conn.close()
-        return [self._event_from_row(r) for r in rows]
-
+        events = [self._event_from_row(r) for r in rows]
+        if after is not None:
+            idx = next((i for i, e in enumerate(events) if e.event_id == after), None)
+            if idx is None:
+                return []
+            events = events[idx + 1 :]
+        if limit is not None:
+            events = events[:limit]
+        return events
     def head(self) -> EventLogHead:
         sid = _stream_id(self.timeline_id)
         db_path = derive_database_path(self._projects_root)
@@ -528,35 +529,34 @@ class SqliteEventLogBackend:
             if stream is None:
                 return EventLogVerification(ok=False, error="unknown stream", checked_events=0, last_event_id=None)
             head_seq = int(stream["head_seq"])
-            rows = conn.execute("SELECT seq, payload_json FROM events WHERE stream_id = ? ORDER BY seq ASC", (sid,)).fetchall()
+            rows = conn.execute("SELECT seq, event_id, payload_json FROM events WHERE stream_id = ? ORDER BY seq ASC", (sid,)).fetchall()
             if len(rows) != head_seq:
                 return EventLogVerification(ok=False, error=f"stream head seq is {head_seq} but {len(rows)} events are stored", checked_events=len(rows), last_event_id=None)
             prev_hash: str | None = None
+            last_verified_id: str | None = None
             for idx, row in enumerate(rows):
                 seq = int(row["seq"])
                 if seq != idx + 1:
-                    return EventLogVerification(ok=False, error=f"gap or reorder: expected seq {idx+1}, found {seq}", checked_events=len(rows), last_event_id=None)
+                    return EventLogVerification(ok=False, error=f"gap or reorder: expected seq {idx+1}, found {seq}", checked_events=idx, last_event_id=last_verified_id)
                 try:
                     payload = parse_json(row["payload_json"])
                 except (CanonicalizationError, ValueError, TypeError) as exc:
-                    return EventLogVerification(ok=False, error=f"payload is not valid JSON at seq {seq}: {exc}", checked_events=len(rows), last_event_id=None)
+                    return EventLogVerification(ok=False, error=f"payload is not valid JSON at seq {seq}: {exc}", checked_events=idx, last_event_id=last_verified_id)
                 if not isinstance(payload, dict):
-                    return EventLogVerification(ok=False, error=f"payload is not an object at seq {seq}", checked_events=len(rows), last_event_id=None)
+                    return EventLogVerification(ok=False, error=f"payload is not an object at seq {seq}", checked_events=idx, last_event_id=last_verified_id)
                 integrity = payload.get("_integrity")
                 if not isinstance(integrity, dict):
-                    return EventLogVerification(ok=False, error=f"missing _integrity at seq {seq}", checked_events=len(rows), last_event_id=None)
+                    return EventLogVerification(ok=False, error=f"missing _integrity at seq {seq}", checked_events=idx, last_event_id=last_verified_id)
                 stored_hash = integrity.get("event_hash")
                 stored_prev = integrity.get("previous_event_hash")
                 if stored_prev != prev_hash:
-                    return EventLogVerification(ok=False, error=f"previous_event_hash mismatch at seq {seq}", checked_events=len(rows), last_event_id=None)
+                    return EventLogVerification(ok=False, error=f"previous_event_hash mismatch at seq {seq}", checked_events=idx, last_event_id=last_verified_id)
                 computed = payload_event_hash(payload)
                 if stored_hash != computed:
-                    return EventLogVerification(ok=False, error=f"event_hash mismatch at seq {seq}", checked_events=len(rows), last_event_id=None)
+                    return EventLogVerification(ok=False, error=f"event_hash mismatch at seq {seq}", checked_events=idx, last_event_id=last_verified_id)
                 prev_hash = stored_hash
-            last_id = None
-            if rows:
-                pass
-            result = EventLogVerification(ok=True, error=None, checked_events=len(rows), last_event_id=last_id)
+                last_verified_id = str(row["event_id"])
+            result = EventLogVerification(ok=True, error=None, checked_events=len(rows), last_event_id=last_verified_id)
         finally:
             conn.close()
         return result
