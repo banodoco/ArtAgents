@@ -56,12 +56,14 @@ Adapter executor manifests declare `kind: external` in their component metadata:
 ```
 
 The `kind: external` field signals to agents and tooling that this capability
-wraps a third-party substrate. The `_capability` block in inspect output
-preserves this:
+wraps a third-party substrate. The `_capability` block in the capability
+inspection output preserves this:
 
-```bash
-python3 -m astrid executors inspect moirae.moirae --json
-# → "_capability": { "kind": "external", ... }
+```python
+import astrid.sdk as sdk
+
+cap = sdk.get_capability("moirae.moirae", kind="executor")
+# → cap["_capability"] == {"kind": "external", ...}
 ```
 
 Key manifest conventions for adapters:
@@ -103,13 +105,15 @@ appropriately. The `run.py` entrypoint should be a thin wrapper that:
 
 ## Discovery
 
-Adapter executors appear in normal search and list output alongside core
-capabilities. Agents can identify them by the `kind: external` field in the
+Adapter executors appear in normal discovery alongside core capabilities.
+Agents can identify them by the `kind: external` field in the
 `_capability` block during inspect:
 
-```bash
-python3 -m astrid executors search runpod --json
-python3 -m astrid executors list --json --pack runpod
+```python
+import astrid.sdk as sdk
+
+caps = sdk.discover(include_installed=False, kind="executor")
+adapter = sdk.get_capability("runpod.provision", kind="executor")
 ```
 
 The search surface treats adapter executors the same as core capabilities —

@@ -141,24 +141,25 @@ def build_pool_cut_cmd(args: argparse.Namespace) -> list[str]:
 
 
 def build_hype_render_cmd(args: argparse.Namespace) -> list[str]:
-    """Build the canonical task-mode facade invocation for Hype renders."""
+    """Build the direct render-facade invocation for Hype renders.
+
+    The ``executors`` gateway family was retired with the task-mode runtime;
+    children now run as guarded module subprocesses with
+    ``ASTRID_INTERNAL_INVOCATION=1`` (see the orchestrator retarget
+    convention).
+    """
 
     cmd = [
         str(args.python_exec),
         "-m",
-        "astrid",
-        "executors",
-        "run",
-        "rendering.render",
+        "astrid.packs.rendering.executors.render.run",
+        "--timeline",
+        str(args.brief_out / "hype.timeline.json"),
+        "--assets",
+        str(args.brief_out / "hype.assets.json"),
         "--out",
         str(args.brief_out),
-        "--input",
-        f"timeline={args.brief_out / 'hype.timeline.json'}",
-        "--input",
-        f"assets_registry={args.brief_out / 'hype.assets.json'}",
     ]
-    if getattr(args, "theme", None):
-        cmd.extend(["--input", f"theme={args.theme}"])
     return add_extra_args(args, "render", cmd)
 
 

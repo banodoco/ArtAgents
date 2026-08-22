@@ -156,6 +156,13 @@ def test_generate_facade_is_lazy_public_surface() -> None:
         # isinstance-based envelope checks (m4 platform lane).
         for module_name, module in popped.items():
             sys.modules[module_name] = module
+        # The fresh re-import also rebound the ``astrid.sdk`` package
+        # attribute to the new module object; restore it to the original
+        # module so attribute-based resolution (getattr chains used by
+        # monkeypatch.setattr targets, product dispatch, and the SDK
+        # surfaces) agrees with sys.modules again.
+        if "astrid.sdk" in popped and popped["astrid.sdk"] is not None:
+            setattr(astrid, "sdk", popped["astrid.sdk"])
 
 
 def test_representative_top_level_submodule_imports_resolve() -> None:
