@@ -1,7 +1,9 @@
 """JSON-Schema-based validator for TimelineConfig.
 
 `strict=False` is the only Sprint 1 mode (SD-015 strict-mode lands Sprint 5).
-This shells through to `jsonschema` against the artifact emitted by Zod.
+This shells through to `jsonschema` against the canonical hand-written
+artifact at python/banodoco_timeline_schema/timeline.schema.json (the sole
+source of truth; generated.ts and generated.py are mirrors of it).
 """
 
 from __future__ import annotations

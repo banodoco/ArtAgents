@@ -5,7 +5,6 @@ PKG := $(CURDIR)
 install:
 	npm install
 	pip install -e python
-	pip install datamodel-code-generator
 
 build:
 	npm run build

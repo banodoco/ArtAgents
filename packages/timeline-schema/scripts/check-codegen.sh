@@ -14,6 +14,7 @@ cd "$PKG_ROOT"
 
 SCHEMA="python/banodoco_timeline_schema/timeline.schema.json"
 GENERATED_TS="typescript/src/generated.ts"
+PYTHON=${PYTHON:-python3}
 
 fail() {
     echo "FATAL: $*" >&2
@@ -29,8 +30,27 @@ if [ "$SIZE" -lt 1000 ]; then
     fail "$SCHEMA is $SIZE bytes (degenerate artifact)"
 fi
 
+# 1b. Stable-$id gate: the artifact must carry a stable $id that stays
+# unchanged against the committed expectation. Renaming the schema's
+# identity silently breaks downstream $ref bases and version tooling.
+EXPECTED_ID=$(cat scripts/expected-schema-id.txt)
+ACTUAL_ID=$("$PYTHON" - "$SCHEMA" <<'EOF'
+import json
+import sys
+
+schema = json.load(open(sys.argv[1]))
+print(schema.get("$id", ""))
+EOF
+)
+if [ -z "$ACTUAL_ID" ]; then
+    fail "$SCHEMA lacks a stable \$id (expected '$EXPECTED_ID')"
+fi
+if [ "$ACTUAL_ID" != "$EXPECTED_ID" ]; then
+    fail "$SCHEMA \$id changed: expected '$EXPECTED_ID', got '$ACTUAL_ID' — update scripts/expected-schema-id.txt only if intentional"
+fi
+echo "artifact: stable \$id '$ACTUAL_ID'"
+
 # 2. Meta-schema validity + required definitions (python + jsonschema).
-PYTHON=${PYTHON:-python3}
 "$PYTHON" - "$SCHEMA" <<'EOF'
 import json
 import sys
@@ -61,11 +81,6 @@ fi
 # 5. The degenerate-artifact guard must trip on a truncated schema.
 TMP_SCHEMA=$(mktemp)
 echo '{"$schema":"http://json-schema.org/draft-07/schema#","type":"object","properties":{},"definitions":{}}' > "$TMP_SCHEMA"
-if node -e "
-const { compile } = require('json-schema-to-typescript');
-" 2>/dev/null; then
-    :
-fi
 # Emulate the guard: feed the tiny schema through the same emit path (the
 # generator itself rejects degenerate artifacts before writing).
 if node --input-type=module -e "
