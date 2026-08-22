@@ -26,7 +26,7 @@ import threading
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any, Callable, ClassVar
 
 # ---------------------------------------------------------------------------
 # Wire constants (frozen contract §2, §9)
@@ -431,7 +431,15 @@ class ReighTaskBridge:
     _MAX_PROGRESS_BYTES = 16 * 1024
     _MAX_ERROR_MESSAGE_CHARS = 4000
 
-    def __init__(self, *, writer: Any, registry: Any, projects_root: Path):
+    def __init__(
+        self,
+        *,
+        writer: Any,
+        registry: Any,
+        projects_root: Path,
+        generation_repo_factory: Callable[[], Any] | None = None,
+        timeline_repo_factory: Callable[[], Any] | None = None,
+    ):
         self._writer = writer
         self._registry = registry
         self._projects_root = Path(projects_root)
@@ -439,6 +447,11 @@ class ReighTaskBridge:
         self._tasks: Any | None = None
         self._media: Any | None = None
         self._receipts: Any | None = None
+        # Pack repositories join the ONE completion unit of work through
+        # factories composed at the serve root (kernel-to-pack boundary:
+        # only ``astrid/core/gateway/dispatch.py`` may import packs).
+        self._generation_repo_factory = generation_repo_factory
+        self._timeline_repo_factory = timeline_repo_factory
 
     # -- lazy kernel wiring (no repository import at module import time) ---
 
@@ -1239,21 +1252,21 @@ class ReighTaskBridge:
         generation_repo = None
         timeline_repo = None
         if generation_request is not None:
-            from astrid.packs.shots.generation_repository import (
-                GenerationRepository,
-            )
-
-            generation_repo = GenerationRepository()
+            if self._generation_repo_factory is None:
+                raise BridgeInternalError(
+                    "output_policy.create_generation requires a composed "
+                    "generation repository factory; compose the task bridge "
+                    "at the serve root with generation_repo_factory"
+                )
+            generation_repo = self._generation_repo_factory()
         if registry_merge is not None:
-            from astrid.core.events.service import EventAppendService
-            from astrid.core.repositories.projects import ProjectRepository
-            from astrid.packs.timeline.repository import TimelineRepository
-
-            timeline_repo = TimelineRepository(
-                events=EventAppendService(self._registry),
-                receipts=_receipts,
-                projects=ProjectRepository(events=None, receipts=None),
-            )
+            if self._timeline_repo_factory is None:
+                raise BridgeInternalError(
+                    "output_policy.timeline_visibility requires a composed "
+                    "timeline repository factory; compose the task bridge "
+                    "at the serve root with timeline_repo_factory"
+                )
+            timeline_repo = self._timeline_repo_factory()
         try:
             result = UnitOfWork(self._writer).run(
                 lambda u: tasks.complete(

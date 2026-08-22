@@ -34,11 +34,32 @@ def task_server(
     """A fully composed serve root: timeline bridge + task bridge."""
     composition = compose_standard_bridge(projects_root)
     from astrid.core.integrations.reigh.bridge_service import ReighTaskBridge
+    from astrid.core.receipts.service import ReceiptService
+
+    def _generation_repo_factory() -> object:
+        from astrid.packs.shots.generation_repository import (
+            GenerationRepository,
+        )
+
+        return GenerationRepository()
+
+    def _timeline_repo_factory() -> object:
+        from astrid.core.events.service import EventAppendService
+        from astrid.core.repositories.projects import ProjectRepository
+        from astrid.packs.timeline.repository import TimelineRepository
+
+        return TimelineRepository(
+            events=EventAppendService(composition.registry),
+            receipts=ReceiptService(),
+            projects=ProjectRepository(events=None, receipts=None),
+        )
 
     task_bridge = ReighTaskBridge(
         writer=composition.writer,
         registry=composition.registry,
         projects_root=composition.projects_root,
+        generation_repo_factory=_generation_repo_factory,
+        timeline_repo_factory=_timeline_repo_factory,
     )
     server = create_local_bridge_server(
         projects_root=projects_root,

@@ -46,30 +46,31 @@ def test_generate_image_rejects_invalid_gpt_image_2_size():
     assert main(["--prompt", "bad size", "--size", "1000x1000", "--dry-run"]) == 2
 
 
-def test_load_api_key_reads_env_by_default(monkeypatch, tmp_path):
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    (tmp_path / ".env").write_text("OPENAI_API_KEY=from-dot-env", encoding="utf-8")
-
-    assert load_api_key("OPENAI_API_KEY") == "from-dot-env"
-
-
-def test_load_api_key_prefers_env_file_over_process_env(monkeypatch, tmp_path):
-    # Contract: a committed .env takes precedence over an exported env var, so a
-    # stale or empty shell value never shadows the key the repo actually carries.
+def test_load_api_key_reads_process_env_by_default(monkeypatch, tmp_path):
+    # Frozen m4 precedence: the process environment is the default tier and a
+    # .env sitting in the working directory is never scavenged.
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("OPENAI_API_KEY", "from-process-env")
     (tmp_path / ".env").write_text("OPENAI_API_KEY=from-dot-env", encoding="utf-8")
 
-    assert load_api_key("OPENAI_API_KEY") == "from-dot-env"
+    assert load_api_key("OPENAI_API_KEY") == "from-process-env"
 
 
-def test_llm_client_key_loader_reads_env(monkeypatch, tmp_path):
+def test_load_api_key_process_env_beats_named_env_file(monkeypatch, tmp_path):
+    # Frozen order: process environment precedes the named env file, so a
+    # stale shell value is the deliberate winner.
     monkeypatch.chdir(tmp_path)
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    (tmp_path / ".env").write_text("ANTHROPIC_API_KEY=from-dot-env", encoding="utf-8")
+    monkeypatch.setenv("OPENAI_API_KEY", "from-process-env")
+    env_file = tmp_path / "keys.env"
+    env_file.write_text("OPENAI_API_KEY=from-dot-env", encoding="utf-8")
 
-    assert _load_api_key(None, "ANTHROPIC_API_KEY") == "from-dot-env"
+    assert load_api_key("OPENAI_API_KEY", env_file=env_file) == "from-process-env"
+
+
+def test_llm_client_key_loader_reads_scoped_credentials(monkeypatch, tmp_path):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "from-process-env")
+
+    assert _load_api_key(None, "ANTHROPIC_API_KEY") == "from-process-env"
 
 
 def test_packs_that_used_generate_image_env_helpers_read_shared_env(monkeypatch, tmp_path):
