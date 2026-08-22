@@ -567,7 +567,11 @@ class ReighTaskBridge:
         if isinstance(priority, bool) or not isinstance(priority, int):
             raise BridgeBodyError("body.priority must be an integer")
         try:
-            entry = resolve_family_capability(family, task_input)
+            entry = resolve_family_capability(
+                family,
+                task_input,
+                projects_root=self._projects_root,
+            )
             if entry.child_only:
                 raise ChildAdmissionForbidden(
                     f"family {family!r} is executor-only; child families "

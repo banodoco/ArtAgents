@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -64,6 +65,8 @@ FAMILY_EDIT_VIDEO_ORCHESTRATOR = "edit_video_orchestrator"
 FAMILY_CHARACTER_ANIMATE = "character_animate"
 FAMILY_KLEIN_EDIT = "klein_edit"
 FAMILY_RENDER_EXPORT = "render_export"
+FAMILY_LOCAL_WORKFLOW = "local.workflow.run"
+"""Generic declared-custom-workflow family (doc 27 §3.3)."""
 
 PUBLIC_FAMILIES: frozenset[str] = frozenset(
     {
@@ -80,9 +83,11 @@ PUBLIC_FAMILIES: frozenset[str] = frozenset(
         FAMILY_EDIT_VIDEO_ORCHESTRATOR,
         FAMILY_CHARACTER_ANIMATE,
         FAMILY_KLEIN_EDIT,
+        FAMILY_LOCAL_WORKFLOW,
         FAMILY_RENDER_EXPORT,
     }
 )
+
 
 WORKER_CHILD_ALLOWLIST: frozenset[str] = frozenset(
     {
@@ -191,6 +196,11 @@ def _require_prompts(input: dict[str, Any]) -> None:
         raise CapabilityInputError("prompts x imagesPerPrompt must be <= 16")
 
 
+def _derive_local_workflow(input: dict[str, Any]) -> str:
+    """``local.workflow.run`` slug derivation (doc 27 §3.3)."""
+    return f"local.{normalize_capability_name(str(input.get('id', '')))}"
+
+
 def _require_non_empty_str(*fields: str) -> Callable[[dict[str, Any]], None]:
     def _validate(input: dict[str, Any]) -> None:
         for name in fields:
@@ -237,6 +247,7 @@ FAMILY_VALIDATORS: dict[str, Callable[[dict[str, Any]], None]] = {
     FAMILY_CHARACTER_ANIMATE: _require_non_empty_str("image_url"),
     FAMILY_KLEIN_EDIT: _require_non_empty_str("image_url", "prompt"),
     FAMILY_RENDER_EXPORT: _require_non_empty_str("timeline_ref"),
+    FAMILY_LOCAL_WORKFLOW: _require_non_empty_str("id"),
 }
 
 #: Family -> capability derivation (doc 27 §3.1 table).
@@ -261,6 +272,10 @@ FAMILY_DERIVATIONS: dict[
     FAMILY_CHARACTER_ANIMATE: _derive_single("reigh.animate_character"),
     FAMILY_KLEIN_EDIT: _derive_single("reigh.flux_klein_edit"),
     FAMILY_RENDER_EXPORT: _derive_single("rendering.timeline_visualize"),
+    # local.<slug> — the derived id resolves against declared custom
+    # workflows at admission time (doc 27 §3.3); the generic static row
+    # below is the fallback capability when no slug is derived.
+    FAMILY_LOCAL_WORKFLOW: _derive_local_workflow,
 }
 
 # ---------------------------------------------------------------------------
@@ -484,6 +499,17 @@ REGISTRY: dict[str, CapabilityEntry] = {
             _policy(create_generation=True),
             child_only=True,
         ),
+        # Generic declared-custom-workflow row (doc 27 §3.3): admission
+        # resolves local.<slug> rows from YAML declarations; both feed the
+        # one generic VibeComfy handler. No template — declared workflows
+        # snapshot their own bytes.
+        CapabilityEntry(
+            "local.workflow.run",
+            FAMILY_LOCAL_WORKFLOW,
+            BINDING_VIBECOMFY,
+            _policy(),
+            required_inputs={"id": str},
+        ),
     )
 }
 
@@ -583,7 +609,9 @@ def load_workflow_snapshot(entry: CapabilityEntry) -> dict[str, Any]:
             entry.capability_id, "entry has no vendored workflow"
         )
     rel_path, expected = entry.template
-    path = _PACKAGE_DIR / rel_path
+    # Declared custom workflows carry absolute paths (doc 27 §3.3);
+    # shipped vendored workflows are package-relative.
+    path = Path(rel_path) if os.path.isabs(rel_path) else _PACKAGE_DIR / rel_path
     try:
         raw = path.read_bytes()
     except OSError as exc:
@@ -599,6 +627,8 @@ def load_workflow_snapshot(entry: CapabilityEntry) -> dict[str, Any]:
             f"{expected}, found {found}",
         )
     return {
+        # The declared template path (relative for vendored workflows,
+        # absolute for declared custom ones) — the admission provenance.
         "path": rel_path,
         "sha256": expected,
         "workflow": json.loads(raw),
@@ -624,6 +654,10 @@ def verify_registry_workflows() -> None:
                 "(path, sha256) pair of non-empty strings"
             )
         rel_path, expected = entry.template
+        # Import-time enforcement covers the vendored in-repo tree only;
+        # declared absolute paths are verified at admission + execution.
+        if os.path.isabs(rel_path):
+            continue
         try:
             raw = (_PACKAGE_DIR / rel_path).read_bytes()
         except OSError as exc:
@@ -655,6 +689,8 @@ def normalize_capability_name(raw: str) -> str:
 def resolve_family_capability(
     family: str,
     input: dict[str, Any],
+    *,
+    projects_root: str | Path | None = None,
 ) -> CapabilityEntry:
     """Derive and validate the one capability for a public family request.
 
@@ -693,6 +729,19 @@ def resolve_family_capability(
         validator(input)
     capability_id = derivation(input)
     entry = REGISTRY.get(capability_id)
+    if entry is None and capability_id.startswith("local."):
+        # Declared custom workflow (doc 27 §3.3): registry-shaped entry
+        # built from the YAML row; admission snapshots + hashes its bytes.
+        from astrid.core.integrations.reigh.local_workflows import (
+            declaration_entry,
+            resolve_local_declaration,
+        )
+
+        declaration = resolve_local_declaration(
+            capability_id, projects_root=projects_root
+        )
+        if declaration is not None:
+            entry = declaration_entry(declaration)
     if entry is None:
         raise CapabilityUnavailable(
             capability_id,

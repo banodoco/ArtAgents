@@ -22,8 +22,10 @@ from astrid.core.integrations.reigh.capabilities import (
     resolve_family_capability,
 )
 
-# The 19 retained flat IDs from doc 16 plus the render capability.
+# The 19 retained flat IDs from doc 16 plus the render capability,
+# plus the generic declared-custom-workflow row (doc 27 §3.3).
 EXPECTED_PUBLIC_IDS = {
+    "local.workflow.run",
     "reigh.wan_2_2_t2i",
     "reigh.qwen_image",
     "reigh.qwen_image_style",
