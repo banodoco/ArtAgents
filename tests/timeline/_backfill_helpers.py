@@ -262,3 +262,38 @@ def marker_json(projects_root: Path) -> dict[str, Any]:
     if not path.is_file():
         return {}
     return _json.loads(path.read_text(encoding="utf-8"))
+
+
+def resolve_project_id(writer: DatabaseWriter, *, slug: str = "proj") -> str:
+    """Resolve the kernel project id for *slug* (read-only).
+
+    The identity-column verifier (round-2 P2#1) compares the stored
+    ``timelines.project_id`` against the project the import targets, so the
+    reusable-checker tests need the resolved id here.
+    """
+    projects, _receipts, _timelines = make_backfill_deps(writer)
+    return projects.resolve(writer, slug)
+
+
+def tamper_event_payload_without_rehash(
+    home: Path, *, index: int, mutate
+) -> str:
+    """Edit one event's payload in ``assembly.jsonl`` WITHOUT recomputing
+    hashes (round-2 P3#5 laundering probe).
+
+    Reproduces the panel scenario: the stored ``hash`` / ``prev_hash`` stay
+    verbatim while the payload changes, so a source that skips chain
+    verification would import the rewritten history as green. ``mutate``
+    receives the parsed payload dict and edits it in place; the event is
+    re-serialized as JSON (line formatting is not load-bearing). Returns the
+    tampered ``event_id``.
+    """
+    import json as _json
+
+    events_path = home / "assembly.jsonl"
+    lines = events_path.read_text(encoding="utf-8").splitlines()
+    raw = _json.loads(lines[index])
+    mutate(raw["payload"])
+    lines[index] = _json.dumps(raw)
+    events_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return str(raw["event_id"])

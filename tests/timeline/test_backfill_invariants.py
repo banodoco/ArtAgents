@@ -52,6 +52,8 @@ from ._backfill_helpers import (
     marker_json,
     marker_state,
     project_root_with_timeline,
+    resolve_project_id,
+    tamper_event_payload_without_rehash,
 )
 
 
@@ -120,7 +122,12 @@ def test_invariants_count_head_kinds_quote_numbers(tmp_path: Path) -> None:
 
 def test_verify_backfill_reusable_checker(tmp_path: Path) -> None:
     report, source, writer, _root, stream_id, _tid = _import(tmp_path)
-    verification = verify_backfill(source, stream_id=stream_id, writer=writer)
+    verification = verify_backfill(
+        source,
+        stream_id=stream_id,
+        project_id=resolve_project_id(writer),
+        writer=writer,
+    )
     assert verification.ok is True
     assert verification.source_event_count == 6
     assert verification.kernel_event_count == 6
@@ -526,7 +533,10 @@ def test_interruption_converges_to_exact_states(tmp_path: Path) -> None:
         }
         assert head_seq(writer, stream_id) == 6
         assert verify_backfill(
-            source, stream_id=stream_id, writer=writer
+            source,
+            stream_id=stream_id,
+            project_id=resolve_project_id(writer),
+            writer=writer,
         ).ok is True
 
         # --- Transition point 2: post-commit/pre-marker crash -------------
@@ -558,7 +568,10 @@ def test_interruption_converges_to_exact_states(tmp_path: Path) -> None:
         assert len(kernel_event_rows(writer, stream_id)) == 6
         assert head_seq(writer, stream_id) == 6
         assert verify_backfill(
-            source, stream_id=stream_id, writer=writer
+            source,
+            stream_id=stream_id,
+            project_id=resolve_project_id(writer),
+            writer=writer,
         ).ok is True
     finally:
         writer.close()
@@ -602,7 +615,10 @@ def test_marker_crash_retry_converges(tmp_path: Path) -> None:
         assert len(kernel_event_rows(writer, stream_id)) == 6
         assert head_seq(writer, stream_id) == 6
         assert verify_backfill(
-            source, stream_id=stream_id, writer=writer
+            source,
+            stream_id=stream_id,
+            project_id=resolve_project_id(writer),
+            writer=writer,
         ).ok is True
     finally:
         writer.close()
@@ -696,7 +712,10 @@ def test_paged_verification_past_ten_thousand_events(tmp_path: Path) -> None:
             ).fetchone()["n"]
         assert kernel_count == event_count
         assert verify_backfill(
-            source, stream_id=stream_id, writer=writer
+            source,
+            stream_id=stream_id,
+            project_id=resolve_project_id(writer),
+            writer=writer,
         ).ok is True
     finally:
         writer.close()
@@ -836,7 +855,10 @@ def test_tampered_document_json_probe_reports_projection_mismatch(
     )
     try:
         verification = verify_backfill(
-            source, stream_id=stream_id, writer=writer
+            source,
+            stream_id=stream_id,
+            project_id=resolve_project_id(writer),
+            writer=writer,
         )
         assert verification.ok is False
         assert any(
@@ -858,6 +880,181 @@ def test_tampered_document_json_probe_reports_projection_mismatch(
         assert "document_json" in str(excinfo.value)
     finally:
         writer.close()
+
+
+# ---------------------------------------------------------------------------
+# P2#1 — bridge-served identity columns (event_stream_id / name / project_id)
+# ---------------------------------------------------------------------------
+
+
+def _assert_identity_tamper_fails_closed(
+    writer, source, stream_id, projects_root, column: str
+) -> None:
+    """Shared P2#1 probe body: tamper one committed identity column, force
+    re-verification -> named mismatch, and assert the re-import fails closed
+    with the same column named (no green report, no marker rewrite)."""
+    verification = verify_backfill(
+        source,
+        stream_id=stream_id,
+        project_id=resolve_project_id(writer),
+        writer=writer,
+    )
+    assert verification.ok is False
+    assert any(
+        column in item and source.timeline_id in item
+        for item in verification.projection_mismatches
+    ), (column, verification.projection_mismatches)
+    projects, receipts, _ = make_backfill_deps(writer)
+    with pytest.raises(BackfillDiscrepancyError) as excinfo:
+        backfill_timeline(
+            writer=writer,
+            projects=projects,
+            receipts=receipts,
+            project_slug="proj",
+            source=source,
+            projects_root=projects_root,
+        )
+    assert column in str(excinfo.value)
+
+
+def test_tampered_event_stream_id_probe_reports_identity_mismatch(
+    tmp_path: Path,
+) -> None:
+    """P2#1 probe: tamper the stored timelines.event_stream_id post-hoc (the
+    bridge serves this column via repository.py:1706); the verifier names
+    the column and the import fails closed. The tamper value is the project's
+    own core.project stream — a real event_streams row, so the kernel FK
+    constraint stays satisfied and the check is exercised, not SQLite."""
+    report, source, writer, projects_root, stream_id, _tid = _import(tmp_path)
+    project_id = resolve_project_id(writer)
+    writer.submit(
+        lambda session: session.execute(
+            "UPDATE timelines SET event_stream_id = ? WHERE id = ?",
+            (f"{project_id}:core.project", source.timeline_id),
+        )
+    )
+    try:
+        _assert_identity_tamper_fails_closed(
+            writer, source, stream_id, projects_root, "event_stream_id"
+        )
+    finally:
+        writer.close()
+
+
+def test_tampered_name_probe_reports_identity_mismatch(tmp_path: Path) -> None:
+    """P2#1 probe: tamper the stored timelines.name post-hoc (the bridge
+    serves it via repository.py:1706); the verifier names the column and the
+    import fails closed."""
+    report, source, writer, projects_root, stream_id, _tid = _import(tmp_path)
+    writer.submit(
+        lambda session: session.execute(
+            "UPDATE timelines SET name = 'CORRUPTED-SERVED-NAME' WHERE id = ?",
+            (source.timeline_id,),
+        )
+    )
+    try:
+        _assert_identity_tamper_fails_closed(
+            writer, source, stream_id, projects_root, "name"
+        )
+    finally:
+        writer.close()
+
+
+def test_tampered_project_id_probe_reports_identity_mismatch(
+    tmp_path: Path,
+) -> None:
+    """P2#1 probe: tamper the stored timelines.project_id post-hoc (the
+    bridge route reads it via repository.py:1706); the verifier names the
+    column and the import fails closed. The tamper value is a second real
+    project row, so the kernel FK constraint stays satisfied."""
+    report, source, writer, projects_root, stream_id, _tid = _import(tmp_path)
+    other_project_id, _other_projects = make_project(
+        writer, slug="other", key="proj-2"
+    )
+    assert other_project_id != resolve_project_id(writer)
+    writer.submit(
+        lambda session: session.execute(
+            "UPDATE timelines SET project_id = ? WHERE id = ?",
+            (other_project_id, source.timeline_id),
+        )
+    )
+    try:
+        _assert_identity_tamper_fails_closed(
+            writer, source, stream_id, projects_root, "project_id"
+        )
+    finally:
+        writer.close()
+
+
+# ---------------------------------------------------------------------------
+# P3#5 — LocalFs sources pass chain verification before ANY use
+# ---------------------------------------------------------------------------
+
+
+def test_local_fs_chain_tamper_rejected_full_lifecycle(tmp_path: Path) -> None:
+    """P3#5 (a): a full-lifecycle local_fs source with one payload edited
+    WITHOUT recomputing its hash is rejected before any event is read —
+    ``source chain invalid`` naming the failing event (the round-2 panel
+    laundering scenario: without this guard the rewrite would import as a
+    fresh valid kernel chain)."""
+    from astrid.packs.timeline.backfill import (
+        BackfillSourceError,
+        load_local_fs_source,
+    )
+
+    projects_root, home, _timeline_id, _ulid = project_root_with_timeline(
+        tmp_path
+    )
+    # The last source event is timeline.custom_note with a raw-dict payload;
+    # edit it in place and leave every hash untouched.
+    tampered_id = tamper_event_payload_without_rehash(
+        home,
+        index=-1,
+        mutate=lambda payload: payload.update({"note": "CORRUPTED-NOTE"}),
+    )
+    with pytest.raises(BackfillSourceError) as excinfo:
+        load_local_fs_source(home)
+    message = str(excinfo.value)
+    assert "source chain invalid" in message
+    assert tampered_id in message
+    assert "hash mismatch" in message
+    assert "checked" in message
+
+
+def test_local_fs_chain_tamper_rejected_slice_shaped(tmp_path: Path) -> None:
+    """P3#5 (b): a slice-shaped source (no timeline.created) with one
+    payload edited without rehash is rejected the same way — the guard is
+    shape-independent."""
+    import json as _json
+
+    from astrid.packs.timeline.backfill import (
+        BackfillSourceError,
+        load_local_fs_source,
+    )
+
+    projects_root = tmp_path / "projects"
+    timelines_dir = projects_root / "proj" / "timelines"
+    timelines_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(
+        DESERT_SLICE, timelines_dir / "01KYPVKMW5STB4W6FE05ED8242"
+    )
+    home = timelines_dir / "01KYPVKMW5STB4W6FE05ED8242"
+    # Tamper a simple numeric payload (clip.retimed duration) without rehash.
+    lines = (home / "assembly.jsonl").read_text(encoding="utf-8").splitlines()
+    index = next(
+        i
+        for i, line in enumerate(lines)
+        if _json.loads(line)["kind"] == "clip.retimed"
+    )
+    tampered_id = tamper_event_payload_without_rehash(
+        home, index=index, mutate=lambda payload: payload.update({"duration": 5.0})
+    )
+    with pytest.raises(BackfillSourceError) as excinfo:
+        load_local_fs_source(home)
+    message = str(excinfo.value)
+    assert "source chain invalid" in message
+    assert tampered_id in message
+    assert "hash mismatch" in message
 
 
 # ---------------------------------------------------------------------------

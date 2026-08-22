@@ -79,8 +79,12 @@ f. the marker is written only after (a)-(e) hold; a failed import writes no
    marker;
 g. projections: stored ``timelines.document_json`` == canonical
    ``source.projected_config`` and stored ``asset_registry_json`` ==
-   canonical ``source.projected_registry["assets"]`` (verify what you
-   serve, W4).
+   canonical ``source.projected_registry["assets"]``, AND the
+   bridge-served identity columns of the same row equal their expected
+   import values — ``project_id`` == the project the import targets,
+   ``event_stream_id`` == the mapped stream id, ``name`` == the
+   source-side identity name (fallback ``timeline_ulid``) (verify what
+   you serve, W4; round-2 P2#1).
 
 Verification placement (W1): the full verifier runs TWICE per fresh import —
 once INSIDE the ``BEGIN IMMEDIATE`` unit of work against the transaction
@@ -188,6 +192,7 @@ from __future__ import annotations
 
 import hashlib
 import sqlite3
+import time
 import uuid
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
@@ -334,7 +339,9 @@ class BackfillVerification:
     hold. ``synthesized_count`` is the number of synthesized bootstrap
     events the expected stream carries (0 or 1; W3), and
     ``projection_mismatches`` carries the W4 column/index details separately
-    so the report can distinguish them.
+    so the report can distinguish them — including the bridge-served
+    identity columns (``project_id`` / ``event_stream_id`` / ``name``,
+    round-2 P2#1).
     """
 
     source_event_count: int
@@ -709,7 +716,9 @@ def load_local_fs_source(
 ) -> BackfillSource:
     """Load and validate one immutable LocalFs source export (read-only).
 
-    Never writes to *timeline_home*: events are read through
+    Never writes to *timeline_home*: the hash chain is verified first
+    (``LocalFsBackend.verify_chain`` — a broken chain fails closed before
+    any event is read, round-2 P3#5), events are read through
     ``LocalFsBackend.read_events`` and the head sidecar is parsed directly
     (see :func:`_read_head_version`). Fail closed on any inconsistency.
     """
@@ -724,6 +733,17 @@ def load_local_fs_source(
     backend = LocalFsBackend(
         timeline_id=source_timeline_id, timeline_home=home
     )
+    # Round-2 P3#5: verify the hash chain BEFORE any event is read into the
+    # source. A payload edited without recomputing its hash must fail closed
+    # here, never laundered into a fresh kernel chain downstream (the same
+    # guard the Supabase-export leg runs in ``_build_supabase_source``).
+    chain = backend.verify_chain()
+    if not chain.ok:
+        detail = chain.error or "unknown chain error"
+        raise BackfillSourceError(
+            f"source chain invalid: {detail} "
+            f"(checked {chain.checked_events} events)"
+        )
     events = tuple(backend.read_events())
     if not events:
         raise BackfillSourceError(
@@ -1244,6 +1264,7 @@ def _verify_on(
     source: BackfillSource,
     *,
     stream_id: str,
+    project_id: str,
     synthesized_events: Sequence[TimelineEvent] = (),
 ) -> BackfillVerification:
     """Run the zero-loss invariants (a),(b),(c),(e),(g) against *reader*.
@@ -1254,7 +1275,10 @@ def _verify_on(
     bootstrap event(s) followed by every source event; expected head is
     ``source.head_version + synthesized_count`` (invariant b, W3).
     ``mismatches`` names every failed check, ``projection_mismatches`` the
-    W4 stored-projection diffs (column + timeline id).
+    W4 stored-projection diffs (column + timeline id) — including the
+    bridge-served identity columns ``project_id`` / ``event_stream_id`` /
+    ``name``, each compared against the expected value the import wrote
+    (round-2 P2#1).
     """
     mismatches: list[str] = []
     projection_mismatches: list[str] = []
@@ -1343,8 +1367,18 @@ def _verify_on(
 
     # (g) verify what you serve (W4): stored whole-document projections vs
     # the source-side projected config/registry, naming column + timeline id.
+    # Round-2 P2#1: the bridge also serves ``project_id``, ``event_stream_id``
+    # and ``name`` from this row (repository.py:1706), so all three identity
+    # columns are verified against the expected import values too — each
+    # mismatch names the column. The expected ``name`` is the source-side
+    # identity value (local_fs: identity sidecar ``display.name``;
+    # supabase_export: the created-event data name), falling back to the
+    # timeline ULID exactly like the import write; the source carries no
+    # project identity of its own, so the kernel ``project_id`` is compared
+    # against the project the import targets (threaded from the caller).
     timeline_row = reader.query_one(
-        "SELECT document_json, asset_registry_json FROM timelines WHERE id = ?",
+        "SELECT project_id, event_stream_id, name, document_json, "
+        "asset_registry_json FROM timelines WHERE id = ?",
         (source.timeline_id,),
     )
     if timeline_row is None:
@@ -1352,6 +1386,22 @@ def _verify_on(
             f"projection: timelines row missing for index {source.timeline_id}"
         )
     else:
+        expected_name = source.name or source.timeline_ulid
+        if str(timeline_row["event_stream_id"]) != stream_id:
+            projection_mismatches.append(
+                f"identity: event_stream_id (index {source.timeline_id}) "
+                f"{timeline_row['event_stream_id']!r} != expected {stream_id!r}"
+            )
+        if str(timeline_row["name"]) != expected_name:
+            projection_mismatches.append(
+                f"identity: name (index {source.timeline_id}) "
+                f"{timeline_row['name']!r} != expected {expected_name!r}"
+            )
+        if str(timeline_row["project_id"]) != project_id:
+            projection_mismatches.append(
+                f"identity: project_id (index {source.timeline_id}) "
+                f"{timeline_row['project_id']!r} != expected {project_id!r}"
+            )
         try:
             stored_document = parse_json(str(timeline_row["document_json"]))
         except CanonicalizationError:
@@ -1392,6 +1442,7 @@ def verify_backfill(
     source: BackfillSource,
     *,
     stream_id: str,
+    project_id: str,
     writer: DatabaseWriter,
     synthesized_events: Sequence[TimelineEvent] = (),
 ) -> BackfillVerification:
@@ -1399,10 +1450,13 @@ def verify_backfill(
 
     Read-only: runs on the writer's transaction-free read-only connection
     and never mutates state. ``mismatches`` names every failed check;
-    ``projection_mismatches`` names the W4 stored-projection diffs.
+    ``projection_mismatches`` names the W4 stored-projection diffs
+    (including the bridge-served identity columns, round-2 P2#1).
     ``synthesized_events`` carries the deterministic bootstrap event(s) the
     expected stream prepends (W3); verification reads the stream via a
     COUNT query plus keyset paging, so there is no 10k cap in this path.
+    ``project_id`` is the project the import targets (the caller resolves
+    it); the stored ``timelines.project_id`` must equal it.
     """
     with writer.read_only_connection() as conn:
         reader = _ConnectionReader(conn)
@@ -1410,6 +1464,7 @@ def verify_backfill(
             reader,
             source,
             stream_id=stream_id,
+            project_id=project_id,
             synthesized_events=synthesized_events,
         )
 
@@ -1651,6 +1706,7 @@ def backfill_timeline(
             verification = verify_backfill(
                 source,
                 stream_id=stream_id,
+                project_id=project_id,
                 writer=writer,
                 synthesized_events=synthesized_events,
             )
@@ -1806,6 +1862,7 @@ def backfill_timeline(
             uow,
             source,
             stream_id=stream_id,
+            project_id=project_id,
             synthesized_events=synthesized_events,
         )
         if not verification.ok:
@@ -1865,6 +1922,7 @@ def backfill_timeline(
     verification = verify_backfill(
         source,
         stream_id=stream_id,
+        project_id=project_id,
         writer=writer,
         synthesized_events=synthesized_events,
     )
@@ -2020,14 +2078,18 @@ def backfill_project(
     (``checkpoint_path_for_run`` / ``write_resumable_checkpoint`` /
     ``read_resumable_checkpoint``): after each successful timeline the
     checkpoint records progress under ``<project>/runs/migrations/<ts>/``,
-    and a resumed run (same ``run_ts``) revalidates the completed prefix
-    instead of skipping it blindly (W2): the CURRENT source
+    and a resumed run (same explicit ``run_ts``) revalidates the completed
+    prefix instead of skipping it blindly (W2): the CURRENT source
     ``events_sha256`` + head are recomputed for every timeline — a marker
     disagreeing with either fails the resume closed with named drift (the
     operator reruns fresh), a matching marker is re-verified read-only, and
     a marker-missing timeline converges through W1.3 (idempotent
     marker completion). A timeline failure aborts the run (fail closed)
-    with the checkpoint left at the last completed timeline.
+    with the checkpoint left at the last completed timeline. When
+    ``run_ts`` is omitted the run gets a collision-safe id (epoch second +
+    short unique suffix, round-2 P3#2) so two runs started in the same
+    second never share one checkpoint dir; pass the same explicit
+    ``run_ts`` to resume a run.
     """
     from astrid.core.timeline.migration import (
         checkpoint_path_for_run,
@@ -2053,8 +2115,21 @@ def backfill_project(
 
     checkpoint_file = None
     if not dry_run:
+        # Round-2 P3#2: a fresh run (no explicit run_ts) gets a
+        # collision-safe id — epoch second + short unique suffix — so two
+        # runs started in the same second never share one checkpoint dir.
+        # Shared dirs let a changed source of the SECOND run enter
+        # resume-drift handling and report the wrong failure class. An
+        # explicit run_ts (resume) is preserved verbatim so the resumed run
+        # reuses its checkpoint. The legacy ``migration.py`` default is
+        # intentionally untouched (zero impact on legacy callers).
+        effective_run_ts = (
+            run_ts
+            if run_ts is not None
+            else f"{int(time.time())}-{uuid.uuid4().hex[:8]}"
+        )
         checkpoint_file = checkpoint_path_for_run(
-            project_slug, root=root, run_ts=run_ts
+            project_slug, root=root, run_ts=effective_run_ts
         )
     completed_prefix = 0
     if checkpoint_file is not None:
@@ -2165,6 +2240,7 @@ def _revalidate_resumed(
     verification = verify_backfill(
         source,
         stream_id=_stream_id(source.timeline_id),
+        project_id=projects.resolve(writer, project_slug),
         writer=writer,
         synthesized_events=synthesized_events,
     )

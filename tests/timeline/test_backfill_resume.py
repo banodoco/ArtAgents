@@ -344,3 +344,56 @@ def test_resume_completes_missing_marker_after_crash(tmp_path: Path) -> None:
         assert marker_state(root1)[tid_a]["events_sha256"]
     finally:
         writer2.close()
+
+
+def test_two_runs_same_second_distinct_checkpoint_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P3#2: two runs constructed within the same second get distinct
+    checkpoint paths. Without the collision-safe run id both runs would
+    share ``runs/migrations/<epoch-second>/`` — the second run would inherit
+    the first's checkpoint, and a changed source would enter resume-drift
+    handling and render the wrong failure class. The clock is pinned so the
+    same-second collision is exercised deterministically."""
+    import astrid.packs.timeline.backfill as backfill_mod
+
+    monkeypatch.setattr(backfill_mod.time, "time", lambda: 1750000000.5)
+
+    root1, db1, tid_a, tid_b, _home_a, _home_b = _build_root(tmp_path, "root1")
+    w = make_writer(db1)
+    try:
+        make_project(w)
+    finally:
+        w.close()
+    writer, projects, receipts = _open(root1, db1)
+    try:
+        reports1 = backfill_project(
+            writer=writer,
+            projects=projects,
+            receipts=receipts,
+            project_slug="proj",
+            projects_root=root1,
+        )
+        reports2 = backfill_project(
+            writer=writer,
+            projects=projects,
+            receipts=receipts,
+            project_slug="proj",
+            projects_root=root1,
+        )
+        assert set(reports1) == {tid_a, tid_b}
+        assert set(reports2) == {tid_a, tid_b}
+        # Distinct run ids: the second run did NOT inherit the first's
+        # checkpoint (no completed-prefix skip — every timeline re-imports
+        # and replays its receipt with zero new rows).
+        assert all(report.replayed for report in reports2.values())
+    finally:
+        writer.close()
+    migrations_root = root1 / "proj" / "runs" / "migrations"
+    checkpoint_dirs = sorted(p.name for p in migrations_root.iterdir())
+    assert len(checkpoint_dirs) == 2, checkpoint_dirs
+    assert checkpoint_dirs[0] != checkpoint_dirs[1]
+    # Both runs landed in the SAME pinned epoch second and still diverge.
+    assert {d.split("-", 1)[0] for d in checkpoint_dirs} == {"1750000000"}
+    for name in checkpoint_dirs:
+        assert (migrations_root / name / "checkpoint.json").is_file()
