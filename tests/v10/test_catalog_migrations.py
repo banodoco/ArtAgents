@@ -14,8 +14,8 @@ another:
 
 Counts are always derived from manifests and the catalog declaration:
 the valid kernel is ``len(CORE_TABLES)`` (14) and the standard composition
-is that kernel plus the packs' declared owned tables (1 timeline + 2 shots +
-3 references). ``20`` is an observation of that derivation, never a universal
+is that kernel plus the packs' declared owned tables (1 timeline + 4 shots +
+3 references). ``22`` is an observation of that derivation, never a universal
 kernel constant, so a core-only database must never claim it.
 """
 
@@ -372,14 +372,14 @@ def test_media_is_kernel_citizenship(core_database, core_registry) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_standard_database_contains_14_plus_1_plus_2_plus_3_tables(
+def test_standard_database_contains_14_plus_1_plus_4_plus_3_tables(
     standard_database,
     standard_registry,
 ) -> None:
     conn, _ = standard_database
     # Counts are derived from the composed registry, not from a fixed "20".
     expected = len(standard_registry.tables)
-    assert expected == len(CORE_TABLES) + 1 + 2 + 3
+    assert expected == len(CORE_TABLES) + 1 + 4 + 3
     assert _table_names(conn) == set(standard_registry.tables)
     assert len(_table_names(conn)) == expected
 
@@ -532,6 +532,8 @@ def test_pack_tables_never_gain_kernel_or_foreign_tables(standard_database) -> N
         "timelines",
         "shots",
         "shot_items",
+        "generations",
+        "generation_variants",
         "project_references",
         "media_references",
         "reference_links",

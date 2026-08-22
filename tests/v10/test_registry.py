@@ -59,8 +59,9 @@ from astrid.packs import (
 )
 
 CORE_TABLE_COUNT = len(CORE_TABLES)
-# 14 kernel + timelines + shots/shot_items + the 3 reference tables.
-STANDARD_TABLE_COUNT = CORE_TABLE_COUNT + 1 + 2 + 3
+# 14 kernel + timelines + shots/shot_items/generations/generation_variants
+# + the 3 reference tables.
+STANDARD_TABLE_COUNT = CORE_TABLE_COUNT + 1 + 4 + 3
 
 
 def _empty_manifest(id_: str = "probe") -> dict:
@@ -165,10 +166,12 @@ def test_standard_composition_derives_20_table_catalog() -> None:
     register_core_vocabulary(registry)
     register_standard_schema_packs(registry)
     frozen = registry.freeze()
-    assert len(frozen.tables) == STANDARD_TABLE_COUNT == 20
+    assert len(frozen.tables) == STANDARD_TABLE_COUNT == 22
     assert frozen.tables["timelines"] == "timeline"
     assert frozen.tables["shots"] == "shots"
     assert frozen.tables["shot_items"] == "shots"
+    assert frozen.tables["generations"] == "shots"
+    assert frozen.tables["generation_variants"] == "shots"
     assert frozen.tables["project_references"] == "references"
     assert frozen.tables["media_references"] == "references"
     assert frozen.tables["reference_links"] == "references"
@@ -1145,13 +1148,13 @@ def test_m3_pack_vocabulary_is_namespaced_and_owned() -> None:
     assert set(all_kinds).isdisjoint(CORE_COMMAND_KINDS)
 
 
-def test_m3_standard_catalog_is_unchanged_at_20_tables() -> None:
-    """Manifest ownership, not DDL: the m3 vocabulary adds no tables."""
+def test_standard_catalog_is_frozen_at_22_tables() -> None:
+    """Manifest ownership, not DDL: pack vocabulary adds no tables."""
     registry = SchemaPackRegistry()
     register_core_vocabulary(registry)
     register_standard_schema_packs(registry)
     frozen = registry.freeze()
-    assert len(frozen.tables) == CORE_TABLE_COUNT + 1 + 2 + 3 == 20
+    assert len(frozen.tables) == CORE_TABLE_COUNT + 1 + 4 + 3 == 22
     assert frozen.tables["project_references"] == "references"
     assert frozen.tables["media_references"] == "references"
     assert frozen.tables["reference_links"] == "references"

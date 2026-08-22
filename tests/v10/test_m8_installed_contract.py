@@ -320,6 +320,7 @@ def test_installed_contract_uses_manifest_runtime_and_migration_evidence(
         ("core", 1),
         ("timeline", 1),
         ("shots", 1),
+        ("shots", 2),
         ("references", 1),
     }
     for evidence in payload["too_new"].values():

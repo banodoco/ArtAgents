@@ -15,8 +15,8 @@ runtime semantics:
   manifest-declared nested-mount parser edges (timelines→shots,
   media→references) recorded as documented composition exemptions — any
   other error fails closed;
-- **forbidden drift rejection**: schema/catalog composition drift (the frozen
-  v10 20-table catalog: kernel 14 + timeline 1 + shots 2 + references 3),
+  **forbidden drift rejection**: schema/catalog composition drift (the frozen
+  v10 catalog: kernel 14 + timeline 1 + shots 4 + references 3 = 22),
   product surface drift (exactly five top-level families, two
   manifest-declared nested mounts, no ``timelines copy`` route), SDK surface
   drift (no public raw runner promises), and sentinel-secret persistence in
@@ -91,11 +91,16 @@ DISPOSITION_SCHEMA = "astrid.reigh_external_gate_disposition.v1"
 # retained m4 evidence artifact for it.
 SENTINEL = "astrid-sentinel-secret-7f3c9d"
 
-# Frozen v10 composition: kernel 14 + timeline 1 + shots 2 + references 3 = 20.
+# Frozen composition: kernel 14 + timeline 1 + shots 4 + references 3 = 22.
+FROZEN_TABLE_COUNT = 22
+"""The frozen standard composition total (core + declared pack tables)."""
+
 FROZEN_CORE_TABLE_COUNT = 14
 FROZEN_PACK_TABLES: dict[str, frozenset[str]] = {
     "timeline": frozenset({"timelines"}),
-    "shots": frozenset({"shots", "shot_items"}),
+    "shots": frozenset(
+        {"shots", "shot_items", "generations", "generation_variants"}
+    ),
     "references": frozenset(
         {"project_references", "media_references", "reference_links"}
     ),
@@ -543,7 +548,7 @@ def _run_authority_lint() -> tuple[bool, list[str], list[str]]:
 
 
 def _check_schema_composition() -> tuple[bool, list[str], dict[str, object]]:
-    """Reject schema/catalog drift from the frozen v10 20-table composition."""
+    """Reject schema/catalog drift from the frozen 22-table composition."""
     violations: list[str] = []
     from astrid.core.migrations.catalog import CORE_TABLES, FORBIDDEN_TABLES
     from astrid.core.schema_packs.manifest import load_schema_pack_manifest
@@ -565,7 +570,13 @@ def _check_schema_composition() -> tuple[bool, list[str], dict[str, object]]:
             continue
         manifest = load_schema_pack_manifest(manifest_path)
         manifest_pack_ids.append(manifest.id)
-        declared.update({table: manifest.id for table in manifest.migrations[0].tables})
+        declared.update(
+            {
+                table: manifest.id
+                for migration in manifest.migrations
+                for table in migration.tables
+            }
+        )
     if tuple(sorted(manifest_pack_ids)) != tuple(sorted(STANDARD_SCHEMA_PACKS)):
         violations.append(
             f"schema-pack drift: found packs {sorted(manifest_pack_ids)} != "
@@ -580,8 +591,10 @@ def _check_schema_composition() -> tuple[bool, list[str], dict[str, object]]:
                 f"pack {pack_id!r} table drift: {sorted(actual)} != {sorted(expected)}"
             )
     total = len(CORE_TABLES) + len(declared)
-    if total != 20:
-        violations.append(f"composition table count {total} != frozen 20")
+    if total != FROZEN_TABLE_COUNT:
+        violations.append(
+            f"composition table count {total} != frozen {FROZEN_TABLE_COUNT}"
+        )
     forbidden_hit = sorted(set(declared) & set(FORBIDDEN_TABLES))
     if forbidden_hit:
         violations.append(
