@@ -139,8 +139,11 @@ def admit_orchestrator_project_run(
         run_root.mkdir(parents=True, exist_ok=True)
         return KernelAdmissionContext(run_id=run_id, run_root=run_root, project_slug=project)
 
-    # Fallback when kernel not available: allocate single ULID (no orphan on replay because replay would have taken early return above)
-    run_id = generate_lowercase_ulid()
-    run_root = root / project / "runs" / run_id
-    run_root.mkdir(parents=True, exist_ok=True)
-    return KernelAdmissionContext(run_id=run_id, run_root=run_root, project_slug=project)
+    # Kernel unavailable with no reconciled run — fail closed (no filesystem ghost).
+    # Every invocation is a kernel run+task; without a kernel run there is
+    # no derived projection to write.
+    from astrid.core.project.run import ProjectRunError
+
+    raise ProjectRunError(
+        f"kernel run unavailable for project {project!r}: database not reachable or project has no kernel row"
+    )

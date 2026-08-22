@@ -593,16 +593,15 @@ def _prepare_project_request(
         raise OrchestratorRunnerError(
             f"--project cannot be combined with passthrough --out for {orchestrator.id}"
         )
-    # Storage-only: ensure an output directory exists for the run's artifacts
+    # No kernel run available and no explicit --out: fail closed.
+    # The unified execution path requires a kernel run for every invocation;
+    # storage-only run directories without a kernel row are not created.
     if request.out in (None, ""):
-        from astrid.core.foundation.project_paths import resolve_projects_root
-        from astrid.core.ids import generate_lowercase_ulid
+        from astrid.core.project.run import ProjectRunError
 
-        projects_root = resolve_projects_root(request.projects_root)
-        run_id = generate_lowercase_ulid()
-        run_root = projects_root / request.project / "runs" / run_id
-        run_root.mkdir(parents=True, exist_ok=True)
-        return None, _request_with_effective_out(request, orchestrator, run_root)
+        raise ProjectRunError(
+            f"orchestrator {orchestrator.id!r} requires --out or a kernel run"
+        )
     return None, request
 
 def _orchestrator_requires_output_path(orchestrator: OrchestratorDefinition) -> bool:
