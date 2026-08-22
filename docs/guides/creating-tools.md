@@ -66,11 +66,15 @@ previous one cannot satisfy the request.
    (existing + new) and may call other orchestrators. Executors must not call
    orchestrators.
 
-When an orchestrator needs to drive kernel tasks, admit them through the
-`tasks` family (`python3 -m astrid tasks create --project <p> --capability
-<id> --spec '{...}'`) for capabilities that ship a task-mode adapter
-(`astrid.core.task_executor` `TaskHandler`); every other capability runs
-direct-mode through `astrid.sdk.invoke`. The legacy task-mode plan schema
+When an orchestrator needs child work, use one of two supported shapes.
+**Direct-mode child invocation**: call the capability through
+`astrid.sdk.invoke` — it runs via the executor runner and records the
+filesystem `run.json` ledger; this is the path every shipped surface uses
+today. **Task-mode adapter**: ship an `astrid.core.task_executor`
+`TaskHandler` so the capability can be admitted into the kernel
+(`python3 -m astrid tasks create --project <p> --capability <id> --spec '{...}'`);
+that adapter path is wired only by the test suites today — there is no
+shipped driver that executes an admitted task. The legacy task-mode plan schema
 (`plan.json`, `plan_initialized`, `plan_mutated`, step adapters, `repeat`
 loops, `remote-artifact` leaves) was retired with the task-mode runtime and
 must not be authored.

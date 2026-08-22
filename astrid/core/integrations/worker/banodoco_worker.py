@@ -236,9 +236,12 @@ def _worker_append_events(
     :func:`astrid.core.timeline.kernel_binding.kernel_timeline_writer_for`
     wrapper). When it binds, the gateway commits the kernel
     ``timeline.replace_config`` receipt BEFORE the eventlog append (no
-    kernel/eventlog divergence); when it returns ``None`` (no kernel
-    project/timeline, or the kernel DB is owned by another process) the
-    documented eventlog-only escape applies.
+    kernel/eventlog divergence); when it returns ``None`` (absent kernel DB,
+    project, or timeline) the documented eventlog-only escape applies. When
+    the kernel DB exists but is lock-held by another process, resolution
+    raises
+    :class:`~astrid.core.timeline._edit_helpers.TimelineEditError`
+    (fail-closed) rather than falling back to eventlog-only writes.
 
     Returns:
         int: Event-stream version after appends (used as ``config_version``

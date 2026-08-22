@@ -1,14 +1,29 @@
 # Run Ledger Contract — M2
 
-## Invariant
+Astrid has **two genuinely separate ledgers**:
 
-**Every Astrid execution that is not an explicitly documented exemption produces
-exactly one truthful ledger entry in exactly one project.**
+1. **FS ledger** — the filesystem record `<project>/runs/<run_id>/run.json`,
+   written by direct-mode executor/orchestrator runs via
+   `prepare_project_run` / `finalize_project_run`
+   (`astrid/core/project/run.py`). The invariant below scopes to this ledger.
+2. **Kernel ledger** — `runs`/`tasks`/`events` rows in the kernel database,
+   created by kernel fan-out (`RunRepository.create`), task-mode adapter
+   execution (test-wired only today), and migration import. See
+   "Kernel ledger" below.
+
+There is no automatic bridge between them; see "Two-ledger relationship".
+
+## Invariant (FS ledger)
+
+**Every direct-mode Astrid execution that is not an explicitly documented
+exemption produces exactly one truthful `run.json` entry in exactly one
+project.**
 
 "Truthful" means the entry records the actual tool invoked, the actual status
 the run reached, and the actual outputs produced (or a manifest pointer to
 them). "Exactly one" means no run is invisible (unledgered) and no run produces
-duplicate entries.
+duplicate entries. This invariant covers the FS ledger only; it makes no claim
+about kernel `runs`/`tasks`/`events` rows.
 
 ---
 
@@ -18,15 +33,52 @@ The project run directory carries three record kinds with distinct roles:
 
 | Record | Role | Writer | Status authority for runs? |
 |---|---|---|---|
-| `run.json` | **Ledger entry** — identity, status, provenance, pointer to outputs, metadata | `prepare_project_run` / `finalize_project_run` (`astrid/core/project/run.py`) | **Yes** — canonical status for executor, orchestrator, and scratch runs |
+| `run.json` | **FS ledger entry** — identity, status, provenance, pointer to outputs, metadata; this is the direct-mode ledger | `prepare_project_run` / `finalize_project_run` (`astrid/core/project/run.py`) | **Yes** for direct-mode runs — status authority for executor, orchestrator, and scratch runs recorded on the FS |
 | `manifest.json` | **Executor self-description** — rich detail (parameters, per-output metadata, cost, timings) | Individual generation executors (`generate_image`, `generate_video`, `generate_image_openai`) | No — already well-structured; left alone by M2 |
 | `events.jsonl` | **Task-mode process log** | Task-run driver (hype pipeline steps, operator actions) | For task runs only — executor/orchestrator runs do not produce this file |
 
 **Key distinction**: `events.jsonl` is _not_ a parallel status authority for
-executor runs. The `run.json` status field is the single source of truth for
-every non-task run. Readers that today derive status exclusively from
+executor runs. Within the FS ledger, the `run.json` status field is the
+single source of truth for every direct-mode non-task run. Readers that
+today derive status exclusively from
 `events.jsonl` must fall back to `run.json.status` when `events.jsonl` is
 absent — otherwise executor runs appear "in-flight" forever.
+
+---
+
+## Kernel ledger
+
+A second, independent ledger lives in the kernel database as `runs`,
+`tasks`, and `events` rows. Rows are created only through the kernel
+fan-out path:
+
+- **Kernel fan-out**: `RunRepository.create` registers a kernel run row
+  (plus task/event rows where applicable).
+- **Task-mode adapter execution**: capabilities driven by an
+  `astrid.core.task_executor` `TaskHandler` write kernel `tasks`/`runs`/
+  `events` rows. Today only the test suites wire those adapters; there is
+  no shipped command that executes an admitted kernel task.
+- **Migration import**: legacy pre-kernel data imported by the scripts in
+  `scripts/migrations/v10/`.
+
+Kernel rows carry their own status lifecycle. They are never derived from,
+mirrored into, or synchronized with any `run.json`.
+
+## Two-ledger relationship
+
+- Direct-mode invokes (`astrid.sdk.invoke`, typed facades such as
+  `astrid.generate.*`) write **only** the FS ledger. They do not create
+  kernel rows.
+- Kernel rows exist **only** via kernel fan-out (`RunRepository.create`),
+  task-mode adapter execution, or migration import. They never produce a
+  `run.json`.
+- There is **no automatic bridge**: no reconciler copies statuses, ids, or
+  artifacts between the ledgers, and nothing enforces agreement between
+  them.
+- Cross-ledger consistency is **by convention** — callers reuse the same
+  project slug and, where present, the same run ids on both sides — not
+  enforced by code. Readers must not assume a kernel row and a `run.json`
+  describing the same work exist together or agree.
 
 ---
 

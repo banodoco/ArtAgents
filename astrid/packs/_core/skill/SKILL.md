@@ -173,11 +173,14 @@ services). See [docs/reference/sdk.md](../../../../docs/reference/sdk.md).
 Packs integrate with the kernel in one of two ways:
 
 - **Task-mode adapters** — a pack ships a `task_adapter.py` implementing the
-  kernel `TaskHandler` protocol (`astrid.core.task_executor`). The capability
-  then runs as a fenced kernel task: admit it with
-  `python3 -m astrid tasks create --project <p> --capability <id> --spec '{...}'`
-  and track it through the `tasks`/`runs` families. Today:
-  `rendering.timeline_visualize` and `generation.generate_image`.
+  kernel `TaskHandler` protocol (`astrid.core.task_executor`). Kernel task
+  admission exists (the `tasks` CLI family and SDK `client.tasks.create`) and
+  admitted tasks are tracked through the kernel `tasks`/`runs`/`events`
+  tables, but execution is driven by a task-mode adapter, and today only the
+  test suites wire adapters (`rendering.timeline_visualize`,
+  `generation.generate_image`) — no shipped command executes an admitted
+  task. Direct capability runs go through the executor runner below and are
+  recorded in the filesystem `run.json` ledger.
 - **Direct-mode executors** — a file-only `run.py` invoked through the SDK
   runner (subprocess, `ASTRID_INTERNAL_INVOCATION=1`). Every executor with a
   `runtime_module` works this way; outputs are file-based and returned in the

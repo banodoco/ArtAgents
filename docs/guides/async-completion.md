@@ -8,8 +8,11 @@
 
 The current surface is the eight-family CLI (projects, timelines, media,
 tasks, runs, serve, doctor, backup) plus the SDK. Kernel tasks admitted via
-`python3 -m astrid tasks create` are executed by pack-owned task-mode
-adapters through `astrid.core.task_executor` (fenced attempts, staging
-transactions, universal result manifests) — there is no interactive
-`next`/`ack` loop. See [CLI journeys](cli-journeys.md) and
+`python3 -m astrid tasks create` are admitted and tracked in the kernel
+`runs`/`tasks`/`events` tables only. Executing an admitted task requires a
+task-mode adapter driver (`astrid.core.task_executor`); today only the test
+suites wire such drivers — there is no shipped command that executes an
+admitted task. Direct-mode invocation (`astrid.sdk.invoke`) runs a
+capability immediately and records the filesystem `run.json` ledger instead.
+See [CLI journeys](cli-journeys.md) and
 [docs/reference/sdk.md](../reference/sdk.md) for the supported flows.
