@@ -1027,6 +1027,7 @@ class RunningBridge:
 
     process: subprocess.Popen[str]
     base_url: str
+    request_token: str
     stdout_path: Path
     stderr_path: Path
     command: tuple[str, ...]
@@ -1152,9 +1153,15 @@ def _installed_bridge(
         )
         match = _READY_RE.search(ready_line)
         assert match, ready_line
+        # The launcher delivers the per-boot request token out of band
+        # (doc 27 §4.7.2); the app reads it from the managed root exactly
+        # as here before issuing mutations.
         yield RunningBridge(
             process=process,
             base_url=f"http://127.0.0.1:{match.group(1)}",
+            request_token=(
+                harness.roots.project / ".astrid" / "request-token"
+            ).read_text(encoding="utf-8").strip(),
             stdout_path=stdout_path,
             stderr_path=stderr_path,
             command=command,
@@ -1179,10 +1186,14 @@ def _http_request(
     body: dict[str, Any] | None = None,
     headers: dict[str, str] | None = None,
 ) -> tuple[int, dict[str, str], bytes]:
+    request_headers = dict(headers or {})
+    if method not in ("GET", "HEAD", "OPTIONS"):
+        # Local-trust posture (doc 27 §4.7): mutations carry the boot token.
+        request_headers["X-Astrid-Request-Token"] = bridge.request_token
     request = urllib.request.Request(
         bridge.base_url + path,
         data=(json.dumps(body).encode("utf-8") if body is not None else None),
-        headers=headers or {},
+        headers=request_headers,
         method=method,
     )
     try:
