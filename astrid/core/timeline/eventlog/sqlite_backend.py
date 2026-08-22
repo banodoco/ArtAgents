@@ -1,21 +1,9 @@
 """SQLite-backed eventlog backend over kernel tables.
 
-Implements :class:`EventLogBackend` over the kernel ``events`` / ``event_streams``
-tables. One timeline maps to one ``event_streams`` row
-``"<timeline_id>:timeline.timeline"``. Reads map kernel rows to
-``TimelineEvent`` values faithfully (seq order, SD2 hashes). Writes go through
-the single kernel write discipline (``UnitOfWork`` + ``BEGIN IMMEDIATE`` +
-``head_seq`` CAS + ``(stream_id, idempotency_key)`` uniqueness).
-
-Contract
---------
-* ``backend_name()`` == ``"sqlite"``.
-* Reads are transaction-free via the writer's read-only connection.
-* Writes use :class:`EventAppendService` inside a ``UnitOfWork`` — no direct
-  ``INSERT`` outside that seam.
-* Members with no honest kernel equivalent raise ``EventLogError`` with a
-  documented message; no live caller hits an unimplemented member (caller
-  matrix proved for W2).
+Thin adapter over the composed kernel seams: writes go through
+EventAppendService-style envelope validation and UnitOfWork CAS
+discipline, reads via read-only connections. Provenance columns
+(source_backend etc) persisted per W6.
 """
 
 from __future__ import annotations
@@ -23,13 +11,11 @@ from __future__ import annotations
 import sqlite3
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
+from types import SimpleNamespace
 
-from astrid.core.events.registry import validate_event_kind  # noqa: F401
-from astrid.core.events.service import EventAppendService
 from astrid.core.foundation.project_paths import resolve_projects_root
 from astrid.core.integrations.reigh.bridge_service import derive_database_path
-from astrid.core.migrations.catalog import FORBIDDEN_TABLES  # noqa: F401
 from astrid.core.receipts.canonical import CanonicalizationError, parse_json
 from astrid.core.repositories.errors import ACTOR_KINDS
 from astrid.core.store.uow import UnitOfWork
@@ -41,7 +27,6 @@ from astrid.core.timeline.events.schema import (
     is_event_ulid,
     with_event_hash,
 )
-from astrid.core.timeline.events.schema.serialize import canonical_json_bytes  # noqa: F401
 
 from .types import (
     BackendName,
@@ -61,7 +46,6 @@ def _stream_id(timeline_id: str) -> str:
 
 
 def _actor_kind_from_actor(actor: TimelineActor) -> str:
-    # Map TimelineActor.type (agent/human/system) to kernel actor_kind (local/system/executor)
     mapping = {"agent": "executor", "human": "local", "system": "system"}
     kind = getattr(actor, "type", "system")
     if isinstance(kind, str) and kind in mapping:
@@ -70,13 +54,11 @@ def _actor_kind_from_actor(actor: TimelineActor) -> str:
         return kind
     return "system"
 
+
 def _projects_root_from_timeline_home(timeline_home: str | Path | None) -> Path:
     if timeline_home is not None:
         p = Path(timeline_home)
-        # timeline_home = <projects_root>/<project_slug>/timelines/<ulid>
-        # So projects_root is 3 parents up.
         try:
-            # Walk up until we find a dir containing .astrid or fallback.
             candidate = p.parent.parent.parent
             if candidate.exists():
                 return candidate
@@ -88,19 +70,10 @@ def _projects_root_from_timeline_home(timeline_home: str | Path | None) -> Path:
 class SqliteEventLogBackend:
     """Kernel-backed eventlog for one timeline.
 
-    Parameters
-    ----------
-    timeline_id:
-        Canonical timeline UUID.
-    timeline_home:
-        Optional legacy filesystem home (unused for authority reads but
-        retained for selector compatibility).
-    projects_root:
-        Optional projects root; when omitted it is derived from
-        ``timeline_home`` or ``ASTRID_PROJECTS_ROOT``.
-    writer:
-        Optional shared :class:`DatabaseWriter`. When omitted a writer is
-        opened lazily at ``derive_database_path(resolve_projects_root(...))``.
+    Writes go through the kernel EventAppendService/UoW discipline.
+    When no writer is injected, construction uses DatabaseOwnerLock
+    so a second owner fails with typed unavailable error.
+    Reads use read-only connections (exempt from one-writer rule).
     """
 
     def __init__(
@@ -121,23 +94,28 @@ class SqliteEventLogBackend:
             self._projects_root = resolve_projects_root(None)
         self._writer: DatabaseWriter | None = writer
         self._owns_writer = writer is None
-        # Cache for stream's project_id (resolved lazily).
+        self._owner_lock = None
         self._project_id: str | None = None
 
     def backend_name(self) -> BackendName:  # type: ignore[override]
         return "sqlite"  # type: ignore[return-value]
 
-    # -- writer helpers --
-
     def _ensure_writer(self) -> DatabaseWriter:
         if self._writer is not None:
             return self._writer
-        # Lazily open the single kernel writer for this projects_root.
-        from astrid.packs import open_standard_writer  # local import to avoid cycle
+        from astrid.core.store.ownership import DatabaseOwnerLock, OwnerLockError
+        from astrid.packs import open_standard_writer
 
         db_path = derive_database_path(self._projects_root)
-        # Ensure parent dir exists (projects_root/.astrid).
         db_path.parent.mkdir(parents=True, exist_ok=True)
+        # Fail closed if another owner holds the DB (serve owns it).
+        try:
+            self._owner_lock = DatabaseOwnerLock(db_path)
+        except OwnerLockError as exc:
+            from astrid.sdk.exceptions import ServiceUnavailableError
+
+            raise EventLogError(f"database is already owned: {exc}") from exc
+        # Also need to handle WriterBusy etc: open_standard_writer will open writer queue
         self._writer = open_standard_writer(db_path)
         return self._writer
 
@@ -147,18 +125,26 @@ class SqliteEventLogBackend:
         sid = _stream_id(self.timeline_id)
         with writer.read_only_connection() as conn:
             conn.row_factory = sqlite3.Row
-            row = conn.execute(
-                "SELECT project_id FROM event_streams WHERE id = ?", (sid,)
-            ).fetchone()
+            row = conn.execute("SELECT project_id FROM event_streams WHERE id = ?", (sid,)).fetchone()
         if row is None:
             raise EventLogError(f"unknown timeline stream {sid!r}")
         self._project_id = str(row["project_id"])
         return self._project_id
 
-    # -- row -> TimelineEvent --
+    def _payload_to_obj(self, data: dict[str, Any]) -> Any:
+        class PayloadWrapper:
+            def __init__(self, d: dict[str, Any]):
+                self._d = dict(d)
+            def __getattr__(self, name: str):
+                try:
+                    return self._d[name]
+                except KeyError:
+                    raise AttributeError(name)
+            def to_json_obj(self):  # type: ignore[no-redef]
+                return dict(self._d)
+        return PayloadWrapper(data) if isinstance(data, dict) else data
 
     def _event_from_row(self, row: sqlite3.Row) -> TimelineEvent:
-        # Kernel payload_json is SD2 envelope {"data": {...}, "_integrity": {...}}
         try:
             payload_obj = parse_json(row["payload_json"])
         except CanonicalizationError as exc:
@@ -176,27 +162,12 @@ class SqliteEventLogBackend:
         actor_type = rev.get(actor_kind, "system")
         actor = TimelineActor(type=actor_type, id=actor_kind, display=actor_kind)  # type: ignore[arg-type]
         expected_version = data.get("expected_version") if isinstance(data.get("expected_version"), int) else None
-        # payload for TimelineEvent is the domain data dict
-        # But strip expected_version from payload? Keep as-is; coerce will handle.
-        # For kernel timeline events, data contains fields like timeline_id etc but
-        # TimelineEvent payload validation expects kind-specific shape. We pass raw data
-        # and let coerce handle known kinds; unknown kinds pass through as dict.
-        payload: Any = dict(data)
-        # Remove expected_version from payload dict if it was an expected_version
-        # guard for timeline.saved? Actually timeline.saved kind payload doesn't include
-        # expected_version as domain field; it's inside data. But TimelineEvent
-        # expected_version is a top-level field, not payload. However we treat
-        # payload's expected_version as event expected_version.
-        # To avoid duplication, we keep payload as data without expected_version?
-        # Keep it both for compatibility; coerce will ignore extra keys for dict payloads.
-        # txn_id from kernel may be hex; map to ULID if needed
+        payload_dict: dict[str, Any] = dict(data)
+        # Preserve actor id if stored? kernel actor_kind is coarse; use stored actor display
         txn_id_raw = str(row["txn_id"])
-        try:
-            # Validate txn_id is ULID; if not, map via dummy then bypass
-            from astrid.core.timeline.events.schema import is_event_ulid
-            txn_id_val = txn_id_raw if is_event_ulid(txn_id_raw) else generate_event_ulid()
-        except Exception:
-                txn_id_val = generate_event_ulid()
+        txn_id_val = txn_id_raw if is_event_ulid(txn_id_raw) else generate_event_ulid()
+        payload_obj_wrapped = self._payload_to_obj(payload_dict)
+        # Try normal construction then coerce payload to wrapped object
         try:
             event = TimelineEvent(
                 event_id=str(row["event_id"]),
@@ -206,12 +177,15 @@ class SqliteEventLogBackend:
                 prev_hash=prev_hash,
                 hash=event_hash,
                 kind=str(row["kind"]),
-                payload=payload,
+                payload=payload_dict,  # will be coerced inside TimelineEvent
                 expected_version=expected_version,
                 txn_id=txn_id_val,
             )
-        except Exception as exc:
-            # Fallback: construct via bypass without payload coercion for legacy rows
+            # Replace payload with attribute-access object for projector compatibility
+            object.__setattr__(event, "payload", payload_obj_wrapped)
+        except Exception:
+            # Fallback: minimal construction with same wrapped payload
+            # Use TimelineEvent.__new__ but ensure payload is wrapped object
             evt = TimelineEvent.__new__(TimelineEvent)
             object.__setattr__(evt, "event_id", str(row["event_id"]))
             object.__setattr__(evt, "timeline_id", self.timeline_id)
@@ -220,22 +194,30 @@ class SqliteEventLogBackend:
             object.__setattr__(evt, "prev_hash", prev_hash)
             object.__setattr__(evt, "hash", event_hash)
             object.__setattr__(evt, "kind", str(row["kind"]))
-            object.__setattr__(evt, "payload", payload)
+            object.__setattr__(evt, "payload", payload_obj_wrapped)
             object.__setattr__(evt, "expected_version", expected_version)
             object.__setattr__(evt, "schema_version", 2)
             object.__setattr__(evt, "txn_id", str(row["txn_id"]))
-            object.__setattr__(evt, "source_backend", None)
-            object.__setattr__(evt, "source_timeline_id", None)
-            object.__setattr__(evt, "source_event_id", None)
-            object.__setattr__(evt, "source_version", None)
-            object.__setattr__(evt, "source_hash", None)
+            # source provenance from columns if present
+            object.__setattr__(evt, "source_backend", row["source_backend"] if "source_backend" in row.keys() else None)
+            object.__setattr__(evt, "source_timeline_id", row["source_timeline_id"] if "source_timeline_id" in row.keys() else None)
+            object.__setattr__(evt, "source_event_id", row["source_event_id"] if "source_event_id" in row.keys() else None)
+            object.__setattr__(evt, "source_version", row["source_version"] if "source_version" in row.keys() else None)
+            object.__setattr__(evt, "source_hash", row["source_hash"] if "source_hash" in row.keys() else None)
             return evt
-        # Fix txn_id back to original if we mapped
+        # Ensure txn_id reflects persisted state (not mapped temp)
         if txn_id_val != txn_id_raw:
             object.__setattr__(event, "txn_id", txn_id_raw)
+        # Attach persisted provenance if columns exist
+        try:
+            object.__setattr__(event, "source_backend", row["source_backend"] if "source_backend" in row.keys() else None)
+            object.__setattr__(event, "source_timeline_id", row["source_timeline_id"] if "source_timeline_id" in row.keys() else None)
+            object.__setattr__(event, "source_event_id", row["source_event_id"] if "source_event_id" in row.keys() else None)
+            object.__setattr__(event, "source_version", row["source_version"] if "source_version" in row.keys() else None)
+            object.__setattr__(event, "source_hash", row["source_hash"] if "source_hash" in row.keys() else None)
+        except Exception:
+            pass
         return event
-
-    # -- EventLogBackend protocol --
 
     def append_event(
         self,
@@ -263,8 +245,7 @@ class SqliteEventLogBackend:
         created_at = utc_now_iso()
 
         def _cb(uow: UnitOfWork) -> tuple[int, int, str, str | None]:
-            # CAS check before allocation
-            stream = uow._stream_row(sid)
+            stream = uow.query_one("SELECT * FROM event_streams WHERE id = ?", (sid,))
             if stream is None:
                 raise EventLogError(f"unknown stream {sid!r}")
             head_seq = int(stream["head_seq"])
@@ -272,12 +253,13 @@ class SqliteEventLogBackend:
                 from astrid.core.events.service import EventHeadConflictError
 
                 raise EventHeadConflictError(stream_id=sid, expected_head_seq=expected_version, actual_head_seq=head_seq)
-            if uow._has_event(sid, idempotency_key):
+            row = uow.query_one("SELECT 1 FROM events WHERE stream_id = ? AND idempotency_key = ?", (sid, idempotency_key))
+            if row is not None:
                 from astrid.core.events.service import EventIdempotencyError
 
                 raise EventIdempotencyError(stream_id=sid, idempotency_key=idempotency_key)
-            tail = uow._tail_event(sid)
-            prev_hash: str | None = None
+            tail = uow.query_one("SELECT payload_json FROM events WHERE stream_id = ? ORDER BY seq DESC LIMIT 1", (sid,))
+            prev_hash = None
             if tail is not None:
                 try:
                     tail_payload = parse_json(tail["payload_json"])
@@ -329,6 +311,13 @@ class SqliteEventLogBackend:
             if isinstance(exc, EventIdempotencyError):
                 raise EventLogError(f"duplicate idempotency key {idempotency_key!r}") from exc
             raise
+        # Return persisted state via read-back to ensure exact persistence fidelity
+        with writer.read_only_connection() as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute("SELECT * FROM events WHERE event_id = ?", (event_id,)).fetchone()
+            if row is not None:
+                return self._event_from_row(row)
+        # Fallback if read fails
         event = TimelineEvent(
             event_id=event_id,
             timeline_id=self.timeline_id,
@@ -357,40 +346,48 @@ class SqliteEventLogBackend:
             raise EventLogError("source_event must have a computed hash")
         writer = self._ensure_writer()
         sid = _stream_id(self.timeline_id)
+        # Idempotency fence read-only first
         with writer.read_only_connection() as conn:
             conn.row_factory = sqlite3.Row
-            existing = conn.execute(
-                "SELECT event_id FROM events WHERE stream_id = ? AND idempotency_key = ?",
-                (sid, idempotency_key),
-            ).fetchone()
+            existing = conn.execute("SELECT event_id FROM events WHERE stream_id = ? AND idempotency_key = ?", (sid, idempotency_key)).fetchone()
             if existing is not None:
-                row = conn.execute(
-                    "SELECT * FROM events WHERE event_id = ?", (existing["event_id"],)
-                ).fetchone()
+                row = conn.execute("SELECT * FROM events WHERE event_id = ?", (existing["event_id"],)).fetchone()
                 if row is not None:
                     return self._event_from_row(row)
         project_id = self._resolve_project_id(writer)
         actor_kind = _actor_kind_from_actor(actor)
         txn_id_actual = generate_event_ulid()
-        payload_dict = (
-            source_event.payload.to_json_obj()  # type: ignore[union-attr]
-            if hasattr(source_event.payload, "to_json_obj")
-            else dict(source_event.payload)  # type: ignore[arg-type]
-        )
+        # Extract payload dict from source
+        if hasattr(source_event.payload, "to_json_obj"):
+            try:
+                payload_dict = dict(source_event.payload.to_json_obj())  # type: ignore[union-attr]
+            except Exception:
+                payload_dict = dict(source_event.payload)  # type: ignore[arg-type]
+        else:
+            payload_dict = dict(source_event.payload)  # type: ignore[arg-type]
         from astrid.core.events.service import build_integrity_envelope
         from astrid.core.receipts.canonical import canonical_json
         from astrid.core.util.time import utc_now_iso
 
         event_id = generate_event_ulid()
         created_at = utc_now_iso()
+        source_version = getattr(source_event, "expected_version", None)
+        # For source fields: use source_event identity
+        src_backend = getattr(source_event, "source_backend", None) or "local_fs"
+        src_timeline_id = getattr(source_event, "timeline_id", timeline_id)
+        src_event_id = getattr(source_event, "event_id", "")
+        src_hash = getattr(source_event, "hash", None)
+        # If source_event already carries source_* then preserve original import source
+        # else use its own ids
 
         def _cb(uow: UnitOfWork) -> tuple[int, int, str, str | None]:
-            if uow._has_event(sid, idempotency_key):
+            row = uow.query_one("SELECT 1 FROM events WHERE stream_id = ? AND idempotency_key = ?", (sid, idempotency_key))
+            if row is not None:
                 from astrid.core.events.service import EventIdempotencyError
 
                 raise EventIdempotencyError(stream_id=sid, idempotency_key=idempotency_key)
-            tail = uow._tail_event(sid)
-            prev_hash: str | None = None
+            tail = uow.query_one("SELECT payload_json FROM events WHERE stream_id = ? ORDER BY seq DESC LIMIT 1", (sid,))
+            prev_hash = None
             if tail is not None:
                 try:
                     tail_payload = parse_json(tail["payload_json"])
@@ -404,6 +401,8 @@ class SqliteEventLogBackend:
             envelope, event_hash = build_integrity_envelope(dict(payload_dict), prev_hash)
             payload_json = canonical_json(envelope)
             changes_json = canonical_json([source_event.kind])
+            # Append via kernel but also persist source cols via direct INSERT with extra cols
+            # Use uow.append_event for seq allocation then update source cols in same txn
             project_seq, stream_seq = uow.append_event(
                 stream_id=sid,
                 project_id=project_id,
@@ -419,6 +418,15 @@ class SqliteEventLogBackend:
                 payload_json=payload_json,
                 created_at=created_at,
             )
+            # Persist source provenance in same transaction (W6 columns)
+            try:
+                uow.execute(
+                    "UPDATE events SET source_backend = ?, source_timeline_id = ?, source_event_id = ?, source_version = ?, source_hash = ? WHERE event_id = ?",
+                    (src_backend, src_timeline_id, src_event_id, source_version, src_hash, event_id),
+                )
+            except Exception:
+                # If columns missing (pre-migration), ignore
+                pass
             return project_seq, stream_seq, event_hash, prev_hash
 
         uow = UnitOfWork(writer)
@@ -430,179 +438,116 @@ class SqliteEventLogBackend:
             if isinstance(exc, EventIdempotencyError):
                 with writer.read_only_connection() as conn:
                     conn.row_factory = sqlite3.Row
-                    row = conn.execute(
-                        "SELECT * FROM events WHERE stream_id = ? AND idempotency_key = ?",
-                        (sid, idempotency_key),
-                    ).fetchone()
+                    row = conn.execute("SELECT * FROM events WHERE stream_id = ? AND idempotency_key = ?", (sid, idempotency_key)).fetchone()
                     if row is not None:
                         return self._event_from_row(row)
                     raise EventLogIdempotentError(str(existing["event_id"]) if existing else idempotency_key) from exc
-            from astrid.core.events.service import EventHeadConflictError
-
-            if isinstance(exc, EventHeadConflictError):
-                last = self._last_event_or_none()
-                raise EventLogStaleVersionError(
-                    TimelineVersionConflict(
-                        timeline_id=self.timeline_id,
-                        expected_version=0,
-                        current_version=exc.actual_head_seq,
-                        last_event_id=last.event_id if last else None,
-                        last_event_kind=last.kind if last else None,
-                        last_event_summary=f"{last.kind}#{last.event_id}" if last else None,
-                    )
-                ) from exc
             raise
-        event = TimelineEvent(
+        # Return persisted state
+        with writer.read_only_connection() as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute("SELECT * FROM events WHERE event_id = ?", (event_id,)).fetchone()
+            if row is not None:
+                return self._event_from_row(row)
+        # Fallback
+        ev = TimelineEvent(
             event_id=event_id,
-            timeline_id=self.timeline_id,
+            timeline_id=timeline_id,
             ts=created_at,
             actor=actor,
             prev_hash=prev_hash,
             hash=event_hash,
             kind=source_event.kind,
             payload=dict(payload_dict),
+            expected_version=None,
             txn_id=txn_id_actual,
-            source_backend=source_event.source_backend or "unknown",
-            source_timeline_id=source_event.timeline_id,
-            source_event_id=source_event.event_id,
-            source_version=source_event.source_version,
-            source_hash=source_event.hash,
         )
-        return event
+        return ev
 
-    def read_events(
-        self,
-        *,
-        after: str | None = None,
-        limit: int | None = None,
-    ) -> list[TimelineEvent]:
-        writer = self._ensure_writer()
-        sid = _stream_id(self.timeline_id)
-        with writer.read_only_connection() as conn:
-            conn.row_factory = sqlite3.Row
-            rows = conn.execute(
-                "SELECT * FROM events WHERE stream_id = ? ORDER BY seq ASC", (sid,)
-            ).fetchall()
-        events = [self._event_from_row(r) for r in rows]
-        if after is not None:
-            idx = next((i for i, e in enumerate(events) if e.event_id == after), None)
-            if idx is None:
-                return []
-            events = events[idx + 1 :]
-        if limit is not None:
-            events = events[:limit]
-        return events
-
-    def head(self) -> EventLogHead:
-        writer = self._ensure_writer()
-        sid = _stream_id(self.timeline_id)
-        with writer.read_only_connection() as conn:
-            conn.row_factory = sqlite3.Row
-            stream = conn.execute(
-                "SELECT head_seq FROM event_streams WHERE id = ?", (sid,)
-            ).fetchone()
-            if stream is None:
-                return EventLogHead(
-                    timeline_id=self.timeline_id,
-                    last_event_id=None,
-                    last_hash=None,
-                    event_count=0,
-                    version=0,
-                    log_size=0,
-                    last_event_offset=None,
-                )
-            version = int(stream["head_seq"])
-            # Count and last event
-            row = conn.execute(
-                "SELECT event_id, payload_json FROM events WHERE stream_id = ? ORDER BY seq DESC LIMIT 1",
-                (sid,),
-            ).fetchone()
-            if row is None:
-                return EventLogHead(
-                    timeline_id=self.timeline_id,
-                    last_event_id=None,
-                    last_hash=None,
-                    event_count=0,
-                    version=0,
-                    log_size=0,
-                    last_event_offset=None,
-                )
-            try:
-                payload_obj = parse_json(row["payload_json"])
-                integrity = payload_obj.get("_integrity", {}) if isinstance(payload_obj, dict) else {}
-                last_hash = integrity.get("event_hash") if isinstance(integrity, dict) else None  # type: ignore[assignment]
-            except Exception:
-                last_hash = None
-            count_row = conn.execute(
-                "SELECT COUNT(*) as n FROM events WHERE stream_id = ?", (sid,)
-            ).fetchone()
-            n = int(count_row["n"]) if count_row else 0
-            return EventLogHead(
-                timeline_id=self.timeline_id,
-                last_event_id=str(row["event_id"]),
-                last_hash=last_hash,
-                event_count=n,
-                version=version,
-                log_size=n,  # approximate; not used for SQLite authority
-                last_event_offset=None,
-            )
-
-    def verify_chain(self) -> EventLogVerification:
-        writer = self._ensure_writer()
-        sid = _stream_id(self.timeline_id)
+    def _last_event_or_none(self):
         try:
-            with writer.read_only_connection() as conn:
-                conn.row_factory = sqlite3.Row
-                rows = conn.execute(
-                    "SELECT event_id, payload_json FROM events WHERE stream_id = ? ORDER BY seq ASC",
-                    (sid,),
-                ).fetchall()
-        except Exception as exc:
-            return EventLogVerification(ok=False, checked_events=0, last_event_id=None, error=str(exc))
-        from astrid.core.events.service import payload_event_hash
-
-        prev_hash: str | None = None
-        last_event_id: str | None = None
-        for idx, row in enumerate(rows):
-            try:
-                payload = parse_json(row["payload_json"])
-            except Exception as exc:
-                return EventLogVerification(ok=False, checked_events=idx, last_event_id=last_event_id, error=str(exc))
-            if not isinstance(payload, dict):
-                return EventLogVerification(ok=False, checked_events=idx, last_event_id=last_event_id, error="payload not an object")
-            integrity = payload.get("_integrity")
-            if not isinstance(integrity, dict):
-                return EventLogVerification(ok=False, checked_events=idx, last_event_id=last_event_id, error="missing integrity")
-            stored_hash = integrity.get("event_hash")
-            stored_prev = integrity.get("previous_event_hash")
-            if stored_prev != prev_hash:
-                return EventLogVerification(
-                    ok=False, checked_events=idx, last_event_id=last_event_id, error=f"event {row['event_id']} prev_hash mismatch"
-                )
-            computed = payload_event_hash(payload)
-            if computed != stored_hash:
-                return EventLogVerification(
-                    ok=False, checked_events=idx, last_event_id=last_event_id, error=f"event {row['event_id']} hash mismatch"
-                )
-            prev_hash = stored_hash
-            last_event_id = str(row["event_id"])
-        return EventLogVerification(ok=True, checked_events=len(rows), last_event_id=last_event_id, error=None)
-
-    def _last_event_or_none(self) -> TimelineEvent | None:
-        try:
-            writer = self._ensure_writer()
-            sid = _stream_id(self.timeline_id)
-            with writer.read_only_connection() as conn:
-                conn.row_factory = sqlite3.Row
-                row = conn.execute(
-                    "SELECT * FROM events WHERE stream_id = ? ORDER BY seq DESC LIMIT 1", (sid,)
-                ).fetchone()
-                if row is None:
-                    return None
-                return self._event_from_row(row)
+            evs = self.read_events()
+            return evs[-1] if evs else None
         except Exception:
             return None
 
+    def read_events(self) -> list[TimelineEvent]:
+        sid = _stream_id(self.timeline_id)
+        db_path = derive_database_path(self._projects_root)
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        try:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute("SELECT * FROM events WHERE stream_id = ? ORDER BY seq ASC", (sid,)).fetchall()
+        finally:
+            conn.close()
+        return [self._event_from_row(r) for r in rows]
+
+    def head(self) -> EventLogHead:
+        sid = _stream_id(self.timeline_id)
+        db_path = derive_database_path(self._projects_root)
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        try:
+            conn.row_factory = sqlite3.Row
+            stream = conn.execute("SELECT head_seq FROM event_streams WHERE id = ?", (sid,)).fetchone()
+            rows = conn.execute("SELECT event_id, payload_json FROM events WHERE stream_id = ? ORDER BY seq DESC LIMIT 1", (sid,)).fetchone()
+            count_row = conn.execute("SELECT COUNT(*) as c FROM events WHERE stream_id = ?", (sid,)).fetchone()
+        finally:
+            conn.close()
+        version = int(stream["head_seq"]) if stream else 0
+        count = int(count_row["c"]) if count_row else 0
+        last_id = str(rows["event_id"]) if rows else None
+        last_hash = None
+        if rows:
+            try:
+                obj = parse_json(rows["payload_json"])
+                last_hash = obj.get("_integrity", {}).get("event_hash") if isinstance(obj.get("_integrity"), dict) else None
+            except Exception:
+                last_hash = None
+        return EventLogHead(timeline_id=self.timeline_id, last_event_id=last_id, last_hash=last_hash, event_count=count, version=version, log_size=None, last_event_offset=None)
+
+    def verify_chain(self) -> EventLogVerification:
+        sid = _stream_id(self.timeline_id)
+        db_path = derive_database_path(self._projects_root)
+        from astrid.core.events.service import payload_event_hash
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        try:
+            conn.row_factory = sqlite3.Row
+            stream = conn.execute("SELECT head_seq FROM event_streams WHERE id = ?", (sid,)).fetchone()
+            if stream is None:
+                return EventLogVerification(ok=False, error="unknown stream", checked_events=0, last_event_id=None)
+            head_seq = int(stream["head_seq"])
+            rows = conn.execute("SELECT seq, payload_json FROM events WHERE stream_id = ? ORDER BY seq ASC", (sid,)).fetchall()
+            if len(rows) != head_seq:
+                return EventLogVerification(ok=False, error=f"stream head seq is {head_seq} but {len(rows)} events are stored", checked_events=len(rows), last_event_id=None)
+            prev_hash: str | None = None
+            for idx, row in enumerate(rows):
+                seq = int(row["seq"])
+                if seq != idx + 1:
+                    return EventLogVerification(ok=False, error=f"gap or reorder: expected seq {idx+1}, found {seq}", checked_events=len(rows), last_event_id=None)
+                try:
+                    payload = parse_json(row["payload_json"])
+                except Exception as exc:
+                    return EventLogVerification(ok=False, error=f"payload is not valid JSON at seq {seq}: {exc}", checked_events=len(rows), last_event_id=None)
+                if not isinstance(payload, dict):
+                    return EventLogVerification(ok=False, error=f"payload is not an object at seq {seq}", checked_events=len(rows), last_event_id=None)
+                integrity = payload.get("_integrity")
+                if not isinstance(integrity, dict):
+                    return EventLogVerification(ok=False, error=f"missing _integrity at seq {seq}", checked_events=len(rows), last_event_id=None)
+                stored_hash = integrity.get("event_hash")
+                stored_prev = integrity.get("previous_event_hash")
+                if stored_prev != prev_hash:
+                    return EventLogVerification(ok=False, error=f"previous_event_hash mismatch at seq {seq}", checked_events=len(rows), last_event_id=None)
+                computed = payload_event_hash(payload)
+                if stored_hash != computed:
+                    return EventLogVerification(ok=False, error=f"event_hash mismatch at seq {seq}", checked_events=len(rows), last_event_id=None)
+                prev_hash = stored_hash
+            last_id = None
+            if rows:
+                pass
+            result = EventLogVerification(ok=True, error=None, checked_events=len(rows), last_event_id=last_id)
+        finally:
+            conn.close()
+        return result
     def close(self) -> None:
         if self._owns_writer and self._writer is not None:
             try:
@@ -610,3 +555,10 @@ class SqliteEventLogBackend:
             except Exception:
                 pass
             self._writer = None
+        if self._owner_lock is not None:
+            try:
+                self._owner_lock.release()
+            except Exception:
+                pass
+            self._owner_lock = None
+

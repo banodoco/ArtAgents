@@ -10,7 +10,7 @@
 # immutable slug and ULID address metadata live in timeline.created event
 # payloads and the default timeline id lives in projects.settings_json.
 id: timeline
-version: 2
+version: 3
 depends_on:
   - core >= 1
 migrations:
@@ -24,6 +24,10 @@ migrations:
     path: migrations/0002_add_history_kind_index.sql
     tables:
       - timeline_contract_canary
+  - version: 3
+    name: add_source_provenance
+    path: migrations/0003_add_source_provenance.sql
+    tables: []
 stream_types:
   - timeline.timeline
 event_kinds:

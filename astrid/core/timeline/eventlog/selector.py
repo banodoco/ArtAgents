@@ -91,19 +91,15 @@ def select_timeline_stream(
 
 def _projects_root_for_stream(stream: TimelineStreamRef) -> Path:
     if stream.home is not None:
-        # timeline_home = <projects_root>/<project>/timelines/<ulid>
-        # Parent chain: timelines -> project_slug -> projects_root
         p = Path(stream.home)
-        # Best-effort: 3 levels up when it looks like a timeline home.
-        candidate = p.parent.parent.parent
-        # If candidate contains .astrid or exists, use it; else fallback to env.
-        try:
-            if candidate.exists():
+        # Validate layout .../<project>/timelines/<ulid> ; if it matches, use deterministic root
+        if p.parent.name == "timelines":
+            candidate = p.parent.parent.parent
+            if candidate.is_dir():
                 return candidate
-        except Exception:
-            pass
+        # For non-conforming test harnesses (e.g. /tmp/timeline-home), fall back to ambient
+        return resolve_projects_root(None)
     return resolve_projects_root(None)
-
 
 def _is_backfilled(timeline_id: str, projects_root: Path) -> bool:
     # Consult authority marker; garbage fails closed (R4/R5).
@@ -232,7 +228,33 @@ def resolve_event_log_target(
             timeline_home=target.timeline_home,
         )
 
-    # Default: LocalFs
+    # Default: marker-aware Local vs SQLite (R5)
+    # Determine projects_root for marker probe
+    if target.timeline_home is not None:
+        th = Path(target.timeline_home)
+        if th.parent.name == "timelines":
+            projects_root = th.parent.parent.parent
+        else:
+            projects_root = resolve_projects_root(root)
+    else:
+        projects_root = resolve_projects_root(root)
+    if _is_backfilled(target.timeline_id, projects_root):
+        from .sqlite_backend import SqliteEventLogBackend
+
+        backend = SqliteEventLogBackend(
+            timeline_id=target.timeline_id,
+            timeline_home=target.timeline_home,
+            projects_root=projects_root,
+        )
+        return EventLogTarget(
+            backend_name="sqlite",  # type: ignore[typeddict-item]
+            timeline_id=target.timeline_id,
+            timeline_ulid=target.timeline_ulid,
+            timeline_home=target.timeline_home,
+            slug=target.slug,
+            backend=backend,
+            source="local",
+        )
     backend = LocalFsBackend(
         timeline_id=target.timeline_id,
         timeline_home=target.timeline_home,

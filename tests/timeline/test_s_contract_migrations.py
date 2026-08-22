@@ -163,6 +163,7 @@ def test_fresh_database_applies_timeline_v2_once(tmp_path) -> None:
     assert [(row[0], row[1], row[2]) for row in rows] == [
         ("timeline", 1, "initial"),
         ("timeline", 2, "add_history_kind_index"),
+        ("timeline", 3, "add_source_provenance"),
     ]
     assert len(rows[1][3]) == 64
     assert set(rows[1][3]) <= set("0123456789abcdef")

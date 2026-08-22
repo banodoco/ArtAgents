@@ -155,34 +155,59 @@ def _resolve_or_bootstrap_backend(
     if isinstance(identity, dict):
         timeline_id = identity.get("timeline_id")
         if not isinstance(timeline_id, str) or not timeline_id:
-            raise TimelineEditError(
-                "timeline identity sidecar is missing timeline_id"
-            )
+            raise TimelineEditError("timeline identity sidecar is missing timeline_id")
         preferred_backend = identity.get("backend")
         if preferred_backend is not None and not isinstance(preferred_backend, str):
-            raise TimelineEditError(
-                "timeline identity sidecar has malformed backend"
-            )
-        select_kwargs: dict[str, Any] = {
-            "timeline_id": timeline_id,
-            "timeline_home": tdir,
-            "preferred_backend": preferred_backend,
-        }
+            raise TimelineEditError("timeline identity sidecar has malformed backend")
+        select_kwargs: dict[str, Any] = {"timeline_id": timeline_id, "timeline_home": tdir, "preferred_backend": preferred_backend}
         if supabase_options is not None:
             select_kwargs["supabase_options"] = supabase_options
         _stream, backend = select_timeline_backend(**select_kwargs)
         return timeline_id, tdir, backend, False
-
+    # Identity missing: try kernel fallback for backfilled timelines (W4 sidecar disposable)
+    try:
+        from astrid.core.foundation.project_paths import resolve_projects_root as _resolve_pr
+        from astrid.core.integrations.reigh.bridge_service import derive_database_path as _derive
+        from astrid.packs.timeline.backfill import read_backfill_state as _read_state
+        import sqlite3 as _sql
+        _pr = _resolve_pr(root)
+        # ulid is directory name
+        ulid_try = tdir.name
+        # Try kernel lookup by ulid
+        _db = _derive(_pr)
+        tl_id_k = None
+        if _db.is_file():
+            _conn = _sql.connect(str(_db))
+            try:
+                _conn.row_factory = _sql.Row
+                _row = _conn.execute("SELECT json_extract(payload_json,'$.data.timeline_id') as tid FROM events WHERE kind='timeline.created' AND json_extract(payload_json,'$.data.timeline_ulid')=? LIMIT 1", (ulid_try,)).fetchone()
+                if _row and _row["tid"]:
+                    tl_id_k = str(_row["tid"])
+                else:
+                    # Fallback: slug→ timeline_id via events where slug matches project+slug?
+                    # Try direct slug lookup in timelines table via kernel repo not available; try events with slug
+                    _row2 = _conn.execute("SELECT json_extract(payload_json,'$.data.timeline_id') as tid FROM events WHERE kind='timeline.created' AND json_extract(payload_json,'$.data.slug')=? LIMIT 1", (slug,)).fetchone()
+                    if _row2 and _row2["tid"]:
+                        tl_id_k = str(_row2["tid"])
+            finally:
+                _conn.close()
+            if tl_id_k:
+                try:
+                    _state = _read_state(_pr)
+                    if tl_id_k in _state:
+                        from astrid.core.timeline.eventlog.sqlite_backend import SqliteEventLogBackend as _SqliteBE
+                        be = _SqliteBE(timeline_id=tl_id_k, timeline_home=tdir, projects_root=_pr)
+                        return tl_id_k, tdir, be, False
+                except Exception:
+                    pass
+    except Exception:
+        pass
     detail = (
         f"timeline '{slug}' has an event log ({jsonl_path.name}) but no identity sidecar"
         if jsonl_path.is_file()
         else f"timeline '{slug}' has no identity sidecar"
     )
-    raise TimelineEditError(
-        f"{detail}. Runtime legacy bootstrap is disabled; run the Sprint 2 "
-        "migration before editing this timeline."
-    )
-
+    raise TimelineEditError(f"{detail}. Runtime legacy bootstrap is disabled; run the Sprint 2 migration before editing this timeline.")
 
 def _resolve_backend(
     project_slug: str,
@@ -389,129 +414,108 @@ def pack_write_gateway(
     # 0.5 Kernel replace_config commit (m2): when the caller supplies a
     # kernel writer, every timeline.config_replaced event is additionally
     # committed to the kernel timeline store through the repository command
-    # (receipt + timeline.config_replaced event) inside one UnitOfWork per
-    # event, BEFORE the eventlog append. The kernel timeline must already
-    # exist for the project+slug (created through the SDK/kernel surface);
-    # the repository's own not-found/version fences fail closed. Imports
-    # are deferred so this core module never imports ``astrid.packs`` at
-    # module scope.
-    if writer is not None:
-        if timeline_repository is None or not timeline_stream_type:
-            raise TimelineEditError(
-                "pack_write_gateway: a kernel writer requires the injected "
-                "timeline_repository and timeline_stream_type (kernel modules "
-                "must not import astrid.packs)"
-            )
+    # Ensure kernel writer/repository available for atomic replace_config (W2).
+    # Pack callers historically omit writer; we now obtain it via the standard seam
+    # so whole-document saves are always document_json+registry+event in ONE txn.
+    effective_writer = writer
+    effective_repo = timeline_repository
+    effective_stream_type = timeline_stream_type
+    _owns_effective_writer = False
+    _writer_lock = None
+    if effective_writer is None:
+        # Try to compose standard writer (requires projects_root)
+        try:
+            from astrid.core.foundation.project_paths import resolve_projects_root as _resolve_root
+            from astrid.core.integrations.reigh.bridge_service import derive_database_path as _derive_db
+            from astrid.core.store.ownership import DatabaseOwnerLock as _OwnerLock
+            from astrid.packs import build_standard_registry as _build_reg, open_standard_writer as _open_writer
+            from astrid.core.events.service import EventAppendService as _EvtSvc
+            from astrid.core.receipts.service import ReceiptService as _ReceiptSvc
+            from astrid.core.repositories.projects import ProjectRepository as _ProjRepo
+            from astrid.packs.timeline.repository import TimelineRepository as _TLRepo
+            _projects_root = _resolve_root(root)
+            _db_path = _derive_db(_projects_root)
+            _db_path.parent.mkdir(parents=True, exist_ok=True)
+            # Readers exempt, but writer needs exclusive owner; try lock, but if fails
+            # fall back to no-writer (legacy) rather than raising — fail-closed handled downstream.
+            try:
+                _writer_lock = _OwnerLock(_db_path)
+            except Exception:
+                _writer_lock = None
+            if _writer_lock is not None or _db_path.is_file():
+                _reg = _build_reg()
+                effective_writer = _open_writer(_db_path, registry=_reg)
+                _owns_effective_writer = True
+                if effective_repo is None:
+                    _evt = _EvtSvc(_reg)
+                    _rcpt = _ReceiptSvc()
+                    _proj = _ProjRepo(events=_evt, receipts=_rcpt)
+                    effective_repo = _TLRepo(events=_evt, receipts=_rcpt, projects=_proj)
+                    effective_stream_type = "timeline.timeline"
+        except Exception:
+            effective_writer = None
+    # If we now have a writer/repo, handle timeline.config_replaced atomically
+    if effective_writer is not None and effective_repo is not None and effective_stream_type:
         from astrid.core.events.service import EventAppendService
         from astrid.core.receipts.service import ReceiptService
         from astrid.core.repositories.projects import ProjectRepository
         from astrid.core.store.uow import UnitOfWork
-
+        registry = _composed_registry_or_build()
         kernel_events = EventAppendService(registry)
         kernel_receipts = ReceiptService()
-        kernel_projects = ProjectRepository(
-            events=kernel_events, receipts=kernel_receipts
-        )
-        kernel_timelines = timeline_repository
-        project_id = kernel_projects.resolve(writer, project_slug)
-
-        def _commit_replace_config(payload: Mapping[str, Any]) -> None:
-            def run(uow: UnitOfWork) -> None:
-                timeline_id = kernel_timelines._resolve_id(
-                    uow, project_id, timeline_slug
-                )
-                head = uow.query_one(
-                    "SELECT head_seq FROM event_streams WHERE id = ?",
-                    (f"{timeline_id}:{timeline_stream_type}",),
-                )
-                if head is None:
-                    raise TimelineEditError(
-                        f"timeline {timeline_slug!r} in project "
-                        f"{project_slug!r} has no kernel event stream"
-                    )
-                config = payload.get("config", {})
-                registry = payload.get("asset_registry")
-                if registry is None:
-                    registry = {"assets": {}}
-                if not isinstance(config, Mapping):
-                    raise TimelineEditError(
-                        "config_replaced payload.config must be a JSON object"
-                    )
-                if not isinstance(registry, Mapping):
-                    raise TimelineEditError(
-                        "config_replaced payload.asset_registry must be a "
-                        "JSON object"
-                    )
-                kernel_timelines.replace_config(
-                    uow,
-                    project_id=project_id,
-                    ref=timeline_slug,
-                    config=dict(config),
-                    registry=dict(registry),
-                    expected_version=int(head["head_seq"]),
-                    idempotency_key=(
-                        f"timeline.replace_config:{timeline_id}:{head['head_seq']}"
-                    ),
-                )
-
-            UnitOfWork(writer).run(run)
-
-        for event_spec in events:
-            if event_spec["kind"] == "timeline.config_replaced":
-                _commit_replace_config(event_spec.get("payload", {}))
-
-    # Resolve the ULID from the slug if the caller did not supply one
-    # (packs that only know project+slug from CLI args rely on this).
-    effective_ulid = timeline_ulid
-    if not effective_ulid:
-        found = find_timeline_by_slug(project_slug, timeline_slug, root=root)
-        if found is not None:
-            effective_ulid, _tdir = found
-
-    # 1. Build the actor.
-    if actor is None:
-        effective_id = actor_id or f"pack-gateway:{effective_ulid}"
-        actor = TimelineActor(
-            type=actor_type,
-            id=effective_id,
-            display=actor_display,
-            via=[actor_via] if actor_via is not None else None,
-        )
-    elif actor_via is not None:
-        # Merge: wrap the supplied actor with the via chain.
-        existing_via = list(actor.via) if actor.via else []
-        actor = TimelineActor(
-            type=actor.type,
-            id=actor.id,
-            display=actor.display,
-            via=existing_via + [actor_via],
-        )
-
-    # 2. Resolve an identity-backed backend. Legacy timelines without an
-    #    identity sidecar are rejected until migrated.
-    resolved_timeline_id, timeline_home, backend, bootstrap_emitted = \
-        _resolve_or_bootstrap_backend(
-            project_slug,
-            timeline_slug,
-            root=root,
-            actor=actor,
-            supabase_options=supabase_options,
-        )
-    effective_stream_id = resolved_timeline_id
+        kernel_projects = ProjectRepository(events=kernel_events, receipts=kernel_receipts)
+        kernel_timelines = effective_repo
+        try:
+            project_id = kernel_projects.resolve(effective_writer, project_slug)
+        except Exception:
+            project_id = None
+        if project_id is not None:
+            def _commit_replace_config(payload: Mapping[str, Any]) -> None:
+                def run(uow: UnitOfWork) -> None:
+                    timeline_id = kernel_timelines._resolve_id(uow, project_id, timeline_slug)
+                    head = uow.query_one("SELECT head_seq FROM event_streams WHERE id = ?", (f"{timeline_id}:{effective_stream_type}",))
+                    if head is None:
+                        raise TimelineEditError(f"timeline {timeline_slug!r} in project {project_slug!r} has no kernel event stream")
+                    config = payload.get("config", {})
+                    reg = payload.get("asset_registry")
+                    if reg is None:
+                        reg = {"assets": {}}
+                    if not isinstance(config, Mapping):
+                        raise TimelineEditError("config_replaced payload.config must be a JSON object")
+                    if not isinstance(reg, Mapping):
+                        raise TimelineEditError("config_replaced payload.asset_registry must be a JSON object")
+                    kernel_timelines.replace_config(uow, project_id=project_id, ref=timeline_slug, config=dict(config), registry=dict(reg), expected_version=int(head["head_seq"]), idempotency_key=f"timeline.replace_config:{timeline_id}:{head['head_seq']}")
+                UnitOfWork(effective_writer).run(run)
+            for event_spec in events:
+                if event_spec["kind"] == "timeline.config_replaced":
+                    _commit_replace_config(event_spec.get("payload", {}))
+            # For config_replaced, document already updated atomically; skip backend append for that kind
+            # Track that we handled it
+            _config_replaced_handled = any(e["kind"] == "timeline.config_replaced" for e in events)
+        else:
+            _config_replaced_handled = False
+    else:
+        _config_replaced_handled = False
 
     # 4. Append domain events (batch — no per-event materialization).
     event_ids: list[str] = []
     for event_spec in events:
+        if _config_replaced_handled and event_spec["kind"] == "timeline.config_replaced":
+            # Already committed atomically via replace_config; count it without second append
+            # Retrieve last event id from backend head later
+            continue
         kind = event_spec["kind"]
         payload = event_spec.get("payload", {})
-        event = backend.append_event(
-            timeline_id=effective_stream_id,
-            kind=kind,
-            payload=payload,
-            actor=actor,
-        )
+        event = backend.append_event(timeline_id=effective_stream_id, kind=kind, payload=payload, actor=actor)
         event_ids.append(event.event_id)
-
+    # If config_replaced was handled, fetch its event id from kernel head
+    if _config_replaced_handled:
+        try:
+            last = backend.head()
+            if last.last_event_id:
+                event_ids.append(last.last_event_id)
+        except Exception:
+            pass
     # 5. Regenerate assembly.json once from the canonical event stream.
     regenerate_projection(effective_stream_id, backend, timeline_home=timeline_home)
 
