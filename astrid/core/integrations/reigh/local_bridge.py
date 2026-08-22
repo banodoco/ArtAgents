@@ -203,22 +203,55 @@ def list_bridge_timelines(
 
 
 def _load_canonical_timeline_id(timeline_home: Path, timeline_ulid: str) -> str:
-    """Resolve the canonical timeline id from the assembly identity file."""
+    """Resolve the canonical timeline id — kernel-first (H2).
+
+    For marked (SQLite-authority) timelines the authoritative id is derived
+    from the directory ULID via the backfill marker/kernel binding FIRST;
+    the identity sidecar is consulted ONLY for unbackfilled legacy dirs.
+    """
+    # Kernel-first authoritative resolution
+    try:
+        from pathlib import Path as _P
+
+        from astrid.core.foundation.project_paths import resolve_projects_root as _rr_lb
+        from astrid.core.timeline.authority import (
+            is_backfilled_timeline,
+            resolve_authoritative_timeline_id,
+        )
+        _th = _P(timeline_home)
+        _pr_lb = None
+        try:
+            # Derive projects_root from timeline_home layout
+            _cand = _th.parent.parent.parent
+            if _cand.is_dir():
+                _pr_lb = _cand
+            else:
+                _pr_lb = _rr_lb(None)
+        except Exception:
+            _pr_lb = _rr_lb(None)
+        _auth = resolve_authoritative_timeline_id(_th, _pr_lb)
+        if isinstance(_auth, str) and _auth:
+            try:
+                if is_backfilled_timeline(_auth, _pr_lb):
+                    return _auth
+            except Exception:
+                pass
+            # Not backfilled but auth exists (legacy sidecar fallback) — return it
+            return _auth
+    except Exception:
+        pass
     identity_path = timeline_home / "assembly.identity.json"
     if not identity_path.is_file():
         return timeline_ulid
-
     try:
         identity = read_json(identity_path)
     except Exception:
         return timeline_ulid
-
     if isinstance(identity, dict):
         timeline_id = identity.get("timeline_id")
         if isinstance(timeline_id, str) and timeline_id:
             return timeline_id
     return timeline_ulid
-
 
 def find_bridge_timeline(
     project_slug: str,
@@ -512,8 +545,9 @@ def _registry_from_sqlite(record: BridgeTimelineRecord, *, root: str | Path | No
     """Recover registry for a backfilled timeline from kernel SQLite (single authority)."""
     try:
         projects_root = resolve_projects_root(root)
-        from astrid.core.integrations.reigh.bridge_service import derive_database_path as _derive_db
         import sqlite3
+
+        from astrid.core.integrations.reigh.bridge_service import derive_database_path as _derive_db
         db_path = _derive_db(projects_root)
         if not db_path.is_file():
             return None
@@ -569,8 +603,9 @@ def _registry_from_legacy_assets(record: BridgeTimelineRecord) -> dict[str, Any]
 
 def _is_record_backfilled(record: BridgeTimelineRecord, *, root: str | Path | None = None) -> bool:
     """Check backfill marker for this timeline; fail closed on unreadable marker."""
-    from astrid.core.foundation.project_paths import resolve_projects_root as _resolve_root
     import importlib as _il
+
+    from astrid.core.foundation.project_paths import resolve_projects_root as _resolve_root
     _bf_mod = _il.import_module("astrid.packs.timeline.backfill")
     BackfillError = _bf_mod.BackfillError  # type: ignore[attr-defined]
     read_backfill_state = _bf_mod.read_backfill_state  # type: ignore[attr-defined]

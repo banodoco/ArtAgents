@@ -251,30 +251,13 @@ def sync_asset_registry(
     # Build the new registry
     new_registry: dict[str, Any] = {"assets": merged_assets}
 
-    # Use selected backend (sqlite for marked) — single-authority writer.
-    identity_path = assembly_identity_path(project_slug, tdir.name, root=projects_root)
-    identity = read_json(identity_path) if identity_path.is_file() else {}
-    timeline_id = identity.get("timeline_id")
-    if not isinstance(timeline_id, str) or not timeline_id.strip():
-        # Try kernel fallback for sidecarless backfilled
-        try:
-            import sqlite3 as _sq3
+    # Kernel-first authoritative timeline_id (H2): derive from ULID/dir via
+    # backfill marker binding; sidecar consulted ONLY for unbackfilled legacy.
+    from astrid.core.timeline.authority import resolve_authoritative_timeline_id
 
-            from astrid.core.foundation.project_paths import resolve_projects_root as _rr3
-            from astrid.core.integrations.reigh.bridge_service import derive_database_path as _dd3
-            _pr3 = _rr3(projects_root)
-            _db3 = _dd3(_pr3)
-            if _db3.is_file():
-                c = _sq3.connect(f"file:{_db3}?mode=ro", uri=True)
-                c.row_factory = _sq3.Row
-                r = c.execute("SELECT json_extract(payload_json,'$.data.timeline_id') as tid FROM events WHERE kind='timeline.created' AND lower(json_extract(payload_json,'$.data.timeline_ulid'))=lower(?) LIMIT 1", (tdir.name,)).fetchone()
-                if r and r["tid"]:
-                    timeline_id = str(r["tid"])
-                c.close()
-        except Exception:
-            pass
-        if not isinstance(timeline_id, str) or not timeline_id.strip():
-            raise AstridError("timeline identity is missing timeline_id")
+    timeline_id = resolve_authoritative_timeline_id(tdir, projects_root)
+    if not isinstance(timeline_id, str) or not timeline_id.strip():
+        raise AstridError("timeline identity is missing timeline_id")
     # Marker-gated backend selection — fail-closed on unreadable marker (shared authority helper).
     import importlib as _il4
     _bf_mod4 = _il4.import_module("astrid.packs.timeline.backfill")
@@ -283,6 +266,7 @@ def sync_asset_registry(
         _is_back4 = is_backfilled_timeline(timeline_id, projects_root)
     except BackfillError as exc:
         raise AstridError(f"backfill authority marker is unreadable: {exc}") from exc
+    backend: Any = None
     if _is_back4:
         backend = SqliteEventLogBackend(timeline_id=timeline_id, timeline_home=tdir, projects_root=projects_root)
     else:
@@ -292,20 +276,35 @@ def sync_asset_registry(
         id="agent:project:" + project_slug,
         display="project:" + project_slug,
     )
-
-    event = backend.append_event(
-        timeline_id,
-        "timeline.asset_registry_replaced",
-        AssetRegistryReplacedPayload(
-            registry=new_registry,
-            source="other",
-        ),
-        actor=act,
-        expected_version=expected_version,
-    )
-
-    # Update the registry.json sidecar
-    registry_path = tdir / "registry.json"
-    write_json_atomic(registry_path, new_registry)
-
-    return event
+    # H1: OWNED backends closed in finally, borrowed (shared/injected) never closed.
+    _is_sqlite = _is_back4
+    try:
+        event = backend.append_event(
+            timeline_id,
+            "timeline.asset_registry_replaced",
+            AssetRegistryReplacedPayload(
+                registry=new_registry,
+                source="other",
+            ),
+            actor=act,
+            expected_version=expected_version,
+        )
+        # Update the registry.json sidecar
+        registry_path = tdir / "registry.json"
+        write_json_atomic(registry_path, new_registry)
+        return event
+    finally:
+        if _is_sqlite and backend is not None:
+            try:
+                owns = bool(getattr(backend, "_owns_shared", False) or getattr(backend, "_owns_writer", False))
+                # Borrowed backends have owns==False -> never close underlying writer
+                if owns:
+                    backend.close()
+                else:
+                    # Borrowed: drop reference without closing shared writer
+                    try:
+                        backend._writer = None  # type: ignore[attr-defined]
+                    except Exception:
+                        pass
+            except Exception:
+                pass

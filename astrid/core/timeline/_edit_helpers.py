@@ -140,9 +140,69 @@ def _resolve_or_bootstrap_backend(
     Raises ``TimelineEditError`` on any failure.
     """
     ulid, tdir = _locate_timeline(project_slug, slug, root=root)
+    # H2 kernel-first authoritative resolution: ULID/dir -> marker/kernel binding FIRST;
+    # sidecar consulted ONLY for unbackfilled legacy. This subsumes is_backfilled usage.
+    from astrid.core.timeline.authority import resolve_authoritative_timeline_id
+
+    auth_tid = resolve_authoritative_timeline_id(tdir, root)
+    if isinstance(auth_tid, str) and auth_tid:
+        # Authoritative id found — check if backfilled to force SQLite authority.
+        try:
+            import importlib as _il_bf
+
+            from astrid.core.timeline.authority import is_backfilled_timeline as _isbf
+            _bfm = _il_bf.import_module("astrid.packs.timeline.backfill")
+            BackfillErrorAuth = _bfm.BackfillError  # type: ignore[attr-defined]
+            try:
+                if _isbf(auth_tid, root):
+                    from astrid.core.foundation.project_paths import (
+                        resolve_projects_root as _rr_auth,
+                    )
+                    from astrid.core.timeline.eventlog.sqlite_backend import (
+                        SqliteEventLogBackend as _SBEAuth,
+                    )
+                    _pr_auth = _rr_auth(root)
+                    # Derive.projects_root from tdir if layout matches
+                    try:
+                        td_par = tdir.parent
+                        if td_par.name == "timelines" and td_par.parent.is_dir():
+                            _pr_auth = td_par.parent.parent
+                    except Exception:
+                        pass
+                    return auth_tid, tdir, _SBEAuth(timeline_id=auth_tid, timeline_home=tdir, projects_root=_pr_auth), False
+            except BackfillErrorAuth:
+                raise
+            except Exception:
+                pass
+        except Exception:
+            pass
+        # If not backfilled or check failed, fall through to sidecar-driven selection
+        # but still use auth_tid as preferred (for legacy unbackfilled sidecarless case, auth_tid is sidecar id)
+        # For legacy backfilled==False, we still need preferred_backend from sidecar if present.
+        # Use select_timeline_backend with auth_tid to ensure legacy path still works.
+        try:
+            identity_side = None
+            try:
+                identity_side = read_json(assembly_identity_path(project_slug, ulid, root=root))
+            except Exception:
+                identity_side = None
+            pref = None
+            if isinstance(identity_side, dict):
+                pref = identity_side.get("backend")
+                if pref is not None and not isinstance(pref, str):
+                    raise TimelineEditError("timeline identity sidecar has malformed backend")
+            sel_kwargs: dict[str, Any] = {"timeline_id": auth_tid, "timeline_home": tdir, "preferred_backend": pref}
+            if supabase_options is not None:
+                sel_kwargs["supabase_options"] = supabase_options
+            _st, be = select_timeline_backend(**sel_kwargs)
+            return auth_tid, tdir, be, False
+        except TimelineEditError:
+            raise
+        except Exception:
+            pass
+    # Fallback legacy path (no authoritative id): original sidecar-or-kernel logic
     identity_path = assembly_identity_path(project_slug, ulid, root=root)
     jsonl_path = tdir / "assembly.jsonl"
-
     identity = None
     try:
         identity = read_json(identity_path)
@@ -150,8 +210,6 @@ def _resolve_or_bootstrap_backend(
         identity = None
     except Exception:
         identity = None
-
-    # --- Case 1: Identity exists → resolve normally ---
     if isinstance(identity, dict):
         timeline_id = identity.get("timeline_id")
         if not isinstance(timeline_id, str) or not timeline_id:
@@ -164,19 +222,17 @@ def _resolve_or_bootstrap_backend(
             select_kwargs["supabase_options"] = supabase_options
         _stream, backend = select_timeline_backend(**select_kwargs)
         return timeline_id, tdir, backend, False
-    # Identity missing: try kernel fallback for backfilled timelines (W4 sidecar disposable)
     try:
+        import importlib as _il
+
         from astrid.core.foundation.project_paths import resolve_projects_root as _resolve_pr
         from astrid.core.integrations.reigh.bridge_service import derive_database_path as _derive
-        import importlib as _il
         _bf_mod = _il.import_module("astrid.packs.timeline.backfill")
         _read_state = _bf_mod.read_backfill_state  # type: ignore[attr-defined]
         BackfillError = _bf_mod.BackfillError  # type: ignore[attr-defined]
         import sqlite3 as _sql
         _pr = _resolve_pr(root)
-        # ulid is directory name
         ulid_try = tdir.name
-        # Try kernel lookup by ulid
         _db = _derive(_pr)
         tl_id_k = None
         if _db.is_file():
@@ -196,7 +252,9 @@ def _resolve_or_bootstrap_backend(
                 try:
                     _state = _read_state(_pr)
                     if tl_id_k in _state:
-                        from astrid.core.timeline.eventlog.sqlite_backend import SqliteEventLogBackend as _SqliteBE
+                        from astrid.core.timeline.eventlog.sqlite_backend import (
+                            SqliteEventLogBackend as _SqliteBE,
+                        )
                         be = _SqliteBE(timeline_id=tl_id_k, timeline_home=tdir, projects_root=_pr)
                         return tl_id_k, tdir, be, False
                 except BackfillError:
@@ -413,7 +471,9 @@ def pack_write_gateway(
         if effective_writer is None:
             # Determine if we are in legacy (no DB file) or backfilled (DB exists).
             from astrid.core.foundation.project_paths import resolve_projects_root as _resolve_root
-            from astrid.core.integrations.reigh.bridge_service import derive_database_path as _derive_db
+            from astrid.core.integrations.reigh.bridge_service import (
+                derive_database_path as _derive_db,
+            )
 
             _compose_projects_root = _resolve_root(root)
             _compose_db_path = _derive_db(_compose_projects_root)
@@ -422,9 +482,10 @@ def pack_write_gateway(
                 _config_replaced_handled = False
             else:
                 # Backfilled: must acquire owner lock fail-closed, then open writer.
+                import importlib as _il2
+
                 from astrid.core.store.ownership import DatabaseOwnerLock as _OwnerLock
                 from astrid.core.store.ownership import OwnerLockError as _OwnerLockError
-                import importlib as _il2
                 _packs_mod = _il2.import_module("astrid.packs")
                 _build_reg = _packs_mod.build_standard_registry  # type: ignore[attr-defined]
                 _open_writer = _packs_mod.open_standard_writer  # type: ignore[attr-defined]
@@ -515,7 +576,10 @@ def pack_write_gateway(
                         if not isinstance(raw_expected, int):
                             raise TimelineEditError("payload.expected_version must be an integer")
                         if raw_expected != current_head:
-                            from astrid.core.timeline.eventlog.types import EventLogStaleVersionError, TimelineVersionConflict
+                            from astrid.core.timeline.eventlog.types import (
+                                EventLogStaleVersionError,
+                                TimelineVersionConflict,
+                            )
                             raise EventLogStaleVersionError(TimelineVersionConflict(timeline_id=timeline_id, expected_version=raw_expected, current_version=current_head, last_event_id=None, last_event_kind=None, last_event_summary=None))
                         expected_version = raw_expected
                     else:

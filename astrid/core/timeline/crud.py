@@ -242,10 +242,13 @@ def show_timeline(
     if found is None:
         return None
     ulid, tdir = found
-    # Marker-gated single-authority read: backfilled timelines read through SQLite, not file-first.
+    # H2 kernel-first authoritative id (ULID/dir -> marker/kernel FIRST; sidecar ONLY for legacy)
     import importlib as _il3
 
-    from astrid.core.timeline.authority import is_backfilled_timeline
+    from astrid.core.timeline.authority import (
+        is_backfilled_timeline,
+        resolve_authoritative_timeline_id,
+    )
     _bf_mod3 = _il3.import_module("astrid.packs.timeline.backfill")
     BackfillError = _bf_mod3.BackfillError  # type: ignore[attr-defined]
     _is_back = False
@@ -253,34 +256,13 @@ def show_timeline(
     _pr = None
     try:
         from astrid.core.foundation.project_paths import resolve_projects_root as _rr
-        from astrid.core.integrations.reigh.bridge_service import derive_database_path as _dd
         _pr = _rr(root)
         th_par = tdir.parent
         if th_par.name == "timelines" and th_par.parent.is_dir():
             _pr = th_par.parent.parent
-        _db = _dd(_pr)
-        if _db.is_file():
-            _ip = tdir / "assembly.identity.json"
-            if _ip.is_file():
-                import json as _j
-                try:
-                    _raw = _j.loads(_ip.read_text())
-                    _tid_for_check = _raw.get("timeline_id") if isinstance(_raw, dict) else None
-                except Exception:
-                    _tid_for_check = None
-            if not isinstance(_tid_for_check, str) or not _tid_for_check:
-                import sqlite3 as _sq
-                try:
-                    c = _sq.connect(f"file:{_db}?mode=ro", uri=True)
-                    c.row_factory = _sq.Row
-                    r = c.execute("SELECT json_extract(payload_json,'$.data.timeline_id') as tid FROM events WHERE kind='timeline.created' AND lower(json_extract(payload_json,'$.data.timeline_ulid'))=lower(?) LIMIT 1", (ulid,)).fetchone()
-                    if r and r["tid"]:
-                        _tid_for_check = str(r["tid"])
-                    c.close()
-                except Exception:
-                    pass
-            if isinstance(_tid_for_check, str) and _tid_for_check:
-                _is_back = is_backfilled_timeline(_tid_for_check, _pr)
+        _tid_for_check = resolve_authoritative_timeline_id(tdir, _pr)
+        if isinstance(_tid_for_check, str) and _tid_for_check:
+            _is_back = is_backfilled_timeline(_tid_for_check, _pr)
     except BackfillError as exc:
         raise TimelineCrudError(f"backfill authority marker is unreadable: {exc}") from exc
     except TimelineCrudError:
@@ -310,7 +292,6 @@ def show_timeline(
         return None
     assembly = validate_timeline_config_json(raw_assembly)
     if _is_back:
-        # Marked timelines: sidecars are disposable caches; synthesize manifest if missing.
         try:
             manifest = Manifest.from_json(tdir / "manifest.json")
         except FileNotFoundError:
@@ -351,55 +332,33 @@ def show_timeline(
     return result
 
 def _verify_timeline_read_only(tdir: Path) -> dict[str, Any]:
-    # G4: for marked (SQLite-authority) timelines, verify the marked event stream
-    # directly (absent JSONL does not mean healthy; sidecars are caches).
-    # Derive timeline_id via identity sidecar or kernel lookup, then check marker.
+    # G4: kernel-first authoritative id; marked verify via SQLite authority.
     _is_back_v = False
     _tid_v: str | None = None
     try:
         import importlib as _ilv
 
-        from astrid.core.timeline.authority import is_backfilled_timeline
+        from astrid.core.timeline.authority import (
+            is_backfilled_timeline,
+            resolve_authoritative_timeline_id,
+        )
         _bfv = _ilv.import_module("astrid.packs.timeline.backfill")
         BackfillErrorV = _bfv.BackfillError  # type: ignore[attr-defined]
-        _id_file = tdir / "assembly.identity.json"
-        if _id_file.is_file():
-            try:
-                _rawv = read_json(_id_file)
-                _tid_v = _rawv.get("timeline_id") if isinstance(_rawv, dict) else None
-            except Exception:
-                _tid_v = None
-        if not isinstance(_tid_v, str) or not _tid_v:
-            # Kernel lookup by ULID for sidecarless marked
-            try:
-                import sqlite3 as _sqv
-
-                from astrid.core.foundation.project_paths import resolve_projects_root as _rrv
-                from astrid.core.integrations.reigh.bridge_service import (
-                    derive_database_path as _ddv,
-                )
-                _prv = _rrv(None)
-                td_parv = tdir.parent
-                if td_parv.name == "timelines" and td_parv.parent.is_dir():
-                    _prv = td_parv.parent.parent
-                _dbv = _ddv(_prv)
-                if _dbv.is_file():
-                    _ulidv = tdir.name
-                    _connv = _sqv.connect(f"file:{_dbv}?mode=ro", uri=True)
-                    try:
-                        _connv.row_factory = _sqv.Row
-                        _rv = _connv.execute("SELECT json_extract(payload_json,'$.data.timeline_id') as tid FROM events WHERE kind='timeline.created' AND lower(json_extract(payload_json,'$.data.timeline_ulid'))=lower(?) LIMIT 1", (_ulidv,)).fetchone()
-                        if _rv and _rv["tid"]:
-                            _tid_v = str(_rv["tid"])
-                    finally:
-                        _connv.close()
-            except Exception:
-                pass
+        # Kernel-first authoritative id (sidecar ONLY for unbackfilled)
+        try:
+            from astrid.core.foundation.project_paths import resolve_projects_root as _rrv0
+            _prv0 = _rrv0(None)
+            td_par0 = tdir.parent
+            if td_par0.name == "timelines" and td_par0.parent.is_dir():
+                _prv0 = td_par0.parent.parent
+            _tid_v = resolve_authoritative_timeline_id(tdir, _prv0)
+        except BackfillErrorV:
+            raise
+        except Exception:
+            _tid_v = None
         if isinstance(_tid_v, str) and _tid_v:
-            # Check marker; propagate corrupt marker fail-closed
             try:
                 _is_back_v = is_backfilled_timeline(_tid_v, None)
-                # Re-resolve projects_root from tdir if possible for accurate check
                 try:
                     from astrid.core.foundation.project_paths import resolve_projects_root as _rrv2
                     _prv2 = _rrv2(None)

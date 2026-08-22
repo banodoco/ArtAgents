@@ -63,12 +63,8 @@ def _shared_key(db_path: Path) -> str:
 
 
 def _get_shared_writer(db_path: Path) -> DatabaseWriter | None:
-    key = _shared_key(db_path)
-    with _SHARED_WRITERS_GUARD:
-        entry = _SHARED_WRITERS.get(key)
-        if entry is not None:
-            return entry[0]
-    # Also check composition registration via packs (serve owns outside this registry).
+    # Single process-level registry: packs._ACTIVE_WRITERS is canonical.
+    # Check it first so lazy backends borrow a live application/bridge writer.
     try:
         import importlib as _il
         mod = _il.import_module("astrid.packs")
@@ -79,9 +75,23 @@ def _get_shared_writer(db_path: Path) -> DatabaseWriter | None:
                 return w
     except Exception:
         pass
+    key = _shared_key(db_path)
+    with _SHARED_WRITERS_GUARD:
+        entry = _SHARED_WRITERS.get(key)
+        if entry is not None:
+            return entry[0]
     return None
 
 def _register_shared_writer(db_path: Path, writer: DatabaseWriter, lock: Any) -> None:
+    # Register in both registries for single-writer visibility (H1).
+    try:
+        import importlib as _il2
+        mod2 = _il2.import_module("astrid.packs")
+        raw = getattr(mod2, "_register_active_writer", None)
+        if raw is not None:
+            raw(db_path, writer)
+    except Exception:
+        pass
     key = _shared_key(db_path)
     with _SHARED_WRITERS_GUARD:
         if key not in _SHARED_WRITERS:
@@ -89,10 +99,17 @@ def _register_shared_writer(db_path: Path, writer: DatabaseWriter, lock: Any) ->
 
 
 def _unregister_shared_writer(db_path: Path) -> None:
+    try:
+        import importlib as _il3
+        mod3 = _il3.import_module("astrid.packs")
+        raw3 = getattr(mod3, "_unregister_active_writer", None)
+        if raw3 is not None:
+            raw3(db_path)
+    except Exception:
+        pass
     key = _shared_key(db_path)
     with _SHARED_WRITERS_GUARD:
         _SHARED_WRITERS.pop(key, None)
-
 
 def _projects_root_from_timeline_home(timeline_home: str | Path | None) -> Path:
     if timeline_home is not None:

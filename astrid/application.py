@@ -150,6 +150,13 @@ class CoreApplication:
         still holds an open writer.
         """
         self.writer.close()
+        # Unregister from the single shared registry (packs canonical, H1).
+        try:
+            from astrid.packs import _unregister_active_writer
+
+            _unregister_active_writer(self.database_path)
+        except Exception:
+            pass
         if self.owner_lock is not None:
             self.owner_lock.release()
 
@@ -326,6 +333,11 @@ def compose_standard_application(
     writer: DatabaseWriter | None = None
     try:
         writer = open_standard_writer(db_path, registry=registry)
+        # Single shared registration helper (H1): both application and bridge
+        # use the same process-level writer registry so lazy backends borrow.
+        from astrid.packs import _register_active_writer as _reg_writer
+
+        _reg_writer(db_path, writer)
         events = EventAppendService(registry)
         receipts = ReceiptService()
         projects = ProjectRepository(events=events, receipts=receipts)
@@ -390,6 +402,12 @@ def compose_standard_application(
         )
     except BaseException:
         if writer is not None:
+            try:
+                from astrid.packs import _unregister_active_writer as _unreg
+
+                _unreg(db_path)
+            except Exception:
+                pass
             writer.close()
         owner_lock.release()
         raise

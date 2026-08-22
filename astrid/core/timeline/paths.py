@@ -167,46 +167,13 @@ def find_timeline_by_slug(
             continue
         if not include_tombstoned and _timeline_home_is_tombstoned(child):
             continue
-        # Skip backfilled timelines in file scan: classify by marker/dir ULID vs backfill state,
-        # never by sidecar content alone (stale identity must not cause exclusion miss).
+        # H2: skip backfilled timelines in file scan via authoritative resolver (kernel-first)
         try:
+            from astrid.core.timeline.authority import (
+                resolve_authoritative_timeline_id as _res_auth_excl,
+            )
+            _tid_candidate = _res_auth_excl(child, root)
             _skip = False
-            # Derive timeline_id for this directory via kernel event lookup by ULID (authoritative)
-            _dir_ulid = child.name
-            _tid_candidate = None
-            try:
-                import sqlite3 as _sq_s
-
-                from astrid.core.foundation.project_paths import resolve_projects_root as _rr_s
-                from astrid.core.integrations.reigh.bridge_service import (
-                    derive_database_path as _dd_s,
-                )
-                _pr_s = _rr_s(root)
-                _db_s = _dd_s(_pr_s)
-                if _db_s.is_file():
-                    _conn_s = _sq_s.connect(f"file:{_db_s}?mode=ro", uri=True)
-                    try:
-                        _conn_s.row_factory = _sq_s.Row
-                        _row_s = _conn_s.execute("SELECT json_extract(payload_json,'$.data.timeline_id') as tid FROM events WHERE kind='timeline.created' AND json_extract(payload_json,'$.data.timeline_ulid')=? LIMIT 1", (_dir_ulid,)).fetchone()
-                        if _row_s is None or not _row_s["tid"]:
-                            _row_s = _conn_s.execute("SELECT json_extract(payload_json,'$.data.timeline_id') as tid FROM events WHERE kind='timeline.created' AND json_extract(payload_json,'$.data.timeline_ulid')=? LIMIT 1", (_dir_ulid.lower(),)).fetchone()
-                        if _row_s is None or not _row_s["tid"]:
-                            _row_s = _conn_s.execute("SELECT json_extract(payload_json,'$.data.timeline_id') as tid FROM events WHERE kind='timeline.created' AND json_extract(payload_json,'$.data.timeline_ulid')=? LIMIT 1", (_dir_ulid.upper(),)).fetchone()
-                        if _row_s and _row_s["tid"]:
-                            _tid_candidate = str(_row_s["tid"])
-                    finally:
-                        _conn_s.close()
-            except Exception:
-                _tid_candidate = None
-            # Fallback to sidecar only if kernel lookup unavailable (legacy path) but still verify via marker
-            if _tid_candidate is None:
-                _ip = child / "assembly.identity.json"
-                if _ip.is_file():
-                    try:
-                        _raw = read_json(_ip)
-                        _tid_candidate = _raw.get("timeline_id") if isinstance(_raw, dict) else None
-                    except Exception:
-                        _tid_candidate = None
             if _tid_candidate and isinstance(_tid_candidate, str):
                 try:
                     if is_backfilled_timeline(_tid_candidate, root):
@@ -324,60 +291,35 @@ def load_display_json_with_repair(timeline_home: str | Path) -> dict[str, object
     identity_file = timeline_dir_path / "assembly.identity.json"
 
     if not events_file.is_file():
-        # as authority — resolve from SQLite instead (disposable cache).
-        # Need timeline_id to check marker; derive from identity if present, else
-        # kernel lookup by ULID. Fail closed on corrupt marker.
+        # H2 kernel-first: authoritative id via ULID/dir binding FIRST.
+        from astrid.core.timeline.authority import resolve_authoritative_timeline_id as _res_auth0
         _tid_check: str | None = None
-        if identity_file.is_file():
-            try:
-                _raw_id = read_json(identity_file)
-                _tid_check = _raw_id.get("timeline_id") if isinstance(_raw_id, dict) else None
-            except Exception:
-                _tid_check = None
-        if _tid_check is None and timeline_dir_path.name:
-            try:
-                import sqlite3 as _sq0
-
-                from astrid.core.foundation.project_paths import resolve_projects_root as _rr0
-                from astrid.core.integrations.reigh.bridge_service import (
-                    derive_database_path as _dd0,
-                )
-                _pr0 = _rr0(None)
-                td_par0 = timeline_dir_path.parent
-                if td_par0.name == "timelines" and td_par0.parent.is_dir():
-                    _pr0 = td_par0.parent.parent
-                _db0 = _dd0(_pr0)
-                if _db0.is_file():
-                    _ulid_try = timeline_dir_path.name
-                    conn0 = _sq0.connect(f"file:{_db0}?mode=ro", uri=True)
-                    try:
-                        conn0.row_factory = _sq0.Row
-                        r0 = conn0.execute("SELECT json_extract(payload_json,'$.data.timeline_id') as tid FROM events WHERE kind='timeline.created' AND lower(json_extract(payload_json,'$.data.timeline_ulid'))=lower(?) LIMIT 1", (_ulid_try,)).fetchone()
-                        if r0 and r0["tid"]:
-                            _tid_check = str(r0["tid"])
-                    finally:
-                        conn0.close()
-            except Exception:
-                pass
+        _pr0_guess: Path | None = None
+        try:
+            from astrid.core.foundation.project_paths import resolve_projects_root as _rr0_guess
+            _pr0_guess = _rr0_guess(None)
+            td_par0_guess = timeline_dir_path.parent
+            if td_par0_guess.name == "timelines" and td_par0_guess.parent.is_dir():
+                _pr0_guess = td_par0_guess.parent.parent
+        except Exception:
+            _pr0_guess = None
+        try:
+            _tid_check = _res_auth0(timeline_dir_path, _pr0_guess)
+        except Exception:
+            # BackfillError propagates; other errors fallback to legacy file path
+            raise
         if isinstance(_tid_check, str) and _tid_check:
             try:
                 from astrid.core.timeline.authority import is_backfilled_timeline
-                _pr_check = None
-                try:
-                    from astrid.core.foundation.project_paths import resolve_projects_root as _rrc
-                    _pr_check = _rrc(None)
-                    td_parc = timeline_dir_path.parent
-                    if td_parc.name == "timelines" and td_parc.parent.is_dir():
-                        _pr_check = td_parc.parent.parent
-                except Exception:
-                    _pr_check = None
+                _pr_check = _pr0_guess
                 if is_backfilled_timeline(_tid_check, _pr_check):
                     # Marked sidecarless timeline: derive display from SQLite authority.
                     try:
-                        from astrid.core.timeline.eventlog.sqlite_backend import SqliteEventLogBackend as _SBE0
                         from astrid.core.timeline.eventlog import project_display as _pd0
-                        _be0 = _SBE0(timeline_id=_tid_check, timeline_home=timeline_dir_path, projects_root=_pr_check if _pr_check is not None else _pr0)
-                        # Try to get fallback display from identity if available, else None
+                        from astrid.core.timeline.eventlog.sqlite_backend import (
+                            SqliteEventLogBackend as _SBE0,
+                        )
+                        _be0 = _SBE0(timeline_id=_tid_check, timeline_home=timeline_dir_path, projects_root=_pr_check if _pr_check is not None else _pr0_guess)
                         _fallback0 = None
                         try:
                             if identity_file.is_file():
@@ -422,8 +364,11 @@ def load_display_json_with_repair(timeline_home: str | Path) -> dict[str, object
         _tid_side = None
         try:
             import sqlite3 as _sq_side
+
             from astrid.core.foundation.project_paths import resolve_projects_root as _rr_side
-            from astrid.core.integrations.reigh.bridge_service import derive_database_path as _dd_side
+            from astrid.core.integrations.reigh.bridge_service import (
+                derive_database_path as _dd_side,
+            )
             _pr_side = _rr_side(None)
             td_par_side = timeline_dir_path.parent
             if td_par_side.name == "timelines" and td_par_side.parent.is_dir():
@@ -448,8 +393,10 @@ def load_display_json_with_repair(timeline_home: str | Path) -> dict[str, object
                 if _isbf_side(_tid_side, _pr_side2):
                     # Derive display via SQLite for marked sidecarless
                     try:
-                        from astrid.core.timeline.eventlog.sqlite_backend import SqliteEventLogBackend as _SBE_side
                         from astrid.core.timeline.eventlog import project_display as _pd_side
+                        from astrid.core.timeline.eventlog.sqlite_backend import (
+                            SqliteEventLogBackend as _SBE_side,
+                        )
                         _be_side = _SBE_side(timeline_id=_tid_side, timeline_home=timeline_dir_path, projects_root=_pr_side)
                         _proj_side = _pd_side(_be_side.read_events(), fallback_display=None)
                         if _proj_side.deleted or _proj_side.display is None:
@@ -485,26 +432,42 @@ def load_display_json_with_repair(timeline_home: str | Path) -> dict[str, object
         except TimelineValidationError:
             fallback_display = None
 
-    # Marker classification for this timeline (ULID/dir vs backfill state) — used to gate fast path.
+    # H2 kernel-first marker classification: authoritative id via ULID/dir binding FIRST.
     _is_back_display = False
+    _auth_tid_display: str | None = None
     try:
-
         from astrid.core.foundation.project_paths import resolve_projects_root as _rr2_gate
-        from astrid.core.integrations.reigh.bridge_service import derive_database_path as _dd2_gate
+        from astrid.core.timeline.authority import is_backfilled_timeline as _isbf_gate
+        from astrid.core.timeline.authority import (
+            resolve_authoritative_timeline_id as _res_auth_gate,
+        )
         _pr2_gate = _rr2_gate(None)
         td_par_gate = timeline_dir_path.parent
         if td_par_gate.name == "timelines" and td_par_gate.parent.is_dir():
             _pr2_gate = td_par_gate.parent.parent
-        _db2_gate = _dd2_gate(_pr2_gate)
-        if _db2_gate.is_file():
+        _auth_tid_display = _res_auth_gate(timeline_dir_path, _pr2_gate)
+        if isinstance(_auth_tid_display, str) and _auth_tid_display:
             try:
-                _rbs_gate = _bf_mod2.read_backfill_state  # type: ignore[attr-defined]
-                _st_gate = _rbs_gate(_pr2_gate)
-                _is_back_display = timeline_id in _st_gate
+                _is_back_display = _isbf_gate(_auth_tid_display, _pr2_gate)
             except BackfillError:
                 raise
             except Exception:
                 _is_back_display = False
+        else:
+            # Fallback to sidecar id for classification when kernel absent (legacy)
+            from astrid.core.integrations.reigh.bridge_service import (
+                derive_database_path as _dd2_gate,
+            )
+            _db2_gate = _dd2_gate(_pr2_gate)
+            if _db2_gate.is_file():
+                try:
+                    _rbs_gate = _bf_mod2.read_backfill_state  # type: ignore[attr-defined]
+                    _st_gate = _rbs_gate(_pr2_gate)
+                    _is_back_display = timeline_id in _st_gate
+                except BackfillError:
+                    raise
+                except Exception:
+                    _is_back_display = False
     except BackfillError:
         raise
     except Exception:
@@ -519,36 +482,39 @@ def load_display_json_with_repair(timeline_home: str | Path) -> dict[str, object
         if current_display == fallback_display.to_json_obj():
             return current_display
 
-    # Marker-gated backend selection: backfilled timelines never use LocalFs for display projection
+    # H2 kernel-first backend selection: use authoritative id when backfilled.
+    _effective_tid = _auth_tid_display if (_is_back_display and isinstance(_auth_tid_display, str) and _auth_tid_display) else timeline_id
     try:
-
         from astrid.core.foundation.project_paths import resolve_projects_root as _rr2
         from astrid.core.integrations.reigh.bridge_service import derive_database_path as _dd2
         _pr2 = _rr2(None)
-        # Derive projects_root from timeline_dir if layout matches
         td_par = timeline_dir_path.parent
         if td_par.name == "timelines" and td_par.parent.is_dir():
             _pr2 = td_par.parent.parent
         _is_back = False
-        _db2 = _dd2(_pr2)
-        if _db2.is_file():
-            try:
-                _rbs2 = _bf_mod2.read_backfill_state  # type: ignore[attr-defined]
-                _st2 = _rbs2(_pr2)
-                _is_back = timeline_id in _st2
-            except BackfillError:
-                raise
-            except Exception:
-                _is_back = False
+        # Re-use _is_back_display when authoritative id already classified; else check effective id
+        if _is_back_display:
+            _is_back = True
+        else:
+            _db2 = _dd2(_pr2)
+            if _db2.is_file():
+                try:
+                    _rbs2 = _bf_mod2.read_backfill_state  # type: ignore[attr-defined]
+                    _st2 = _rbs2(_pr2)
+                    _is_back = _effective_tid in _st2
+                except BackfillError:
+                    raise
+                except Exception:
+                    _is_back = False
         if _is_back:
             from astrid.core.timeline.eventlog.sqlite_backend import SqliteEventLogBackend as _SBE2
-            backend = _SBE2(timeline_id=timeline_id, timeline_home=timeline_dir_path, projects_root=_pr2)
+            backend = _SBE2(timeline_id=_effective_tid, timeline_home=timeline_dir_path, projects_root=_pr2)
         else:
-            backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=timeline_dir_path)
+            backend = LocalFsBackend(timeline_id=_effective_tid, timeline_home=timeline_dir_path)
     except BackfillError:
         raise
     except Exception:
-        backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=timeline_dir_path)
+        backend = LocalFsBackend(timeline_id=_effective_tid, timeline_home=timeline_dir_path)
     projection = project_display(backend.read_events(), fallback_display=fallback_display)
     if projection.deleted:
         return None
@@ -614,8 +580,11 @@ def load_assembly_json_with_repair(
         _tid_side = None
         try:
             import sqlite3 as _sq_side
+
             from astrid.core.foundation.project_paths import resolve_projects_root as _rr_side
-            from astrid.core.integrations.reigh.bridge_service import derive_database_path as _dd_side
+            from astrid.core.integrations.reigh.bridge_service import (
+                derive_database_path as _dd_side,
+            )
             _pr_side = _rr_side(None)
             td_par_side = timeline_dir_path.parent
             if td_par_side.name == "timelines" and td_par_side.parent.is_dir():
@@ -640,8 +609,10 @@ def load_assembly_json_with_repair(
                 if _isbf_side(_tid_side, _pr_side2):
                     # Derive display via SQLite for marked sidecarless
                     try:
-                        from astrid.core.timeline.eventlog.sqlite_backend import SqliteEventLogBackend as _SBE_side
                         from astrid.core.timeline.eventlog import project_display as _pd_side
+                        from astrid.core.timeline.eventlog.sqlite_backend import (
+                            SqliteEventLogBackend as _SBE_side,
+                        )
                         _be_side = _SBE_side(timeline_id=_tid_side, timeline_home=timeline_dir_path, projects_root=_pr_side)
                         _proj_side = _pd_side(_be_side.read_events(), fallback_display=None)
                         if _proj_side.deleted or _proj_side.display is None:

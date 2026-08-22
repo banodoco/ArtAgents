@@ -303,6 +303,7 @@ def _dispatch_serve(args: list[str]) -> int:
         finally:
             try:
                 from astrid.packs import _unregister_active_writer
+
                 _unregister_active_writer(composition.database_path)
             except Exception:
                 pass

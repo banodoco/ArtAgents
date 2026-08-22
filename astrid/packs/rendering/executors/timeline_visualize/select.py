@@ -326,10 +326,12 @@ def _discover(project_dir: Path) -> tuple[list[ManagedTimeline], list[str]]:
     # Projects root for backfill marker/ kernel lookup: project_dir parent
     # when layout matches <projects_root>/<project_slug>, else resolve_projects_root.
     try:
+        import sqlite3 as _sql
+
         from astrid.core.foundation.project_paths import resolve_projects_root as _resolve_pr
         from astrid.core.integrations.reigh.bridge_service import derive_database_path as _derive_db
-        from astrid.packs.timeline.backfill import BackfillError, read_backfill_state as _read_state
-        import sqlite3 as _sql
+        from astrid.packs.timeline.backfill import BackfillError
+        from astrid.packs.timeline.backfill import read_backfill_state as _read_state
     except Exception:
         _resolve_pr = None  # type: ignore
         _derive_db = None  # type: ignore
@@ -447,8 +449,50 @@ def _discover(project_dir: Path) -> tuple[list[ManagedTimeline], list[str]]:
         if problem is not None:
             diagnostics.append(f"skipped {child.name}: {problem}")
             continue
+        # H2 kernel-first: for marked timelines, authoritative id overrides stale sidecar.
+        try:
+            from astrid.core.timeline.authority import is_backfilled_timeline as _isbf_vis
+            from astrid.core.timeline.authority import (
+                resolve_authoritative_timeline_id as _res_auth_vis,
+            )
+            # Derive projects_root from project_dir (<root>/<slug>)
+            _pr_vis = None
+            try:
+                _cand_vis = Path(project_dir).resolve()
+                _pr_vis = _cand_vis.parent
+                if not _pr_vis.is_dir():
+                    from astrid.core.foundation.project_paths import (
+                        resolve_projects_root as _rr_vis,
+                    )
+                    _pr_vis = _rr_vis(None)
+            except Exception:
+                _pr_vis = None
+            _auth_vis = _res_auth_vis(child, _pr_vis)
+            if isinstance(_auth_vis, str) and _auth_vis:
+                try:
+                    if _isbf_vis(_auth_vis, _pr_vis):
+                        # Marked: authoritative id is kernel id; build timeline with it if different
+                        side_tid = identity.get("uuid") or identity.get("stable_id") or identity.get("timeline_id")
+                        # _timeline_from_identity uses identity's uuid/ulid; override tid if stale
+                        if isinstance(side_tid, str) and side_tid.lower() != _auth_vis.lower():
+                            # Construct with authoritative id while preserving other identity fields
+                            ulid_canonical = _canonical_ulid(child.name) or child.name.upper()
+                            tid_canonical = _canonical_uuid(_auth_vis) or _auth_vis
+                            slug_disp, is_default_disp = _read_display_state(child, identity)
+                            timelines.append(ManagedTimeline(
+                                timeline_dir=Path(child),
+                                timeline_id=tid_canonical,
+                                timeline_ulid=ulid_canonical,
+                                slug=slug_disp,
+                                is_default=is_default_disp,
+                                is_tombstoned=_is_tombstoned(child),
+                            ))
+                            continue
+                except Exception:
+                    pass
+        except Exception:
+            pass
         timelines.append(_timeline_from_identity(child, identity))
-    timelines.sort(key=lambda t: (t.timeline_ulid, str(t.timeline_dir) if t.timeline_dir else ""))
     return timelines, diagnostics
 
 

@@ -40,6 +40,7 @@ import sqlite3
 import threading as _threading
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from astrid.core.backup.operations import recover_restore_staging
 from astrid.core.events.registry import register_core_vocabulary
