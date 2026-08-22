@@ -572,11 +572,12 @@ class ReighTaskBridge:
                 task_input,
                 projects_root=self._projects_root,
             )
-            if entry.child_only:
-                raise ChildAdmissionForbidden(
-                    f"family {family!r} is executor-only; child families "
-                    "are admitted only by the live fenced parent executor"
-                )
+            # Dual-use rows (doc 27 §3.1): join_clips_orchestrator and
+            # travel_stitch are child_only AND publicly derivable through
+            # their families. The §3.1 family-derivation table is the one
+            # authority for what a browser may admit; executor-child-only
+            # names never reach here because resolve_family_capability's
+            # direct-name fallback rejects every child_only row with 403.
             check_available(entry)
             # Digest fence + provenance snapshot (pin the data, not the
             # code): verify the vendored workflow against its pinned SHA-256
@@ -646,9 +647,15 @@ class ReighTaskBridge:
         slug: str | None,
         body: Mapping[str, Any],
         idempotency_key: str,
-    ) -> dict[str, Any]:
-        """T8 hard gate: fenced executor-only child admission (§3.5)."""
+    ) -> tuple[int, dict[str, Any]]:
+        """T8 hard gate: fenced executor-only child admission (§3.5).
+
+        Returns ``(201, {"task": ...})`` on first commit and ``(200,
+        {"task": ...})`` on a deterministic-key replay — the SAME child
+        row, never a duplicate.
+        """
         from astrid.core.integrations.reigh.capabilities import (
+            check_available,
             resolve_child_capability,
         )
         from astrid.core.store.uow import UnitOfWork
@@ -697,62 +704,91 @@ class ReighTaskBridge:
 
         family = body.get("family")
         try:
-            entry = resolve_child_capability(family if isinstance(family, str) else "")
+            entry = resolve_child_capability(
+                family if isinstance(family, str) else ""
+            )
+            # Same availability gate as public admission (review-N2
+            # symmetry): a child whose binding prerequisite closure is
+            # open is a typed 422, never a silent later failure.
+            check_available(entry)
         except Exception as exc:  # noqa: BLE001 - narrowed below
             from astrid.core.integrations.reigh.capabilities import (
+                CapabilityUnavailable,
                 ChildAdmissionForbidden,
             )
 
             if isinstance(exc, ChildAdmissionForbidden):
                 raise BridgeChildAdmissionForbiddenError(str(exc)) from None
+            if isinstance(exc, CapabilityUnavailable):
+                raise BridgeCapabilityUnavailableError(
+                    f"{exc.identifier}: {exc.hint}"
+                ) from None
             raise
 
-        # Live parent fence: the caller's attempt is the parent's live,
-        # unexpired leased attempt owned by this executor (doc 27 §3.5.1).
-        parent = self._task_row(parent_task_id)
-        project_id = str(parent["project_id"])
+        # Replay-first determinism: the deterministic key is the one
+        # authority for child identity. A retry of an already-admitted
+        # child returns the SAME row without re-paying the live parent
+        # fence — the original admission already proved executor
+        # authority, and a heartbeat between attempt N and retry N+1
+        # advances status_version without changing the answer.
+        replay = self._existing_child_receipt(idempotency_key)
+        parent = (
+            None if replay is not None else self._task_row(parent_task_id)
+        )
+        project_id = str(
+            replay["project_id"]
+            if replay is not None
+            else parent["project_id"]
+        )
         if slug is not None:
             resolved_slug_project = self.resolve_project_id(slug)
             if resolved_slug_project != project_id:
                 raise BridgeNotFoundError(
-                    f"parent task {parent_task_id!r} is not in project {slug!r}"
+                    f"parent task {parent_task_id!r} is not in project "
+                    f"{slug!r}"
                 )
-        if str(parent["status"]) != "running":
-            raise BridgeConflictError(
-                "parent task is not running",
-                attempt=self._current_attempt_extra(parent_attempt_id),
-            )
-        attempt = self._attempt_row(parent_attempt_id)
-        if (
-            attempt is None
-            or str(attempt["task_id"]) != parent_task_id
-            or str(attempt["status"]) not in ("claimed", "running")
-            or str(attempt["executor_id"] or "") != executor_id
-            or str(attempt["lease_id"] or "") != lease_id
-            or int(attempt["status_version"]) != status_version
-        ):
-            raise BridgeChildAdmissionForbiddenError(
-                "the parent fence does not match the caller's live attempt"
-            )
-        from datetime import datetime, timezone
 
-        expires = str(attempt["lease_expires_at"])
-        now_dt = datetime.now(timezone.utc)
-        try:
-            expiry_dt = datetime.fromisoformat(expires)
-        except ValueError:
-            expiry_dt = None
-        if expiry_dt is None or expiry_dt.tzinfo is None:
-            expiry_dt = (
-                expiry_dt.replace(tzinfo=timezone.utc)
-                if expiry_dt is not None
-                else now_dt
-            )
-        if expiry_dt <= now_dt:
-            raise BridgeConflictError(
-                "parent lease has expired",
-                attempt=_attempt_wire_shape(attempt),
-            )
+        if replay is None:
+            # Live parent fence (doc 27 §3.5.1): only NEW admissions pay
+            # this gate; the caller's attempt must be the parent's live,
+            # unexpired leased attempt owned by this executor.
+            if str(parent["status"]) != "running":
+                raise BridgeConflictError(
+                    "parent task is not running",
+                    attempt=self._current_attempt_extra(parent_attempt_id),
+                )
+            attempt = self._attempt_row(parent_attempt_id)
+            if (
+                attempt is None
+                or str(attempt["task_id"]) != parent_task_id
+                or str(attempt["status"]) not in ("claimed", "running")
+                or str(attempt["executor_id"] or "") != executor_id
+                or str(attempt["lease_id"] or "") != lease_id
+                or int(attempt["status_version"]) != status_version
+            ):
+                raise BridgeChildAdmissionForbiddenError(
+                    "the parent fence does not match the caller's live "
+                    "attempt"
+                )
+            from datetime import datetime, timezone
+
+            expires = str(attempt["lease_expires_at"])
+            now_dt = datetime.now(timezone.utc)
+            try:
+                expiry_dt = datetime.fromisoformat(expires)
+            except ValueError:
+                expiry_dt = None
+            if expiry_dt is None or expiry_dt.tzinfo is None:
+                expiry_dt = (
+                    expiry_dt.replace(tzinfo=timezone.utc)
+                    if expiry_dt is not None
+                    else now_dt
+                )
+            if expiry_dt <= now_dt:
+                raise BridgeConflictError(
+                    "parent lease has expired",
+                    attempt=_attempt_wire_shape(attempt),
+                )
 
         task_input = body.get("input")
         if not isinstance(task_input, dict):
@@ -773,20 +809,56 @@ class ReighTaskBridge:
             "output_policy": dict(entry.output_policy),
         }
         tasks, _media, _receipts = self._services()
-        task = UnitOfWork(self._writer).run(
-            lambda u: tasks.create(
-                u,
+
+        def command(uow):
+            # Same stable-id replay contract as public admission: the
+            # kernel receipt gate hashes task_id into the request, so a
+            # fresh ULID under a retried key would mismatch. The lookup
+            # runs INSIDE the writer-serialized unit of work, so two
+            # concurrent admissions of one (role, index) converge on the
+            # winner's row — exactly one child per deterministic key.
+            existing = uow.query_one(
+                "SELECT t.id AS task_id FROM tasks t "
+                "JOIN command_receipts r "
+                "ON r.primary_stream_id = t.event_stream_id "
+                "WHERE r.project_id = ? AND r.idempotency_key = ?",
+                (project_id, idempotency_key),
+            )
+            stable_id = existing["task_id"] if existing is not None else None
+            task = tasks.create(
+                uow,
                 project_id=project_id,
                 capability=entry.capability_id,
                 spec=spec,
                 input_manifest=[],
                 idempotency_key=idempotency_key,
-                max_attempts=3,
                 actor_kind="executor",
+                task_id=stable_id,
+                max_attempts=3,
                 dependencies=dependencies,
             )
-        )
-        return {"task": task.to_dict()}
+            return existing is not None, task
+
+        replayed, task = UnitOfWork(self._writer).run(command)
+        return (200 if replayed else 201), {"task": task.to_dict()}
+
+    def _existing_child_receipt(self, idempotency_key: str) -> dict | None:
+        """Read-only probe: has this deterministic key admitted already?
+
+        The ``reigh.orch:v1:<parent>:<role>:<index>`` key space is owned
+        exclusively by child admission, so the create-kind receipt keyed
+        by this string alone identifies the prior admission; the
+        in-unit-of-work join in :meth:`admit_child` still scopes by
+        project before any mutation.
+        """
+        with self._writer.read_only_connection() as conn:
+            conn.row_factory = _sqlite_row_factory
+            row = conn.execute(
+                "SELECT project_id FROM command_receipts "
+                "WHERE idempotency_key = ? AND command_kind = ?",
+                (idempotency_key, "core.task.create"),
+            ).fetchone()
+        return dict(row) if row is not None else None
 
     def _resolve_materialized_inputs(
         self,

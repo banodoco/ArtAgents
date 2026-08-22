@@ -1382,10 +1382,10 @@ def make_local_bridge_handler(
                 bridge = self._task_bridge()
                 try:
                     if "child_admission" in body:
-                        payload = bridge.admit_child(
+                        status, payload = bridge.admit_child(
                             slug=parts[1], body=body, idempotency_key=key
                         )
-                        self._send_json(201, payload)
+                        self._send_json(status, payload)
                         return
                     status, payload = bridge.admit(
                         slug=parts[1], body=body, idempotency_key=key

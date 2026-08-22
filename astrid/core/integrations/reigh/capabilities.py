@@ -98,6 +98,9 @@ WORKER_CHILD_ALLOWLIST: frozenset[str] = frozenset(
         "reigh.join_clips_orchestrator",
     }
 )
+"""The executor-only child gate. Import-time compiler enforcement
+(doc 27 §3.1/§3.2) holds this set EXACTLY equal to the ``child_only``
+registry rows — one authority, no drift between the two declarations."""
 
 # Active-but-dead / inactive legacy names (doc 27 §3.1, doc 16 §5): rejected
 # with ``capability_unavailable``, never aliased.
@@ -389,6 +392,7 @@ REGISTRY: dict[str, CapabilityEntry] = {
             BINDING_WGP,
             _policy(create_generation=False),
             required_inputs={"clip_source": (str, dict)},
+            child_only=True,
             probe="wgp_runtime",
         ),
         CapabilityEntry(
@@ -473,6 +477,7 @@ REGISTRY: dict[str, CapabilityEntry] = {
             BINDING_WGP,
             _policy(),
             required_inputs={"image_urls": list},
+            child_only=True,
             probe="wgp_runtime",
         ),
         CapabilityEntry(
@@ -681,6 +686,16 @@ def _validate_registry() -> None:
                 "an object"
             )
         seen_families.add(entry.family)
+    unflagged = sorted(
+        cid
+        for cid in WORKER_CHILD_ALLOWLIST
+        if REGISTRY.get(cid) is None or not REGISTRY[cid].child_only
+    )
+    if unflagged:
+        raise RuntimeError(
+            f"worker-child allowlist ids without a child_only registry "
+            f"row: {unflagged}"
+        )
     missing = PUBLIC_FAMILIES - seen_families
     if missing:
         raise RuntimeError(f"families without any capability: {sorted(missing)}")

@@ -52,6 +52,16 @@ EXPECTED_CHILD_IDS = {
     "reigh.join_clips_segment",
     "reigh.join_final_stitch",
     "reigh.travel_segment",
+    "reigh.travel_stitch",
+    "reigh.join_clips_orchestrator",
+}
+
+# Dual-use rows (doc 27 §3.1): child_only AND publicly derivable through
+# their families — browsers start orchestrations via the family table,
+# executors admit the same capabilities through the fenced child gate.
+DUAL_USE_CHILD_IDS = {
+    "reigh.travel_stitch",
+    "reigh.join_clips_orchestrator",
 }
 
 
@@ -59,15 +69,44 @@ def test_registry_carries_all_retained_ids_plus_render() -> None:
     public = {
         cid for cid, entry in REGISTRY.items() if not entry.child_only
     }
-    assert public == EXPECTED_PUBLIC_IDS
+    assert public == EXPECTED_PUBLIC_IDS - DUAL_USE_CHILD_IDS
     child = {cid for cid, entry in REGISTRY.items() if entry.child_only}
     assert child == EXPECTED_CHILD_IDS
-    # The full child allowlist also covers the two dual-use families whose
-    # child use goes through the executor gate.
-    assert WORKER_CHILD_ALLOWLIST == EXPECTED_CHILD_IDS | {
-        "reigh.travel_stitch",
-        "reigh.join_clips_orchestrator",
-    }
+    # One authority (review-N1 resolution): the gate allowlist and the
+    # child_only registry flag agree EXACTLY; import-time compiler
+    # enforcement in _validate_registry holds the same equality.
+    assert WORKER_CHILD_ALLOWLIST == EXPECTED_CHILD_IDS
+    # Dual-use rows stay publicly derivable through their §3.1 families.
+    assert (
+        resolve_family_capability(
+            "join_clips", {"clip_source": "clips"}
+        ).capability_id
+        == "reigh.join_clips_orchestrator"
+    )
+    assert (
+        resolve_family_capability(
+            "crossfade_join", {"image_urls": ["a.png", "b.png"]}
+        ).capability_id
+        == "reigh.travel_stitch"
+    )
+    # ...while their flat capability names remain executor-gate-only.
+    with pytest.raises(ChildAdmissionForbidden):
+        resolve_family_capability("join_clips_orchestrator", {})
+    with pytest.raises(ChildAdmissionForbidden):
+        resolve_family_capability("travel_stitch", {})
+
+
+def test_edit_family_stays_childless() -> None:
+    """Doc 27 §3.1 allowlist is exhaustive: no edit_* child exists."""
+    entry = REGISTRY["reigh.edit_video_orchestrator"]
+    assert entry.child_only is False
+    assert "reigh.edit_video_orchestrator" not in WORKER_CHILD_ALLOWLIST
+    with pytest.raises(ChildAdmissionForbidden):
+        resolve_child_capability("edit_video_orchestrator")
+    admitted = resolve_family_capability(
+        "edit_video_orchestrator", {"clip_source": "clips"}
+    )
+    assert admitted.capability_id == "reigh.edit_video_orchestrator"
 
 
 def test_every_entry_has_exactly_one_binding_and_policy() -> None:
