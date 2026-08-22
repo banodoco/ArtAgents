@@ -249,6 +249,7 @@ def declaration_entry(declaration: LocalWorkflowDeclaration) -> Any:
         _policy(**dict(declaration.output_policy)),
         required_inputs=required_inputs,
         template=(declaration.workflow_path, declaration.digest),
+        probe="vibecomfy_runtime",
     )
 
 

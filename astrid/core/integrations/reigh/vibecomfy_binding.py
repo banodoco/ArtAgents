@@ -378,33 +378,54 @@ def repo_root() -> Path:
     return Path(__file__).resolve().parents[4]
 
 
-def resolve_runtime() -> VibeComfyRuntime:
-    """Resolve the pinned checkout and interpreter, refusing if absent.
-
-    Resolution order: explicit env override, then the B1-provisioned
-    vendor checkout beside the repository. A missing checkout is a typed
-    refusal naming the provisioning path — never a silent substitute.
-    """
+def _resolve_paths() -> tuple[Path, Path]:
+    """Resolve the checkout root and interpreter paths (no presence gates)."""
     root = Path(_env(CHECKOUT_ENV) or (repo_root().parent / "vendor" / "VibeComfy"))
     checkout = root.resolve()
-    marker = checkout / "pyproject.toml"
-    if not marker.is_file():
-        raise RuntimeUnavailable(
-            f"pinned VibeComfy checkout not found at {checkout} "
-            f"(set {CHECKOUT_ENV}); provision it via the install recipe "
-            "(clone --filter=blob:none + checkout --detach <pinned sha>)"
-        )
     python_env = _env(PYTHON_ENV)
     if python_env:
         python = Path(python_env)
     else:
         venv_python = checkout / ".venv" / "bin" / "python"
         python = venv_python if venv_python.is_file() else Path(sys.executable)
+    return checkout, python
+
+
+def probe_runtime() -> tuple[bool, list[str]]:
+    """Non-raising prerequisite closure of the pinned subprocess runtime.
+
+    Returns ``(ok, missing)`` where *missing* names each absent artifact
+    exactly. Single authority for the presence checks: the registry's
+    ``vibecomfy_runtime`` availability probe and :func:`resolve_runtime`
+    both consume this predicate.
+    """
+    checkout, python = _resolve_paths()
+    missing: list[str] = []
+    if not (checkout / "pyproject.toml").is_file():
+        missing.append(
+            f"pinned VibeComfy checkout not found at {checkout} "
+            f"(set {CHECKOUT_ENV}); provision it via the install recipe "
+            "(clone --filter=blob:none + checkout --detach <pinned sha>)"
+        )
     if not python.is_file():
-        raise RuntimeUnavailable(
+        missing.append(
             f"VibeComfy interpreter not found at {python} "
             f"(set {PYTHON_ENV})"
         )
+    return (not missing), missing
+
+
+def resolve_runtime() -> VibeComfyRuntime:
+    """Resolve the pinned checkout and interpreter, refusing if absent.
+
+    Resolution order: explicit env override, then the B1-provisioned
+    vendor checkout beside the repository. A missing prerequisite is a
+    typed refusal naming the exact artifacts — never a silent substitute.
+    """
+    ok, missing = probe_runtime()
+    if not ok:
+        raise RuntimeUnavailable("; ".join(missing))
+    checkout, python = _resolve_paths()
     return VibeComfyRuntime(checkout=checkout, python=python)
 
 
