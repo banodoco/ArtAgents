@@ -20,6 +20,7 @@ from typing import Any, Callable, Sequence
 from astrid.core.foundation.hash import sha256_file
 from astrid.core.foundation.project_paths import project_dir
 from astrid.core.media import ffprobe_duration_seconds
+from astrid.core.project.kernel_admission import admit_orchestrator_project_run
 from astrid.core.project.run import (
     finalize_project_run,
     prepare_project_run,
@@ -632,62 +633,33 @@ def main(argv: Sequence[str] | None = None) -> int:
             recovery_command="use one of: ados-sunday-template, search-transcript, find-holding-screens, render",
         )
 
-    # Orchestrator path — full project setup
-    project_context = None
-
+    # Orchestrator path — full project setup (kernel admission, staging-only)
     try:
-        # Pre-parse for project slug
         pre_parser = argparse.ArgumentParser(add_help=False)
         pre_parser.add_argument("--project")
         pre_parser.add_argument("--out")
         parsed, _unknown = pre_parser.parse_known_args(effective_argv)
 
-        # Prepare project run if --project is set
+        kernel_ctx = None
         if parsed.project:
             reject_project_with_out(parsed.project, parsed.out)
-            project_context = prepare_project_run(
-                parsed.project,
+            kernel_ctx = admit_orchestrator_project_run(
+                project=parsed.project,
                 tool_id="video_editing.event_talks",
-                kind="orchestrator",
                 argv=["event_talks", *effective_argv],
-                metadata={"entrypoint": "direct"},
             )
-            effective_argv = [*effective_argv, "--out", str(project_context.run_root)]
+            effective_argv = [*effective_argv, "--out", str(kernel_ctx.run_root)]
 
         args = resolve_args(effective_argv)
-        if project_context is not None:
-            args.project = project_context.project_slug
-
+        if kernel_ctx is not None:
+            args.project = kernel_ctx.project_slug
         returncode = run_orchestrator(args)
-
-        if project_context is not None:
-            finalize_project_run(
-                project_context,
-                status="success" if returncode == 0 else "failed",
-                returncode=returncode,
-                metadata={"dry_run": args.dry_run},
-            )
-
         return returncode
     except SystemExit as exc:
-        if project_context is not None:
-            finalize_project_run(
-                project_context,
-                status="error",
-                returncode=exc.code if isinstance(exc.code, int) else 1,
-                error=exc,
-            )
         if isinstance(exc.code, int):
             return exc.code
         return 1
-    except Exception as exc:
-        if project_context is not None:
-            finalize_project_run(
-                project_context,
-                status="error",
-                returncode=-1,
-                error=exc,
-            )
+    except Exception:
         raise
 
 

@@ -6,13 +6,12 @@ gate command interception, and environment variable management are
 isolated from the manifest-facing ``main()`` entrypoint.
 """
 
-from __future__ import annotations
-
 import argparse
 import os
 from pathlib import Path
 from typing import Any
 
+from astrid.core.project.kernel_admission import admit_orchestrator_project_run
 from astrid.core.project.run import (
     METADATA_KEY_TIMELINE_BINDING_MODE,
     METADATA_KEY_TIMELINE_EVENT_STREAM_ID,
@@ -20,8 +19,6 @@ from astrid.core.project.run import (
     TIMELINE_BINDING_MODE_MANAGED,
     ProjectRunError,
     bind_managed_timeline,
-    # prepare_project_run – imported late via run.py facade for monkeypatch seam
-    project_run_env,
     reject_project_with_out,
 )
 
@@ -37,9 +34,9 @@ def _project_slug_for_gate(argv: list[str]) -> str | None:
 def _prepare_project_main(argv: list[str]) -> tuple[Any | None, list[str]]:
     """Prepare a project run context when ``--project`` is present.
 
-    Returns ``(context, effective_argv)`` where *context* is the
-    ``prepare_project_run`` result or ``None`` when no ``--project`` was
-    requested.
+    Kernel shim (B2.3): staging-only, no authoritative run.json second ledger.
+    Returns ``(context, effective_argv)`` where *context* is the kernel
+    admission context or ``None`` when no ``--project`` was requested.
     """
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--project")
@@ -50,46 +47,10 @@ def _prepare_project_main(argv: list[str]) -> tuple[Any | None, list[str]]:
     if not parsed.project:
         return None, argv
     reject_project_with_out(parsed.project, parsed.out)
-
-    # Derive managed timeline slug from brief (m3.5 managed binding).
-    brief_slug = getattr(parsed, "brief_slug", None) or None
-    if brief_slug is None:
-        brief_path = getattr(parsed, "brief", None) or None
-        if brief_path is not None:
-            brief_stem = Path(brief_path).stem
-            generic_brief_names = {"brief", "plan", "prompt"}
-            brief_slug = brief_stem if brief_stem.lower() not in generic_brief_names else None
-    # Fall back to a slug derived from the project name when no brief is available.
-    if brief_slug is None:
-        brief_slug = parsed.project
-
-    # Establish managed timeline binding.
-    try:
-        timeline_ulid, timeline_slug, timeline_event_stream_id = bind_managed_timeline(
-            parsed.project, brief_slug
-        )
-    except Exception as exc:
-        raise ProjectRunError(
-            f"failed to bind managed timeline for project {parsed.project!r}: {exc}"
-        ) from exc
-
-    managed_metadata: dict[str, Any] = {
-        "entrypoint": "direct",
-        METADATA_KEY_TIMELINE_SLUG: timeline_slug,
-        METADATA_KEY_TIMELINE_EVENT_STREAM_ID: timeline_event_stream_id,
-        METADATA_KEY_TIMELINE_BINDING_MODE: TIMELINE_BINDING_MODE_MANAGED,
-    }
-    # Late import through the run.py facade to preserve the monkeypatch
-    # seam on ``astrid.packs.video_editing.orchestrators.hype.run.prepare_project_run``.
-    from astrid.packs.video_editing.orchestrators.hype import run as _hype_run
-
-    context = _hype_run.prepare_project_run(
-        parsed.project,
+    context = admit_orchestrator_project_run(
+        project=parsed.project,
         tool_id="video_editing.hype",
-        kind="orchestrator",
         argv=["hype", *argv],
-        metadata=managed_metadata,
-        timeline_id=timeline_ulid,
     )
     return context, [*argv, "--out", str(context.run_root)]
 

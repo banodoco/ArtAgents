@@ -131,6 +131,9 @@ class InvocationResult:
     run_root: str | None = None
     outputs: Mapping[str, Any] = field(default_factory=dict)
     executor_version: str | None = None
+    kernel_run_id: str | None = None
+    kernel_task_id: str | None = None
+    kernel_attempt_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return _json_safe_mapping(
@@ -146,6 +149,9 @@ class InvocationResult:
                 "outputs": self.outputs,
                 "executor_version": self.executor_version,
                 "raw_result": self.raw_result,
+                "kernel_run_id": self.kernel_run_id,
+                "kernel_task_id": self.kernel_task_id,
+                "kernel_attempt_id": self.kernel_attempt_id,
             }
         )
 

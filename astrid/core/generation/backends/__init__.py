@@ -8,7 +8,6 @@ backend-specific branching.
 from astrid.core.generation.backends.base import BackendAdapter, GenerationResult
 from astrid.core.generation.backends.codex import CodexBackend
 from astrid.core.generation.backends.fal import FalBackend
-from astrid.core.generation.backends.wavespeed import WavespeedBackend
 from astrid.core.generation.backends.registry import (
     GenerationBackendDescriptor,
     GenerationBackendRegistry,
@@ -40,4 +39,11 @@ def __getattr__(name: str):
         from astrid.core.generation.backends.vibecomfy import VibeComfyBackend
 
         return VibeComfyBackend
+    if name == "WavespeedBackend":
+        try:
+            from astrid.core.generation.backends.wavespeed import WavespeedBackend
+
+            return WavespeedBackend
+        except ModuleNotFoundError as exc:
+            raise AttributeError(f"module {__name__!r} has no attribute {name!r}") from exc
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

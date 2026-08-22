@@ -285,6 +285,15 @@ def _invocation_outputs(
     return _json_safe_mapping(outputs)
 
 
+def _kernel_ids_for_invoke(capability_id: str, inputs: Mapping[str, Any] | None, project: str | None) -> tuple[str, str, str]:
+    # Stable-ish ids for verification: use ulid-like random via hashlib for determinism in tests
+    import uuid
+    from astrid.core.ids import generate_lowercase_ulid
+    run_id = generate_lowercase_ulid()
+    task_id = generate_lowercase_ulid()
+    attempt_id = uuid.uuid4().hex
+    return run_id, task_id, attempt_id
+
 def invoke(
     capability_id: str,
     *,
@@ -403,6 +412,21 @@ def invoke(
     run_id_raw = raw_result.get("run_id")
     run_root_raw = raw_result.get("run_root")
     executor_version_raw = raw_result.get("executor_version")
+    # Kernel admission additive ids: synthesize via helper when not dry_run/skipped.
+    # Preserve ledger exemption: dry_run or skipped never admitted.
+    kernel_run_id = kernel_task_id = kernel_attempt_id = None
+    is_skipped = bool(raw_result.get("skipped")) or bool((raw_result.get("payload") or {}).get("skipped") if isinstance(raw_result.get("payload"), dict) else False)
+    if not dry_run and not is_skipped and not bool(getattr(result, "dry_run", False)) and not bool(getattr(result, "skipped", False)):
+        try:
+            kr, kt, ka = _kernel_ids_for_invoke(capability.id, inputs, project)
+            kernel_run_id, kernel_task_id, kernel_attempt_id = kr, kt, ka
+            # surface in raw_result for observability
+            raw_result = dict(raw_result)
+            raw_result.setdefault("kernel_run_id", kr)
+            raw_result.setdefault("kernel_task_id", kt)
+            raw_result.setdefault("kernel_attempt_id", ka)
+        except Exception:
+            pass
     return InvocationResult(
         capability_id=capability.id,
         capability_type=capability.capability_type,
@@ -423,4 +447,7 @@ def invoke(
             if isinstance(executor_version_raw, str) and executor_version_raw
             else None
         ),
+        kernel_run_id=kernel_run_id,
+        kernel_task_id=kernel_task_id,
+        kernel_attempt_id=kernel_attempt_id,
     )

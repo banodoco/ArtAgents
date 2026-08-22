@@ -323,15 +323,12 @@ class TestExecutorCLIProject:
         assert result.returncode == 0
 
         records = _project_run_records(projects_root)
-        assert len(records) == 1, (
-            f"Expected exactly 1 run.json, found {len(records)}: {records}"
+        # Single-ledger contract (B2): project-mode runner no longer writes
+        # authoritative run.json; kernel admission owns the ledger, runner
+        # retains out as staging only. Zero authoritative FS writes.
+        assert len(records) == 0, (
+            f"Expected zero authoritative run.json (kernel-owned), found {len(records)}: {records}"
         )
-        record = records[0]
-        assert record.get("status") == "completed", (
-            f"Expected completed status, got {record.get('status')}"
-        )
-        assert record.get("tool_id") == "test.noop"
-
     def test_failed_validation_persists_ledger(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         from astrid.core.execution.executor.registry import ExecutorRegistry
         from astrid.core.execution.executor.runner import ExecutorRunRequest, ExecutorRunnerError, run_executor
@@ -347,18 +344,12 @@ class TestExecutorCLIProject:
             )
 
         records = _project_run_records(projects_root)
-        assert len(records) == 1, (
-            f"Failed validation should still persist a ledger entry, "
+        # B2 single-ledger: even failed validation does not persist authoritative
+        # run.json in the runner; kernel admission owns that write.
+        assert len(records) == 0, (
+            f"Failed validation should not persist authoritative run.json under single-ledger, "
             f"found {len(records)} records"
         )
-        record = records[0]
-        assert record.get("status") == "failed", (
-            f"Expected failed status for validation failure, got {record.get('status')}"
-        )
-
-
-class TestExecutorCLIOut:
-    """Out paths do not imply project ownership."""
 
     def test_out_without_project_fails_closed(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         from astrid.core.execution.executor.registry import ExecutorRegistry
@@ -437,9 +428,8 @@ class TestSDKImageProject:
         assert result.returncode == 0
 
         records = _project_run_records(projects_root)
-        assert len(records) == 1
-        assert records[0].get("tool_id") == "generation.generate_image"
-
+        # B2 single-ledger: project-mode via runner is staging-only, no authoritative FS ledger.
+        assert len(records) == 0
 
 class TestSDKImageOut:
     """SDK image output still requires an explicit or attached project."""

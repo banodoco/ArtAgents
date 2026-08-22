@@ -17,14 +17,10 @@ import sys
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
-from astrid.core.cli_choices import add_choice_arg
 from astrid.core.foundation.hash import sha256_file
 from astrid.core.foundation.project_paths import project_dir
-from astrid.core.project.run import (
-    finalize_project_run,
-    prepare_project_run,
-    reject_project_with_out,
-)
+from astrid.core.project.kernel_admission import admit_orchestrator_project_run
+from astrid.core.project.run import reject_project_with_out
 from astrid.packs.training.executors.asset_cache import run as asset_cache
 from astrid.packs.video_editing.orchestrators.thumbnail_maker.plan_template import (
     build_plan_v2,
@@ -536,57 +532,32 @@ def main(argv: Sequence[str] | None = None) -> int:
             valid_options=sorted(step_commands),
             recovery_command="choose one of the valid subcommands listed above",
         )
-
-    project_context = None
-
+    # Kernel admission shim (B2.3): staging-only, no authoritative run.json
     try:
         parser = argparse.ArgumentParser(add_help=False)
         parser.add_argument("--project")
         parser.add_argument("--out")
         parsed, _unknown = parser.parse_known_args(effective_argv)
 
+        kernel_ctx = None
         if parsed.project:
             reject_project_with_out(parsed.project, parsed.out)
-            project_context = prepare_project_run(
-                parsed.project,
+            kernel_ctx = admit_orchestrator_project_run(
+                project=parsed.project,
                 tool_id="video_editing.thumbnail_maker",
-                kind="orchestrator",
                 argv=["thumbnail_maker", *effective_argv],
-                metadata={"entrypoint": "direct"},
             )
-            effective_argv = [*effective_argv, "--out", str(project_context.run_root)]
+            effective_argv = [*effective_argv, "--out", str(kernel_ctx.run_root)]
 
         args = resolve_args(effective_argv)
-        if project_context is not None:
-            args.project = project_context.project_slug
+        if kernel_ctx is not None:
+            args.project = kernel_ctx.project_slug
 
         returncode = run_orchestrator(args)
-
-        if project_context is not None:
-            finalize_project_run(
-                project_context,
-                status="success" if returncode == 0 else "failed",
-                returncode=returncode,
-                metadata={"dry_run": args.dry_run},
-            )
-
         return returncode
     except SystemExit as exc:
-        if project_context is not None:
-            finalize_project_run(
-                project_context,
-                status="error",
-                returncode=exc.code if isinstance(exc.code, int) else 1,
-                error=exc,
-            )
         if isinstance(exc.code, int):
             return exc.code
         return 1
-    except Exception as exc:
-        if project_context is not None:
-            finalize_project_run(project_context, status="error", returncode=-1, error=exc)
+    except Exception:
         raise
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
