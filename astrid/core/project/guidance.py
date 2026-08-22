@@ -79,8 +79,8 @@ def format_project_required_guidance(*, operation: str) -> str:
         "",
         "Choose how to continue:",
         "  astrid projects list",
-        "  astrid projects select <project>         # select for this session",
-        "  re-run this command with --project <project>  # select for this run",
+        "  astrid projects select <project>    # persist a default preference (suggestion only)",
+        "  re-run this command with --project <project>  # attach for this run",
         '  astrid projects create <slug> --name "Display Name"',
         "",
         "Check the current selection at any time:",
@@ -110,7 +110,9 @@ def format_project_required_guidance(*, operation: str) -> str:
                 f"{row['runs']} runs · {row['timelines']} timelines · "
                 f"{row['experiments']} experiments"
             )
-            lines.append(f"    select: astrid projects select {row['slug']}")
+            lines.append(
+                f"    set preference: astrid projects select {row['slug']}"
+            )
     else:
         lines.extend(
             [

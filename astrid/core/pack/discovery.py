@@ -8,10 +8,11 @@ their ordering to drift apart. This module centralizes the walk and exposes a
 skills discovery — consumes one ordered list with identical priority semantics.
 
 Fault tolerance: the ``extra`` / ``env`` / ``installed`` layers are
-external by definition. A root whose pack manifest fails to load — or an
-installed pack that fails validation — is skipped with a logged warning so
-one broken external pack cannot abort the whole walk. The source-tree scan
-stays strict: first-party packs must always load.
+external by definition. A pack whose manifest fails to load — or an
+installed pack that fails validation — is skipped individually with a
+logged warning so one broken external pack cannot hide its valid
+neighbors. The source-tree scan stays strict: first-party packs must
+always load.
 """
 
 from __future__ import annotations
@@ -123,20 +124,54 @@ def discover_pack_metadata(
     _LOGGER = logging.getLogger(__name__)
 
     def _scan_external_root(raw_root: str | Path, source_kind: str) -> None:
-        """Scan one external root, skipping it wholesale when it cannot be read."""
+        """Scan one external root, isolating failures per pack manifest.
+
+        A readable root contributes every loadable pack; one bad manifest
+        skips only its own pack (with a warning), so valid neighbors in the
+        same root survive. Only an unreadable root is skipped wholesale.
+        """
+        from astrid.core.pack import load_pack_manifest, pack_manifest_path
+
         resolved = _resolve_pack_root(raw_root)
         if not resolved.is_dir():
             return
-        try:
-            packs = scan(resolved)
-        except Exception as exc:  # noqa: BLE001 - external roots are fault-tolerant
-            _LOGGER.warning(
-                "skipping %s pack root %s: %s", source_kind, resolved, exc
-            )
-            return
-        for pack in packs:
+        seen: dict[str, Path] = {}
+        for child in sorted(resolved.iterdir(), key=lambda path: path.name):
+            if (
+                not child.is_dir()
+                or child.name.startswith(".")
+                or child.name == "__pycache__"
+            ):
+                continue
+            manifest_path = pack_manifest_path(child)
+            if manifest_path is None:
+                continue
+            try:
+                pack = load_pack_manifest(manifest_path)
+            except Exception as exc:  # noqa: BLE001 - external roots are fault-tolerant
+                _LOGGER.warning(
+                    "skipping %s pack %s: manifest failed to load: %s",
+                    source_kind,
+                    manifest_path,
+                    exc,
+                )
+                continue
             if pack.id == "local":
                 continue
+            if pack.visibility == "hidden":
+                continue
+            if pack.id in seen:
+                _LOGGER.warning(
+                    "skipping duplicate pack id %r in %s root %s "
+                    "(%s and %s)",
+                    pack.id,
+                    source_kind,
+                    resolved,
+                    seen[pack.id],
+                    manifest_path,
+                )
+                continue
+            seen[pack.id] = manifest_path
             _add(pack, source_kind)
 
     for pack in scan():

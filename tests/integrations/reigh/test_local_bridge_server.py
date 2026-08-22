@@ -243,7 +243,7 @@ def repository_server(
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
-        composition.writer.close()
+        composition.close()
 
 
 def test_health_and_timeline_endpoints_repository_backed(
@@ -1297,7 +1297,7 @@ def test_serve_dispatcher_starts_and_serves_health(
             try:
                 srv.serve_forever()
             finally:
-                composition.writer.close()
+                composition.close()
         except Exception as exc:
             server_error = exc
             server_started.set()

@@ -360,7 +360,10 @@ def pack_write_gateway(
         ``UnitOfWork(writer)`` per event, with receipt key
         ``timeline.replace_config:{timeline_id}:{expected_version}`` —
         committed **before** the eventlog append (fail-closed: no eventlog
-        event without its kernel receipt). When omitted (packs running
+        event without its kernel receipt). The kernel commit itself runs
+        only after the identity-backed eventlog backend has been resolved
+        and validated, so a backend failure raises with zero mutation on
+        either side. When omitted (packs running
         without kernel access), the gateway keeps its eventlog-only
         behavior and no kernel receipt is written.
 
@@ -386,15 +389,58 @@ def pack_write_gateway(
     for event_spec in events:
         validate_event_kind(registry, event_spec["kind"])
 
-    # 0.5 Kernel replace_config commit (m2): when the caller supplies a
+
+    # Resolve the ULID from the slug if the caller did not supply one
+    # (packs that only know project+slug from CLI args rely on this).
+    effective_ulid = timeline_ulid
+    if not effective_ulid:
+        found = find_timeline_by_slug(project_slug, timeline_slug, root=root)
+        if found is not None:
+            effective_ulid, _tdir = found
+
+    # 1. Build the actor.
+    if actor is None:
+        effective_id = actor_id or f"pack-gateway:{effective_ulid}"
+        actor = TimelineActor(
+            type=actor_type,
+            id=effective_id,
+            display=actor_display,
+            via=[actor_via] if actor_via is not None else None,
+        )
+    elif actor_via is not None:
+        # Merge: wrap the supplied actor with the via chain.
+        existing_via = list(actor.via) if actor.via else []
+        actor = TimelineActor(
+            type=actor.type,
+            id=actor.id,
+            display=actor.display,
+            via=existing_via + [actor_via],
+        )
+
+    # 2. Resolve an identity-backed backend. Legacy timelines without an
+    #    identity sidecar are rejected until migrated.
+    resolved_timeline_id, timeline_home, backend, bootstrap_emitted = \
+        _resolve_or_bootstrap_backend(
+            project_slug,
+            timeline_slug,
+            root=root,
+            actor=actor,
+            supabase_options=supabase_options,
+        )
+    effective_stream_id = resolved_timeline_id
+
+    # 3. Kernel replace_config commit (m2): when the caller supplies a
     # kernel writer, every timeline.config_replaced event is additionally
     # committed to the kernel timeline store through the repository command
     # (receipt + timeline.config_replaced event) inside one UnitOfWork per
-    # event, BEFORE the eventlog append. The kernel timeline must already
-    # exist for the project+slug (created through the SDK/kernel surface);
-    # the repository's own not-found/version fences fail closed. Imports
-    # are deferred so this core module never imports ``astrid.packs`` at
-    # module scope.
+    # event, BEFORE the eventlog append. This commit runs only AFTER the
+    # eventlog backend has been resolved and validated (step 2), so a
+    # backend failure raises with zero mutation — no orphaned kernel
+    # receipt, no kernel/eventlog divergence. The kernel timeline must
+    # already exist for the project+slug (created through the SDK/kernel
+    # surface); the repository's own not-found/version fences fail closed.
+    # Imports are deferred so this core module never imports
+    # ``astrid.packs`` at module scope.
     if writer is not None:
         if timeline_repository is None or not timeline_stream_type:
             raise TimelineEditError(
@@ -459,45 +505,6 @@ def pack_write_gateway(
         for event_spec in events:
             if event_spec["kind"] == "timeline.config_replaced":
                 _commit_replace_config(event_spec.get("payload", {}))
-
-    # Resolve the ULID from the slug if the caller did not supply one
-    # (packs that only know project+slug from CLI args rely on this).
-    effective_ulid = timeline_ulid
-    if not effective_ulid:
-        found = find_timeline_by_slug(project_slug, timeline_slug, root=root)
-        if found is not None:
-            effective_ulid, _tdir = found
-
-    # 1. Build the actor.
-    if actor is None:
-        effective_id = actor_id or f"pack-gateway:{effective_ulid}"
-        actor = TimelineActor(
-            type=actor_type,
-            id=effective_id,
-            display=actor_display,
-            via=[actor_via] if actor_via is not None else None,
-        )
-    elif actor_via is not None:
-        # Merge: wrap the supplied actor with the via chain.
-        existing_via = list(actor.via) if actor.via else []
-        actor = TimelineActor(
-            type=actor.type,
-            id=actor.id,
-            display=actor.display,
-            via=existing_via + [actor_via],
-        )
-
-    # 2. Resolve an identity-backed backend. Legacy timelines without an
-    #    identity sidecar are rejected until migrated.
-    resolved_timeline_id, timeline_home, backend, bootstrap_emitted = \
-        _resolve_or_bootstrap_backend(
-            project_slug,
-            timeline_slug,
-            root=root,
-            actor=actor,
-            supabase_options=supabase_options,
-        )
-    effective_stream_id = resolved_timeline_id
 
     # 4. Append domain events (batch — no per-event materialization).
     event_ids: list[str] = []

@@ -801,7 +801,7 @@ def test_composition_startup_gc_preserves_live_attempt_staging(tmp_path: Path) -
         project = composition.projects.show(composition.writer, project_id)
         assert project.slug == "pilot-1"
     finally:
-        composition.writer.close()
+        composition.close()
 
 
 def test_composition_startup_gc_collects_live_attempts_read_only(tmp_path: Path) -> None:
@@ -853,7 +853,7 @@ def test_composition_startup_gc_never_touches_managed_digests(tmp_path: Path) ->
         assert managed_media_path(tmp_path, prepared.digest).read_bytes() == b"managed bytes"
         assert not staging_path(tmp_path, TXN_B).exists()
     finally:
-        composition.writer.close()
+        composition.close()
 
 
 def test_composition_startup_gc_skips_malformed_staging_references(tmp_path: Path) -> None:
@@ -890,7 +890,7 @@ def test_composition_startup_gc_skips_malformed_staging_references(tmp_path: Pat
         assert not staging_path(tmp_path, TXN_B).exists()
         assert not staging_path(tmp_path, TXN_C).exists()
     finally:
-        composition.writer.close()
+        composition.close()
 
 
 def test_composition_startup_gc_without_staging_root_is_noop(tmp_path: Path) -> None:
@@ -902,4 +902,4 @@ def test_composition_startup_gc_without_staging_root_is_noop(tmp_path: Path) -> 
         assert not (tmp_path / MANAGED_ROOT_DIRNAME / "media" / ".staging").exists()
         assert composition.projects.list(composition.writer) == []
     finally:
-        composition.writer.close()
+        composition.close()

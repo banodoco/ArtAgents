@@ -148,7 +148,7 @@ def test_restore_kill_matrix_reopens_old_or_complete_editable_state(
             with composition.writer.read_only_connection() as connection:
                 assert connection.execute("SELECT COUNT(*) FROM projects").fetchone()[0]
         finally:
-            composition.writer.close()
+            composition.close()
 
         recovered_state = _state(old_root)
         assert recovered_state in {old_state, replacement_state}
@@ -387,7 +387,7 @@ def test_startup_gc_keeps_live_attempts_and_only_removes_orphans(
         with composition.writer.read_only_connection() as connection:
             assert connection.execute("SELECT COUNT(*) FROM projects").fetchone()[0] == 1
     finally:
-        composition.writer.close()
+        composition.close()
 
     assert live_path.exists()
     assert not terminal_path.exists()
@@ -626,4 +626,4 @@ def test_migration_statement_crashes_reopen_as_complete_schema(
             assert len(migrations) == 4
             assert {"projects", "events", "timelines", "shots", "project_references"} <= tables
         finally:
-            composition.writer.close()
+            composition.close()

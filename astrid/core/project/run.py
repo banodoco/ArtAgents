@@ -355,15 +355,19 @@ def resolve_required_project_timeline(
         return live[0].ulid, live[0].slug
     if not live:
         raise ProjectRunError(
-            f"project {project_slug!r} has no live timelines; "
-            f"recovery: python3 -m astrid attach {project_slug} && "
-            "python3 -m astrid timelines create main --default"
+            f"project {project_slug!r} has no live timelines; recovery:\n"
+            "  python3 -m astrid projects list\n"
+            '  python3 -m astrid timelines create main --name "Main" '
+            f"--default --project {project_slug}"
         )
     choices = ", ".join(row.slug for row in live)
     raise ProjectRunError(
-        f"project {project_slug!r} has no default timeline and {len(live)} live timelines "
-        f"({choices}); recovery: python3 -m astrid attach {project_slug} && "
-        "python3 -m astrid timelines set-default <slug>"
+        f"project {project_slug!r} has no default timeline and {len(live)} "
+        f"live timelines ({choices}); recovery:\n"
+        f"  python3 -m astrid timelines archive <slug> --project {project_slug}"
+        "  # repeat until exactly one remains, or set a fresh default:\n"
+        '  python3 -m astrid timelines create main --name "Main" '
+        f"--default --project {project_slug}"
     )
 
 

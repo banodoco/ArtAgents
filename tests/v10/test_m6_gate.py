@@ -145,7 +145,7 @@ def test_serve_boots_clean_project_end_to_end(tmp_path: Path) -> None:
         finally:
             _stop_server(server, thread)
     finally:
-        composition.writer.close()
+        composition.close()
 
 
 # ---------------------------------------------------------------------------

@@ -412,7 +412,7 @@ def test_m7_dogfood_empty_root_survives_full_public_journey(tmp_path, monkeypatc
         finally:
             _close_server(server, thread)
     finally:
-        bridge_composition.writer.close()
+        bridge_composition.close()
 
     after = _public_snapshot(root, spec)
     assert after == before  # GA 10: all shared snapshots are exact after reopen.

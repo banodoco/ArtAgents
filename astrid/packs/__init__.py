@@ -58,7 +58,9 @@ from astrid.core.schema_packs.registry import (
     FrozenSchemaPackRegistry,
     SchemaPackRegistry,
 )
+from astrid.core.store.ownership import DatabaseOwnerLock, OwnerLockError
 from astrid.core.store.writer import DatabaseWriter
+from astrid.sdk.exceptions import ServiceUnavailableError
 from astrid.packs.timeline.bridge import TimelineBridgeAdapter
 from astrid.packs.timeline.repository import TimelineRepository
 from astrid.sdk.projects import ProjectsService
@@ -194,6 +196,20 @@ class StandardBridgeComposition:
     projects: ProjectRepository
     timelines: TimelineRepository
     bridge: TimelineBridgeAdapter
+    owner_lock: DatabaseOwnerLock | None
+    """The exclusive-owner lock held for the composition's lifetime."""
+
+    def close(self) -> None:
+        """Close the writer, then release the owner lock.
+
+        Mirrors ``CoreApplication.close``: the lock is released only after
+        the writer is closed, so a second owner can never acquire the
+        database while this process still holds an open writer. Both steps
+        are idempotent, so a double ``close()`` is safe.
+        """
+        self.writer.close()
+        if self.owner_lock is not None:
+            self.owner_lock.release()
 
 
 def compose_standard_bridge(
@@ -206,15 +222,20 @@ def compose_standard_bridge(
     Resolves the projects root (argument, ``ASTRID_PROJECTS_ROOT``, or the
     default), derives ``${root}/.astrid/astrid.sqlite3``, creates the
     managed-data directory, composes the standard registry (unless one is
-    injected), opens exactly one ``DatabaseWriter`` (the single write
-    authority), wires the kernel services and repositories, constructs the
-    typed project/timeline **services** over that one writer, and returns
-    the frozen composition whose bridge adapter is backed by those services
-    (plan step 20) — the adapter holds no SQL and never opens a writer of
-    its own.
+    injected), acquires the exclusive-owner lock beside the database
+    **before** opening exactly one ``DatabaseWriter`` (the single write
+    authority — same m4 law as ``compose_standard_application``), wires the
+    kernel services and repositories, constructs the typed project/timeline
+    **services** over that one writer, and returns the frozen composition
+    whose bridge adapter is backed by those services (plan step 20) — the
+    adapter holds no SQL and never opens a writer of its own. A concurrent
+    standard-application / kernel-binding composition fails closed with the
+    SDK's typed ``unavailable`` error while the bridge is open.
 
     Must be called only from the gateway serve composition root. The caller
-    owns the writer lifecycle (``close()`` on shutdown).
+    owns the composition lifecycle: call
+    :meth:`StandardBridgeComposition.close` on shutdown (closes the writer,
+    then releases the owner lock).
     """
     root = resolve_projects_root(projects_root)
     # Restore recovery is a read-before-write filesystem decision. It must
@@ -225,47 +246,65 @@ def compose_standard_bridge(
     database_path.parent.mkdir(parents=True, exist_ok=True)
     if registry is None:
         registry = build_standard_registry()
-    writer = DatabaseWriter(database_path, registry)
-    # Startup staging GC (m2 plan step 3/4): through the single writer just
-    # constructed, collect live-attempt staging references and remove only
-    # staging directories no live attempt references. No second writer or
-    # write authority is opened; best-effort cleanup never touches the
-    # managed digest tree.
-    run_startup_staging_gc(root, writer)
-    events = EventAppendService(registry)
-    receipts = ReceiptService()
-    projects = ProjectRepository(events=events, receipts=receipts)
-    timelines = TimelineRepository(
-        events=events, receipts=receipts, projects=projects
-    )
-    # The bridge adapter is composed over the **typed SDK services**
-    # (m4 plan step 20, task T21) — the same project/timeline services the
-    # standard application wires for SDK/CLI consumers, over the one shared
-    # writer queue. The adapter holds no SQL and never opens a writer of
-    # its own; it supplies the hidden deterministic bridge save key through
-    # the service's caller-key slot.
-    from astrid.sdk.timelines import TimelinesService  # lazy: pack-owned (m4)
+    # Exclusive-owner lock (SD3-m4): acquired before any writable connection
+    # or writer queue can open, exactly like compose_standard_application,
+    # so a second writer for the same database fails closed with the typed
+    # unavailable contract instead of silently coexisting.
+    try:
+        owner_lock = DatabaseOwnerLock(database_path)
+    except OwnerLockError as exc:
+        raise ServiceUnavailableError(
+            "the database is already owned by another process"
+        ) from exc
+    writer: DatabaseWriter | None = None
+    try:
+        writer = DatabaseWriter(database_path, registry)
+        # Startup staging GC (m2 plan step 3/4): through the single writer just
+        # constructed, collect live-attempt staging references and remove only
+        # staging directories no live attempt references. No second writer or
+        # write authority is opened; best-effort cleanup never touches the
+        # managed digest tree.
+        run_startup_staging_gc(root, writer)
+        events = EventAppendService(registry)
+        receipts = ReceiptService()
+        projects = ProjectRepository(events=events, receipts=receipts)
+        timelines = TimelineRepository(
+            events=events, receipts=receipts, projects=projects
+        )
+        # The bridge adapter is composed over the **typed SDK services**
+        # (m4 plan step 20, task T21) — the same project/timeline services the
+        # standard application wires for SDK/CLI consumers, over the one shared
+        # writer queue. The adapter holds no SQL and never opens a writer of
+        # its own; it supplies the hidden deterministic bridge save key through
+        # the service's caller-key slot.
+        from astrid.sdk.timelines import TimelinesService  # lazy: pack-owned (m4)
 
-    projects_service = ProjectsService(
-        writer, projects, receipts, projects_root=root
-    )
-    timelines_service = TimelinesService(
-        writer, projects, timelines, receipts
-    )
-    bridge = TimelineBridgeAdapter(
-        writer=writer,
-        projects=projects_service,
-        timelines=timelines_service,
-    )
-    return StandardBridgeComposition(
-        projects_root=root,
-        database_path=database_path,
-        registry=registry,
-        writer=writer,
-        projects=projects,
-        timelines=timelines,
-        bridge=bridge,
-    )
+        projects_service = ProjectsService(
+            writer, projects, receipts, projects_root=root
+        )
+        timelines_service = TimelinesService(
+            writer, projects, timelines, receipts
+        )
+        bridge = TimelineBridgeAdapter(
+            writer=writer,
+            projects=projects_service,
+            timelines=timelines_service,
+        )
+        return StandardBridgeComposition(
+            projects_root=root,
+            database_path=database_path,
+            registry=registry,
+            writer=writer,
+            projects=projects,
+            timelines=timelines,
+            bridge=bridge,
+            owner_lock=owner_lock,
+        )
+    except BaseException:
+        if writer is not None:
+            writer.close()
+        owner_lock.release()
+        raise
 
 
 __all__: list[str] = [

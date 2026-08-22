@@ -263,7 +263,9 @@ def _dispatch_serve(args: list[str]) -> int:
         finally:
             server.server_close()
     finally:
-        composition.writer.close()
+        # Closes the writer, then releases the exclusive-owner lock held
+        # since composition (StandardBridgeComposition.close contract).
+        composition.close()
 
     return 0
 

@@ -59,7 +59,7 @@ Operational families:
   python3 -m astrid serve [--host HOST] [--port PORT] [--projects-root PATH]
   python3 -m astrid doctor [--json]
   python3 -m astrid backup create [--out PATH]
-  python3 -m astrid backup restore <BACKUP_PATH>
+  python3 -m astrid backup restore <BACKUP_PATH> [--force]
 
 Nested mounts (manifest-owned):
   python3 -m astrid timelines shots ...

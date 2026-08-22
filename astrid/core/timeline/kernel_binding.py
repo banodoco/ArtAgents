@@ -18,6 +18,10 @@ Resolution outcomes:
   not exist (nothing to diverge from), or the database is owned by another
   process (e.g. a running bridge/server) so composition is unavailable.
   Callers keep the documented eventlog-only escape and log a warning.
+- **raise** — the kernel project and timeline rows exist but the event
+  stream row is missing (stream head ``None``): an inconsistent kernel
+  state fails closed with :class:`TimelineEditError` instead of silently
+  diverging through the eventlog-only escape.
 
 This module lives under ``astrid.core`` and never imports ``astrid.packs``:
 the timeline repository is reached structurally through the composed
@@ -37,10 +41,16 @@ from typing import Any
 
 from astrid.application import StandardApplication, compose_standard_application
 
+
 TIMELINE_STREAM_TYPE = "timeline.timeline"
 """The timeline pack's stream type, mirrored here as the kernel-side
 protocol constant. The pack declares the same value in its schema-pack /
 repository; a sync test pins the two equal."""
+TIMELINE_CREATED_EVENT_KIND = "timeline.created"
+"""Mirrored pack event kind, used only by the forensic existence probe in
+:func:`kernel_timeline_writer_for` (the stream row may be missing in the
+inconsistent states this module diagnoses, so the repository's own
+event-sourced slug resolution cannot be reused there)."""
 
 __all__ = [
     "KernelTimelineBinding",
@@ -112,9 +122,18 @@ def kernel_timeline_writer_for(
     kernel DB is owned by another process (composition fails closed with the
     typed unavailable error). Any other resolution error propagates: an
     ambiguous failure must not silently downgrade to eventlog-only.
+
+    Raises
+    ------
+    TimelineEditError
+        When the kernel project and timeline exist but the event stream row
+        is missing (head ``None``) — an inconsistent kernel state that must
+        fail closed instead of unbounding into eventlog-only writes.
     """
     from astrid.core.repositories.projects import ProjectNotFoundError
     from astrid.sdk.exceptions import ServiceUnavailableError
+
+    from ._edit_helpers import TimelineEditError
 
     try:
         app = compose_standard_application(projects_root)
@@ -143,24 +162,47 @@ def kernel_timeline_writer_for(
         except ProjectNotFoundError:
             _unbound("no kernel project")
             return None
-        try:
-            with app.writer.read_only_connection() as conn:
-                conn.row_factory = sqlite3.Row
+        with app.writer.read_only_connection() as conn:
+            conn.row_factory = sqlite3.Row
+            try:
                 timeline_id = app.timelines._resolve_id(
                     conn, project_id, timeline_slug
                 )
-                head = conn.execute(
-                    "SELECT head_seq FROM event_streams WHERE id = ?",
-                    (f"{timeline_id}:{stream_type}",),
+            except Exception as exc:  # noqa: BLE001 - structural probe below
+                if type(exc).__name__ != "TimelineNotFoundError":
+                    raise
+                # Event-sourced slug resolution joins ``event_streams``, so
+                # a timeline whose stream row was lost masquerades as
+                # absent. Probe the timelines row through the surviving
+                # created-event payload before accepting the unbound
+                # escape; a genuinely absent slug still probes empty.
+                row = conn.execute(
+                    "SELECT t.id AS timeline_id FROM timelines t "
+                    "JOIN events e ON json_extract(e.payload_json, "
+                    "'$.data.timeline_id') = t.id "
+                    "WHERE t.project_id = ? AND e.kind = ? "
+                    "AND json_extract(e.payload_json, '$.data.slug') = ? "
+                    "LIMIT 1",
+                    (project_id, TIMELINE_CREATED_EVENT_KIND, timeline_slug),
                 ).fetchone()
-        except Exception as exc:  # noqa: BLE001 - pack error caught structurally
-            if type(exc).__name__ == "TimelineNotFoundError":
-                _unbound("no kernel timeline")
-                return None
-            raise
+                if row is None:
+                    _unbound("no kernel timeline")
+                    return None
+                timeline_id = str(row["timeline_id"])
+            head = conn.execute(
+                "SELECT head_seq FROM event_streams WHERE id = ?",
+                (f"{timeline_id}:{stream_type}",),
+            ).fetchone()
         if head is None:
-            _unbound("kernel timeline has no event stream yet")
-            return None
+            # Inconsistent kernel state: the project and timeline rows exist
+            # but the event stream row does not. This must fail loudly —
+            # silently unbounding here would append eventlog-only and diverge
+            # from a kernel timeline that half-exists.
+            raise TimelineEditError(
+                f"kernel timeline {timeline_slug!r} in project "
+                f"{project_slug!r} exists but has no event stream row; "
+                "refusing to bind or unbound (inconsistent kernel state)"
+            )
         return KernelTimelineBinding(
             app=app,
             writer=app.writer,
