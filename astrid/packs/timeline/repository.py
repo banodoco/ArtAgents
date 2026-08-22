@@ -130,6 +130,17 @@ head exactly once; its presence on the stream is the single event-backed
 authority for archived state (there is no column and no second authority).
 Archived timelines disappear from ordinary lists and reject further saves,
 while direct historical lookup (show/history/diff) keeps working."""
+TIMELINE_REGISTRY_MERGED_EVENT_KIND = "timeline.registry_merged"
+"""The event kind appended by the internal asset-registry merge.
+
+The completion unit of work merges new asset entries into
+``asset_registry_json`` additively (existing keys are never clobbered)
+without touching ``document_json``, so a worker completion makes media
+addressable against the current head while the editor's document stays
+byte-identical (27-build-spec section 5 step 7). The event carries the
+merged ``assets``, the sorted ``added_keys``, and the ``base_head`` the
+merge applied against; there is no receipt — the surrounding completion
+commit is the atomicity record."""
 
 _TIMELINE_HISTORY_KINDS: tuple[str, ...] = (
     TIMELINE_CREATED_EVENT_KIND,
@@ -1119,6 +1130,128 @@ class TimelineRepository:
         )
         return read_model
 
+    # -- internal asset-registry merge (completion UoW; no receipt) ---------
+
+    def merge_registry(
+        self,
+        uow: UnitOfWork,
+        *,
+        project_id: str,
+        timeline_id: str,
+        entries: Mapping[str, Any],
+        actor_kind: str = "system",
+        created_at: str | None = None,
+    ) -> int:
+        """Merge *entries* into ``asset_registry_json`` additively.
+
+        The internal completion-time visibility path (27-build-spec §5
+        step 7): inside the caller's unit of work this reads the current
+        stream head, adds every entry whose key is not already present
+        (existing keys are editor authority and are never clobbered),
+        leaves ``document_json`` byte-identical, and appends one
+        hash-chained :data:`TIMELINE_REGISTRY_MERGED_EVENT_KIND` event
+        carrying the merged ``assets``, the sorted ``added_keys``, and the
+        ``base_head`` the merge applied against — with an
+        ``expected_head_seq`` defense-in-depth CAS on that head. There is
+        no caller ``expected_version`` and no receipt: the surrounding
+        completion commit is the atomicity record.
+
+        The event-backed archive fence applies: an archived timeline
+        rejects the merge before any change. A merge whose entries are all
+        already present changes zero rows and returns the current head
+        without appending anything. Returns the new stream head (the
+        value a client's next whole-document save must pass as its
+        ``expected_version``).
+        """
+        project_id = _require_non_empty_string("project_id", project_id)
+        timeline_id = _require_non_empty_string("timeline_id", timeline_id)
+        if not isinstance(entries, Mapping):
+            raise TimelineValidationError("entries must be a JSON object")
+        for key in entries:
+            _require_non_empty_string("entry key", key)
+
+        row = uow.query_one(
+            "SELECT t.id, t.project_id, t.event_stream_id "
+            "FROM timelines t WHERE t.id = ? AND t.project_id = ?",
+            (timeline_id, project_id),
+        )
+        if row is None:
+            raise TimelineNotFoundError(ref=timeline_id, project_id=project_id)
+        stream = uow._stream_row(str(row["event_stream_id"]))
+        if stream is None:
+            raise TimelineRepositoryError(
+                f"timeline {timeline_id!r} is missing its event stream"
+            )
+        base_head = int(stream["head_seq"])
+
+        # Event-backed archive fence (SD1), identical to save: derived from
+        # the stream's ordered events, never a column.
+        if (
+            uow.query_one(
+                "SELECT 1 FROM events WHERE stream_id = ? AND kind = ? LIMIT 1",
+                (row["event_stream_id"], TIMELINE_ARCHIVED_EVENT_KIND),
+            )
+            is not None
+        ):
+            raise TimelineArchivedError(
+                timeline_id=timeline_id, project_id=project_id
+            )
+
+        existing = self._parse_document(
+            str(uow.query_one(
+                "SELECT asset_registry_json FROM timelines WHERE id = ?",
+                (timeline_id,),
+            )["asset_registry_json"]),
+            timeline_id,
+        )
+        added_keys = sorted(key for key in entries if key not in existing)
+        if not added_keys:
+            return base_head
+
+        merged_assets = {**existing, **{key: entries[key] for key in added_keys}}
+        try:
+            assets_json = canonical_json(merged_assets)
+        except CanonicalizationError as exc:
+            raise TimelineValidationError(
+                f"cannot canonicalize merged asset registry: {exc}"
+            ) from exc
+
+        stamp = created_at if created_at is not None else utc_now_iso()
+        if not isinstance(stamp, str) or not stamp:
+            raise TimelineValidationError("created_at must be a non-empty string")
+
+        changed = uow.update_projection(
+            "timelines",
+            {"asset_registry_json": assets_json, "updated_at": stamp},
+            {"id": timeline_id, "project_id": project_id},
+        )
+        if changed != 1:
+            raise TimelineNotFoundError(ref=timeline_id, project_id=project_id)
+
+        append = self._events.append(
+            uow,
+            stream_id=str(row["event_stream_id"]),
+            project_id=project_id,
+            event_kind=TIMELINE_REGISTRY_MERGED_EVENT_KIND,
+            data={
+                "timeline_id": timeline_id,
+                "assets": merged_assets,
+                "added_keys": added_keys,
+                "base_head": base_head,
+            },
+            changes=["registry"],
+            idempotency_key=(
+                f"{TIMELINE_REGISTRY_MERGED_EVENT_KIND}:{project_id}:"
+                f"{timeline_id}:{base_head}"
+            ),
+            txn_id=uuid.uuid4().hex,
+            event_id=uuid.uuid4().hex,
+            actor_kind=actor_kind,
+            expected_head_seq=base_head,
+            created_at=stamp,
+        )
+        return append.stream_seq
+
     # -- whole-config replacement (m2; the lossless full-replacement path) --
 
     def replace_config(
@@ -1945,6 +2078,7 @@ __all__ = [
     "TIMELINE_ARCHIVE_COMMAND_KIND",
     "TIMELINE_ARCHIVED_EVENT_KIND",
     "TIMELINE_CONFIG_REPLACED_EVENT_KIND",
+    "TIMELINE_REGISTRY_MERGED_EVENT_KIND",
     "TIMELINE_CREATE_COMMAND_KIND",
     "TIMELINE_CREATED_EVENT_KIND",
     "TIMELINE_REPLACE_CONFIG_COMMAND_KIND",

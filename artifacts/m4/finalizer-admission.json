@@ -3,12 +3,7 @@
   "authority_lint": {
     "errors": [],
     "exemption_note": "the recorded exemptions are the two manifest-declared nested-mount parser composition edges (timelines->shots, media->references), mirroring the dispatch.py composition root",
-    "exemptions": [
-      "astrid/core/cli/domain_media.py: kernel-to-pack import 'astrid.packs.references' (only the serve composition root is exempt)",
-      "astrid/core/cli/domain_media.py: kernel-to-pack import 'astrid.packs.references.cli' (only the serve composition root is exempt)",
-      "astrid/packs/timeline/cli.py: pack-to-pack import 'astrid.packs.shots' from pack 'timeline'",
-      "astrid/packs/timeline/cli.py: pack-to-pack import 'astrid.packs.shots.cli' from pack 'timeline'"
-    ],
+    "exemptions": [],
     "ok": true
   },
   "drift": {
@@ -34,15 +29,7 @@
           "runs",
           "timelines"
         ],
-        "product_timeline_verbs": [
-          "archive",
-          "create",
-          "diff",
-          "history",
-          "list",
-          "save",
-          "show"
-        ]
+        "product_timeline_verbs": []
       },
       "schema_composition": {
         "core_table_count": 14,
@@ -52,70 +39,24 @@
           "timeline"
         ],
         "pack_tables": {
-          "media_references": [
-            "c",
-            "e",
-            "e",
-            "e",
-            "e",
-            "f",
-            "n",
-            "r",
-            "r",
-            "s"
-          ],
-          "project_references": [
-            "c",
-            "e",
-            "e",
-            "e",
-            "e",
-            "f",
-            "n",
-            "r",
-            "r",
-            "s"
-          ],
-          "reference_links": [
-            "c",
-            "e",
-            "e",
-            "e",
-            "e",
-            "f",
-            "n",
-            "r",
-            "r",
-            "s"
-          ],
-          "shot_items": [
-            "h",
-            "o",
-            "s",
-            "s",
-            "t"
+          "references": [
+            "media_references",
+            "project_references",
+            "reference_links"
           ],
           "shots": [
-            "h",
-            "o",
-            "s",
-            "s",
-            "t"
+            "generation_variants",
+            "generations",
+            "shot_items",
+            "shots"
           ],
-          "timelines": [
-            "e",
-            "e",
-            "i",
-            "i",
-            "l",
-            "m",
-            "n",
-            "t"
+          "timeline": [
+            "timelines"
           ]
         },
         "registry_error": "",
         "registry_frozen": true,
-        "total_table_count": 20
+        "total_table_count": 22
       },
       "sdk_surface": {
         "export_count": 34,
@@ -158,28 +99,26 @@
         "is_list": true
       },
       "secrets": {
-        "scanned_files": 39,
+        "scanned_files": 33,
         "sentinel": "<redacted; the literal sentinel is never persisted in retained gate evidence>",
         "sentinel_sha256_prefix": "397f6b833f9b8b10"
       }
     },
-    "ok": true,
-    "violations": []
+    "ok": false,
+    "violations": [
+      "excluded-from-census set drift: ['backup', 'doctor', 'serve']",
+      "product timeline verbs [] != ['archive', 'create', 'diff', 'history', 'list', 'save', 'show']"
+    ]
   },
-  "duration_seconds": 274.844,
-  "exit": 0,
+  "duration_seconds": 252.341,
+  "exit": 1,
   "feasibility": {
-    "accepted": true,
-    "admitted": true,
-    "parseable": true,
-    "path": "/workspace/astrid-first-ce15b5a3/astrid/.megaplan/plans/m4-bridge-sdk-and-cli-domains-20260818-0642/task_feasibility.json",
-    "plan_hash": "sha256:fda0d8a5399c91477e24c84e6e204ec50fbb93aaebc5f1f52132d74d658d9b65",
-    "present": true,
-    "schema_version": "megaplan-task-feasibility-v2",
-    "task_contract_hash": "sha256:cf280ec74f49b2f7d98c415a9b3a408890e350448802632efa01a8eec87e660f",
-    "task_count": 38
+    "path": "/workspace/reigh-phase-a-20260822/exec-track-S/.megaplan/plans/m4-bridge-sdk-and-cli-domains-20260818-0642/task_feasibility.json",
+    "present": false
   },
-  "feasibility_problems": [],
+  "feasibility_problems": [
+    "feasibility admission absent at /workspace/reigh-phase-a-20260822/exec-track-S/.megaplan/plans/m4-bridge-sdk-and-cli-domains-20260818-0642/task_feasibility.json; gate success requires a present accepted admission"
+  ],
   "lane_subset": [
     "contracts",
     "composition",
@@ -197,11 +136,11 @@
   ],
   "lanes": {
     "authority_lint": {
-      "duration_seconds": 1.204,
+      "duration_seconds": 0.775,
       "failed": 0,
       "junit": "out/m4-gate/latest/authority_lint-junit.xml",
       "log": "out/m4-gate/latest/authority_lint.log",
-      "passed": 28,
+      "passed": 34,
       "returncode": 0,
       "selectors": [
         "tests/v10/test_authority_lint.py"
@@ -210,11 +149,11 @@
       "status": "pass"
     },
     "bridge": {
-      "duration_seconds": 35.253,
+      "duration_seconds": 35.003,
       "failed": 0,
       "junit": "out/m4-gate/latest/bridge-junit.xml",
       "log": "out/m4-gate/latest/bridge.log",
-      "passed": 86,
+      "passed": 91,
       "returncode": 0,
       "selectors": [
         "tests/integrations/reigh/test_local_bridge_server.py",
@@ -225,11 +164,11 @@
       "status": "pass"
     },
     "cli": {
-      "duration_seconds": 6.227,
+      "duration_seconds": 3.091,
       "failed": 0,
       "junit": "out/m4-gate/latest/cli-junit.xml",
       "log": "out/m4-gate/latest/cli.log",
-      "passed": 312,
+      "passed": 313,
       "returncode": 0,
       "selectors": [
         "tests/v10/test_domain_cli_surface.py",
@@ -238,14 +177,13 @@
         "tests/v10/test_domain_cli_tasks_runs.py",
         "tests/test_cli_registration_conformance.py",
         "tests/test_canonical_aliases.py",
-        "tests/test_canonical_entrypoint.py",
-        "tests/session/test_cli_gate.py"
+        "tests/test_canonical_entrypoint.py"
       ],
       "skipped": 0,
       "status": "pass"
     },
     "composition": {
-      "duration_seconds": 103.881,
+      "duration_seconds": 95.698,
       "failed": 0,
       "junit": "out/m4-gate/latest/composition-junit.xml",
       "log": "out/m4-gate/latest/composition.log",
@@ -259,7 +197,7 @@
       "status": "pass"
     },
     "contracts": {
-      "duration_seconds": 2.219,
+      "duration_seconds": 2.134,
       "failed": 0,
       "junit": "out/m4-gate/latest/contracts-junit.xml",
       "log": "out/m4-gate/latest/contracts.log",
@@ -273,7 +211,7 @@
       "status": "pass"
     },
     "crash_contention": {
-      "duration_seconds": 54.01,
+      "duration_seconds": 51.047,
       "failed": 0,
       "junit": "out/m4-gate/latest/crash_contention-junit.xml",
       "log": "out/m4-gate/latest/crash_contention.log",
@@ -287,7 +225,7 @@
       "status": "pass"
     },
     "media_conformance": {
-      "duration_seconds": 3.774,
+      "duration_seconds": 3.069,
       "failed": 0,
       "junit": "out/m4-gate/latest/media_conformance-junit.xml",
       "log": "out/m4-gate/latest/media_conformance.log",
@@ -301,7 +239,7 @@
       "status": "pass"
     },
     "owner_lock": {
-      "duration_seconds": 1.84,
+      "duration_seconds": 1.828,
       "failed": 0,
       "junit": "out/m4-gate/latest/owner_lock-junit.xml",
       "log": "out/m4-gate/latest/owner_lock.log",
@@ -314,7 +252,7 @@
       "status": "pass"
     },
     "pack_conformance": {
-      "duration_seconds": 14.634,
+      "duration_seconds": 14.787,
       "failed": 0,
       "junit": "out/m4-gate/latest/pack_conformance-junit.xml",
       "log": "out/m4-gate/latest/pack_conformance.log",
@@ -328,11 +266,11 @@
       "status": "pass"
     },
     "platform": {
-      "duration_seconds": 37.437,
+      "duration_seconds": 31.869,
       "failed": 0,
       "junit": "out/m4-gate/latest/platform-junit.xml",
       "log": "out/m4-gate/latest/platform.log",
-      "passed": 102,
+      "passed": 99,
       "returncode": 0,
       "selectors": [
         "tests/test_platform_contract.py",
@@ -343,7 +281,7 @@
       "status": "pass"
     },
     "secrets": {
-      "duration_seconds": 2.357,
+      "duration_seconds": 1.992,
       "failed": 0,
       "junit": "out/m4-gate/latest/secrets-junit.xml",
       "log": "out/m4-gate/latest/secrets.log",
@@ -358,11 +296,11 @@
       "status": "pass"
     },
     "services": {
-      "duration_seconds": 6.805,
+      "duration_seconds": 7.413,
       "failed": 0,
       "junit": "out/m4-gate/latest/services-junit.xml",
       "log": "out/m4-gate/latest/services.log",
-      "passed": 124,
+      "passed": 136,
       "returncode": 0,
       "selectors": [
         "tests/sdk/test_projects.py",
@@ -377,7 +315,7 @@
       "status": "pass"
     },
     "task_run_conformance": {
-      "duration_seconds": 3.115,
+      "duration_seconds": 2.39,
       "failed": 0,
       "junit": "out/m4-gate/latest/task_run_conformance-junit.xml",
       "log": "out/m4-gate/latest/task_run_conformance.log",
@@ -391,7 +329,7 @@
       "status": "pass"
     }
   },
-  "ok": true,
+  "ok": false,
   "problems": [],
   "python_matrix": {
     "matrix_targets": [
@@ -403,16 +341,14 @@
       "version": "3.11.11"
     },
     "secondary": {
-      "executable": "/root/.pyenv/shims/python3.13",
-      "reason": "secondary interpreter found but the pinned dev extra (pytest) is not installed for it; the CI matrix job is the authoritative 3.11/3.12 execution",
-      "status": "unavailable",
-      "version": "3.13.0"
+      "reason": "no python3.12/python3.13 secondary interpreter on PATH; the CI matrix job is the authoritative 3.12 execution",
+      "status": "unavailable"
     }
   },
   "repo": {
-    "git_sha": "6a654039c77efdc637f0a6c6385d71ce51f538ee",
-    "git_short_sha": "6a654039c77e",
-    "root": "/workspace/astrid-first-ce15b5a3/astrid"
+    "git_sha": "da2080d32cdd9f8416d5d5c37a915e06edefc472",
+    "git_short_sha": "da2080d32cdd",
+    "root": "/workspace/reigh-phase-a-20260822/exec-track-S"
   },
   "retained_reference": {
     "baseline": {
@@ -434,7 +370,7 @@
   },
   "schema": "astrid.m4_finalizer_admission.v1",
   "timestamp": {
-    "finished_at": "2026-08-19T07:49:01Z",
-    "started_at": "2026-08-19T07:44:26Z"
+    "finished_at": "2026-08-22T01:53:02Z",
+    "started_at": "2026-08-22T01:48:50Z"
   }
 }

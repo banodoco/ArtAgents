@@ -88,6 +88,7 @@ from astrid.core.repositories.projects import ProjectNotFoundError
 from astrid.core.store.uow import UnitOfWork
 from astrid.core.store.writer import DatabaseWriter
 from astrid.core.util.time import utc_now_iso
+from astrid.packs.shots.generation_repository import GenerationRepository
 
 SHOT_STREAM_TYPE = "shot.shot"
 """The pack stream type every shot aggregate owns (one per shot)."""
@@ -1502,6 +1503,7 @@ class ShotRepository:
 
 
 __all__ = [
+    "GenerationRepository",
     "SHOT_ADD_ITEM_COMMAND_KIND",
     "SHOT_CREATE_COMMAND_KIND",
     "SHOT_CREATED_EVENT_KIND",
