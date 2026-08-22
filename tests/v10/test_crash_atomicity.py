@@ -2153,6 +2153,135 @@ def test_publication_is_durable_before_begin_immediate_at_every_boundary(
     _emit_diagnostics("spike.pre_lock_publish", rows)
 
 
+def test_pre_published_import_in_lock_work_is_stat_only(tmp_path: Path) -> None:
+    """Amended §5 flow: publish before BEGIN IMMEDIATE, O(stat) in lock.
+
+    The prepared source fixture and the whole staging tree are deleted
+    after the pre-transaction publication, so a successful in-lock import
+    proves the writer transaction never copies or re-reads source bytes:
+    its only filesystem work is the O(stat) presence validation, observed
+    as exactly one ``repo.published`` hook and no staging/publication
+    hooks. A mismatched publication digest and an absent managed object
+    both raise before any projection write.
+    """
+    from astrid.core.io.media_import import (
+        MediaLocationError,
+        managed_media_path,
+        prepare_media_file,
+        publish_prepared_for_commit,
+        set_media_crash_hook,
+        validate_published_presence,
+    )
+    from astrid.core.repositories.media import MediaValidationError
+
+    db = tmp_path / "astrid.sqlite3"
+    root = tmp_path / "managed"
+    root.mkdir(parents=True, exist_ok=True)
+    _seed_spike_template(db, root)
+    ctx = _build_context(db, managed_root=root)
+    try:
+        fixture = root / _SPIKE_REL
+        prepared = prepare_media_file(fixture, root=root)
+
+        # Outside any transaction: durable publication at the hash path.
+        (publications,) = publish_prepared_for_commit(
+            root, _SPIKE_TXN_ID, [prepared]
+        )
+        assert publications.reused is False
+        # The in-lock phase must not need the source or staging bytes.
+        fixture.unlink()
+        shutil.rmtree(root / ".astrid" / "media" / ".staging")
+
+        hooks: list[str] = []
+        set_media_crash_hook(hooks.append)
+        try:
+            model = UnitOfWork(ctx.writer).run(
+                lambda u: ctx.media.import_prepared(
+                    u,
+                    project_id=_SPIKE_PROJECT_ID,
+                    prepared=prepared,
+                    idempotency_key="prepublished-import",
+                    media_id=_SPIKE_MEDIA_ID,
+                    published=publications,
+                    created_at=TS,
+                )
+            )
+        finally:
+            set_media_crash_hook(None)
+        assert model.content_hash == prepared.digest
+        assert hooks == ["repo.published"], hooks
+        assert not fixture.exists(), "in-lock work resurrected source bytes"
+        assert (
+            validate_published_presence(root, prepared.digest)
+            == prepared.byte_size
+        )
+        wrong = publications.__class__(
+            digest="0" * 64,
+            managed_path=managed_media_path(root, "0" * 64),
+            byte_size=prepared.byte_size,
+            reused=False,
+        )
+        try:
+            UnitOfWork(ctx.writer).run(
+                lambda u: ctx.media.import_prepared(
+                    u,
+                    project_id=_SPIKE_PROJECT_ID,
+                    prepared=prepared,
+                    idempotency_key="wrong-digest",
+                    media_id=_SPIKE_MEDIA_ID + "-x",
+                    published=wrong,
+                    created_at=TS,
+                )
+            )
+            raise AssertionError("mismatched published digest was accepted")
+        except MediaValidationError:
+            pass
+
+        # An absent managed object can never back a committed row.
+        managed_media_path(root, prepared.digest).unlink()
+        try:
+            UnitOfWork(ctx.writer).run(
+                lambda u: ctx.media.import_prepared(
+                    u,
+                    project_id=_SPIKE_PROJECT_ID,
+                    prepared=prepare_media_file(
+                        _write_spike_fixture(root), root=root
+                    ),
+                    idempotency_key="absent-object",
+                    media_id=_SPIKE_MEDIA_ID + "-y",
+                    published=publications,
+                    created_at=TS,
+                )
+            )
+            raise AssertionError("import committed against absent bytes")
+        except MediaLocationError:
+            pass
+    finally:
+        ctx.writer.close()
+
+
+def test_publish_for_commit_is_idempotent_and_reuses_orphans(
+    tmp_path: Path,
+) -> None:
+    """Pre-lock publication is idempotent; crashes leave reusable orphans."""
+    from astrid.core.io.media_import import (
+        prepare_media_file,
+        publish_prepared_for_commit,
+    )
+
+    db = tmp_path / "astrid.sqlite3"
+    root = tmp_path / "managed"
+    root.mkdir(parents=True, exist_ok=True)
+    _seed_spike_template(db, root)
+    prepared = prepare_media_file(root / _SPIKE_REL, root=root)
+
+    first = publish_prepared_for_commit(root, _SPIKE_TXN_ID, [prepared])[0]
+    second = publish_prepared_for_commit(root, _SPIKE_TXN_ID, [prepared])[0]
+    assert first.reused is False and second.reused is True
+    assert second.byte_size == prepared.byte_size
+    assert first.managed_path == second.managed_path
+
+
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "--child":
         raise SystemExit(_child_main(sys.argv[2:]))
