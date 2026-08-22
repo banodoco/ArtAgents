@@ -342,13 +342,13 @@ def compose_standard_application(
         evidence = EvidenceRepository(events=events, receipts=receipts)
         event_log = EventRepository(writer)
         # The seven typed services, wired over the shared repositories and
-        # the single writer queue. Services contain no SQL and never open a
-        # writer of their own (plan step 17).
         projects_service = ProjectsService(writer, projects, receipts)
+        # L: thread bound root ONLY when caller explicitly passed projects_root;
+        # when None, pass None so per-call ambient resolution stays live (I).
+        _bound_projects_root = root if projects_root is not None else None
         timelines_service = TimelinesService(
-            writer, projects, timelines, receipts, projects_root=root
+            writer, projects, timelines, receipts, projects_root=_bound_projects_root
         )
-        # One shared service-authority instrumentation point (plan step 30):
         # every timeline save — bridge, SDK, or CLI — is recorded on the
         # single timeline service before it commits through the one writer.
         timeline_save_calls = _instrument_timeline_save(timelines_service)

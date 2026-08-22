@@ -170,9 +170,10 @@ def _cmd_diff(parsed: argparse.Namespace) -> int:
 
 def _cmd_backfill(parsed: argparse.Namespace) -> int:
     import re as _re
+    import sys as _sys
 
-    _RUN_TS_RE = _re.compile(r"^\d+-[0-9a-f]{32}$")
-    if parsed.run_ts is not None and not _RUN_TS_RE.match(parsed.run_ts):
+    _RUN_TS_RE = _re.compile(r"[0-9]+-[0-9a-f]{32}")
+    if parsed.run_ts is not None and not _RUN_TS_RE.fullmatch(parsed.run_ts):
         parsed.parser.error(
             f"invalid --run-ts {parsed.run_ts!r}: expected '<epoch>-<32 lowercase hex>' "
             f"(e.g. '1750000000-{'a'*32}')"
@@ -188,6 +189,8 @@ def _cmd_backfill(parsed: argparse.Namespace) -> int:
         from_source = path
     # H: echo the ACTIVE run_ts BEFORE the SDK call so a SIGKILL mid-run
     # leaves an echoed id on stdout (flush). Keep the completion line after.
+    # N: in --json mode route the start line to STDERR so stdout stays pure
+    # JSON envelope (machine wire contract).
     early_run_ts: str | None = parsed.run_ts
     early_allocated = False
     if early_run_ts is None and not parsed.dry_run:
@@ -199,16 +202,17 @@ def _cmd_backfill(parsed: argparse.Namespace) -> int:
             early_allocated = True
         except SystemExit:
             raise
-        except Exception:
-            # Allocation failed (project missing, etc.); no early echo — let
-            # the SDK surface the typed failure.
-            early_run_ts = None
-            early_allocated = False
+        except Exception as exc:
+            # M: fail closed — no SDK invocation without an echoed id.
+            print(f"error backfill_allocation_failed: {exc}", file=_sys.stderr, flush=True)
+            return 1
     if early_run_ts is not None:
-        print(f"backfill run_ts: {early_run_ts}", flush=True)
+        if parsed.json:
+            print(f"backfill run_ts: {early_run_ts}", file=_sys.stderr, flush=True)
+        else:
+            print(f"backfill run_ts: {early_run_ts}", flush=True)
     # Pass the early-allocated id to the SDK so it does not allocate a
-    # second dir; when early allocation failed, pass original parsed.run_ts
-    # (None) so SDK will allocate/report failure.
+    # second dir.
     run_ts_for_sdk = early_run_ts if early_allocated else parsed.run_ts
     if early_run_ts is not None and not early_allocated:
         run_ts_for_sdk = early_run_ts
@@ -222,13 +226,14 @@ def _cmd_backfill(parsed: argparse.Namespace) -> int:
     # Completion line (keep it): if the SDK returned a different or only
     # run_ts, print it; when we already echoed the same id, the early line
     # already satisfies the completion semantics — printing again would
-    # duplicate, so suppress duplicate.
+    # duplicate, so suppress duplicate. In --json mode route to stderr.
     if isinstance(result.data, dict):
         active_run_ts = result.data.get("run_ts")
         if active_run_ts and active_run_ts != early_run_ts:
-            # Either we had no early id, or SDK allocated a different one
-            # (e.g. early allocation failed and SDK succeeded).
-            print(f"backfill run_ts: {active_run_ts}")
+            if parsed.json:
+                print(f"backfill run_ts: {active_run_ts}", file=_sys.stderr, flush=True)
+            else:
+                print(f"backfill run_ts: {active_run_ts}")
     return print_result(result, as_json=parsed.json)
 
 # -- parser ----------------------------------------------------------------

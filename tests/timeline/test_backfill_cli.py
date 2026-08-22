@@ -80,6 +80,7 @@ def test_backfill_dispatch_default_source() -> None:
     # allocate a second dir.
     assert len(client.calls) == 1
     assert client.calls[0][0] == "timelines.backfill"
+    assert set(client.calls[0][1]) == {"project", "timeline", "from_supabase_export", "dry_run", "run_ts"}
     assert client.calls[0][1]["project"] == "demo"
     assert client.calls[0][1]["timeline"] is None
     assert client.calls[0][1]["from_supabase_export"] is None
@@ -87,8 +88,7 @@ def test_backfill_dispatch_default_source() -> None:
     import re as _re
 
     dispatched = client.calls[0][1]["run_ts"] or ""
-    assert _re.match(r"^\d+-[0-9a-f]{32}$", dispatched)
-    # Clean up the early-allocated checkpoint dir so the test leaves no
+    assert _re.fullmatch(r"[0-9]+-[0-9a-f]{32}", dispatched)
     # filesystem artifact (the fake client does not have a real project).
     try:
         from pathlib import Path as _Path

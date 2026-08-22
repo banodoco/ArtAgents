@@ -349,12 +349,12 @@ class TimelinesService:
             backfill_project,
         )
 
-        _RUN_TS_RE = __import__("re").compile(r"^\d+-[0-9a-f]{32}$")
+        _RUN_TS_RE = __import__("re").compile(r"[0-9]+-[0-9a-f]{32}")
 
         def _validate_run_ts(value: str | None) -> None:
             if value is None:
                 return
-            if not _RUN_TS_RE.match(value):
+            if not _RUN_TS_RE.fullmatch(value):
                 raise ServiceValidationError(
                     f"invalid --run-ts {value!r}: expected '<epoch>-<32 lowercase hex>' "
                     f"(e.g. '1750000000-{'a'*32}')"

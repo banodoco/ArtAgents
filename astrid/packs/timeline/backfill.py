@@ -199,6 +199,7 @@ supabase-export <path>``. No credentials are needed on this box and none are
 read by this module.
 
 Honesty boundary (round-3 P2#1, part 3): the LocalFs identity sidecar and
+the fallback ``registry.json`` are NOT part of the event hash chain. A
 FIRST-import tamper of an unanchored sidecar — one with no
 ``timeline.created`` event to cross-check (slice-shaped sources), or of a
 sidecar field the created event does not carry (e.g. the ULID, which today
