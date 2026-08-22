@@ -35,7 +35,8 @@ def admit_orchestrator_project_run(
 ) -> KernelAdmissionContext:
     """Admit via kernel — projects_root threaded, no authoritative run.json write.
 
-    Create-only: admits 1 run + 4 tasks (hard chain) via ``RunRepository``.
+    Create-only: admits 1 run + 1 task via ``RunRepository`` (single-task
+    generic fan-out; N only if capability manifest declares children).
     Returns the reconciled kernel ``run_id`` on idempotent replay (no orphan
     ULID). Raises ``ReceiptMismatchError`` on idempotency-key reuse with a
     different request hash; does not swallow it. Drive (claim/start/complete)
@@ -86,25 +87,21 @@ def admit_orchestrator_project_run(
             except Exception:
                 pass
 
-            _steps = ["plan", "fetch", "render", "publish"]
+            _steps = ["run"]
             import hashlib
             # Deterministic ids for idempotent replay (no orphan mismatch):
-            # run_id and child task_ids derived from idempotency_key.
+            # run_id and child task_id derived from idempotency_key.
             deterministic_run_id = hashlib.sha256(f"run:{idempotency_key}".encode()).hexdigest()[:26]
-            _task_ids = [hashlib.sha256(f"{idempotency_key}:{step}".encode()).hexdigest()[:26] for step in _steps]
-            _children: list[dict[str, Any]] = []
-            for _idx, (_tid, _step) in enumerate(zip(_task_ids, _steps)):
-                _spec: dict[str, Any] = {"tool_id": tool_id, "step": _step, "argv": list(argv), "project": project}
-                _deps: list[dict[str, Any]] = [{"task_id": _task_ids[_idx - 1], "kind": "hard"}] if _idx > 0 else []
-                _children.append(
-                    {
-                        "capability": tool_id,
-                        "spec": _spec,
-                        "input_manifest": [],
-                        "task_id": _tid,
-                        "dependencies": _deps,
-                    }
-                )
+            deterministic_task_id = hashlib.sha256(f"task:{idempotency_key}:0".encode()).hexdigest()[:26]
+            _children: list[dict[str, Any]] = [
+                {
+                    "capability": tool_id,
+                    "spec": {"tool_id": tool_id, "argv": list(argv), "project": project},
+                    "input_manifest": [],
+                    "task_id": deterministic_task_id,
+                    "dependencies": [],
+                }
+            ]
 
             def _create(u):
                 return runs.create(

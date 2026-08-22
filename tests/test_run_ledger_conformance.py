@@ -426,26 +426,30 @@ class TestExecutorCLIProject:
 
 
 class TestOrchestratorCLIProject:
-    """orchestrators run --project <p> → storage-only (kernel ledger)."""
+    """orchestrators run --project <p> without kernel/out → fail-closed."""
 
     def test_creates_exactly_one_run_json(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         from astrid.core.execution.orchestrator.registry import OrchestratorRegistry
         from astrid.core.execution.orchestrator.runner import OrchestratorRunRequest, run_orchestrator
+        from astrid.core.project.run import ProjectRunError
 
         projects_root, _ = _setup_project_env(tmp_path, monkeypatch, "demo")
 
         registry = OrchestratorRegistry([_make_minimal_orchestrator("test.orch")])
-        result = run_orchestrator(
-            OrchestratorRunRequest("test.orch", project="demo"), registry
-        )
-        assert result.returncode == 0
+        with pytest.raises((ProjectRunError, Exception), match="requires --out|kernel run|project required"):
+            run_orchestrator(
+                OrchestratorRunRequest("test.orch", project="demo"), registry
+            )
 
         records = _project_run_records(projects_root)
-        # Single-ledger contract (B4): orchestrator runner is storage-only; kernel owns ledger
+        # Fail-closed: no authoritative run.json written
         assert len(records) == 0, (
-            f"Expected zero authoritative run.json (kernel-owned), found {len(records)}"
+            f"Expected zero authoritative run.json (fail-closed, kernel-owned), found {len(records)}"
         )
-
+        # And no kernel rows created
+        runs, tasks, _, _ = _kernel_counts(projects_root)
+        assert runs == 0, f"expected zero kernel runs on fail-closed, found {runs}"
+        assert tasks == 0, f"expected zero kernel tasks on fail-closed, found {tasks}"
 class TestOrchestratorCLIOut:
     """Orchestrator output paths do not imply project ownership."""
 
@@ -722,10 +726,10 @@ class TestSingleLedgerHarness:
         create_project("demo-orch")
         ctx = admit_orchestrator_project_run(project="demo-orch", tool_id="test.orch", argv=["--project", "demo-orch"], projects_root=projects_root)
         assert ctx.run_id
-        # Drive hard chain to terminal (admit is create-only; harness drives)
+        # Drive single-task to terminal (admit is create-only; harness drives)
         _drive_orchestrator_chain(projects_root, "demo-orch")
-        # After R3.1 fan-out, orchestrator should have 1 run +4 tasks hard chain, events>=12 receipts>=4
-        _assert_kernel_single_ledger(projects_root, expected_runs=1, expected_tasks=4, min_events=12, min_receipts=4)
+        # Generic single-task fan-out: 1 run +1 task, no ghost hard chain
+        _assert_kernel_single_ledger(projects_root, expected_runs=1, expected_tasks=1, min_events=4, min_receipts=2)
         # Zero authoritative run.json
         assert _project_run_records(projects_root) == [] or all(r.get("authority") != "authoritative" for r in _project_run_records(projects_root))
 
