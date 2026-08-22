@@ -258,26 +258,27 @@ def parse_multipart(
             digest.update(data)
             os.write(handle_fd, data)
 
-        while True:
-            idx = buf.find(delimiter)
-            if idx != -1:
-                spill(bytes(buf[:idx]))
-                del buf[: idx + len(delimiter)]
-                break
-            retain = len(delimiter) - 1
-            if len(buf) > retain:
-                window = bytes(buf[:-retain])
-                del buf[:-retain]
-                spill(window)
-                continue
-            if not fill():
-                os.close(handle_fd)
-                raise fail(
-                    MultipartError(
-                        "truncated multipart body: boundary never closed"
+        try:
+            while True:
+                idx = buf.find(delimiter)
+                if idx != -1:
+                    spill(bytes(buf[:idx]))
+                    del buf[: idx + len(delimiter)]
+                    break
+                retain = len(delimiter) - 1
+                if len(buf) > retain:
+                    window = bytes(buf[:-retain])
+                    del buf[:-retain]
+                    spill(window)
+                    continue
+                if not fill():
+                    raise fail(
+                        MultipartError(
+                            "truncated multipart body: boundary never closed"
+                        )
                     )
-                )
-        os.close(handle_fd)
+        finally:
+            os.close(handle_fd)
         return StagedFile(
             field_name=field_name,
             filename=filename,

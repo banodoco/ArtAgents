@@ -1154,8 +1154,73 @@ class ReighTaskBridge:
                 "exactly one manifest.outputs entry must be primary"
             )
 
+        # Doc 27 §5 publication half: every verified object is durably
+        # published into the SHA-256 tree BEFORE ``BEGIN IMMEDIATE``; the
+        # in-lock boundary is then O(stat) presence validation only.
+        import json as _json
+        import uuid as _uuid
+
+        from astrid.core.io.media_import import publish_prepared_for_commit
+
+        txn_id = _uuid.uuid4().hex
+
+        publications = publish_prepared_for_commit(
+            self._projects_root,
+            txn_id,
+            [entry["prepared"] for entry in entries],
+        )
+        for entry, publication in zip(entries, publications):
+            entry["published"] = publication
+
         task_row = self._task_row(task_id)
         project_id = str(task_row["project_id"])
+
+        # Output policy (doc 27 §5 steps 6-7): parsed from the admitted
+        # spec outside the writer lock; the repositories join the ONE
+        # completion unit of work below.
+        generation_request: dict[str, Any] | None = None
+        registry_merge: dict[str, Any] | None = None
+        try:
+            spec = _json.loads(str(task_row["spec_json"]))
+        except (ValueError, TypeError):
+            spec = None
+        policy = (
+            spec.get("output_policy")
+            if isinstance(spec, dict)
+            else None
+        )
+        if isinstance(policy, dict):
+            if policy.get("create_generation"):
+                primary_prepared = next(
+                    e["prepared"] for e in entries if e["is_primary"]
+                )
+                kind = primary_prepared.media_kind
+                gen_params = {
+                    key: policy[key]
+                    for key in ("shot_id", "based_on_generation_id")
+                    if policy.get(key) is not None
+                }
+                generation_request = {
+                    "type": kind if kind in ("image", "video", "audio") else "other",
+                    "params": gen_params or None,
+                }
+            visibility = policy.get("timeline_visibility")
+            if isinstance(visibility, dict) and visibility.get("timeline_id"):
+                primary_entry = next(e for e in entries if e["is_primary"])
+                asset_key = visibility.get("asset_key") or (
+                    f"task:{task_id}"
+                )
+                registry_merge = {
+                    "timeline_id": str(visibility["timeline_id"]),
+                    "entries": {
+                        str(asset_key): {
+                            "content_sha256": primary_entry["prepared"].digest,
+                            "type": primary_entry["prepared"].mime_type,
+                        }
+                    },
+                }
+
+
         manifest_attempt = None
         attempt_id = fence.get("attempt_id")
         if not isinstance(attempt_id, str) or not attempt_id:
@@ -1171,6 +1236,24 @@ class ReighTaskBridge:
                 attempt=_attempt_wire_shape(manifest_attempt),
             )
         tasks, media, _receipts = self._services()
+        generation_repo = None
+        timeline_repo = None
+        if generation_request is not None:
+            from astrid.packs.shots.generation_repository import (
+                GenerationRepository,
+            )
+
+            generation_repo = GenerationRepository()
+        if registry_merge is not None:
+            from astrid.core.events.service import EventAppendService
+            from astrid.core.repositories.projects import ProjectRepository
+            from astrid.packs.timeline.repository import TimelineRepository
+
+            timeline_repo = TimelineRepository(
+                events=EventAppendService(self._registry),
+                receipts=_receipts,
+                projects=ProjectRepository(events=None, receipts=None),
+            )
         try:
             result = UnitOfWork(self._writer).run(
                 lambda u: tasks.complete(
@@ -1184,6 +1267,10 @@ class ReighTaskBridge:
                     outputs=entries,
                     media_repo=media,
                     actor_kind="executor",
+                    generation_repo=generation_repo,
+                    generation_request=generation_request,
+                    timeline_repo=timeline_repo,
+                    registry_merge=registry_merge,
                 )
             )
         except Exception:

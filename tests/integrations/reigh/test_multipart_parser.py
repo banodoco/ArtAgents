@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import os
 from pathlib import Path
 
 import pytest
@@ -79,6 +80,27 @@ class TestParserAbuse:
         with pytest.raises(MultipartTooLarge, match="file part 'big'"):
             _parse(body, "capfile", staging, max_file_bytes=1024)
         assert _staging_files(staging) == []
+
+    def test_oversize_file_rejection_does_not_leak_fds(
+        self, tmp_path: Path
+    ) -> None:
+        staging = tmp_path / "staging"
+        body = _body(
+            [
+                ("manifest", "{}", None),
+                ("big", b"z" * 4096, "big.bin"),
+            ],
+            "capfd",
+        )
+
+        def open_fds() -> int:
+            return len(os.listdir("/proc/self/fd"))
+
+        before = open_fds()
+        for _ in range(50):
+            with pytest.raises(MultipartTooLarge, match="file part 'big'"):
+                _parse(body, "capfd", staging, max_file_bytes=1024)
+        assert open_fds() == before
 
     def test_missing_terminator_fails_and_unlinks_staged_bytes(
         self, tmp_path: Path

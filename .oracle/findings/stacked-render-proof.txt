@@ -1,0 +1,10 @@
+Layer Stack — real stacked render proof
+test: tests/core/rendering/test_layer_stack.py::test_real_stacked_render_constructed_plan_threejs_over_remotion
+video.codec=h264 pix_fmt=yuv420p frames=24 size=320x180
+audio.codec=aac
+format.duration=1.000000
+planner=rendering.layer-stack
+finalizer=rendering.ffmpeg-compositor
+segments=[{"alpha_expected": false, "renderer": "rendering.remotion", "tracks": ["source"], "z": 0}, {"alpha_expected": true, "renderer": "rendering.threejs", "tracks": ["overlay"], "z": 1}]
+corner_rgb=(252, 0, 0)  — media red showing through transparent threejs
+text_rgb=(155, 225, 213) — NOT media red (top composited)

@@ -756,6 +756,110 @@ class TestCompletion:
         # Staged bytes are cleaned up.
         assert not list((composition.projects_root / ".astrid").rglob("*out0*"))
 
+    def _set_task_spec(self, composition, task_id: str, spec: dict) -> None:
+        def command(uow):
+            uow.execute(
+                "UPDATE tasks SET spec_json = ? WHERE id = ?",
+                (json.dumps(spec), task_id),
+            )
+
+        UnitOfWork(composition.writer).run(command)
+
+    def _create_timeline(self, composition, project_id: str) -> str:
+        from astrid.core.events.service import EventAppendService
+        from astrid.core.receipts.service import ReceiptService
+        from astrid.core.repositories.projects import ProjectRepository
+        from astrid.packs.timeline.repository import TimelineRepository
+
+        timelines = TimelineRepository(
+            events=EventAppendService(composition.registry),
+            receipts=ReceiptService(),
+            projects=ProjectRepository(events=None, receipts=None),
+        )
+
+        def command(uow):
+            return timelines.create(
+                uow,
+                project_id=project_id,
+                slug="primary",
+                name="Primary",
+                config={},
+                idempotency_key="timeline-primary",
+            )
+
+        return UnitOfWork(composition.writer).run(command).timeline_id
+
+    def test_completion_creates_generation_per_output_policy(
+        self, claimed: dict[str, Any]
+    ) -> None:
+        env = claimed["env"]
+        composition = env["composition"]
+        status, result = _complete_multipart(
+            env, claimed["claim"], claimed["task_id"], key="done-gen"
+        )
+        assert status == 200, result
+        # reigh.image_upscale admits create_generation=True (doc 16 §1.1).
+        assert result["generation"] is not None
+        generation = result["generation"]
+        assert generation["task_id"] == claimed["task_id"]
+        assert _db_count(
+            composition, "SELECT COUNT(*) FROM generations"
+        ) == 1
+        assert _db_count(
+            composition, "SELECT COUNT(*) FROM generation_variants"
+        ) == 1
+        with composition.writer.read_only_connection() as conn:
+            variant = conn.execute(
+                "SELECT is_primary, variant_type FROM generation_variants"
+            ).fetchone()
+        assert variant[0] == 1
+        assert variant[1] == "original"
+
+    def test_registry_visibility_merge_updates_timeline_head(
+        self, claimed: dict[str, Any]
+    ) -> None:
+        env = claimed["env"]
+        composition = env["composition"]
+        with composition.writer.read_only_connection() as conn:
+            project_id = conn.execute(
+                "SELECT project_id FROM tasks WHERE id = ?",
+                (claimed["task_id"],),
+            ).fetchone()[0]
+            spec = json.loads(
+                conn.execute(
+                    "SELECT spec_json FROM tasks WHERE id = ?",
+                    (claimed["task_id"],),
+                ).fetchone()[0]
+            )
+        timeline_id = self._create_timeline(composition, project_id)
+        spec["output_policy"]["timeline_visibility"] = {
+            "timeline_id": timeline_id,
+            "asset_key": "gen:upscaled",
+        }
+        self._set_task_spec(composition, claimed["task_id"], spec)
+        digest = hashlib.sha256(b"rendered-bytes").hexdigest()
+        status, result = _complete_multipart(
+            env, claimed["claim"], claimed["task_id"], key="done-vis"
+        )
+        assert status == 200, result
+        with composition.writer.read_only_connection() as conn:
+            registry_row = conn.execute(
+                "SELECT asset_registry_json FROM timelines WHERE id = ?",
+                (timeline_id,),
+            ).fetchone()
+        registry = json.loads(registry_row[0])
+        assert registry["gen:upscaled"]["content_sha256"] == digest
+
+    def test_completion_without_visibility_skips_merge(
+        self, claimed: dict[str, Any]
+    ) -> None:
+        env = claimed["env"]
+        status, result = _complete_multipart(
+            env, claimed["claim"], claimed["task_id"], key="done-skip"
+        )
+        assert status == 200, result
+        assert result["timeline_head"] is None
+
     def test_lost_ack_replay_returns_stored_completion(
         self, claimed: dict[str, Any]
     ) -> None:

@@ -47,6 +47,7 @@ from astrid.core.util.secrets import KeychainProvider, load_api_key
 
 _PROVIDER_ENV: dict[str, str] = {
     "fal": "FAL_KEY",
+    "wavespeed": "WAVESPEED_API_KEY",
     "openai": "OPENAI_API_KEY",
     "anthropic": "ANTHROPIC_API_KEY",
     "deepseek": "DEEPSEEK_API_KEY",
