@@ -477,6 +477,360 @@ class TestChildGate:
         assert status == 403
 
 
+    def test_browser_child_family_through_public_route_403(
+        self, claimed_parent: dict[str, Any]
+    ) -> None:
+        # A browser posting a leaf child family WITHOUT the envelope is
+        # refused by the public resolver's direct-name fallback.
+        status, body = _post(
+            claimed_parent["env"],
+            f"/projects/{claimed_parent['slug']}/tasks",
+            key="browser-child-attempt",
+            body={"family": "join_clips_segment", "input": {}},
+        )
+        assert status == 403
+        assert body["error"] == "child_admission_forbidden"
+
+    def test_expired_parent_lease_409(
+        self, claimed_parent: dict[str, Any]
+    ) -> None:
+        from astrid.core.store.uow import UnitOfWork
+
+        env = claimed_parent["env"]
+        attempt = claimed_parent["claim"]["attempt"]
+        UnitOfWork(env["composition"].writer).run(
+            lambda u: u.execute(
+                "UPDATE execution_attempts SET lease_expires_at = ? "
+                "WHERE id = ?",
+                ("2020-01-01T00:00:00.000000+00:00", attempt["id"]),
+            )
+        )
+        status, body = self._child_request(claimed_parent, overrides={})
+        assert status == 409, body
+        assert body["error"] == "conflict"
+        assert "expired" in body["detail"]
+
+    def test_non_running_parent_409(
+        self, claimed_parent: dict[str, Any]
+    ) -> None:
+        claim = claimed_parent["claim"]
+        attempt = claim["attempt"]
+        cstatus, _ = _post(
+            claimed_parent["env"],
+            (
+                f"/projects/{claimed_parent['slug']}/tasks/"
+                f"{claimed_parent['parent_id']}/cancel"
+            ),
+            body={
+                "attempt_id": attempt["id"],
+                "lease_id": attempt["lease_id"],
+                "status_version": attempt["status_version"],
+            },
+        )
+        assert cstatus == 200
+        status, body = self._child_request(claimed_parent, overrides={})
+        assert status == 409, body
+        assert body["error"] == "conflict"
+
+    def test_wrong_slug_404(self, claimed_parent: dict[str, Any]) -> None:
+        _create_project(
+            claimed_parent["env"]["composition"], "other-proj"
+        )
+        status, body = _post(
+            claimed_parent["env"],
+            "/projects/other-proj/tasks",
+            key=f"reigh.orch:v1:{claimed_parent['parent_id']}:segment:0",
+            body={
+                "family": "join_clips_segment",
+                "input": {},
+                "child_admission": {
+                    **self._envelope(claimed_parent),
+                },
+            },
+        )
+        assert status == 404, body
+        assert body["error"] == "not_found"
+
+    def test_unknown_parent_404(self, claimed_parent: dict[str, Any]) -> None:
+        ghost = "01GHOSTPARENT000000000000000"
+        fixture = dict(claimed_parent, parent_id=ghost)
+        status, body = self._child_request(fixture, overrides={})
+        assert status == 404, body
+        assert body["error"] == "not_found"
+
+    def test_unknown_attempt_403(self, claimed_parent: dict[str, Any]) -> None:
+        status, body = self._child_request(
+            claimed_parent,
+            overrides={
+                "envelope": {
+                    "parent_attempt_id": "01GHOSTATTEMPT0000000000000"
+                }
+            },
+        )
+        assert status == 403, body
+        assert body["error"] == "child_admission_forbidden"
+
+    def test_unavailable_binding_probe_422(
+        self,
+        claimed_parent: dict[str, Any],
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        # Review-N2 symmetry: children pay the same availability probe as
+        # public admission — a typed 422, not a silent later failure.
+        monkeypatch.setenv("REIGH_WGP_HOME", str(tmp_path / "absent"))
+        status, body = self._child_request(claimed_parent, overrides={})
+        assert status == 422, body
+        assert body["error"] == "capability_unavailable"
+        assert "missing_prerequisites" in body["detail"]
+
+    def _envelope(self, fixture: dict[str, Any]) -> dict[str, Any]:
+        attempt = fixture["claim"]["attempt"]
+        return {
+            "parent_task_id": fixture["parent_id"],
+            "parent_attempt_id": attempt["id"],
+            "executor_id": "exec-1",
+            "lease_id": attempt["lease_id"],
+            "status_version": attempt["status_version"],
+            "role": "segment",
+            "index": 0,
+        }
+
+
+class TestChildReplayCoordinator:
+    """T4.1 proof-work: replay determinism is a named primitive."""
+
+    @pytest.fixture
+    def claimed_parent(self, tmp_bridge_root: Path) -> dict[str, Any]:
+        with task_server(tmp_bridge_root) as env:
+            slug = "replay-proj"
+            _create_project(env["composition"], slug)
+            status, task_resp = _post(
+                env,
+                f"/projects/{slug}/tasks",
+                key="k-parent",
+                body={
+                    "family": "join_clips",
+                    "input": {"clip_source": "clips", "clips": ["a", "b"]},
+                },
+            )
+            assert status == 201, task_resp
+            parent_id = task_resp["task"]["id"]
+            cstatus, claim = _post(
+                env,
+                "/queue/claim",
+                body={
+                    "executor_id": "exec-1",
+                    "capabilities": ["reigh.join_clips_orchestrator"],
+                },
+            )
+            assert cstatus == 200, claim
+            yield {
+                "env": env,
+                "slug": slug,
+                "parent_id": parent_id,
+                "claim": claim,
+            }
+
+    def _child_request(
+        self, fixture: dict[str, Any], *, overrides: dict[str, Any]
+    ) -> tuple[int, dict[str, Any]]:
+        attempt = fixture["claim"]["attempt"]
+        envelope = {
+            "parent_task_id": fixture["parent_id"],
+            "parent_attempt_id": attempt["id"],
+            "executor_id": "exec-1",
+            "lease_id": attempt["lease_id"],
+            "status_version": attempt["status_version"],
+            "role": "segment",
+            "index": 0,
+        }
+        envelope.update(overrides.get("envelope", {}))
+        key = overrides.get(
+            "key",
+            f"reigh.orch:v1:{fixture['parent_id']}:segment:0",
+        )
+        body = {
+            "family": "join_clips_segment",
+            "input": overrides.get("input", {"segment_index": 0}),
+            "child_admission": envelope,
+        }
+        return _post(
+            fixture["env"],
+            f"/projects/{fixture['slug']}/tasks",
+            key=key,
+            body=body,
+        )
+
+    def test_replay_201_then_200_same_row_zero_duplicates(
+        self, claimed_parent: dict[str, Any]
+    ) -> None:
+        first_status, first = self._child_request(
+            claimed_parent, overrides={}
+        )
+        assert first_status == 201, first
+        retry_status, retry = self._child_request(
+            claimed_parent, overrides={}
+        )
+        assert retry_status == 200, retry
+        assert retry["task"]["id"] == first["task"]["id"]
+        rows = _db_count(
+            claimed_parent["env"]["composition"],
+            (
+                "SELECT COUNT(*) FROM tasks WHERE capability = "
+                "'reigh.join_clips_segment'"
+            ),
+        )
+        assert rows == 1
+
+    def test_retry_after_heartbeat_returns_same_row(
+        self, claimed_parent: dict[str, Any]
+    ) -> None:
+        # Attempt N admits; the lease heartbeats (status_version moves);
+        # retry N+1 carries the NEW fence value and must resolve to the
+        # SAME child row — never a duplicate, never a stale-fence 403.
+        first_status, first = self._child_request(
+            claimed_parent, overrides={}
+        )
+        assert first_status == 201, first
+        attempt = claimed_parent["claim"]["attempt"]
+        hstatus, beat = _post(
+            claimed_parent["env"],
+            (
+                f"/tasks/{claimed_parent['parent_id']}/attempts/"
+                f"{attempt['attempt_no']}/heartbeat"
+            ),
+            body={
+                "attempt_id": attempt["id"],
+                "lease_id": attempt["lease_id"],
+                "status_version": attempt["status_version"],
+            },
+        )
+        assert hstatus == 200, beat
+        fresh_version = beat["attempt"]["status_version"]
+        assert fresh_version == attempt["status_version"] + 1
+        retry_status, retry = self._child_request(
+            claimed_parent,
+            overrides={"envelope": {"status_version": fresh_version}},
+        )
+        assert retry_status == 200, retry
+        assert retry["task"]["id"] == first["task"]["id"]
+        rows = _db_count(
+            claimed_parent["env"]["composition"],
+            (
+                "SELECT COUNT(*) FROM tasks WHERE capability = "
+                "'reigh.join_clips_segment'"
+            ),
+        )
+        assert rows == 1
+
+    def test_concurrent_duplicate_admission_single_row(
+        self, claimed_parent: dict[str, Any]
+    ) -> None:
+        from concurrent.futures import ThreadPoolExecutor
+
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            results = list(
+                pool.map(
+                    lambda _: self._child_request(
+                        claimed_parent, overrides={}
+                    ),
+                    range(4),
+                )
+            )
+        statuses = sorted(status for status, _ in results)
+        # Every racer converges on the winner's row: exactly one 201,
+        # the rest idempotent 200 replays — never a second row.
+        assert statuses == [200, 200, 200, 201], statuses
+        ids = {body["task"]["id"] for _, body in results}
+        assert len(ids) == 1
+        rows = _db_count(
+            claimed_parent["env"]["composition"],
+            (
+                "SELECT COUNT(*) FROM tasks WHERE capability = "
+                "'reigh.join_clips_segment'"
+            ),
+        )
+        assert rows == 1
+
+    def test_cross_parent_and_cross_role_isolation(
+        self, claimed_parent: dict[str, Any]
+    ) -> None:
+        env = claimed_parent["env"]
+        # A second live parent in the same project.
+        p2status, p2resp = _post(
+            env,
+            f"/projects/{claimed_parent['slug']}/tasks",
+            key="k-parent-2",
+            body={
+                "family": "join_clips",
+                "input": {"clip_source": "clips", "clips": ["c", "d"]},
+            },
+        )
+        assert p2status == 201, p2resp
+        parent2_id = p2resp["task"]["id"]
+        cstatus, claim2 = _post(
+            env,
+            "/queue/claim",
+            body={
+                "executor_id": "exec-2",
+                "capabilities": ["reigh.join_clips_orchestrator"],
+            },
+        )
+        assert cstatus == 200, claim2
+        assert claim2["task"]["id"] == parent2_id
+        fixture2 = dict(claimed_parent, parent_id=parent2_id, claim=claim2)
+
+        s1, r1 = self._child_request(claimed_parent, overrides={})
+        s2, r2 = self._child_request(
+            fixture2,
+            overrides={"envelope": {"executor_id": "exec-2"}},
+        )
+        s3, r3 = self._child_request(
+            claimed_parent,
+            overrides={
+                "envelope": {"role": "stitch"},
+                "key": f"reigh.orch:v1:{claimed_parent['parent_id']}:stitch:0",
+            },
+        )
+        assert (s1, s2, s3) == (201, 201, 201), (r1, r2, r3)
+        ids = {r1["task"]["id"], r2["task"]["id"], r3["task"]["id"]}
+        # Same (role, index) under different parents and different roles
+        # under one parent derive DIFFERENT keys — three distinct rows.
+        assert len(ids) == 3
+        assert r1["task"]["id"] != r2["task"]["id"]
+        assert r1["task"]["id"] != r3["task"]["id"]
+
+    def test_dependant_on_wires_hard_dependencies(
+        self, claimed_parent: dict[str, Any]
+    ) -> None:
+        first_status, first = self._child_request(
+            claimed_parent, overrides={}
+        )
+        assert first_status == 201, first
+        dep_id = first["task"]["id"]
+        dep_status, dependent = self._child_request(
+            claimed_parent,
+            overrides={
+                "envelope": {"index": 1},
+                "key": f"reigh.orch:v1:{claimed_parent['parent_id']}:segment:1",
+                "input": {"segment_index": 1, "dependant_on": [dep_id]},
+            },
+        )
+        assert dep_status == 201, dependent
+        task = dependent["task"]
+        # The kernel gates eligibility on hard edges: unsatisfied hard
+        # dependency starts the child ``blocked``.
+        assert task["status"] == "blocked"
+        edges = [
+            dep
+            for dep in task["dependencies"]
+            if dep.get("kind") == "hard"
+            and dep.get("depends_on_task_id") == dep_id
+        ]
+        assert len(edges) == 1
+
+
 # ---------------------------------------------------------------------------
 # T6: claim ordering + heartbeat semantics
 # ---------------------------------------------------------------------------
