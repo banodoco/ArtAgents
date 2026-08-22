@@ -163,50 +163,64 @@ def test_k_cli_accepts_valid():
     assert code == 0
 
 
-# ---------------------------------------------------------------------------
-# L — bound root honored vs decoy ambient; unbound honors env after open
-# ---------------------------------------------------------------------------
-
 def test_l_bound_root_honored_vs_decoy_ambient(tmp_path: Path, monkeypatch):
-    """Bound-root honored vs decoy ambient (I exploit)."""
+    """Bound-root honored vs decoy ambient — real backfill must use the explicit root, not the env decoy."""
     from astrid.sdk.client import AstridClient
 
-    real_base = tmp_path / "real"
-    decoy_base = tmp_path / "decoy"
-    real_base.mkdir()
-    decoy_base.mkdir()
-    # create timeline in real_root only
-    projects_root, home, tid, ulid = project_root_with_timeline(real_base, project_slug="proj")
-    # projects_root is real_base / "projects"
-    monkeypatch.setenv("ASTRID_PROJECTS_ROOT", str(decoy_base / "projects"))
-    client = AstridClient.open(projects_root=str(projects_root))
+    x_base = tmp_path / "x"
+    y_base = tmp_path / "y"
+    x_base.mkdir()
+    y_base.mkdir()
+    x_projects_root, x_home, x_tid, x_ulid = project_root_with_timeline(x_base, project_slug="proj")
+    y_projects_root = y_base / "projects"
+    y_projects_root.mkdir(parents=True, exist_ok=True)
+    # Ensure Y is a distinct decoy that would yield empty scan if honoured.
+    monkeypatch.setenv("ASTRID_PROJECTS_ROOT", str(y_projects_root))
+    client = AstridClient.open(projects_root=str(x_projects_root))
     try:
-        res = client.projects.create(slug="proj", name="Proj")
-        result = client.timelines.backfill("proj", dry_run=True)
-        assert result.ok is True
+        created = client.projects.create(slug="proj", name="Proj")
+        assert created.ok is True
+        result = client.timelines.backfill("proj", dry_run=False)
+        assert result.ok is True, result.error
+        assert set(result.data["timelines"].keys()) == {x_tid}
+        run_ts = result.data["run_ts"]
+        assert run_ts, "expected active run_ts from real backfill"
+        # Checkpoint must live under X, not Y.
+        checkpoint = x_projects_root / "proj" / "runs" / "migrations" / run_ts / "checkpoint.json"
+        assert checkpoint.is_file(), f"checkpoint missing under bound root X: {checkpoint}"
+        assert (x_projects_root / "proj" / "runs" / "migrations" / run_ts).is_dir()
+        # No runs/migrations tree may have been created under the decoy Y.
+        assert not (y_projects_root / "proj" / "runs" / "migrations").exists(), "decoy Y must not have runs/migrations"
+        assert not list(y_base.rglob("migrations")), "no migrations directory anywhere under decoy Y"
     finally:
         client.close()
 
 
 def test_l_unbound_honors_env_after_open(tmp_path: Path, monkeypatch):
-    """Unbound client honors ASTRID_PROJECTS_ROOT set AFTER open()."""
-    from astrid.sdk.timelines import TimelinesService
+    """Unbound client honors ASTRID_PROJECTS_ROOT set AFTER open() via per-call ambient fallback."""
+    from astrid.sdk.client import AstridClient
 
-    real_base = tmp_path / "real2"
-    real_base.mkdir()
-    monkeypatch.delenv("ASTRID_PROJECTS_ROOT", raising=False)
-    writer = make_writer(tmp_path / "l_unbound.sqlite3")
-    projects, receipts, timelines = make_backfill_deps(writer)
-    svc = TimelinesService(writer, projects, timelines, receipts, projects_root=None)
-    assert svc._projects_root is None
-    make_project(writer, slug="proj")
-    projects_root, home, tid, ulid = project_root_with_timeline(real_base, project_slug="proj")
-    monkeypatch.setenv("ASTRID_PROJECTS_ROOT", str(projects_root))
-    result = svc.backfill("proj", dry_run=False)
-    assert result.ok is True
-    assert tid in result.data["timelines"]
-    writer.close()
-
+    a_base = tmp_path / "a_empty"
+    b_base = tmp_path / "b_valid"
+    a_base.mkdir()
+    b_base.mkdir()
+    a_projects_root = a_base / "projects"
+    a_projects_root.mkdir(parents=True, exist_ok=True)
+    b_projects_root, b_home, b_tid, b_ulid = project_root_with_timeline(b_base, project_slug="proj")
+    monkeypatch.setenv("ASTRID_PROJECTS_ROOT", str(a_projects_root))
+    client = AstridClient.open()
+    try:
+        # Kernel project must exist in the DB the client opened (at A).
+        created = client.projects.create(slug="proj", name="Proj")
+        assert created.ok is True
+        # Switch ambient to B after the client is already composed.
+        monkeypatch.setenv("ASTRID_PROJECTS_ROOT", str(b_projects_root))
+        result = client.timelines.backfill("proj", dry_run=False)
+        assert result.ok is True, result.error
+        assert b_tid in result.data["timelines"], f"expected B tid {b_tid} in {result.data['timelines'].keys()}"
+        assert set(result.data["timelines"].keys()) == {b_tid}
+    finally:
+        client.close()
 
 # ---------------------------------------------------------------------------
 # M — early-allocation ordering and fail-closed
