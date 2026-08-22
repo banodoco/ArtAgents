@@ -1,0 +1,21 @@
+{
+  "brief": "/private/tmp/rework-b2b.md",
+  "elapsed_s": 824.269,
+  "error": null,
+  "error_class": null,
+  "finish_reason": null,
+  "finished_at": "2026-08-22T15:16:57Z",
+  "meta_file": "/Users/peteromalley/Documents/reigh-workspace/Astrid-unified-oracle/.oracle/findings/rework-b2/rework-b2b.meta.json",
+  "model": "openrouter:meta/muse-spark-1.2-contributor",
+  "pid": 27557,
+  "raw_result_keys": [
+    "stdout"
+  ],
+  "response_chars": 2334,
+  "response_file": "/Users/peteromalley/Documents/reigh-workspace/Astrid-unified-oracle/.oracle/findings/rework-b2/rework-b2b.txt",
+  "started_at": "2026-08-22T15:03:12Z",
+  "status": "ok",
+  "stem": "rework-b2b",
+  "task_timeout_s": 2400,
+  "tool_calls": 0
+}

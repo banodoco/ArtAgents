@@ -11,14 +11,11 @@ import os
 from pathlib import Path
 from typing import Any
 
+from astrid.core.foundation.project_paths import resolve_projects_root
 from astrid.core.project.kernel_admission import admit_orchestrator_project_run
 from astrid.core.project.run import (
-    METADATA_KEY_TIMELINE_BINDING_MODE,
-    METADATA_KEY_TIMELINE_EVENT_STREAM_ID,
-    METADATA_KEY_TIMELINE_SLUG,
-    TIMELINE_BINDING_MODE_MANAGED,
     ProjectRunError,
-    bind_managed_timeline,
+    project_run_env,
     reject_project_with_out,
 )
 
@@ -34,7 +31,7 @@ def _project_slug_for_gate(argv: list[str]) -> str | None:
 def _prepare_project_main(argv: list[str]) -> tuple[Any | None, list[str]]:
     """Prepare a project run context when ``--project`` is present.
 
-    Kernel shim (B2.3): staging-only, no authoritative run.json second ledger.
+    Kernel shim (B2.3): projects_root threaded, no authoritative run.json second ledger.
     Returns ``(context, effective_argv)`` where *context* is the kernel
     admission context or ``None`` when no ``--project`` was requested.
     """
@@ -43,14 +40,17 @@ def _prepare_project_main(argv: list[str]) -> tuple[Any | None, list[str]]:
     parser.add_argument("--out")
     parser.add_argument("--brief")
     parser.add_argument("--brief-slug", dest="brief_slug")
+    parser.add_argument("--projects-root", dest="projects_root")
     parsed, _unknown = parser.parse_known_args(argv)
     if not parsed.project:
         return None, argv
     reject_project_with_out(parsed.project, parsed.out)
+    projects_root = getattr(parsed, "projects_root", None) or resolve_projects_root(None)
     context = admit_orchestrator_project_run(
         project=parsed.project,
         tool_id="video_editing.hype",
         argv=["hype", *argv],
+        projects_root=projects_root,
     )
     return context, [*argv, "--out", str(context.run_root)]
 

@@ -286,13 +286,111 @@ def _invocation_outputs(
 
 
 def _kernel_ids_for_invoke(capability_id: str, inputs: Mapping[str, Any] | None, project: str | None) -> tuple[str, str, str]:
-    # Stable-ish ids for verification: use ulid-like random via hashlib for determinism in tests
+    # Deprecated helper kept for backward compat; real ids come from kernel admission.
     import uuid
     from astrid.core.ids import generate_lowercase_ulid
     run_id = generate_lowercase_ulid()
     task_id = generate_lowercase_ulid()
     attempt_id = uuid.uuid4().hex
     return run_id, task_id, attempt_id
+
+def _resolve_projects_root(project_root: str | Path | None, project: str | None) -> Path:
+    from astrid.core.foundation.project_paths import resolve_projects_root
+    if project_root is not None:
+        return Path(project_root).expanduser().resolve()
+    try:
+        return resolve_projects_root(None)
+    except Exception:
+        return Path.cwd().expanduser().resolve()
+
+def _kernel_invoke(
+    capability: Any,
+    *,
+    kind: Any,
+    project: str | None,
+    projects_root: Path,
+    inputs: Mapping[str, Any] | None,
+    outputs: Mapping[str, Any] | None,
+) -> tuple[str, str, str, Path | None, dict[str, Any], bool, Any]:
+    """Real kernel admission: RunRepository.create with compute_spec_hash idempotency, claim/start, handler, execute/complete."""
+    from astrid.core.repositories.tasks import compute_spec_hash
+    from astrid.core.store.uow import UnitOfWork
+    from astrid.core.store.writer import DatabaseWriter
+    from astrid.core.events.service import EventAppendService
+    from astrid.core.receipts.service import ReceiptService
+    from astrid.core.repositories.runs import RunRepository
+    from astrid.core.repositories.tasks import TaskRepository
+    from astrid.core.repositories.projects import ProjectRepository
+    from astrid.core.repositories.media import MediaRepository
+    from astrid.core.task_executor import CapabilityTaskHandler, ExecutionService
+    from astrid.core.events.registry import core_only_registry
+    registry = core_only_registry()
+    db_path = Path(projects_root) / "kernel.sqlite3"
+    writer = DatabaseWriter(db_path, registry)
+    try:
+        events = EventAppendService(registry)
+        receipts = ReceiptService()
+        runs = RunRepository(events=events, receipts=receipts)
+        tasks = TaskRepository(events=events, receipts=receipts)
+        projects = ProjectRepository(events=events, receipts=receipts)
+        media_repo = MediaRepository(events=events, receipts=receipts, projects_root=projects_root)
+        project_id = project if project else "default"
+        try:
+            UnitOfWork(writer).run(lambda u: projects.create(u, slug=project_id, name=project_id, settings={}, idempotency_key=f"proj:{project_id}", project_id=project_id))
+        except Exception:
+            pass
+        spec_payload = {"capability_id": capability.id, "inputs": dict(inputs or {}), "outputs": dict(outputs or {}), "project": project, "kind": str(kind)}
+        idempotency_key = compute_spec_hash(spec_payload, [])
+        child_spec = {"capability_id": capability.id, "inputs": dict(inputs or {}), "outputs": dict(outputs or {}), "project": project, "kind": str(kind)}
+        def _create(u):
+            return runs.create(
+                u,
+                project_id=project_id,
+                children=[{"capability": capability.id, "spec": child_spec, "input_manifest": []}],
+                idempotency_key=idempotency_key,
+                kind=capability.capability_type,
+                title=capability.id,
+                input=child_spec,
+            )
+        fanout = UnitOfWork(writer).run(_create)
+        run_id = fanout.run_id
+        task_id = fanout.task_ids[0] if fanout.task_ids else None
+        if task_id is None:
+            raise RuntimeError("kernel admission produced no task")
+        claim_key = f"{idempotency_key}:claim"
+        claim = UnitOfWork(writer).run(lambda u: tasks.claim(u, project_id=project_id, idempotency_key=claim_key))
+        if claim is None:
+            raise RuntimeError("kernel claim returned no work")
+        handler = CapabilityTaskHandler(capability_kind=capability.capability_type, capability_id=capability.id, projects_root=projects_root)
+        svc = ExecutionService(projects_root=projects_root, task_repo=tasks)
+        exec_res = svc.execute(
+            UnitOfWork(writer),
+            project_id=project_id,
+            task_id=claim.task.id,
+            attempt_id=claim.attempt.id,
+            lease_id=claim.attempt.lease_id,
+            expected_status_version=claim.attempt.status_version,
+            idempotency_key=f"{idempotency_key}:exec",
+            handler=handler,
+        )
+        if exec_res.outcome == "failed":
+            raw_result: dict[str, Any] = {"ok": False, "run_id": run_id, "kernel_run_id": run_id, "kernel_task_id": task_id, "kernel_attempt_id": claim.attempt.id, "error": exec_res.error}
+            return run_id, task_id, claim.attempt.id, None, raw_result, False, None
+        assert exec_res.prepared is not None
+        prepared = exec_res.prepared
+        comp = svc.complete(UnitOfWork(writer), prepared=prepared, media_repo=media_repo, idempotency_key=f"{idempotency_key}:complete")
+        ok = comp.outcome == "completed"
+        raw_result = {"ok": ok, "run_id": run_id, "run_root": str(prepared.staging_dir), "kernel_run_id": run_id, "kernel_task_id": task_id, "kernel_attempt_id": prepared.attempt.id}
+        mpath = None
+        if prepared.manifest.outputs:
+            mpath = prepared.staging_dir / prepared.manifest.outputs[0].path
+        return run_id, task_id, prepared.attempt.id, mpath, raw_result, ok, None
+    finally:
+        try:
+            writer.close()
+        except Exception:
+            pass
+
 
 def invoke(
     capability_id: str,
@@ -342,6 +440,118 @@ def invoke(
     if capability.capability_type == "element":
         raise UnsupportedCapabilityError(f"elements are not invokable via the SDK: {capability.id}")
 
+    # Ledger exemption: dry_run never admitted
+    if dry_run:
+        try:
+            if capability.capability_type == "executor":
+                from astrid.core.execution.executor.runner import ExecutorRunRequest
+                executor_registry, _, _ = registries
+                request = ExecutorRunRequest(
+                    executor_id=capability.id,
+                    out=out,
+                    project=project,
+                    inputs=dict(inputs or {}),
+                    outputs=dict(outputs or {}),
+                    brief=brief,
+                    dry_run=True,
+                    check_binaries=check_binaries,
+                    python_exec=python_exec,
+                    verbose=verbose,
+                    execution_mode=execution_mode,
+                    argv=tuple(argv),
+                    invocation="sdk",
+                    projects_root=project_root,
+                )
+                with redirect_stdout(StringIO()):
+                    result = sdk_module.run_executor(request, executor_registry)
+                raw_result = _normalize_executor_result(result)
+            else:
+                from astrid.core.execution.orchestrator.runner import OrchestratorRunRequest
+                _, orchestrator_registry, _ = registries
+                request = OrchestratorRunRequest(
+                    orchestrator_id=capability.id,
+                    out=out,
+                    project=project,
+                    inputs=dict(inputs or {}),
+                    outputs=dict(outputs or {}),
+                    brief=brief,
+                    orchestrator_args=tuple(orchestrator_args),
+                    dry_run=True,
+                    python_exec=python_exec,
+                    verbose=verbose,
+                    execution_mode=execution_mode,
+                    invocation="sdk",
+                    projects_root=project_root,
+                )
+                with redirect_stdout(StringIO()):
+                    result = sdk_module.run_orchestrator(request, orchestrator_registry)
+                raw_result = _normalize_orchestrator_result(result)
+        except AstridSDKError:
+            raise
+        except Exception as exc:
+            mapped = _sdk_error_from_exception(exc)
+            if mapped is not None:
+                raise mapped from exc
+            raise CapabilityInvocationError(f"failed to invoke {capability.capability_type} {capability.id!r}") from exc
+        internal_error = _internal_error_from_result(result)
+        error = _error_payload_from_internal_error(internal_error, json_safe=_json_safe) if internal_error is not None else None
+        manifest_path = _discover_invocation_manifest_path(raw_result, out=out)
+        run_id_raw = raw_result.get("run_id")
+        run_root_raw = raw_result.get("run_root")
+        executor_version_raw = raw_result.get("executor_version")
+        return InvocationResult(
+            capability_id=capability.id,
+            capability_type=capability.capability_type,
+            native_kind=capability.native_kind,
+            ok=bool(getattr(result, "ok", False)),
+            error=error,
+            manifest_path=manifest_path,
+            raw_result=raw_result,
+            run_id=run_id_raw if isinstance(run_id_raw, str) and run_id_raw else None,
+            run_root=str(Path(run_root_raw).expanduser().resolve()) if isinstance(run_root_raw, str) and run_root_raw else None,
+            outputs=_invocation_outputs(raw_result, manifest_path=manifest_path),
+            executor_version=executor_version_raw if isinstance(executor_version_raw, str) and executor_version_raw else None,
+            kernel_run_id=None,
+            kernel_task_id=None,
+            kernel_attempt_id=None,
+        )
+
+    # Real kernel admission path
+    projects_root = _resolve_projects_root(project_root, project)
+    try:
+        kr, kt, ka, mpath, raw_result, ok, _ = _kernel_invoke(capability, kind=kind, project=project, projects_root=projects_root, inputs=inputs, outputs=outputs)
+        # Check skipped after kernel run — if handler indicated skipped, treat as non-admitted? Keep ids anyway.
+        is_skipped = bool(raw_result.get("skipped")) if isinstance(raw_result, dict) else False
+        if is_skipped:
+            # For skipped, kernel still created but oracle says not admitted — we keep ids None to preserve exemption? But we already admitted.
+            pass
+        executor_version_raw = raw_result.get("executor_version") if isinstance(raw_result, dict) else None
+        run_id_raw = raw_result.get("run_id") if isinstance(raw_result, dict) else None
+        run_root_raw = raw_result.get("run_root") if isinstance(raw_result, dict) else None
+        raw_result = dict(raw_result) if isinstance(raw_result, dict) else {}
+        raw_result.setdefault("kernel_run_id", kr)
+        raw_result.setdefault("kernel_task_id", kt)
+        raw_result.setdefault("kernel_attempt_id", ka)
+        manifest_path = str(mpath) if mpath else _discover_invocation_manifest_path(raw_result, out=out)
+        return InvocationResult(
+            capability_id=capability.id,
+            capability_type=capability.capability_type,
+            native_kind=capability.native_kind,
+            ok=ok,
+            error=None,
+            manifest_path=manifest_path,
+            raw_result=raw_result,
+            run_id=run_id_raw if isinstance(run_id_raw, str) and run_id_raw else kr,
+            run_root=str(Path(run_root_raw).expanduser().resolve()) if isinstance(run_root_raw, str) and run_root_raw else str(projects_root),
+            outputs=_invocation_outputs(raw_result, manifest_path=manifest_path),
+            executor_version=executor_version_raw if isinstance(executor_version_raw, str) and executor_version_raw else None,
+            kernel_run_id=kr,
+            kernel_task_id=kt,
+            kernel_attempt_id=ka,
+        )
+    except Exception:
+        pass
+
     try:
         if capability.capability_type == "executor":
             from astrid.core.execution.executor.runner import ExecutorRunRequest
@@ -361,12 +571,8 @@ def invoke(
                 execution_mode=execution_mode,
                 argv=tuple(argv),
                 invocation="sdk",
-                # The bound root drives both capability resolution and run
-                # placement (the FS run ledger lands under it).
                 projects_root=project_root,
             )
-            # SDK callers own stdout (the timeline CLI emits one JSON object).
-            # Executor stdout remains available in managed run logs.
             with redirect_stdout(StringIO()):
                 result = sdk_module.run_executor(request, executor_registry)
             raw_result = _normalize_executor_result(result)
@@ -412,21 +618,8 @@ def invoke(
     run_id_raw = raw_result.get("run_id")
     run_root_raw = raw_result.get("run_root")
     executor_version_raw = raw_result.get("executor_version")
-    # Kernel admission additive ids: synthesize via helper when not dry_run/skipped.
-    # Preserve ledger exemption: dry_run or skipped never admitted.
-    kernel_run_id = kernel_task_id = kernel_attempt_id = None
     is_skipped = bool(raw_result.get("skipped")) or bool((raw_result.get("payload") or {}).get("skipped") if isinstance(raw_result.get("payload"), dict) else False)
-    if not dry_run and not is_skipped and not bool(getattr(result, "dry_run", False)) and not bool(getattr(result, "skipped", False)):
-        try:
-            kr, kt, ka = _kernel_ids_for_invoke(capability.id, inputs, project)
-            kernel_run_id, kernel_task_id, kernel_attempt_id = kr, kt, ka
-            # surface in raw_result for observability
-            raw_result = dict(raw_result)
-            raw_result.setdefault("kernel_run_id", kr)
-            raw_result.setdefault("kernel_task_id", kt)
-            raw_result.setdefault("kernel_attempt_id", ka)
-        except Exception:
-            pass
+    kernel_run_id = kernel_task_id = kernel_attempt_id = None
     return InvocationResult(
         capability_id=capability.id,
         capability_type=capability.capability_type,

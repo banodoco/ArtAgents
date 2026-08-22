@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Callable, Sequence
 
 from astrid.core.foundation.hash import sha256_file
-from astrid.core.foundation.project_paths import project_dir
+from astrid.core.foundation.project_paths import project_dir, resolve_projects_root
 from astrid.core.project.kernel_admission import admit_orchestrator_project_run
 from astrid.core.project.run import reject_project_with_out
 from astrid.packs.training.executors.asset_cache import run as asset_cache
@@ -268,44 +268,6 @@ def resolve_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return args
 
 
-def _write_run_json(args: argparse.Namespace) -> None:
-    run_json = args.out / "run.json"
-    consumes: list[dict[str, str]] = []
-    video = getattr(args, "video", None)
-    if video is not None and isinstance(video, Path) and video.is_file():
-        consumes.append({"source": str(video), "sha256": sha256_file(video)})
-
-    fields: dict[str, Any] = {
-        "consumes": consumes,
-        "orchestrator": "video_editing.thumbnail_maker",
-    }
-
-    if run_json.exists():
-        try:
-            existing = json.loads(run_json.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            existing = {}
-        if not isinstance(existing, dict):
-            existing = {}
-        existing.update(fields)
-        run_json.write_text(json.dumps(existing, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    else:
-        run_json.parent.mkdir(parents=True, exist_ok=True)
-        run_json.write_text(json.dumps(fields, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-
-
-def _append_pack_run_started(run_root: Path) -> None:
-    """Append a pack-local audit event, not a task-run ledger entry."""
-    events_path = run_root / "pack_events.jsonl"
-    ev: dict[str, Any] = {
-        "kind": "pack_run_started",
-        "ts": dt.datetime.now(dt.timezone.utc).isoformat(),
-    }
-    events_path.parent.mkdir(parents=True, exist_ok=True)
-    with events_path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(ev, sort_keys=True, separators=(",", ":")) + "\n")
-
-
 def _exec_resolve_video(args: argparse.Namespace) -> int:
     out: Path = args.out
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -341,6 +303,17 @@ def _exec_generate_thumbnails(args: argparse.Namespace) -> int:
         "thumbnail_maker.generate_thumbnails: not implemented; see SPRINT_1 milestone D"
     )
 
+def _append_pack_run_started(run_root: Path) -> None:
+    """Append a pack-local audit event, not a task-run ledger entry."""
+    events_path = run_root / "pack_events.jsonl"
+    ev: dict[str, Any] = {
+        "kind": "pack_run_started",
+        "ts": dt.datetime.now(dt.timezone.utc).isoformat(),
+    }
+    events_path.parent.mkdir(parents=True, exist_ok=True)
+    with events_path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(ev, sort_keys=True, separators=(",", ":")) + "\n")
+
 
 def run_orchestrator(args: argparse.Namespace) -> int:
     args.out.mkdir(parents=True, exist_ok=True)
@@ -360,9 +333,6 @@ def run_orchestrator(args: argparse.Namespace) -> int:
     emit_plan_json(plan, plan_path)
 
     plan_hash = "sha256:" + sha256_file(plan_path)
-
-    _write_run_json(args)
-    _append_pack_run_started(args.out)
 
     if args.dry_run:
         print(f"thumbnail_maker: plan emitted to {plan_path} (plan_hash={plan_hash})")
@@ -532,20 +502,23 @@ def main(argv: Sequence[str] | None = None) -> int:
             valid_options=sorted(step_commands),
             recovery_command="choose one of the valid subcommands listed above",
         )
-    # Kernel admission shim (B2.3): staging-only, no authoritative run.json
+    # Kernel admission with projects_root threading (no second ledger)
     try:
         parser = argparse.ArgumentParser(add_help=False)
         parser.add_argument("--project")
         parser.add_argument("--out")
+        parser.add_argument("--projects-root", dest="projects_root")
         parsed, _unknown = parser.parse_known_args(effective_argv)
 
         kernel_ctx = None
         if parsed.project:
             reject_project_with_out(parsed.project, parsed.out)
+            projects_root = getattr(parsed, "projects_root", None) or resolve_projects_root(None)
             kernel_ctx = admit_orchestrator_project_run(
                 project=parsed.project,
                 tool_id="video_editing.thumbnail_maker",
                 argv=["thumbnail_maker", *effective_argv],
+                projects_root=projects_root,
             )
             effective_argv = [*effective_argv, "--out", str(kernel_ctx.run_root)]
 

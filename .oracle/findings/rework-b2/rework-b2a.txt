@@ -1,0 +1,18 @@
+**R2.1+R2.2 done — no commit, basetemp cleaned**
+
+- `astrid/sdk/invocation.py:306-420` — removed `generate_lowercase_ulid` fake `_kernel_ids_for_invoke`; added `_resolve_projects_root` + `_kernel_invoke` using `compute_spec_hash` idempotency, `RunRepository.create` with one child `{"capability": id, "spec": child_spec}`, `TaskRepository.claim`, `CapabilityTaskHandler(capability_kind, capability_id, projects_root)`, `ExecutionService.execute` (does `start`+handler outside SQLite, `validate_result_manifest`+`prepare_media_file`) / `complete` with `MediaRepository`, surfaces real `kernel_run_id/task_id/attempt_id`; `dry_run` early exemption (no admission). Ghost comment removed. Fallback to direct runner only if kernel path throws.
+
+- `astrid/core/task_executor/capability_handler.py:1-60` — now imports `validate_result_manifest`, `prepare_media_file`, `discover_manifest_path`, `load_manifest_output_artifacts`; removes ad-hoc `hashlib.sha256(read_bytes)`, uses `prepare_media_file(...).digest/.byte_size` (`sha256:`+digest), calls `load_manifest_output_artifacts` when manifest found, validates via `validate_result_manifest` (reuse service validation), handles evidence-only `outputs:[]` per batch-1 relaxed contract, `out=None` when `project` set to avoid `--project+--out` conflict.
+
+- `astrid/core/task_executor/__init__.py:25-35` — exports `CapabilityTaskHandler` (was missing), fixes duplicate `__all__`.
+
+**Verification (3 executors via `sdk.invoke` → kernel store, zero `run.json`):**
+```bash
+rm -rf /tmp/rework-b2a; mkdir -p /tmp/rework-b2a
+python3 -c "import astrid; [astrid.invoke('rendering.timeline_visualize',kind='executor',project=f'proj-{i}',inputs={'project_slug':f'proj-{i}','layout':'time-scaled'},include_installed=False,project_root='/tmp/rework-b2a/projects') for i in range(3)]"
+# each InvocationResult.kernel_run_id/task_id/attempt_id = real ULIDs from RunRepository (not `generate_lowercase_ulid` ghosts), raw_result.kernel_* set
+# kernel.sqlite3: events>0, command_receipts>0, execution_attempts>0, tasks=3, runs=3, leases present, authoritative `run.json` writers =0 (pack shims not touched per R2.3 scope)
+rm -rf /tmp/rework-b2a
+```
+LSP hint fixed: `PreparedMedia.content_hash/bytes` → `digest`/`byte_size`; kernel DB path `projects_root/kernel.sqlite3` with `DatabaseWriter(db_path, core_only_registry())`, `EventAppendService` from `astrid.core.events.service`, `ProjectRepository.create(slug,name,settings,idempotency_key,project_id)`.
+0

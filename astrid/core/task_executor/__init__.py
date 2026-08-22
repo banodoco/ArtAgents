@@ -22,6 +22,7 @@ The public surface is re-exported from :mod:`astrid.core.task_executor`.
 
 from __future__ import annotations
 
+from astrid.core.task_executor.capability_handler import CapabilityTaskHandler
 from astrid.core.task_executor.service import (
     ExecutionResult,
     ExecutionService,
@@ -35,6 +36,7 @@ from astrid.core.task_executor.service import (
 
 __all__ = [
     "STAGING_TXN_ID_KEY",
+    "CapabilityTaskHandler",
     "ExecutionResult",
     "ExecutionService",
     "HandlerExecutionError",

@@ -19,14 +19,7 @@ guard_canonical_entrypoint('video_editing.hype')
 import os
 import sys
 
-from astrid.core.project.run import (
-    METADATA_KEY_TIMELINE_EVENT_STREAM_ID,
-    METADATA_KEY_TIMELINE_SLUG,
-    ProjectRunError,
-    finalize_project_run,
-    prepare_project_run,
-    reject_project_with_out,
-)
+from astrid.core.project.run import ProjectRunError
 from astrid.packs.training.executors.asset_cache import run as asset_cache
 
 # Extracted modules (M4 T62)
@@ -73,7 +66,6 @@ from astrid.packs.video_editing.orchestrators.hype.runner import (  # noqa: F401
     _run_revise,
     _run_steps_once,
     _url_inputs,
-    _write_run_json,
     log_dir_for_step,
     parse_brief_frontmatter,
     pool_main,
@@ -126,34 +118,16 @@ def main(argv: list[str] | None = None) -> int:
             args = resolve_args(effective_argv)
         except AstridError as exc:
             if project_context is not None:
-                finalize_project_run(
-                    project_context,
-                    status="error",
-                    returncode=2,
-                    error=exc,
-                )
                 render_astrid_error(exc)
                 return 2
             raise
         except SystemExit as exc:
             if project_context is not None:
-                finalize_project_run(project_context, status="error", returncode=_system_exit_code(exc), error=exc)
                 return _system_exit_code(exc)
             raise
         if project_context is not None:
             args.project = project_context.project_slug
             args.render_parent_run_id = project_context.run_id
-            # Propagate managed timeline slug and event-stream id from run
-            # metadata so subprocess callers (cut, refine, etc.) can pass
-            # --project + --timeline-slug, and hype-owned managed mutations
-            # (e.g. _apply_trim_deltas_to_arrangement) can use the gateway.
-            managed_meta = project_context.run.get("metadata", {}) if hasattr(project_context, "run") else {}
-            if isinstance(managed_meta, dict):
-                args.timeline_slug = managed_meta.get(METADATA_KEY_TIMELINE_SLUG)
-                args.timeline_event_stream_id = managed_meta.get(METADATA_KEY_TIMELINE_EVENT_STREAM_ID)
-            # m3.5 actor provenance: when managed, determine who launched hype
-            # and set args.actor_via so child packs and in-process mutations
-            # can chain upstream provenance in actor.via.
             if not hasattr(args, "actor_via") or args.actor_via is None:
                 from astrid.core.timeline.events.schema import TimelineActor as _HypeActor
 
@@ -171,38 +145,10 @@ def main(argv: list[str] | None = None) -> int:
                 returncode = pool_main(args)
         except SystemExit as exc:
             if project_context is not None:
-                finalize_project_run(
-                    project_context,
-                    status="error",
-                    returncode=_system_exit_code(exc),
-                    error=exc,
-                    metadata=_project_hype_metadata(args),
-                    brief_slug=getattr(args, "brief_slug", None),
-                    artifact_roots=_project_hype_artifact_roots(args),
-                )
                 return _system_exit_code(exc)
             raise
-        except Exception as exc:
-            if project_context is not None:
-                finalize_project_run(
-                    project_context,
-                    status="error",
-                    returncode=-1,
-                    error=exc,
-                    metadata=_project_hype_metadata(args),
-                    brief_slug=getattr(args, "brief_slug", None),
-                    artifact_roots=_project_hype_artifact_roots(args),
-                )
+        except Exception:
             raise
-        if project_context is not None:
-            finalize_project_run(
-                project_context,
-                status="skipped" if bool(getattr(args, "dry_run", False)) else ("success" if returncode == 0 else "failed"),
-                returncode=returncode,
-                metadata=_project_hype_metadata(args),
-                brief_slug=getattr(args, "brief_slug", None),
-                artifact_roots=_project_hype_artifact_roots(args),
-            )
         return returncode
     finally:
         _restore_project_env(project_env)

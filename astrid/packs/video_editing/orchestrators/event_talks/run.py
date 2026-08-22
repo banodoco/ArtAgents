@@ -18,14 +18,10 @@ from pathlib import Path
 from typing import Any, Callable, Sequence
 
 from astrid.core.foundation.hash import sha256_file
-from astrid.core.foundation.project_paths import project_dir
+from astrid.core.foundation.project_paths import project_dir, resolve_projects_root
 from astrid.core.media import ffprobe_duration_seconds
 from astrid.core.project.kernel_admission import admit_orchestrator_project_run
-from astrid.core.project.run import (
-    finalize_project_run,
-    prepare_project_run,
-    reject_project_with_out,
-)
+from astrid.core.project.run import reject_project_with_out
 from astrid.packs.video_editing.orchestrators.event_talks.plan_template import (
     build_plan_v2,
     emit_plan_json,
@@ -384,51 +380,8 @@ def _coalesce_hit_intervals(
 # ---------------------------------------------------------------------------
 
 
-def _write_run_json(args: argparse.Namespace) -> None:
-    """Write ``run.json`` with ``consumes`` populated from source media."""
-    run_json = args.out / "run.json"
-
-    consumes: list[dict[str, str]] = []
-    source = getattr(args, "source", None)
-    if source is not None and isinstance(source, Path) and source.is_file():
-        consumes.append({"source": str(source), "sha256": sha256_file(source)})
-    transcript = getattr(args, "transcript", None)
-    if transcript is not None and isinstance(transcript, Path) and transcript.is_file():
-        consumes.append(
-            {"source": str(transcript), "sha256": sha256_file(transcript)}
-        )
-
-    fields: dict[str, Any] = {
-        "consumes": consumes,
-        "orchestrator": "video_editing.event_talks",
-    }
-
-    if run_json.exists():
-        try:
-            existing = json.loads(run_json.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            existing = {}
-        if not isinstance(existing, dict):
-            existing = {}
-        existing.update(fields)
-        run_json.write_text(
-            json.dumps(existing, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
-    else:
-        run_json.parent.mkdir(parents=True, exist_ok=True)
-        run_json.write_text(
-            json.dumps(fields, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
-
-
 def _append_pack_run_started(run_root: Path) -> None:
-    """Append a pack-local audit event.
-
-    This log is intentionally not the task-run ``events.jsonl`` ledger. Canonical
-    task-run events are written through the task gate's WriterContext.
-    """
+    """Append a pack-local audit event (non-ledger, never task events.jsonl)."""
     events_path = run_root / "pack_events.jsonl"
     ev: dict[str, Any] = {
         "kind": "pack_run_started",
@@ -440,7 +393,7 @@ def _append_pack_run_started(run_root: Path) -> None:
 
 
 def run_orchestrator(args: argparse.Namespace) -> int:
-    """Emit plan v2, write run.json, and execute steps directly."""
+    """Emit plan v2 and execute steps directly (kernel is authority, no run.json)."""
     args.out.mkdir(parents=True, exist_ok=True)
 
     # 1. Emit plan v2
@@ -461,17 +414,11 @@ def run_orchestrator(args: argparse.Namespace) -> int:
     # 2. Compute plan hash
     plan_hash = "sha256:" + sha256_file(plan_path)
 
-    # 3. Write run.json with consumes
-    _write_run_json(args)
-
-    # 4. Append pack-local audit event
-    _append_pack_run_started(args.out)
-
     if args.dry_run:
         print(f"event_talks: plan emitted to {plan_path} (plan_hash={plan_hash})")
         return 0
 
-    # 5. Execute the local steps directly (file-only pipeline)
+    # 3. Execute the local steps directly (file-only pipeline, no second ledger)
     return _execute_steps_directly(args)
 
 
@@ -633,20 +580,24 @@ def main(argv: Sequence[str] | None = None) -> int:
             recovery_command="use one of: ados-sunday-template, search-transcript, find-holding-screens, render",
         )
 
-    # Orchestrator path — full project setup (kernel admission, staging-only)
+    # Orchestrator path — kernel admission with projects_root threading
     try:
         pre_parser = argparse.ArgumentParser(add_help=False)
         pre_parser.add_argument("--project")
         pre_parser.add_argument("--out")
+        pre_parser.add_argument("--projects-root", dest="projects_root")
         parsed, _unknown = pre_parser.parse_known_args(effective_argv)
 
         kernel_ctx = None
         if parsed.project:
             reject_project_with_out(parsed.project, parsed.out)
+            # Thread projects_root: explicit CLI value, else env/default via helper
+            projects_root = getattr(parsed, "projects_root", None) or resolve_projects_root(None)
             kernel_ctx = admit_orchestrator_project_run(
                 project=parsed.project,
                 tool_id="video_editing.event_talks",
                 argv=["event_talks", *effective_argv],
+                projects_root=projects_root,
             )
             effective_argv = [*effective_argv, "--out", str(kernel_ctx.run_root)]
 
@@ -661,7 +612,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 1
     except Exception:
         raise
-
 
 if __name__ == "__main__":
     raise SystemExit(main())

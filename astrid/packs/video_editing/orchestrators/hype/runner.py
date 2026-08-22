@@ -32,67 +32,6 @@ def _compute_plan_hash(plan_path: str | Path) -> str:
     return "sha256:" + sha256_file(plan_path)
 
 
-def _write_run_json(args: argparse.Namespace, plan_hash: str) -> None:
-    """Write or update ``run.json`` in the run directory with hype metadata.
-
-    ``consumes`` is populated from source media paths (video, audio, brief,
-    theme, assets). The ``plan_hash`` and ``orchestrator`` fields are added
-    for run audit. If ``run.json`` already exists (created by ``cmd_start``),
-    the new fields are merged in.
-    """
-    run_json = args.out / "run.json"
-
-    # Build consumes list from source media paths.
-    consumes: list[dict[str, str]] = []
-    video = getattr(args, "video", None)
-    if video is not None and isinstance(video, Path) and video.is_file():
-        consumes.append({"source": str(video), "sha256": sha256_file(video)})
-    audio = getattr(args, "audio", None)
-    if (
-        audio is not None
-        and isinstance(audio, Path)
-        and audio.is_file()
-        and audio != video
-    ):
-        consumes.append({"source": str(audio), "sha256": sha256_file(audio)})
-    brief = getattr(args, "brief", None)
-    if brief is not None and isinstance(brief, Path) and brief.is_file():
-        consumes.append({"source": str(brief), "sha256": sha256_file(brief)})
-    theme = getattr(args, "theme", None)
-    if theme is not None and isinstance(theme, Path) and theme.is_file():
-        consumes.append({"source": str(theme), "sha256": sha256_file(theme)})
-    for key, path in getattr(args, "asset_pairs", []):
-        if isinstance(path, Path) and path.is_file():
-            consumes.append(
-                {"source": str(path), "sha256": sha256_file(path)}
-            )
-
-    hype_fields: dict[str, Any] = {
-        "consumes": consumes,
-        "orchestrator": "video_editing.hype",
-    }
-    if plan_hash:
-        hype_fields["plan_hash"] = plan_hash
-
-    if run_json.exists():
-        try:
-            existing = json.loads(run_json.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            existing = {}
-        if not isinstance(existing, dict):
-            existing = {}
-        existing.update(hype_fields)
-        run_json.write_text(
-            json.dumps(existing, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
-    else:
-        run_json.parent.mkdir(parents=True, exist_ok=True)
-        run_json.write_text(
-            json.dumps(hype_fields, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
-
 def _clear_per_brief_sentinels(brief_out: Path) -> None:
     for name in PER_BRIEF_SENTINELS:
         (brief_out / name).unlink(missing_ok=True)
@@ -574,9 +513,6 @@ def pool_main(args: argparse.Namespace) -> int:
     selected_steps = select_steps(args)
 
     # Sprint 5a: emit the plan v2 to the project root (canonical plan.json
-    # path). Hype's graph is capability-selected at runtime, so plan emission
-    # must happen after parser resolution, brief fact discovery, registry
-    # lookup, and select_steps(args).
     _plan_hash = ""
     project_slug = getattr(args, "project", None)
     if project_slug is not None:
@@ -596,7 +532,6 @@ def pool_main(args: argparse.Namespace) -> int:
                 run_id=getattr(args, "run_id", None),
             )
             emit_plan_json(plan, plan_path)
-
             _plan_hash = _compute_plan_hash(plan_path)
         except Exception as exc:
             logging.warning("hype: plan emission failed: %s", exc)
@@ -611,8 +546,7 @@ def pool_main(args: argparse.Namespace) -> int:
                 _plan_hash = _compute_plan_hash(plan_json)
             except Exception:
                 _plan_hash = ""
-    _write_run_json(args, _plan_hash)
-
+    # Kernel is authority: no run.json second ledger (plan_hash retained for logs)
     _prefetch_url_inputs(args)
     steps = [step for step in selected_steps if step.name not in set(args.skip)]
     editor_steps = [step for step in steps if step.name != "validate"]
