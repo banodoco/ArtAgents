@@ -1,0 +1,476 @@
+{
+  "100": {
+    "class_type": "GrowMask",
+    "inputs": {
+      "expand": 10,
+      "mask": [
+        "104",
+        0
+      ]
+    }
+  },
+  "102": {
+    "class_type": "DownloadAndLoadSAM2Model",
+    "inputs": {
+      "device": "cuda",
+      "model": "sam2_hiera_base_plus.safetensors",
+      "segmentor": "video"
+    }
+  },
+  "104": {
+    "class_type": "Sam2Segmentation",
+    "inputs": {
+      "coordinates_positive": [
+        "107",
+        0
+      ],
+      "image": [
+        "63",
+        0
+      ],
+      "sam2_model": [
+        "102",
+        0
+      ]
+    }
+  },
+  "107": {
+    "class_type": "PointsEditor",
+    "inputs": {
+      "bbox_format": "xyxy",
+      "bbox_store": "[{}]",
+      "bboxes": "[{}]",
+      "bg_image": [
+        "63",
+        0
+      ],
+      "coordinates": "[{\"x\":483.34844284815,\"y\":333.283583335728},{\"x\":479.85856239437277,\"y\":158.78956064686517}]",
+      "height": 480,
+      "neg_coordinates": "[{\"x\":0,\"y\":0}]",
+      "points_store": "{\"positive\":[{\"x\":483.34844284815,\"y\":333.283583335728},{\"x\":479.85856239437277,\"y\":158.78956064686517}],\"negative\":[{\"x\":0,\"y\":0}]}",
+      "widget_9": "",
+      "width": 832
+    }
+  },
+  "108": {
+    "class_type": "BlockifyMask",
+    "inputs": {
+      "masks": [
+        "100",
+        0
+      ]
+    }
+  },
+  "112": {
+    "class_type": "VHS_VideoCombine",
+    "inputs": {
+      "crf": 19,
+      "filename_prefix": "WanVideo2_1_T2V",
+      "format": "video/h264-mp4",
+      "frame_rate": 16,
+      "images": [
+        "96",
+        0
+      ],
+      "pix_fmt": "yuv420p",
+      "save_metadata": true,
+      "save_output": false,
+      "trim_to_audio": false
+    }
+  },
+  "120": {
+    "class_type": "FaceMaskFromPoseKeypoints",
+    "inputs": {
+      "pose_kps": [
+        "73",
+        1
+      ]
+    }
+  },
+  "150": {
+    "class_type": "INTConstant",
+    "inputs": {
+      "value": 832
+    }
+  },
+  "151": {
+    "class_type": "INTConstant",
+    "inputs": {
+      "value": 480
+    }
+  },
+  "152": {
+    "class_type": "PixelPerfectResolution",
+    "inputs": {
+      "image_gen_height": [
+        "151",
+        0
+      ],
+      "image_gen_width": [
+        "150",
+        0
+      ],
+      "original_image": [
+        "63",
+        0
+      ],
+      "resize_mode": 512,
+      "widget_1": 512,
+      "widget_2": "Just Resize"
+    }
+  },
+  "171": {
+    "class_type": "WanVideoLoraSelectMulti",
+    "inputs": {
+      "lora_0": "WanVideo/WanAnimate_relight_lora_fp16.safetensors",
+      "lora_1": "WanVideo/Lightx2v/lightx2v_I2V_14B_480p_cfg_step_distill_rank64_bf16.safetensors",
+      "merge_loras": false,
+      "strength_1": 1.2
+    }
+  },
+  "22": {
+    "class_type": "WanVideoModelLoader",
+    "inputs": {
+      "attention_mode": "sageattn",
+      "base_precision": "fp16_fast",
+      "compile_args": [
+        "35",
+        0
+      ],
+      "model": "WanVideo/2_2/Wan2_2-Animate-14B_fp8_e4m3fn_scaled_KJ.safetensors"
+    }
+  },
+  "27": {
+    "class_type": "WanVideoSampler",
+    "inputs": {
+      "batched_cfg": "",
+      "cfg": 1,
+      "image_embeds": [
+        "62",
+        0
+      ],
+      "model": [
+        "50",
+        0
+      ],
+      "scheduler": "dpm++_sde",
+      "seed": 42,
+      "steps": 6,
+      "text_embeds": [
+        "65",
+        0
+      ]
+    }
+  },
+  "28": {
+    "class_type": "WanVideoDecode",
+    "inputs": {
+      "normalization": "default",
+      "samples": [
+        "27",
+        0
+      ],
+      "vae": [
+        "38",
+        0
+      ]
+    }
+  },
+  "30": {
+    "class_type": "VHS_VideoCombine",
+    "inputs": {
+      "audio": [
+        "63",
+        2
+      ],
+      "crf": 19,
+      "filename_prefix": "Wanimate",
+      "format": "video/h264-mp4",
+      "frame_rate": 16,
+      "images": [
+        "66",
+        0
+      ],
+      "pix_fmt": "yuv420p",
+      "save_metadata": true,
+      "save_output": false,
+      "trim_to_audio": false
+    }
+  },
+  "35": {
+    "class_type": "WanVideoTorchCompileSettings",
+    "inputs": {}
+  },
+  "38": {
+    "class_type": "WanVideoVAELoader",
+    "inputs": {
+      "model_name": "wanvideo/Wan2_1_VAE_bf16.safetensors"
+    }
+  },
+  "42": {
+    "class_type": "GetImageSizeAndCount",
+    "inputs": {
+      "image": [
+        "28",
+        0
+      ]
+    }
+  },
+  "48": {
+    "class_type": "WanVideoSetLoRAs",
+    "inputs": {
+      "lora": [
+        "171",
+        0
+      ],
+      "model": [
+        "22",
+        0
+      ]
+    }
+  },
+  "50": {
+    "class_type": "WanVideoSetBlockSwap",
+    "inputs": {
+      "block_swap_args": [
+        "51",
+        0
+      ],
+      "model": [
+        "48",
+        0
+      ]
+    }
+  },
+  "51": {
+    "class_type": "WanVideoBlockSwap",
+    "inputs": {
+      "blocks_to_swap": 25,
+      "prefetch_blocks": 1,
+      "use_non_blocking": true
+    }
+  },
+  "57": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "refer.jpeg"
+    }
+  },
+  "62": {
+    "class_type": "WanVideoAnimateEmbeds",
+    "inputs": {
+      "bg_images": [
+        "99",
+        0
+      ],
+      "clip_embeds": [
+        "70",
+        0
+      ],
+      "face_images": [
+        "96",
+        0
+      ],
+      "force_offload": false,
+      "height": [
+        "151",
+        0
+      ],
+      "mask": [
+        "108",
+        0
+      ],
+      "num_frames": [
+        "63",
+        1
+      ],
+      "pose_images": [
+        "73",
+        0
+      ],
+      "ref_images": [
+        "64",
+        0
+      ],
+      "vae": [
+        "38",
+        0
+      ],
+      "width": [
+        "150",
+        0
+      ]
+    }
+  },
+  "63": {
+    "class_type": "VHS_LoadVideo",
+    "inputs": {
+      "choose video to upload": "image",
+      "custom_height": [
+        "151",
+        0
+      ],
+      "custom_width": [
+        "150",
+        0
+      ],
+      "force_rate": 16,
+      "video": "raw.mp4"
+    }
+  },
+  "64": {
+    "class_type": "ImageResizeKJv2",
+    "inputs": {
+      "crop_position": "top",
+      "device": "cpu",
+      "divisible_by": 16,
+      "height": [
+        "151",
+        0
+      ],
+      "image": [
+        "57",
+        0
+      ],
+      "keep_proportion": "pad_edge_pixel",
+      "upscale_method": "lanczos",
+      "width": [
+        "150",
+        0
+      ]
+    }
+  },
+  "65": {
+    "class_type": "WanVideoTextEncodeCached",
+    "inputs": {
+      "model_name": "umt5-xxl-enc-bf16.safetensors",
+      "negative_prompt": "\u8272\u8c03\u8273\u4e3d\uff0c\u8fc7\u66dd\uff0c\u9759\u6001\uff0c\u7ec6\u8282\u6a21\u7cca\u4e0d\u6e05\uff0c\u5b57\u5e55\uff0c\u98ce\u683c\uff0c\u4f5c\u54c1\uff0c\u753b\u4f5c\uff0c\u753b\u9762\uff0c\u9759\u6b62\uff0c\u6574\u4f53\u53d1\u7070\uff0c\u6700\u5dee\u8d28\u91cf\uff0c\u4f4e\u8d28\u91cf\uff0cJPEG\u538b\u7f29\u6b8b\u7559\uff0c\u4e11\u964b\u7684\uff0c\u6b8b\u7f3a\u7684\uff0c\u591a\u4f59\u7684\u624b\u6307\uff0c\u753b\u5f97\u4e0d\u597d\u7684\u624b\u90e8\uff0c\u753b\u5f97\u4e0d\u597d\u7684\u8138\u90e8\uff0c\u7578\u5f62\u7684\uff0c\u6bc1\u5bb9\u7684\uff0c\u5f62\u6001\u7578\u5f62\u7684\u80a2\u4f53\uff0c\u624b\u6307\u878d\u5408\uff0c\u9759\u6b62\u4e0d\u52a8\u7684\u753b\u9762\uff0c\u6742\u4e71\u7684\u80cc\u666f\uff0c\u4e09\u6761\u817f\uff0c\u80cc\u666f\u4eba\u5f88\u591a\uff0c\u5012\u7740\u8d70",
+      "positive_prompt": "man is walking, style is soft 3D render style, night time, moonlight",
+      "use_disk_cache": false
+    }
+  },
+  "66": {
+    "class_type": "ImageConcatMulti",
+    "inputs": {
+      "direction": "left",
+      "image_1": [
+        "42",
+        0
+      ],
+      "image_2": [
+        "77",
+        0
+      ],
+      "match_image_size": true
+    }
+  },
+  "70": {
+    "class_type": "WanVideoClipVisionEncode",
+    "inputs": {
+      "clip_vision": [
+        "71",
+        0
+      ],
+      "image_1": [
+        "64",
+        0
+      ]
+    }
+  },
+  "71": {
+    "class_type": "CLIPVisionLoader",
+    "inputs": {
+      "clip_name": "clip_vision_h.safetensors"
+    }
+  },
+  "73": {
+    "class_type": "DWPreprocessor",
+    "inputs": {
+      "bbox_detector": "yolox_l.torchscript.pt",
+      "detect_body": "enable",
+      "detect_face": "disable",
+      "detect_hand": "disable",
+      "image": [
+        "63",
+        0
+      ],
+      "pose_estimator": "dw-ll_ucoco_384_bs5.torchscript.pt",
+      "resolution": [
+        "152",
+        0
+      ],
+      "scale_stick_for_xinsr_cn": "disable"
+    }
+  },
+  "75": {
+    "class_type": "VHS_VideoCombine",
+    "inputs": {
+      "crf": 19,
+      "filename_prefix": "WanVideo2_1_T2V",
+      "format": "video/h264-mp4",
+      "frame_rate": 16,
+      "images": [
+        "99",
+        0
+      ],
+      "pix_fmt": "yuv420p",
+      "save_metadata": true,
+      "save_output": false,
+      "trim_to_audio": false
+    }
+  },
+  "77": {
+    "class_type": "ImageConcatMulti",
+    "inputs": {
+      "direction": "down",
+      "image_1": [
+        "64",
+        0
+      ],
+      "image_2": [
+        "96",
+        0
+      ],
+      "image_3": [
+        "73",
+        0
+      ],
+      "image_4": [
+        "63",
+        0
+      ],
+      "inputcount": 4,
+      "match_image_size": true
+    }
+  },
+  "96": {
+    "class_type": "ImageCropByMaskAndResize",
+    "inputs": {
+      "image": [
+        "63",
+        0
+      ],
+      "mask": [
+        "120",
+        0
+      ],
+      "widget_0": 512,
+      "widget_1": 0,
+      "widget_2": 128,
+      "widget_3": 512
+    }
+  },
+  "99": {
+    "class_type": "DrawMaskOnImage",
+    "inputs": {
+      "image": [
+        "63",
+        0
+      ],
+      "mask": [
+        "108",
+        0
+      ]
+    }
+  }
+}

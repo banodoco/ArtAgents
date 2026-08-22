@@ -24,7 +24,10 @@ sources (doc 27 §3.6).
 
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable
 
 # ---------------------------------------------------------------------------
@@ -37,6 +40,7 @@ BINDING_VIBECOMFY = "vibecomfy"
 """Local VibeComfy/ComfyUI scratchpad binding."""
 BINDING_ASTRID_REMOTION = "astrid_remotion"
 """Astrid/Remotion render binding."""
+
 
 _KNOWN_BINDINGS = frozenset(
     {BINDING_WGP, BINDING_VIBECOMFY, BINDING_ASTRID_REMOTION}
@@ -280,6 +284,10 @@ REGISTRY: dict[str, CapabilityEntry] = {
             BINDING_VIBECOMFY,
             _policy(),
             required_inputs={"prompts": list},
+            template=(
+                "workflows/qwen_image_2512.json",
+                "2db0bd637a48e6141068d11c70e9d7de297748af8dd5b597c639e28b2edaf0b7",
+            ),
         ),
         CapabilityEntry(
             "reigh.qwen_image_style",
@@ -287,6 +295,10 @@ REGISTRY: dict[str, CapabilityEntry] = {
             BINDING_VIBECOMFY,
             _policy(),
             required_inputs={"prompts": list},
+            template=(
+                "workflows/qwen_image_2512.json",
+                "2db0bd637a48e6141068d11c70e9d7de297748af8dd5b597c639e28b2edaf0b7",
+            ),
         ),
         CapabilityEntry(
             "reigh.qwen_image_2512",
@@ -294,6 +306,10 @@ REGISTRY: dict[str, CapabilityEntry] = {
             BINDING_VIBECOMFY,
             _policy(),
             required_inputs={"prompts": list},
+            template=(
+                "workflows/qwen_image_2512.json",
+                "2db0bd637a48e6141068d11c70e9d7de297748af8dd5b597c639e28b2edaf0b7",
+            ),
         ),
         CapabilityEntry(
             "reigh.z_image_turbo",
@@ -301,6 +317,10 @@ REGISTRY: dict[str, CapabilityEntry] = {
             BINDING_VIBECOMFY,
             _policy(),
             required_inputs={"prompts": list},
+            template=(
+                "workflows/z_image.json",
+                "b7348cdc30472b1811a0bd370df420b50b72d910eda1089fbebac0b401cfe427",
+            ),
         ),
         CapabilityEntry(
             "reigh.image_upscale",
@@ -308,6 +328,10 @@ REGISTRY: dict[str, CapabilityEntry] = {
             BINDING_VIBECOMFY,
             _policy(variant={"source_variant_id": None, "is_primary": True}),
             required_inputs={"image_url": str},
+            template=(
+                "workflows/basic_image_upscale.json",
+                "25d68cd7e32e1987742f497f01d8bcefb77207bf295b7eceec896d6476fe5e24",
+            ),
         ),
         CapabilityEntry(
             "reigh.individual_travel_segment",
@@ -329,6 +353,10 @@ REGISTRY: dict[str, CapabilityEntry] = {
             BINDING_VIBECOMFY,
             _policy(),
             required_inputs={"video_url": str},
+            template=(
+                "workflows/basic_video_enhance.json",
+                "c4415d2b385dc9deb202e3e7211cfd23ae4171c7ae3488d219c548a654d6cfc3",
+            ),
         ),
         CapabilityEntry(
             "reigh.z_image_turbo_i2i",
@@ -336,6 +364,10 @@ REGISTRY: dict[str, CapabilityEntry] = {
             BINDING_VIBECOMFY,
             _policy(),
             required_inputs={"image_url": str},
+            template=(
+                "workflows/z_image_img2img.json",
+                "092f5a2115807a20048a94953727da8660ae0bf7ac18a8aa9b4ab794c8e796f6",
+            ),
         ),
         CapabilityEntry(
             "reigh.qwen_image_edit",
@@ -343,6 +375,10 @@ REGISTRY: dict[str, CapabilityEntry] = {
             BINDING_VIBECOMFY,
             _policy(),
             required_inputs={"prompt": str, "image_url": str},
+            template=(
+                "workflows/qwen_image_edit.json",
+                "fe3157ecb6896120c862c80a037a7be91ba61c46069227a8745bb37d58c9740f",
+            ),
         ),
         CapabilityEntry(
             "reigh.image_inpaint",
@@ -350,6 +386,10 @@ REGISTRY: dict[str, CapabilityEntry] = {
             BINDING_VIBECOMFY,
             _policy(),
             required_inputs={"image_url": str, "mask_url": str},
+            template=(
+                "workflows/qwen_image_edit.json",
+                "fe3157ecb6896120c862c80a037a7be91ba61c46069227a8745bb37d58c9740f",
+            ),
         ),
         CapabilityEntry(
             "reigh.annotated_image_edit",
@@ -357,6 +397,10 @@ REGISTRY: dict[str, CapabilityEntry] = {
             BINDING_VIBECOMFY,
             _policy(),
             required_inputs={"image_url": str, "mask_url": str},
+            template=(
+                "workflows/qwen_image_edit.json",
+                "fe3157ecb6896120c862c80a037a7be91ba61c46069227a8745bb37d58c9740f",
+            ),
         ),
         CapabilityEntry(
             "reigh.travel_orchestrator",
@@ -392,6 +436,10 @@ REGISTRY: dict[str, CapabilityEntry] = {
             BINDING_VIBECOMFY,
             _policy(),
             required_inputs={"image_url": str},
+            template=(
+                "workflows/wanvideo_wrapper_wan_animate.json",
+                "1e5727b7160c80099ddc072e62d0b436c183b7d71f3b185067ef9f4b8bfe0fb0",
+            ),
         ),
         CapabilityEntry(
             "reigh.flux_klein_edit",
@@ -399,6 +447,10 @@ REGISTRY: dict[str, CapabilityEntry] = {
             BINDING_VIBECOMFY,
             _policy(),
             required_inputs={"image_url": str, "prompt": str},
+            template=(
+                "workflows/flux2_klein_9b_image_edit_base.json",
+                "1a09eb1f68affbeee04d5e04be6411f60596a33072ff31f35fb18d4fb9811c26",
+            ),
         ),
         CapabilityEntry(
             "rendering.timeline_visualize",
@@ -505,6 +557,85 @@ def _validate_registry() -> None:
         if family not in PUBLIC_FAMILIES:
             raise RuntimeError(
                 f"derivation registered for unknown family {family!r}"
+            )
+    verify_registry_workflows()
+
+
+# ---------------------------------------------------------------------------
+# Vendored workflow truth (pin the data, not the code)
+# ---------------------------------------------------------------------------
+
+_PACKAGE_DIR = Path(__file__).resolve().parent
+"""Directory containing this registry and the vendored ``workflows/`` tree."""
+
+
+def load_workflow_snapshot(entry: CapabilityEntry) -> dict[str, Any]:
+    """Verify the entry's vendored workflow bytes against its pinned digest.
+
+    Returns the admission provenance snapshot ``{"path", "sha256",
+    "workflow"}`` carrying the exact parsed Comfy API-format JSON that may
+    execute. Any drift — missing file or digest mismatch — raises
+    :class:`CapabilityUnavailable`: the capability refuses fail-closed, never
+    falls back to re-reading drifted bytes.
+    """
+    if entry.template is None:
+        raise CapabilityUnavailable(
+            entry.capability_id, "entry has no vendored workflow"
+        )
+    rel_path, expected = entry.template
+    path = _PACKAGE_DIR / rel_path
+    try:
+        raw = path.read_bytes()
+    except OSError as exc:
+        raise CapabilityUnavailable(
+            entry.capability_id,
+            f"vendored workflow unreadable: {rel_path} ({exc.strerror})",
+        ) from None
+    found = hashlib.sha256(raw).hexdigest()
+    if found != expected:
+        raise CapabilityUnavailable(
+            entry.capability_id,
+            f"vendored workflow {rel_path} digest mismatch: expected "
+            f"{expected}, found {found}",
+        )
+    return {
+        "path": rel_path,
+        "sha256": expected,
+        "workflow": json.loads(raw),
+    }
+
+
+def verify_registry_workflows() -> None:
+    """Import-time fence: every populated template matches disk bytes.
+
+    Runs inside :func:`_validate_registry` so registry/workflow drift fails
+    module import — the same compiler enforcement as every other entry rule.
+    """
+    for entry in REGISTRY.values():
+        if entry.template is None:
+            continue
+        if (
+            not isinstance(entry.template, tuple)
+            or len(entry.template) != 2
+            or not all(isinstance(part, str) and part for part in entry.template)
+        ):
+            raise RuntimeError(
+                f"capability {entry.capability_id!r} template must be a "
+                "(path, sha256) pair of non-empty strings"
+            )
+        rel_path, expected = entry.template
+        try:
+            raw = (_PACKAGE_DIR / rel_path).read_bytes()
+        except OSError as exc:
+            raise RuntimeError(
+                f"capability {entry.capability_id!r} vendored workflow "
+                f"{rel_path!r} is missing ({exc.strerror})"
+            ) from None
+        found = hashlib.sha256(raw).hexdigest()
+        if found != expected:
+            raise RuntimeError(
+                f"capability {entry.capability_id!r} vendored workflow "
+                f"{rel_path!r} digest drift: expected {expected}, found {found}"
             )
 
 

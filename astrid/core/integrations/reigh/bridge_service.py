@@ -547,6 +547,7 @@ class ReighTaskBridge:
             CapabilityUnavailable,
             ChildAdmissionForbidden,
             check_available,
+            load_workflow_snapshot,
             resolve_family_capability,
         )
         from astrid.core.store.uow import UnitOfWork
@@ -573,6 +574,16 @@ class ReighTaskBridge:
                     "are admitted only by the live fenced parent executor"
                 )
             check_available(entry)
+            # Digest fence + provenance snapshot (pin the data, not the
+            # code): verify the vendored workflow against its pinned SHA-256
+            # BEFORE any write and carry the exact parsed bytes into the
+            # attempt spec, so execution replays admitted bytes even if the
+            # on-disk file drifts afterwards.
+            workflow_snapshot = (
+                load_workflow_snapshot(entry)
+                if entry.template is not None
+                else None
+            )
         except CapabilityInputError as exc:
             raise BridgeBodyError(str(exc)) from None
         except CapabilityUnavailable as exc:
@@ -591,6 +602,8 @@ class ReighTaskBridge:
             "params": dict(task_input),
             "output_policy": dict(entry.output_policy),
         }
+        if workflow_snapshot is not None:
+            spec["workflow"] = workflow_snapshot
         tasks, _media, _receipts = self._services()
 
         def command(uow):

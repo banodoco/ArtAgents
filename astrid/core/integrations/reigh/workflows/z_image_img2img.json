@@ -1,0 +1,132 @@
+{
+  "1": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "image_z_image_img2img_input.png"
+    }
+  },
+  "10": {
+    "class_type": "KSampler",
+    "inputs": {
+      "cfg": 0.0,
+      "denoise": 0.7,
+      "latent_image": [
+        "9",
+        0
+      ],
+      "model": [
+        "5",
+        0
+      ],
+      "negative": [
+        "7",
+        0
+      ],
+      "positive": [
+        "6",
+        0
+      ],
+      "sampler_name": "res_multistep",
+      "seed": 770044821593082,
+      "steps": 12
+    }
+  },
+  "11": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "10",
+        0
+      ],
+      "vae": [
+        "4",
+        0
+      ]
+    }
+  },
+  "12": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "filename_prefix": "z-image-img2img",
+      "images": [
+        "11",
+        0
+      ]
+    }
+  },
+  "2": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "z_image_bf16.safetensors"
+    }
+  },
+  "3": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "qwen_3_4b.safetensors",
+      "type": "lumina2"
+    }
+  },
+  "4": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "ae.safetensors"
+    }
+  },
+  "5": {
+    "class_type": "ModelSamplingAuraFlow",
+    "inputs": {
+      "model": [
+        "2",
+        0
+      ],
+      "shift": 3
+    }
+  },
+  "6": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": [
+        "3",
+        0
+      ],
+      "text": "A compact red cube on a clean white tabletop, product-photo lighting."
+    }
+  },
+  "7": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": [
+        "3",
+        0
+      ],
+      "text": ""
+    }
+  },
+  "8": {
+    "class_type": "ImageScale",
+    "inputs": {
+      "crop": "center",
+      "height": 1024,
+      "image": [
+        "1",
+        0
+      ],
+      "upscale_method": "lanczos",
+      "width": 1024
+    }
+  },
+  "9": {
+    "class_type": "VAEEncode",
+    "inputs": {
+      "pixels": [
+        "8",
+        0
+      ],
+      "vae": [
+        "4",
+        0
+      ]
+    }
+  }
+}
