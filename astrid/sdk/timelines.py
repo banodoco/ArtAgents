@@ -298,6 +298,68 @@ class TimelinesService:
             return DomainResult.failure(map_error(exc))
         return DomainResult.success([entry.to_dict() for entry in entries])
 
+    # -- backfill (S1: the recorded SQLite cutover) -------------------------
+
+    def backfill(
+        self,
+        project: str,
+        *,
+        timeline: str | None = None,
+        from_supabase_export: str | None = None,
+        dry_run: bool = False,
+    ) -> DomainResult[dict[str, Any]]:
+        """Backfill project timelines into the kernel database (cutover).
+
+        NEW product verb for the recorded SQLite cutover — deliberately
+        distinct from the retired legacy migration/push/pull/sync verbs,
+        which are absent from the product CLI and never return. Delegates to
+        :mod:`astrid.packs.timeline.backfill` over this application's single
+        writer: every zero-loss invariant must pass or the timeline fails
+        closed with zero new rows and no authority marker.
+
+        ``project`` is the project id or slug; ``timeline`` optionally
+        narrows to one timeline (ULID or UUID); ``from_supabase_export``
+        reads a version-ordered Supabase export file (the documented
+        ``VersionedTimelineEvent.to_append_json_obj()`` envelope) instead of
+        the project's LocalFs timeline directories; ``dry_run`` reports the
+        source checks without writing events, receipts, or markers.
+
+        Returns ``data`` = ``{"project", "project_id", "dry_run",
+        "timelines": {timeline_id: report}}`` where each report carries the
+        source/kernel counts, head versions, per-kind counts,
+        ``events_sha256``, every check outcome, and the marker state (see
+        the backfill module docstring for how to read results).
+        """
+        from astrid.packs.timeline.backfill import backfill_project
+
+        try:
+            project_id = self._projects.resolve(self._writer, project)
+        except Exception as exc:  # noqa: BLE001 - centralized bounded mapping
+            return DomainResult.failure(map_error(exc))
+        try:
+            reports = backfill_project(
+                writer=self._writer,
+                projects=self._projects,
+                receipts=self._receipts,
+                project_slug=project,
+                timeline_refs=[timeline] if timeline is not None else None,
+                from_supabase_export=from_supabase_export,
+                dry_run=dry_run,
+            )
+        except Exception as exc:  # noqa: BLE001 - centralized bounded mapping
+            return DomainResult.failure(map_error(exc))
+        return DomainResult.success(
+            {
+                "project": project,
+                "project_id": project_id,
+                "dry_run": bool(dry_run),
+                "timelines": {
+                    timeline_id: report.to_dict()
+                    for timeline_id, report in sorted(reports.items())
+                },
+            }
+        )
+
     # -- private helpers ---------------------------------------------------
 
     @staticmethod

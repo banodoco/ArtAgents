@@ -1,0 +1,167 @@
+"""S1 backfill CLI wiring test.
+
+Proves the ``astrid timelines backfill`` product verb parses through the
+family parser, dispatches through the product boundary
+(``run_product_family``), and makes exactly one SDK call
+(``client.timelines.backfill``) with the expected arguments — the same
+one-call-per-handler rule as the other seven verbs. Also pins the help text:
+``backfill`` is the NEW cutover verb, distinct from the retired legacy
+migration/push/pull/sync verbs, which stay absent.
+"""
+
+from __future__ import annotations
+
+import argparse
+import pytest
+
+from astrid.core.cli.domain_product import run_product_family
+from astrid.sdk.contracts import DomainResult
+
+
+class _RecordingBackfillClient:
+    """Minimal recording fake: only the backfill service method is used."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict]] = []
+
+    class _Timelines:
+        def __init__(self, owner: "_RecordingBackfillClient") -> None:
+            self._owner = owner
+
+        def backfill(
+            self,
+            project: str,
+            *,
+            timeline: str | None = None,
+            from_supabase_export: str | None = None,
+            dry_run: bool = False,
+        ) -> DomainResult:
+            self._owner.calls.append(
+                (
+                    "timelines.backfill",
+                    {
+                        "project": project,
+                        "timeline": timeline,
+                        "from_supabase_export": from_supabase_export,
+                        "dry_run": dry_run,
+                    },
+                )
+            )
+            return DomainResult.success(
+                {
+                    "project": project,
+                    "dry_run": dry_run,
+                    "timelines": {},
+                }
+            )
+
+    @property
+    def timelines(self) -> "_RecordingBackfillClient._Timelines":
+        return self._Timelines(self)
+
+
+def _run(*args: str) -> tuple[int, _RecordingBackfillClient]:
+    client = _RecordingBackfillClient()
+    code = run_product_family(
+        "timelines", list(args), client=client
+    )
+    return code, client
+
+
+def test_backfill_dispatch_default_source() -> None:
+    code, client = _run("backfill", "--project", "demo")
+    assert code == 0
+    assert client.calls == [
+        (
+            "timelines.backfill",
+            {
+                "project": "demo",
+                "timeline": None,
+                "from_supabase_export": None,
+                "dry_run": False,
+            },
+        )
+    ]
+
+
+def test_backfill_dispatch_timeline_ref() -> None:
+    code, client = _run(
+        "backfill", "--project", "demo", "--timeline", "01KYPVKMW5STB4W6FE05ED8242"
+    )
+    assert code == 0
+    assert client.calls[0][1]["timeline"] == "01KYPVKMW5STB4W6FE05ED8242"
+
+
+def test_backfill_dispatch_supabase_export() -> None:
+    code, client = _run(
+        "backfill",
+        "--project",
+        "demo",
+        "--from",
+        "supabase-export",
+        "/tmp/export.jsonl",
+    )
+    assert code == 0
+    assert client.calls[0][1]["from_supabase_export"] == "/tmp/export.jsonl"
+    assert client.calls[0][1]["dry_run"] is False
+
+
+def test_backfill_dispatch_dry_run() -> None:
+    code, client = _run("backfill", "--project", "demo", "--dry-run", "--json")
+    assert code == 0
+    assert client.calls[0][1]["dry_run"] is True
+
+
+def test_backfill_rejects_unknown_source() -> None:
+    with pytest.raises(SystemExit) as excinfo:
+        _run("backfill", "--project", "demo", "--from", "local", "/tmp/x.jsonl")
+    assert excinfo.value.code == 2  # argparse usage error
+
+
+def test_backfill_requires_project() -> None:
+    with pytest.raises(SystemExit) as excinfo:
+        _run("backfill")
+    assert excinfo.value.code == 2
+
+
+def test_backfill_help_names_cutover_and_legacy_distinction() -> None:
+    from astrid.packs.timeline.cli import build_parser
+
+    parser = build_parser(_RecordingBackfillClient())
+    help_text = parser.format_help()
+    assert "backfill" in help_text
+    assert "SQLite-cutover" in help_text
+    sub = parser._subparsers._group_actions[0]
+    for action in sub.choices:
+        if action == "backfill":
+            subparser = sub.choices[action]
+            sub_help = subparser.format_help()
+            assert "--dry-run" in sub_help
+            assert "supabase-export" in sub_help
+            assert "--timeline" in sub_help
+            # The legacy verbs stay absent from this product parser.
+            for legacy in ("migration", "push", "pull", "sync", "audit",
+                           "erase", "repair"):
+                assert legacy not in sub.choices
+
+
+def test_seven_existing_verbs_still_parse() -> None:
+    from astrid.packs.timeline.cli import build_parser
+
+    parser = build_parser(_RecordingBackfillClient())
+    sub = parser._subparsers._group_actions[0]
+    assert set(sub.choices) == {
+        "create",
+        "list",
+        "show",
+        "save",
+        "archive",
+        "history",
+        "diff",
+        "backfill",
+        "shots",
+    }
+    # Each pre-existing verb still parses with its required args.
+    parser.parse_args(["show", "--project", "p", "ref"])
+    parser.parse_args(["history", "--project", "p", "ref"])
+    parser.parse_args(["diff", "--project", "p", "ref"])

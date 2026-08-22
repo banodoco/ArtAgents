@@ -6,10 +6,11 @@ SDK call**, returns exact envelopes and keys, persists ``select`` as the
 non-authoritative preference, and provides executable help.
 
 Task T28 (plan step 26) proves the ``timelines`` product family
-(``astrid/packs/timeline/cli.py``): exactly the seven planned verbs are
-reachable through one-call SDK adapters, legacy aliases and
-migration/push/pull/sync/audit/erase/repair are absent, ``copy`` is
-absent (deferred past m6), all help is executable, and the gateway
+(``astrid/packs/timeline/cli.py``): exactly the seven planned m4 verbs
+(plus the S1 cutover verb ``backfill``) are reachable through one-call SDK
+adapters, legacy aliases and migration/push/pull/sync/audit/erase/repair
+are absent, ``copy`` is absent (deferred past m6), all help is executable,
+and the gateway
 dispatch routes every timelines verb through the product boundary
 (m6 teardown removed the legacy timeline CLI and its fallback).
 
@@ -548,9 +549,13 @@ def test_projects_help_is_executable(argv: list[str]) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_timelines_parser_has_exactly_seven_verbs_and_no_aliases() -> None:
+def test_timelines_parser_has_exactly_eight_verbs_and_no_aliases() -> None:
     from astrid.packs.timeline.cli import COMMANDS, build_parser
 
+    # S1 added the cutover verb ``backfill`` (SQLite backfill of JSONL /
+    # Supabase-export timelines) to the seven m4 product verbs; it is the
+    # one NEW product verb for the recorded cutover, deliberately distinct
+    # from the retired legacy migration/push/pull/sync verbs.
     assert tuple(spec.name for spec in COMMANDS) == (
         "create",
         "list",
@@ -559,9 +564,10 @@ def test_timelines_parser_has_exactly_seven_verbs_and_no_aliases() -> None:
         "archive",
         "history",
         "diff",
+        "backfill",
     )
     assert all(spec.aliases == () for spec in COMMANDS)
-    # The parser registers exactly the seven timeline verbs plus the
+    # The parser registers exactly the eight timeline verbs plus the
     # manifest-declared nested ``shots`` mount (task T29).
     assert _subparser_choices(build_parser(_FakeClient())) == {
         "create",
@@ -571,6 +577,7 @@ def test_timelines_parser_has_exactly_seven_verbs_and_no_aliases() -> None:
         "archive",
         "history",
         "diff",
+        "backfill",
         "shots",
     }
 

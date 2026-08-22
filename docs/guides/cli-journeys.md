@@ -260,7 +260,7 @@ There is no `--run` flag on `tasks retry`; the batch retry surface is
 
 ---
 
-## 6. `timelines` — create / list / show / save / archive / history / diff
+## 6. `timelines` — create / list / show / save / archive / history / diff / backfill
 
 ```bash
 # create — one client.timelines.create call (slug immutable)
@@ -287,6 +287,21 @@ python3 -m astrid timelines history --project demo primary --json
 
 # diff — deterministic adjacent-version diffs (read)
 python3 -m astrid timelines diff --project demo primary --json
+
+# backfill — the S1 SQLite-cutover verb (NEW product verb for the recorded
+# cutover, distinct from the retired legacy migration/push/pull/sync verbs).
+# Migrates the project's immutable JSONL timeline exports into the kernel
+# database 1:1 (zero-loss invariants; authority marker at
+# <projects_root>/.astrid/backfill-state.json written only after every check
+# passes). --dry-run validates and reports WITHOUT writing anything.
+python3 -m astrid timelines backfill --project demo --dry-run --json
+python3 -m astrid timelines backfill --project demo --json
+
+# backfill from a version-ordered Supabase export file (the documented
+# VersionedTimelineEvent.to_append_json_obj() envelope — the p_events payload
+# of the append_timeline_event RPC; SELECT ... ORDER BY version feeds it).
+python3 -m astrid timelines backfill --project demo \
+  --from supabase-export /tmp/timeline_events_export.jsonl --json
 ```
 
 ---

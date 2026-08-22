@@ -18,7 +18,7 @@ product parser (``astrid/packs/shots/cli.py``) so shot
 ``list/create/add/remove/reorder`` are executable only beneath timelines
 (plan step 26, task T29). There is **no top-level shots family**.
 
-Verbs (exactly these seven plus the nested ``shots`` mount, one SDK call
+Verbs (exactly these eight plus the nested ``shots`` mount, one SDK call
 each):
 
 - ``create`` — ``client.timelines.create`` (project id/slug, slug, name,
@@ -30,14 +30,29 @@ each):
   ``--config``/``--registry`` and ``--expected-version``;
 - ``archive`` — event-backed terminal ``client.timelines.archive``;
 - ``history`` — ordered lifecycle events (read);
-- ``diff`` — deterministic adjacent-version diffs (read).
+- ``diff`` — deterministic adjacent-version diffs (read);
+- ``backfill`` — the S1 SQLite-cutover verb
+  ``client.timelines.backfill`` (``--project``, optional ``--timeline``,
+  ``--from supabase-export <path>``, ``--dry-run``). It migrates immutable
+  JSONL / Supabase-export timelines into the kernel database 1:1 with
+  per-timeline zero-loss invariants (count, head continuity, content
+  projection, idempotency, per-kind preservation) and writes the
+  per-timeline authority marker at
+  ``<projects_root>/.astrid/backfill-state.json`` only after every check
+  passes — see ``astrid/packs/timeline/backfill.py`` for the marker schema
+  and how to read results. The single remaining operational step (live
+  export of the deployed Supabase ``public.timeline_events`` rows,
+  version-ordered per timeline) is documented in that module and in the
+  ``--from`` help.
 
 **Negative routes (sense check SC28):** the legacy timeline verbs
 ``migration``, ``push``, ``pull``, ``sync``, ``audit``, ``erase``, and
 ``repair`` are **absent** from this product parser, as are all obsolete
 aliases (``ls``, ``tl``, ...), and ``copy`` is **absent** — the reserved
 save-as-copy route is contractually deferred to m6 (plan step 2 / watch
-item) and must never be registered here.
+item) and must never be registered here. ``backfill`` is the one NEW verb:
+it is the recorded cutover's product surface, deliberately distinct from
+those retired legacy verbs.
 
 This module contains **no SQL**, **no repository logic**, and **no
 domain rules**: it parses argv, makes one SDK call, and renders the
@@ -153,6 +168,25 @@ def _cmd_diff(parsed: argparse.Namespace) -> int:
     return print_result(result, as_json=parsed.json)
 
 
+def _cmd_backfill(parsed: argparse.Namespace) -> int:
+    from_source = None
+    if parsed.from_source is not None:
+        kind, path = parsed.from_source
+        if kind != "supabase-export":
+            parsed.parser.error(
+                f"unsupported backfill source {kind!r}; only "
+                "'supabase-export' is accepted"
+            )
+        from_source = path
+    result = parsed.client.timelines.backfill(
+        parsed.project,
+        timeline=parsed.timeline,
+        from_supabase_export=from_source,
+        dry_run=parsed.dry_run,
+    )
+    return print_result(result, as_json=parsed.json)
+
+
 # -- parser ----------------------------------------------------------------
 
 
@@ -244,6 +278,48 @@ def _configure_diff(subparser: argparse.ArgumentParser) -> None:
     subparser.set_defaults(handler=_cmd_diff)
 
 
+def _configure_backfill(subparser: argparse.ArgumentParser) -> None:
+    """Configure the SQLite-cutover backfill verb (S1).
+
+    Decision fed (recorded cutover): the backfilled database replaces JSONL
+    files and the Supabase eventlog as the authoritative store. Source
+    exports are never mutated; the authority marker is written at
+    ``<projects_root>/.astrid/backfill-state.json`` only after every
+    zero-loss invariant passes (see ``astrid/packs/timeline/backfill.py``).
+    """
+    _add_project_arg(subparser)
+    subparser.add_argument(
+        "--timeline",
+        default=None,
+        help="Backfill one timeline (ULID or UUID); default: every "
+        "event-sourced timeline of the project.",
+    )
+    subparser.add_argument(
+        "--from",
+        dest="from_source",
+        nargs=2,
+        metavar=("SOURCE", "PATH"),
+        default=None,
+        help="Import source. Only 'supabase-export <path>' is supported: a "
+        "version-ordered export file in the VersionedTimelineEvent "
+        "to_append_json_obj() envelope shape (per-timeline contiguous "
+        "versions, prev_hash chain) — exactly the append_timeline_event RPC "
+        "payload, so a cloud export 'SELECT ... ORDER BY version' feeds the "
+        "backfill directly. Default source: the project's LocalFs timeline "
+        "directories.",
+    )
+    subparser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Validate the source and report every check WITHOUT writing "
+        "events, receipts, or the authority marker.",
+    )
+    _add_json_flag(subparser)
+    subparser.set_defaults(
+        handler=_cmd_backfill, parser=subparser
+    )
+
+
 COMMANDS: tuple[CommandSpec, ...] = (
     CommandSpec(
         "create",
@@ -280,17 +356,31 @@ COMMANDS: tuple[CommandSpec, ...] = (
         help="Deterministic adjacent-version diffs for one timeline.",
         configure=_configure_diff,
     ),
+    CommandSpec(
+        "backfill",
+        help="SQLite-cutover backfill of JSONL / Supabase-export timelines "
+        "(zero-loss; dry-run supported).",
+        configure=_configure_backfill,
+    ),
 )
 
 
 def build_parser(client: Any) -> argparse.ArgumentParser:
     """Build the ``timelines`` product-family parser stamped with *client*.
 
-    Exactly the seven verbs above are registered — no aliases, no legacy
+    Exactly the seven product verbs above plus the S1 cutover verb
+    ``backfill`` are registered — no aliases, no legacy
     migration/push/pull/sync/audit/erase/repair verbs, and no ``copy``
     (reserved for m6) — plus the manifest-declared nested ``shots`` mount
     (``astrid timelines shots <verb>``) embedded from the shots product
     parser.
+
+    ``backfill`` is a NEW product verb for the recorded SQLite cutover: it
+    migrates immutable JSONL / Supabase-export timelines into the kernel
+    database with per-timeline zero-loss invariants and an authority-state
+    marker (``astrid/packs/timeline/backfill.py``). It is deliberately
+    distinct from the retired legacy migration/push/pull/sync verbs, which
+    are absent from this product parser and never return.
     """
     from astrid.packs.shots import cli as shots_cli
 
@@ -303,8 +393,9 @@ def build_parser(client: Any) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="astrid timelines",
         description=(
-            "Timeline create/list/show/save/archive/history/diff "
-            "(product family); nested shots beneath 'timelines shots'."
+            "Timeline create/list/show/save/archive/history/diff/backfill "
+            "(product family; backfill is the SQLite-cutover verb); nested "
+            "shots beneath 'timelines shots'."
         ),
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
