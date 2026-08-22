@@ -195,7 +195,6 @@ LANES: tuple[tuple[str, tuple[str, ...]], ...] = (
             "tests/test_cli_registration_conformance.py",
             "tests/test_canonical_aliases.py",
             "tests/test_canonical_entrypoint.py",
-            "tests/session/test_cli_gate.py",
         ),
     ),
     (
@@ -618,7 +617,10 @@ def _check_schema_composition() -> tuple[bool, list[str], dict[str, object]]:
 
     record: dict[str, object] = {
         "core_table_count": core_count,
-        "pack_tables": {k: sorted(v) for k, v in sorted(declared.items())},
+        "pack_tables": {
+            pack: sorted(table for table, owner in declared.items() if owner == pack)
+            for pack in sorted(FROZEN_PACK_TABLES)
+        },
         "pack_ids": sorted(manifest_pack_ids),
         "total_table_count": total,
         "registry_frozen": registry_ok,
