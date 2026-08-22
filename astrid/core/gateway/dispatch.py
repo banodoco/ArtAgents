@@ -2,17 +2,56 @@
 
 from __future__ import annotations
 
+import json
 import os
 import signal
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from astrid.core.contracts.errors import AstridError
 
 
+def _count_usage(raw: list[str]) -> None:
+    """Record one CLI invocation (best effort; never breaks dispatch).
+
+    Decision it feeds (plan-v5, future DB owner: browser vs Python):
+    whether the CLI families are exercised at all. If CLI usage is ~zero,
+    a browser-owned (OPFS) database with CLI access through the sync/cloud
+    path is acceptable; heavy CLI use means the DB should be
+    Python-owned. One JSON line per invocation is appended to
+    ``$ASTRID_USAGE_LOG`` (default ``~/.astrid/cli-usage.jsonl``).
+    Counting is fire-and-forget: any OSError is swallowed so
+    instrumentation never breaks a command. ``family`` is the first CLI
+    argument after the program name (``argv[1]`` in ``sys.argv`` terms),
+    or ``"none"`` for a bare invocation.
+
+    Read after a week:
+        wc -l ~/.astrid/cli-usage.jsonl
+        jq -r '.day' ~/.astrid/cli-usage.jsonl | sort | uniq -c
+        jq -r '.family' ~/.astrid/cli-usage.jsonl | sort | uniq -c
+    """
+    try:
+        default_log = str(Path.home() / ".astrid" / "cli-usage.jsonl")
+        log_path = Path(os.environ.get("ASTRID_USAGE_LOG", default_log))
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        now = datetime.now(timezone.utc)
+        line = json.dumps({
+            "ts": now.isoformat(),
+            "day": now.date().isoformat(),
+            "family": raw[0] if raw else "none",
+        })
+        with log_path.open("a", encoding="utf-8") as handle:
+            handle.write(line + "\n")
+    except OSError:
+        # Instrumentation must never break a command.
+        pass
+
+
 def _dispatch(raw: list[str]) -> int:
+    _count_usage(raw)
     from . import _print_entrypoint_help
 
     if not raw:
