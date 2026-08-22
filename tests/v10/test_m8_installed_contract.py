@@ -69,18 +69,49 @@ def manifest_catalog(relative):
             yaml_section(text, "cli_mounts"),
         )
     )
-    tables_section = re.search(
-        r"(?ms)^migrations:\s*\n.*?^\s+tables:\s*\n((?:^\s+-\s+[^\n]+\n?)+)",
-        text,
+    # Parse EVERY migration descriptor structurally: block-split on the
+    # ``- version:`` markers so a second migration's ``tables:`` list cannot
+    # bleed into the first one's (multi-migration packs; exec-sqlite S3).
+    migrations_match = re.search(
+        r"(?ms)^migrations:\s*\n(.*?)(?=^[a-z_]+:\s*$)", text
     )
-    if tables_section is None:
-        raise AssertionError(f"missing migration tables in {relative}")
-    tables = tuple(
-        line.strip()[2:].strip()
-        for line in tables_section.group(1).splitlines()
-        if line.strip().startswith("-")
-    )
-    return {"mounts": mounts, "tables": tables, "text": text}
+    if migrations_match is None:
+        raise AssertionError(f"missing migrations section in {relative}")
+    body = migrations_match.group(1)
+    # Split on ``- version: N`` markers, KEEPING the marker (capturing
+    # group): odd parts are version lines, even parts are descriptor bodies.
+    blocks = re.split(r"(?m)^(\s*-\s*version:\s*\d+\s*)$", body)
+    migrations = []
+    for index in range(1, len(blocks), 2):
+        version_line = blocks[index]
+        block = blocks[index + 1] if index + 1 < len(blocks) else ""
+        version = int(re.search(r"version:\s*(\d+)", version_line).group(1))
+        name = re.search(r"(?m)^\s*name:\s*([^\s]+)\s*$", block)
+        path = re.search(r"(?m)^\s*path:\s*([^\s]+)\s*$", block)
+        tables_section = re.search(
+            r"(?ms)^\s+tables:\s*\n((?:^\s+-\s+[^\n]+\n?)+)", block
+        )
+        tables = ()
+        if tables_section is not None:
+            tables = tuple(
+                line.strip()[2:].strip()
+                for line in tables_section.group(1).splitlines()
+                if line.strip().startswith("-")
+            )
+        migrations.append(
+            {
+                "version": version,
+                "name": name.group(1) if name else "",
+                "path": path.group(1) if path else "",
+                "tables": tables,
+            }
+        )
+    return {
+        "mounts": mounts,
+        "migrations": migrations,
+        "tables": tuple(table for migration in migrations for table in migration["tables"]),
+        "text": text,
+    }
 
 
 def sql_tables(relative):
@@ -148,20 +179,29 @@ core_tables = set(sql_tables(core_sql))
 assert len(core_tables) == 14, sorted(core_tables)
 
 pack_specs = {
-    "timeline": "migrations/0001_initial.sql",
-    "shots": "migrations/0001_initial.sql",
-    "references": "migrations/0001_initial.sql",
+    "timeline": [
+        "migrations/0001_initial.sql",
+        "migrations/0002_add_history_kind_index.sql",
+    ],
+    "shots": ["migrations/0001_initial.sql"],
+    "references": ["migrations/0001_initial.sql"],
 }
 pack_resource_paths = {
-    pack: f"packs/{pack}/{path}"
-    for pack, path in pack_specs.items()
+    pack: [f"packs/{pack}/{path}" for path in paths]
+    for pack, paths in pack_specs.items()
 }
 pack_catalog = {
     pack: {
         "manifest_tables": sorted(manifest_catalogs[pack]["tables"]),
-        "sql_tables": sorted(sql_tables(path)),
+        "sql_tables": sorted(
+            {
+                table
+                for path in pack_resource_paths[pack]
+                for table in sql_tables(path)
+            }
+        ),
     }
-    for pack, path in pack_resource_paths.items()
+    for pack in pack_specs
 }
 for pack, catalog in pack_catalog.items():
     assert catalog["manifest_tables"] == catalog["sql_tables"], (pack, catalog)
@@ -178,25 +218,43 @@ class InstalledRegistry:
                 for pack in pack_specs
             },
         }
-        specs = [("core", "initial", "sql/core/0001_initial.sql")]
-        specs.extend(
-            (pack, "initial", path) for pack, path in pack_specs.items()
-        )
+        specs = [("core", 1, "initial", "sql/core/0001_initial.sql")]
+        for pack, paths in pack_specs.items():
+            for path in paths:
+                descriptors = [
+                    m
+                    for m in manifest_catalogs[pack]["migrations"]
+                    if m["path"] == path
+                ]
+                assert len(descriptors) == 1, (pack, path, descriptors)
+                descriptor = descriptors[0]
+                specs.append(
+                    (
+                        pack,
+                        descriptor["version"],
+                        descriptor["name"],
+                        path,
+                    )
+                )
         self.migrations = tuple(
             RegisteredMigration(
                 pack=pack,
-                version=1,
+                version=version,
                 name=name,
                 path=path,
                 tables=tuple(
                     sorted(
                         core_tables
                         if pack == "core"
-                        else manifest_catalogs[pack]["tables"]
+                        else next(
+                            m["tables"]
+                            for m in manifest_catalogs[pack]["migrations"]
+                            if m["path"] == path
+                        )
                     )
                 ),
             )
-            for pack, name, path in specs
+            for pack, version, name, path in specs
         )
 
     def migration(self, pack, version):
@@ -246,7 +304,7 @@ expected_tables = core_tables | {
     for table in catalog["manifest_tables"]
 }
 assert tables == expected_tables, sorted(tables ^ expected_tables)
-assert migration_rows == {("core", 1), ("timeline", 1), ("shots", 1), ("references", 1)}
+assert migration_rows == {("core", 1), ("timeline", 1), ("timeline", 2), ("shots", 1), ("references", 1)}
 assert {(row.pack, row.version) for row in applied} == migration_rows
 
 
@@ -319,6 +377,7 @@ def test_installed_contract_uses_manifest_runtime_and_migration_evidence(
     assert {tuple(row) for row in payload["migration_rows"]} == {
         ("core", 1),
         ("timeline", 1),
+        ("timeline", 2),
         ("shots", 1),
         ("references", 1),
     }

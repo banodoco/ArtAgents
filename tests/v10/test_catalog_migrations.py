@@ -13,9 +13,10 @@ another:
 6. forbidden vocabulary (v10 "no dormant platform" tables must be absent).
 
 Counts are always derived from manifests and the catalog declaration:
-the valid kernel is ``len(CORE_TABLES)`` (14) and the standard composition
-is that kernel plus the packs' declared owned tables (1 timeline + 2 shots +
-3 references). ``20`` is an observation of that derivation, never a universal
+*the valid kernel is ``len(CORE_TABLES)`` (14) and the standard composition
+is that kernel plus the packs' declared owned tables (2 timeline +
+2 shots +
+3 references). ``21`` is an observation of that derivation, never a universal
 kernel constant, so a core-only database must never claim it.
 """
 
@@ -150,9 +151,10 @@ def test_core_only_database_contains_exactly_the_declared_kernel_tables(
 
 def test_core_only_database_never_claims_the_standard_count(core_database) -> None:
     conn, _ = core_database
-    # 20 is a property of the *standard* composition; a kernel-only database
-    # must never be described by it.
-    assert len(_table_names(conn)) != 20
+    # 21 is a property of the *standard* composition (14 kernel + 2 timeline
+    # tables incl. timeline_contract_canary + 2 shots + 3 references); a
+    # kernel-only database must never be described by it.
+    assert len(_table_names(conn)) != 21
     assert len(_table_names(conn)) == len(CORE_TABLES)
 
 
@@ -368,18 +370,18 @@ def test_media_is_kernel_citizenship(core_database, core_registry) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Section 6: the standard 14+1+2+3 composition
+# Section 6: the standard 14+2+2+3 composition
 # ---------------------------------------------------------------------------
 
 
-def test_standard_database_contains_14_plus_1_plus_2_plus_3_tables(
+def test_standard_database_contains_14_plus_2_plus_2_plus_3_tables(
     standard_database,
     standard_registry,
 ) -> None:
     conn, _ = standard_database
-    # Counts are derived from the composed registry, not from a fixed "20".
+    # Counts are derived from the composed registry, not from a fixed "21".
     expected = len(standard_registry.tables)
-    assert expected == len(CORE_TABLES) + 1 + 2 + 3
+    assert expected == len(CORE_TABLES) + 2 + 2 + 3
     assert _table_names(conn) == set(standard_registry.tables)
     assert len(_table_names(conn)) == expected
 
@@ -526,10 +528,11 @@ def test_pack_indexes_match_their_declarations(standard_database) -> None:
 
 def test_pack_tables_never_gain_kernel_or_foreign_tables(standard_database) -> None:
     conn, _ = standard_database
-    # The three packs add exactly their six owned tables and nothing else.
+    # The three packs add exactly their seven owned tables and nothing else.
     pack_tables = _table_names(conn) - set(CORE_TABLES)
     assert pack_tables == {
         "timelines",
+        "timeline_contract_canary",
         "shots",
         "shot_items",
         "project_references",

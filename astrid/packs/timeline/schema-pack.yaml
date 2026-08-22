@@ -19,6 +19,11 @@ migrations:
     path: migrations/0001_initial.sql
     tables:
       - timelines
+  - version: 2
+    name: add_history_kind_index
+    path: migrations/0002_add_history_kind_index.sql
+    tables:
+      - timeline_contract_canary
 stream_types:
   - timeline.timeline
 event_kinds:

@@ -33,7 +33,12 @@ from tests.sdk.test_zero_secret_smoke import (
 _PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
 
 # The sentinel secret value that must never reach a backup directory.
-SENTINEL = "ASTRID_TEST_SECRET=canary"
+# The plain word "canary" cannot be the sentinel: the timeline pack's
+# contract table is named timeline_contract_canary, so that substring is
+# legitimately present in every standard database snapshot. The assertion
+# therefore targets the env-shaped key prefix, which schema DDL never
+# contains.
+SENTINEL = "ASTRID_TEST_SECRET=canary-7f3c9d"
 
 
 def _seed_project(root: Path) -> None:
@@ -104,7 +109,9 @@ def test_backup_directory_never_contains_sentinel_secret_value(
 
     blob = _all_backup_bytes(dest)
     assert SENTINEL.encode("utf-8") not in blob
-    assert b"canary" not in blob
+    # The env-secret shape never crosses the sink (schema DDL cannot
+    # legitimately contain this key prefix).
+    assert b"ASTRID_TEST_SECRET=" not in blob
 
 
 # ---------------------------------------------------------------------------

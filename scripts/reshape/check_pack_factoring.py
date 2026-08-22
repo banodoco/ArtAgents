@@ -92,12 +92,13 @@ DOMAIN_PACKS: tuple[str, ...] = ("timeline", "shots", "references")
 """Exactly the in-tree schema packs the standard composition registers."""
 
 PACK_TABLES: dict[str, tuple[str, ...]] = {
-    "timeline": ("timelines",),
+    "timeline": ("timelines", "timeline_contract_canary"),
     "shots": ("shots", "shot_items"),
     "references": ("project_references", "media_references", "reference_links"),
 }
 """Tables each domain pack declares through its manifest migrations (frozen
-m1/m3 catalog; never inferred from a live database)."""
+m1/m3 catalog plus the exec-sqlite S3 contract canary; never inferred from a
+live database)."""
 
 ALL_PACK_TABLES: frozenset[str] = frozenset().union(*PACK_TABLES.values())
 

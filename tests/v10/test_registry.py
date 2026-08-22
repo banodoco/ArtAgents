@@ -59,8 +59,9 @@ from astrid.packs import (
 )
 
 CORE_TABLE_COUNT = len(CORE_TABLES)
-# 14 kernel + timelines + shots/shot_items + the 3 reference tables.
-STANDARD_TABLE_COUNT = CORE_TABLE_COUNT + 1 + 2 + 3
+# 14 kernel + timelines + timeline_contract_canary + shots/shot_items +
+# the 3 reference tables.
+STANDARD_TABLE_COUNT = CORE_TABLE_COUNT + 2 + 2 + 3
 
 
 def _empty_manifest(id_: str = "probe") -> dict:
@@ -160,13 +161,14 @@ def test_standard_composition_has_no_discovery_beyond_in_tree_manifests() -> Non
     assert len(schema_pack_files) == len(STANDARD_SCHEMA_PACKS) == 3
 
 
-def test_standard_composition_derives_20_table_catalog() -> None:
+def test_standard_composition_derives_21_table_catalog() -> None:
     registry = SchemaPackRegistry()
     register_core_vocabulary(registry)
     register_standard_schema_packs(registry)
     frozen = registry.freeze()
-    assert len(frozen.tables) == STANDARD_TABLE_COUNT == 20
+    assert len(frozen.tables) == STANDARD_TABLE_COUNT == 21
     assert frozen.tables["timelines"] == "timeline"
+    assert frozen.tables["timeline_contract_canary"] == "timeline"
     assert frozen.tables["shots"] == "shots"
     assert frozen.tables["shot_items"] == "shots"
     assert frozen.tables["project_references"] == "references"
@@ -1145,18 +1147,19 @@ def test_m3_pack_vocabulary_is_namespaced_and_owned() -> None:
     assert set(all_kinds).isdisjoint(CORE_COMMAND_KINDS)
 
 
-def test_m3_standard_catalog_is_unchanged_at_20_tables() -> None:
+def test_m3_standard_catalog_is_unchanged_at_21_tables() -> None:
     """Manifest ownership, not DDL: the m3 vocabulary adds no tables."""
     registry = SchemaPackRegistry()
     register_core_vocabulary(registry)
     register_standard_schema_packs(registry)
     frozen = registry.freeze()
-    assert len(frozen.tables) == CORE_TABLE_COUNT + 1 + 2 + 3 == 20
+    assert len(frozen.tables) == CORE_TABLE_COUNT + 2 + 2 + 3 == 21
     assert frozen.tables["project_references"] == "references"
     assert frozen.tables["media_references"] == "references"
     assert frozen.tables["reference_links"] == "references"
     assert frozen.tables["shots"] == "shots"
     assert frozen.tables["shot_items"] == "shots"
     assert frozen.tables["timelines"] == "timeline"
+    assert frozen.tables["timeline_contract_canary"] == "timeline"
     for table in CORE_TABLES:
         assert frozen.tables[table] == CORE_PACK_ID

@@ -44,8 +44,9 @@ EXPECTED_FAMILIES: frozenset[str] = frozenset(
 )
 """The exactly-eight top-level families (five product + three operational)."""
 
-EXPECTED_TABLE_COUNT = 20
-"""The frozen v10 schema table count (core + timeline/shots/references)."""
+EXPECTED_TABLE_COUNT = 21
+"""The frozen v10 schema table count (core + timeline/shots/references,
+including the timeline contract canary)."""
 
 
 def _destroy_live_data(root: Path) -> None:

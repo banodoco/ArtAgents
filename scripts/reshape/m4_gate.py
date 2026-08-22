@@ -91,10 +91,11 @@ DISPOSITION_SCHEMA = "astrid.reigh_external_gate_disposition.v1"
 # retained m4 evidence artifact for it.
 SENTINEL = "astrid-sentinel-secret-7f3c9d"
 
-# Frozen v10 composition: kernel 14 + timeline 1 + shots 2 + references 3 = 20.
+# Frozen v10 composition: kernel 14 + timeline 2 (incl. contract canary)
+# + shots 2 + references 3 = 21.
 FROZEN_CORE_TABLE_COUNT = 14
 FROZEN_PACK_TABLES: dict[str, frozenset[str]] = {
-    "timeline": frozenset({"timelines"}),
+    "timeline": frozenset({"timelines", "timeline_contract_canary"}),
     "shots": frozenset({"shots", "shot_items"}),
     "references": frozenset(
         {"project_references", "media_references", "reference_links"}
@@ -565,7 +566,10 @@ def _check_schema_composition() -> tuple[bool, list[str], dict[str, object]]:
             continue
         manifest = load_schema_pack_manifest(manifest_path)
         manifest_pack_ids.append(manifest.id)
-        declared.update({table: manifest.id for table in manifest.migrations[0].tables})
+        for migration in manifest.migrations:
+            declared.update(
+                {table: manifest.id for table in migration.tables}
+            )
     if tuple(sorted(manifest_pack_ids)) != tuple(sorted(STANDARD_SCHEMA_PACKS)):
         violations.append(
             f"schema-pack drift: found packs {sorted(manifest_pack_ids)} != "
@@ -580,8 +584,8 @@ def _check_schema_composition() -> tuple[bool, list[str], dict[str, object]]:
                 f"pack {pack_id!r} table drift: {sorted(actual)} != {sorted(expected)}"
             )
     total = len(CORE_TABLES) + len(declared)
-    if total != 20:
-        violations.append(f"composition table count {total} != frozen 20")
+    if total != 21:
+        violations.append(f"composition table count {total} != frozen 21")
     forbidden_hit = sorted(set(declared) & set(FORBIDDEN_TABLES))
     if forbidden_hit:
         violations.append(
