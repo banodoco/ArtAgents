@@ -146,6 +146,18 @@ for SQL in "${SQL_FILES[@]}"; do
         fail "migration $NAME is not additive-only (first offense at $OFFENSE)"
     fi
 
+    # 6b2. Same lint against a whitespace-normalized copy (newlines/tabs
+    # collapsed to single spaces) so a destructive keyword split across
+    # lines cannot bypass the additive-only gate while its refreshed
+    # checksum passes the 6d freshness gate. File-level message: the
+    # line pass above already names ordinary single-line offenses with
+    # their line number.
+    SQL_NORM=$(tr '\n\r\t' '   ' < "$SQL" | tr -s ' ')
+    if grep -qE -i 'DROP |DELETE FROM|UPDATE |ALTER TABLE[[:space:]]+.*RENAME|PRAGMA' <<< "$SQL_NORM"; then
+        FRAGMENT=$(grep -E -o -i -m 1 'DROP |DELETE FROM|UPDATE |ALTER TABLE[[:space:]]+.*RENAME|PRAGMA' <<< "$SQL_NORM")
+        fail "migration $NAME is not additive-only (whitespace-normalized pass matched fragment '$FRAGMENT')"
+    fi
+
     # 6c. Parses via sqlite3 against :memory: (hermetic: uses the Python
     # sqlite3 engine, same library the Astrid runner executes against).
     if ! PARSE_ERR=$("$PYTHON" - "$SQL" <<'EOF' 2>&1
