@@ -239,7 +239,7 @@ class TestP22CursorBoundary:
             payload = json.dumps({"data": {"config": {"clips": [], "tracks": []}}, "_integrity": {"event_hash": f"h-{eid[:6]}", "previous_event_hash": None}})  # noqa: E501
             er = TursoEventRow(event_id=eid, timeline_id=tl_id, project_id=proj_id, stream_id=sid, seq=10 if eid == r0 else 11, kind="timeline.saved", payload_json=payload, actor_kind="system", actor_id="system", txn_id=generate_event_ulid(), idempotency_key=f"ik-{eid}", created_at="2026-01-01T00:00:00Z")  # noqa: E501
             replica_events.append(er)
-        doc_row = TursoDocumentRow(timeline_id=tl_id, project_id=proj_id, event_stream_id=sid, name="T1", document_json=json.dumps({"tracks": [{"r": 1}]}), version=ver+2, created_at="2026-01-01T00:00:00Z", updated_at="2026-01-01T00:00:00Z")  # noqa: E501
+        doc_row = TursoDocumentRow(timeline_id=tl_id, project_id=proj_id, event_stream_id=sid, name="T1", document_json=json.dumps({"tracks": []}), version=ver+2, created_at="2026-01-01T00:00:00Z", updated_at="2026-01-01T00:00:00Z")  # noqa: E501
         replica.push_timeline_updates(doc_row, replica_events, require_document=True, expected_remote_version=ver)  # noqa: E501
         orig_fetch = replica.fetch_remote_events
 

@@ -128,10 +128,10 @@ class TestQ7aDestinationOnlyNoClobber:
         count_mid = len(replica.fetch_remote_events(tl_id))
         assert count_mid == count_before + 1
 
-        # Local does NOTHING — push should be up_to_date, no clobber
+        # Local does NOTHING — push should be honest remote_ahead, no clobber (rework-17)
         backend2 = SqliteEventLogBackend(timeline_id=tl_id, timeline_home=home, projects_root=tmp_path)
         result = push_to_turso(timeline_id=tl_id, timeline_home=home, projects_root=tmp_path, backend=backend2, replica=replica)
-        assert result.action == "up_to_date"
+        assert result.action == "remote_ahead"
         assert result.local_version == remote_mid["version"] - 1  # local still behind
         assert result.remote_version == remote_mid["version"]
         # remote doc unchanged

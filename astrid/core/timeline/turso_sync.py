@@ -315,7 +315,7 @@ def _is_pull_resume_already_committed(
 class TursoSyncResult:
     """Structured result for push/pull."""
 
-    action: str  # up_to_date | pushed | pulled | conflict | error
+    action: str  # up_to_date | pushed | pulled | conflict | remote_ahead | error
     timeline_id: str
     local_version: int
     remote_version: int
@@ -323,7 +323,6 @@ class TursoSyncResult:
     pulled: int = 0
     conflict_artifacts: tuple[Any, ...] = ()
     error: str | None = None
-
 
 # -- local helpers -----------------------------------------------------------
 
@@ -463,6 +462,122 @@ def _extract_event_hash(payload_json: str | None) -> str | None:
         return None
     return None
 
+
+def _fetch_remote_document_json(replica: TursoReplicaClient, timeline_id: str) -> str | None:
+    try:
+        raw = replica.fetch_remote_head(timeline_id)
+    except Exception:
+        return None
+    if not raw or not isinstance(raw, dict):
+        return None
+    doc = raw.get("document")
+    if isinstance(doc, dict):
+        dj = doc.get("document_json")
+        return str(dj) if dj is not None else None
+    return None
+
+
+def _doc_divergence_conflict_result(
+    *,
+    timeline_id: str,
+    timeline_home: str | Path,
+    backend: Any,
+    replica: TursoReplicaClient,
+    local_head: HeadSnapshot,
+    remote_head: HeadSnapshot,
+    bookmark: SyncBookmark | None,
+) -> TursoSyncResult:
+    """Build keep-both artifact for document-byte divergence at equal event-head."""
+    after_local = bookmark.spoke_event_id if bookmark else None
+    after_remote = bookmark.hub_event_id if bookmark else None
+    try:
+        local_suffix: list[TimelineEvent] = backend.read_events(after=after_local) if after_local else backend.read_events()  # noqa: E501
+    except Exception as exc:
+        raise TursoSyncError(f"failed to read local suffix for doc divergence fork: {exc}") from exc  # noqa: E501
+    try:
+        remote_suffix_rows = replica.fetch_remote_events(timeline_id, after=after_remote)
+    except Exception as exc:
+        raise TursoSyncError(f"failed to read remote suffix for doc divergence fork: {exc}") from exc  # noqa: E501
+    remote_suffix: list[TimelineEvent] = []
+    skipped_rows: list[dict[str, Any]] = []
+    for r in remote_suffix_rows:
+        try:
+            payload_obj = json.loads(str(r.get("payload_json", "{}")))
+            data = payload_obj.get("data", {}) if isinstance(payload_obj, dict) else {}
+            integ = payload_obj.get("_integrity", {}) if isinstance(payload_obj, dict) else {}
+            actor = TimelineActor(type="system", id=str(r.get("actor_id", "system")), display=str(r.get("actor_id", "system")))  # noqa: E501
+            ev = TimelineEvent(
+                event_id=str(r.get("event_id")),
+                timeline_id=timeline_id,
+                ts=str(r.get("created_at", utc_now_iso())),
+                actor=actor,
+                prev_hash=integ.get("previous_event_hash") if isinstance(integ, dict) else None,
+                hash=integ.get("event_hash") if isinstance(integ, dict) else None,
+                kind=str(r.get("kind")),
+                payload=data if isinstance(data, dict) else {},
+                expected_version=None,
+                txn_id=str(r.get("txn_id", "")),
+            )
+            remote_suffix.append(ev)
+        except Exception as exc:
+            skipped_rows.append({"event_id": str(r.get("event_id", "")), "error": str(exc)})
+            continue
+    @dataclass(frozen=True)
+    class _ShimTarget:
+        timeline_id: str
+        timeline_home: Path | None
+        backend: Any
+        backend_name: str
+        slug: str = "t1"
+        timeline_ulid: str = "01J000000000000000000000AA"
+        source: str = "test"
+
+    local_backend_name = backend.backend_name() if hasattr(backend, "backend_name") else "sqlite"  # noqa: E501
+    src_target = _ShimTarget(timeline_id=timeline_id, timeline_home=None, backend=replica, backend_name="turso")  # noqa: E501
+    dst_target = _ShimTarget(timeline_id=timeline_id, timeline_home=Path(timeline_home), backend=backend, backend_name=local_backend_name)  # noqa: E501
+    try:
+        artifact = write_keep_both_artifact(
+            source=src_target,
+            destination=dst_target,
+            source_head=remote_head,
+            destination_head=local_head,
+            source_suffix=remote_suffix,
+            destination_suffix=local_suffix,
+        )
+    except Exception as exc:
+        raise TursoSyncError(f"failed to write keep-both artifact for doc divergence: {exc}") from exc  # noqa: E501
+    if artifact is None:
+        raise TursoSyncError("doc divergence artifact write returned None — failing closed")
+    try:
+        art_path = Path(str(getattr(artifact, "path", "")))
+        if art_path.exists():
+            raw = read_json(art_path)
+            if isinstance(raw, dict) and skipped_rows:
+                raw["skipped_rows"] = skipped_rows
+                write_json_atomic(art_path, raw)
+        diag_path = art_path.with_name(art_path.stem + ".diagnostic.json")
+        diag_payload = {
+            "kind": "sync_divergence_diagnostic",
+            "created_at": utc_now_milliseconds(),
+            "timeline_id": timeline_id,
+            "local_suffix": [{"event_id": e.event_id, "kind": e.kind} for e in local_suffix],
+            "remote_suffix": [{"event_id": e.event_id, "kind": e.kind} for e in remote_suffix],
+            "skipped_rows": skipped_rows,
+        }
+        try:
+            write_json_atomic(diag_path, diag_payload)
+        except Exception:
+            pass
+    except Exception as exc:
+        raise TursoSyncError(f"failed to finalize doc divergence diagnostics: {exc}") from exc
+    return TursoSyncResult(
+        action="conflict",
+        timeline_id=timeline_id,
+        local_version=local_head.version,
+        remote_version=remote_head.version,
+        conflict_artifacts=(artifact,),
+    )
+
 # -- push --------------------------------------------------------------------
 def push_to_turso(
     *,
@@ -522,6 +637,23 @@ def push_to_turso(
     except Exception as exc:
         raise TursoSyncError(f"sync classification failed: {exc}") from exc
     if action == "up_to_date":
+        try:
+            local_doc = _read_local_document_snapshot(timeline_id, root)
+            remote_doc_json = _fetch_remote_document_json(replica, timeline_id)
+            if remote_doc_json is not None and local_doc.document_json != remote_doc_json:
+                return _doc_divergence_conflict_result(
+                    timeline_id=timeline_id,
+                    timeline_home=timeline_home,
+                    backend=backend,
+                    replica=replica,
+                    local_head=local_head,
+                    remote_head=remote_head,
+                    bookmark=bookmark,
+                )
+        except TursoSyncError:
+            raise
+        except Exception:
+            pass
         return TursoSyncResult(
             action="up_to_date",
             timeline_id=timeline_id,
@@ -595,9 +727,9 @@ def push_to_turso(
         )
 
     if action == "destination_only":
-        # Remote advanced alone — local has nothing new; no-op without touching cursor or remote.
+        # Remote advanced alone — honest non-terminal; no cursor writes, no data loss.
         return TursoSyncResult(
-            action="up_to_date",
+            action="remote_ahead",
             timeline_id=timeline_id,
             local_version=local_head.version,
             remote_version=remote_head.version,
@@ -933,6 +1065,23 @@ def pull_from_turso(
     except Exception as exc:
         raise TursoSyncError(f"sync classification failed: {exc}") from exc
     if action == "up_to_date":
+        try:
+            local_doc = _read_local_document_snapshot(timeline_id, root)
+            remote_doc_json = _fetch_remote_document_json(replica, timeline_id)
+            if remote_doc_json is not None and local_doc.document_json != remote_doc_json:
+                return _doc_divergence_conflict_result(
+                    timeline_id=timeline_id,
+                    timeline_home=timeline_home,
+                    backend=backend,
+                    replica=replica,
+                    local_head=local_head,
+                    remote_head=remote_head,
+                    bookmark=bookmark,
+                )
+        except TursoSyncError:
+            raise
+        except Exception:
+            pass
         return TursoSyncResult(
             action="up_to_date",
             timeline_id=timeline_id,
