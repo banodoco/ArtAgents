@@ -382,7 +382,7 @@ class TestB2bInterleavedHonesty:
 
         def injected(replica_inner, tid_inner):
             cnt["n"] += 1
-            if cnt["n"] == 2 and tid_inner == tl_id and r3 not in fake.events:
+            if cnt["n"] >= 4 and tid_inner == tl_id and r3 not in fake.events:
                 fake.events[r3] = {
                     "event_id": r3,
                     "timeline_id": tl_id,

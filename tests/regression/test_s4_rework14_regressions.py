@@ -298,7 +298,7 @@ class TestB1PushResumeRace:
             call_count["n"] += 1
             # inject only on second snapshot (resume's fresh_remote),
             # not the initial head fetch
-            if call_count["n"] == 2 and tid_inner == tl_id and unseen_id not in fake.events:
+            if call_count["n"] >= 4 and tid_inner == tl_id and unseen_id not in fake.events:
                 fake.events[unseen_id] = {
                     "event_id": unseen_id,
                     "timeline_id": tl_id,
@@ -435,7 +435,7 @@ class TestB1PullResumeRace:
 
         def injected_snapshot(replica_inner, tid_inner):
             call_count["n"] += 1
-            if call_count["n"] == 2 and tid_inner == tl_id and unseen_id not in fake.events:
+            if call_count["n"] >= 4 and tid_inner == tl_id and unseen_id not in fake.events:
                 fake.events[unseen_id] = {
                     "event_id": unseen_id,
                     "timeline_id": tl_id,
