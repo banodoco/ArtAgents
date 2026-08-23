@@ -1949,6 +1949,7 @@ def test_derive_progress_is_ordered_and_pure(run_env) -> None:
     claim_a = _claim_child(run_env, project_id=project.id, idempotency_key="derive-claim-a")
     assert claim_a is not None and claim_a.task.id == child_a
     _fail_started_child(run_env, project_id=project.id, claim=claim_a, idempotency_key="derive-fail-a")
+    stored_before_read = _run_result_json(run_env.writer, result.run_id)
 
     progress = UnitOfWork(run_env.writer).run(
         lambda u: run_env.run_repo.derive_progress(
@@ -1965,9 +1966,17 @@ def test_derive_progress_is_ordered_and_pure(run_env) -> None:
     assert progress.succeeded == 0
     assert progress.cancelled == 0
     assert progress.ordered == ((0, child_a, "failed"), (1, child_b, "queued"))
-    # The read is pure: the stored projection is untouched (no persisted
-    # cursor or mutable progress aggregate).
-    assert _run_result_json(run_env.writer, result.run_id) == {}
+    expected_projection = {
+        "total_children": progress.total_children,
+        "succeeded": progress.succeeded,
+        "failed": progress.failed,
+        "cancelled": progress.cancelled,
+        "status": progress.status,
+    }
+    # The failed-child transition durably refreshes the parent projection;
+    # derive_progress is still a pure, order-stable read and cannot mutate it.
+    assert stored_before_read == expected_projection
+    assert _run_result_json(run_env.writer, result.run_id) == stored_before_read
     # Round-trips through the frozen model.
     assert RunProgressReadModel.from_mapping(progress.to_dict()) == progress
 
@@ -2030,6 +2039,5 @@ def test_group_operations_create_no_forbidden_tables(run_env) -> None:
     # No parent task and no evidence rows appeared either.
     assert _task_row(run_env.writer, result.run_id) is None
     assert _counts(run_env.writer)[6] == 0
-
 
 
