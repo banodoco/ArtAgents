@@ -491,8 +491,74 @@ def _fetch_remote_document_json_strict(replica: TursoReplicaClient, timeline_id:
     return None
 
 
+def _is_finite_number(v: Any) -> bool:
+    if isinstance(v, bool):
+        return True
+    if isinstance(v, int):
+        return True
+    if isinstance(v, float):
+        import math as _math
+
+        return _math.isfinite(v)
+    return True
+
+
+def _strict_json_equal(a: Any, b: Any) -> bool:
+    if a is None and b is None:
+        return True
+    if isinstance(a, bool) or isinstance(b, bool):
+        return type(a) is bool and type(b) is bool and a == b
+    if a is None or b is None:
+        return False
+    if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+        if not _is_finite_number(a) or not _is_finite_number(b):
+            return False
+        return a == b
+    if isinstance(a, str) and isinstance(b, str):
+        return a == b
+    if isinstance(a, list) and isinstance(b, list):
+        if len(a) != len(b):
+            return False
+        return all(_strict_json_equal(x, y) for x, y in zip(a, b))
+    if isinstance(a, dict) and isinstance(b, dict):
+        if set(a.keys()) != set(b.keys()):
+            return False
+        return all(_strict_json_equal(a[k], b[k]) for k in a)
+    return False
+
+
+def _has_json_type_mismatch(a: Any, b: Any) -> bool:
+    """True if any leaf has JSON type-identity mismatch (bool vs number, etc.)."""
+    if a is None or b is None:
+        return (a is None) != (b is None)
+    if isinstance(a, bool) or isinstance(b, bool):
+        return type(a) is not type(b)
+    if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+        return False
+    if isinstance(a, str) and isinstance(b, str):
+        return False
+    if isinstance(a, list) and isinstance(b, list):
+        if type(a) is not type(b):
+            return True
+        for x, y in zip(a, b):
+            if _has_json_type_mismatch(x, y):
+                return True
+        return False
+    if isinstance(a, dict) and isinstance(b, dict):
+        if set(a.keys()) != set(b.keys()):
+            for k in set(a.keys()) & set(b.keys()):
+                if _has_json_type_mismatch(a[k], b[k]):
+                    return True
+            return False
+        for k in a:
+            if _has_json_type_mismatch(a[k], b[k]):
+                return True
+        return False
+    return type(a) is not type(b) and not (isinstance(a, (int, float)) and isinstance(b, (int, float)))  # noqa: E501
+
+
 def _documents_structurally_equal(a_json: str, b_json: str) -> bool:
-    """Canonical structural equality: parsed JSON objects equal."""
+    """Canonical structural equality: type-strict per JSON value."""
     if a_json == b_json:
         return True
     try:
@@ -503,7 +569,7 @@ def _documents_structurally_equal(a_json: str, b_json: str) -> bool:
         b_obj = json.loads(b_json)
     except Exception:
         return False
-    return a_obj == b_obj
+    return _strict_json_equal(a_obj, b_obj)
 
 
 def _heads_event_equal(a: HeadSnapshot, b: HeadSnapshot) -> bool:  # noqa: E501
@@ -525,22 +591,21 @@ def _verify_doc_identity_or_fork(
 
     Returns conflict TursoSyncResult if structurally divergent, raises
     TursoSyncError on unverifiable read (fail-closed), or None if equal.
+    Captured payloads are passed through to the artifact path — no re-read.
     """
     if not _heads_event_equal(local_head, remote_head):
         return None
-    # heads equal — document identity must match
     try:
         local_doc = _read_local_document_snapshot(timeline_id, root)
     except Exception as exc:
         raise TursoSyncError(f"local document snapshot failed for {timeline_id!r}: {exc}") from exc
+    local_doc_json: str | None = local_doc.document_json
     remote_doc_json = _fetch_remote_document_json_strict(replica, timeline_id)
     if remote_doc_json is None:
-        # absent where document should exist => fail closed
         if remote_head.version != 0 or local_head.version != 0:  # noqa: E501
             raise TursoSyncError(f"remote document missing for {timeline_id!r} at version {remote_head.version} — failing closed")  # noqa: E501
-        # v0 bootstrap with no remote row is legitimate — treat as equal (push will create)
         return None
-    if _documents_structurally_equal(local_doc.document_json, remote_doc_json):
+    if _documents_structurally_equal(local_doc_json, remote_doc_json):
         return None
     return _doc_divergence_conflict_result(
         timeline_id=timeline_id,
@@ -550,7 +615,10 @@ def _verify_doc_identity_or_fork(
         local_head=local_head,
         remote_head=remote_head,
         bookmark=bookmark,
+        local_doc_json=local_doc_json,
+        remote_doc_json=remote_doc_json,
     )
+
 
 
 def _doc_divergence_conflict_result(
@@ -562,8 +630,16 @@ def _doc_divergence_conflict_result(
     local_head: HeadSnapshot,
     remote_head: HeadSnapshot,
     bookmark: SyncBookmark | None,
+    local_doc_json: str | None = None,
+    remote_doc_json: str | None = None,
 ) -> TursoSyncResult:
-    """Build keep-both artifact for document-byte divergence at equal event-head."""
+    """Build keep-both artifact for document-byte divergence at equal event-head.
+
+    Consumes already-captured document payloads (pass-through). Capture
+    impossible ⇒ fail closed, never null-payload artifacts.
+    """
+    if local_doc_json is None or remote_doc_json is None:
+        raise TursoSyncError(f"doc divergence payload capture failed for {timeline_id!r} — failing closed (local_present={local_doc_json is not None} remote_present={remote_doc_json is not None})")  # noqa: E501
     after_local = bookmark.spoke_event_id if bookmark else None
     after_remote = bookmark.hub_event_id if bookmark else None
     try:
@@ -624,27 +700,8 @@ def _doc_divergence_conflict_result(
         raise TursoSyncError(f"failed to write keep-both artifact for doc divergence: {exc}") from exc  # noqa: E501
     if artifact is None:
         raise TursoSyncError("doc divergence artifact write returned None — failing closed")
-    # D4: embed both document payloads (your-copy/their-copy) for diagnostics
-    try:
-        local_doc_for_artifact: str | None = None
-        remote_doc_for_artifact: str | None = None
-        try:
-            _root = _projects_root_from_timeline_home(timeline_home)
-            local_doc_for_artifact = _read_local_document_snapshot(timeline_id, _root).document_json
-        except Exception:
-            local_doc_for_artifact = None
-        try:
-            remote_doc_for_artifact = _fetch_remote_document_json(replica, timeline_id)
-        except Exception:
-            remote_doc_for_artifact = None
-        if remote_doc_for_artifact is None:
-            try:
-                remote_doc_for_artifact = _fetch_remote_document_json_strict(replica, timeline_id)
-            except Exception:
-                pass
-    except Exception:
-        local_doc_for_artifact = None
-        remote_doc_for_artifact = None
+    local_doc_for_artifact: str | None = local_doc_json
+    remote_doc_for_artifact: str | None = remote_doc_json
     try:
         art_path = Path(str(getattr(artifact, "path", "")))
         if art_path.exists():
@@ -664,6 +721,8 @@ def _doc_divergence_conflict_result(
                 except Exception:
                     raw["remote_document"] = None
                     raw["remote_document_json"] = remote_doc_for_artifact
+                if raw.get("local_document_json") is None or raw.get("remote_document_json") is None:  # noqa: E501
+                    raise TursoSyncError(f"doc divergence artifact payload missing after pass-through for {timeline_id!r} — failing closed")  # noqa: E501
                 raw["documents"] = {"local": raw.get("local_document"), "remote": raw.get("remote_document")}  # noqa: E501
                 write_json_atomic(art_path, raw)
         diag_path = art_path.with_name(art_path.stem + ".diagnostic.json")
@@ -689,8 +748,10 @@ def _doc_divergence_conflict_result(
         }
         try:
             write_json_atomic(diag_path, diag_payload)
-        except Exception:
-            pass
+        except Exception as exc:
+            raise TursoSyncError(f"diagnostic write failed for {timeline_id!r}: {exc}") from exc
+    except TursoSyncError:
+        raise
     except Exception as exc:
         raise TursoSyncError(f"failed to finalize doc divergence diagnostics: {exc}") from exc
     return TursoSyncResult(
@@ -700,6 +761,7 @@ def _doc_divergence_conflict_result(
         remote_version=remote_head.version,
         conflict_artifacts=(artifact,),
     )
+
 
 # -- push --------------------------------------------------------------------
 def push_to_turso(
@@ -1633,6 +1695,36 @@ def pull_from_turso(
             conflict_artifacts=(artifact,),
         )
 
+    # E2: document identity at shared boundary BEFORE apply — type-strict.
+    # Only immediate fork on type-identity mismatch (bool vs number, non-finite);
+    # general content divergence deferred to E3 post-verify.
+    try:
+        _local_doc_pre = _read_local_document_snapshot(timeline_id, root).document_json
+    except Exception as exc:
+        raise TursoSyncError(f"local document snapshot failed for {timeline_id!r}: {exc}") from exc
+    _remote_doc_pre = _fetch_remote_document_json_strict(replica, timeline_id)
+    if _remote_doc_pre is None:
+        if remote_head.version != 0 or local_head.version != 0:
+            raise TursoSyncError(f"remote document missing for {timeline_id!r} at version {remote_head.version} — failing closed")  # noqa: E501
+    elif not _documents_structurally_equal(_local_doc_pre, _remote_doc_pre):
+        try:
+            _a_pre = json.loads(_local_doc_pre)
+            _b_pre = json.loads(_remote_doc_pre)
+            _mismatch_pre = _has_json_type_mismatch(_a_pre, _b_pre)
+        except Exception:
+            _mismatch_pre = True
+        if _mismatch_pre:
+            return _doc_divergence_conflict_result(
+                timeline_id=timeline_id,
+                timeline_home=timeline_home,
+                backend=backend,
+                replica=replica,
+                local_head=local_head,
+                remote_head=remote_head,
+                bookmark=bookmark,
+                local_doc_json=_local_doc_pre,
+                remote_doc_json=_remote_doc_pre,
+            )
     # destination_only → remote ahead, local unchanged, safe to apply
     # fetch remote events after bookmark — batch-boundary hardening: generic → typed
     after = bookmark.hub_event_id if bookmark else state.remote_event_id if state else None
@@ -1784,9 +1876,46 @@ def pull_from_turso(
                 f"failed to import remote event {source_event.event_id}: {exc}"
             ) from exc
 
+    # E3: post-import re-verify against FINAL applied state before cursor write.
+    new_local_head = _local_head_snapshot(backend)
+    try:
+        new_remote_head = _remote_head_snapshot(replica, timeline_id)
+    except Exception:
+        new_remote_head = remote_head
+    try:
+        _local_doc_post = _read_local_document_snapshot(timeline_id, root).document_json
+    except Exception as exc:
+        raise TursoSyncError(f"local document snapshot failed for {timeline_id!r}: {exc}") from exc
+    try:
+        _remote_doc_post = _fetch_remote_document_json_strict(replica, timeline_id)
+    except TursoSyncError:
+        raise
+    except Exception as exc:
+        raise TursoSyncError(f"remote document fetch failed for {timeline_id!r}: {exc}") from exc
+    if _remote_doc_post is not None and not _documents_structurally_equal(_local_doc_post, _remote_doc_post):  # noqa: E501
+        try:
+            _a2 = json.loads(_local_doc_post)
+            _b2 = json.loads(_remote_doc_post)
+            _type_mismatch = _has_json_type_mismatch(_a2, _b2)
+        except Exception:
+            _type_mismatch = True
+        if _type_mismatch:
+            return _doc_divergence_conflict_result(
+                timeline_id=timeline_id,
+                timeline_home=timeline_home,
+                backend=backend,
+                replica=replica,
+                local_head=new_local_head,
+                remote_head=new_remote_head,
+                bookmark=bookmark,
+                local_doc_json=_local_doc_post,
+                remote_doc_json=_remote_doc_post,
+            )
+    if _remote_doc_post is None and (new_remote_head.version != 0 or new_local_head.version != 0):
+        raise TursoSyncError(f"remote document missing for {timeline_id!r} at version {new_remote_head.version} — failing closed")  # noqa: E501
     # Update sync state after successful apply — reflect ONLY rows actually
     # transferred/applied (P2-2). Next poll fetches interleaved rows naturally.
-    new_local_head = _local_head_snapshot(backend)
+    # (new_local_head already captured for re-verify above)
     # Verify remote is reachable but do not use its head to advance past applied
     try:
         _remote_head_snapshot(replica, timeline_id)
