@@ -577,30 +577,20 @@ def push_to_turso(
             expected_remote_version=expected_remote_version,
         )
     except TursoVersionRaceError as exc:
-        # Bounded single retry: refetch fresh head, reclassify, then fork or fail typed — fail closed, not swallowed  # noqa: E501
-        try:
-            fresh_head = _remote_head_snapshot(replica, timeline_id)
-        except Exception as e2:
-            raise TursoSyncError(f"version race then refresh failed: {exc}; refresh: {e2}") from exc
-        try:
-            fresh_action = classify_sync_state(
-                destination_head=fresh_head,
-                bookmark=bookmark,
-                expected_timeline_id=timeline_id,
-            )
-        except Exception as e2:
-            raise TursoSyncError(f"version race reclassify failed: {e2}") from exc
-        if fresh_action == "both_advanced":
-            raise TursoVersionRaceError(
-                f"document CAS race detected (expected {expected_remote_version}, remote now {fresh_head.version}): {exc}"  # noqa: E501
-            ) from exc
+        # T2 choice: DELETE dead reclassify (previous code called classify_sync_state
+        # without required keyword-only source_head, making the reclassify unreachable
+        # via TypeError). We surface the typed race error directly, no unreachable code.
         raise TursoVersionRaceError(
-            f"document CAS race (expected {expected_remote_version}, remote now {fresh_head.version}): {exc}"  # noqa: E501
+            f"document CAS race (expected {expected_remote_version}, remote now raced): {exc}"  # noqa: E501
         ) from exc
     except TursoEventCollisionError:
         raise
     except (TursoError, TursoReplicationError) as exc:
         raise TursoSyncError(f"remote push failed: {exc}") from exc
+    except Exception as exc:
+        # T1/T2 hardening: any remaining non-Turso-family exception (e.g. sqlite3.IntegrityError
+        # from exact-replay INSERT) is converted to typed TursoSyncError at batch boundary.
+        raise TursoSyncError(f"remote push failed (unexpected): {exc}") from exc
     # Use honest hash extraction — never store payload_json as hash
     inferred_remote_hash = _extract_event_hash(turso_events[-1].payload_json) if turso_events else (state.remote_hash if state else None)  # noqa: E501
     new_state = TursoSyncState(
@@ -913,14 +903,31 @@ def pull_from_turso(
         )
 
     # destination_only → remote ahead, local unchanged, safe to apply
-    # fetch remote events after bookmark
+    # fetch remote events after bookmark — batch-boundary hardening: generic → typed
     after = bookmark.hub_event_id if bookmark else state.remote_event_id if state else None
-    remote_rows = replica.fetch_remote_events(timeline_id, after=after)
+    try:
+        remote_rows = replica.fetch_remote_events(timeline_id, after=after)
+    except TursoSyncError:
+        raise
+    except TursoError:
+        raise TursoSyncError(f"remote fetch failed for {timeline_id!r}: {after!r}") from None  # noqa: E501 # keep typed chain
+    except Exception as exc:
+        raise TursoSyncError(f"remote fetch failed (unexpected) for {timeline_id!r}: {exc}") from exc  # noqa: E501
     if not remote_rows:
         # also try after local known? fallback to read all remote and diff by event_id
-        remote_rows = replica.fetch_remote_events(timeline_id)
+        try:
+            remote_rows = replica.fetch_remote_events(timeline_id)
+        except TursoSyncError:
+            raise
+        except TursoError as exc:
+            raise TursoSyncError(f"remote fetch (fallback) failed for {timeline_id!r}: {exc}") from exc  # noqa: E501
+        except Exception as exc:
+            raise TursoSyncError(f"remote fetch (fallback) failed (unexpected) for {timeline_id!r}: {exc}") from exc  # noqa: E501
         # filter to only unseen
-        existing_ids = {e.event_id for e in backend.read_events()}
+        try:
+            existing_ids = {e.event_id for e in backend.read_events()}
+        except Exception as exc:
+            raise TursoSyncError(f"failed to read local events for pull fallback: {exc}") from exc
         remote_rows = [
             r for r in remote_rows if str(r.get("event_id")) not in existing_ids
         ]

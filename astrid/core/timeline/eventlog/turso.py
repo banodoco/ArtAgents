@@ -591,6 +591,8 @@ class TursoReplicaClient:
         if document is None and require_document and len(events) == 0:
             raise TursoReplicationError("push_timeline_updates: nothing to push")
         # --- R1: probe event collisions before building statements (same txn view) ---
+        # T1: exact-replay candidates are filtered from emission entirely (idempotent skip).
+        events_to_push: list[TursoEventRow] = list(events)  # default; may be filtered below
         if events:
             # Build lookup maps from remote state via transport queries.
             # Use the transport's query for real sqlite semantics; fake mirrors it.
@@ -626,6 +628,7 @@ class TursoReplicaClient:
                         existing_by_ik[(str(r.get("timeline_id")), ik)] = r
             # Also detect duplicate event_id within the batch itself (real PK semantics)
             seen_batch_ids: set[str] = set()
+            filtered: list[TursoEventRow] = []
             for ev in events:
                 if ev.event_id in seen_batch_ids:
                     raise TursoEventCollisionError(
@@ -649,6 +652,7 @@ class TursoReplicaClient:
                         existing_by_ik.get((ev.timeline_id, ev.idempotency_key)),
                     ),
                 ]
+                is_exact_replay = False
                 for key_kind, existing in candidate_checks:
                     if existing is None:
                         continue
@@ -664,13 +668,17 @@ class TursoReplicaClient:
                         and existing_ik == ev.idempotency_key
                     )
                     if payload_equal and identity_equal:
-                        continue  # noqa: E501 — exact replay benign
+                        is_exact_replay = True
+                        continue  # noqa: E501 — exact replay benign for this key
                     raise TursoEventCollisionError(
                         f"event collision key={key_kind} "  # noqa: E501
                         f"candidate event_id={ev.event_id!r} seq={ev.seq} idempotency_key={ev.idempotency_key!r} "  # noqa: E501
                         f"existing event_id={existing_event_id!r} seq={existing_seq!r} "  # noqa: E501
                         f"candidate_hash={_h(ev.payload_json)} existing_hash={_h(existing_payload)}"  # noqa: E501
                     )
+                if is_exact_replay:
+                    # T1: skip emission entirely; do not add to maps or push list
+                    continue
                 existing_by_id[ev.event_id] = {
                     "event_id": ev.event_id,
                     "timeline_id": ev.timeline_id,
@@ -680,9 +688,10 @@ class TursoReplicaClient:
                 }
                 existing_by_seq[(ev.timeline_id, ev.seq)] = existing_by_id[ev.event_id]
                 existing_by_ik[(ev.timeline_id, ev.idempotency_key)] = existing_by_id[ev.event_id]
+                filtered.append(ev)
+            events_to_push = filtered
         statements: list[tuple[str, tuple[Any, ...]]] = []
         if document is not None:
-            self._validate_document(document)
             sql = self._document_upsert_sql(expected_remote_version)
             params_list: list[Any] = [
                 document.timeline_id,
@@ -702,7 +711,7 @@ class TursoReplicaClient:
             raise TursoReplicationError(
                 "push_timeline_updates: document is required when require_document=True"
             )
-        for ev in events:
+        for ev in events_to_push:
             self._validate_event(ev)
             sql = self._event_upsert_sql()
             params = (
