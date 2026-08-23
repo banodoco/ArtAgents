@@ -97,7 +97,8 @@ def staged_binding_runtimes(
     (vibecomfy / "pyproject.toml").write_text("", encoding="utf-8")
     wgp = root / "Wan2GP"
     wgp.mkdir()
-    (wgp / "worker.py").write_text("", encoding="utf-8")
+    (wgp / "wgp.py").write_text("", encoding="utf-8")
+    (wgp / "defaults").mkdir()
     monkeypatch.setenv("REIGH_VIBECOMFY_HOME", str(vibecomfy))
     monkeypatch.setenv("REIGH_WGP_HOME", str(wgp))
 
