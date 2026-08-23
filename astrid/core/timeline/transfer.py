@@ -143,14 +143,23 @@ def push_timeline(
         ValueError: When the local timeline cannot be resolved or Supabase
             credentials are missing.
     """
-    # Resolve local source
+    # Resolve local source — marker-aware (S4 amendment 3a): marked ⇒ sqlite, legacy ⇒ local_fs
     source_target = resolve_event_log_target(
         project_slug, slug_or_id, root=root
     )
-    if source_target.backend_name != "local_fs":
-        raise ValueError(
-            f"push requires a local source timeline; "
-            f"got backend={source_target.backend_name}"
+    # Marker-aware authority check: use canonical authority seam, fail closed on corrupt marker
+    from astrid.core.timeline.authority import is_backfilled_timeline
+    try:
+        _is_marked = is_backfilled_timeline(source_target.timeline_id, root)
+    except Exception as exc:
+        # is_backfilled_timeline raises BackfillError fail-closed on corrupt marker
+        raise TransferFailure(f"backfill authority marker is unreadable: {exc}") from exc
+    # When DB missing, is_backfilled returns False (legacy), which maps to local_fs
+    expected = "sqlite" if _is_marked else "local_fs"
+    if source_target.backend_name != expected:
+        raise TransferFailure(
+            f"push authority mismatch for {source_target.timeline_id!r}: "
+            f"marker={expected}, backend={source_target.backend_name} — failing closed (R5)"
         )
 
     _preflight_push_destination(
@@ -256,6 +265,21 @@ def pull_timeline(
         remote_source_timeline_id=source_target.timeline_id,
         root=root,
     )
+    # S4 amendment 3a: validate destination authority matches marker (fail closed)
+    if dest.target is not None and dest.target.timeline_home is not None:
+        try:
+            from astrid.core.timeline.authority import is_backfilled_timeline as _is_bf2
+            _is_marked2 = _is_bf2(dest.target.timeline_id, root)
+            _expected2 = "sqlite" if _is_marked2 else "local_fs"
+            if dest.target.backend_name != _expected2:
+                raise TransferFailure(
+                    f"pull destination authority mismatch for {dest.target.timeline_id!r}: "
+                    f"marker={_expected2}, backend={dest.target.backend_name} — failing closed (R5)"
+                )
+        except TransferFailure:
+            raise
+        except Exception as exc:
+            raise TransferFailure(f"backfill authority marker is unreadable: {exc}") from exc
 
     actor = destination_actor or TimelineActor(
         type="system", id="transfer:pull", display="pull-transfer"
