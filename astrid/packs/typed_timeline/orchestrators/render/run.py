@@ -67,10 +67,8 @@ def _video_frame_count(video_path: Path) -> int | None:
 
 def _run_ffmpeg_render(timeline_path: Path, assets_path: Path, out_path: Path) -> bool:
     """Real render via audio_reactive_colour. NO fake fallback. Returns True only on real video."""
-    # Primary: audio_reactive_colour fast path — must produce real 8085-frame video
     try:
-        from astrid.packs.rendering.backends.ffmpeg.audio_reactive_colour import match_and_validate, render
-
+        from astrid.packs.rendering.executors.render.audio_reactive_colour import match_and_validate, render
         import json as _json
 
         timeline_data = _json.loads(timeline_path.read_text(encoding="utf-8"))

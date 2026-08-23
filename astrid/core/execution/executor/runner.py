@@ -33,6 +33,8 @@ from astrid.core.contracts.exec_error import (
 from astrid.core.contracts.run_status import RunStatus
 from astrid.core.contracts.scoped_config import SCOPE_REGISTRY, ScopeRequest
 from astrid.core.env_vars import ASTRID_INTERNAL_INVOCATION, HYPE_ACTIVE_THEME
+from astrid.core.pack.resolver import resolve_callable_from_metadata
+from astrid.core.project.ownership import require_project_owned_artifact
 from astrid.core.foundation.paths import REPO_ROOT
 from astrid.core.project.run import (
     ProjectRunContext,

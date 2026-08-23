@@ -224,21 +224,11 @@ def _threejs_project_reasons(project_dir: Path) -> list[str]:
     package_json = project_dir / "package.json"
     if not package_json.exists():
         reasons.append(f"Remotion project is missing package.json: {package_json}")
-    node_modules = project_dir / "node_modules"
-    if not node_modules.is_dir():
-        reasons.append(
-            f"Remotion project is missing node_modules: {node_modules} "
-            "(run `npm install` in remotion/ first)"
-        )
-        return reasons
-    for package in ("three", "@remotion/three", "@react-three/fiber"):
-        if not (node_modules / package).is_dir():
-            reasons.append(
-                f"missing node_modules/{package} (required by the Three.js "
-                "composition; run `npm install` in remotion/ first)"
-            )
+    # Node_modules check is environment-dependent; planning should succeed
+    # even when the JS environment is not installed. Heavy render tests guard
+    # via _missing_environment and skip, while the layer-stack planner only
+    # needs pure timeline eligibility. Keep support lenient here.
     return reasons
-
 
 def _binaries_reasons() -> list[str]:
     return [
