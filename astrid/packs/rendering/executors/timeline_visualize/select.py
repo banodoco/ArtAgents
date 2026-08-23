@@ -538,7 +538,6 @@ def _discover(project_dir: Path) -> tuple[list[ManagedTimeline], list[str]]:
             _side_tid = identity.get("timeline_id") or identity.get("uuid") or identity.get("stable_id")
             if isinstance(_side_tid, str) and _side_tid:
                 _side_tid_s = str(_side_tid)
-                # Load global backfill state (same projects_root derivation as _check_backfilled_ulid)
                 _f_projects_root = None
                 try:
                     _cand_f = Path(project_dir).resolve()
@@ -574,10 +573,11 @@ def _discover(project_dir: Path) -> tuple[list[ManagedTimeline], list[str]]:
                     except Exception:
                         _f_state = None
                     if _f_state is not None and _side_tid_s in _f_state:
-                        # Scoped kernel lookup for THIS project's ULID
                         _f_ulid = child.name
                         _f_proj_slug = Path(project_dir).name if Path(project_dir).name else None
-                        _f_is_foreign = False
+                        if _f_proj_slug is None:
+                            diagnostics.append(f"skipped {child.name}: identity cache names another project's authoritative stream; delete the disposable sidecar cache to repair (another/UNVERIFIABLE authoritative stream)")
+                            continue
                         try:
                             import sqlite3 as _sql_f
 
@@ -586,42 +586,28 @@ def _discover(project_dir: Path) -> tuple[list[ManagedTimeline], list[str]]:
                             )
 
                             _f_db = _ddb_f(_f_projects_root)
-                            if _f_db.is_file():
-                                _f_conn = _sql_f.connect(f"file:{_f_db}?mode=ro", uri=True)
-                                try:
-                                    _f_conn.row_factory = _sql_f.Row
-                                    _f_row = None
-                                    if _f_proj_slug is not None:
-                                        try:
-                                            _f_prow = _f_conn.execute("SELECT id FROM projects WHERE slug=?", (_f_proj_slug,)).fetchone()
-                                            if _f_prow is not None and _f_prow["id"]:
-                                                _f_pid = str(_f_prow["id"])
-                                                _f_row = _f_conn.execute(
-                                                    "SELECT json_extract(payload_json,'$.data.timeline_id') as ktid FROM events WHERE kind='timeline.created' AND project_id=? AND lower(json_extract(payload_json,'$.data.timeline_ulid'))=lower(?) LIMIT 1",
-                                                    (_f_pid, _f_ulid),
-                                                ).fetchone()
-                                            else:
-                                                _f_row = None
-                                        except Exception:
-                                            _f_row = _f_conn.execute(
-                                                "SELECT json_extract(payload_json,'$.data.timeline_id') as ktid FROM events WHERE kind='timeline.created' AND json_extract(payload_json,'$.data.timeline_ulid')=? LIMIT 1",
-                                                (_f_ulid,),
-                                            ).fetchone()
-                                    else:
-                                        _f_row = _f_conn.execute(
-                                            "SELECT json_extract(payload_json,'$.data.timeline_id') as ktid FROM events WHERE kind='timeline.created' AND json_extract(payload_json,'$.data.timeline_ulid')=? LIMIT 1",
-                                            (_f_ulid,),
-                                        ).fetchone()
-                                    if _f_row is None or not _f_row["ktid"] or str(_f_row["ktid"]) != _side_tid_s:
-                                        _f_is_foreign = True
-                                finally:
-                                    _f_conn.close()
-                            else:
-                                _f_is_foreign = True
-                        except Exception:
-                            _f_is_foreign = False
-                        if _f_is_foreign:
-                            diagnostics.append(f"skipped {child.name}: identity cache names another project's authoritative stream")
+                            if not _f_db.is_file():
+                                diagnostics.append(f"skipped {child.name}: identity cache names another project's authoritative stream; delete the disposable sidecar cache to repair (another/UNVERIFIABLE authoritative stream)")
+                                continue
+                            _f_conn = _sql_f.connect(f"file:{_f_db}?mode=ro", uri=True)
+                            try:
+                                _f_conn.row_factory = _sql_f.Row
+                                _f_prow = _f_conn.execute("SELECT id FROM projects WHERE slug=?", (_f_proj_slug,)).fetchone()
+                                if _f_prow is None or not _f_prow["id"]:
+                                    diagnostics.append(f"skipped {child.name}: identity cache names another project's authoritative stream; delete the disposable sidecar cache to repair (another/UNVERIFIABLE authoritative stream)")
+                                    continue
+                                _f_pid = str(_f_prow["id"])
+                                _f_row = _f_conn.execute(
+                                    "SELECT json_extract(payload_json,'$.data.timeline_id') as ktid FROM events WHERE kind='timeline.created' AND project_id=? AND lower(json_extract(payload_json,'$.data.timeline_ulid'))=lower(?) LIMIT 1",
+                                    (_f_pid, _f_ulid),
+                                ).fetchone()
+                                if _f_row is None or not _f_row["ktid"] or str(_f_row["ktid"]) != _side_tid_s:
+                                    diagnostics.append(f"skipped {child.name}: identity cache names another project's authoritative stream; delete the disposable sidecar cache to repair (another/UNVERIFIABLE authoritative stream)")
+                                    continue
+                            finally:
+                                _f_conn.close()
+                        except Exception as _ex_f:
+                            diagnostics.append(f"skipped {child.name}: identity cache names another project's authoritative stream; delete the disposable sidecar cache to repair (another/UNVERIFIABLE authoritative stream): {_ex_f}")
                             continue
         except Exception:
             pass
