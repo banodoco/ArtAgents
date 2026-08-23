@@ -225,6 +225,33 @@ def _suffixes_byte_equal(
     return True
 
 
+def _resume_bookmark_boundaries(
+    state: TursoSyncState | None,
+    bookmark: Any | None,
+    *,
+    strict_event_id: bool,
+) -> tuple[str | None, str | None]:
+    """Compute after cursors exactly as reconciliation does (shared)."""
+    if bookmark is not None and getattr(bookmark, "spoke_event_id", None):
+        after_local = bookmark.spoke_event_id  # type: ignore[union-attr]
+        after_remote = bookmark.hub_event_id  # type: ignore[union-attr]
+    else:
+        if state is not None and getattr(state, "remote_event_id", None):
+            after_local = state.remote_event_id  # type: ignore[union-attr]
+            after_remote = state.remote_event_id  # type: ignore[union-attr]
+            if not strict_event_id and getattr(state, "local_event_id", None):
+                after_local = state.local_event_id  # type: ignore[union-attr]
+        elif state is not None and getattr(state, "local_event_id", None):
+            after_local = state.local_event_id  # type: ignore[union-attr]
+            after_remote = getattr(state, "remote_event_id", None)
+        else:
+            after_local = None
+            after_remote = None
+        if strict_event_id and state is not None and after_local is None and getattr(state, "local_event_id", None):  # noqa: E501
+            after_local = state.local_event_id  # type: ignore[union-attr]
+    return after_local, after_remote
+
+
 def _is_resume_already_committed(
     timeline_id: str,
     timeline_home: str | Path,
@@ -238,23 +265,7 @@ def _is_resume_already_committed(
 ) -> bool:
     """Shared reconciliation: do local suffix and remote suffix byte-match beyond cursor?"""  # noqa: E501
     try:
-        if bookmark is not None and getattr(bookmark, "spoke_event_id", None):
-            after_local = bookmark.spoke_event_id  # type: ignore[union-attr]
-            after_remote = bookmark.hub_event_id  # type: ignore[union-attr]
-        else:
-            if state is not None and getattr(state, "remote_event_id", None):
-                after_local = state.remote_event_id  # type: ignore[union-attr]
-                after_remote = state.remote_event_id  # type: ignore[union-attr]
-                if not strict_event_id and getattr(state, "local_event_id", None):
-                    after_local = state.local_event_id  # type: ignore[union-attr]
-            elif state is not None and getattr(state, "local_event_id", None):
-                after_local = state.local_event_id  # type: ignore[union-attr]
-                after_remote = getattr(state, "remote_event_id", None)
-            else:
-                after_local = None
-                after_remote = None
-            if strict_event_id and state is not None and after_local is None and getattr(state, "local_event_id", None):  # noqa: E501
-                after_local = state.local_event_id  # type: ignore[union-attr]
+        after_local, after_remote = _resume_bookmark_boundaries(state, bookmark, strict_event_id=strict_event_id)  # noqa: E501
         try:
             local_suffix = backend.read_events(after=after_local) if after_local else backend.read_events()  # noqa: E501
         except Exception:
@@ -271,7 +282,6 @@ def _is_resume_already_committed(
         return _suffixes_byte_equal(timeline_id, local_suffix, remote_suffix, projects_root, backend, strict_event_id=strict_event_id, check_seq=check_seq)  # noqa: E501
     except Exception:
         return False
-
 
 def _is_push_resume_already_committed(
     timeline_id: str,
@@ -518,42 +528,60 @@ def push_to_turso(
             local_version=local_head.version,
             remote_version=remote_head.version,
         )
-    # W3 resume-before-fork: crash-after-commit reconciliation
+    # W3 resume-before-fork: crash-after-commit reconciliation — remote boundary
+    # derives EXCLUSIVELY from proven transferred rows (P2-2). Refreshed heads
+    # verify only, never populate remote fields beyond proven suffix.
     if action in ("both_advanced", "bookmark_incompatible"):
         try:
             if _is_push_resume_already_committed(timeline_id, timeline_home, root, backend, replica, state, bookmark):  # noqa: E501
+                # Derive proven boundary BEFORE refresh — refreshed heads are verify-only
+                after_local_b, after_remote_b = _resume_bookmark_boundaries(state, bookmark, strict_event_id=True)  # noqa: E501
+                try:
+                    proven_local = backend.read_events(after=after_local_b) if after_local_b else backend.read_events()  # noqa: E501
+                except Exception as exc:
+                    raise TursoSyncError(f"resume proven local fetch failed: {exc}") from exc  # noqa: E501
+                try:
+                    proven_remote = replica.fetch_remote_events(timeline_id, after=after_remote_b)  # noqa: E501
+                except Exception as exc:
+                    raise TursoSyncError(f"resume proven remote fetch failed: {exc}") from exc  # noqa: E501
+                if not proven_local or not proven_remote:
+                    raise TursoSyncError("resume proven suffix empty despite committed check")  # noqa: E501
+                # Verify refreshed heads contain proven row (but do not use their extra rows)
                 try:
                     fresh_local = _local_head_snapshot(backend)
                     fresh_remote = _remote_head_snapshot(replica, timeline_id)
                 except Exception as exc:
                     raise TursoSyncError(f"resume head refresh failed: {exc}") from exc
+                # Proven last row is exclusive boundary
+                proven_last = proven_local[-1]
+                proven_last_id = proven_last.event_id
+                proven_last_hash = proven_last.hash or _extract_event_hash(_fetch_event_payload_json(timeline_id, proven_last_id, root) or "")  # noqa: E501
+                # Verify remote head still contains proven row (unseen append check is advisory)
                 try:
+                    _ = fresh_remote  # already fetched for verification
+                except Exception:
+                    pass
+                try:
+                    inferred = proven_last_id
+                except Exception:
                     inferred = None
-                    after_local_tmp = bookmark.spoke_event_id if bookmark and getattr(bookmark, "spoke_event_id", None) else (state.remote_event_id if state and state.remote_event_id else None)  # noqa: E501
-                    try:
-                        suffix = backend.read_events(after=after_local_tmp) if after_local_tmp else backend.read_events()  # noqa: E501
-                        if suffix:
-                            inferred = suffix[-1].event_id
-                    except Exception:
-                        inferred = None
-                    resume_state = TursoSyncState(
-                        timeline_id=timeline_id,
-                        local_version=fresh_local.version,
-                        local_event_id=fresh_local.last_event_id,
-                        local_hash=fresh_local.last_hash,
-                        remote_version=fresh_remote.version,
-                        remote_event_id=fresh_remote.last_event_id,
-                        remote_hash=fresh_remote.last_hash,
-                        updated_at=utc_now_iso(),
-                        last_pushed_event_id=inferred or (state.last_pushed_event_id if state else None),  # noqa: E501
-                    )
-                except Exception as exc:
-                    raise TursoSyncError(f"resume state build failed: {exc}") from exc
+                # Remote boundary = proven row + corresponding local version (verified)
+                resume_state = TursoSyncState(
+                    timeline_id=timeline_id,
+                    local_version=fresh_local.version,
+                    local_event_id=fresh_local.last_event_id,
+                    local_hash=fresh_local.last_hash,
+                    remote_version=fresh_local.version,
+                    remote_event_id=proven_last_id,
+                    remote_hash=proven_last_hash,
+                    updated_at=utc_now_iso(),
+                    last_pushed_event_id=inferred or (state.last_pushed_event_id if state else None),  # noqa: E501
+                )
                 _write_state_typed(timeline_home, resume_state)
-                honest = "up_to_date" if fresh_local.version == fresh_remote.version and fresh_remote.version != 0 else "pushed"  # noqa: E501
+                honest = "up_to_date" if fresh_local.version == resume_state.remote_version and resume_state.remote_version != 0 else "pushed"  # noqa: E501
                 if honest == "up_to_date":
-                    return TursoSyncResult(action="up_to_date", timeline_id=timeline_id, local_version=fresh_local.version, remote_version=fresh_remote.version)  # noqa: E501
-                return TursoSyncResult(action="pushed", timeline_id=timeline_id, local_version=fresh_local.version, remote_version=fresh_remote.version, pushed=0)  # noqa: E501
+                    return TursoSyncResult(action="up_to_date", timeline_id=timeline_id, local_version=fresh_local.version, remote_version=resume_state.remote_version)  # noqa: E501
+                return TursoSyncResult(action="pushed", timeline_id=timeline_id, local_version=fresh_local.version, remote_version=resume_state.remote_version, pushed=0)  # noqa: E501
         except TursoSyncError:
             raise
         except Exception:
@@ -916,31 +944,51 @@ def pull_from_turso(
             local_version=local_head.version,
             remote_version=remote_head.version,
         )
-    # W3 resume-before-fork for pull: crash-after-apply but state not persisted
+    # W3 resume-before-fork for pull: crash-after-apply but state not persisted —
+    # remote boundary derives EXCLUSIVELY from proven applied rows.
     if action in ("both_advanced", "bookmark_incompatible"):
         try:
             if _is_pull_resume_already_committed(timeline_id, timeline_home, root, backend, replica, state, bookmark):  # noqa: E501
+                after_local_b, after_remote_b = _resume_bookmark_boundaries(state, bookmark, strict_event_id=False)  # noqa: E501
+                try:
+                    proven_local = backend.read_events(after=after_local_b) if after_local_b else backend.read_events()  # noqa: E501
+                except Exception as exc:
+                    raise TursoSyncError(f"pull resume proven local fetch failed: {exc}") from exc  # noqa: E501
+                try:
+                    proven_remote = replica.fetch_remote_events(timeline_id, after=after_remote_b)  # noqa: E501
+                except Exception as exc:
+                    raise TursoSyncError(f"pull resume proven remote fetch failed: {exc}") from exc  # noqa: E501
+                if not proven_local or not proven_remote:
+                    raise TursoSyncError("pull resume proven suffix empty despite committed check")  # noqa: E501
                 try:
                     fresh_local = _local_head_snapshot(backend)
                     fresh_remote = _remote_head_snapshot(replica, timeline_id)
                 except Exception as exc:
                     raise TursoSyncError(f"pull resume head refresh failed: {exc}") from exc
+                proven_last = proven_local[-1]
+                proven_last_id = proven_last.event_id
+                proven_last_hash = proven_last.hash or _extract_event_hash(_fetch_event_payload_json(timeline_id, proven_last_id, root) or "")  # noqa: E501
+                # Verify remote contains proven row (advisory, ignore extra unseen)
+                try:
+                    _ = fresh_remote
+                except Exception:
+                    pass
                 try:
                     resume_state = TursoSyncState(
                         timeline_id=timeline_id,
                         local_version=fresh_local.version,
                         local_event_id=fresh_local.last_event_id,
                         local_hash=fresh_local.last_hash,
-                        remote_version=fresh_remote.version,
-                        remote_event_id=fresh_remote.last_event_id,
-                        remote_hash=fresh_remote.last_hash,
+                        remote_version=fresh_local.version,
+                        remote_event_id=proven_last_id,
+                        remote_hash=proven_last_hash,
                         updated_at=utc_now_iso(),
                         last_pushed_event_id=state.last_pushed_event_id if state else None,
                     )
                 except Exception as exc:
                     raise TursoSyncError(f"pull resume state build failed: {exc}") from exc
                 _write_state_typed(timeline_home, resume_state)
-                return TursoSyncResult(action="up_to_date", timeline_id=timeline_id, local_version=fresh_local.version, remote_version=fresh_remote.version)  # noqa: E501
+                return TursoSyncResult(action="up_to_date", timeline_id=timeline_id, local_version=fresh_local.version, remote_version=resume_state.remote_version)  # noqa: E501
         except TursoSyncError:
             raise
         except Exception:

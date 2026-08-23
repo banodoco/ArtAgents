@@ -75,9 +75,9 @@ pip install libsql-experimental   # provides `libsql_experimental` (Turso HTTP c
 # Without it, first operation (execute_batch/query) raises TursoConfigError:
 #   "libsql driver is not installed — install with: pip install libsql-experimental ..."
 # LibSqlHttpTransport() construction succeeds with env set; the driver is loaded lazily at first use.
-# The transport tries `import libsql` first, falling back to `import libsql_experimental` — both share the same connect surface (see `astrid/core/timeline/eventlog/turso.py:456`).
+# The transport tries `import libsql` first, falling back to `import libsql_experimental` — both share the same connect surface (see `astrid/core/timeline/eventlog/turso.py` `LibSqlHttpTransport._ensure_client`).
 ```
-`grep -rn "turso" astrid --exclude-dir=__pycache__ | grep -v test` shows only `astrid/core/timeline/eventlog/turso.py`, `astrid/core/timeline/turso_sync.py`, `astrid/core/timeline/sync_divergence.py` (legitimate divergence seam at :80), and this doc/env seams — no pub-sub, no websocket, no LWW.
+`grep -rin "turso" astrid --exclude-dir=__pycache__ | grep -v test` shows only `astrid/core/timeline/eventlog/turso.py`, `astrid/core/timeline/turso_sync.py`, `astrid/core/timeline/sync_divergence.py` (legitimate divergence seam at :80), and this doc/env seams — no pub-sub, no websocket, no LWW.
 
 ## 4. Driver install (optional dep)
 
@@ -129,8 +129,8 @@ Run `pull_from_turso` + `push_to_turso` on a timer (e.g. every 15–30s per time
 - pushes as one atomic batched transaction: document CAS (`WHERE documents.version = ?`) plus guarded conditional event inserts (`INSERT ... SELECT ... WHERE EXISTS (document version+document_json+name)`) inside the same `execute_batch` so a losing CAS commits zero events; `FakeTursoTransport` emulates the same atomicity, `LibSqlHttpTransport` prefers native `execute_batch` and falls back to `BEGIN`/`COMMIT`; content-aware post-batch verification raises typed `TursoVersionRaceError` as belt-and-braces;
 - on pull, if `remote version == local known` → no-op; if `local unchanged and remote newer` → applies through `UnitOfWork`/`append_imported_event` (preserves ids via `source_event_id` provenance, or remaps with continuity — documented in `turso_sync.py` as import-remap; tested via `tests/timeline/test_turso_sync.py::TestPullCleanApply::test_pull_clean_applies_via_uow`);
 - if both diverged → writes `divergence-*.json` artifacts via `sync_divergence.write_keep_both_artifact` (primary, full your-copy/their-copy event payloads + `skipped_rows` diagnostics), returns `conflict`, never overwrites, never merges, never LWW.
-  - attribution boundary: remote attribution collapses to the sync agent on apply — pulled events are hard-coded to `system`/`turso-sync:pull` (see `turso_sync.py:1237` via `append_imported_event`); the replicated `actor_kind`/`actor_id` columns are preserved only inside the divergence artifact, not on the imported row (asserted in `tests/regression/test_s4_rework1_regressions.py::TestAttributionCollapsed`).
-  - crash-resume semantics: pull resume compares remote event_id against local `source_event_id` falling back to `event_id` (identity-faithful); distinct same-bytes/different-id histories fork (`conflict`+artifact), while a previously pulled import (source_event_id == remote id) reconciles clean to `up_to_date` with zero artifacts and zero remote writes; push resume stays strictly `event_id` identity-based.
+  - attribution boundary: remote attribution collapses to the sync agent on apply — pulled events are hard-coded to `system`/`turso-sync:pull` (see `turso_sync.py` via `append_imported_event` / `pull_from_turso`); the replicated `actor_kind`/`actor_id` columns are preserved only inside the divergence artifact, not on the imported row (asserted in `tests/regression/test_s4_rework1_regressions.py::TestAttributionCollapsed`).
+  - crash-resume semantics: pull resume compares remote event_id against local `source_event_id` falling back to `event_id` (identity-faithful); distinct same-bytes/different-id histories fork (`conflict`+artifact), while a previously pulled import (source_event_id == remote id) reconciles clean to `up_to_date` with zero artifacts and zero remote writes; if the local suffix beyond the bookmark byte-equals a strict prefix of the unacked remote suffix, the remainder is applied honestly as `pulled` (count = remainder length) with zero artifacts and zero remote writes (prefix-reconcile, rework-13); push resume stays strictly `event_id` identity-based.
 
 ## 7. Observability
 

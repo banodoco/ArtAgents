@@ -49,7 +49,7 @@ def _event_params(event_id: str, payload: str = '{"a":1}', seq: int = 1) -> tupl
 def _doc_sql() -> str:
     cols = ", ".join(DOCUMENT_REPLICA_COLUMNS)
     placeholders = ", ".join("?" for _ in DOCUMENT_REPLICA_COLUMNS)
-    return f"INSERT INTO documents ({cols}) VALUES ({placeholders})"
+    return f"INSERT INTO documents ({cols}) VALUES ({placeholders}) ON CONFLICT(timeline_id) DO UPDATE SET name=excluded.name, document_json=excluded.document_json, version=excluded.version, updated_at=excluded.updated_at"
 
 
 def _event_sql() -> str:

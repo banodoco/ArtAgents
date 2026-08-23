@@ -273,10 +273,16 @@ class FakeTursoTransport:
                     existing["version"] = row["version"]
                     existing["updated_at"] = row["updated_at"]
                 elif existing is not None:
-                    existing["name"] = row["name"]
-                    existing["document_json"] = row["document_json"]
-                    existing["version"] = row["version"]
-                    existing["updated_at"] = row["updated_at"]
+                    # Fidelity: plain INSERT (no ON CONFLICT) must raise UNIQUE;
+                    # ON CONFLICT upsert is allowed to overwrite.
+                    is_upsert = "on conflict" in s
+                    if is_upsert:
+                        existing["name"] = row["name"]
+                        existing["document_json"] = row["document_json"]
+                        existing["version"] = row["version"]
+                        existing["updated_at"] = row["updated_at"]
+                    else:
+                        raise TursoError(f"UNIQUE constraint failed: documents.timeline_id={tid!r} (plain insert violates PK)")  # noqa: E501
                 else:
                     # New document — CAS expected is ignored (no conflict)
                     staged_documents[tid] = dict(row)
@@ -312,6 +318,11 @@ class FakeTursoTransport:
                 eid = str(row["event_id"])
                 if eid in staged_events:
                     raise TursoError(f"duplicate event_id: {eid!r} violates PK")
+                # F2: FK fidelity — plain inserts must reference existing document
+                if guard_info is None:
+                    evt_tid = str(row.get("timeline_id", ""))
+                    if evt_tid not in staged_documents:
+                        raise TursoError(f"FOREIGN KEY constraint failed: events.timeline_id={evt_tid!r} references missing documents.timeline_id")  # noqa: E501
                 if guard_info is not None:
                     guard_tid, guard_version, guard_doc_json, guard_name = guard_info
                     doc = staged_documents.get(guard_tid)
