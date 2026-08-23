@@ -111,3 +111,31 @@ def test_config_schema_reconstructs_from_pinned_bytes_with_zero_drift() -> None:
         "recorded wgp_config.json schema disagrees with pinned bytes; "
         "reconstruct DEFAULT_SERVER_CONFIG against the pin"
     )
+
+
+def test_full_pipeline_driver_reports_all_five_gates() -> None:
+    from astrid.core.integrations.reigh.wgp_gates import (
+        gates_passed,
+        run_pipeline,
+    )
+
+    reports = run_pipeline(
+        checkout=_checkout_or_skip(),
+        conversion_fixtures_dir=Path(__file__).parent
+        / "fixtures"
+        / "wgp_conversion",
+        output_corpus_path=Path(__file__).parent
+        / "fixtures"
+        / "wgp_corpus"
+        / "corpus.json",
+    )
+    assert set(reports) == {1, 2, 3, 4, 5}
+    assert gates_passed(reports), {
+        gate: [leg.name for leg in report.legs if leg.status == "failed"]
+        for gate, report in reports.items()
+    }
+    # The CUDA-dependent remainder is explicit in the evidence, not hidden.
+    skipped = {
+        gate: [leg.name for leg in report.skipped] for gate, report in reports.items()
+    }
+    assert skipped[5], "semantic-diff legs must be recorded blocked(CUDA)"

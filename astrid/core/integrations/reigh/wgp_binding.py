@@ -87,7 +87,12 @@ def build_store() -> BuildManifestStore:
 
 def _fence_build(store: BuildManifestStore) -> tuple[Any, str]:
     """Prove the installed build matches the vendored pin; return digest."""
-    manifest = store.require_current()
+    from .wgp_build import BuildManifestError
+
+    try:
+        manifest = store.require_current()
+    except BuildManifestError as exc:
+        raise BuildFenceMismatch(str(exc)) from None
     if manifest.wan2gp_sha != PINNED_WAN2GP_SHA:
         raise BuildFenceMismatch(
             f"installed build manifest targets {manifest.wan2gp_sha} but "
