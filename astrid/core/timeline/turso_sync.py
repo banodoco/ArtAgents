@@ -142,9 +142,9 @@ def _write_state_typed(timeline_home: str | Path, state: TursoSyncState) -> Path
     except TursoSyncError:
         raise
     except OSError as exc:
-        raise TursoSyncError(f"turso sync state write failed at {timeline_home}: {exc}") from exc
+        raise TursoSyncError(f"turso sync state write failed at {timeline_home}: {exc}") from exc  # noqa: E501
     except Exception as exc:
-        raise TursoSyncError(f"turso sync state write failed at {timeline_home}: {exc}") from exc
+        raise TursoSyncError(f"turso sync state write failed at {timeline_home}: {exc}") from exc  # noqa: E501
 
 
 def _local_payload_json_for_event(timeline_id: str, event_id: str, projects_root: Path) -> str | None:  # noqa: E501
@@ -1107,7 +1107,12 @@ def push_to_turso(
                     updated_at=utc_now_iso(),
                     last_pushed_event_id=inferred or (state.last_pushed_event_id if state else None),  # noqa: E501
                 )
-                _write_state_typed(timeline_home, resume_state)
+                try:
+                    _write_state_typed(timeline_home, resume_state)
+                except TursoSyncError:
+                    raise
+                except Exception as exc:
+                    raise TursoSyncError(f"turso sync state write failed at {timeline_home}: {exc}") from exc  # noqa: E501
                 # Honest: only up_to_date if remote head matches proven boundary (not tautology)
                 if fresh_remote.version != resume_state.remote_version or fresh_remote.last_event_id != resume_state.remote_event_id:  # noqa: E501
                     return TursoSyncResult(action="pushed", timeline_id=timeline_id, local_version=fresh_local.version, remote_version=resume_state.remote_version, pushed=0)  # noqa: E501
@@ -1149,6 +1154,39 @@ def push_to_turso(
             )
         except Exception as exc:
             raise TursoSyncError(f"failed to read remote suffix for fork: {exc}") from exc
+        # F4: convergent heads must not fork — gate before artifact
+        try:
+            if _heads_provenance_equivalent(timeline_id, local_head, remote_head, backend, root):
+                _ldoc_gate = _read_local_document_snapshot(timeline_id, root).document_json
+                _rdoc_gate = _fetch_remote_document_json_strict(replica, timeline_id)
+                if _rdoc_gate is not None and _documents_structurally_equal(_ldoc_gate, _rdoc_gate):
+                    try:
+                        _fl_gate = _local_head_snapshot(backend)
+                        _fr_gate = _remote_head_snapshot(replica, timeline_id)
+                        _healed_gate = TursoSyncState(
+                            timeline_id=timeline_id,
+                            local_version=_fl_gate.version,
+                            local_event_id=_fl_gate.last_event_id,
+                            local_hash=_fl_gate.last_hash,
+                            remote_version=_fl_gate.version,
+                            remote_event_id=_fr_gate.last_event_id or _fl_gate.last_event_id,
+                            remote_hash=_fr_gate.last_hash or _fl_gate.last_hash,
+                            updated_at=utc_now_iso(),
+                            last_pushed_event_id=state.last_pushed_event_id if state else None,
+                        )
+                    except Exception as exc:
+                        raise TursoSyncError(f"push heal state build failed: {exc}") from exc
+                    try:
+                        _write_state_typed(timeline_home, _healed_gate)
+                    except TursoSyncError:
+                        raise
+                    except Exception as exc:
+                        raise TursoSyncError(f"turso sync state write failed at {timeline_home}: {exc}") from exc  # noqa: E501
+                    return TursoSyncResult(action="up_to_date", timeline_id=timeline_id, local_version=_fl_gate.version, remote_version=_healed_gate.remote_version)  # noqa: E501
+        except TursoSyncError:
+            raise
+        except Exception:
+            pass
         # map remote rows to TimelineEvents with full payloads — record skips (mirror pull)
         remote_suffix: list[TimelineEvent] = []
         skipped_rows: list[dict[str, Any]] = []
@@ -1605,7 +1643,12 @@ def pull_from_turso(
                     )
                 except Exception as exc:
                     raise TursoSyncError(f"pull resume state build failed: {exc}") from exc
-                _write_state_typed(timeline_home, resume_state)
+                try:
+                    _write_state_typed(timeline_home, resume_state)
+                except TursoSyncError:
+                    raise
+                except Exception as exc:
+                    raise TursoSyncError(f"turso sync state write failed at {timeline_home}: {exc}") from exc  # noqa: E501
                 # Honest: if refreshed head exceeds proven boundary, do NOT return up_to_date
                 if fresh_remote.version != resume_state.remote_version or fresh_remote.last_event_id != resume_state.remote_event_id:  # noqa: E501
                     return TursoSyncResult(
@@ -1733,7 +1776,12 @@ def pull_from_turso(
                         updated_at=utc_now_iso(),
                         last_pushed_event_id=state.last_pushed_event_id if state else None,
                     )
-                    _write_state_typed(timeline_home, new_state)
+                    try:
+                        _write_state_typed(timeline_home, new_state)
+                    except TursoSyncError:
+                        raise
+                    except Exception as exc:
+                        raise TursoSyncError(f"turso sync state write failed at {timeline_home}: {exc}") from exc  # noqa: E501
                     return TursoSyncResult(
                         action="pulled",
                         timeline_id=timeline_id,
@@ -1745,7 +1793,39 @@ def pull_from_turso(
                 raise
             except Exception:
                 pass
-
+        # F4: convergent heads must not fork — gate before artifact
+        try:
+            if _heads_provenance_equivalent(timeline_id, local_head, remote_head, backend, root):
+                _ldoc_gate = _read_local_document_snapshot(timeline_id, root).document_json
+                _rdoc_gate = _fetch_remote_document_json_strict(replica, timeline_id)
+                if _rdoc_gate is not None and _documents_structurally_equal(_ldoc_gate, _rdoc_gate):
+                    try:
+                        _fl_gate = _local_head_snapshot(backend)
+                        _fr_gate = _remote_head_snapshot(replica, timeline_id)
+                        _healed_gate = TursoSyncState(
+                            timeline_id=timeline_id,
+                            local_version=_fl_gate.version,
+                            local_event_id=_fl_gate.last_event_id,
+                            local_hash=_fl_gate.last_hash,
+                            remote_version=_fl_gate.version,
+                            remote_event_id=_fr_gate.last_event_id or _fl_gate.last_event_id,
+                            remote_hash=_fr_gate.last_hash or _fl_gate.last_hash,
+                            updated_at=utc_now_iso(),
+                            last_pushed_event_id=state.last_pushed_event_id if state else None,
+                        )
+                    except Exception as exc:
+                        raise TursoSyncError(f"pull heal state build failed: {exc}") from exc
+                    try:
+                        _write_state_typed(timeline_home, _healed_gate)
+                    except TursoSyncError:
+                        raise
+                    except Exception as exc:
+                        raise TursoSyncError(f"turso sync state write failed at {timeline_home}: {exc}") from exc  # noqa: E501
+                    return TursoSyncResult(action="up_to_date", timeline_id=timeline_id, local_version=_fl_gate.version, remote_version=_healed_gate.remote_version)  # noqa: E501
+        except TursoSyncError:
+            raise
+        except Exception:
+            pass
         # Map remote rows to TimelineEvents for artifact; record skips inside artifact
         remote_suffix: list[TimelineEvent] = []
         skipped_rows: list[dict[str, Any]] = []
