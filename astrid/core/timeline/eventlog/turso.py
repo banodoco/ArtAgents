@@ -292,6 +292,13 @@ class FakeTursoTransport:
             for i in sorted(self.indexes):
                 rows.append({"type": "index", "name": i})
             return rows
+        if "select count" in s and "from events" in s:
+            tid = params[0] if params else None
+            if tid:
+                cnt = sum(1 for v in self.events.values() if str(v.get("timeline_id")) == str(tid))
+            else:
+                cnt = len(self.events)
+            return [{"cnt": cnt}]
         if "from documents" in s and "where timeline_id" in s:
             tid = params[0] if params else None
             row = self.documents.get(str(tid)) if tid else None
@@ -312,13 +319,6 @@ class FakeTursoTransport:
             rows = list(self.events.values())
             rows.sort(key=lambda r: (str(r.get("timeline_id")), int(r.get("seq", 0))))
             return [dict(r) for r in rows]
-        if "select count" in s and "from events" in s:
-            tid = params[0] if params else None
-            if tid:
-                cnt = sum(1 for v in self.events.values() if str(v.get("timeline_id")) == str(tid))
-            else:
-                cnt = len(self.events)
-            return [{"cnt": cnt}]
         return []
 
     def close(self) -> None:
@@ -364,20 +364,27 @@ class LibSqlHttpTransport:
     def _ensure_client(self) -> Any:
         if self._client is not None:
             return self._client
-        try:
-            import libsql  # type: ignore[import-not-found]
-        except Exception as exc:
+        libsql_mod = None
+        last_exc: Exception | None = None
+        for mod_name in ("libsql", "libsql_experimental"):
+            try:
+                libsql_mod = __import__(mod_name)
+                break
+            except ImportError as exc:
+                last_exc = exc
+                continue
+        if libsql_mod is None:
             raise TursoConfigError(
-                "libsql driver is not installed — install with: pip install libsql-experimental "
-                "(or libsql) and set TURSO_DATABASE_URL / TURSO_AUTH_TOKEN"
-            ) from exc
-        # lazy connect; libsql-experimental exposes libsql.connect(url, authToken=token)
+                "libsql driver is not installed — install with: pip install libsql-experimental "  # noqa: E501
+                "(provides libsql_experimental; libsql also accepted) and set TURSO_DATABASE_URL / TURSO_AUTH_TOKEN"  # noqa: E501
+            ) from last_exc
+        # lazy connect; both libsql and libsql_experimental expose libsql.connect(url, authToken=token)  # noqa: E501
         try:
             # try libsql.connect signature
-            self._client = libsql.connect(database=self._url, auth_token=self._token)  # type: ignore[attr-defined]
+            self._client = libsql_mod.connect(database=self._url, auth_token=self._token)  # type: ignore[attr-defined]
         except TypeError:
             try:
-                self._client = libsql.connect(self._url, authToken=self._token)  # type: ignore[attr-defined]
+                self._client = libsql_mod.connect(self._url, authToken=self._token)  # type: ignore[attr-defined]
             except Exception as exc:
                 raise TursoConfigError(f"failed to connect to Turso at {self._url}: {exc}") from exc
         except Exception as exc:
@@ -476,12 +483,16 @@ class TursoReplicaClient:
         self._transport = transport
 
     # -- helpers -------------------------------------------------------------
-
     def _document_upsert_sql(self) -> str:
         cols = ", ".join(DOCUMENT_REPLICA_COLUMNS)
         placeholders = ", ".join("?" for _ in DOCUMENT_REPLICA_COLUMNS)
-        # SQLite upsert: INSERT OR REPLACE (Turso supports it)
-        return f"INSERT OR REPLACE INTO documents ({cols}) VALUES ({placeholders})"
+        # Use ON CONFLICT to preserve FK child rows (events) — NEVER REPLACE
+        return (
+            f"INSERT INTO documents ({cols}) VALUES ({placeholders}) "
+            "ON CONFLICT(timeline_id) DO UPDATE SET "
+            "name=excluded.name, document_json=excluded.document_json, "
+            "version=excluded.version, updated_at=excluded.updated_at"
+        )
 
     def _event_upsert_sql(self) -> str:
         cols = ", ".join(EVENT_REPLICA_COLUMNS)

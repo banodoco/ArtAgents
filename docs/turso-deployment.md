@@ -67,10 +67,11 @@ export TURSO_AUTH_TOKEN="eyJ..."   # turso db tokens create output
 Absent env → `TursoConfigError` with actionable message (no silent fallback). The driver itself is optional:
 
 ```bash
-pip install libsql-experimental   # or libsql; not in default install
+pip install libsql-experimental   # provides `libsql_experimental` (Turso HTTP client); `libsql` also accepted
 # Without it, first operation (execute_batch/query) raises TursoConfigError:
 #   "libsql driver is not installed — install with: pip install libsql-experimental ..."
 # LibSqlHttpTransport() construction succeeds with env set; the driver is loaded lazily at first use.
+# The transport accepts either `import libsql` or `import libsql_experimental` (fallback) — both share the same connect surface.
 ```
 `grep -rn "turso" astrid | grep -v test` shows only `astrid/core/timeline/eventlog/turso.py`, `astrid/core/timeline/turso_sync.py`, and this doc/env seams — no pub-sub, no websocket, no LWW.
 

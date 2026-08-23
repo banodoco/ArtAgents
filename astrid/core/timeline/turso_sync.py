@@ -355,8 +355,9 @@ def push_to_turso(
             )
         except Exception as exc:
             raise TursoSyncError(f"failed to read remote suffix for fork: {exc}") from exc
-        # map remote rows to TimelineEvents with full payloads
+        # map remote rows to TimelineEvents with full payloads — record skips (mirror pull)
         remote_suffix: list[TimelineEvent] = []
+        skipped_rows: list[dict[str, Any]] = []
         for r in remote_suffix_rows:
             try:
                 payload_obj = json.loads(str(r.get("payload_json", "{}")))
@@ -376,8 +377,14 @@ def push_to_turso(
                     txn_id=str(r.get("txn_id", "")),
                 )
                 remote_suffix.append(ev)
-            except Exception:
+            except Exception as exc:
+                skipped_rows.append({"event_id": str(r.get("event_id", "")), "error": str(exc)})
                 continue
+        # If entire remote suffix failed to decode, fail closed with typed error
+        if remote_suffix_rows and not remote_suffix and len(skipped_rows) == len(remote_suffix_rows):  # noqa: E501
+            raise TursoSyncError(
+                f"remote suffix entirely undecodable ({len(skipped_rows)} rows): {skipped_rows[0]['error']}"  # noqa: E501
+            )
         # Build artifact via write_keep_both_artifact with honest backend names.
         # Destination must be local (sqlite/local_fs) so artifact lands under timeline_home.
         @dataclass(frozen=True)
@@ -406,6 +413,29 @@ def push_to_turso(
             raise TursoSyncError(f"failed to write keep-both artifact for fork: {exc}") from exc
         if artifact is None:
             raise TursoSyncError("fork artifact write returned None — failing closed")
+        # Inject skipped_rows diagnostic and re-wrap suffixes with full payloads
+        try:
+            art_path = Path(str(getattr(artifact, "path", "")))
+            if art_path.exists():
+                raw = read_json(art_path)
+                if isinstance(raw, dict) and skipped_rows:
+                    raw["skipped_rows"] = skipped_rows
+                    write_json_atomic(art_path, raw)
+            diag_path = art_path.with_name(art_path.stem + ".diagnostic.json")
+            diag_payload = {
+                "kind": "sync_divergence_diagnostic",
+                "created_at": utc_now_milliseconds(),
+                "timeline_id": timeline_id,
+                "local_suffix": [{"event_id": e.event_id, "kind": e.kind} for e in local_suffix],
+                "remote_suffix": [{"event_id": e.event_id, "kind": e.kind} for e in remote_suffix],
+                "skipped_rows": skipped_rows,
+            }
+            try:
+                write_json_atomic(diag_path, diag_payload)
+            except Exception:
+                pass
+        except Exception as exc:
+            raise TursoSyncError(f"failed to finalize fork artifact diagnostics: {exc}") from exc
         return TursoSyncResult(
             action="conflict",
             timeline_id=timeline_id,
