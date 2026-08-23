@@ -1,6 +1,6 @@
 """Single kernel reader helper (R3.2).
 
-ONE store, ONE path: callers that previously opened ``kernel.sqlite3`` with
+ONE store, ONE path: callers that previously opened legacy databases with
 raw ``sqlite3.connect(..., mode=ro)`` now call these two helpers, which open
 through :func:`astrid.core.store.database.open_database` (read-only, probe)
 and resolve ``slug ↔ ULID`` project identity once.
@@ -16,21 +16,9 @@ from astrid.core.foundation.project_paths import resolve_projects_root
 
 
 def _db_path(projects_root: Path) -> Path | None:
-    # Canonical layouts:
-    # - tests / legacy:  <root>/kernel.sqlite3
-    # - app:             <root>/.astrid/astrid.sqlite3  or  <root>/.astrid/kernel.sqlite3
-    # Prefer the file that exists; fall back to kernel.sqlite3 default for callers that check is_file.
-    candidates = [
-        projects_root / "kernel.sqlite3",
-        projects_root / ".astrid" / "astrid.sqlite3",
-        projects_root / ".astrid" / "kernel.sqlite3",
-        projects_root / "astrid.sqlite3",
-    ]
-    for cand in candidates:
-        if cand.is_file():
-            return cand
-    # default probe location for open_database error path
-    return candidates[0]
+    from astrid.core.integrations.reigh.bridge_service import derive_database_path
+
+    return derive_database_path(projects_root)
 
 
 def _resolve_project_id(conn: sqlite3.Connection, slug: str) -> str | None:
@@ -64,12 +52,10 @@ def kernel_run_info(
     if db_path is None or not db_path.is_file():
         return None
     try:
-        from astrid.core.events.registry import core_only_registry
-        from astrid.core.store.database import open_database
+        from astrid.application import open_standard_read_connection
 
-        registry = core_only_registry()
-        conn = open_database(db_path, registry, read_only=True)
-    except (sqlite3.Error, FileNotFoundError, OSError):
+        conn = open_standard_read_connection(pr)
+    except (sqlite3.Error, FileNotFoundError, OSError, RuntimeError):
         return None
     try:
         conn.row_factory = sqlite3.Row
@@ -144,12 +130,10 @@ def kernel_runs_for_project(
     if db_path is None or not db_path.is_file():
         return []
     try:
-        from astrid.core.events.registry import core_only_registry
-        from astrid.core.store.database import open_database
+        from astrid.application import open_standard_read_connection
 
-        registry = core_only_registry()
-        conn = open_database(db_path, registry, read_only=True)
-    except (sqlite3.Error, FileNotFoundError, OSError):
+        conn = open_standard_read_connection(pr)
+    except (sqlite3.Error, FileNotFoundError, OSError, RuntimeError):
         return []
     try:
         conn.row_factory = sqlite3.Row

@@ -3,20 +3,21 @@ import io
 import json
 from pathlib import Path
 
-from astrid.packs.video_editing.orchestrators.iteration_video import run as iteration_video
-from astrid.packs.video_editing.orchestrators.iteration_video import plan_template
 from astrid.core.execution.orchestrator.runner import OrchestratorRunRequest, run_orchestrator
 from astrid.core.project.project import create_project
 from astrid.core.threads.index import ThreadIndexStore
 from astrid.core.threads.schema import make_thread_record
-
+from astrid.packs.video_editing.orchestrators.iteration_video import plan_template
+from astrid.packs.video_editing.orchestrators.iteration_video import run as iteration_video
 
 THREAD_ID = "01ARZ3NDEKTSV4RRFFQ69G5FV0"
 TARGET_RUN_ID = "01ARZ3NDEKTSV4RRFFQ69G5FV1"
 ROOT_RUN_ID = "01ARZ3NDEKTSV4RRFFQ69G5FV2"
 
 
-def test_iteration_video_renders_hype_adapter_and_records_five_output_variant_group(tmp_path: Path, monkeypatch) -> None:
+def test_iteration_video_renders_attached_and_records_six_output_variant_group(
+    tmp_path: Path, monkeypatch
+) -> None:
     repo = tmp_path
     projects_root = repo / "projects"
     out_dir = repo / "runs" / "iteration-video"
@@ -56,6 +57,7 @@ def test_iteration_video_renders_hype_adapter_and_records_five_output_variant_gr
                 out=out_dir,
                 project="demo",
                 project_was_auto_resolved=True,
+                run_root=out_dir,
                 inputs={"thread": THREAD_ID, "target_run_id": TARGET_RUN_ID, "repo_root": str(repo)},
                 orchestrator_args=(
                     "--max-iterations",
@@ -78,6 +80,7 @@ def test_iteration_video_renders_hype_adapter_and_records_five_output_variant_gr
     render_kwargs = forwarded["render_kwargs"]
     assert render_kwargs["engine"] == "rendering.fixture"
     assert render_kwargs["project_slug"] == "demo"
+    assert render_kwargs["parent_run_id"] == out_dir.name
     assert render_kwargs["step_id"] == "iteration-render"
     assert (out_dir / "iteration.mp4").read_bytes() == b"rendered-mp4"
     assert _read_json(out_dir / "iteration.mp4.provenance.json")["output"] == str(
@@ -89,8 +92,7 @@ def test_iteration_video_renders_hype_adapter_and_records_five_output_variant_gr
 
     assert not (out_dir / "run.json").exists()
     run_records = sorted((projects_root / "demo" / "runs").glob("*/run.json"))
-    assert len(run_records) == 1
-    assert _read_json(run_records[0])["tool_id"] == "video_editing.iteration_video"
+    assert run_records == []
     sidecar = _read_json(out_dir / ".astrid.variants.json")
     variant_artifacts = [artifact for artifact in sidecar["artifacts"] if artifact.get("role") == "variant"]
     assert sorted(Path(item["path"]).name for item in variant_artifacts) == [

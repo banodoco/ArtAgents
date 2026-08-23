@@ -40,8 +40,8 @@ from scripts.reshape.check_pack_factoring import (
     check_removal,
 )
 
-LANE_TIMEOUT = 90
-"""Generous per-lane pytest bound; the measured lane wall time is ~32s."""
+LANE_TIMEOUT = 180
+"""Bounded per-lane budget that tolerates concurrent local release gates."""
 
 
 # ---------------------------------------------------------------------------

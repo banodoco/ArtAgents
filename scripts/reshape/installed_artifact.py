@@ -22,7 +22,6 @@ import shlex
 import shutil
 import subprocess
 import sys
-import sysconfig
 import tempfile
 import zipfile
 from dataclasses import dataclass
@@ -31,9 +30,10 @@ from email.parser import Parser
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-
 SCHEMA = "astrid.installed_artifact.v1"
 DEFAULT_DISTRIBUTION = "astrid"
+BUILD_LOCK = Path("requirements/build.lock")
+RUNTIME_LOCK = Path("requirements/runtime.lock")
 
 
 class InstalledArtifactError(RuntimeError):
@@ -421,6 +421,7 @@ import astrid
 import importlib.metadata
 import json
 import sys
+import sysconfig
 
 print(json.dumps({
     "executable": sys.executable,
@@ -428,6 +429,7 @@ print(json.dumps({
     "version": importlib.metadata.version("astrid"),
     "prefix": sys.prefix,
     "base_prefix": sys.base_prefix,
+    "purelib": sysconfig.get_path("purelib"),
     "sys_path": sys.path,
 }))
 """
@@ -514,15 +516,65 @@ class InstalledArtifactHarness:
 
         source_snapshot = workspace_path / "source"
         dist_dir = workspace_path / "dist"
+        build_venv_dir = workspace_path / "build-venv"
         venv_dir = workspace_path / "venv"
         try:
             shutil.copytree(root, source_snapshot, ignore=_copy_ignore)
             dist_dir.mkdir(parents=True, exist_ok=True)
+            build_lock = source_snapshot / BUILD_LOCK
+            runtime_lock = source_snapshot / RUNTIME_LOCK
+            for lock in (build_lock, runtime_lock):
+                if not lock.is_file():
+                    raise InstalledArtifactError(f"required hashed lock is missing: {lock}")
+
+            build_venv_result = subprocess.run(
+                [
+                    str(python_executable or sys.executable),
+                    "-m",
+                    "venv",
+                    str(build_venv_dir),
+                ],
+                cwd=workspace_path,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if build_venv_result.returncode != 0:
+                raise InstalledArtifactError(
+                    "isolated build venv creation failed:\n"
+                    + _redact_output(build_venv_result.stdout + build_venv_result.stderr)
+                )
+            build_python = build_venv_dir / (
+                "Scripts/python.exe" if os.name == "nt" else "bin/python"
+            )
+            build_install = subprocess.run(
+                [
+                    str(build_python),
+                    "-m",
+                    "pip",
+                    "install",
+                    "--disable-pip-version-check",
+                    "--no-input",
+                    "--require-hashes",
+                    "-r",
+                    str(build_lock),
+                ],
+                cwd=workspace_path,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if build_install.returncode != 0:
+                raise InstalledArtifactError(
+                    "hashed build-tool installation failed:\n"
+                    + _redact_output(build_install.stdout + build_install.stderr)
+                )
             build_command = [
-                str(python_executable or sys.executable),
+                str(build_python),
                 "-m",
                 "build",
                 "--wheel",
+                "--no-isolation",
                 "--outdir",
                 str(dist_dir),
             ]
@@ -562,7 +614,7 @@ class InstalledArtifactHarness:
             if not child_python.is_file():
                 raise InstalledArtifactError(f"venv Python executable is missing: {child_python}")
 
-            install_command = [
+            install_base = [
                 str(child_python),
                 "-m",
                 "pip",
@@ -570,10 +622,6 @@ class InstalledArtifactHarness:
                 "--disable-pip-version-check",
                 "--no-input",
             ]
-            if not install_dependencies:
-                install_command.append("--no-deps")
-                install_command.append("--no-index")
-            install_command.append(str(artifact.path))
             install_env = {
                 "PATH": os.environ.get("PATH", os.defpath),
                 "HOME": str(workspace_path / "pip-home"),
@@ -585,6 +633,33 @@ class InstalledArtifactHarness:
             }
             Path(install_env["HOME"]).mkdir(parents=True, exist_ok=True)
             Path(install_env["TMPDIR"]).mkdir(parents=True, exist_ok=True)
+            if install_dependencies:
+                dependency_result = subprocess.run(
+                    [
+                        *install_base,
+                        "--require-hashes",
+                        "-r",
+                        str(runtime_lock),
+                    ],
+                    cwd=workspace_path,
+                    env=install_env,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                if dependency_result.returncode != 0:
+                    raise InstalledArtifactError(
+                        "hashed runtime dependency installation failed:\n"
+                        + _redact_output(
+                            dependency_result.stdout + dependency_result.stderr
+                        )
+                    )
+            install_command = [
+                *install_base,
+                "--no-deps",
+                "--no-index",
+                str(artifact.path),
+            ]
             install_result = subprocess.run(
                 install_command,
                 cwd=workspace_path,
@@ -598,6 +673,20 @@ class InstalledArtifactHarness:
                     "wheel installation failed:\n"
                     + _redact_output(install_result.stdout + install_result.stderr)
                 )
+            if install_dependencies:
+                check_result = subprocess.run(
+                    [str(child_python), "-m", "pip", "check"],
+                    cwd=workspace_path,
+                    env=install_env,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                if check_result.returncode != 0:
+                    raise InstalledArtifactError(
+                        "locked installed environment failed pip check:\n"
+                        + _redact_output(check_result.stdout + check_result.stderr)
+                    )
 
             roots = IsolatedRoots.create(workspace_path / "roots")
             harness = cls(
@@ -690,6 +779,7 @@ class InstalledArtifactHarness:
             version = str(payload["version"])
             prefix = Path(str(payload["prefix"])).expanduser().resolve()
             base_prefix = Path(str(payload["base_prefix"])).expanduser().resolve()
+            child_purelib = Path(str(payload["purelib"])).expanduser().resolve()
             sys_path = tuple(str(item) for item in payload["sys_path"])
         except (KeyError, TypeError, ValueError) as exc:
             raise ArtifactIdentityError(f"identity probe omitted required fields: {payload}") from exc
@@ -704,12 +794,8 @@ class InstalledArtifactHarness:
                 f"child interpreter is not an isolated venv: prefix={prefix}, base_prefix={base_prefix}"
             )
         purelib_candidates = {
-            Path(value).expanduser().resolve()
-            for value in {
-                sysconfig.get_path("purelib", vars={"base": str(prefix), "platbase": str(prefix)}),
-                str(prefix / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}" / "site-packages"),
-                str(prefix / "Lib" / "site-packages"),
-            }
+            child_purelib,
+            (prefix / "Lib" / "site-packages").resolve(),
         }
         if not any(_relative_to(import_path, candidate) for candidate in purelib_candidates):
             raise ArtifactIdentityError(

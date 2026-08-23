@@ -8,6 +8,6 @@
     "smoke": "node smoke.mjs"
   },
   "devDependencies": {
-    "playwright": "^1.62.1"
+    "playwright": "1.62.1"
   }
 }

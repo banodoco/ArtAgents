@@ -84,8 +84,6 @@ class RenderRemotionRegistryGenerationTest(unittest.TestCase):
             tmp = Path(tmp_text)
             project_root, project_dir, timeline_path, assets_path = self._copy_local_effect_smoke_project(tmp)
             out_path = tmp / "fixture-smoke.mp4"
-            real_local_effect = ROOT / "astrid" / "packs" / "local" / "elements" / "effects" / "model-trends"
-            self.assertTrue(real_local_effect.exists(), "test assumes the developer checkout has real local effects")
             discovered_effect_ids: list[str] = []
             registry_project_roots: list[Path] = []
             props_payloads: list[dict[str, object]] = []

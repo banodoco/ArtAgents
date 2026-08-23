@@ -560,12 +560,10 @@ def test_invoke_rejects_elements_and_missing_executor_project(
             )
 
 
-def test_invoke_executor_project_routing_allows_out_none_with_in_process_mode(
+def test_invoke_executor_project_routing_supplies_kernel_staging_in_process(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``sdk.invoke(kind="executor", project="demo", out=None, execution_mode="in_process")``
-    must construct an ``ExecutorRunRequest`` with ``project="demo"`` and ``out=None``
-    without raising ``CapabilityInvocationError`` about a missing out path."""
+    """Kernel admission owns the output path even for in-process execution."""
     astrid = _import_public_module()
     from astrid.core.execution.executor import runner as executor_runner
 
@@ -600,7 +598,8 @@ def test_invoke_executor_project_routing_allows_out_none_with_in_process_mode(
 
     assert captured_request["executor_id"] == "editorial.arrange"
     assert captured_request["project"] == "demo"
-    assert captured_request["out"] is None
+    assert isinstance(captured_request["out"], Path)
+    assert "/.astrid/media/.staging/" in captured_request["out"].as_posix()
     assert captured_request["execution_mode"] == "in_process"
     assert result.capability_id == "editorial.arrange"
     assert result.capability_type == "executor"

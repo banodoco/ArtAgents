@@ -4,11 +4,11 @@ Proves every must/should done criterion of the m6 sprint plan against the
 live tree, end to end:
 
 - ``serve`` boots a clean project: ``compose_standard_bridge`` on a fresh
-  ``tmp_path`` registers exactly the three in-tree schema packs and the
+  ``tmp_path`` registers exactly the four in-tree schema packs and the
   local bridge HTTP server answers ``GET /health``;
 - ``backup create`` -> destroy live data -> ``backup restore`` reopens with
-  matching state: table count (20), event-stream heads, and pack migration
-  state (core + timeline/shots/references) are byte-identical;
+  matching state: table count (21), event-stream heads, and pack migration
+  state (core + timeline/shots/references/runaway) are byte-identical;
 - ``doctor`` is clean (exit 0, every check ok) on a fresh project and on a
   restored project, and fails closed (exit 1, ``"ok": false``) when the
   database is deleted;
@@ -45,7 +45,7 @@ EXPECTED_FAMILIES: frozenset[str] = frozenset(
 """The exactly-eight top-level families (five product + three operational)."""
 
 EXPECTED_TABLE_COUNT = 21
-"""The frozen v10 schema table count (core + timeline/shots/references)."""
+"""The frozen v10 schema table count (core + four standard packs)."""
 
 
 def _destroy_live_data(root: Path) -> None:

@@ -21,17 +21,14 @@ from astrid.core._shared.capability_common import (
 )
 from astrid.core.contracts.capability_runner import CapabilityRunner
 from astrid.core.contracts.run_status import RunStatus
-from astrid.core.project.run import (
-    ProjectRunContext,
-    _project_subprocess_env,
-    finalize_project_run,
-    prepare_project_run,
-    project_run_env,
-    reject_project_with_out,
-)
 from astrid.core.project.guidance import (
     format_project_required_guidance,
     selected_project,
+)
+from astrid.core.project.run import (
+    ProjectRunContext,
+    _project_subprocess_env,
+    reject_project_with_out,
 )
 from astrid.core.runtime import (
     InProcessExecutionPreconditionError,
@@ -591,44 +588,12 @@ def _prepare_project_request(
             f"--project cannot be combined with passthrough --out for {orchestrator.id}"
         )
     if request.out in (None, ""):
-        # Test / in-process fallback: synthesize a filesystem run so ledger
-        # assertions pass for the two orchestrator tests. Real sdk.invoke
-        # paths provide --out via the kernel staging_dir, so this branch is
-        # not taken for kernel-first runs. For real user misuse (subprocess
-        # command without --out), preserve fail-closed ProjectRunError.
-        is_test_fallback = (
-            request.execution_mode == "in_process" or orchestrator.runtime.kind == "python"
+        from astrid.core.project.run import ProjectRunError
+
+        raise ProjectRunError(
+            f"orchestrator {orchestrator.id!r} requires --out or a kernel run"
         )
-        if not is_test_fallback:
-            from astrid.core.project.run import ProjectRunError
-
-            raise ProjectRunError(
-                f"orchestrator {orchestrator.id!r} requires --out or a kernel run"
-            )
-        try:
-            context = prepare_project_run(
-                request.project,
-                tool_id=orchestrator.id,
-                kind="orchestrator",
-                argv=_project_argv(request),
-                metadata={
-                    "dry_run": bool(request.dry_run),
-                    "project_resolution": "attached" if request.project_was_auto_resolved else "explicit",
-                },
-                root=request.projects_root,
-                auto_bound=False,
-                record_out=None,
-                requires_timeline=False if request.project_was_auto_resolved else None,
-                invocation=request.invocation,
-            )
-        except Exception as exc:
-            from astrid.core.project.run import ProjectRunError
-
-            raise ProjectRunError(
-                f"orchestrator {orchestrator.id!r} requires --out or a kernel run"
-            ) from exc
-        updated = _request_with_effective_out(request, orchestrator, context.run_root)
-        return context, replace(updated, run_root=context.run_root)
+    return None, request
 def _orchestrator_requires_output_path(orchestrator: OrchestratorDefinition) -> bool:
     return bool(orchestrator.metadata.get("requires_output_path"))
 
@@ -681,15 +646,11 @@ def _finalize_project_orchestrator(
     returncode: int | None,
     error: BaseException | str | None = None,
 ) -> None:
-    metadata = {"dry_run": bool(request.dry_run)}
-    finalize_project_run(
-        context,
-        status=status,
-        returncode=returncode,
-        error=error,
-        metadata=metadata,
-        artifact_roots=[context.run_root],
-    )
+    # Kernel admission owns the only durable run ledger.  A project-bound
+    # orchestrator receives its staging directory from that kernel run; the
+    # capability runner must never create or finalize a second filesystem
+    # ledger beside it.
+    return None
 
 def _resolve_project_request(
     request: OrchestratorRunRequest,

@@ -7,6 +7,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import shutil
+import uuid
 from collections.abc import Mapping
 from contextlib import redirect_stdout
 from io import StringIO
@@ -287,12 +290,98 @@ def _invocation_outputs(
 
 def _resolve_projects_root(project_root: str | Path | None, project: str | None) -> Path:
     from astrid.core.foundation.project_paths import resolve_projects_root
+
     if project_root is not None:
         return Path(project_root).expanduser().resolve()
+    return resolve_projects_root(None)
+
+
+def _promote_staged_run_outputs(
+    *,
+    projects_root: Path,
+    project_slug: str,
+    run_id: str,
+    staging_dir: Path,
+) -> Path:
+    """Atomically publish one successful task's output tree as its run root.
+
+    Handlers write only into the kernel-owned quarantine.  Once the task has
+    completed, the public artifact pack must live below the owning project's
+    kernel run, never below global ``.astrid/media/.staging``.  Copying into a
+    sibling temporary directory and renaming that complete tree makes readers
+    observe either no run artifact directory or the complete immutable pack.
+    """
+
+    from astrid.core.foundation.project_paths import run_dir
+
+    source = (staging_dir / "out").resolve()
+    if not source.is_dir():
+        raise RuntimeError(f"kernel staging output directory is missing: {source}")
+    for entry in source.rglob("*"):
+        if entry.is_symlink() or not (entry.is_file() or entry.is_dir()):
+            raise RuntimeError(f"kernel staging output contains an unsupported entry: {entry}")
+
+    destination = run_dir(project_slug, run_id, root=projects_root).resolve()
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if destination.exists():
+        if destination.is_dir() and not any(destination.iterdir()):
+            destination.rmdir()
+        else:
+            raise RuntimeError(f"kernel run artifact directory already exists: {destination}")
+
+    temporary = destination.parent / f".{run_id}.{uuid.uuid4().hex}.promoting"
     try:
-        return resolve_projects_root(None)
+        shutil.copytree(source, temporary)
+        os.replace(temporary, destination)
+        directory_fd = os.open(destination.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
     except Exception:
-        return Path.cwd().expanduser().resolve()
+        if temporary.exists():
+            shutil.rmtree(temporary)
+        raise
+    return destination
+
+
+def _rewrite_promoted_paths(
+    value: Any,
+    *,
+    staging_output: Path,
+    run_root: Path,
+) -> Any:
+    """Rewrite absolute public result paths from quarantine to the run root."""
+
+    if isinstance(value, str):
+        candidate = Path(value).expanduser()
+        if candidate.is_absolute():
+            try:
+                relative = candidate.resolve().relative_to(staging_output.resolve())
+            except ValueError:
+                return value
+            return str(run_root / relative)
+        return value
+    if isinstance(value, Mapping):
+        return {
+            str(key): _rewrite_promoted_paths(
+                item,
+                staging_output=staging_output,
+                run_root=run_root,
+            )
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [
+            _rewrite_promoted_paths(
+                item,
+                staging_output=staging_output,
+                run_root=run_root,
+            )
+            for item in value
+        ]
+    return value
+
 
 def _kernel_invoke(
     capability: Any,
@@ -304,20 +393,25 @@ def _kernel_invoke(
     outputs: Mapping[str, Any] | None,
 ) -> tuple[str, str, str, Path | None, dict[str, Any], bool, Any]:
     """Real kernel admission: RunRepository.create with compute_spec_hash idempotency, claim/start, handler, execute/complete."""
-    from astrid.core.repositories.tasks import compute_spec_hash
-    from astrid.core.store.uow import UnitOfWork
-    from astrid.core.store.writer import DatabaseWriter
     from astrid.core.events.service import EventAppendService
+    from astrid.core.integrations.reigh.bridge_service import derive_database_path
     from astrid.core.receipts.service import ReceiptService
-    from astrid.core.repositories.runs import RunRepository
-    from astrid.core.repositories.tasks import TaskRepository
-    from astrid.core.repositories.projects import ProjectRepository
     from astrid.core.repositories.media import MediaRepository
+    from astrid.core.repositories.projects import (
+        ProjectNotFoundError,
+        ProjectRepository,
+        ProjectSlugConflictError,
+    )
+    from astrid.core.repositories.runs import RunRepository
+    from astrid.core.repositories.tasks import TaskRepository, compute_spec_hash
+    from astrid.core.store.uow import UnitOfWork
     from astrid.core.task_executor import CapabilityTaskHandler, ExecutionService
-    from astrid.core.events.registry import core_only_registry
-    registry = core_only_registry()
-    db_path = Path(projects_root) / "kernel.sqlite3"
-    writer = DatabaseWriter(db_path, registry)
+    from astrid.packs import build_standard_registry, open_standard_writer
+
+    registry = build_standard_registry()
+    db_path = derive_database_path(projects_root)
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    writer = open_standard_writer(db_path, registry=registry)
     try:
         events = EventAppendService(registry)
         receipts = ReceiptService()
@@ -325,31 +419,78 @@ def _kernel_invoke(
         tasks = TaskRepository(events=events, receipts=receipts)
         projects = ProjectRepository(events=events, receipts=receipts)
         media_repo = MediaRepository(events=events, receipts=receipts, projects_root=projects_root)
-        project_id = project if project else "default"
+        project_ref = project if project else "default"
         try:
-            UnitOfWork(writer).run(lambda u: projects.create(u, slug=project_id, name=project_id, settings={}, idempotency_key=f"proj:{project_id}", project_id=project_id))
-        except Exception:
-            pass
-        spec_payload = {"capability_id": capability.id, "inputs": dict(inputs or {}), "outputs": dict(outputs or {}), "project": project, "kind": str(kind)}
-        idempotency_key = compute_spec_hash(spec_payload, [])
-        # Deterministic ids for idempotent replay: run_id derived from
-        # idempotency_key so identical retry returns same run_id via receipt
-        # (request_hash includes run_id). Child task_id also deterministic
-        # so request identity is stable; receipt replay returns same ids.
+            project_id = projects.resolve(writer, project_ref)
+        except ProjectNotFoundError:
+            generated_project_id = hashlib.sha256(f"project:{project_ref}".encode()).hexdigest()[
+                :26
+            ]
+            try:
+                created = UnitOfWork(writer).run(
+                    lambda u: projects.create(
+                        u,
+                        slug=project_ref,
+                        name=project_ref,
+                        settings={},
+                        idempotency_key=f"proj:{project_ref}",
+                        project_id=generated_project_id,
+                    )
+                )
+                project_id = created.id
+            except ProjectSlugConflictError:
+                project_id = projects.resolve(writer, project_ref)
+        project_row = UnitOfWork(writer).run(
+            lambda u: u.query_one("SELECT slug FROM projects WHERE id = ?", (project_id,))
+        )
+        if project_row is None:
+            raise RuntimeError(f"kernel project disappeared after resolution: {project_id!r}")
+        project_slug = str(project_row["slug"])
+        spec_payload = {
+            "capability_id": capability.id,
+            "inputs": dict(inputs or {}),
+            "outputs": dict(outputs or {}),
+            "project": project,
+            "kind": str(kind),
+        }
+        # ``invoke`` has no caller idempotency key, so each public call is a
+        # distinct run even when its semantic inputs are identical.  The
+        # per-call nonce still gives every repository command in this one
+        # drive a stable shared key and deterministic child identities.
+        idempotency_key = compute_spec_hash(
+            {"invocation_nonce": uuid.uuid4().hex, "request": spec_payload}, []
+        )
         deterministic_run_id = hashlib.sha256(f"run:{idempotency_key}".encode()).hexdigest()[:26]
-        deterministic_task_id = hashlib.sha256(f"task:{idempotency_key}:0".encode()).hexdigest()[:26]
-        child_spec = {"capability_id": capability.id, "inputs": dict(inputs or {}), "outputs": dict(outputs or {}), "project": project, "kind": str(kind)}
+        deterministic_task_id = hashlib.sha256(f"task:{idempotency_key}:0".encode()).hexdigest()[
+            :26
+        ]
+        child_spec = {
+            "capability_id": capability.id,
+            "inputs": dict(inputs or {}),
+            "outputs": dict(outputs or {}),
+            "project": project,
+            "kind": str(kind),
+        }
+
         def _create(u):
             return runs.create(
                 u,
                 project_id=project_id,
-                children=[{"capability": capability.id, "spec": child_spec, "input_manifest": [], "task_id": deterministic_task_id}],
+                children=[
+                    {
+                        "capability": capability.id,
+                        "spec": child_spec,
+                        "input_manifest": [],
+                        "task_id": deterministic_task_id,
+                    }
+                ],
                 idempotency_key=idempotency_key,
                 kind=capability.capability_type,
                 title=capability.id,
                 input=child_spec,
                 run_id=deterministic_run_id,
             )
+
         fanout = UnitOfWork(writer).run(_create)
         run_id = fanout.run_id
         task_id = fanout.task_ids[0] if fanout.task_ids else None
@@ -357,32 +498,62 @@ def _kernel_invoke(
             raise RuntimeError("kernel admission produced no task")
         # If run already terminal (idempotent replay after success), skip re-drive.
         # Query run status without receipt side-effects.
-        try:
-            row = UnitOfWork(writer).run(lambda u: u.query_one("SELECT status FROM runs WHERE id = ?", (run_id,)))
-            if row is not None and row["status"] in ("succeeded", "failed", "cancelled"):
-                # Derive winning attempt for stable return.
-                trow = UnitOfWork(writer).run(lambda u: u.query_one("SELECT winning_attempt_id FROM tasks WHERE id = ?", (task_id,)))
-                winning = trow["winning_attempt_id"] if trow is not None and trow["winning_attempt_id"] else f"{idempotency_key}:complete"
-                raw_result = {"ok": row["status"] == "succeeded", "run_id": run_id, "kernel_run_id": run_id, "kernel_task_id": task_id, "kernel_attempt_id": winning}
-                if row["status"] == "succeeded":
-                    # Try to recover staging dir for manifest
-                    mpath = None
-                    try:
-                        prow = UnitOfWork(writer).run(lambda u: u.query_one("SELECT progress_json FROM execution_attempts WHERE id = ?", (winning,)))
-                    except Exception:
-                        prow = None
-                    return run_id, task_id, winning, mpath, raw_result, row["status"] == "succeeded", None
-                return run_id, task_id, winning, None, raw_result, False, None
-        except Exception:
-            pass
+        row = UnitOfWork(writer).run(
+            lambda u: u.query_one("SELECT status FROM runs WHERE id = ?", (run_id,))
+        )
+        if row is not None and row["status"] in ("succeeded", "failed", "cancelled"):
+            # Derive the winning attempt for a stable idempotent return.
+            trow = UnitOfWork(writer).run(
+                lambda u: u.query_one(
+                    "SELECT winning_attempt_id FROM tasks WHERE id = ?", (task_id,)
+                )
+            )
+            winning = (
+                trow["winning_attempt_id"]
+                if trow is not None and trow["winning_attempt_id"]
+                else f"{idempotency_key}:complete"
+            )
+            from astrid.core.foundation.project_paths import run_dir
+
+            durable_run_root = run_dir(project_slug, run_id, root=projects_root).resolve()
+            raw_result = {
+                "ok": row["status"] == "succeeded",
+                "run_id": run_id,
+                "run_root": (str(durable_run_root) if durable_run_root.is_dir() else None),
+                "kernel_run_id": run_id,
+                "kernel_task_id": task_id,
+                "kernel_attempt_id": winning,
+            }
+            replay_manifest = _discover_invocation_manifest_path(raw_result, out=None)
+            return (
+                run_id,
+                task_id,
+                winning,
+                Path(replay_manifest) if replay_manifest is not None else None,
+                raw_result,
+                row["status"] == "succeeded",
+                None,
+            )
         claim_key = f"{idempotency_key}:claim"
-        claim = UnitOfWork(writer).run(lambda u: tasks.claim(u, project_id=project_id, idempotency_key=claim_key))
+        claim = UnitOfWork(writer).run(
+            lambda u: tasks.claim(u, project_id=project_id, idempotency_key=claim_key)
+        )
         if claim is None:
             # Idempotent replay after task already succeeded but run not yet
             # marked terminal (task succeeded before run derived status).
-            raw_result: dict[str, Any] = {"ok": True, "run_id": run_id, "kernel_run_id": run_id, "kernel_task_id": task_id, "kernel_attempt_id": claim_key}
+            raw_result: dict[str, Any] = {
+                "ok": True,
+                "run_id": run_id,
+                "kernel_run_id": run_id,
+                "kernel_task_id": task_id,
+                "kernel_attempt_id": claim_key,
+            }
             return run_id, task_id, claim_key, None, raw_result, True, None
-        handler = CapabilityTaskHandler(capability_kind=capability.capability_type, capability_id=capability.id, projects_root=projects_root)
+        handler = CapabilityTaskHandler(
+            capability_kind=capability.capability_type,
+            capability_id=capability.id,
+            projects_root=projects_root,
+        )
         svc = ExecutionService(projects_root=projects_root, task_repo=tasks)
         exec_res = svc.execute(
             UnitOfWork(writer),
@@ -395,22 +566,81 @@ def _kernel_invoke(
             handler=handler,
         )
         if exec_res.outcome == "failed":
-            raw_result: dict[str, Any] = {"ok": False, "run_id": run_id, "kernel_run_id": run_id, "kernel_task_id": task_id, "kernel_attempt_id": claim.attempt.id, "error": exec_res.error}
+            raw_result: dict[str, Any] = {
+                "ok": False,
+                "run_id": run_id,
+                "kernel_run_id": run_id,
+                "kernel_task_id": task_id,
+                "kernel_attempt_id": claim.attempt.id,
+                "error": exec_res.error,
+            }
             return run_id, task_id, claim.attempt.id, None, raw_result, False, None
         assert exec_res.prepared is not None
         prepared = exec_res.prepared
-        comp = svc.complete(UnitOfWork(writer), prepared=prepared, media_repo=media_repo, idempotency_key=f"{idempotency_key}:complete")
+        capability_result = handler.last_result
+        if capability_result is None:
+            raise RuntimeError("capability handler produced no public result")
+        if capability.capability_type == "executor":
+            raw_result = _normalize_executor_result(capability_result)
+        else:
+            raw_result = _normalize_orchestrator_result(capability_result)
+        comp = svc.complete(
+            UnitOfWork(writer),
+            prepared=prepared,
+            media_repo=media_repo,
+            idempotency_key=f"{idempotency_key}:complete",
+        )
         ok = comp.outcome == "completed"
-        raw_result = {"ok": ok, "run_id": run_id, "run_root": str(prepared.staging_dir), "kernel_run_id": run_id, "kernel_task_id": task_id, "kernel_attempt_id": prepared.attempt.id}
-        mpath = None
-        if prepared.manifest.outputs:
-            mpath = prepared.staging_dir / prepared.manifest.outputs[0].path
+        if not ok:
+            raw_result.update(
+                {
+                    "ok": False,
+                    "run_id": run_id,
+                    "kernel_run_id": run_id,
+                    "kernel_task_id": task_id,
+                    "kernel_attempt_id": prepared.attempt.id,
+                    "error": comp.error,
+                }
+            )
+            return (
+                run_id,
+                task_id,
+                prepared.attempt.id,
+                None,
+                raw_result,
+                False,
+                None,
+            )
+
+        durable_run_root = _promote_staged_run_outputs(
+            projects_root=projects_root,
+            project_slug=project_slug,
+            run_id=run_id,
+            staging_dir=prepared.staging_dir,
+        )
+        rewritten = _rewrite_promoted_paths(
+            raw_result,
+            staging_output=prepared.staging_dir / "out",
+            run_root=durable_run_root,
+        )
+        if not isinstance(rewritten, dict):  # pragma: no cover - mapping input
+            raise RuntimeError("promoted capability result is not an object")
+        raw_result = rewritten
+        raw_result.update(
+            {
+                "ok": True,
+                "run_id": run_id,
+                "run_root": str(durable_run_root),
+                "kernel_run_id": run_id,
+                "kernel_task_id": task_id,
+                "kernel_attempt_id": prepared.attempt.id,
+            }
+        )
+        manifest = _discover_invocation_manifest_path(raw_result, out=None)
+        mpath = Path(manifest) if manifest is not None else None
         return run_id, task_id, prepared.attempt.id, mpath, raw_result, ok, None
     finally:
-        try:
-            writer.close()
-        except Exception:
-            pass
+        writer.close()
 
 
 def invoke(
@@ -466,6 +696,7 @@ def invoke(
         try:
             if capability.capability_type == "executor":
                 from astrid.core.execution.executor.runner import ExecutorRunRequest
+
                 executor_registry, _, _ = registries
                 request = ExecutorRunRequest(
                     executor_id=capability.id,
@@ -488,6 +719,7 @@ def invoke(
                 raw_result = _normalize_executor_result(result)
             else:
                 from astrid.core.execution.orchestrator.runner import OrchestratorRunRequest
+
                 _, orchestrator_registry, _ = registries
                 request = OrchestratorRunRequest(
                     orchestrator_id=capability.id,
@@ -513,9 +745,15 @@ def invoke(
             mapped = _sdk_error_from_exception(exc)
             if mapped is not None:
                 raise mapped from exc
-            raise CapabilityInvocationError(f"failed to invoke {capability.capability_type} {capability.id!r}") from exc
+            raise CapabilityInvocationError(
+                f"failed to invoke {capability.capability_type} {capability.id!r}"
+            ) from exc
         internal_error = _internal_error_from_result(result)
-        error = _error_payload_from_internal_error(internal_error, json_safe=_json_safe) if internal_error is not None else None
+        error = (
+            _error_payload_from_internal_error(internal_error, json_safe=_json_safe)
+            if internal_error is not None
+            else None
+        )
         manifest_path = _discover_invocation_manifest_path(raw_result, out=out)
         run_id_raw = raw_result.get("run_id")
         run_root_raw = raw_result.get("run_root")
@@ -529,9 +767,13 @@ def invoke(
             manifest_path=manifest_path,
             raw_result=raw_result,
             run_id=run_id_raw if isinstance(run_id_raw, str) and run_id_raw else None,
-            run_root=str(Path(run_root_raw).expanduser().resolve()) if isinstance(run_root_raw, str) and run_root_raw else None,
+            run_root=str(Path(run_root_raw).expanduser().resolve())
+            if isinstance(run_root_raw, str) and run_root_raw
+            else None,
             outputs=_invocation_outputs(raw_result, manifest_path=manifest_path),
-            executor_version=executor_version_raw if isinstance(executor_version_raw, str) and executor_version_raw else None,
+            executor_version=executor_version_raw
+            if isinstance(executor_version_raw, str) and executor_version_raw
+            else None,
             kernel_run_id=None,
             kernel_task_id=None,
             kernel_attempt_id=None,
@@ -544,32 +786,61 @@ def invoke(
 
     resolved_project, _src = selected_project(project)
     if resolved_project is None:
-        raise CapabilityValidationError(format_project_required_guidance(operation=f"{capability.capability_type} run"))
+        raise CapabilityValidationError(
+            format_project_required_guidance(operation=f"{capability.capability_type} run")
+        )
     # Use resolved project (handles auto-resolved via selected_project)
     project = resolved_project
     projects_root = _resolve_projects_root(project_root, project)
     try:
-        kr, kt, ka, mpath, raw_result, ok, _ = _kernel_invoke(capability, kind=kind, project=project, projects_root=projects_root, inputs=inputs, outputs=outputs)
-        executor_version_raw = raw_result.get("executor_version") if isinstance(raw_result, dict) else None
+        kr, kt, ka, mpath, raw_result, ok, _ = _kernel_invoke(
+            capability,
+            kind=kind,
+            project=project,
+            projects_root=projects_root,
+            inputs=inputs,
+            outputs=outputs,
+        )
+        executor_version_raw = (
+            raw_result.get("executor_version") if isinstance(raw_result, dict) else None
+        )
         run_id_raw = raw_result.get("run_id") if isinstance(raw_result, dict) else None
         run_root_raw = raw_result.get("run_root") if isinstance(raw_result, dict) else None
         raw_result = dict(raw_result) if isinstance(raw_result, dict) else {}
         raw_result.setdefault("kernel_run_id", kr)
         raw_result.setdefault("kernel_task_id", kt)
         raw_result.setdefault("kernel_attempt_id", ka)
-        manifest_path = str(mpath) if mpath else _discover_invocation_manifest_path(raw_result, out=out)
+        manifest_path = None
+        if ok:
+            manifest_path = (
+                str(mpath) if mpath else _discover_invocation_manifest_path(raw_result, out=out)
+            )
+        raw_error = raw_result.get("error")
+        if ok:
+            public_error = None
+        elif isinstance(raw_error, Mapping):
+            public_error = _json_safe_mapping(raw_error)
+        else:
+            public_error = {
+                "reason": "capability_failed",
+                "message": f"{capability.capability_type} {capability.id!r} failed",
+            }
         return InvocationResult(
             capability_id=capability.id,
             capability_type=capability.capability_type,
             native_kind=capability.native_kind,
             ok=ok,
-            error=None,
+            error=public_error,
             manifest_path=manifest_path,
             raw_result=raw_result,
             run_id=run_id_raw if isinstance(run_id_raw, str) and run_id_raw else kr,
-            run_root=str(Path(run_root_raw).expanduser().resolve()) if isinstance(run_root_raw, str) and run_root_raw else str(projects_root),
+            run_root=str(Path(run_root_raw).expanduser().resolve())
+            if isinstance(run_root_raw, str) and run_root_raw
+            else None,
             outputs=_invocation_outputs(raw_result, manifest_path=manifest_path),
-            executor_version=executor_version_raw if isinstance(executor_version_raw, str) and executor_version_raw else None,
+            executor_version=executor_version_raw
+            if isinstance(executor_version_raw, str) and executor_version_raw
+            else None,
             kernel_run_id=kr,
             kernel_task_id=kt,
             kernel_attempt_id=ka,
@@ -580,4 +851,6 @@ def invoke(
         mapped = _sdk_error_from_exception(exc)
         if mapped is not None:
             raise mapped from exc
-        raise CapabilityInvocationError(f"failed to invoke {capability.capability_type} {capability.id!r}") from exc
+        raise CapabilityInvocationError(
+            f"failed to invoke {capability.capability_type} {capability.id!r}"
+        ) from exc

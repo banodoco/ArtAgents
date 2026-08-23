@@ -16,9 +16,8 @@ from typing import Any, Iterator, Mapping
 
 from astrid.core._shared.result_manifest import validate_result_manifest
 from astrid.core.env_vars import ASTRID_INTERNAL_INVOCATION
-from astrid.core.io.media_import import prepare_media_file
 from astrid.core.execution.executor.runner import ExecutorRunRequest, run_executor
-from astrid.core.execution.orchestrator.runner import OrchestratorRunRequest, run_orchestrator
+from astrid.core.io.media_import import prepare_media_file
 from astrid.core.project.run import discover_manifest_path, load_manifest_output_artifacts
 
 
@@ -47,13 +46,31 @@ class CapabilityTaskHandler:
         invocation: str = "sdk",
     ) -> None:
         if capability_kind not in ("executor", "orchestrator"):
-            raise ValueError(f"capability_kind must be executor/orchestrator, got {capability_kind!r}")
+            raise ValueError(
+                f"capability_kind must be executor/orchestrator, got {capability_kind!r}"
+            )
         if not capability_id:
             raise ValueError("capability_id must be non-empty")
         self._kind = capability_kind
         self._capability_id = capability_id
-        self._projects_root = Path(projects_root).expanduser().resolve() if projects_root is not None else None
+        self._projects_root = (
+            Path(projects_root).expanduser().resolve() if projects_root is not None else None
+        )
         self._invocation = invocation
+        self._last_result: Any | None = None
+
+    @property
+    def last_result(self) -> Any | None:
+        """Return the runner result produced by the most recent execution.
+
+        The kernel service owns validation and completion, while the SDK
+        boundary still needs the capability's public payload, output map, and
+        executor definition digest.  Keeping that non-authoritative result on
+        this per-invocation handler avoids reconstructing public metadata from
+        the universal task manifest.
+        """
+
+        return self._last_result
 
     def execute(self, *, task: Any, staging_dir: Path) -> Mapping[str, Any]:
         staging_dir = Path(staging_dir)
@@ -66,7 +83,15 @@ class CapabilityTaskHandler:
             request_inputs = dict(spec.get("inputs") or spec.get("request_inputs") or {})
             request_outputs = dict(spec.get("outputs") or {})
             if not request_inputs and spec:
-                reserved = {"capability_id", "capability_kind", "inputs", "outputs", "project", "kind", "request"}
+                reserved = {
+                    "capability_id",
+                    "capability_kind",
+                    "inputs",
+                    "outputs",
+                    "project",
+                    "kind",
+                    "request",
+                }
                 if not any(k in spec for k in reserved):
                     request_inputs = dict(spec)
                 req_env = spec.get("request")
@@ -85,7 +110,6 @@ class CapabilityTaskHandler:
         # ASTRID_INTERNAL_INVOCATION=1 (staging-only, kernel-owned ledger).
         with _scoped_env(ASTRID_INTERNAL_INVOCATION, "1"):
             if self._kind == "executor":
-
                 req = ExecutorRunRequest(
                     executor_id=self._capability_id,
                     out=out_dir,
@@ -104,12 +128,16 @@ class CapabilityTaskHandler:
                     project_was_auto_resolved=True,
                 )
                 result = run_executor(req, None)
+                self._last_result = result
                 ok = bool(getattr(result, "ok", False))
                 if not ok:
                     msg = getattr(result, "payload", {}) or {}
                     raise RuntimeError(f"executor {self._capability_id!r} failed: {msg}")
             else:
-                from astrid.core.execution.orchestrator.runner import OrchestratorRunRequest, run_orchestrator  # noqa: E402
+                from astrid.core.execution.orchestrator.runner import (
+                    OrchestratorRunRequest,
+                    run_orchestrator,
+                )  # noqa: E402
 
                 req = OrchestratorRunRequest(
                     orchestrator_id=self._capability_id,
@@ -128,12 +156,18 @@ class CapabilityTaskHandler:
                     project_was_auto_resolved=True,
                 )
                 result = run_orchestrator(req, None)
+                self._last_result = result
                 ok = bool(getattr(result, "ok", False))
                 if not ok:
                     raise RuntimeError(f"orchestrator {self._capability_id!r} failed: {result}")
         manifest_path = discover_manifest_path(out_dir, fallback_root=staging_dir)
         if manifest_path is None:
-            for cand in (staging_dir / "manifest.json", out_dir / "manifest.json", staging_dir / "agent-view" / "manifest.json", out_dir / "agent-view" / "manifest.json"):
+            for cand in (
+                staging_dir / "manifest.json",
+                out_dir / "manifest.json",
+                staging_dir / "agent-view" / "manifest.json",
+                out_dir / "agent-view" / "manifest.json",
+            ):
                 if cand.is_file():
                     manifest_path = cand
                     break
@@ -147,13 +181,22 @@ class CapabilityTaskHandler:
                 for art in artifacts:
                     raw = art.get("path") or art.get("relative_path") or art.get("file")
                     if isinstance(raw, str) and raw:
-                        # art path is relative to manifest dir; resolve to staging rel
+                        # Artifact manifests may declare a directory (for
+                        # example one child pack per timeline). Expand such
+                        # entries into concrete files before preparing media;
+                        # the universal task manifest never names a directory.
                         cand = (Path(manifest_path).parent / raw).resolve()
-                        try:
-                            rel = cand.relative_to(staging_dir.resolve()).as_posix()
-                        except ValueError:
-                            rel = raw
-                        rels.append(rel)
+                        candidates = (
+                            sorted(path for path in cand.rglob("*") if path.is_file())
+                            if cand.is_dir()
+                            else [cand]
+                        )
+                        for concrete in candidates:
+                            try:
+                                rel = concrete.relative_to(staging_dir.resolve()).as_posix()
+                            except ValueError:
+                                rel = raw
+                            rels.append(rel)
             if not rels:
                 for p in sorted(out_dir.rglob("*")):
                     if p.is_file():
@@ -161,7 +204,11 @@ class CapabilityTaskHandler:
                             rels.append(p.resolve().relative_to(staging_dir.resolve()).as_posix())
                         except ValueError:
                             continue
-            primary_rel = Path(manifest_path).resolve().relative_to(staging_dir.resolve()).as_posix() if Path(manifest_path).resolve().is_relative_to(staging_dir.resolve()) else Path(manifest_path).name
+            primary_rel = (
+                Path(manifest_path).resolve().relative_to(staging_dir.resolve()).as_posix()
+                if Path(manifest_path).resolve().is_relative_to(staging_dir.resolve())
+                else Path(manifest_path).name
+            )
             if primary_rel not in rels:
                 rels.append(primary_rel)
             uniq: list[str] = []

@@ -12,9 +12,13 @@ from pathlib import Path
 
 from astrid.core._shared.result_manifest import build_manifest, write_manifest
 from astrid.core.pack.entrypoint import run_pack_main
-from astrid.core.foundation.project_paths import resolve_projects_root
-
-from astrid.packs.typed_timeline.common import ensure_tone_wav, parse_json_rows, resolve_mapping_path
+from astrid.packs.typed_timeline.common import (
+    confined_output_path,
+    ensure_tone_wav,
+    load_admitted_rows,
+    portable_input_ref,
+    resolve_mapping_path,
+)
 
 
 
@@ -38,50 +42,29 @@ def main(argv=None) -> int:
         out_dir = Path(args.out)
         out_dir.mkdir(parents=True, exist_ok=True)
 
-        # resolve project
+        # Project identity is supplied by kernel admission (environment) or an
+        # explicit internal invocation.  This pack never guesses an owner.
         from astrid.core.foundation.project_paths import resolve_projects_root
-        projects_root = resolve_projects_root(None)
-        # project from flag or env selection
-        project_id = args.project
-        if project_id is None:
-            # try to get from ASTRID selected project?
-            try:
-                from astrid.core.project.guidance import selected_project
-                project_id, _ = selected_project(None)
-            except Exception:
-                project_id = None
-        # fallback to env or default used in tests
-        if not project_id:
-            project_id = "runaway-piano-colour-demo"
+        from astrid.core.project.guidance import selected_project
 
-        # load rows
-        rows = []
-        if args.json_rows is not None:
-            try:
-                rows = parse_json_rows(args.json_rows)
-            except Exception as e:
-                print(f"failed to parse json_rows: {e}", file=sys.stderr)
-                return 1
-            # json_rows with runaway mapping must still validate event count later; allow 0 only for json source
-            if args.source == "runaway" and not rows:
-                print(f"load_runaway returned 0 rows for project_id={project_id!r} run_id={args.run_id!r} — failing", file=sys.stderr)
-                return 1
-        elif args.source == "json" and args.json_path:
-            from astrid.packs.typed_timeline.sources import load_json_rows
-            rows = load_json_rows(args.json_path)
-        else:
-            # runaway source — 0 rows must FAIL, not silently produce empty timeline
-            from astrid.packs.typed_timeline.sources import load_runaway_transitions
-            try:
-                rows = load_runaway_transitions(project_id=project_id, run_id=args.run_id, projects_root=projects_root)
-            except Exception as e:
-                print(f"load_runaway failed: {e}", file=sys.stderr)
-                return 1
-            if not rows:
-                print(f"load_runaway returned 0 rows for project_id={project_id!r} run_id={args.run_id!r} — failing (slug resolution checked)", file=sys.stderr)
-                return 1
-        # resolve mapping
-        mapping_path = resolve_mapping_path(args.mapping)
+        projects_root = resolve_projects_root(None)
+        project_id, _ = selected_project(args.project)
+
+        try:
+            rows = load_admitted_rows(
+                source=args.source,
+                json_path=args.json_path,
+                json_rows=args.json_rows,
+                project=project_id,
+                projects_root=projects_root,
+                run_id=args.run_id,
+            )
+            mapping_path = resolve_mapping_path(
+                args.mapping, project=project_id, projects_root=projects_root
+            )
+        except Exception as exc:
+            print(f"typed timeline input rejected: {exc}", file=sys.stderr)
+            return 1
 
         from astrid.packs.typed_timeline.mapper import TypedDataTimelineMapper
 
@@ -89,28 +72,22 @@ def main(argv=None) -> int:
         timeline = mapper.to_timeline()
         assets = mapper.to_assets()
 
-        timeline_path = out_dir / "timeline.json"
-        assets_path = out_dir / "assets.json"
+        timeline_path = confined_output_path(out_dir, "timeline.json")
+        assets_path = confined_output_path(out_dir, "assets.json")
+
+        # Materialize only project-run staging outputs.  Mapping-controlled
+        # asset paths cannot escape ``out_dir``.
+        total_sec = mapper.total_duration_sec
+        assets_file = assets.get("assets", {}).get("audio", {}).get("file") if isinstance(assets.get("assets"), dict) else None
+        try:
+            tone_path = confined_output_path(out_dir, assets_file or "tone.wav")
+            ensure_tone_wav(tone_path, total_sec)
+        except Exception as exc:
+            print(f"typed timeline output rejected: {exc}", file=sys.stderr)
+            return 1
+
         timeline_path.write_text(json.dumps(timeline, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         assets_path.write_text(json.dumps(assets, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-
-        # ensure tone.wav for audio-reactive path
-        total_sec = mapper.total_duration_sec
-        # assets file entry file is tone.wav relative to assets_path
-        assets_file = assets.get("assets", {}).get("audio", {}).get("file") if isinstance(assets.get("assets"), dict) else None
-        if assets_file:
-            tone_path = (assets_path.parent / assets_file).resolve() if not Path(assets_file).is_absolute() else Path(assets_file)
-            # if tone_path is inside out_dir, ensure it
-            if str(tone_path).startswith(str(out_dir.resolve())) or tone_path.parent == out_dir.resolve():
-                ensure_tone_wav(tone_path, total_sec)
-            else:
-                # create sibling tone.wav in out_dir as well
-                fallback = out_dir / "tone.wav"
-                ensure_tone_wav(fallback, total_sec)
-                # also ensure the declared path exists if relative to assets_path
-                ensure_tone_wav(tone_path, total_sec)
-        else:
-            ensure_tone_wav(out_dir / "tone.wav", total_sec)
 
         # write manifest
         manifest_path = out_dir / "manifest.json"
@@ -118,26 +95,28 @@ def main(argv=None) -> int:
         from astrid.core.util.time import utc_now_iso
         manifest = build_manifest(
             kind="typed_timeline.map",
-            inputs={"source": args.source, "mapping": args.mapping, "run_id": args.run_id, "project": project_id},
+            inputs={
+                "source": args.source,
+                "mapping": portable_input_ref(args.mapping, projects_root=projects_root),
+                "run_id": args.run_id,
+                "project": project_id,
+            },
             outputs=[
-                {"path": str(timeline_path), "type": "file"},
-                {"path": str(assets_path), "type": "file"},
+                {"path": timeline_path.relative_to(out_dir.resolve()).as_posix(), "type": "file"},
+                {"path": assets_path.relative_to(out_dir.resolve()).as_posix(), "type": "file"},
             ],
             created=utc_now_iso(),
         )
         # include tone.wav if exists
-        tone_candidate = out_dir / "tone.wav"
-        if tone_candidate.exists():
-            manifest["outputs"].append({"path": str(tone_candidate), "type": "file"})
+        if tone_path.exists():
+            manifest["outputs"].append(
+                {
+                    "path": tone_path.relative_to(out_dir.resolve()).as_posix(),
+                    "type": "file",
+                }
+            )
 
         write_manifest(manifest_path, manifest)
-        # also write to staging_dir / manifest.json for handler discovery fallback
-        alt = out_dir.parent / "manifest.json"
-        if alt != manifest_path:
-            try:
-                alt.write_text(manifest_path.read_text(encoding="utf-8"), encoding="utf-8")
-            except Exception:
-                pass
         return 0
 
     return run_pack_main("typed_timeline.map", _run, argv=argv)

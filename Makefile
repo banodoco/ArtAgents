@@ -8,7 +8,7 @@
 
 PY ?= python3
 
-.PHONY: help check ci structure doctor ruff mypy cycles remotion-typecheck renderer-parity wheel ci-mirror editable s1-gate m4-baseline m4-gate m7-gate m8-gate
+.PHONY: help check ci structure doctor ruff mypy cycles remotion-typecheck renderer-parity wheel ci-mirror editable lock-build lock-runtime lock-validate toolchain-record s1-gate m4-baseline m4-gate m7-gate m8-gate
 
 help:
 	@echo "make check   - blocking gates: structure, doctor, ruff, mypy, cycles, Remotion, renderer parity"
@@ -18,6 +18,8 @@ help:
 	@echo "make m4-gate - m4 Step 33: 13 focused lanes + authority lint + drift rejection + feasibility admission (fails closed)"
 	@echo "make m7-gate - m7 GA evidence: admitted selectors 1-10 + provisional/retained dispositions (fails closed)"
 	@echo "make m8-gate - m8 packaged GA evidence: digest validation + atomic six-file release publication (set M8_EVIDENCE=... to publish a bundle)"
+	@echo "make lock-runtime / lock-build - refresh universal SHA-256 dependency locks with uv"
+	@echo "make lock-validate - validate exact pins, hashes, and direct dependency coverage"
 	@echo "make <gate>  - run one gate: structure | doctor | ruff | mypy | cycles | remotion-typecheck | renderer-parity | wheel | ci-mirror | editable | s1-gate | m4-baseline | m4-gate | m7-gate | m8-gate"
 
 # --- Fast gates: catch the common deploy blockers in seconds. Run before every push. ---
@@ -64,6 +66,19 @@ editable:
 
 wheel:
 	bash scripts/smoke_wheel_install.sh
+
+lock-build:
+	uv pip compile requirements/build.in --universal --python-version 3.11 --generate-hashes --no-annotate --custom-compile-command 'make lock-build' --output-file requirements/build.lock
+
+lock-runtime:
+	uv pip compile pyproject.toml --universal --python-version 3.11 --generate-hashes --no-annotate --custom-compile-command 'make lock-runtime' --output-file requirements/runtime.lock
+
+lock-validate:
+	@$(PY) -c "from scripts.reshape.release_reproducibility import validate_dependency_locks; validate_dependency_locks(); print('✓ hashed dependency locks')"
+
+toolchain-record:
+	@$(PY) -m scripts.reshape.release_reproducibility --output out/release-toolchain.json >/dev/null
+	@echo "✓ release toolchain recorded in out/release-toolchain.json"
 
 ci-mirror:
 	bash scripts/reshape/run_ci_checks.sh

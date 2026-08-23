@@ -85,6 +85,7 @@ _PACK_TAXONOMY_ENUMS: dict[str, tuple[str, ...]] = {
         "integration",
         "media",
         "system",
+        "timeline",
     ),
     "stability": ("stable", "experimental", "deprecated"),
     "support": ("project", "core", "community"),

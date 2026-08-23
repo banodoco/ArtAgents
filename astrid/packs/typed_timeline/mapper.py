@@ -2,12 +2,17 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 import yaml
 
-from .frames import ms_to_frame, frame_to_sec
+from .frames import frame_to_sec, ms_to_frame
+
+MAX_TIMELINE_DURATION_SEC = 600.0
+MAX_CANVAS_DIMENSION = 8_192
+_HEX_COLOUR_RE = re.compile(r"^#[0-9A-F]{6}$")
 
 
 def _get_dotted(obj: Mapping[str, Any], path: str) -> Any:
@@ -46,7 +51,7 @@ def _resolve_value(
                 return None
             try:
                 return ms_to_frame(int(v), fps)
-            except Exception:
+            except (TypeError, ValueError, OverflowError):
                 return None
         if "$total_duration_sec" in spec:
             return total_duration_sec
@@ -59,7 +64,7 @@ def _resolve_value(
                     try:
                         # if it's already a frame number
                         return int(pv)
-                    except Exception:
+                    except (TypeError, ValueError, OverflowError):
                         return pv
             fallback = spec.get("fallback")
             if fallback is not None:
@@ -93,11 +98,20 @@ class TypedDataTimelineMapper:
             self.mapping = raw
         else:
             self.mapping = dict(mapping)
+        if self.mapping.get("schema_version", 1) != 1:
+            raise ValueError("typed timeline mapping schema_version must be 1")
+        if not isinstance(rows, Sequence) or isinstance(rows, (str, bytes)):
+            raise ValueError("typed timeline rows must be an array")
+        for index, row in enumerate(rows):
+            if not isinstance(row, Mapping):
+                raise ValueError(f"typed timeline rows[{index}] must be an object")
         # normalize rows sorted by ordinal when present
         self.rows = sorted(list(rows), key=lambda r: (int(r.get("ordinal", 0)) if isinstance(r.get("ordinal"), int) else 0, str(r.get("id", ""))))
         # canvas — single canonical path
         canvas = self.mapping.get("canvas", {}) if isinstance(self.mapping.get("canvas"), Mapping) else {}
         self.fps = int(canvas.get("fps", 48))
+        if not 1 <= self.fps <= 240:
+            raise ValueError(f"mapping fps must be between 1 and 240, got {self.fps}")
         if "total_frames" in canvas:
             self.total_frames = int(canvas["total_frames"])
             self.total_duration_sec = self.total_frames / float(self.fps)
@@ -116,6 +130,11 @@ class TypedDataTimelineMapper:
         else:
             self.total_frames = 8085
             self.total_duration_sec = self.total_frames / float(self.fps)
+        if self.total_frames <= 0 or not 0 < self.total_duration_sec <= MAX_TIMELINE_DURATION_SEC:
+            raise ValueError(
+                "mapping duration must be positive and no longer than "
+                f"{MAX_TIMELINE_DURATION_SEC:g} seconds"
+            )
     def _frame_for_row(self, row: Mapping[str, Any]) -> int | None:
         # prefer metadata.frame else ms_to_frame(start_ms)
         meta = row.get("metadata") if isinstance(row.get("metadata"), Mapping) else {}
@@ -127,21 +146,21 @@ class TypedDataTimelineMapper:
         if frame_val is not None:
             try:
                 return int(frame_val)
-            except Exception:
+            except (TypeError, ValueError, OverflowError):
                 pass
         # also try top-level metadata.* dotted path "metadata.frame"
         dotted = _get_dotted(row, "metadata.frame")
         if dotted is not None:
             try:
                 return int(dotted)
-            except Exception:
+            except (TypeError, ValueError, OverflowError):
                 pass
         # fallback ms_to_frame
         start_ms = row.get("start_ms")
         if start_ms is not None:
             try:
                 return ms_to_frame(int(start_ms), self.fps)
-            except Exception:
+            except (TypeError, ValueError, OverflowError):
                 return None
         return None
 
@@ -164,6 +183,10 @@ class TypedDataTimelineMapper:
         canvas = self.mapping.get("canvas", {})
         width = int(canvas.get("width", 1280))
         height = int(canvas.get("height", 720))
+        if not 1 <= width <= MAX_CANVAS_DIMENSION or not 1 <= height <= MAX_CANVAS_DIMENSION:
+            raise ValueError(
+                f"canvas dimensions must be between 1 and {MAX_CANVAS_DIMENSION}"
+            )
         theme_overrides = {"visual": {"canvas": {"width": width, "height": height, "fps": self.fps}}}
 
         clips: list[dict[str, Any]] = []
@@ -189,14 +212,16 @@ class TypedDataTimelineMapper:
                         raw_frame = _resolve_value(row, self.rows, frame_spec, fps=float(self.fps), total_duration_sec=self.total_duration_sec)
                         try:
                             frame = int(raw_frame) if raw_frame is not None else None
-                        except Exception:
+                        except (TypeError, ValueError, OverflowError):
                             frame = None
                     else:
                         frame = self._frame_for_row(row)
                     if frame is None:
-                        continue
+                        raise ValueError("every aggregated row must resolve to a frame")
                     if frame <= 0 or frame >= self.total_frames:
-                        continue
+                        raise ValueError(
+                            f"event frame {frame} must be positive and below {self.total_frames}"
+                        )
                     # color: YAML color.path/spec, fallback to hard-coded multi-path
                     if color_spec is not None:
                         color = _resolve_value(row, self.rows, color_spec, fps=float(self.fps), total_duration_sec=self.total_duration_sec)
@@ -209,29 +234,38 @@ class TypedDataTimelineMapper:
                         if color is None:
                             color = _get_dotted(row, "color")
                     if not isinstance(color, str):
-                        continue
+                        raise ValueError(f"event at frame {frame} has no colour")
                     color = color.upper()
+                    if _HEX_COLOUR_RE.fullmatch(color) is None:
+                        raise ValueError(
+                            f"event at frame {frame} colour must be #RRGGBB"
+                        )
                     # id: YAML id.path/spec, fallback to row id/ordinal
                     if id_spec is not None:
                         raw_id = _resolve_value(row, self.rows, id_spec, fps=float(self.fps), total_duration_sec=self.total_duration_sec)
-                        eid = str(raw_id) if raw_id not in (None, "") else str(row.get("id") or row.get("ordinal") or f"e{frame}")
+                        fallback_id = row.get("id")
+                        if fallback_id in (None, ""):
+                            fallback_id = row.get("ordinal")
+                        eid = str(raw_id) if raw_id not in (None, "") else str(
+                            fallback_id if fallback_id not in (None, "") else f"e{frame}"
+                        )
                     else:
-                        eid = str(row.get("id") or row.get("ordinal") or f"e{frame}")
+                        fallback_id = row.get("id")
+                        if fallback_id in (None, ""):
+                            fallback_id = row.get("ordinal")
+                        eid = str(
+                            fallback_id if fallback_id not in (None, "") else f"e{frame}"
+                        )
+                    if not eid:
+                        raise ValueError(f"event at frame {frame} has an empty id")
                     events.append({"id": eid, "frame": int(frame), "color": color})
                 events.sort(key=lambda e: e["frame"])
-                deduped: list[dict[str, Any]] = []
-                seen_frames: set[int] = set()
-                for ev in events:
-                    if ev["frame"] in seen_frames:
-                        # replace previous with later (stable)
-                        for idx, prev in enumerate(deduped):
-                            if prev["frame"] == ev["frame"]:
-                                deduped[idx] = ev
-                                break
-                    else:
-                        deduped.append(ev)
-                        seen_frames.add(ev["frame"])
-                # enforce strictly increasing already
+                frames = [event["frame"] for event in events]
+                if len(frames) != len(set(frames)):
+                    raise ValueError("aggregated event frames must be unique")
+                ids = [event["id"] for event in events]
+                if len(ids) != len(set(ids)):
+                    raise ValueError("aggregated event ids must be unique")
                 initial = clip_cfg.get("initialColor") or self.mapping.get("initialColor") or "#16B09B"
                 if isinstance(initial, dict) and "const" in initial:
                     initial = initial["const"]
@@ -247,7 +281,7 @@ class TypedDataTimelineMapper:
                         "params": {
                             "schemaVersion": 1,
                             "initialColor": initial,
-                            "events": deduped,
+                            "events": events,
                         },
                     }
                 )
@@ -283,8 +317,18 @@ class TypedDataTimelineMapper:
                 if "duration_ms" in row:
                     try:
                         hold = float(int(row["duration_ms"])) / 1000.0
-                    except Exception:
+                    except (TypeError, ValueError, OverflowError):
                         pass
+                exact_remaining = self.total_duration_sec - float(at_sec)
+                if 0 < exact_remaining < hold and hold - exact_remaining <= 0.001:
+                    hold = exact_remaining
+                # start/duration milliseconds are independently rounded from
+                # frame values, so their reconstructed end may differ from
+                # the exact frame boundary by at most one millisecond.
+                if at_sec < 0 or hold <= 0 or at_sec + hold > self.total_duration_sec + 0.001:
+                    raise ValueError(
+                        f"row {idx} clip range [{at_sec}, {at_sec + hold}) escapes timeline duration"
+                    )
                 # resolve params via dotted paths + builtins
                 params: dict[str, Any] = {}
                 for k, v in params_map.items():
@@ -302,7 +346,10 @@ class TypedDataTimelineMapper:
                 if "content" not in params and clip_type == "text-card":
                     params["content"] = str(row.get("prompt", f"row {idx}"))
                 # overlay track first => ensure at is overlay? track already overlay
-                clip_id = f"row_{idx}_{row.get('id') or row.get('ordinal', idx)}"
+                identity = row.get("id")
+                if identity in (None, ""):
+                    identity = row.get("ordinal", idx)
+                clip_id = f"row_{idx}_{identity}"
                 clips.append(
                     {
                         "id": clip_id,

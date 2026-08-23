@@ -58,6 +58,7 @@ _PACK_REPOSITORY_MODULES: dict[str, str] = {
     "timeline": "astrid.packs.timeline.repository",
     "shots": "astrid.packs.shots.repository",
     "references": "astrid.packs.references.repository",
+    "runaway": "astrid.packs.runaway.repository",
 }
 
 # (b) command kind -> event kind for the irregular documented pairs. The

@@ -152,8 +152,8 @@ PACK_VOCABULARY: dict[str, dict[str, tuple[str, ...]]] = {
         "bridge_mounts": (),
     },
     "runaway": {
-        "stream_types": (),
-        "event_kinds": (),
+        "stream_types": ("runaway.transition_set",),
+        "event_kinds": ("runaway.created",),
         "command_kinds": ("runaway.create",),
         "repositories": ("RunawayRepository",),
         "cli_mounts": (),
@@ -478,6 +478,16 @@ expected = json.loads(sys.argv[2])
 artifact_root = Path(sys.argv[3]).resolve()
 assert Path(astrid.__file__).resolve().is_relative_to(artifact_root), astrid.__file__
 
+# The typed-timeline consumer is independently installable and must survive
+# removal of every schema pack, especially Runaway.  Its admitted-artifact
+# source seam must not import a domain repository or sqlite directly.
+from astrid.packs.typed_timeline.mapper import TypedDataTimelineMapper
+from astrid.packs.typed_timeline.sources import load_json_rows
+typed_source = Path(load_json_rows.__code__.co_filename).read_text(encoding="utf-8")
+assert "astrid.packs.runaway" not in typed_source
+assert "sqlite3" not in typed_source
+assert TypedDataTimelineMapper
+
 registry = SchemaPackRegistry()
 register_core_vocabulary(registry)
 register_standard_schema_packs(registry)
@@ -644,7 +654,7 @@ def run_artifact_kernel_suite(
     *,
     python: str | None = None,
     base_dir: Path | None = None,
-    timeout: int = 90,
+    timeout: int = 180,
 ) -> subprocess.CompletedProcess[str]:
     """Run the complete fixed kernel suite against one artifact root."""
     interpreter = python or sys.executable
@@ -662,14 +672,25 @@ def run_artifact_kernel_suite(
             "--no-header",
             *KERNEL_LANE,
         ]
-        return subprocess.run(
-            command,
-            cwd=test_workspace,
-            env=environment,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
+        try:
+            return subprocess.run(
+                command,
+                cwd=test_workspace,
+                env=environment,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired as exc:
+            stdout = exc.stdout.decode() if isinstance(exc.stdout, bytes) else exc.stdout
+            stderr = exc.stderr.decode() if isinstance(exc.stderr, bytes) else exc.stderr
+            return subprocess.CompletedProcess(
+                args=command,
+                returncode=124,
+                stdout=stdout or "",
+                stderr=(stderr or "")
+                + f"\nkernel lane exceeded deterministic {timeout}s deadline\n",
+            )
     finally:
         shutil.rmtree(test_workspace, ignore_errors=True)
 
@@ -709,7 +730,7 @@ def check_artifact_removal(
     python: str | None = None,
     base_dir: Path | None = None,
     keep_temp: bool = False,
-    kernel_timeout: int = 90,
+    kernel_timeout: int = 180,
     catalog_timeout: int = 30,
 ) -> ArtifactRemovalResult:
     """Remove one pack from a wheel root and run every packaged check."""
@@ -753,7 +774,7 @@ def check_artifact_factoring(
     python: str | None = None,
     base_dir: Path | None = None,
     keep_temp: bool = False,
-    kernel_timeout: int = 90,
+    kernel_timeout: int = 180,
     catalog_timeout: int = 30,
 ) -> ArtifactFactoringResult:
     """Run packaged factorability independently for every requested pack.
@@ -785,10 +806,12 @@ def check_artifact_factoring(
             shutil.copytree(source, base_root, symlinks=False)
 
         # Each reduced artifact is an isolated copy and its catalog/kernel
-        # probes run in subprocesses.  Keep the declared result order while
-        # running independent pack removals concurrently so the complete T9
-        # selector fits its aggregate verification budget.
-        with ThreadPoolExecutor(max_workers=len(requested)) as executor:
+        # probes run in subprocesses. Kernel lanes are CPU-heavy complete-suite
+        # processes, so keep the declared result order and run the
+        # independent reductions serially: concurrent lanes contend with the
+        # repository's other release gates and repeatedly turn a functional
+        # check into a scheduler-dependent timeout.
+        with ThreadPoolExecutor(max_workers=1) as executor:
             futures = [
                 executor.submit(
                     check_artifact_removal,
@@ -975,7 +998,7 @@ def verify_sketch_kernel_inventory(repo_root: Path = REPO_ROOT) -> str:
 
 
 def run_kernel_lane(
-    work: Path, python: str, *, timeout: int = 90
+    work: Path, python: str, *, timeout: int = 180
 ) -> subprocess.CompletedProcess[str]:
     """Run the complete enumerated kernel lane against the temp copy."""
     env = os.environ.copy()
@@ -992,9 +1015,20 @@ def run_kernel_lane(
         "--no-header",
         *KERNEL_LANE,
     ]
-    return subprocess.run(
-        cmd, cwd=work, env=env, capture_output=True, text=True, timeout=timeout
-    )
+    try:
+        return subprocess.run(
+            cmd, cwd=work, env=env, capture_output=True, text=True, timeout=timeout
+        )
+    except subprocess.TimeoutExpired as exc:
+        stdout = exc.stdout.decode() if isinstance(exc.stdout, bytes) else exc.stdout
+        stderr = exc.stderr.decode() if isinstance(exc.stderr, bytes) else exc.stderr
+        return subprocess.CompletedProcess(
+            args=cmd,
+            returncode=124,
+            stdout=stdout or "",
+            stderr=(stderr or "")
+            + f"\nkernel lane exceeded deterministic {timeout}s deadline\n",
+        )
 
 
 @dataclass(frozen=True)
@@ -1018,7 +1052,7 @@ def check_removal(
     python: str | None = None,
     base_dir: Path | None = None,
     keep_temp: bool = False,
-    lane_timeout: int = 90,
+    lane_timeout: int = 180,
     catalog_timeout: int = 30,
 ) -> RemovalCheckResult:
     """Remove ``removed_pack`` from a temporary source composition and prove
@@ -1084,7 +1118,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--python", default=None, help="interpreter for subprocesses")
     parser.add_argument("--keep-temp", action="store_true", help="keep temp copies on failure")
-    parser.add_argument("--lane-timeout", type=int, default=90, help="per-lane pytest timeout")
+    parser.add_argument(
+        "--lane-timeout", type=int, default=180, help="per-lane pytest timeout"
+    )
     args = parser.parse_args(argv)
 
     if args.artifact_root is not None and args.wheel is None:

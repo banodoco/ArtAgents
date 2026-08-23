@@ -160,8 +160,7 @@ leave the dependent task ``blocked`` (soft dependencies never block).
 
 
 class EventAppendPort(Protocol):
-    def append(self, uow: UnitOfWork, **kwargs: object) -> Any:
-        ...
+    def append(self, uow: UnitOfWork, **kwargs: object) -> Any: ...
 
 
 # ---------------------------------------------------------------------------
@@ -223,10 +222,7 @@ class TaskDependencyError(TaskValidationError):
         if depends_on_task_id is None:
             detail = f"task {task_id!r} dependency violation: {reason}"
         else:
-            detail = (
-                f"task {task_id!r} dependency on {depends_on_task_id!r} "
-                f"violation: {reason}"
-            )
+            detail = f"task {task_id!r} dependency on {depends_on_task_id!r} violation: {reason}"
         super().__init__(detail)
 
 
@@ -340,20 +336,14 @@ class TaskDependencyReadModel:
         if not isinstance(self.task_id, str) or not self.task_id:
             raise TaskValidationError("dependency task_id must be a non-empty string")
         if not isinstance(self.depends_on_task_id, str) or not self.depends_on_task_id:
-            raise TaskValidationError(
-                "depends_on_task_id must be a non-empty string"
-            )
+            raise TaskValidationError("depends_on_task_id must be a non-empty string")
         if self.kind not in DEPENDENCY_KINDS:
             raise TaskValidationError(
-                f"dependency kind must be one of {DEPENDENCY_KINDS}, "
-                f"got {self.kind!r}"
+                f"dependency kind must be one of {DEPENDENCY_KINDS}, got {self.kind!r}"
             )
-        if isinstance(self.ordinal, bool) or not isinstance(
-            self.ordinal, int
-        ) or self.ordinal < 0:
+        if isinstance(self.ordinal, bool) or not isinstance(self.ordinal, int) or self.ordinal < 0:
             raise TaskValidationError(
-                f"dependency ordinal must be a non-negative integer, "
-                f"got {self.ordinal!r}"
+                f"dependency ordinal must be a non-negative integer, got {self.ordinal!r}"
             )
 
     def to_dict(self) -> dict[str, Any]:
@@ -583,8 +573,7 @@ class TaskExpiryReadModel:
     def __post_init__(self) -> None:
         if self.outcome not in ("requeued", "failed"):
             raise TaskValidationError(
-                f"expiry outcome must be 'requeued' or 'failed', "
-                f"got {self.outcome!r}"
+                f"expiry outcome must be 'requeued' or 'failed', got {self.outcome!r}"
             )
 
     def to_dict(self) -> dict[str, Any]:
@@ -636,11 +625,7 @@ class TaskCancelReadModel:
         attempt = value.get("attempt")
         return cls(
             task=TaskReadModel.from_mapping(value["task"]),
-            attempt=(
-                TaskAttemptReadModel.from_mapping(attempt)
-                if attempt is not None
-                else None
-            ),
+            attempt=(TaskAttemptReadModel.from_mapping(attempt) if attempt is not None else None),
         )
 
 
@@ -665,8 +650,7 @@ class TaskFailReadModel:
     def __post_init__(self) -> None:
         if self.outcome not in ("requeued", "failed"):
             raise TaskValidationError(
-                f"fail outcome must be 'requeued' or 'failed', "
-                f"got {self.outcome!r}"
+                f"fail outcome must be 'requeued' or 'failed', got {self.outcome!r}"
             )
 
     def to_dict(self) -> dict[str, Any]:
@@ -713,12 +697,13 @@ class TaskRetryReadModel:
                 "retry prior_attempt_status must be 'failed' or 'expired', "
                 f"got {self.prior_attempt_status!r}"
             )
-        if isinstance(self.prior_attempt_no, bool) or not isinstance(
-            self.prior_attempt_no, int
-        ) or self.prior_attempt_no < 1:
+        if (
+            isinstance(self.prior_attempt_no, bool)
+            or not isinstance(self.prior_attempt_no, int)
+            or self.prior_attempt_no < 1
+        ):
             raise TaskValidationError(
-                "retry prior_attempt_no must be a positive integer, "
-                f"got {self.prior_attempt_no!r}"
+                f"retry prior_attempt_no must be a positive integer, got {self.prior_attempt_no!r}"
             )
 
     def to_dict(self) -> dict[str, Any]:
@@ -745,14 +730,14 @@ class TaskRetryReadModel:
 class TaskOutputReadModel:
     """One immutable ordered task output (m2 plan step 10, T18).
 
-        A frozen projection of one ordered completion output: the deterministic
-        ``ordinal`` within the completing task, the ``role`` (``"result"`` for
-        the primary output), the materialized ``media_id`` (project-scoped
-        byte-identity; ``None`` for an evidence output, which declares no
-        media identity), the ``is_primary`` flag, and the caller-supplied
-        output ``params`` (label, staging-relative path, digest evidence).
-        ``to_dict`` is the JSON-safe persisted shape and ``from_mapping``
-        rebuilds it for exact replay.
+    A frozen projection of one ordered completion output: the deterministic
+    ``ordinal`` within the completing task, the ``role`` (``"result"`` for
+    the primary output), the materialized ``media_id`` (project-scoped
+    byte-identity; ``None`` for an evidence output, which declares no
+    media identity), the ``is_primary`` flag, and the caller-supplied
+    output ``params`` (label, staging-relative path, digest evidence).
+    ``to_dict`` is the JSON-safe persisted shape and ``from_mapping``
+    rebuilds it for exact replay.
     """
 
     ordinal: int
@@ -763,20 +748,13 @@ class TaskOutputReadModel:
     created_at: str
 
     def __post_init__(self) -> None:
-        if isinstance(self.ordinal, bool) or not isinstance(
-            self.ordinal, int
-        ) or self.ordinal < 0:
+        if isinstance(self.ordinal, bool) or not isinstance(self.ordinal, int) or self.ordinal < 0:
             raise TaskValidationError(
-                f"output ordinal must be a non-negative integer, "
-                f"got {self.ordinal!r}"
+                f"output ordinal must be a non-negative integer, got {self.ordinal!r}"
             )
         if not isinstance(self.role, str) or not self.role:
-            raise TaskValidationError(
-                f"output role must be a non-empty string, got {self.role!r}"
-            )
-        if self.media_id is not None and (
-            not isinstance(self.media_id, str) or not self.media_id
-        ):
+            raise TaskValidationError(f"output role must be a non-empty string, got {self.role!r}")
+        if self.media_id is not None and (not isinstance(self.media_id, str) or not self.media_id):
             raise TaskValidationError(
                 f"output media_id must be a non-empty string or None "
                 f"(evidence output), got {self.media_id!r}"
@@ -804,10 +782,7 @@ class TaskOutputReadModel:
         return cls(
             ordinal=int(value["ordinal"]),
             role=str(value["role"]),
-            media_id=(
-                None if value.get("media_id") is None
-                else str(value["media_id"])
-            ),
+            media_id=(None if value.get("media_id") is None else str(value["media_id"])),
             is_primary=bool(value["is_primary"]),
             params=dict(value.get("params") or {}),
             created_at=str(value["created_at"]),
@@ -856,15 +831,11 @@ class TaskCompleteReadModel:
             task=TaskReadModel.from_mapping(value["task"]),
             attempt=TaskAttemptReadModel.from_mapping(value["attempt"]),
             outputs=tuple(
-                TaskOutputReadModel.from_mapping(output)
-                for output in (value.get("outputs") or [])
+                TaskOutputReadModel.from_mapping(output) for output in (value.get("outputs") or [])
             ),
             event_ids=tuple(str(event_id) for event_id in (value.get("event_ids") or [])),
             run=dict(value["run"]) if value.get("run") is not None else None,
-            result=(
-                dict(value["result"]) if value.get("result") is not None
-                else None
-            ),
+            result=(dict(value["result"]) if value.get("result") is not None else None),
         )
 
 
@@ -903,9 +874,7 @@ class TaskListRow:
         }
 
 
-def compute_spec_hash(
-    spec: Mapping[str, Any], input_manifest: Sequence[Any]
-) -> str:
+def compute_spec_hash(spec: Mapping[str, Any], input_manifest: Sequence[Any]) -> str:
     """Return the byte-stable SHA-256 spec hash for one task.
 
     The digest covers one canonical representation — ``{"spec": ...,
@@ -966,21 +935,15 @@ def _normalize_dependencies(
     """
     if dependencies is None:
         return ()
-    if isinstance(dependencies, (str, bytes)) or not isinstance(
-        dependencies, Sequence
-    ):
+    if isinstance(dependencies, (str, bytes)) or not isinstance(dependencies, Sequence):
         raise TaskValidationError("dependencies must be a JSON array")
     normalized: list[TaskDependencyReadModel] = []
     for index, entry in enumerate(dependencies):
         if not isinstance(entry, Mapping):
-            raise TaskValidationError(
-                f"dependency at ordinal {index} must be a JSON object"
-            )
+            raise TaskValidationError(f"dependency at ordinal {index} must be a JSON object")
         depends_on = entry.get("task_id")
         if not isinstance(depends_on, str) or not depends_on:
-            raise TaskValidationError(
-                f"dependency at ordinal {index} requires a non-empty task_id"
-            )
+            raise TaskValidationError(f"dependency at ordinal {index} requires a non-empty task_id")
         kind = entry.get("kind", "hard")
         ordinal = entry.get("ordinal", index)
         normalized.append(
@@ -1067,9 +1030,7 @@ def _validate_dependency_graph(
             )
 
 
-def _dependency_closure_contains_cycle(
-    uow: UnitOfWork, *, start: str, new_task_id: str
-) -> bool:
+def _dependency_closure_contains_cycle(uow: UnitOfWork, *, start: str, new_task_id: str) -> bool:
     """Whether following existing dependency edges from *start* reaches a cycle.
 
     Depth-first walk over ``task_dependencies`` edges (``task_id`` depends on
@@ -1120,9 +1081,7 @@ def _initial_status_from_dependencies(
     if not hard_deps:
         return "queued"
     for dep in hard_deps:
-        dep_row = uow.query_one(
-            "SELECT status FROM tasks WHERE id = ?", (dep.depends_on_task_id,)
-        )
+        dep_row = uow.query_one("SELECT status FROM tasks WHERE id = ?", (dep.depends_on_task_id,))
         # Existence was validated; a vanished row would be a race only a
         # corrupt store could produce, so treat it as unsatisfied.
         if dep_row is None or str(dep_row["status"]) != HARD_DEPENDENCY_SATISFIED_STATUS:
@@ -1284,9 +1243,7 @@ class TaskRepository:
         capability = _require_non_empty_string("capability", capability)
         spec_dict = _require_json_object("spec", spec)
         manifest_list = _require_json_array("input_manifest", input_manifest)
-        idempotency_key = _require_non_empty_string(
-            "idempotency_key", idempotency_key
-        )
+        idempotency_key = _require_non_empty_string("idempotency_key", idempotency_key)
         command_kind = _require_non_empty_string("command_kind", command_kind)
         priority = _require_int("priority", priority)
         max_attempts = _require_int("max_attempts", max_attempts)
@@ -1294,8 +1251,7 @@ class TaskRepository:
             raise TaskValidationError("max_attempts must be a positive integer")
         if actor_kind not in ACTOR_KINDS:
             raise TaskValidationError(
-                f"actor_kind must be one of {sorted(ACTOR_KINDS)}, "
-                f"got {actor_kind!r}"
+                f"actor_kind must be one of {sorted(ACTOR_KINDS)}, got {actor_kind!r}"
             )
         if task_id is None:
             task_id = generate_lowercase_ulid()
@@ -1330,9 +1286,7 @@ class TaskRepository:
         try:
             request_digest = request_hash(command_kind, request)
         except CanonicalizationError as exc:
-            raise TaskValidationError(
-                f"cannot hash task create request: {exc}"
-            ) from exc
+            raise TaskValidationError(f"cannot hash task create request: {exc}") from exc
 
         # Idempotency gate first: replay or mismatch happens before any
         # sequence allocation, event append, or projection change.
@@ -1349,14 +1303,10 @@ class TaskRepository:
         # The project must exist before any stream/task row is inserted;
         # typed rejection beats a raw FOREIGN KEY or sequence error.
         if uow.query_one("SELECT id FROM projects WHERE id = ?", (project_id,)) is None:
-            raise TaskValidationError(
-                f"task creation requires an existing project: {project_id!r}"
-            )
+            raise TaskValidationError(f"task creation requires an existing project: {project_id!r}")
 
         # Typed duplicate rejection before the UNIQUE constraints fire.
-        existing = uow.query_one(
-            "SELECT id FROM tasks WHERE id = ?", (task_id,)
-        )
+        existing = uow.query_one("SELECT id FROM tasks WHERE id = ?", (task_id,))
         if existing is not None:
             raise TaskAlreadyExistsError(task_id=task_id)
 
@@ -1573,9 +1523,7 @@ class TaskRepository:
             created_at=str(row["created_at"]),
             updated_at=str(row["updated_at"]),
             finished_at=row["finished_at"],
-            dependencies=tuple(
-                TaskDependencyReadModel.from_mapping(dep) for dep in dependencies
-            ),
+            dependencies=tuple(TaskDependencyReadModel.from_mapping(dep) for dep in dependencies),
         )
 
     def show(self, writer: DatabaseWriter, task_id: str) -> TaskReadModel:
@@ -1605,9 +1553,7 @@ class TaskRepository:
                 "ORDER BY ordinal ASC, depends_on_task_id ASC",
                 (task_id,),
             ).fetchall()
-        return self._row_to_read_model(
-            row, [dict(dep) for dep in dependency_rows]
-        )
+        return self._row_to_read_model(row, [dict(dep) for dep in dependency_rows])
 
     def list(self, writer: DatabaseWriter, project_id: str) -> list[TaskListRow]:
         """Sorted read-only list query: every task in one project.
@@ -1797,23 +1743,21 @@ class TaskRepository:
         :class:`ReceiptMismatchError` before any mutation.
         """
         project_id = _require_non_empty_string("project_id", project_id)
-        idempotency_key = _require_non_empty_string(
-            "idempotency_key", idempotency_key
-        )
+        idempotency_key = _require_non_empty_string("idempotency_key", idempotency_key)
         command_kind = _require_non_empty_string("command_kind", command_kind)
         if executor_id is not None:
             _require_non_empty_string("executor_id", executor_id)
-        if isinstance(lease_seconds, bool) or not isinstance(
-            lease_seconds, int
-        ) or lease_seconds <= 0:
+        if (
+            isinstance(lease_seconds, bool)
+            or not isinstance(lease_seconds, int)
+            or lease_seconds <= 0
+        ):
             raise TaskValidationError(
-                "lease_seconds must be a positive integer, "
-                f"got {lease_seconds!r}"
+                f"lease_seconds must be a positive integer, got {lease_seconds!r}"
             )
         if actor_kind not in ACTOR_KINDS:
             raise TaskValidationError(
-                f"actor_kind must be one of {sorted(ACTOR_KINDS)}, "
-                f"got {actor_kind!r}"
+                f"actor_kind must be one of {sorted(ACTOR_KINDS)}, got {actor_kind!r}"
             )
 
         # Semantic request identity: only caller-supplied facts participate;
@@ -1825,9 +1769,7 @@ class TaskRepository:
         try:
             request_digest = request_hash(command_kind, request)
         except CanonicalizationError as exc:
-            raise TaskValidationError(
-                f"cannot hash claim request: {exc}"
-            ) from exc
+            raise TaskValidationError(f"cannot hash claim request: {exc}") from exc
 
         # Idempotency gate first: replay or mismatch before the scan or any
         # sequence allocation.
@@ -2033,13 +1975,13 @@ class TaskRepository:
         project_id = _require_non_empty_string("project_id", project_id)
         task_id = _require_non_empty_string("task_id", task_id)
         attempt_id = _require_non_empty_string("attempt_id", attempt_id)
-        idempotency_key = _require_non_empty_string(
-            "idempotency_key", idempotency_key
-        )
+        idempotency_key = _require_non_empty_string("idempotency_key", idempotency_key)
         command_kind = _require_non_empty_string("command_kind", command_kind)
-        if isinstance(expected_status_version, bool) or not isinstance(
-            expected_status_version, int
-        ) or expected_status_version <= 0:
+        if (
+            isinstance(expected_status_version, bool)
+            or not isinstance(expected_status_version, int)
+            or expected_status_version <= 0
+        ):
             raise TaskValidationError(
                 "expected_status_version must be a positive integer, "
                 f"got {expected_status_version!r}"
@@ -2048,8 +1990,7 @@ class TaskRepository:
             _require_non_empty_string("lease_id", lease_id)
         if actor_kind not in ACTOR_KINDS:
             raise TaskValidationError(
-                f"actor_kind must be one of {sorted(ACTOR_KINDS)}, "
-                f"got {actor_kind!r}"
+                f"actor_kind must be one of {sorted(ACTOR_KINDS)}, got {actor_kind!r}"
             )
 
         # Semantic request identity: the fenced transition the caller wants.
@@ -2062,9 +2003,7 @@ class TaskRepository:
         try:
             request_digest = request_hash(command_kind, request)
         except CanonicalizationError as exc:
-            raise TaskValidationError(
-                f"cannot hash start request: {exc}"
-            ) from exc
+            raise TaskValidationError(f"cannot hash start request: {exc}") from exc
 
         # Idempotency gate first: replay or mismatch before any fence read
         # or sequence allocation.
@@ -2094,14 +2033,9 @@ class TaskRepository:
                 task_id=task_id,
                 attempt_id=attempt_id,
                 reason="task_not_running",
-                detail=(
-                    f"task status is {task_row['status']!r}, "
-                    "expected 'running'"
-                ),
+                detail=(f"task status is {task_row['status']!r}, expected 'running'"),
             )
-        attempt_row = uow.query_one(
-            "SELECT * FROM execution_attempts WHERE id = ?", (attempt_id,)
-        )
+        attempt_row = uow.query_one("SELECT * FROM execution_attempts WHERE id = ?", (attempt_id,))
         if attempt_row is None:
             raise TaskAttemptNotFoundError(attempt_id=attempt_id)
         if str(attempt_row["task_id"]) != task_id:
@@ -2115,10 +2049,7 @@ class TaskRepository:
                 task_id=task_id,
                 attempt_id=attempt_id,
                 reason="attempt_not_claimed",
-                detail=(
-                    f"attempt status is {attempt_row['status']!r}, "
-                    "expected 'claimed'"
-                ),
+                detail=(f"attempt status is {attempt_row['status']!r}, expected 'claimed'"),
             )
         if int(attempt_row["status_version"]) != expected_status_version:
             raise TaskTransitionError(
@@ -2131,10 +2062,7 @@ class TaskRepository:
                     f"{expected_status_version}"
                 ),
             )
-        if (
-            lease_id is not None
-            and str(attempt_row["lease_id"]) != lease_id
-        ):
+        if lease_id is not None and str(attempt_row["lease_id"]) != lease_id:
             raise TaskTransitionError(
                 task_id=task_id,
                 attempt_id=attempt_id,
@@ -2250,19 +2178,22 @@ class TaskRepository:
         task_id = _require_non_empty_string("task_id", task_id)
         attempt_id = _require_non_empty_string("attempt_id", attempt_id)
         lease_id = _require_non_empty_string("lease_id", lease_id)
-        if isinstance(expected_status_version, bool) or not isinstance(
-            expected_status_version, int
-        ) or expected_status_version <= 0:
+        if (
+            isinstance(expected_status_version, bool)
+            or not isinstance(expected_status_version, int)
+            or expected_status_version <= 0
+        ):
             raise TaskValidationError(
                 "expected_status_version must be a positive integer, "
                 f"got {expected_status_version!r}"
             )
-        if isinstance(lease_seconds, bool) or not isinstance(
-            lease_seconds, int
-        ) or lease_seconds <= 0:
+        if (
+            isinstance(lease_seconds, bool)
+            or not isinstance(lease_seconds, int)
+            or lease_seconds <= 0
+        ):
             raise TaskValidationError(
-                "lease_seconds must be a positive integer, "
-                f"got {lease_seconds!r}"
+                f"lease_seconds must be a positive integer, got {lease_seconds!r}"
             )
         stamp = now if now is not None else utc_now_iso()
         if not isinstance(stamp, str) or not stamp:
@@ -2280,13 +2211,9 @@ class TaskRepository:
                 task_id=task_id,
                 attempt_id=attempt_id,
                 reason="task_not_running",
-                detail=(
-                    f"task status is {task_row['status']!r}, expected 'running'"
-                ),
+                detail=(f"task status is {task_row['status']!r}, expected 'running'"),
             )
-        attempt_row = uow.query_one(
-            "SELECT * FROM execution_attempts WHERE id = ?", (attempt_id,)
-        )
+        attempt_row = uow.query_one("SELECT * FROM execution_attempts WHERE id = ?", (attempt_id,))
         if attempt_row is None:
             raise TaskAttemptNotFoundError(attempt_id=attempt_id)
         if str(attempt_row["task_id"]) != task_id:
@@ -2301,8 +2228,7 @@ class TaskRepository:
                 attempt_id=attempt_id,
                 reason="attempt_not_live",
                 detail=(
-                    f"attempt status is {attempt_row['status']!r}, "
-                    "expected 'claimed' or 'running'"
+                    f"attempt status is {attempt_row['status']!r}, expected 'claimed' or 'running'"
                 ),
             )
         if int(attempt_row["status_version"]) != expected_status_version:
@@ -2328,8 +2254,7 @@ class TaskRepository:
                 attempt_id=attempt_id,
                 reason="lease_expired",
                 detail=(
-                    f"attempt lease expired at "
-                    f"{attempt_row['lease_expires_at']}, before {stamp}"
+                    f"attempt lease expired at {attempt_row['lease_expires_at']}, before {stamp}"
                 ),
             )
 
@@ -2360,9 +2285,7 @@ class TaskRepository:
                 reason="stale_status_version",
                 detail="attempt changed between the fence check and the update",
             )
-        fresh = uow.query_one(
-            "SELECT * FROM execution_attempts WHERE id = ?", (attempt_id,)
-        )
+        fresh = uow.query_one("SELECT * FROM execution_attempts WHERE id = ?", (attempt_id,))
         if fresh is None:  # pragma: no cover - deleted rows cannot reappear
             raise TaskAttemptNotFoundError(attempt_id=attempt_id)
         return self._attempt_read_model(fresh)
@@ -2408,14 +2331,11 @@ class TaskRepository:
         raises :class:`ReceiptMismatchError` before any mutation.
         """
         project_id = _require_non_empty_string("project_id", project_id)
-        idempotency_key = _require_non_empty_string(
-            "idempotency_key", idempotency_key
-        )
+        idempotency_key = _require_non_empty_string("idempotency_key", idempotency_key)
         command_kind = _require_non_empty_string("command_kind", command_kind)
         if actor_kind not in ACTOR_KINDS:
             raise TaskValidationError(
-                f"actor_kind must be one of {sorted(ACTOR_KINDS)}, "
-                f"got {actor_kind!r}"
+                f"actor_kind must be one of {sorted(ACTOR_KINDS)}, got {actor_kind!r}"
             )
 
         # Semantic request identity: the sweep target is generated state, so
@@ -2424,9 +2344,7 @@ class TaskRepository:
         try:
             request_digest = request_hash(command_kind, request)
         except CanonicalizationError as exc:
-            raise TaskValidationError(
-                f"cannot hash expire request: {exc}"
-            ) from exc
+            raise TaskValidationError(f"cannot hash expire request: {exc}") from exc
 
         # Idempotency gate first: replay or mismatch before the scan or any
         # sequence allocation.
@@ -2457,9 +2375,7 @@ class TaskRepository:
             "ORDER BY a.lease_expires_at ASC, a.task_id ASC, a.attempt_no ASC",
             (project_id,),
         )
-        overdue = [
-            row for row in candidates if _iso_le(str(row["lease_expires_at"]), stamp)
-        ]
+        overdue = [row for row in candidates if _iso_le(str(row["lease_expires_at"]), stamp)]
         if not overdue:
             return None
         row = overdue[0]
@@ -2476,9 +2392,7 @@ class TaskRepository:
                 task_id=task_id,
                 attempt_id=attempt_id,
                 reason="task_not_running",
-                detail=(
-                    f"task status is {row['task_status']!r}, expected 'running'"
-                ),
+                detail=(f"task status is {row['task_status']!r}, expected 'running'"),
             )
 
         outcome = "requeued" if attempt_no < max_attempts else "failed"
@@ -2557,9 +2471,7 @@ class TaskRepository:
         )
         # 4. The complete receipt: refreshed task plus the expired attempt.
         task_model = self._task_model(uow, task_id=task_id, project_id=project_id)
-        fresh = uow.query_one(
-            "SELECT * FROM execution_attempts WHERE id = ?", (attempt_id,)
-        )
+        fresh = uow.query_one("SELECT * FROM execution_attempts WHERE id = ?", (attempt_id,))
         if fresh is None:  # pragma: no cover - deleted rows cannot reappear
             raise TaskAttemptNotFoundError(attempt_id=attempt_id)
         result = TaskExpiryReadModel(
@@ -2638,14 +2550,11 @@ class TaskRepository:
         """
         project_id = _require_non_empty_string("project_id", project_id)
         task_id = _require_non_empty_string("task_id", task_id)
-        idempotency_key = _require_non_empty_string(
-            "idempotency_key", idempotency_key
-        )
+        idempotency_key = _require_non_empty_string("idempotency_key", idempotency_key)
         command_kind = _require_non_empty_string("command_kind", command_kind)
         if actor_kind not in ACTOR_KINDS:
             raise TaskValidationError(
-                f"actor_kind must be one of {sorted(ACTOR_KINDS)}, "
-                f"got {actor_kind!r}"
+                f"actor_kind must be one of {sorted(ACTOR_KINDS)}, got {actor_kind!r}"
             )
         if cancel_request_id is not None:
             _require_non_empty_string("cancel_request_id", cancel_request_id)
@@ -2679,9 +2588,7 @@ class TaskRepository:
         try:
             request_digest = request_hash(command_kind, request)
         except CanonicalizationError as exc:
-            raise TaskValidationError(
-                f"cannot hash cancel request: {exc}"
-            ) from exc
+            raise TaskValidationError(f"cannot hash cancel request: {exc}") from exc
 
         # Idempotency gate first: replay or mismatch before any fence read
         # or sequence allocation.
@@ -2718,9 +2625,7 @@ class TaskRepository:
             )
 
         effective_cancel_request_id = (
-            cancel_request_id
-            if cancel_request_id is not None
-            else generate_lowercase_ulid()
+            cancel_request_id if cancel_request_id is not None else generate_lowercase_ulid()
         )
         stream_id = f"{task_id}:{CORE_TASK_STREAM_TYPE}"
         txn_id = uuid.uuid4().hex
@@ -2735,11 +2640,7 @@ class TaskRepository:
         if prior_status == "running":
             # Running cancellation terminates the owned attempt: the caller
             # must present the exact lease/version evidence.
-            if (
-                attempt_id is None
-                or lease_id is None
-                or expected_status_version is None
-            ):
+            if attempt_id is None or lease_id is None or expected_status_version is None:
                 raise TaskValidationError(
                     "cancelling a running task requires attempt_id, "
                     "lease_id, and expected_status_version"
@@ -2809,19 +2710,19 @@ class TaskRepository:
                     reason="stale_status_version",
                     detail="attempt changed between the fence check and the update",
                 )
-            fresh = uow.query_one(
-                "SELECT * FROM execution_attempts WHERE id = ?", (attempt_id,)
-            )
+            fresh = uow.query_one("SELECT * FROM execution_attempts WHERE id = ?", (attempt_id,))
             if fresh is None:  # pragma: no cover - deleted rows cannot reappear
                 raise TaskAttemptNotFoundError(attempt_id=attempt_id)
             attempt_model = self._attempt_read_model(fresh)
         else:
             # Queued/blocked cancellation: no attempt exists to terminate;
             # any supplied attempt fence is a caller bug.
-            if attempt_id is not None or lease_id is not None or expected_status_version is not None:
-                raise TaskValidationError(
-                    "cancelling a queued/blocked task takes no attempt fence"
-                )
+            if (
+                attempt_id is not None
+                or lease_id is not None
+                or expected_status_version is not None
+            ):
+                raise TaskValidationError("cancelling a queued/blocked task takes no attempt fence")
 
         # 2. The task leaves the claim queue terminally: cancelled with
         #    finished_at stamped; it can never be claimed or completed.
@@ -2956,21 +2857,20 @@ class TaskRepository:
         task_id = _require_non_empty_string("task_id", task_id)
         attempt_id = _require_non_empty_string("attempt_id", attempt_id)
         lease_id = _require_non_empty_string("lease_id", lease_id)
-        idempotency_key = _require_non_empty_string(
-            "idempotency_key", idempotency_key
-        )
+        idempotency_key = _require_non_empty_string("idempotency_key", idempotency_key)
         command_kind = _require_non_empty_string("command_kind", command_kind)
-        if isinstance(expected_status_version, bool) or not isinstance(
-            expected_status_version, int
-        ) or expected_status_version <= 0:
+        if (
+            isinstance(expected_status_version, bool)
+            or not isinstance(expected_status_version, int)
+            or expected_status_version <= 0
+        ):
             raise TaskValidationError(
                 "expected_status_version must be a positive integer, "
                 f"got {expected_status_version!r}"
             )
         if actor_kind not in ACTOR_KINDS:
             raise TaskValidationError(
-                f"actor_kind must be one of {sorted(ACTOR_KINDS)}, "
-                f"got {actor_kind!r}"
+                f"actor_kind must be one of {sorted(ACTOR_KINDS)}, got {actor_kind!r}"
             )
         error_payload = dict(error) if error is not None else {}
 
@@ -2986,9 +2886,7 @@ class TaskRepository:
         try:
             request_digest = request_hash(command_kind, request)
         except CanonicalizationError as exc:
-            raise TaskValidationError(
-                f"cannot hash fail request: {exc}"
-            ) from exc
+            raise TaskValidationError(f"cannot hash fail request: {exc}") from exc
 
         # Idempotency gate first: replay or mismatch before any fence read
         # or sequence allocation.
@@ -3018,13 +2916,9 @@ class TaskRepository:
                 task_id=task_id,
                 attempt_id=attempt_id,
                 reason="task_not_running",
-                detail=(
-                    f"task status is {task_row['status']!r}, expected 'running'"
-                ),
+                detail=(f"task status is {task_row['status']!r}, expected 'running'"),
             )
-        attempt_row = uow.query_one(
-            "SELECT * FROM execution_attempts WHERE id = ?", (attempt_id,)
-        )
+        attempt_row = uow.query_one("SELECT * FROM execution_attempts WHERE id = ?", (attempt_id,))
         if attempt_row is None:
             raise TaskAttemptNotFoundError(attempt_id=attempt_id)
         if str(attempt_row["task_id"]) != task_id:
@@ -3039,8 +2933,7 @@ class TaskRepository:
                 attempt_id=attempt_id,
                 reason="attempt_not_live",
                 detail=(
-                    f"attempt status is {attempt_row['status']!r}, "
-                    "expected 'claimed' or 'running'"
+                    f"attempt status is {attempt_row['status']!r}, expected 'claimed' or 'running'"
                 ),
             )
         if str(attempt_row["lease_id"]) != lease_id:
@@ -3075,9 +2968,7 @@ class TaskRepository:
         try:
             error_json = canonical_json(error_payload)
         except CanonicalizationError as exc:
-            raise TaskValidationError(
-                f"cannot serialize fail error payload: {exc}"
-            ) from exc
+            raise TaskValidationError(f"cannot serialize fail error payload: {exc}") from exc
         cursor = uow.execute(
             "UPDATE execution_attempts SET status = 'failed', "
             "status_version = ?, updated_at = ?, finished_at = ?, "
@@ -3120,7 +3011,21 @@ class TaskRepository:
                 reason="task_not_running",
                 detail="task changed between the fence read and the update",
             )
-        # 3. The hash-chained core.task.failed event on the task stream.
+
+        # 3. Recompute the parent run projection exactly as completion does.
+        # A terminal failed child must not leave its owning kernel run stuck
+        # in ``running``; a requeued child simply keeps the derived run status
+        # nonterminal.
+        run_id = task_row["run_id"]
+        if run_id is not None:
+            self._update_run_projection_on_child_terminal(
+                uow,
+                run_id=str(run_id),
+                project_id=project_id,
+                stamp=stamp,
+            )
+
+        # 4. The hash-chained core.task.failed event on the task stream.
         event_data: dict[str, Any] = {
             "task_id": task_id,
             "attempt_id": attempt_id,
@@ -3154,11 +3059,9 @@ class TaskRepository:
             event_id=event_id,
             created_at=stamp,
         )
-        # 4. The complete receipt: refreshed task plus the failed attempt.
+        # 5. The complete receipt: refreshed task plus the failed attempt.
         task_model = self._task_model(uow, task_id=task_id, project_id=project_id)
-        fresh = uow.query_one(
-            "SELECT * FROM execution_attempts WHERE id = ?", (attempt_id,)
-        )
+        fresh = uow.query_one("SELECT * FROM execution_attempts WHERE id = ?", (attempt_id,))
         if fresh is None:  # pragma: no cover - deleted rows cannot reappear
             raise TaskAttemptNotFoundError(attempt_id=attempt_id)
         result = TaskFailReadModel(
@@ -3242,23 +3145,21 @@ class TaskRepository:
         """
         project_id = _require_non_empty_string("project_id", project_id)
         task_id = _require_non_empty_string("task_id", task_id)
-        idempotency_key = _require_non_empty_string(
-            "idempotency_key", idempotency_key
-        )
+        idempotency_key = _require_non_empty_string("idempotency_key", idempotency_key)
         command_kind = _require_non_empty_string("command_kind", command_kind)
         if actor_kind not in ACTOR_KINDS:
             raise TaskValidationError(
-                f"actor_kind must be one of {sorted(ACTOR_KINDS)}, "
-                f"got {actor_kind!r}"
+                f"actor_kind must be one of {sorted(ACTOR_KINDS)}, got {actor_kind!r}"
             )
         if executor_id is not None:
             _require_non_empty_string("executor_id", executor_id)
-        if isinstance(lease_seconds, bool) or not isinstance(
-            lease_seconds, int
-        ) or lease_seconds <= 0:
+        if (
+            isinstance(lease_seconds, bool)
+            or not isinstance(lease_seconds, int)
+            or lease_seconds <= 0
+        ):
             raise TaskValidationError(
-                "lease_seconds must be a positive integer, "
-                f"got {lease_seconds!r}"
+                f"lease_seconds must be a positive integer, got {lease_seconds!r}"
             )
         if selected_task_ids is not None:
             if (
@@ -3267,15 +3168,12 @@ class TaskRepository:
                 or not selected_task_ids
             ):
                 raise TaskValidationError(
-                    "selected_task_ids must be a non-empty sequence of "
-                    "non-empty task ids"
+                    "selected_task_ids must be a non-empty sequence of non-empty task ids"
                 )
             for entry in selected_task_ids:
                 _require_non_empty_string("selected_task_ids[]", entry)
             if len(set(selected_task_ids)) != len(selected_task_ids):
-                raise TaskValidationError(
-                    "selected_task_ids must not contain duplicates"
-                )
+                raise TaskValidationError("selected_task_ids must not contain duplicates")
 
         # Semantic request identity: the task plus the optional group
         # selection set (canonical sorted form); generated state (the new
@@ -3286,9 +3184,7 @@ class TaskRepository:
         try:
             request_digest = request_hash(command_kind, request)
         except CanonicalizationError as exc:
-            raise TaskValidationError(
-                f"cannot hash retry request: {exc}"
-            ) from exc
+            raise TaskValidationError(f"cannot hash retry request: {exc}") from exc
 
         # Idempotency gate first: replay or mismatch before any fence read
         # or sequence allocation.
@@ -3318,10 +3214,7 @@ class TaskRepository:
             raise TaskTransitionError(
                 task_id=task_id,
                 reason="task_terminal",
-                detail=(
-                    f"task status is {prior_status!r}; a terminal task "
-                    "never resurrects"
-                ),
+                detail=(f"task status is {prior_status!r}; a terminal task never resurrects"),
             )
         if prior_status != "queued":
             raise TaskTransitionError(
@@ -3333,16 +3226,14 @@ class TaskRepository:
                 ),
             )
         prior_attempt_row = uow.query_one(
-            "SELECT * FROM execution_attempts WHERE task_id = ? "
-            "ORDER BY attempt_no DESC LIMIT 1",
+            "SELECT * FROM execution_attempts WHERE task_id = ? ORDER BY attempt_no DESC LIMIT 1",
             (task_id,),
         )
         if prior_attempt_row is None:
             raise TaskTransitionError(
                 task_id=task_id,
                 reason="not_retryable",
-                detail="task has no prior attempt; only failed or expired "
-                "work is retryable",
+                detail="task has no prior attempt; only failed or expired work is retryable",
             )
         prior_attempt_status = str(prior_attempt_row["status"])
         if prior_attempt_status not in ("failed", "expired"):
@@ -3453,9 +3344,7 @@ class TaskRepository:
 
         # 4. The complete receipt: refreshed task plus the new attempt.
         task_model = self._task_model(uow, task_id=task_id, project_id=project_id)
-        fresh = uow.query_one(
-            "SELECT * FROM execution_attempts WHERE id = ?", (attempt_id,)
-        )
+        fresh = uow.query_one("SELECT * FROM execution_attempts WHERE id = ?", (attempt_id,))
         if fresh is None:  # pragma: no cover - deleted rows cannot reappear
             raise TaskAttemptNotFoundError(attempt_id=attempt_id)
         result = TaskRetryReadModel(
@@ -3513,8 +3402,7 @@ class TaskRepository:
         if prior_status != "queued":
             return False, "not_retryable"
         prior_attempt_row = uow.query_one(
-            "SELECT * FROM execution_attempts WHERE task_id = ? "
-            "ORDER BY attempt_no DESC LIMIT 1",
+            "SELECT * FROM execution_attempts WHERE task_id = ? ORDER BY attempt_no DESC LIMIT 1",
             (task_id,),
         )
         if prior_attempt_row is None:
@@ -3601,21 +3489,20 @@ class TaskRepository:
         task_id = _require_non_empty_string("task_id", task_id)
         attempt_id = _require_non_empty_string("attempt_id", attempt_id)
         lease_id = _require_non_empty_string("lease_id", lease_id)
-        idempotency_key = _require_non_empty_string(
-            "idempotency_key", idempotency_key
-        )
+        idempotency_key = _require_non_empty_string("idempotency_key", idempotency_key)
         command_kind = _require_non_empty_string("command_kind", command_kind)
-        if isinstance(expected_status_version, bool) or not isinstance(
-            expected_status_version, int
-        ) or expected_status_version <= 0:
+        if (
+            isinstance(expected_status_version, bool)
+            or not isinstance(expected_status_version, int)
+            or expected_status_version <= 0
+        ):
             raise TaskValidationError(
                 "expected_status_version must be a positive integer, "
                 f"got {expected_status_version!r}"
             )
         if actor_kind not in ACTOR_KINDS:
             raise TaskValidationError(
-                f"actor_kind must be one of {sorted(ACTOR_KINDS)}, "
-                f"got {actor_kind!r}"
+                f"actor_kind must be one of {sorted(ACTOR_KINDS)}, got {actor_kind!r}"
             )
         if not hasattr(media_repo, "materialize_prepared"):
             raise TaskValidationError(
@@ -3634,8 +3521,7 @@ class TaskRepository:
         result_summary = dict(result) if result else None
         if not normalized_outputs and result_summary is None:
             raise TaskValidationError(
-                "complete requires at least one materialized output or a "
-                "non-empty result summary"
+                "complete requires at least one materialized output or a non-empty result summary"
             )
 
         # Semantic request identity: the fenced transition plus every
@@ -3652,18 +3538,14 @@ class TaskRepository:
             "attempt_id": attempt_id,
             "lease_id": lease_id,
             "expected_status_version": expected_status_version,
-            "outputs": [
-                self._output_request_identity(entry) for entry in normalized_outputs
-            ],
+            "outputs": [self._output_request_identity(entry) for entry in normalized_outputs],
         }
         if result_summary is not None:
             request["result"] = result_summary
         try:
             request_digest = request_hash(command_kind, request)
         except CanonicalizationError as exc:
-            raise TaskValidationError(
-                f"cannot hash complete request: {exc}"
-            ) from exc
+            raise TaskValidationError(f"cannot hash complete request: {exc}") from exc
 
         # Idempotency gate first: replay or mismatch before any fence read
         # or sequence allocation.
@@ -3693,13 +3575,9 @@ class TaskRepository:
                 task_id=task_id,
                 attempt_id=attempt_id,
                 reason="task_not_running",
-                detail=(
-                    f"task status is {task_row['status']!r}, expected 'running'"
-                ),
+                detail=(f"task status is {task_row['status']!r}, expected 'running'"),
             )
-        attempt_row = uow.query_one(
-            "SELECT * FROM execution_attempts WHERE id = ?", (attempt_id,)
-        )
+        attempt_row = uow.query_one("SELECT * FROM execution_attempts WHERE id = ?", (attempt_id,))
         if attempt_row is None:
             raise TaskAttemptNotFoundError(attempt_id=attempt_id)
         if str(attempt_row["task_id"]) != task_id:
@@ -3714,8 +3592,7 @@ class TaskRepository:
                 attempt_id=attempt_id,
                 reason="attempt_not_live",
                 detail=(
-                    f"attempt status is {attempt_row['status']!r}, "
-                    "expected 'claimed' or 'running'"
+                    f"attempt status is {attempt_row['status']!r}, expected 'claimed' or 'running'"
                 ),
             )
         if str(attempt_row["lease_id"]) != lease_id:
@@ -3773,9 +3650,7 @@ class TaskRepository:
                 materialize_args["locator"] = entry["locator"]
             if entry.get("relations") is not None:
                 materialize_args["relations"] = entry["relations"]
-            materialized_media = media_repo.materialize_prepared(
-                uow, **materialize_args
-            )
+            materialized_media = media_repo.materialize_prepared(uow, **materialize_args)
             materialized.append(
                 {
                     "ordinal": entry["ordinal"],
@@ -3801,9 +3676,7 @@ class TaskRepository:
             try:
                 params_json = canonical_json(params)
             except CanonicalizationError as exc:
-                raise TaskValidationError(
-                    f"cannot serialize output params: {exc}"
-                ) from exc
+                raise TaskValidationError(f"cannot serialize output params: {exc}") from exc
             uow.execute(
                 "INSERT INTO task_outputs "
                 "(task_id, ordinal, role, media_id, is_primary, "
@@ -3836,9 +3709,7 @@ class TaskRepository:
             if "prepared" in entry:
                 continue
             params = {
-                key: entry[key]
-                for key in ("path", "digest", "byte_size", "label")
-                if key in entry
+                key: entry[key] for key in ("path", "digest", "byte_size", "label") if key in entry
             }
             output_models.append(
                 TaskOutputReadModel(
@@ -3895,9 +3766,7 @@ class TaskRepository:
         # 5. Unblock eligible hard dependents: a blocked dependent whose
         #    every hard dependency has now succeeded becomes queued (pure
         #    projection update — the vocabulary has no unblocked event).
-        unblocked = self._unblock_eligible_dependents(
-            uow, task_id=task_id, stamp=stamp
-        )
+        unblocked = self._unblock_eligible_dependents(uow, task_id=task_id, stamp=stamp)
 
         # 6. Recompute the parent run projection when the task belongs to a
         #    run (plan step 10: update any parent run projection).
@@ -3912,9 +3781,7 @@ class TaskRepository:
             )
 
         # 7. The hash-chained core.task.completed event on the task stream.
-        media_id_by_ordinal = {
-            entry["ordinal"]: entry["media_id"] for entry in materialized
-        }
+        media_id_by_ordinal = {entry["ordinal"]: entry["media_id"] for entry in materialized}
         event_outputs: list[dict[str, Any]] = []
         for entry in normalized_outputs:
             item: dict[str, Any] = {
@@ -3983,16 +3850,13 @@ class TaskRepository:
                 task_id=task_id,
                 attempt_id=attempt_id,
                 reason="task_not_running",
-                detail="completion appended no events; the transaction "
-                "cannot be recorded",
+                detail="completion appended no events; the transaction cannot be recorded",
             )
         first_seq = int(ordered_events[0]["project_seq"])
         last_seq = int(ordered_events[-1]["project_seq"])
 
         task_model = self._task_model(uow, task_id=task_id, project_id=project_id)
-        fresh = uow.query_one(
-            "SELECT * FROM execution_attempts WHERE id = ?", (attempt_id,)
-        )
+        fresh = uow.query_one("SELECT * FROM execution_attempts WHERE id = ?", (attempt_id,))
         if fresh is None:  # pragma: no cover - deleted rows cannot reappear
             raise TaskAttemptNotFoundError(attempt_id=attempt_id)
         completed = TaskCompleteReadModel(
@@ -4045,46 +3909,34 @@ class TaskRepository:
         is :meth:`complete`'s decision. Returns the entries ordered by
         ordinal (ties impossible after the uniqueness check).
         """
-        if isinstance(outputs, (str, bytes)) or not isinstance(
-            outputs, Sequence
-        ):
-            raise TaskValidationError(
-                "outputs must be a sequence of output mappings"
-            )
+        if isinstance(outputs, (str, bytes)) or not isinstance(outputs, Sequence):
+            raise TaskValidationError("outputs must be a sequence of output mappings")
         normalized: list[dict[str, Any]] = []
         seen_ordinals: set[int] = set()
         for index, raw in enumerate(outputs):
             if not isinstance(raw, Mapping):
                 raise TaskValidationError(
-                    f"outputs[{index}] must be a mapping, got "
-                    f"{type(raw).__name__}"
+                    f"outputs[{index}] must be a mapping, got {type(raw).__name__}"
                 )
             ordinal = raw.get("ordinal")
-            if isinstance(ordinal, bool) or not isinstance(
-                ordinal, int
-            ) or ordinal < 0:
+            if isinstance(ordinal, bool) or not isinstance(ordinal, int) or ordinal < 0:
                 raise TaskValidationError(
-                    f"outputs[{index}].ordinal must be a non-negative "
-                    f"integer, got {ordinal!r}"
+                    f"outputs[{index}].ordinal must be a non-negative integer, got {ordinal!r}"
                 )
             if ordinal in seen_ordinals:
-                raise TaskValidationError(
-                    f"outputs[{index}].ordinal {ordinal!r} is duplicated"
-                )
+                raise TaskValidationError(f"outputs[{index}].ordinal {ordinal!r} is duplicated")
             seen_ordinals.add(ordinal)
             is_primary = raw.get("is_primary")
             if not isinstance(is_primary, bool):
                 raise TaskValidationError(
-                    f"outputs[{index}].is_primary must be a boolean, "
-                    f"got {is_primary!r}"
+                    f"outputs[{index}].is_primary must be a boolean, got {is_primary!r}"
                 )
             role = raw.get("role")
             if role is None:
                 role = "result" if is_primary else "output"
             if not isinstance(role, str) or not role:
                 raise TaskValidationError(
-                    f"outputs[{index}].role must be a non-empty string, "
-                    f"got {role!r}"
+                    f"outputs[{index}].role must be a non-empty string, got {role!r}"
                 )
             if role != "result" and is_primary:
                 raise TaskValidationError(
@@ -4109,18 +3961,13 @@ class TaskRepository:
                         value = raw[key]
                         if not isinstance(value, str) or not value:
                             raise TaskValidationError(
-                                f"outputs[{index}].{key} must be a non-empty "
-                                f"string, got {value!r}"
+                                f"outputs[{index}].{key} must be a non-empty string, got {value!r}"
                             )
                         entry[key] = value
                 if raw.get("relations") is not None:
                     relations = raw["relations"]
-                    if not isinstance(relations, Sequence) or isinstance(
-                        relations, (str, bytes)
-                    ):
-                        raise TaskValidationError(
-                            f"outputs[{index}].relations must be a sequence"
-                        )
+                    if not isinstance(relations, Sequence) or isinstance(relations, (str, bytes)):
+                        raise TaskValidationError(f"outputs[{index}].relations must be a sequence")
                     entry["relations"] = list(relations)
             else:
                 declared = [
@@ -4144,24 +3991,23 @@ class TaskRepository:
                         value = raw[key]
                         if not isinstance(value, str) or not value:
                             raise TaskValidationError(
-                                f"outputs[{index}].{key} must be a non-empty "
-                                f"string, got {value!r}"
+                                f"outputs[{index}].{key} must be a non-empty string, got {value!r}"
                             )
                         entry[key] = value
                 byte_size = raw.get("byte_size")
                 if byte_size is not None:
-                    if isinstance(byte_size, bool) or not isinstance(
-                        byte_size, int
-                    ) or byte_size < 0:
+                    if (
+                        isinstance(byte_size, bool)
+                        or not isinstance(byte_size, int)
+                        or byte_size < 0
+                    ):
                         raise TaskValidationError(
                             f"outputs[{index}].byte_size must be a "
                             f"non-negative integer, got {byte_size!r}"
                         )
                     entry["byte_size"] = byte_size
             normalized.append(entry)
-        if normalized and sum(
-            1 for entry in normalized if entry["is_primary"]
-        ) != 1:
+        if normalized and sum(1 for entry in normalized if entry["is_primary"]) != 1:
             raise TaskValidationError(
                 "complete requires exactly one primary output "
                 f"(got {sum(1 for e in normalized if e['is_primary'])})"
@@ -4287,9 +4133,7 @@ class TaskRepository:
             # plan step 13, own terminal-run rejection); keep the projection
             # as it stands.
             return {"status": str(run_row["status"]), "terminal": True}
-        counts, run_status = derive_run_progress_counts(
-            uow, run_id=run_id, project_id=project_id
-        )
+        counts, run_status = derive_run_progress_counts(uow, run_id=run_id, project_id=project_id)
         total = sum(counts.values())
         projection: dict[str, Any] = {
             "total_children": total,
@@ -4301,9 +4145,7 @@ class TaskRepository:
         try:
             result_json = canonical_json(projection)
         except CanonicalizationError as exc:  # pragma: no cover - ints only
-            raise TaskValidationError(
-                f"cannot serialize run projection: {exc}"
-            ) from exc
+            raise TaskValidationError(f"cannot serialize run projection: {exc}") from exc
         uow.execute(
             "UPDATE runs SET result_json = ?, status = ?, finished_at = ? "
             "WHERE id = ? AND status = 'running'",
@@ -4318,9 +4160,7 @@ class TaskRepository:
 
     # -- internal lifecycle helpers ----------------------------------------
 
-    def _task_model(
-        self, uow: UnitOfWork, *, task_id: str, project_id: str
-    ) -> TaskReadModel:
+    def _task_model(self, uow: UnitOfWork, *, task_id: str, project_id: str) -> TaskReadModel:
         """Rebuild the frozen task read model inside the active UoW.
 
         Joins the current project head so ``event_head_seq`` reflects every
@@ -4341,9 +4181,7 @@ class TaskRepository:
             "ORDER BY ordinal ASC, depends_on_task_id ASC",
             (task_id,),
         )
-        return self._row_to_read_model(
-            row, [dict(dep) for dep in dependency_rows]
-        )
+        return self._row_to_read_model(row, [dict(dep) for dep in dependency_rows])
 
     @staticmethod
     def _attempt_read_model(row: Mapping[str, Any]) -> TaskAttemptReadModel:

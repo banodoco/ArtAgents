@@ -166,12 +166,13 @@ def _kernel_or_fs_runs(slug: str, *, root: str | Path | None = None) -> list[str
 
     try:
         import sqlite3
+
         from astrid.core.kernel.read import kernel_runs_for_project
 
         projects_root = paths.resolve_projects_root(root)
-        db_candidates = [projects_root / "kernel.sqlite3", projects_root / ".astrid" / "astrid.sqlite3", projects_root / ".astrid" / "kernel.sqlite3"]
-        has_db = any(p.is_file() for p in db_candidates)
-        if has_db:
+        from astrid.core.integrations.reigh.bridge_service import derive_database_path
+
+        if derive_database_path(projects_root).is_file():
             ids = kernel_runs_for_project(slug, projects_root=projects_root)
             return ids
     except sqlite3.Error:

@@ -29,6 +29,13 @@ unsupported and must not be silently treated as tested.
 | Clean account | **fresh credential-free local account** | Each run uses isolated home, state, project, media, cache, configuration, and browser-profile paths with account, cloud, and provider credentials/configuration absent. It proves the installed product's local-first journey, not a pre-seeded or authenticated environment. |
 | Evidence owner | **Astrid Release Owner** | The role owns the matrix, evidence completeness, digest consistency, and ship decision. CI lane owners produce automated records; the designated physical-device operator retains manual device records under the Release Owner's custody. |
 
+The release dependency and toolchain inputs are frozen by the hashed locks and
+machine-readable evidence described in
+[`docs/runbooks/reproducible-release.md`](../runbooks/reproducible-release.md).
+The label "current stable Chromium" is realized by the exact Playwright package
+and Chromium revision recorded by each matrix cell; it is never resolved from
+an unpinned `npx` invocation.
+
 ### 1.1 Evidence classification
 
 - **Blocking automated evidence:** installed-wheel packaging, import/help/version

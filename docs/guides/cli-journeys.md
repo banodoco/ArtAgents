@@ -347,6 +347,11 @@ second writer. A doctor result with `schema_versions: fail` indicates a
 too-new migration or schema incompatibility. Keep the original project and
 select a compatible checkout or restore a compatible backup.
 
+An unexpected command failure is reported as the typed `internal_error`
+condition with a bounded, redacted message. Preserve the original project,
+record the command and error code, and diagnose the implementation before
+retrying; do not edit kernel state to work around it.
+
 Timeline saves are compare-and-swap operations. A stale expected version is
 an HTTP `409 timeline_version_conflict` (or SDK `stale_version`) and changes
 nothing. Load the current timeline, merge the local draft, and save again with

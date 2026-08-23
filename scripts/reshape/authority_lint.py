@@ -66,9 +66,8 @@ from __future__ import annotations
 import ast
 import json
 import re
-import sqlite3
-from dataclasses import dataclass
 from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -399,7 +398,7 @@ def lint_writer_authority(root: Path) -> list[str]:
 
     ``astrid/core/store`` owns every writable connection. Two documented
     exemptions exist: the conformance kit (``astrid/core/conformance/kit.py``)
-    constructs scratch ``DatabaseWriter``\ s on its own temp databases to
+    constructs scratch ``DatabaseWriter`` instances on its own temp databases to
     prove crash atomicity of the kernel store — that is conformance testing
     of the store, never a second write authority; and
     ``astrid/packs/__init__.py`` is the standard composition root itself,
@@ -408,7 +407,6 @@ def lint_writer_authority(root: Path) -> list[str]:
     not writers and are never flagged.
     """
     errors: list[str] = []
-    store_root = root / "astrid" / "core" / "store"
     for path in _iter_python(root / "astrid"):
         rel = _rel(path, root)
         if rel.startswith("astrid/core/store/"):
@@ -420,6 +418,11 @@ def lint_writer_authority(root: Path) -> list[str]:
         try:
             source = path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
+            continue
+        if "kernel.sqlite3" in source:
+            errors.append(
+                f"{rel}: legacy kernel.sqlite3 path creates a ghost database authority"
+            )
             continue
         if "DatabaseWriter(" in source:
             errors.append(

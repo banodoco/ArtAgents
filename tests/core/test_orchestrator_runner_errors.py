@@ -17,15 +17,15 @@ import pytest
 
 from astrid.core.contracts.schema import CommandSpec, IsolationMetadata, Output, Port
 from astrid.core.execution.orchestrator.registry import OrchestratorRegistry
-from astrid.core.foundation import project_paths
-from astrid.core.project.project import create_project
 from astrid.core.execution.orchestrator.runner import (
-    OrchestratorRunRequest,
     OrchestratorRunnerError,
+    OrchestratorRunRequest,
     build_orchestrator_command,
     run_orchestrator,
 )
 from astrid.core.execution.orchestrator.schema import OrchestratorDefinition, RuntimeSpec
+from astrid.core.foundation import project_paths
+from astrid.core.project.project import create_project
 from astrid.core.timeline.crud import create_timeline
 
 
@@ -387,7 +387,7 @@ def test_python_orchestrator_in_process_mode_keeps_direct_python_runtime_path(
     assert result.ok is True
 
 
-def test_project_command_orchestrator_in_process_mode_preserves_project_run_finalization(
+def test_project_command_orchestrator_in_process_mode_requires_kernel_owned_out(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -415,47 +415,26 @@ def test_project_command_orchestrator_in_process_mode_preserves_project_run_fina
         },
     )
     registry = _registry(orch)
-    seen: dict[str, Any] = {}
+    from astrid.core.project.run import ProjectRunError
 
-    def _fake_in_process(
-        argv: tuple[str, ...],
-        *,
-        metadata: dict[str, Any],
-        owner_id: str,
-        cwd: str | None = None,
-        env: dict[str, str] | None = None,
-        parent_env: dict[str, str] | None = None,
-        **_: Any,
-    ) -> types.SimpleNamespace:
-        seen["argv"] = argv
-        seen["cwd"] = cwd
-        seen["env"] = dict(env or {})
-        seen["owner_id"] = owner_id
-        return types.SimpleNamespace(returncode=0)
-
-    import astrid.core.execution.orchestrator.runner as runner_mod
-
-    monkeypatch.setattr(runner_mod, "invoke_in_process_command", _fake_in_process)
-
-    result = run_orchestrator(
-        OrchestratorRunRequest(
-            orchestrator_id=orch.id,
-            project="demo",
-            execution_mode="in_process",
-            orchestrator_args=("--brief", str(tmp_path / "brief.txt"), "--target-duration", "1"),
-        ),
-        registry,
-    )
+    with pytest.raises(ProjectRunError, match="requires --out or a kernel run"):
+        run_orchestrator(
+            OrchestratorRunRequest(
+                orchestrator_id=orch.id,
+                project="demo",
+                execution_mode="in_process",
+                orchestrator_args=(
+                    "--brief",
+                    str(tmp_path / "brief.txt"),
+                    "--target-duration",
+                    "1",
+                ),
+            ),
+            registry,
+        )
 
     records = sorted((projects_root / "demo" / "runs").glob("*/run.json"))
-
-    assert result.returncode == 0
-    assert seen["owner_id"] == orch.id
-    assert "--out" in seen["argv"]
-    assert seen["env"]["ASTRID_PROJECT_RUN"] == "1"
-    assert seen["env"]["ASTRID_INTERNAL_INVOCATION"] == "1"
-    assert len(records) == 1
-    assert '"status": "completed"' in records[0].read_text(encoding="utf-8")
+    assert records == []
 
 
 # ---------------------------------------------------------------------------
@@ -609,12 +588,12 @@ def test_command_orchestrator_rejects_unknown_placeholder(tmp_path: Path) -> Non
 # ---------------------------------------------------------------------------
 
 
-def test_project_python_orchestrator_is_ledgered(
+def test_project_python_orchestrator_requires_kernel_owned_out(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    import astrid.core.execution.orchestrator.runner as runner_mod
     from astrid.core.foundation import project_paths
     from astrid.core.project.project import create_project
-    import astrid.core.execution.orchestrator.runner as runner_mod
 
     monkeypatch.setenv(project_paths.PROJECTS_ROOT_ENV, str(tmp_path / "projects"))
     create_project("demo")
@@ -627,14 +606,16 @@ def test_project_python_orchestrator_is_ledgered(
     orch = _python_orchestrator(function="_test_python_target")
     registry = _registry(orch)
 
-    result = run_orchestrator(
-        OrchestratorRunRequest(orchestrator_id=orch.id, project="demo"),
-        registry,
-    )
+    from astrid.core.project.run import ProjectRunError
 
-    assert result.ok is True
+    with pytest.raises(ProjectRunError, match="requires --out or a kernel run"):
+        run_orchestrator(
+            OrchestratorRunRequest(orchestrator_id=orch.id, project="demo"),
+            registry,
+        )
+
     records = list((tmp_path / "projects" / "demo" / "runs").glob("*/run.json"))
-    assert len(records) == 1
+    assert records == []
 
 
 def test_project_orchestrator_rejects_passthrough_out(

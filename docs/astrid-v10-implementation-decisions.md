@@ -76,7 +76,7 @@ original m1–m6 decisions remain historical unless explicitly amended below.
 | 10 | `cli_mounts` | mapping | explicit in-tree CLI mounts |
 | 11 | `bridge_mounts` | list | explicit bridge mounts |
 
-**Composition rule:** startup registers only the three in-tree schema packs via one explicit `register_pack()` call; there is no dynamic discovery, install/uninstall, or capability-pack loader reuse (v10 §2 "Boundary now, loader later"). Parsing reuses only `load_manifest_mapping()` for YAML loading; everything else is strict validation.
+**Composition rule:** startup registers only the four in-tree schema packs (timeline, shots, references, Runaway) through the one explicit composition function; there is no dynamic discovery, install/uninstall, or capability-pack loader reuse (v10 §2 "Boundary now, loader later"). Parsing reuses only `load_manifest_mapping()` for YAML loading; everything else is strict validation.
 
 ## 5. Managed media layout
 

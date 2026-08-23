@@ -45,15 +45,8 @@ import sqlite3
 import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 
-from typing import Protocol
-
-from astrid.core.repositories.errors import ACTOR_KINDS
-
-class EventAppendPort(Protocol):
-    def append(self, stream_id: str, event: object, **kwargs: object) -> tuple[int, int]:
-        ...
 from astrid.core.ids import generate_lowercase_ulid, is_lowercase_ulid
 from astrid.core.receipts.canonical import (
     CanonicalizationError,
@@ -62,10 +55,16 @@ from astrid.core.receipts.canonical import (
     request_hash,
 )
 from astrid.core.receipts.service import ReceiptService
-from astrid.core.repositories.errors import RepositoryError
+from astrid.core.repositories.errors import ACTOR_KINDS, RepositoryError
 from astrid.core.store.uow import UnitOfWork
 from astrid.core.store.writer import DatabaseWriter
 from astrid.core.util.time import utc_now_iso
+
+
+class EventAppendPort(Protocol):
+    """Structural event-appender dependency used by project commands."""
+
+    def append(self, uow: UnitOfWork, **kwargs: object) -> Any: ...
 
 CORE_PROJECT_STREAM_TYPE = "core.project"
 """The kernel stream type every project aggregate owns (one per project)."""
@@ -96,7 +95,7 @@ REPOSITORY_OWNED_SETTINGS_KEYS: frozenset[str] = frozenset(
 )
 """Caller-invisible ``settings_json`` keys owned by the repository."""
 
-_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
+_SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 """Immutable slug grammar: lowercase letters/digits joined by single hyphens."""
 
 

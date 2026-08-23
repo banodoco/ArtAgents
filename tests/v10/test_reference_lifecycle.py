@@ -824,8 +824,8 @@ def test_reference_lifecycle_leaves_catalog_unchanged(env) -> None:
         }
     )
     # The frozen standard catalog: 14 kernel tables + timelines + shots +
-    # shot_items + the three reference tables = 20, with no plan/step tables.
-    assert len(present) == 20
+    # shot_items + three reference tables + runaway transitions = 21.
+    assert len(present) == 21
     for table in (
         "project_references",
         "media_references",

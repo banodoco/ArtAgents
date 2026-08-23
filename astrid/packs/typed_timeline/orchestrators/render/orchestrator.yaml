@@ -39,7 +39,9 @@
     {
       "name": "json_path",
       "type": "string",
-      "required": false
+      "required": false,
+      "description": "Project-owned staged rows artifact",
+      "artifact_type": "timeline/typed_rows"
     },
     {
       "name": "json_rows",

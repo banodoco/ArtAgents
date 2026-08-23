@@ -1,3 +1,8 @@
 # typed_timeline.render — Stage
 
-Single-task orchestrator (no child_executors): admits kernel run+task, maps rows via TypedDataTimelineMapper → timeline.json/assets.json, ensures tone.wav (total_duration_sec), validates via match_and_validate, then ffmpeg renders video.mp4. No second ledger; every run observable. Former child_executors declaration removed to avoid silent divergence.
+Single-task orchestrator (no child executors): admits exactly one kernel task,
+maps host-admitted rows, validates the complete audio-reactive timeline, and
+performs a real FFmpeg render. It succeeds only when `ffprobe` proves the
+encoded frame count equals the mapped frame count; there is no fake MP4,
+one-second fallback, second database, or filesystem ledger. Outputs and the
+portable result manifest stay inside the assigned staging directory.

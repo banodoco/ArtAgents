@@ -12,13 +12,12 @@ EXPLICIT_WORKSPACE="${SMOKE_WHEEL_WORKSPACE:-}"
 
 cd "$REPO_ROOT"
 
+set --
 if [[ -n "$EXPLICIT_WORKSPACE" ]]; then
-  WORKSPACE_ARGS=("--workspace" "$EXPLICIT_WORKSPACE")
-else
-  WORKSPACE_ARGS=()
+  set -- --workspace "$EXPLICIT_WORKSPACE"
 fi
 
-exec "$PYTHON_BIN" - "$REPO_ROOT" "${WORKSPACE_ARGS[@]}" <<'PY'
+exec "$PYTHON_BIN" - "$REPO_ROOT" "$@" <<'PY'
 from __future__ import annotations
 
 import json

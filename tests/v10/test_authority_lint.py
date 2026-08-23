@@ -498,6 +498,20 @@ def test_read_only_probe_is_not_a_writer(tmp_path: Path) -> None:
     assert errors == [], errors
 
 
+def test_legacy_kernel_database_path_is_a_ghost_authority(tmp_path: Path) -> None:
+    _bootstrap(tmp_path)
+    _write(
+        tmp_path,
+        "astrid/core/legacy_reader.py",
+        "db = projects_root / 'kernel.sqlite3'\n",
+    )
+    errors = lint_writer_authority(tmp_path)
+    assert errors == [
+        "astrid/core/legacy_reader.py: legacy kernel.sqlite3 path creates a "
+        "ghost database authority"
+    ]
+
+
 def test_conformance_kit_scratch_writer_is_exempt(tmp_path: Path) -> None:
     _bootstrap(tmp_path)
     _write(

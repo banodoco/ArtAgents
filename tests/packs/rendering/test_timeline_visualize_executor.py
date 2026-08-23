@@ -6,6 +6,7 @@ import hashlib
 import json
 import re
 import shutil
+import sqlite3
 import subprocess
 from pathlib import Path
 
@@ -17,7 +18,6 @@ from astrid.core.execution.executor.registry import load_default_registry
 from astrid.core.execution.executor.schema import load_executor_manifest
 from astrid.core.foundation.project_paths import project_dir
 from astrid.core.project.project import create_project
-from astrid.core.project.run import load_run_record
 
 TESTS_ROOT = Path(__file__).resolve().parents[2]
 REPO_ROOT = TESTS_ROOT.parent
@@ -79,11 +79,38 @@ def _pack_bytes(root: Path) -> dict[str, bytes]:
     }
 
 
+def _kernel_run_state(projects_root: Path, run_id: str) -> dict[str, object]:
+    """Read the authoritative run/task projection without a run.json sidecar."""
+
+    database = projects_root / ".astrid" / "astrid.sqlite3"
+    with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as connection:
+        connection.row_factory = sqlite3.Row
+        run = connection.execute(
+            "SELECT r.id, r.kind, r.title, r.status, p.slug AS project_slug "
+            "FROM runs r JOIN projects p ON p.id = r.project_id "
+            "WHERE r.id = ?",
+            (run_id,),
+        ).fetchone()
+        tasks = connection.execute(
+            "SELECT id, status, winning_attempt_id FROM tasks "
+            "WHERE run_id = ? ORDER BY run_ordinal",
+            (run_id,),
+        ).fetchall()
+        output_count = connection.execute(
+            "SELECT COUNT(*) FROM task_outputs o "
+            "JOIN tasks t ON t.id = o.task_id WHERE t.run_id = ?",
+            (run_id,),
+        ).fetchone()[0]
+    assert run is not None
+    return {
+        **dict(run),
+        "tasks": [dict(task) for task in tasks],
+        "output_count": int(output_count),
+    }
+
+
 def test_executor_registration_and_non_exemption() -> None:
-    executor_path = (
-        REPO_ROOT
-        / "astrid/packs/rendering/executors/timeline_visualize/executor.yaml"
-    )
+    executor_path = REPO_ROOT / "astrid/packs/rendering/executors/timeline_visualize/executor.yaml"
     definition = load_executor_manifest(executor_path)
     assert definition.id == "rendering.timeline_visualize"
     assert definition.version == "1.0"
@@ -120,19 +147,17 @@ def test_executor_registration_and_non_exemption() -> None:
     assert registered.id == definition.id
     assert registered.metadata["runtime_module"] == definition.metadata["runtime_module"]
 
-    core_skill = (REPO_ROOT / "astrid/packs/_core/skill/SKILL.md").read_text(
+    core_skill = (REPO_ROOT / "astrid/packs/_core/skill/SKILL.md").read_text(encoding="utf-8")
+    rendering_skill = (REPO_ROOT / "astrid/packs/rendering/skill/SKILL.md").read_text(
         encoding="utf-8"
     )
-    rendering_skill = (
-        REPO_ROOT / "astrid/packs/rendering/skill/SKILL.md"
-    ).read_text(encoding="utf-8")
     assert "`rendering.timeline_visualize`" in core_skill
     assert "`rendering.timeline_visualize`" in rendering_skill
 
     exemptions = json.loads(
-        (
-            REPO_ROOT / "astrid/core/contracts/output_result_exemptions.json"
-        ).read_text(encoding="utf-8")
+        (REPO_ROOT / "astrid/core/contracts/output_result_exemptions.json").read_text(
+            encoding="utf-8"
+        )
     )
     assert "rendering.timeline_visualize" in exemptions["non_exempt"]
     assert "rendering.timeline_visualize" not in exemptions["exemptions"]
@@ -159,9 +184,7 @@ def test_full_managed_executor_pack_conforms_and_timeline_manifest_is_unchanged(
     assert first.manifest_path is not None
     assert first.executor_version is not None
     assert _DIGEST_RE.fullmatch(first.executor_version)
-    assert {"pack_root", "manifest_path", "pages", "file_hashes"} <= set(
-        first.outputs
-    )
+    assert {"pack_root", "manifest_path", "pages", "file_hashes"} <= set(first.outputs)
 
     run_root = Path(first.run_root)
     pack_root = Path(first.outputs["pack_root"])
@@ -189,16 +212,21 @@ def test_full_managed_executor_pack_conforms_and_timeline_manifest_is_unchanged(
     }
     assert set(_pack_bytes(pack_root)) == expected
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    assert {"schema_version", "kind", "inputs", "outputs", "created", "warnings"} <= set(
-        manifest
-    )
+    assert {"schema_version", "kind", "inputs", "outputs", "created", "warnings"} <= set(manifest)
 
-    record = load_run_record(slug, first.run_id, root=tmp_projects_root)
-    assert "timeline_id" not in record
-    assert record["metadata"]["timeline_ids"] == [TIMELINE_ULID]
-    assert record["metadata"]["evidence"] is True
-    assert record["metadata"]["executor_version"] == first.executor_version
-    assert Path(project_root / record["manifest_path"]).resolve() == manifest_path
+    state = _kernel_run_state(tmp_projects_root, first.run_id)
+    assert state["project_slug"] == slug
+    assert state["kind"] == "executor"
+    assert state["title"] == "rendering.timeline_visualize"
+    assert state["status"] == "succeeded"
+    assert state["output_count"] >= 1
+    assert len(state["tasks"]) == 1
+    assert state["tasks"][0]["status"] == "succeeded"
+    assert state["tasks"][0]["winning_attempt_id"] == first.kernel_attempt_id
+    assert first.raw_result["payload"]["timeline_ids"] == [TIMELINE_ULID]
+    assert first.raw_result["executor_version"] == first.executor_version
+    assert manifest_path.is_relative_to(project_root / "runs" / first.run_id)
+    assert not (run_root / "run.json").exists()
     assert (timeline_dir / "manifest.json").read_bytes() == sentinel
 
 
@@ -215,8 +243,9 @@ def test_requires_timeline_false_runs_without_manifest_and_never_creates_one(
     assert result.ok is True
     assert Path(result.manifest_path or "").is_file()
     assert not timeline_manifest.exists()
-    record = load_run_record(slug, result.run_id or "", root=tmp_projects_root)
-    assert "timeline_id" not in record
+    assert result.run_id is not None
+    assert _kernel_run_state(tmp_projects_root, result.run_id)["status"] == "succeeded"
+    assert not (Path(result.run_root or "") / "run.json").exists()
 
 
 def test_sdk_return_shape_and_stdout_are_cli_ready(
@@ -240,9 +269,7 @@ def test_sdk_return_shape_and_stdout_are_cli_ready(
     assert result.run_root and Path(result.run_root).is_dir()
     assert result.manifest_path and Path(result.manifest_path).is_file()
     assert result.executor_version and _DIGEST_RE.fullmatch(result.executor_version)
-    assert {"pack_root", "manifest_path", "pages", "file_hashes"} <= set(
-        result.outputs
-    )
+    assert {"pack_root", "manifest_path", "pages", "file_hashes"} <= set(result.outputs)
     serialized = result.to_dict()
     assert serialized["run_id"] == result.run_id
     assert serialized["run_root"] == result.run_root
@@ -280,17 +307,19 @@ def test_multi_timeline_selection_writes_sorted_run_owned_metadata(
     result = _invoke(slug, all=True)
 
     assert result.ok is True
-    record = load_run_record(slug, result.run_id or "", root=tmp_projects_root)
-    assert "timeline_id" not in record
-    assert record["metadata"]["timeline_ids"] == sorted(
-        [SECOND_TIMELINE_ULID, TIMELINE_ULID]
-    )
-    assert record["metadata"]["evidence"] is True
+    assert result.run_id is not None
+    state = _kernel_run_state(tmp_projects_root, result.run_id)
+    assert state["status"] == "succeeded"
+    assert state["tasks"][0]["status"] == "succeeded"
+    expected_timeline_ids = sorted([SECOND_TIMELINE_ULID, TIMELINE_ULID])
+    assert result.raw_result["payload"]["timeline_ids"] == expected_timeline_ids
     manifest = json.loads(Path(result.manifest_path or "").read_text(encoding="utf-8"))
     assert manifest["kind"] == "timeline_visualize_project"
-    assert manifest["timeline_ids"] == record["metadata"]["timeline_ids"]
+    assert manifest["timeline_ids"] == expected_timeline_ids
     assert manifest["reading_order"] == ["TL01/manifest.json", "TL02/manifest.json"]
-    assert all((Path(result.outputs["pack_root"]) / item).is_file() for item in manifest["reading_order"])
+    assert all(
+        (Path(result.outputs["pack_root"]) / item).is_file() for item in manifest["reading_order"]
+    )
 
 
 def _rewrite_registry_event(
@@ -332,11 +361,7 @@ def _rewrite_registry_event(
         event_dict["hash"] = updated.hash
         previous_hash = updated.hash
     events_path.write_text(
-        "\n".join(
-            json.dumps(event, sort_keys=True, separators=(",", ":"))
-            for event in raw
-        )
-        + "\n",
+        "\n".join(json.dumps(event, sort_keys=True, separators=(",", ":")) for event in raw) + "\n",
         encoding="utf-8",
     )
 
@@ -424,11 +449,10 @@ def test_rendered_video_mode_refuses_unverified_output(tmp_projects_root: Path) 
         execution_mode="subprocess",
     )
     assert result.ok is False
-    assert result.run_root is not None
-    stderr = (Path(result.run_root) / "logs" / "stderr.log").read_text(
-        encoding="utf-8", errors="replace"
-    )
-    assert "rendered filmstrip refused: hash_unrecorded" in stderr
+    assert result.run_root is None
+    assert "rendered filmstrip refused: hash_unrecorded" in json.dumps(result.error)
+    assert result.run_id is not None
+    assert _kernel_run_state(tmp_projects_root, result.run_id)["status"] == "failed"
 
 
 def test_multi_asset_scope_respects_per_page_frame_budget(tmp_projects_root: Path) -> None:
@@ -480,9 +504,7 @@ def test_multi_asset_scope_respects_per_page_frame_budget(tmp_projects_root: Pat
     # so a page's total frames are the files whose name starts with the page id.
     total_frames = 0
     for page in view_map["pages"]:
-        frame_count = len(
-            list(filmstrip_dir.glob(f"{page['page_id']}_*_film_*.png"))
-        )
+        frame_count = len(list(filmstrip_dir.glob(f"{page['page_id']}_*_film_*.png")))
         assert frame_count <= 12, f"{page['page_id']} exceeds the per-page frame budget"
         total_frames += frame_count
     # The desert slice has four verified image assets on the visual page —

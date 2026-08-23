@@ -44,6 +44,7 @@ def packaged_wheel(
         harness.close()
 
 
+@pytest.mark.timeout(600)
 def test_each_pack_can_be_removed_from_one_wheel_without_kernel_drift(
     packaged_wheel: Path,
     tmp_path: Path,
@@ -52,11 +53,17 @@ def test_each_pack_can_be_removed_from_one_wheel_without_kernel_drift(
     result = check_artifact_factoring(
         wheel=packaged_wheel,
         base_dir=tmp_path,
-        kernel_timeout=90,
+        kernel_timeout=180,
         catalog_timeout=30,
     )
 
-    assert result.ok
+    failures = [
+        f"{item.removed_pack}: rc={item.kernel_returncode}\n"
+        f"{item.kernel_output}\n{item.kernel_error}"
+        for item in result.removals
+        if not item.ok
+    ]
+    assert result.ok, "\n\n".join(failures)
     assert result.sketch_summary == (
         "sketch-ok kernel_tables=14 packs=['changeset', 'review', 'workspace']"
     )
@@ -79,6 +86,8 @@ def test_packaged_factoring_inputs_are_explicit_and_disjoint() -> None:
     assert len(KERNEL_LANE) == 15
     assert set(PACK_TABLES["timeline"]).isdisjoint(CORE_KERNEL_TABLES)
     assert ALL_PACK_TABLES.isdisjoint(CORE_KERNEL_TABLES)
+    assert PACK_VOCABULARY["runaway"]["stream_types"] == ("runaway.transition_set",)
+    assert PACK_VOCABULARY["runaway"]["event_kinds"] == ("runaway.created",)
     assert not set(KERNEL_LANE) & {
         "tests/v10/test_registry.py",
         "tests/v10/test_catalog_migrations.py",

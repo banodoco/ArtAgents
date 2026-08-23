@@ -397,8 +397,7 @@ def test_image_order_swap_is_recorded_and_never_a_silent_duplicate_session() -> 
         _ordered_evidence(pack_order, answers=case["fixture"]["answers"])
     )
     assert detect_divergences(gate, declared_image_hashes=pack_order) == [
-        "image-order-divergence: "
-        f"declared={list(pack_order)!r}, observed={list(gate_order)!r}"
+        f"image-order-divergence: declared={list(pack_order)!r}, observed={list(gate_order)!r}"
     ]
 
 
@@ -587,8 +586,8 @@ def test_tombstone_frozen_lineage_resolves_and_refresh_surfaces_tombstone(
     assert after.ok is True, after.error
     assert _pack_bytes(Path(after.outputs["pack_root"])) == before_bytes
 
-    # Any fresh render of the live timeline surfaces the tombstone state.  The
-    # executor fails selection and writes the diagnostic to its stderr log.
+    # Any fresh render of the live timeline surfaces the tombstone state in
+    # the kernel-owned failure payload; failed staging is never promoted.
     refused = astrid.invoke(
         "rendering.timeline_visualize",
         kind="executor",
@@ -604,10 +603,8 @@ def test_tombstone_frozen_lineage_resolves_and_refresh_surfaces_tombstone(
         execution_mode="subprocess",
     )
     assert refused.ok is False
-    stderr = (Path(refused.run_root or "") / "logs" / "stderr.log").read_text(
-        encoding="utf-8", errors="replace"
-    )
-    assert "tombstoned" in stderr
+    assert refused.run_root is None
+    assert "tombstoned" in json.dumps(refused.error)
 
 
 def _root_view(projects_root: Path, slug: str):

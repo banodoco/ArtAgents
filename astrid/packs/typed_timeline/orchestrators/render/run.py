@@ -16,7 +16,13 @@ from astrid.core._shared.result_manifest import build_manifest, write_manifest
 from astrid.core.pack.entrypoint import run_pack_main
 from astrid.core.util.time import utc_now_iso
 
-from astrid.packs.typed_timeline.common import ensure_tone_wav, parse_json_rows, resolve_mapping_path
+from astrid.packs.typed_timeline.common import (
+    confined_output_path,
+    ensure_tone_wav,
+    load_admitted_rows,
+    portable_input_ref,
+    resolve_mapping_path,
+)
 
 
 def _video_frame_count(video_path: Path) -> int | None:
@@ -117,62 +123,43 @@ def main(argv=None) -> int:
         # alias: --project-id
         if getattr(args, "project_id_alias", None) and not args.project:
             args.project = args.project_id_alias
-        project_id = args.project
-        if not project_id:
-            try:
-                from astrid.core.project.guidance import selected_project
-                project_id, _ = selected_project(None)
-            except Exception:
-                project_id = None
-        if not project_id:
-            project_id = "runaway-piano-colour-demo"
         from astrid.core.foundation.project_paths import resolve_projects_root
+        from astrid.core.project.guidance import selected_project
+
+        project_id, _ = selected_project(args.project)
         projects_root = resolve_projects_root(None)
-        rows = []
-        if args.json_rows is not None:
-            try:
-                rows = parse_json_rows(args.json_rows)
-            except Exception as e:
-                print(f"json_rows parse failed: {e}", file=sys.stderr)
-                return 1
-            # For runaway mapping, 0 rows must fail even via json_rows if source is runaway
-            if args.source != "json" and not rows:
-                print(f"load returned 0 rows for project_id={project_id!r} run_id={args.run_id!r} — failing", file=sys.stderr)
-                return 1
-        elif args.source == "json" and args.json_path:
-            from astrid.packs.typed_timeline.sources import load_json_rows
-            rows = load_json_rows(args.json_path)
-        else:
-            from astrid.packs.typed_timeline.sources import load_runaway_transitions
-            try:
-                rows = load_runaway_transitions(project_id=project_id, run_id=args.run_id, projects_root=projects_root)
-            except Exception as e:
-                print(f"load_runaway failed: {e}", file=sys.stderr)
-                return 1
-            if not rows:
-                print(f"load_runaway returned 0 rows for project_id={project_id!r} run_id={args.run_id!r} — failing", file=sys.stderr)
-                return 1
-        mapping_path = resolve_mapping_path(args.mapping)
+        try:
+            rows = load_admitted_rows(
+                source=args.source,
+                json_path=args.json_path,
+                json_rows=args.json_rows,
+                project=project_id,
+                projects_root=projects_root,
+                run_id=args.run_id,
+            )
+            mapping_path = resolve_mapping_path(
+                args.mapping, project=project_id, projects_root=projects_root
+            )
+        except Exception as exc:
+            print(f"typed timeline input rejected: {exc}", file=sys.stderr)
+            return 1
         from astrid.packs.typed_timeline.mapper import TypedDataTimelineMapper
         mapper = TypedDataTimelineMapper(rows, mapping_path)
         timeline = mapper.to_timeline()
         assets = mapper.to_assets()
-        timeline_path = out_dir / "timeline.json"
-        assets_path = out_dir / "assets.json"
-        timeline_path.write_text(json.dumps(timeline, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-        assets_path.write_text(json.dumps(assets, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        timeline_path = confined_output_path(out_dir, "timeline.json")
+        assets_path = confined_output_path(out_dir, "assets.json")
         total_sec = mapper.total_duration_sec
-        ensure_tone_wav(out_dir / "tone.wav", total_sec)
         try:
             af = assets.get("assets", {}).get("audio", {}).get("file")
-            if af:
-                p = Path(af)
-                if not p.is_absolute():
-                    p = (assets_path.parent / af).resolve()
-                    ensure_tone_wav(p, total_sec)
-        except Exception:
-            pass
-        video_path = out_dir / args.output_name
+            tone_path = confined_output_path(out_dir, af or "tone.wav")
+            ensure_tone_wav(tone_path, total_sec)
+            video_path = confined_output_path(out_dir, args.output_name)
+        except Exception as exc:
+            print(f"typed timeline output rejected: {exc}", file=sys.stderr)
+            return 1
+        timeline_path.write_text(json.dumps(timeline, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        assets_path.write_text(json.dumps(assets, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         ok = _run_ffmpeg_render(timeline_path, assets_path, video_path)
         if not ok:
             print("render failed — not writing success manifest", file=sys.stderr)
@@ -180,7 +167,8 @@ def main(argv=None) -> int:
         if not video_path.exists() or video_path.stat().st_size < 1000:
             print(f"render did not produce video at {video_path}", file=sys.stderr)
             return 1
-        # Honest validation before success manifest: timeline must have matching events, video must be 8085 frames
+        # Honest validation before success manifest: the encoded video must
+        # match this mapping's declared duration, not a demo-specific number.
         try:
             tdata = json.loads(timeline_path.read_text(encoding="utf-8"))
             clips = tdata.get("clips", [])
@@ -222,15 +210,15 @@ def main(argv=None) -> int:
                     total_frames = mapper.total_frames
             else:
                 total_frames = mapper.total_frames
-            if total_frames != 8085:
-                print(f"validation failed: total_frames {total_frames} != 8085", file=sys.stderr)
+            if total_frames != mapper.total_frames:
+                print(f"validation failed: total_frames {total_frames} != {mapper.total_frames}", file=sys.stderr)
                 return 1
             frames = _video_frame_count(video_path)
             if frames is None:
                 print("validation failed: could not count video frames via ffprobe", file=sys.stderr)
                 return 1
-            if frames != 8085:
-                print(f"validation failed: video frames {frames} != 8085", file=sys.stderr)
+            if frames != mapper.total_frames:
+                print(f"validation failed: video frames {frames} != {mapper.total_frames}", file=sys.stderr)
                 return 1
             print(f"validation passed: events {len(events) if reactive else 'n/a'} frames_total {total_frames} video_frames {frames}", file=sys.stderr)
         except SystemExit:
@@ -241,21 +229,20 @@ def main(argv=None) -> int:
         manifest_path = out_dir / "manifest.json"
         manifest = build_manifest(
             kind="typed_timeline.render",
-            inputs={"source": args.source, "mapping": args.mapping, "run_id": args.run_id, "project": project_id},
+            inputs={
+                "source": args.source,
+                "mapping": portable_input_ref(args.mapping, projects_root=projects_root),
+                "run_id": args.run_id,
+                "project": project_id,
+            },
             outputs=[
-                {"path": str(timeline_path), "type": "file"},
-                {"path": str(assets_path), "type": "file"},
-                {"path": str(video_path), "type": "file"},
+                {"path": timeline_path.relative_to(out_dir.resolve()).as_posix(), "type": "file"},
+                {"path": assets_path.relative_to(out_dir.resolve()).as_posix(), "type": "file"},
+                {"path": video_path.relative_to(out_dir.resolve()).as_posix(), "type": "file"},
             ],
             created=utc_now_iso(),
         )
         write_manifest(manifest_path, manifest)
-        alt = out_dir.parent / "manifest.json"
-        if alt != manifest_path:
-            try:
-                alt.write_text(manifest_path.read_text(encoding="utf-8"), encoding="utf-8")
-            except Exception:
-                pass
         return 0
     return run_pack_main("typed_timeline.render", _run, argv=argv)
 

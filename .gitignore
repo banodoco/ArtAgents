@@ -48,6 +48,7 @@ cache/
 */cache/
 out/
 */out/
+/manifest.json
 *.log
 *.preview.*
 *tmp_*

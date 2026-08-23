@@ -13,7 +13,7 @@ from functools import lru_cache
 from importlib import import_module
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Literal, Mapping, Sequence
+from typing import Any, Literal, Mapping
 
 from astrid.core._shared.capability_common import (
     _PLACEHOLDER_RE,
@@ -24,7 +24,6 @@ from astrid.core._shared.capability_common import (
     _validate_required_inputs,
 )
 from astrid.core.contracts.capability_runner import CapabilityRunner
-from astrid.core.io.cas import executor_definition_digest
 from astrid.core.contracts.exec_error import (
     ExecError,
     error_from_missing_binaries,
@@ -32,19 +31,19 @@ from astrid.core.contracts.exec_error import (
 )
 from astrid.core.contracts.run_status import RunStatus
 from astrid.core.contracts.scoped_config import SCOPE_REGISTRY, ScopeRequest
-from astrid.core.env_vars import ASTRID_INTERNAL_INVOCATION, HYPE_ACTIVE_THEME
-from astrid.core.pack.resolver import resolve_callable_from_metadata
-from astrid.core.project.ownership import require_project_owned_artifact
+from astrid.core.env_vars import HYPE_ACTIVE_THEME
 from astrid.core.foundation.paths import REPO_ROOT
-from astrid.core.project.run import (
-    ProjectRunContext,
-    _project_subprocess_env,
-    project_run_env,
-    reject_project_with_out,
-)
+from astrid.core.io.cas import executor_definition_digest
+from astrid.core.pack.resolver import resolve_callable_from_metadata
 from astrid.core.project.guidance import (
     format_project_required_guidance,
     selected_project,
+)
+from astrid.core.project.ownership import require_project_owned_artifact
+from astrid.core.project.run import (
+    ProjectRunContext,
+    _project_subprocess_env,
+    reject_project_with_out,
 )
 from astrid.core.runtime import (
     InProcessExecutionPreconditionError,
@@ -858,6 +857,11 @@ def _prepare_project_request(
     if not request.project:
         return None, request
     _validate_project_owned_inputs(request, executor)
+    if request.out in (None, ""):
+        raise ExecutorRunnerError(
+            "project-scoped executor execution requires kernel admission to "
+            "supply a staging output directory"
+        )
     if not request.project_was_auto_resolved:
         reject_project_with_out(request.project, request.out)
     # Validate timeline requirement without writing a project run record.

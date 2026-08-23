@@ -36,7 +36,6 @@ from PIL import Image
 import astrid
 from astrid.core.foundation.project_paths import project_dir
 from astrid.core.project.project import create_project
-from astrid.core.project.run import load_run_record
 from astrid.core.timeline.banodoco_schema import validate_timeline_config_for_container
 from astrid.core.timeline.duration import (
     clip_end_frame,
@@ -233,9 +232,7 @@ _PNG_LANE = (38, 38, 46)  # render_png._LANE — lane band fill (drawn chrome)
 _PNG_LANE = (38, 38, 46)  # render_png._LANE — lane band fill
 
 
-def _background_probes(
-    width: int, height: int, boxes: list[dict]
-) -> list[tuple[int, int]]:
+def _background_probes(width: int, height: int, boxes: list[dict]) -> list[tuple[int, int]]:
     """Deterministic sample points that lie OUTSIDE every view-map box and, by
     construction, on pure page background: the four corners, the left/right
     margins (the lane bands start at x=40 and end at x=1880), and the empty
@@ -269,8 +266,7 @@ def _background_probes(
         if x < 0 or y < 0 or x >= width or y >= height:
             continue
         if any(
-            box["x"] <= x < box["x"] + box["width"]
-            and box["y"] <= y < box["y"] + box["height"]
+            box["x"] <= x < box["x"] + box["width"] and box["y"] <= y < box["y"] + box["height"]
             for box in boxes
         ):
             continue
@@ -373,10 +369,7 @@ def _frozen_paths() -> list[tuple[str, Path]]:
 
 
 def _frozen_hashes() -> dict[str, str]:
-    return {
-        rel: hashlib.sha256(path.read_bytes()).hexdigest()
-        for rel, path in _frozen_paths()
-    }
+    return {rel: hashlib.sha256(path.read_bytes()).hexdigest() for rel, path in _frozen_paths()}
 
 
 # Baseline captured at import: the immutability fence asserts the matrix runs
@@ -411,13 +404,12 @@ class TestFactsThroughFullPipeline:
     ) -> None:
         config = _normalized_config(_json(PARITY_ROOT / f"{fixture_name}.json"))
         fps = _fps(config)
-        _project_root, timeline_dir = _prepare_project(
-            tmp_projects_root, f"matrix-facts-{fixture_name.lower()}"
-        )
+        project_slug = f"matrix-facts-{fixture_name.lower().replace('_', '-')}"
+        _project_root, timeline_dir = _prepare_project(tmp_projects_root, project_slug)
         _write_synthetic_log(timeline_dir, config)
 
         result = _invoke(
-            f"matrix-facts-{fixture_name.lower()}",
+            project_slug,
             timeline_source=str(timeline_dir),
         )
 
@@ -428,12 +420,8 @@ class TestFactsThroughFullPipeline:
 
         assert gt["snapshots"][0]["fps"] == fps
         assert gt["snapshots"][0]["event_head"]["version"] == 2
-        clip_by_id = {
-            c["canonical_ref"]["authored_id"]: c for c in gt["timelines"][0]["clips"]
-        }
-        track_kinds = {
-            t["authored_id"]: t["kind"] for t in gt["timelines"][0]["tracks"]
-        }
+        clip_by_id = {c["canonical_ref"]["authored_id"]: c for c in gt["timelines"][0]["clips"]}
+        track_kinds = {t["authored_id"]: t["kind"] for t in gt["timelines"][0]["tracks"]}
 
         for clip in config["clips"]:
             entry = clip_by_id[clip["id"]]
@@ -486,13 +474,9 @@ class TestFactsThroughFullPipeline:
             assert config_order == [0, 1]
             assert paint_order == [1, 0]
 
-    def test_desert_frozen_facts_through_full_pipeline(
-        self, tmp_projects_root: Path
-    ) -> None:
+    def test_desert_frozen_facts_through_full_pipeline(self, tmp_projects_root: Path) -> None:
         truth = _json(FIXTURE_ROOT / "desert_truth.json")
-        _project_root, timeline_dir = _prepare_project(
-            tmp_projects_root, "matrix-desert-facts"
-        )
+        _project_root, timeline_dir = _prepare_project(tmp_projects_root, "matrix-desert-facts")
 
         result = _invoke("matrix-desert-facts", timeline_source=str(timeline_dir))
 
@@ -506,22 +490,22 @@ class TestFactsThroughFullPipeline:
         assert round(durations["authored_visual_only_end_seconds"], 4) == round(
             truth["durations_seconds"]["authored_visual_only_end"], 4
         )
-        assert durations["frame_quantized_visual_end"]["frames"] == truth[
-            "durations_frames"
-        ]["frame_quantized_visual"]
+        assert (
+            durations["frame_quantized_visual_end"]["frames"]
+            == truth["durations_frames"]["frame_quantized_visual"]
+        )
         assert round(durations["frame_quantized_visual_end"]["seconds"], 4) == round(
             truth["durations_seconds"]["frame_quantized_visual_end"], 4
         )
-        assert durations["all_track_composition"]["frames"] == truth["durations_frames"][
-            "all_track_composition"
-        ]
+        assert (
+            durations["all_track_composition"]["frames"]
+            == truth["durations_frames"]["all_track_composition"]
+        )
         assert round(durations["all_track_composition"]["seconds"], 4) == round(
             truth["durations_seconds"]["all_track_composition_end"], 4
         )
         # Per-clip compositor windows must match the frozen truth exactly.
-        clip_by_id = {
-            c["canonical_ref"]["authored_id"]: c for c in gt["timelines"][0]["clips"]
-        }
+        clip_by_id = {c["canonical_ref"]["authored_id"]: c for c in gt["timelines"][0]["clips"]}
         for window in truth["clip_windows"]:
             entry = clip_by_id[window["id"]]
             assert entry["start_frame"] == window["frame_start"]
@@ -537,9 +521,7 @@ class TestStaleHeadSidecar:
     def test_wrong_head_sidecar_snapshot_still_v159_with_diagnostics(
         self, tmp_projects_root: Path
     ) -> None:
-        _project_root, timeline_dir = _prepare_project(
-            tmp_projects_root, "matrix-stale-head"
-        )
+        _project_root, timeline_dir = _prepare_project(tmp_projects_root, "matrix-stale-head")
         head = _json(timeline_dir / "assembly.head.json")
         assert head["version"] == 159
         head["version"] = 100
@@ -562,12 +544,8 @@ class TestStaleHeadSidecar:
         assert "HEAD_SIDECAR_STALE" in codes
         assert "HEAD_SIDECAR_MISMATCH" in codes
 
-    def test_drill_down_from_stale_sidecar_root_is_unchanged(
-        self, tmp_projects_root: Path
-    ) -> None:
-        _project_root, timeline_dir = _prepare_project(
-            tmp_projects_root, "matrix-stale-head-child"
-        )
+    def test_drill_down_from_stale_sidecar_root_is_unchanged(self, tmp_projects_root: Path) -> None:
+        _project_root, timeline_dir = _prepare_project(tmp_projects_root, "matrix-stale-head-child")
         head = _json(timeline_dir / "assembly.head.json")
         head["version"] = 100
         head["last_event_id"] = "01KZS6CCD73SYEC924B5XR12XX"
@@ -696,9 +674,7 @@ class TestMediaToctou:
     ) -> None:
         from astrid.core.timeline.resolution import classify_registry
 
-        project_root, timeline_dir = _prepare_project(
-            tmp_projects_root, "matrix-toctou-unit"
-        )
+        project_root, timeline_dir = _prepare_project(tmp_projects_root, "matrix-toctou-unit")
         self._write_real_media(project_root, timeline_dir)
         snapshot = acquire_snapshot(
             timeline_dir,
@@ -724,12 +700,8 @@ class TestMediaToctou:
         assert guard_sampling(fresh) is not None
         assert "hash_mismatch" in guard_sampling(fresh)
 
-    def test_mutated_asset_sampling_refused_through_pipeline(
-        self, tmp_projects_root: Path
-    ) -> None:
-        project_root, timeline_dir = _prepare_project(
-            tmp_projects_root, "matrix-toctou-pipeline"
-        )
+    def test_mutated_asset_sampling_refused_through_pipeline(self, tmp_projects_root: Path) -> None:
+        project_root, timeline_dir = _prepare_project(tmp_projects_root, "matrix-toctou-pipeline")
         self._write_real_media(project_root, timeline_dir)
         # Mutate ONE image before the pipeline samples.
         from astrid.core.timeline.resolution import classify_registry
@@ -770,10 +742,7 @@ class TestMediaToctou:
         assert result["returncode"] == 0, result.get("error")
         pack_root = Path(result["outputs"]["pack_root"])
         asset_index = _json(pack_root / "asset-index.json")
-        by_key = {
-            entry["canonical_ref"]["authored_id"]: entry
-            for entry in asset_index["assets"]
-        }
+        by_key = {entry["canonical_ref"]["authored_id"]: entry for entry in asset_index["assets"]}
         assert by_key[mutated_key]["integrity_state"] == "hash_mismatch"
         healthy = [k for k in image_keys if k != mutated_key]
         assert all(by_key[k]["integrity_state"] == "verified_original" for k in healthy)
@@ -782,10 +751,7 @@ class TestMediaToctou:
         assert filmstrip_dir.is_dir()
         mutated_ref = by_key[mutated_key]["qualified_ref"].replace(".", "_")
         assert not list(filmstrip_dir.glob(f"*_{mutated_ref}_film_*.png"))
-        assert any(
-            path.name.endswith("_film_00.png")
-            for path in filmstrip_dir.iterdir()
-        )
+        assert any(path.name.endswith("_film_00.png") for path in filmstrip_dir.iterdir())
 
 
 def _rewrite_registry_event(timeline_dir: Path, mutate) -> None:
@@ -820,11 +786,7 @@ def _rewrite_registry_event(timeline_dir: Path, mutate) -> None:
         event_dict["hash"] = updated.hash
         previous_hash = updated.hash
     events_path.write_text(
-        "\n".join(
-            json.dumps(event, sort_keys=True, separators=(",", ":"))
-            for event in raw
-        )
-        + "\n",
+        "\n".join(json.dumps(event, sort_keys=True, separators=(",", ":")) for event in raw) + "\n",
         encoding="utf-8",
     )
 
@@ -845,12 +807,8 @@ class TestInvalidSpeed:
             "tracks": [{"id": "v1", "kind": "visual", "label": "V1"}],
             "clips": [{"id": "c1", "at": 0, "hold": 1, "track": "v1"}],
         }
-        _project_root, timeline_dir = _prepare_project(
-            tmp_projects_root, f"matrix-speed-{speed}"
-        )
-        _write_synthetic_log(
-            timeline_dir, config, speed_overrides={"c1": float(speed)}
-        )
+        _project_root, timeline_dir = _prepare_project(tmp_projects_root, f"matrix-speed-{speed}")
+        _write_synthetic_log(timeline_dir, config, speed_overrides={"c1": float(speed)})
 
         failure = _executor_failure(
             [
@@ -890,13 +848,9 @@ class TestInvalidSpeed:
         with pytest.raises(ValueError):
             json.dumps({"clips": [clip]}, allow_nan=False)
 
-    def test_f9_speed_fixture_rejected_by_full_pipeline(
-        self, tmp_projects_root: Path
-    ) -> None:
+    def test_f9_speed_fixture_rejected_by_full_pipeline(self, tmp_projects_root: Path) -> None:
         config = _json(PARITY_ROOT / "F9_speed-zero-rejected.json")
-        _project_root, timeline_dir = _prepare_project(
-            tmp_projects_root, "matrix-speed-f9"
-        )
+        _project_root, timeline_dir = _prepare_project(tmp_projects_root, "matrix-speed-f9")
         _write_synthetic_log(timeline_dir, config)
 
         failure = _executor_failure(
@@ -927,9 +881,7 @@ class TestRegistryDrift:
     def test_tampered_registry_sidecar_ignored_events_authoritative(
         self, tmp_projects_root: Path
     ) -> None:
-        _project_root, timeline_dir = _prepare_project(
-            tmp_projects_root, "matrix-registry-drift"
-        )
+        _project_root, timeline_dir = _prepare_project(tmp_projects_root, "matrix-registry-drift")
         # Tamper the bridge's persisted sidecar to an unrelated registry.
         (timeline_dir / "registry.json").write_text(
             json.dumps(
@@ -940,28 +892,20 @@ class TestRegistryDrift:
             encoding="utf-8",
         )
 
-        result = _invoke(
-            "matrix-registry-drift", timeline_source=str(timeline_dir)
-        )
+        result = _invoke("matrix-registry-drift", timeline_source=str(timeline_dir))
 
         assert result.ok is True, result.error
         pack_root = Path(result.outputs["pack_root"])
         asset_index = _json(pack_root / "asset-index.json")
-        authored = {
-            entry["canonical_ref"]["authored_id"] for entry in asset_index["assets"]
-        }
+        authored = {entry["canonical_ref"]["authored_id"] for entry in asset_index["assets"]}
         # Snapshot registry comes from the last registry EVENT, not the sidecar.
         assert "intruder" not in authored
         assert {"plant-frame-1", "plant-frame-2", "plant-frame-3", "plant-frame-4"} <= authored
         # The drift is observable: no diagnostic ever names the sidecar.
         diagnostics = _json(pack_root / "diagnostics.json")
-        assert all(
-            "registry.json" not in str(entry) for entry in diagnostics["diagnostics"]
-        )
+        assert all("registry.json" not in str(entry) for entry in diagnostics["diagnostics"])
 
-    def test_drifted_sidecar_does_not_change_snapshot_identity(
-        self, tmp_path: Path
-    ) -> None:
+    def test_drifted_sidecar_does_not_change_snapshot_identity(self, tmp_path: Path) -> None:
         clean = tmp_path / "clean"
         drifted = tmp_path / "drifted"
         shutil.copytree(SLICE_DIR, clean)
@@ -971,12 +915,8 @@ class TestRegistryDrift:
             encoding="utf-8",
         )
 
-        clean_snapshot = acquire_snapshot(
-            clean, project_slug="matrix-registry-drift-identity"
-        )
-        drifted_snapshot = acquire_snapshot(
-            drifted, project_slug="matrix-registry-drift-identity"
-        )
+        clean_snapshot = acquire_snapshot(clean, project_slug="matrix-registry-drift-identity")
+        drifted_snapshot = acquire_snapshot(drifted, project_slug="matrix-registry-drift-identity")
 
         assert clean_snapshot.sns() == drifted_snapshot.sns()
         assert "intruder" not in drifted_snapshot.registry.get("assets", {})
@@ -1054,9 +994,7 @@ class TestTransitionRetiming:
                 if to_start < from_start or to_start > from_end:
                     index += 1
                     continue
-                transition_id = (
-                    transition["id"] if isinstance(transition, dict) else transition
-                )
+                transition_id = transition["id"] if isinstance(transition, dict) else transition
                 resolved = resolve_transition_duration_frames(
                     transition,
                     from_end - from_start,
@@ -1078,11 +1016,17 @@ class TestTransitionRetiming:
                 )
                 result[to_clip["id"]]["mounted"] = (
                     from_start + to_offset,
-                    min(composition, from_start + to_offset + (clip_end_frame(to_clip, fps) - to_start)),
+                    min(
+                        composition,
+                        from_start + to_offset + (clip_end_frame(to_clip, fps) - to_start),
+                    ),
                 )
                 result[to_clip["id"]]["effective"] = (
                     from_start + to_offset + resolved,
-                    min(composition, from_start + to_offset + (clip_end_frame(to_clip, fps) - to_start)),
+                    min(
+                        composition,
+                        from_start + to_offset + (clip_end_frame(to_clip, fps) - to_start),
+                    ),
                 )
                 index += 2
         return result
@@ -1093,21 +1037,16 @@ class TestTransitionRetiming:
         config = self._f7_config()
         fps = _fps(config)
         expected = self._compositor_intervals(config, fps)
-        _project_root, timeline_dir = _prepare_project(
-            tmp_projects_root, "matrix-f7-ground-truth"
-        )
+        _project_root, timeline_dir = _prepare_project(tmp_projects_root, "matrix-f7-ground-truth")
         _write_synthetic_log(timeline_dir, config)
 
-        result = _invoke(
-            "matrix-f7-ground-truth", timeline_source=str(timeline_dir)
-        )
+        result = _invoke("matrix-f7-ground-truth", timeline_source=str(timeline_dir))
 
         assert result.ok is True, result.error
         pack_root = Path(result.outputs["pack_root"])
         gt = _json(pack_root / "ground-truth.json")
         by_authored = {
-            entry["canonical_ref"]["authored_id"]: entry
-            for entry in gt["timelines"][0]["clips"]
+            entry["canonical_ref"]["authored_id"]: entry for entry in gt["timelines"][0]["clips"]
         }
         for clip_id, intervals in expected.items():
             entry = by_authored[clip_id]
@@ -1170,14 +1109,10 @@ class TestTransitionRetiming:
             == by_authored["effect_layer_to"]["start_frame"]
         )
 
-    def test_f7_rendered_pages_show_retimed_overlap(
-        self, tmp_projects_root: Path
-    ) -> None:
+    def test_f7_rendered_pages_show_retimed_overlap(self, tmp_projects_root: Path) -> None:
         config = self._f7_config()
         fps = _fps(config)
-        _project_root, timeline_dir = _prepare_project(
-            tmp_projects_root, "matrix-f7-pages"
-        )
+        _project_root, timeline_dir = _prepare_project(tmp_projects_root, "matrix-f7-pages")
         _write_synthetic_log(timeline_dir, config)
 
         result = _invoke(
@@ -1196,9 +1131,7 @@ class TestTransitionRetiming:
             for entry in gt["timelines"][0]["clips"]
         }
         page = view_map["pages"][0]
-        boxes = {
-            entry["object_ref"]: entry["bbox"] for entry in page["object_boxes"]
-        }
+        boxes = {entry["object_ref"]: entry["bbox"] for entry in page["object_boxes"]}
         from_ref = authored_to_ref["explicit_from"]
         to_ref = authored_to_ref["explicit_to"]
         assert from_ref in boxes and to_ref in boxes
@@ -1210,8 +1143,7 @@ class TestTransitionRetiming:
         assert overlap_px == pytest.approx(30 * pixels_per_frame, abs=0.6)
         # Ground truth in the SAME pack carries the retimed effective interval.
         explicit_from = {
-            entry["canonical_ref"]["authored_id"]: entry
-            for entry in gt["timelines"][0]["clips"]
+            entry["canonical_ref"]["authored_id"]: entry for entry in gt["timelines"][0]["clips"]
         }["explicit_from"]
         assert explicit_from["transition"]["state"] == "accepted"
         assert (
@@ -1227,9 +1159,7 @@ class TestTransitionRetiming:
             ).itertext()
         )
         printed_refs = {
-            label["object_ref"]
-            for label in page.get("labels", [])
-            if label["status"] == "printed"
+            label["object_ref"] for label in page.get("labels", []) if label["status"] == "printed"
         }
         assert printed_refs
         for ref in printed_refs:
@@ -1272,18 +1202,14 @@ class TestMalformedIds:
         )
         assert any("duplicate clip id 'c1'" in error for error in errors)
 
-    def test_dangling_track_ref_rejected_by_pipeline(
-        self, tmp_projects_root: Path
-    ) -> None:
+    def test_dangling_track_ref_rejected_by_pipeline(self, tmp_projects_root: Path) -> None:
         config = {
             "theme": "banodoco-default",
             "theme_overrides": {"visual": {"canvas": {"fps": 30}}},
             "tracks": [{"id": "v1", "kind": "visual", "label": "V1"}],
             "clips": [{"id": "c1", "at": 0, "hold": 1, "track": "missing"}],
         }
-        _project_root, timeline_dir = _prepare_project(
-            tmp_projects_root, "matrix-dangling-track"
-        )
+        _project_root, timeline_dir = _prepare_project(tmp_projects_root, "matrix-dangling-track")
         _write_synthetic_log(timeline_dir, config)
 
         failure = _executor_failure(
@@ -1304,18 +1230,13 @@ class TestMalformedIds:
         )
         assert "references nonexistent track 'missing'" in str(failure["error"])
 
-    def test_bad_qualified_ref_rejected_at_frozen_preflight(
-        self, tmp_projects_root: Path
-    ) -> None:
-        _project_root, _timeline_dir = _prepare_project(
-            tmp_projects_root, "matrix-bad-ref"
-        )
+    def test_bad_qualified_ref_rejected_at_frozen_preflight(self, tmp_projects_root: Path) -> None:
+        _project_root, _timeline_dir = _prepare_project(tmp_projects_root, "matrix-bad-ref")
         root = _invoke("matrix-bad-ref")
         assert root.ok is True, root.error
         frozen = load_frozen_view(
-            Path(root.manifest_path or ""), project_root=project_dir(
-                "matrix-bad-ref", root=tmp_projects_root
-            )
+            Path(root.manifest_path or ""),
+            project_root=project_dir("matrix-bad-ref", root=tmp_projects_root),
         )
         # TR is not a valid object kind: rejected by the qualified-ref grammar
         # at the frozen preflight, before any identity lookup.
@@ -1349,9 +1270,7 @@ class TestMalformedIds:
 
 
 class TestTombstones:
-    def test_tombstoned_excluded_from_default_and_all(
-        self, tmp_projects_root: Path
-    ) -> None:
+    def test_tombstoned_excluded_from_default_and_all(self, tmp_projects_root: Path) -> None:
         _project_root, _first = _prepare_project(
             tmp_projects_root,
             "matrix-tombstones",
@@ -1370,21 +1289,15 @@ class TestTombstones:
 
         default = _invoke("matrix-tombstones")
         assert default.ok is True, default.error
-        record = load_run_record(
-            "matrix-tombstones", default.run_id or "", root=tmp_projects_root
-        )
-        assert record["metadata"]["timeline_ids"] == [TIMELINE_ULID]
+        assert default.raw_result["payload"]["timeline_ids"] == [TIMELINE_ULID]
+        assert not (Path(default.run_root or "") / "run.json").exists()
 
         all_result = _invoke("matrix-tombstones", all=True)
         assert all_result.ok is True, all_result.error
-        record = load_run_record(
-            "matrix-tombstones", all_result.run_id or "", root=tmp_projects_root
-        )
-        assert record["metadata"]["timeline_ids"] == [TIMELINE_ULID]
+        assert all_result.raw_result["payload"]["timeline_ids"] == [TIMELINE_ULID]
+        assert not (Path(all_result.run_root or "") / "run.json").exists()
 
-    def test_slug_of_tombstoned_timeline_yields_diagnostic(
-        self, tmp_projects_root: Path
-    ) -> None:
+    def test_slug_of_tombstoned_timeline_yields_diagnostic(self, tmp_projects_root: Path) -> None:
         _project_root, _first = _prepare_project(
             tmp_projects_root,
             "matrix-tombstone-slug",
@@ -1464,9 +1377,7 @@ class TestFiveHundredClips:
     def test_500_clip_pagination_complete_exactly_once_within_budget(
         self, tmp_projects_root: Path
     ) -> None:
-        _project_root, timeline_dir = _prepare_project(
-            tmp_projects_root, "matrix-500-clips"
-        )
+        _project_root, timeline_dir = _prepare_project(tmp_projects_root, "matrix-500-clips")
         _write_synthetic_log(timeline_dir, self._config_500())
 
         result = _invoke("matrix-500-clips", timeline_source=str(timeline_dir))
@@ -1490,20 +1401,14 @@ class TestFiveHundredClips:
         # No clip appears on two pages.
         assert len(set(seen)) == 500
 
-    def test_500_clip_pagination_is_deterministic(
-        self, tmp_projects_root: Path
-    ) -> None:
+    def test_500_clip_pagination_is_deterministic(self, tmp_projects_root: Path) -> None:
         _project_root, timeline_dir = _prepare_project(
             tmp_projects_root, "matrix-500-clips-deterministic"
         )
         _write_synthetic_log(timeline_dir, self._config_500())
 
-        first = _invoke(
-            "matrix-500-clips-deterministic", timeline_source=str(timeline_dir)
-        )
-        second = _invoke(
-            "matrix-500-clips-deterministic", timeline_source=str(timeline_dir)
-        )
+        first = _invoke("matrix-500-clips-deterministic", timeline_source=str(timeline_dir))
+        second = _invoke("matrix-500-clips-deterministic", timeline_source=str(timeline_dir))
 
         assert first.ok is second.ok is True
         first_map = _json(Path(first.outputs["pack_root"]) / "view-map.json")
@@ -1520,17 +1425,13 @@ class TestSourceByteEquality:
     def test_root_run_leaves_timeline_and_sources_byte_identical(
         self, tmp_projects_root: Path
     ) -> None:
-        project_root, timeline_dir = _prepare_project(
-            tmp_projects_root, "matrix-source-bytes-root"
-        )
+        project_root, timeline_dir = _prepare_project(tmp_projects_root, "matrix-source-bytes-root")
         before = {
             **_tree_hashes(timeline_dir),
             **_tree_hashes(project_root / "sources"),
         }
 
-        result = _invoke(
-            "matrix-source-bytes-root", timeline_source=str(timeline_dir)
-        )
+        result = _invoke("matrix-source-bytes-root", timeline_source=str(timeline_dir))
 
         assert result.ok is True, result.error
         after = {
@@ -1581,9 +1482,7 @@ class TestRendererParity:
     def test_pipeline_png_svg_agree_with_view_map_and_golden_pixels(
         self, tmp_projects_root: Path
     ) -> None:
-        _project_root, timeline_dir = _prepare_project(
-            tmp_projects_root, "matrix-renderer-parity"
-        )
+        _project_root, timeline_dir = _prepare_project(tmp_projects_root, "matrix-renderer-parity")
 
         result = _invoke(
             "matrix-renderer-parity",
@@ -1669,22 +1568,18 @@ class TestRendererParity:
                     y = int(bbox["y"] + bbox["height"] * fy)
                     pixel = image.getpixel((x, y))
                     assert pixel not in (_PNG_BG, _PNG_LANE), (
-                        f"{entry['object_ref']} box not painted at ({x},{y}): "
-                        f"{pixel}"
+                        f"{entry['object_ref']} box not painted at ({x},{y}): {pixel}"
                     )
 
             # Outside every view-map box the page is pure background.
             all_boxes = [entry["bbox"] for entry in page["object_boxes"]] + [
                 label["bbox"] for label in page["labels"] if label.get("bbox")
             ]
-            probes = _background_probes(
-                image.size[0], image.size[1], all_boxes
-            )
+            probes = _background_probes(image.size[0], image.size[1], all_boxes)
             assert len(probes) >= 8, "expected a meaningful background probe set"
             for x, y in probes:
                 assert image.getpixel((x, y)) in (_PNG_BG, _PNG_LANE), (
-                    f"expected background or lane fill at ({x},{y}), got "
-                    f"{image.getpixel((x, y))}"
+                    f"expected background or lane fill at ({x},{y}), got {image.getpixel((x, y))}"
                 )
 
         # SVG ↔ view-map geometry: the SVG carries a rect for every clip box
@@ -1693,13 +1588,10 @@ class TestRendererParity:
         # through the shared view-map contract.
         svg_root = ET.fromstring(svg_path.read_text(encoding="utf-8"))
         assert svg_root.get("viewBox") == (
-            f"0 0 {page['dimensions']['width_px']} "
-            f"{page['dimensions']['height_px']}"
+            f"0 0 {page['dimensions']['width_px']} {page['dimensions']['height_px']}"
         )
         svg_rects: list[dict[str, float]] = []
-        for node in svg_root.findall(
-            ".//s:rect", {"s": "http://www.w3.org/2000/svg"}
-        ):
+        for node in svg_root.findall(".//s:rect", {"s": "http://www.w3.org/2000/svg"}):
             attrs = {
                 key: float(node.get(key))
                 for key in ("x", "y", "width", "height")
@@ -1717,15 +1609,10 @@ class TestRendererParity:
                 and abs(rect["width"] - bbox["width"]) < 0.05
                 and abs(rect["height"] - bbox["height"]) < 0.05
             ]
-            assert matches, (
-                f"no SVG rect matches view-map bbox for "
-                f"{entry['object_ref']}: {bbox}"
-            )
+            assert matches, f"no SVG rect matches view-map bbox for {entry['object_ref']}: {bbox}"
 
     @pytest.mark.timeout(600)
-    def test_pipeline_output_byte_deterministic_twice(
-        self, tmp_projects_root: Path
-    ) -> None:
+    def test_pipeline_output_byte_deterministic_twice(self, tmp_projects_root: Path) -> None:
         _project_root, timeline_dir = _prepare_project(
             tmp_projects_root, "matrix-renderer-deterministic"
         )
@@ -1754,9 +1641,7 @@ class TestRendererParity:
 
 
 class TestAllMode:
-    def test_all_writes_sorted_ids_and_covers_both_timelines(
-        self, tmp_projects_root: Path
-    ) -> None:
+    def test_all_writes_sorted_ids_and_covers_both_timelines(self, tmp_projects_root: Path) -> None:
         _project_root, _first = _prepare_project(
             tmp_projects_root, "matrix-all", second_timeline=True
         )
@@ -1764,9 +1649,8 @@ class TestAllMode:
         result = _invoke("matrix-all", all=True)
 
         assert result.ok is True, result.error
-        record = load_run_record("matrix-all", result.run_id or "", root=tmp_projects_root)
         expected = sorted([TIMELINE_ULID, SECOND_TIMELINE_ULID])
-        assert record["metadata"]["timeline_ids"] == expected
+        assert result.raw_result["payload"]["timeline_ids"] == expected
         pack_root = Path(result.outputs["pack_root"])
         manifest = _json(pack_root / "manifest.json")
         assert manifest["kind"] == "timeline_visualize_project"
@@ -1819,9 +1703,7 @@ class TestFrozenLineage:
     def test_root_v159_drill_down_stays_frozen_after_live_append(
         self, tmp_projects_root: Path
     ) -> None:
-        _project_root, timeline_dir = _prepare_project(
-            tmp_projects_root, "matrix-lineage-frozen"
-        )
+        _project_root, timeline_dir = _prepare_project(tmp_projects_root, "matrix-lineage-frozen")
         root = _invoke("matrix-lineage-frozen", timeline_source=str(timeline_dir))
         assert root.ok is True, root.error
         root_manifest = str(Path(root.manifest_path or ""))
@@ -1848,18 +1730,12 @@ class TestFrozenLineage:
         before_gt = _json(Path(before.outputs["pack_root"]) / "ground-truth.json")
         assert before_gt["snapshots"][0]["event_head"]["version"] == 159
 
-    def test_refresh_root_is_the_only_transition_to_v160(
-        self, tmp_projects_root: Path
-    ) -> None:
-        project_root, timeline_dir = _prepare_project(
-            tmp_projects_root, "matrix-lineage-refresh"
-        )
+    def test_refresh_root_is_the_only_transition_to_v160(self, tmp_projects_root: Path) -> None:
+        project_root, timeline_dir = _prepare_project(tmp_projects_root, "matrix-lineage-refresh")
         root = _invoke("matrix-lineage-refresh", timeline_source=str(timeline_dir))
         assert root.ok is True, root.error
         root_manifest = str(Path(root.manifest_path or ""))
-        frozen = load_frozen_view(
-            Path(root_manifest), project_root=project_root
-        )
+        frozen = load_frozen_view(Path(root_manifest), project_root=project_root)
         old_sns = frozen.snapshot_sns
         old_pack_bytes = _pack_bytes(Path(root.outputs["pack_root"]))
 
@@ -1873,9 +1749,7 @@ class TestFrozenLineage:
         )
 
         assert refreshed.ok is True, refreshed.error
-        fresh = load_frozen_view(
-            Path(refreshed.manifest_path or ""), project_root=project_root
-        )
+        fresh = load_frozen_view(Path(refreshed.manifest_path or ""), project_root=project_root)
         assert fresh.manifest["snapshots"][0]["event_head"]["version"] == 160
         assert fresh.snapshot_sns != old_sns
         assert fresh.manifest["inputs"]["from_view"] is None
@@ -1888,9 +1762,7 @@ class TestFrozenLineage:
             focus="TL01.CL03",
         )
         assert old_child.ok is True, old_child.error
-        old_child_gt = _json(
-            Path(old_child.outputs["pack_root"]) / "ground-truth.json"
-        )
+        old_child_gt = _json(Path(old_child.outputs["pack_root"]) / "ground-truth.json")
         assert old_child_gt["snapshots"][0]["digest"] == old_sns
 
 
@@ -1937,9 +1809,7 @@ class TestImmutabilityFence:
             # from that commit onward.
             current_bytes = path.read_bytes()
             legit_update_at = _FROZEN_LEGITIMATE_UPDATES.get(rel)
-            commits = [
-                line.split()[0] for line in out.stdout.strip().splitlines() if line.strip()
-            ]
+            commits = [line.split()[0] for line in out.stdout.strip().splitlines() if line.strip()]
             for commit in commits:
                 if commit == legit_update_at:
                     continue

@@ -67,6 +67,7 @@ from astrid.core.repositories import (
     TaskRepository,
 )
 from astrid.core.schema_packs.registry import FrozenSchemaPackRegistry
+from astrid.core.store.database import open_database
 from astrid.core.store.ownership import DatabaseOwnerLock, OwnerLockError
 from astrid.core.store.writer import DatabaseWriter
 from astrid.packs import build_standard_registry, open_standard_writer
@@ -89,7 +90,25 @@ __all__ = [
     "TimelineSaveCall",
     "compose_core_application",
     "compose_standard_application",
+    "open_standard_read_connection",
 ]
+
+
+def open_standard_read_connection(
+    projects_root: str | Path | None = None,
+):
+    """Open the canonical standard store read-only with all schema packs.
+
+    Read helpers use this application boundary instead of guessing legacy
+    database filenames or probing a standard database with a core-only
+    registry (which incorrectly classifies installed pack migrations as too
+    new).
+    """
+
+    root = resolve_projects_root(projects_root)
+    return open_database(
+        derive_database_path(root), build_standard_registry(), read_only=True
+    )
 
 
 @dataclass(frozen=True, slots=True)

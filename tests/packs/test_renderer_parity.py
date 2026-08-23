@@ -15,7 +15,6 @@ import shutil
 import subprocess
 import sys
 from contextlib import nullcontext, suppress
-from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -30,15 +29,13 @@ from astrid.core.media import ffprobe_metadata_strict
 from astrid.core.project.project import create_project
 from astrid.core.project.run import write_run_record
 from astrid.core.rendering.artifacts import validate_render_result
-from astrid.core.rendering.contracts import AudioOwnership, RenderRequest, SCHEMA_VERSION
+from astrid.core.rendering.contracts import SCHEMA_VERSION, AudioOwnership, RenderRequest
 from astrid.core.rendering.errors import RendererException
 from astrid.core.rendering.registry import load_default_registries
 from astrid.core.rendering.service import LegacyRenderRoutingWarning, RenderService
 from astrid.core.rendering.transport import CommandTransport
 from astrid.core.subprocess_env import TASK_PROJECT_ENV, TASK_RUN_ID_ENV, TASK_STEP_ID_ENV
-from astrid.core.project.run import step_dir_for
 from astrid.core.timeline.crud import create_timeline
-
 
 pytestmark = [pytest.mark.renderer_parity, pytest.mark.integration]
 
@@ -234,8 +231,8 @@ def _assert_managed_chromium_denial(exc: RendererException, output: Path) -> Non
     """Accept only the host sandbox's macOS bootstrap denial, never render errors."""
 
     message = str(exc)
-    assert "MachPortRendezvousServer" in message
-    assert "Permission denied (1100)" in message
+    assert "MachPortRendezvousServer" in message, exc.error.to_dict()
+    assert "Permission denied (1100)" in message, exc.error.to_dict()
     assert not output.exists()
     assert not Path(f"{output}.provenance.json").exists()
     assert not list(output.parent.glob(f".{output.name}.render-service-*"))
@@ -558,7 +555,12 @@ def _fake_render_process(monkeypatch: pytest.MonkeyPatch) -> None:
         Path(f"{out}.provenance.json").write_text("{}", encoding="utf-8")
         return 0
 
+    def fake_subprocess_run(argv, **kwargs):
+        returncode = fake_run(argv, **kwargs)
+        return subprocess.CompletedProcess(argv, returncode)
+
     monkeypatch.setattr(executor_runner, "run_subprocess_with_capture", fake_run)
+    monkeypatch.setattr(executor_runner.subprocess, "run", fake_subprocess_run)
     monkeypatch.setattr(
         executor_runner,
         "open_run_log_capture",
@@ -570,7 +572,7 @@ def _fake_render_process(monkeypatch: pytest.MonkeyPatch) -> None:
     ("attached", "output_name"),
     ((False, "hype.mp4"), (True, "attached-parity.mp4")),
 )
-def test_public_facade_standalone_and_attached_run_ownership(
+def test_internal_runner_uses_kernel_staging_without_a_secondary_ledger(
     attached: bool,
     output_name: str,
     tmp_path: Path,
@@ -610,33 +612,28 @@ def test_public_facade_standalone_and_attached_run_ownership(
         monkeypatch.setenv(TASK_RUN_ID_ENV, PARENT_RUN_ID)
         monkeypatch.setenv(TASK_STEP_ID_ENV, TASK_STEP_ID)
 
+    staging = tmp_path / "kernel-staging" / ("attached" if attached else "standalone")
     result = run_executor(
         ExecutorRunRequest(
             executor_id="rendering.render",
-            out=None,
+            out=staging,
             project="demo",
             inputs=inputs,
+            project_was_auto_resolved=True,
         ),
         load_default_registry(),
     )
     assert result.returncode == 0
     run_jsons = sorted((projects_root / "demo" / "runs").glob("**/run.json"))
     if attached:
-        expected_parent = projects_root / "demo" / "runs" / PARENT_RUN_ID / "run.json"
-        assert run_jsons == [expected_parent]
-        expected_root = step_dir_for(
-            "demo",
-            PARENT_RUN_ID,
-            TASK_STEP_ID,
-            step_version=1,
-            root=projects_root,
-        )
-        assert result.run_root == expected_root
-        assert not (expected_root / "run.json").exists()
+        assert run_jsons == [
+            projects_root / "demo" / "runs" / PARENT_RUN_ID / "run.json"
+        ]
     else:
-        assert len(run_jsons) == 1
-        assert result.run_root == run_jsons[0].parent
-    assert (result.run_root / output_name).is_file()
+        assert run_jsons == []
+    assert result.run_root is None
+    assert (staging / output_name).is_file()
+    assert not (staging / "run.json").exists()
 
 
 def test_remotion_typecheck_is_blocking_when_dependencies_are_installed() -> None:
