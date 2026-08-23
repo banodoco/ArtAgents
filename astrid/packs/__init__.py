@@ -51,6 +51,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from astrid.core.backup.operations import recover_restore_staging
+from astrid.core.model_setup.journal import resolve_boot_state as _replay_setup_journal
 from astrid.core.events.registry import register_core_vocabulary
 from astrid.core.events.service import EventAppendService
 from astrid.core.foundation.project_paths import resolve_projects_root
@@ -316,6 +317,12 @@ def compose_standard_bridge(
     # resolve any journal left by a hard-dead restore before the database
     # writer can open and observe a mixed database/media pair.
     recover_restore_staging(root)
+    # Setup-journal boot replay (B8, doc 27 §6.1): resolve any dangling
+    # acquisition transaction BEFORE the database path is derived. The
+    # journal is a sidecar replay log, never truth; this completes or
+    # resumes interrupted installs from filesystem reality and never
+    # creates the product database.
+    _replay_setup_journal(root)
     database_path = derive_database_path(root)
     database_path.parent.mkdir(parents=True, exist_ok=True)
     if registry is None:

@@ -618,10 +618,12 @@ def _probe_wgp_runtime() -> tuple[bool, list[str]]:
 
 
 def _probe_remotion_ready() -> tuple[bool, list[str]]:
-    """Render-binding runtime binaries are resolvable (primitive half).
+    """Render-binding prerequisite closure (primitive + bundle halves).
 
-    The Remotion bundle artifact joins this closure with the B8 probe
-    registrations; the render executor already requires ffmpeg.
+    Primitives: the ``node``/``ffmpeg`` binaries the render executor
+    spawns. Bundle: the Remotion project's installed adapter packages
+    (``node_modules/@banodoco/*``) — bytes on disk are the truth; a
+    checkout without ``npm install`` advertises honestly unavailable.
     """
     import shutil
 
@@ -630,7 +632,67 @@ def _probe_remotion_ready() -> tuple[bool, list[str]]:
         for name in ("node", "ffmpeg")
         if shutil.which(name) is None
     ]
+    bundle = _REPO_ROOT / "remotion"
+    banodoco = bundle / "node_modules" / "@banodoco"
+    if not (bundle / "package.json").is_file():
+        missing.append(
+            f"Remotion project not found at {bundle} (expected package.json)"
+        )
+    else:
+        absent = [
+            f"@banodoco/{name}"
+            for name in ("timeline-composition", "timeline-schema", "timeline-theme-2rp")
+            if not (banodoco / name).is_dir()
+        ]
+        if absent:
+            missing.append(
+                f"Remotion adapter packages missing under {banodoco}: "
+                + ", ".join(absent)
+                + "; run 'npm install' in "
+                f"{_REPO_ROOT.name}/remotion/"
+            )
     return (not missing), missing
+
+
+def _setup_stamp_probe(name: str, runtime_probe) -> Callable[[], tuple[bool, list[str]]]:
+    """One parameterized weight probe over runtime closure + setup stamp.
+
+    The E7 composition: the binding's runtime primitives AND the
+    journal stamp for exactly this artifact id. Probes read one place —
+    :func:`astrid.core.model_setup.journal.read_stamp` — never a second
+    mirrored state; deep hashing stays with ``doctor``.
+    """
+
+    def _probe() -> tuple[bool, list[str]]:
+        from astrid.core.foundation.project_paths import resolve_projects_root
+        from astrid.core.model_setup.journal import read_stamp
+
+        _, runtime_missing = runtime_probe()
+        _, stamp_missing = read_stamp(resolve_projects_root(), (name,))
+        missing = [*runtime_missing, *stamp_missing]
+        return (not missing), missing
+
+    return _probe
+
+
+def resolve_probe(name: str) -> Callable[[], tuple[bool, list[str]]] | None:
+    """Resolve one availability-probe name to its predicate.
+
+    Exact names come from :data:`AVAILABILITY_PROBES`; the parameterized
+    E7 families ``wgp_weights:<model>`` and ``vc_weights:<template>``
+    derive their predicate from the name itself. Unknown names resolve
+    to ``None`` (import-time validation refuses them).
+    """
+    exact = AVAILABILITY_PROBES.get(name)
+    if exact is not None:
+        return exact
+    prefix, sep, param = name.partition(":")
+    if sep and param:
+        if prefix == "wgp_weights":
+            return _setup_stamp_probe(name, _probe_wgp_runtime)
+        if prefix == "vc_weights":
+            return _setup_stamp_probe(name, _probe_vibecomfy_runtime)
+    return None
 
 
 AVAILABILITY_PROBES: dict[str, Callable[[], tuple[bool, list[str]]]] = {
@@ -683,7 +745,7 @@ def _validate_registry() -> None:
                 f"child-only capability {entry.capability_id!r} is outside "
                 "the worker-child allowlist"
             )
-        if entry.probe not in AVAILABILITY_PROBES:
+        if resolve_probe(entry.probe) is None:
             raise RuntimeError(
                 f"capability {entry.capability_id!r} references unknown "
                 f"probe {entry.probe!r}"
@@ -909,7 +971,7 @@ def check_available(entry: CapabilityEntry) -> None:
     (doc 27 §6). The entry stays registered — unavailability is
     advertised-gated, never a registry removal.
     """
-    probe = AVAILABILITY_PROBES.get(entry.probe)
+    probe = resolve_probe(entry.probe)
     ok, missing = (
         probe()
         if probe is not None

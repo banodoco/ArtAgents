@@ -53,7 +53,7 @@ def generate_video(**kwargs):
     out = os.path.join(save_path, "stub_output.png")
     with open(out, "wb") as f:
         f.write(b"stub-bytes")
-    return [out]
+    return [os.path.abspath(out)]
 '''
 
 
