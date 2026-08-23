@@ -172,8 +172,11 @@ class TestMissingRemoteDocument:
             try:
                 r = pull_from_turso(timeline_id=tl_id, timeline_home=home, projects_root=tmp_path, backend=be2, replica=replica)
             except TursoSyncError as exc:
-                msg = str(exc).lower()
-                assert "failing closed" in msg or "missing" in msg or "corruption" in msg, f"expected corruption/fail-closed, got {exc}"
+                msg = str(exc)
+                assert "[doc-identity-verify]" in msg or "[heal-gate]" in msg, f"expected site-specific missing-doc signature, got {exc}"
+                # this scenario binds to doc-identity-verify early guard (heal-gate is defense-in-depth)
+                assert "[doc-identity-verify]" in msg, f"expected doc-identity-verify guard, got {exc}"
+                assert "failing closed" in msg.lower(), f"expected fail-closed, got {exc}"
                 print(f"GREEN missing-doc: raised TursoSyncError {exc} artifacts=0")
                 assert len(_disk_artifacts(home)) == 0
                 return
@@ -200,7 +203,7 @@ class TestRevertShowsRed25:
         orig_gate = sync_mod._convergent_heal_gate
         orig_recheck = sync_mod._heal_gate_recheck_movement
 
-        def buggy_recheck(replica_, tid, captured):
+        def buggy_recheck(replica_, tid, captured, site="heal-gate"):  # noqa: ARG001
             return None  # swallow movement
 
         def buggy_gate(*, timeline_id, timeline_home, root, backend, replica, state):

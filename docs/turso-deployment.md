@@ -153,6 +153,16 @@ If a manual trigger is needed, run a one-liner with the snippet in §5 (or `pyth
 - Supabase is demoted at cutover; nothing keeps both replicas (one writer, one file; bridge/FSA remains the asset plane).
 - Sync machinery is polling + watchdog ack discipline only (no pub-sub).
 
+
+## Guard-site map (missing-doc fail-closed)
+
+Four identical-text guards exist in `astrid/core/timeline/turso_sync.py`; each now carries a site tag so pins bind to the intended early guard:
+* `_convergent_heal_gate` (~:782) — `— failing closed [heal-gate]`
+* `_verify_doc_identity_or_fork` early (~:836) — `— failing closed [doc-identity-verify]` (authoritative missing-doc gate; tightened pin asserts this tag)
+* pre-apply E2 (~:2052) — `— failing closed [pre-apply]`
+* post-apply E3 (~:2272) — `— failing closed [post-apply]`
+Movement rechecks (`_heal_gate_recheck_movement`) are also site-tagged: `remote head moved during <site> … — retry required` with `<site>` in {`heal-gate`, `doc-identity-verify`, `pre-apply`, `post-apply`}, replacing the previous generic “during heal gate” wording.
+
 ## 9. Rollback
 
 Delete `TURSO_DATABASE_URL` env or stop the polling service — local serves uninterrupted (selector never returns a Turso backend; see `test_turso_selector_isolation.py`). To re-enable, re-set env and resume polling; the cursor file is durable and idempotent.

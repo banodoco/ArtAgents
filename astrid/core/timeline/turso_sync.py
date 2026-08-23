@@ -711,6 +711,7 @@ def _heal_gate_recheck_movement(
     replica: TursoReplicaClient,
     timeline_id: str,
     remote_captured: HeadSnapshot,
+    site: str = "heal-gate",
 ) -> None:
     """Recheck remote head against captured boundary; movement ⇒ typed retry-required."""
     try:
@@ -725,7 +726,7 @@ def _heal_gate_recheck_movement(
         or remote_recheck.last_hash != remote_captured.last_hash
     ):
         raise TursoSyncError(
-            f"remote head moved during heal gate (captured v{remote_captured.version} -> v{remote_recheck.version}) — retry required"  # noqa: E501
+            f"remote head moved during {site} (captured v{remote_captured.version} -> v{remote_recheck.version}) — retry required"  # noqa: E501
         )
 
 
@@ -763,7 +764,7 @@ def _convergent_heal_gate(
     except Exception as exc:
         raise TursoSyncError(f"local head snapshot failed: {exc}") from exc
     if not _heads_provenance_equivalent(timeline_id, local_captured, remote_captured, backend, root):  # noqa: E501
-        _heal_gate_recheck_movement(replica, timeline_id, remote_captured)
+        _heal_gate_recheck_movement(replica, timeline_id, remote_captured, site="heal-gate")
         return None
     try:
         local_doc_json = _read_local_document_snapshot(timeline_id, root).document_json
@@ -779,11 +780,11 @@ def _convergent_heal_gate(
         raise TursoSyncError(f"remote document fetch failed for {timeline_id!r}: {exc}") from exc
     if remote_doc_json is None:
         if remote_captured.version != 0:
-            raise TursoSyncError(f"remote document missing for {timeline_id!r} at version {remote_captured.version} — failing closed")  # noqa: E501
-        _heal_gate_recheck_movement(replica, timeline_id, remote_captured)
+            raise TursoSyncError(f"remote document missing for {timeline_id!r} at version {remote_captured.version} — failing closed [heal-gate]")  # noqa: E501
+        _heal_gate_recheck_movement(replica, timeline_id, remote_captured, site="heal-gate")
         return None
     if not _documents_structurally_equal(local_doc_json, remote_doc_json):
-        _heal_gate_recheck_movement(replica, timeline_id, remote_captured)
+        _heal_gate_recheck_movement(replica, timeline_id, remote_captured, site="heal-gate")
         return None
     healed = TursoSyncState(
         timeline_id=timeline_id,
@@ -834,18 +835,18 @@ def _verify_doc_identity_or_fork(
      remote_doc_json = _fetch_remote_document_json_strict(replica, timeline_id)
      if remote_doc_json is None:
          if remote_head.version != 0 or local_head.version != 0:  # noqa: E501
-             raise TursoSyncError(f"remote document missing for {timeline_id!r} at version {remote_head.version} — failing closed")  # noqa: E501
-         _heal_gate_recheck_movement(replica, timeline_id, remote_head)
+             raise TursoSyncError(f"remote document missing for {timeline_id!r} at version {remote_head.version} — failing closed [doc-identity-verify]")  # noqa: E501
+         _heal_gate_recheck_movement(replica, timeline_id, remote_head, site="doc-identity-verify")
          return None
      if _documents_structurally_equal(local_doc_json, remote_doc_json):
-         _heal_gate_recheck_movement(replica, timeline_id, remote_head)
+         _heal_gate_recheck_movement(replica, timeline_id, remote_head, site="doc-identity-verify")
          return None
      # S4-rework22: provenance-equivalent heads with structurally unequal docs
      # must fork regardless of bookmark position — stale bookmark is NOT a
      # deferral (eliminates the dishonest `up_to_date` seam). Type-mismatch
      # forks remain unconditional; value-level divergence forks for aligned,
      # bookmark-less, and now stale bookmarks alike.
-     _heal_gate_recheck_movement(replica, timeline_id, remote_head)
+     _heal_gate_recheck_movement(replica, timeline_id, remote_head, site="doc-identity-verify")
      try:
          _a_fork = json.loads(local_doc_json)  # type: ignore[arg-type]
          _b_fork = json.loads(remote_doc_json)  # type: ignore[arg-type]
@@ -2051,8 +2052,8 @@ def pull_from_turso(
         raise TursoSyncError(f"remote document fetch failed for {timeline_id!r}: {exc}") from exc
     if _remote_doc_pre is None:
         if remote_head.version != 0 or local_head.version != 0:
-            raise TursoSyncError(f"remote document missing for {timeline_id!r} at version {remote_head.version} — failing closed")  # noqa: E501
-        _heal_gate_recheck_movement(replica, timeline_id, remote_head)
+            raise TursoSyncError(f"remote document missing for {timeline_id!r} at version {remote_head.version} — failing closed [pre-apply]")  # noqa: E501
+        _heal_gate_recheck_movement(replica, timeline_id, remote_head, site="pre-apply")
     elif not _documents_structurally_equal(_local_doc_pre, _remote_doc_pre):
         try:
             _a_pre = json.loads(_local_doc_pre)
@@ -2062,7 +2063,7 @@ def pull_from_turso(
             _mismatch_pre = True
         _prov_pre = _heads_provenance_equivalent(timeline_id, local_head, remote_head, backend, root)  # noqa: E501
         if _mismatch_pre or _prov_pre:
-            _heal_gate_recheck_movement(replica, timeline_id, remote_head)
+            _heal_gate_recheck_movement(replica, timeline_id, remote_head, site="pre-apply")
             return _doc_divergence_conflict_result(
                 timeline_id=timeline_id,
                 timeline_home=timeline_home,
@@ -2074,11 +2075,11 @@ def pull_from_turso(
                 local_doc_json=_local_doc_pre,
                 remote_doc_json=_remote_doc_pre,
             )
-        # Equal docs (no mismatch/not provenance) — recheck before apply
-        _heal_gate_recheck_movement(replica, timeline_id, remote_head)
+        # Docs structurally unequal but not type-mismatch and not provenance-equivalent: deferred — recheck before apply  # noqa: E501
+        _heal_gate_recheck_movement(replica, timeline_id, remote_head, site="pre-apply")
     else:
         # Docs structurally equal — recheck bound to supplied remote_head before proceeding
-        _heal_gate_recheck_movement(replica, timeline_id, remote_head)
+        _heal_gate_recheck_movement(replica, timeline_id, remote_head, site="pre-apply")
     # fetch remote events after bookmark — batch-boundary hardening: generic → typed
     after = bookmark.hub_event_id if bookmark else state.remote_event_id if state else None
     try:
@@ -2253,7 +2254,7 @@ def pull_from_turso(
         except Exception:
             _type_mismatch = True
         if _type_mismatch:
-            _heal_gate_recheck_movement(replica, timeline_id, new_remote_head)
+            _heal_gate_recheck_movement(replica, timeline_id, new_remote_head, site="post-apply")
             return _doc_divergence_conflict_result(
                 timeline_id=timeline_id,
                 timeline_home=timeline_home,
@@ -2266,15 +2267,15 @@ def pull_from_turso(
                 remote_doc_json=_remote_doc_post,
             )
         # Unequal but not type-mismatch (value divergence without fork threshold) — recheck bound
-        _heal_gate_recheck_movement(replica, timeline_id, new_remote_head)
+        _heal_gate_recheck_movement(replica, timeline_id, new_remote_head, site="post-apply")
     elif _remote_doc_post is not None:
         # Equal docs — recheck bound before state write
-        _heal_gate_recheck_movement(replica, timeline_id, new_remote_head)
+        _heal_gate_recheck_movement(replica, timeline_id, new_remote_head, site="post-apply")
     if _remote_doc_post is None and (new_remote_head.version != 0 or new_local_head.version != 0):
-        raise TursoSyncError(f"remote document missing for {timeline_id!r} at version {new_remote_head.version} — failing closed")  # noqa: E501
+        raise TursoSyncError(f"remote document missing for {timeline_id!r} at version {new_remote_head.version} — failing closed [post-apply]")  # noqa: E501
     elif _remote_doc_post is None:
         # Both heads version 0 with no doc — recheck bound
-        _heal_gate_recheck_movement(replica, timeline_id, new_remote_head)
+        _heal_gate_recheck_movement(replica, timeline_id, new_remote_head, site="post-apply")
     # Update sync state after successful apply — reflect ONLY rows actually
     # transferred/applied (P2-2). Next poll fetches interleaved rows naturally.
     # (new_local_head already captured for re-verify above)
