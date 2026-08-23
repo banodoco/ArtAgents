@@ -179,6 +179,8 @@ class BuildManifestStore:
                 "refusing to swap in an identical build manifest "
                 f"({manifest.digest()}); upgrades must change the build"
             )
+        if current is not None:
+            self._atomic_write(self.prior_path, current)
         self._atomic_write(self.current_path, manifest)
         return current
 

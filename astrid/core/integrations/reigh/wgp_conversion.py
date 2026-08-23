@@ -139,13 +139,15 @@ def download_loras(
     parameters: Mapping[str, Any],
     dest_dir: Path,
     *,
-    downloader: Callable[[str, Path], None],
+    downloader: Callable[[str, Path], None] | None = None,
 ) -> list[Path]:
     """Materialize LoRA task-param URLs into *dest_dir*.
 
     ``loras``/``additional_loras`` entries are either plain names (already
     cached upstream — passed through untouched) or URL strings downloaded
     through the injected *downloader* at conversion time (doc 03 §3.4).
+    Without an explicit downloader, URL entries refuse typed: outbound
+    fetch belongs to setup mode (Batch B8), never task execution.
     Returns the downloaded paths; deterministic order.
     """
     dest_dir.mkdir(parents=True, exist_ok=True)
@@ -159,6 +161,12 @@ def download_loras(
                 continue
             if "://" not in entry:
                 continue  # plain cache name: nothing to fetch
+            if downloader is None:
+                raise ConversionRefused(
+                    f"LoRA URL materialization requires the B8 setup "
+                    f"journal (refused fetching {entry}); declare cached "
+                    "LoRA names instead"
+                )
             name = entry.rstrip("/").rsplit("/", 1)[-1]
             target = dest_dir / name
             downloader(entry, target)
