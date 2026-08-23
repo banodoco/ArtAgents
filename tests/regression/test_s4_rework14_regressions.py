@@ -110,7 +110,7 @@ def _make_local_db(tmp_path: Path, project_slug: str = "proj"):
     writer = open_standard_writer(db_path, registry=registry)
     proj_id = uuid.uuid4().hex
     tl_id = uuid.uuid4().hex
-    ulid = "01J000000000000000000000000AA"
+    ulid = "01J000000000000000000000AA"
     sid = f"{tl_id}:timeline.timeline"
 
     def _setup(uow: UnitOfWork):

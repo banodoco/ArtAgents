@@ -578,6 +578,9 @@ def push_to_turso(
                     last_pushed_event_id=inferred or (state.last_pushed_event_id if state else None),  # noqa: E501
                 )
                 _write_state_typed(timeline_home, resume_state)
+                # Honest: only up_to_date if remote head matches proven boundary (not tautology)
+                if fresh_remote.version != resume_state.remote_version or fresh_remote.last_event_id != resume_state.remote_event_id:  # noqa: E501
+                    return TursoSyncResult(action="pushed", timeline_id=timeline_id, local_version=fresh_local.version, remote_version=resume_state.remote_version, pushed=0)  # noqa: E501
                 honest = "up_to_date" if fresh_local.version == resume_state.remote_version and resume_state.remote_version != 0 else "pushed"  # noqa: E501
                 if honest == "up_to_date":
                     return TursoSyncResult(action="up_to_date", timeline_id=timeline_id, local_version=fresh_local.version, remote_version=resume_state.remote_version)  # noqa: E501
@@ -965,14 +968,10 @@ def pull_from_turso(
                     fresh_remote = _remote_head_snapshot(replica, timeline_id)
                 except Exception as exc:
                     raise TursoSyncError(f"pull resume head refresh failed: {exc}") from exc
-                proven_last = proven_local[-1]
-                proven_last_id = proven_last.event_id
-                proven_last_hash = proven_last.hash or _extract_event_hash(_fetch_event_payload_json(timeline_id, proven_last_id, root) or "")  # noqa: E501
-                # Verify remote contains proven row (advisory, ignore extra unseen)
-                try:
-                    _ = fresh_remote
-                except Exception:
-                    pass
+                proven_local_last = proven_local[-1]
+                proven_remote_last = proven_remote[-1]  # type: ignore[index]
+                proven_remote_id = str(proven_remote_last.get("event_id", ""))  # type: ignore[union-attr]
+                proven_remote_hash = _extract_event_hash(str(proven_remote_last.get("payload_json", ""))) or proven_local_last.hash or _extract_event_hash(_fetch_event_payload_json(timeline_id, proven_local_last.event_id, root) or "")  # noqa: E501
                 try:
                     resume_state = TursoSyncState(
                         timeline_id=timeline_id,
@@ -980,14 +979,23 @@ def pull_from_turso(
                         local_event_id=fresh_local.last_event_id,
                         local_hash=fresh_local.last_hash,
                         remote_version=fresh_local.version,
-                        remote_event_id=proven_last_id,
-                        remote_hash=proven_last_hash,
+                        remote_event_id=proven_remote_id,
+                        remote_hash=proven_remote_hash,
                         updated_at=utc_now_iso(),
                         last_pushed_event_id=state.last_pushed_event_id if state else None,
                     )
                 except Exception as exc:
                     raise TursoSyncError(f"pull resume state build failed: {exc}") from exc
                 _write_state_typed(timeline_home, resume_state)
+                # Honest: if refreshed head exceeds proven boundary, do NOT return up_to_date
+                if fresh_remote.version != resume_state.remote_version or fresh_remote.last_event_id != resume_state.remote_event_id:  # noqa: E501
+                    return TursoSyncResult(
+                        action="pulled",
+                        timeline_id=timeline_id,
+                        local_version=fresh_local.version,
+                        remote_version=resume_state.remote_version,
+                        pulled=0,
+                    )
                 return TursoSyncResult(action="up_to_date", timeline_id=timeline_id, local_version=fresh_local.version, remote_version=resume_state.remote_version)  # noqa: E501
         except TursoSyncError:
             raise
@@ -1349,6 +1357,11 @@ def pull_from_turso(
             ) from exc
         # choose idempotency key deterministic
         ik = f"turso:pull:{timeline_id}:{source_event.event_id}"
+        # B2c fence detection: pre-read head to detect idempotent fence-return (no raise)
+        try:
+            head_before = _local_head_snapshot(backend).version
+        except Exception:
+            head_before = None
         try:
             backend.append_imported_event(
                 timeline_id=timeline_id,
@@ -1358,6 +1371,15 @@ def pull_from_turso(
                     type="system", id="turso-sync:pull", display="turso-sync"
                 ),
             )
+            # fence-return detection: version unchanged => duplicate, count zero
+            try:
+                head_after = _local_head_snapshot(backend).version
+            except Exception:
+                head_after = None
+            if head_before is not None and head_after is not None and head_after == head_before:  # noqa: E501
+                last_applied_remote_id = source_event.event_id
+                last_applied_hash = source_event.hash or _extract_event_hash(r.get("payload_json", ""))  # type: ignore[arg-type]  # noqa: E501
+                continue
             applied += 1
             last_applied_remote_id = source_event.event_id
             last_applied_hash = source_event.hash or _extract_event_hash(r.get("payload_json", ""))  # type: ignore[arg-type]
