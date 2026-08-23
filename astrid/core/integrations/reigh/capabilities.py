@@ -133,6 +133,10 @@ class CapabilityEntry:
     required_inputs: dict[str, Any] = field(default_factory=dict)
     #: Optional ready-template path with its pinned digest.
     template: tuple[str, str] | None = None  # (path, sha256 digest)
+    #: Declared revision of this capability's admission semantics. The
+    #: boot manifest digests it per row (doc 27 §3.2 receipt scope);
+    #: bump it deliberately when a row's meaning changes.
+    definition_version: int = 1
     #: Availability probe name resolved through :data:`AVAILABILITY_PROBES`.
     probe: str = "always_available"
 
@@ -754,6 +758,15 @@ def _validate_registry() -> None:
             raise RuntimeError(
                 f"capability {entry.capability_id!r} output_policy must be "
                 "an object"
+            )
+        if (
+            isinstance(entry.definition_version, bool)
+            or not isinstance(entry.definition_version, int)
+            or entry.definition_version < 1
+        ):
+            raise RuntimeError(
+                f"capability {entry.capability_id!r} definition_version "
+                "must be a positive integer"
             )
         seen_families.add(entry.family)
     unflagged = sorted(

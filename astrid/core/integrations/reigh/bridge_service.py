@@ -1217,6 +1217,9 @@ class ReighTaskBridge:
         output_specs: list[Mapping[str, Any]],
         staged_files: list[Any],
     ) -> dict[str, Any]:
+        from astrid.core.integrations.reigh.boot_manifest import (
+            load_boot_manifest_hash,
+        )
         from astrid.core.io.media_import import prepare_media_file
         from astrid.core.store.uow import UnitOfWork
 
@@ -1413,6 +1416,16 @@ class ReighTaskBridge:
         _cleanup_staged(staged_files)
         payload = result.to_dict()
         payload.pop("event_ids", None)  # receipt secrecy by construction
+        # B9 completion provenance: name the boot manifest that governed
+        # this build in the attempt-completion result. The frozen nine-key
+        # CommandReceipt shape is NOT extended — this rides the bridge
+        # response only, and only when a manifest was stamped at boot.
+        boot_hash = load_boot_manifest_hash(self._projects_root)
+        if boot_hash is not None:
+            payload["provenance"] = {
+                "kind": "reigh.boot_manifest",
+                "sha256": boot_hash,
+            }
         return payload
 
     # -- R8: fenced failure (server applies max_attempts; doc 27 §4.5) -------

@@ -1566,8 +1566,15 @@ def test_one_installed_wheel_completes_the_local_first_run(
 
     # Repository-backed state is the only semantic authority in this journey:
     # no project/timeline JSONL or sidecar files were produced beside it.
+    # The B9 executor-build boot manifest is the one sanctioned derived
+    # receipt (plan task 11) — it is a digest receipt over the registry and
+    # fixtures, never a second authority, stamped by serve at this root.
+    sanctioned = {".astrid/boot-manifest.json"}
     assert not any(
-        path.is_file() and path.suffix in {".json", ".jsonl"}
+        path.is_file()
+        and path.suffix in {".json", ".jsonl"}
+        and path.relative_to(harness.roots.project).as_posix()
+        not in sanctioned
         for path in harness.roots.project.rglob("*")
     )
     assert not any(
