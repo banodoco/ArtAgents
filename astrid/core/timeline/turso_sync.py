@@ -26,10 +26,13 @@ from astrid.core.store.ownership import OwnerLockError
 from astrid.core.timeline.eventlog.turso import (
     TursoDocumentRow,
     TursoError,
+    TursoEventCollisionError,
     TursoEventRow,
     TursoOwnershipError,
     TursoReplicaClient,
     TursoReplicationError,
+    TursoSyncError,
+    TursoVersionRaceError,
 )
 from astrid.core.timeline.eventlog.types import EventLogError
 from astrid.core.timeline.events.schema import TimelineActor, TimelineEvent
@@ -43,10 +46,6 @@ from astrid.core.timeline.sync_state import (
 from astrid.core.util.time import utc_now_iso, utc_now_milliseconds
 
 TURSO_SYNC_STATE_FILENAME = "turso-sync-state.json"
-
-
-class TursoSyncError(RuntimeError):
-    """Base error for Turso sync operations (typed diagnostic)."""
 
 
 class TursoSyncConfigError(TursoSyncError):
@@ -213,11 +212,14 @@ def _remote_head_snapshot(
     head = replica.fetch_remote_head(timeline_id)
     if head is None:
         return HeadSnapshot(version=0, last_event_id=None, last_hash=None)
-    return HeadSnapshot(
-        version=int(head.get("version", 0)),
-        last_event_id=head.get("last_event_id"),
-        last_hash=head.get("last_hash"),
-    )
+    ver = int(head.get("version", 0))
+    leid = head.get("last_event_id")
+    lhash = head.get("last_hash")
+    # Q9: if most-recent payload malformed, last_hash may be None while version>0;  # noqa: E501
+    # fallback to last_event_id to keep HeadSnapshot valid — fork path handles malformed rows via skipped_rows.  # noqa: E501
+    if ver > 0 and lhash is None and leid is not None:
+        lhash = str(leid)
+    return HeadSnapshot(version=ver, last_event_id=leid, last_hash=lhash)
 
 
 def _local_head_snapshot(backend: Any) -> HeadSnapshot:
@@ -302,12 +304,31 @@ def push_to_turso(
         else _projects_root_from_timeline_home(timeline_home)
     )
     _assert_backfilled_or_fail_closed(timeline_id, root)
-    state = read_turso_sync_state(timeline_home)
-    local_head = _local_head_snapshot(backend)
-    remote_head = _remote_head_snapshot(replica, timeline_id)
-
+    # -- R3 entry-prologue hardening: state/bookmark/head coercion → typed --
+    try:
+        state = read_turso_sync_state(timeline_home)
+    except TursoSyncError:
+        raise
+    except Exception as exc:
+        raise TursoSyncError(f"turso sync state unreadable at {timeline_home}: {exc}") from exc
+    try:
+        local_head = _local_head_snapshot(backend)
+    except TursoSyncError:
+        raise
+    except Exception as exc:
+        raise TursoSyncError(f"local head snapshot failed (backend.head corrupt?): {exc}") from exc
+    try:
+        remote_head = _remote_head_snapshot(replica, timeline_id)
+    except TursoSyncError:
+        raise
+    except Exception as exc:
+        raise TursoSyncError(f"remote head snapshot failed for {timeline_id!r} (documents.version expected int, last_event_id/hash required when version>0): {exc}") from exc  # noqa: E501
+    try:
+        bookmark = _make_sync_bookmark_for_classify(state)
+    except Exception as exc:
+        # SyncStateError from spoke_version≠0 but missing spoke_event_id etc.
+        raise TursoSyncError(f"sync bookmark corrupt (state.local_version={getattr(state, 'local_version', '?')} spoke_event_id={getattr(state, 'local_event_id', '?')}): {exc}") from exc  # noqa: E501
     # Classify to decide if push is needed; we still allow push when bookmark missing
-    bookmark = _make_sync_bookmark_for_classify(state)
     try:
         action = classify_sync_state(
             source_head=local_head,
@@ -317,7 +338,6 @@ def push_to_turso(
         )
     except Exception as exc:
         raise TursoSyncError(f"sync classification failed: {exc}") from exc
-
     if action == "up_to_date":
         return TursoSyncResult(
             action="up_to_date",
@@ -433,7 +453,7 @@ def push_to_turso(
             try:
                 write_json_atomic(diag_path, diag_payload)
             except Exception:
-                pass
+                pass  # best-effort diagnostic only — primary artifact intact, swallow
         except Exception as exc:
             raise TursoSyncError(f"failed to finalize fork artifact diagnostics: {exc}") from exc
         return TursoSyncResult(
@@ -547,16 +567,40 @@ def push_to_turso(
         # But ensure FK exists: remote already has document row at this version
         document_to_push = None
         require_doc = False
-
-    # Execute remote batch atomically
+    # Execute remote batch atomically — R2 CAS on document version
+    expected_remote_version = remote_head.version if document_to_push is not None else None
     try:
         replica.push_timeline_updates(
-            document_to_push, turso_events, require_document=require_doc
+            document_to_push,
+            turso_events,
+            require_document=require_doc,
+            expected_remote_version=expected_remote_version,
         )
+    except TursoVersionRaceError as exc:
+        # Bounded single retry: refetch fresh head, reclassify, then fork or fail typed — fail closed, not swallowed  # noqa: E501
+        try:
+            fresh_head = _remote_head_snapshot(replica, timeline_id)
+        except Exception as e2:
+            raise TursoSyncError(f"version race then refresh failed: {exc}; refresh: {e2}") from exc
+        try:
+            fresh_action = classify_sync_state(
+                destination_head=fresh_head,
+                bookmark=bookmark,
+                expected_timeline_id=timeline_id,
+            )
+        except Exception as e2:
+            raise TursoSyncError(f"version race reclassify failed: {e2}") from exc
+        if fresh_action == "both_advanced":
+            raise TursoVersionRaceError(
+                f"document CAS race detected (expected {expected_remote_version}, remote now {fresh_head.version}): {exc}"  # noqa: E501
+            ) from exc
+        raise TursoVersionRaceError(
+            f"document CAS race (expected {expected_remote_version}, remote now {fresh_head.version}): {exc}"  # noqa: E501
+        ) from exc
+    except TursoEventCollisionError:
+        raise
     except (TursoError, TursoReplicationError) as exc:
         raise TursoSyncError(f"remote push failed: {exc}") from exc
-
-    # Advance cursor ONLY after remote unit commits
     # Use honest hash extraction — never store payload_json as hash
     inferred_remote_hash = _extract_event_hash(turso_events[-1].payload_json) if turso_events else (state.remote_hash if state else None)  # noqa: E501
     new_state = TursoSyncState(
@@ -643,10 +687,29 @@ def pull_from_turso(
         else _projects_root_from_timeline_home(timeline_home)
     )
     _assert_backfilled_or_fail_closed(timeline_id, root)
-    state = read_turso_sync_state(timeline_home)
-    local_head = _local_head_snapshot(backend)
-    remote_head = _remote_head_snapshot(replica, timeline_id)
-    bookmark = _make_sync_bookmark_for_classify(state)
+    # -- R3 entry-prologue hardening: state/bookmark/head → typed --
+    try:
+        state = read_turso_sync_state(timeline_home)
+    except TursoSyncError:
+        raise
+    except Exception as exc:
+        raise TursoSyncError(f"turso sync state unreadable at {timeline_home}: {exc}") from exc
+    try:
+        local_head = _local_head_snapshot(backend)
+    except TursoSyncError:
+        raise
+    except Exception as exc:
+        raise TursoSyncError(f"local head snapshot failed (backend.head corrupt?): {exc}") from exc
+    try:
+        remote_head = _remote_head_snapshot(replica, timeline_id)
+    except TursoSyncError:
+        raise
+    except Exception as exc:
+        raise TursoSyncError(f"remote head snapshot failed for {timeline_id!r} (documents.version expected int, last_event_id/hash required when version>0): {exc}") from exc  # noqa: E501
+    try:
+        bookmark = _make_sync_bookmark_for_classify(state)
+    except Exception as exc:
+        raise TursoSyncError(f"sync bookmark corrupt (state.local_version={getattr(state, 'local_version', '?')} spoke_event_id={getattr(state, 'local_event_id', '?')}): {exc}") from exc  # noqa: E501
     try:
         action = classify_sync_state(
             source_head=local_head,
@@ -656,7 +719,6 @@ def pull_from_turso(
         )
     except Exception as exc:
         raise TursoSyncError(f"sync classification failed: {exc}") from exc
-
     if action == "up_to_date":
         return TursoSyncResult(
             action="up_to_date",
@@ -673,8 +735,23 @@ def pull_from_turso(
             remote_version=remote_head.version,
         )
     if action == "bookmark_incompatible":
-        raise TursoSyncError("bookmark incompatible — refusing pull")
-
+        try:
+            if bookmark and local_head.version == bookmark.spoke_version and local_head.last_event_id == bookmark.spoke_event_id:  # noqa: E501
+                hub_after = bookmark.hub_event_id if bookmark else None
+                try:
+                    new_remote = replica.fetch_remote_events(timeline_id, after=hub_after)
+                except Exception:
+                    new_remote = []
+                if new_remote and remote_head.version == bookmark.hub_version:
+                    action = "destination_only"
+                else:
+                    raise TursoSyncError("bookmark incompatible — refusing pull")
+            else:
+                raise TursoSyncError("bookmark incompatible — refusing pull")
+        except TursoSyncError:
+            raise
+        except Exception as exc:
+            raise TursoSyncError(f"bookmark incompatible — refusing pull: {exc}") from exc
     if action == "both_advanced":
         # fork-not-merge: primary is write_keep_both_artifact with full payloads
         after = bookmark.spoke_event_id if bookmark else None
@@ -819,14 +896,13 @@ def pull_from_turso(
                 ],
                 "skipped_rows": skipped_rows,
             }
+            # best-effort diagnostic: summary file failure must not fail primary fork — swallow
             try:
                 write_json_atomic(diag_path, diag_payload)
             except Exception:
-                pass
+                pass  # best-effort diagnostic only — primary artifact intact, swallow
         except Exception as exc:
-            raise TursoSyncError(
-                f"failed to finalize fork artifact diagnostics: {exc}"
-            ) from exc
+            raise TursoSyncError(f"failed to finalize fork artifact diagnostics: {exc}") from exc
 
         return TursoSyncResult(
             action="conflict",

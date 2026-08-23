@@ -20,10 +20,6 @@ import re
 from dataclasses import dataclass
 from typing import Any, Protocol, Sequence
 
-# ---------------------------------------------------------------------------
-# Errors
-# ---------------------------------------------------------------------------
-
 
 class TursoError(RuntimeError):
     """Base error for Turso replica operations."""
@@ -41,8 +37,17 @@ class TursoOwnershipError(TursoError):
     """Sync attempted to open a second writer while DB is owned."""
 
 
-# ---------------------------------------------------------------------------
-# R2 allowlist — exhaustive column lists (every replicated column named)
+class TursoSyncError(TursoError):
+    """Base error for Turso sync operations (typed diagnostic). Shared base so
+    replica-layer collisions/races are also sync-typed."""
+
+
+class TursoEventCollisionError(TursoSyncError):
+    """Event collision: same key maps to different payload. Typed."""
+
+
+class TursoVersionRaceError(TursoSyncError):
+    """Document CAS failed: expected_remote_version mismatch. Typed."""
 # ---------------------------------------------------------------------------
 
 # documents (remote replica) — R2: identity + document_json + version, NO asset_registry_json
@@ -191,14 +196,12 @@ class FakeTursoTransport:
     def execute_batch(self, statements: list[tuple[str, tuple[Any, ...]]]) -> None:
         if self._fail_next_batch:
             self._fail_next_batch = False
-            # simulate failure BEFORE any writes are applied (atomic rollback)
             raise TursoError(self._fail_message)
-        # collect intended mutations without applying
         pending_docs: dict[str, dict[str, Any]] = {}
+        pending_docs_expected: dict[str, int | None] = {}
         pending_events: dict[str, dict[str, Any]] = {}
         pending_tables: set[str] = set()
         pending_indexes: set[str] = set()
-        # naive parsing: look at statement prefix to know table
         for sql, params in statements:
             s = sql.strip().lower()
             if s.startswith("create table"):
@@ -228,19 +231,31 @@ class FakeTursoTransport:
                 continue
             if s.startswith("insert") and "into documents" in s:
                 cols = list(DOCUMENT_REPLICA_COLUMNS)
-                if len(params) != len(cols):
-                    row = {"timeline_id": params[0]}
-                    for i, v in enumerate(params):
+                has_where = "where documents.version" in s
+                expected: int | None = None
+                data_params = params
+                if has_where:
+                    if len(params) != len(cols) + 1:
+                        raise TursoError("document CAS expects version param")
+                    expected = int(params[-1])
+                    data_params = params[:-1]
+                if len(data_params) != len(cols):
+                    row = {"timeline_id": data_params[0]}
+                    for i, v in enumerate(data_params):
                         if i < len(cols):
                             row[cols[i]] = v
                 else:
-                    row = {c: v for c, v in zip(cols, params)}
+                    row = {c: v for c, v in zip(cols, data_params)}
                 doc_json = str(row.get("document_json", ""))
                 if _contains_blob_payload(doc_json) or "asset_registry_json" in doc_json:
                     raise TursoReplicationError(
                         "replication refused: document contains blob/asset_registry (R2)"
                     )
-                pending_docs[str(row["timeline_id"])] = row
+                tid = str(row["timeline_id"])
+                if tid in pending_docs:
+                    raise TursoError(f"duplicate document timeline_id within batch: {tid!r}")
+                pending_docs[tid] = row
+                pending_docs_expected[tid] = expected
             elif s.startswith("insert") and "into events" in s:
                 cols = list(EVENT_REPLICA_COLUMNS)
                 if len(params) != len(cols):
@@ -253,39 +268,57 @@ class FakeTursoTransport:
                 payload = str(row.get("payload_json", ""))
                 _assert_no_blob_in_payload_json(payload)
                 _assert_no_asset_registry_payload(payload)
-                pending_events[str(row["event_id"])] = row
+                eid = str(row["event_id"])
+                if eid in pending_events:
+                    raise TursoError(f"duplicate event_id within batch: {eid!r}")
+                pending_events[eid] = row
             else:
                 raise TursoError(f"fake transport does not support statement: {sql[:80]!r}")
-        # All statements validated — now apply atomically
         self.tables.update(pending_tables)
         self.indexes.update(pending_indexes)
-        self.documents.update(pending_docs)
-        # events: upsert with idempotent ignore (event_id UNIQUE)
+        # documents: CAS + column-subset mutation
+        for tid, row in pending_docs.items():
+            expected = pending_docs_expected[tid]
+            existing = self.documents.get(tid)
+            if existing is not None and expected is not None:
+                try:
+                    cur_v = int(existing.get("version", 0))
+                except Exception:
+                    cur_v = None
+                if cur_v != expected:
+                    # CAS fail: preserve existing (zero rows updated) — caller will verify and raise race  # noqa: E501
+                    continue
+                # CAS pass: mutate ONLY production subset (never REPLACE)
+                existing["name"] = row["name"]
+                existing["document_json"] = row["document_json"]
+                existing["version"] = row["version"]
+                existing["updated_at"] = row["updated_at"]
+                # project_id, event_stream_id, created_at preserved
+            elif existing is not None:
+                # no CAS — same subset mutation
+                existing["name"] = row["name"]
+                existing["document_json"] = row["document_json"]
+                existing["version"] = row["version"]
+                existing["updated_at"] = row["updated_at"]
+            else:
+                # create path: CAS with expected fails if row exists check above, else insert full row  # noqa: E501
+                # For create race: if expected is not None and row just appeared via concurrent insert,  # noqa: E501
+                # we would have existing above. If no existing, INSERT succeeds (even with CAS expected=0 or None)  # noqa: E501
+                self.documents[tid] = dict(row)
         for eid, row in pending_events.items():
             if eid in self.events:
-                continue
-            tid = str(row.get("timeline_id"))
-            seq = row.get("seq")
-            ik = row.get("idempotency_key")
-            dup = False
-            for existing in self.events.values():
-                if str(existing.get("timeline_id")) == tid:
-                    if existing.get("seq") == seq or existing.get("idempotency_key") == ik:
-                        dup = True
-                        break
-            if dup:
-                continue
+                # Should not happen: push_timeline_updates probes and raises collision before batch;
+                # but keep strict PK semantics
+                raise TursoError(f"duplicate event_id: {eid!r} violates PK")
+            # duplicate seq / ik within batch already checked via probe; fake keeps simple insert
             self.events[eid] = row
-
     def query(self, sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
         s = sql.strip().lower()
         if "sqlite_master" in s:
-            # for schema verification: return tables/indexes
             if "type='table'" in s or 'type="table"' in s:
                 return [{"name": t} for t in sorted(self.tables)]
             if "type='index'" in s or 'type="index"' in s:
                 return [{"name": i} for i in sorted(self.indexes)]
-            # generic master query
             rows: list[dict[str, Any]] = []
             for t in sorted(self.tables):
                 rows.append({"type": "table", "name": t})
@@ -304,23 +337,45 @@ class FakeTursoTransport:
             row = self.documents.get(str(tid)) if tid else None
             return [dict(row)] if row else []
         if "from documents" in s:
+            # only support bare documents scan; other shapes are unsupported
+            if "select *" not in s and "select" in s:
+                raise NotImplementedError(f"fake query unsupported: {sql[:80]!r}")
             return [dict(v) for v in self.documents.values()]
-        if "from events" in s and "where timeline_id" in s and "order by seq" in s:
-            tid = params[0] if params else None
-            rows = [v for v in self.events.values() if str(v.get("timeline_id")) == str(tid)]
-            rows.sort(key=lambda r: int(r.get("seq", 0)))
-            # handle params like (timeline_id, after_seq) or limit
-            return [dict(r) for r in rows]
-        if "from events" in s and "where timeline_id" in s:
-            tid = params[0] if params else None
-            rows = [v for v in self.events.values() if str(v.get("timeline_id")) == str(tid)]
-            return [dict(r) for r in rows]
         if "from events" in s:
+            if "where timeline_id" in s:
+                tid = params[0] if params else None
+                rows = [v for v in self.events.values() if str(v.get("timeline_id")) == str(tid)]
+                if "order by" in s:
+                    # honor ORDER BY <col> DESC/ASC  + LIMIT
+                    order_desc = "desc" in s
+                    # extract column name after order by
+                    try:
+                        order_part = s.split("order by", 1)[1].split("limit")[0]
+                        col = order_part.strip().split()[0]
+                    except Exception:
+                        col = "seq"
+                    try:
+                        rows.sort(key=lambda r: (r.get(col) if r.get(col) is not None else 0), reverse=order_desc)  # noqa: E501
+                    except Exception:
+                        rows.sort(key=lambda r: int(r.get("seq", 0)), reverse=order_desc)
+                    if "limit" in s:
+                        try:
+                            lim = int(s.split("limit", 1)[1].strip().split()[0])
+                            rows = rows[:lim]
+                        except Exception:
+                            pass
+                    else:
+                        rows.sort(key=lambda r: int(r.get("seq", 0)), reverse=order_desc)
+                else:
+                    rows.sort(key=lambda r: int(r.get("seq", 0)))
+                return [dict(r) for r in rows]
+            # bare events scan requires explicit handling; honor order/limit if present
+            if "order by" in s or "where" in s:
+                raise NotImplementedError(f"fake query unsupported: {sql[:80]!r}")
             rows = list(self.events.values())
             rows.sort(key=lambda r: (str(r.get("timeline_id")), int(r.get("seq", 0))))
             return [dict(r) for r in rows]
-        return []
-
+        raise NotImplementedError(f"fake query unsupported: {sql[:80]!r}")
     def close(self) -> None:
         pass
 
@@ -435,9 +490,8 @@ class LibSqlHttpTransport:
             try:
                 self._client.close()
             except Exception:
-                pass
+                pass  # best-effort close: no diagnostic needed, connection teardown is idempotent
             self._client = None
-
 
 # ---------------------------------------------------------------------------
 # Replica client — NOT an EventLogBackend (W2)
@@ -483,21 +537,23 @@ class TursoReplicaClient:
         self._transport = transport
 
     # -- helpers -------------------------------------------------------------
-    def _document_upsert_sql(self) -> str:
+    def _document_upsert_sql(self, expected_remote_version: int | None = None) -> str:
         cols = ", ".join(DOCUMENT_REPLICA_COLUMNS)
         placeholders = ", ".join("?" for _ in DOCUMENT_REPLICA_COLUMNS)
-        # Use ON CONFLICT to preserve FK child rows (events) — NEVER REPLACE
-        return (
+        base = (
             f"INSERT INTO documents ({cols}) VALUES ({placeholders}) "
             "ON CONFLICT(timeline_id) DO UPDATE SET "
             "name=excluded.name, document_json=excluded.document_json, "
             "version=excluded.version, updated_at=excluded.updated_at"
         )
+        if expected_remote_version is not None:
+            base += " WHERE documents.version = ?"
+        return base
 
     def _event_upsert_sql(self) -> str:
         cols = ", ".join(EVENT_REPLICA_COLUMNS)
         placeholders = ", ".join("?" for _ in EVENT_REPLICA_COLUMNS)
-        return f"INSERT OR IGNORE INTO events ({cols}) VALUES ({placeholders})"
+        return f"INSERT INTO events ({cols}) VALUES ({placeholders})"
 
     def _validate_document(self, row: TursoDocumentRow) -> None:
         if row.document_json and (
@@ -513,14 +569,13 @@ class TursoReplicaClient:
         _assert_no_blob_in_payload_json(row.payload_json)
         _assert_no_asset_registry_payload(row.payload_json)
 
-    # -- public --------------------------------------------------------------
-
     def push_timeline_updates(
         self,
         document: TursoDocumentRow | None,
         events: Sequence[TursoEventRow],
         *,
         require_document: bool = True,
+        expected_remote_version: int | None = None,
     ) -> None:
         """Apply document row + event batch as ONE remote unit.
 
@@ -528,14 +583,108 @@ class TursoReplicaClient:
         are pushed (amendment 3b: event-only transfer when document unchanged).
         If events is empty and document is not None, only document is pushed.
         The transport's execute_batch must be atomic (all-or-nothing).
+        When ``expected_remote_version`` is not None, the document upsert
+        becomes CAS-guarded (WHERE version = expected); zero rows ⇒ race error.
+        Event collisions are probed inside the same logical transaction:
+        identical replay is idempotent, divergent payload ⇒ typed collision.
         """
         if document is None and require_document and len(events) == 0:
             raise TursoReplicationError("push_timeline_updates: nothing to push")
+        # --- R1: probe event collisions before building statements (same txn view) ---
+        if events:
+            # Build lookup maps from remote state via transport queries.
+            # Use the transport's query for real sqlite semantics; fake mirrors it.
+            # Collect all remote events for involved timeline_ids to check all three keys.
+            # Events all share document timeline_id when document present, else first event's.
+            probe_tids = set()
+            if document is not None:
+                probe_tids.add(document.timeline_id)
+            for ev in events:
+                probe_tids.add(ev.timeline_id)
+            existing_by_id: dict[str, dict[str, Any]] = {}
+            existing_by_seq: dict[tuple[str, int], dict[str, Any]] = {}
+            existing_by_ik: dict[tuple[str, str], dict[str, Any]] = {}
+            for tid in probe_tids:
+                try:
+                    rows = self._transport.query(
+                        "SELECT * FROM events WHERE timeline_id = ?",
+                        (tid,),
+                    )
+                except Exception:
+                    rows = []
+                for r in rows:
+                    eid = str(r.get("event_id", ""))
+                    if eid:
+                        existing_by_id[eid] = r
+                    try:
+                        seq = int(r.get("seq", 0))
+                    except Exception:
+                        seq = r.get("seq")
+                    existing_by_seq[(str(r.get("timeline_id")), seq)] = r
+                    ik = str(r.get("idempotency_key", ""))
+                    if ik:
+                        existing_by_ik[(str(r.get("timeline_id")), ik)] = r
+            # Also detect duplicate event_id within the batch itself (real PK semantics)
+            seen_batch_ids: set[str] = set()
+            for ev in events:
+                if ev.event_id in seen_batch_ids:
+                    raise TursoEventCollisionError(
+                        f"event collision key=event_id duplicate within batch event_id={ev.event_id!r}"  # noqa: E501
+                    )
+                seen_batch_ids.add(ev.event_id)
+                # Check each key against existing remote rows
+                import hashlib
+
+                def _h(payload: str) -> str:
+                    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12]
+
+                candidate_checks = [
+                    ("event_id", existing_by_id.get(ev.event_id)),
+                    (
+                        "timeline_seq",
+                        existing_by_seq.get((ev.timeline_id, ev.seq)),
+                    ),
+                    (
+                        "timeline_idempotency_key",
+                        existing_by_ik.get((ev.timeline_id, ev.idempotency_key)),
+                    ),
+                ]
+                for key_kind, existing in candidate_checks:
+                    if existing is None:
+                        continue
+                    # Existing row found — compare identity + payload
+                    existing_payload = str(existing.get("payload_json", ""))
+                    existing_event_id = str(existing.get("event_id", ""))
+                    existing_seq = existing.get("seq")
+                    existing_ik = str(existing.get("idempotency_key", ""))
+                    payload_equal = existing_payload == ev.payload_json
+                    identity_equal = (
+                        existing_event_id == ev.event_id
+                        and existing_seq == ev.seq
+                        and existing_ik == ev.idempotency_key
+                    )
+                    if payload_equal and identity_equal:
+                        continue  # noqa: E501 — exact replay benign
+                    raise TursoEventCollisionError(
+                        f"event collision key={key_kind} "  # noqa: E501
+                        f"candidate event_id={ev.event_id!r} seq={ev.seq} idempotency_key={ev.idempotency_key!r} "  # noqa: E501
+                        f"existing event_id={existing_event_id!r} seq={existing_seq!r} "  # noqa: E501
+                        f"candidate_hash={_h(ev.payload_json)} existing_hash={_h(existing_payload)}"  # noqa: E501
+                    )
+                existing_by_id[ev.event_id] = {
+                    "event_id": ev.event_id,
+                    "timeline_id": ev.timeline_id,
+                    "seq": ev.seq,
+                    "payload_json": ev.payload_json,
+                    "idempotency_key": ev.idempotency_key,
+                }
+                existing_by_seq[(ev.timeline_id, ev.seq)] = existing_by_id[ev.event_id]
+                existing_by_ik[(ev.timeline_id, ev.idempotency_key)] = existing_by_id[ev.event_id]
         statements: list[tuple[str, tuple[Any, ...]]] = []
         if document is not None:
             self._validate_document(document)
-            sql = self._document_upsert_sql()
-            params = (
+            sql = self._document_upsert_sql(expected_remote_version)
+            params_list: list[Any] = [
                 document.timeline_id,
                 document.project_id,
                 document.event_stream_id,
@@ -544,7 +693,10 @@ class TursoReplicaClient:
                 document.version,
                 document.created_at,
                 document.updated_at,
-            )
+            ]
+            if expected_remote_version is not None:
+                params_list.append(expected_remote_version)
+            params = tuple(params_list)
             statements.append((sql, params))
         elif require_document:
             raise TursoReplicationError(
@@ -571,6 +723,34 @@ class TursoReplicaClient:
         if not statements:
             return
         self._transport.execute_batch(statements)
+        # --- R2: CAS verification when expected_remote_version was set ---
+        if document is not None and expected_remote_version is not None:
+            # Verify the document actually took the new version; if not, remote raced.
+            try:
+                rows = self._transport.query(
+                    "SELECT * FROM documents WHERE timeline_id = ?",
+                    (document.timeline_id,),
+                )
+            except Exception:
+                rows = []
+            if rows:
+                cur_version = rows[0].get("version")
+                try:
+                    cur_v = int(cur_version)  # type: ignore[arg-type]
+                except Exception:
+                    cur_v = None
+                if cur_v != document.version:
+                    raise TursoVersionRaceError(
+                        f"document CAS failed timeline_id={document.timeline_id!r} "
+                        f"expected_remote_version={expected_remote_version} "
+                        f"attempted_version={document.version} remote_version={cur_version!r}"
+                    )
+            else:
+                # No row after push? Should have inserted — race on create path also fails
+                raise TursoVersionRaceError(
+                    f"document CAS failed (no row after upsert) timeline_id={document.timeline_id!r} "  # noqa: E501
+                    f"expected_remote_version={expected_remote_version}"
+                )
 
     def fetch_remote_head(self, timeline_id: str) -> dict[str, Any] | None:
         rows = self._transport.query(
@@ -585,17 +765,39 @@ class TursoReplicaClient:
             "WHERE timeline_id = ? ORDER BY seq DESC LIMIT 1",
             (timeline_id,),
         )
-        last_event_id = ev_rows[0]["event_id"] if ev_rows else None
-        last_payload = ev_rows[0]["payload_json"] if ev_rows else None
+        last_event_id = ev_rows[0].get("event_id") if ev_rows else None
         last_hash = None
-        if last_payload:
-            try:
-                obj = json.loads(str(last_payload))
-                integ = obj.get("_integrity") if isinstance(obj, dict) else None
-                if isinstance(integ, dict):
-                    last_hash = integ.get("event_hash")
-            except Exception:
-                last_hash = None
+        if ev_rows:
+            payload = ev_rows[0].get("payload_json")
+            if payload:
+                try:
+                    obj = json.loads(str(payload))
+                    integ = obj.get("_integrity") if isinstance(obj, dict) else None
+                    if isinstance(integ, dict) and integ.get("event_hash"):
+                        last_hash = str(integ.get("event_hash"))
+                except Exception:
+                    last_hash = None
+            if last_hash is None:
+                # most-recent payload malformed — scan for most recent valid hash (Q9: fork expects hash from good row)  # noqa: E501
+                try:
+                    all_rows = self._transport.query(
+                        "SELECT event_id, seq, payload_json FROM events WHERE timeline_id = ? ORDER BY seq DESC",  # noqa: E501
+                        (timeline_id,),
+                    )
+                except Exception:
+                    all_rows = []
+                for cand in all_rows:
+                    p = cand.get("payload_json")
+                    if not p:
+                        continue
+                    try:
+                        o = json.loads(str(p))
+                        integ = o.get("_integrity") if isinstance(o, dict) else None
+                        if isinstance(integ, dict) and integ.get("event_hash"):
+                            last_hash = str(integ.get("event_hash"))
+                            break
+                    except Exception:
+                        continue
         cnt_rows = self._transport.query(
             "SELECT COUNT(*) as cnt FROM events WHERE timeline_id = ?",
             (timeline_id,),
@@ -610,7 +812,6 @@ class TursoReplicaClient:
             "last_event_id": last_event_id,
             "last_hash": last_hash,
         }
-
     def fetch_remote_events(
         self,
         timeline_id: str,

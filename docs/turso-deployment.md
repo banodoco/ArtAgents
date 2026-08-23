@@ -19,7 +19,7 @@ Record URL and token as `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` (see §3).
 
 ## 2. Apply the replica schema (R1)
 
-DDL originates in `ArtAgents/packages/timeline-schema/sql/turso/0001_turso_replica_schema.sql` and is S-owned (R1). The local schema-pack runner covers local migrations (``0001–0003``) only; the Turso replica schema is applied separately via the replica transport — not through the local runner.
+DDL originates in `ArtAgents/packages/timeline-schema/sql/turso/0001_turso_replica_schema.sql` and is S-owned (R1). The local schema-pack runner covers local migrations (``0001–0003``) only; the Turso replica schema is applied separately via the replica transport — not through the local runner. Astrid does NOT vend a copy of the Turso DDL: `astrid/packs/timeline/schema-pack.yaml` lists only `migrations/0001_initial.sql` through `0003_add_source_provenance.sql` (local authority tables). The sole source is the sibling S checkout at `../ArtAgents/packages/timeline-schema/sql/turso/0001_turso_replica_schema.sql` relative to the Astrid repo root (or `/workspace/goalmd-sqlite-20260822/repos/ArtAgents/...` in CI).
 
 **From Astrid (replica schema applicator):**
 
@@ -27,9 +27,14 @@ The replica schema file contains multiple statements (two tables + two indexes) 
 
 ```python
 from pathlib import Path
-from astrid.core.timeline.eventlog.turso import FakeTursoTransport, TursoReplicaClient, apply_replica_schema
+from astrid.core.timeline.eventlog.turso import (
+    FakeTursoTransport,
+    LibSqlHttpTransport,
+    TursoReplicaClient,
+    apply_replica_schema,
+)
 
-sql = Path("ArtAgents/packages/timeline-schema/sql/turso/0001_turso_replica_schema.sql").read_text()
+sql = Path("../ArtAgents/packages/timeline-schema/sql/turso/0001_turso_replica_schema.sql").read_text()
 # against a transport (or TursoReplicaClient — both accepted):
 transport = FakeTursoTransport()  # swap for LibSqlHttpTransport() in prod (reads TURSO_* env)
 stmts = apply_replica_schema(transport, sql)
@@ -38,11 +43,10 @@ print(f"turso replica schema applied ({len(stmts)} statements)")
 # replica = TursoReplicaClient(transport)
 # apply_replica_schema(replica, sql)
 ```
-
 Or apply via `turso` CLI shell:
 
 ```bash
-turso db shell astrid-timelines < ArtAgents/packages/timeline-schema/sql/turso/0001_turso_replica_schema.sql
+turso db shell astrid-timelines < ../ArtAgents/packages/timeline-schema/sql/turso/0001_turso_replica_schema.sql
 ```
 
 Verify:
@@ -111,7 +115,7 @@ if result.action == "conflict":
     print("both diverged → your-copy/their-copy artifacts written, authorities intact")
 ```
 
-Cursor/bookmark: `turso-sync-state.json` beside `timeline_home` (file-based, like `sync_bookmark_path`). Idempotent resume across restarts; interrupted mid-push resumes without duplicating (event_id upsert on remote; cursor advances ONLY after remote commit).
+Cursor/bookmark: `turso-sync-state.json` inside `timeline_home` (file-based, like `sync_bookmark_path`). Idempotent resume across restarts; interrupted mid-push resumes without duplicating (event_id upsert on remote; cursor advances ONLY after remote commit).
 
 **Manual runbook for first sync:**
 
