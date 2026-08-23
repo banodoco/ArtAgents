@@ -476,6 +476,82 @@ def _fetch_remote_document_json(replica: TursoReplicaClient, timeline_id: str) -
         return str(dj) if dj is not None else None
     return None
 
+def _fetch_remote_document_json_strict(replica: TursoReplicaClient, timeline_id: str) -> str | None:
+    """Strict fetch for doc-identity: transport failure propagates as typed error."""
+    try:
+        raw = replica.fetch_remote_head(timeline_id)
+    except Exception as exc:
+        raise TursoSyncError(f"remote document fetch failed for {timeline_id!r}: {exc}") from exc
+    if not raw or not isinstance(raw, dict):
+        return None
+    doc = raw.get("document")
+    if isinstance(doc, dict):
+        dj = doc.get("document_json")
+        return str(dj) if dj is not None else None
+    return None
+
+
+def _documents_structurally_equal(a_json: str, b_json: str) -> bool:
+    """Canonical structural equality: parsed JSON objects equal."""
+    if a_json == b_json:
+        return True
+    try:
+        a_obj = json.loads(a_json)
+    except Exception:
+        return False
+    try:
+        b_obj = json.loads(b_json)
+    except Exception:
+        return False
+    return a_obj == b_obj
+
+
+def _heads_event_equal(a: HeadSnapshot, b: HeadSnapshot) -> bool:  # noqa: E501
+    return a.version == b.version and a.last_event_id == b.last_event_id and a.last_hash == b.last_hash  # noqa: E501
+
+
+def _verify_doc_identity_or_fork(
+    *,
+    timeline_id: str,
+    timeline_home: str | Path,
+    root: Path,
+    replica: TursoReplicaClient,
+    local_head: HeadSnapshot,
+    remote_head: HeadSnapshot,
+    backend: Any,
+    bookmark: SyncBookmark | None,
+) -> TursoSyncResult | None:
+    """Verify document identity when heads are event-equal.
+
+    Returns conflict TursoSyncResult if structurally divergent, raises
+    TursoSyncError on unverifiable read (fail-closed), or None if equal.
+    """
+    if not _heads_event_equal(local_head, remote_head):
+        return None
+    # heads equal — document identity must match
+    try:
+        local_doc = _read_local_document_snapshot(timeline_id, root)
+    except Exception as exc:
+        raise TursoSyncError(f"local document snapshot failed for {timeline_id!r}: {exc}") from exc
+    remote_doc_json = _fetch_remote_document_json_strict(replica, timeline_id)
+    if remote_doc_json is None:
+        # absent where document should exist => fail closed
+        if remote_head.version != 0 or local_head.version != 0:  # noqa: E501
+            raise TursoSyncError(f"remote document missing for {timeline_id!r} at version {remote_head.version} — failing closed")  # noqa: E501
+        # v0 bootstrap with no remote row is legitimate — treat as equal (push will create)
+        return None
+    if _documents_structurally_equal(local_doc.document_json, remote_doc_json):
+        return None
+    return _doc_divergence_conflict_result(
+        timeline_id=timeline_id,
+        timeline_home=timeline_home,
+        backend=backend,
+        replica=replica,
+        local_head=local_head,
+        remote_head=remote_head,
+        bookmark=bookmark,
+    )
+
 
 def _doc_divergence_conflict_result(
     *,
@@ -548,14 +624,57 @@ def _doc_divergence_conflict_result(
         raise TursoSyncError(f"failed to write keep-both artifact for doc divergence: {exc}") from exc  # noqa: E501
     if artifact is None:
         raise TursoSyncError("doc divergence artifact write returned None — failing closed")
+    # D4: embed both document payloads (your-copy/their-copy) for diagnostics
+    try:
+        local_doc_for_artifact: str | None = None
+        remote_doc_for_artifact: str | None = None
+        try:
+            _root = _projects_root_from_timeline_home(timeline_home)
+            local_doc_for_artifact = _read_local_document_snapshot(timeline_id, _root).document_json
+        except Exception:
+            local_doc_for_artifact = None
+        try:
+            remote_doc_for_artifact = _fetch_remote_document_json(replica, timeline_id)
+        except Exception:
+            remote_doc_for_artifact = None
+        if remote_doc_for_artifact is None:
+            try:
+                remote_doc_for_artifact = _fetch_remote_document_json_strict(replica, timeline_id)
+            except Exception:
+                pass
+    except Exception:
+        local_doc_for_artifact = None
+        remote_doc_for_artifact = None
     try:
         art_path = Path(str(getattr(artifact, "path", "")))
         if art_path.exists():
             raw = read_json(art_path)
-            if isinstance(raw, dict) and skipped_rows:
-                raw["skipped_rows"] = skipped_rows
+            if isinstance(raw, dict):
+                if skipped_rows:
+                    raw["skipped_rows"] = skipped_rows
+                try:
+                    raw["local_document"] = json.loads(local_doc_for_artifact) if local_doc_for_artifact is not None else None  # noqa: E501
+                    raw["local_document_json"] = local_doc_for_artifact
+                except Exception:
+                    raw["local_document"] = None
+                    raw["local_document_json"] = local_doc_for_artifact
+                try:
+                    raw["remote_document"] = json.loads(remote_doc_for_artifact) if remote_doc_for_artifact is not None else None  # noqa: E501
+                    raw["remote_document_json"] = remote_doc_for_artifact
+                except Exception:
+                    raw["remote_document"] = None
+                    raw["remote_document_json"] = remote_doc_for_artifact
+                raw["documents"] = {"local": raw.get("local_document"), "remote": raw.get("remote_document")}  # noqa: E501
                 write_json_atomic(art_path, raw)
         diag_path = art_path.with_name(art_path.stem + ".diagnostic.json")
+        try:
+            _local_diag = json.loads(local_doc_for_artifact) if local_doc_for_artifact is not None else None  # noqa: E501
+        except Exception:
+            _local_diag = None
+        try:
+            _remote_diag = json.loads(remote_doc_for_artifact) if remote_doc_for_artifact is not None else None  # noqa: E501
+        except Exception:
+            _remote_diag = None
         diag_payload = {
             "kind": "sync_divergence_diagnostic",
             "created_at": utc_now_milliseconds(),
@@ -563,6 +682,10 @@ def _doc_divergence_conflict_result(
             "local_suffix": [{"event_id": e.event_id, "kind": e.kind} for e in local_suffix],
             "remote_suffix": [{"event_id": e.event_id, "kind": e.kind} for e in remote_suffix],
             "skipped_rows": skipped_rows,
+            "local_document": _local_diag,
+            "remote_document": _remote_diag,
+            "local_document_json": local_doc_for_artifact,
+            "remote_document_json": remote_doc_for_artifact,
         }
         try:
             write_json_atomic(diag_path, diag_payload)
@@ -636,24 +759,25 @@ def push_to_turso(
         )
     except Exception as exc:
         raise TursoSyncError(f"sync classification failed: {exc}") from exc
+    # D5+D1+D2: equal heads must verify document identity fail-closed (structural)
+    try:
+        maybe_fork = _verify_doc_identity_or_fork(
+            timeline_id=timeline_id,
+            timeline_home=timeline_home,
+            root=root,
+            replica=replica,
+            local_head=local_head,
+            remote_head=remote_head,
+            backend=backend,
+            bookmark=bookmark,
+        )
+        if maybe_fork is not None:
+            return maybe_fork
+    except TursoSyncError:
+        raise
+    except Exception as exc:
+        raise TursoSyncError(f"document identity check failed: {exc}") from exc
     if action == "up_to_date":
-        try:
-            local_doc = _read_local_document_snapshot(timeline_id, root)
-            remote_doc_json = _fetch_remote_document_json(replica, timeline_id)
-            if remote_doc_json is not None and local_doc.document_json != remote_doc_json:
-                return _doc_divergence_conflict_result(
-                    timeline_id=timeline_id,
-                    timeline_home=timeline_home,
-                    backend=backend,
-                    replica=replica,
-                    local_head=local_head,
-                    remote_head=remote_head,
-                    bookmark=bookmark,
-                )
-        except TursoSyncError:
-            raise
-        except Exception:
-            pass
         return TursoSyncResult(
             action="up_to_date",
             timeline_id=timeline_id,
@@ -666,6 +790,24 @@ def push_to_turso(
     if action in ("both_advanced", "bookmark_incompatible"):
         try:
             if _is_push_resume_already_committed(timeline_id, timeline_home, root, backend, replica, state, bookmark):  # noqa: E501
+                # D3: doc identity precedes cursor write (use existing heads to avoid extra snapshot side-effects)  # noqa: E501
+                try:
+                    maybe_pre = _verify_doc_identity_or_fork(
+                        timeline_id=timeline_id,
+                        timeline_home=timeline_home,
+                        root=root,
+                        replica=replica,
+                        local_head=local_head,
+                        remote_head=remote_head,
+                        backend=backend,
+                        bookmark=bookmark,
+                    )
+                    if maybe_pre is not None:
+                        return maybe_pre
+                except TursoSyncError:
+                    raise
+                except Exception as exc:
+                    raise TursoSyncError(f"resume doc identity check failed: {exc}") from exc
                 # Derive proven boundary BEFORE refresh — refreshed heads are verify-only
                 after_local_b, after_remote_b = _resume_bookmark_boundaries(state, bookmark, strict_event_id=True)  # noqa: E501
                 try:
@@ -684,6 +826,24 @@ def push_to_turso(
                     fresh_remote = _remote_head_snapshot(replica, timeline_id)
                 except Exception as exc:
                     raise TursoSyncError(f"resume head refresh failed: {exc}") from exc
+                # D3: re-verify after refresh before claiming health
+                try:
+                    maybe_fork_post = _verify_doc_identity_or_fork(
+                        timeline_id=timeline_id,
+                        timeline_home=timeline_home,
+                        root=root,
+                        replica=replica,
+                        local_head=fresh_local,
+                        remote_head=fresh_remote,
+                        backend=backend,
+                        bookmark=bookmark,
+                    )
+                    if maybe_fork_post is not None:
+                        return maybe_fork_post
+                except TursoSyncError:
+                    raise
+                except Exception as exc:
+                    raise TursoSyncError(f"resume post-refresh doc identity failed: {exc}") from exc
                 # Proven last row is exclusive boundary
                 proven_last = proven_local[-1]
                 proven_last_id = proven_last.event_id
@@ -877,8 +1037,26 @@ def push_to_turso(
     except Exception as exc:
         raise TursoSyncError(f"failed to read local events for push: {exc}") from exc
 
-    # If no new events but document version unchanged, nothing to push
+    # If no new events but document version unchanged, nothing to push — but doc identity must still match  # noqa: E501
     if not local_events and doc.version == remote_head.version:
+        # D3/D5: this terminal up_to_date must verify docs
+        try:
+            maybe = _verify_doc_identity_or_fork(
+                timeline_id=timeline_id,
+                timeline_home=timeline_home,
+                root=root,
+                replica=replica,
+                local_head=local_head,
+                remote_head=remote_head,
+                backend=backend,
+                bookmark=bookmark,
+            )
+            if maybe is not None:
+                return maybe
+        except TursoSyncError:
+            raise
+        except Exception as exc:
+            raise TursoSyncError(f"doc identity check failed (push tail): {exc}") from exc
         return TursoSyncResult(
             action="up_to_date",
             timeline_id=timeline_id,
@@ -1064,24 +1242,25 @@ def pull_from_turso(
         )
     except Exception as exc:
         raise TursoSyncError(f"sync classification failed: {exc}") from exc
+    # D5+D1+D2: equal heads must verify document identity fail-closed (structural)
+    try:
+        maybe_fork = _verify_doc_identity_or_fork(
+            timeline_id=timeline_id,
+            timeline_home=timeline_home,
+            root=root,
+            replica=replica,
+            local_head=local_head,
+            remote_head=remote_head,
+            backend=backend,
+            bookmark=bookmark,
+        )
+        if maybe_fork is not None:
+            return maybe_fork
+    except TursoSyncError:
+        raise
+    except Exception as exc:
+        raise TursoSyncError(f"document identity check failed: {exc}") from exc
     if action == "up_to_date":
-        try:
-            local_doc = _read_local_document_snapshot(timeline_id, root)
-            remote_doc_json = _fetch_remote_document_json(replica, timeline_id)
-            if remote_doc_json is not None and local_doc.document_json != remote_doc_json:
-                return _doc_divergence_conflict_result(
-                    timeline_id=timeline_id,
-                    timeline_home=timeline_home,
-                    backend=backend,
-                    replica=replica,
-                    local_head=local_head,
-                    remote_head=remote_head,
-                    bookmark=bookmark,
-                )
-        except TursoSyncError:
-            raise
-        except Exception:
-            pass
         return TursoSyncResult(
             action="up_to_date",
             timeline_id=timeline_id,
@@ -1101,6 +1280,24 @@ def pull_from_turso(
     if action in ("both_advanced", "bookmark_incompatible"):
         try:
             if _is_pull_resume_already_committed(timeline_id, timeline_home, root, backend, replica, state, bookmark):  # noqa: E501
+                # D3: doc identity precedes cursor write (use existing heads)  # noqa: E501
+                try:
+                    maybe_pre = _verify_doc_identity_or_fork(
+                        timeline_id=timeline_id,
+                        timeline_home=timeline_home,
+                        root=root,
+                        replica=replica,
+                        local_head=local_head,
+                        remote_head=remote_head,
+                        backend=backend,
+                        bookmark=bookmark,
+                    )
+                    if maybe_pre is not None:
+                        return maybe_pre
+                except TursoSyncError:
+                    raise
+                except Exception as exc:
+                    raise TursoSyncError(f"pull resume doc identity check failed: {exc}") from exc
                 after_local_b, after_remote_b = _resume_bookmark_boundaries(state, bookmark, strict_event_id=False)  # noqa: E501
                 try:
                     proven_local = backend.read_events(after=after_local_b) if after_local_b else backend.read_events()  # noqa: E501
@@ -1117,6 +1314,23 @@ def pull_from_turso(
                     fresh_remote = _remote_head_snapshot(replica, timeline_id)
                 except Exception as exc:
                     raise TursoSyncError(f"pull resume head refresh failed: {exc}") from exc
+                try:
+                    maybe_post = _verify_doc_identity_or_fork(
+                        timeline_id=timeline_id,
+                        timeline_home=timeline_home,
+                        root=root,
+                        replica=replica,
+                        local_head=fresh_local,
+                        remote_head=fresh_remote,
+                        backend=backend,
+                        bookmark=bookmark,
+                    )
+                    if maybe_post is not None:
+                        return maybe_post
+                except TursoSyncError:
+                    raise
+                except Exception as exc:
+                    raise TursoSyncError(f"pull resume post-refresh doc identity failed: {exc}") from exc  # noqa: E501
                 proven_local_last = proven_local[-1]
                 proven_remote_last = proven_remote[-1]  # type: ignore[index]
                 proven_remote_id = str(proven_remote_last.get("event_id", ""))  # type: ignore[union-attr]
