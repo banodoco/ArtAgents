@@ -610,8 +610,9 @@ def _discover(project_dir: Path) -> tuple[list[ManagedTimeline], list[str]]:
                         except Exception as _ex_f:
                             diagnostics.append(f"skipped {child.name}: identity cache names another project's authoritative stream; delete the disposable sidecar cache to repair (another/UNVERIFIABLE authoritative stream): {_ex_f}")
                             continue
-        except Exception:
-            pass
+        except Exception as _exc_n1_post:
+            diagnostics.append(f"skipped {child.name}: timeline authority state could not be verified: {_exc_n1_post}")
+            continue
         timelines.append(_timeline_from_identity(child, identity))
     return timelines, diagnostics
 
