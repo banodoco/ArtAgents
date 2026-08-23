@@ -159,16 +159,28 @@ def _suffixes_byte_equal(
     backend: Any | None = None,
     strict_event_id: bool = True,
     check_seq: bool = True,
-) -> bool:
+) -> bool:  # noqa: E501
     """Compare local TimelineEvents vs remote dict rows byte-equal on identity+payload+kind+stream."""  # noqa: E501
     if len(local_events) != len(remote_rows):
         return False
     if not local_events and not remote_rows:
         return True
     for le, rr in zip(local_events, remote_rows):
-        if strict_event_id and str(getattr(le, "event_id", "")) != str(rr.get("event_id", "")):
-            return False
-        if str(getattr(le, "kind", "")) != str(rr.get("kind", "")):
+        # Identity-faithful: pull resume must compare REMOTE event_id against
+        # LOCAL provenance source_event_id (populated by append_imported_event)
+        # falling back to local event_id. Push resume stays strictly identity-based.
+        # Fallback ordering: source_event_id -> event_id (cite: sqlite_backend.append_imported_event
+        # persists source_event_id, _event_from_row exposes it as source_event_id).
+        if strict_event_id:
+            if str(getattr(le, "event_id", "")) != str(rr.get("event_id", "")):
+                return False
+        else:
+            # Pull provenance mode: remote event_id must match local source_event_id if present  # noqa: E501
+            local_source = getattr(le, "source_event_id", None)
+            local_id_for_compare = str(local_source) if local_source else str(getattr(le, "event_id", ""))  # noqa: E501
+            if local_id_for_compare != str(rr.get("event_id", "")):
+                return False
+        if str(getattr(le, "kind", "")) != str(rr.get("kind", "")):  # noqa: E501
             return False
         local_pj = _local_payload_json_for_event(timeline_id, str(getattr(le, "event_id", "")), projects_root)  # noqa: E501
         if local_pj is None:
@@ -188,8 +200,6 @@ def _suffixes_byte_equal(
             except Exception:
                 return False
         remote_pj = str(rr.get("payload_json", ""))
-        # Byte-equal on data payload + kind, but allow integrity/actor metadata to differ (pull re-hash).  # noqa: E501
-        # Compare data field if both are JSON with data key; else fall back to full string equality.
         try:
             local_obj = json.loads(local_pj) if local_pj else {}
             remote_obj = json.loads(remote_pj) if remote_pj else {}

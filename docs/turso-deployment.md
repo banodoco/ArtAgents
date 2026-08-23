@@ -77,7 +77,7 @@ pip install libsql-experimental   # provides `libsql_experimental` (Turso HTTP c
 # LibSqlHttpTransport() construction succeeds with env set; the driver is loaded lazily at first use.
 # The transport accepts either `import libsql` or `import libsql_experimental` (fallback) — both share the same connect surface.
 ```
-`grep -rn "turso" astrid | grep -v test` shows only `astrid/core/timeline/eventlog/turso.py`, `astrid/core/timeline/turso_sync.py`, and this doc/env seams — no pub-sub, no websocket, no LWW.
+`grep -rn "turso" astrid --exclude-dir=__pycache__ | grep -v test` shows only `astrid/core/timeline/eventlog/turso.py`, `astrid/core/timeline/turso_sync.py`, and this doc/env seams — no pub-sub, no websocket, no LWW.
 
 ## 4. Driver install (optional dep)
 
@@ -105,7 +105,7 @@ from astrid.core.timeline.turso_sync import push_to_turso, pull_from_turso
 backend = SqliteEventLogBackend(timeline_id=tid, timeline_home=home, projects_root=root)
 replica = TursoReplicaClient(FakeTursoTransport())  # swap for LibSqlHttpTransport() in prod
 
-# push drain + document+version as ONE remote unit (atomic batch)
+# push drain + document+version as ONE remote atomic unit: guarded conditional event inserts re-verify intended document content (version+document_json+name) inside the same batch, plus content-aware post-batch verification (TursoVersionRaceError). Zero partial mutations on CAS loss (see `TursoReplicaClient.push_timeline_updates`).
 result = push_to_turso(timeline_id=tid, timeline_home=home, projects_root=root, backend=backend, replica=replica)
 print(result.action)  # pushed | up_to_date | conflict
 
@@ -115,7 +115,7 @@ if result.action == "conflict":
     print("both diverged → your-copy/their-copy artifacts written, authorities intact")
 ```
 
-Cursor/bookmark: `turso-sync-state.json` inside `timeline_home` (file-based, like `sync_bookmark_path`). Idempotent resume across restarts; interrupted mid-push resumes without duplicating (event_id upsert on remote; cursor advances ONLY after remote commit).
+Cursor/bookmark: `turso-sync-state.json` inside `timeline_home` (file-based, like `sync_bookmark_path`). Idempotent resume across restarts; interrupted mid-push resumes without duplicating (exact-replay is filtered via pre-batch probe and skipped; divergent payload raises typed collision; cursor advances ONLY after remote batch commits).
 
 **Manual runbook for first sync:**
 
@@ -126,11 +126,11 @@ Cursor/bookmark: `turso-sync-state.json` inside `timeline_home` (file-based, lik
 Run `pull_from_turso` + `push_to_turso` on a timer (e.g. every 15–30s per timeline) under process supervision. The service:
 
 - reads local via `backend.read_events(after=..., limit=...)` (protocol, not ad-hoc SQL);
-- pushes as one batched transaction (fake emulates atomic all-or-nothing; `LibSqlHttpTransport` prefers native `execute_batch` and falls back to `BEGIN`/`COMMIT`);
-- on pull, if `remote version == local known` → no-op; if `local unchanged and remote newer` → applies through `UnitOfWork`/`append_imported_event` (preserves ids, or remaps with continuity — documented in `turso_sync.py` as import-remap; tested via `test_turso_sync.py::test_pull_clean_applies_through_uow`);
+- pushes as one atomic batched transaction: document CAS (`WHERE documents.version = ?`) plus guarded conditional event inserts (`INSERT ... SELECT ... WHERE EXISTS (document version+document_json+name)`) inside the same `execute_batch` so a losing CAS commits zero events; `FakeTursoTransport` emulates the same atomicity, `LibSqlHttpTransport` prefers native `execute_batch` and falls back to `BEGIN`/`COMMIT`; content-aware post-batch verification raises typed `TursoVersionRaceError` as belt-and-braces;
+- on pull, if `remote version == local known` → no-op; if `local unchanged and remote newer` → applies through `UnitOfWork`/`append_imported_event` (preserves ids via `source_event_id` provenance, or remaps with continuity — documented in `turso_sync.py` as import-remap; tested via `tests/timeline/test_turso_sync.py::TestPullCleanApply::test_pull_clean_applies_via_uow`);
 - if both diverged → writes `divergence-*.json` artifacts via `sync_divergence.write_keep_both_artifact` (primary, full your-copy/their-copy event payloads + `skipped_rows` diagnostics), returns `conflict`, never overwrites, never merges, never LWW.
-  - attribution boundary: remote attribution collapses to the sync agent on apply — pulled events are hard-coded to `system`/`turso-sync:pull` (see `turso_sync.py:778` via `append_imported_event`); the replicated `actor_kind`/`actor_id` columns are preserved only inside the divergence artifact, not on the imported row (asserted in `tests/regression/test_s4_rework1_regressions.py::TestAttributionCollapsed`).
-Ownership: the pull path catches typed `OwnerLockError` (direct) and `EventLogError` wrapping `OwnerLockError` (backend seam) → `TursoOwnershipError` (no substring sniffing) and fails closed with that typed error if serve already owns the DB — no second writable connection is opened concurrently. A generic `EventLogError` or other failure whose message happens to contain "owned" is classified as `TursoSyncError`, not ownership.
+  - attribution boundary: remote attribution collapses to the sync agent on apply — pulled events are hard-coded to `system`/`turso-sync:pull` (see `turso_sync.py:1237` via `append_imported_event`); the replicated `actor_kind`/`actor_id` columns are preserved only inside the divergence artifact, not on the imported row (asserted in `tests/regression/test_s4_rework1_regressions.py::TestAttributionCollapsed`).
+  - crash-resume semantics: pull resume compares remote event_id against local `source_event_id` falling back to `event_id` (identity-faithful); distinct same-bytes/different-id histories fork (`conflict`+artifact), while a previously pulled import (source_event_id == remote id) reconciles clean to `up_to_date` with zero artifacts and zero remote writes; push resume stays strictly `event_id` identity-based.
 
 ## 7. Observability
 
@@ -141,7 +141,7 @@ Ownership: the pull path catches typed `OwnerLockError` (direct) and `EventLogEr
 
 ## 8. CLI posture
 
-No new `astrid timelines turso-*` verb was added. The existing `timelines` gateway (`astrid/packs/timeline/cli.py`) is a product-family parser for create/list/show/save/archive/history/diff/backfill plus nested `shots`; adding a polling daemon verb would not be a thin (~<40 line) registration over `turso_sync.push_to_turso`/`pull_from_turso` — it would require supervision, timer, and multi-timeline Fan-out that belongs in a service, not a one-shot CLI. The service entry points are the two functions above; operators wire them under their process manager (systemd, launchd, or `hub` `ps`).
+No new `astrid timelines turso-*` verb was added. The existing `timelines` gateway (`astrid/packs/timeline/cli.py`) is a product-family parser for create/list/show/save/archive/history/diff/backfill plus nested `shots`; adding a polling daemon verb would not be a thin (~<40 line) registration over `turso_sync.push_to_turso`/`pull_from_turso` — it would require supervision, timer, and multi-timeline fan-out that belongs in a service, not a one-shot CLI. The service entry points are the two functions above; operators wire them under their process manager (systemd, launchd).
 
 If a manual trigger is needed, run a one-liner with the snippet in §5 (or `python -m astrid.core.timeline.turso_sync` if you add a thin wrapper — document here instead of shipping a verb).
 

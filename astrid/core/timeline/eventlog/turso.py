@@ -257,26 +257,47 @@ class FakeTursoTransport:
                 pending_docs[tid] = row
                 pending_docs_expected[tid] = expected
             elif s.startswith("insert") and "into events" in s:
+                # Guarded conditional insert: INSERT INTO events (...) SELECT ... WHERE EXISTS (...)
+                # Detect guarded shape via WHERE EXISTS and SELECT; then evaluate guard atomically
+                is_guarded = "where exists" in s and "select" in s
+                guard_info: tuple[str, int, str, str] | None = None
                 cols = list(EVENT_REPLICA_COLUMNS)
-                if len(params) != len(cols):
-                    row = {"event_id": params[0]}
-                    for i, v in enumerate(params):
-                        if i < len(cols):
-                            row[cols[i]] = v
+                if is_guarded:
+                    # params = event_cols (len cols) + guard (timeline_id, version, document_json, name)  # noqa: E501
+                    expected_param_len = len(cols) + 4
+                    if len(params) != expected_param_len:
+                        raise TursoError(f"guarded event insert expects {expected_param_len} params, got {len(params)}")  # noqa: E501
+                    event_params = params[: len(cols)]
+                    guard_tid = str(params[len(cols)])
+                    guard_version = int(params[len(cols) + 1])
+                    guard_doc_json = str(params[len(cols) + 2])
+                    guard_name = str(params[len(cols) + 3])
+                    guard_info = (guard_tid, guard_version, guard_doc_json, guard_name)
+                    row = {c: v for c, v in zip(cols, event_params)}
                 else:
-                    row = {c: v for c, v in zip(cols, params)}
+                    if len(params) != len(cols):
+                        row = {"event_id": params[0]}
+                        for i, v in enumerate(params):
+                            if i < len(cols):
+                                row[cols[i]] = v
+                    else:
+                        row = {c: v for c, v in zip(cols, params)}
                 payload = str(row.get("payload_json", ""))
                 _assert_no_blob_in_payload_json(payload)
                 _assert_no_asset_registry_payload(payload)
                 eid = str(row["event_id"])
                 if eid in pending_events:
                     raise TursoError(f"duplicate event_id within batch: {eid!r}")
+                # Stash guard for atomic evaluation after document CAS stage
+                if guard_info is not None:
+                    row["_guard"] = guard_info  # type: ignore[assignment]
                 pending_events[eid] = row
             else:
                 raise TursoError(f"fake transport does not support statement: {sql[:80]!r}")
         self.tables.update(pending_tables)
         self.indexes.update(pending_indexes)
-        # documents: CAS + column-subset mutation
+        # documents: CAS + column-subset mutation (track which tids succeeded vs failed)
+        cas_failed_tids: set[str] = set()
         for tid, row in pending_docs.items():
             expected = pending_docs_expected[tid]
             existing = self.documents.get(tid)
@@ -286,32 +307,40 @@ class FakeTursoTransport:
                 except Exception:
                     cur_v = None
                 if cur_v != expected:
-                    # CAS fail: preserve existing (zero rows updated) — caller will verify and raise race  # noqa: E501
+                    cas_failed_tids.add(tid)
                     continue
-                # CAS pass: mutate ONLY production subset (never REPLACE)
                 existing["name"] = row["name"]
                 existing["document_json"] = row["document_json"]
                 existing["version"] = row["version"]
                 existing["updated_at"] = row["updated_at"]
-                # project_id, event_stream_id, created_at preserved
             elif existing is not None:
-                # no CAS — same subset mutation
                 existing["name"] = row["name"]
                 existing["document_json"] = row["document_json"]
                 existing["version"] = row["version"]
                 existing["updated_at"] = row["updated_at"]
             else:
-                # create path: CAS with expected fails if row exists check above, else insert full row  # noqa: E501
-                # For create race: if expected is not None and row just appeared via concurrent insert,  # noqa: E501
-                # we would have existing above. If no existing, INSERT succeeds (even with CAS expected=0 or None)  # noqa: E501
                 self.documents[tid] = dict(row)
-        for eid, row in pending_events.items():
+        for eid, row in list(pending_events.items()):
+            guard = row.pop("_guard", None)  # type: ignore[attr-defined]
+            if guard is not None:
+                guard_tid, guard_version, guard_doc_json, guard_name = guard  # type: ignore[misc]
+                # If the batch included a document for this timeline that CAS-failed, guard fails
+                if guard_tid in cas_failed_tids:
+                    continue
+                # Evaluate against the post-document state (atomic batch semantics)
+                doc = self.documents.get(guard_tid)
+                if doc is None:
+                    continue
+                try:
+                    doc_v = int(doc.get("version", 0))
+                except Exception:
+                    doc_v = None
+                if doc_v != guard_version or str(doc.get("document_json", "")) != guard_doc_json or str(doc.get("name", "")) != guard_name:  # noqa: E501
+                    continue
             if eid in self.events:
-                # Should not happen: push_timeline_updates probes and raises collision before batch;
-                # but keep strict PK semantics
                 raise TursoError(f"duplicate event_id: {eid!r} violates PK")
-            # duplicate seq / ik within batch already checked via probe; fake keeps simple insert
             self.events[eid] = row
+
     def query(self, sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
         s = sql.strip().lower()
         if "sqlite_master" in s:
@@ -436,10 +465,10 @@ class LibSqlHttpTransport:
         # lazy connect; both libsql and libsql_experimental expose libsql.connect(url, authToken=token)  # noqa: E501
         try:
             # try libsql.connect signature
-            self._client = libsql_mod.connect(database=self._url, auth_token=self._token)  # type: ignore[attr-defined]
+            self._client = libsql_mod.connect(database=self._url, auth_token=self._token)  # type: ignore[attr-defined]  # noqa: E501
         except TypeError:
             try:
-                self._client = libsql_mod.connect(self._url, authToken=self._token)  # type: ignore[attr-defined]
+                self._client = libsql_mod.connect(self._url, authToken=self._token)  # type: ignore[attr-defined]  # noqa: E501
             except Exception as exc:
                 raise TursoConfigError(f"failed to connect to Turso at {self._url}: {exc}") from exc
         except Exception as exc:
@@ -727,28 +756,63 @@ class TursoReplicaClient:
             )
         for ev in events_to_push:
             self._validate_event(ev)
-            sql = self._event_upsert_sql()
-            params = (
-                ev.event_id,
-                ev.timeline_id,
-                ev.project_id,
-                ev.stream_id,
-                ev.seq,
-                ev.kind,
-                ev.payload_json,
-                ev.actor_kind,
-                ev.actor_id,
-                ev.txn_id,
-                ev.idempotency_key,
-                ev.created_at,
-            )
+            if document is not None and expected_remote_version is not None:
+                # Guarded conditional insert: event only lands if document CAS succeeded
+                # to the intended CONTENT (version + document_json + name), not just version number.
+                # Shape (a) same-version-different-content would otherwise pass a version-only check.  # noqa: E501
+                cols = ", ".join(EVENT_REPLICA_COLUMNS)
+                placeholders = ", ".join("?" for _ in EVENT_REPLICA_COLUMNS)
+                sql = (
+                    f"INSERT INTO events ({cols}) SELECT {placeholders} "
+                    "WHERE EXISTS (SELECT 1 FROM documents WHERE timeline_id = ? "
+                    "AND version = ? AND document_json = ? AND name = ?)"
+                )
+                base_params = (
+                    ev.event_id,
+                    ev.timeline_id,
+                    ev.project_id,
+                    ev.stream_id,
+                    ev.seq,
+                    ev.kind,
+                    ev.payload_json,
+                    ev.actor_kind,
+                    ev.actor_id,
+                    ev.txn_id,
+                    ev.idempotency_key,
+                    ev.created_at,
+                )
+                guard_params = (
+                    document.timeline_id,
+                    document.version,
+                    document.document_json,
+                    document.name,
+                )
+                params = base_params + guard_params
+            else:
+                sql = self._event_upsert_sql()
+                params = (
+                    ev.event_id,
+                    ev.timeline_id,
+                    ev.project_id,
+                    ev.stream_id,
+                    ev.seq,
+                    ev.kind,
+                    ev.payload_json,
+                    ev.actor_kind,
+                    ev.actor_id,
+                    ev.txn_id,
+                    ev.idempotency_key,
+                    ev.created_at,
+                )
             statements.append((sql, params))
         if not statements:
             return
         self._transport.execute_batch(statements)
-        # --- R2: CAS verification when expected_remote_version was set ---
         if document is not None and expected_remote_version is not None:
-            # Verify the document actually took the new version; if not, remote raced.
+            # Belt-and-braces: guard ensures events only land if document reached intended
+            # CONTENT, but we still verify post-batch that the document row matches
+            # intended version AND bytes (document_json/name). Version-only equality
+            # would miss shape (a) where theirs-v2 and ours-v2 are numerically equal.
             try:
                 rows = self._transport.query(
                     "SELECT * FROM documents WHERE timeline_id = ?",
@@ -758,18 +822,20 @@ class TursoReplicaClient:
                 rows = []
             if rows:
                 cur_version = rows[0].get("version")
+                cur_json = str(rows[0].get("document_json", ""))
+                cur_name = str(rows[0].get("name", ""))
                 try:
                     cur_v = int(cur_version)  # type: ignore[arg-type]
                 except Exception:
                     cur_v = None
-                if cur_v != document.version:
+                if cur_v != document.version or cur_json != document.document_json or cur_name != document.name:  # noqa: E501
                     raise TursoVersionRaceError(
                         f"document CAS failed timeline_id={document.timeline_id!r} "
                         f"expected_remote_version={expected_remote_version} "
-                        f"attempted_version={document.version} remote_version={cur_version!r}"
+                        f"attempted_version={document.version} remote_version={cur_version!r} "
+                        f"content_mismatch={cur_json != document.document_json or cur_name != document.name}"  # noqa: E501
                     )
             else:
-                # No row after push? Should have inserted — race on create path also fails
                 raise TursoVersionRaceError(
                     f"document CAS failed (no row after upsert) timeline_id={document.timeline_id!r} "  # noqa: E501
                     f"expected_remote_version={expected_remote_version}"
