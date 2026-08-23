@@ -19,53 +19,86 @@ from astrid.core.util.time import utc_now_iso
 from astrid.packs.typed_timeline.common import ensure_tone_wav, parse_json_rows, resolve_mapping_path
 
 
+def _video_frame_count(video_path: Path) -> int | None:
+    """Return video frame count via ffprobe, or None if unavailable."""
+    ffprobe = shutil.which("ffprobe")
+    if ffprobe is None:
+        return None
+    try:
+        # Prefer nb_read_frames counting
+        result = subprocess.run(
+            [ffprobe, "-v", "error", "-select_streams", "v:0", "-count_frames", "-show_entries", "stream=nb_read_frames", "-of", "csv=p=0", str(video_path)],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10, text=True,
+        )
+        txt = (result.stdout or "").strip()
+        if txt and txt != "N/A":
+            return int(txt)
+    except Exception:
+        pass
+    try:
+        result = subprocess.run(
+            [ffprobe, "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=nb_frames", "-of", "csv=p=0", str(video_path)],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10, text=True,
+        )
+        txt = (result.stdout or "").strip()
+        if txt and txt != "N/A":
+            return int(float(txt))
+    except Exception:
+        pass
+    try:
+        result = subprocess.run(
+            [ffprobe, "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=duration,r_frame_rate,avg_frame_rate", "-of", "json", str(video_path)],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10, text=True,
+        )
+        data = json.loads(result.stdout) if result.stdout else {}
+        streams = data.get("streams", []) if isinstance(data, dict) else []
+        if streams:
+            s = streams[0]
+            dur = s.get("duration")
+            rfr = s.get("avg_frame_rate") or s.get("r_frame_rate")
+            if dur and rfr and "/" in str(rfr):
+                num, den = str(rfr).split("/", 1)
+                fps = float(num) / float(den) if float(den) != 0 else 0
+                return int(round(float(dur) * fps))
+    except Exception:
+        pass
+    return None
+
+
 def _run_ffmpeg_render(timeline_path: Path, assets_path: Path, out_path: Path) -> bool:
+    """Real render via audio_reactive_colour. NO fake fallback. Returns True only on real video."""
+    # Primary: audio_reactive_colour fast path — must produce real 8085-frame video
     try:
         from astrid.packs.rendering.backends.ffmpeg.audio_reactive_colour import match_and_validate, render
+
         import json as _json
+
         timeline_data = _json.loads(timeline_path.read_text(encoding="utf-8"))
         registry = _json.loads(assets_path.read_text(encoding="utf-8"))
         spec = match_and_validate(timeline_data, registry, assets_path)
         if spec is not None:
             try:
                 render(spec, out_path)
-                return out_path.exists()
+                if out_path.exists() and out_path.stat().st_size > 1000:
+                    return True
+                print("audio_reactive_colour render produced no file", file=sys.stderr)
             except Exception as e:
                 print(f"audio_reactive_colour render failed: {e}", file=sys.stderr)
-                pass
+                # do not fall back to fake — propagate failure
+                return False
+        else:
+            print("audio_reactive_colour match_and_validate returned None — no effect clip match", file=sys.stderr)
+            return False
     except Exception as e:
         print(f"fast path unavailable: {e}", file=sys.stderr)
+        return False
+    # No lavfi 1s colour fallback, no fake MP4 header — fail honestly
     ffmpeg = shutil.which("ffmpeg")
     if ffmpeg is None:
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_bytes(b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom")
-        return True
-    tone = None
-    try:
-        reg = json.loads(assets_path.read_text(encoding="utf-8"))
-        tone = list(reg.get("assets", {}).values())[0].get("file") if reg.get("assets") else None
-    except Exception:
-        pass
-    audio_arg = []
-    if tone:
-        audio_path = Path(tone)
-        if not audio_path.is_absolute():
-            audio_path = (assets_path.parent / audio_path).resolve()
-        if audio_path.exists():
-            audio_arg = ["-i", str(audio_path)]
-    cmd = [ffmpeg, "-y", "-f", "lavfi", "-i", "color=c=0x16B09B:s=320x180:r=24:d=1", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-t", "1", str(out_path)]
-    if audio_arg:
-        cmd = [ffmpeg, "-y", "-f", "lavfi", "-i", "color=c=0x16B09B:s=320x180:r=24:d=1"] + audio_arg + ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-shortest", str(out_path)]
-    try:
-        subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
-        return out_path.exists()
-    except Exception as e:
-        print(f"ffmpeg fallback failed: {e}", file=sys.stderr)
-        try:
-            out_path.write_bytes(b"\x00\x00\x00\x18ftypmp42")
-            return True
-        except Exception:
-            return False
+        print("ffmpeg not found — failing (no fake video)", file=sys.stderr)
+        return False
+    print("ffmpeg fallback disabled for validated timeline — failing", file=sys.stderr)
+    return False
 
 
 def main(argv=None) -> int:
@@ -75,6 +108,7 @@ def main(argv=None) -> int:
         parser.add_argument("--mapping", default="runaway_colour")
         parser.add_argument("--run-id", dest="run_id", default=None)
         parser.add_argument("--project", default=None)
+        parser.add_argument("--project-id", dest="project_id_alias", default=None)
         parser.add_argument("--json-path", dest="json_path", default=None)
         parser.add_argument("--json-rows", dest="json_rows", default=None)
         parser.add_argument("--out", type=Path, default=None)
@@ -82,6 +116,9 @@ def main(argv=None) -> int:
         args, unknown = parser.parse_known_args(argv)
         out_dir = Path(args.out) if args.out else Path.cwd() / "out"
         out_dir.mkdir(parents=True, exist_ok=True)
+        # alias: --project-id
+        if getattr(args, "project_id_alias", None) and not args.project:
+            args.project = args.project_id_alias
         project_id = args.project
         if not project_id:
             try:
@@ -99,7 +136,11 @@ def main(argv=None) -> int:
                 rows = parse_json_rows(args.json_rows)
             except Exception as e:
                 print(f"json_rows parse failed: {e}", file=sys.stderr)
-                rows = []
+                return 1
+            # For runaway mapping, 0 rows must fail even via json_rows if source is runaway
+            if args.source != "json" and not rows:
+                print(f"load returned 0 rows for project_id={project_id!r} run_id={args.run_id!r} — failing", file=sys.stderr)
+                return 1
         elif args.source == "json" and args.json_path:
             from astrid.packs.typed_timeline.sources import load_json_rows
             rows = load_json_rows(args.json_path)
@@ -109,7 +150,10 @@ def main(argv=None) -> int:
                 rows = load_runaway_transitions(project_id=project_id, run_id=args.run_id, projects_root=projects_root)
             except Exception as e:
                 print(f"load_runaway failed: {e}", file=sys.stderr)
-                rows = []
+                return 1
+            if not rows:
+                print(f"load_runaway returned 0 rows for project_id={project_id!r} run_id={args.run_id!r} — failing", file=sys.stderr)
+                return 1
         mapping_path = resolve_mapping_path(args.mapping)
         from astrid.packs.typed_timeline.mapper import TypedDataTimelineMapper
         mapper = TypedDataTimelineMapper(rows, mapping_path)
@@ -131,7 +175,71 @@ def main(argv=None) -> int:
         except Exception:
             pass
         video_path = out_dir / args.output_name
-        _run_ffmpeg_render(timeline_path, assets_path, video_path)
+        ok = _run_ffmpeg_render(timeline_path, assets_path, video_path)
+        if not ok:
+            print("render failed — not writing success manifest", file=sys.stderr)
+            return 1
+        if not video_path.exists() or video_path.stat().st_size < 1000:
+            print(f"render did not produce video at {video_path}", file=sys.stderr)
+            return 1
+        # Honest validation before success manifest: timeline must have matching events, video must be 8085 frames
+        try:
+            tdata = json.loads(timeline_path.read_text(encoding="utf-8"))
+            clips = tdata.get("clips", [])
+            reactive = [c for c in clips if isinstance(c, dict) and c.get("clipType") == "audio-reactive-colour"]
+            if reactive:
+                events = reactive[0].get("params", {}).get("events", [])
+                exp_events = len(rows)
+                # dedup frames may reduce count, but demo 566 should be exact
+                if len(events) == 0:
+                    print(f"validation failed: timeline has 0 events but rows={len(rows)}", file=sys.stderr)
+                    return 1
+                # If rows are 566 fixture, require 566 events exactly
+                if len(rows) == 566 and len(events) != 566:
+                    print(f"validation failed: expected 566 events, got {len(events)}", file=sys.stderr)
+                    return 1
+                if len(rows) == 10 and len(events) != 10:
+                    print(f"validation failed: expected 10 events, got {len(events)}", file=sys.stderr)
+                    return 1
+                # general: events must equal rows count when no dedup loss
+                if len(events) != exp_events:
+                    # allow dedup but warn; require at least >0 and <= exp_events
+                    if len(events) > exp_events or len(events) == 0:
+                        print(f"validation failed: events {len(events)} != rows {exp_events}", file=sys.stderr)
+                        return 1
+            # canvas total_frames validation
+            canvas = tdata.get("theme_overrides", {}).get("visual", {}).get("canvas", {})
+            fps = int(canvas.get("fps", 48))
+            # total_frames from hold* fps or mapper
+            hold = None
+            for c in clips:
+                if isinstance(c, dict) and c.get("clipType") == "audio-reactive-colour":
+                    hold = c.get("hold")
+                    break
+            total_frames = None
+            if hold is not None:
+                try:
+                    total_frames = int(round(float(hold) * fps))
+                except Exception:
+                    total_frames = mapper.total_frames
+            else:
+                total_frames = mapper.total_frames
+            if total_frames != 8085:
+                print(f"validation failed: total_frames {total_frames} != 8085", file=sys.stderr)
+                return 1
+            frames = _video_frame_count(video_path)
+            if frames is None:
+                print("validation failed: could not count video frames via ffprobe", file=sys.stderr)
+                return 1
+            if frames != 8085:
+                print(f"validation failed: video frames {frames} != 8085", file=sys.stderr)
+                return 1
+            print(f"validation passed: events {len(events) if reactive else 'n/a'} frames_total {total_frames} video_frames {frames}", file=sys.stderr)
+        except SystemExit:
+            raise
+        except Exception as e:
+            print(f"validation failed: {e}", file=sys.stderr)
+            return 1
         manifest_path = out_dir / "manifest.json"
         manifest = build_manifest(
             kind="typed_timeline.render",

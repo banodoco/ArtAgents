@@ -20,6 +20,52 @@ def _row_to_dict(row: Any) -> dict[str, Any]:
         return {k: row[k] for k in row.keys()}  # type: ignore
 
 
+def _resolve_project_id(conn: sqlite3.Connection, project_id: str) -> str:
+    """Resolve slug→id via projects table when project_id looks like a slug.
+
+    The capability may supply the human slug (e.g. runaway-piano-colour-demo)
+    but the kernel table is keyed by id. Probe: SELECT id, slug FROM projects
+    WHERE slug='runaway-piano-colour-demo' must resolve to the kernel project
+    that holds the 566 rows. Heuristic: slug contains '-' or is not a ULID/hash.
+    """
+    pid = str(project_id)
+    looks_like_slug = "-" in pid
+    # also treat non-ULID/non-hex as slug
+    if not looks_like_slug:
+        try:
+            from astrid.core.ids import is_lowercase_ulid
+
+            if not is_lowercase_ulid(pid):
+                looks_like_slug = True
+        except Exception:
+            # fallback: if not 26-char alnum, treat as slug
+            if len(pid) != 26 or not pid.isalnum():
+                looks_like_slug = True
+    if looks_like_slug:
+        try:
+            cur = conn.execute("SELECT id FROM projects WHERE slug = ?", (pid,))
+            row = cur.fetchone()
+            if row is not None:
+                # Row may be sqlite3.Row or tuple
+                try:
+                    resolved = row["id"]
+                except Exception:
+                    resolved = row[0]
+                if resolved:
+                    return str(resolved)
+            # also accept id == slug case (already stored as id)
+            cur2 = conn.execute("SELECT id FROM projects WHERE id = ?", (pid,))
+            row2 = cur2.fetchone()
+            if row2 is not None:
+                try:
+                    return str(row2["id"])
+                except Exception:
+                    return str(row2[0])
+        except Exception:
+            pass
+    return pid
+
+
 def load_runaway_transitions(
     *,
     projects_root: Path | str | None = None,
@@ -43,8 +89,9 @@ def load_runaway_transitions(
     conn = _sqlite.connect(str(db_path))
     conn.row_factory = _sqlite.Row
     try:
+        resolved_id = _resolve_project_id(conn, project_id)
         repo = RunawayRepository(receipts=ReceiptService())
-        models = repo.list(conn, project_id=project_id, run_id=run_id)
+        models = repo.list(conn, project_id=resolved_id, run_id=run_id)
         rows = [_row_to_dict(m) for m in models]
     finally:
         conn.close()

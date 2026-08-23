@@ -26,9 +26,14 @@ def main(argv=None) -> int:
         parser.add_argument("--out", required=True, type=Path)
         parser.add_argument("--run-id", dest="run_id", default=None)
         parser.add_argument("--project", default=None)
+        parser.add_argument("--project-id", dest="project_id_alias", default=None)
         parser.add_argument("--json-path", dest="json_path", default=None)
         parser.add_argument("--json-rows", dest="json_rows", default=None)
         args = parser.parse_args(argv)
+
+        # alias: --project-id supplied via sdk inputs project_id
+        if args.project_id_alias and not args.project:
+            args.project = args.project_id_alias
 
         out_dir = Path(args.out)
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -57,19 +62,24 @@ def main(argv=None) -> int:
             except Exception as e:
                 print(f"failed to parse json_rows: {e}", file=sys.stderr)
                 return 1
+            # json_rows with runaway mapping must still validate event count later; allow 0 only for json source
+            if args.source == "runaway" and not rows:
+                print(f"load_runaway returned 0 rows for project_id={project_id!r} run_id={args.run_id!r} — failing", file=sys.stderr)
+                return 1
         elif args.source == "json" and args.json_path:
             from astrid.packs.typed_timeline.sources import load_json_rows
             rows = load_json_rows(args.json_path)
         else:
-            # runaway source
+            # runaway source — 0 rows must FAIL, not silently produce empty timeline
             from astrid.packs.typed_timeline.sources import load_runaway_transitions
             try:
                 rows = load_runaway_transitions(project_id=project_id, run_id=args.run_id, projects_root=projects_root)
             except Exception as e:
-                # if DB empty, fall back to 0 rows
                 print(f"load_runaway failed: {e}", file=sys.stderr)
-                rows = []
-
+                return 1
+            if not rows:
+                print(f"load_runaway returned 0 rows for project_id={project_id!r} run_id={args.run_id!r} — failing (slug resolution checked)", file=sys.stderr)
+                return 1
         # resolve mapping
         mapping_path = resolve_mapping_path(args.mapping)
 
