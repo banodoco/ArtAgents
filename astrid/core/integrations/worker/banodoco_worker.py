@@ -1,5 +1,9 @@
 """Astrid banodoco worker pool implementation.
 
+deployment-gated: retired at Turso LIVE cutover; replacement = core/timeline/turso_sync.py
+A-side zero-traffic paths removed; production-gated sources remain.
+
+
 Resolution of open contracts (citations are intentionally repeated here so the
 worker file is auditable in isolation):
 

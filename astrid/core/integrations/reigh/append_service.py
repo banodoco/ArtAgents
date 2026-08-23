@@ -1,4 +1,8 @@
-"""Hosted Astrid-backed Reigh timeline append HTTP service."""
+"""Hosted Astrid-backed Reigh timeline append HTTP service.
+
+deployment-gated: retired at Turso LIVE cutover; replacement = core/timeline/turso_sync.py
+A-side zero-traffic paths removed; production-gated sources remain.
+"""
 
 from __future__ import annotations
 
