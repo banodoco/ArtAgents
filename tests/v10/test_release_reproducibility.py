@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import platform
 from pathlib import Path
@@ -17,6 +18,11 @@ from scripts.reshape.release_reproducibility import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
+RUNAWAY_RELEASE_FIXTURE_HASHES = {
+    "audio-reactive-v1.json": "d7925d72b52180e206a2511a5d30cf1638c7007a962fd57d8a6eb9ffb10af886",
+    "timing-manifest.json": "44b5c0eea0aeb8b35a83e3e7620b5dbab27a106bf575fcc6e0ca6591dd4612bb",
+}
 
 
 def test_repository_dependency_locks_are_hashed_exact_and_cover_metadata() -> None:
@@ -85,3 +91,13 @@ def test_playwright_lockfile_remains_valid_json() -> None:
     lock = json.loads((root / "package-lock.json").read_text(encoding="utf-8"))
     assert package["devDependencies"]["playwright"] == "1.62.1"
     assert lock["packages"][""]["devDependencies"]["playwright"] == "1.62.1"
+
+
+def test_runaway_release_migration_inputs_are_tracked_and_byte_pinned() -> None:
+    fixture_root = REPO_ROOT / "tests/fixtures/runaway_release"
+    assert {
+        path.name for path in fixture_root.glob("*.json")
+    } == set(RUNAWAY_RELEASE_FIXTURE_HASHES)
+    for name, expected_hash in RUNAWAY_RELEASE_FIXTURE_HASHES.items():
+        fixture = fixture_root / name
+        assert hashlib.sha256(fixture.read_bytes()).hexdigest() == expected_hash

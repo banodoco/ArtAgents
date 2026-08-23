@@ -4,6 +4,9 @@ This runbook is the operator gate for the Runaway timing-v1 pack, the
 typed-timeline mapper/renderer, and the local Reigh bridge. The canonical
 store is `${ASTRID_PROJECTS_ROOT}/.astrid/astrid.sqlite3`; the original
 `deliverables/` and `timeline/` files remain immutable migration inputs.
+Exact-commit release automation uses the byte-pinned tracked copies under
+`tests/fixtures/runaway_release/`; their executable SHA-256 contract prevents
+an ignored local project tree from silently changing release evidence.
 
 ## Preconditions
 
