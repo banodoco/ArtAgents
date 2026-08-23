@@ -533,6 +533,98 @@ def _discover(project_dir: Path) -> tuple[list[ManagedTimeline], list[str]]:
         if _auth_failed:
             # Corrupt marker: fail closed — do not fall through to stale sidecar identity.
             continue
+        # N1: poisoned identity cache — sidecar tid globally backfilled but not kernel-bound to THIS project/ULID
+        try:
+            _side_tid = identity.get("timeline_id") or identity.get("uuid") or identity.get("stable_id")
+            if isinstance(_side_tid, str) and _side_tid:
+                _side_tid_s = str(_side_tid)
+                # Load global backfill state (same projects_root derivation as _check_backfilled_ulid)
+                _f_projects_root = None
+                try:
+                    _cand_f = Path(project_dir).resolve()
+                    _pr_cand_f = _cand_f.parent if _cand_f.name != "timelines" else _cand_f.parent.parent
+                    if _pr_cand_f.is_dir():
+                        _f_projects_root = Path(project_dir).parent
+                        if not _f_projects_root.is_dir():
+                            from astrid.core.foundation.project_paths import (
+                                resolve_projects_root as _rr_f,
+                            )
+
+                            _f_projects_root = _rr_f(None)
+                    else:
+                        from astrid.core.foundation.project_paths import (
+                            resolve_projects_root as _rr_f2,
+                        )
+
+                        _f_projects_root = _rr_f2(None)
+                except Exception:
+                    try:
+                        from astrid.core.foundation.project_paths import (
+                            resolve_projects_root as _rr_f3,
+                        )
+
+                        _f_projects_root = _rr_f3(None)
+                    except Exception:
+                        _f_projects_root = None
+                if _f_projects_root is not None:
+                    try:
+                        from astrid.packs.timeline.backfill import read_backfill_state as _rbf_f
+
+                        _f_state = _rbf_f(_f_projects_root)
+                    except Exception:
+                        _f_state = None
+                    if _f_state is not None and _side_tid_s in _f_state:
+                        # Scoped kernel lookup for THIS project's ULID
+                        _f_ulid = child.name
+                        _f_proj_slug = Path(project_dir).name if Path(project_dir).name else None
+                        _f_is_foreign = False
+                        try:
+                            import sqlite3 as _sql_f
+
+                            from astrid.core.integrations.reigh.bridge_service import (
+                                derive_database_path as _ddb_f,
+                            )
+
+                            _f_db = _ddb_f(_f_projects_root)
+                            if _f_db.is_file():
+                                _f_conn = _sql_f.connect(f"file:{_f_db}?mode=ro", uri=True)
+                                try:
+                                    _f_conn.row_factory = _sql_f.Row
+                                    _f_row = None
+                                    if _f_proj_slug is not None:
+                                        try:
+                                            _f_prow = _f_conn.execute("SELECT id FROM projects WHERE slug=?", (_f_proj_slug,)).fetchone()
+                                            if _f_prow is not None and _f_prow["id"]:
+                                                _f_pid = str(_f_prow["id"])
+                                                _f_row = _f_conn.execute(
+                                                    "SELECT json_extract(payload_json,'$.data.timeline_id') as ktid FROM events WHERE kind='timeline.created' AND project_id=? AND lower(json_extract(payload_json,'$.data.timeline_ulid'))=lower(?) LIMIT 1",
+                                                    (_f_pid, _f_ulid),
+                                                ).fetchone()
+                                            else:
+                                                _f_row = None
+                                        except Exception:
+                                            _f_row = _f_conn.execute(
+                                                "SELECT json_extract(payload_json,'$.data.timeline_id') as ktid FROM events WHERE kind='timeline.created' AND json_extract(payload_json,'$.data.timeline_ulid')=? LIMIT 1",
+                                                (_f_ulid,),
+                                            ).fetchone()
+                                    else:
+                                        _f_row = _f_conn.execute(
+                                            "SELECT json_extract(payload_json,'$.data.timeline_id') as ktid FROM events WHERE kind='timeline.created' AND json_extract(payload_json,'$.data.timeline_ulid')=? LIMIT 1",
+                                            (_f_ulid,),
+                                        ).fetchone()
+                                    if _f_row is None or not _f_row["ktid"] or str(_f_row["ktid"]) != _side_tid_s:
+                                        _f_is_foreign = True
+                                finally:
+                                    _f_conn.close()
+                            else:
+                                _f_is_foreign = True
+                        except Exception:
+                            _f_is_foreign = False
+                        if _f_is_foreign:
+                            diagnostics.append(f"skipped {child.name}: identity cache names another project's authoritative stream")
+                            continue
+        except Exception:
+            pass
         timelines.append(_timeline_from_identity(child, identity))
     return timelines, diagnostics
 

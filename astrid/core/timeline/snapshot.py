@@ -806,6 +806,65 @@ def _is_timeline_backfilled(timeline_dir: Path, project_root: Path | None) -> tu
             raise
         except Exception:
             pass
+    # N1: foreign identity cache — sidecar tid is globally backfilled but not kernel-bound to THIS project/ULID
+    if timeline_id is not None and timeline_id in state:
+        _f_ulid = Path(timeline_dir).name
+        _f_proj_slug: str | None = None
+        try:
+            _td_f = Path(timeline_dir)
+            if _td_f.parent.name == "timelines" and _td_f.parent.parent.is_dir():
+                _f_proj_slug = _td_f.parent.parent.name
+        except Exception:
+            _f_proj_slug = None
+        _foreign_is_foreign = False
+        try:
+            import sqlite3 as _sq3
+
+            from astrid.core.integrations.reigh.bridge_service import derive_database_path as _ddb3
+
+            _db3 = _ddb3(projects_root)
+            if _db3.is_file():
+                c3 = _sq3.connect(f"file:{_db3}?mode=ro", uri=True)
+                try:
+                    c3.row_factory = _sq3.Row
+                    _kr3 = None
+                    if _f_proj_slug is not None:
+                        try:
+                            _prow3 = c3.execute("SELECT id FROM projects WHERE slug=?", (_f_proj_slug,)).fetchone()
+                            if _prow3 is not None and _prow3["id"]:
+                                _pid3 = str(_prow3["id"])
+                                _kr3 = c3.execute(
+                                    "SELECT json_extract(payload_json,'$.data.timeline_id') as ktid FROM events WHERE kind='timeline.created' AND project_id=? AND lower(json_extract(payload_json,'$.data.timeline_ulid'))=lower(?) LIMIT 1",
+                                    (_pid3, _f_ulid),
+                                ).fetchone()
+                            else:
+                                _kr3 = None
+                        except Exception:
+                            _kr3 = c3.execute(
+                                "SELECT json_extract(payload_json,'$.data.timeline_id') as ktid FROM events WHERE kind='timeline.created' AND json_extract(payload_json,'$.data.timeline_ulid')=? LIMIT 1",
+                                (_f_ulid,),
+                            ).fetchone()
+                    else:
+                        _kr3 = c3.execute(
+                            "SELECT json_extract(payload_json,'$.data.timeline_id') as ktid FROM events WHERE kind='timeline.created' AND json_extract(payload_json,'$.data.timeline_ulid')=? LIMIT 1",
+                            (_f_ulid,),
+                        ).fetchone()
+                    if _kr3 is None or not _kr3["ktid"] or str(_kr3["ktid"]) != timeline_id:
+                        _foreign_is_foreign = True
+                finally:
+                    c3.close()
+            else:
+                # No DB file but state says backfilled -> cannot be this directory's stream; treat as foreign when state globally contains tid
+                _foreign_is_foreign = True
+        except SnapshotIntegrityError:
+            raise
+        except Exception:
+            # On lookup failure, do not obscure with false foreign; keep original global acceptance
+            _foreign_is_foreign = False
+        if _foreign_is_foreign:
+            raise SnapshotIntegrityError(
+                f"identity cache {identity_path} names another project's authoritative stream {timeline_id!r}; delete the disposable sidecar cache to repair"
+            )
     if timeline_id is not None and timeline_id in state:
         return True, timeline_id
     return False, timeline_id
