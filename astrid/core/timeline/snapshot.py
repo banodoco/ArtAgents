@@ -660,18 +660,13 @@ def _snapshot_projects_root(timeline_dir: Path, project_root: Path | None) -> Pa
             actual = pr.parent
             if actual.is_dir():
                 return actual
-        # Case 3: caller passed projects_root but with extra nesting? Try to validate via existence
-        # If neither layout matches, fall back to ambient config root if timeline_dir itself validates
-        candidate = td.parent.parent.parent
-        if candidate.is_dir() and (candidate / ".astrid").is_dir():
-            # timeline_dir layout is valid independent of caller argument -> caller argument was wrong, use real root
-            return candidate
-        # Test harness: caller explicitly passed a project_root (e.g., tmp_path/project) with direct timeline child
-        # Allow the explicit root as projects_root when timeline is directly under it (legacy test layout).
-        if pr.is_dir() and td.is_relative_to(pr):
-            return pr.parent if pr.parent.is_dir() else pr
-        # Non-test production misaligned argument → fail closed
-        raise SnapshotIntegrityError(f"project_root {pr} does not match timeline layout {td} and no deterministic root found")
+        # Legacy test harness: timeline directory directly under caller-passed root.
+        if td.parent == pr and pr.is_dir():
+            return pr
+        # Non-canonical layout: authority root cannot be determined → fail closed
+        raise SnapshotIntegrityError(
+            f"non-canonical timeline layout {td} with project_root {pr}; authority root cannot be determined"
+        )
     # No caller root: derive from timeline_dir layout
     try:
         candidate = td.parent.parent.parent
