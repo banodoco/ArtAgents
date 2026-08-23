@@ -730,10 +730,11 @@ def _verify_doc_identity_or_fork(
          return None
      if _documents_structurally_equal(local_doc_json, remote_doc_json):
          return None
-     # Value-level divergence: only immediate fork when type mismatch OR when
-     # heads are provenance-equivalent at steady state (bookmark at same version).
-     # This preserves resume honesty for crash-after-commit where bookmark is behind
-     # and docs may transiently differ due to stale local document after import.
+     # S4-rework22: provenance-equivalent heads with structurally unequal docs
+     # must fork regardless of bookmark position — stale bookmark is NOT a
+     # deferral (eliminates the dishonest `up_to_date` seam). Type-mismatch
+     # forks remain unconditional; value-level divergence forks for aligned,
+     # bookmark-less, and now stale bookmarks alike.
      try:
          _a_fork = json.loads(local_doc_json)  # type: ignore[arg-type]
          _b_fork = json.loads(remote_doc_json)  # type: ignore[arg-type]
@@ -779,7 +780,21 @@ def _verify_doc_identity_or_fork(
              local_doc_json=local_doc_json,
              remote_doc_json=remote_doc_json,
          )
-     return None
+     # S4-rework22: stale bookmark is NOT a deferral — provenance-equivalent
+     # heads with structurally unequal documents must fork even when bookmark
+     # is present but not at the boundary. This eliminates the dishonest
+     # `up_to_date` seam that healed the bookmark while documents disagreed.
+     return _doc_divergence_conflict_result(
+         timeline_id=timeline_id,
+         timeline_home=timeline_home,
+         backend=backend,
+         replica=replica,
+         local_head=local_head,
+         remote_head=remote_head,
+         bookmark=bookmark,
+         local_doc_json=local_doc_json,
+         remote_doc_json=remote_doc_json,
+     )
 
 
 def _doc_divergence_conflict_result(

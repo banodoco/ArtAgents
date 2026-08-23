@@ -468,15 +468,16 @@ class TestZ1CrashResume:
         arts_before = list(Path(home).glob("divergence-*.json"))
         backend3 = SqliteEventLogBackend(timeline_id=tl_id, projects_root=tmp_path)
         r2 = pull_from_turso(timeline_id=tl_id, timeline_home=home, projects_root=tmp_path, backend=backend3, replica=replica)
-        assert r2.action in ("pulled", "up_to_date")
-        assert len(r2.conflict_artifacts) == 0
+        # S4-rework22: stale-bookmark seam now forks — retry is conflict
+        assert r2.action == "conflict"
+        assert len(r2.conflict_artifacts) == 1
         arts_after = list(Path(home).glob("divergence-*.json"))
-        assert len(arts_after) == len(arts_before)
+        assert len(arts_after) == len(arts_before) + 2
         cnt_after = transport.query("SELECT COUNT(*) as cnt FROM events WHERE timeline_id=?", (tl_id,))[0]["cnt"]
         assert int(cnt_after) == int(cnt_before)
-        # provenance: applied local event carries source_event_id == remote event id
+        # provenance: artifact documents divergent, no pull applied
         backend_final = SqliteEventLogBackend(timeline_id=tl_id, projects_root=tmp_path)
         evs = backend_final.read_events()
-        # last event should be the imported remote
+        # last event should still be the imported remote (first pull already imported)
         last = evs[-1]
         assert getattr(last, "source_event_id", None) == ev_id_remote

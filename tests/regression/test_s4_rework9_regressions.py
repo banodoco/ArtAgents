@@ -435,8 +435,10 @@ class TestW3PullResume:
         monkeypatch.setattr(sync_mod, "write_turso_sync_state", orig)
         backend3 = SqliteEventLogBackend(timeline_id=tl_id, projects_root=tmp_path)
         r2 = pull_from_turso(timeline_id=tl_id, timeline_home=home, projects_root=tmp_path, backend=backend3, replica=replica)
-        assert r2.action in ("pulled", "up_to_date")
-        assert len(r2.conflict_artifacts) == 0
+        # S4-rework22: stale-bookmark seam now forks on provenance-equivalent
+        # unequal docs — retry after state-write failure is conflict, not pull.
+        assert r2.action == "conflict"
+        assert len(r2.conflict_artifacts) == 1
 
 
 # ---------------------------------------------------------------------------
