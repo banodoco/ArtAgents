@@ -156,9 +156,9 @@ def _write_supabase_divergence(
     source_suffix: list[TimelineEvent],
     destination_suffix: list[TimelineEvent],
 ) -> SupabaseDivergenceArtifactRef:
-    if source.backend_name != "local_fs":
+    if source.backend_name not in ("local_fs", "sqlite"):
         raise TransferFailure(
-            "Supabase divergence logging currently requires a local spoke source"
+            "Supabase divergence logging currently requires a local spoke source (local_fs|sqlite)"
         )
     backend = destination.backend
     if not isinstance(backend, SupabaseBackend):

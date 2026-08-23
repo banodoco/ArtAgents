@@ -177,6 +177,9 @@ class FakeTursoTransport:
     def __init__(self) -> None:
         self.documents: dict[str, dict[str, Any]] = {}
         self.events: dict[str, dict[str, Any]] = {}
+        # DDL tracking for replica schema tests
+        self.tables: set[str] = set()
+        self.indexes: set[str] = set()
         # timeline_id -> list of events sorted by seq
         self._fail_next_batch = False
         self._fail_message = "injected mid-batch failure"
@@ -193,23 +196,45 @@ class FakeTursoTransport:
         # collect intended mutations without applying
         pending_docs: dict[str, dict[str, Any]] = {}
         pending_events: dict[str, dict[str, Any]] = {}
+        pending_tables: set[str] = set()
+        pending_indexes: set[str] = set()
         # naive parsing: look at statement prefix to know table
         for sql, params in statements:
             s = sql.strip().lower()
+            if s.startswith("create table"):
+                try:
+                    rest = sql.strip().split(None, 3)[2]
+                    tbl = rest.split("(")[0].strip().strip('"').strip("'")
+                    tbl = tbl.split()[0]
+                    if tbl.lower() == "if":
+                        parts = sql.strip().split()
+                        low = [p.lower() for p in parts]
+                        if "exists" in low:
+                            idx = low.index("exists")
+                            tbl = parts[idx + 1].split("(")[0]
+                    pending_tables.add(tbl.lower())
+                except Exception:
+                    pending_tables.add("unknown")
+                continue
+            if s.startswith("create index") or s.startswith("create unique index"):
+                try:
+                    parts = sql.strip().split()
+                    low = [p.lower() for p in parts]
+                    idx_pos = low.index("index")
+                    idx_name = parts[idx_pos + 1]
+                    pending_indexes.add(idx_name.lower())
+                except Exception:
+                    pending_indexes.add("unknown")
+                continue
             if s.startswith("insert") and "into documents" in s:
-                # Expect: INSERT ... documents (cols) VALUES (...)
-                # params order matches DOCUMENT_REPLICA_COLUMNS
                 cols = list(DOCUMENT_REPLICA_COLUMNS)
-                # Some callers may use a subset; handle by counting params
                 if len(params) != len(cols):
-                    # fallback: assume sql order — store by timeline_id first param
                     row = {"timeline_id": params[0]}
                     for i, v in enumerate(params):
                         if i < len(cols):
                             row[cols[i]] = v
                 else:
                     row = {c: v for c, v in zip(cols, params)}
-                # validate blob guard on document_json
                 doc_json = str(row.get("document_json", ""))
                 if _contains_blob_payload(doc_json) or "asset_registry_json" in doc_json:
                     raise TursoReplicationError(
@@ -232,16 +257,16 @@ class FakeTursoTransport:
             else:
                 raise TursoError(f"fake transport does not support statement: {sql[:80]!r}")
         # All statements validated — now apply atomically
+        self.tables.update(pending_tables)
+        self.indexes.update(pending_indexes)
         self.documents.update(pending_docs)
         # events: upsert with idempotent ignore (event_id UNIQUE)
         for eid, row in pending_events.items():
             if eid in self.events:
                 continue
-            # also enforce UNIQUE (timeline_id, seq) and (timeline_id, idempotency_key)
             tid = str(row.get("timeline_id"))
             seq = row.get("seq")
             ik = row.get("idempotency_key")
-            # check duplicate seq or ik for same timeline
             dup = False
             for existing in self.events.values():
                 if str(existing.get("timeline_id")) == tid:
@@ -254,6 +279,19 @@ class FakeTursoTransport:
 
     def query(self, sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
         s = sql.strip().lower()
+        if "sqlite_master" in s:
+            # for schema verification: return tables/indexes
+            if "type='table'" in s or 'type="table"' in s:
+                return [{"name": t} for t in sorted(self.tables)]
+            if "type='index'" in s or 'type="index"' in s:
+                return [{"name": i} for i in sorted(self.indexes)]
+            # generic master query
+            rows: list[dict[str, Any]] = []
+            for t in sorted(self.tables):
+                rows.append({"type": "table", "name": t})
+            for i in sorted(self.indexes):
+                rows.append({"type": "index", "name": i})
+            return rows
         if "from documents" in s and "where timeline_id" in s:
             tid = params[0] if params else None
             row = self.documents.get(str(tid)) if tid else None
@@ -587,3 +625,130 @@ class TursoReplicaClient:
             self._transport.close()
         except Exception:
             pass
+
+# ---------------------------------------------------------------------------
+# SQL splitter + replica schema application (Q5)
+# ---------------------------------------------------------------------------
+
+
+def split_sql_statements(sql_text: str) -> list[str]:
+    """Split *sql_text* into individual statements (quote/comment-aware).
+
+    Handles ``--`` line comments and string literals with embedded semicolons
+    (single and double quoted). ``/* … */`` block comments are also skipped.
+    Trailing whitespace and empty statements are dropped.
+    """
+    statements: list[str] = []
+    buf: list[str] = []
+    i = 0
+    n = len(sql_text)
+    in_single = False
+    in_double = False
+    in_line_comment = False
+    in_block_comment = False
+    while i < n:
+        ch = sql_text[i]
+        nxt = sql_text[i + 1] if i + 1 < n else ""
+        if in_line_comment:
+            if ch == "\n":
+                in_line_comment = False
+                buf.append(ch)
+            # otherwise skip comment chars
+            i += 1
+            continue
+        if in_block_comment:
+            if ch == "*" and nxt == "/":
+                in_block_comment = False
+                i += 2
+            else:
+                i += 1
+            continue
+        if in_single:
+            buf.append(ch)
+            if ch == "'":
+                if nxt == "'":
+                    # escaped single quote '' inside string
+                    buf.append(nxt)
+                    i += 2
+                    continue
+                else:
+                    in_single = False
+            i += 1
+            continue
+        if in_double:
+            buf.append(ch)
+            if ch == '"':
+                if nxt == '"':
+                    buf.append(nxt)
+                    i += 2
+                    continue
+                else:
+                    in_double = False
+            i += 1
+            continue
+        # not in string/comment
+        if ch == "-" and nxt == "-":
+            in_line_comment = True
+            i += 2
+            continue
+        if ch == "/" and nxt == "*":
+            in_block_comment = True
+            i += 2
+            continue
+        if ch == "'":
+            in_single = True
+            buf.append(ch)
+            i += 1
+            continue
+        if ch == '"':
+            in_double = True
+            buf.append(ch)
+            i += 1
+            continue
+        if ch == ";":
+            stmt = "".join(buf).strip()
+            if stmt:
+                statements.append(stmt + ";")
+            buf = []
+            i += 1
+            # skip whitespace after semicolon to avoid empty trailing
+            while i < n and sql_text[i].isspace():
+                # keep newline for readability? not needed
+                i += 1
+            # we already consumed whitespace, continue; but need to handle that whitespace may contain comment start  # noqa: E501
+            # loop will detect comment
+            continue
+        buf.append(ch)
+        i += 1
+    tail = "".join(buf).strip()
+    if tail:
+        # include trailing statement even without semicolon
+        if not tail.endswith(";"):
+            tail += ";"
+        statements.append(tail)
+    return statements
+
+
+def apply_replica_schema(
+    transport_or_replica: Any,
+    sql_text: str,
+) -> list[str]:
+    """Split *sql_text* and apply all statements as one atomic batch.
+
+    Accepts either a :class:`TursoTransport` or :class:`TursoReplicaClient`
+    (or any object exposing ``execute_batch`` or ``_transport``).
+    Returns the split statements for observability. The batch is all-or-nothing
+    via the transport's atomic ``execute_batch``.
+    """
+    statements = split_sql_statements(sql_text)
+    if not statements:
+        return []
+    # resolve underlying transport
+    transport: Any = transport_or_replica
+    if hasattr(transport_or_replica, "_transport") and hasattr(transport_or_replica._transport, "execute_batch"):  # noqa: E501
+        transport = transport_or_replica._transport  # type: ignore[attr-defined]
+    if not hasattr(transport, "execute_batch"):
+        raise TursoError("apply_replica_schema: transport missing execute_batch")
+    batch: list[tuple[str, tuple[Any, ...]]] = [(stmt, ()) for stmt in statements]
+    transport.execute_batch(batch)  # type: ignore[attr-defined]
+    return statements

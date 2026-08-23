@@ -67,6 +67,9 @@ def _make_local_db(tmp_path: Path, project_slug: str = "proj"):
     writer.close()
     home = tmp_path / project_slug / "timelines" / ulid
     home.mkdir(parents=True, exist_ok=True)
+    from astrid.packs.timeline.backfill import write_backfill_state
+
+    write_backfill_state(tmp_path, timeline_id=tl_id, source="local_fs", source_head_version=1, events_sha256="abc")
     return proj_id, tl_id, sid, home
 
 

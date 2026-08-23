@@ -19,21 +19,24 @@ Record URL and token as `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` (see §3).
 
 ## 2. Apply the replica schema (R1)
 
-DDL originates in `ArtAgents/packages/timeline-schema/sql/turso/0001_turso_replica_schema.sql` and is consumed via the schema-pack runner — including the Turso-side replica. Do not hand-edit DDL anywhere else.
+DDL originates in `ArtAgents/packages/timeline-schema/sql/turso/0001_turso_replica_schema.sql` and is S-owned (R1). The local schema-pack runner covers local migrations (``0001–0003``) only; the Turso replica schema is applied separately via the replica transport — not through the local runner.
 
-**From Astrid (schema-pack runner):**
+**From Astrid (replica schema applicator):**
 
-The Astrid runner probes `sql/turso/CHECKSUMS` before applying. Apply to Turso via libsql HTTP:
+The replica schema file contains multiple statements (two tables + two indexes) and must be split before batch execution (libsql executes one statement at a time). Use the quote/comment-aware splitter:
 
 ```python
-# one-shot, run from a deploy host with TURSO_* env set
-from astrid.core.timeline.eventlog.turso import LibSqlHttpTransport
-transport = LibSqlHttpTransport()  # reads TURSO_DATABASE_URL / TURSO_AUTH_TOKEN
-# read the migration file verbatim and execute as a batch
 from pathlib import Path
+from astrid.core.timeline.eventlog.turso import FakeTursoTransport, TursoReplicaClient, apply_replica_schema
+
 sql = Path("ArtAgents/packages/timeline-schema/sql/turso/0001_turso_replica_schema.sql").read_text()
-transport.execute_batch([(sql, ())])
-print("turso replica schema applied")
+# against a transport (or TursoReplicaClient — both accepted):
+transport = FakeTursoTransport()  # swap for LibSqlHttpTransport() in prod (reads TURSO_* env)
+stmts = apply_replica_schema(transport, sql)
+print(f"turso replica schema applied ({len(stmts)} statements)")
+# or via the replica client:
+# replica = TursoReplicaClient(transport)
+# apply_replica_schema(replica, sql)
 ```
 
 Or apply via `turso` CLI shell:
@@ -65,10 +68,10 @@ Absent env → `TursoConfigError` with actionable message (no silent fallback). 
 
 ```bash
 pip install libsql-experimental   # or libsql; not in default install
-# Without it, LibSqlHttpTransport.__init__ raises TursoConfigError:
+# Without it, first operation (execute_batch/query) raises TursoConfigError:
 #   "libsql driver is not installed — install with: pip install libsql-experimental ..."
+# LibSqlHttpTransport() construction succeeds with env set; the driver is loaded lazily at first use.
 ```
-
 `grep -rn "turso" astrid | grep -v test` shows only `astrid/core/timeline/eventlog/turso.py`, `astrid/core/timeline/turso_sync.py`, and this doc/env seams — no pub-sub, no websocket, no LWW.
 
 ## 4. Driver install (optional dep)
@@ -113,9 +116,7 @@ Cursor/bookmark: `turso-sync-state.json` beside `timeline_home` (file-based, lik
 
 1. Ensure backfill marker is present (`<projects_root>/.astrid/backfill-state.json` contains timeline id → SQLite authority). Unmarked timelines stay on `local_fs` and are not synced until backfilled.
 2. Run `push_to_turso` once for each backfilled timeline. The first push carries the whole history; the cursor file is created atomically after the remote batch commits.
-3. Verify `TURSO_DATABASE_URL/turso-sync-state.json` exists and `replica.fetch_remote_head(tid)["version"]` equals local `backend.head().version`.
-
-## 6. Steady-state polling
+3. Verify `<timeline_home>/turso-sync-state.json` exists and `replica.fetch_remote_head(tid)["version"]` equals local `backend.head().version`.
 
 Run `pull_from_turso` + `push_to_turso` on a timer (e.g. every 15–30s per timeline) under process supervision. The service:
 
@@ -124,7 +125,7 @@ Run `pull_from_turso` + `push_to_turso` on a timer (e.g. every 15–30s per time
 - on pull, if `remote version == local known` → no-op; if `local unchanged and remote newer` → applies through `UnitOfWork`/`append_imported_event` (preserves ids, or remaps with continuity — documented in `turso_sync.py` as import-remap; tested via `test_turso_sync.py::test_pull_clean_applies_through_uow`);
 - if both diverged → writes `divergence-*.json` artifacts via `sync_divergence.write_keep_both_artifact` (primary, full your-copy/their-copy event payloads + `skipped_rows` diagnostics), returns `conflict`, never overwrites, never merges, never LWW.
   - attribution boundary: remote attribution collapses to the sync agent on apply — pulled events are re-attributed to `turso-sync:pull` (`system`) via `append_imported_event`; the replicated `actor_kind`/`actor_id` columns are preserved only inside the divergence artifact, not on the imported row (asserted in `tests/regression/test_s4_rework1_regressions.py::TestAttributionCollapsed`).
-Ownership: the pull path catches typed `OwnerLockError` → `TursoOwnershipError` (no substring sniffing) and fails closed with that typed error if serve already owns the DB — no second writable connection is opened concurrently. A generic failure whose message happens to contain "owned" is classified as `TursoSyncError`, not ownership.
+Ownership: the pull path catches typed `OwnerLockError` (direct) and `EventLogError` wrapping `OwnerLockError` (backend seam) → `TursoOwnershipError` (no substring sniffing) and fails closed with that typed error if serve already owns the DB — no second writable connection is opened concurrently. A generic `EventLogError` or other failure whose message happens to contain "owned" is classified as `TursoSyncError`, not ownership.
 
 ## 7. Observability
 

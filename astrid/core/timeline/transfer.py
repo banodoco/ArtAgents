@@ -408,6 +408,8 @@ def _transfer_events(
             source_suffix=source_events,
             destination_suffix=destination_suffix,
         )
+        if divergence_artifact is None:
+            raise TransferFailure("fork artifact write returned None — failing closed before replay")  # noqa: E501
 
     scanned = len(source_events)
     appended = 0

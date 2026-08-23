@@ -31,6 +31,7 @@ from astrid.core.timeline.eventlog.turso import (
     TursoReplicaClient,
     TursoReplicationError,
 )
+from astrid.core.timeline.eventlog.types import EventLogError
 from astrid.core.timeline.events.schema import TimelineActor, TimelineEvent
 from astrid.core.timeline.sync_divergence import write_keep_both_artifact
 from astrid.core.timeline.sync_state import (
@@ -245,33 +246,39 @@ def _make_sync_bookmark_for_classify(
     )
 
 
-def _ensure_writer_or_fail_closed(projects_root: Path) -> Any:
-    """Return a DatabaseWriter handle or raise TursoOwnershipError if owned elsewhere.
-
-    Reuses the shared writer seam like SqliteEventLogBackend does.
-    """
-    from astrid.core.store.ownership import DatabaseOwnerLock
-    from astrid.core.timeline.eventlog.sqlite_backend import (
-        _get_shared_writer as _get_shared,
-    )
-
-    db_path = derive_database_path(projects_root)
-    shared = _get_shared(db_path)
-    if shared is not None:
-        return shared
+def _assert_backfilled_or_fail_closed(
+    timeline_id: str, projects_root: Path
+) -> None:
+    """R5: only SQLite-authoritative (marked) timelines may sync (fail closed)."""
     try:
-        lock = DatabaseOwnerLock(db_path)
-    except OwnerLockError as exc:
-        raise TursoOwnershipError(
-            f"database is already owned (serve holds writer): {exc}"
-        ) from exc
-    # caller must manage lock lifetime; we return lock + will open writer elsewhere
-    return lock
+        from astrid.core.timeline.authority import is_backfilled_timeline
+    except Exception as exc:
+        raise TursoSyncError(f"failed to resolve authority seam: {exc}") from exc
+    try:
+        marked = is_backfilled_timeline(timeline_id, projects_root=projects_root)
+    except Exception as exc:
+        # authority seam fails closed on corrupt marker — surface as typed sync error (no pack import)  # noqa: E501
+        raise TursoSyncError(f"authority check failed for {timeline_id!r}: {exc}") from exc
+    if not marked:
+        raise TursoSyncError(
+            f"timeline {timeline_id!r} is not SQLite-authoritative (missing backfill marker) — refusing sync (R5)"  # noqa: E501
+        )
 
+
+def _extract_event_hash(payload_json: str | None) -> str | None:
+    if not payload_json:
+        return None
+    try:
+        obj = json.loads(str(payload_json))
+        integ = obj.get("_integrity") if isinstance(obj, dict) else None
+        if isinstance(integ, dict):
+            h = integ.get("event_hash")
+            return str(h) if h else None
+    except Exception:
+        return None
+    return None
 
 # -- push --------------------------------------------------------------------
-
-
 def push_to_turso(
     *,
     timeline_id: str,
@@ -294,6 +301,7 @@ def push_to_turso(
         if projects_root
         else _projects_root_from_timeline_home(timeline_home)
     )
+    _assert_backfilled_or_fail_closed(timeline_id, root)
     state = read_turso_sync_state(timeline_home)
     local_head = _local_head_snapshot(backend)
     remote_head = _remote_head_snapshot(replica, timeline_id)
@@ -320,6 +328,81 @@ def push_to_turso(
     if action in ("bookmark_incompatible",):
         raise TursoSyncError(
             f"bookmark incompatible — refusing push (action={action})"
+        )
+
+    if action == "both_advanced":
+        # fork-not-merge: build keep-both artifact, never overwrite remote (R6)
+        after_local = bookmark.spoke_event_id if bookmark else None
+        after_remote = bookmark.hub_event_id if bookmark else None
+        try:
+            local_suffix = (
+                backend.read_events(after=after_local) if after_local else backend.read_events()
+            )
+        except Exception as exc:
+            raise TursoSyncError(f"failed to read local suffix for fork: {exc}") from exc
+        try:
+            remote_suffix_rows = replica.fetch_remote_events(
+                timeline_id, after=after_remote
+            )
+        except Exception as exc:
+            raise TursoSyncError(f"failed to read remote suffix for fork: {exc}") from exc
+        # map remote rows to TimelineEvents with full payloads
+        remote_suffix: list[TimelineEvent] = []
+        for r in remote_suffix_rows:
+            try:
+                payload_obj = json.loads(str(r.get("payload_json", "{}")))
+                data = payload_obj.get("data", {}) if isinstance(payload_obj, dict) else {}
+                integ = payload_obj.get("_integrity", {}) if isinstance(payload_obj, dict) else {}
+                actor = TimelineActor(type="system", id=str(r.get("actor_id", "system")), display=str(r.get("actor_id", "system")))  # noqa: E501
+                ev = TimelineEvent(
+                    event_id=str(r.get("event_id")),
+                    timeline_id=timeline_id,
+                    ts=str(r.get("created_at", utc_now_iso())),
+                    actor=actor,
+                    prev_hash=integ.get("previous_event_hash") if isinstance(integ, dict) else None,
+                    hash=integ.get("event_hash") if isinstance(integ, dict) else None,
+                    kind=str(r.get("kind")),
+                    payload=data if isinstance(data, dict) else {},
+                    expected_version=None,
+                    txn_id=str(r.get("txn_id", "")),
+                )
+                remote_suffix.append(ev)
+            except Exception:
+                continue
+        # Build artifact via write_keep_both_artifact with honest backend names.
+        # Destination must be local (sqlite/local_fs) so artifact lands under timeline_home.
+        @dataclass(frozen=True)
+        class _ShimTarget:
+            timeline_id: str
+            timeline_home: Path | None
+            backend: Any
+            backend_name: str
+            slug: str = "t1"
+            timeline_ulid: str = "01J000000000000000000000AA"
+            source: str = "test"
+
+        local_backend_name = backend.backend_name() if hasattr(backend, "backend_name") else "sqlite"  # noqa: E501
+        src_target = _ShimTarget(timeline_id=timeline_id, timeline_home=None, backend=replica, backend_name="turso")  # noqa: E501
+        dst_target = _ShimTarget(timeline_id=timeline_id, timeline_home=Path(timeline_home), backend=backend, backend_name=local_backend_name)  # noqa: E501
+        try:
+            artifact = write_keep_both_artifact(
+                source=src_target,
+                destination=dst_target,
+                source_head=remote_head,
+                destination_head=local_head,
+                source_suffix=remote_suffix,
+                destination_suffix=local_suffix,
+            )
+        except Exception as exc:
+            raise TursoSyncError(f"failed to write keep-both artifact for fork: {exc}") from exc
+        if artifact is None:
+            raise TursoSyncError("fork artifact write returned None — failing closed")
+        return TursoSyncResult(
+            action="conflict",
+            timeline_id=timeline_id,
+            local_version=local_head.version,
+            remote_version=remote_head.version,
+            conflict_artifacts=(artifact,),
         )
 
     # Determine after-boundary for incremental push
@@ -429,6 +512,8 @@ def push_to_turso(
         raise TursoSyncError(f"remote push failed: {exc}") from exc
 
     # Advance cursor ONLY after remote unit commits
+    # Use honest hash extraction — never store payload_json as hash
+    inferred_remote_hash = _extract_event_hash(turso_events[-1].payload_json) if turso_events else (state.remote_hash if state else None)  # noqa: E501
     new_state = TursoSyncState(
         timeline_id=timeline_id,
         local_version=doc.version,
@@ -444,9 +529,7 @@ def push_to_turso(
         remote_event_id=(
             turso_events[-1].event_id if turso_events else state.remote_event_id if state else None  # type: ignore[union-attr]
         ),
-        remote_hash=(
-            turso_events[-1].payload_json if turso_events else state.remote_hash if state else None  # type: ignore[union-attr]
-        ),
+        remote_hash=inferred_remote_hash,
         updated_at=utc_now_iso(),
         last_pushed_event_id=(
             turso_events[-1].event_id  # type: ignore[union-attr]
@@ -456,10 +539,9 @@ def push_to_turso(
             else None
         ),
     )
-    # For accurate remote_version, fetch head after push
+    # For accurate remote_version, fetch head after push — fail closed on transport failure
     try:
         refreshed_remote = _remote_head_snapshot(replica, timeline_id)
-        # patch versions
         new_state = TursoSyncState(
             timeline_id=timeline_id,
             local_version=doc.version,
@@ -477,8 +559,13 @@ def push_to_turso(
                 turso_events[-1].event_id if turso_events else new_state.last_pushed_event_id
             ),
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        # Refresh is best-effort but failure must not silently store payload_json as hash.
+        # We already have an honest inferred hash; if remote is unreachable, surface typed error
+        # rather than silently advancing with potentially stale version.
+        # However, the remote batch already committed, so we can still record with inferred values
+        # but must not swallow a typed transport error silently. Raise typed.
+        raise TursoSyncError(f"failed to refresh remote head after push: {exc}") from exc
     write_turso_sync_state(timeline_home, new_state)
     return TursoSyncResult(
         action="pushed",
@@ -505,7 +592,12 @@ def pull_from_turso(
     """
     if timeline_home is None:
         raise TursoSyncConfigError("pull_from_turso requires a timeline_home")
-    _ = Path(projects_root) if projects_root else None  # keep for parity; root used elsewhere
+    root = (
+        Path(projects_root)
+        if projects_root
+        else _projects_root_from_timeline_home(timeline_home)
+    )
+    _assert_backfilled_or_fail_closed(timeline_id, root)
     state = read_turso_sync_state(timeline_home)
     local_head = _local_head_snapshot(backend)
     remote_head = _remote_head_snapshot(replica, timeline_id)
@@ -711,13 +803,25 @@ def pull_from_turso(
         remote_rows = [
             r for r in remote_rows if str(r.get("event_id")) not in existing_ids
         ]
+    if not remote_rows:
+        # fail closed if classification says remote-ahead but zero rows fetched from both attempts
+        # genuine absence stays legal only when remote genuinely has no rows (empty replica / version 0)  # noqa: E501
+        if remote_head.version == 0 and remote_head.last_event_id is None:
+            return TursoSyncResult(
+                action="up_to_date",
+                timeline_id=timeline_id,
+                local_version=local_head.version,
+                remote_version=remote_head.version,
+            )
+        raise TursoSyncError(
+            f"remote ahead (action={action}, remote_version={remote_head.version}) but zero new rows fetched after both attempts — failing closed; events unfetchable"  # noqa: E501
+        )
 
     applied = 0
     # Ownership check — fail closed if second writer would be opened
     # backend.read_events used read-only, but append needs writer.
     # The backend's own _ensure_writer will reuse shared writer or fail if owner lock held
     for r in remote_rows:
-        # Map row → TimelineEvent for import
         try:
             payload_obj = json.loads(str(r.get("payload_json", "{}")))
             data = (
@@ -767,6 +871,25 @@ def pull_from_turso(
             applied += 1
         except OwnerLockError as exc:
             raise TursoOwnershipError(str(exc)) from exc
+        except EventLogError as exc:
+            # Backend seam wraps OwnerLockError as EventLogError("database is already owned: ...")
+            # Map only when cause chain contains typed OwnerLockError, never by substring.
+            cause = exc.__cause__
+            cur: Any = cause
+            is_ownership = False
+            while cur is not None:
+                if isinstance(cur, OwnerLockError):
+                    is_ownership = True
+                    break
+                cur = getattr(cur, "__cause__", None)
+            if is_ownership:
+                raise TursoOwnershipError(str(exc)) from exc
+            # Not ownership: check idempotency (EventLogIdempotentError is subclass of EventLogError)  # noqa: E501
+            from astrid.core.timeline.eventlog.types import EventLogIdempotentError
+
+            if isinstance(exc, EventLogIdempotentError):
+                continue
+            raise TursoSyncError(f"failed to import remote event {source_event.event_id}: {exc}") from exc  # noqa: E501
         except Exception as exc:
             # idempotent duplicate is not failure — treat as skipped
             from astrid.core.timeline.eventlog.types import (
