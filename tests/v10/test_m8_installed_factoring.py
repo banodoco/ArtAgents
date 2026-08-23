@@ -28,7 +28,6 @@ from scripts.reshape.check_pack_factoring import (
 )
 from scripts.reshape.installed_artifact import build_once
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -73,8 +72,8 @@ def test_each_pack_can_be_removed_from_one_wheel_without_kernel_drift(
 
 
 def test_packaged_factoring_inputs_are_explicit_and_disjoint() -> None:
-    """Lock the three removal inputs and the full, non-discovered kernel lane."""
-    assert DOMAIN_PACKS == ("timeline", "shots", "references")
+    """Lock the four removal inputs and the full, non-discovered kernel lane."""
+    assert DOMAIN_PACKS == ("timeline", "shots", "references", "runaway")
     assert set(PACK_TABLES) == set(DOMAIN_PACKS)
     assert set(PACK_VOCABULARY) == set(DOMAIN_PACKS)
     assert len(KERNEL_LANE) == 15

@@ -39,6 +39,7 @@ import json
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from astrid.core.backup.operations import recover_restore_staging
 from astrid.core.events.registry import register_core_vocabulary
@@ -52,8 +53,8 @@ from astrid.core.io.media_import import (
     validate_txn_id,
 )
 from astrid.core.receipts import ReceiptService
-from astrid.core.repositories.projects import ProjectRepository
 from astrid.core.repositories.evidence import EvidenceRepository
+from astrid.core.repositories.projects import ProjectRepository
 from astrid.core.schema_packs.manifest import load_schema_pack_manifest
 from astrid.core.schema_packs.registry import (
     FrozenSchemaPackRegistry,
@@ -61,10 +62,9 @@ from astrid.core.schema_packs.registry import (
 )
 from astrid.core.store.ownership import DatabaseOwnerLock, OwnerLockError
 from astrid.core.store.writer import DatabaseWriter
-from astrid.sdk.exceptions import ServiceUnavailableError
 from astrid.packs.timeline.bridge import TimelineBridgeAdapter
 from astrid.packs.timeline.repository import TimelineRepository
-from astrid.packs.runaway.repository import RunawayRepository
+from astrid.sdk.exceptions import ServiceUnavailableError
 from astrid.sdk.projects import ProjectsService
 
 STANDARD_SCHEMA_PACKS: tuple[str, ...] = ("timeline", "shots", "references", "runaway")
@@ -197,8 +197,8 @@ class StandardBridgeComposition:
     writer: DatabaseWriter
     projects: ProjectRepository
     timelines: TimelineRepository
-    runaway: RunawayRepository
-    runaway_evidence: EvidenceRepository
+    runaway: Any | None
+    runaway_evidence: EvidenceRepository | None
     bridge: TimelineBridgeAdapter
     owner_lock: DatabaseOwnerLock | None
     """The exclusive-owner lock held for the composition's lifetime."""
@@ -275,8 +275,16 @@ def compose_standard_bridge(
         timelines = TimelineRepository(
             events=events, receipts=receipts, projects=projects
         )
-        runaway = RunawayRepository(receipts=receipts)
-        runaway_evidence = EvidenceRepository(events=events, receipts=receipts)
+        runaway: Any | None = None
+        runaway_evidence: EvidenceRepository | None = None
+        if "runaway" in registry.packs:
+            # Lazy pack-owned import keeps the deterministic reduced-pack
+            # composition importable when Runaway is removed in factorability
+            # checks; the normal standard registry always takes this branch.
+            from astrid.packs.runaway.repository import RunawayRepository
+
+            runaway = RunawayRepository(receipts=receipts)
+            runaway_evidence = EvidenceRepository(events=events, receipts=receipts)
         # The bridge adapter is composed over the **typed SDK services**
         # (m4 plan step 20, task T21) — the same project/timeline services the
         # standard application wires for SDK/CLI consumers, over the one shared

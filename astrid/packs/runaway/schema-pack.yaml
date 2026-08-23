@@ -32,4 +32,5 @@ conformance:
   - writer_ownership
   - crash_atomicity
 cli_mounts: {}
-bridge_mounts: []
+bridge_mounts:
+  - runaway_transitions

@@ -823,7 +823,9 @@ def make_local_bridge_handler(*, projects_root: Path):
                 and parts[0] == "projects"
                 and parts[2] == "runaway-transitions"
             ):
-                run_ids = parse_qs(parsed_url.query).get("run_id", [])
+                run_ids = parse_qs(
+                    parsed_url.query, keep_blank_values=True
+                ).get("run_id", [])
                 if len(run_ids) > 1 or (run_ids and not run_ids[0]):
                     self._send_error(
                         400, "invalid_run", "run_id must be a non-empty string"

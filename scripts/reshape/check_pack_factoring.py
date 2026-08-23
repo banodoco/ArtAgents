@@ -1,6 +1,7 @@
 """Deterministic packaged and temporary-copy factoring checks.
 
-Proves that each in-tree schema pack (``timeline``, ``shots``, ``references``)
+Proves that each in-tree schema pack (``timeline``, ``shots``, ``references``,
+``runaway``)
 can be removed **only inside a temporary source copy** -- both the pack
 directory and the explicit standard registration tuple
 (``astrid.packs.STANDARD_SCHEMA_PACKS``, which drives
@@ -18,7 +19,7 @@ Lane completeness
 -----------------
 The enumerated :data:`KERNEL_LANE` is the fixed, complete set of kernel test
 files under ``tests/v10`` that import no domain schema pack at module level
-and whose assertions hold under *any* subset of the three packs:
+and whose assertions hold under *any* subset of the four packs:
 
 - kernel repositories/execution: fanout (run creation/continuation), the
   multi-task journey, task races, evidence, media, projects, receipts/events,
@@ -30,7 +31,7 @@ and whose assertions hold under *any* subset of the three packs:
 Deliberately excluded suites (asserted separately, see below):
 
 - ``test_registry.py`` / ``test_catalog_migrations.py`` assert the exact
-  *standard* 3-pack composition (e.g. the 20-table catalog), so they cannot
+  *standard* 4-pack composition, so they cannot
   run under a reduced composition; the check's own catalog verification step
   re-derives the remaining manifest-derived catalog from the modified
   registration instead.
@@ -43,7 +44,7 @@ Deliberately excluded suites (asserted separately, see below):
   requires the timeline pack.
 
 The remaining catalog is verified deterministically for every removal:
-core + the two remaining packs compose to exactly
+core + the three remaining packs compose to exactly
 ``CORE_TABLES | (all pack tables - the removed pack's tables)``, the removed
 pack is absent from the frozen registry and the registration tuple, and a
 fresh database opened from the modified composition contains exactly the
@@ -70,16 +71,15 @@ uninstalled.
 from __future__ import annotations
 
 import argparse
-from concurrent.futures import ThreadPoolExecutor
 import json
 import os
 import re
 import shutil
-import sqlite3
 import subprocess
 import sys
 import tempfile
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -88,13 +88,14 @@ from astrid.core.migrations.catalog import CORE_MIGRATIONS
 REPO_ROOT = Path(__file__).resolve().parents[2]
 """The repository root the check copies from (read-only)."""
 
-DOMAIN_PACKS: tuple[str, ...] = ("timeline", "shots", "references")
+DOMAIN_PACKS: tuple[str, ...] = ("timeline", "shots", "references", "runaway")
 """Exactly the in-tree schema packs the standard composition registers."""
 
 PACK_TABLES: dict[str, tuple[str, ...]] = {
     "timeline": ("timelines",),
     "shots": ("shots", "shot_items"),
     "references": ("project_references", "media_references", "reference_links"),
+    "runaway": ("runaway_transitions",),
 }
 """Tables each domain pack declares through its manifest migrations (frozen
 m1/m3 catalog; never inferred from a live database)."""
@@ -149,6 +150,14 @@ PACK_VOCABULARY: dict[str, dict[str, tuple[str, ...]]] = {
         "repositories": ("ReferenceRepository",),
         "cli_mounts": ("references",),
         "bridge_mounts": (),
+    },
+    "runaway": {
+        "stream_types": (),
+        "event_kinds": (),
+        "command_kinds": ("runaway.create",),
+        "repositories": ("RunawayRepository",),
+        "cli_mounts": (),
+        "bridge_mounts": ("runaway_transitions",),
     },
 }
 """The complete vocabulary owned by each fixed schema pack.

@@ -198,6 +198,7 @@ def test_standard_composition_declares_pack_vocabulary_and_mounts() -> None:
     assert frozen.cli_mounts["shots"] == ("shots", "timelines shots")
     assert frozen.cli_mounts["references"] == ("references", "media references")
     assert frozen.bridge_mounts["timelines"] == "timeline"
+    assert frozen.bridge_mounts["runaway_transitions"] == "runaway"
 
 
 # ---------------------------------------------------------------------------

@@ -8,7 +8,10 @@ from typing import Any, Generator
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
+from astrid.core.events.service import EventAppendService
 from astrid.core.integrations.reigh.local_bridge_server import create_local_bridge_server
+from astrid.core.receipts.service import ReceiptService
+from astrid.core.repositories.runs import RunRepository
 from astrid.core.store.uow import UnitOfWork
 from astrid.packs import compose_standard_bridge
 
@@ -389,6 +392,125 @@ def test_projects_timelines_list_route_invalid_slug_returns_400(
 
     assert status == 400
     assert error["error"] == "invalid_project"
+
+
+def test_runaway_transitions_route_returns_typed_rows_filter_and_evidence(
+    tmp_bridge_root: Path,
+) -> None:
+    """The editor route is repository-backed and preserves typed provenance."""
+    with repository_server(tmp_bridge_root) as (base_url, composition):
+        project = _repo_create_project(
+            composition, slug="runaway-demo", key="proj-runaway"
+        )
+        run_id = "01j5runawaytimingv1000000000000"
+        runs = RunRepository(
+            events=EventAppendService(composition.registry),
+            receipts=ReceiptService(),
+        )
+
+        def _seed(uow: UnitOfWork) -> None:
+            runs.create(
+                uow,
+                project_id=project.id,
+                run_id=run_id,
+                children=[],
+                evidence=[],
+                idempotency_key="runaway-test:run",
+                kind="runaway:timing-v1",
+                title="Runaway timing",
+                input={},
+                created_at=TS,
+            )
+            composition.runaway.create(
+                uow,
+                project_id=project.id,
+                run_id=run_id,
+                transitions=[
+                    {
+                        "ordinal": 0,
+                        "start_ms": 292,
+                        "duration_ms": 41,
+                        "prompt": "rose neon piano chord, hard cut, 48fps, S01",
+                        "metadata": {"frame": 14, "region": "S01", "colour": "rose"},
+                    },
+                    {
+                        "ordinal": 1,
+                        "start_ms": 333,
+                        "duration_ms": 63,
+                        "prompt": "teal neon piano chord, hard cut, 48fps, S02",
+                        "metadata": {"frame": 16, "region": "S02", "colour": "teal"},
+                    },
+                ],
+            )
+            composition.runaway_evidence.record(
+                uow,
+                project_id=project.id,
+                run_id=run_id,
+                kind="runaway_timing_migrated",
+                summary="2 transitions across 3 declared regions",
+                data={
+                    "fps": 48,
+                    "frame_count": 19,
+                    "region_counts": {"S01": 1, "S02": 1, "S03": 0},
+                },
+                idempotency_key="runaway-test:evidence",
+                created_at=TS,
+            )
+
+        UnitOfWork(composition.writer).run(_seed)
+        status, body = _get_json(
+            f"{base_url}/projects/runaway-demo/runaway-transitions"
+        )
+        filtered_status, filtered = _get_json(
+            f"{base_url}/projects/runaway-demo/runaway-transitions?run_id={run_id}"
+        )
+
+    assert status == filtered_status == 200
+    assert body == filtered
+    assert body["project"] == "runaway-demo"
+    assert body["count"] == 2
+    assert [row["ordinal"] for row in body["transitions"]] == [0, 1]
+    assert body["transitions"][0]["metadata"]["frame"] == 14
+    assert body["transitions"][1]["prompt"].startswith("teal neon")
+    assert body["timing_summary"]["run_id"] == run_id
+    assert body["timing_summary"]["data"]["region_counts"] == {
+        "S01": 1,
+        "S02": 1,
+        "S03": 0,
+    }
+
+
+def test_runaway_transitions_route_empty_unknown_and_invalid_filter(
+    tmp_bridge_root: Path,
+) -> None:
+    with repository_server(tmp_bridge_root) as (base_url, composition):
+        _repo_create_project(composition, slug="empty-runaway", key="proj-empty")
+        empty_status, empty = _get_json(
+            f"{base_url}/projects/empty-runaway/runaway-transitions"
+        )
+        missing_status, missing = _get_error(
+            f"{base_url}/projects/no-such-project/runaway-transitions"
+        )
+        invalid_status, invalid = _get_error(
+            f"{base_url}/projects/empty-runaway/runaway-transitions?run_id="
+        )
+        duplicate_status, duplicate = _get_error(
+            f"{base_url}/projects/empty-runaway/runaway-transitions?run_id=a&run_id=b"
+        )
+
+    assert empty_status == 200
+    assert empty == {
+        "project": "empty-runaway",
+        "count": 0,
+        "timing_summary": None,
+        "transitions": [],
+    }
+    assert missing_status == 404
+    assert missing["error"] == "project_not_found"
+    assert invalid_status == 400
+    assert invalid["error"] == "invalid_run"
+    assert duplicate_status == 400
+    assert duplicate["error"] == "invalid_run"
 
 
 def test_projects_timeline_load_missing_project_returns_project_not_found(
