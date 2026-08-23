@@ -491,6 +491,22 @@ def _fetch_remote_document_json_strict(replica: TursoReplicaClient, timeline_id:
     return None
 
 
+def _contains_non_finite(v: Any) -> bool:
+    if isinstance(v, bool):
+        return False
+    if isinstance(v, int):
+        return False
+    if isinstance(v, float):
+        import math as _math
+
+        return not _math.isfinite(v)
+    if isinstance(v, list):
+        return any(_contains_non_finite(x) for x in v)
+    if isinstance(v, dict):
+        return any(_contains_non_finite(x) for x in v.values())
+    return False
+
+
 def _is_finite_number(v: Any) -> bool:
     if isinstance(v, bool):
         return True
@@ -576,32 +592,71 @@ def _heads_event_equal(a: HeadSnapshot, b: HeadSnapshot) -> bool:  # noqa: E501
     return a.version == b.version and a.last_event_id == b.last_event_id and a.last_hash == b.last_hash  # noqa: E501
 
 
-def _fetch_local_source_event_id(
+def _fetch_local_provenance(
     timeline_id: str,
     event_id: str,
     backend: Any,
     root: Path,
-) -> str | None:
+) -> dict[str, Any] | None:
     try:
         for ev in backend.read_events():
             if str(getattr(ev, "event_id", "")) == str(event_id):
-                src = getattr(ev, "source_event_id", None)
-                if isinstance(src, str) and src:
-                    return src
-                break
+                return {
+                    "source_event_id": getattr(ev, "source_event_id", None),
+                    "source_backend": getattr(ev, "source_backend", None),
+                    "source_timeline_id": getattr(ev, "source_timeline_id", None),
+                }
     except Exception:
         pass
     try:
         db_path = derive_database_path(root)
         conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
         try:
-            row = conn.execute("SELECT source_event_id FROM events WHERE event_id = ?", (str(event_id),)).fetchone()  # noqa: E501
-            if row and row[0]:
-                return str(row[0])
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT source_event_id, source_backend, source_timeline_id FROM events WHERE event_id = ?",  # noqa: E501
+                (str(event_id),),
+            ).fetchone()
+            if row is not None:
+                return {
+                    "source_event_id": row["source_event_id"],
+                    "source_backend": row["source_backend"],
+                    "source_timeline_id": row["source_timeline_id"],
+                }
         finally:
             conn.close()
     except Exception:
         pass
+    return None
+
+
+def _is_provenance_consistent(prov: dict[str, Any] | None, timeline_id: str) -> bool:
+    if prov is None:
+        return False
+    src_id = prov.get("source_event_id")
+    if not isinstance(src_id, str) or not src_id:
+        return False
+    backend = prov.get("source_backend")
+    tid = prov.get("source_timeline_id")
+    if not isinstance(backend, str) or not backend:
+        return False
+    if not isinstance(tid, str) or tid != timeline_id:
+        return False
+    return True
+
+
+def _fetch_local_source_event_id(
+    timeline_id: str,
+    event_id: str,
+    backend: Any,
+    root: Path,
+) -> str | None:
+    prov = _fetch_local_provenance(timeline_id, event_id, backend, root)
+    if prov is None:
+        return None
+    src = prov.get("source_event_id")
+    if isinstance(src, str) and src:
+        return src
     return None
 
 
@@ -618,23 +673,25 @@ def _heads_provenance_equivalent(
         return False
     if remote_head.last_event_id is None or local_head.last_event_id is None:
         return False
-    direct = _fetch_local_source_event_id(timeline_id, str(local_head.last_event_id), backend, root)
-    if direct is not None and str(direct) == str(remote_head.last_event_id):
+    prov = _fetch_local_provenance(timeline_id, str(local_head.last_event_id), backend, root)  # noqa: E501
+    if prov is None or not isinstance(prov.get("source_event_id"), str) or not prov.get("source_event_id"):  # noqa: E501
+        return False
+    if not _is_provenance_consistent(prov, timeline_id):
+        return False
+    direct = str(prov.get("source_event_id"))
+    if direct == str(remote_head.last_event_id):
         return True
-    try:
-        events = list(backend.read_events())
-    except Exception:
-        events = []
-    for ev in events:
-        src = getattr(ev, "source_event_id", None)
-        if isinstance(src, str) and src == str(remote_head.last_event_id):
-            return True
     visited: set[str] = set()
     cur = direct
     while cur and cur not in visited:
         visited.add(cur)
-        nxt = _fetch_local_source_event_id(timeline_id, cur, backend, root)
-        if nxt is None:
+        nxt_prov = _fetch_local_provenance(timeline_id, cur, backend, root)
+        if nxt_prov is None:
+            break
+        if not _is_provenance_consistent(nxt_prov, timeline_id):
+            return False
+        nxt = nxt_prov.get("source_event_id")
+        if not isinstance(nxt, str) or not nxt:
             break
         if nxt == str(remote_head.last_event_id):
             return True
@@ -643,84 +700,86 @@ def _heads_provenance_equivalent(
 
 
 def _verify_doc_identity_or_fork(
-    *,
-    timeline_id: str,
-    timeline_home: str | Path,
-    root: Path,
-    replica: TursoReplicaClient,
-    local_head: HeadSnapshot,
-    remote_head: HeadSnapshot,
-    backend: Any,
-    bookmark: SyncBookmark | None,
-) -> TursoSyncResult | None:
-    """Verify document identity when heads are event-equal.
+     *,
+     timeline_id: str,
+     timeline_home: str | Path,
+     root: Path,
+     replica: TursoReplicaClient,
+     local_head: HeadSnapshot,
+     remote_head: HeadSnapshot,
+     backend: Any,
+     bookmark: SyncBookmark | None,
+ ) -> TursoSyncResult | None:
+     """Verify document identity when heads are event-equal.
 
-    Returns conflict TursoSyncResult if structurally divergent, raises
-    TursoSyncError on unverifiable read (fail-closed), or None if equal.
-    Captured payloads are passed through to the artifact path — no re-read.
-    """
-    if not _heads_provenance_equivalent(timeline_id, local_head, remote_head, backend, root):
-        return None
-    try:
-        local_doc = _read_local_document_snapshot(timeline_id, root)
-    except Exception as exc:
-        raise TursoSyncError(f"local document snapshot failed for {timeline_id!r}: {exc}") from exc
-    local_doc_json: str | None = local_doc.document_json
-    remote_doc_json = _fetch_remote_document_json_strict(replica, timeline_id)
-    if remote_doc_json is None:
-        if remote_head.version != 0 or local_head.version != 0:  # noqa: E501
-            raise TursoSyncError(f"remote document missing for {timeline_id!r} at version {remote_head.version} — failing closed")  # noqa: E501
-        return None
-    if _documents_structurally_equal(local_doc_json, remote_doc_json):
-        return None
-    # Value-level divergence: only immediate fork when type mismatch OR when
-    # heads are provenance-equivalent at steady state (bookmark at same version).
-    # This preserves resume honesty for crash-after-commit where bookmark is behind
-    # and docs may transiently differ due to stale local document after import.
-    try:
-        _a_fork = json.loads(local_doc_json)  # type: ignore[arg-type]
-        _b_fork = json.loads(remote_doc_json)  # type: ignore[arg-type]
-        _type_mismatch_fork = _has_json_type_mismatch(_a_fork, _b_fork)
-    except Exception:
-        _type_mismatch_fork = True
-    if _type_mismatch_fork:
-        return _doc_divergence_conflict_result(
-            timeline_id=timeline_id,
-            timeline_home=timeline_home,
-            backend=backend,
-            replica=replica,
-            local_head=local_head,
-            remote_head=remote_head,
-            bookmark=bookmark,
-            local_doc_json=local_doc_json,
-            remote_doc_json=remote_doc_json,
-        )
-    if bookmark is not None and bookmark.spoke_version == local_head.version and bookmark.hub_version == remote_head.version:  # noqa: E501
-        return _doc_divergence_conflict_result(
-            timeline_id=timeline_id,
-            timeline_home=timeline_home,
-            backend=backend,
-            replica=replica,
-            local_head=local_head,
-            remote_head=remote_head,
-            bookmark=bookmark,
-            local_doc_json=local_doc_json,
-            remote_doc_json=remote_doc_json,
-        )
-    if bookmark is None and local_head.version == 0 and remote_head.version == 0:
-        return _doc_divergence_conflict_result(
-            timeline_id=timeline_id,
-            timeline_home=timeline_home,
-            backend=backend,
-            replica=replica,
-            local_head=local_head,
-            remote_head=remote_head,
-            bookmark=bookmark,
-            local_doc_json=local_doc_json,
-            remote_doc_json=remote_doc_json,
-        )
-    return None
-
+     Returns conflict TursoSyncResult if structurally divergent, raises
+     TursoSyncError on unverifiable read (fail-closed), or None if equal.
+     Captured payloads are passed through to the artifact path — no re-read.
+     """
+     if not _heads_provenance_equivalent(timeline_id, local_head, remote_head, backend, root):
+         return None
+     try:
+         local_doc = _read_local_document_snapshot(timeline_id, root)
+     except Exception as exc:
+         raise TursoSyncError(f"local document snapshot failed for {timeline_id!r}: {exc}") from exc
+     local_doc_json: str | None = local_doc.document_json
+     remote_doc_json = _fetch_remote_document_json_strict(replica, timeline_id)
+     if remote_doc_json is None:
+         if remote_head.version != 0 or local_head.version != 0:  # noqa: E501
+             raise TursoSyncError(f"remote document missing for {timeline_id!r} at version {remote_head.version} — failing closed")  # noqa: E501
+         return None
+     if _documents_structurally_equal(local_doc_json, remote_doc_json):
+         return None
+     # Value-level divergence: only immediate fork when type mismatch OR when
+     # heads are provenance-equivalent at steady state (bookmark at same version).
+     # This preserves resume honesty for crash-after-commit where bookmark is behind
+     # and docs may transiently differ due to stale local document after import.
+     try:
+         _a_fork = json.loads(local_doc_json)  # type: ignore[arg-type]
+         _b_fork = json.loads(remote_doc_json)  # type: ignore[arg-type]
+         if _contains_non_finite(_a_fork) or _contains_non_finite(_b_fork):
+             _type_mismatch_fork = True
+         else:
+             _type_mismatch_fork = _has_json_type_mismatch(_a_fork, _b_fork)
+     except Exception:
+         _type_mismatch_fork = True
+     if _type_mismatch_fork:
+         return _doc_divergence_conflict_result(
+             timeline_id=timeline_id,
+             timeline_home=timeline_home,
+             backend=backend,
+             replica=replica,
+             local_head=local_head,
+             remote_head=remote_head,
+             bookmark=bookmark,
+             local_doc_json=local_doc_json,
+             remote_doc_json=remote_doc_json,
+         )
+     if bookmark is not None and bookmark.spoke_version == local_head.version and bookmark.hub_version == remote_head.version:  # noqa: E501
+         return _doc_divergence_conflict_result(
+             timeline_id=timeline_id,
+             timeline_home=timeline_home,
+             backend=backend,
+             replica=replica,
+             local_head=local_head,
+             remote_head=remote_head,
+             bookmark=bookmark,
+             local_doc_json=local_doc_json,
+             remote_doc_json=remote_doc_json,
+         )
+     if bookmark is None:
+         return _doc_divergence_conflict_result(
+             timeline_id=timeline_id,
+             timeline_home=timeline_home,
+             backend=backend,
+             replica=replica,
+             local_head=local_head,
+             remote_head=remote_head,
+             bookmark=bookmark,
+             local_doc_json=local_doc_json,
+             remote_doc_json=remote_doc_json,
+         )
+     return None
 
 
 def _doc_divergence_conflict_result(
