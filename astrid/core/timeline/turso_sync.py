@@ -158,6 +158,7 @@ def _suffixes_byte_equal(
     projects_root: Path,
     backend: Any | None = None,
     strict_event_id: bool = True,
+    check_seq: bool = True,
 ) -> bool:
     """Compare local TimelineEvents vs remote dict rows byte-equal on identity+payload+kind+stream."""  # noqa: E501
     if len(local_events) != len(remote_rows):
@@ -201,16 +202,65 @@ def _suffixes_byte_equal(
         except Exception:
             if local_pj != remote_pj:
                 return False
-        seq_local = _fetch_event_seq(timeline_id, str(getattr(le, "event_id", "")), projects_root)
-        try:
-            seq_remote = int(rr.get("seq"))
-        except Exception:
-            seq_remote = rr.get("seq")
-        if seq_local != seq_remote:
-            return False
+        if check_seq:
+            seq_local = _fetch_event_seq(timeline_id, str(getattr(le, "event_id", "")), projects_root)  # noqa: E501
+            try:
+                seq_remote = int(rr.get("seq"))
+            except Exception:
+                seq_remote = rr.get("seq")
+            if seq_local != seq_remote:
+                return False
         if str(rr.get("timeline_id", "")) != str(timeline_id):
             return False
     return True
+
+
+def _is_resume_already_committed(
+    timeline_id: str,
+    timeline_home: str | Path,
+    projects_root: Path,
+    backend: Any,
+    replica: TursoReplicaClient,
+    state: TursoSyncState | None,
+    bookmark: Any | None,
+    *,
+    strict_event_id: bool,
+) -> bool:
+    """Shared reconciliation: do local suffix and remote suffix byte-match beyond cursor?"""  # noqa: E501
+    try:
+        if bookmark is not None and getattr(bookmark, "spoke_event_id", None):
+            after_local = bookmark.spoke_event_id  # type: ignore[union-attr]
+            after_remote = bookmark.hub_event_id  # type: ignore[union-attr]
+        else:
+            if state is not None and getattr(state, "remote_event_id", None):
+                after_local = state.remote_event_id  # type: ignore[union-attr]
+                after_remote = state.remote_event_id  # type: ignore[union-attr]
+                if not strict_event_id and getattr(state, "local_event_id", None):
+                    after_local = state.local_event_id  # type: ignore[union-attr]
+            elif state is not None and getattr(state, "local_event_id", None):
+                after_local = state.local_event_id  # type: ignore[union-attr]
+                after_remote = getattr(state, "remote_event_id", None)
+            else:
+                after_local = None
+                after_remote = None
+            if strict_event_id and state is not None and after_local is None and getattr(state, "local_event_id", None):  # noqa: E501
+                after_local = state.local_event_id  # type: ignore[union-attr]
+        try:
+            local_suffix = backend.read_events(after=after_local) if after_local else backend.read_events()  # noqa: E501
+        except Exception:
+            return False
+        try:
+            remote_suffix = replica.fetch_remote_events(timeline_id, after=after_remote)
+        except Exception:
+            return False
+        if not local_suffix and not remote_suffix:
+            return False
+        if not local_suffix or not remote_suffix:
+            return False
+        check_seq = True
+        return _suffixes_byte_equal(timeline_id, local_suffix, remote_suffix, projects_root, backend, strict_event_id=strict_event_id, check_seq=check_seq)  # noqa: E501
+    except Exception:
+        return False
 
 
 def _is_push_resume_already_committed(
@@ -223,24 +273,7 @@ def _is_push_resume_already_committed(
     bookmark: Any | None,
 ) -> bool:
     """Reconciliation for crash-after-commit: do local suffix and remote suffix byte-match beyond cursor?"""  # noqa: E501
-    try:
-        after_local = bookmark.spoke_event_id if bookmark and getattr(bookmark, "spoke_event_id", None) else (state.remote_event_id if state and state.remote_event_id else (state.local_event_id if state and state.local_event_id else None))  # noqa: E501
-        after_remote = bookmark.hub_event_id if bookmark and getattr(bookmark, "hub_event_id", None) else (state.remote_event_id if state and state.remote_event_id else None)  # noqa: E501
-        try:
-            local_suffix = backend.read_events(after=after_local) if after_local else backend.read_events()  # noqa: E501
-        except Exception:
-            return False
-        try:
-            remote_suffix = replica.fetch_remote_events(timeline_id, after=after_remote)
-        except Exception:
-            return False
-        if not local_suffix and not remote_suffix:
-            return False
-        if not local_suffix or not remote_suffix:
-            return False
-        return _suffixes_byte_equal(timeline_id, local_suffix, remote_suffix, projects_root, backend, strict_event_id=True)  # noqa: E501
-    except Exception:
-        return False
+    return _is_resume_already_committed(timeline_id, timeline_home, projects_root, backend, replica, state, bookmark, strict_event_id=True)  # noqa: E501
 
 
 def _is_pull_resume_already_committed(
@@ -253,24 +286,9 @@ def _is_pull_resume_already_committed(
     bookmark: Any | None,
 ) -> bool:
     """Pull side resume: remote suffix beyond bookmark equals local suffix beyond bookmark."""
-    try:
-        after_local = bookmark.spoke_event_id if bookmark and getattr(bookmark, "spoke_event_id", None) else (state.local_event_id if state and state.local_event_id else None)  # noqa: E501
-        after_remote = bookmark.hub_event_id if bookmark and getattr(bookmark, "hub_event_id", None) else (state.remote_event_id if state and state.remote_event_id else None)  # noqa: E501
-        try:
-            local_suffix = backend.read_events(after=after_local) if after_local else backend.read_events()  # noqa: E501
-        except Exception:
-            return False
-        try:
-            remote_suffix = replica.fetch_remote_events(timeline_id, after=after_remote)
-        except Exception:
-            return False
-        if not local_suffix and not remote_suffix:
-            return False
-        if not local_suffix or not remote_suffix:
-            return False
-        return _suffixes_byte_equal(timeline_id, local_suffix, remote_suffix, projects_root, backend, strict_event_id=False)  # noqa: E501
-    except Exception:
-        return False
+    return _is_resume_already_committed(timeline_id, timeline_home, projects_root, backend, replica, state, bookmark, strict_event_id=False)  # noqa: E501
+
+
 
 
 @dataclass(frozen=True)
