@@ -1,0 +1,33 @@
+schema_version: 1
+id: typed_timeline
+name: Typed Timeline Mapper
+version: "1.0.0"
+origin: builtin
+install_tier: core
+pack_type: capability
+domain: timeline
+stability: stable
+support: core
+visibility: visible
+permissions:
+  - id: project_files
+    reason: Reads typed rows and writes timeline/assets into the run.
+  - id: subprocess
+    reason: Map executor may invoke ffmpeg to generate silent audio for smoke tests.
+depends:
+  - id: core
+    version: ">=1"
+description: Generic typed-row to timeline mapper with Runaway colour and text mappings.
+keywords: [timeline, mapper, typed, runaway, colour]
+capabilities:
+  - typed_timeline.map
+  - typed_timeline.render
+agent:
+  purpose: Map typed DB rows to validated timelines and render via ffmpeg.
+  do_not_use_for: Direct timeline hand-editing.
+  normal_entrypoints:
+    - typed_timeline.map
+    - typed_timeline.render
+content:
+  executors: executors
+  orchestrators: orchestrators

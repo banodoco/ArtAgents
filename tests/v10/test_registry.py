@@ -60,7 +60,7 @@ from astrid.packs import (
 
 CORE_TABLE_COUNT = len(CORE_TABLES)
 # 14 kernel + timelines + shots/shot_items + the 3 reference tables.
-STANDARD_TABLE_COUNT = CORE_TABLE_COUNT + 1 + 2 + 3
+STANDARD_TABLE_COUNT = CORE_TABLE_COUNT + 1 + 2 + 3 + 1
 
 
 def _empty_manifest(id_: str = "probe") -> dict:
@@ -140,38 +140,39 @@ def test_core_manifest_passes_strict_11_field_validation() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_standard_composition_registers_exactly_three_packs() -> None:
+def test_standard_composition_registers_exactly_four_packs() -> None:
     registry = SchemaPackRegistry()
     register_standard_schema_packs(registry)
     frozen = registry.freeze()
-    assert list(frozen.packs) == ["references", "shots", "timeline"]
+    assert list(frozen.packs) == ["references", "runaway", "shots", "timeline"]
     assert frozen.has_pack(CORE_PACK_ID) is False  # core is registered separately
 
 
 def test_standard_composition_declares_the_fixed_pack_order() -> None:
-    assert STANDARD_SCHEMA_PACKS == ("timeline", "shots", "references")
+    assert STANDARD_SCHEMA_PACKS == ("timeline", "shots", "references", "runaway")
 
 
 def test_standard_composition_has_no_discovery_beyond_in_tree_manifests() -> None:
     packs_root = Path(packs_package.__file__).parent
     schema_pack_files = sorted(packs_root.glob("*/schema-pack.yaml"))
     discovered = sorted(path.parent.name for path in schema_pack_files)
-    assert discovered == ["references", "shots", "timeline"]
-    assert len(schema_pack_files) == len(STANDARD_SCHEMA_PACKS) == 3
+    assert discovered == ["references", "runaway", "shots", "timeline"]
+    assert len(schema_pack_files) == len(STANDARD_SCHEMA_PACKS) == 4
 
 
-def test_standard_composition_derives_20_table_catalog() -> None:
+def test_standard_composition_derives_21_table_catalog() -> None:
     registry = SchemaPackRegistry()
     register_core_vocabulary(registry)
     register_standard_schema_packs(registry)
     frozen = registry.freeze()
-    assert len(frozen.tables) == STANDARD_TABLE_COUNT == 20
+    assert len(frozen.tables) == STANDARD_TABLE_COUNT == 21
     assert frozen.tables["timelines"] == "timeline"
     assert frozen.tables["shots"] == "shots"
     assert frozen.tables["shot_items"] == "shots"
     assert frozen.tables["project_references"] == "references"
     assert frozen.tables["media_references"] == "references"
     assert frozen.tables["reference_links"] == "references"
+    assert frozen.tables["runaway_transitions"] == "runaway"
 
 
 def test_standard_composition_declares_pack_vocabulary_and_mounts() -> None:
@@ -1151,7 +1152,7 @@ def test_m3_standard_catalog_is_unchanged_at_20_tables() -> None:
     register_core_vocabulary(registry)
     register_standard_schema_packs(registry)
     frozen = registry.freeze()
-    assert len(frozen.tables) == CORE_TABLE_COUNT + 1 + 2 + 3 == 20
+    assert len(frozen.tables) == CORE_TABLE_COUNT + 1 + 2 + 3 + 1 == 21
     assert frozen.tables["project_references"] == "references"
     assert frozen.tables["media_references"] == "references"
     assert frozen.tables["reference_links"] == "references"

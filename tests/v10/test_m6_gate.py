@@ -44,7 +44,7 @@ EXPECTED_FAMILIES: frozenset[str] = frozenset(
 )
 """The exactly-eight top-level families (five product + three operational)."""
 
-EXPECTED_TABLE_COUNT = 20
+EXPECTED_TABLE_COUNT = 21
 """The frozen v10 schema table count (core + timeline/shots/references)."""
 
 
@@ -129,8 +129,8 @@ def _stop_server(server, thread: threading.Thread) -> None:
 def test_serve_boots_clean_project_end_to_end(tmp_path: Path) -> None:
     composition = compose_standard_bridge(tmp_path)
     try:
-        # Exactly the three in-tree schema packs are registered.
-        assert STANDARD_SCHEMA_PACKS == ("timeline", "shots", "references")
+        # Exactly the four in-tree schema packs are registered.
+        assert STANDARD_SCHEMA_PACKS == ("timeline", "shots", "references", "runaway")
         assert set(STANDARD_SCHEMA_PACKS) <= set(composition.registry.packs)
         assert "core" in composition.registry.packs
         assert composition.database_path.is_file()

@@ -1,4 +1,4 @@
-"""Kernel-side standard schema-pack composition (core + the three in-tree packs).
+"""Kernel-side standard schema-pack composition (core + four in-tree packs).
 
 The standard-Astrid registry is the composed expectation used by schema
 validation (``doctor`` schema_versions, backup restore validation). Kernel
@@ -6,7 +6,7 @@ modules (``astrid/core/**``) must be able to build it **without importing
 ``astrid.packs``** — the single documented kernel-to-pack composition
 exemption is the gateway serve root
 (``astrid/core/gateway/dispatch.py``) — so this kernel composition registers
-the core vocabulary and loads the three in-tree schema-pack manifests from
+the core vocabulary and loads the four in-tree schema-pack manifests from
 the installed package tree. ``astrid.packs.build_standard_registry`` keeps
 its own pack-layer implementation (the ``STANDARD_SCHEMA_PACKS`` literal
 there is required by the deterministic pack-factoring surgery); this module
@@ -24,12 +24,12 @@ from astrid.core.schema_packs.registry import (
     SchemaPackRegistry,
 )
 
-STANDARD_SCHEMA_PACKS: tuple[str, ...] = ("timeline", "shots", "references")
+STANDARD_SCHEMA_PACKS: tuple[str, ...] = ("timeline", "shots", "references", "runaway")
 """Exactly the in-tree schema packs the standard composition registers."""
 
 
 def build_standard_registry() -> FrozenSchemaPackRegistry:
-    """Compose and freeze the standard-Astrid registry (core + three packs).
+    """Compose and freeze the standard-Astrid registry (core + four packs).
 
     Registers the core vocabulary, then loads each in-tree schema-pack
     manifest from the installed package tree (``astrid/packs/<id>/``). The

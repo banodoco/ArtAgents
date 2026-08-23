@@ -12,7 +12,7 @@ from email.utils import formatdate
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 from astrid.core.integrations.reigh.bridge_service import (
     BridgeError,
@@ -774,7 +774,8 @@ def make_local_bridge_handler(*, projects_root: Path):
             self._send_json(error.status_code, error.to_dict())
 
         def do_GET(self) -> None:  # noqa: N802
-            path = urlparse(self.path).path
+            parsed_url = urlparse(self.path)
+            path = parsed_url.path
             parts = [part for part in unquote(path).split("/") if part]
 
             if parts == ["health"]:
@@ -815,6 +816,43 @@ def make_local_bridge_handler(*, projects_root: Path):
                     self._send_bridge_error(exc)
                     return
                 self._send_json(200, payload)
+                return
+
+            if (
+                len(parts) == 3
+                and parts[0] == "projects"
+                and parts[2] == "runaway-transitions"
+            ):
+                run_ids = parse_qs(parsed_url.query).get("run_id", [])
+                if len(run_ids) > 1 or (run_ids and not run_ids[0]):
+                    self._send_error(
+                        400, "invalid_run", "run_id must be a non-empty string"
+                    )
+                    return
+                try:
+                    rows = self._bridge().list_runaway_transitions(
+                        parts[1], run_id=run_ids[0] if run_ids else None
+                    )
+                    summary = self._bridge().get_runaway_timing_summary(parts[1])
+                except BridgeError as exc:
+                    self._send_bridge_error(exc)
+                    return
+                except Exception:  # noqa: BLE001 - defensive typed envelope
+                    self._send_error(
+                        500,
+                        "internal",
+                        "unexpected failure while reading Runaway transitions",
+                    )
+                    return
+                self._send_json(
+                    200,
+                    {
+                        "project": parts[1],
+                        "count": len(rows),
+                        "timing_summary": summary,
+                        "transitions": rows,
+                    },
+                )
                 return
 
             # ---- Asset endpoint ----

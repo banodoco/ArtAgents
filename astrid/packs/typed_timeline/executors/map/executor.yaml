@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "id": "typed_timeline.map",
+  "name": "Typed Timeline Map",
+  "kind": "built_in",
+  "version": "1.0.0",
+  "short_description": "Map typed rows to a validated timeline JSON.",
+  "description": "Generic mapper from typed DB rows to timeline JSON via mapping YAML. Supports aggregated and per-row scopes.",
+  "keywords": ["timeline", "mapper", "typed"],
+  "inputs": [
+    {"name": "source", "type": "string", "required": true, "description": "Source table: runaway or json"},
+    {"name": "mapping", "type": "string", "required": true, "description": "Mapping name or path: runaway_colour, runaway_text"},
+    {"name": "run_id", "type": "string", "required": false, "description": "Optional run_id filter for runaway source"},
+    {"name": "project", "type": "string", "required": false, "description": "Project id override"},
+    {"name": "json_path", "type": "string", "required": false, "description": "Path to JSON file for json source"},
+    {"name": "json_rows", "type": "json", "required": false, "description": "Inline rows for tests"}
+  ],
+  "outputs": [
+    {"name": "timeline", "type": "file", "path_template": "{out}/timeline.json", "mode": "create_or_replace", "artifact_type": "timeline"},
+    {"name": "assets", "type": "file", "path_template": "{out}/assets.json", "mode": "create_or_replace", "artifact_type": "timeline/assets"}
+  ],
+  "cache": {"mode": "none"},
+  "isolation": {"mode": "subprocess", "network": false, "binaries": []},
+  "command": {
+    "argv": [
+      "{python_exec}",
+      "-m",
+      "astrid.packs.typed_timeline.executors.map.run",
+      "--source",
+      "{source}",
+      "--mapping",
+      "{mapping}",
+      "--out",
+      "{out}"
+    ],
+    "input_args": [
+      {"input": "run_id", "flag": "--run-id", "optional": true},
+      {"input": "project", "flag": "--project", "optional": true},
+      {"input": "json_path", "flag": "--json-path", "optional": true},
+      {"input": "json_rows", "flag": "--json-rows", "optional": true}
+    ]
+  },
+  "metadata": {
+    "runtime_module": "astrid.packs.typed_timeline.executors.map.run",
+    "runtime_file": "run.py"
+  }
+}

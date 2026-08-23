@@ -17,6 +17,8 @@ from typing import Any, Iterator, Mapping
 from astrid.core._shared.result_manifest import validate_result_manifest
 from astrid.core.env_vars import ASTRID_INTERNAL_INVOCATION
 from astrid.core.io.media_import import prepare_media_file
+from astrid.core.execution.executor.runner import ExecutorRunRequest, run_executor
+from astrid.core.execution.orchestrator.runner import OrchestratorRunRequest, run_orchestrator
 from astrid.core.project.run import discover_manifest_path, load_manifest_output_artifacts
 
 
@@ -86,7 +88,7 @@ class CapabilityTaskHandler:
 
                 req = ExecutorRunRequest(
                     executor_id=self._capability_id,
-                    out=None if project is not None else out_dir,
+                    out=out_dir,
                     project=project,
                     inputs=dict(request_inputs),
                     outputs=dict(request_outputs),
@@ -99,6 +101,7 @@ class CapabilityTaskHandler:
                     argv=(),
                     invocation=self._invocation,
                     projects_root=self._projects_root,
+                    project_was_auto_resolved=True,
                 )
                 result = run_executor(req, None)
                 ok = bool(getattr(result, "ok", False))
@@ -110,7 +113,7 @@ class CapabilityTaskHandler:
 
                 req = OrchestratorRunRequest(
                     orchestrator_id=self._capability_id,
-                    out=None if project is not None else out_dir,
+                    out=out_dir,
                     project=project,
                     inputs=dict(request_inputs),
                     outputs=dict(request_outputs),
@@ -122,6 +125,7 @@ class CapabilityTaskHandler:
                     execution_mode="in_process",
                     invocation=self._invocation,
                     projects_root=self._projects_root,
+                    project_was_auto_resolved=True,
                 )
                 result = run_orchestrator(req, None)
                 ok = bool(getattr(result, "ok", False))

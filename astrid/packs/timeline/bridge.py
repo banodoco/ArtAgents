@@ -47,6 +47,7 @@ fixtures and is migrated to services in plan step 21.
 from __future__ import annotations
 
 import re
+import sqlite3
 from collections.abc import Mapping
 from typing import Any
 
@@ -126,13 +127,55 @@ class TimelineBridgeAdapter:
         writer: DatabaseWriter,
         projects: ProjectRepository | ProjectsService,
         timelines: TimelineRepository | TimelinesService,
+        runaway: Any | None = None,
+        runaway_evidence: Any | None = None,
     ) -> None:
         self._writer = writer
         self._projects = projects
         self._timelines = timelines
+        self._runaway = runaway
+        self._runaway_evidence = runaway_evidence
         self._service_mode = isinstance(projects, ProjectsService) and isinstance(
             timelines, TimelinesService
         )
+
+    def list_runaway_transitions(
+        self, project_slug: str, *, run_id: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Return project-scoped typed Runaway transitions for editor viewers."""
+        project_id = self._resolve_project_id(project_slug)
+        if self._runaway is None:
+            raise BridgeInternalError("the Runaway repository is not composed")
+        try:
+            with self._writer.read_only_connection() as conn:
+                conn.row_factory = sqlite3.Row
+                rows = self._runaway.list(
+                    conn, project_id=project_id, run_id=run_id
+                )
+        except Exception as exc:  # noqa: BLE001 - normalize local read errors
+            raise BridgeInternalError(str(exc)) from exc
+        return [row.to_dict() for row in rows]
+
+    def get_runaway_timing_summary(self, project_slug: str) -> dict[str, Any] | None:
+        """Return the typed migration evidence that declares all regions."""
+        project_id = self._resolve_project_id(project_slug)
+        if self._runaway_evidence is None:
+            return None
+        try:
+            rows = self._runaway_evidence.list(self._writer, project_id=project_id)
+        except Exception as exc:  # noqa: BLE001 - normalize local read errors
+            raise BridgeInternalError(str(exc)) from exc
+        candidates = [row for row in rows if row.kind == "runaway_timing_migrated"]
+        if not candidates:
+            return None
+        latest = candidates[-1]
+        return {
+            "evidence_id": latest.id,
+            "run_id": latest.run_id,
+            "summary": latest.summary,
+            "data": dict(latest.data),
+            "created_at": latest.created_at,
+        }
 
     # -- health / projects -------------------------------------------------
 

@@ -89,12 +89,17 @@ EVIDENCE_KINDS: tuple[str, ...] = (
     "validation",
     "decision",
     "error",
+    "runaway_timing_migrated",
 )
-"""The closed m3 evidence kinds, in decision-artifact order.
-
-``evidence_items.kind`` has no DDL CHECK, so this repository-enforced
-closed vocabulary is the single gate before any evidence write.
+"""The closed m3 evidence kinds, in decision-artifact order plus the
+migrated Runaway timing marker (runaway:timing-v1). The runaway pack's
+migration creates a run with kind ``runaway:timing-v1`` and attaches one
+evidence row with kind ``runaway_timing_migrated`` that pins the source
+timing-manifest (frame count 8085, 566 transitions). The kernel table
+``evidence_items.kind`` has no DDL CHECK, so the repository gate is the
+single vocabulary enforcement point.
 """
+
 
 
 # ---------------------------------------------------------------------------
