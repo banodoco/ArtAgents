@@ -10,28 +10,13 @@ import json
 import shutil
 import subprocess
 import sys
-import wave
-import struct
 from pathlib import Path
 
 from astrid.core._shared.result_manifest import build_manifest, write_manifest
 from astrid.core.pack.entrypoint import run_pack_main
 from astrid.core.util.time import utc_now_iso
 
-REPO_ROOT = Path(__file__).resolve().parents[5]
-
-
-def _ensure_tone_wav(path: Path, duration_sec: float) -> None:
-    if path.exists():
-        return
-    path.parent.mkdir(parents=True, exist_ok=True)
-    sample_rate = 48000
-    n_frames = int(sample_rate * duration_sec)
-    with wave.open(str(path), "w") as wf:
-        wf.setnchannels(1)
-        wf.setsampwidth(2)
-        wf.setframerate(sample_rate)
-        wf.writeframes(struct.pack("<h", 0) * n_frames)
+from astrid.packs.typed_timeline.common import ensure_tone_wav, parse_json_rows, resolve_mapping_path
 
 
 def _run_ffmpeg_render(timeline_path: Path, assets_path: Path, out_path: Path) -> bool:
@@ -111,13 +96,7 @@ def main(argv=None) -> int:
         rows = []
         if args.json_rows is not None:
             try:
-                parsed = json.loads(args.json_rows) if isinstance(args.json_rows, str) else args.json_rows
-                if isinstance(parsed, list):
-                    rows = parsed
-                elif isinstance(parsed, dict) and "rows" in parsed:
-                    rows = parsed["rows"]
-                else:
-                    rows = [parsed]
+                rows = parse_json_rows(args.json_rows)
             except Exception as e:
                 print(f"json_rows parse failed: {e}", file=sys.stderr)
                 rows = []
@@ -131,15 +110,7 @@ def main(argv=None) -> int:
             except Exception as e:
                 print(f"load_runaway failed: {e}", file=sys.stderr)
                 rows = []
-        mapping_path = Path(args.mapping)
-        if not mapping_path.exists():
-            cand = Path(__file__).resolve().parent.parent.parent / "mappings" / f"{args.mapping}.yaml"
-            if cand.exists():
-                mapping_path = cand
-            else:
-                cand2 = Path(__file__).resolve().parent.parent.parent / "mappings" / args.mapping
-                if cand2.exists():
-                    mapping_path = cand2
+        mapping_path = resolve_mapping_path(args.mapping)
         from astrid.packs.typed_timeline.mapper import TypedDataTimelineMapper
         mapper = TypedDataTimelineMapper(rows, mapping_path)
         timeline = mapper.to_timeline()
@@ -149,14 +120,14 @@ def main(argv=None) -> int:
         timeline_path.write_text(json.dumps(timeline, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         assets_path.write_text(json.dumps(assets, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         total_sec = mapper.total_duration_sec
-        _ensure_tone_wav(out_dir / "tone.wav", min(total_sec, 1.5))
+        ensure_tone_wav(out_dir / "tone.wav", total_sec)
         try:
             af = assets.get("assets", {}).get("audio", {}).get("file")
             if af:
                 p = Path(af)
                 if not p.is_absolute():
                     p = (assets_path.parent / af).resolve()
-                    _ensure_tone_wav(p, min(total_sec, 1.5))
+                    ensure_tone_wav(p, total_sec)
         except Exception:
             pass
         video_path = out_dir / args.output_name

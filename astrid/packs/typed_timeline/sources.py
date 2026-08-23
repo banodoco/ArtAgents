@@ -5,7 +5,6 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from astrid.core.store.writer import DatabaseWriter
 
 
 def _row_to_dict(row: Any) -> dict[str, Any]:

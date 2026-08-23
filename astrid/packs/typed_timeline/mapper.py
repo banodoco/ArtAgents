@@ -86,25 +86,17 @@ class TypedDataTimelineMapper:
         mapping: Mapping[str, Any] | Path | str,
     ) -> None:
         if isinstance(mapping, (str, Path)):
-            p = Path(mapping)
-            # if it's a name like "runaway_colour", resolve inside pack
-            if not p.exists():
-                # try pack mappings dir
-                candidate = Path(__file__).parent / "mappings" / f"{str(mapping)}.yaml"
-                if candidate.exists():
-                    p = candidate
-                else:
-                    candidate2 = Path(__file__).parent / "mappings" / str(mapping)
-                    if candidate2.exists():
-                        p = candidate2
+            from .common import resolve_mapping_path
+
+            p = resolve_mapping_path(mapping)
             raw = yaml.safe_load(p.read_text(encoding="utf-8"))
             self.mapping = raw
         else:
             self.mapping = dict(mapping)
         # normalize rows sorted by ordinal when present
         self.rows = sorted(list(rows), key=lambda r: (int(r.get("ordinal", 0)) if isinstance(r.get("ordinal"), int) else 0, str(r.get("id", ""))))
-        # canvas
-        canvas = self.mapping.get("canvas", {})
+        # canvas — single canonical path
+        canvas = self.mapping.get("canvas", {}) if isinstance(self.mapping.get("canvas"), Mapping) else {}
         self.fps = int(canvas.get("fps", 48))
         if "total_frames" in canvas:
             self.total_frames = int(canvas["total_frames"])
@@ -115,14 +107,15 @@ class TypedDataTimelineMapper:
         elif "total_duration" in canvas:
             self.total_duration_sec = float(canvas["total_duration"])
             self.total_frames = int(round(self.total_duration_sec * self.fps))
-        else:
-            # fallback: from mapping top level
-            self.total_frames = int(self.mapping.get("total_frames", 8085))
-            self.total_duration_sec = self.total_frames / float(self.fps)
-        if self.mapping.get("total_frames") and "total_frames" not in canvas:
+        elif "total_frames" in self.mapping:
             self.total_frames = int(self.mapping["total_frames"])
             self.total_duration_sec = self.total_frames / float(self.fps)
-
+        elif "total_duration_sec" in self.mapping:
+            self.total_duration_sec = float(self.mapping["total_duration_sec"])  # type: ignore[arg-type]
+            self.total_frames = int(round(self.total_duration_sec * self.fps))
+        else:
+            self.total_frames = 8085
+            self.total_duration_sec = self.total_frames / float(self.fps)
     def _frame_for_row(self, row: Mapping[str, Any]) -> int | None:
         # prefer metadata.frame else ms_to_frame(start_ms)
         meta = row.get("metadata") if isinstance(row.get("metadata"), Mapping) else {}
@@ -182,30 +175,49 @@ class TypedDataTimelineMapper:
             track = clip_cfg.get("track", "colour")
             clip_type = clip_cfg.get("clipType", "audio-reactive-colour")
             if clip_type == "audio-reactive-colour":
-                # build events
+                # declarative spec from YAML — honor clip.events if present, else hard-coded fallback
+                events_cfg = clip_cfg.get("events") if isinstance(clip_cfg.get("events"), Mapping) else None
+                frame_spec = events_cfg.get("frame") if isinstance(events_cfg, Mapping) else None
+                color_spec = None
+                if isinstance(events_cfg, Mapping):
+                    color_spec = events_cfg.get("color") if "color" in events_cfg else events_cfg.get("colour")
+                id_spec = events_cfg.get("id") if isinstance(events_cfg, Mapping) else None
                 events: list[dict[str, Any]] = []
                 for row in self.rows:
-                    frame = self._frame_for_row(row)
+                    # frame: YAML spec via _resolve_value, fallback to _frame_for_row
+                    if frame_spec is not None:
+                        raw_frame = _resolve_value(row, self.rows, frame_spec, fps=float(self.fps), total_duration_sec=self.total_duration_sec)
+                        try:
+                            frame = int(raw_frame) if raw_frame is not None else None
+                        except Exception:
+                            frame = None
+                    else:
+                        frame = self._frame_for_row(row)
                     if frame is None:
                         continue
                     if frame <= 0 or frame >= self.total_frames:
-                        # clamp? spec says must be < total_frames and >0
-                        # skip out-of-range
                         continue
-                    color = _get_dotted(row, "metadata.colour_hex")
-                    if color is None:
-                        color = _get_dotted(row, "metadata.color_hex")
-                    if color is None:
-                        color = _get_dotted(row, "metadata.colour")
-                    if color is None:
-                        color = _get_dotted(row, "color")
+                    # color: YAML color.path/spec, fallback to hard-coded multi-path
+                    if color_spec is not None:
+                        color = _resolve_value(row, self.rows, color_spec, fps=float(self.fps), total_duration_sec=self.total_duration_sec)
+                    else:
+                        color = _get_dotted(row, "metadata.colour_hex")
+                        if color is None:
+                            color = _get_dotted(row, "metadata.color_hex")
+                        if color is None:
+                            color = _get_dotted(row, "metadata.colour")
+                        if color is None:
+                            color = _get_dotted(row, "color")
                     if not isinstance(color, str):
                         continue
                     color = color.upper()
-                    # id from row id or ordinal
-                    eid = str(row.get("id") or row.get("ordinal") or f"e{frame}")
+                    # id: YAML id.path/spec, fallback to row id/ordinal
+                    if id_spec is not None:
+                        raw_id = _resolve_value(row, self.rows, id_spec, fps=float(self.fps), total_duration_sec=self.total_duration_sec)
+                        eid = str(raw_id) if raw_id not in (None, "") else str(row.get("id") or row.get("ordinal") or f"e{frame}")
+                    else:
+                        eid = str(row.get("id") or row.get("ordinal") or f"e{frame}")
                     events.append({"id": eid, "frame": int(frame), "color": color})
-                # ensure sorted and strictly increasing, dedupe same frame (keep last)
                 events.sort(key=lambda e: e["frame"])
                 deduped: list[dict[str, Any]] = []
                 seen_frames: set[int] = set()

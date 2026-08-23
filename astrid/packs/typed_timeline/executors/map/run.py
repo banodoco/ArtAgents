@@ -8,31 +8,14 @@ guard_canonical_entrypoint('typed_timeline.map')
 import argparse
 import json
 import sys
-import hashlib
-import wave
-import struct
 from pathlib import Path
 
 from astrid.core._shared.result_manifest import build_manifest, write_manifest
 from astrid.core.pack.entrypoint import run_pack_main
 from astrid.core.foundation.project_paths import resolve_projects_root
 
-REPO_ROOT = Path(__file__).resolve().parents[5]
+from astrid.packs.typed_timeline.common import ensure_tone_wav, parse_json_rows, resolve_mapping_path
 
-
-def _ensure_tone_wav(path: Path, duration_sec: float) -> None:
-    if path.exists():
-        return
-    path.parent.mkdir(parents=True, exist_ok=True)
-    sample_rate = 48000
-    n_frames = int(sample_rate * duration_sec)
-    # generate silence via wave (mono 16-bit)
-    with wave.open(str(path), "w") as wf:
-        wf.setnchannels(1)
-        wf.setsampwidth(2)
-        wf.setframerate(sample_rate)
-        silence = struct.pack("<h", 0) * n_frames
-        wf.writeframes(silence)
 
 
 def main(argv=None) -> int:
@@ -70,13 +53,7 @@ def main(argv=None) -> int:
         rows = []
         if args.json_rows is not None:
             try:
-                parsed = json.loads(args.json_rows) if isinstance(args.json_rows, str) else args.json_rows
-                if isinstance(parsed, list):
-                    rows = parsed
-                elif isinstance(parsed, dict) and "rows" in parsed:
-                    rows = parsed["rows"]
-                else:
-                    rows = [parsed]
+                rows = parse_json_rows(args.json_rows)
             except Exception as e:
                 print(f"failed to parse json_rows: {e}", file=sys.stderr)
                 return 1
@@ -94,15 +71,7 @@ def main(argv=None) -> int:
                 rows = []
 
         # resolve mapping
-        mapping_path = Path(args.mapping)
-        if not mapping_path.exists():
-            cand = Path(__file__).resolve().parent.parent.parent / "mappings" / f"{args.mapping}.yaml"
-            if cand.exists():
-                mapping_path = cand
-            else:
-                cand2 = Path(__file__).resolve().parent.parent.parent / "mappings" / args.mapping
-                if cand2.exists():
-                    mapping_path = cand2
+        mapping_path = resolve_mapping_path(args.mapping)
 
         from astrid.packs.typed_timeline.mapper import TypedDataTimelineMapper
 
@@ -123,15 +92,15 @@ def main(argv=None) -> int:
             tone_path = (assets_path.parent / assets_file).resolve() if not Path(assets_file).is_absolute() else Path(assets_file)
             # if tone_path is inside out_dir, ensure it
             if str(tone_path).startswith(str(out_dir.resolve())) or tone_path.parent == out_dir.resolve():
-                _ensure_tone_wav(tone_path, total_sec)
+                ensure_tone_wav(tone_path, total_sec)
             else:
                 # create sibling tone.wav in out_dir as well
                 fallback = out_dir / "tone.wav"
-                _ensure_tone_wav(fallback, total_sec)
+                ensure_tone_wav(fallback, total_sec)
                 # also ensure the declared path exists if relative to assets_path
-                _ensure_tone_wav(tone_path, total_sec)
+                ensure_tone_wav(tone_path, total_sec)
         else:
-            _ensure_tone_wav(out_dir / "tone.wav", total_sec)
+            ensure_tone_wav(out_dir / "tone.wav", total_sec)
 
         # write manifest
         manifest_path = out_dir / "manifest.json"
