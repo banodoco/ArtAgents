@@ -371,16 +371,36 @@ def _discover(project_dir: Path) -> tuple[list[ManagedTimeline], list[str]]:
             raise RuntimeError(f"backfill marker unreadable: {exc}") from exc
         except Exception as exc:
             raise RuntimeError(f"backfill marker unreadable: {exc}") from exc
-        # Kernel lookup by ULID
+        # Kernel lookup by ULID — tenant-scoped by owning project (derived from project_dir)
         timeline_id = None
         slug = None
+        # Derive owning project slug from project_dir layout <root>/<project>
+        _proj_slug_vis = None
+        try:
+            _proj_slug_vis = Path(project_dir).name
+            if not _proj_slug_vis:
+                _proj_slug_vis = None
+        except Exception:
+            _proj_slug_vis = None
         try:
             db_path = _derive_db(projects_root)
             if db_path.is_file():
                 conn = _sql.connect(f"file:{db_path}?mode=ro", uri=True)
                 try:
                     conn.row_factory = _sql.Row
-                    row = conn.execute("SELECT json_extract(payload_json,'$.data.timeline_id') as tid, json_extract(payload_json,'$.data.slug') as s FROM events WHERE kind='timeline.created' AND json_extract(payload_json,'$.data.timeline_ulid')=? LIMIT 1", (ulid,)).fetchone()
+                    row = None
+                    if _proj_slug_vis is not None:
+                        try:
+                            prow = conn.execute("SELECT id FROM projects WHERE slug=?", (_proj_slug_vis,)).fetchone()
+                            if prow is not None and prow["id"]:
+                                pid = str(prow["id"])
+                                row = conn.execute("SELECT json_extract(payload_json,'$.data.timeline_id') as tid, json_extract(payload_json,'$.data.slug') as s FROM events WHERE kind='timeline.created' AND project_id=? AND lower(json_extract(payload_json,'$.data.timeline_ulid'))=lower(?) LIMIT 1", (pid, ulid,)).fetchone()
+                            else:
+                                row = None
+                        except Exception:
+                            row = conn.execute("SELECT json_extract(payload_json,'$.data.timeline_id') as tid, json_extract(payload_json,'$.data.slug') as s FROM events WHERE kind='timeline.created' AND json_extract(payload_json,'$.data.timeline_ulid')=? LIMIT 1", (ulid,)).fetchone()
+                    else:
+                        row = conn.execute("SELECT json_extract(payload_json,'$.data.timeline_id') as tid, json_extract(payload_json,'$.data.slug') as s FROM events WHERE kind='timeline.created' AND json_extract(payload_json,'$.data.timeline_ulid')=? LIMIT 1", (ulid,)).fetchone()
                     if row is not None and row["tid"]:
                         timeline_id = str(row["tid"])
                         slug = str(row["s"]) if row["s"] else None

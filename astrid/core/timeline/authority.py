@@ -76,15 +76,47 @@ def resolve_authoritative_timeline_id(
                 # Fail-closed marker read
                 state = _load_backfill_state(pr)
                 # Kernel lookup by ULID (case-insensitive for ULID)
+                # Tenant scoping: derive owning project from timeline_home layout
+                # <root>/<project>/timelines/<ulid> => th.parent.parent.name is slug.
+                project_slug: str | None = None
+                try:
+                    if th.parent.name == "timelines" and th.parent.parent.is_dir():
+                        cand_slug = th.parent.parent.name
+                        if cand_slug:
+                            project_slug = cand_slug
+                except Exception:
+                    project_slug = None
                 import sqlite3 as _sql
 
                 conn = _sql.connect(f"file:{db}?mode=ro", uri=True)
                 try:
                     conn.row_factory = _sql.Row
-                    row = conn.execute(
-                        "SELECT json_extract(payload_json,'$.data.timeline_id') as tid FROM events WHERE kind='timeline.created' AND lower(json_extract(payload_json,'$.data.timeline_ulid'))=lower(?) LIMIT 1",
-                        (ulid,),
-                    ).fetchone()
+                    row = None
+                    if project_slug is not None:
+                        # Try to scope by project_id when layout derivable
+                        try:
+                            prow = conn.execute("SELECT id FROM projects WHERE slug=?", (project_slug,)).fetchone()
+                            if prow is not None and prow["id"]:
+                                pid = str(prow["id"])
+                                row = conn.execute(
+                                    "SELECT json_extract(payload_json,'$.data.timeline_id') as tid FROM events WHERE kind='timeline.created' AND project_id=? AND lower(json_extract(payload_json,'$.data.timeline_ulid'))=lower(?) LIMIT 1",
+                                    (pid, ulid),
+                                ).fetchone()
+                            else:
+                                # Layout derivable but project not in DB -> scoped miss (do NOT fall back to global, prevents cross-project leak)
+                                row = None
+                        except Exception:
+                            # On lookup failure, fall back to unscoped for backward compat (non-layout case)
+                            row = conn.execute(
+                                "SELECT json_extract(payload_json,'$.data.timeline_id') as tid FROM events WHERE kind='timeline.created' AND lower(json_extract(payload_json,'$.data.timeline_ulid'))=lower(?) LIMIT 1",
+                                (ulid,),
+                            ).fetchone()
+                    else:
+                        # Non-layout fallback (e.g. in-memory tmp without <root>/<project>/timelines): keep current global behavior
+                        row = conn.execute(
+                            "SELECT json_extract(payload_json,'$.data.timeline_id') as tid FROM events WHERE kind='timeline.created' AND lower(json_extract(payload_json,'$.data.timeline_ulid'))=lower(?) LIMIT 1",
+                            (ulid,),
+                        ).fetchone()
                     if row and row["tid"]:
                         tid = str(row["tid"])
                         if tid in state:

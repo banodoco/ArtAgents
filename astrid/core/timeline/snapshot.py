@@ -701,19 +701,46 @@ def _is_timeline_backfilled(timeline_dir: Path, project_root: Path | None) -> tu
             raise SnapshotIntegrityError(f"unreadable identity sidecar {identity_path}: {exc}") from exc
     if timeline_id is None:
         ulid = Path(timeline_dir).name
+        # Derive owning project slug from layout for tenant scoping
+        _snap_proj_slug: str | None = None
         try:
-            from astrid.core.integrations.reigh.bridge_service import derive_database_path
+            _td_snap = Path(timeline_dir)
+            if _td_snap.parent.name == "timelines" and _td_snap.parent.parent.is_dir():
+                _snap_proj_slug = _td_snap.parent.parent.name
+        except Exception:
+            _snap_proj_slug = None
+        try:
             import sqlite3
+
+            from astrid.core.integrations.reigh.bridge_service import derive_database_path
 
             db_path = derive_database_path(projects_root)
             if db_path.is_file():
                 conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
                 try:
                     conn.row_factory = sqlite3.Row
-                    row = conn.execute(
-                        "SELECT json_extract(payload_json, '$.data.timeline_id') as tid FROM events WHERE kind = ? AND json_extract(payload_json, '$.data.timeline_ulid') = ? LIMIT 1",
-                        ("timeline.created", ulid),
-                    ).fetchone()
+                    row = None
+                    if _snap_proj_slug is not None:
+                        try:
+                            prow = conn.execute("SELECT id FROM projects WHERE slug=?", (_snap_proj_slug,)).fetchone()
+                            if prow is not None and prow["id"]:
+                                pid = str(prow["id"])
+                                row = conn.execute(
+                                    "SELECT json_extract(payload_json, '$.data.timeline_id') as tid FROM events WHERE kind = ? AND project_id=? AND lower(json_extract(payload_json, '$.data.timeline_ulid'))=lower(?) LIMIT 1",
+                                    ("timeline.created", pid, ulid),
+                                ).fetchone()
+                            else:
+                                row = None
+                        except Exception:
+                            row = conn.execute(
+                                "SELECT json_extract(payload_json, '$.data.timeline_id') as tid FROM events WHERE kind = ? AND json_extract(payload_json, '$.data.timeline_ulid') = ? LIMIT 1",
+                                ("timeline.created", ulid),
+                            ).fetchone()
+                    else:
+                        row = conn.execute(
+                            "SELECT json_extract(payload_json, '$.data.timeline_id') as tid FROM events WHERE kind = ? AND json_extract(payload_json, '$.data.timeline_ulid') = ? LIMIT 1",
+                            ("timeline.created", ulid),
+                        ).fetchone()
                     if row is not None and row["tid"]:
                         timeline_id = str(row["tid"])
                     else:
@@ -739,15 +766,36 @@ def _is_timeline_backfilled(timeline_dir: Path, project_root: Path | None) -> tu
     # Cross-check: if sidecar timeline_id mismatches kernel binding for same ULID → typed failure
     if timeline_id is not None:
         ulid = Path(timeline_dir).name
+        # Derive owning project slug for scoping (same as above)
+        _snap_cc_proj_slug: str | None = None
         try:
-            from astrid.core.integrations.reigh.bridge_service import derive_database_path as _ddb
+            _td_cc = Path(timeline_dir)
+            if _td_cc.parent.name == "timelines" and _td_cc.parent.parent.is_dir():
+                _snap_cc_proj_slug = _td_cc.parent.parent.name
+        except Exception:
+            _snap_cc_proj_slug = None
+        try:
             import sqlite3 as _sq2
+
+            from astrid.core.integrations.reigh.bridge_service import derive_database_path as _ddb
             _db2 = _ddb(projects_root)
             if _db2.is_file():
                 c2 = _sq2.connect(f"file:{_db2}?mode=ro", uri=True)
                 try:
                     c2.row_factory = _sq2.Row
-                    kr = c2.execute("SELECT json_extract(payload_json,'$.data.timeline_id') as ktid FROM events WHERE kind='timeline.created' AND json_extract(payload_json,'$.data.timeline_ulid')=? LIMIT 1", (ulid,)).fetchone()
+                    kr = None
+                    if _snap_cc_proj_slug is not None:
+                        try:
+                            prow2 = c2.execute("SELECT id FROM projects WHERE slug=?", (_snap_cc_proj_slug,)).fetchone()
+                            if prow2 is not None and prow2["id"]:
+                                pid2 = str(prow2["id"])
+                                kr = c2.execute("SELECT json_extract(payload_json,'$.data.timeline_id') as ktid FROM events WHERE kind='timeline.created' AND project_id=? AND lower(json_extract(payload_json,'$.data.timeline_ulid'))=lower(?) LIMIT 1", (pid2, ulid,)).fetchone()
+                            else:
+                                kr = None
+                        except Exception:
+                            kr = c2.execute("SELECT json_extract(payload_json,'$.data.timeline_id') as ktid FROM events WHERE kind='timeline.created' AND json_extract(payload_json,'$.data.timeline_ulid')=? LIMIT 1", (ulid,)).fetchone()
+                    else:
+                        kr = c2.execute("SELECT json_extract(payload_json,'$.data.timeline_id') as ktid FROM events WHERE kind='timeline.created' AND json_extract(payload_json,'$.data.timeline_ulid')=? LIMIT 1", (ulid,)).fetchone()
                     if kr and kr["ktid"]:
                         ktid = str(kr["ktid"])
                         if ktid in state and ktid != timeline_id:

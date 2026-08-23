@@ -247,16 +247,31 @@ def _resolve_or_bootstrap_backend(
             _conn = _sql.connect(f"file:{_db}?mode=ro", uri=True)
             try:
                 _conn.row_factory = _sql.Row
-                _row = _conn.execute("SELECT json_extract(payload_json,'$.data.timeline_id') as tid FROM events WHERE kind='timeline.created' AND json_extract(payload_json,'$.data.timeline_ulid')=? LIMIT 1", (ulid_try,)).fetchone()
+                # Tenant-scoped lookup: derive project_id from project_slug
+                _pid_eh: str | None = None
+                try:
+                    prow = _conn.execute("SELECT id FROM projects WHERE slug=?", (project_slug,)).fetchone()
+                    if prow is not None and prow["id"]:
+                        _pid_eh = str(prow["id"])
+                except Exception:
+                    _pid_eh = None
+                _row = None
+                if _pid_eh is not None:
+                    _row = _conn.execute("SELECT json_extract(payload_json,'$.data.timeline_id') as tid FROM events WHERE kind='timeline.created' AND project_id=? AND lower(json_extract(payload_json,'$.data.timeline_ulid'))=lower(?) LIMIT 1", (_pid_eh, ulid_try,)).fetchone()
+                else:
+                    _row = _conn.execute("SELECT json_extract(payload_json,'$.data.timeline_id') as tid FROM events WHERE kind='timeline.created' AND json_extract(payload_json,'$.data.timeline_ulid')=? LIMIT 1", (ulid_try,)).fetchone()
                 if _row and _row["tid"]:
                     tl_id_k = str(_row["tid"])
                 else:
-                    _row2 = _conn.execute("SELECT json_extract(payload_json,'$.data.timeline_id') as tid FROM events WHERE kind='timeline.created' AND json_extract(payload_json,'$.data.slug')=? LIMIT 1", (slug,)).fetchone()
+                    _row2 = None
+                    if _pid_eh is not None:
+                        _row2 = _conn.execute("SELECT json_extract(payload_json,'$.data.timeline_id') as tid FROM events WHERE kind='timeline.created' AND project_id=? AND lower(json_extract(payload_json,'$.data.slug'))=lower(?) LIMIT 1", (_pid_eh, slug,)).fetchone()
+                    else:
+                        _row2 = _conn.execute("SELECT json_extract(payload_json,'$.data.timeline_id') as tid FROM events WHERE kind='timeline.created' AND json_extract(payload_json,'$.data.slug')=? LIMIT 1", (slug,)).fetchone()
                     if _row2 and _row2["tid"]:
                         tl_id_k = str(_row2["tid"])
             finally:
                 _conn.close()
-            if tl_id_k:
                 try:
                     _state = _read_state(_pr)
                     if tl_id_k in _state:
