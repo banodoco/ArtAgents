@@ -142,7 +142,7 @@ If a manual trigger is needed, run a one-liner with the snippet in §5 (or `pyth
 ## 9. Cutover note
 
 - Local SQLite is THE authority; Turso is REPLICA target only — never a selector fallback, never co-authority.
-- Replication allowlist: `timelines` identity columns (`timeline_id`, `project_id`, `event_stream_id`, `name`) + `document_json` + integer `version` and scoped `events` rows (`event_id`, `timeline_id`, `project_id`, `stream_id`, `seq`, `kind`, `payload_json`, `actor_kind`, `actor_id`, `txn_id`, `idempotency_key`, `created_at`) ONLY. `asset_registry_json` excluded; events with `data:`/`base64` payloads are refused (tested in `test_turso_replica.py`).
+- Replication allowlist: `timelines` identity columns (`timeline_id`, `project_id`, `event_stream_id`, `name`) + `document_json` + integer `version` and scoped `events` rows (`event_id`, `timeline_id`, `project_id`, `stream_id`, `seq`, `kind`, `payload_json`, `actor_kind`, `actor_id`, `txn_id`, `idempotency_key`, `created_at`) ONLY. `asset_registry_json` excluded; events with `data:`/`base64` payloads are refused (tested in `tests/timeline/test_turso_sync.py`).
 - Supabase is demoted at cutover; nothing keeps both replicas (one writer, one file; bridge/FSA remains the asset plane).
 - Sync machinery is polling + watchdog ack discipline only (no pub-sub).
 

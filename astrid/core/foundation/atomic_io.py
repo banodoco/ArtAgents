@@ -18,6 +18,10 @@ class AtomicWriteError(OSError):
     """Raised when an atomic write cannot be completed."""
 
 
+class AtomicReadError(OSError):
+    """Raised when a JSON read cannot be completed due to an OS error."""
+
+
 def _fsync_dir(path: Path) -> None:
     """Best-effort directory fsync to durably record the rename."""
     flags: int = getattr(os, "O_DIRECTORY", 0) | os.O_RDONLY
@@ -142,7 +146,6 @@ def read_json(path: str | Path) -> Any:
     except json.JSONDecodeError as exc:
         raise ValueError(f"invalid JSON in {json_path}: {exc.msg}") from exc
     except OSError as exc:
-        raise AstridError(
+        raise AtomicReadError(
             f"failed to read {json_path}: {exc}",
-            recovery_command="check file permissions and disk health, then retry",
         ) from exc
