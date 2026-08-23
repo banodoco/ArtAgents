@@ -478,7 +478,7 @@ def _discover(project_dir: Path) -> tuple[list[ManagedTimeline], list[str]]:
                 resolve_authoritative_timeline_id as _res_auth_vis,
             )
             from astrid.packs.timeline.backfill import BackfillError as _BackfillErrorVis
-            # Derive projects_root from project_dir (<root>/<slug>)
+            # Derive projects_root from project_dir (<root>/<slug>) — fail closed on derivation fault.
             _pr_vis = None
             try:
                 _cand_vis = Path(project_dir).resolve()
@@ -488,8 +488,9 @@ def _discover(project_dir: Path) -> tuple[list[ManagedTimeline], list[str]]:
                         resolve_projects_root as _rr_vis,
                     )
                     _pr_vis = _rr_vis(None)
-            except Exception:
-                _pr_vis = None
+            except Exception as _exc_pr_vis:
+                diagnostics.append(f"skipped {child.name}: timeline authority root could not be determined: {_exc_pr_vis}")
+                continue
             _auth_vis: str | None = None
             try:
                 _auth_vis = _res_auth_vis(child, _pr_vis)
@@ -561,15 +562,9 @@ def _discover(project_dir: Path) -> tuple[list[ManagedTimeline], list[str]]:
                         )
 
                         _f_projects_root = _rr_f2(None)
-                except Exception:
-                    try:
-                        from astrid.core.foundation.project_paths import (
-                            resolve_projects_root as _rr_f3,
-                        )
-
-                        _f_projects_root = _rr_f3(None)
-                    except Exception:
-                        _f_projects_root = None
+                except Exception as _exc_f_root:
+                    diagnostics.append(f"skipped {child.name}: timeline authority root could not be determined: {_exc_f_root}")
+                    continue
                 if _f_projects_root is not None:
                     try:
                         from astrid.packs.timeline.backfill import read_backfill_state as _rbf_f
