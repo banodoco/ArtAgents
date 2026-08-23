@@ -107,6 +107,7 @@ _ULID_RE = re.compile(r"^[0123456789abcdefghjkmnpqrstvwxyz]{26}$")
 """Lowercase 26-character Crockford ULID grammar (bridge §8 order 2)."""
 
 _RUNAWAY_CURSOR_VERSION = 1
+_RUNAWAY_CURSOR_SIGNATURE_BYTES = 18
 _MAX_CURSOR_BYTES = 2_048
 
 
@@ -114,7 +115,7 @@ def _encode_runaway_cursor(payload: Mapping[str, Any], *, key: bytes) -> str:
     raw = json.dumps(
         dict(payload), sort_keys=True, separators=(",", ":"), ensure_ascii=True
     ).encode("utf-8")
-    digest = hmac.digest(key, raw, "sha256")[:18]
+    digest = hmac.digest(key, raw, "sha256")[:_RUNAWAY_CURSOR_SIGNATURE_BYTES]
     return base64.urlsafe_b64encode(raw + b"." + digest).rstrip(b"=").decode("ascii")
 
 
@@ -124,8 +125,14 @@ def _decode_runaway_cursor(cursor: str, *, key: bytes) -> dict[str, Any]:
     try:
         padded = cursor + "=" * (-len(cursor) % 4)
         decoded = base64.urlsafe_b64decode(padded.encode("ascii"))
-        raw, supplied = decoded.rsplit(b".", 1)
-        expected = hmac.digest(key, raw, "sha256")[:18]
+        delimiter_index = len(decoded) - _RUNAWAY_CURSOR_SIGNATURE_BYTES - 1
+        if delimiter_index < 0 or decoded[delimiter_index : delimiter_index + 1] != b".":
+            raise ValueError("cursor signature delimiter is missing")
+        raw = decoded[:delimiter_index]
+        supplied = decoded[-_RUNAWAY_CURSOR_SIGNATURE_BYTES:]
+        expected = hmac.digest(key, raw, "sha256")[
+            :_RUNAWAY_CURSOR_SIGNATURE_BYTES
+        ]
         if not hmac.compare_digest(supplied, expected):
             raise ValueError("cursor authentication mismatch")
         payload = json.loads(raw.decode("utf-8"))

@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
 import json
+import random
+import string
 import threading
 from contextlib import contextmanager
 from pathlib import Path
@@ -15,8 +20,85 @@ from astrid.core.receipts.service import ReceiptService
 from astrid.core.repositories.runs import RunRepository
 from astrid.core.store.uow import UnitOfWork
 from astrid.packs import compose_standard_bridge
+from astrid.packs.timeline import bridge as timeline_bridge
 
 TS = "2026-08-15T00:00:00.000000+00:00"
+
+
+def _cursor_payload(counter: int, label: str) -> dict[str, Any]:
+    return {
+        "v": 1,
+        "p": f"project-{counter}-{label}",
+        "r": f"run.{counter}.{label}",
+        "s": counter,
+        "o": counter * 2,
+        "q": f"run-{counter}",
+        "i": f"transition-{counter}-{label}",
+    }
+
+
+def test_runaway_cursor_accepts_binary_signature_containing_delimiter() -> None:
+    """A signature byte equal to ``.`` must not be mistaken for the separator."""
+
+    key = (30).to_bytes(32, "big")
+    payload = {
+        "v": 1,
+        "p": "project",
+        "r": "run",
+        "s": 5,
+        "o": 3,
+        "q": "run",
+        "i": "id",
+    }
+    raw = json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+    ).encode("utf-8")
+    signature = hmac.digest(key, raw, "sha256")[
+        : timeline_bridge._RUNAWAY_CURSOR_SIGNATURE_BYTES
+    ]
+    assert b"." in signature  # deterministic counterexample to delimiter splitting
+
+    cursor = timeline_bridge._encode_runaway_cursor(payload, key=key)
+
+    assert timeline_bridge._decode_runaway_cursor(cursor, key=key) == payload
+
+
+def test_runaway_cursor_round_trip_and_tamper_properties() -> None:
+    """Many deterministic pseudo-random keys/payloads round-trip and fail closed."""
+
+    import pytest
+
+    rng = random.Random(0xA57D)
+    alphabet = string.ascii_letters + string.digits + ".-_"
+    for counter in range(512):
+        label = "".join(rng.choice(alphabet) for _ in range(rng.randrange(1, 40)))
+        payload = _cursor_payload(counter, label)
+        key = hashlib.sha256(f"cursor-key-{counter}-{label}".encode()).digest()
+        cursor = timeline_bridge._encode_runaway_cursor(payload, key=key)
+        assert timeline_bridge._decode_runaway_cursor(cursor, key=key) == payload
+
+        padded = cursor + "=" * (-len(cursor) % 4)
+        decoded = bytearray(base64.urlsafe_b64decode(padded.encode("ascii")))
+        decoded[rng.randrange(len(decoded))] ^= 1
+        tampered = base64.urlsafe_b64encode(decoded).rstrip(b"=").decode("ascii")
+        with pytest.raises(timeline_bridge.BridgeCursorError):
+            timeline_bridge._decode_runaway_cursor(tampered, key=key)
+        with pytest.raises(timeline_bridge.BridgeCursorError):
+            timeline_bridge._decode_runaway_cursor(cursor[:-1], key=key)
+
+    payload = _cursor_payload(513, "wrong-delimiter")
+    key = hashlib.sha256(b"wrong-delimiter").digest()
+    raw = json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+    ).encode("utf-8")
+    signature = hmac.digest(key, raw, "sha256")[
+        : timeline_bridge._RUNAWAY_CURSOR_SIGNATURE_BYTES
+    ]
+    malformed = base64.urlsafe_b64encode(raw + b":" + signature).rstrip(b"=").decode(
+        "ascii"
+    )
+    with pytest.raises(timeline_bridge.BridgeCursorError):
+        timeline_bridge._decode_runaway_cursor(malformed, key=key)
 
 
 def _repo_create_project(composition, *, slug: str, key: str):
