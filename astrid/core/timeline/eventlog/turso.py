@@ -656,24 +656,34 @@ class TursoReplicaClient:
                 for key_kind, existing in candidate_checks:
                     if existing is None:
                         continue
-                    # Existing row found — compare identity + payload
+                    # Existing row found — compare identity + payload + kind + timeline identity
                     existing_payload = str(existing.get("payload_json", ""))
                     existing_event_id = str(existing.get("event_id", ""))
                     existing_seq = existing.get("seq")
                     existing_ik = str(existing.get("idempotency_key", ""))
+                    existing_kind = str(existing.get("kind", ""))
+                    existing_tid = str(existing.get("timeline_id", ""))
+                    existing_pid = str(existing.get("project_id", ""))
+                    existing_sid = str(existing.get("stream_id", ""))
                     payload_equal = existing_payload == ev.payload_json
                     identity_equal = (
                         existing_event_id == ev.event_id
                         and existing_seq == ev.seq
                         and existing_ik == ev.idempotency_key
                     )
-                    if payload_equal and identity_equal:
+                    kind_equal = existing_kind == ev.kind
+                    timeline_identity_equal = (
+                        existing_tid == ev.timeline_id
+                        and existing_pid == ev.project_id
+                        and existing_sid == ev.stream_id
+                    )
+                    if payload_equal and identity_equal and kind_equal and timeline_identity_equal:
                         is_exact_replay = True
                         continue  # noqa: E501 — exact replay benign for this key
                     raise TursoEventCollisionError(
                         f"event collision key={key_kind} "  # noqa: E501
-                        f"candidate event_id={ev.event_id!r} seq={ev.seq} idempotency_key={ev.idempotency_key!r} "  # noqa: E501
-                        f"existing event_id={existing_event_id!r} seq={existing_seq!r} "  # noqa: E501
+                        f"candidate event_id={ev.event_id!r} seq={ev.seq} idempotency_key={ev.idempotency_key!r} kind={ev.kind!r} "  # noqa: E501
+                        f"existing event_id={existing_event_id!r} seq={existing_seq!r} kind={existing_kind!r} "  # noqa: E501
                         f"candidate_hash={_h(ev.payload_json)} existing_hash={_h(existing_payload)}"  # noqa: E501
                     )
                 if is_exact_replay:
@@ -685,6 +695,9 @@ class TursoReplicaClient:
                     "seq": ev.seq,
                     "payload_json": ev.payload_json,
                     "idempotency_key": ev.idempotency_key,
+                    "kind": ev.kind,
+                    "project_id": ev.project_id,
+                    "stream_id": ev.stream_id,
                 }
                 existing_by_seq[(ev.timeline_id, ev.seq)] = existing_by_id[ev.event_id]
                 existing_by_ik[(ev.timeline_id, ev.idempotency_key)] = existing_by_id[ev.event_id]
@@ -692,6 +705,7 @@ class TursoReplicaClient:
             events_to_push = filtered
         statements: list[tuple[str, tuple[Any, ...]]] = []
         if document is not None:
+            self._validate_document(document)
             sql = self._document_upsert_sql(expected_remote_version)
             params_list: list[Any] = [
                 document.timeline_id,

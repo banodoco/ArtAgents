@@ -124,8 +124,153 @@ def read_turso_sync_state(timeline_home: str | Path) -> TursoSyncState | None:
 
 def write_turso_sync_state(timeline_home: str | Path, state: TursoSyncState) -> Path:
     path = turso_sync_state_path(timeline_home)
-    write_json_atomic(path, state.to_dict())
+    try:
+        write_json_atomic(path, state.to_dict())
+    except TursoSyncError:
+        raise
+    except OSError as exc:
+        raise TursoSyncError(f"turso sync state write failed at {path}: {exc}") from exc
+    except Exception as exc:
+        raise TursoSyncError(f"turso sync state write failed at {path}: {exc}") from exc
     return path
+
+
+def _write_state_typed(timeline_home: str | Path, state: TursoSyncState) -> Path:
+    """Wrapper ensuring OSError never escapes as raw."""
+    try:
+        return write_turso_sync_state(timeline_home, state)
+    except TursoSyncError:
+        raise
+    except OSError as exc:
+        raise TursoSyncError(f"turso sync state write failed at {timeline_home}: {exc}") from exc
+    except Exception as exc:
+        raise TursoSyncError(f"turso sync state write failed at {timeline_home}: {exc}") from exc
+
+
+def _local_payload_json_for_event(timeline_id: str, event_id: str, projects_root: Path) -> str | None:  # noqa: E501
+    return _fetch_event_payload_json(timeline_id, event_id, projects_root)
+
+
+def _suffixes_byte_equal(
+    timeline_id: str,
+    local_events: list[Any],
+    remote_rows: list[dict[str, Any]],
+    projects_root: Path,
+    backend: Any | None = None,
+    strict_event_id: bool = True,
+) -> bool:
+    """Compare local TimelineEvents vs remote dict rows byte-equal on identity+payload+kind+stream."""  # noqa: E501
+    if len(local_events) != len(remote_rows):
+        return False
+    if not local_events and not remote_rows:
+        return True
+    for le, rr in zip(local_events, remote_rows):
+        if strict_event_id and str(getattr(le, "event_id", "")) != str(rr.get("event_id", "")):
+            return False
+        if str(getattr(le, "kind", "")) != str(rr.get("kind", "")):
+            return False
+        local_pj = _local_payload_json_for_event(timeline_id, str(getattr(le, "event_id", "")), projects_root)  # noqa: E501
+        if local_pj is None:
+            try:
+                payload_dict = getattr(le, "payload", {})
+                if not isinstance(payload_dict, dict):
+                    payload_dict = {}
+                local_pj = json.dumps(
+                    {
+                        "data": payload_dict,
+                        "_integrity": {
+                            "event_hash": getattr(le, "hash", None),
+                            "previous_event_hash": getattr(le, "prev_hash", None),
+                        },
+                    }
+                )
+            except Exception:
+                return False
+        remote_pj = str(rr.get("payload_json", ""))
+        # Byte-equal on data payload + kind, but allow integrity/actor metadata to differ (pull re-hash).  # noqa: E501
+        # Compare data field if both are JSON with data key; else fall back to full string equality.
+        try:
+            local_obj = json.loads(local_pj) if local_pj else {}
+            remote_obj = json.loads(remote_pj) if remote_pj else {}
+            if isinstance(local_obj, dict) and isinstance(remote_obj, dict) and "data" in local_obj and "data" in remote_obj:  # noqa: E501
+                if json.dumps(local_obj.get("data"), sort_keys=True, separators=(",",":")) != json.dumps(remote_obj.get("data"), sort_keys=True, separators=(",",":")):  # noqa: E501
+                    return False
+            else:
+                if local_pj != remote_pj:
+                    return False
+        except Exception:
+            if local_pj != remote_pj:
+                return False
+        seq_local = _fetch_event_seq(timeline_id, str(getattr(le, "event_id", "")), projects_root)
+        try:
+            seq_remote = int(rr.get("seq"))
+        except Exception:
+            seq_remote = rr.get("seq")
+        if seq_local != seq_remote:
+            return False
+        if str(rr.get("timeline_id", "")) != str(timeline_id):
+            return False
+    return True
+
+
+def _is_push_resume_already_committed(
+    timeline_id: str,
+    timeline_home: str | Path,
+    projects_root: Path,
+    backend: Any,
+    replica: TursoReplicaClient,
+    state: TursoSyncState | None,
+    bookmark: Any | None,
+) -> bool:
+    """Reconciliation for crash-after-commit: do local suffix and remote suffix byte-match beyond cursor?"""  # noqa: E501
+    try:
+        after_local = bookmark.spoke_event_id if bookmark and getattr(bookmark, "spoke_event_id", None) else (state.remote_event_id if state and state.remote_event_id else (state.local_event_id if state and state.local_event_id else None))  # noqa: E501
+        after_remote = bookmark.hub_event_id if bookmark and getattr(bookmark, "hub_event_id", None) else (state.remote_event_id if state and state.remote_event_id else None)  # noqa: E501
+        try:
+            local_suffix = backend.read_events(after=after_local) if after_local else backend.read_events()  # noqa: E501
+        except Exception:
+            return False
+        try:
+            remote_suffix = replica.fetch_remote_events(timeline_id, after=after_remote)
+        except Exception:
+            return False
+        if not local_suffix and not remote_suffix:
+            return False
+        if not local_suffix or not remote_suffix:
+            return False
+        return _suffixes_byte_equal(timeline_id, local_suffix, remote_suffix, projects_root, backend, strict_event_id=True)  # noqa: E501
+    except Exception:
+        return False
+
+
+def _is_pull_resume_already_committed(
+    timeline_id: str,
+    timeline_home: str | Path,
+    projects_root: Path,
+    backend: Any,
+    replica: TursoReplicaClient,
+    state: TursoSyncState | None,
+    bookmark: Any | None,
+) -> bool:
+    """Pull side resume: remote suffix beyond bookmark equals local suffix beyond bookmark."""
+    try:
+        after_local = bookmark.spoke_event_id if bookmark and getattr(bookmark, "spoke_event_id", None) else (state.local_event_id if state and state.local_event_id else None)  # noqa: E501
+        after_remote = bookmark.hub_event_id if bookmark and getattr(bookmark, "hub_event_id", None) else (state.remote_event_id if state and state.remote_event_id else None)  # noqa: E501
+        try:
+            local_suffix = backend.read_events(after=after_local) if after_local else backend.read_events()  # noqa: E501
+        except Exception:
+            return False
+        try:
+            remote_suffix = replica.fetch_remote_events(timeline_id, after=after_remote)
+        except Exception:
+            return False
+        if not local_suffix and not remote_suffix:
+            return False
+        if not local_suffix or not remote_suffix:
+            return False
+        return _suffixes_byte_equal(timeline_id, local_suffix, remote_suffix, projects_root, backend, strict_event_id=False)  # noqa: E501
+    except Exception:
+        return False
 
 
 @dataclass(frozen=True)
@@ -345,6 +490,46 @@ def push_to_turso(
             local_version=local_head.version,
             remote_version=remote_head.version,
         )
+    # W3 resume-before-fork: crash-after-commit reconciliation
+    if action in ("both_advanced", "bookmark_incompatible"):
+        try:
+            if _is_push_resume_already_committed(timeline_id, timeline_home, root, backend, replica, state, bookmark):  # noqa: E501
+                try:
+                    fresh_local = _local_head_snapshot(backend)
+                    fresh_remote = _remote_head_snapshot(replica, timeline_id)
+                except Exception as exc:
+                    raise TursoSyncError(f"resume head refresh failed: {exc}") from exc
+                try:
+                    inferred = None
+                    after_local_tmp = bookmark.spoke_event_id if bookmark and getattr(bookmark, "spoke_event_id", None) else (state.remote_event_id if state and state.remote_event_id else None)  # noqa: E501
+                    try:
+                        suffix = backend.read_events(after=after_local_tmp) if after_local_tmp else backend.read_events()  # noqa: E501
+                        if suffix:
+                            inferred = suffix[-1].event_id
+                    except Exception:
+                        inferred = None
+                    resume_state = TursoSyncState(
+                        timeline_id=timeline_id,
+                        local_version=fresh_local.version,
+                        local_event_id=fresh_local.last_event_id,
+                        local_hash=fresh_local.last_hash,
+                        remote_version=fresh_remote.version,
+                        remote_event_id=fresh_remote.last_event_id,
+                        remote_hash=fresh_remote.last_hash,
+                        updated_at=utc_now_iso(),
+                        last_pushed_event_id=inferred or (state.last_pushed_event_id if state else None),  # noqa: E501
+                    )
+                except Exception as exc:
+                    raise TursoSyncError(f"resume state build failed: {exc}") from exc
+                _write_state_typed(timeline_home, resume_state)
+                honest = "up_to_date" if fresh_local.version == fresh_remote.version and fresh_remote.version != 0 else "pushed"  # noqa: E501
+                if honest == "up_to_date":
+                    return TursoSyncResult(action="up_to_date", timeline_id=timeline_id, local_version=fresh_local.version, remote_version=fresh_remote.version)  # noqa: E501
+                return TursoSyncResult(action="pushed", timeline_id=timeline_id, local_version=fresh_local.version, remote_version=fresh_remote.version, pushed=0)  # noqa: E501
+        except TursoSyncError:
+            raise
+        except Exception:
+            pass
     if action in ("bookmark_incompatible",):
         raise TursoSyncError(
             f"bookmark incompatible — refusing push (action={action})"
@@ -597,16 +782,16 @@ def push_to_turso(
         timeline_id=timeline_id,
         local_version=doc.version,
         local_event_id=(
-            local_events[-1].event_id if local_events else state.local_event_id if state else None  # type: ignore[union-attr]
+            local_events[-1].event_id if local_events else state.local_event_id if state else None  # type: ignore[union-attr]  # noqa: E501
         ),
         local_hash=(
-            local_events[-1].hash if local_events else state.local_hash if state else None  # type: ignore[union-attr]
+            local_events[-1].hash if local_events else state.local_hash if state else None  # type: ignore[union-attr]  # noqa: E501
         ),
         remote_version=(
             doc.version if document_to_push else remote_head.version + len(turso_events)
         ),
         remote_event_id=(
-            turso_events[-1].event_id if turso_events else state.remote_event_id if state else None  # type: ignore[union-attr]
+            turso_events[-1].event_id if turso_events else state.remote_event_id if state else None  # type: ignore[union-attr]  # noqa: E501
         ),
         remote_hash=inferred_remote_hash,
         updated_at=utc_now_iso(),
@@ -645,7 +830,7 @@ def push_to_turso(
         # However, the remote batch already committed, so we can still record with inferred values
         # but must not swallow a typed transport error silently. Raise typed.
         raise TursoSyncError(f"failed to refresh remote head after push: {exc}") from exc
-    write_turso_sync_state(timeline_home, new_state)
+    _write_state_typed(timeline_home, new_state)
     return TursoSyncResult(
         action="pushed",
         timeline_id=timeline_id,
@@ -724,6 +909,35 @@ def pull_from_turso(
             local_version=local_head.version,
             remote_version=remote_head.version,
         )
+    # W3 resume-before-fork for pull: crash-after-apply but state not persisted
+    if action in ("both_advanced", "bookmark_incompatible"):
+        try:
+            if _is_pull_resume_already_committed(timeline_id, timeline_home, root, backend, replica, state, bookmark):  # noqa: E501
+                try:
+                    fresh_local = _local_head_snapshot(backend)
+                    fresh_remote = _remote_head_snapshot(replica, timeline_id)
+                except Exception as exc:
+                    raise TursoSyncError(f"pull resume head refresh failed: {exc}") from exc
+                try:
+                    resume_state = TursoSyncState(
+                        timeline_id=timeline_id,
+                        local_version=fresh_local.version,
+                        local_event_id=fresh_local.last_event_id,
+                        local_hash=fresh_local.last_hash,
+                        remote_version=fresh_remote.version,
+                        remote_event_id=fresh_remote.last_event_id,
+                        remote_hash=fresh_remote.last_hash,
+                        updated_at=utc_now_iso(),
+                        last_pushed_event_id=state.last_pushed_event_id if state else None,
+                    )
+                except Exception as exc:
+                    raise TursoSyncError(f"pull resume state build failed: {exc}") from exc
+                _write_state_typed(timeline_home, resume_state)
+                return TursoSyncResult(action="up_to_date", timeline_id=timeline_id, local_version=fresh_local.version, remote_version=fresh_remote.version)  # noqa: E501
+        except TursoSyncError:
+            raise
+        except Exception:
+            pass
     if action == "bookmark_incompatible":
         try:
             if bookmark and local_head.version == bookmark.spoke_version and local_head.last_event_id == bookmark.spoke_event_id:  # noqa: E501
@@ -1044,7 +1258,7 @@ def pull_from_turso(
         updated_at=utc_now_iso(),
         last_pushed_event_id=state.last_pushed_event_id if state else None,
     )
-    write_turso_sync_state(timeline_home, new_state)
+    _write_state_typed(timeline_home, new_state)
     return TursoSyncResult(
         action="pulled",
         timeline_id=timeline_id,

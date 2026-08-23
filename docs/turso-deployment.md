@@ -57,7 +57,7 @@ turso db shell astrid-timelines "SELECT name FROM sqlite_master WHERE type='tabl
 # → events
 ```
 
-Checksums: `bash ArtAgents/packages/timeline-schema/scripts/check-codegen.sh` must exit 0 (covers `sql/turso/CHECKSUMS` freshness; drift fails loudly). Pipeline: `sql/turso/*.sql` is parse-valid on `:memory:`, additive-only, and strictly versioned (`0001_...`).
+Checksums: `bash ../ArtAgents/packages/timeline-schema/scripts/check-codegen.sh` must exit 0 (covers `sql/turso/CHECKSUMS` freshness; drift fails loudly). Pipeline: `sql/turso/*.sql` is parse-valid on `:memory:`, additive-only, and strictly versioned (`0001_...`).
 
 ## 3. Env vars (typed, fail-closed)
 
@@ -92,7 +92,7 @@ Local SQLite stays authority; the editor never imports `turso.py`.
 
 ## 5. First sync (one timeline, manual)
 
-Turso sync is polling + watchdog ack (no pub-sub). The polling service reuses `sync_state` primitives and `write_keep_both_artifact` fork pattern.
+Turso sync is polling (no pub-sub, no separate watchdog-ack verb). The polling service reuses `sync_state` primitives and `write_keep_both_artifact` fork pattern.
 
 **Entry points (library, not CLI):**
 
@@ -126,10 +126,10 @@ Cursor/bookmark: `turso-sync-state.json` inside `timeline_home` (file-based, lik
 Run `pull_from_turso` + `push_to_turso` on a timer (e.g. every 15–30s per timeline) under process supervision. The service:
 
 - reads local via `backend.read_events(after=..., limit=...)` (protocol, not ad-hoc SQL);
-- pushes as one batched transaction (fake emulates atomic all-or-nothing; `LibSqlHttpTransport` uses `BEGIN`/`COMMIT`);
+- pushes as one batched transaction (fake emulates atomic all-or-nothing; `LibSqlHttpTransport` prefers native `execute_batch` and falls back to `BEGIN`/`COMMIT`);
 - on pull, if `remote version == local known` → no-op; if `local unchanged and remote newer` → applies through `UnitOfWork`/`append_imported_event` (preserves ids, or remaps with continuity — documented in `turso_sync.py` as import-remap; tested via `test_turso_sync.py::test_pull_clean_applies_through_uow`);
 - if both diverged → writes `divergence-*.json` artifacts via `sync_divergence.write_keep_both_artifact` (primary, full your-copy/their-copy event payloads + `skipped_rows` diagnostics), returns `conflict`, never overwrites, never merges, never LWW.
-  - attribution boundary: remote attribution collapses to the sync agent on apply — pulled events are re-attributed to `turso-sync:pull` (`system`) via `append_imported_event`; the replicated `actor_kind`/`actor_id` columns are preserved only inside the divergence artifact, not on the imported row (asserted in `tests/regression/test_s4_rework1_regressions.py::TestAttributionCollapsed`).
+  - attribution boundary: remote attribution collapses to the sync agent on apply — pulled events are hard-coded to `system`/`turso-sync:pull` (see `turso_sync.py:778` via `append_imported_event`); the replicated `actor_kind`/`actor_id` columns are preserved only inside the divergence artifact, not on the imported row (asserted in `tests/regression/test_s4_rework1_regressions.py::TestAttributionCollapsed`).
 Ownership: the pull path catches typed `OwnerLockError` (direct) and `EventLogError` wrapping `OwnerLockError` (backend seam) → `TursoOwnershipError` (no substring sniffing) and fails closed with that typed error if serve already owns the DB — no second writable connection is opened concurrently. A generic `EventLogError` or other failure whose message happens to contain "owned" is classified as `TursoSyncError`, not ownership.
 
 ## 7. Observability
