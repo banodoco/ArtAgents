@@ -99,7 +99,21 @@ def _build_typeddict_registry() -> (
         if id(typed_dict) in visited:
             continue
         visited.add(id(typed_dict))
-        for annotation in get_type_hints(typed_dict, include_extras=True).values():
+        names = by_id[id(typed_dict)]
+        shared = sorted(name for name in names if name.startswith("Shared"))
+        canonical_name = shared[0] if shared else sorted(names)[0]
+        for field_name, annotation in get_type_hints(
+            typed_dict, include_extras=True
+        ).items():
+            # An override replaces the complete upstream annotation at the TS
+            # boundary. Do not recursively emit private codegen types that are
+            # reachable only through that replaced annotation: shared schema
+            # releases can expose a private ``Clip`` behind
+            # SharedTimelineConfig.clips, which otherwise collides with the
+            # intentional public ``Clip = SharedTimelineClip`` compatibility
+            # alias below.
+            if (canonical_name, field_name) in _FIELD_TYPE_OVERRIDES:
+                continue
             pending = [annotation]
             while pending:
                 candidate = pending.pop()

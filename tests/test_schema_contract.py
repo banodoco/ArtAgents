@@ -4,6 +4,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from collections import Counter
 from unittest import mock
 from pathlib import Path
 
@@ -77,6 +78,16 @@ class SchemaContractTest(unittest.TestCase):
 
     def test_generator_byte_stability(self) -> None:
         self.assertEqual(self._generate_types(), self._generate_types())
+
+    def test_generator_emits_each_typescript_identifier_once(self) -> None:
+        source = self._generate_types()
+        names = re.findall(
+            r"^export (?:interface|type|const) ([A-Za-z_$][A-Za-z0-9_$]*)",
+            source,
+            re.MULTILINE,
+        )
+        duplicates = sorted(name for name, count in Counter(names).items() if count > 1)
+        self.assertEqual(duplicates, [])
 
     def test_generator_arrays_match_frozensets(self) -> None:
         self.assertEqual(self._parse_generated_array("_TIMELINE_TOP_ALLOWED"), set(timeline._TIMELINE_TOP_ALLOWED))
