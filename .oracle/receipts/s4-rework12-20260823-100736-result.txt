@@ -1,0 +1,16 @@
+Verdict: PASS
+Changed file:line: astrid/core/timeline/eventlog/turso.py:297 (stage-then-commit), docs/turso-deployment.md:14, docs/turso-deployment.md:76
+QUOTED RED:
+FAILED tests/regression/test_s4_rework12_regressions.py::TestY2BatchAtomicityDuplicateLeavesDocumentUnchanged::test_duplicate_event_in_batch_does_not_mutate_document - assert 2 == 1
+>       assert cur["version"] == 1
+E       assert 2 == 1
+QUOTED GREEN:
+tests/regression/test_s4_rework12_regressions.py ..                      [100%]
+2 passed in 0.30s
+Standing quotes:
+- Single commit exec-s4-rework12:; tree clean except receipts; no push; no root-level report files. -> git status shows clean except .oracle/receipts
+- python3 -m pytest tests/regression/ -q -> 116 passed in 6.93s
+- gate family -> 136 passed
+- ruff check -> All checks passed!
+- census -> python3 -m astrid --help lists eight families
+final HEAD sha: d8887e4ae1ef3204d9e2d94d6dd2338eebdf04db
