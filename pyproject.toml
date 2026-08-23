@@ -188,6 +188,11 @@ show_error_codes = true
 warn_unused_configs = true
 
 [tool.pytest.ini_options]
+# Passed test sandboxes can contain full wheels, virtualenvs, rendered media,
+# and adversarial package copies. Remove each passed tmp_path at teardown so a
+# complete suite does not retain gigabytes until session end. Failed sandboxes
+# remain available for diagnosis.
+tmp_path_retention_policy = "failed"
 # --- Suite-wide hang guard (architectural root fix) ---
 # A DEFAULT per-test timeout applies to every test in the suite. Any test that
 # hangs (spawns a server/subprocess and waits forever, deadlocks, blocks on a
