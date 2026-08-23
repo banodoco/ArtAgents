@@ -268,20 +268,26 @@ def _is_resume_already_committed(
         after_local, after_remote = _resume_bookmark_boundaries(state, bookmark, strict_event_id=strict_event_id)  # noqa: E501
         try:
             local_suffix = backend.read_events(after=after_local) if after_local else backend.read_events()  # noqa: E501
-        except Exception:
-            return False
+        except TursoSyncError:
+            raise
+        except Exception as exc:
+            raise TursoSyncError(f"resume local suffix fetch failed: {exc}") from exc
         try:
             remote_suffix = replica.fetch_remote_events(timeline_id, after=after_remote)
-        except Exception:
-            return False
+        except TursoSyncError:
+            raise
+        except Exception as exc:
+            raise TursoSyncError(f"resume remote suffix fetch failed: {exc}") from exc
         if not local_suffix and not remote_suffix:
             return False
         if not local_suffix or not remote_suffix:
             return False
         check_seq = True
         return _suffixes_byte_equal(timeline_id, local_suffix, remote_suffix, projects_root, backend, strict_event_id=strict_event_id, check_seq=check_seq)  # noqa: E501
-    except Exception:
-        return False
+    except TursoSyncError:
+        raise
+    except Exception as exc:
+        raise TursoSyncError(f"resume reconciliation failed: {exc}") from exc
 
 def _is_push_resume_already_committed(
     timeline_id: str,
@@ -606,8 +612,10 @@ def _fetch_local_provenance(
                     "source_backend": getattr(ev, "source_backend", None),
                     "source_timeline_id": getattr(ev, "source_timeline_id", None),
                 }
-    except Exception:
-        pass
+    except TursoSyncError:
+        raise
+    except Exception as exc:
+        raise TursoSyncError(f"provenance fetch failed for {event_id!r} (backend.read_events): {exc}") from exc  # noqa: E501
     try:
         db_path = derive_database_path(root)
         conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
@@ -625,8 +633,10 @@ def _fetch_local_provenance(
                 }
         finally:
             conn.close()
-    except Exception:
-        pass
+    except TursoSyncError:
+        raise
+    except Exception as exc:
+        raise TursoSyncError(f"provenance fetch failed for {event_id!r} (db read): {exc}") from exc
     return None
 
 
@@ -697,6 +707,87 @@ def _heads_provenance_equivalent(
             return True
         cur = nxt
     return False
+def _convergent_heal_gate(
+    *,
+    timeline_id: str,
+    timeline_home: str | Path,
+    root: Path,
+    backend: Any,
+    replica: TursoReplicaClient,
+    state: TursoSyncState | None,
+) -> TursoSyncResult | None:
+    """One-boundary heal: captured remote head is the exclusive boundary.
+
+    Captures remote head FIRST, then local head; evaluates doc equality
+    against THAT captured pair; builds healed state exclusively from the
+    captured pair (never mixing local version into remote field). Before
+    returning up_to_date re-reads remote head; if it moved past the
+    captured boundary, raises typed to avoid false terminal label.
+    Every read is typed (TursoSyncError) — no swallow-to-fork.
+    """
+    try:
+        remote_captured = _remote_head_snapshot(replica, timeline_id)
+    except TursoSyncError:
+        raise
+    except Exception as exc:
+        raise TursoSyncError(f"remote head snapshot failed for {timeline_id!r}: {exc}") from exc
+    try:
+        local_captured = _local_head_snapshot(backend)
+    except TursoSyncError:
+        raise
+    except Exception as exc:
+        raise TursoSyncError(f"local head snapshot failed: {exc}") from exc
+    if not _heads_provenance_equivalent(timeline_id, local_captured, remote_captured, backend, root):  # noqa: E501
+        return None
+    try:
+        local_doc_json = _read_local_document_snapshot(timeline_id, root).document_json
+    except TursoSyncError:
+        raise
+    except Exception as exc:
+        raise TursoSyncError(f"local document snapshot failed for {timeline_id!r}: {exc}") from exc
+    try:
+        remote_doc_json = _fetch_remote_document_json_strict(replica, timeline_id)
+    except TursoSyncError:
+        raise
+    except Exception as exc:
+        raise TursoSyncError(f"remote document fetch failed for {timeline_id!r}: {exc}") from exc
+    if remote_doc_json is None:
+        return None
+    if not _documents_structurally_equal(local_doc_json, remote_doc_json):
+        return None
+    healed = TursoSyncState(
+        timeline_id=timeline_id,
+        local_version=local_captured.version,
+        local_event_id=local_captured.last_event_id,
+        local_hash=local_captured.last_hash,
+        remote_version=remote_captured.version,
+        remote_event_id=remote_captured.last_event_id,
+        remote_hash=remote_captured.last_hash,
+        updated_at=utc_now_iso(),
+        last_pushed_event_id=state.last_pushed_event_id if state else None,
+    )
+    try:
+        remote_recheck = _remote_head_snapshot(replica, timeline_id)
+    except TursoSyncError:
+        raise
+    except Exception as exc:
+        raise TursoSyncError(f"remote head recheck failed for {timeline_id!r}: {exc}") from exc
+    if (
+        remote_recheck.version != remote_captured.version
+        or remote_recheck.last_event_id != remote_captured.last_event_id
+        or remote_recheck.last_hash != remote_captured.last_hash
+    ):
+        raise TursoSyncError(
+            f"remote head moved during heal gate (captured v{remote_captured.version} -> v{remote_recheck.version}) — retry required"  # noqa: E501
+        )
+    _write_state_typed(timeline_home, healed)
+    return TursoSyncResult(
+        action="up_to_date",
+        timeline_id=timeline_id,
+        local_version=healed.local_version,
+        remote_version=healed.remote_version,
+    )
+
 
 
 def _verify_doc_identity_or_fork(
@@ -1154,39 +1245,17 @@ def push_to_turso(
             )
         except Exception as exc:
             raise TursoSyncError(f"failed to read remote suffix for fork: {exc}") from exc
-        # F4: convergent heads must not fork — gate before artifact
-        try:
-            if _heads_provenance_equivalent(timeline_id, local_head, remote_head, backend, root):
-                _ldoc_gate = _read_local_document_snapshot(timeline_id, root).document_json
-                _rdoc_gate = _fetch_remote_document_json_strict(replica, timeline_id)
-                if _rdoc_gate is not None and _documents_structurally_equal(_ldoc_gate, _rdoc_gate):
-                    try:
-                        _fl_gate = _local_head_snapshot(backend)
-                        _fr_gate = _remote_head_snapshot(replica, timeline_id)
-                        _healed_gate = TursoSyncState(
-                            timeline_id=timeline_id,
-                            local_version=_fl_gate.version,
-                            local_event_id=_fl_gate.last_event_id,
-                            local_hash=_fl_gate.last_hash,
-                            remote_version=_fl_gate.version,
-                            remote_event_id=_fr_gate.last_event_id or _fl_gate.last_event_id,
-                            remote_hash=_fr_gate.last_hash or _fl_gate.last_hash,
-                            updated_at=utc_now_iso(),
-                            last_pushed_event_id=state.last_pushed_event_id if state else None,
-                        )
-                    except Exception as exc:
-                        raise TursoSyncError(f"push heal state build failed: {exc}") from exc
-                    try:
-                        _write_state_typed(timeline_home, _healed_gate)
-                    except TursoSyncError:
-                        raise
-                    except Exception as exc:
-                        raise TursoSyncError(f"turso sync state write failed at {timeline_home}: {exc}") from exc  # noqa: E501
-                    return TursoSyncResult(action="up_to_date", timeline_id=timeline_id, local_version=_fl_gate.version, remote_version=_healed_gate.remote_version)  # noqa: E501
-        except TursoSyncError:
-            raise
-        except Exception:
-            pass
+        # F4: convergent heads must not fork — one-boundary heal gate
+        healed = _convergent_heal_gate(
+            timeline_id=timeline_id,
+            timeline_home=timeline_home,
+            root=root,
+            backend=backend,
+            replica=replica,
+            state=state,
+        )
+        if healed is not None:
+            return healed
         # map remote rows to TimelineEvents with full payloads — record skips (mirror pull)
         remote_suffix: list[TimelineEvent] = []
         skipped_rows: list[dict[str, Any]] = []
@@ -1793,39 +1862,17 @@ def pull_from_turso(
                 raise
             except Exception:
                 pass
-        # F4: convergent heads must not fork — gate before artifact
-        try:
-            if _heads_provenance_equivalent(timeline_id, local_head, remote_head, backend, root):
-                _ldoc_gate = _read_local_document_snapshot(timeline_id, root).document_json
-                _rdoc_gate = _fetch_remote_document_json_strict(replica, timeline_id)
-                if _rdoc_gate is not None and _documents_structurally_equal(_ldoc_gate, _rdoc_gate):
-                    try:
-                        _fl_gate = _local_head_snapshot(backend)
-                        _fr_gate = _remote_head_snapshot(replica, timeline_id)
-                        _healed_gate = TursoSyncState(
-                            timeline_id=timeline_id,
-                            local_version=_fl_gate.version,
-                            local_event_id=_fl_gate.last_event_id,
-                            local_hash=_fl_gate.last_hash,
-                            remote_version=_fl_gate.version,
-                            remote_event_id=_fr_gate.last_event_id or _fl_gate.last_event_id,
-                            remote_hash=_fr_gate.last_hash or _fl_gate.last_hash,
-                            updated_at=utc_now_iso(),
-                            last_pushed_event_id=state.last_pushed_event_id if state else None,
-                        )
-                    except Exception as exc:
-                        raise TursoSyncError(f"pull heal state build failed: {exc}") from exc
-                    try:
-                        _write_state_typed(timeline_home, _healed_gate)
-                    except TursoSyncError:
-                        raise
-                    except Exception as exc:
-                        raise TursoSyncError(f"turso sync state write failed at {timeline_home}: {exc}") from exc  # noqa: E501
-                    return TursoSyncResult(action="up_to_date", timeline_id=timeline_id, local_version=_fl_gate.version, remote_version=_healed_gate.remote_version)  # noqa: E501
-        except TursoSyncError:
-            raise
-        except Exception:
-            pass
+        # F4: convergent heads must not fork — one-boundary heal gate
+        healed = _convergent_heal_gate(
+            timeline_id=timeline_id,
+            timeline_home=timeline_home,
+            root=root,
+            backend=backend,
+            replica=replica,
+            state=state,
+        )
+        if healed is not None:
+            return healed
         # Map remote rows to TimelineEvents for artifact; record skips inside artifact
         remote_suffix: list[TimelineEvent] = []
         skipped_rows: list[dict[str, Any]] = []
@@ -1976,7 +2023,12 @@ def pull_from_turso(
         _local_doc_pre = _read_local_document_snapshot(timeline_id, root).document_json
     except Exception as exc:
         raise TursoSyncError(f"local document snapshot failed for {timeline_id!r}: {exc}") from exc
-    _remote_doc_pre = _fetch_remote_document_json_strict(replica, timeline_id)
+    try:
+        _remote_doc_pre = _fetch_remote_document_json_strict(replica, timeline_id)
+    except TursoSyncError:
+        raise
+    except Exception as exc:
+        raise TursoSyncError(f"remote document fetch failed for {timeline_id!r}: {exc}") from exc
     if _remote_doc_pre is None:
         if remote_head.version != 0 or local_head.version != 0:
             raise TursoSyncError(f"remote document missing for {timeline_id!r} at version {remote_head.version} — failing closed")  # noqa: E501
