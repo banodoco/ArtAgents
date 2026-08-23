@@ -330,6 +330,15 @@ def push_to_turso(
             f"bookmark incompatible — refusing push (action={action})"
         )
 
+    if action == "destination_only":
+        # Remote advanced alone — local has nothing new; no-op without touching cursor or remote.
+        return TursoSyncResult(
+            action="up_to_date",
+            timeline_id=timeline_id,
+            local_version=local_head.version,
+            remote_version=remote_head.version,
+        )
+
     if action == "both_advanced":
         # fork-not-merge: build keep-both artifact, never overwrite remote (R6)
         after_local = bookmark.spoke_event_id if bookmark else None
@@ -419,6 +428,20 @@ def push_to_turso(
     if bookmark and action in ("source_only", "both_advanced"):
         after = bookmark.spoke_event_id
 
+    # Read current document snapshot (one row) BEFORE draining — belt-and-braces guard.
+    try:
+        doc = _read_local_document_snapshot(timeline_id, root)
+    except Exception as exc:
+        raise TursoSyncError(f"failed to read local document for push: {exc}") from exc
+
+    # Belt-and-braces: stale-document push refusal — pushes may only carry
+    # document at EQUAL or ADVANCED version; anything older must go through
+    # the both_advanced fork path. Independent of classification.
+    if doc.version < remote_head.version:
+        raise TursoSyncError(
+            f"stale document version {doc.version} < remote {remote_head.version} — refusing push, fork required"  # noqa: E501
+        )
+
     # Drain local events after cursor (protocol read_events)
     try:
         if after is not None:
@@ -428,12 +451,6 @@ def push_to_turso(
     except Exception as exc:
         raise TursoSyncError(f"failed to read local events for push: {exc}") from exc
 
-    # Read current document snapshot (one row)
-    try:
-        doc = _read_local_document_snapshot(timeline_id, root)
-    except Exception as exc:
-        raise TursoSyncError(f"failed to read local document for push: {exc}") from exc
-
     # If no new events but document version unchanged, nothing to push
     if not local_events and doc.version == remote_head.version:
         return TursoSyncResult(
@@ -442,8 +459,6 @@ def push_to_turso(
             local_version=local_head.version,
             remote_version=remote_head.version,
         )
-
-    # Map TimelineEvents → TursoEventRows
     turso_events: list[TursoEventRow] = []
     for ev in local_events:
         bk_name = (
