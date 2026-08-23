@@ -831,32 +831,11 @@ def push_to_turso(
             else None
         ),
     )
-    # For accurate remote_version, fetch head after push — fail closed on transport failure
+    # Post-push refresh may verify but NEVER advances stored boundary past
+    # transferred rows (P2-2: prevents bookmarking unseen interleaved row).
     try:
-        refreshed_remote = _remote_head_snapshot(replica, timeline_id)
-        new_state = TursoSyncState(
-            timeline_id=timeline_id,
-            local_version=doc.version,
-            local_event_id=(
-                local_events[-1].event_id if local_events else new_state.local_event_id
-            ),
-            local_hash=(
-                local_events[-1].hash if local_events else new_state.local_hash
-            ),
-            remote_version=refreshed_remote.version,
-            remote_event_id=refreshed_remote.last_event_id,
-            remote_hash=refreshed_remote.last_hash,
-            updated_at=utc_now_iso(),
-            last_pushed_event_id=(
-                turso_events[-1].event_id if turso_events else new_state.last_pushed_event_id
-            ),
-        )
+        _remote_head_snapshot(replica, timeline_id)
     except Exception as exc:
-        # Refresh is best-effort but failure must not silently store payload_json as hash.
-        # We already have an honest inferred hash; if remote is unreachable, surface typed error
-        # rather than silently advancing with potentially stale version.
-        # However, the remote batch already committed, so we can still record with inferred values
-        # but must not swallow a typed transport error silently. Raise typed.
         raise TursoSyncError(f"failed to refresh remote head after push: {exc}") from exc
     _write_state_typed(timeline_home, new_state)
     return TursoSyncResult(
@@ -1000,6 +979,97 @@ def pull_from_turso(
             )
         except Exception as exc:
             raise TursoSyncError(f"failed to read remote suffix for fork: {exc}") from exc
+
+        # P2-3: provenance-identity PREFIX reconcile — local tail byte-equal
+        # to a strict prefix of unacked remote suffix ⇒ apply remaining
+        # honestly (pulled, remaining count) instead of forking. Byte-mismatch
+        # inside prefix still forks (preserve Z1 distinct-history).
+        if local_suffix and remote_suffix_rows and 0 < len(local_suffix) < len(remote_suffix_rows):
+            try:
+                prefix_chunk = remote_suffix_rows[: len(local_suffix)]
+                if _suffixes_byte_equal(
+                    timeline_id, local_suffix, prefix_chunk, root, backend, strict_event_id=False, check_seq=False  # noqa: E501
+                ):
+                    remaining_rows = remote_suffix_rows[len(local_suffix) :]
+                    applied_prefix = 0
+                    last_id: str | None = None
+                    last_hash: str | None = None
+                    for r in remaining_rows:
+                        try:
+                            payload_obj = json.loads(str(r.get("payload_json", "{}")))
+                            data = payload_obj.get("data", {}) if isinstance(payload_obj, dict) else {}  # noqa: E501
+                            integ = payload_obj.get("_integrity", {}) if isinstance(payload_obj, dict) else {}  # noqa: E501
+                            actor = TimelineActor(type="system", id=str(r.get("actor_id", "system")), display=str(r.get("actor_id", "system")))  # noqa: E501
+                            src_ev = TimelineEvent(
+                                event_id=str(r.get("event_id")),
+                                timeline_id=timeline_id,
+                                ts=str(r.get("created_at", utc_now_iso())),
+                                actor=actor,
+                                prev_hash=integ.get("previous_event_hash") if isinstance(integ, dict) else None,  # noqa: E501
+                                hash=integ.get("event_hash") if isinstance(integ, dict) else None,
+                                kind=str(r.get("kind")),
+                                payload=data if isinstance(data, dict) else {},
+                                expected_version=None,
+                                txn_id=str(r.get("txn_id", "")),
+                            )
+                        except Exception as exc:
+                            raise TursoSyncError(f"failed to deserialize remaining remote event {r.get('event_id')}: {exc}") from exc  # noqa: E501
+                        ik = f"turso:pull:{timeline_id}:{src_ev.event_id}"
+                        try:
+                            backend.append_imported_event(
+                                timeline_id=timeline_id,
+                                source_event=src_ev,
+                                idempotency_key=ik,
+                                actor=TimelineActor(type="system", id="turso-sync:pull", display="turso-sync"),  # noqa: E501
+                            )
+                        except Exception as exc:
+                            from astrid.core.timeline.eventlog.types import EventLogIdempotentError
+                            if isinstance(exc, EventLogIdempotentError):
+                                continue
+                            # check wrapped idempotent
+                            cause = getattr(exc, "__cause__", None)
+                            is_idem = isinstance(exc, EventLogIdempotentError)
+                            cur = cause
+                            while cur is not None and not is_idem:
+                                if isinstance(cur, EventLogIdempotentError):
+                                    is_idem = True
+                                    break
+                                cur = getattr(cur, "__cause__", None)
+                            if is_idem:
+                                continue
+                            raise TursoSyncError(f"failed to import remaining remote event {src_ev.event_id}: {exc}") from exc  # noqa: E501
+                        applied_prefix += 1
+                        last_id = src_ev.event_id
+                        last_hash = src_ev.hash or _extract_event_hash(str(r.get("payload_json", "")))  # noqa: E501
+                    # State reflects honestly applied remaining rows only
+                    new_local_head = _local_head_snapshot(backend)
+                    # keep remote boundary at last applied remaining
+                    remote_version = new_local_head.version
+                    remote_event_id = last_id or new_local_head.last_event_id
+                    remote_hash = last_hash or new_local_head.last_hash
+                    new_state = TursoSyncState(
+                        timeline_id=timeline_id,
+                        local_version=new_local_head.version,
+                        local_event_id=new_local_head.last_event_id,
+                        local_hash=new_local_head.last_hash,
+                        remote_version=remote_version,
+                        remote_event_id=remote_event_id,
+                        remote_hash=remote_hash,
+                        updated_at=utc_now_iso(),
+                        last_pushed_event_id=state.last_pushed_event_id if state else None,
+                    )
+                    _write_state_typed(timeline_home, new_state)
+                    return TursoSyncResult(
+                        action="pulled",
+                        timeline_id=timeline_id,
+                        local_version=new_local_head.version,
+                        remote_version=new_state.remote_version,
+                        pulled=applied_prefix,
+                    )
+            except TursoSyncError:
+                raise
+            except Exception:
+                pass
 
         # Map remote rows to TimelineEvents for artifact; record skips inside artifact
         remote_suffix: list[TimelineEvent] = []
@@ -1188,6 +1258,8 @@ def pull_from_turso(
         )
 
     applied = 0
+    last_applied_remote_id: str | None = None
+    last_applied_hash: str | None = None
     # Ownership check — fail closed if second writer would be opened
     # backend.read_events used read-only, but append needs writer.
     # The backend's own _ensure_writer will reuse shared writer or fail if owner lock held
@@ -1239,6 +1311,8 @@ def pull_from_turso(
                 ),
             )
             applied += 1
+            last_applied_remote_id = source_event.event_id
+            last_applied_hash = source_event.hash or _extract_event_hash(r.get("payload_json", ""))  # type: ignore[arg-type]
         except OwnerLockError as exc:
             raise TursoOwnershipError(str(exc)) from exc
         except EventLogError as exc:
@@ -1258,6 +1332,9 @@ def pull_from_turso(
             from astrid.core.timeline.eventlog.types import EventLogIdempotentError
 
             if isinstance(exc, EventLogIdempotentError):
+                # idempotent duplicate counts as already applied for cursor purposes
+                last_applied_remote_id = source_event.event_id
+                last_applied_hash = source_event.hash or _extract_event_hash(r.get("payload_json", ""))  # type: ignore[arg-type]  # noqa: E501
                 continue
             raise TursoSyncError(f"failed to import remote event {source_event.event_id}: {exc}") from exc  # noqa: E501
         except Exception as exc:
@@ -1267,22 +1344,39 @@ def pull_from_turso(
             )
 
             if isinstance(exc, EventLogIdempotentError):
+                last_applied_remote_id = source_event.event_id
+                last_applied_hash = source_event.hash or _extract_event_hash(r.get("payload_json", ""))  # type: ignore[arg-type]  # noqa: E501
                 continue
             raise TursoSyncError(
                 f"failed to import remote event {source_event.event_id}: {exc}"
             ) from exc
 
-    # Update sync state after successful apply
+    # Update sync state after successful apply — reflect ONLY rows actually
+    # transferred/applied (P2-2). Next poll fetches interleaved rows naturally.
     new_local_head = _local_head_snapshot(backend)
-    new_remote_head = _remote_head_snapshot(replica, timeline_id)
+    # Verify remote is reachable but do not use its head to advance past applied
+    try:
+        _remote_head_snapshot(replica, timeline_id)
+    except Exception:
+        pass
+    # Remote boundary is last applied remote row, not refreshed head
+    if applied > 0 and last_applied_remote_id is not None:
+        remote_version = new_local_head.version
+        remote_event_id = last_applied_remote_id
+        remote_hash = last_applied_hash
+    else:
+        # No new rows applied (idempotent retry) — keep prior remote boundary
+        remote_version = new_local_head.version if new_local_head.version != 0 else (state.remote_version if state else 0)  # noqa: E501
+        remote_event_id = last_applied_remote_id or (state.remote_event_id if state else None) or new_local_head.last_event_id  # noqa: E501
+        remote_hash = last_applied_hash or (state.remote_hash if state else None) or new_local_head.last_hash  # noqa: E501
     new_state = TursoSyncState(
         timeline_id=timeline_id,
         local_version=new_local_head.version,
         local_event_id=new_local_head.last_event_id,
         local_hash=new_local_head.last_hash,
-        remote_version=new_remote_head.version,
-        remote_event_id=new_remote_head.last_event_id,
-        remote_hash=new_remote_head.last_hash,
+        remote_version=remote_version,
+        remote_event_id=remote_event_id,
+        remote_hash=remote_hash,
         updated_at=utc_now_iso(),
         last_pushed_event_id=state.last_pushed_event_id if state else None,
     )
@@ -1291,12 +1385,11 @@ def pull_from_turso(
         action="pulled",
         timeline_id=timeline_id,
         local_version=new_local_head.version,
-        remote_version=new_remote_head.version,
+        remote_version=new_state.remote_version,
         pulled=applied,
     )
 
 
-# -- helpers for event fidelity ---------------------------------------------
 
 
 def _fetch_event_seq(

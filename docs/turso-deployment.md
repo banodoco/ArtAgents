@@ -11,7 +11,9 @@ Provisioning a Turso database, applying the S-owned replica schema, installing t
 ```bash
 # via turso CLI
 turso db create astrid-timelines --group <group>  # pick region near your users
-turso db tokens create astrid-timelines --expiration none  # flag spelling unverified locally; check `turso db tokens create --help` if this fails
+turso db show astrid-timelines --url      # → libsql://astrid-timelines-xxx.turso.io
+turso db tokens create astrid-timelines --expiration none
+```
 
 Record URL and token as `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` (see §3).
 
@@ -73,9 +75,9 @@ pip install libsql-experimental   # provides `libsql_experimental` (Turso HTTP c
 # Without it, first operation (execute_batch/query) raises TursoConfigError:
 #   "libsql driver is not installed — install with: pip install libsql-experimental ..."
 # LibSqlHttpTransport() construction succeeds with env set; the driver is loaded lazily at first use.
-# The transport tries `import libsql` first, falling back to `import libsql_experimental` — both share the same connect surface (see `astrid/core/timeline/eventlog/turso.py:453`).
+# The transport tries `import libsql` first, falling back to `import libsql_experimental` — both share the same connect surface (see `astrid/core/timeline/eventlog/turso.py:456`).
 ```
-`grep -rn "turso" astrid --exclude-dir=__pycache__ | grep -v test` shows only `astrid/core/timeline/eventlog/turso.py`, `astrid/core/timeline/turso_sync.py`, and this doc/env seams — no pub-sub, no websocket, no LWW.
+`grep -rn "turso" astrid --exclude-dir=__pycache__ | grep -v test` shows only `astrid/core/timeline/eventlog/turso.py`, `astrid/core/timeline/turso_sync.py`, `astrid/core/timeline/sync_divergence.py` (legitimate divergence seam at :80), and this doc/env seams — no pub-sub, no websocket, no LWW.
 
 ## 4. Driver install (optional dep)
 

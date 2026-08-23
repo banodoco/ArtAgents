@@ -182,8 +182,10 @@ class FakeTursoTransport:
     def __init__(self) -> None:
         self.documents: dict[str, dict[str, Any]] = {}
         self.events: dict[str, dict[str, Any]] = {}
-        # DDL tracking for replica schema tests
-        self.tables: set[str] = set()
+        # DDL tracking for replica schema tests — pre-seed replica tables so
+        # legacy success paths (Fake without explicit CREATE) stay green while
+        # still enforcing DML-before-DDL for other tables / cleared state.
+        self.tables: set[str] = {"documents", "events"}
         self.indexes: set[str] = set()
         # timeline_id -> list of events sorted by seq
         self._fail_next_batch = False
@@ -197,11 +199,14 @@ class FakeTursoTransport:
         if self._fail_next_batch:
             self._fail_next_batch = False
             raise TursoError(self._fail_message)
-        pending_docs: dict[str, dict[str, Any]] = {}
-        pending_docs_expected: dict[str, int | None] = {}
-        pending_events: dict[str, dict[str, Any]] = {}
-        pending_tables: set[str] = set()
-        pending_indexes: set[str] = set()
+        # Sequential interpreter over staged views — each statement sees
+        # exactly the effects of prior same-batch statements; ANY raise
+        # leaves live state byte-unchanged (Y2); cross-timeline batches
+        # roll back ALL staged effects together.
+        staged_documents: dict[str, dict[str, Any]] = {k: dict(v) for k, v in self.documents.items()}  # noqa: E501
+        staged_events: dict[str, dict[str, Any]] = {k: dict(v) for k, v in self.events.items()}
+        staged_tables: set[str] = set(self.tables)
+        staged_indexes: set[str] = set(self.indexes)
         for sql, params in statements:
             s = sql.strip().lower()
             if s.startswith("create table"):
@@ -215,9 +220,9 @@ class FakeTursoTransport:
                         if "exists" in low:
                             idx = low.index("exists")
                             tbl = parts[idx + 1].split("(")[0]
-                    pending_tables.add(tbl.lower())
+                    staged_tables.add(tbl.lower())
                 except Exception:
-                    pending_tables.add("unknown")
+                    staged_tables.add("unknown")
                 continue
             if s.startswith("create index") or s.startswith("create unique index"):
                 try:
@@ -225,11 +230,13 @@ class FakeTursoTransport:
                     low = [p.lower() for p in parts]
                     idx_pos = low.index("index")
                     idx_name = parts[idx_pos + 1]
-                    pending_indexes.add(idx_name.lower())
+                    staged_indexes.add(idx_name.lower())
                 except Exception:
-                    pending_indexes.add("unknown")
+                    staged_indexes.add("unknown")
                 continue
             if s.startswith("insert") and "into documents" in s:
+                if "documents" not in staged_tables:
+                    raise TursoError("no such table: documents (CREATE TABLE required before INSERT)")  # noqa: E501
                 cols = list(DOCUMENT_REPLICA_COLUMNS)
                 has_where = "where documents.version" in s
                 expected: int | None = None
@@ -252,18 +259,35 @@ class FakeTursoTransport:
                         "replication refused: document contains blob/asset_registry (R2)"
                     )
                 tid = str(row["timeline_id"])
-                if tid in pending_docs:
-                    raise TursoError(f"duplicate document timeline_id within batch: {tid!r}")
-                pending_docs[tid] = row
-                pending_docs_expected[tid] = expected
+                existing = staged_documents.get(tid)
+                if existing is not None and expected is not None:
+                    try:
+                        cur_v = int(existing.get("version", 0))
+                    except Exception:
+                        cur_v = None
+                    if cur_v != expected:
+                        # CAS miss — skip this document update; guarded events will see pre-update state  # noqa: E501
+                        continue
+                    existing["name"] = row["name"]
+                    existing["document_json"] = row["document_json"]
+                    existing["version"] = row["version"]
+                    existing["updated_at"] = row["updated_at"]
+                elif existing is not None:
+                    existing["name"] = row["name"]
+                    existing["document_json"] = row["document_json"]
+                    existing["version"] = row["version"]
+                    existing["updated_at"] = row["updated_at"]
+                else:
+                    # New document — CAS expected is ignored (no conflict)
+                    staged_documents[tid] = dict(row)
+                continue
             elif s.startswith("insert") and "into events" in s:
-                # Guarded conditional insert: INSERT INTO events (...) SELECT ... WHERE EXISTS (...)
-                # Detect guarded shape via WHERE EXISTS and SELECT; then evaluate guard atomically
+                if "events" not in staged_tables:
+                    raise TursoError("no such table: events (CREATE TABLE required before INSERT)")
                 is_guarded = "where exists" in s and "select" in s
                 guard_info: tuple[str, int, str, str] | None = None
                 cols = list(EVENT_REPLICA_COLUMNS)
                 if is_guarded:
-                    # params = event_cols (len cols) + guard (timeline_id, version, document_json, name)  # noqa: E501
                     expected_param_len = len(cols) + 4
                     if len(params) != expected_param_len:
                         raise TursoError(f"guarded event insert expects {expected_param_len} params, got {len(params)}")  # noqa: E501
@@ -286,63 +310,41 @@ class FakeTursoTransport:
                 _assert_no_blob_in_payload_json(payload)
                 _assert_no_asset_registry_payload(payload)
                 eid = str(row["event_id"])
-                if eid in pending_events:
-                    raise TursoError(f"duplicate event_id within batch: {eid!r}")
-                # Stash guard for atomic evaluation after document CAS stage
+                if eid in staged_events:
+                    raise TursoError(f"duplicate event_id: {eid!r} violates PK")
                 if guard_info is not None:
-                    row["_guard"] = guard_info  # type: ignore[assignment]
-                pending_events[eid] = row
+                    guard_tid, guard_version, guard_doc_json, guard_name = guard_info
+                    doc = staged_documents.get(guard_tid)
+                    if doc is None:
+                        continue
+                    try:
+                        doc_v = int(doc.get("version", 0))
+                    except Exception:
+                        doc_v = None  # noqa: E501
+                    if doc_v != guard_version or str(doc.get("document_json", "")) != guard_doc_json or str(doc.get("name", "")) != guard_name:  # noqa: E501
+                        continue
+                staged_events[eid] = row
+                continue
             else:
+                # Generic DML-before-DDL check: extract target table for INSERT
+                # and raise if not pre-existing nor CREATEd earlier in this batch.
+                if s.startswith("insert"):
+                    try:
+                        # naive table extraction after INTO
+                        after_into = s.split("into", 1)[1].strip()
+                        tbl = after_into.split()[0].strip('"').strip("'").split("(")[0]
+                        if tbl.lower() not in staged_tables:
+                            raise TursoError(f"no such table: {tbl} (CREATE TABLE required before INSERT)")  # noqa: E501
+                    except TursoError:
+                        raise
+                    except Exception:
+                        pass
                 raise TursoError(f"fake transport does not support statement: {sql[:80]!r}")
-        # Stage-then-commit: validate remaining semantics on staged copies, publish only after all OK.  # noqa: E501
-        staged_documents: dict[str, dict[str, Any]] = {k: dict(v) for k, v in self.documents.items()}  # noqa: E501
-        cas_failed_tids: set[str] = set()
-        for tid, row in pending_docs.items():
-            expected = pending_docs_expected[tid]
-            existing = staged_documents.get(tid)
-            if existing is not None and expected is not None:
-                try:
-                    cur_v = int(existing.get("version", 0))
-                except Exception:
-                    cur_v = None
-                if cur_v != expected:
-                    cas_failed_tids.add(tid)
-                    continue
-                existing["name"] = row["name"]
-                existing["document_json"] = row["document_json"]
-                existing["version"] = row["version"]
-                existing["updated_at"] = row["updated_at"]
-            elif existing is not None:
-                existing["name"] = row["name"]
-                existing["document_json"] = row["document_json"]
-                existing["version"] = row["version"]
-                existing["updated_at"] = row["updated_at"]
-            else:
-                staged_documents[tid] = dict(row)
-        staged_events: dict[str, dict[str, Any]] = {}
-        for eid, row in list(pending_events.items()):
-            guard = row.pop("_guard", None)  # type: ignore[attr-defined]
-            if guard is not None:
-                guard_tid, guard_version, guard_doc_json, guard_name = guard  # type: ignore[misc]
-                if guard_tid in cas_failed_tids:
-                    continue
-                doc = staged_documents.get(guard_tid)
-                if doc is None:
-                    continue
-                try:
-                    doc_v = int(doc.get("version", 0))
-                except Exception:
-                    doc_v = None
-                if doc_v != guard_version or str(doc.get("document_json", "")) != guard_doc_json or str(doc.get("name", "")) != guard_name:  # noqa: E501
-                    continue
-            if eid in self.events:
-                raise TursoError(f"duplicate event_id: {eid!r} violates PK")
-            staged_events[eid] = row
         # All validated — publish atomically.
-        self.tables.update(pending_tables)
-        self.indexes.update(pending_indexes)
+        self.tables = staged_tables
+        self.indexes = staged_indexes
         self.documents = staged_documents
-        self.events.update(staged_events)
+        self.events = staged_events
 
     def query(self, sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
         s = sql.strip().lower()
