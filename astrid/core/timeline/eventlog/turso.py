@@ -294,13 +294,12 @@ class FakeTursoTransport:
                 pending_events[eid] = row
             else:
                 raise TursoError(f"fake transport does not support statement: {sql[:80]!r}")
-        self.tables.update(pending_tables)
-        self.indexes.update(pending_indexes)
-        # documents: CAS + column-subset mutation (track which tids succeeded vs failed)
+        # Stage-then-commit: validate remaining semantics on staged copies, publish only after all OK.  # noqa: E501
+        staged_documents: dict[str, dict[str, Any]] = {k: dict(v) for k, v in self.documents.items()}  # noqa: E501
         cas_failed_tids: set[str] = set()
         for tid, row in pending_docs.items():
             expected = pending_docs_expected[tid]
-            existing = self.documents.get(tid)
+            existing = staged_documents.get(tid)
             if existing is not None and expected is not None:
                 try:
                     cur_v = int(existing.get("version", 0))
@@ -319,16 +318,15 @@ class FakeTursoTransport:
                 existing["version"] = row["version"]
                 existing["updated_at"] = row["updated_at"]
             else:
-                self.documents[tid] = dict(row)
+                staged_documents[tid] = dict(row)
+        staged_events: dict[str, dict[str, Any]] = {}
         for eid, row in list(pending_events.items()):
             guard = row.pop("_guard", None)  # type: ignore[attr-defined]
             if guard is not None:
                 guard_tid, guard_version, guard_doc_json, guard_name = guard  # type: ignore[misc]
-                # If the batch included a document for this timeline that CAS-failed, guard fails
                 if guard_tid in cas_failed_tids:
                     continue
-                # Evaluate against the post-document state (atomic batch semantics)
-                doc = self.documents.get(guard_tid)
+                doc = staged_documents.get(guard_tid)
                 if doc is None:
                     continue
                 try:
@@ -339,7 +337,12 @@ class FakeTursoTransport:
                     continue
             if eid in self.events:
                 raise TursoError(f"duplicate event_id: {eid!r} violates PK")
-            self.events[eid] = row
+            staged_events[eid] = row
+        # All validated — publish atomically.
+        self.tables.update(pending_tables)
+        self.indexes.update(pending_indexes)
+        self.documents = staged_documents
+        self.events.update(staged_events)
 
     def query(self, sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
         s = sql.strip().lower()
