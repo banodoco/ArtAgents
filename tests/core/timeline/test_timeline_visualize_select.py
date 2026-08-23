@@ -314,9 +314,12 @@ def test_import_graph_never_loads_repair_modules() -> None:
             imported.append(node.module or "")
     assert imported, "expected at least stdlib imports"
     # E8: marker-gated backfill checks legitimately import kernel marker modules; whitelist them.
+    # R5 single-authority: select.py consults astrid.core.timeline.authority for kernel-first
+    # authoritative id (fail-closed on corrupt marker) — the sole authority classification seam.
     allowed_core = {
         "astrid.core.foundation.project_paths",
         "astrid.core.integrations.reigh.bridge_service",
+        "astrid.core.timeline.authority",
         "astrid.packs.timeline.backfill",
     }
     assert all(

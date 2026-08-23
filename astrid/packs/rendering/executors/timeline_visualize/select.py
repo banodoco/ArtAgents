@@ -497,8 +497,10 @@ def _discover(project_dir: Path) -> tuple[list[ManagedTimeline], list[str]]:
                 _auth_failed = True
                 _auth_exc_msg = str(_be)
                 diagnostics.append(f"skipped {child.name}: backfill authority marker is unreadable: {_be}")
-            except Exception:
-                _auth_vis = None
+            except Exception as _ex_vis:
+                _auth_failed = True
+                _auth_exc_msg = str(_ex_vis)
+                diagnostics.append(f"skipped {child.name}: backfill authority marker is unreadable: {_ex_vis}")
             if not _auth_failed and isinstance(_auth_vis, str) and _auth_vis:
                 try:
                     if _isbf_vis(_auth_vis, _pr_vis):
@@ -523,13 +525,16 @@ def _discover(project_dir: Path) -> tuple[list[ManagedTimeline], list[str]]:
                     _auth_failed = True
                     _auth_exc_msg = str(_be2)
                     diagnostics.append(f"skipped {child.name}: backfill authority marker is unreadable: {_be2}")
-                except Exception:
-                    pass
+                except Exception as _ex2:
+                    _auth_failed = True
+                    _auth_exc_msg = str(_ex2)
+                    diagnostics.append(f"skipped {child.name}: backfill authority marker is unreadable: {_ex2}")
         except _BackfillErrorVis as _be_outer:
             diagnostics.append(f"skipped {child.name}: backfill authority marker is unreadable: {_be_outer}")
             _auth_failed = True
-        except Exception:
-            pass
+        except Exception as _ex_outer:
+            diagnostics.append(f"skipped {child.name}: backfill authority marker is unreadable: {_ex_outer}")
+            _auth_failed = True
         if _auth_failed:
             # Corrupt marker: fail closed — do not fall through to stale sidecar identity.
             continue
@@ -570,8 +575,9 @@ def _discover(project_dir: Path) -> tuple[list[ManagedTimeline], list[str]]:
                         from astrid.packs.timeline.backfill import read_backfill_state as _rbf_f
 
                         _f_state = _rbf_f(_f_projects_root)
-                    except Exception:
-                        _f_state = None
+                    except Exception as _ex_f_state:
+                        diagnostics.append(f"skipped {child.name}: backfill authority marker is unreadable: {_ex_f_state}")
+                        continue
                     if _f_state is not None and _side_tid_s in _f_state:
                         _f_ulid = child.name
                         _f_proj_slug = Path(project_dir).name if Path(project_dir).name else None
