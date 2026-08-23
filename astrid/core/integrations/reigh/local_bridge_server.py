@@ -56,7 +56,7 @@ _RANGELESS_FULL_BODY_LIMIT_BYTES = 64 * 1024 * 1024
 _RANGELESS_INITIAL_CHUNK_BYTES = 1024 * 1024
 _OPEN_ENDED_RANGE_CHUNK_BYTES = 4 * 1024 * 1024
 _DIAGNOSTICS_ENABLED = os.environ.get("ASTRID_BRIDGE_DIAGNOSTICS", "0") != "0"
-
+_REGISTRY_ASSET_BYTES_B64_RE = re.compile(r"[A-Za-z0-9+/]{256,}={0,2}")
 
 def _classify_persisted_registry_locator(locator: str) -> str:
     """Classify a persisted-registry locator: ``http``, ``unsafe``, ``local``.
@@ -936,6 +936,12 @@ def _validate_save_payload_schema(request: TimelineSaveRequest) -> None:
     to ``422 schema_incompatible`` (contract §6.2) with JSON-pointer-style
     ``issues[]``, mirroring the repository's canonicalization gate so the
     route and the store agree on what is rejectable before any mutation.
+
+    Additionally, registry entries are the asset-index plane (NS "Assets
+    never enter SQLite"): any STRING value inside ``/registry/assets/*``
+    that carries asset bytes — ``data:``/``blob:`` URI or a base64 run
+    ≥256 chars — is rejected 422 with a precise ``/registry/assets/<key>/<field>``
+    pointer. ``/config`` is NOT scanned (opaque app bag).
     """
     issues: list[BridgeIssue] = []
     assets = request.registry.get("assets", {})
@@ -947,6 +953,64 @@ def _validate_save_payload_schema(request: TimelineSaveRequest) -> None:
                 message="registry.assets must be a JSON object",
             )
         )
+    else:
+        # Content boundary: reject asset BYTES smuggled as registry strings.
+        def _is_asset_bytes_value(value: str) -> bool:
+            lowered = value.lstrip().lower()
+            if lowered.startswith("data:") or lowered.startswith("blob:"):
+                return True
+            return bool(_REGISTRY_ASSET_BYTES_B64_RE.search(value))
+
+        def _scan_entry(entry: Any, base_pointer: str) -> None:
+            if isinstance(entry, str):
+                if _is_asset_bytes_value(entry):
+                    issues.append(
+                        BridgeIssue(
+                            pointer=base_pointer,
+                            code="schema_incompatible",
+                            message="registry entry value contains asset bytes (data:/blob: URI or base64 blob)",
+                        )
+                    )
+                return
+            if isinstance(entry, Mapping):
+                for field, field_value in entry.items():
+                    field_pointer = f"{base_pointer}/{field}"
+                    if isinstance(field_value, str):
+                        if _is_asset_bytes_value(field_value):
+                            issues.append(
+                                BridgeIssue(
+                                    pointer=field_pointer,
+                                    code="schema_incompatible",
+                                    message="registry entry value contains asset bytes (data:/blob: URI or base64 blob)",
+                                )
+                            )
+                    elif isinstance(field_value, (Mapping, list, tuple)):
+                        # Recurse for nested structures inside an entry
+                        _scan_nested(field_value, field_pointer)
+                return
+            if isinstance(entry, (list, tuple)):
+                _scan_nested(entry, base_pointer)
+
+        def _scan_nested(value: Any, pointer: str) -> None:
+            if isinstance(value, str):
+                if _is_asset_bytes_value(value):
+                    issues.append(
+                        BridgeIssue(
+                            pointer=pointer,
+                            code="schema_incompatible",
+                            message="registry entry value contains asset bytes (data:/blob: URI or base64 blob)",
+                        )
+                    )
+            elif isinstance(value, Mapping):
+                for k, v in value.items():
+                    _scan_nested(v, f"{pointer}/{k}")
+            elif isinstance(value, (list, tuple)):
+                for idx, v in enumerate(value):
+                    _scan_nested(v, f"{pointer}/{idx}")
+
+        for asset_key, asset_entry in assets.items():
+            _scan_entry(asset_entry, f"/registry/assets/{asset_key}")
+
     for pointer, value in (
         ("/config", request.config),
         ("/registry", request.registry),

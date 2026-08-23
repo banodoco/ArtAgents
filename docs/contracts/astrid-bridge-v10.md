@@ -104,6 +104,8 @@ CORS is response-header-only; there is **no `OPTIONS` preflight route** (an `OPT
 - **Numeric version rule:** `expected_version` is integer-only. JSON booleans are rejected (a boolean is not a version). The integer is opaque to the editor, but on the server it equals the timeline stream head (`event_streams.head_seq`); a successful save advances the head by exactly one and returns the new head as `config_version`.
 - No `idempotency_key` field exists on this route. The bridge derives an internal idempotency key from timeline identity, `expected_version`, and the canonical save payload, and commits the normal internal receipt; no new receipt field is returned (receipt secrecy, §5).
 
+- **Registry content boundary (NS "Assets never enter SQLite"):** any STRING value inside `registry.assets` that carries asset bytes — `data:`/`blob:` URI (case-insensitive prefix) or a base64 run ≥256 chars `[A-Za-z0-9+/]{256,}={0,2}` — is rejected `422 schema_incompatible` with a precise `/registry/assets/<key>/<field>` pointer. `/config` is NOT scanned (opaque app bag).
+
 ### 4.2 Responses
 
 - `200` — the committed payload, same shape as the load payload (§3) with the **new** `config_version`.
@@ -115,8 +117,7 @@ CORS is response-header-only; there is **no `OPTIONS` preflight route** (an `OPT
 - `404 project_not_found` — project missing.
 - `404 timeline_not_found` — timeline missing.
 - `409 timeline_version_conflict` — `expected_version` is stale; response adds `"config_version": <current head>`. Zero database mutation occurs (document, registry, events, heads, receipts all unchanged).
-- `422 schema_incompatible` — config/registry validation fails; response adds `issues[]` (see §2.2). A schema rejection is a typed 422, never a connection-close 500.
-
+- `422 schema_incompatible` — config/registry validation fails (including the registry bytes boundary above); response adds `issues[]` (see §2.2). A schema rejection is a typed 422, never a connection-close 500.
 ### 4.3 Atomicity
 
 A successful save atomically updates `document_json` + `asset_registry_json`, appends one `timeline.saved` event, advances the timeline stream head (and project head), and writes the internal receipt in one `BEGIN IMMEDIATE` transaction (v10 §2.3). Concurrent saves from one expected head yield exactly one success and one `409`; no SQLite busy error or losing receipt is exposed.
