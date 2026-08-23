@@ -88,9 +88,16 @@ def _crash_attempt1(tmp_path, tl_id, home, backend, replica):
 
 
 class TestGateReadTransientTyped:
-    """Pin 1: gate-read transient failure (doc/provenance/head) under equal docs ⇒ typed, artifacts=0."""
+    """Pin 1: gate-read transient failure (doc/provenance/head) under equal docs ⇒ typed, artifacts=0.
+
+    Real transport injection: failures raised via replica/backend transport methods so the
+    heal gate's typed wrappers are exercised — reverting those wrappers to swallow makes
+    this pin RED (conflict/fork) instead of GREEN (typed).
+    """
 
     def _run_gate_variant(self, tmp_path, fail_target: str):
+        import inspect
+
         proj_id, tl_id, sid, home = _make_local_db(tmp_path)
         db_path = derive_database_path(tmp_path)
         backend = SqliteEventLogBackend(timeline_id=tl_id, projects_root=tmp_path)
@@ -98,17 +105,20 @@ class TestGateReadTransientTyped:
         replica = TursoReplicaClient(fake)
         _seed_convergent_remote(tmp_path, tl_id, sid, proj_id, home, fake, replica, backend, db_path)
         _crash_attempt1(tmp_path, tl_id, home, backend, replica)
-        # ensure gate path (both_advanced)
         orig_is_pull = sync_mod._is_pull_resume_already_committed
         sync_mod._is_pull_resume_already_committed = lambda *a, **k: False  # type: ignore[assignment]
         be2 = SqliteEventLogBackend(timeline_id=tl_id, projects_root=tmp_path)
-        # arm transient
         if fail_target == "doc":
-            orig = sync_mod._fetch_remote_document_json_strict
+            orig_fetch = replica.fetch_remote_head
 
-            def flaky(replica_, tid):
-                raise OSError("transient remote doc fetch failure at gate")
-            sync_mod._fetch_remote_document_json_strict = flaky  # type: ignore[assignment]
+            def flaky_doc(tid):
+                # trigger only when inside the heal gate's doc fetch
+                stack_names = {f.function for f in inspect.stack()}
+                if "_convergent_heal_gate" in stack_names and "_fetch_remote_document_json_strict" in stack_names:
+                    raise OSError("transient remote doc fetch failure at gate")
+                return orig_fetch(tid)
+
+            replica.fetch_remote_head = flaky_doc  # type: ignore[assignment]
             try:
                 try:
                     r = pull_from_turso(timeline_id=tl_id, timeline_home=home, projects_root=tmp_path, backend=be2, replica=replica)
@@ -118,14 +128,18 @@ class TestGateReadTransientTyped:
                     return
                 assert False, f"{fail_target} should have raised TursoSyncError, got {r.action}"
             finally:
-                sync_mod._fetch_remote_document_json_strict = orig  # type: ignore[assignment]
+                replica.fetch_remote_head = orig_fetch  # type: ignore[assignment]
                 sync_mod._is_pull_resume_already_committed = orig_is_pull  # type: ignore[assignment]
         elif fail_target == "provenance":
-            orig_prov = sync_mod._fetch_local_provenance
+            orig_read = be2.read_events
 
-            def flaky_prov(timeline_id_, event_id_, backend_, root_):
-                raise OSError("transient provenance read failure")
-            sync_mod._fetch_local_provenance = flaky_prov  # type: ignore[assignment]
+            def flaky_prov(*a, **k):
+                stack_names = {f.function for f in inspect.stack()}
+                if "_convergent_heal_gate" in stack_names:
+                    raise OSError("transient provenance read failure")
+                return orig_read(*a, **k)
+
+            be2.read_events = flaky_prov  # type: ignore[assignment]
             try:
                 try:
                     r = pull_from_turso(timeline_id=tl_id, timeline_home=home, projects_root=tmp_path, backend=be2, replica=replica)
@@ -135,14 +149,18 @@ class TestGateReadTransientTyped:
                     return
                 assert False, f"{fail_target} should have raised TursoSyncError, got {r.action}"
             finally:
-                sync_mod._fetch_local_provenance = orig_prov  # type: ignore[assignment]
+                be2.read_events = orig_read  # type: ignore[assignment]
                 sync_mod._is_pull_resume_already_committed = orig_is_pull  # type: ignore[assignment]
         elif fail_target == "head":
-            orig_snap = sync_mod._remote_head_snapshot
+            orig_fetch = replica.fetch_remote_head
 
-            def flaky_snap(replica_, tid):
-                raise OSError("transient head snapshot failure")
-            sync_mod._remote_head_snapshot = flaky_snap  # type: ignore[assignment]
+            def flaky_head(tid):
+                stack_names = {f.function for f in inspect.stack()}
+                if "_convergent_heal_gate" in stack_names:
+                    raise OSError("transient head snapshot failure")
+                return orig_fetch(tid)
+
+            replica.fetch_remote_head = flaky_head  # type: ignore[assignment]
             try:
                 try:
                     r = pull_from_turso(timeline_id=tl_id, timeline_home=home, projects_root=tmp_path, backend=be2, replica=replica)
@@ -152,7 +170,7 @@ class TestGateReadTransientTyped:
                     return
                 assert False, f"{fail_target} should have raised TursoSyncError, got {r.action}"
             finally:
-                sync_mod._remote_head_snapshot = orig_snap  # type: ignore[assignment]
+                replica.fetch_remote_head = orig_fetch  # type: ignore[assignment]
                 sync_mod._is_pull_resume_already_committed = orig_is_pull  # type: ignore[assignment]
 
     def test_doc_fetch_transient_raises_typed(self, tmp_path):
@@ -163,7 +181,6 @@ class TestGateReadTransientTyped:
 
     def test_head_snapshot_transient_raises_typed(self, tmp_path):
         self._run_gate_variant(tmp_path, "head")
-
 
 class TestOneBoundaryHealTOCTOU:
     """Pin 2: single SCHEMA-VALID interleaved append between equality check and refreshed-head read ⇒ NOT up_to_date, coherent, next poll pulls."""

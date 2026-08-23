@@ -707,6 +707,28 @@ def _heads_provenance_equivalent(
             return True
         cur = nxt
     return False
+def _heal_gate_recheck_movement(
+    replica: TursoReplicaClient,
+    timeline_id: str,
+    remote_captured: HeadSnapshot,
+) -> None:
+    """Recheck remote head against captured boundary; movement ⇒ typed retry-required."""
+    try:
+        remote_recheck = _remote_head_snapshot(replica, timeline_id)
+    except TursoSyncError:
+        raise
+    except Exception as exc:
+        raise TursoSyncError(f"remote head recheck failed for {timeline_id!r}: {exc}") from exc
+    if (
+        remote_recheck.version != remote_captured.version
+        or remote_recheck.last_event_id != remote_captured.last_event_id
+        or remote_recheck.last_hash != remote_captured.last_hash
+    ):
+        raise TursoSyncError(
+            f"remote head moved during heal gate (captured v{remote_captured.version} -> v{remote_recheck.version}) — retry required"  # noqa: E501
+        )
+
+
 def _convergent_heal_gate(
     *,
     timeline_id: str,
@@ -724,6 +746,9 @@ def _convergent_heal_gate(
     returning up_to_date re-reads remote head; if it moved past the
     captured boundary, raises typed to avoid false terminal label.
     Every read is typed (TursoSyncError) — no swallow-to-fork.
+    Every None exit that could fork first rechecks the captured boundary;
+    movement raises typed retry-required; only a quiescent boundary may
+    reach None→fork. Missing remote document at version>0 fails closed.
     """
     try:
         remote_captured = _remote_head_snapshot(replica, timeline_id)
@@ -738,6 +763,7 @@ def _convergent_heal_gate(
     except Exception as exc:
         raise TursoSyncError(f"local head snapshot failed: {exc}") from exc
     if not _heads_provenance_equivalent(timeline_id, local_captured, remote_captured, backend, root):  # noqa: E501
+        _heal_gate_recheck_movement(replica, timeline_id, remote_captured)
         return None
     try:
         local_doc_json = _read_local_document_snapshot(timeline_id, root).document_json
@@ -752,8 +778,12 @@ def _convergent_heal_gate(
     except Exception as exc:
         raise TursoSyncError(f"remote document fetch failed for {timeline_id!r}: {exc}") from exc
     if remote_doc_json is None:
+        if remote_captured.version != 0:
+            raise TursoSyncError(f"remote document missing for {timeline_id!r} at version {remote_captured.version} — failing closed")  # noqa: E501
+        _heal_gate_recheck_movement(replica, timeline_id, remote_captured)
         return None
     if not _documents_structurally_equal(local_doc_json, remote_doc_json):
+        _heal_gate_recheck_movement(replica, timeline_id, remote_captured)
         return None
     healed = TursoSyncState(
         timeline_id=timeline_id,
@@ -766,20 +796,7 @@ def _convergent_heal_gate(
         updated_at=utc_now_iso(),
         last_pushed_event_id=state.last_pushed_event_id if state else None,
     )
-    try:
-        remote_recheck = _remote_head_snapshot(replica, timeline_id)
-    except TursoSyncError:
-        raise
-    except Exception as exc:
-        raise TursoSyncError(f"remote head recheck failed for {timeline_id!r}: {exc}") from exc
-    if (
-        remote_recheck.version != remote_captured.version
-        or remote_recheck.last_event_id != remote_captured.last_event_id
-        or remote_recheck.last_hash != remote_captured.last_hash
-    ):
-        raise TursoSyncError(
-            f"remote head moved during heal gate (captured v{remote_captured.version} -> v{remote_recheck.version}) — retry required"  # noqa: E501
-        )
+    _heal_gate_recheck_movement(replica, timeline_id, remote_captured)
     _write_state_typed(timeline_home, healed)
     return TursoSyncResult(
         action="up_to_date",
@@ -1213,8 +1230,8 @@ def push_to_turso(
                 return TursoSyncResult(action="pushed", timeline_id=timeline_id, local_version=fresh_local.version, remote_version=resume_state.remote_version, pushed=0)  # noqa: E501
         except TursoSyncError:
             raise
-        except Exception:
-            pass
+        except Exception as exc:
+            raise TursoSyncError(f"push resume reconciliation failed: {exc}") from exc
     if action in ("bookmark_incompatible",):
         raise TursoSyncError(
             f"bookmark incompatible — refusing push (action={action})"
@@ -1730,8 +1747,8 @@ def pull_from_turso(
                 return TursoSyncResult(action="up_to_date", timeline_id=timeline_id, local_version=fresh_local.version, remote_version=resume_state.remote_version)  # noqa: E501
         except TursoSyncError:
             raise
-        except Exception:
-            pass
+        except Exception as exc:
+            raise TursoSyncError(f"pull resume reconciliation failed: {exc}") from exc
     if action == "bookmark_incompatible":
         try:
             if bookmark and local_head.version == bookmark.spoke_version and local_head.last_event_id == bookmark.spoke_event_id:  # noqa: E501
@@ -1860,8 +1877,8 @@ def pull_from_turso(
                     )
             except TursoSyncError:
                 raise
-            except Exception:
-                pass
+            except Exception as exc:
+                raise TursoSyncError(f"pull prefix reconcile failed: {exc}") from exc
         # F4: convergent heads must not fork — one-boundary heal gate
         healed = _convergent_heal_gate(
             timeline_id=timeline_id,
