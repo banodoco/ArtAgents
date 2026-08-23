@@ -22,25 +22,24 @@ from typing import Any
 
 from astrid.core._shared.jsonio import read_json, write_json_atomic
 from astrid.core.integrations.reigh.bridge_service import derive_database_path
+from astrid.core.store.ownership import OwnerLockError
 from astrid.core.timeline.eventlog.turso import (
-    TursoEventRow,
     TursoDocumentRow,
+    TursoError,
+    TursoEventRow,
+    TursoOwnershipError,
     TursoReplicaClient,
     TursoReplicationError,
-    TursoError,
-    TursoOwnershipError,
 )
 from astrid.core.timeline.events.schema import TimelineActor, TimelineEvent
+from astrid.core.timeline.sync_divergence import write_keep_both_artifact
 from astrid.core.timeline.sync_state import (
     HeadSnapshot,
     SyncBookmark,
-    compare_head_to_bookmark,
     classify_sync_state,
     head_snapshot_from_backend,
-    read_local_sync_bookmark,
 )
-from astrid.core.timeline.sync_divergence import write_keep_both_artifact
-from astrid.core.util.time import utc_now_iso, utc_now_seconds
+from astrid.core.util.time import utc_now_iso, utc_now_milliseconds
 
 TURSO_SYNC_STATE_FILENAME = "turso-sync-state.json"
 
@@ -115,7 +114,9 @@ def read_turso_sync_state(timeline_home: str | Path) -> TursoSyncState | None:
     try:
         raw = read_json(path)
     except Exception as exc:
-        raise TursoSyncError(f"turso sync state is unreadable at {path}: {exc}") from exc
+        raise TursoSyncError(
+            f"turso sync state is unreadable at {path}: {exc}"
+        ) from exc
     if not isinstance(raw, dict):
         raise TursoSyncError(f"turso sync state at {path} is not an object")
     return TursoSyncState.from_dict(raw)
@@ -143,8 +144,14 @@ class TursoSyncResult:
 
 # -- local helpers -----------------------------------------------------------
 
-def _projects_root_from_timeline_home(timeline_home: str | Path | None) -> Path:
-    from astrid.core.foundation.project_paths import resolve_projects_root as _resolve
+
+def _projects_root_from_timeline_home(
+    timeline_home: str | Path | None,
+) -> Path:
+    from astrid.core.foundation.project_paths import (
+        resolve_projects_root as _resolve,
+    )
+
     if timeline_home is not None:
         try:
             # layout <root>/<project>/timelines/<ulid>
@@ -169,11 +176,21 @@ def _read_local_document_snapshot(
     conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     try:
         conn.row_factory = sqlite3.Row
-        row = conn.execute("SELECT id, project_id, event_stream_id, name, document_json, created_at, updated_at FROM timelines WHERE id = ?", (timeline_id,)).fetchone()
+        row = conn.execute(
+            "SELECT id, project_id, event_stream_id, name, "
+            "document_json, created_at, updated_at "
+            "FROM timelines WHERE id = ?",
+            (timeline_id,),
+        ).fetchone()
         if row is None:
-            raise TursoSyncConfigError(f"local timeline {timeline_id!r} not found in timelines")
+            raise TursoSyncConfigError(
+                f"local timeline {timeline_id!r} not found in timelines"
+            )
         stream_id = str(row["event_stream_id"])
-        head = conn.execute("SELECT head_seq FROM event_streams WHERE id = ?", (stream_id,)).fetchone()
+        head = conn.execute(
+            "SELECT head_seq FROM event_streams WHERE id = ?",
+            (stream_id,),
+        ).fetchone()
         version = int(head["head_seq"]) if head else 0
         return TursoDocumentRow(
             timeline_id=str(row["id"]),
@@ -189,7 +206,9 @@ def _read_local_document_snapshot(
         conn.close()
 
 
-def _remote_head_snapshot(replica: TursoReplicaClient, timeline_id: str) -> HeadSnapshot:
+def _remote_head_snapshot(
+    replica: TursoReplicaClient, timeline_id: str
+) -> HeadSnapshot:
     head = replica.fetch_remote_head(timeline_id)
     if head is None:
         return HeadSnapshot(version=0, last_event_id=None, last_hash=None)
@@ -231,8 +250,10 @@ def _ensure_writer_or_fail_closed(projects_root: Path) -> Any:
 
     Reuses the shared writer seam like SqliteEventLogBackend does.
     """
-    from astrid.core.store.ownership import DatabaseOwnerLock, OwnerLockError
-    from astrid.core.timeline.eventlog.sqlite_backend import _get_shared_writer as _get_shared  # type: ignore
+    from astrid.core.store.ownership import DatabaseOwnerLock
+    from astrid.core.timeline.eventlog.sqlite_backend import (
+        _get_shared_writer as _get_shared,
+    )
 
     db_path = derive_database_path(projects_root)
     shared = _get_shared(db_path)
@@ -241,12 +262,15 @@ def _ensure_writer_or_fail_closed(projects_root: Path) -> Any:
     try:
         lock = DatabaseOwnerLock(db_path)
     except OwnerLockError as exc:
-        raise TursoOwnershipError(f"database is already owned (serve holds writer): {exc}") from exc
+        raise TursoOwnershipError(
+            f"database is already owned (serve holds writer): {exc}"
+        ) from exc
     # caller must manage lock lifetime; we return lock + will open writer elsewhere
     return lock
 
 
 # -- push --------------------------------------------------------------------
+
 
 def push_to_turso(
     *,
@@ -262,8 +286,14 @@ def push_to_turso(
     resume without duplicating (event_id upsert on remote).
     """
     if timeline_home is None:
-        raise TursoSyncConfigError("push_to_turso requires a timeline_home for cursor file")
-    root = Path(projects_root) if projects_root else _projects_root_from_timeline_home(timeline_home)
+        raise TursoSyncConfigError(
+            "push_to_turso requires a timeline_home for cursor file"
+        )
+    root = (
+        Path(projects_root)
+        if projects_root
+        else _projects_root_from_timeline_home(timeline_home)
+    )
     state = read_turso_sync_state(timeline_home)
     local_head = _local_head_snapshot(backend)
     remote_head = _remote_head_snapshot(replica, timeline_id)
@@ -281,12 +311,23 @@ def push_to_turso(
         raise TursoSyncError(f"sync classification failed: {exc}") from exc
 
     if action == "up_to_date":
-        return TursoSyncResult(action="up_to_date", timeline_id=timeline_id, local_version=local_head.version, remote_version=remote_head.version)
+        return TursoSyncResult(
+            action="up_to_date",
+            timeline_id=timeline_id,
+            local_version=local_head.version,
+            remote_version=remote_head.version,
+        )
     if action in ("bookmark_incompatible",):
-        raise TursoSyncError(f"bookmark incompatible — refusing push (action={action})")
+        raise TursoSyncError(
+            f"bookmark incompatible — refusing push (action={action})"
+        )
 
     # Determine after-boundary for incremental push
-    after = state.remote_event_id if state and state.remote_event_id else (state.local_event_id if state and state.local_event_id else None)
+    after = (
+        state.remote_event_id
+        if state and state.remote_event_id
+        else (state.local_event_id if state and state.local_event_id else None)
+    )
     # Prefer the more precise cursor: last_pushed_event_id if present
     if state and state.last_pushed_event_id:
         after = state.last_pushed_event_id
@@ -310,47 +351,55 @@ def push_to_turso(
     except Exception as exc:
         raise TursoSyncError(f"failed to read local document for push: {exc}") from exc
 
-    # Decide whether document is needed: if events empty and document version unchanged, still push document if forced? No-op if already up-to-date handled above.
-    # If no new events but document version > remote, push document only (via push_timeline_updates with events empty)
-    need_doc = True
+    # If no new events but document version unchanged, nothing to push
     if not local_events and doc.version == remote_head.version:
-        # nothing to push
-        return TursoSyncResult(action="up_to_date", timeline_id=timeline_id, local_version=local_head.version, remote_version=remote_head.version)
+        return TursoSyncResult(
+            action="up_to_date",
+            timeline_id=timeline_id,
+            local_version=local_head.version,
+            remote_version=remote_head.version,
+        )
 
     # Map TimelineEvents → TursoEventRows
     turso_events: list[TursoEventRow] = []
     for ev in local_events:
-        # Build deterministic idempotency key matching transfer.py convention
-        # For Turso we store the key as stored idempotency_key
-        ik = f"turso:push:{backend.backend_name()}:{timeline_id}:{ev.event_id}" if hasattr(backend, "backend_name") else f"turso:push:{timeline_id}:{ev.event_id}"
-        # payload_json: use canonical json with integrity
-        # Use ev.to_json_obj or manual via payload serialization already in TimelineEvent
-        # We reconstruct payload_json from the event's persisted payload via parse? Simpler: re-serialize via the backend's row payload
-        # For now, use ev.payload -> but need full payload_json with integrity; we can reconstruct via with_event_hash helper or via event's json form.
-        # Easiest: use the backend's raw row payload_json if available — we already have ev; we can ask sqlite_backend for raw? Instead, serialize deterministically.
-        from astrid.core.timeline.events.schema import with_event_hash  # type: ignore
-
-        payload_dict = ev.payload if isinstance(ev.payload, dict) else {}  # type: ignore[attr-defined]
-        # coerce to json with integrity? Use helper to build minimal payload_json
-        # For пуш we mimic kernel's payload_json shape: json with data + _integrity
-        # We can fetch raw payload_json from backend.read_events? Already parsed. Instead build via ev's to_json mechanism: use ev.__dict__ fallback
-        # Simpler: read raw payload_json via direct DB query for fidelity
-        payload_json_raw = _fetch_event_payload_json(timeline_id, ev.event_id, root)
+        bk_name = (
+            backend.backend_name()
+            if hasattr(backend, "backend_name")
+            else "unknown"
+        )
+        ik = f"turso:push:{bk_name}:{timeline_id}:{ev.event_id}"
+        payload_dict = (
+            ev.payload if isinstance(ev.payload, dict) else {}  # type: ignore[attr-defined]
+        )
+        payload_json_raw = _fetch_event_payload_json(
+            timeline_id, ev.event_id, root
+        )
         if payload_json_raw is None:
-            import json as _json
-            payload_json_raw = _json.dumps({"data": payload_dict, "_integrity": {"event_hash": ev.hash, "previous_event_hash": ev.prev_hash}})
-        actor_kind = ev.actor.type  # type: ignore[attr-defined]  but kernel maps to actor_kind strings; handle mapping
-        # map actor type to kernel actor_kind
+            payload_json_raw = json.dumps(
+                {
+                    "data": payload_dict,
+                    "_integrity": {
+                        "event_hash": ev.hash,
+                        "previous_event_hash": ev.prev_hash,
+                    },
+                }
+            )
         ak_map = {"agent": "executor", "human": "local", "system": "system"}
         ak = ak_map.get(str(getattr(ev.actor, "type", "system")), "system")
         actor_id = str(getattr(ev.actor, "id", ak))
+        seq_val = _fetch_event_seq(timeline_id, ev.event_id, root)
+        if seq_val is None:
+            raise TursoSyncError(
+                f"missing seq for drained event {ev.event_id!r} — failing closed"
+            )
         turso_events.append(
             TursoEventRow(
                 event_id=ev.event_id,
                 timeline_id=timeline_id,
                 project_id=doc.project_id,
                 stream_id=f"{timeline_id}:timeline.timeline",
-                seq=_fetch_event_seq(timeline_id, ev.event_id, root) or 0,
+                seq=seq_val,
                 kind=ev.kind,
                 payload_json=payload_json_raw,
                 actor_kind=ak,
@@ -363,25 +412,19 @@ def push_to_turso(
 
     # If document unchanged vs remote, we can push events-only (amendment 3b)
     document_to_push: TursoDocumentRow | None = doc
-    if state and doc.version == remote_head.version and local_events:
-        # document may still be needed for foreign key; keep it but allow event-only if caller wants
-        # For now keep doc; replica upsert is idempotent anyway
-        pass
-    # If remote already has document at same version, we could skip doc to prove event-only path works
-    # Keep doc unless remote already matches exactly — but we keep it for batch atomicity
-    # Event-only path is supported via require_document=False; push uses require_document=False when doc.version unchanged?
-    # Decide: if no local_events, we push doc only; if doc.version == remote.version and local_events non-empty, we could push events only.
     require_doc = True
     if local_events and doc.version == remote_head.version and remote_head.version != 0:
-        # allow event-only push ( proves W3 event-only direction)
+        # allow event-only push (proves W3 event-only direction)
         # Keep doc as None to exercise event-only path
-        # But ensure FK exists: remote already has document row at this version, so events FK will satisfy
+        # But ensure FK exists: remote already has document row at this version
         document_to_push = None
         require_doc = False
 
     # Execute remote batch atomically
     try:
-        replica.push_timeline_updates(document_to_push, turso_events, require_document=require_doc)
+        replica.push_timeline_updates(
+            document_to_push, turso_events, require_document=require_doc
+        )
     except (TursoError, TursoReplicationError) as exc:
         raise TursoSyncError(f"remote push failed: {exc}") from exc
 
@@ -389,13 +432,29 @@ def push_to_turso(
     new_state = TursoSyncState(
         timeline_id=timeline_id,
         local_version=doc.version,
-        local_event_id=local_events[-1].event_id if local_events else state.local_event_id if state else None,
-        local_hash=local_events[-1].hash if local_events else state.local_hash if state else None,
-        remote_version=doc.version if document_to_push else remote_head.version + len(turso_events),
-        remote_event_id=turso_events[-1].event_id if turso_events else state.remote_event_id if state else None,
-        remote_hash=turso_events[-1].payload_json if turso_events else state.remote_hash if state else None,  # store hash-ish
+        local_event_id=(
+            local_events[-1].event_id if local_events else state.local_event_id if state else None  # type: ignore[union-attr]
+        ),
+        local_hash=(
+            local_events[-1].hash if local_events else state.local_hash if state else None  # type: ignore[union-attr]
+        ),
+        remote_version=(
+            doc.version if document_to_push else remote_head.version + len(turso_events)
+        ),
+        remote_event_id=(
+            turso_events[-1].event_id if turso_events else state.remote_event_id if state else None  # type: ignore[union-attr]
+        ),
+        remote_hash=(
+            turso_events[-1].payload_json if turso_events else state.remote_hash if state else None  # type: ignore[union-attr]
+        ),
         updated_at=utc_now_iso(),
-        last_pushed_event_id=turso_events[-1].event_id if turso_events else state.last_pushed_event_id if state else None,
+        last_pushed_event_id=(
+            turso_events[-1].event_id  # type: ignore[union-attr]
+            if turso_events
+            else state.last_pushed_event_id  # type: ignore[union-attr]
+            if state
+            else None
+        ),
     )
     # For accurate remote_version, fetch head after push
     try:
@@ -404,21 +463,34 @@ def push_to_turso(
         new_state = TursoSyncState(
             timeline_id=timeline_id,
             local_version=doc.version,
-            local_event_id=local_events[-1].event_id if local_events else new_state.local_event_id,
-            local_hash=local_events[-1].hash if local_events else new_state.local_hash,
+            local_event_id=(
+                local_events[-1].event_id if local_events else new_state.local_event_id
+            ),
+            local_hash=(
+                local_events[-1].hash if local_events else new_state.local_hash
+            ),
             remote_version=refreshed_remote.version,
             remote_event_id=refreshed_remote.last_event_id,
             remote_hash=refreshed_remote.last_hash,
             updated_at=utc_now_iso(),
-            last_pushed_event_id=turso_events[-1].event_id if turso_events else new_state.last_pushed_event_id,
+            last_pushed_event_id=(
+                turso_events[-1].event_id if turso_events else new_state.last_pushed_event_id
+            ),
         )
     except Exception:
         pass
     write_turso_sync_state(timeline_home, new_state)
-    return TursoSyncResult(action="pushed", timeline_id=timeline_id, local_version=doc.version, remote_version=new_state.remote_version, pushed=len(turso_events))
+    return TursoSyncResult(
+        action="pushed",
+        timeline_id=timeline_id,
+        local_version=doc.version,
+        remote_version=new_state.remote_version,
+        pushed=len(turso_events),
+    )
 
 
 # -- pull --------------------------------------------------------------------
+
 
 def pull_from_turso(
     *,
@@ -433,7 +505,7 @@ def pull_from_turso(
     """
     if timeline_home is None:
         raise TursoSyncConfigError("pull_from_turso requires a timeline_home")
-    root = Path(projects_root) if projects_root else _projects_root_from_timeline_home(timeline_home)
+    _ = Path(projects_root) if projects_root else None  # keep for parity; root used elsewhere
     state = read_turso_sync_state(timeline_home)
     local_head = _local_head_snapshot(backend)
     remote_head = _remote_head_snapshot(replica, timeline_id)
@@ -449,91 +521,183 @@ def pull_from_turso(
         raise TursoSyncError(f"sync classification failed: {exc}") from exc
 
     if action == "up_to_date":
-        return TursoSyncResult(action="up_to_date", timeline_id=timeline_id, local_version=local_head.version, remote_version=remote_head.version)
+        return TursoSyncResult(
+            action="up_to_date",
+            timeline_id=timeline_id,
+            local_version=local_head.version,
+            remote_version=remote_head.version,
+        )
     if action == "source_only":
         # local ahead, remote behind — nothing to pull
-        return TursoSyncResult(action="up_to_date", timeline_id=timeline_id, local_version=local_head.version, remote_version=remote_head.version)
+        return TursoSyncResult(
+            action="up_to_date",
+            timeline_id=timeline_id,
+            local_version=local_head.version,
+            remote_version=remote_head.version,
+        )
     if action == "bookmark_incompatible":
         raise TursoSyncError("bookmark incompatible — refusing pull")
 
     if action == "both_advanced":
-        # fork-not-merge: write your-copy/their-copy artifacts, leave authorities intact
-        # Need source/destination targets for write_keep_both_artifact
-        from astrid.core.timeline.eventlog.selector import EventLogTarget  # type: ignore
-        from astrid.core.timeline.events.schema import TimelineEvent as _TE  # noqa
-
-        # Use lightweight EventLogTarget shims for the artifact writer
-        # Instead of constructing full targets, call write_keep_both_artifact via generic path using sync_state heads
-        # Build suffixes: events after bookmark
+        # fork-not-merge: primary is write_keep_both_artifact with full payloads
         after = bookmark.spoke_event_id if bookmark else None
         try:
-            local_suffix = backend.read_events(after=after) if after else backend.read_events()
-        except Exception:
-            local_suffix = []
-        remote_suffix_rows = replica.fetch_remote_events(timeline_id, after=bookmark.hub_event_id if bookmark else None)
-        # Map remote rows to TimelineEvents for artifact
+            local_suffix = (
+                backend.read_events(after=after) if after else backend.read_events()
+            )
+        except Exception as exc:
+            raise TursoSyncError(f"failed to read local suffix for fork: {exc}") from exc
+        try:
+            remote_suffix_rows = replica.fetch_remote_events(
+                timeline_id,
+                after=bookmark.hub_event_id if bookmark else None,
+            )
+        except Exception as exc:
+            raise TursoSyncError(f"failed to read remote suffix for fork: {exc}") from exc
+
+        # Map remote rows to TimelineEvents for artifact; record skips inside artifact
         remote_suffix: list[TimelineEvent] = []
+        skipped_rows: list[dict[str, Any]] = []
         for r in remote_suffix_rows:
             try:
-                # reconstruct minimal TimelineEvent from row for artifact rendering
-                import json as _json
-                payload_obj = _json.loads(str(r.get("payload_json", "{}")))
-                data = payload_obj.get("data", {}) if isinstance(payload_obj, dict) else {}
-                integ = payload_obj.get("_integrity", {}) if isinstance(payload_obj, dict) else {}
-                actor = TimelineActor(type="system", id=str(r.get("actor_id", "system")), display=str(r.get("actor_id", "system")))
+                payload_obj = json.loads(str(r.get("payload_json", "{}")))
+                data = (
+                    payload_obj.get("data", {})
+                    if isinstance(payload_obj, dict)
+                    else {}
+                )
+                integ = (
+                    payload_obj.get("_integrity", {})
+                    if isinstance(payload_obj, dict)
+                    else {}
+                )
+                actor = TimelineActor(
+                    type="system",
+                    id=str(r.get("actor_id", "system")),
+                    display=str(r.get("actor_id", "system")),
+                )
                 ev = TimelineEvent(
                     event_id=str(r.get("event_id")),
                     timeline_id=timeline_id,
                     ts=str(r.get("created_at", utc_now_iso())),
                     actor=actor,
-                    prev_hash=integ.get("previous_event_hash") if isinstance(integ, dict) else None,
-                    hash=integ.get("event_hash") if isinstance(integ, dict) else None,
+                    prev_hash=(
+                        integ.get("previous_event_hash")
+                        if isinstance(integ, dict)
+                        else None
+                    ),
+                    hash=(
+                        integ.get("event_hash")
+                        if isinstance(integ, dict)
+                        else None
+                    ),
                     kind=str(r.get("kind")),
                     payload=data if isinstance(data, dict) else {},
                     expected_version=None,
                     txn_id=str(r.get("txn_id", "")),
                 )
                 remote_suffix.append(ev)
-            except Exception:
+            except Exception as exc:
+                skipped_rows.append(
+                    {
+                        "event_id": str(r.get("event_id", "")),
+                        "error": str(exc),
+                    }
+                )
                 continue
-        # Build minimal source/destination targets for the writer (needs timeline_home etc.)
-        # Use fake targets: create ad-hoc objects with required attributes
+
+        # Build keep-both artifact via primary mechanism (honest backend names)
         @dataclass(frozen=True)
         class _ShimTarget:
             timeline_id: str
             timeline_home: Path | None
             backend: Any
             backend_name: str
-        # Direct fork artifact for Turso (sqlite is local authority) — bypass selector check
-        # Write a local divergence file containing both suffixes (your-copy/their-copy)
-        from astrid.core._shared.jsonio import write_json_atomic as _wja
-        from astrid.core.util.time import utc_now_milliseconds as _now_ms
+            slug: str = "t1"
+            timeline_ulid: str = "01J000000000000000000000AA"
+            source: str = "test"
+
+        # Determine honest backend name for local authority (sqlite or local_fs)
+        local_backend_name = (
+            backend.backend_name()
+            if hasattr(backend, "backend_name")
+            else "sqlite"
+        )
+        # Source is the hub (Turso); we report it as "turso" if the writer
+        # supports it, otherwise fall back to generic hub label that still
+        # round-trips through _render_side. The extension to accept sqlite
+        # locally means we never need to fake supabase here.
+        src_target = _ShimTarget(
+            timeline_id=timeline_id,
+            timeline_home=None,
+            backend=replica,
+            backend_name="turso",
+        )
+        dst_target = _ShimTarget(
+            timeline_id=timeline_id,
+            timeline_home=Path(timeline_home),
+            backend=backend,
+            backend_name=local_backend_name,
+        )
+        # Primary artifact — full payloads — must succeed or raise typed
         try:
-            created_at = _now_ms()
-            filename = f"divergence-{created_at}.json"
-            path = Path(timeline_home) / filename
-            payload = {
-                "schema_version": 1,
-                "kind": "sync_divergence",
-                "created_at": created_at,
-                "timeline_id": timeline_id,
-                "local_head": {"version": local_head.version, "last_event_id": local_head.last_event_id, "last_hash": local_head.last_hash},
-                "remote_head": {"version": remote_head.version, "last_event_id": remote_head.last_event_id, "last_hash": remote_head.last_hash},
-                "local_suffix": [{"event_id": e.event_id, "kind": e.kind} for e in local_suffix],
-                "remote_suffix": [{"event_id": e.event_id, "kind": e.kind} for e in remote_suffix],
-            }
-            _wja(path, payload)
-            from astrid.core.timeline.sync_divergence import LocalDivergenceArtifactRef as _LDAR
-            artifact = _LDAR(path=str(path), timeline_id=timeline_id, created_at=created_at)
+            artifact = write_keep_both_artifact(
+                source=src_target,
+                destination=dst_target,
+                source_head=remote_head,
+                destination_head=local_head,
+                source_suffix=remote_suffix,
+                destination_suffix=local_suffix,
+            )
         except Exception as exc:
-            # fallback to write_keep_both_artifact if direct fails
+            raise TursoSyncError(
+                f"failed to write keep-both artifact for fork: {exc}"
+            ) from exc
+
+        if artifact is None:
+            raise TursoSyncError(
+                "fork artifact write returned None — failing closed"
+            )
+
+        # Inject skipped_rows diagnostic and re-wrap suffixes with full payloads
+        # plus lightweight summary file for observability.
+        try:
+            art_path = Path(str(getattr(artifact, "path", "")))
+            if art_path.exists():
+                raw = read_json(art_path)
+                if isinstance(raw, dict) and skipped_rows:
+                    raw["skipped_rows"] = skipped_rows
+                    write_json_atomic(art_path, raw)
+            # Additional diagnostic file (summary-only) — not primary
+            diag_path = art_path.with_name(art_path.stem + ".diagnostic.json")
+            diag_payload = {
+                "kind": "sync_divergence_diagnostic",
+                "created_at": utc_now_milliseconds(),
+                "timeline_id": timeline_id,
+                "local_suffix": [
+                    {"event_id": e.event_id, "kind": e.kind} for e in local_suffix
+                ],
+                "remote_suffix": [
+                    {"event_id": e.event_id, "kind": e.kind} for e in remote_suffix
+                ],
+                "skipped_rows": skipped_rows,
+            }
             try:
-                src = _ShimTarget(timeline_id=timeline_id, timeline_home=None, backend=replica, backend_name="supabase")
-                dst = _ShimTarget(timeline_id=timeline_id, timeline_home=Path(timeline_home), backend=backend, backend_name="local_fs")
-                artifact = write_keep_both_artifact(source=src, destination=dst, source_head=remote_head, destination_head=local_head, source_suffix=remote_suffix, destination_suffix=local_suffix)
+                write_json_atomic(diag_path, diag_payload)
             except Exception:
-                artifact = None
-        return TursoSyncResult(action="conflict", timeline_id=timeline_id, local_version=local_head.version, remote_version=remote_head.version, conflict_artifacts=(artifact,) if artifact else ())
+                pass
+        except Exception as exc:
+            raise TursoSyncError(
+                f"failed to finalize fork artifact diagnostics: {exc}"
+            ) from exc
+
+        return TursoSyncResult(
+            action="conflict",
+            timeline_id=timeline_id,
+            local_version=local_head.version,
+            remote_version=remote_head.version,
+            conflict_artifacts=(artifact,),
+        )
 
     # destination_only → remote ahead, local unchanged, safe to apply
     # fetch remote events after bookmark
@@ -544,35 +708,51 @@ def pull_from_turso(
         remote_rows = replica.fetch_remote_events(timeline_id)
         # filter to only unseen
         existing_ids = {e.event_id for e in backend.read_events()}
-        remote_rows = [r for r in remote_rows if str(r.get("event_id")) not in existing_ids]
+        remote_rows = [
+            r for r in remote_rows if str(r.get("event_id")) not in existing_ids
+        ]
 
     applied = 0
     # Ownership check — fail closed if second writer would be opened
     # backend.read_events used read-only, but append needs writer.
-    # The backend's own _ensure_writer will reuse shared writer or fail if owner lock held elsewhere.
-    # We surface TursoOwnershipError if that path fails with "already owned".
+    # The backend's own _ensure_writer will reuse shared writer or fail if owner lock held
     for r in remote_rows:
         # Map row → TimelineEvent for import
         try:
-            import json as _json
-            payload_obj = _json.loads(str(r.get("payload_json", "{}")))
-            data = payload_obj.get("data", {}) if isinstance(payload_obj, dict) else {}
-            integ = payload_obj.get("_integrity", {}) if isinstance(payload_obj, dict) else {}
-            actor = TimelineActor(type="system", id=str(r.get("actor_id", "system")), display=str(r.get("actor_id", "system")))
+            payload_obj = json.loads(str(r.get("payload_json", "{}")))
+            data = (
+                payload_obj.get("data", {}) if isinstance(payload_obj, dict) else {}
+            )
+            integ = (
+                payload_obj.get("_integrity", {})
+                if isinstance(payload_obj, dict)
+                else {}
+            )
+            actor = TimelineActor(
+                type="system",
+                id=str(r.get("actor_id", "system")),
+                display=str(r.get("actor_id", "system")),
+            )
             source_event = TimelineEvent(
                 event_id=str(r.get("event_id")),
                 timeline_id=timeline_id,
                 ts=str(r.get("created_at", utc_now_iso())),
                 actor=actor,
-                prev_hash=integ.get("previous_event_hash") if isinstance(integ, dict) else None,
-                hash=integ.get("event_hash") if isinstance(integ, dict) else None,
+                prev_hash=(
+                    integ.get("previous_event_hash") if isinstance(integ, dict) else None
+                ),
+                hash=(
+                    integ.get("event_hash") if isinstance(integ, dict) else None
+                ),
                 kind=str(r.get("kind")),
                 payload=data if isinstance(data, dict) else {},
                 expected_version=None,
                 txn_id=str(r.get("txn_id", "")),
             )
         except Exception as exc:
-            raise TursoSyncError(f"failed to deserialize remote event {r.get('event_id')}: {exc}") from exc
+            raise TursoSyncError(
+                f"failed to deserialize remote event {r.get('event_id')}: {exc}"
+            ) from exc
         # choose idempotency key deterministic
         ik = f"turso:pull:{timeline_id}:{source_event.event_id}"
         try:
@@ -580,19 +760,24 @@ def pull_from_turso(
                 timeline_id=timeline_id,
                 source_event=source_event,
                 idempotency_key=ik,
-                actor=TimelineActor(type="system", id="turso-sync:pull", display="turso-sync"),
+                actor=TimelineActor(
+                    type="system", id="turso-sync:pull", display="turso-sync"
+                ),
             )
             applied += 1
+        except OwnerLockError as exc:
+            raise TursoOwnershipError(str(exc)) from exc
         except Exception as exc:
-            # Check for ownership error
-            if "already owned" in str(exc).lower() or "owned" in str(exc).lower():
-                raise TursoOwnershipError(str(exc)) from exc
             # idempotent duplicate is not failure — treat as skipped
-            from astrid.core.timeline.eventlog.types import EventLogIdempotentError
+            from astrid.core.timeline.eventlog.types import (
+                EventLogIdempotentError,
+            )
 
             if isinstance(exc, EventLogIdempotentError):
                 continue
-            raise TursoSyncError(f"failed to import remote event {source_event.event_id}: {exc}") from exc
+            raise TursoSyncError(
+                f"failed to import remote event {source_event.event_id}: {exc}"
+            ) from exc
 
     # Update sync state after successful apply
     new_local_head = _local_head_snapshot(backend)
@@ -609,35 +794,58 @@ def pull_from_turso(
         last_pushed_event_id=state.last_pushed_event_id if state else None,
     )
     write_turso_sync_state(timeline_home, new_state)
-    return TursoSyncResult(action="pulled", timeline_id=timeline_id, local_version=new_local_head.version, remote_version=new_remote_head.version, pulled=applied)
+    return TursoSyncResult(
+        action="pulled",
+        timeline_id=timeline_id,
+        local_version=new_local_head.version,
+        remote_version=new_remote_head.version,
+        pulled=applied,
+    )
 
 
 # -- helpers for event fidelity ---------------------------------------------
 
-def _fetch_event_seq(timeline_id: str, event_id: str, projects_root: Path) -> int | None:
+
+def _fetch_event_seq(
+    timeline_id: str, event_id: str, projects_root: Path
+) -> int | None:
     db_path = derive_database_path(projects_root)
     try:
         conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    except Exception as exc:
+        raise TursoSyncError(f"failed to open DB for seq fetch: {exc}") from exc
+    try:
         try:
-            row = conn.execute("SELECT seq FROM events WHERE event_id = ?", (event_id,)).fetchone()
+            row = conn.execute(
+                "SELECT seq FROM events WHERE event_id = ?", (event_id,)
+            ).fetchone()
             return int(row[0]) if row else None
-        finally:
-            conn.close()
-    except Exception:
-        return None
+        except Exception as exc:
+            raise TursoSyncError(f"failed to fetch seq for {event_id!r}: {exc}") from exc
+    finally:
+        conn.close()
 
 
-def _fetch_event_payload_json(timeline_id: str, event_id: str, projects_root: Path) -> str | None:
+def _fetch_event_payload_json(
+    timeline_id: str, event_id: str, projects_root: Path
+) -> str | None:
     db_path = derive_database_path(projects_root)
     try:
         conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    except Exception as exc:
+        raise TursoSyncError(f"failed to open DB for payload fetch: {exc}") from exc
+    try:
         try:
-            row = conn.execute("SELECT payload_json FROM events WHERE event_id = ?", (event_id,)).fetchone()
+            row = conn.execute(
+                "SELECT payload_json FROM events WHERE event_id = ?", (event_id,)
+            ).fetchone()
             return str(row[0]) if row else None
-        finally:
-            conn.close()
-    except Exception:
-        return None
+        except Exception as exc:
+            raise TursoSyncError(
+                f"failed to fetch payload for {event_id!r}: {exc}"
+            ) from exc
+    finally:
+        conn.close()
 
 
 def _seq_for_event(backend: Any, event_id: str) -> int | None:

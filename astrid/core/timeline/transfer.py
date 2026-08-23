@@ -144,11 +144,10 @@ def push_timeline(
             credentials are missing.
     """
     # Resolve local source — marker-aware (S4 amendment 3a): marked ⇒ sqlite, legacy ⇒ local_fs
-    source_target = resolve_event_log_target(
-        project_slug, slug_or_id, root=root
-    )
+    source_target = resolve_event_log_target(project_slug, slug_or_id, root=root)
     # Marker-aware authority check: use canonical authority seam, fail closed on corrupt marker
     from astrid.core.timeline.authority import is_backfilled_timeline
+
     try:
         _is_marked = is_backfilled_timeline(source_target.timeline_id, root)
     except Exception as exc:
@@ -251,8 +250,7 @@ def pull_timeline(
     )
     if source_target.backend_name != "supabase":
         raise ValueError(
-            f"pull requires a Supabase source; "
-            f"got backend={source_target.backend_name}"
+            f"pull requires a Supabase source; got backend={source_target.backend_name}"
         )
 
     # Resolve local destination
@@ -269,6 +267,7 @@ def pull_timeline(
     if dest.target is not None and dest.target.timeline_home is not None:
         try:
             from astrid.core.timeline.authority import is_backfilled_timeline as _is_bf2
+
             _is_marked2 = _is_bf2(dest.target.timeline_id, root)
             _expected2 = "sqlite" if _is_marked2 else "local_fs"
             if dest.target.backend_name != _expected2:
@@ -520,9 +519,7 @@ def _source_events_for_action(
         return source_backend.read_events()
     if sync_action in {"source_only", "both_advanced"}:
         if bookmark is None:
-            raise TransferFailure(
-                f"{sync_action} requires a bookmark boundary before replay"
-            )
+            raise TransferFailure(f"{sync_action} requires a bookmark boundary before replay")
         boundary = bookmark.spoke_event_id if direction == "push" else bookmark.hub_event_id
         return source_backend.read_events(after=boundary)
     return source_backend.read_events()
@@ -609,8 +606,7 @@ def _preflight_push_destination(
             or f"Supabase metadata preflight for {source.timeline_id} was unauthorized"
         )
     raise TransferFailure(
-        preflight.detail
-        or f"Supabase metadata preflight for {source.timeline_id} failed"
+        preflight.detail or f"Supabase metadata preflight for {source.timeline_id} failed"
     )
 
 
@@ -761,10 +757,7 @@ def _read_local_identity(timeline_home: Path | None) -> dict[str, object]:
 
 
 def _is_born_local_identity(identity: dict[str, object]) -> bool:
-    return (
-        identity.get("provenance") == "created"
-        and identity.get("backend") == "local_fs"
-    )
+    return identity.get("provenance") == "created" and identity.get("backend") == "local_fs"
 
 
 def _identity_display_name(
@@ -786,27 +779,21 @@ def _resolve_sync_user_id() -> str:
         value = (os.environ.get(env_name) or "").strip()
         if value:
             return value
-    raise TransferFailure(
-        "born-local push requires ASTRID_SYNC_USER_ID or REIGH_SYNC_USER_ID"
-    )
+    raise TransferFailure("born-local push requires ASTRID_SYNC_USER_ID or REIGH_SYNC_USER_ID")
 
 
 def _resolve_append_service_url() -> str:
     value = (os.environ.get("REIGH_APPEND_SERVICE_URL") or "").strip()
     if value:
         return value.rstrip("/")
-    raise TransferFailure(
-        "born-local push requires REIGH_APPEND_SERVICE_URL"
-    )
+    raise TransferFailure("born-local push requires REIGH_APPEND_SERVICE_URL")
 
 
 def _resolve_append_service_token() -> str:
     value = (os.environ.get("REIGH_APPEND_SERVICE_INTERNAL_TOKEN") or "").strip()
     if value:
         return value
-    raise TransferFailure(
-        "born-local push requires REIGH_APPEND_SERVICE_INTERNAL_TOKEN"
-    )
+    raise TransferFailure("born-local push requires REIGH_APPEND_SERVICE_INTERNAL_TOKEN")
 
 
 def _upsert_supabase_bookmark(

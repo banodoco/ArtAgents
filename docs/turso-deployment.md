@@ -122,9 +122,9 @@ Run `pull_from_turso` + `push_to_turso` on a timer (e.g. every 15–30s per time
 - reads local via `backend.read_events(after=..., limit=...)` (protocol, not ad-hoc SQL);
 - pushes as one batched transaction (fake emulates atomic all-or-nothing; `LibSqlHttpTransport` uses `BEGIN`/`COMMIT`);
 - on pull, if `remote version == local known` → no-op; if `local unchanged and remote newer` → applies through `UnitOfWork`/`append_imported_event` (preserves ids, or remaps with continuity — documented in `turso_sync.py` as import-remap; tested via `test_turso_sync.py::test_pull_clean_applies_through_uow`);
-- if both diverged → writes `divergence-*.json` + `divergence-*.json` artifacts via `sync_divergence.write_keep_both_artifact`, returns `conflict`, never overwrites, never merges, never LWW.
-
-Ownership: the pull path reuses the shared writer seam (`_get_shared_writer` / `DatabaseOwnerLock`) and fails closed with `TursoOwnershipError` if serve already owns the DB — no second writable connection is opened concurrently.
+- if both diverged → writes `divergence-*.json` artifacts via `sync_divergence.write_keep_both_artifact` (primary, full your-copy/their-copy event payloads + `skipped_rows` diagnostics), returns `conflict`, never overwrites, never merges, never LWW.
+  - attribution boundary: remote attribution collapses to the sync agent on apply — pulled events are re-attributed to `turso-sync:pull` (`system`) via `append_imported_event`; the replicated `actor_kind`/`actor_id` columns are preserved only inside the divergence artifact, not on the imported row (asserted in `tests/regression/test_s4_rework1_regressions.py::TestAttributionCollapsed`).
+Ownership: the pull path catches typed `OwnerLockError` → `TursoOwnershipError` (no substring sniffing) and fails closed with that typed error if serve already owns the DB — no second writable connection is opened concurrently. A generic failure whose message happens to contain "owned" is classified as `TursoSyncError`, not ownership.
 
 ## 7. Observability
 

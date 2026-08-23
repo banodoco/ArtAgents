@@ -18,14 +18,12 @@ import json
 import os
 import re
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, Protocol, Sequence
-
-from astrid.core.timeline.events.schema import TimelineActor, TimelineEvent
 
 # ---------------------------------------------------------------------------
 # Errors
 # ---------------------------------------------------------------------------
+
 
 class TursoError(RuntimeError):
     """Base error for Turso replica operations."""
@@ -33,6 +31,7 @@ class TursoError(RuntimeError):
 
 class TursoConfigError(TursoError):
     """Turso driver/env is missing (typed, actionable)."""
+
 
 class TursoReplicationError(TursoError):
     """Replication was refused (allowlist / blob guard)."""
@@ -121,6 +120,7 @@ def _assert_no_blob_in_payload_json(payload_json: str) -> None:
         obj = json.loads(payload_json)
     except Exception:
         return
+
     def _walk(node: Any) -> None:
         if isinstance(node, str) and ("data:" in node and "base64" in node):
             raise TursoReplicationError(
@@ -132,6 +132,7 @@ def _assert_no_blob_in_payload_json(payload_json: str) -> None:
         elif isinstance(node, list):
             for v in node:
                 _walk(v)
+
     _walk(obj)
 
 
@@ -152,6 +153,7 @@ def assert_replication_allowlist() -> frozenset[str]:
 # Transport protocol
 # ---------------------------------------------------------------------------
 
+
 class TursoTransport(Protocol):
     """Narrow batched statement + query seam."""
 
@@ -167,6 +169,7 @@ class TursoTransport(Protocol):
 # ---------------------------------------------------------------------------
 # Fake transport — in-memory, batch-atomic
 # ---------------------------------------------------------------------------
+
 
 class FakeTursoTransport:
     """Scripted in-memory fake for tests; emulates atomic batch semantics."""
@@ -199,7 +202,7 @@ class FakeTursoTransport:
                 cols = list(DOCUMENT_REPLICA_COLUMNS)
                 # Some callers may use a subset; handle by counting params
                 if len(params) != len(cols):
-                    # fallback: assume order is as given in sql — we still store by timeline_id first param
+                    # fallback: assume sql order — store by timeline_id first param
                     row = {"timeline_id": params[0]}
                     for i, v in enumerate(params):
                         if i < len(cols):
@@ -209,7 +212,9 @@ class FakeTursoTransport:
                 # validate blob guard on document_json
                 doc_json = str(row.get("document_json", ""))
                 if _contains_blob_payload(doc_json) or "asset_registry_json" in doc_json:
-                    raise TursoReplicationError("replication refused: document contains blob/asset_registry (R2)")
+                    raise TursoReplicationError(
+                        "replication refused: document contains blob/asset_registry (R2)"
+                    )
                 pending_docs[str(row["timeline_id"])] = row
             elif s.startswith("insert") and "into events" in s:
                 cols = list(EVENT_REPLICA_COLUMNS)
@@ -286,6 +291,7 @@ class FakeTursoTransport:
 # libsql HTTP transport — stubbed deployment path (DC4)
 # ---------------------------------------------------------------------------
 
+
 class LibSqlHttpTransport:
     """Lazy libsql-HTTP backed transport.
 
@@ -298,8 +304,12 @@ class LibSqlHttpTransport:
         database_url: str | None = None,
         auth_token: str | None = None,
     ) -> None:
-        url = (database_url if database_url is not None else os.environ.get(TURSO_ENV_URL, "")).strip()
-        token = (auth_token if auth_token is not None else os.environ.get(TURSO_ENV_TOKEN, "")).strip()
+        url = (
+            database_url if database_url is not None else os.environ.get(TURSO_ENV_URL, "")
+        ).strip()
+        token = (
+            auth_token if auth_token is not None else os.environ.get(TURSO_ENV_TOKEN, "")
+        ).strip()
         if not url:
             raise TursoConfigError(
                 f"{TURSO_ENV_URL} is not set — set it to your Turso libsql URL "
@@ -388,6 +398,7 @@ class LibSqlHttpTransport:
 # Replica client — NOT an EventLogBackend (W2)
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class TursoDocumentRow:
     timeline_id: str
@@ -440,8 +451,12 @@ class TursoReplicaClient:
         return f"INSERT OR IGNORE INTO events ({cols}) VALUES ({placeholders})"
 
     def _validate_document(self, row: TursoDocumentRow) -> None:
-        if row.document_json and ("asset_registry_json" in row.document_json or _contains_blob_payload(row.document_json)):
-            raise TursoReplicationError("replication refused: document contains blob/asset_registry (R2)")
+        if row.document_json and (
+            "asset_registry_json" in row.document_json or _contains_blob_payload(row.document_json)
+        ):
+            raise TursoReplicationError(
+                "replication refused: document contains blob/asset_registry (R2)"
+            )
         if row.version < 0:
             raise TursoReplicationError(f"document version must be >=0, got {row.version}")
 
@@ -483,7 +498,9 @@ class TursoReplicaClient:
             )
             statements.append((sql, params))
         elif require_document:
-            raise TursoReplicationError("push_timeline_updates: document is required when require_document=True")
+            raise TursoReplicationError(
+                "push_timeline_updates: document is required when require_document=True"
+            )
         for ev in events:
             self._validate_event(ev)
             sql = self._event_upsert_sql()
@@ -515,7 +532,8 @@ class TursoReplicaClient:
             return None
         doc = rows[0]
         ev_rows = self._transport.query(
-            "SELECT event_id, seq, payload_json FROM events WHERE timeline_id = ? ORDER BY seq DESC LIMIT 1",
+            "SELECT event_id, seq, payload_json FROM events "
+            "WHERE timeline_id = ? ORDER BY seq DESC LIMIT 1",
             (timeline_id,),
         )
         last_event_id = ev_rows[0]["event_id"] if ev_rows else None

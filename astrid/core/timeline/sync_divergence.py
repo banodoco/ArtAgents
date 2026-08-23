@@ -76,9 +76,11 @@ def write_keep_both_artifact(
 
     Local destinations receive a JSON sidecar under the destination timeline
     home. Supabase destinations write a row to ``public.divergence_log``.
+    Local covers both ``local_fs`` and ``sqlite`` authorities (same file
+    plane); Turso sync therefore uses this path honestly without shims.
     """
 
-    if destination.backend_name == "local_fs":
+    if destination.backend_name in ("local_fs", "sqlite"):
         return _write_local_divergence(
             source=source,
             destination=destination,
