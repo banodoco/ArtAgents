@@ -46,12 +46,17 @@ fixtures and is migrated to services in plan step 21.
 
 from __future__ import annotations
 
+import base64
+import hmac
+import json
 import re
+import secrets
 import sqlite3
 from collections.abc import Mapping
 from typing import Any
 
 from astrid.core.integrations.reigh.bridge_service import (
+    BridgeCursorError,
     BridgeInternalError,
     BridgeInvalidProjectError,
     BridgeInvalidTimelineError,
@@ -62,6 +67,7 @@ from astrid.core.integrations.reigh.bridge_service import (
     BridgeVersionConflictError,
     HealthStatus,
     ProjectRow,
+    RunawayTransitionPage,
     TimelineLoad,
     TimelineRow,
     TimelineSaveRequest,
@@ -100,6 +106,35 @@ _UUID_RE = re.compile(
 _ULID_RE = re.compile(r"^[0123456789abcdefghjkmnpqrstvwxyz]{26}$")
 """Lowercase 26-character Crockford ULID grammar (bridge §8 order 2)."""
 
+_RUNAWAY_CURSOR_VERSION = 1
+_MAX_CURSOR_BYTES = 2_048
+
+
+def _encode_runaway_cursor(payload: Mapping[str, Any], *, key: bytes) -> str:
+    raw = json.dumps(
+        dict(payload), sort_keys=True, separators=(",", ":"), ensure_ascii=True
+    ).encode("utf-8")
+    digest = hmac.digest(key, raw, "sha256")[:18]
+    return base64.urlsafe_b64encode(raw + b"." + digest).rstrip(b"=").decode("ascii")
+
+
+def _decode_runaway_cursor(cursor: str, *, key: bytes) -> dict[str, Any]:
+    if not isinstance(cursor, str) or not cursor or len(cursor) > _MAX_CURSOR_BYTES:
+        raise BridgeCursorError("cursor must be a bounded non-empty string")
+    try:
+        padded = cursor + "=" * (-len(cursor) % 4)
+        decoded = base64.urlsafe_b64decode(padded.encode("ascii"))
+        raw, supplied = decoded.rsplit(b".", 1)
+        expected = hmac.digest(key, raw, "sha256")[:18]
+        if not hmac.compare_digest(supplied, expected):
+            raise ValueError("cursor authentication mismatch")
+        payload = json.loads(raw.decode("utf-8"))
+    except Exception as exc:  # noqa: BLE001 - one typed wire error
+        raise BridgeCursorError("cursor is malformed or has been altered") from exc
+    if not isinstance(payload, dict) or payload.get("v") != _RUNAWAY_CURSOR_VERSION:
+        raise BridgeCursorError("cursor version is unsupported")
+    return payload
+
 
 def _is_timeline_ref(ref: str) -> bool:
     """Whether *ref* matches one of the three frozen address forms (§8)."""
@@ -135,6 +170,9 @@ class TimelineBridgeAdapter:
         self._timelines = timelines
         self._runaway = runaway
         self._runaway_evidence = runaway_evidence
+        # Process-local signing makes cursors opaque and tamper-evident. A
+        # server restart intentionally invalidates outstanding read cursors.
+        self._runaway_cursor_key = secrets.token_bytes(32)
         self._service_mode = isinstance(projects, ProjectsService) and isinstance(
             timelines, TimelinesService
         )
@@ -156,7 +194,92 @@ class TimelineBridgeAdapter:
             raise BridgeInternalError(str(exc)) from exc
         return [row.to_dict() for row in rows]
 
-    def get_runaway_timing_summary(self, project_slug: str) -> dict[str, Any] | None:
+    def page_runaway_transitions(
+        self,
+        project_slug: str,
+        *,
+        run_id: str | None = None,
+        limit: int = 1_000,
+        cursor: str | None = None,
+    ) -> RunawayTransitionPage:
+        """Return a bounded, opaque-cursor page from one immutable snapshot."""
+
+        project_id = self._resolve_project_id(project_slug)
+        if self._runaway is None:
+            raise BridgeInternalError("the Runaway repository is not composed")
+
+        snapshot_rowid = None
+        after_ordinal = after_run_id = after_id = None
+        if cursor is not None:
+            payload = _decode_runaway_cursor(
+                cursor, key=self._runaway_cursor_key
+            )
+            if payload.get("p") != project_id or payload.get("r") != run_id:
+                raise BridgeCursorError(
+                    "cursor does not belong to this project and run filter"
+                )
+            snapshot_rowid = payload.get("s")
+            after_ordinal = payload.get("o")
+            after_run_id = payload.get("q")
+            after_id = payload.get("i")
+            if (
+                isinstance(snapshot_rowid, bool)
+                or not isinstance(snapshot_rowid, int)
+                or snapshot_rowid < 0
+                or isinstance(after_ordinal, bool)
+                or not isinstance(after_ordinal, int)
+                or after_ordinal < 0
+                or not isinstance(after_run_id, str)
+                or not after_run_id
+                or not isinstance(after_id, str)
+                or not after_id
+            ):
+                raise BridgeCursorError("cursor position is malformed")
+
+        try:
+            with self._writer.read_only_connection() as conn:
+                conn.row_factory = sqlite3.Row
+                page = self._runaway.list_page(
+                    conn,
+                    project_id=project_id,
+                    run_id=run_id,
+                    limit=limit,
+                    snapshot_rowid=snapshot_rowid,
+                    after_ordinal=after_ordinal,
+                    after_run_id=after_run_id,
+                    after_id=after_id,
+                )
+        except Exception as exc:  # noqa: BLE001 - normalize pack read errors
+            raise BridgeInternalError(str(exc)) from exc
+
+        next_cursor = None
+        if page.has_more:
+            next_cursor = _encode_runaway_cursor(
+                {
+                    "v": _RUNAWAY_CURSOR_VERSION,
+                    "p": project_id,
+                    "r": run_id,
+                    "s": page.snapshot_rowid,
+                    "o": page.next_ordinal,
+                    "q": page.next_run_id,
+                    "i": page.next_id,
+                },
+                key=self._runaway_cursor_key,
+            )
+        summary = self.get_runaway_timing_summary(project_slug, run_id=run_id)
+        return RunawayTransitionPage(
+            project=project_slug,
+            transitions=tuple(row.to_dict() for row in page.transitions),
+            timing_summary=summary,
+            snapshot=f"runaway-v1:{project_id}:{page.snapshot_rowid}",
+            total_count=page.total_count,
+            limit=limit,
+            next_cursor=next_cursor,
+        )
+
+    def get_runaway_timing_summary(
+        self, project_slug: str, *, run_id: str | None = None
+    ) -> dict[str, Any] | None:
         """Return the typed migration evidence that declares all regions."""
         project_id = self._resolve_project_id(project_slug)
         if self._runaway_evidence is None:
@@ -165,7 +288,13 @@ class TimelineBridgeAdapter:
             rows = self._runaway_evidence.list(self._writer, project_id=project_id)
         except Exception as exc:  # noqa: BLE001 - normalize local read errors
             raise BridgeInternalError(str(exc)) from exc
-        candidates = [row for row in rows if row.kind == "runaway_timing_migrated"]
+        candidates = [
+            row
+            for row in rows
+            if row.kind == "measurement"
+            and row.data.get("subtype") == "runaway_timing_migrated"
+            and (run_id is None or row.run_id == run_id)
+        ]
         if not candidates:
             return None
         latest = candidates[-1]

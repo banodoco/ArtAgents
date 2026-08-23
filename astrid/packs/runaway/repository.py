@@ -45,7 +45,7 @@ Reads are transaction-free on a separate read-only connection:
 (optionally filtered to one run), and :meth:`show` returns one transition
 by id. :meth:`get_by_ordinal` is the direct run+ordinal lookup.
 
-The repository is stateless apart from the receipt service; every command
+The repository is stateless apart from the injected event and receipt services; every command
 must run inside the caller's :class:`astrid.core.store.uow.UnitOfWork`,
 and it never constructs a writer or opens a transaction.
 """
@@ -58,6 +58,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from astrid.core.events.service import EventAppendService
 from astrid.core.ids import generate_lowercase_ulid
 from astrid.core.receipts.canonical import (
     CanonicalizationError,
@@ -65,12 +66,22 @@ from astrid.core.receipts.canonical import (
     parse_json,
     request_hash,
 )
+from astrid.core.receipts.service import ReceiptService
 from astrid.core.repositories.errors import RepositoryError
 from astrid.core.store.uow import UnitOfWork
 from astrid.core.util.time import utc_now_iso
 
 RUNAWAY_CREATE_COMMAND_KIND = "runaway.create"
 """The runaway command kind that transition-create receipts are keyed on."""
+
+RUNAWAY_CREATED_EVENT_KIND = "runaway.created"
+"""Hash-chained event emitted for each atomically admitted transition batch."""
+
+RUNAWAY_STREAM_TYPE = "runaway.transition_set"
+"""One immutable transition-set stream per kernel run."""
+
+MAX_RUNAWAY_PAGE_SIZE = 1_000
+"""Hard upper bound for one editor-bridge transition page."""
 
 # ---------------------------------------------------------------------------
 # Typed errors
@@ -192,6 +203,25 @@ class RunawayCreateReadModel:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class RunawayTransitionPageReadModel:
+    """One stable page from an insert-only Runaway snapshot.
+
+    ``snapshot_rowid`` freezes the visible set across page requests. New rows
+    admitted after the first page have larger SQLite rowids and therefore do
+    not leak into the traversal. The opaque HTTP cursor is produced by the
+    bridge adapter; the repository exposes only typed positioning facts.
+    """
+
+    transitions: tuple[RunawayTransitionReadModel, ...]
+    snapshot_rowid: int
+    total_count: int
+    has_more: bool
+    next_ordinal: int | None
+    next_run_id: str | None
+    next_id: str | None
+
+
 # ---------------------------------------------------------------------------
 # Validation helpers
 # ---------------------------------------------------------------------------
@@ -300,8 +330,9 @@ def _row_to_model(row: sqlite3.Row) -> RunawayTransitionReadModel:
 class RunawayRepository:
     """Stateless runaway command surface over the kernel unit of work."""
 
-    def __init__(self, receipts: ReceiptService) -> None:
+    def __init__(self, receipts: ReceiptService, events: EventAppendService) -> None:
         self._receipts = receipts
+        self._events = events
 
     # -- create (one UoW after run fan-out) --------------------------------
 
@@ -487,29 +518,41 @@ class RunawayRepository:
                 raise
             inserted_ids.append(tid)
 
-        # Record receipt. Use one allocated project seq as the receipt range
-        # (no domain events for this pack; receipt tracks the DB mutation).
-        # Allocate gap-free project seq even though we emit no events, so the
-        # receipt's project_seq range is valid and monotonic.
-        try:
-            seq = uow.next_project_seq(project_id)
-        except Exception:
-            # Fallback: use current head if allocation fails (should not happen).
-            head_row = uow.query_one("SELECT event_head_seq FROM projects WHERE id = ?", (project_id,))
-            seq = int(head_row["event_head_seq"]) if head_row is not None else 1
-        first_project_seq = seq
-        last_project_seq = seq
-        # Primary stream is the run's own stream if present.
-        run_stream_id = f"{run_id}:core.run"
-        stream_row = uow.query_one("SELECT id FROM event_streams WHERE id = ?", (run_stream_id,))
-        primary_stream_id = str(stream_row["id"]) if stream_row is not None else None
-
         result = RunawayCreateReadModel(
             run_id=run_id,
             project_id=project_id,
             transition_ids=tuple(inserted_ids),
             first_ordinal=batch_min,
             last_ordinal=batch_max,
+            created_at=stamp,
+        )
+        stream_id = f"{run_id}:{RUNAWAY_STREAM_TYPE}"
+        stream_row = uow.query_one(
+            "SELECT id FROM event_streams WHERE id = ?", (stream_id,)
+        )
+        if stream_row is None:
+            uow.execute(
+                "INSERT INTO event_streams "
+                "(id, project_id, stream_type, aggregate_id, head_seq, created_at) "
+                "VALUES (?, ?, ?, ?, 0, ?)",
+                (stream_id, project_id, RUNAWAY_STREAM_TYPE, run_id, stamp),
+            )
+        append = self._events.append(
+            uow,
+            stream_id=stream_id,
+            project_id=project_id,
+            event_kind=RUNAWAY_CREATED_EVENT_KIND,
+            data={
+                "run_id": run_id,
+                "transition_ids": list(inserted_ids),
+                "first_ordinal": batch_min,
+                "last_ordinal": batch_max,
+            },
+            changes=["transition_ids", "first_ordinal", "last_ordinal"],
+            idempotency_key=idempotency_key,
+            txn_id=txn_id,
+            actor_kind="local",
+            command_kind=command_kind,
             created_at=stamp,
         )
         self._receipts.record(
@@ -519,12 +562,12 @@ class RunawayRepository:
             request_hash=request_digest,
             command_kind=command_kind,
             txn_id=txn_id,
-            first_project_seq=first_project_seq,
-            last_project_seq=last_project_seq,
-            event_ids=[],
+            first_project_seq=append.project_seq,
+            last_project_seq=append.project_seq,
+            event_ids=[append.event_id],
             result=result.to_dict(),
-            primary_stream_id=primary_stream_id,
-            resulting_stream_seq=None,
+            primary_stream_id=stream_id,
+            resulting_stream_seq=append.stream_seq,
             created_at=stamp,
         )
         return result
@@ -556,6 +599,112 @@ class RunawayRepository:
                 (project_id,),
             ).fetchall()
         return tuple(_row_to_model(row) for row in rows)
+
+    def list_page(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        project_id: str,
+        run_id: str | None = None,
+        limit: int = 250,
+        snapshot_rowid: int | None = None,
+        after_ordinal: int | None = None,
+        after_run_id: str | None = None,
+        after_id: str | None = None,
+    ) -> RunawayTransitionPageReadModel:
+        """List one bounded, repeatable page in ``ordinal/run/id`` order.
+
+        The first call captures the maximum visible SQLite rowid. Subsequent
+        calls pass that value back from their cursor, so concurrent appends do
+        not change the result set mid-traversal. All cursor position fields
+        are either present together or absent together.
+        """
+
+        project_id = _require_non_empty_string("project_id", project_id)
+        if run_id is not None:
+            run_id = _require_non_empty_string("run_id", run_id)
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= MAX_RUNAWAY_PAGE_SIZE:
+            raise RunawayValidationError(
+                f"limit must be an integer between 1 and {MAX_RUNAWAY_PAGE_SIZE}"
+            )
+        if snapshot_rowid is not None and (
+            isinstance(snapshot_rowid, bool)
+            or not isinstance(snapshot_rowid, int)
+            or snapshot_rowid < 0
+        ):
+            raise RunawayValidationError("snapshot_rowid must be a non-negative integer")
+        position = (after_ordinal, after_run_id, after_id)
+        if any(value is not None for value in position) and not all(
+            value is not None for value in position
+        ):
+            raise RunawayValidationError("page cursor position is incomplete")
+        if after_ordinal is not None:
+            _require_non_negative_int("after_ordinal", after_ordinal)
+            _require_non_empty_string("after_run_id", after_run_id)
+            _require_non_empty_string("after_id", after_id)
+
+        scope_sql = "project_id = ?"
+        scope_params: list[Any] = [project_id]
+        if run_id is not None:
+            scope_sql += " AND run_id = ?"
+            scope_params.append(run_id)
+
+        if snapshot_rowid is None:
+            snapshot = conn.execute(
+                f"SELECT COALESCE(MAX(rowid), 0) AS snapshot_rowid "
+                f"FROM runaway_transitions WHERE {scope_sql}",
+                tuple(scope_params),
+            ).fetchone()
+            snapshot_rowid = int(snapshot["snapshot_rowid"] if isinstance(snapshot, sqlite3.Row) else snapshot[0])
+
+        where_sql = f"{scope_sql} AND rowid <= ?"
+        params: list[Any] = [*scope_params, snapshot_rowid]
+        if after_ordinal is not None:
+            where_sql += (
+                " AND (ordinal > ? OR (ordinal = ? AND run_id > ?) "
+                "OR (ordinal = ? AND run_id = ? AND id > ?))"
+            )
+            params.extend(
+                [
+                    after_ordinal,
+                    after_ordinal,
+                    after_run_id,
+                    after_ordinal,
+                    after_run_id,
+                    after_id,
+                ]
+            )
+
+        rows = conn.execute(
+            f"SELECT * FROM runaway_transitions WHERE {where_sql} "
+            "ORDER BY ordinal ASC, run_id ASC, id ASC LIMIT ?",
+            (*params, limit + 1),
+        ).fetchall()
+        total = conn.execute(
+            f"SELECT COUNT(*) AS total_count FROM runaway_transitions "
+            f"WHERE {scope_sql} AND rowid <= ?",
+            (*scope_params, snapshot_rowid),
+        ).fetchone()
+        total_count = int(total["total_count"] if isinstance(total, sqlite3.Row) else total[0])
+        has_more = len(rows) > limit
+        visible = rows[:limit]
+        models = tuple(_row_to_model(row) for row in visible)
+        if has_more and models:
+            last = models[-1]
+            next_ordinal = last.ordinal
+            next_run_id = last.run_id
+            next_id = last.id
+        else:
+            next_ordinal = next_run_id = next_id = None
+        return RunawayTransitionPageReadModel(
+            transitions=models,
+            snapshot_rowid=snapshot_rowid,
+            total_count=total_count,
+            has_more=has_more,
+            next_ordinal=next_ordinal,
+            next_run_id=next_run_id,
+            next_id=next_id,
+        )
 
     def show(
         self,
@@ -609,11 +758,15 @@ class RunawayRepository:
 
 __all__ = [
     "RUNAWAY_CREATE_COMMAND_KIND",
+    "RUNAWAY_CREATED_EVENT_KIND",
+    "RUNAWAY_STREAM_TYPE",
     "RunawayAlreadyExistsError",
     "RunawayCreateReadModel",
     "RunawayNotFoundError",
     "RunawayRepository",
     "RunawayRepositoryError",
+    "RunawayTransitionPageReadModel",
     "RunawayTransitionReadModel",
     "RunawayValidationError",
+    "MAX_RUNAWAY_PAGE_SIZE",
 ]

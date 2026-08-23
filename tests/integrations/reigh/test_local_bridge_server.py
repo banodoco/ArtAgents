@@ -9,6 +9,7 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from astrid.core.events.service import EventAppendService
+from astrid.core.integrations.reigh.bridge_service import HealthStatus
 from astrid.core.integrations.reigh.local_bridge_server import create_local_bridge_server
 from astrid.core.receipts.service import ReceiptService
 from astrid.core.repositories.runs import RunRepository
@@ -446,9 +447,10 @@ def test_runaway_transitions_route_returns_typed_rows_filter_and_evidence(
                 uow,
                 project_id=project.id,
                 run_id=run_id,
-                kind="runaway_timing_migrated",
+                kind="measurement",
                 summary="2 transitions across 3 declared regions",
                 data={
+                    "subtype": "runaway_timing_migrated",
                     "fps": 48,
                     "frame_count": 19,
                     "region_counts": {"S01": 1, "S02": 1, "S03": 0},
@@ -469,6 +471,9 @@ def test_runaway_transitions_route_returns_typed_rows_filter_and_evidence(
     assert body == filtered
     assert body["project"] == "runaway-demo"
     assert body["count"] == 2
+    assert body["api_version"] == "v1"
+    assert body["total_count"] == 2
+    assert body["page"] == {"limit": 1000, "next_cursor": None}
     assert [row["ordinal"] for row in body["transitions"]] == [0, 1]
     assert body["transitions"][0]["metadata"]["frame"] == 14
     assert body["transitions"][1]["prompt"].startswith("teal neon")
@@ -499,18 +504,299 @@ def test_runaway_transitions_route_empty_unknown_and_invalid_filter(
         )
 
     assert empty_status == 200
-    assert empty == {
-        "project": "empty-runaway",
-        "count": 0,
-        "timing_summary": None,
-        "transitions": [],
-    }
+    assert empty["project"] == "empty-runaway"
+    assert empty["count"] == empty["total_count"] == 0
+    assert empty["api_version"] == "v1"
+    assert empty["page"] == {"limit": 1000, "next_cursor": None}
+    assert empty["timing_summary"] is None
+    assert empty["transitions"] == []
     assert missing_status == 404
     assert missing["error"] == "project_not_found"
     assert invalid_status == 400
     assert invalid["error"] == "invalid_run"
     assert duplicate_status == 400
     assert duplicate["error"] == "invalid_run"
+
+
+def test_runaway_v1_pagination_is_snapshot_consistent_and_scope_bound(
+    tmp_bridge_root: Path,
+) -> None:
+    """Opaque cursors freeze inserts and cannot cross project boundaries."""
+
+    with repository_server(tmp_bridge_root) as (base_url, composition):
+        project = _repo_create_project(
+            composition, slug="runaway-page", key="proj-page"
+        )
+        other = _repo_create_project(
+            composition, slug="runaway-other", key="proj-other"
+        )
+        run_id = "01j5runawaypage000000000000000"
+        other_run_id = "01j5runawayother00000000000000"
+        runs = RunRepository(
+            events=EventAppendService(composition.registry),
+            receipts=ReceiptService(),
+        )
+
+        def _seed(uow: UnitOfWork) -> None:
+            for project_id, candidate in (
+                (project.id, run_id),
+                (other.id, other_run_id),
+            ):
+                runs.create(
+                    uow,
+                    project_id=project_id,
+                    run_id=candidate,
+                    children=[],
+                    evidence=[],
+                    idempotency_key=f"page-run:{candidate}",
+                    kind="runaway:timing-v1",
+                    title="Runaway page",
+                    input={},
+                    created_at=TS,
+                )
+            composition.runaway.create(
+                uow,
+                project_id=project.id,
+                run_id=run_id,
+                transitions=[
+                    {
+                        "ordinal": ordinal,
+                        "start_ms": ordinal * 20,
+                        "duration_ms": 20,
+                        "prompt": f"transition {ordinal}",
+                        "metadata": {"frame": ordinal + 1},
+                    }
+                    for ordinal in range(5)
+                ],
+            )
+
+        UnitOfWork(composition.writer).run(_seed)
+        status, first = _get_json(
+            f"{base_url}/v1/projects/runaway-page/runaway-transitions"
+            f"?run_id={run_id}&limit=2"
+        )
+        cursor = first["page"]["next_cursor"]
+        assert status == 200
+        assert first["api_version"] == "v1"
+        assert first["total_count"] == 5
+        assert [row["ordinal"] for row in first["transitions"]] == [0, 1]
+        assert isinstance(cursor, str) and cursor
+
+        # Append after the first response. The old cursor must still traverse
+        # the original five-row snapshot, never the sixth row.
+        UnitOfWork(composition.writer).run(
+            lambda uow: composition.runaway.create(
+                uow,
+                project_id=project.id,
+                run_id=run_id,
+                transitions=[
+                    {
+                        "ordinal": 5,
+                        "start_ms": 100,
+                        "duration_ms": 20,
+                        "prompt": "transition 5",
+                        "metadata": {"frame": 6},
+                    }
+                ],
+                idempotency_key=f"runaway:create:{run_id}:append",
+            )
+        )
+        _, second = _get_json(
+            f"{base_url}/v1/projects/runaway-page/runaway-transitions"
+            f"?run_id={run_id}&limit=2&cursor={cursor}"
+        )
+        cursor2 = second["page"]["next_cursor"]
+        _, third = _get_json(
+            f"{base_url}/v1/projects/runaway-page/runaway-transitions"
+            f"?run_id={run_id}&limit=2&cursor={cursor2}"
+        )
+        assert second["snapshot"] == third["snapshot"] == first["snapshot"]
+        assert second["total_count"] == third["total_count"] == 5
+        assert [row["ordinal"] for row in second["transitions"]] == [2, 3]
+        assert [row["ordinal"] for row in third["transitions"]] == [4]
+        assert third["page"]["next_cursor"] is None
+
+        cross_status, cross = _get_error(
+            f"{base_url}/v1/projects/runaway-other/runaway-transitions"
+            f"?limit=2&cursor={cursor}"
+        )
+        bad_status, bad = _get_error(
+            f"{base_url}/v1/projects/runaway-page/runaway-transitions"
+            "?cursor=definitely-not-a-cursor"
+        )
+
+    assert cross_status == bad_status == 400
+    assert cross["error"] == bad["error"] == "invalid_cursor"
+
+
+def test_bridge_refuses_non_loopback_bind_and_enforces_optional_bearer(
+    tmp_bridge_root: Path,
+) -> None:
+    import pytest
+
+    with pytest.raises(ValueError, match="local-only"):
+        create_local_bridge_server(projects_root=tmp_bridge_root, host="0.0.0.0")
+
+    composition = compose_standard_bridge(tmp_bridge_root)
+    server = create_local_bridge_server(
+        projects_root=tmp_bridge_root,
+        bridge=composition.bridge,
+        writer=composition.writer,
+        database_path=composition.database_path,
+        auth_token="ship-secret",
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://{server.server_address[0]}:{server.server_address[1]}"
+    try:
+        denied_status, denied = _get_error(f"{base}/v1/health")
+        request = Request(f"{base}/v1/health")
+        request.add_header("Authorization", "Bearer ship-secret")
+        with urlopen(request) as response:  # noqa: S310 - loopback test server
+            allowed_status = response.status
+            allowed = json.loads(response.read().decode("utf-8"))
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+        composition.close()
+    assert denied_status == 401
+    assert denied["error"] == "unauthorized"
+    assert allowed_status == 200
+    assert allowed["ok"] is True
+
+
+def test_release_mode_fails_closed_and_requires_auth_and_protocol_version(
+    tmp_bridge_root: Path,
+    monkeypatch,
+) -> None:
+    import pytest
+
+    monkeypatch.delenv("ASTRID_BRIDGE_TOKEN", raising=False)
+    with pytest.raises(ValueError, match="requires ASTRID_BRIDGE_TOKEN"):
+        create_local_bridge_server(
+            projects_root=tmp_bridge_root,
+            release_mode=True,
+        )
+
+    composition = compose_standard_bridge(tmp_bridge_root)
+    server = create_local_bridge_server(
+        projects_root=tmp_bridge_root,
+        bridge=composition.bridge,
+        writer=composition.writer,
+        database_path=composition.database_path,
+        auth_token="ship-secret",
+        release_mode=True,
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://{server.server_address[0]}:{server.server_address[1]}"
+    try:
+        denied_status, denied = _get_error(f"{base}/v1/health")
+
+        auth_only = Request(f"{base}/v1/health")
+        auth_only.add_header("Authorization", "Bearer ship-secret")
+        with pytest.raises(HTTPError) as version_error:
+            urlopen(auth_only)  # noqa: S310 - loopback test server
+        version_body = json.loads(version_error.value.read().decode("utf-8"))
+
+        compatible = Request(f"{base}/v1/health")
+        compatible.add_header("Authorization", "Bearer ship-secret")
+        compatible.add_header("X-Astrid-Bridge-Version", "v1")
+        with urlopen(compatible) as response:  # noqa: S310 - loopback test server
+            compatible_status = response.status
+            response_version = response.headers["X-Astrid-Bridge-Version"]
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+        composition.close()
+
+    assert denied_status == 401
+    assert denied["error"] == "unauthorized"
+    assert version_error.value.code == 426
+    assert version_body["error"] == "protocol_version_mismatch"
+    assert compatible_status == 200
+    assert response_version == "v1"
+
+
+def test_bridge_rate_budget_rejects_with_retry_after(tmp_bridge_root: Path) -> None:
+    import pytest
+
+    composition = compose_standard_bridge(tmp_bridge_root)
+    server = create_local_bridge_server(
+        projects_root=tmp_bridge_root,
+        bridge=composition.bridge,
+        writer=composition.writer,
+        database_path=composition.database_path,
+        rate_limit_capacity=1,
+        rate_limit_refill_per_second=0.001,
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://{server.server_address[0]}:{server.server_address[1]}"
+    try:
+        first_status, _first = _get_json(f"{base}/v1/health")
+        with pytest.raises(HTTPError) as limited:
+            urlopen(f"{base}/v1/health")  # noqa: S310 - loopback test server
+        limited_body = json.loads(limited.value.read().decode("utf-8"))
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+        composition.close()
+
+    assert first_status == 200
+    assert limited.value.code == 429
+    assert limited.value.headers["Retry-After"]
+    assert limited_body["error"] == "rate_limited"
+
+
+def test_bridge_concurrency_budget_rejects_then_releases(
+    tmp_bridge_root: Path,
+) -> None:
+    entered = threading.Event()
+    release = threading.Event()
+    first_result: dict[str, int] = {}
+
+    class SlowHealthBridge:
+        def health(self, projects_root: str) -> HealthStatus:
+            entered.set()
+            assert release.wait(timeout=5)
+            return HealthStatus(ok=True, projects_root=projects_root)
+
+    server = create_local_bridge_server(
+        projects_root=tmp_bridge_root,
+        bridge=SlowHealthBridge(),
+        max_concurrent_requests=1,
+        rate_limit_capacity=100,
+        rate_limit_refill_per_second=100.0,
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://{server.server_address[0]}:{server.server_address[1]}"
+
+    def first_request() -> None:
+        first_result["status"] = _get_json(f"{base}/v1/health")[0]
+
+    client = threading.Thread(target=first_request, daemon=True)
+    client.start()
+    try:
+        assert entered.wait(timeout=5)
+        limited_status, limited = _get_error(f"{base}/v1/health")
+        release.set()
+        client.join(timeout=5)
+        after_status, _after = _get_json(f"{base}/v1/health")
+    finally:
+        release.set()
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+    assert limited_status == 429
+    assert limited["error"] == "rate_limited"
+    assert first_result["status"] == 200
+    assert after_status == 200
 
 
 def test_projects_timeline_load_missing_project_returns_project_not_found(
@@ -1015,7 +1301,6 @@ def test_save_endpoint_404_for_unknown_timeline(
     tmp_bridge_root: Path,
 ) -> None:
     """POST /save for a timeline that does not exist returns 404 timeline_not_found."""
-    timeline_id = "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"
     with repository_server(tmp_bridge_root) as (base_url, composition):
         _repo_create_project(composition, slug="known-proj", key="proj-1")
         url = f"{base_url}/projects/known-proj/timelines/ffffffff-ffff-ffff-ffff-ffffffffffff/save"
@@ -1096,8 +1381,8 @@ def test_cors_preflight_options_returns_204_with_cors_headers(
     assert status == 204
     assert headers.get("Access-Control-Allow-Origin") == "http://localhost:3000"
     assert headers.get("Access-Control-Allow-Methods") == "GET, HEAD, POST, OPTIONS"
-    assert headers.get("Access-Control-Allow-Headers") == "Content-Type, Range, If-None-Match, If-Modified-Since"
-    assert headers.get("Access-Control-Expose-Headers") == "Accept-Ranges, Content-Length, Content-Range, Content-Type, ETag, Last-Modified"
+    assert headers.get("Access-Control-Allow-Headers") == "Authorization, Content-Type, Range, If-None-Match, If-Modified-Since, X-Astrid-Bridge-Version"
+    assert headers.get("Access-Control-Expose-Headers") == "Accept-Ranges, Content-Length, Content-Range, Content-Type, ETag, Last-Modified, X-Astrid-Bridge-Version"
 
 
 def test_cors_preflight_no_origin_omits_cors_headers(
@@ -1115,10 +1400,10 @@ def test_cors_preflight_no_origin_omits_cors_headers(
     assert headers.get("Access-Control-Allow-Origin") is None
 
 
-def test_cors_preflight_disallowed_origin_omits_cors_headers(
+def test_cors_preflight_disallowed_origin_is_rejected(
     seed_bridge_project, tmp_bridge_root: Path,
 ) -> None:
-    """OPTIONS from a non-whitelisted origin omits CORS response headers."""
+    """OPTIONS from a non-whitelisted origin is rejected before routing."""
     timeline_id = "33333333-3333-3333-3333-3333cors03"
     seed_bridge_project(slug="bad-origin-proj", timeline_id=timeline_id)
 
@@ -1126,7 +1411,7 @@ def test_cors_preflight_disallowed_origin_omits_cors_headers(
         url = f"{base_url}/projects/bad-origin-proj/timelines/{timeline_id}/save"
         status, headers = _options(url, origin="https://evil.com")
 
-    assert status == 204
+    assert status == 403
     assert headers.get("Access-Control-Allow-Origin") is None
 
 
@@ -2162,7 +2447,8 @@ def test_persisted_registry_asset_options_preflight(
         "Access-Control-Allow-Methods", ""
     )
     assert headers.get("Access-Control-Allow-Headers") == (
-        "Content-Type, Range, If-None-Match, If-Modified-Since"
+        "Authorization, Content-Type, Range, If-None-Match, If-Modified-Since, "
+        "X-Astrid-Bridge-Version"
     )
 
 

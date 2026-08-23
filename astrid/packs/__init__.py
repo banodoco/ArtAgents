@@ -283,7 +283,7 @@ def compose_standard_bridge(
             # checks; the normal standard registry always takes this branch.
             from astrid.packs.runaway.repository import RunawayRepository
 
-            runaway = RunawayRepository(receipts=receipts)
+            runaway = RunawayRepository(receipts=receipts, events=events)
             runaway_evidence = EvidenceRepository(events=events, receipts=receipts)
         # The bridge adapter is composed over the **typed SDK services**
         # (m4 plan step 20, task T21) — the same project/timeline services the

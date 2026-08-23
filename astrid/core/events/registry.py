@@ -4,7 +4,7 @@
 independently of any Astrid pack: core declares the ``core.project``,
 ``core.task``, ``core.run``, and ``core.media`` stream types plus the m1/m2
 core event/command kinds, and only then may the explicit standard-Astrid
-composition in ``astrid/packs/__init__.py`` register the three in-tree schema
+composition in ``astrid/packs/__init__.py`` registers the four in-tree schema
 packs (v10 section 2.3 law 5; decision artifact section 4).
 
 Rules kept here:
@@ -298,6 +298,11 @@ STREAM_AGGREGATE_RULES: Mapping[str, StreamAggregateRule] = MappingProxyType(
             stream_type="shot.shot",
             declaring_pack="shots",
             subject_type="shot",
+        ),
+        "runaway.transition_set": StreamAggregateRule(
+            stream_type="runaway.transition_set",
+            declaring_pack="runaway",
+            subject_type="runaway_transition_set",
         ),
     }
 )

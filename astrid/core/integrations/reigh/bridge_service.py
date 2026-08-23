@@ -21,7 +21,7 @@ secrecy (contract §7) is enforced by construction, not by filtering.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -142,6 +142,40 @@ class TimelineLoad:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class RunawayTransitionPage:
+    """Versioned, snapshot-consistent page of typed Runaway rows."""
+
+    project: str
+    transitions: tuple[Mapping[str, Any], ...]
+    timing_summary: Mapping[str, Any] | None
+    snapshot: str
+    total_count: int
+    limit: int
+    next_cursor: str | None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "api_version": "v1",
+            "project": self.project,
+            # ``count`` remains the page count for compatibility with the
+            # original viewer; total_count makes pagination explicit.
+            "count": len(self.transitions),
+            "total_count": self.total_count,
+            "timing_summary": (
+                dict(self.timing_summary)
+                if self.timing_summary is not None
+                else None
+            ),
+            "snapshot": self.snapshot,
+            "page": {
+                "limit": self.limit,
+                "next_cursor": self.next_cursor,
+            },
+            "transitions": [dict(row) for row in self.transitions],
+        }
+
+
 _MISSING = object()
 
 
@@ -240,6 +274,55 @@ class BridgeExpectedVersionError(BridgeError):
 
     status_code = 400
     code = "invalid_expected_version"
+
+
+class BridgeCursorError(BridgeError):
+    """``400 invalid_cursor`` — malformed, stale, or cross-scope cursor."""
+
+    status_code = 400
+    code = "invalid_cursor"
+
+
+class BridgeLimitError(BridgeError):
+    """``400 invalid_limit`` — page size is absent from the supported range."""
+
+    status_code = 400
+    code = "invalid_limit"
+
+
+class BridgeAuthenticationError(BridgeError):
+    """``401 unauthorized`` — configured bearer token is missing/invalid."""
+
+    status_code = 401
+    code = "unauthorized"
+
+
+class BridgeProtocolVersionError(BridgeError):
+    """``426 protocol_version_mismatch`` — release client is incompatible."""
+
+    status_code = 426
+    code = "protocol_version_mismatch"
+
+
+class BridgeRateLimitError(BridgeError):
+    """``429 rate_limited`` — bounded local bridge admission is exhausted."""
+
+    status_code = 429
+    code = "rate_limited"
+
+
+class BridgeForbiddenError(BridgeError):
+    """``403 forbidden`` — Host or Origin violates the local bridge policy."""
+
+    status_code = 403
+    code = "forbidden"
+
+
+class BridgePayloadTooLargeError(BridgeError):
+    """``413 payload_too_large`` — request body exceeds the hard cap."""
+
+    status_code = 413
+    code = "payload_too_large"
 
 
 class BridgeInvalidProjectError(BridgeError):
@@ -349,15 +432,22 @@ __all__ = [
     "ASTROID_DATABASE_NAME",
     "ASTROID_DIR_NAME",
     "BRIDGE_ERROR_ENVELOPE_KEYS",
+    "BridgeAuthenticationError",
     "BridgeBodyError",
     "BridgeConfigError",
+    "BridgeCursorError",
     "BridgeError",
     "BridgeExpectedVersionError",
+    "BridgeForbiddenError",
     "BridgeInternalError",
     "BridgeInvalidProjectError",
     "BridgeInvalidTimelineError",
     "BridgeIssue",
+    "BridgeLimitError",
+    "BridgePayloadTooLargeError",
+    "BridgeProtocolVersionError",
     "BridgeProjectNotFoundError",
+    "BridgeRateLimitError",
     "BridgeRegistryError",
     "BridgeSchemaIncompatibleError",
     "BridgeTimelineNotFoundError",
@@ -365,6 +455,7 @@ __all__ = [
     "HealthStatus",
     "ProjectRow",
     "RECEIPT_SECRECY_FIELDS",
+    "RunawayTransitionPage",
     "TimelineLoad",
     "TimelineRow",
     "TimelineSaveRequest",

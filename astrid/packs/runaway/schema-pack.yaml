@@ -9,9 +9,9 @@
 # The table FK-integrates with the kernel run table (runs.id RESTRICT,
 # projects.id CASCADE, tasks.id SET NULL) and handles sharding: runs with
 # >256 transitions use continue_run with globally contiguous ordinals,
-# storing run_id per shard. The pack has no pack-owned event stream; the
-# repository is kernel-writer backed and uses the single shared
-# command_receipts table for idempotency (key runaway:create:{run_id}).
+# storing run_id per shard. The repository is kernel-writer backed and owns
+# one transition-set event stream per run, emitting one hash-chained pack
+# event per admitted batch before recording the shared command receipt.
 id: runaway
 version: 1
 depends_on:
@@ -22,8 +22,10 @@ migrations:
     path: migrations/0001_initial.sql
     tables:
       - runaway_transitions
-stream_types: []
-event_kinds: []
+stream_types:
+  - runaway.transition_set
+event_kinds:
+  - runaway.created
 command_kinds:
   - runaway.create
 repositories:

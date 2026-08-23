@@ -57,7 +57,7 @@ def env(tmp_path: Path):
             "receipts": receipts,
             "project_repo": ProjectRepository(events=events, receipts=receipts),
             "run_repo": RunRepository(events=events, receipts=receipts),
-            "runaway_repo": RunawayRepository(receipts=receipts),
+            "runaway_repo": RunawayRepository(receipts=receipts, events=events),
         }
     finally:
         writer.close()

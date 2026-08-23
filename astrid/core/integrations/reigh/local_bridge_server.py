@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import hmac
+import ipaddress
 import json
 import mimetypes
 import os
 import re
+import threading
 import time
 from collections.abc import Mapping
 from email.utils import formatdate
@@ -15,14 +18,17 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qs, unquote, urlparse
 
 from astrid.core.integrations.reigh.bridge_service import (
+    BridgeAuthenticationError,
+    BridgeCursorError,
     BridgeError,
+    BridgeForbiddenError,
     BridgeInternalError,
-    BridgeInvalidProjectError,
-    BridgeInvalidTimelineError,
     BridgeIssue,
-    BridgeProjectNotFoundError,
+    BridgeLimitError,
+    BridgePayloadTooLargeError,
+    BridgeProtocolVersionError,
+    BridgeRateLimitError,
     BridgeSchemaIncompatibleError,
-    BridgeTimelineNotFoundError,
     TimelineSaveRequest,
 )
 from astrid.core.integrations.reigh.local_bridge import (
@@ -56,6 +62,93 @@ _RANGELESS_FULL_BODY_LIMIT_BYTES = 64 * 1024 * 1024
 _RANGELESS_INITIAL_CHUNK_BYTES = 1024 * 1024
 _OPEN_ENDED_RANGE_CHUNK_BYTES = 4 * 1024 * 1024
 _DIAGNOSTICS_ENABLED = os.environ.get("ASTRID_BRIDGE_DIAGNOSTICS", "0") != "0"
+_MAX_REQUEST_BODY_BYTES = 8 * 1024 * 1024
+_MAX_REQUEST_TARGET_BYTES = 8 * 1024
+_REQUEST_SOCKET_TIMEOUT_SEC = 15.0
+_DEFAULT_RUNAWAY_PAGE_SIZE = 1_000
+_MAX_RUNAWAY_PAGE_SIZE = 1_000
+_BRIDGE_PROTOCOL_VERSION = "v1"
+_DEFAULT_MAX_CONCURRENT_REQUESTS = 8
+_DEFAULT_RATE_LIMIT_CAPACITY = 32
+_DEFAULT_RATE_LIMIT_REFILL_PER_SECOND = 16.0
+
+
+class _RequestAdmissionController:
+    """Thread-safe fixed-capacity concurrency and token-bucket admission."""
+
+    def __init__(
+        self,
+        *,
+        max_concurrent: int,
+        rate_capacity: int,
+        refill_per_second: float,
+    ) -> None:
+        if max_concurrent < 1 or rate_capacity < 1 or refill_per_second <= 0:
+            raise ValueError("bridge admission limits must be positive")
+        self._semaphore = threading.BoundedSemaphore(max_concurrent)
+        self._rate_capacity = float(rate_capacity)
+        self._refill_per_second = refill_per_second
+        self._tokens = float(rate_capacity)
+        self._updated_at = time.monotonic()
+        self._rate_lock = threading.Lock()
+
+    def try_acquire(self) -> tuple[bool, int]:
+        now = time.monotonic()
+        with self._rate_lock:
+            elapsed = max(0.0, now - self._updated_at)
+            self._tokens = min(
+                self._rate_capacity,
+                self._tokens + elapsed * self._refill_per_second,
+            )
+            self._updated_at = now
+            if self._tokens < 1.0:
+                retry_after = max(
+                    1, int((1.0 - self._tokens) / self._refill_per_second) + 1
+                )
+                return False, retry_after
+            self._tokens -= 1.0
+        if not self._semaphore.acquire(blocking=False):
+            return False, 1
+        return True, 0
+
+    def release(self) -> None:
+        self._semaphore.release()
+
+
+def _require_loopback_bind_host(host: str) -> None:
+    """Refuse a local-editor bridge exposed on a non-loopback interface."""
+
+    normalized = host.strip().lower()
+    if normalized == "localhost":
+        return
+    try:
+        if ipaddress.ip_address(normalized).is_loopback:
+            return
+    except ValueError:
+        pass
+    raise ValueError(
+        "Astrid's editor bridge is local-only; --host must be localhost, "
+        "127.0.0.1, or ::1"
+    )
+
+
+def _is_loopback_host_header(value: str) -> bool:
+    """Validate Host without DNS resolution (DNS-rebinding protection)."""
+
+    raw = value.strip()
+    if not raw:
+        return False
+    if raw.startswith("["):
+        end = raw.find("]")
+        hostname = raw[1:end] if end >= 0 else ""
+    else:
+        hostname = raw.rsplit(":", 1)[0]
+    if hostname.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(hostname).is_loopback
+    except ValueError:
+        return False
 
 
 def _classify_persisted_registry_locator(locator: str) -> str:
@@ -85,7 +178,15 @@ class LocalBridgeHTTPServer(ThreadingHTTPServer):
     # ``serve_forever`` has started would create a second write authority,
     # so it is rejected at runtime.
     _BRIDGE_AUTHORITY_ATTRIBUTES = frozenset(
-        {"bridge", "bridge_writer", "bridge_database_path"}
+        {
+            "bridge",
+            "bridge_writer",
+            "bridge_database_path",
+            "bridge_auth_token",
+            "bridge_release_mode",
+            "bridge_protocol_version",
+            "bridge_admission",
+        }
     )
 
     def __init__(
@@ -96,6 +197,11 @@ class LocalBridgeHTTPServer(ThreadingHTTPServer):
         bridge: Any | None,
         bridge_writer: Any | None,
         bridge_database_path: str | Path | None,
+        bridge_auth_token: str | None = None,
+        bridge_release_mode: bool = False,
+        max_concurrent_requests: int = _DEFAULT_MAX_CONCURRENT_REQUESTS,
+        rate_limit_capacity: int = _DEFAULT_RATE_LIMIT_CAPACITY,
+        rate_limit_refill_per_second: float = _DEFAULT_RATE_LIMIT_REFILL_PER_SECOND,
     ) -> None:
         """Bind the server and install the bridge authority at construction.
 
@@ -113,6 +219,15 @@ class LocalBridgeHTTPServer(ThreadingHTTPServer):
         self.bridge = bridge
         self.bridge_writer = bridge_writer
         self.bridge_database_path = bridge_database_path
+        self.bridge_auth_token = bridge_auth_token
+        self.bridge_release_mode = bridge_release_mode
+        self.bridge_protocol_version = _BRIDGE_PROTOCOL_VERSION
+        self.bridge_shutdown_event = threading.Event()
+        self.bridge_admission = _RequestAdmissionController(
+            max_concurrent=max_concurrent_requests,
+            rate_capacity=rate_limit_capacity,
+            refill_per_second=rate_limit_refill_per_second,
+        )
 
     def __setattr__(self, name: str, value: Any) -> None:
         if (
@@ -132,6 +247,10 @@ class LocalBridgeHTTPServer(ThreadingHTTPServer):
         finally:
             self._serving = False
 
+    def shutdown(self) -> None:
+        self.bridge_shutdown_event.set()
+        super().shutdown()
+
 
 def create_local_bridge_server(
     *,
@@ -141,6 +260,11 @@ def create_local_bridge_server(
     bridge: Any | None = None,
     writer: Any | None = None,
     database_path: str | Path | None = None,
+    auth_token: str | None = None,
+    release_mode: bool = False,
+    max_concurrent_requests: int = _DEFAULT_MAX_CONCURRENT_REQUESTS,
+    rate_limit_capacity: int = _DEFAULT_RATE_LIMIT_CAPACITY,
+    rate_limit_refill_per_second: float = _DEFAULT_RATE_LIMIT_REFILL_PER_SECOND,
 ) -> ThreadingHTTPServer:
     """Create a bridge HTTP server bound to the requested host/port.
 
@@ -157,7 +281,16 @@ def create_local_bridge_server(
     sidecar/FSA asset fallback) — answers the typed ``500 internal``
     envelope.
     """
+    _require_loopback_bind_host(host)
     resolved_root = resolve_bridge_projects_root(projects_root)
+    if auth_token is None:
+        auth_token = os.environ.get("ASTRID_BRIDGE_TOKEN", "").strip() or None
+    elif not isinstance(auth_token, str) or not auth_token.strip():
+        raise ValueError("auth_token must be a non-empty string when provided")
+    if release_mode and auth_token is None:
+        raise ValueError(
+            "release bridge mode requires ASTRID_BRIDGE_TOKEN to be set"
+        )
     handler = make_local_bridge_handler(projects_root=resolved_root)
     return LocalBridgeHTTPServer(
         (host, port),
@@ -165,6 +298,11 @@ def create_local_bridge_server(
         bridge=bridge,
         bridge_writer=writer,
         bridge_database_path=database_path,
+        bridge_auth_token=auth_token,
+        bridge_release_mode=release_mode,
+        max_concurrent_requests=max_concurrent_requests,
+        rate_limit_capacity=rate_limit_capacity,
+        rate_limit_refill_per_second=rate_limit_refill_per_second,
     )
 
 
@@ -172,6 +310,10 @@ def make_local_bridge_handler(*, projects_root: Path):
     """Build a request handler bound to one resolved projects root."""
 
     class Handler(BaseHTTPRequestHandler):
+        def setup(self) -> None:
+            super().setup()
+            self.connection.settimeout(_REQUEST_SOCKET_TIMEOUT_SEC)
+
         def log_message(self, _fmt: str, *_args: Any) -> None:
             return
 
@@ -180,9 +322,15 @@ def make_local_bridge_handler(*, projects_root: Path):
             self._diag_response_status: int | None = None
             self._diag_content_range: str | None = None
             self._diag_content_length: str | None = None
+            self._bridge_admitted = False
+            self._bridge_cancelled = threading.Event()
             try:
                 super().handle_one_request()
             finally:
+                self._bridge_cancelled.set()
+                if self._bridge_admitted:
+                    self.server.bridge_admission.release()
+                    self._bridge_admitted = False
                 self._diag_finish_request()
 
         def parse_request(self) -> bool:
@@ -249,8 +397,8 @@ def make_local_bridge_handler(*, projects_root: Path):
             "http://127.0.0.1:5173",
         )
         _ALLOWED_METHODS = "GET, HEAD, POST, OPTIONS"
-        _ALLOWED_HEADERS = "Content-Type, Range, If-None-Match, If-Modified-Since"
-        _EXPOSED_HEADERS = "Accept-Ranges, Content-Length, Content-Range, Content-Type, ETag, Last-Modified"
+        _ALLOWED_HEADERS = "Authorization, Content-Type, Range, If-None-Match, If-Modified-Since, X-Astrid-Bridge-Version"
+        _EXPOSED_HEADERS = "Accept-Ranges, Content-Length, Content-Range, Content-Type, ETag, Last-Modified, X-Astrid-Bridge-Version"
 
         def _set_cors_headers(self) -> None:
             origin = self.headers.get("Origin", "")
@@ -262,15 +410,29 @@ def make_local_bridge_handler(*, projects_root: Path):
                 self.send_header("Access-Control-Max-Age", "86400")
                 self.send_header("Vary", "Origin")
 
-        def _send_json(self, status: int, payload: dict[str, Any]) -> None:
+        def _send_json(
+            self,
+            status: int,
+            payload: dict[str, Any],
+            *,
+            headers: Mapping[str, str] | None = None,
+        ) -> None:
             body = json.dumps(payload).encode("utf-8")
             self.send_response(status)
             self._set_cors_headers()
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Astrid-Bridge-Version", _BRIDGE_PROTOCOL_VERSION)
+            for name, value in (headers or {}).items():
+                self.send_header(name, value)
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Referrer-Policy", "no-referrer")
             self.end_headers()
-            self.wfile.write(body)
+            try:
+                self.wfile.write(body)
+            except (BrokenPipeError, ConnectionResetError):
+                self._bridge_cancelled.set()
 
         def _send_error(self, status: int, code: str, detail: str) -> None:
             self._send_json(status, {"error": code, "detail": detail})
@@ -620,6 +782,11 @@ def make_local_bridge_handler(*, projects_root: Path):
                             chunk = fh.read(min(65536, remaining))
                             if not chunk:
                                 break
+                            if (
+                                self._bridge_cancelled.is_set()
+                                or self.server.bridge_shutdown_event.is_set()
+                            ):
+                                return
                             self.wfile.write(chunk)
                             remaining -= len(chunk)
                 except (BrokenPipeError, ConnectionResetError):
@@ -773,69 +940,160 @@ def make_local_bridge_handler(*, projects_root: Path):
             """Serialize a typed bridge error with its frozen envelope."""
             self._send_json(error.status_code, error.to_dict())
 
+        def _authorize_request(self, *, require_token: bool = True) -> bool:
+            """Apply bounded admission, local-origin, auth, and version gates."""
+
+            if not self._bridge_admitted:
+                admitted, retry_after = self.server.bridge_admission.try_acquire()
+                if not admitted:
+                    error = BridgeRateLimitError(
+                        "the local bridge request budget is exhausted"
+                    )
+                    self._send_json(
+                        error.status_code,
+                        error.to_dict(),
+                        headers={"Retry-After": str(retry_after)},
+                    )
+                    return False
+                self._bridge_admitted = True
+
+            if len(self.path.encode("utf-8", errors="replace")) > _MAX_REQUEST_TARGET_BYTES:
+                self._send_error(414, "uri_too_long", "request target exceeds the bridge limit")
+                return False
+            host = self.headers.get("Host", "")
+            if not _is_loopback_host_header(host):
+                self._send_bridge_error(
+                    BridgeForbiddenError("Host must identify a loopback address")
+                )
+                return False
+            origin = self.headers.get("Origin")
+            if origin is not None and origin not in self._ALLOWED_ORIGINS:
+                self._send_bridge_error(
+                    BridgeForbiddenError("Origin is not allowed by the local bridge")
+                )
+                return False
+            token = getattr(self.server, "bridge_auth_token", None)
+            release_mode = bool(getattr(self.server, "bridge_release_mode", False))
+            if require_token and (token is not None or release_mode):
+                supplied = self.headers.get("Authorization", "")
+                expected = f"Bearer {token}"
+                if not hmac.compare_digest(supplied, expected):
+                    self._send_bridge_error(
+                        BridgeAuthenticationError("a valid bridge bearer token is required")
+                    )
+                    return False
+            if require_token and release_mode:
+                supplied_version = self.headers.get("X-Astrid-Bridge-Version", "")
+                if supplied_version != _BRIDGE_PROTOCOL_VERSION:
+                    self._send_bridge_error(
+                        BridgeProtocolVersionError(
+                            f"X-Astrid-Bridge-Version must be {_BRIDGE_PROTOCOL_VERSION}"
+                        )
+                    )
+                    return False
+            return True
+
         def do_GET(self) -> None:  # noqa: N802
+            if not self._authorize_request():
+                return
             parsed_url = urlparse(self.path)
             path = parsed_url.path
             parts = [part for part in unquote(path).split("/") if part]
+            route_parts = parts[1:] if parts[:1] == ["v1"] else parts
 
-            if parts == ["health"]:
-                status = self._bridge().health(str(projects_root))
+            if route_parts == ["health"]:
+                try:
+                    status = self._bridge().health(str(projects_root))
+                except BridgeError as exc:
+                    self._send_bridge_error(exc)
+                    return
                 self._send_json(200, status.to_dict())
                 return
 
-            if parts == ["projects"]:
-                rows = [
-                    row.to_dict() for row in self._bridge().list_projects()
-                ]
+            if route_parts == ["projects"]:
+                try:
+                    rows = [
+                        row.to_dict() for row in self._bridge().list_projects()
+                    ]
+                except BridgeError as exc:
+                    self._send_bridge_error(exc)
+                    return
                 self._send_json(200, {"projects": rows})
                 return
 
-            if len(parts) == 3 and parts[0] == "projects" and parts[2] == "timelines":
+            if len(route_parts) == 3 and route_parts[0] == "projects" and route_parts[2] == "timelines":
                 try:
                     rows = [
                         row.to_dict()
-                        for row in self._bridge().list_timelines(parts[1])
+                        for row in self._bridge().list_timelines(route_parts[1])
                     ]
-                except (BridgeInvalidProjectError, BridgeProjectNotFoundError) as exc:
+                except BridgeError as exc:
                     self._send_bridge_error(exc)
                     return
                 self._send_json(200, {"timelines": rows})
                 return
 
-            if len(parts) == 4 and parts[0] == "projects" and parts[2] == "timelines":
+            if len(route_parts) == 4 and route_parts[0] == "projects" and route_parts[2] == "timelines":
                 try:
                     payload = self._bridge().load_timeline(
-                        parts[1], parts[3]
+                        route_parts[1], route_parts[3]
                     ).to_dict()
-                except (
-                    BridgeInvalidProjectError,
-                    BridgeInvalidTimelineError,
-                    BridgeProjectNotFoundError,
-                    BridgeTimelineNotFoundError,
-                ) as exc:
+                except BridgeError as exc:
                     self._send_bridge_error(exc)
                     return
                 self._send_json(200, payload)
                 return
 
+            runaway_parts = route_parts
             if (
-                len(parts) == 3
-                and parts[0] == "projects"
-                and parts[2] == "runaway-transitions"
+                len(runaway_parts) == 3
+                and runaway_parts[0] == "projects"
+                and runaway_parts[2] == "runaway-transitions"
             ):
-                run_ids = parse_qs(
-                    parsed_url.query, keep_blank_values=True
-                ).get("run_id", [])
+                query = parse_qs(parsed_url.query, keep_blank_values=True)
+                unknown = set(query).difference({"run_id", "limit", "cursor"})
+                if unknown:
+                    self._send_error(
+                        400,
+                        "invalid_query",
+                        f"unsupported query parameter(s): {', '.join(sorted(unknown))}",
+                    )
+                    return
+                run_ids = query.get("run_id", [])
                 if len(run_ids) > 1 or (run_ids and not run_ids[0]):
                     self._send_error(
                         400, "invalid_run", "run_id must be a non-empty string"
                     )
                     return
+                limits = query.get("limit", [])
+                if len(limits) > 1:
+                    self._send_bridge_error(BridgeLimitError("limit may be provided once"))
+                    return
                 try:
-                    rows = self._bridge().list_runaway_transitions(
-                        parts[1], run_id=run_ids[0] if run_ids else None
+                    limit = int(limits[0]) if limits else _DEFAULT_RUNAWAY_PAGE_SIZE
+                except (TypeError, ValueError):
+                    self._send_bridge_error(BridgeLimitError("limit must be an integer"))
+                    return
+                if not 1 <= limit <= _MAX_RUNAWAY_PAGE_SIZE:
+                    self._send_bridge_error(
+                        BridgeLimitError(
+                            f"limit must be between 1 and {_MAX_RUNAWAY_PAGE_SIZE}"
+                        )
                     )
-                    summary = self._bridge().get_runaway_timing_summary(parts[1])
+                    return
+                cursors = query.get("cursor", [])
+                if len(cursors) > 1 or (cursors and not cursors[0]):
+                    self._send_bridge_error(
+                        BridgeCursorError("cursor must be one non-empty string")
+                    )
+                    return
+                try:
+                    page = self._bridge().page_runaway_transitions(
+                        runaway_parts[1],
+                        run_id=run_ids[0] if run_ids else None,
+                        limit=limit,
+                        cursor=cursors[0] if cursors else None,
+                    )
                 except BridgeError as exc:
                     self._send_bridge_error(exc)
                     return
@@ -846,41 +1104,36 @@ def make_local_bridge_handler(*, projects_root: Path):
                         "unexpected failure while reading Runaway transitions",
                     )
                     return
-                self._send_json(
-                    200,
-                    {
-                        "project": parts[1],
-                        "count": len(rows),
-                        "timing_summary": summary,
-                        "transitions": rows,
-                    },
-                )
+                self._send_json(200, page.to_dict())
                 return
 
             # ---- Asset endpoint ----
             if (
-                len(parts) == 6
-                and parts[0] == "projects"
-                and parts[2] == "timelines"
-                and parts[4] == "assets"
+                len(route_parts) == 6
+                and route_parts[0] == "projects"
+                and route_parts[2] == "timelines"
+                and route_parts[4] == "assets"
             ):
-                self._serve_asset(parts[1], parts[3], parts[5])
+                self._serve_asset(route_parts[1], route_parts[3], route_parts[5])
                 return
 
             self._send_error(404, "not_found", f"unknown route: {path}")
 
         def do_HEAD(self) -> None:  # noqa: N802
+            if not self._authorize_request():
+                return
             path = urlparse(self.path).path
             parts = [part for part in unquote(path).split("/") if part]
+            route_parts = parts[1:] if parts[:1] == ["v1"] else parts
 
             if (
-                len(parts) == 6
-                and parts[0] == "projects"
-                and parts[2] == "timelines"
-                and parts[4] == "assets"
+                len(route_parts) == 6
+                and route_parts[0] == "projects"
+                and route_parts[2] == "timelines"
+                and route_parts[4] == "assets"
             ):
                 self._serve_asset(
-                    parts[1], parts[3], parts[5], head_only=True
+                    route_parts[1], route_parts[3], route_parts[5], head_only=True
                 )
                 return
 
@@ -894,6 +1147,11 @@ def make_local_bridge_handler(*, projects_root: Path):
         # ------------------------------------------------------------------
 
         def do_OPTIONS(self) -> None:  # noqa: N802
+            # Browser preflights announce Authorization but do not carry its
+            # bearer value. Origin/Host/URL gates still run; the actual
+            # request must authenticate.
+            if not self._authorize_request(require_token=False):
+                return
             self.send_response(204)
             self._set_cors_headers()
             self.send_header("Content-Length", "0")
@@ -904,19 +1162,26 @@ def make_local_bridge_handler(*, projects_root: Path):
         # ------------------------------------------------------------------
 
         def do_POST(self) -> None:  # noqa: N802
+            if not self._authorize_request():
+                return
             path = urlparse(self.path).path
             parts = [part for part in unquote(path).split("/") if part]
+            route_parts = parts[1:] if parts[:1] == ["v1"] else parts
 
             # POST /projects/:project/timelines/:timeline/save
             if (
-                len(parts) == 5
-                and parts[0] == "projects"
-                and parts[2] == "timelines"
-                and parts[4] == "save"
+                len(route_parts) == 5
+                and route_parts[0] == "projects"
+                and route_parts[2] == "timelines"
+                and route_parts[4] == "save"
             ):
-                project_slug = parts[1]
-                timeline_ref = parts[3]
-                body = self._read_request_body()
+                project_slug = route_parts[1]
+                timeline_ref = route_parts[3]
+                try:
+                    body = self._read_request_body()
+                except BridgePayloadTooLargeError as exc:
+                    self._send_bridge_error(exc)
+                    return
                 if body is None:
                     self._send_error(
                         400, "invalid_body", "request body must be valid JSON"
@@ -975,7 +1240,16 @@ def make_local_bridge_handler(*, projects_root: Path):
                 return None
             if length <= 0:
                 return None
-            raw = self.rfile.read(length)
+            if length > _MAX_REQUEST_BODY_BYTES:
+                raise BridgePayloadTooLargeError(
+                    f"request body exceeds {_MAX_REQUEST_BODY_BYTES} bytes"
+                )
+            try:
+                raw = self.rfile.read(length)
+            except TimeoutError:
+                return None
+            if len(raw) != length:
+                return None
             try:
                 payload = json.loads(raw.decode("utf-8"))
             except (json.JSONDecodeError, UnicodeDecodeError):

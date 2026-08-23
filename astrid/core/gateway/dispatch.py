@@ -12,6 +12,7 @@ from typing import Any
 
 from astrid.core.contracts.errors import AstridError
 
+
 def _dispatch(raw: list[str]) -> int:
     from . import _print_entrypoint_help
 
@@ -154,7 +155,9 @@ def _dispatch_serve(args: list[str]) -> int:
         prog="astrid serve", description="Start the Astrid local bridge."
     )
     parser.add_argument(
-        "--host", default="127.0.0.1", help="Host to bind (default: 127.0.0.1)",
+        "--host",
+        default="127.0.0.1",
+        help="Loopback host to bind (default: 127.0.0.1; remote binds are refused)",
     )
     parser.add_argument(
         "--port", type=int, default=0, help="Port to bind (default: 0 = OS-assigned)",
@@ -175,6 +178,16 @@ def _dispatch_serve(args: list[str]) -> int:
         "--no-open-editor",
         action="store_true",
         help="Skip opening the editor (headless/CI use).",
+    )
+    parser.add_argument(
+        "--release-mode",
+        "--require-auth",
+        dest="release_mode",
+        action="store_true",
+        help=(
+            "Require ASTRID_BRIDGE_TOKEN bearer auth and the v1 client "
+            "protocol header; fail before binding when the token is absent."
+        ),
     )
     parsed = parser.parse_args(args)
 
@@ -198,19 +211,24 @@ def _dispatch_serve(args: list[str]) -> int:
         return 1
 
     try:
-        server = create_local_bridge_server(
-            host=parsed.host,
-            port=parsed.port,
-            projects_root=composition.projects_root,
-            # Bridge, writer, and database path are constructor-injected at
-            # this composition root (m4 plan step 21): there is no
-            # post-construction ``server.bridge = ...`` assignment, so the
-            # HTTP server never gains a second authority. The writer stays
-            # owned by this root and is closed on shutdown below.
-            bridge=composition.bridge,
-            writer=composition.writer,
-            database_path=composition.database_path,
-        )
+        try:
+            server = create_local_bridge_server(
+                host=parsed.host,
+                port=parsed.port,
+                projects_root=composition.projects_root,
+                # Bridge, writer, and database path are constructor-injected at
+                # this composition root (m4 plan step 21): there is no
+                # post-construction ``server.bridge = ...`` assignment, so the
+                # HTTP server never gains a second authority. The writer stays
+                # owned by this root and is closed on shutdown below.
+                bridge=composition.bridge,
+                writer=composition.writer,
+                database_path=composition.database_path,
+                release_mode=parsed.release_mode,
+            )
+        except (OSError, ValueError) as exc:
+            print(f"serve failed: {exc}", file=sys.stderr)
+            return 1
         host, port = server.server_address
 
         # Resolve and open the editor (readiness is printed after bind).
