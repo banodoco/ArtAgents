@@ -230,4 +230,91 @@ EOF
     fail "migrations checksum/freshness gate: $MIGRATE_ERR"
 fi
 
+# 6e. Turso replica migrations surface (exec-sqlite S4): every
+# sql/turso/*.sql must parse on :memory:, be additive-only, carry a
+# fresh exact-byte SHA-256 in sql/turso/CHECKSUMS, and follow
+# 0000_name.sql with strictly increasing versions. This extends the
+# second contract surface to the Turso replica (R1).
+TURSO_DIR="sql/turso"
+TURSO_CHECKSUMS="sql/turso/CHECKSUMS"
+if [ -d "$TURSO_DIR" ]; then
+    if [ ! -f "$TURSO_CHECKSUMS" ]; then
+        fail "$TURSO_CHECKSUMS missing"
+    fi
+    shopt -s nullglob
+    TURSO_FILES=("$TURSO_DIR"/*.sql)
+    shopt -u nullglob
+    if [ ${#TURSO_FILES[@]} -eq 0 ]; then
+        fail "$TURSO_DIR contains no .sql files"
+    fi
+    LAST_VERSION=0
+    for SQL in "${TURSO_FILES[@]}"; do
+        NAME=$(basename "$SQL")
+        if ! [[ "$NAME" =~ ^[0-9]{4}_[a-z0-9_]+\.sql$ ]]; then
+            fail "turso migration filename $NAME violates ^([0-9]{4})_[a-z0-9_]+\.sql\$"
+        fi
+        VERSION=$((10#${NAME:0:4}))
+        if [ "$VERSION" -le "$LAST_VERSION" ]; then
+            fail "turso migration versions must be strictly increasing: $NAME has version $VERSION, not greater than $LAST_VERSION"
+        fi
+        LAST_VERSION=$VERSION
+        if grep -qE -i 'DROP |DELETE FROM|UPDATE |ALTER TABLE[[:space:]]+.*RENAME|PRAGMA' "$SQL"; then
+            OFFENSE=$(grep -E -i -n -m 1 'DROP |DELETE FROM|UPDATE |ALTER TABLE[[:space:]]+.*RENAME|PRAGMA' "$SQL")
+            fail "turso migration $NAME is not additive-only (first offense at $OFFENSE)"
+        fi
+        SQL_NORM=$(tr '\n\r\t' '   ' < "$SQL" | tr -s ' ')
+        if grep -qE -i 'DROP |DELETE FROM|UPDATE |ALTER TABLE[[:space:]]+.*RENAME|PRAGMA' <<< "$SQL_NORM"; then
+            FRAGMENT=$(grep -E -o -i -m 1 'DROP |DELETE FROM|UPDATE |ALTER TABLE[[:space:]]+.*RENAME|PRAGMA' <<< "$SQL_NORM")
+            fail "turso migration $NAME is not additive-only (whitespace-normalized pass matched fragment '$FRAGMENT')"
+        fi
+        if ! PARSE_ERR=$("$PYTHON" - "$SQL" <<'EOF' 2>&1
+import sqlite3
+import sys
+path = sys.argv[1]
+conn = sqlite3.connect(":memory:")
+try:
+    with open(path, encoding="utf-8") as handle:
+        sql_text = handle.read()
+    conn.executescript(sql_text)
+except Exception as exc:
+    print(f"{path}: {exc}")
+    raise SystemExit(1)
+EOF
+); then
+            fail "turso migration $NAME does not parse on :memory:: $PARSE_ERR"
+        fi
+    done
+    if ! MIGRATE_ERR=$("$PYTHON" - "$TURSO_DIR" "$TURSO_CHECKSUMS" <<'EOF' 2>&1
+import hashlib
+import sys
+from pathlib import Path
+sql_dir = Path(sys.argv[1])
+manifest_path = Path(sys.argv[2])
+manifest: dict[str, str] = {}
+for line_number, line in enumerate(manifest_path.read_text(encoding="utf-8").splitlines(), 1):
+    stripped = line.strip()
+    if not stripped:
+        continue
+    prefix, separator, name = stripped.partition("  ")
+    if not separator or not prefix.startswith("sha256=") or not name:
+        raise SystemExit(f"CHECKSUMS line {line_number} malformed: {stripped!r}")
+    manifest[name] = prefix[len("sha256="):]
+sql_files = sorted(p.name for p in sql_dir.glob("*.sql"))
+missing = [name for name in sql_files if name not in manifest]
+if missing:
+    raise SystemExit("CHECKSUMS missing entries for: " + ", ".join(missing))
+stale = [name for name in manifest if name not in sql_files]
+if stale:
+    raise SystemExit("CHECKSUMS names files not in sql/: " + ", ".join(stale))
+for name in sql_files:
+    actual = hashlib.sha256((sql_dir / name).read_bytes()).hexdigest()
+    if actual != manifest[name]:
+        raise SystemExit(f"CHECKSUMS drift for {name}: recomputed {actual}, manifest {manifest[name]}")
+EOF
+); then
+        fail "turso migrations checksum/freshness gate: $MIGRATE_ERR"
+    fi
+fi
+
 echo "codegen clean (artifact valid, TS reproducible, TypedDicts consistent, degenerate guard armed, migrations surface green)"
+
