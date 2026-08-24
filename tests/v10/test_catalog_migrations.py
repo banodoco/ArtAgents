@@ -413,6 +413,7 @@ def test_timelines_table_has_no_convenience_columns(standard_database) -> None:
         "asset_registry_json",
         "created_at",
         "updated_at",
+        "project_data_json",
     ]
     sql = _table_sql(conn, "timelines")
     for forbidden in ("slug", "timeline_ulid", "is_default", "event_hash"):

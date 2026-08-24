@@ -25,6 +25,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar
 
+from astrid.core.integrations.reigh.timeline_bundle import (
+    BUNDLE_MISSING,
+    TimelineBundleValidationError,
+    validate_timeline_bundle,
+)
+
 # ---------------------------------------------------------------------------
 # Wire constants (frozen contract §2, §9)
 # ---------------------------------------------------------------------------
@@ -128,9 +134,10 @@ class TimelineLoad:
     config: Mapping[str, Any]
     registry: Mapping[str, Any]
     config_version: int
+    bundle: Mapping[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "timeline_id": self.timeline_id,
             "timeline_ulid": self.timeline_ulid,
             "slug": self.slug,
@@ -140,6 +147,9 @@ class TimelineLoad:
             "registry": dict(self.registry),
             "config_version": self.config_version,
         }
+        if self.bundle is not None:
+            payload["bundle"] = dict(self.bundle)
+        return payload
 
 
 @dataclass(frozen=True, slots=True)
@@ -191,6 +201,7 @@ class TimelineSaveRequest:
     config: Mapping[str, Any]
     registry: Mapping[str, Any]
     expected_version: int
+    bundle: Mapping[str, Any] | None | object = BUNDLE_MISSING
 
     @classmethod
     def parse(cls, body: Any) -> TimelineSaveRequest:
@@ -201,6 +212,7 @@ class TimelineSaveRequest:
         config = body.get("config", _MISSING)
         registry = body.get("registry", _MISSING)
         expected_version = body.get("expected_version", _MISSING)
+        bundle = body.get("bundle", BUNDLE_MISSING)
         if config is _MISSING or not isinstance(config, Mapping):
             raise BridgeConfigError("config must be a JSON object")
         if registry is _MISSING or not isinstance(registry, Mapping):
@@ -212,10 +224,19 @@ class TimelineSaveRequest:
                 "expected_version must be an integer (a boolean is not a "
                 "version)"
             )
+        if bundle is not BUNDLE_MISSING and bundle is not None:
+            try:
+                bundle = validate_timeline_bundle(bundle)
+            except TimelineBundleValidationError as exc:
+                raise BridgeSchemaIncompatibleError(
+                    "bundle failed schema validation",
+                    issues=[BridgeIssue(pointer=exc.pointer, message=exc.message)],
+                ) from exc
         return cls(
             config=config,
             registry=registry,
             expected_version=expected_version,
+            bundle=bundle,
         )
 
 

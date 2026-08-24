@@ -176,9 +176,9 @@ def _repo_db_snapshot(composition) -> dict[str, Any]:
             ).fetchall()
         }
         snapshot["docs"] = {
-            str(row[0]): (str(row[1]), str(row[2]))
+            str(row[0]): (str(row[1]), str(row[2]), str(row[3]))
             for row in conn.execute(
-                "SELECT id, document_json, asset_registry_json "
+                "SELECT id, document_json, asset_registry_json, project_data_json "
                 "FROM timelines ORDER BY id"
             ).fetchall()
         }
@@ -1385,6 +1385,84 @@ def test_save_endpoint_200_for_valid_config(
         assert field not in result, f"receipt field leaked: {field!r}"
 
 
+def test_save_endpoint_bundle_cas_round_trip_clear_and_schema_guard(
+    tmp_bridge_root: Path,
+) -> None:
+    """Bundle is bridge-owned, CAS-persisted, omission-preserving, and typed."""
+    timeline_id = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaa02"
+    timeline_ulid = "01jm4k5n7p000000000000bun1"
+    bundle = {
+        "schema_version": 1,
+        "itemsBySchemaRef": {
+            "reigh.transcript_segment/v1": [{
+                "id": "assetA:src:0",
+                "shape": "interval",
+                "domain": "source_seconds",
+                "extent": {"start": 0, "end": 1.5},
+                "schemaRef": "reigh.transcript_segment/v1",
+                "payload": {"text": "hello", "app": {"opaque": True}},
+                "sourceArtifactRef": {"assetId": "assetA"},
+                "provenance": {"adapterId": "reigh.adaptTranscript", "adapterVersion": "1"},
+            }],
+        },
+        "app": {"extension": {"opaque": "authored"}},
+    }
+    with repository_server(tmp_bridge_root) as (base_url, composition):
+        project = _repo_create_project(composition, slug="bundle-proj", key="proj-1")
+        _repo_create_timeline(
+            composition,
+            project_id=project.id,
+            slug="primary",
+            key="tl-1",
+            timeline_id=timeline_id,
+            timeline_ulid=timeline_ulid,
+            name="Primary",
+        )
+        url = f"{base_url}/projects/bundle-proj/timelines/{timeline_id}/save"
+        status, saved = _post_json(url, {
+            "config": {"clips": [], "tracks": [], "output": {"derived": True}},
+            "registry": {"assets": {}},
+            "expected_version": 1,
+            "bundle": bundle,
+        })
+        assert status == 200
+        assert saved["bundle"] == bundle
+
+        # Omitted means preserve the bridge-owned document lane.
+        status, preserved = _post_json(url, {
+            "config": {"clips": [{"id": "authored"}], "tracks": []},
+            "registry": {"assets": {}},
+            "expected_version": 2,
+        })
+        assert status == 200
+        assert preserved["bundle"] == bundle
+
+        # Explicit null clears it atomically.
+        status, cleared = _post_json(url, {
+            "config": {"clips": [], "tracks": []},
+            "registry": {"assets": {}},
+            "expected_version": 3,
+            "bundle": None,
+        })
+        assert status == 200
+        assert "bundle" not in cleared
+        assert _repo_load_timeline(composition, project.id, timeline_id).bundle is None
+
+        before = _repo_db_snapshot(composition)
+        status, invalid = _post_json(url, {
+            "config": {"clips": [], "tracks": []},
+            "registry": {"assets": {}},
+            "expected_version": 4,
+            "bundle": {"schema_version": 99, "itemsBySchemaRef": {}},
+        })
+        after = _repo_db_snapshot(composition)
+
+    assert status == 422
+    assert invalid["error"] == "schema_incompatible"
+    assert invalid["issues"][0]["pointer"] == "/bundle/schema_version"
+    assert before == after
+
+
 def test_save_endpoint_400_for_malformed_body_not_json(
     seed_bridge_project, tmp_bridge_root: Path,
 ) -> None:
@@ -1844,7 +1922,7 @@ def test_serve_dispatcher_starts_and_serves_health(
                 srv.serve_forever()
             finally:
                 composition.close()
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - capture server-thread startup failures
             server_error = exc
             server_started.set()
 

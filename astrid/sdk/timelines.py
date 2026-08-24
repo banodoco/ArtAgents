@@ -39,6 +39,7 @@ import hashlib
 from collections.abc import Mapping
 from typing import Any
 
+from astrid.core.integrations.reigh.timeline_bundle import BUNDLE_MISSING
 from astrid.core.receipts.service import CommandReceipt, ReceiptService
 from astrid.core.repositories.projects import ProjectRepository
 from astrid.core.store.uow import UnitOfWork
@@ -195,6 +196,7 @@ class TimelinesService:
         config: Mapping[str, Any],
         registry: Mapping[str, Any],
         expected_version: int,
+        bundle: Mapping[str, Any] | None | object = BUNDLE_MISSING,
         idempotency_key: str | None = None,
     ) -> DomainResult[dict[str, Any]]:
         """Whole-document CAS save of *ref* in *project* and its receipt.
@@ -220,6 +222,7 @@ class TimelinesService:
                     config=config,
                     registry=registry,
                     expected_version=expected_version,
+                    bundle=bundle,
                     idempotency_key=key,
                 )
             )
