@@ -51,7 +51,7 @@ import re
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Mapping, Sequence
+from typing import Callable, Mapping, Sequence
 
 from astrid.core.media import MediaProbeError, ffprobe_metadata_strict
 
@@ -89,7 +89,7 @@ _DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 _TXN_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 """Kernel transaction id grammar (``uuid.uuid4().hex``, 32 lowercase hex)."""
 
-_MIME_FALLBACKS: Mapping[str, str] = {
+_MIME_BY_EXTENSION: Mapping[str, str] = {
     ".md": "text/markdown",
     ".yaml": "application/x-yaml",
     ".yml": "application/x-yaml",
@@ -112,9 +112,11 @@ _MIME_FALLBACKS: Mapping[str, str] = {
     ".sql": "application/sql",
     ".rtf": "application/rtf",
 }
-"""Small extension fallbacks for common types ``mimetypes`` may miss on a
-bare Python install. Used only when ``mimetypes.guess_type`` returns
-nothing useful; the stdlib result wins when present."""
+"""Canonical MIME values for extensions whose stdlib result is not stable.
+
+``mimetypes`` consults Python-version and host databases, so these common
+extensions must win over it to keep persisted media records reproducible.
+"""
 
 _DOCUMENT_MIME_PREFIXES: tuple[str, ...] = (
     "application/pdf",
@@ -130,6 +132,7 @@ _DOCUMENT_MIME_PREFIXES: tuple[str, ...] = (
 _DATA_MIME_PREFIXES: tuple[str, ...] = (
     "application/json",
     "application/xml",
+    "application/yaml",
     "application/x-yaml",
     "application/toml",
     "application/sql",
@@ -265,16 +268,19 @@ def derive_mime_type(path: str | Path) -> str:
     """Derive a MIME type from *path*'s name (extension-based).
 
     Independent derivation: this function reads only the file name. The
-    stdlib ``mimetypes`` result wins when present; otherwise a small
-    fallback table covers common types. Unknown extensions produce
+    Astrid's canonical table wins for common extensions whose stdlib values
+    vary across Python versions or hosts; otherwise ``mimetypes`` is used.
+    Unknown extensions produce
     ``application/octet-stream`` — never a fabricated specific type.
     """
     name = Path(path).name
+    canonical = _MIME_BY_EXTENSION.get(Path(name).suffix.lower())
+    if canonical is not None:
+        return canonical
     guessed, _encoding = mimetypes.guess_type(name)
     if guessed is not None:
         return guessed
-    fallback = _MIME_FALLBACKS.get(Path(name).suffix.lower())
-    return fallback if fallback is not None else "application/octet-stream"
+    return "application/octet-stream"
 
 
 def derive_media_kind(mime_type: object) -> str:
