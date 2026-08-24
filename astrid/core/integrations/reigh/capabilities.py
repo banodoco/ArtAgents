@@ -815,11 +815,12 @@ def resolve_child_capability(family: str) -> CapabilityEntry:
     normalized = normalize_capability_name(family_key)
     candidate = f"reigh.{normalized}" if "." not in family_key else family_key
     entry = REGISTRY.get(candidate)
-    if (
-        entry is None
-        or not entry.child_only
-        or entry.capability_id not in WORKER_CHILD_ALLOWLIST
-    ):
+    # ``travel_stitch`` is also the public ``crossfade_join`` implementation
+    # and therefore remains browser-admissible through that family name.  The
+    # worker allowlist is the authoritative gate for its executor-child use;
+    # requiring ``child_only`` here would make the declared travel plan
+    # impossible without weakening the public family registry.
+    if entry is None or entry.capability_id not in WORKER_CHILD_ALLOWLIST:
         raise ChildAdmissionForbidden(
             f"family {family_key!r} is not an executor-child capability; "
             "child families are admitted only by the live fenced parent "

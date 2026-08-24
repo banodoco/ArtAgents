@@ -346,7 +346,7 @@ class ReighTaskBridge:
         slug: str | None,
         body: Mapping[str, Any],
         idempotency_key: str,
-    ) -> dict[str, Any]:
+    ) -> tuple[int, dict[str, Any]]:
         """T8 hard gate: fenced executor-only child admission (§3.5)."""
         from astrid.core.integrations.reigh.capabilities import (
             resolve_child_capability,
@@ -407,10 +407,37 @@ class ReighTaskBridge:
                 raise BridgeChildAdmissionForbiddenError(str(exc)) from None
             raise
 
-        # Live parent fence: the caller's attempt is the parent's live,
-        # unexpired leased attempt owned by this executor (doc 27 §3.5.1).
+        # Receipt identity is checked before the live fence.  A coordinator
+        # can lose the response after the child commit and then resume after
+        # the parent lease has been reclaimed; the deterministic key must
+        # still return the original row, without re-paying the old fence.
         parent = self._task_row(parent_task_id)
         project_id = str(parent["project_id"])
+        with self._writer.read_only_connection() as conn:
+            conn.row_factory = _sqlite_row_factory
+            receipt = conn.execute(
+                "SELECT result_json FROM command_receipts "
+                "WHERE project_id = ? AND idempotency_key = ? "
+                "AND command_kind = 'core.task.create'",
+                (project_id, idempotency_key),
+            ).fetchone()
+        if receipt is not None:
+            import json as _json
+
+            try:
+                result = _json.loads(str(receipt["result_json"]))
+            except (TypeError, ValueError, KeyError):
+                raise BridgeInternalError(
+                    "child admission receipt contains invalid task data"
+                ) from None
+            if not isinstance(result, dict):
+                raise BridgeInternalError(
+                    "child admission receipt contains invalid task data"
+                )
+            return 200, {"task": result}
+
+        # Live parent fence: the caller's attempt is the parent's live,
+        # unexpired leased attempt owned by this executor (doc 27 §3.5.1).
         if slug is not None:
             resolved_slug_project = self.resolve_project_id(slug)
             if resolved_slug_project != project_id:
@@ -469,24 +496,38 @@ class ReighTaskBridge:
             "schema_version": 1,
             "family": entry.family,
             "source_task_type": entry.capability_id,
+            "definition_version": entry.definition_version,
             "params": dict(task_input),
             "output_policy": dict(entry.output_policy),
         }
         tasks, _media, _receipts = self._services()
-        task = UnitOfWork(self._writer).run(
-            lambda u: tasks.create(
-                u,
+        def command(uow):
+            # Supply the committed task id on the tiny race where another
+            # writer won the receipt between the read above and this UoW.
+            existing = uow.query_one(
+                "SELECT t.id AS task_id FROM tasks t "
+                "JOIN command_receipts r ON r.primary_stream_id = t.event_stream_id "
+                "WHERE r.project_id = ? AND r.idempotency_key = ? "
+                "AND r.command_kind = 'core.task.create'",
+                (project_id, idempotency_key),
+            )
+            stable_id = existing["task_id"] if existing is not None else None
+            task = tasks.create(
+                uow,
                 project_id=project_id,
                 capability=entry.capability_id,
                 spec=spec,
                 input_manifest=[],
                 idempotency_key=idempotency_key,
+                task_id=stable_id,
                 max_attempts=3,
                 actor_kind="executor",
                 dependencies=dependencies,
             )
-        )
-        return {"task": task.to_dict()}
+            return existing is not None, task
+
+        replayed, task = UnitOfWork(self._writer).run(command)
+        return (200 if replayed else 201), {"task": task.to_dict()}
 
     def _resolve_materialized_inputs(
         self,
