@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -45,6 +46,7 @@ from astrid.core.backup.operations import recover_restore_staging
 from astrid.core.events.registry import register_core_vocabulary
 from astrid.core.events.service import EventAppendService
 from astrid.core.foundation.project_paths import resolve_projects_root
+from astrid.core.ids import generate_lowercase_ulid
 from astrid.core.integrations.reigh.bridge_service import derive_database_path
 from astrid.core.io.media_import import (
     MediaPreparationError,
@@ -55,13 +57,15 @@ from astrid.core.io.media_import import (
 from astrid.core.receipts import ReceiptService
 from astrid.core.repositories.evidence import EvidenceRepository
 from astrid.core.repositories.projects import ProjectRepository
+from astrid.core.repositories.tasks import TaskRepository
 from astrid.core.schema_packs.manifest import load_schema_pack_manifest
 from astrid.core.schema_packs.registry import (
     FrozenSchemaPackRegistry,
     SchemaPackRegistry,
 )
 from astrid.core.store.ownership import DatabaseOwnerLock, OwnerLockError
-from astrid.core.store.writer import DatabaseWriter
+from astrid.core.store.uow import UnitOfWork
+from astrid.core.store.writer import DatabaseWriter, WriterShutdownError
 from astrid.packs.timeline.bridge import TimelineBridgeAdapter
 from astrid.packs.timeline.repository import TimelineRepository
 from astrid.sdk.exceptions import ServiceUnavailableError
@@ -187,6 +191,68 @@ def run_startup_staging_gc(
     return gc_unreferenced_staging(projects_root, live_txn_ids)
 
 
+DEFAULT_LEASE_SWEEP_INTERVAL_SECONDS = 15.0
+
+
+class LeaseExpirySweeper:
+    """Serve-owned daemon that expires overdue task attempt leases."""
+
+    def __init__(
+        self,
+        writer: DatabaseWriter,
+        tasks: TaskRepository,
+        *,
+        interval_seconds: float = DEFAULT_LEASE_SWEEP_INTERVAL_SECONDS,
+    ) -> None:
+        if interval_seconds <= 0:
+            raise ValueError("interval_seconds must be positive")
+        self._writer = writer
+        self._tasks = tasks
+        self._interval_seconds = float(interval_seconds)
+        self._stop_requested = threading.Event()
+        self._thread = threading.Thread(
+            target=self._run,
+            name="astrid-lease-expiry-sweeper",
+            daemon=True,
+        )
+        self._thread.start()
+
+    def stop(self) -> None:
+        """Stop and join the sweeper; safe to call repeatedly."""
+        self._stop_requested.set()
+        if self._thread.is_alive():
+            self._thread.join()
+
+    def _run(self) -> None:
+        while not self._stop_requested.wait(self._interval_seconds):
+            if not self._sweep_once():
+                return
+
+    def _sweep_once(self) -> bool:
+        try:
+            with self._writer.read_only_connection() as connection:
+                rows = connection.execute(
+                    "SELECT id FROM projects ORDER BY slug ASC"
+                ).fetchall()
+        except sqlite3.Error:
+            return True
+        for row in rows:
+            project_id = str(row[0])
+            try:
+                UnitOfWork(self._writer).run(
+                    lambda uow, project_id=project_id: self._tasks.expire_overdue(
+                        uow,
+                        project_id=project_id,
+                        idempotency_key=generate_lowercase_ulid(),
+                    )
+                )
+            except WriterShutdownError:
+                return False
+            except Exception:  # noqa: BLE001 - one project must not stop all sweeps
+                continue
+        return True
+
+
 @dataclass(frozen=True, slots=True)
 class StandardBridgeComposition:
     """Everything the gateway serve root constructed for the bridge."""
@@ -203,6 +269,8 @@ class StandardBridgeComposition:
     task_bridge: Any
     owner_lock: DatabaseOwnerLock | None
     """The exclusive-owner lock held for the composition's lifetime."""
+    expiry_sweeper: LeaseExpirySweeper
+    """Serve-owned lease expiry worker stopped before writer shutdown."""
 
     def close(self) -> None:
         """Close the writer, then release the owner lock.
@@ -212,6 +280,7 @@ class StandardBridgeComposition:
         database while this process still holds an open writer. Both steps
         are idempotent, so a double ``close()`` is safe.
         """
+        self.expiry_sweeper.stop()
         self.writer.close()
         if self.owner_lock is not None:
             self.owner_lock.release()
@@ -322,6 +391,9 @@ def compose_standard_bridge(
             generation_repo_factory=lambda: generation_repository,
             timeline_repo_factory=lambda: timelines,
         )
+        expiry_sweeper = LeaseExpirySweeper(
+            writer, TaskRepository(events=events, receipts=receipts)
+        )
         return StandardBridgeComposition(
             projects_root=root,
             database_path=database_path,
@@ -334,6 +406,7 @@ def compose_standard_bridge(
             bridge=bridge,
             task_bridge=task_bridge,
             owner_lock=owner_lock,
+            expiry_sweeper=expiry_sweeper,
         )
     except BaseException:
         if writer is not None:
@@ -343,9 +416,11 @@ def compose_standard_bridge(
 
 
 __all__: list[str] = [
+    "DEFAULT_LEASE_SWEEP_INTERVAL_SECONDS",
     "FrozenSchemaPackRegistry",
     "LIVE_ATTEMPT_STAGING_KEY",
     "LIVE_ATTEMPT_STATUSES",
+    "LeaseExpirySweeper",
     "STANDARD_SCHEMA_PACKS",
     "SchemaPackRegistry",
     "StandardBridgeComposition",
