@@ -209,7 +209,10 @@ def test_corruption_matrix_has_stable_public_failures_and_is_read_only(
             assert not result.ok
             assert result.error is not None
             missing_codes.append(result.error.code)
-    assert missing_codes == ["internal_error", "internal_error"]
+    # Missing external bytes are a typed media-integrity failure just like
+    # mutated managed bytes; the public media verification contract must not
+    # drift based on realm or invocation count.
+    assert missing_codes == ["integrity_error", "integrity_error"]
     assert _tree_snapshot(missing_root) == before_missing
 
     mutated_root = tmp_path / "mutated-media"

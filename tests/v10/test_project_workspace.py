@@ -181,7 +181,7 @@ def _make_minimal_executor(executor_id: str = "test.noop") -> Any:
     )
 
 
-def test_direct_mode_executor_resolves_workspace_and_lands_run(
+def test_kernel_admitted_executor_uses_staging_without_filesystem_ledger(
     workspace_env,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -195,11 +195,16 @@ def test_direct_mode_executor_resolves_workspace_and_lands_run(
     monkeypatch.setenv("ASTRID_PROJECTS_ROOT", str(env.projects_root))
     registry = ExecutorRegistry([_make_minimal_executor()])
 
-    run = run_executor(ExecutorRunRequest("test.noop", out="", project="pd"), registry)
-    assert run.ok, run.error
-
-    run_json = Path(str(run.run_root)) / "run.json"
-    assert run_json.is_file()
-    assert run_json == (
-        env.projects_root / "pd" / "runs" / str(run.run_id) / "run.json"
+    staging = env.projects_root / "pd" / ".astrid" / "media" / ".staging" / "test"
+    run = run_executor(
+        ExecutorRunRequest(
+            "test.noop",
+            out=staging,
+            project="pd",
+            project_was_auto_resolved=True,
+        ),
+        registry,
     )
+    assert run.ok, run.error
+    assert run.run_root is None
+    assert not list((env.projects_root / "pd" / "runs").glob("**/run.json"))

@@ -96,7 +96,7 @@ REPOSITORY_OWNED_SETTINGS_KEYS: frozenset[str] = frozenset(
 )
 """Caller-invisible ``settings_json`` keys owned by the repository."""
 
-_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
+_SLUG_RE = re.compile(r"^(?=.{1,63}$)[a-z0-9]+(?:-[a-z0-9]+)*$")
 """Immutable slug grammar: lowercase letters/digits joined by single hyphens."""
 
 

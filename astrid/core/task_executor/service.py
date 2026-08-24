@@ -736,6 +736,7 @@ class ExecutionService:
                 command_kind=command_kind
                 if command_kind is not None
                 else "core.task.fail",
+                update_run_projection=True,
             )
 
         return uow.run(run)

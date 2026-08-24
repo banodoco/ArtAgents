@@ -9,6 +9,7 @@ creation and backup restore can materialize the same shape.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -28,6 +29,8 @@ def materialize_project_workspace(
     updated_at: str | None = None,
     default_timeline_id: str | None = None,
     reconcile_binding: bool = False,
+    write_json: Callable[..., Any] = write_json_atomic,
+    write_text: Callable[..., Any] = write_text_atomic,
 ) -> dict[str, object]:
     """Ensure one kernel project's non-authoritative workspace projection.
 
@@ -45,7 +48,7 @@ def materialize_project_workspace(
     plan_path = root / "plan.md"
     plan_created = False
     if not plan_path.exists():
-        write_text_atomic(plan_path, PLAN_MD_SKELETON.format(slug=slug))
+        write_text(plan_path, PLAN_MD_SKELETON.format(slug=slug))
         plan_created = True
 
     binding_path = project_json_path(slug, root=projects_root)
@@ -73,7 +76,7 @@ def materialize_project_workspace(
         canonical["kernel_authority"] = True
         payload = {**dict(existing), **canonical}
         if binding_created or payload != dict(existing):
-            write_json_atomic(binding_path, payload)
+            write_json(binding_path, payload)
             binding_updated = not binding_created
 
     return {

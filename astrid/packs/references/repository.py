@@ -753,6 +753,36 @@ def _resolve_reference_id(uow: UnitOfWork, *, project_id: str, ref: str) -> str:
     return str(matches[0]["id"])
 
 
+def _resolve_reference_id_if_present(
+    uow: UnitOfWork, *, project_id: str, ref: str
+) -> str:
+    """Resolve a present reference without turning a missing target into an error.
+
+    Receipt-backed mutations must be able to compute their request identity
+    before enforcing target existence: a changed request under an existing
+    idempotency key must fail with ``ReceiptMismatchError`` even when the new
+    target does not exist.  The command's normal pre-write fence calls
+    :func:`_resolve_reference_id` afterwards and therefore retains the typed
+    missing/foreign/ambiguous errors for a fresh key.
+    """
+    row = uow.query_one(
+        "SELECT id FROM project_references WHERE id = ? AND project_id = ?",
+        (ref, project_id),
+    )
+    if row is not None:
+        return str(row["id"])
+    matches = uow.query(
+        "SELECT id FROM project_references WHERE project_id = ? AND name = ? ORDER BY id ASC",
+        (project_id, ref),
+    )
+    if len(matches) == 1:
+        return str(matches[0]["id"])
+    # Keep an absent, foreign, or ambiguous address in the request identity;
+    # the normal command fence will issue the precise typed rejection after
+    # the receipt gate.
+    return ref
+
+
 def _parse_object(raw: str, *, label: str, subject: str) -> dict[str, Any]:
     """Parse one stored JSON object canonically, rejecting non-objects."""
     try:
@@ -1200,7 +1230,7 @@ class ReferenceRepository:
             raise ReferenceValidationError(
                 f"actor_kind must be one of {sorted(ACTOR_KINDS)}, got {actor_kind!r}"
             )
-        reference_id = _resolve_reference_id(
+        reference_id = _resolve_reference_id_if_present(
             uow, project_id=project_id, ref=reference_id
         )
 
@@ -1225,6 +1255,13 @@ class ReferenceRepository:
         )
         if replayed is not None:
             return ReferenceArchiveReadModel.from_mapping(replayed)
+
+        # Resolve the public address only after the idempotency gate.  This
+        # preserves mismatch-before-mutation for a changed target, including
+        # a target that is missing or foreign in the current project.
+        reference_id = _resolve_reference_id(
+            uow, project_id=project_id, ref=reference_id
+        )
 
         # Fences before any write: the reference exists in the project and
         # is still active.
@@ -2240,10 +2277,13 @@ class ReferenceRepository:
             raise ReferenceValidationError(
                 f"actor_kind must be one of {sorted(ACTOR_KINDS)}, got {actor_kind!r}"
             )
-        from_reference_id = _resolve_reference_id(
+        # Keep absent/foreign endpoint addresses intact so the link-specific
+        # endpoint fences below can return ``missing_*``/``foreign_*`` typed
+        # errors instead of leaking the generic reference-not-found error.
+        from_reference_id = _resolve_reference_id_if_present(
             uow, project_id=project_id, ref=from_reference_id
         )
-        to_reference_id = _resolve_reference_id(
+        to_reference_id = _resolve_reference_id_if_present(
             uow, project_id=project_id, ref=to_reference_id
         )
         if kind not in REFERENCE_LINK_KINDS:

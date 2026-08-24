@@ -33,7 +33,7 @@ def derive_database_path(projects_root: str | Path) -> Path:
 
     return Path(projects_root) / ASTROID_DIR_NAME / ASTROID_DATABASE_NAME
 
-_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,62}$")
+_SLUG_RE = re.compile(r"^(?=.{1,63}$)[a-z0-9]+(?:-[a-z0-9]+)*$")
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 _EXPERIMENT_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 
@@ -51,7 +51,7 @@ def resolve_projects_root(root: str | Path | None = None) -> Path:
 def validate_project_slug(slug: object) -> str:
     if not isinstance(slug, str) or _SLUG_RE.fullmatch(slug) is None:
         raise ProjectPathError(
-            "project slug must start with a lowercase letter or digit and contain only lowercase letters, digits, '-' or '_'"
+            "project slug must contain lowercase letters/digits joined by single hyphens"
         )
     return slug
 

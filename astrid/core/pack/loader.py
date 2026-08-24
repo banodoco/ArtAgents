@@ -6,7 +6,14 @@ import json
 from pathlib import Path
 from typing import Any
 
-import yaml
+try:
+    import yaml
+except ModuleNotFoundError:  # pragma: no cover - exercised by no-deps probes
+    # The gateway's documentation/version paths do not parse capability
+    # manifests. Keep importing the gateway possible in a minimal wheel
+    # environment; manifest parsing below still fails over to Astrid's
+    # deterministic flat parser when PyYAML is unavailable.
+    yaml = None  # type: ignore[assignment]
 
 from astrid.core.pack._common import (
     ELEMENT_MANIFEST_NAMES,
@@ -202,17 +209,18 @@ def _load_manifest_payload(path: Path) -> Any:
             raise PackValidationError(f"invalid JSON pack manifest {path}: {exc.msg}") from exc
     # Try canonical YAML parsing first (handles both flat and nested manifests).
     # Fall back to the legacy flat parser for manifests that yaml.safe_load cannot parse.
-    try:
-        data = yaml.safe_load(text)
-        if isinstance(data, dict):
-            if "schema_version" in data:
-                return data
-            try:
-                return _parse_flat_yaml(text, path=path)
-            except PackValidationError:
-                return data
-    except yaml.YAMLError:
-        pass
+    if yaml is not None:
+        try:
+            data = yaml.safe_load(text)
+            if isinstance(data, dict):
+                if "schema_version" in data:
+                    return data
+                try:
+                    return _parse_flat_yaml(text, path=path)
+                except PackValidationError:
+                    return data
+        except yaml.YAMLError:
+            pass
     return _parse_flat_yaml(text, path=path)
 
 

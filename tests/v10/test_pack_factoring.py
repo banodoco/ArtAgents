@@ -88,9 +88,13 @@ def test_real_repository_tree_is_never_mutated() -> None:
         assert (REPO_ROOT / "astrid" / "packs" / pack).is_dir(), pack
     assert packs_module.STANDARD_SCHEMA_PACKS == DOMAIN_PACKS
     # The in-tree manifests are still exactly the three domain packs.
+    # The standard composition is deliberately closed over the three domain
+    # packs, while separately shipped schema packs (for example ``runaway``)
+    # may exist in-tree without being part of this factoring lane.
     discovered = sorted(
         path.parent.name
         for path in (REPO_ROOT / "astrid" / "packs").glob("*/schema-pack.yaml")
+        if path.parent.name in DOMAIN_PACKS
     )
     assert discovered == sorted(DOMAIN_PACKS)
 

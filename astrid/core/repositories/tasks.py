@@ -3153,6 +3153,7 @@ class TaskRepository:
         error: Mapping[str, Any] | None = None,
         now: str | None = None,
         command_kind: str = CORE_TASK_FAIL_COMMAND_KIND,
+        update_run_projection: bool = False,
     ) -> TaskFailReadModel:
         """Fail one owned attempt through a receipt-protected event.
 
@@ -3361,7 +3362,7 @@ class TaskRepository:
         # invocation can return a failed task while leaving its run row
         # ``running`` until a caller happens to close it.
         run_id = task_row["run_id"]
-        if outcome == "failed" and run_id is not None:
+        if update_run_projection and outcome == "failed" and run_id is not None:
             self._update_run_projection_on_child_terminal(
                 uow,
                 run_id=str(run_id),
@@ -3446,6 +3447,7 @@ class TaskRepository:
         now: str | None = None,
         command_kind: str = CORE_TASK_RETRY_COMMAND_KIND,
         lease_seconds: int = DEFAULT_LEASE_SECONDS,
+        allow_one_shot_invocation_retry: bool = True,
     ) -> TaskRetryReadModel:
         """Retry one eligible nonterminal task through a receipt-protected event.
 
@@ -3661,6 +3663,7 @@ class TaskRepository:
             and max_attempts == 1
             and prior_attempt_no == 1
             and not retried_before
+            and allow_one_shot_invocation_retry
         )
         if prior_attempt_no >= max_attempts and not one_shot_invocation_retry:
             raise TaskTransitionError(
@@ -3830,6 +3833,7 @@ class TaskRepository:
         *,
         project_id: str,
         task_id: str,
+        allow_one_shot_invocation_retry: bool = True,
     ) -> tuple[bool, str]:
         """Read-only retry-eligibility check shared with group retry (m2 step 13).
 
@@ -3883,6 +3887,7 @@ class TaskRepository:
                     "SELECT 1 FROM events WHERE stream_id = ? AND kind = ? LIMIT 1",
                     (f"{task_id}:{CORE_TASK_STREAM_TYPE}", CORE_TASK_RETRIED_EVENT_KIND),
                 ) is None
+                and allow_one_shot_invocation_retry
             )
         ):
             return False, "attempt_budget_exhausted"

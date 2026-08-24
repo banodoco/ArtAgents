@@ -105,6 +105,7 @@ from astrid.core.repositories.tasks import (
     DEFAULT_LEASE_SECONDS,
     TaskDependencyReadModel,
     TaskRepository,
+    TaskTransitionError,
     _initial_status_from_dependencies,
     _normalize_dependencies,
     _validate_dependency_graph,
@@ -2202,11 +2203,32 @@ class RunRepository:
                 continue  # explicit subset: unselected children untouched
             if selected is None:
                 eligible, _reason = task_repo.is_retry_eligible(
-                    uow, project_id=project_id, task_id=child_id
+                    uow,
+                    project_id=project_id,
+                    task_id=child_id,
+                    allow_one_shot_invocation_retry=False,
                 )
                 if not eligible:
                     skipped.append(child_id)
                     continue
+            else:
+                eligible, reason = task_repo.is_retry_eligible(
+                    uow,
+                    project_id=project_id,
+                    task_id=child_id,
+                    allow_one_shot_invocation_retry=False,
+                )
+                if not eligible:
+                    # A selected terminal child is a hard error, not a
+                    # partial-success skip.  Group retry treats an exhausted
+                    # terminal failure as the same immutable terminal state
+                    # exposed by the task transition contract.
+                    if reason == "attempt_budget_exhausted" and str(child["status"]) == "failed":
+                        reason = "task_terminal"
+                    raise TaskTransitionError(
+                        task_id=child_id,
+                        reason=reason,
+                    )
             task_repo.retry(
                 uow,
                 project_id=project_id,
@@ -2220,6 +2242,7 @@ class RunRepository:
                 now=stamp,
                 command_kind=CORE_TASK_RETRY_COMMAND_KIND,
                 lease_seconds=lease_seconds,
+                allow_one_shot_invocation_retry=False,
             )
             retried.append(child_id)
         if not retried:

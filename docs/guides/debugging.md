@@ -73,5 +73,6 @@ a request-sensitive support report and `astrid.render(...)` for a local render.
 is in [reference/sdk.md](../reference/sdk.md).
 
 For any project-facing failure, return to `doctor --json`, inspect the typed
-error envelope, and preserve the old state until a complete replacement is
-available.
+error envelope (including `internal_error` when an unexpected backend failure
+is mapped at the public boundary), and preserve the old state until a complete
+replacement is available.

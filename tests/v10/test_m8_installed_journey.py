@@ -1526,6 +1526,7 @@ def test_one_installed_wheel_completes_the_local_first_run(
             str(backup_path),
             "--projects-root",
             str(harness.roots.project),
+            "--force",
             "--json",
         ],
     )

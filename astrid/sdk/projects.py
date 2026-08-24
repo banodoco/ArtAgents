@@ -37,11 +37,11 @@ its own writer or connection.
 """
 
 import logging
-
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from astrid.core.foundation.atomic_io import write_json_atomic, write_text_atomic
 from astrid.core.foundation.project_paths import project_dir
 from astrid.core.preferences import (
     ConfigError,
@@ -50,20 +50,19 @@ from astrid.core.preferences import (
 )
 from astrid.core.project.workspace import materialize_project_workspace
 from astrid.core.receipts.service import CommandReceipt, ReceiptService
-
 from astrid.core.repositories.projects import (
     CORE_PROJECT_CREATE_COMMAND_KIND,
     ProjectRepository,
 )
 from astrid.core.store.uow import UnitOfWork
 from astrid.core.store.writer import DatabaseWriter
+from astrid.core.util.log_and_swallow import swallowing
 from astrid.sdk.contracts import (
     DomainResult,
     derive_stable_id,
     resolve_idempotency_key,
 )
 from astrid.sdk.exceptions import ServiceNotFoundError, ServiceValidationError, map_error
-from astrid.core.util.log_and_swallow import swallowing
 
 __all__ = ["ProjectsService"]
 
@@ -99,6 +98,10 @@ def _materialize_workspace(
         name=name,
         project_id=project_id,
         projects_root=projects_root,
+        # Keep the service-level materialization seam patchable for callers
+        # that need to exercise the committed-row/failed-filesystem boundary.
+        write_json=write_json_atomic,
+        write_text=write_text_atomic,
     )
 
 

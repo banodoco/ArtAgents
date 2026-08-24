@@ -135,7 +135,12 @@ def _build_database(root: Path, spec: dict[str, Any], paths: dict[str, Path]) ->
         for entry in spec["media"]:
             key = str(entry["key"])
             realm = str(entry["realm"])
-            locator = str(entry["relative_path"]) if realm == EXTERNAL_LOCAL_REALM else None
+            # External-local locators are persisted as the explicit source
+            # path, not as a path relative to the disposable fixture root.
+            # The backup portability contract resolves the recorded locator
+            # exactly as a caller supplied it; keeping this absolute makes
+            # the fixture exercise that contract from any working directory.
+            locator = str(paths[key]) if realm == EXTERNAL_LOCAL_REALM else None
             prepared = prepare_media_file(paths[key])
             _uow(
                 app,

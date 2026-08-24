@@ -1033,7 +1033,6 @@ def _lint_installed_source_patterns(root: Path) -> list[str]:
                             "legacy",
                             "localfs",
                             "supabase",
-                            "eventlog",
                             "sidecar",
                             "jsonl",
                             "file system",

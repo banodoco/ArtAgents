@@ -131,7 +131,10 @@ def _cmd_list(parsed: argparse.Namespace) -> int:
 
 
 def _cmd_show(parsed: argparse.Namespace) -> int:
-    result = parsed.client.tasks.show(parsed.task_id, parsed.project)
+    if parsed.project is None:
+        result = parsed.client.tasks.show(parsed.task_id)
+    else:
+        result = parsed.client.tasks.show(parsed.task_id, parsed.project)
     return print_result(result, as_json=parsed.json)
 
 
@@ -154,7 +157,10 @@ def _cmd_retry(parsed: argparse.Namespace) -> int:
 
 
 def _cmd_events(parsed: argparse.Namespace) -> int:
-    result = parsed.client.tasks.events(parsed.task_id, parsed.project)
+    if parsed.project is None:
+        result = parsed.client.tasks.events(parsed.task_id)
+    else:
+        result = parsed.client.tasks.events(parsed.task_id, parsed.project)
     return print_result(result, as_json=parsed.json)
 
 
