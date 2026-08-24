@@ -161,7 +161,7 @@ def _kernel_or_fs_run_count(slug: str, projects_root: Path, project_root: Path) 
         ids = kernel_runs_for_project(slug, projects_root=projects_root)
         # kernel_runs_for_project returns [] when DB exists but zero runs (authority)
         # — do not count stale FS leftovers in that case. Fall through only when no DB.
-        from astrid.core.integrations.reigh.bridge_service import derive_database_path
+        from astrid.core.foundation.project_paths import derive_database_path
 
         if derive_database_path(projects_root).is_file():
             return len(ids)

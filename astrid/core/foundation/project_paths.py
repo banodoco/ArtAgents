@@ -35,6 +35,11 @@ def resolve_projects_root(root: str | Path | None = None) -> Path:
     return path.expanduser().resolve()
 
 
+def derive_database_path(projects_root: str | Path) -> Path:
+    """Return the managed Astrid database path for a projects root."""
+    return Path(projects_root) / ".astrid" / "astrid.sqlite3"
+
+
 def validate_project_slug(slug: object) -> str:
     if not isinstance(slug, str) or _SLUG_RE.fullmatch(slug) is None:
         raise ProjectPathError(

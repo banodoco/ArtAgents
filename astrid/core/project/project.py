@@ -170,7 +170,7 @@ def _kernel_or_fs_runs(slug: str, *, root: str | Path | None = None) -> list[str
         from astrid.core.kernel.read import kernel_runs_for_project
 
         projects_root = paths.resolve_projects_root(root)
-        from astrid.core.integrations.reigh.bridge_service import derive_database_path
+        from astrid.core.foundation.project_paths import derive_database_path
 
         if derive_database_path(projects_root).is_file():
             ids = kernel_runs_for_project(slug, projects_root=projects_root)

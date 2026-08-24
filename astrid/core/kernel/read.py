@@ -13,11 +13,10 @@ from pathlib import Path
 from typing import Any
 
 from astrid.core.foundation.project_paths import resolve_projects_root
+from astrid.core.foundation.project_paths import derive_database_path
 
 
 def _db_path(projects_root: Path) -> Path | None:
-    from astrid.core.integrations.reigh.bridge_service import derive_database_path
-
     return derive_database_path(projects_root)
 
 

@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar
 
+from astrid.core.foundation.project_paths import derive_database_path
 from astrid.core.integrations.reigh.timeline_bundle import (
     BUNDLE_MISSING,
     TimelineBundleValidationError,
@@ -63,16 +64,6 @@ RECEIPT_SECRECY_FIELDS: frozenset[str] = frozenset(
 # ---------------------------------------------------------------------------
 # Path derivation
 # ---------------------------------------------------------------------------
-
-
-def derive_database_path(projects_root: str | Path) -> Path:
-    """Return the repository-backed database path for a projects root.
-
-    ``${ASTRID_PROJECTS_ROOT}/.astrid/astrid.sqlite3`` (decision artifact
-    §5). The parent directory is *not* created here — the serve composition
-    root creates it when the writer opens the database.
-    """
-    return Path(projects_root) / ASTROID_DIR_NAME / ASTROID_DATABASE_NAME
 
 
 # ---------------------------------------------------------------------------
