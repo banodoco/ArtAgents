@@ -240,13 +240,14 @@ class LeaseExpirySweeper:
         for row in rows:
             project_id = str(row[0])
             try:
-                UnitOfWork(self._writer).run(
-                    lambda uow, project_id=project_id: self._tasks.expire_overdue(
+                def expire(uow: UnitOfWork) -> Any:
+                    return self._tasks.expire_overdue(
                         uow,
                         project_id=project_id,
                         idempotency_key=generate_lowercase_ulid(),
                     )
-                )
+
+                UnitOfWork(self._writer).run(expire)
             except WriterShutdownError:
                 return False
             except Exception:  # noqa: BLE001 - one project must not stop all sweeps
