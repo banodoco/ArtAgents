@@ -24,14 +24,16 @@ from __future__ import annotations
 
 from astrid.core.task_executor.capability_handler import CapabilityTaskHandler
 from astrid.core.task_executor.service import (
+    STAGING_TXN_ID_KEY,
     ExecutionResult,
     ExecutionService,
     HandlerExecutionError,
     PreparedExecution,
     PreparedOutput,
-    STAGING_TXN_ID_KEY,
     TaskExecutorError,
     TaskHandler,
+    register_task_handler,
+    resolve_task_handler,
 )
 
 __all__ = [
@@ -44,4 +46,6 @@ __all__ = [
     "PreparedOutput",
     "TaskExecutorError",
     "TaskHandler",
+    "register_task_handler",
+    "resolve_task_handler",
 ]

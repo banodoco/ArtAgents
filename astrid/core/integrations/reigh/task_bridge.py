@@ -211,6 +211,7 @@ class ReighTaskBridge:
             CapabilityUnavailable,
             ChildAdmissionForbidden,
             check_available,
+            load_workflow_snapshot,
             resolve_family_capability,
         )
         from astrid.core.store.uow import UnitOfWork
@@ -230,13 +231,20 @@ class ReighTaskBridge:
         if isinstance(priority, bool) or not isinstance(priority, int):
             raise BridgeBodyError("body.priority must be an integer")
         try:
-            entry = resolve_family_capability(family, task_input)
+            entry = resolve_family_capability(
+                family,
+                task_input,
+                projects_root=self._projects_root,
+            )
             if entry.child_only:
                 raise ChildAdmissionForbidden(
                     f"family {family!r} is executor-only; child families "
                     "are admitted only by the live fenced parent executor"
                 )
             check_available(entry)
+            workflow_snapshot = (
+                load_workflow_snapshot(entry) if entry.template is not None else None
+            )
         except CapabilityInputError as exc:
             raise BridgeBodyError(str(exc)) from None
         except CapabilityUnavailable as exc:
@@ -252,9 +260,12 @@ class ReighTaskBridge:
             "schema_version": 1,
             "family": entry.family,
             "source_task_type": entry.capability_id,
+            "definition_version": entry.definition_version,
             "params": dict(task_input),
             "output_policy": dict(entry.output_policy),
         }
+        if workflow_snapshot is not None:
+            spec["workflow"] = workflow_snapshot
         tasks, _media, _receipts = self._services()
 
         def command(uow):

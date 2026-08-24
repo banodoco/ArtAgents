@@ -234,7 +234,7 @@ class LeaseExpirySweeper:
                 rows = connection.execute(
                     "SELECT id FROM projects ORDER BY slug ASC"
                 ).fetchall()
-        except sqlite3.Error:
+        except (OSError, sqlite3.Error):
             return True
         for row in rows:
             project_id = str(row[0])

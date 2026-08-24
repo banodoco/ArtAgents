@@ -24,7 +24,11 @@ sources (doc 27 §3.6).
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import hashlib
+import json
+import os
+from dataclasses import dataclass, field, replace
+from pathlib import Path
 from typing import Any, Callable
 
 # ---------------------------------------------------------------------------
@@ -60,6 +64,7 @@ FAMILY_EDIT_VIDEO_ORCHESTRATOR = "edit_video_orchestrator"
 FAMILY_CHARACTER_ANIMATE = "character_animate"
 FAMILY_KLEIN_EDIT = "klein_edit"
 FAMILY_RENDER_EXPORT = "render_export"
+FAMILY_LOCAL_WORKFLOW = "local.workflow.run"
 
 PUBLIC_FAMILIES: frozenset[str] = frozenset(
     {
@@ -76,6 +81,7 @@ PUBLIC_FAMILIES: frozenset[str] = frozenset(
         FAMILY_EDIT_VIDEO_ORCHESTRATOR,
         FAMILY_CHARACTER_ANIMATE,
         FAMILY_KLEIN_EDIT,
+        FAMILY_LOCAL_WORKFLOW,
         FAMILY_RENDER_EXPORT,
     }
 )
@@ -123,6 +129,8 @@ class CapabilityEntry:
     template: tuple[str, str] | None = None  # (path, sha256 digest)
     #: Availability probe name resolved through :data:`AVAILABILITY_PROBES`.
     probe: str = "always_available"
+    #: Monotonic definition revision used by boot manifests and provenance.
+    definition_version: int = 1
 
 
 def _policy(**overrides: Any) -> dict[str, Any]:
@@ -187,6 +195,10 @@ def _require_prompts(input: dict[str, Any]) -> None:
         raise CapabilityInputError("prompts x imagesPerPrompt must be <= 16")
 
 
+def _derive_local_workflow(input: dict[str, Any]) -> str:
+    return f"local.{normalize_capability_name(str(input.get('id', '')))}"
+
+
 def _require_non_empty_str(*fields: str) -> Callable[[dict[str, Any]], None]:
     def _validate(input: dict[str, Any]) -> None:
         for name in fields:
@@ -248,6 +260,7 @@ FAMILY_VALIDATORS: dict[str, Callable[[dict[str, Any]], None]] = {
     FAMILY_CHARACTER_ANIMATE: _require_non_empty_str("image_url"),
     FAMILY_KLEIN_EDIT: _require_non_empty_str("image_url", "prompt"),
     FAMILY_RENDER_EXPORT: _validate_render_export,
+    FAMILY_LOCAL_WORKFLOW: _require_non_empty_str("id"),
 }
 
 #: Family -> capability derivation (doc 27 §3.1 table).
@@ -272,6 +285,7 @@ FAMILY_DERIVATIONS: dict[
     FAMILY_CHARACTER_ANIMATE: _derive_single("reigh.animate_character"),
     FAMILY_KLEIN_EDIT: _derive_single("reigh.flux_klein_edit"),
     FAMILY_RENDER_EXPORT: _derive_single("rendering.timeline_visualize"),
+    FAMILY_LOCAL_WORKFLOW: _derive_local_workflow,
 }
 
 # ---------------------------------------------------------------------------
@@ -295,6 +309,10 @@ REGISTRY: dict[str, CapabilityEntry] = {
             BINDING_VIBECOMFY,
             _policy(),
             required_inputs={"prompts": list},
+            template=(
+                "workflows/qwen_image_2512.json",
+                "2db0bd637a48e6141068d11c70e9d7de297748af8dd5b597c639e28b2edaf0b7",
+            ),
         ),
         CapabilityEntry(
             "reigh.qwen_image_style",
@@ -302,6 +320,10 @@ REGISTRY: dict[str, CapabilityEntry] = {
             BINDING_VIBECOMFY,
             _policy(),
             required_inputs={"prompts": list},
+            template=(
+                "workflows/qwen_image_2512.json",
+                "2db0bd637a48e6141068d11c70e9d7de297748af8dd5b597c639e28b2edaf0b7",
+            ),
         ),
         CapabilityEntry(
             "reigh.qwen_image_2512",
@@ -309,6 +331,10 @@ REGISTRY: dict[str, CapabilityEntry] = {
             BINDING_VIBECOMFY,
             _policy(),
             required_inputs={"prompts": list},
+            template=(
+                "workflows/qwen_image_2512.json",
+                "2db0bd637a48e6141068d11c70e9d7de297748af8dd5b597c639e28b2edaf0b7",
+            ),
         ),
         CapabilityEntry(
             "reigh.z_image_turbo",
@@ -316,6 +342,10 @@ REGISTRY: dict[str, CapabilityEntry] = {
             BINDING_VIBECOMFY,
             _policy(),
             required_inputs={"prompts": list},
+            template=(
+                "workflows/z_image.json",
+                "b7348cdc30472b1811a0bd370df420b50b72d910eda1089fbebac0b401cfe427",
+            ),
         ),
         CapabilityEntry(
             "reigh.image_upscale",
@@ -323,6 +353,10 @@ REGISTRY: dict[str, CapabilityEntry] = {
             BINDING_VIBECOMFY,
             _policy(variant={"source_variant_id": None, "is_primary": True}),
             required_inputs={"image_url": str},
+            template=(
+                "workflows/basic_image_upscale.json",
+                "25d68cd7e32e1987742f497f01d8bcefb77207bf295b7eceec896d6476fe5e24",
+            ),
         ),
         CapabilityEntry(
             "reigh.individual_travel_segment",
@@ -344,6 +378,10 @@ REGISTRY: dict[str, CapabilityEntry] = {
             BINDING_VIBECOMFY,
             _policy(),
             required_inputs={"video_url": str},
+            template=(
+                "workflows/basic_video_enhance.json",
+                "c4415d2b385dc9deb202e3e7211cfd23ae4171c7ae3488d219c548a654d6cfc3",
+            ),
         ),
         CapabilityEntry(
             "reigh.z_image_turbo_i2i",
@@ -351,6 +389,10 @@ REGISTRY: dict[str, CapabilityEntry] = {
             BINDING_VIBECOMFY,
             _policy(),
             required_inputs={"image_url": str},
+            template=(
+                "workflows/z_image_img2img.json",
+                "092f5a2115807a20048a94953727da8660ae0bf7ac18a8aa9b4ab794c8e796f6",
+            ),
         ),
         CapabilityEntry(
             "reigh.qwen_image_edit",
@@ -358,6 +400,10 @@ REGISTRY: dict[str, CapabilityEntry] = {
             BINDING_VIBECOMFY,
             _policy(),
             required_inputs={"prompt": str, "image_url": str},
+            template=(
+                "workflows/qwen_image_edit.json",
+                "fe3157ecb6896120c862c80a037a7be91ba61c46069227a8745bb37d58c9740f",
+            ),
         ),
         CapabilityEntry(
             "reigh.image_inpaint",
@@ -365,6 +411,10 @@ REGISTRY: dict[str, CapabilityEntry] = {
             BINDING_VIBECOMFY,
             _policy(),
             required_inputs={"image_url": str, "mask_url": str},
+            template=(
+                "workflows/qwen_image_edit.json",
+                "fe3157ecb6896120c862c80a037a7be91ba61c46069227a8745bb37d58c9740f",
+            ),
         ),
         CapabilityEntry(
             "reigh.annotated_image_edit",
@@ -372,6 +422,10 @@ REGISTRY: dict[str, CapabilityEntry] = {
             BINDING_VIBECOMFY,
             _policy(),
             required_inputs={"image_url": str, "mask_url": str},
+            template=(
+                "workflows/qwen_image_edit.json",
+                "fe3157ecb6896120c862c80a037a7be91ba61c46069227a8745bb37d58c9740f",
+            ),
         ),
         CapabilityEntry(
             "reigh.travel_orchestrator",
@@ -407,6 +461,10 @@ REGISTRY: dict[str, CapabilityEntry] = {
             BINDING_VIBECOMFY,
             _policy(),
             required_inputs={"image_url": str},
+            template=(
+                "workflows/wanvideo_wrapper_wan_animate.json",
+                "1e5727b7160c80099ddc072e62d0b436c183b7d71f3b185067ef9f4b8bfe0fb0",
+            ),
         ),
         CapabilityEntry(
             "reigh.flux_klein_edit",
@@ -414,6 +472,10 @@ REGISTRY: dict[str, CapabilityEntry] = {
             BINDING_VIBECOMFY,
             _policy(),
             required_inputs={"image_url": str, "prompt": str},
+            template=(
+                "workflows/flux2_klein_9b_image_edit_base.json",
+                "1a09eb1f68affbeee04d5e04be6411f60596a33072ff31f35fb18d4fb9811c26",
+            ),
         ),
         CapabilityEntry(
             "rendering.timeline_visualize",
@@ -447,7 +509,28 @@ REGISTRY: dict[str, CapabilityEntry] = {
             _policy(create_generation=True),
             child_only=True,
         ),
+        CapabilityEntry(
+            "local.workflow.run",
+            FAMILY_LOCAL_WORKFLOW,
+            BINDING_VIBECOMFY,
+            _policy(),
+            required_inputs={"id": str},
+        ),
     )
+}
+
+# Every binding advertises through its prerequisite closure; availability is
+# data on the registry row, not a separate caller-side allowlist.
+_BINDING_PROBES = {
+    BINDING_WGP: "wgp_runtime",
+    BINDING_VIBECOMFY: "vibecomfy_runtime",
+    BINDING_ASTRID_REMOTION: "remotion_ready",
+}
+REGISTRY = {
+    capability_id: replace(
+        entry, probe=_BINDING_PROBES.get(entry.binding, entry.probe)
+    )
+    for capability_id, entry in REGISTRY.items()
 }
 
 # ---------------------------------------------------------------------------
@@ -455,8 +538,48 @@ REGISTRY: dict[str, CapabilityEntry] = {
 # closures; direct calls to unavailable entries are 422).
 # ---------------------------------------------------------------------------
 
-AVAILABILITY_PROBES: dict[str, Callable[[], bool]] = {
-    "always_available": lambda: True,
+_REPO_ROOT = Path(__file__).resolve().parents[4]
+WGP_CHECKOUT_ENV = "REIGH_WGP_HOME"
+
+
+def _probe_vibecomfy_runtime() -> tuple[bool, list[str]]:
+    from astrid.core.integrations.reigh.vibecomfy_binding import probe_runtime
+
+    return probe_runtime()
+
+
+def _probe_wgp_runtime() -> tuple[bool, list[str]]:
+    root = os.environ.get(WGP_CHECKOUT_ENV)
+    checkout = (
+        Path(root).resolve()
+        if root
+        else (_REPO_ROOT.parent / "vendor" / "Wan2GP")
+    )
+    worker = checkout / "worker.py"
+    if worker.is_file():
+        return True, []
+    return False, [
+        f"pinned Wan2GP tree not found at {checkout} (expected {worker}; "
+        f"set {WGP_CHECKOUT_ENV})"
+    ]
+
+
+def _probe_remotion_ready() -> tuple[bool, list[str]]:
+    import shutil
+
+    missing = [
+        f"{name} binary not found on PATH"
+        for name in ("node", "ffmpeg")
+        if shutil.which(name) is None
+    ]
+    return not missing, missing
+
+
+AVAILABILITY_PROBES: dict[str, Callable[[], tuple[bool, list[str]]]] = {
+    "always_available": lambda: (True, []),
+    "vibecomfy_runtime": _probe_vibecomfy_runtime,
+    "wgp_runtime": _probe_wgp_runtime,
+    "remotion_ready": _probe_remotion_ready,
 }
 
 
@@ -479,6 +602,67 @@ class CapabilityInputError(CapabilityError):
 
 class ChildAdmissionForbidden(CapabilityError):
     """``403 child_admission_forbidden`` — the executor-only gate."""
+
+
+_PACKAGE_DIR = Path(__file__).resolve().parent
+
+
+def load_workflow_snapshot(entry: CapabilityEntry) -> dict[str, Any]:
+    """Verify and parse the workflow pinned by *entry* before admission."""
+    if entry.template is None:
+        raise CapabilityUnavailable(
+            entry.capability_id, "entry has no vendored workflow"
+        )
+    rel_path, expected = entry.template
+    path = Path(rel_path) if os.path.isabs(rel_path) else _PACKAGE_DIR / rel_path
+    try:
+        raw = path.read_bytes()
+    except OSError as exc:
+        raise CapabilityUnavailable(
+            entry.capability_id,
+            f"vendored workflow unreadable: {rel_path} ({exc.strerror})",
+        ) from None
+    found = hashlib.sha256(raw).hexdigest()
+    if found != expected:
+        raise CapabilityUnavailable(
+            entry.capability_id,
+            f"vendored workflow {rel_path} digest mismatch: expected "
+            f"{expected}, found {found}",
+        )
+    try:
+        workflow = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise CapabilityUnavailable(
+            entry.capability_id,
+            f"vendored workflow {rel_path} is invalid JSON: {exc}",
+        ) from None
+    if not isinstance(workflow, dict):
+        raise CapabilityUnavailable(
+            entry.capability_id, "vendored workflow must be a JSON object"
+        )
+    return {"path": rel_path, "sha256": expected, "workflow": workflow}
+
+
+def verify_registry_workflows() -> None:
+    """Fail closed at import when shipped workflow bytes drift."""
+    for entry in REGISTRY.values():
+        if entry.template is None:
+            continue
+        rel_path, expected = entry.template
+        if os.path.isabs(rel_path):
+            continue
+        try:
+            actual = hashlib.sha256((_PACKAGE_DIR / rel_path).read_bytes()).hexdigest()
+        except OSError as exc:
+            raise RuntimeError(
+                f"capability {entry.capability_id!r} workflow {rel_path!r} "
+                f"is missing ({exc.strerror})"
+            ) from None
+        if actual != expected:
+            raise RuntimeError(
+                f"capability {entry.capability_id!r} workflow {rel_path!r} "
+                f"digest drift: expected {expected}, found {actual}"
+            )
 
 
 def _validate_registry() -> None:
@@ -513,6 +697,15 @@ def _validate_registry() -> None:
                 "an object"
             )
         seen_families.add(entry.family)
+        if (
+            isinstance(entry.definition_version, bool)
+            or not isinstance(entry.definition_version, int)
+            or entry.definition_version < 1
+        ):
+            raise RuntimeError(
+                f"capability {entry.capability_id!r} definition_version "
+                "must be a positive integer"
+            )
     missing = PUBLIC_FAMILIES - seen_families
     if missing:
         raise RuntimeError(f"families without any capability: {sorted(missing)}")
@@ -521,6 +714,7 @@ def _validate_registry() -> None:
             raise RuntimeError(
                 f"derivation registered for unknown family {family!r}"
             )
+    verify_registry_workflows()
 
 
 _validate_registry()
@@ -539,6 +733,8 @@ def normalize_capability_name(raw: str) -> str:
 def resolve_family_capability(
     family: str,
     input: dict[str, Any],
+    *,
+    projects_root: str | Path | None = None,
 ) -> CapabilityEntry:
     """Derive and validate the one capability for a public family request.
 
@@ -577,12 +773,36 @@ def resolve_family_capability(
         validator(input)
     capability_id = derivation(input)
     entry = REGISTRY.get(capability_id)
+    if entry is None and capability_id.startswith("local."):
+        from astrid.core.integrations.reigh.local_workflows import (
+            declaration_entry,
+            resolve_local_declaration,
+        )
+
+        declaration = resolve_local_declaration(
+            capability_id, projects_root=projects_root
+        )
+        if declaration is not None:
+            entry = declaration_entry(declaration)
     if entry is None:
         raise CapabilityUnavailable(
             capability_id,
             "derived capability is not in the registry",
         )
+    for name, expected_type in entry.required_inputs.items():
+        value = input.get(name)
+        if value is None or not isinstance(value, expected_type):
+            raise CapabilityInputError(
+                f"{name} must be present and have type "
+                f"{_type_label(expected_type)}"
+            )
     return entry
+
+
+def _type_label(expected_type: Any) -> str:
+    if isinstance(expected_type, tuple):
+        return " or ".join(_type_label(item) for item in expected_type)
+    return getattr(expected_type, "__name__", str(expected_type))
 
 
 def resolve_child_capability(family: str) -> CapabilityEntry:
@@ -615,11 +835,15 @@ def check_available(entry: CapabilityEntry) -> None:
     when the probe fails (doc 27 §6).
     """
     probe = AVAILABILITY_PROBES.get(entry.probe)
-    if probe is None or not probe():
+    ok, missing = (
+        probe() if probe is not None else (False, [f"unknown probe {entry.probe!r}"])
+    )
+    if not ok:
         raise CapabilityUnavailable(
             entry.capability_id,
-            "missing_prerequisites; run 'astrid doctor' or the setup "
-            "command for this capability's binding",
+            "missing_prerequisites: "
+            + "; ".join(missing)
+            + "; run 'astrid doctor setup'",
         )
 
 
@@ -644,6 +868,8 @@ __all__ = [
     "BINDING_ASTRID_REMOTION",
     "BINDING_VIBECOMFY",
     "BINDING_WGP",
+    "FAMILY_LOCAL_WORKFLOW",
+    "WGP_CHECKOUT_ENV",
     "CapabilityEntry",
     "CapabilityError",
     "CapabilityInputError",
@@ -656,6 +882,7 @@ __all__ = [
     "REGISTRY",
     "WORKER_CHILD_ALLOWLIST",
     "check_available",
+    "load_workflow_snapshot",
     "normalize_capability_name",
     "reject_dead_or_unknown",
     "resolve_child_capability",

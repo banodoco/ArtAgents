@@ -50,6 +50,7 @@ short repository operations through them (single-writer architecture).
 from __future__ import annotations
 
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Protocol
@@ -70,7 +71,6 @@ from astrid.core.receipts.canonical import (
 )
 from astrid.core.repositories.tasks import (
     CORE_TASK_COMPLETE_COMMAND_KIND,
-    DEFAULT_LEASE_SECONDS,
     TaskAttemptNotFoundError,
     TaskAttemptReadModel,
     TaskCompleteReadModel,
@@ -126,6 +126,35 @@ class TaskHandler(Protocol):
     ) -> Mapping[str, Any]:
         """Run the capability and return a universal result manifest."""
         ...
+
+
+_TASK_HANDLER_FACTORIES: dict[str, Callable[[], TaskHandler]] = {}
+
+
+def register_task_handler(
+    binding: str, factory: Callable[[], TaskHandler]
+) -> None:
+    """Register one explicit handler factory for a binding."""
+    if not isinstance(binding, str) or not binding:
+        raise TaskExecutorError("binding must be a non-empty string")
+    if not callable(factory):
+        raise TaskExecutorError("factory must be callable")
+    existing = _TASK_HANDLER_FACTORIES.get(binding)
+    if existing is not None and existing is not factory:
+        raise TaskExecutorError(
+            f"binding {binding!r} already has a registered handler factory"
+        )
+    _TASK_HANDLER_FACTORIES[binding] = factory
+
+
+def resolve_task_handler(binding: str) -> TaskHandler:
+    """Resolve the one explicitly registered handler for *binding*."""
+    factory = _TASK_HANDLER_FACTORIES.get(binding)
+    if factory is None:
+        raise TaskExecutorError(
+            f"no TaskHandler registered for binding {binding!r}"
+        )
+    return factory()
 
 
 @dataclass(frozen=True, slots=True)
