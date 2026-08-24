@@ -79,7 +79,7 @@ def reconcile_journal(projects_root: str | Path) -> list[RepairReport]:
     journal = jrn.SetupJournal(root)
     for artifact_id, manifest in sorted(manifests.items()):
         final = jrn.artifact_path(root, artifact_id)
-        if final.is_file():
+        if final.is_file() and not final.is_symlink():
             digest, size = jrn._hash_file(final)
             if digest == manifest.sha256 and size == manifest.size:
                 journal.append(artifact_id, "installed", sha256=digest, size=size)
@@ -140,12 +140,23 @@ def doctor_setup(
     root = Path(projects_root)
     # Reconciliation first: a hand-corrupted log must not steer repair.
     reports = reconcile_journal(root)
-    reconciled = {report.artifact_id for report in reports}
+    reconciled = {report.artifact_id: report for report in reports}
     snapshot = jrn.resolve_boot_state(root, write=False)
     manifests = stored_manifests(root)
     journal = jrn.SetupJournal(root)
     for artifact_id, manifest in sorted(manifests.items()):
-        if artifact_id in reconciled:
+        reconciled_report = reconciled.get(artifact_id)
+        if reconciled_report is not None:
+            # Reconciliation can discover a byte-level mismatch while
+            # rebuilding a hand-corrupted journal. Do not let that report
+            # suppress the explicitly requested targeted repair.
+            if reconciled_report.verdict != "corrupt" or acquire is None:
+                continue
+            repaired = _try_repair(root, manifest, acquire)
+            reports = [
+                report for report in reports if report.artifact_id != artifact_id
+            ]
+            reports.append(repaired)
             continue
         final = jrn.artifact_path(root, artifact_id)
         state = snapshot.states.get(artifact_id)
@@ -167,24 +178,7 @@ def doctor_setup(
                     )
                 )
                 continue
-            try:
-                acquire(manifest)
-            except Exception as exc:  # noqa: BLE001 - surfaced in the report
-                reports.append(
-                    RepairReport(
-                        artifact_id=artifact_id,
-                        verdict="repair_failed",
-                        detail=str(exc),
-                    )
-                )
-                continue
-            reports.append(
-                RepairReport(
-                    artifact_id=artifact_id,
-                    verdict="repaired",
-                    detail="re-acquired via setup mode",
-                )
-            )
+            reports.append(_try_repair(root, manifest, acquire))
             continue
         if state.phase != "installed":
             continue  # absent/in-flight artifacts are acquisition's business
@@ -200,24 +194,7 @@ def doctor_setup(
             continue
         journal.append(artifact_id, "corrupt", reason="deep_hash_mismatch")
         if acquire is not None:
-            try:
-                acquire(manifest)
-            except Exception as exc:  # noqa: BLE001 - surfaced in the report
-                reports.append(
-                    RepairReport(
-                        artifact_id=artifact_id,
-                        verdict="repair_failed",
-                        detail=str(exc),
-                    )
-                )
-                continue
-            reports.append(
-                RepairReport(
-                    artifact_id=artifact_id,
-                    verdict="repaired",
-                    detail="re-acquired via setup mode",
-                )
-            )
+            reports.append(_try_repair(root, manifest, acquire))
         else:
             reports.append(
                 RepairReport(
@@ -230,6 +207,42 @@ def doctor_setup(
                 )
             )
     return reports
+
+
+def _try_repair(
+    root: Path,
+    manifest: DistributionManifest,
+    acquire: Callable[[DistributionManifest], None],
+) -> RepairReport:
+    """Run targeted acquisition and verify its durable result before success."""
+    try:
+        acquire(manifest)
+        final = jrn.artifact_path(root, manifest.artifact_id)
+        if final.is_symlink() or not final.is_file():
+            raise ValueError("repair did not produce a regular installed file")
+        digest, size = jrn._hash_file(final)
+        if digest != manifest.sha256 or size != manifest.size:
+            raise ValueError(
+                f"repair returned without signed bytes (found {digest}, {size})"
+            )
+        # The injected acquirer is a setup-mode boundary, not necessarily the
+        # concrete ``acquire_artifact`` implementation. Re-stamp the verified
+        # bytes here so a successful custom repair cannot leave the journal in
+        # its prior corrupt state.
+        jrn.SetupJournal(root).append(
+            manifest.artifact_id, "installed", sha256=digest, size=size
+        )
+    except Exception as exc:  # noqa: BLE001 - surfaced in the report
+        return RepairReport(
+            artifact_id=manifest.artifact_id,
+            verdict="repair_failed",
+            detail=str(exc),
+        )
+    return RepairReport(
+        artifact_id=manifest.artifact_id,
+        verdict="repaired",
+        detail="re-acquired via setup mode",
+    )
 
 
 __all__ = [

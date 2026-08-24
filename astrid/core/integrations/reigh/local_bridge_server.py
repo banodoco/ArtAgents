@@ -88,6 +88,12 @@ def _route_schema(projects_root: Path) -> dict[str, Any]:
                 "shutdown; use the HTTP routes for reads and writes while it runs."
             ),
         },
+        "trust": {
+            "host": "the bound loopback literal is required on every request",
+            "mutation_header": TRUST_TOKEN_HEADER,
+            "token_file": ".astrid/request-token",
+            "cors_preflight": "OPTIONS is exempt from the mutation token gate",
+        },
         "routes": [
             {"method": "GET", "path": "/health"},
             {"method": "GET", "path": "/routes"},
@@ -98,6 +104,29 @@ def _route_schema(projects_root: Path) -> dict[str, Any]:
             {
                 "method": "GET|HEAD",
                 "path": "/projects/{project}/timelines/{timeline}/assets/{registry_key}",
+            },
+            {"method": "GET", "path": "/projects/{project}/tasks"},
+            {"method": "GET", "path": "/projects/{project}/tasks/{task_id}"},
+            {"method": "GET", "path": "/projects/{project}/generations"},
+            {"method": "GET", "path": "/projects/{project}/generations/{generation_id}"},
+            {
+                "method": "GET|HEAD",
+                "path": "/projects/{project}/media/{media_id}/content",
+            },
+            {"method": "POST", "path": "/projects/{project}/tasks"},
+            {"method": "POST", "path": "/projects/{project}/tasks/{task_id}/cancel"},
+            {"method": "POST", "path": "/queue/claim"},
+            {
+                "method": "POST",
+                "path": "/tasks/{task_id}/attempts/{attempt_no}/heartbeat",
+            },
+            {
+                "method": "POST",
+                "path": "/tasks/{task_id}/attempts/{attempt_no}/complete",
+            },
+            {
+                "method": "POST",
+                "path": "/tasks/{task_id}/attempts/{attempt_no}/fail",
             },
         ],
         "save": {
@@ -1145,7 +1174,11 @@ def make_local_bridge_handler(
             parts = [part for part in unquote(path).split("/") if part]
 
             if parts == ["health"]:
-                status = self._bridge().health(str(projects_root))
+                try:
+                    status = self._bridge().health(str(projects_root))
+                except BridgeError as exc:
+                    self._send_bridge_error(exc)
+                    return
                 self._send_json(200, status.to_dict())
                 return
 
@@ -1154,9 +1187,13 @@ def make_local_bridge_handler(
                 return
 
             if parts == ["projects"]:
-                rows = [
-                    row.to_dict() for row in self._bridge().list_projects()
-                ]
+                try:
+                    rows = [
+                        row.to_dict() for row in self._bridge().list_projects()
+                    ]
+                except BridgeError as exc:
+                    self._send_bridge_error(exc)
+                    return
                 self._send_json(200, {"projects": rows})
                 return
 

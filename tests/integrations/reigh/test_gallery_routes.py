@@ -81,7 +81,7 @@ def gallery_server(projects_root: Path) -> Generator[dict[str, Any], None, None]
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
-        composition.writer.close()
+        composition.close()
 
 
 def _request(

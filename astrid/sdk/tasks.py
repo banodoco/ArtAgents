@@ -15,10 +15,12 @@ fencing, cancellation, and retry logic (m2 plan steps 6-8):
   task id from ``(command kind, project scope, key)`` so a retry under the
   same key derives the same id and replays with zero new rows;
 - **cancel** drives a nonterminal task to the terminal ``cancelled`` state
-  through the repository's receipt-protected, version-fenced transition; a
-  running task's cancellation requires the executor's attempt fence
-  (``attempt_id``/``lease_id``/``expected_status_version``) because claim
-  and lease ownership stay internal to the executor;
+  through the repository's receipt-protected transition; operators may
+  cancel a running task cooperatively without executor-private fence facts,
+  while executor callers may provide the complete
+  ``attempt_id``/``lease_id``/``expected_status_version`` fence (partial
+  fences are rejected). Claim and lease ownership stay internal to the
+  executor;
 - **retry** restarts eligible failed/expired work through the repository's
   shared retry predicate (budget and terminal-immutability rules included);
 - **list** and **show** are transaction-free reads; ``show`` returns the

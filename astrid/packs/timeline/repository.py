@@ -1196,10 +1196,24 @@ class TimelineRepository:
         """
         project_id = _require_non_empty_string("project_id", project_id)
         timeline_id = _require_non_empty_string("timeline_id", timeline_id)
+        if actor_kind not in ACTOR_KINDS:
+            raise TimelineValidationError(
+                f"actor_kind must be one of {sorted(ACTOR_KINDS)}, got {actor_kind!r}"
+            )
         if not isinstance(entries, Mapping):
             raise TimelineValidationError("entries must be a JSON object")
         for key in entries:
             _require_non_empty_string("entry key", key)
+        # Validate the complete request, including values for keys that may
+        # already exist. Otherwise a redundant merge containing NaN or an
+        # unserializable object would silently succeed while an additive merge
+        # rejects the same malformed payload.
+        try:
+            canonical_json(dict(entries))
+        except CanonicalizationError as exc:
+            raise TimelineValidationError(
+                f"cannot canonicalize asset registry entries: {exc}"
+            ) from exc
 
         row = uow.query_one(
             "SELECT t.id, t.project_id, t.event_stream_id "
@@ -1215,15 +1229,11 @@ class TimelineRepository:
             )
         base_head = int(stream["head_seq"])
 
-        # Event-backed archive fence (SD1), identical to save: derived from
-        # the stream's ordered events, never a column.
-        if (
-            uow.query_one(
-                "SELECT 1 FROM events WHERE stream_id = ? AND kind = ? LIMIT 1",
-                (row["event_stream_id"], TIMELINE_ARCHIVED_EVENT_KIND),
-            )
-            is not None
-        ):
+        # Event-backed archive fence (SD1), identical to save: the latest
+        # archive/unarchive transition is authoritative, never the mere
+        # historical presence of an archive event. A timeline recovered by
+        # unarchive is therefore eligible for a new additive merge.
+        if self._archive_state(uow, str(row["event_stream_id"]))[0]:
             raise TimelineArchivedError(
                 timeline_id=timeline_id, project_id=project_id
             )

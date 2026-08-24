@@ -321,6 +321,50 @@ def test_health_and_timeline_endpoints_repository_backed(
     }
 
 
+def test_routes_discovery_includes_phase_b_and_asset_surfaces(
+    tmp_bridge_root: Path,
+) -> None:
+    """Discovery must describe every composed route, not just timeline v1."""
+    with repository_server(tmp_bridge_root) as (base_url, _composition):
+        status, body = _get_json(f"{base_url}/routes")
+
+    assert status == 200
+    assert body["trust"]["mutation_header"] == "X-Astrid-Request-Token"
+    assert body["trust"]["token_file"] == ".astrid/request-token"
+    routes = {(route["method"], route["path"]) for route in body["routes"]}
+    assert {
+        ("GET", "/health"),
+        ("GET", "/routes"),
+        ("GET", "/projects/{project}/tasks"),
+        ("GET", "/projects/{project}/tasks/{task_id}"),
+        ("GET", "/projects/{project}/generations"),
+        ("GET", "/projects/{project}/generations/{generation_id}"),
+        ("GET|HEAD", "/projects/{project}/media/{media_id}/content"),
+        ("GET|HEAD", "/projects/{project}/timelines/{timeline}/assets/{registry_key}"),
+        ("POST", "/projects/{project}/tasks"),
+        ("POST", "/projects/{project}/tasks/{task_id}/cancel"),
+        ("POST", "/queue/claim"),
+        ("POST", "/tasks/{task_id}/attempts/{attempt_no}/heartbeat"),
+        ("POST", "/tasks/{task_id}/attempts/{attempt_no}/complete"),
+        ("POST", "/tasks/{task_id}/attempts/{attempt_no}/fail"),
+    } <= routes
+
+
+def test_core_read_routes_fail_closed_with_typed_errors_without_bridge(
+    seed_bridge_project, tmp_bridge_root: Path,
+) -> None:
+    """Missing composition authority never turns a read into a dropped socket."""
+    seed_bridge_project(
+        slug="uncomposed-proj",
+        timeline_id="11111111-1111-1111-1111-111111111111",
+    )
+    with running_server(tmp_bridge_root) as base_url:
+        for path in ("/health", "/projects"):
+            status, body = _get_error(f"{base_url}{path}")
+            assert status == 500
+            assert body["error"] == "internal"
+
+
 def test_projects_list_route_empty_root_returns_empty_envelope(
     tmp_bridge_root: Path,
 ) -> None:
@@ -490,7 +534,7 @@ def test_asset_200_full_response_with_correct_headers(
     """Full asset fetch returns 200, Accept-Ranges, Content-Type, and full body."""
     timeline_id = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
     timeline_ulid = "01JM4K5N7P00000000000000AA"
-    registry = {"assets": {"clip-a": {"file": "clip-a.mp4"}}}
+    registry = {"assets": {"clip-a": {"file": "clip-a.bin"}}}
     asset_content = b"Hello, this is a test asset file with some bytes!\n" * 10
     with repository_server(tmp_bridge_root) as (base_url, composition):
         _repo_seed_asset_timeline(
@@ -499,7 +543,7 @@ def test_asset_200_full_response_with_correct_headers(
             timeline_id=timeline_id,
             timeline_ulid=timeline_ulid,
             registry=registry,
-            media={"clip-a": (asset_content, "clip-a.mp4")},
+            media={"clip-a": (asset_content, "clip-a.bin")},
         )
         url = f"{base_url}/projects/media-proj/timelines/{timeline_id}/assets/clip-a"
         status, headers, body = _get_bytes(url)
@@ -519,7 +563,7 @@ def test_asset_head_response_with_media_headers(
 ) -> None:
     timeline_id = "a0a0a0a0-a0a0-a0a0-a0a0-a0a0a0a0a0a0"
     timeline_ulid = "01JM4K5N7P0000000000000A0A"
-    registry = {"assets": {"clip-head": {"file": "clip-head.mp4"}}}
+    registry = {"assets": {"clip-head": {"file": "clip-head.bin"}}}
     asset_content = b"head metadata only"
     with repository_server(tmp_bridge_root) as (base_url, composition):
         _repo_seed_asset_timeline(
@@ -528,7 +572,7 @@ def test_asset_head_response_with_media_headers(
             timeline_id=timeline_id,
             timeline_ulid=timeline_ulid,
             registry=registry,
-            media={"clip-head": (asset_content, "clip-head.mp4")},
+            media={"clip-head": (asset_content, "clip-head.bin")},
         )
         url = (
             f"{base_url}/projects/head-media-proj/timelines/{timeline_id}"
@@ -584,7 +628,7 @@ def test_asset_range_less_large_response_returns_initial_partial_chunk(
 
     timeline_id = "abababab-abab-abab-abab-abababababab"
     timeline_ulid = "01JM4K5N7P0000000000000ABA"
-    registry = {"assets": {"large": {"file": "large.mp4"}}}
+    registry = {"assets": {"large": {"file": "large.bin"}}}
     asset_content = b"0123456789abcdefghijklmnopqrstuvwxyz"
     with repository_server(tmp_bridge_root) as (base_url, composition):
         _repo_seed_asset_timeline(
@@ -593,7 +637,7 @@ def test_asset_range_less_large_response_returns_initial_partial_chunk(
             timeline_id=timeline_id,
             timeline_ulid=timeline_ulid,
             registry=registry,
-            media={"large": (asset_content, "large.mp4")},
+            media={"large": (asset_content, "large.bin")},
         )
         url = (
             f"{base_url}/projects/large-media-proj/timelines/{timeline_id}"
@@ -979,6 +1023,8 @@ def test_save_endpoint_persists_every_save_and_fails_closed_on_wal_replacement(
        the next save returns the frozen ``500 internal`` envelope instead
        of a fabricated ``200`` success, and zero rows change.
     """
+    import os
+    import shutil
     import sqlite3 as sqlite3_module
     import subprocess
     import sys
@@ -1066,6 +1112,16 @@ def test_save_endpoint_persists_every_save_and_fails_closed_on_wal_replacement(
         subprocess.run(
             [sys.executable, "-c", foreign_code], check=True, timeout=60
         )
+
+        # A read-only/foreign close does not unlink an active WAL on every
+        # supported SQLite build (notably macOS). Simulate the documented
+        # replacement at the filesystem boundary so this HTTP regression is
+        # deterministic while still exercising the real writer guard.
+        wal_path = db_path + "-wal"
+        assert os.path.exists(wal_path)
+        replacement_path = wal_path + ".replacement"
+        shutil.copyfile(wal_path, replacement_path)
+        os.replace(replacement_path, wal_path)
 
         poisoned_before = _external_counts()
         status_3, result_3 = _post_json(url, {
@@ -1182,7 +1238,7 @@ def test_asset_lookup_after_registry_write(
             timeline_ulid=timeline_ulid,
         )
         asset_path = _write_source_file(
-            composition, "rarw-proj", "rarw-clip.webm", asset_content
+            composition, "rarw-proj", "rarw-clip.bin", asset_content
         )
         _repo_import_media(
             composition,
@@ -1190,14 +1246,14 @@ def test_asset_lookup_after_registry_write(
             path=asset_path,
             key="media-1",
             realm="managed_local",
-            locator="rarw-clip.webm",
+            locator="rarw-clip.bin",
         )
 
         # Step 1: Write the registry through the combined save.
         save_url = f"{base_url}/projects/rarw-proj/timelines/{timeline_id}/save"
         save_status, save_result = _post_json(save_url, {
             "config": {"clips": [], "tracks": []},
-            "registry": {"assets": {"rarw-clip": {"file": "rarw-clip.webm"}}},
+            "registry": {"assets": {"rarw-clip": {"file": "rarw-clip.bin"}}},
             "expected_version": 1,
         })
         assert save_status == 200
@@ -1832,7 +1888,7 @@ def test_persisted_registry_asset_200_full_response_with_headers(
     """Full asset fetch over a persisted registry: 200 + media headers."""
     timeline_id = "aaaaaaa1-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
     timeline_ulid = "01jm4k5n7p0000000000000pa1"
-    registry = {"assets": {"clip-a": {"file": "clip-a.mp4"}}}
+    registry = {"assets": {"clip-a": {"file": "clip-a.bin"}}}
     asset_content = b"Hello, persisted-registry asset bytes!\n" * 10
     with repository_server(tmp_bridge_root) as (base_url, composition):
         _repo_seed_asset_timeline(
@@ -1841,7 +1897,7 @@ def test_persisted_registry_asset_200_full_response_with_headers(
             timeline_id=timeline_id,
             timeline_ulid=timeline_ulid,
             registry=registry,
-            media={"clip-a": (asset_content, "clip-a.mp4")},
+            media={"clip-a": (asset_content, "clip-a.bin")},
         )
         url = (
             f"{base_url}/projects/media-proj/timelines/{timeline_id}"

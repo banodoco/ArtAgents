@@ -246,6 +246,26 @@ def test_import_creates_atomic_media_state(media_env) -> None:
     assert project_row["event_head_seq"] == 2  # project.created + media.imported
 
 
+def test_managed_import_rejects_noncanonical_locator_before_publication(media_env) -> None:
+    """A managed row must always point at its digest-derived CAS object."""
+    project = _create_project(media_env)
+    source = _write(media_env.projects_root, "in/noncanonical.png", PNG_BYTES)
+    prepared = prepare_media_file(source, root=media_env.projects_root / "in")
+    before = _counts(media_env.writer)
+
+    with pytest.raises(MediaValidationError, match="digest-derived managed path"):
+        _import(
+            media_env,
+            project_id=project.id,
+            prepared=prepared,
+            idempotency_key="managed-noncanonical-k",
+            locator=str(media_env.projects_root / "elsewhere" / "asset.png"),
+        )
+
+    assert _counts(media_env.writer) == before
+    assert not managed_media_path(media_env.projects_root, prepared.digest).exists()
+
+
 def test_imported_event_is_registered_and_hash_chained(media_env) -> None:
     project = _create_project(media_env)
     prepared = prepare_media_file(

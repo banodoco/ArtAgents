@@ -61,7 +61,11 @@ invocation produces duplicate runs/tasks or duplicate projections.
 | fail / retry | `TaskRepository.fail` / `retry` | Attempt `failed`/`expired`; `retry` mints the next fenced attempt within the `max_attempts` budget; an exhausted budget leaves the task terminal forever. |
 
 Cancellation is a receipt-protected group cancel that drives every eligible
-child to the terminal `cancelled` status.
+queued, blocked, or running child to the terminal `cancelled` status. Running
+children are cancelled cooperatively: operators do not need executor-private
+attempt/lease/version facts, and a handler that finishes after cancellation
+loses its later fenced completion without publishing media or task outputs.
+Executor callers may provide the complete fence; partial fences are rejected.
 
 ## Derived projection (`run.json`)
 

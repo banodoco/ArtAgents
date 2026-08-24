@@ -33,6 +33,7 @@ from astrid.packs.timeline.repository import (
     TimelineArchivedError,
     TimelineNotFoundError,
     TimelineRepository,
+    TimelineValidationError,
     TimelineVersionConflictError,
 )
 
@@ -202,6 +203,17 @@ def test_redundant_merge_changes_zero_rows_and_appends_nothing(env) -> None:
     ) == events_before
 
 
+def test_redundant_merge_still_rejects_non_json_values(env) -> None:
+    """No-op semantics must not bypass registry payload validation."""
+    _merge(env, {"clip-1": {"media_id": "m1"}})
+    before = _timeline_row(env.writer, env.timeline.timeline_id)
+    with pytest.raises(TimelineValidationError):
+        _merge(env, {"clip-1": object()})
+    after = _timeline_row(env.writer, env.timeline.timeline_id)
+    assert after["asset_registry_json"] == before["asset_registry_json"]
+    assert after["updated_at"] == before["updated_at"]
+
+
 def test_merge_honors_archive_fence_and_typed_misses(env) -> None:
     with pytest.raises(TimelineNotFoundError):
         _merge(env, {"clip-1": {"media_id": "m1"}}, timeline_id="missing-tl")
@@ -221,6 +233,88 @@ def test_merge_honors_archive_fence_and_typed_misses(env) -> None:
     after = _timeline_row(env.writer, env.timeline.timeline_id)
     assert after["asset_registry_json"] == before["asset_registry_json"]
     assert after["document_json"] == before["document_json"]
+
+
+def test_merge_after_unarchive_uses_latest_archive_transition(env) -> None:
+    """A historical archive must not fence a recovered timeline merge."""
+    UnitOfWork(env.writer).run(
+        lambda u: env.repo.archive(
+            u,
+            project_id=env.project.id,
+            ref=env.timeline.timeline_id,
+            idempotency_key="tl-archive-recover-1",
+            created_at=TS2,
+        )
+    )
+    UnitOfWork(env.writer).run(
+        lambda u: env.repo.unarchive(
+            u,
+            project_id=env.project.id,
+            ref=env.timeline.timeline_id,
+            idempotency_key="tl-unarchive-recover-1",
+            created_at=TS3,
+        )
+    )
+
+    head = _merge(env, {"recovered": {"media_id": "m-recovered"}})
+
+    assert head == 4  # created + archived + unarchived + registry merge
+    shown = env.repo.show(env.writer, env.project.id, env.timeline.slug)
+    assert shown.config_version == head
+    assert shown.registry["assets"]["recovered"] == {
+        "media_id": "m-recovered"
+    }
+
+
+def test_rearchive_after_unarchive_restores_merge_fence(env) -> None:
+    """Archive state follows the latest transition, including rearchive."""
+    UnitOfWork(env.writer).run(
+        lambda u: env.repo.archive(
+            u,
+            project_id=env.project.id,
+            ref=env.timeline.timeline_id,
+            idempotency_key="tl-archive-rearchive-1",
+            created_at=TS2,
+        )
+    )
+    recovered = UnitOfWork(env.writer).run(
+        lambda u: env.repo.unarchive(
+            u,
+            project_id=env.project.id,
+            ref=env.timeline.timeline_id,
+            idempotency_key="tl-unarchive-rearchive-1",
+            created_at=TS3,
+        )
+    )
+    assert recovered.changed is True
+    repeated = UnitOfWork(env.writer).run(
+        lambda u: env.repo.unarchive(
+            u,
+            project_id=env.project.id,
+            ref=env.timeline.timeline_id,
+            idempotency_key="tl-unarchive-rearchive-2",
+            created_at=TS3,
+        )
+    )
+    assert repeated.changed is False
+
+    UnitOfWork(env.writer).run(
+        lambda u: env.repo.archive(
+            u,
+            project_id=env.project.id,
+            ref=env.timeline.timeline_id,
+            idempotency_key="tl-archive-rearchive-2",
+            created_at=TS3,
+        )
+    )
+    before = _timeline_row(env.writer, env.timeline.timeline_id)
+    with pytest.raises(TimelineArchivedError):
+        _merge(env, {"blocked": {"media_id": "m-blocked"}})
+    after = _timeline_row(env.writer, env.timeline.timeline_id)
+    assert after["asset_registry_json"] == before["asset_registry_json"]
+    assert env.repo.list(env.writer, env.project.id) == []
+    inclusive = env.repo.list(env.writer, env.project.id, include_archived=True)
+    assert inclusive[0].archived_at == TS3
 
 
 def test_merged_head_is_the_next_editor_save_version(env) -> None:

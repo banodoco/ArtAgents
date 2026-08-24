@@ -260,7 +260,7 @@ python3 -m astrid runs show --project demo RUN_01ABC --evidence --json
 # media ids, roles, labels, hashes, sizes, and safe relative paths for the
 # render and provenance artifacts.
 
-# cancel — drive every eligible child to terminal cancelled
+# cancel — drive every queued, blocked, or running child to terminal cancelled
 python3 -m astrid runs cancel --project demo RUN_01ABC --json
 
 # retry-failed — batch retry (see semantics below)

@@ -45,7 +45,7 @@ recovers from it; automated tests are regression guards only.
 | `media` | import file/directory → list/show → verify | duplicate content hash; missing/mutated bytes; wrong realm; relocate identity preservation; cross-project relation; self/duplicate/invalid relation | media rows, location realm/locator/verified time, content hash/size, relation rows, managed-media bytes |
 | `media references` | create with canonical media → associate/link → set-primary → update/list/show | frozen kind/role/link vocabulary; archive and inclusive read; primary replacement; used-as-input context-task requirement; cross-project/self link | reference lifecycle, association primary flags/ordinals, link symmetry, archive timestamp, receipts/events |
 | `tasks` | create immutable standalone task → list/show/events → cancel queued | malformed JSON/admission; hard/soft dependency gating, self/cross-project/cycle/duplicate edge; retry never-claimed/terminal/exhausted; same-key replay/mismatch | task read model/spec hash/status, dependency rows, attempt rows, ordered `core.task` events, receipt |
-| `runs` | capability admission creates run + child; list/show/progress/events; cancel/retry group; close terminal run | zero-child run close; partial child failure; running child skipped by group cancel; explicit subset vs all-failed retry; >256 children; terminal run; stale continuation head/ordinal/dependency | run row + derived progress, ordered child ordinals/statuses, run event stream, evidence IDs, receipt event range |
+| `runs` | capability admission creates run + child; list/show/progress/events; cancel/retry group; close terminal run | zero-child run close; partial child failure; running child cooperative cancel and late-completion fence; explicit subset vs all-failed retry; >256 children; terminal run; stale continuation head/ordinal/dependency | run row + derived progress, ordered child ordinals/statuses, run event stream, evidence IDs, receipt event range |
 | nested `timelines shots` | create shot → add media at position → reorder → remove | foreign media; missing/duplicate/omitted permutation; negative/out-of-range position; remove preserves media bytes; replay/mismatch | shot/item rows and order, media still present, receipt/event stream |
 | capability SDK/invocation | discover/get capability → invoke with project → kernel admit/claim/start/execute/complete/fail → inspect tasks/runs/events and final projection | missing project; invalid capability/kind; dry-run must not admit; executor failure/lease expiry; replay; output/manifest and run projection reconciliation | `InvocationResult`, kernel run/task/attempt IDs, canonical DB rows, run directory/run.json, event hash verification |
 | `doctor` | run on fresh/healthy root | missing DB; too-new/checksum-drift migration; quick-check corruption; FK violation; malformed managed-media tree; orphan staging warning; run while writer owns DB | checks list/status/detail, exit/JSON behavior, no file/row modification |
@@ -97,8 +97,9 @@ database/filesystem/event evidence.
    the original evidence, and understand the batch retry subset policy.
 8. **Cancel mixed run work.** “Cancel a run containing queued, running and
    terminal children; leave already-finished work intact.” Watch for the missing
-   executor fence on running cancellation, whether group cancel silently skips
-   work in a way the agent can explain, and whether derived progress is trusted
+   cooperative cancellation and late-completion fence on running work, whether
+   group cancel reports already-terminal skips clearly, and whether derived
+   progress is trusted
    over stale cached counts.
 9. **Diagnose a damaged project.** “Before changing anything, determine whether
    this project is healthy, then recover it from the supplied backup if needed.”
@@ -156,11 +157,12 @@ tampering must be detected and never repaired by a read.
 
 Public CLI/SDK exposes create/list/show/cancel/retry/events. Claim/start/
 heartbeat/fail/complete are executor-owned kernel operations. Test both the
-public adapter and the internal executor seam because cancellation of a
-running task requires the attempt/lease/status-version fence that the CLI
-does not expose. Exercise lease expiry, heartbeat counter/version increments,
-foreign/stale fences, completion races, output materialization, dependency
-unblocking, and terminal immutability.
+public adapter and the internal executor seam: operator cancellation of a
+running task is cooperative, while executor transitions retain strict
+attempt/lease/status-version fences and reject partial fences. Exercise lease
+expiry, heartbeat counter/version increments, foreign/stale fences, late
+completion races, output materialization, dependency unblocking, and terminal
+immutability.
 
 ### Run lifecycle
 
@@ -326,7 +328,7 @@ tests bypass the discovery/navigation burden an agent experiences:
 | P1 | **“Build and merge a timeline.”** Two agents save different changes, then one resolves the conflict. | Highest user-facing lost-update risk. | one winner, one understandable `stale_version`, loser changes zero rows, agent reloads/merges/history-checks. |
 | P1 | **“Import, verify, and curate.”** Import assets, induce a missing/mutated source, then use references/shots and report preserved identity. | Cross-domain identity, byte integrity and nested-mount discoverability are easy to misunderstand. | integrity failure is read-only; relation/association scopes are correct; shot removal preserves media; agent explains realm/primary/permutation. |
 | P1 | **“Manage blocked and failed work.”** Create dependency-gated tasks, run a deterministic failure, retry eligible work, and report event evidence. | Agents may reach for retired task-mode verbs or retry terminal work unsafely. | agent discovers executor-owned lifecycle boundary, distinguishes blocked/failed/expired/terminal, and retries with preserved IDs/evidence. |
-| P2 | **“Cancel a mixed run and close it.”** Cancel queued/running/terminal children, inspect derived progress, and close only when legal. | Exercises hidden run creation and the confusing running-child fence. | terminal work remains intact; progress is derived and explained; no premature close or silent data loss. |
+| P2 | **“Cancel a mixed run and close it.”** Cancel queued/running/terminal children, inspect derived progress, and close only when legal. | Exercises hidden run creation, cooperative running cancellation, and late-completion fencing. | terminal work remains intact; running handlers cannot publish after cancel; progress is derived and explained; no premature close or silent data loss. |
 | P2 | **“Diagnose and restore.”** Doctor a damaged root, restore a supplied backup, and prove the final state. | Recovery friction is costly even when core state is correct. | doctor is read-only; restore is old-or-complete; agent handles `--force`, journal replay and secret exclusions. |
 
 ## Reproduced wave-0 observations

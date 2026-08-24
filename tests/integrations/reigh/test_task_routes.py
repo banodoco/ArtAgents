@@ -83,7 +83,7 @@ def task_server(
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
-        composition.writer.close()
+        composition.close()
 
 
 def _headers(token: str, key: str | None = None) -> dict[str, str]:

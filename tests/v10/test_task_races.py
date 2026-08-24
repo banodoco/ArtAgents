@@ -43,6 +43,7 @@ import pytest
 from astrid.core.events.service import EventAppendService
 from astrid.core.ids import generate_lowercase_ulid
 from astrid.core.receipts import ReceiptService
+from astrid.core.receipts.service import ReceiptMismatchError
 from astrid.core.repositories import ProjectRepository
 from astrid.core.repositories.media import MediaRepository
 from astrid.core.repositories.tasks import (
@@ -350,7 +351,7 @@ def test_race_queued_cancel_wins_claim_loses_with_no_receipt(env) -> None:
     assert kinds == [CORE_TASK_CREATED_EVENT_KIND, CORE_TASK_CANCELLED_EVENT_KIND]
 
 
-def test_race_claim_wins_fenceless_cancel_rejected_before_mutation(env) -> None:
+def test_race_claim_wins_cooperative_cancel_is_terminal_winner(env) -> None:
     project = _create_project(env)
     task = _admit(env, project_id=project.id)
     receipts_before = _receipt_count(env.writer, project.id)
@@ -360,14 +361,20 @@ def test_race_claim_wins_fenceless_cancel_rejected_before_mutation(env) -> None:
     assert claim is not None and claim.task.id == task.id
     assert _task_row(env.writer, task.id)["status"] == "running"
 
-    # A cancel that presents no running fences is rejected before mutation.
-    with pytest.raises(TaskValidationError) as excinfo:
-        _cancel(env, project_id=project.id, task_id=task.id,
-                idempotency_key="cancel-claimed")
-    assert "requires attempt_id" in str(excinfo.value)
-    assert _receipt_count(env.writer, project.id) == receipts_before + 1  # only claim
-    assert _task_row(env.writer, task.id)["status"] == "running"
-    # No second claim can double-claim the running task.
+    # An operator cancellation intentionally carries no executor-private
+    # fence. The single writer terminates the claimed attempt and task.
+    cancelled = _cancel(
+        env,
+        project_id=project.id,
+        task_id=task.id,
+        idempotency_key="cancel-claimed",
+    )
+    assert cancelled.task.status == "cancelled"
+    assert cancelled.attempt is not None
+    assert cancelled.attempt.status == "cancelled"
+    assert _receipt_count(env.writer, project.id) == receipts_before + 2
+    assert _task_row(env.writer, task.id)["status"] == "cancelled"
+    # No second claim can resurrect the terminal task.
     assert _claim(env, project_id=project.id, idempotency_key="claim-again") is None
 
 
@@ -695,6 +702,93 @@ def test_race_terminal_task_rejects_retry_cancel_and_failure_without_mutation(
     attempts = _attempt_rows(env.writer, task.id)
     assert len(attempts) == 1 and attempts[0]["status"] == "succeeded"
     _verify_chain(env, core_registry, task.id)
+
+
+def test_standalone_terminal_failure_is_not_reported_retryable(env) -> None:
+    """The read predicate and retry transition agree for standalone failures."""
+    project = _create_project(env)
+    task = _admit(env, project_id=project.id, max_attempts=1)
+    claim = _claim(env, project_id=project.id, idempotency_key="standalone-claim")
+    assert claim is not None
+    started = _start(
+        env, project_id=project.id, claim=claim, idempotency_key="standalone-start"
+    )
+    failed = _fail(
+        env,
+        project_id=project.id,
+        task_id=task.id,
+        attempt_id=claim.attempt.id,
+        lease_id=claim.attempt.lease_id,
+        status_version=started.status_version,
+        idempotency_key="standalone-fail",
+    )
+    assert failed.task.status == "failed"
+    eligible = UnitOfWork(env.writer).run(
+        lambda u: env.task_repo.is_retry_eligible(
+            u, project_id=project.id, task_id=task.id
+        )
+    )
+    assert eligible == (False, "task_terminal")
+    with pytest.raises(TaskTransitionError) as excinfo:
+        _retry(env, project_id=project.id, task_id=task.id, idempotency_key="standalone-retry")
+    assert excinfo.value.reason == "task_terminal"
+
+
+def test_completion_idempotency_covers_generation_and_registry_side_effects(env) -> None:
+    """Changing optional completion side effects must mismatch before fences."""
+    project = _create_project(env)
+    task, claim, started = _running_task(env, project_id=project.id, idempotency_key="sidefx-claim")
+
+    class _Timeline:
+        def __init__(self):
+            self.calls = 0
+
+        def merge_registry(self, *_args, **_kwargs):
+            self.calls += 1
+            return 9
+
+    class _Generation:
+        def __init__(self):
+            self.calls = 0
+
+        def record_completion(self, *_args, **_kwargs):
+            self.calls += 1
+            return {"generation_id": "g1"}
+
+    timeline = _Timeline()
+    generation = _Generation()
+    first = _complete(
+        env,
+        project_id=project.id,
+        task_id=task.id,
+        attempt_id=claim.attempt.id,
+        lease_id=claim.attempt.lease_id,
+        status_version=started.status_version,
+        outputs=[],
+        result={"ok": True},
+        generation_request={"type": "image", "params": {"prompt": "x"}},
+        generation_repo=generation,
+        registry_merge={"timeline_id": "tl", "entries": {"asset": {"media_id": "m"}}},
+        timeline_repo=timeline,
+        idempotency_key="sidefx-complete",
+    )
+    assert first.timeline_head == 9
+    assert timeline.calls == 1
+    assert generation.calls == 1
+    with pytest.raises(ReceiptMismatchError):
+        _complete(
+            env,
+            project_id=project.id,
+            task_id=task.id,
+            attempt_id=claim.attempt.id,
+            lease_id=claim.attempt.lease_id,
+            status_version=started.status_version,
+            outputs=[],
+            result={"ok": True},
+            timeline_repo=timeline,
+            idempotency_key="sidefx-complete",
+        )
+    assert timeline.calls == 1
 
 
 # ---------------------------------------------------------------------------

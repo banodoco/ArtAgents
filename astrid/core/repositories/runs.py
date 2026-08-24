@@ -17,12 +17,13 @@ Plan step 13 (T22) adds the group surface on top of that fan-out:
   ``derive_run_progress_counts`` in the task repository also backs task
   completion's parent-run recompute);
 - :meth:`RunRepository.cancel` is a receipt-protected group cancel that
-  drives every eligible queued/blocked child to the terminal ``cancelled``
-  state through the **shared task-cancel predicate**
-  (:meth:`TaskRepository.cancel`), skips already-terminal and running
-  children (a running child's owned attempt needs its executor's fence),
-  recomputes the run projection, appends ``core.run.cancelled``, and
-  records one run-level receipt;
+  drives every eligible queued/blocked/running child to the terminal
+  ``cancelled`` state through the **shared task-cancel predicate**
+  (:meth:`TaskRepository.cancel`). Running children are cancelled
+  cooperatively; a handler already outside SQLite may finish, but its later
+  fenced completion cannot publish outputs. Already-terminal children are
+  skipped. The command recomputes the run projection, appends
+  ``core.run.cancelled``, and records one run-level receipt;
 - :meth:`RunRepository.retry` is a receipt-protected group retry that
   restarts all eligible children — or an explicit subset — through the
   **shared task-retry predicate** (:meth:`TaskRepository.retry`) with the
@@ -526,9 +527,10 @@ class RunCancelReadModel:
     ``cancelled_task_ids`` the children the shared task-cancel predicate
     drove to the terminal ``cancelled`` state (ordinal order), and
     ``skipped_task_ids`` the children left untouched (already-terminal
-    children, and running children whose owned attempt fence a group
-    command cannot present). ``cancel_request_id`` is the one group-level
-    request id shared by every cancelled child.
+    children). Running children are cooperatively cancelled without exposing
+    executor-private fences; ``cooperative_task_ids`` reports those running
+    children. ``cancel_request_id`` is the one group-level request id shared
+    by every cancelled child.
     """
 
     run: Mapping[str, Any]
@@ -1816,13 +1818,12 @@ class RunRepository:
         event id.
 
         - **Eligibility.** A child is group-cancellable when it is
-          ``queued`` or ``blocked`` (no live attempt): the shared predicate
-          needs no attempt fence there. Already-terminal children
-          (``succeeded``/``failed``/``cancelled``) and ``running`` children
-          are skipped — a running child's owned attempt requires its
-          executor's exact ``attempt_id``/``lease_id``/``status_version``
-          fence, which a group signal cannot present, so the group command
-          never invents one.
+          ``queued``, ``blocked``, or ``running``. Queued/blocked children
+          have no attempt; running children are cancelled cooperatively and
+          their live attempt is terminated by the shared predicate. A
+          handler already outside SQLite may finish, but its later fenced
+          completion cannot publish outputs. Already-terminal children
+          (``succeeded``/``failed``/``cancelled``) are skipped.
         - **Terminal-run rejection.** A run that already reached
           ``succeeded``/``failed``/``cancelled`` raises
           :class:`RunTerminalError` before any child is touched: terminal
@@ -1938,8 +1939,9 @@ class RunRepository:
                 skipped.append(child_id)
         if not cancelled:
             raise RunValidationError(
-                f"run {run_id!r} has no cancellable children (queued/blocked); "
-                "terminal and running children need no group cancel"
+                f"run {run_id!r} has no cancellable children "
+                "(queued/blocked/running); terminal children need no group "
+                "cancel"
             )
 
         # 2. Recompute the run projection from the child rows.

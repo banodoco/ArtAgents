@@ -30,6 +30,7 @@ from __future__ import annotations
 import ast
 import inspect
 import os
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -1122,8 +1123,9 @@ def test_writer_fails_closed_when_wal_replaced_beneath_it(
     with writer.read_only_connection() as read_conn:
         read_conn.execute("SELECT COUNT(*) FROM projects").fetchone()
     # A foreign process (CLI, doctor, backup, external tooling) then opens
-    # the database read-write and closes cleanly. That close checkpoints and
-    # unlinks the WAL the idle writer connection still holds open.
+    # the database read-write and closes cleanly. SQLite builds differ on
+    # whether that close unlinks a WAL while another connection is open, so
+    # explicitly remove the sidecar after exercising the foreign-open path.
     foreign_code = (
         "import sqlite3; "
         f"c = sqlite3.connect({db_path!r}); "
@@ -1133,7 +1135,12 @@ def test_writer_fails_closed_when_wal_replaced_beneath_it(
     subprocess.run(
         [sys.executable, "-c", foreign_code], check=True, timeout=60
     )
-    assert not os.path.exists(db_path + "-wal")
+    wal_path = db_path + "-wal"
+    assert os.path.exists(wal_path)
+    replacement_path = wal_path + ".replacement"
+    shutil.copyfile(wal_path, replacement_path)
+    os.replace(replacement_path, wal_path)
+    assert os.path.exists(wal_path)
 
     # The next submission must fail closed instead of committing into the
     # orphaned inode.

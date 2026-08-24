@@ -17,9 +17,11 @@ cancellation, retry-selection, and close logic (m2 plan steps 12-13):
   items (``EvidenceRepository.list`` filtered to the run) plus bounded
   ``child_outputs`` read from the authoritative winning-task completion
   projection;
-- **cancel** drives every eligible child to the terminal ``cancelled`` state
-  through the shared task-cancel predicate, recomputes the run projection,
-  and returns one complete run-level receipt;
+- **cancel** drives every queued, blocked, or running child to the terminal
+  ``cancelled`` state through the shared task-cancel predicate. Running
+  children are cancelled cooperatively without executor-private fences; a
+  late handler completion remains fenced from publication. The service
+  recomputes the run projection and returns one complete run-level receipt;
 - **retry_failed** restarts the run's eligible failed/expired children (or an
   explicit ``selected_task_ids`` subset) through the shared task-retry
   predicate, preserving attempt-budget and terminal-immutability rules;

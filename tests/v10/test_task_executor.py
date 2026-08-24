@@ -373,6 +373,95 @@ def test_handler_runs_outside_sqlite_transactions(env) -> None:
     assert observed["in_transaction"] is False
 
 
+def test_operator_cancel_wins_blocked_handler_completion_without_publication(env) -> None:
+    """A late handler result cannot publish after unfenced operator cancel."""
+    project = _create_project(env)
+    task = _admit(env, project_id=project.id, max_attempts=1)
+    claim = _claim(env, project_id=project.id)
+    assert claim is not None and claim.task.id == task.id
+
+    class BlockedHandler(FakeHandler):
+        def __init__(self) -> None:
+            super().__init__({"late.txt": b"late output"})
+            self.entered = threading.Event()
+            self.release = threading.Event()
+
+        def execute(self, *, task, staging_dir):
+            self.entered.set()
+            assert self.release.wait(timeout=5), "handler did not unblock"
+            return super().execute(task=task, staging_dir=staging_dir)
+
+    handler = BlockedHandler()
+    execution: dict[str, object] = {}
+    thread_errors: list[BaseException] = []
+
+    def run_handler() -> None:
+        try:
+            execution["result"] = _execute(
+                env,
+                project_id=project.id,
+                claim=claim,
+                handler=handler,
+                idempotency_key="blocked-execute-k",
+            )
+        except BaseException as exc:  # pragma: no cover - assertion aid
+            thread_errors.append(exc)
+
+    worker = threading.Thread(target=run_handler)
+    worker.start()
+    assert handler.entered.wait(timeout=5), "handler did not start"
+
+    # This is the public operator shape: no attempt, lease, or status-version
+    # facts. Cancellation wins while the handler is outside SQLite.
+    cancelled = UnitOfWork(env.writer).run(
+        lambda u: env.task_repo.cancel(
+            u,
+            project_id=project.id,
+            task_id=task.id,
+            idempotency_key="blocked-cancel-k",
+            cancel_request_id="blocked-cancel-request",
+            now=TS2,
+        )
+    )
+    assert cancelled.task.status == "cancelled"
+    assert cancelled.attempt is not None
+    assert cancelled.attempt.status == "cancelled"
+
+    handler.release.set()
+    worker.join(timeout=5)
+    assert not worker.is_alive()
+    assert not thread_errors
+    prepared_result = execution["result"]
+    assert isinstance(prepared_result, ExecutionResult)
+    assert prepared_result.outcome == "prepared"
+    assert prepared_result.prepared is not None
+
+    # The handler did produce a valid late manifest, but the exact completion
+    # fence loses and therefore cannot publish media or task_outputs.
+    service = ExecutionService(
+        projects_root=env.projects_root, task_repo=env.task_repo
+    )
+    completion = service.complete(
+        UnitOfWork(env.writer),
+        prepared=prepared_result.prepared,
+        media_repo=env.media_repo,
+        idempotency_key="blocked-complete-k",
+        now=TS2,
+    )
+    assert completion.outcome == "losing"
+    counts = env.writer.submit(
+        lambda session: session.query_one(
+            "SELECT "
+            "(SELECT COUNT(*) FROM media WHERE project_id = ?) AS media_count, "
+            "(SELECT COUNT(*) FROM task_outputs WHERE task_id = ?) AS output_count",
+            (project.id, task.id),
+        )
+    )
+    assert counts["media_count"] == 0
+    assert counts["output_count"] == 0
+    assert _task_row(env.writer, task.id)["status"] == "cancelled"
+
+
 def test_handler_error_routes_through_failure_command(env) -> None:
     project = _create_project(env)
     task = _admit(env, project_id=project.id, max_attempts=2)

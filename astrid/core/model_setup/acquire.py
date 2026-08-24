@@ -98,6 +98,9 @@ def acquire_artifact(
         )
 
     part = jrn.part_path(root, artifact_id)
+    if part.is_symlink():
+        # Never append through a setup-root symlink into an unrelated file.
+        part.unlink()
     offset = _resume_offset(state, part)
     if state.phase == "corrupt" and state.reason == "hash_mismatch":
         # Targeted repair starts over: the partial bytes failed verify.
@@ -150,6 +153,8 @@ def acquire_artifact(
 
 def _resume_offset(state: jrn.ArtifactState, part: Path) -> int:
     """Filesystem wins over the journal: resume from real bytes on disk."""
+    if part.is_symlink():
+        return 0
     if state.phase == "downloading" and state.offset:
         return state.offset
     if part.is_file():

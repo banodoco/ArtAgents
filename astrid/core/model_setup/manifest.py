@@ -120,6 +120,7 @@ def make_manifest(
     min_ram_bytes: int = 0,
 ) -> DistributionManifest:
     """Build a signed manifest over exact content + license bytes."""
+    _validate_manifest_artifact_id(artifact_id)
     manifest = DistributionManifest(
         artifact_id=artifact_id,
         version=version,
@@ -168,12 +169,23 @@ def parse_manifest(raw: dict[str, Any]) -> DistributionManifest:
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise ManifestError(f"malformed manifest: {exc}") from None
+    _validate_manifest_artifact_id(manifest.artifact_id)
     if not verify_signature(manifest):
         raise ManifestError(
             f"manifest signature mismatch for {manifest.artifact_id}; "
             "refusing to trust it"
         )
     return manifest
+
+
+def _validate_manifest_artifact_id(artifact_id: str) -> None:
+    """Keep signed artifact ids confined to one setup filename component."""
+    from astrid.core.model_setup.journal import SetupJournalError, _validate_artifact_id
+
+    try:
+        _validate_artifact_id(artifact_id)
+    except SetupJournalError as exc:
+        raise ManifestError(str(exc)) from None
 
 
 def load_manifest(path: str | Path) -> DistributionManifest:

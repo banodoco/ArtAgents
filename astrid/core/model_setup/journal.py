@@ -129,17 +129,46 @@ def tmp_dir(projects_root: str | Path) -> Path:
 
 def artifact_path(projects_root: str | Path, artifact_id: str) -> Path:
     """Final installed path of one artifact id."""
+    _validate_artifact_id(artifact_id)
     return artifacts_dir(projects_root) / artifact_id
 
 
 def part_path(projects_root: str | Path, artifact_id: str) -> Path:
     """Partial-download path (Range resume target)."""
+    _validate_artifact_id(artifact_id)
     return tmp_dir(projects_root) / f"{artifact_id}{PART_SUFFIX}"
 
 
 def staged_path(projects_root: str | Path, artifact_id: str) -> Path:
     """Same-filesystem staged path awaiting the atomic rename."""
+    _validate_artifact_id(artifact_id)
     return tmp_dir(projects_root) / f"{artifact_id}{STAGED_SUFFIX}"
+
+
+def _validate_artifact_id(artifact_id: str) -> None:
+    """Reject ids that could escape the setup artifact directories.
+
+    Manifest ids are signed, but a valid signature does not make a path safe:
+    the release key may sign an accidentally malformed id and direct callers
+    can construct a manifest without parsing it. Keep ids as single filename
+    components on every platform; colons remain allowed because built-in
+    parameterized weight ids use them.
+    """
+    from pathlib import PureWindowsPath
+
+    if (
+        not isinstance(artifact_id, str)
+        or not artifact_id
+        or artifact_id in {".", ".."}
+        or "/" in artifact_id
+        or "\\" in artifact_id
+        or Path(artifact_id).is_absolute()
+        or PureWindowsPath(artifact_id).is_absolute()
+        or PureWindowsPath(artifact_id).drive
+    ):
+        raise SetupJournalError(
+            f"unsafe setup artifact id {artifact_id!r}; expected one filename"
+        )
 
 
 def _fsync_directory(path: Path) -> None:
@@ -241,51 +270,70 @@ class SetupJournal:
                 record = json.loads(line)
                 if not isinstance(record, dict):
                     raise ValueError("record must be an object")
-                artifact = str(record["artifact"])
-                event = str(record["event"])
-            except (ValueError, KeyError, TypeError):
+                if record.get("schema") != JOURNAL_SCHEMA:
+                    raise ValueError("record schema mismatch")
+                artifact = record["artifact"]
+                event = record["event"]
+                _validate_artifact_id(artifact)
+                if not isinstance(event, str):
+                    raise ValueError("event must be a string")
+            except (json.JSONDecodeError, UnicodeDecodeError):
                 if index == len(lines) - 1:
                     break  # torn tail from a crash mid-append
                 corrupt = True
                 continue
+            except (ValueError, KeyError, TypeError, SetupJournalError):
+                # A complete JSON object with bad fields/schema is corruption,
+                # including at the tail. Only an unparseable final line can be
+                # the expected crash-torn append.
+                corrupt = True
+                continue
             records += 1
             prior = states.get(artifact, ArtifactState(artifact=artifact))
-            if event == "absent":
-                states[artifact] = ArtifactState(artifact=artifact)
-            elif event == "downloading":
-                states[artifact] = replace(
-                    prior,
-                    phase="downloading",
-                    offset=int(record.get("offset", 0)),
-                )
-            elif event == "verifying":
-                states[artifact] = replace(prior, phase="verifying")
-            elif event == "staged":
-                states[artifact] = replace(
-                    prior,
-                    phase="staged",
-                    sha256=str(record["sha256"])
-                    if "sha256" in record
-                    else None,
-                    size=int(record["size"]) if "size" in record else prior.size,
-                )
-            elif event == "installed":
-                states[artifact] = replace(
-                    prior,
-                    phase="installed",
-                    sha256=str(record.get("sha256")),
-                    size=int(record.get("size", 0)),
-                    offset=0,
-                )
-            elif event == "corrupt":
-                states[artifact] = replace(
-                    prior, phase="corrupt", reason=str(record.get("reason"))
-                )
-            elif event == "repairing":
-                states[artifact] = replace(
-                    prior, phase="repairing", reason=None
-                )
-            else:
+            try:
+                if event == "absent":
+                    states[artifact] = ArtifactState(artifact=artifact)
+                elif event == "downloading":
+                    offset = record.get("offset", 0)
+                    if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0:
+                        raise ValueError("offset must be a non-negative integer")
+                    states[artifact] = replace(
+                        prior, phase="downloading", offset=offset
+                    )
+                elif event == "verifying":
+                    states[artifact] = replace(prior, phase="verifying")
+                elif event == "staged":
+                    size = record.get("size", prior.size)
+                    if size is not None and (
+                        isinstance(size, bool) or not isinstance(size, int) or size < 0
+                    ):
+                        raise ValueError("size must be a non-negative integer")
+                    sha256 = record.get("sha256", prior.sha256)
+                    if sha256 is not None and not isinstance(sha256, str):
+                        raise ValueError("sha256 must be a string")
+                    states[artifact] = replace(
+                        prior, phase="staged", sha256=sha256, size=size
+                    )
+                elif event == "installed":
+                    sha256 = record["sha256"]
+                    size = record["size"]
+                    if not isinstance(sha256, str) or not sha256:
+                        raise ValueError("installed sha256 must be a string")
+                    if isinstance(size, bool) or not isinstance(size, int) or size < 0:
+                        raise ValueError("installed size must be a non-negative integer")
+                    states[artifact] = replace(
+                        prior, phase="installed", sha256=sha256, size=size, offset=0
+                    )
+                elif event == "corrupt":
+                    reason = record.get("reason")
+                    if not isinstance(reason, str) or not reason:
+                        raise ValueError("corrupt reason must be a non-empty string")
+                    states[artifact] = replace(prior, phase="corrupt", reason=reason)
+                elif event == "repairing":
+                    states[artifact] = replace(prior, phase="repairing", reason=None)
+                else:
+                    raise ValueError(f"unknown event {event!r}")
+            except (KeyError, TypeError, ValueError):
                 corrupt = True
         return JournalSnapshot(states=states, corrupt=corrupt, records=records)
 
@@ -316,7 +364,16 @@ def resolve_boot_state(
         staged = staged_path(root, artifact)
         part = part_path(root, artifact)
         if state.phase == "staged" or state.phase == "verifying":
-            if staged.is_file():
+            if staged.is_file() and not staged.is_symlink():
+                if state.sha256 is None or state.size is None:
+                    if write:
+                        journal.append(
+                            artifact, "corrupt", reason="staged_metadata_missing"
+                        )
+                    resolved[artifact] = replace(
+                        state, phase="corrupt", reason="staged_metadata_missing"
+                    )
+                    continue
                 if write:
                     promoted_sha, promoted_size = _promote_staged(
                         root, journal, artifact, state, staged, final
@@ -336,7 +393,7 @@ def resolve_boot_state(
                 else:
                     # Read-only replay: staged bytes are presumed promotable.
                     resolved[artifact] = replace(state, phase="installed", offset=0)
-            elif part.is_file():
+            elif part.is_file() and not part.is_symlink():
                 offset = part.stat().st_size
                 if write:
                     journal.append(artifact, "downloading", offset=offset)
@@ -353,7 +410,11 @@ def resolve_boot_state(
         elif state.phase == "installed":
             # Fast path: stamp + size only. Deep re-hash belongs to doctor.
             try:
-                ok = final.is_file() and final.stat().st_size == state.size
+                ok = (
+                    final.is_file()
+                    and not final.is_symlink()
+                    and final.stat().st_size == state.size
+                )
             except OSError:
                 ok = False
             if ok:
@@ -389,6 +450,9 @@ def _promote_staged(
     if expected is not None and digest != expected:
         # Staged bytes drifted: refuse the promotion, keep it corrupt.
         journal.append(artifact, "corrupt", reason="staged_hash_mismatch")
+        return None, None
+    if state.size is not None and size != state.size:
+        journal.append(artifact, "corrupt", reason="staged_size_mismatch")
         return None, None
     os.replace(staged, final)
     _fsync_directory(final.parent)

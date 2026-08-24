@@ -1166,19 +1166,13 @@ class ReighTaskBridge:
             or status_version <= 0
         ):
             raise BridgeBodyError("status_version must be a positive integer")
-        running_fenced = any(
-            value is not None
-            for value in (attempt_id, lease_id, status_version)
-        )
-        if str(task_row["status"]) == "running":
-            if not running_fenced:
-                raise BridgeConflictError(
-                    "cancelling a running task requires the live attempt "
-                    "fence",
-                    attempt=self._current_attempt_extra(
-                        str(task_row["winning_attempt_id"] or "") or None
-                    ),
-                )
+        # Operator cancellation is deliberately cooperative: the operator
+        # does not own executor-private attempt/lease/version facts.  The
+        # single writer still atomically makes cancellation the terminal
+        # winner, and a handler that is already outside SQLite can only lose
+        # its later fenced completion.  Executor callers may provide the
+        # complete fence, but the repository rejects partial fences before
+        # mutation; keep that contract here by forwarding all supplied facts.
         tasks, _media, _receipts = self._services()
         try:
             result = UnitOfWork(self._writer).run(

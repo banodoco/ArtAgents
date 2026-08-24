@@ -21,10 +21,10 @@ Verbs (exactly these six, one SDK call each):
 - ``list`` — one ``client.tasks.list`` call (project-scoped read, no key);
 - ``show <task_id>`` — one ``client.tasks.show`` call (read, no key);
 - ``cancel <task_id>`` — one ``client.tasks.cancel`` call with the same
-  idempotency-key contract as create. The executor-owned attempt fence
-  (``attempt_id``/``lease_id``/``expected_status_version``) is **not**
-  exposed: a running task's cancellation without the fence is the service's
-  typed ``validation_error``, unchanged;
+  idempotency-key contract as create. Operators cooperatively cancel running
+  work without exposing the executor-owned attempt fence; an executor may
+  provide the complete ``attempt_id``/``lease_id``/``expected_status_version``
+  fence through its internal seam, while partial fences remain invalid;
 - ``retry <task_id>`` — one ``client.tasks.retry`` call with the same
   idempotency-key contract;
 - ``events <task_id>`` — one ``client.tasks.events`` call returning the

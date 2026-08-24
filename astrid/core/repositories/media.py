@@ -865,6 +865,15 @@ class MediaRepository:
                 locator = str(prepared.source_path)
         else:
             locator = _require_non_empty_string("locator", locator)
+        if realm == MANAGED_LOCAL_REALM:
+            canonical_locator = str(
+                managed_media_path(self._projects_root, prepared.digest)
+            )
+            if locator != canonical_locator:
+                raise MediaValidationError(
+                    "managed_local import requires the digest-derived managed "
+                    f"path, got {locator!r} (expected {canonical_locator!r})"
+                )
 
         # Semantic request identity: stable media id, byte digest, derived
         # facts, and the location all participate; generated values (the
@@ -1760,6 +1769,15 @@ class MediaRepository:
                 locator = str(prepared.source_path)
         else:
             locator = _require_non_empty_string("locator", locator)
+        if realm == MANAGED_LOCAL_REALM:
+            canonical_locator = str(
+                managed_media_path(self._projects_root, prepared.digest)
+            )
+            if locator != canonical_locator:
+                raise MediaValidationError(
+                    "managed_local materialization requires the digest-derived "
+                    f"path, got {locator!r} (expected {canonical_locator!r})"
+                )
         normalized_relations = (
             self._normalize_relations(relations) if relations is not None else []
         )

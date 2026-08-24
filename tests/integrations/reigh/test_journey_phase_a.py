@@ -278,7 +278,8 @@ class TestJourneyPhaseA:
             assert rstatus == 200
             assert repeat["task"]["status"] == "cancelled"
 
-            # Running cancel requires the live attempt fence.
+            # Operator cancellation is cooperative and does not expose the
+            # executor's private attempt fence.
             _status, running = _admit_simple(env, slug, "cancel-r")
             running_id = running["task"]["id"]
             claim = _claim(env)
@@ -287,11 +288,19 @@ class TestJourneyPhaseA:
                 f"/projects/{slug}/tasks/{running_id}/cancel",
                 body={},
             )
-            assert ustatus == 409, unfenced
-            attempt = claim["attempt"]
+            assert ustatus == 200, unfenced
+            assert unfenced["task"]["status"] == "cancelled"
+            assert unfenced["attempt"]["status"] == "cancelled"
+
+            # Executor callers may still cancel with the complete strict
+            # fence when they own it.
+            _status, fenced_running = _admit_simple(env, slug, "cancel-r-fenced")
+            fenced_id = fenced_running["task"]["id"]
+            fenced_claim = _claim(env)
+            attempt = fenced_claim["attempt"]
             fstatus, fenced = _post(
                 env,
-                f"/projects/{slug}/tasks/{running_id}/cancel",
+                f"/projects/{slug}/tasks/{fenced_id}/cancel",
                 body={
                     "attempt_id": attempt["id"],
                     "lease_id": attempt["lease_id"],
@@ -301,6 +310,19 @@ class TestJourneyPhaseA:
             assert fstatus == 200, fenced
             assert fenced["task"]["status"] == "cancelled"
             assert fenced["attempt"]["status"] == "cancelled"
+
+            # Partial executor fences remain a typed body error and do not
+            # weaken the strict transition contract.
+            _status, partial_running = _admit_simple(env, slug, "cancel-r-partial")
+            partial_id = partial_running["task"]["id"]
+            partial_claim = _claim(env)
+            pstatus, partial = _post(
+                env,
+                f"/projects/{slug}/tasks/{partial_id}/cancel",
+                body={"attempt_id": partial_claim["attempt"]["id"]},
+            )
+            assert pstatus == 400, partial
+            assert partial["error"] == "invalid_body"
 
     def test_merge_skipped_completion_receipt_is_replayable(
         self, tmp_bridge_root: Path

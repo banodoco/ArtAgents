@@ -2820,15 +2820,16 @@ class TaskRepository:
           ``finished_at`` stamped and the caller's (or a fresh generated)
           ``cancel_request_id``/``cancel_requested_at`` recorded. No
           attempt is touched.
-        - **Running cancellation.** The task is ``running``, so the caller
-          must own the live attempt: *attempt_id*, *lease_id*, and
-          *expected_status_version* are all required, and every fence
-          (attempt belongs to the task, attempt live, lease match, exact
-          status version) is checked **before** any mutation. The owned
-          attempt is terminated in the same command: ``status``
-          ``cancelled``, ``status_version`` +1, ``finished_at`` stamped.
-          The task still ends ``cancelled`` with ``winning_attempt_id``
-          left null.
+        - **Running cancellation.** An operator may cancel a running task
+          without executor-private fence facts. The single writer selects
+          the terminal winner; it finds the live attempt, terminates it in
+          the same command (``status`` ``cancelled``, ``status_version`` +1,
+          ``finished_at`` stamped), and leaves the task ``cancelled`` with
+          ``winning_attempt_id`` null. An executor may instead provide the
+          complete *attempt_id*, *lease_id*, and *expected_status_version*
+          fence; every fence is checked **before** mutation. Partial fences
+          remain a validation error. A handler already outside SQLite may
+          finish, but its later fenced completion cannot publish outputs.
 
         Writer order selects exactly one terminal result: both this command
         and completion run through the single writer FIFO, so whichever
@@ -3610,6 +3611,21 @@ class TaskRepository:
                         "queued task whose latest attempt failed or expired"
                     ),
                 )
+        # A standalone failed task is terminal: only invocation-created
+        # children receive the deliberate one-shot retry exception below.
+        # Keep this distinction observable so the operator/read contract does
+        # not mislabel an already-terminal standalone task as merely budget
+        # exhausted.  Invocation children retain the existing retry path,
+        # which reopens their parent run and extends the one-shot budget.
+        if prior_status == "failed" and task_row["run_id"] is None:
+            raise TaskTransitionError(
+                task_id=task_id,
+                reason="task_terminal",
+                detail=(
+                    "task status is 'failed'; a standalone terminal task "
+                    "never resurrects"
+                ),
+            )
         prior_attempt_row = uow.query_one(
             "SELECT * FROM execution_attempts WHERE task_id = ? "
             "ORDER BY attempt_no DESC LIMIT 1",
@@ -3839,6 +3855,11 @@ class TaskRepository:
             return False, "task_terminal"
         if prior_status not in ("queued", "failed"):
             return False, "not_retryable"
+        # Keep this read-only predicate aligned with retry(): a standalone
+        # task whose terminal failure is recorded directly on the task has no
+        # parent invocation lifecycle to reopen.
+        if prior_status == "failed" and task_row["run_id"] is None:
+            return False, "task_terminal"
         prior_attempt_row = uow.query_one(
             "SELECT * FROM execution_attempts WHERE task_id = ? "
             "ORDER BY attempt_no DESC LIMIT 1",
@@ -4003,6 +4024,22 @@ class TaskRepository:
         }
         if result_summary is not None:
             request["result"] = result_summary
+        # Optional generation and registry writes are externally visible
+        # completion side effects. Include them in request identity so a
+        # changed retry under one idempotency key cannot replay the first
+        # receipt while silently dropping the changed side effect.
+        if generation_request is not None:
+            if not isinstance(generation_request, Mapping):
+                raise TaskValidationError(
+                    "generation_request must be a mapping when supplied"
+                )
+            request["generation_request"] = dict(generation_request)
+        if registry_merge is not None:
+            if not isinstance(registry_merge, Mapping):
+                raise TaskValidationError(
+                    "registry_merge must be a mapping when supplied"
+                )
+            request["registry_merge"] = dict(registry_merge)
         try:
             request_digest = request_hash(command_kind, request)
         except CanonicalizationError as exc:

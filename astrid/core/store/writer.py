@@ -485,15 +485,15 @@ class DatabaseWriter:
                     # means this connection no longer backs durable state:
                     # commits would keep landing in a WAL nobody can read,
                     # so every later submission fails the same way.
-                    identity = self._wal_sidecar_identity()
-                    if identity != self._wal_identity:
+                    before_identity = self._wal_sidecar_identity()
+                    if before_identity != self._wal_identity:
                         if not self._sidecar_fault_reported:
                             self._sidecar_fault_reported = True
                             print(
                                 "astrid-sqlite-writer: database WAL was "
                                 f"replaced beneath the live writer "
                                 f"(observed {self._wal_identity}, now "
-                                f"{identity}); writes fail closed until "
+                                f"{before_identity}); writes fail closed until "
                                 f"restart",
                                 file=sys.stderr,
                             )
@@ -505,7 +505,31 @@ class DatabaseWriter:
                         )
                     session = WriterSession(self._connection)
                     item.result = item.callback(session)
-                    self._wal_identity = self._wal_sidecar_identity()
+                    after_identity = self._wal_sidecar_identity()
+                    # A callback may block long enough for another writable
+                    # connection to checkpoint/unlink or replace the WAL.
+                    # Do not blindly adopt that new inode as the writer's
+                    # baseline: if an already-existing WAL changed during
+                    # the callback, the callback ran across a poisoned
+                    # connection and must fail closed as well.
+                    if (
+                        before_identity is not None
+                        and after_identity != before_identity
+                    ):
+                        if not self._sidecar_fault_reported:
+                            self._sidecar_fault_reported = True
+                            print(
+                                "astrid-sqlite-writer: database WAL was "
+                                "replaced during a live callback; writes "
+                                "fail closed until restart",
+                                file=sys.stderr,
+                            )
+                        raise WriterSidecarError(
+                            "the database WAL was replaced during a live "
+                            "callback; writes cannot be durable — restart "
+                            "astrid serve"
+                        )
+                    self._wal_identity = after_identity
                 except sqlite3.OperationalError as exc:
                     if "locked" in str(exc).lower():
                         item.error = WriterBusyError(
