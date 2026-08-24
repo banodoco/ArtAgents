@@ -15,7 +15,6 @@ import shutil
 import subprocess
 import sys
 from contextlib import nullcontext, suppress
-from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -28,17 +27,16 @@ from astrid.core.foundation import project_paths
 from astrid.core.foundation.hash import sha256_file
 from astrid.core.media import ffprobe_metadata_strict
 from astrid.core.project.project import create_project
-from astrid.core.project.run import write_run_record
+from astrid.core.project.run import step_dir_for, write_run_record
 from astrid.core.rendering.artifacts import validate_render_result
-from astrid.core.rendering.contracts import AudioOwnership, RenderRequest, SCHEMA_VERSION
+from astrid.core.rendering.contracts import SCHEMA_VERSION, AudioOwnership, RenderRequest
 from astrid.core.rendering.errors import RendererException
 from astrid.core.rendering.registry import load_default_registries
 from astrid.core.rendering.service import LegacyRenderRoutingWarning, RenderService
 from astrid.core.rendering.transport import CommandTransport
 from astrid.core.subprocess_env import TASK_PROJECT_ENV, TASK_RUN_ID_ENV, TASK_STEP_ID_ENV
-from astrid.core.project.run import step_dir_for
 from astrid.core.timeline.crud import create_timeline
-
+from tests.packs.rendering._helpers import _execution_env
 
 pytestmark = [pytest.mark.renderer_parity, pytest.mark.integration]
 
@@ -57,6 +55,20 @@ SEMANTIC_FIXTURES = (
 )
 PARENT_RUN_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAT"
 TASK_STEP_ID = "render"
+
+
+@pytest.fixture(autouse=True)
+def renderer_execution_environment():
+    """Keep nested planner/backend commands on the test process runtime.
+
+    The parity suite exercises real protocol subprocesses.  Their manifests
+    intentionally use ``python3`` and the legacy-hybrid planner starts a
+    second protocol child, so relying on the shell's ambient PATH can select a
+    different interpreter that lacks the canonical timeline-schema package.
+    """
+
+    with _execution_env():
+        yield
 
 
 class _ParityTransport(CommandTransport):
@@ -610,12 +622,29 @@ def test_public_facade_standalone_and_attached_run_ownership(
         monkeypatch.setenv(TASK_RUN_ID_ENV, PARENT_RUN_ID)
         monkeypatch.setenv(TASK_STEP_ID_ENV, TASK_STEP_ID)
 
+    # ``run_executor`` is the lower-level capability runner.  Kernel-backed
+    # SDK invocation supplies its private staging root before reaching this
+    # seam; direct callers must provide the equivalent staging path.  Keeping
+    # this explicit prevents the test from asserting the retired runner-owned
+    # run.json ledger behavior.
+    if attached:
+        staging_root = step_dir_for(
+            "demo",
+            PARENT_RUN_ID,
+            TASK_STEP_ID,
+            step_version=1,
+            root=projects_root,
+        )
+    else:
+        staging_root = tmp_path / "standalone-render-staging"
+
     result = run_executor(
         ExecutorRunRequest(
             executor_id="rendering.render",
             out=None,
             project="demo",
             inputs=inputs,
+            run_root=staging_root,
         ),
         load_default_registry(),
     )
@@ -624,18 +653,11 @@ def test_public_facade_standalone_and_attached_run_ownership(
     if attached:
         expected_parent = projects_root / "demo" / "runs" / PARENT_RUN_ID / "run.json"
         assert run_jsons == [expected_parent]
-        expected_root = step_dir_for(
-            "demo",
-            PARENT_RUN_ID,
-            TASK_STEP_ID,
-            step_version=1,
-            root=projects_root,
-        )
-        assert result.run_root == expected_root
-        assert not (expected_root / "run.json").exists()
+        assert result.run_root == staging_root
+        assert not (staging_root / "run.json").exists()
     else:
-        assert len(run_jsons) == 1
-        assert result.run_root == run_jsons[0].parent
+        assert run_jsons == []
+        assert result.run_root == staging_root
     assert (result.run_root / output_name).is_file()
 
 
