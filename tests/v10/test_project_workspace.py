@@ -39,7 +39,10 @@ from astrid.sdk.projects import ProjectsService
 @pytest.fixture
 def projects_root(tmp_path: Path) -> Path:
     """A fresh projects root, separate from the kernel database directory."""
-    root = tmp_path / "projects"
+    # The repository-wide sandbox fixture reserves ``tmp_path/projects`` for
+    # the default ASTRID_PROJECTS_ROOT; keep this service-specific root
+    # distinct so both fixtures retain strict fresh-directory semantics.
+    root = tmp_path / "workspace-projects"
     root.mkdir()
     return root
 
