@@ -57,6 +57,7 @@ from typing import Any, Self
 from astrid.core.events.service import EventAppendService
 from astrid.core.foundation.project_paths import resolve_projects_root
 from astrid.core.integrations.reigh.bridge_service import derive_database_path
+from astrid.core.integrations.reigh.timeline_bundle import BUNDLE_MISSING
 from astrid.core.receipts import ReceiptService
 from astrid.core.repositories import (
     EventRepository,
@@ -279,6 +280,7 @@ def _instrument_timeline_save(service: TimelinesService) -> list[TimelineSaveCal
         config: Mapping[str, Any],
         registry: Mapping[str, Any],
         expected_version: int,
+        bundle: Mapping[str, Any] | None | object = BUNDLE_MISSING,
         idempotency_key: str | None = None,
     ) -> DomainResult[dict[str, Any]]:
         with lock:
@@ -296,6 +298,7 @@ def _instrument_timeline_save(service: TimelinesService) -> list[TimelineSaveCal
             config=config,
             registry=registry,
             expected_version=expected_version,
+            bundle=bundle,
             idempotency_key=idempotency_key,
         )
 
