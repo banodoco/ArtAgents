@@ -79,6 +79,10 @@ non-schema surfaces and import Astrid without that checkout. Timeline document
 validation, managed rendering/visualization, and the exact canonical-schema
 parity assertions require it and fail closed when it is unavailable.
 
+The `dev` extra pins a compatible public source revision so the repository-wide
+test suite and CI validate one deterministic schema. This does not add the
+schema to Astrid's base runtime dependencies.
+
 Install the package from a compatible Banodoco workspace checkout with the same
 interpreter used to run Astrid:
 

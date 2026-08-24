@@ -43,6 +43,11 @@ dev = [
     "mypy==1.17.0",
     "pytest==9.0.2",
     "pytest-cov==7.1.0",
+    # The runtime keeps the canonical Banodoco schema optional, but the full
+    # development/CI suite must exercise timeline validation against one exact
+    # compatible contract instead of an ambient sibling checkout or an older
+    # transitive Remotion copy.
+    "banodoco-timeline-schema @ git+https://github.com/banodoco/ArtAgents.git@242f9c4306bf3b501222cb041a9eb246ef47bc85#subdirectory=packages/timeline-schema/python",
     # Default per-test timeout for the whole suite (see [tool.pytest.ini_options]
     # timeout/timeout_method below). Converts ANY hanging test into a fast,
     # diagnosable failure with a thread stack dump, so a single wedged test can
