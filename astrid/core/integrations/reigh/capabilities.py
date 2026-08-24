@@ -549,18 +549,19 @@ def _probe_vibecomfy_runtime() -> tuple[bool, list[str]]:
 
 
 def _probe_wgp_runtime() -> tuple[bool, list[str]]:
+    from astrid.core.integrations.reigh.wgp_bridge import DEFAULT_CHECKOUT
+
     root = os.environ.get(WGP_CHECKOUT_ENV)
-    checkout = (
-        Path(root).resolve()
-        if root
-        else (_REPO_ROOT.parent / "vendor" / "Wan2GP")
-    )
-    worker = checkout / "worker.py"
-    if worker.is_file():
+    checkout = Path(root).resolve() if root else DEFAULT_CHECKOUT
+    entry = checkout / "wgp.py"
+    if entry.is_file() and (checkout / "defaults").is_dir():
         return True, []
     return False, [
-        f"pinned Wan2GP tree not found at {checkout} (expected {worker}; "
-        f"set {WGP_CHECKOUT_ENV})"
+        f"pinned Wan2GP tree not found at {checkout} (expected {entry} "
+        f"+ defaults/; set {WGP_CHECKOUT_ENV}); vendor it with: "
+        "git clone --branch reigh-sprint-3 "
+        "https://github.com/banodoco/Wan2GP <root> && git checkout "
+        "181bb71a21008032e4771e11663f33e4489c4512"
     ]
 
 

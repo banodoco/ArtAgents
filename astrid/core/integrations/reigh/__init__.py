@@ -5,3 +5,6 @@
 from astrid.core.integrations.reigh.vibecomfy_binding import (  # noqa: F401
     VibeComfyTaskHandler,
 )
+from astrid.core.integrations.reigh.wgp_binding import (  # noqa: F401
+    WgpTaskHandler,
+)
