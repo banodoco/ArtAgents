@@ -14,7 +14,9 @@ cancellation, retry-selection, and close logic (m2 plan steps 12-13):
 - **show** returns the run read model plus the **derived child progress**
   (``RunRepository.derive_progress`` — always a function of the child task
   rows, never a persisted cursor), and optionally the run's ordered evidence
-  items (``EvidenceRepository.list`` filtered to the run);
+  items (``EvidenceRepository.list`` filtered to the run) plus bounded
+  ``child_outputs`` read from the authoritative winning-task completion
+  projection;
 - **cancel** drives every eligible child to the terminal ``cancelled`` state
   through the shared task-cancel predicate, recomputes the run projection,
   and returns one complete run-level receipt;
@@ -23,8 +25,8 @@ cancellation, retry-selection, and close logic (m2 plan steps 12-13):
   predicate, preserving attempt-budget and terminal-immutability rules;
 - **close** terminally closes a run that owns no non-terminal child work
   (zero-child runs, whose derived status can never leave ``running``, and
-  runs whose every child is already terminal), folding the declared outcome
-  into the projection and returning one complete run-level receipt;
+  runs whose every child is already terminal), deriving an omitted outcome
+  from terminal children and returning one complete run-level receipt;
 - **events** returns the run's ordered ``core.run`` stream events through the
   read-only :class:`~astrid.core.repositories.events.EventRepository`.
 
@@ -38,14 +40,17 @@ every failure returns the frozen three-key error object via the centralized
 The run read model and derived progress are assembled here from the kernel
 ``runs`` row and the run repository's public read surface. The service holds
 a reference to the shared writer solely to open one unit of work per mutation
-and read; it never opens its own writer or connection, and its SQL is limited
-to read-only projection queries against the frozen ``runs`` table (no
-mutation logic, hashing, or lifecycle arbitration lives here).
+and read; it never opens its own writer or connection. Its additional
+completion-evidence query is read-only and bounded to direct child tasks and
+their committed ``task_outputs`` rows (no mutation logic, hashing, or
+lifecycle arbitration lives here).
 """
 
 from __future__ import annotations
 
+import sqlite3
 from collections.abc import Mapping, Sequence
+from pathlib import PurePosixPath
 from typing import Any
 
 from astrid.core.receipts.canonical import parse_json
@@ -60,6 +65,7 @@ from astrid.core.repositories.runs import (
 )
 from astrid.core.store.uow import UnitOfWork
 from astrid.core.store.writer import DatabaseWriter
+from astrid.core.schema_packs.registry import FrozenSchemaPackRegistry
 from astrid.sdk.contracts import DomainResult, resolve_idempotency_key
 from astrid.sdk.exceptions import ServiceValidationError, map_error
 
@@ -111,6 +117,10 @@ class RunsService:
         receipts: ReceiptService,
         evidence: EvidenceRepository,
         event_log: EventRepository,
+        tasks: Any | None = None,
+        media: Any | None = None,
+        projects_root: str | None = None,
+        registry: FrozenSchemaPackRegistry | None = None,
     ) -> None:
         self._writer = writer
         self._projects = projects
@@ -118,6 +128,10 @@ class RunsService:
         self._receipts = receipts
         self._evidence = evidence
         self._event_log = event_log
+        self._tasks = tasks
+        self._media = media
+        self._projects_root = projects_root
+        self._registry = registry
 
     # -- list --------------------------------------------------------------
 
@@ -174,7 +188,81 @@ class RunsService:
             except Exception as exc:  # noqa: BLE001 - centralized mapping
                 return DomainResult.failure(map_error(exc))
             data["evidence"] = [row.to_dict() for row in evidence_rows]
+            data["child_outputs"] = self._child_output_evidence(
+                project_id=project_id, run_id=run_id
+            )
         return DomainResult.success(data)
+
+    def _child_output_evidence(
+        self, *, project_id: str, run_id: str
+    ) -> list[dict[str, Any]]:
+        """Return bounded completion facts for a run's direct children.
+
+        ``task_outputs`` is the authoritative completion projection: unlike
+        executor stdout or the transient invocation manifest it is committed
+        in the same fenced transaction as the winning task completion. Keep
+        this read model deliberately small and safe for operator/agent use:
+        ids, roles, labels, content hashes, byte sizes, and staging-relative
+        paths only. Failed children remain represented by the existing
+        ``failures`` read model and simply have no completion outputs.
+        """
+        with self._writer.read_only_connection() as conn:
+            conn.row_factory = sqlite3.Row
+            children = conn.execute(
+                "SELECT id, run_ordinal, status FROM tasks "
+                "WHERE run_id = ? AND project_id = ? "
+                "ORDER BY run_ordinal ASC, id ASC LIMIT 256",
+                (run_id, project_id),
+            ).fetchall()
+            if not children:
+                return []
+            child_ids = [str(row["id"]) for row in children]
+            placeholders = ",".join("?" for _ in child_ids)
+            outputs = conn.execute(
+                "SELECT task_id, ordinal, role, media_id, is_primary, "
+                "params_json, created_at FROM task_outputs "
+                f"WHERE task_id IN ({placeholders}) "
+                "ORDER BY task_id ASC, ordinal ASC LIMIT 8192",
+                child_ids,
+            ).fetchall()
+
+        by_task: dict[str, list[dict[str, Any]]] = {
+            task_id: [] for task_id in child_ids
+        }
+        for row in outputs:
+            params = parse_json(str(row["params_json"]))
+            if not isinstance(params, Mapping):
+                params = {}
+            item: dict[str, Any] = {
+                "ordinal": int(row["ordinal"]),
+                "role": str(row["role"]),
+                "is_primary": bool(row["is_primary"]),
+                "media_id": (
+                    None if row["media_id"] is None else str(row["media_id"])
+                ),
+            }
+            for key in ("label", "content_hash", "byte_size"):
+                value = params.get(key)
+                if value is not None:
+                    item[key] = value
+            path = params.get("path")
+            if isinstance(path, str) and path:
+                candidate = PurePosixPath(path)
+                if not candidate.is_absolute() and ".." not in candidate.parts:
+                    item["path"] = candidate.as_posix()
+            by_task[str(row["task_id"])].append(item)
+
+        return [
+            {
+                "task_id": str(row["id"]),
+                "ordinal": (
+                    None if row["run_ordinal"] is None else int(row["run_ordinal"])
+                ),
+                "status": str(row["status"]),
+                "outputs": by_task[str(row["id"])][:32],
+            }
+            for row in children
+        ]
 
     def _show_read(
         self, uow: UnitOfWork, project_id: str, run_id: str
@@ -191,6 +279,23 @@ class RunsService:
         )
         data = _run_dict(row)
         data["progress"] = progress.to_dict()
+        failures = uow.query(
+            "SELECT t.id AS task_id, a.id AS attempt_id, a.error_json "
+            "FROM tasks t JOIN execution_attempts a ON a.task_id = t.id "
+            "WHERE t.run_id = ? AND t.project_id = ? AND t.status = 'failed' "
+            "AND a.attempt_no = (SELECT MAX(a2.attempt_no) FROM execution_attempts a2 WHERE a2.task_id = t.id) "
+            "ORDER BY t.run_ordinal ASC",
+            (run_id, project_id),
+        )
+        if failures:
+            data["failures"] = [
+                {
+                    "task_id": str(row["task_id"]),
+                    "attempt_id": str(row["attempt_id"]),
+                    "error": parse_json(str(row["error_json"])),
+                }
+                for row in failures
+            ]
         return data
 
     # -- cancel ------------------------------------------------------------
@@ -207,9 +312,9 @@ class RunsService:
         ``project_id`` accepts the canonical project id or the immutable
         slug; an unknown address is a typed ``not_found``. Reuses the
         repository's shared task-cancel predicate and recomputed run
-        projection; running children (whose owned attempt fence a group
-        command cannot present) and already-terminal children are skipped
-        untouched, and a terminal run is a typed ``terminal_state``.
+        projection; running children are cooperatively fenced (their handler
+        may finish, but completion cannot publish), and a terminal run is a
+        typed ``terminal_state``.
         """
         try:
             key = self._resolve_key(idempotency_key)
@@ -268,6 +373,7 @@ class RunsService:
             return DomainResult.failure(
                 map_error(exc), idempotency_key=idempotency_key or ""
             )
+        was_replay = self._committed_receipt(project_id, key) is not None
         try:
             model = UnitOfWork(self._writer).run(
                 lambda uow: self._runs.retry(
@@ -280,8 +386,80 @@ class RunsService:
             )
         except Exception as exc:  # noqa: BLE001 - centralized bounded mapping
             return DomainResult.failure(map_error(exc), idempotency_key=key)
+        result_data = model.to_dict()
+        if (
+            not was_replay
+            and self._tasks is not None
+            and self._media is not None
+            and self._projects_root is not None
+        ):
+            try:
+                from astrid.sdk.invocation import dispatch_retried_task
+                from astrid.core.repositories.tasks import TaskAttemptReadModel
+
+                for task_id in model.retried_task_ids:
+                    task = self._tasks.show(self._writer, task_id)
+                    with self._writer.read_only_connection() as conn:
+                        conn.row_factory = sqlite3.Row
+                        row = conn.execute(
+                            "SELECT * FROM execution_attempts WHERE task_id = ? "
+                            "ORDER BY attempt_no DESC LIMIT 1",
+                            (task_id,),
+                        ).fetchone()
+                    if row is None:
+                        raise RuntimeError(
+                            f"retried task {task_id!r} has no execution attempt"
+                        )
+                    dispatch_retried_task(
+                        writer=self._writer,
+                        task_repo=self._tasks,
+                        media_repo=self._media,
+                        projects_root=self._projects_root,
+                        task=task,
+                        attempt=TaskAttemptReadModel.from_mapping(dict(row)),
+                        idempotency_key=f"{key}:child:{task_id}",
+                        registry=self._registry,
+                    )
+                refreshed = UnitOfWork(self._writer).run(
+                    lambda uow: self._show_read(uow, project_id, run_id)
+                )
+                result_data["run"] = {
+                    **result_data["run"],
+                    "total_children": refreshed["progress"]["total_children"],
+                    "succeeded": refreshed["progress"]["succeeded"],
+                    "failed": refreshed["progress"]["failed"],
+                    "cancelled": refreshed["progress"]["cancelled"],
+                    "status": refreshed["status"],
+                    "result": refreshed["result"],
+                    "finished_at": refreshed["finished_at"],
+                }
+                result_data["progress"] = refreshed["progress"]
+            except Exception as exc:  # noqa: BLE001 - typed retry execution failure
+                return DomainResult.failure(map_error(exc), idempotency_key=key)
+        elif self._tasks is not None:
+            try:
+                # Exact-key replay is read-only but the receipt stores the
+                # admission snapshot. Refresh the current run projection so
+                # a synchronous retry replay cannot lie about its terminal
+                # status or retain a stale finished_at/result.
+                refreshed = UnitOfWork(self._writer).run(
+                    lambda uow: self._show_read(uow, project_id, run_id)
+                )
+                result_data["run"] = {
+                    **result_data["run"],
+                    "total_children": refreshed["progress"]["total_children"],
+                    "succeeded": refreshed["progress"]["succeeded"],
+                    "failed": refreshed["progress"]["failed"],
+                    "cancelled": refreshed["progress"]["cancelled"],
+                    "status": refreshed["status"],
+                    "result": refreshed["result"],
+                    "finished_at": refreshed["finished_at"],
+                }
+                result_data["progress"] = refreshed["progress"]
+            except Exception as exc:  # noqa: BLE001 - typed retry execution failure
+                return DomainResult.failure(map_error(exc), idempotency_key=key)
         return DomainResult.success(
-            model.to_dict(),
+            result_data,
             receipt=self._committed_receipt(project_id, key),
             idempotency_key=key,
         )
@@ -293,16 +471,17 @@ class RunsService:
         project_id: str,
         run_id: str,
         *,
-        outcome: str = "succeeded",
+        outcome: str | None = None,
         idempotency_key: str | None = None,
     ) -> DomainResult[dict[str, Any]]:
         """Terminally close a run that owns no non-terminal child work.
 
         The terminal transition for zero-child runs (whose derived status
         can never leave ``running``) and any run whose every child is
-        already terminal: writes the run's terminal ``status`` and
-        ``finished_at``, folds *outcome* (``succeeded``/``failed``/
-        ``cancelled``) into ``result_json``, emits ``core.run.closed``, and
+        already terminal: writes the child-derived (or explicit) terminal
+        ``status`` and ``finished_at``, folds *outcome* (``succeeded``/
+        ``failed``/``cancelled``) into ``result_json``, emits
+        ``core.run.closed``, and
         returns one complete run-level receipt. A run that still owns a
         queued/blocked/running child is a typed ``validation_error`` and a
         terminal run a typed ``terminal_state``.

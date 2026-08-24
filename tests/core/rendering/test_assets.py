@@ -204,6 +204,41 @@ def test_managed_project_rejects_sibling_project_without_explicit_root(
         AssetMaterializer(registry_path)
 
 
+def test_owned_managed_locator_is_allowed_only_by_exact_hash(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    projects_root = tmp_path / "projects"
+    project = projects_root / "project"
+    project.mkdir(parents=True)
+    managed = projects_root / ".astrid" / "media" / "sha256" / "aa" / "bb" / "asset.bin"
+    managed.parent.mkdir(parents=True)
+    managed.write_bytes(b"owned managed bytes")
+    monkeypatch.setenv("ASTRID_PROJECTS_ROOT", str(projects_root))
+    digest = hashlib.sha256(managed.read_bytes()).hexdigest()
+    registry_path = _write_registry(
+        project / "hype.assets.json",
+        {"asset": {"file": str(managed)}},
+    )
+
+    with AssetMaterializer(
+        registry_path,
+        allowed_root=project,
+        allowed_managed_paths={managed: digest},
+    ) as materializer:
+        staged = materializer.assets["asset"].local_path
+        assert staged is not None
+        assert staged.read_bytes() == managed.read_bytes()
+
+    managed.write_bytes(b"tampered managed bytes")
+    with pytest.raises(ValueError, match="failed integrity check"):
+        AssetMaterializer(
+            registry_path,
+            allowed_root=project,
+            allowed_managed_paths={managed: digest},
+        )
+
+
 def test_managed_asset_free_registry_may_be_invocation_temporary(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -306,7 +341,7 @@ def test_server_binds_once_to_loopback_port_zero_and_joins_thread(tmp_path: Path
         status, headers, body = _read(server.local_url(asset))
         assert status == 200
         assert body == asset.read_bytes()
-        assert headers.get("Access-Control-Allow-Origin") != "*"
+        assert headers.get("Access-Control-Allow-Origin") == "*"
         with pytest.raises(urllib.error.HTTPError) as missing:
             _read(f"{server.base_url}/{outside.name}")
         assert missing.value.code == 404

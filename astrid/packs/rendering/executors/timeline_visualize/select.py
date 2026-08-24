@@ -80,6 +80,7 @@ from __future__ import annotations
 import importlib
 import json
 import re
+import sqlite3
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -169,6 +170,159 @@ class ManagedTimeline:
     is_default: bool
     is_tombstoned: bool  # manifest.json carries a non-null tombstoned_at
     is_frozen_manifest: bool = False  # True when sourced from a frozen manifest
+    kernel_head_version: int | None = None
+    kernel_head_event_id: str | None = None
+    kernel_head_hash: str | None = None
+    kernel_source_event_id: str | None = None
+
+
+@dataclass(frozen=True)
+class KernelTimeline:
+    """Read-only timeline row projected by the public kernel timeline API."""
+
+    timeline_id: str
+    timeline_ulid: str
+    slug: str
+    name: str
+    is_default: bool
+    config: dict
+    registry: dict
+    config_version: int
+    head_event_id: str
+    head_hash: str
+    head_created_at: str
+
+
+def select_kernel_timelines(
+    project_dir: Path,
+    *,
+    project_slug: str,
+    slug: str | None = None,
+    all: bool = False,
+    default: bool = False,
+) -> tuple[list[KernelTimeline], list[str]]:
+    """Resolve public kernel timeline rows without mutating the ledger.
+
+    The timeline CRUD service is authoritative for newly-created timelines,
+    even when no legacy ``timelines/<ULID>/assembly.jsonl`` projection exists.
+    This read-only bridge lets visualization share the public UUID/ULID/slug/
+    default vocabulary and defer materialization until an admitted run.
+    """
+
+    database = Path(project_dir).resolve().parent / ".astrid" / "astrid.sqlite3"
+    if not database.is_file():
+        return [], []
+    diagnostics: list[str] = []
+    try:
+        conn = sqlite3.connect(f"file:{database}?mode=ro", uri=True)
+        conn.row_factory = sqlite3.Row
+    except sqlite3.Error:
+        return [], ["kernel timeline store is unavailable"]
+    try:
+        project = conn.execute(
+            "SELECT id, settings_json FROM projects WHERE slug = ?",
+            (project_slug,),
+        ).fetchone()
+        if project is None:
+            return [], [f"project {project_slug!r} has no kernel timeline rows"]
+        try:
+            settings = json.loads(str(project["settings_json"]))
+        except (TypeError, ValueError):
+            settings = {}
+        default_id = settings.get("default_timeline_id") if isinstance(settings, dict) else None
+        rows = conn.execute(
+            "SELECT t.id, t.name, t.document_json, t.asset_registry_json, s.head_seq, "
+            "json_extract(e.payload_json, '$.data.timeline_ulid') AS timeline_ulid, "
+            "json_extract(e.payload_json, '$.data.slug') AS slug, "
+            "state.kind AS state_kind, tail.event_id AS head_event_id, "
+            "json_extract(tail.payload_json, '$._integrity.event_hash') AS head_hash, "
+            "tail.created_at AS head_created_at "
+            "FROM timelines t JOIN event_streams s ON s.id = t.event_stream_id "
+            "LEFT JOIN events e ON e.stream_id = t.event_stream_id AND e.kind = 'timeline.created' "
+            "LEFT JOIN events state ON state.event_id = ("
+            "SELECT se.event_id FROM events se WHERE se.stream_id = t.event_stream_id "
+            "AND se.kind IN ('timeline.archived', 'timeline.unarchived') "
+            "ORDER BY se.seq DESC LIMIT 1) "
+            "LEFT JOIN events tail ON tail.stream_id = t.event_stream_id AND tail.seq = s.head_seq "
+            "WHERE t.project_id = ? ORDER BY slug, t.id",
+            (project["id"],),
+        ).fetchall()
+    except sqlite3.Error as exc:
+        return [], [f"kernel timeline read failed: {exc}"]
+    finally:
+        conn.close()
+
+    timelines: list[KernelTimeline] = []
+    for row in rows:
+        if row["state_kind"] == "timeline.archived":
+            continue
+        try:
+            config = json.loads(str(row["document_json"]))
+            assets = json.loads(str(row["asset_registry_json"]))
+        except (TypeError, ValueError):
+            diagnostics.append(f"kernel timeline {row['id']!r} has invalid JSON")
+            continue
+        if not isinstance(config, dict) or not isinstance(assets, dict):
+            diagnostics.append(f"kernel timeline {row['id']!r} has invalid document shape")
+            continue
+        if isinstance(assets.get("assets"), dict):
+            assets = assets["assets"]
+        managed_media = importlib.import_module(
+            "astrid.core.io.managed_media_resolver"
+        )
+        assets = managed_media.rebase_timeline_registry_managed_assets(
+            {"assets": assets},
+            projects_root=Path(project_dir).resolve().parent,
+            project_ref=project_slug,
+        ).get("assets", assets)
+        if not isinstance(row["timeline_ulid"], str) or not isinstance(row["slug"], str):
+            diagnostics.append(f"kernel timeline {row['id']!r} has missing alias metadata")
+            continue
+        if (
+            not isinstance(row["head_event_id"], str)
+            or not isinstance(row["head_hash"], str)
+            or not isinstance(row["head_created_at"], str)
+        ):
+            diagnostics.append(f"kernel timeline {row['id']!r} has no verifiable event tail")
+            continue
+        timelines.append(
+            KernelTimeline(
+                timeline_id=str(row["id"]),
+                timeline_ulid=str(row["timeline_ulid"]),
+                slug=str(row["slug"]),
+                name=str(row["name"]),
+                is_default=str(default_id) == str(row["id"]),
+                config=config,
+                registry={"assets": assets},
+                config_version=int(row["head_seq"]),
+                head_event_id=str(row["head_event_id"]),
+                head_hash=str(row["head_hash"]),
+                head_created_at=str(row["head_created_at"]),
+            )
+        )
+    if slug is not None:
+        needle = str(slug).strip().lower()
+        matches = [
+            item for item in timelines
+            if item.slug.lower() == needle
+            or item.timeline_id.lower() == needle
+            or item.timeline_ulid.lower() == needle
+        ]
+        if len(matches) == 1:
+            return matches, diagnostics
+        if len(matches) > 1:
+            return [], [f"ambiguous timeline ref {slug!r}"]
+        return [], [f"no kernel timeline with ref {slug!r}"]
+    if all:
+        return timelines, diagnostics
+    if default:
+        marked = [item for item in timelines if item.is_default]
+        if len(marked) == 1:
+            return marked, diagnostics
+        if len(timelines) == 1:
+            return timelines, diagnostics
+        return [], diagnostics + ["no unique default kernel timeline"]
+    return timelines, diagnostics
 
 
 def _canonical_uuid(value: object) -> str | None:
@@ -363,7 +517,26 @@ def discover_timelines(project_dir: Path) -> list[ManagedTimeline]:
 def _select_by_slug(
     timelines: list[ManagedTimeline], slug: str, diagnostics: list[str]
 ) -> tuple[list[ManagedTimeline], list[str]]:
-    matches = [t for t in timelines if not t.is_tombstoned and t.slug == slug]
+    """Select by the human slug or one of the stable timeline identities.
+
+    The public timeline service teaches agents that a timeline is addressable
+    by UUID, ULID, or slug.  Visualization must honor the same addressing
+    contract; keeping the resolver here read-only avoids forcing callers to
+    make a second ``timelines show`` call merely to translate an id.
+    """
+
+    raw = str(slug).strip()
+    lowered = raw.lower()
+    matches = [
+        t
+        for t in timelines
+        if not t.is_tombstoned
+        and (
+            t.slug == raw
+            or t.timeline_id.lower() == lowered
+            or t.timeline_ulid.lower() == lowered
+        )
+    ]
     if len(matches) == 1:
         return matches, diagnostics
     if len(matches) > 1:
@@ -372,7 +545,16 @@ def _select_by_slug(
             f"ambiguous slug {slug!r} matches {len(matches)} timelines: {ulids}"
         )
         return [], diagnostics
-    tombstoned = [t for t in timelines if t.is_tombstoned and t.slug == slug]
+    tombstoned = [
+        t
+        for t in timelines
+        if t.is_tombstoned
+        and (
+            t.slug == raw
+            or t.timeline_id.lower() == lowered
+            or t.timeline_ulid.lower() == lowered
+        )
+    ]
     if tombstoned:
         diagnostics.append(f"timeline {slug!r} is tombstoned")
         return [], diagnostics
@@ -414,9 +596,9 @@ def select_timeline(
 
     Returns ``(selected, diagnostics)``.  Selection modes, in precedence order:
 
-    * ``slug`` — the single non-tombstoned timeline whose identity
-      ``display.slug`` matches; ambiguous, missing, or tombstoned slugs yield
-      a diagnostic and an empty selection.
+    * ``slug`` — the single non-tombstoned timeline whose identity slug,
+      UUID, or ULID matches; ambiguous, missing, or tombstoned refs yield a
+      diagnostic and an empty selection.
     * ``all`` — every non-tombstoned timeline.
     * ``default`` (and the no-selector fallback) — the timeline whose identity
       ``display.is_default`` is true; if none is marked, the single timeline
@@ -873,8 +1055,10 @@ def select_from_manifest(manifest: dict) -> ManagedTimeline | None:
 
 __all__ = [
     "ManagedTimeline",
+    "KernelTimeline",
     "discover_timelines",
     "select_timeline",
+    "select_kernel_timelines",
     "select_from_manifest",
     "read_identity",
 ]

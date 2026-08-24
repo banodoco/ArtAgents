@@ -20,8 +20,8 @@ gates cache invalidation.
 import astrid.sdk as sdk
 result = sdk.invoke(
     "editorial.shots",
+        kind="executor", project="demo",
     inputs={"video": "./source.mp4"},
-    out="./out",
 )
 ```
 
@@ -31,8 +31,8 @@ Optionally provide a pre-existing scenes file:
 import astrid.sdk as sdk
 result = sdk.invoke(
     "editorial.shots",
+        kind="executor", project="demo",
     inputs={"video": "./source.mp4", "scenes": "./out/scenes.json"},
-    out="./out",
 )
 ```
 

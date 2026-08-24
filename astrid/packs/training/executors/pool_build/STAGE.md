@@ -21,6 +21,7 @@ sentinel gates cache invalidation.
 import astrid.sdk as sdk
 result = sdk.invoke(
     "training.pool_build",
+        kind="executor", project="demo",
     inputs={
         "triage": "./out/triage.json",
         "scene_descriptions": "./out/scene_descriptions.json",
@@ -28,7 +29,6 @@ result = sdk.invoke(
         "transcript": "./out/transcript.json",
         "scenes": "./out/scenes.json",
     },
-    out="./out",
 )
 ```
 

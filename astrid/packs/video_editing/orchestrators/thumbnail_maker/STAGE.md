@@ -17,8 +17,11 @@ query into person/scene/text/emotion needs and emits evidence stubs.
 import astrid.sdk as sdk
 result = sdk.invoke(
     "video_editing.thumbnail_maker",
-    inputs={"video": "source.mp4", "query": "intense reaction moment"},
-    out="runs/thumbs",
+        kind="orchestrator", project="demo",
+    orchestrator_args=(
+        "--video", "source.mp4",
+        "--query", "intense reaction moment",
+    ),
 )
 ```
 

@@ -132,6 +132,99 @@ def test_support_is_request_sensitive_and_accepts_complete_timeline(
     assert report.features["audio_ownership"] == "rendered"
 
 
+def test_support_does_not_reject_legacy_output_hint_without_profile(
+    tmp_path: Path,
+) -> None:
+    timeline_path, assets_path = _write_inputs(tmp_path)
+    payload = json.loads(timeline_path.read_text(encoding="utf-8"))
+    payload["output"] = {
+        "resolution": "640x360",
+        "fps": 30,
+        "file": "title.mp4",
+    }
+    timeline_path.write_text(json.dumps(payload), encoding="utf-8")
+    project = _write_project(tmp_path)
+    request = _request(timeline_path, assets_path, project)
+
+    with mock.patch.object(remotion.shutil, "which", return_value="/usr/bin/tool"):
+        report = remotion.support(request, workspace=tmp_path)
+
+    # Legacy output hints are metadata, not a false 1920-only capability
+    # restriction. An explicit RenderProfile remains the authoritative way to
+    # request/validate the produced media dimensions.
+    assert report.supported is True
+    assert report.reasons == []
+
+
+@pytest.mark.parametrize("clip_type", ["video", "image", "audio"])
+def test_support_accepts_builtin_media_clip_type_aliases(
+    tmp_path: Path,
+    clip_type: str,
+) -> None:
+    timeline_path, assets_path = _write_inputs(tmp_path)
+    payload = json.loads(timeline_path.read_text(encoding="utf-8"))
+    payload["clips"] = [
+        {
+            "id": "source",
+            "at": 0,
+            "track": "v1",
+            "clipType": clip_type,
+            "from": 0,
+            "to": 1,
+        }
+    ]
+    timeline_path.write_text(json.dumps(payload), encoding="utf-8")
+    project = _write_project(tmp_path)
+    request = _request(timeline_path, assets_path, project)
+
+    with mock.patch.object(remotion.shutil, "which", return_value="/usr/bin/tool"):
+        report = remotion.support(request, workspace=tmp_path)
+
+    assert report.supported is True
+    assert report.reasons == []
+
+
+def test_effect_staging_treats_video_as_builtin_media_not_unknown_effect(
+    tmp_path: Path,
+) -> None:
+    timeline_data = {
+        "tracks": [{"id": "v1", "kind": "visual", "label": "Visual"}],
+        "clips": [
+            {
+                "id": "source",
+                "at": 0,
+                "track": "v1",
+                "clipType": "video",
+                "asset": "source-video",
+                "from": 0,
+                "to": 1,
+            }
+        ],
+    }
+
+    with (
+        mock.patch.object(remotion, "_effect_registry_for_assets", return_value=({}, {})),
+        mock.patch.object(
+            remotion,
+            "_resolve_timeline_element_references",
+            return_value={"animations": [], "transitions": []},
+        ),
+    ):
+        staged = remotion._stage_effect_assets_for_timeline(
+            timeline_data,
+            project_dir=tmp_path,
+            theme_path=None,
+            render_hash="media-alias",
+        )
+
+    assert staged == {
+        "root": None,
+        "effects": [],
+        "animations": [],
+        "transitions": [],
+    }
+
+
 def test_support_rejects_native_window_with_actionable_reason(tmp_path: Path) -> None:
     timeline_path, assets_path = _write_inputs(tmp_path)
     project = _write_project(tmp_path)
@@ -154,6 +247,35 @@ def test_support_rejects_native_window_with_actionable_reason(tmp_path: Path) ->
         "rendering.remotion accepts complete timelines, not native frame windows"
     ]
     assert report.features["windows"] is False
+
+
+def test_support_fails_closed_for_unregistered_animation_reference(tmp_path: Path) -> None:
+    timeline_path, assets_path = _write_inputs(tmp_path)
+    timeline.save_timeline(
+        {
+            "theme": "banodoco-default",
+            "tracks": [{"id": "v1", "kind": "visual", "label": "Visual"}],
+            "clips": [
+                {
+                    "id": "title",
+                    "at": 0,
+                    "to": 1,
+                    "track": "v1",
+                    "clipType": "media",
+                    "entrance": {"type": "missing-external-animation"},
+                }
+            ],
+        },
+        timeline_path,
+    )
+    project = _write_project(tmp_path)
+    request = _request(timeline_path, assets_path, project)
+
+    with mock.patch.object(remotion.shutil, "which", return_value="/usr/bin/tool"):
+        report = remotion.support(request, workspace=tmp_path)
+
+    assert report.supported is False
+    assert any("unregistered animation 'missing-external-animation'" in reason for reason in report.reasons)
 
 
 def test_raw_support_adapter_writes_authoritative_support_report(

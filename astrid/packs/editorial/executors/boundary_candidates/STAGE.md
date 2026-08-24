@@ -11,11 +11,11 @@ Run it through the SDK; each executor input maps 1:1 to an `inputs` entry:
 import astrid.sdk as sdk
 result = sdk.invoke(
     "editorial.boundary_candidates",
+        kind="executor", project="demo",
     inputs={
         "video": "source.mp4",
         "manifest": "runs/boundary-review/boundary_manifest.json",
     },
-    out="runs/boundary-review",
 )
 ```
 

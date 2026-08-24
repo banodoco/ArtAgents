@@ -34,7 +34,36 @@
           "type": "array",
           "items": {"type": "string", "minLength": 1},
           "minItems": 1,
-          "uniqueItems": true
+          "uniqueItems": true,
+          "description": "Frozen v1 compatibility locator containing the project slug, not the CLI/SDK timeline_source path. Do not infer source authority from this field; use source_mode and the resolved identity fields."
+        },
+        "source_mode": {
+          "type": "string",
+          "enum": ["kernel", "legacy", "frozen", "project"],
+          "description": "Resolved authority boundary: kernel selector, explicit legacy event log, or frozen view. The former project value remains accepted for existing v1 packs. Optional so existing frozen v1 packs remain valid."
+        },
+        "resolved_project": {
+          "type": "object",
+          "required": ["slug"],
+          "properties": {
+            "slug": {"type": "string", "minLength": 1},
+            "id": {"type": "string", "minLength": 1}
+          },
+          "additionalProperties": false
+        },
+        "resolved_timelines": {
+          "type": "array",
+          "items": {"$ref": "_defs.json#/$defs/timeline_identity"},
+          "minItems": 1,
+          "uniqueItems": true,
+          "description": "Exact frozen-v1 identities. Their ULIDs remain uppercase for schema and frozen-pack compatibility. For comparison with public kernel CLI/SDK DTOs, use canonical_timeline_identities."
+        },
+        "canonical_timeline_identities": {
+          "type": "array",
+          "items": {"$ref": "_defs.json#/$defs/canonical_timeline_identity"},
+          "minItems": 1,
+          "uniqueItems": true,
+          "description": "Optional additive identity projection whose lowercase ULID spelling matches public kernel timeline create/list/show DTOs. Existing frozen v1 manifests may omit it."
         },
         "from_view": {
           "oneOf": [

@@ -9,7 +9,7 @@ handler renders through the shared product output layer
 concise human output, and stable exit codes stay aligned with the frozen SDK
 contract.
 
-Verbs (exactly these five):
+Verbs (exactly these six):
 
 - ``create`` — one ``client.projects.create`` call; accepts
   ``--idempotency-key`` (a fresh key is generated and returned by the SDK
@@ -20,10 +20,9 @@ Verbs (exactly these five):
 - ``update <ref>`` — one ``client.projects.update`` call with the same
   idempotency-key contract as create;
 - ``select <ref>`` — one ``client.projects.select`` call persisting the
-  resolved project as the **non-authoritative** ``default_project``
-  preference (workspace scope by default, ``--scope user`` opts into the
-  user scope). This is a file-side preference only: no receipt, no
-  database mutation, and no sidecar authority (plan step 5 / task T6B).
+  resolved project as the workspace/user routing preference;
+- ``current`` — one ``client.projects.current`` call returning the selected
+  project, canonical path, and the scope that supplied the selection.
 
 This module contains **no SQL**, **no repository logic**, and **no
 domain rules**: it parses argv, makes one SDK call, and renders the
@@ -114,6 +113,11 @@ def _cmd_select(parsed: argparse.Namespace) -> int:
     return print_result(result, as_json=parsed.json)
 
 
+def _cmd_current(parsed: argparse.Namespace) -> int:
+    result = parsed.client.projects.current(cwd=parsed.cwd)
+    return print_result(result, as_json=parsed.json)
+
+
 # -- parser ----------------------------------------------------------------
 
 
@@ -167,10 +171,26 @@ def _configure_select(subparser: argparse.ArgumentParser) -> None:
     subparser.add_argument(
         "--cwd",
         default=None,
-        help="Workspace directory for the preference file (default: cwd).",
+        help=(
+            "Workspace directory for the preference file (default: "
+            "ASTRID_PROJECTS_ROOT when set, otherwise cwd)."
+        ),
     )
     _add_json_flag(subparser)
     subparser.set_defaults(handler=_cmd_select)
+
+
+def _configure_current(subparser: argparse.ArgumentParser) -> None:
+    subparser.add_argument(
+        "--cwd",
+        default=None,
+        help=(
+            "Workspace directory whose selection should be inspected (default: "
+            "ASTRID_PROJECTS_ROOT when set, otherwise cwd)."
+        ),
+    )
+    _add_json_flag(subparser)
+    subparser.set_defaults(handler=_cmd_current)
 
 
 COMMANDS: tuple[CommandSpec, ...] = (
@@ -196,8 +216,13 @@ COMMANDS: tuple[CommandSpec, ...] = (
     ),
     CommandSpec(
         "select",
-        help="Persist a project as the non-authoritative default preference.",
+        help="Persist a project as the workspace/user routing preference.",
         configure=_configure_select,
+    ),
+    CommandSpec(
+        "current",
+        help="Show the selected project, canonical path, and preference scope.",
+        configure=_configure_current,
     ),
 )
 
@@ -206,7 +231,7 @@ def build_parser(client: Any) -> argparse.ArgumentParser:
     """Build the ``projects`` product-family parser stamped with *client*."""
     parser = argparse.ArgumentParser(
         prog="astrid projects",
-        description="Project create/list/show/update/select (product family).",
+        description="Project create/list/show/update/select/current (product family).",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
     register_product_commands(

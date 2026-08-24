@@ -13,16 +13,17 @@ Dry-run through the SDK:
 import astrid.sdk as sdk
 result = sdk.invoke(
     "rendering.html_canvas_effect",
+    kind="executor",
+    project="demo",
     inputs={"effect_id": "glass-product-card", "label": "Glass Product Card"},
-    out="runs/html-canvas-effect",
     dry_run=True,
 )
 ```
 
-Run directly:
+Internal runner form (not a public entrypoint):
 
 ```bash
-python3 -m astrid.packs.rendering.executors.html_canvas_effect.run \
+ASTRID_INTERNAL_INVOCATION=1 python3 -m astrid.packs.rendering.executors.html_canvas_effect.run \
   --effect-id glass-product-card \
   --label "Glass Product Card" \
   --out runs/html-canvas-effect/report.json
@@ -38,7 +39,7 @@ Output:
 Render the preview through the normal renderer:
 
 ```bash
-python3 -m astrid.packs.rendering.executors.render.run \
+ASTRID_INTERNAL_INVOCATION=1 python3 -m astrid.packs.rendering.executors.render.run \
   --timeline runs/html-canvas-effect/timeline.json \
   --assets runs/html-canvas-effect/assets.json \
   --out runs/html-canvas-effect/preview.mp4

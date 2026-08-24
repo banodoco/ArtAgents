@@ -197,9 +197,9 @@ def test_list_returns_slug_sorted_rows(env: SimpleNamespace) -> None:
     result = env.service.list()
     assert result.ok is True
     assert result.data == [
-        {"slug": "alpha", "name": "Alpha"},
-        {"slug": "beta", "name": "Beta"},
-        {"slug": "zeta", "name": "Zeta"},
+        {"slug": "alpha", "name": "Alpha", "path": str((env.projects_root / "alpha").resolve())},
+        {"slug": "beta", "name": "Beta", "path": str((env.projects_root / "beta").resolve())},
+        {"slug": "zeta", "name": "Zeta", "path": str((env.projects_root / "zeta").resolve())},
     ]
 
 
@@ -336,7 +336,7 @@ def test_select_resolves_by_slug_and_persists_default_project(
     result = env.service.select("demo", cwd=sandboxed_home)
     assert result.ok is True
     # The resolved project is returned in the exact read-model envelope.
-    assert result.data == created.data
+    assert result.data["project"] == created.data
     # Non-authoritative: no receipt and no idempotency key.
     assert result.receipt is None
     assert result.idempotency_key == ""
@@ -351,7 +351,7 @@ def test_select_resolves_by_id(env: SimpleNamespace, sandboxed_home: Path) -> No
     created = env.service.create(slug="demo", name="Demo")
     result = env.service.select(created.data["id"], cwd=sandboxed_home)
     assert result.ok is True
-    assert result.data["slug"] == "demo"
+    assert result.data["project"]["slug"] == "demo"
     assert preferences.resolve_default_project(sandboxed_home) == "demo"
 
 

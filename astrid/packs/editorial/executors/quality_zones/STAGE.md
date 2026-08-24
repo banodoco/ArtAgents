@@ -20,8 +20,8 @@ sentinel gates cache invalidation.
 import astrid.sdk as sdk
 result = sdk.invoke(
     "editorial.quality_zones",
+        kind="executor", project="demo",
     inputs={"video": "./source.mp4"},
-    out="./out",
 )
 ```
 

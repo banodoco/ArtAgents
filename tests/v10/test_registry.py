@@ -36,6 +36,7 @@ from astrid.core.events.registry import (
     validate_stream_type,
 )
 from astrid.core.migrations.catalog import CORE_MIGRATIONS, CORE_TABLES
+from astrid.core.migrations.runner import read_migration_bytes, sha256_bytes
 from astrid.core.repositories.errors import (
     CommandVocabularyError,
     EventVocabularyError,
@@ -47,15 +48,25 @@ from astrid.core.schema_packs.manifest import (
     parse_schema_pack_manifest,
 )
 from astrid.core.schema_packs.registry import (
+    FrozenSchemaPackRegistry,
     SchemaPackDuplicateError,
     SchemaPackRegistry,
     SchemaPackRegistryFrozenError,
+)
+from astrid.core.schema_packs.standard import (
+    STANDARD_SCHEMA_PACKS as KERNEL_STANDARD_SCHEMA_PACKS,
+)
+from astrid.core.schema_packs.standard import (
+    build_standard_registry as build_kernel_standard_registry,
 )
 from astrid.core.store.uow import UnitOfWork
 from astrid.core.store.writer import DatabaseWriter
 from astrid.packs import (
     STANDARD_SCHEMA_PACKS,
     register_standard_schema_packs,
+)
+from astrid.packs import (
+    build_standard_registry as build_pack_standard_registry,
 )
 
 CORE_TABLE_COUNT = len(CORE_TABLES)
@@ -154,10 +165,55 @@ def test_standard_composition_declares_the_fixed_pack_order() -> None:
 
 def test_standard_composition_has_no_discovery_beyond_in_tree_manifests() -> None:
     packs_root = Path(packs_package.__file__).parent
-    schema_pack_files = sorted(packs_root.glob("*/schema-pack.yaml"))
-    discovered = sorted(path.parent.name for path in schema_pack_files)
-    assert discovered == ["references", "shots", "timeline"]
-    assert len(schema_pack_files) == len(STANDARD_SCHEMA_PACKS) == 3
+    available_manifest_ids = {
+        path.parent.name for path in packs_root.glob("*/schema-pack.yaml")
+    }
+
+    # Optional schema packs may be shipped in-tree without joining the fixed
+    # standard database composition. ``runaway`` is the concrete guard that
+    # makes a glob/discovery implementation observably different from the
+    # explicit allowlist.
+    assert set(STANDARD_SCHEMA_PACKS) <= available_manifest_ids
+    assert "runaway" in available_manifest_ids - set(STANDARD_SCHEMA_PACKS)
+
+    frozen = build_pack_standard_registry()
+    assert set(frozen.packs) == {CORE_PACK_ID, *STANDARD_SCHEMA_PACKS}
+    assert frozen.has_pack("runaway") is False
+
+
+def _migration_contract(
+    registry: FrozenSchemaPackRegistry,
+) -> tuple[tuple[object, ...], ...]:
+    """Return migration descriptors plus exact resource checksums."""
+    return tuple(
+        (
+            migration.pack,
+            migration.version,
+            migration.name,
+            migration.path,
+            migration.tables,
+            sha256_bytes(read_migration_bytes(migration)),
+        )
+        for migration in registry.migrations
+    )
+
+
+def test_pack_and_kernel_standard_registry_builders_have_exact_parity() -> None:
+    """The duplicated explicit builders must describe the same database."""
+    assert KERNEL_STANDARD_SCHEMA_PACKS == STANDARD_SCHEMA_PACKS
+
+    pack_registry = build_pack_standard_registry()
+    kernel_registry = build_kernel_standard_registry()
+
+    assert dict(pack_registry.packs) == dict(kernel_registry.packs)
+    assert dict(pack_registry.tables) == dict(kernel_registry.tables)
+    assert dict(pack_registry.stream_types) == dict(kernel_registry.stream_types)
+    assert dict(pack_registry.event_kinds) == dict(kernel_registry.event_kinds)
+    assert dict(pack_registry.command_kinds) == dict(kernel_registry.command_kinds)
+    assert dict(pack_registry.repositories) == dict(kernel_registry.repositories)
+    assert dict(pack_registry.cli_mounts) == dict(kernel_registry.cli_mounts)
+    assert dict(pack_registry.bridge_mounts) == dict(kernel_registry.bridge_mounts)
+    assert _migration_contract(pack_registry) == _migration_contract(kernel_registry)
 
 
 def test_standard_composition_derives_20_table_catalog() -> None:

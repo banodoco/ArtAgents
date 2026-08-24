@@ -20,8 +20,8 @@ candidates to select and sequence spoken-word clips in the final cut.
 import astrid.sdk as sdk
 result = sdk.invoke(
     "editorial.quote_scout",
+        kind="executor", project="demo",
     inputs={"transcript": "./out/transcript.json"},
-    out="./out",
 )
 ```
 
@@ -31,11 +31,11 @@ With an explicit env file for API credentials:
 import astrid.sdk as sdk
 result = sdk.invoke(
     "editorial.quote_scout",
+        kind="executor", project="demo",
     inputs={
         "transcript": "./out/transcript.json",
         "env_file": ".env.local",
     },
-    out="./out",
 )
 ```
 

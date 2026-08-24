@@ -56,7 +56,7 @@
   "isolation": {
     "binaries": [],
     "mode": "subprocess",
-    "network": false,
+    "network": true,
     "requirements": []
   },
   "keywords": [
@@ -69,6 +69,8 @@
   ],
   "kind": "built_in",
   "metadata": {
+    "env": ["OPENAI_API_KEY"],
+    "secrets_required": ["OPENAI_API_KEY"],
     "output_result_manifest": true,
     "requires_timeline": false,
     "command_builder": "astrid.packs.video_editing.orchestrators.hype.run.build_pool_steps",

@@ -81,6 +81,9 @@ reference's identity and its initial media association.
 REFERENCE_ARCHIVED_EVENT_KIND = "reference.archived"
 """The m3 event kind emitted by the receipt-backed soft archive."""
 
+REFERENCE_UNARCHIVED_EVENT_KIND = "reference.unarchived"
+"""The recovery event emitted when an archived reference becomes active."""
+
 REFERENCE_UPDATED_EVENT_KIND = "reference.updated"
 """The m4 event kind emitted by the receipt-backed mutable update (plan step 14).
 
@@ -96,6 +99,9 @@ REFERENCE_CREATE_COMMAND_KIND = "reference.create"
 
 REFERENCE_ARCHIVE_COMMAND_KIND = "reference.archive"
 """The m3 command kind that reference-archive receipts are keyed on."""
+
+REFERENCE_UNARCHIVE_COMMAND_KIND = "reference.unarchive"
+"""The recovery command that makes an archived reference active again."""
 
 REFERENCE_UPDATE_COMMAND_KIND = "reference.update"
 """The m4 command kind that reference-update receipts are keyed on (plan
@@ -210,20 +216,30 @@ class ReferenceAlreadyExistsError(ReferenceRepositoryError):
 class ReferenceNotFoundError(ReferenceRepositoryError):
     """Raised when a read or command targets an unknown/foreign reference."""
 
-    def __init__(self, *, reference_id: str, project_id: str) -> None:
+    def __init__(self, *, reference_id: str, project_id: str, detail: str = "missing") -> None:
         self.reference_id: str = reference_id
         self.project_id: str = project_id
+        self.detail: str = detail
+        super().__init__(f"unknown reference {reference_id!r} in project {project_id!r}")
+
+
+class ReferenceAmbiguousError(ReferenceRepositoryError):
+    """Raised when a project-local recovery name matches multiple references."""
+
+    def __init__(self, *, ref: str, candidate_ids: Sequence[str]) -> None:
+        self.ref = ref
+        self.candidate_ids = tuple(str(value) for value in candidate_ids)
         super().__init__(
-            f"unknown reference {reference_id!r} in project {project_id!r}"
+            f"reference name {ref!r} is ambiguous; use one of these ids: "
+            + ", ".join(self.candidate_ids)
         )
 
 
 class ReferenceArchivedError(ReferenceRepositoryError):
     """Raised when a command mutates an already-archived reference.
 
-    Archive is soft and final for mutations (SD1): after ``archived_at`` is
-    set, no new active mutation may touch the reference — direct historical
-    lookup still works.
+    Archive is soft: while ``archived_at`` is set, no active mutation may
+    touch the reference. Explicit unarchive restores the mutable state.
     """
 
     def __init__(self, *, reference_id: str) -> None:
@@ -242,10 +258,7 @@ class ReferenceMediaError(ReferenceRepositoryError):
         self.media_id: str = media_id
         self.project_id: str = project_id
         self.detail: str = detail
-        super().__init__(
-            f"reference media {media_id!r} is {detail} for project "
-            f"{project_id!r}"
-        )
+        super().__init__(f"reference media {media_id!r} is {detail} for project {project_id!r}")
 
 
 class ReferenceAssociationError(ReferenceRepositoryError):
@@ -456,8 +469,7 @@ class ReferenceReadModel:
             archived_at=value.get("archived_at"),
             event_head_seq=int(value["event_head_seq"]),
             media=tuple(
-                ReferenceMediaReadModel.from_mapping(entry)
-                for entry in (value.get("media") or [])
+                ReferenceMediaReadModel.from_mapping(entry) for entry in (value.get("media") or [])
             ),
         )
 
@@ -538,8 +550,42 @@ class ReferenceArchiveReadModel:
             project_id=str(value["project_id"]),
             archived_at=str(value["archived_at"]),
             preserved={
-                str(key): int(count)
-                for key, count in (value.get("preserved") or {}).items()
+                str(key): int(count) for key, count in (value.get("preserved") or {}).items()
+            },
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ReferenceUnarchiveReadModel:
+    """Recovery result with explicit safe repeat-call status."""
+
+    reference_id: str
+    project_id: str
+    status: str
+    changed: bool
+    unarchived_at: str | None
+    preserved: Mapping[str, int]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "reference_id": self.reference_id,
+            "project_id": self.project_id,
+            "status": self.status,
+            "changed": self.changed,
+            "unarchived_at": self.unarchived_at,
+            "preserved": dict(self.preserved),
+        }
+
+    @classmethod
+    def from_mapping(cls, value: Mapping[str, Any]) -> ReferenceUnarchiveReadModel:
+        return cls(
+            reference_id=str(value["reference_id"]),
+            project_id=str(value["project_id"]),
+            status=str(value.get("status") or "active"),
+            changed=bool(value.get("changed", True)),
+            unarchived_at=value.get("unarchived_at"),
+            preserved={
+                str(key): int(count) for key, count in (value.get("preserved") or {}).items()
             },
         )
 
@@ -608,9 +654,7 @@ class ReferencePrimaryChangeReadModel:
         }
 
     @classmethod
-    def from_mapping(
-        cls, value: Mapping[str, Any]
-    ) -> ReferencePrimaryChangeReadModel:
+    def from_mapping(cls, value: Mapping[str, Any]) -> ReferencePrimaryChangeReadModel:
         """Rebuild the frozen primary-change result from a stored mapping."""
         return cls(
             reference_id=str(value["reference_id"]),
@@ -674,9 +718,42 @@ def _require_non_empty_string(name: str, value: Any) -> str:
     return value
 
 
-def _parse_object(
-    raw: str, *, label: str, subject: str
-) -> dict[str, Any]:
+def _resolve_reference_id(uow: UnitOfWork, *, project_id: str, ref: str) -> str:
+    """Resolve an exact id first, then one exact project-local name.
+
+    Mutations use the same addressing contract as ``show`` and ``unarchive``:
+    a name is only a convenience when it identifies exactly one row.  The
+    lookup is deliberately completed before request hashing or any write so a
+    foreign/missing ref or an ambiguous name cannot partially mutate state.
+    """
+    ref = _require_non_empty_string("reference_id", ref)
+    row = uow.query_one(
+        "SELECT id FROM project_references WHERE id = ? AND project_id = ?",
+        (ref, project_id),
+    )
+    if row is not None:
+        return str(row["id"])
+    foreign = uow.query_one("SELECT id FROM project_references WHERE id = ?", (ref,))
+    if foreign is not None:
+        raise ReferenceNotFoundError(
+            reference_id=ref, project_id=project_id, detail="foreign"
+        )
+    matches = uow.query(
+        "SELECT id FROM project_references WHERE project_id = ? AND name = ? ORDER BY id ASC",
+        (project_id, ref),
+    )
+    if len(matches) > 1:
+        raise ReferenceAmbiguousError(
+            ref=ref, candidate_ids=[str(match["id"]) for match in matches]
+        )
+    if not matches:
+        raise ReferenceNotFoundError(
+            reference_id=ref, project_id=project_id, detail="missing"
+        )
+    return str(matches[0]["id"])
+
+
+def _parse_object(raw: str, *, label: str, subject: str) -> dict[str, Any]:
     """Parse one stored JSON object canonically, rejecting non-objects."""
     try:
         parsed = parse_json(raw)
@@ -685,9 +762,7 @@ def _parse_object(
             f"{label} {subject!r} has invalid stored JSON: {exc}"
         ) from exc
     if not isinstance(parsed, Mapping):
-        raise ReferenceRepositoryError(
-            f"{label} {subject!r} stored JSON is not an object"
-        )
+        raise ReferenceRepositoryError(f"{label} {subject!r} stored JSON is not an object")
     return dict(parsed)
 
 
@@ -710,9 +785,7 @@ def _normalize_association_entry(entry: Any) -> dict[str, Any]:
         raise ReferenceAssociationError(detail="bad_role", role=role)
     context_task_id = entry.get("context_task_id")
     if context_task_id is not None:
-        context_task_id = _require_non_empty_string(
-            "association.context_task_id", context_task_id
-        )
+        context_task_id = _require_non_empty_string("association.context_task_id", context_task_id)
     if context_task_id is not None and role not in CONTEXT_ROLES:
         raise ReferenceAssociationError(
             detail="context_not_permitted", role=role, context_task_id=context_task_id
@@ -778,9 +851,7 @@ def _build_reference_read_model(
         (f"{reference_id}:{REFERENCE_STREAM_TYPE}", reference_id, project_id),
     )
     if row is None:
-        raise ReferenceNotFoundError(
-            reference_id=reference_id, project_id=project_id
-        )
+        raise ReferenceNotFoundError(reference_id=reference_id, project_id=project_id)
     media_rows = uow.query(
         "SELECT * FROM media_references WHERE reference_id = ? "
         "ORDER BY role ASC, ordinal ASC, id ASC",
@@ -886,9 +957,7 @@ class ReferenceRepository:
         kind = _require_non_empty_string("kind", kind)
         name = _require_non_empty_string("name", name)
         media_id = _require_non_empty_string("media_id", media_id)
-        idempotency_key = _require_non_empty_string(
-            "idempotency_key", idempotency_key
-        )
+        idempotency_key = _require_non_empty_string("idempotency_key", idempotency_key)
         command_kind = _require_non_empty_string("command_kind", command_kind)
         if kind not in REFERENCE_KINDS:
             raise ReferenceValidationError(
@@ -904,8 +973,7 @@ class ReferenceRepository:
             raise ReferenceValidationError("metadata must be a JSON object")
         if actor_kind not in ACTOR_KINDS:
             raise ReferenceValidationError(
-                f"actor_kind must be one of {sorted(ACTOR_KINDS)}, "
-                f"got {actor_kind!r}"
+                f"actor_kind must be one of {sorted(ACTOR_KINDS)}, got {actor_kind!r}"
             )
         if reference_id is None:
             reference_id = generate_lowercase_ulid()
@@ -928,9 +996,7 @@ class ReferenceRepository:
         try:
             request_digest = request_hash(command_kind, request)
         except CanonicalizationError as exc:
-            raise ReferenceValidationError(
-                f"cannot hash reference create request: {exc}"
-            ) from exc
+            raise ReferenceValidationError(f"cannot hash reference create request: {exc}") from exc
 
         # Idempotency gate first: replay or mismatch before any mutation.
         replayed = self._receipts.check(
@@ -963,13 +1029,9 @@ class ReferenceRepository:
             (media_id,),
         )
         if media_row is None:
-            raise ReferenceMediaError(
-                media_id=media_id, project_id=project_id, detail="missing"
-            )
+            raise ReferenceMediaError(media_id=media_id, project_id=project_id, detail="missing")
         if str(media_row["project_id"]) != project_id:
-            raise ReferenceMediaError(
-                media_id=media_id, project_id=project_id, detail="foreign"
-            )
+            raise ReferenceMediaError(media_id=media_id, project_id=project_id, detail="foreign")
 
         stamp = created_at if created_at is not None else utc_now_iso()
         if not isinstance(stamp, str) or not stamp:
@@ -1124,23 +1186,23 @@ class ReferenceRepository:
         Rejections happen **before any write**: a missing or foreign
         reference raises :class:`ReferenceNotFoundError`, and an
         already-archived reference raises :class:`ReferenceArchivedError`
-        (archive is final for mutations; direct historical lookup still
-        works). Idempotency mirrors the kernel commands: the receipt gate
+        until it is explicitly unarchived. Idempotency mirrors the kernel
+        commands: the receipt gate
         runs first, an identical retry returns exactly the stored archive
         result with zero new rows, and a changed request under the same key
         raises :class:`ReceiptMismatchError` before any mutation.
         """
         project_id = _require_non_empty_string("project_id", project_id)
         reference_id = _require_non_empty_string("reference_id", reference_id)
-        idempotency_key = _require_non_empty_string(
-            "idempotency_key", idempotency_key
-        )
+        idempotency_key = _require_non_empty_string("idempotency_key", idempotency_key)
         command_kind = _require_non_empty_string("command_kind", command_kind)
         if actor_kind not in ACTOR_KINDS:
             raise ReferenceValidationError(
-                f"actor_kind must be one of {sorted(ACTOR_KINDS)}, "
-                f"got {actor_kind!r}"
+                f"actor_kind must be one of {sorted(ACTOR_KINDS)}, got {actor_kind!r}"
             )
+        reference_id = _resolve_reference_id(
+            uow, project_id=project_id, ref=reference_id
+        )
 
         # Semantic request identity: reference/project only; generated
         # values never participate.
@@ -1151,9 +1213,7 @@ class ReferenceRepository:
         try:
             request_digest = request_hash(command_kind, request)
         except CanonicalizationError as exc:
-            raise ReferenceValidationError(
-                f"cannot hash reference archive request: {exc}"
-            ) from exc
+            raise ReferenceValidationError(f"cannot hash reference archive request: {exc}") from exc
 
         # Idempotency gate first: replay or mismatch before any mutation.
         replayed = self._receipts.check(
@@ -1173,9 +1233,7 @@ class ReferenceRepository:
             (reference_id, project_id),
         )
         if row is None:
-            raise ReferenceNotFoundError(
-                reference_id=reference_id, project_id=project_id
-            )
+            raise ReferenceNotFoundError(reference_id=reference_id, project_id=project_id)
         if row["archived_at"] is not None:
             raise ReferenceArchivedError(reference_id=reference_id)
 
@@ -1183,8 +1241,7 @@ class ReferenceRepository:
         preserved = {
             "media_references": int(
                 uow.query_one(
-                    "SELECT count(*) AS n FROM media_references "
-                    "WHERE reference_id = ?",
+                    "SELECT count(*) AS n FROM media_references WHERE reference_id = ?",
                     (reference_id,),
                 )["n"]
             ),
@@ -1260,6 +1317,161 @@ class ReferenceRepository:
         )
         return result
 
+    def unarchive(
+        self,
+        uow: UnitOfWork,
+        *,
+        project_id: str,
+        ref: str,
+        idempotency_key: str,
+        actor_kind: str = "local",
+        now: str | None = None,
+        command_kind: str = REFERENCE_UNARCHIVE_COMMAND_KIND,
+    ) -> ReferenceUnarchiveReadModel:
+        """Restore an archived reference without changing identity or links.
+
+        ``ref`` prefers an exact id, then an exact project-local display name.
+        A duplicate name fails with explicit candidate ids. Repeating the
+        command on an active reference succeeds as a ``changed=false`` no-op.
+        """
+        project_id = _require_non_empty_string("project_id", project_id)
+        ref = _require_non_empty_string("ref", ref)
+        idempotency_key = _require_non_empty_string("idempotency_key", idempotency_key)
+        command_kind = _require_non_empty_string("command_kind", command_kind)
+        if actor_kind not in ACTOR_KINDS:
+            raise ReferenceValidationError(
+                f"actor_kind must be one of {sorted(ACTOR_KINDS)}, got {actor_kind!r}"
+            )
+
+        row = uow.query_one(
+            "SELECT * FROM project_references WHERE id = ? AND project_id = ?",
+            (ref, project_id),
+        )
+        if row is None:
+            matches = uow.query(
+                "SELECT * FROM project_references "
+                "WHERE project_id = ? AND name = ? ORDER BY id ASC",
+                (project_id, ref),
+            )
+            if len(matches) > 1:
+                raise ReferenceAmbiguousError(
+                    ref=ref, candidate_ids=[str(match["id"]) for match in matches]
+                )
+            if not matches:
+                raise ReferenceNotFoundError(reference_id=ref, project_id=project_id)
+            row = matches[0]
+        reference_id = str(row["id"])
+
+        request = {"project_id": project_id, "reference_id": reference_id}
+        try:
+            request_digest = request_hash(command_kind, request)
+        except CanonicalizationError as exc:
+            raise ReferenceValidationError(
+                f"cannot hash reference unarchive request: {exc}"
+            ) from exc
+        replayed = self._receipts.check(
+            uow,
+            project_id=project_id,
+            idempotency_key=idempotency_key,
+            request_hash=request_digest,
+            command_kind=command_kind,
+        )
+        if replayed is not None:
+            return ReferenceUnarchiveReadModel.from_mapping(replayed)
+
+        stream_id = f"{reference_id}:{REFERENCE_STREAM_TYPE}"
+        event_count = int(
+            uow.query_one(
+                "SELECT count(*) AS n FROM events WHERE stream_id = ?",
+                (stream_id,),
+            )["n"]
+        )
+        preserved = {
+            "media_references": int(
+                uow.query_one(
+                    "SELECT count(*) AS n FROM media_references WHERE reference_id = ?",
+                    (reference_id,),
+                )["n"]
+            ),
+            "reference_links": int(
+                uow.query_one(
+                    "SELECT count(*) AS n FROM reference_links "
+                    "WHERE from_reference_id = ? OR to_reference_id = ?",
+                    (reference_id, reference_id),
+                )["n"]
+            ),
+            "events": event_count,
+        }
+
+        if row["archived_at"] is None:
+            last = uow.query_one(
+                "SELECT created_at FROM events WHERE stream_id = ? AND kind = ? "
+                "ORDER BY seq DESC LIMIT 1",
+                (stream_id, REFERENCE_UNARCHIVED_EVENT_KIND),
+            )
+            return ReferenceUnarchiveReadModel(
+                reference_id=reference_id,
+                project_id=project_id,
+                status="active",
+                changed=False,
+                unarchived_at=str(last["created_at"]) if last is not None else None,
+                preserved=preserved,
+            )
+
+        stamp = now if now is not None else utc_now_iso()
+        if not isinstance(stamp, str) or not stamp:
+            raise ReferenceValidationError("now must be a non-empty string")
+        changed = uow.execute(
+            "UPDATE project_references SET archived_at = NULL, updated_at = ? "
+            "WHERE id = ? AND project_id = ? AND archived_at IS NOT NULL",
+            (stamp, reference_id, project_id),
+        ).rowcount
+        if changed != 1:
+            raise ReferenceRepositoryError(f"reference {reference_id!r} changed during unarchive")
+        txn_id = uuid.uuid4().hex
+        append = self._events.append(
+            uow,
+            stream_id=stream_id,
+            project_id=project_id,
+            event_kind=REFERENCE_UNARCHIVED_EVENT_KIND,
+            data={
+                "reference_id": reference_id,
+                "unarchived_at": stamp,
+                "preserved": {**preserved, "events": event_count + 1},
+            },
+            changes=["reference_id", "unarchived_at", "preserved"],
+            idempotency_key=idempotency_key,
+            txn_id=txn_id,
+            actor_kind=actor_kind,
+            command_kind=command_kind,
+            event_id=uuid.uuid4().hex,
+            created_at=stamp,
+        )
+        result = ReferenceUnarchiveReadModel(
+            reference_id=reference_id,
+            project_id=project_id,
+            status="active",
+            changed=True,
+            unarchived_at=stamp,
+            preserved={**preserved, "events": event_count + 1},
+        )
+        self._receipts.record(
+            uow,
+            project_id=project_id,
+            idempotency_key=idempotency_key,
+            request_hash=request_digest,
+            command_kind=command_kind,
+            txn_id=txn_id,
+            first_project_seq=append.project_seq,
+            last_project_seq=append.project_seq,
+            event_ids=[append.event_id],
+            result=result.to_dict(),
+            primary_stream_id=stream_id,
+            resulting_stream_seq=append.stream_seq,
+            created_at=stamp,
+        )
+        return result
+
     # -- mutable update (m4 plan step 14) -----------------------------------
 
     def update(
@@ -1289,29 +1501,30 @@ class ReferenceRepository:
         is preserved by construction.
 
         Each of ``name``/``description``/``metadata`` is an optional delta:
-        ``None`` means "leave unchanged", a provided value replaces the
-        current one (an explicit empty ``metadata`` mapping clears it). An
-        empty/whitespace ``name`` is rejected (as at create).
+        ``None`` means "leave unchanged", and a provided metadata mapping is
+        shallow-merged into the current object (an explicit empty
+        ``metadata`` mapping clears it). An empty/whitespace ``name`` is
+        rejected (as at create).
 
         Rejections happen **before any write**: a missing or foreign
         reference raises :class:`ReferenceNotFoundError`, and an archived
-        reference raises :class:`ReferenceArchivedError` (archive is final
-        for mutations, SD1). Idempotency mirrors the other commands: the
+        reference raises :class:`ReferenceArchivedError` until explicit
+        recovery. Idempotency mirrors the other commands: the
         receipt gate runs first, an identical retry returns exactly the
         stored result with zero new rows, and a changed delta under the same
         key raises :class:`ReceiptMismatchError` before any mutation.
         """
         project_id = _require_non_empty_string("project_id", project_id)
         reference_id = _require_non_empty_string("reference_id", reference_id)
-        idempotency_key = _require_non_empty_string(
-            "idempotency_key", idempotency_key
-        )
+        idempotency_key = _require_non_empty_string("idempotency_key", idempotency_key)
         command_kind = _require_non_empty_string("command_kind", command_kind)
         if actor_kind not in ACTOR_KINDS:
             raise ReferenceValidationError(
-                f"actor_kind must be one of {sorted(ACTOR_KINDS)}, "
-                f"got {actor_kind!r}"
+                f"actor_kind must be one of {sorted(ACTOR_KINDS)}, got {actor_kind!r}"
             )
+        reference_id = _resolve_reference_id(
+            uow, project_id=project_id, ref=reference_id
+        )
         if name is not None:
             if not isinstance(name, str) or not name.strip():
                 raise ReferenceValidationError(
@@ -1336,9 +1549,7 @@ class ReferenceRepository:
         try:
             request_digest = request_hash(command_kind, request)
         except CanonicalizationError as exc:
-            raise ReferenceValidationError(
-                f"cannot hash reference update request: {exc}"
-            ) from exc
+            raise ReferenceValidationError(f"cannot hash reference update request: {exc}") from exc
 
         # Idempotency gate first: replay or mismatch before any mutation.
         replayed = self._receipts.check(
@@ -1359,9 +1570,7 @@ class ReferenceRepository:
             (reference_id, project_id),
         )
         if row is None:
-            raise ReferenceNotFoundError(
-                reference_id=reference_id, project_id=project_id
-            )
+            raise ReferenceNotFoundError(reference_id=reference_id, project_id=project_id)
         if row["archived_at"] is not None:
             raise ReferenceArchivedError(reference_id=reference_id)
 
@@ -1371,12 +1580,15 @@ class ReferenceRepository:
             subject=reference_id,
         )
         new_name = name if name is not None else str(row["name"])
-        new_description = (
-            description if description is not None else str(row["description"])
-        )
-        new_metadata = (
-            metadata_delta if metadata_delta is not None else current_metadata
-        )
+        new_description = description if description is not None else str(row["description"])
+        if metadata_delta is None:
+            new_metadata = current_metadata
+        elif not metadata_delta:
+            # An explicit empty object is the documented clear operation;
+            # non-empty objects are a shallow delta over existing metadata.
+            new_metadata = {}
+        else:
+            new_metadata = {**current_metadata, **metadata_delta}
 
         try:
             metadata_json = canonical_json(new_metadata)
@@ -1533,18 +1745,16 @@ class ReferenceRepository:
         """
         project_id = _require_non_empty_string("project_id", project_id)
         reference_id = _require_non_empty_string("reference_id", reference_id)
-        idempotency_key = _require_non_empty_string(
-            "idempotency_key", idempotency_key
-        )
+        idempotency_key = _require_non_empty_string("idempotency_key", idempotency_key)
         command_kind = _require_non_empty_string("command_kind", command_kind)
         if actor_kind not in ACTOR_KINDS:
             raise ReferenceValidationError(
-                f"actor_kind must be one of {sorted(ACTOR_KINDS)}, "
-                f"got {actor_kind!r}"
+                f"actor_kind must be one of {sorted(ACTOR_KINDS)}, got {actor_kind!r}"
             )
-        if isinstance(associations, (str, bytes)) or not isinstance(
-            associations, Sequence
-        ):
+        reference_id = _resolve_reference_id(
+            uow, project_id=project_id, ref=reference_id
+        )
+        if isinstance(associations, (str, bytes)) or not isinstance(associations, Sequence):
             raise ReferenceValidationError("associations must be a JSON array")
         entries = [_normalize_association_entry(entry) for entry in associations]
         if not entries:
@@ -1583,9 +1793,7 @@ class ReferenceRepository:
             (reference_id, project_id),
         )
         if ref_row is None:
-            raise ReferenceNotFoundError(
-                reference_id=reference_id, project_id=project_id
-            )
+            raise ReferenceNotFoundError(reference_id=reference_id, project_id=project_id)
         if ref_row["archived_at"] is not None:
             raise ReferenceArchivedError(reference_id=reference_id)
 
@@ -1615,9 +1823,7 @@ class ReferenceRepository:
                 )
             seen_keys.add(key)
 
-            media_row = uow.query_one(
-                "SELECT id, project_id FROM media WHERE id = ?", (media_id,)
-            )
+            media_row = uow.query_one("SELECT id, project_id FROM media WHERE id = ?", (media_id,))
             if media_row is None:
                 raise ReferenceAssociationError(
                     detail="missing_media",
@@ -1653,8 +1859,7 @@ class ReferenceRepository:
                         project_id=project_id,
                     )
                 produced = uow.query_one(
-                    "SELECT 1 AS ok FROM task_outputs "
-                    "WHERE task_id = ? AND media_id = ?",
+                    "SELECT 1 AS ok FROM task_outputs WHERE task_id = ? AND media_id = ?",
                     (context_task_id, media_id),
                 )
                 if produced is None:
@@ -1836,18 +2041,16 @@ class ReferenceRepository:
         """
         project_id = _require_non_empty_string("project_id", project_id)
         reference_id = _require_non_empty_string("reference_id", reference_id)
-        media_reference_id = _require_non_empty_string(
-            "media_reference_id", media_reference_id
-        )
-        idempotency_key = _require_non_empty_string(
-            "idempotency_key", idempotency_key
-        )
+        media_reference_id = _require_non_empty_string("media_reference_id", media_reference_id)
+        idempotency_key = _require_non_empty_string("idempotency_key", idempotency_key)
         command_kind = _require_non_empty_string("command_kind", command_kind)
         if actor_kind not in ACTOR_KINDS:
             raise ReferenceValidationError(
-                f"actor_kind must be one of {sorted(ACTOR_KINDS)}, "
-                f"got {actor_kind!r}"
+                f"actor_kind must be one of {sorted(ACTOR_KINDS)}, got {actor_kind!r}"
             )
+        reference_id = _resolve_reference_id(
+            uow, project_id=project_id, ref=reference_id
+        )
 
         request: dict[str, Any] = {
             "project_id": project_id,
@@ -1877,9 +2080,7 @@ class ReferenceRepository:
             (reference_id, project_id),
         )
         if ref_row is None:
-            raise ReferenceNotFoundError(
-                reference_id=reference_id, project_id=project_id
-            )
+            raise ReferenceNotFoundError(reference_id=reference_id, project_id=project_id)
         if ref_row["archived_at"] is not None:
             raise ReferenceArchivedError(reference_id=reference_id)
 
@@ -1889,19 +2090,14 @@ class ReferenceRepository:
             (reference_id, PRIMARY_CANONICAL_ROLE),
         )
         if current is None:
-            raise ReferencePrimaryError(
-                detail="missing_primary", reference_id=reference_id
-            )
+            raise ReferencePrimaryError(detail="missing_primary", reference_id=reference_id)
 
         target = uow.query_one(
-            "SELECT id, reference_id, media_id, role FROM media_references "
-            "WHERE id = ?",
+            "SELECT id, reference_id, media_id, role FROM media_references WHERE id = ?",
             (media_reference_id,),
         )
         if target is None:
-            raise ReferencePrimaryError(
-                detail="not_found", media_reference_id=media_reference_id
-            )
+            raise ReferencePrimaryError(detail="not_found", media_reference_id=media_reference_id)
         if str(target["reference_id"]) != reference_id:
             raise ReferencePrimaryError(
                 detail="foreign",
@@ -2035,22 +2231,21 @@ class ReferenceRepository:
         (``duplicate``) all change zero rows.
         """
         project_id = _require_non_empty_string("project_id", project_id)
-        from_reference_id = _require_non_empty_string(
-            "from_reference_id", from_reference_id
-        )
-        to_reference_id = _require_non_empty_string(
-            "to_reference_id", to_reference_id
-        )
+        from_reference_id = _require_non_empty_string("from_reference_id", from_reference_id)
+        to_reference_id = _require_non_empty_string("to_reference_id", to_reference_id)
         kind = _require_non_empty_string("kind", kind)
-        idempotency_key = _require_non_empty_string(
-            "idempotency_key", idempotency_key
-        )
+        idempotency_key = _require_non_empty_string("idempotency_key", idempotency_key)
         command_kind = _require_non_empty_string("command_kind", command_kind)
         if actor_kind not in ACTOR_KINDS:
             raise ReferenceValidationError(
-                f"actor_kind must be one of {sorted(ACTOR_KINDS)}, "
-                f"got {actor_kind!r}"
+                f"actor_kind must be one of {sorted(ACTOR_KINDS)}, got {actor_kind!r}"
             )
+        from_reference_id = _resolve_reference_id(
+            uow, project_id=project_id, ref=from_reference_id
+        )
+        to_reference_id = _resolve_reference_id(
+            uow, project_id=project_id, ref=to_reference_id
+        )
         if kind not in REFERENCE_LINK_KINDS:
             raise ReferenceLinkError(
                 detail="bad_kind",
@@ -2081,9 +2276,7 @@ class ReferenceRepository:
         # it canonicalizes *before* the request hash so reversed retries
         # under one idempotency key converge on the stored result.
         if kind == REFERENCE_SYMMETRIC_LINK_KIND:
-            stored_from, stored_to = sorted(
-                (from_reference_id, to_reference_id)
-            )
+            stored_from, stored_to = sorted((from_reference_id, to_reference_id))
         else:
             stored_from, stored_to = from_reference_id, to_reference_id
 
@@ -2099,9 +2292,7 @@ class ReferenceRepository:
         try:
             request_digest = request_hash(command_kind, request)
         except CanonicalizationError as exc:
-            raise ReferenceValidationError(
-                f"cannot hash reference link request: {exc}"
-            ) from exc
+            raise ReferenceValidationError(f"cannot hash reference link request: {exc}") from exc
 
         # Idempotency gate first: replay or mismatch before any mutation.
         replayed = self._receipts.check(
@@ -2117,8 +2308,7 @@ class ReferenceRepository:
         # Endpoint fences before any write: both references exist, share
         # the project, and are still active (SD1 archive blocks mutations).
         from_row = uow.query_one(
-            "SELECT id, project_id, archived_at FROM project_references "
-            "WHERE id = ?",
+            "SELECT id, project_id, archived_at FROM project_references WHERE id = ?",
             (from_reference_id,),
         )
         if from_row is None:
@@ -2143,8 +2333,7 @@ class ReferenceRepository:
                 kind=kind,
             )
         to_row = uow.query_one(
-            "SELECT id, project_id, archived_at FROM project_references "
-            "WHERE id = ?",
+            "SELECT id, project_id, archived_at FROM project_references WHERE id = ?",
             (to_reference_id,),
         )
         if to_row is None:
@@ -2197,9 +2386,7 @@ class ReferenceRepository:
         try:
             metadata_json = canonical_json(metadata_dict)
         except CanonicalizationError as exc:
-            raise ReferenceValidationError(
-                f"cannot canonicalize link metadata: {exc}"
-            ) from exc
+            raise ReferenceValidationError(f"cannot canonicalize link metadata: {exc}") from exc
 
         # 1. The reference_links row (stored pair; DDL CHECK enforces
         #    from <> to, which the self-link fence already rejected).
@@ -2275,18 +2462,20 @@ class ReferenceRepository:
         A transaction-free read on a separate read-only connection. ``show``
         is the direct lookup that archive never hides (SD1): an archived
         reference's associations, links, events, media rows, and bytes stay
-        visible here. Returns the immutable :class:`ReferenceReadModel` with
-        the ordered media associations and the reference stream head. A
-        missing project raises :class:`ProjectNotFoundError`; a missing or
-        foreign reference raises :class:`ReferenceNotFoundError`.
+        visible here. ``reference_id`` is the public ``ref`` address: an
+        exact id wins first, otherwise an exact project-local name is used.
+        A duplicate name fails closed with candidate ids, so a human-readable
+        address can never silently select the wrong reference. Returns the
+        immutable :class:`ReferenceReadModel` with the ordered media
+        associations and the reference stream head. A missing project raises
+        :class:`ProjectNotFoundError`; a missing or foreign reference raises
+        :class:`ReferenceNotFoundError`.
         """
         _require_non_empty_string("project_id", project_id)
         _require_non_empty_string("reference_id", reference_id)
         with writer.read_only_connection() as conn:
             conn.row_factory = sqlite3.Row
-            project = conn.execute(
-                "SELECT id FROM projects WHERE id = ?", (project_id,)
-            ).fetchone()
+            project = conn.execute("SELECT id FROM projects WHERE id = ?", (project_id,)).fetchone()
             if project is None:
                 raise ProjectNotFoundError(project_id=project_id)
             row = conn.execute(
@@ -2296,13 +2485,29 @@ class ReferenceRepository:
                 (f"{reference_id}:{REFERENCE_STREAM_TYPE}", reference_id, project_id),
             ).fetchone()
             if row is None:
-                raise ReferenceNotFoundError(
-                    reference_id=reference_id, project_id=project_id
-                )
+                matches = conn.execute(
+                    "SELECT r.*, s.head_seq FROM project_references r "
+                    "JOIN event_streams s ON s.id = r.id || ':" + REFERENCE_STREAM_TYPE + "' "
+                    "WHERE r.project_id = ? AND r.name = ? ORDER BY r.id ASC",
+                    (project_id, reference_id),
+                ).fetchall()
+                if len(matches) > 1:
+                    raise ReferenceAmbiguousError(
+                        ref=reference_id,
+                        candidate_ids=[str(match["id"]) for match in matches],
+                    )
+                if matches:
+                    row = matches[0]
+            if row is None:
+                raise ReferenceNotFoundError(reference_id=reference_id, project_id=project_id)
+            # Name addressing is only an input convenience. Once resolved,
+            # all enrichment must use the canonical aggregate id so name and
+            # exact-id reads are byte-for-byte equivalent.
+            resolved_reference_id = str(row["id"])
             media_rows = conn.execute(
                 "SELECT * FROM media_references WHERE reference_id = ? "
                 "ORDER BY role ASC, ordinal ASC, id ASC",
-                (reference_id,),
+                (resolved_reference_id,),
             ).fetchall()
         media = tuple(
             ReferenceMediaReadModel(
@@ -2360,9 +2565,7 @@ class ReferenceRepository:
             raise ReferenceValidationError("include_archived must be a boolean")
         with writer.read_only_connection() as conn:
             conn.row_factory = sqlite3.Row
-            project = conn.execute(
-                "SELECT id FROM projects WHERE id = ?", (project_id,)
-            ).fetchone()
+            project = conn.execute("SELECT id FROM projects WHERE id = ?", (project_id,)).fetchone()
             if project is None:
                 raise ProjectNotFoundError(project_id=project_id)
             if include_archived:
@@ -2402,6 +2605,8 @@ __all__ = [
     "PRIMARY_CANONICAL_ROLE",
     "REFERENCE_ARCHIVE_COMMAND_KIND",
     "REFERENCE_ARCHIVED_EVENT_KIND",
+    "REFERENCE_UNARCHIVE_COMMAND_KIND",
+    "REFERENCE_UNARCHIVED_EVENT_KIND",
     "REFERENCE_ASSOCIATE_COMMAND_KIND",
     "REFERENCE_CREATE_COMMAND_KIND",
     "REFERENCE_CREATED_EVENT_KIND",
@@ -2417,6 +2622,7 @@ __all__ = [
     "REFERENCE_UPDATE_COMMAND_KIND",
     "REFERENCE_UPDATED_EVENT_KIND",
     "ReferenceAlreadyExistsError",
+    "ReferenceAmbiguousError",
     "ReferenceArchiveReadModel",
     "ReferenceArchivedError",
     "ReferenceAssociateReadModel",
@@ -2432,5 +2638,6 @@ __all__ = [
     "ReferenceReadModel",
     "ReferenceRepository",
     "ReferenceRepositoryError",
+    "ReferenceUnarchiveReadModel",
     "ReferenceValidationError",
 ]

@@ -54,6 +54,7 @@ RECEIPT_KEYS = {
 }
 
 TS = "2026-08-18T00:00:00.000000+00:00"
+TS2 = "2026-08-18T01:00:00.000000+00:00"
 
 
 @pytest.fixture
@@ -411,6 +412,70 @@ def test_retry_restarts_failed_task(env: SimpleNamespace) -> None:
     assert retried.data["task"]["status"] == "running"
     assert retried.data["attempt"]["status"] == "claimed"
     assert retried.data["prior_attempt_status"] == "failed"
+
+
+def test_retry_response_refreshes_synchronous_completion_and_replay(
+    env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A synchronous retry response and its replay expose terminal truth."""
+    project_id = _create_project(env)
+    created = env.service.create(
+        project_id=project_id,
+        capability="cap.a",
+        spec={"x": 1},
+        available_at=TS,
+        max_attempts=2,
+    )
+    task_id = created.data["id"]
+    _fail_task(env, project_id=project_id, task_id=task_id)
+
+    class _NoopMedia:
+        def materialize_prepared(self, *args, **kwargs):  # pragma: no cover
+            raise AssertionError("summary-only test must not materialize media")
+
+    env.service._media = _NoopMedia()
+    env.service._projects_root = "/tmp"
+
+    def _synchronous_dispatch(**kwargs):
+        task_repo = kwargs["task_repo"]
+        attempt = kwargs["attempt"]
+        return UnitOfWork(env.writer).run(
+            lambda u: (
+                task_repo.complete(
+                    u,
+                    project_id=project_id,
+                    task_id=task_id,
+                    attempt_id=attempt.id,
+                    lease_id=attempt.lease_id,
+                    expected_status_version=attempt.status_version,
+                    idempotency_key="fake-dispatch-complete",
+                    outputs=[],
+                    result={"recovered": True},
+                    media_repo=_NoopMedia(),
+                    now=TS2,
+                ),
+                None,
+            )[-1]
+        )
+
+    monkeypatch.setattr(
+        "astrid.sdk.invocation.dispatch_retried_task", _synchronous_dispatch
+    )
+    first = env.service.retry(
+        project_id, task_id, idempotency_key="retry-response-k"
+    )
+    assert first.ok is True
+    shown = env.service.show(task_id, project_id).data
+    assert first.data["task"] == shown
+    assert first.data["task"]["status"] == "succeeded"
+    assert first.data["attempt"]["status"] == "succeeded"
+
+    replay = env.service.retry(
+        project_id, task_id, idempotency_key="retry-response-k"
+    )
+    assert replay.ok is True
+    assert replay.data == first.data
+    assert replay.receipt.receipt_id == first.receipt.receipt_id
 
 
 def test_retry_ineligible_task_returns_typed_error(env: SimpleNamespace) -> None:

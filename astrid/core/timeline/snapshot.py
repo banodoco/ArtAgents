@@ -25,7 +25,7 @@ from astrid.core.timeline.events.schema import (
 from astrid.core.timeline.model import Display
 from astrid.core.timeline.paths import validate_timeline_ulid
 from astrid.core.timeline.projection import project_to_assembly
-from astrid.core.timeline.resolution import resolve_asset_local_path
+from astrid.core.timeline.resolution import resolve_asset_authorized_path
 from astrid.packs.rendering.executors.timeline_visualize.snapshot_digest import (
     SNS_SCHEMA_VERSION,
     canonical_json_bytes,
@@ -410,7 +410,7 @@ def _resolve_media_hashes(
     *,
     project_root: Path | None,
 ) -> tuple[dict[str, str], list[str]]:
-    """Hash only existing files contained by ``project_root/sources``.
+    """Hash existing project sources or exact project-owned managed media.
 
     R5 owns the richer typed asset states; both contracts use the same local
     path resolver.  Deterministic diagnostics make every skip explicit without
@@ -459,11 +459,13 @@ def _resolve_media_hashes(
             )
             continue
 
-        candidate = resolve_asset_local_path(
+        expected = entry.get("content_sha256")
+        candidate = resolve_asset_authorized_path(
             raw_file,
             project_root=resolved_project_root,
+            expected_sha256=expected if isinstance(expected, str) else None,
         )
-        if candidate is None:
+        if candidate is None or not candidate.is_file():
             diagnostics.append(
                 f"MEDIA_MISSING: asset {asset_key!r} local file was not found"
             )
@@ -477,7 +479,6 @@ def _resolve_media_hashes(
                 raise SnapshotIntegrityError(f"failed to hash {candidate}: {exc}") from exc
             by_path[candidate] = observed
         hashes[asset_key] = observed
-        expected = entry.get("content_sha256")
         if isinstance(expected, str) and expected != observed:
             diagnostics.append(
                 f"MEDIA_HASH_MISMATCH: asset {asset_key!r} expected {expected}, "

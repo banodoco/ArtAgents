@@ -126,6 +126,17 @@ class AstridClient:
         """Typed project service (create/list/show/update/select)."""
         return self._app.projects_service
 
+    def selected_project_ref(self, *, cwd: str | Path | None = None) -> str | None:
+        """Return the workspace/user-selected project ref for CLI routing.
+
+        This reads only the non-authoritative preference. The target service
+        still resolves the ref against the bound kernel, so stale selections
+        fail closed and explicit ``--project`` remains authoritative.
+        """
+        from astrid.core.preferences import resolve_default_project
+
+        return resolve_default_project(cwd)
+
     @property
     def timelines(self) -> TimelinesService:
         """Typed timeline service (create/list/show/save/archive/...)."""
@@ -153,7 +164,7 @@ class AstridClient:
 
     @property
     def shots(self) -> ShotsService:
-        """Typed shot service (create/update/archive/add/remove/reorder)."""
+        """Typed shot service (list/show/create/add/remove/reorder)."""
         return self._app.shots_service
 
     # -- lazy capability APIs ------------------------------------------------
@@ -199,7 +210,26 @@ class AstridClient:
         from astrid.sdk import invoke
 
         kwargs.setdefault("project_root", self._bound_root())
+        # Preserve the exact schema-pack composition that opened this client.
+        # A long-lived client may intentionally include migrations beyond the
+        # standard in-tree packs; rebuilding a standard registry at invoke
+        # time would make the canonical DB unreadable to its own client.
+        kwargs.setdefault("registry", self._app.registry)
         return invoke(capability_id, **kwargs)
+
+    def invoke_result(self, capability_id: str, **kwargs: Any) -> Any:
+        """Lazy ``astrid.sdk.invoke_result`` with the bound projects root.
+
+        This is the envelope-oriented sibling of :meth:`invoke`: typed
+        preflight failures are returned as ``InvocationResult(ok=False)``
+        instead of being raised, while the normal invoke API remains
+        exception-oriented for callers that want typed branches.
+        """
+        from astrid.sdk import invoke_result
+
+        kwargs.setdefault("project_root", self._bound_root())
+        kwargs.setdefault("registry", self._app.registry)
+        return invoke_result(capability_id, **kwargs)
 
     @property
     def generate(self) -> Any:

@@ -560,12 +560,16 @@ def test_invoke_rejects_elements_and_missing_executor_project(
             )
 
 
-def test_invoke_executor_project_routing_allows_out_none_with_in_process_mode(
+def test_invoke_executor_project_routing_uses_private_staging_and_cleans_it(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``sdk.invoke(kind="executor", project="demo", out=None, execution_mode="in_process")``
-    must construct an ``ExecutorRunRequest`` with ``project="demo"`` and ``out=None``
-    without raising ``CapabilityInvocationError`` about a missing out path."""
+    """Real project invocation fences in-process execution under staging.
+
+    ``out=None`` is a caller instruction, not the internal runner contract:
+    the kernel supplies a private attempt output directory, completes through
+    managed CAS, and removes that directory before returning. The public
+    result must not expose the deleted staging path as ``run_root``.
+    """
     astrid = _import_public_module()
     from astrid.core.execution.executor import runner as executor_runner
 
@@ -577,6 +581,9 @@ def test_invoke_executor_project_routing_allows_out_none_with_in_process_mode(
         captured_request["out"] = request.out
         captured_request["execution_mode"] = request.execution_mode
         captured_request["inputs"] = dict(request.inputs)
+        captured_request["run_root"] = request.run_root
+        captured_request["project_was_auto_resolved"] = request.project_was_auto_resolved
+        captured_request["out_existed_during_execution"] = Path(request.out).is_dir()
         from astrid.core.execution.executor.runner import ExecutorRunResult
 
         return ExecutorRunResult(
@@ -600,10 +607,19 @@ def test_invoke_executor_project_routing_allows_out_none_with_in_process_mode(
 
     assert captured_request["executor_id"] == "editorial.arrange"
     assert captured_request["project"] == "demo"
-    assert captured_request["out"] is None
+    staged_out = Path(captured_request["out"])
+    assert staged_out.name == "out"
+    assert staged_out.parent.name
+    assert staged_out.parent.parent.name == ".staging"
+    assert captured_request["run_root"] == staged_out.parent
+    assert captured_request["project_was_auto_resolved"] is True
+    assert captured_request["out_existed_during_execution"] is True
     assert captured_request["execution_mode"] == "in_process"
+    assert not staged_out.parent.exists()
     assert result.capability_id == "editorial.arrange"
     assert result.capability_type == "executor"
+    assert result.run_root is None
+    assert "run_root" not in result.raw_result
 
 
 def test_discover_exposes_pack_declared_extension_metadata() -> None:
@@ -857,7 +873,17 @@ def test_invoke_executor_prefers_universal_manifest_path_from_payload(
     import uuid as _uuid
     universal_manifest = tmp_path / "nested" / "manifest.json"
 
-    def fake_kernel_invoke(capability, *, kind, project, projects_root, inputs, outputs):
+    def fake_kernel_invoke(
+        capability,
+        *,
+        kind,
+        project,
+        projects_root,
+        inputs,
+        outputs,
+        extra_pack_roots,
+        idempotency_context,
+    ):
         run_id = generate_lowercase_ulid()
         task_id = generate_lowercase_ulid()
         attempt_id = _uuid.uuid4().hex
@@ -890,7 +916,17 @@ def test_invoke_executor_discovers_universal_manifest_from_out_dir(
     manifest_path = tmp_path / "manifest.json"
     manifest_path.write_text("{}", encoding="utf-8")
 
-    def fake_kernel_invoke(capability, *, kind, project, projects_root, inputs, outputs):
+    def fake_kernel_invoke(
+        capability,
+        *,
+        kind,
+        project,
+        projects_root,
+        inputs,
+        outputs,
+        extra_pack_roots,
+        idempotency_context,
+    ):
         run_id = generate_lowercase_ulid()
         task_id = generate_lowercase_ulid()
         attempt_id = _uuid.uuid4().hex
@@ -924,7 +960,17 @@ def test_invoke_executor_ignores_domain_manifest_payload_paths(
     universal_manifest.write_text("{}", encoding="utf-8")
     domain_manifest = tmp_path / "iteration.manifest.json"
 
-    def fake_kernel_invoke(capability, *, kind, project, projects_root, inputs, outputs):
+    def fake_kernel_invoke(
+        capability,
+        *,
+        kind,
+        project,
+        projects_root,
+        inputs,
+        outputs,
+        extra_pack_roots,
+        idempotency_context,
+    ):
         run_id = generate_lowercase_ulid()
         task_id = generate_lowercase_ulid()
         attempt_id = _uuid.uuid4().hex
@@ -1013,8 +1059,20 @@ def test_invoke_defaults_to_subprocess_execution_mode(
 
     seen: dict[str, Any] = {}
 
-    def fake_kernel_invoke(capability, *, kind, project, projects_root, inputs, outputs):
+    def fake_kernel_invoke(
+        capability,
+        *,
+        kind,
+        project,
+        projects_root,
+        inputs,
+        outputs,
+        extra_pack_roots,
+        idempotency_context,
+    ):
         seen["project"] = project
+        seen["extra_pack_roots"] = extra_pack_roots
+        seen["idempotency_context"] = idempotency_context
         # mimic execution_mode default check: if project was None, would have failed earlier
         run_id = generate_lowercase_ulid()
         task_id = generate_lowercase_ulid()
@@ -1033,6 +1091,8 @@ def test_invoke_defaults_to_subprocess_execution_mode(
     )
 
     assert seen["project"] == "demo-project"
+    assert seen["extra_pack_roots"] == ()
+    assert seen["idempotency_context"] is None
     assert result.ok is True
 
 
@@ -1045,7 +1105,17 @@ def test_invoke_executor_allows_project_without_explicit_out(
     import uuid as _uuid
     seen: dict[str, Any] = {}
 
-    def fake_kernel_invoke(capability, *, kind, project, projects_root, inputs, outputs):
+    def fake_kernel_invoke(
+        capability,
+        *,
+        kind,
+        project,
+        projects_root,
+        inputs,
+        outputs,
+        extra_pack_roots,
+        idempotency_context,
+    ):
         seen["project"] = project
         seen["projects_root"] = projects_root
         run_id = generate_lowercase_ulid()
@@ -1223,7 +1293,17 @@ def test_invoke_reuses_loaded_registries_and_preserves_runner_exception_cause(
         assert kwargs["_registries"] is registries
         return _make_capability(astrid, capability_id, "executor")
 
-    def fake_kernel_invoke(capability, *, kind, project, projects_root, inputs, outputs):
+    def fake_kernel_invoke(
+        capability,
+        *,
+        kind,
+        project,
+        projects_root,
+        inputs,
+        outputs,
+        extra_pack_roots,
+        idempotency_context,
+    ):
         assert project == "demo-project"
         raise ValueError("boom")
 
@@ -1260,7 +1340,18 @@ def test_invoke_maps_typed_sdk_exceptions_from_internal_failures(
     )
 
     for internal_error, expected in cases:
-        def fake_kernel_invoke(capability, *, kind, project, projects_root, inputs, outputs, _internal_error=internal_error) -> Any:
+        def fake_kernel_invoke(
+            capability,
+            *,
+            kind,
+            project,
+            projects_root,
+            inputs,
+            outputs,
+            extra_pack_roots,
+            idempotency_context,
+            _internal_error=internal_error,
+        ) -> Any:
             raise _internal_error
 
         monkeypatch.setattr(inv_mod, "_kernel_invoke", fake_kernel_invoke)
@@ -1281,7 +1372,17 @@ def test_invoke_missing_input_runner_errors_raise_sdk_missing_input(
     astrid = _import_public_module()
     import astrid.sdk.invocation as inv_mod
 
-    def fake_kernel_invoke(capability, *, kind, project, projects_root, inputs, outputs) -> Any:
+    def fake_kernel_invoke(
+        capability,
+        *,
+        kind,
+        project,
+        projects_root,
+        inputs,
+        outputs,
+        extra_pack_roots,
+        idempotency_context,
+    ) -> Any:
         from astrid.core.execution.executor.runner import ExecutorRunnerError
 
         raise ExecutorRunnerError("executor 'editorial.arrange' missing required input(s): brief")
@@ -1307,7 +1408,17 @@ def test_invoke_maps_executor_result_error_into_public_taxonomy(
     from astrid.core.ids import generate_lowercase_ulid
     import uuid as _uuid
 
-    def fake_kernel_invoke(capability, *, kind, project, projects_root, inputs, outputs):
+    def fake_kernel_invoke(
+        capability,
+        *,
+        kind,
+        project,
+        projects_root,
+        inputs,
+        outputs,
+        extra_pack_roots,
+        idempotency_context,
+    ):
         run_id = generate_lowercase_ulid()
         task_id = generate_lowercase_ulid()
         attempt_id = _uuid.uuid4().hex
@@ -1475,8 +1586,9 @@ def test_capability_safety_permissions_are_only_string_ids() -> None:
 
 def test_capability_safety_permissions_mirror_pack_permission_ids() -> None:
     """For every pack that declares permissions, every capability owned by
-    that pack must have its ``safety.permissions`` equal to the pack's
-    ``permission_ids``."""
+    that pack must have its ``safety.permissions`` include the pack's
+    ``permission_ids``. Capability manifests may add narrower requirements
+    (for example, a networked Whisper executor in an otherwise local pack)."""
     astrid = _import_public_module()
     inventory = astrid.discover(include_installed=False)
 
@@ -1488,7 +1600,15 @@ def test_capability_safety_permissions_mirror_pack_permission_ids() -> None:
         pack_id = capability.handle.pack_id
         if not pack_id:
             continue
-        expected = tuple(pack_permission_ids.get(pack_id, []))
+        expected_ids = list(pack_permission_ids.get(pack_id, []))
+        declared = capability.definition.get("metadata", {}).get(
+            "required_permissions", []
+        )
+        if isinstance(declared, (list, tuple)):
+            for permission_id in declared:
+                if isinstance(permission_id, str) and permission_id not in expected_ids:
+                    expected_ids.append(permission_id)
+        expected = tuple(expected_ids)
         actual = capability.handle.safety.permissions
         assert actual == expected, (
             f"capability {capability.id!r} (pack {pack_id!r}) "
@@ -1565,7 +1685,17 @@ def test_invoke_maps_orchestrator_result_errors_into_public_taxonomy(
     from astrid.core.ids import generate_lowercase_ulid
     import uuid as _uuid
 
-    def fake_kernel_invoke(capability, *, kind, project, projects_root, inputs, outputs):
+    def fake_kernel_invoke(
+        capability,
+        *,
+        kind,
+        project,
+        projects_root,
+        inputs,
+        outputs,
+        extra_pack_roots,
+        idempotency_context,
+    ):
         run_id = generate_lowercase_ulid()
         task_id = generate_lowercase_ulid()
         attempt_id = _uuid.uuid4().hex
@@ -2357,6 +2487,58 @@ def test_image_explicit_execution_rejected_when_unavailable(
         )
 
 
+def test_image_backend_alias_rejects_unavailable_pair_before_invoke(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The compatibility ``backend`` spelling must not infer cloud."""
+    astrid = _import_public_module()
+    sdk = importlib.import_module("astrid.sdk")
+    invoked = False
+
+    def unexpected_invoke(*args: Any, **kwargs: Any) -> Any:
+        nonlocal invoked
+        invoked = True
+        raise AssertionError("invalid backend pair must fail before invoke")
+
+    monkeypatch.setattr(sdk, "invoke", unexpected_invoke)
+    with pytest.raises(
+        astrid.CapabilityValidationError,
+        match="Execution 'local' is not available.*Available: cloud, codex",
+    ):
+        astrid.generate.image(
+            model="flux-schnell",
+            mode="t2i",
+            backend="local",
+            out=tmp_path,
+            project="demo",
+        )
+    assert invoked is False
+
+
+def test_image_backend_alias_forwards_as_canonical_execution(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A valid compatibility alias selects the requested backend explicitly."""
+    astrid = _import_public_module()
+    sdk = importlib.import_module("astrid.sdk")
+    fake_invoke, seen = _make_success_invoke(astrid, tmp_path)
+    monkeypatch.setattr(sdk, "invoke", fake_invoke)
+
+    result = astrid.generate.image(
+        model="flux-schnell",
+        mode="t2i",
+        backend="cloud",
+        out=tmp_path,
+        project="demo",
+    )
+
+    assert result.ok is True
+    assert seen["kwargs"]["inputs"]["execution"] == "cloud"
+    assert "backend" not in seen["kwargs"]["inputs"]
+
+
 def test_video_mode_inference_t2v_no_refs(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -2450,8 +2632,21 @@ def test_video_execution_inference_single_backend(
     """Video mode with a single backend auto-infers execution."""
     astrid = _import_public_module()
     sdk = importlib.import_module("astrid.sdk")
+    preflight = importlib.import_module("astrid.core.generation.preflight")
     fake_invoke, seen = _make_success_invoke(astrid, tmp_path)
+    readiness: dict[str, Any] = {}
+
+    def fake_require_local_generation_readiness(entry: Any, mode: str, **kwargs: Any) -> None:
+        readiness["model"] = entry.id
+        readiness["mode"] = mode
+        readiness["python_executable"] = kwargs.get("python_executable")
+
     monkeypatch.setattr(sdk, "invoke", fake_invoke)
+    monkeypatch.setattr(
+        preflight,
+        "require_local_generation_readiness",
+        fake_require_local_generation_readiness,
+    )
 
     # ltx-2.3 flf only has local
     result = astrid.generate.video(
@@ -2464,6 +2659,11 @@ def test_video_execution_inference_single_backend(
     assert result.ok is True
     assert seen["kwargs"]["inputs"]["mode"] == "flf"
     assert seen["kwargs"]["inputs"]["execution"] == "local"
+    assert readiness == {
+        "model": "ltx-2.3",
+        "mode": "flf",
+        "python_executable": None,
+    }
 
 
 def test_unknown_model_raises_validation_error(

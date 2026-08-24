@@ -247,7 +247,14 @@ def to_capability_handle(
             compatibility_token=compatibility_token or None,
             resolved_alias=resolved_alias,
         ),
-        safety=SafetyDeclaration(network=definition.isolation.network),
+        safety=SafetyDeclaration(
+            network=definition.isolation.network,
+            secrets_required=tuple(
+                str(item)
+                for item in metadata.get("secrets_required", ())
+                if isinstance(item, str) and item
+            ),
+        ),
         description=definition.description,
         short_description=definition.short_description,
         keywords=definition.keywords,

@@ -20,7 +20,9 @@ RunPod, network, or GPU calls.
 import astrid.sdk as sdk
 result = sdk.invoke(
     "training.training_run",
-    inputs={"config": "configs/training-run.json"},
+    kind="orchestrator",
+    project="demo",
+    orchestrator_args=("--config", "configs/training-run.json"),
     dry_run=True,
 )
 ```
@@ -34,14 +36,17 @@ state mode that distinguishes CI/smoke validation from an operator dry-run.
 import astrid.sdk as sdk
 result = sdk.invoke(
     "training.training_run",
-    inputs={"config": "configs/training-run.json", "smoke": True},
+    kind="orchestrator",
+    project="demo",
+    orchestrator_args=("--config", "configs/training-run.json", "--smoke"),
 )
 ```
 
-Direct module form:
+Internal runner form (not a public entrypoint; direct invocation is rejected
+unless Astrid has set its internal invocation marker):
 
 ```bash
-python3 -m astrid.packs.training.orchestrators.training_run.run \
+ASTRID_INTERNAL_INVOCATION=1 python3 -m astrid.packs.training.orchestrators.training_run.run \
   --config configs/training-run.json \
   --dry-run
 ```
@@ -67,7 +72,8 @@ state for resume or explicit follow-up.
 import astrid.sdk as sdk
 result = sdk.invoke(
     "training.training_run",
-    inputs={"config": "configs/training-run.json", "confirm_spend": True},
+        kind="orchestrator", project="demo",
+    orchestrator_args=("--config", "configs/training-run.json", "--confirm-spend"),
 )
 ```
 
@@ -80,7 +86,7 @@ teardown, and records the final registration metadata. Use `--skip-teardown`
 only when you intentionally want to keep the pod alive after registration.
 
 ```bash
-python3 -m astrid.packs.training.orchestrators.training_run.run resume \
+ASTRID_INTERNAL_INVOCATION=1 python3 -m astrid.packs.training.orchestrators.training_run.run resume \
   --out runs/training/my-run \
   --pick final \
   --notes "best checkpoint"
@@ -89,7 +95,7 @@ python3 -m astrid.packs.training.orchestrators.training_run.run resume \
 Direct module form:
 
 ```bash
-python3 -m astrid.packs.training.orchestrators.training_run.run resume \
+ASTRID_INTERNAL_INVOCATION=1 python3 -m astrid.packs.training.orchestrators.training_run.run resume \
   --out runs/training/my-run \
   --pick final
 ```

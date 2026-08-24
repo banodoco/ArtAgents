@@ -31,12 +31,14 @@ Fetch a whole project payload:
 ```python
 import astrid.sdk as sdk
 result = sdk.invoke("reigh.reigh_data", inputs={"project_id": "<PROJECT_UUID>"}, out="runs/reigh/project.json")
+    kind="executor", project="demo",
 ```
 
 Fetch one shot's app-shaped media and positions:
 
 ```python
 result = sdk.invoke("reigh.reigh_data", inputs={
+    kind="executor", project="demo",
     "project_id": "<PROJECT_UUID>",
     "shot_id": "<SHOT_UUID>",
 }, out="runs/reigh/shot.json")
@@ -47,6 +49,7 @@ payload:
 
 ```python
 result = sdk.invoke("reigh.reigh_data", inputs={
+    kind="executor", project="demo",
     "project_id": "<PROJECT_UUID>",
     "task_id": "<TASK_UUID>",
     "timeline_id": "<TIMELINE_UUID>",
@@ -57,6 +60,7 @@ The canonical executor entry point can also run it directly:
 
 ```python
 result = sdk.invoke("reigh.reigh_data", inputs={"project_id": "<PROJECT_UUID>"}, out="runs/reigh")
+    kind="executor", project="demo",
 ```
 
 ## Payload Contract

@@ -66,13 +66,13 @@ executor behind the call:
 import astrid.sdk as sdk
 result = sdk.invoke(
     "runpod.session",
+        kind="executor", project="demo",
     inputs={
         "gpu_type": "NVIDIA_L40S",
         "local_root": ".",
         "remote_root": "/workspace",
         "remote_script": "smoke.sh",
     },
-    out="$ASTRID_TASK_PRODUCES_ROOT",
 )
 ```
 

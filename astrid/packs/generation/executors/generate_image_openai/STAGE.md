@@ -21,8 +21,8 @@ Dry-run:
 ```python
 import astrid.sdk as sdk
 result = sdk.invoke("generation.generate_image_openai",
+    kind="executor", project="demo",
     inputs={"prompts_file": "runs/example-images/prompts.txt"},
-    out="runs/example-images",
     dry_run=True)
 ```
 
@@ -30,8 +30,8 @@ Run:
 
 ```python
 result = sdk.invoke("generation.generate_image_openai",
-    inputs={"prompts_file": "runs/example-images/prompts.txt"},
-    out="runs/example-images")
+    kind="executor", project="demo",
+    inputs={"prompts_file": "runs/example-images/prompts.txt"})
 ```
 
 ## Outputs
@@ -45,11 +45,12 @@ Pass `--preset <name>` to use a canned prompt and behaviour bundle. Currently:
 
 - `saint-peter-of-banodoco` — onboarding portrait of the maker as Saint Peter
   of Banodoco; opens the rendered image after writing it (use `--no-open` to
-  skip). Run directly via the `run.py` entrypoint, since the executor manifest
-  command pipes a prompt file rather than a preset:
+  skip). This preset is an internal runner/debug escape hatch because the
+  public executor manifest accepts prompt files; direct module invocation is
+  not a public entrypoint:
 
   ```bash
-  python3 -m astrid.packs.generation.executors.generate_image_openai.run \
+  ASTRID_INTERNAL_INVOCATION=1 python3 -m astrid.packs.generation.executors.generate_image_openai.run \
     --preset saint-peter-of-banodoco \
     --out-dir runs/first-rite/images \
     --manifest runs/first-rite/manifest.json \

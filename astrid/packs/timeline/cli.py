@@ -14,11 +14,11 @@ contract.
 The parser also mounts the manifest-declared nested ``shots`` family beneath
 ``timelines`` (``astrid/packs/shots/schema-pack.yaml`` declares ``shots:
 timelines shots``): ``astrid timelines shots <verb>`` embeds the shots
-product parser (``astrid/packs/shots/cli.py``) so shot
-``list/create/add/remove/reorder`` are executable only beneath timelines
+product parser (``astrid/packs/shots/cli.py``) so project-level reusable shot
+``list/create/show/add/remove/reorder`` commands are executable only beneath timelines
 (plan step 26, task T29). There is **no top-level shots family**.
 
-Verbs (exactly these seven plus the nested ``shots`` mount, one SDK call
+Verbs (exactly these eight plus the nested ``shots`` mount, one SDK call
 each):
 
 - ``create`` — ``client.timelines.create`` (project id/slug, slug, name,
@@ -28,9 +28,14 @@ each):
 - ``show`` — ``client.timelines.show`` by UUID, ULID, or slug;
 - ``save`` — whole-document CAS ``client.timelines.save`` with
   ``--config``/``--registry`` and ``--expected-version``;
-- ``archive`` — event-backed terminal ``client.timelines.archive``;
+- ``archive`` — reversible event-backed ``client.timelines.archive``;
+- ``unarchive`` — idempotent recovery through ``client.timelines.unarchive``;
 - ``history`` — ordered lifecycle events (read);
 - ``diff`` — deterministic adjacent-version diffs (read).
+- ``visualize`` — synchronous ``client.invoke`` of the public
+  ``rendering.timeline_visualize`` capability.
+- ``render`` — version-pinned kernel timeline render through the explicit
+  ``rendering.render`` `timeline_ref` mode.
 
 **Negative routes (sense check SC28):** the legacy timeline verbs
 ``migration``, ``push``, ``pull``, ``sync``, ``audit``, ``erase``, and
@@ -48,6 +53,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from collections.abc import Mapping
 from typing import Any
 
 from astrid.core.cli.domain_output import print_result
@@ -63,9 +69,7 @@ def _parse_json_object(value: str) -> dict[str, Any]:
     try:
         parsed = json.loads(value)
     except json.JSONDecodeError as exc:
-        raise argparse.ArgumentTypeError(
-            f"invalid JSON object: {exc.msg}"
-        ) from exc
+        raise argparse.ArgumentTypeError(f"invalid JSON object: {exc.msg}") from exc
     if not isinstance(parsed, dict):
         raise argparse.ArgumentTypeError("must be a JSON object")
     return parsed
@@ -91,8 +95,9 @@ def _add_idempotency_key(subparser: argparse.ArgumentParser) -> None:
 def _add_project_arg(subparser: argparse.ArgumentParser) -> None:
     subparser.add_argument(
         "--project",
-        required=True,
-        help="Owning project id or slug.",
+        required=False,
+        default=None,
+        help="Owning project id or slug (defaults to the selected project).",
     )
 
 
@@ -113,7 +118,10 @@ def _cmd_create(parsed: argparse.Namespace) -> int:
 
 
 def _cmd_list(parsed: argparse.Namespace) -> int:
-    result = parsed.client.timelines.list(parsed.project)
+    if parsed.include_archived:
+        result = parsed.client.timelines.list(parsed.project, include_archived=True)
+    else:
+        result = parsed.client.timelines.list(parsed.project)
     return print_result(result, as_json=parsed.json)
 
 
@@ -143,6 +151,15 @@ def _cmd_archive(parsed: argparse.Namespace) -> int:
     return print_result(result, as_json=parsed.json)
 
 
+def _cmd_unarchive(parsed: argparse.Namespace) -> int:
+    result = parsed.client.timelines.unarchive(
+        parsed.project,
+        parsed.ref,
+        idempotency_key=parsed.idempotency_key,
+    )
+    return print_result(result, as_json=parsed.json)
+
+
 def _cmd_history(parsed: argparse.Namespace) -> int:
     result = parsed.client.timelines.history(parsed.project, parsed.ref)
     return print_result(result, as_json=parsed.json)
@@ -151,6 +168,174 @@ def _cmd_history(parsed: argparse.Namespace) -> int:
 def _cmd_diff(parsed: argparse.Namespace) -> int:
     result = parsed.client.timelines.diff(parsed.project, parsed.ref)
     return print_result(result, as_json=parsed.json)
+
+
+def _visualization_artifact_summary(outputs: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Summarize repeated visualization artifacts without dropping evidence."""
+    raw_artifacts = outputs.get("artifacts")
+    if not isinstance(raw_artifacts, list):
+        return None
+
+    groups: dict[tuple[str, str], dict[str, Any]] = {}
+    media_ids: set[str] = set()
+    hashes: set[str] = set()
+    for artifact in raw_artifacts:
+        if not isinstance(artifact, Mapping):
+            continue
+        media_id = artifact.get("media_id")
+        content_hash = artifact.get("content_hash")
+        if isinstance(media_id, str) and media_id:
+            media_ids.add(media_id)
+        if isinstance(content_hash, str) and content_hash:
+            hashes.add(content_hash)
+        if not (
+            isinstance(media_id, str)
+            and media_id
+            and isinstance(content_hash, str)
+            and content_hash
+        ):
+            continue
+        key = (media_id, content_hash)
+        group = groups.setdefault(
+            key,
+            {"media_id": media_id, "content_hash": content_hash, "count": 0, "labels": []},
+        )
+        group["count"] += 1
+        label = artifact.get("label")
+        if isinstance(label, str) and label:
+            group["labels"].append(label)
+
+    duplicate_groups = [group for group in groups.values() if group["count"] > 1]
+    duplicate_groups.sort(key=lambda group: (-group["count"], group["media_id"]))
+    return {
+        "artifact_count": len(raw_artifacts),
+        "unique_media_count": len(media_ids),
+        "unique_content_hash_count": len(hashes),
+        "duplicate_reference_count": sum(group["count"] - 1 for group in duplicate_groups),
+        "duplicate_group_count": len(duplicate_groups),
+        "duplicate_groups": duplicate_groups,
+    }
+
+
+def _cmd_visualize(parsed: argparse.Namespace) -> int:
+    """Run visualization through the public SDK and product output layer."""
+    from astrid.sdk.contracts import DomainResult, ErrorObject
+
+    # The public CLI intentionally accepts both ``--format png --format svg``
+    # and ``--format png,svg``.  Normalize both spellings before the one
+    # canonical SDK call so the pre-admission grammar sees one shape.
+    formats = [
+        item.strip().lower()
+        for value in (parsed.formats or ["all"])
+        for item in str(value).split(",")
+        if item.strip()
+    ]
+    inputs: dict[str, Any] = {"formats": formats}
+    timeline_slug = parsed.timeline_slug or parsed.timeline_ref
+    for name in (
+        "timeline_source", "layout", "filmstrip", "rendered_video", "shot",
+        "range", "at", "clip", "asset", "context", "neighbors", "from_view",
+        "focus",
+    ):
+        value = getattr(parsed, name, None)
+        if value not in (None, "", []):
+            inputs[name] = value
+    if timeline_slug not in (None, ""):
+        inputs["timeline_slug"] = timeline_slug
+    if parsed.select_all:
+        inputs["all"] = True
+    if parsed.refresh_root:
+        inputs["refresh_root"] = True
+    result = parsed.client.invoke_result(
+        "rendering.timeline_visualize",
+        kind="executor",
+        project=parsed.project,
+        inputs=inputs,
+        out=parsed.out,
+    )
+    if result.ok:
+        outputs = result.outputs
+        if isinstance(outputs, Mapping):
+            outputs = dict(outputs)
+            summary = _visualization_artifact_summary(outputs)
+            if summary is not None:
+                outputs["artifact_summary"] = summary
+        envelope = DomainResult.success(
+            {
+                "capability_id": result.capability_id,
+                "run_id": result.run_id,
+                "kernel_run_id": result.kernel_run_id,
+                "kernel_task_id": result.kernel_task_id,
+                "kernel_attempt_id": result.kernel_attempt_id,
+                "manifest_path": result.manifest_path,
+                "outputs": outputs,
+            }
+        )
+    else:
+        detail = dict(result.error or {})
+        category = str(detail.get("sdk_category") or "invocation")
+        envelope = DomainResult.failure(
+            ErrorObject(
+                code="validation_error" if category == "validation" else "invocation_error",
+                message=str(detail.get("message") or "timeline visualization failed"),
+                details={
+                    "sdk_error": detail.get("sdk_error"),
+                    "sdk_category": category,
+                    "run_id": result.run_id,
+                    "kernel_run_id": result.kernel_run_id,
+                    "kernel_task_id": result.kernel_task_id,
+                    "kernel_attempt_id": result.kernel_attempt_id,
+                },
+            )
+        )
+    return print_result(envelope, as_json=parsed.json)
+
+
+def _cmd_render(parsed: argparse.Namespace) -> int:
+    """Render one canonical kernel timeline through the public SDK."""
+    from astrid.sdk.contracts import DomainResult, ErrorObject
+
+    inputs: dict[str, Any] = {"timeline_ref": parsed.ref}
+    for name in ("expected_version", "backend", "output_name", "profile"):
+        value = getattr(parsed, name, None)
+        if value not in (None, ""):
+            inputs[name] = value
+    result = parsed.client.invoke_result(
+        "rendering.render",
+        kind="executor",
+        project=parsed.project,
+        inputs=inputs,
+    )
+    if result.ok:
+        envelope = DomainResult.success(
+            {
+                "capability_id": result.capability_id,
+                "run_id": result.run_id,
+                "kernel_run_id": result.kernel_run_id,
+                "kernel_task_id": result.kernel_task_id,
+                "kernel_attempt_id": result.kernel_attempt_id,
+                "outputs": result.outputs,
+            }
+        )
+    else:
+        detail = dict(result.error or {})
+        category = str(detail.get("sdk_category") or "invocation")
+        envelope = DomainResult.failure(
+            ErrorObject(
+                code="validation_error" if category == "validation" else "invocation_error",
+                message=str(detail.get("message") or "timeline render failed"),
+                details={
+                    "sdk_error": detail.get("sdk_error"),
+                    "sdk_category": category,
+                    "validation": detail.get("validation"),
+                    "run_id": result.run_id,
+                    "kernel_run_id": result.kernel_run_id,
+                    "kernel_task_id": result.kernel_task_id,
+                    "kernel_attempt_id": result.kernel_attempt_id,
+                },
+            )
+        )
+    return print_result(envelope, as_json=parsed.json)
 
 
 # -- parser ----------------------------------------------------------------
@@ -184,6 +369,12 @@ def _configure_create(subparser: argparse.ArgumentParser) -> None:
 
 def _configure_list(subparser: argparse.ArgumentParser) -> None:
     _add_project_arg(subparser)
+    subparser.add_argument(
+        "--include-archived",
+        dest="include_archived",
+        action="store_true",
+        help="Include archived timelines and their archived_at state.",
+    )
     _add_json_flag(subparser)
     subparser.set_defaults(handler=_cmd_list)
 
@@ -230,6 +421,17 @@ def _configure_archive(subparser: argparse.ArgumentParser) -> None:
     subparser.set_defaults(handler=_cmd_archive)
 
 
+def _configure_unarchive(subparser: argparse.ArgumentParser) -> None:
+    _add_project_arg(subparser)
+    subparser.add_argument(
+        "ref",
+        help="Timeline UUID, ULID, or slug from list --include-archived.",
+    )
+    _add_idempotency_key(subparser)
+    _add_json_flag(subparser)
+    subparser.set_defaults(handler=_cmd_unarchive)
+
+
 def _configure_history(subparser: argparse.ArgumentParser) -> None:
     _add_project_arg(subparser)
     subparser.add_argument("ref", help="Timeline UUID, ULID, or slug.")
@@ -242,6 +444,110 @@ def _configure_diff(subparser: argparse.ArgumentParser) -> None:
     subparser.add_argument("ref", help="Timeline UUID, ULID, or slug.")
     _add_json_flag(subparser)
     subparser.set_defaults(handler=_cmd_diff)
+
+
+def _configure_visualize(subparser: argparse.ArgumentParser) -> None:
+    _add_project_arg(subparser)
+    subparser.add_argument(
+        "timeline_ref", nargs="?", default=None,
+        help="Optional positional timeline slug, UUID, or ULID (prefer --timeline-slug).",
+    )
+    subparser.add_argument(
+        "--timeline-slug",
+        default=None,
+        help="Timeline slug, UUID, or ULID; omit to use the project default.",
+    )
+    subparser.add_argument(
+        "--all", dest="select_all", action="store_true",
+        help="Visualize every active timeline in the project.",
+    )
+    subparser.add_argument(
+        "--timeline-source", action="append", default=[],
+        help=(
+            "Explicit legacy managed timeline directory/file; repeat for multiple "
+            "sources. In result manifests, inputs.timeline_source remains a "
+            "project-slug compatibility field; inspect source_mode and resolved "
+            "identities for authority/provenance."
+        ),
+    )
+    subparser.add_argument("--shot", default=None, help="Focus an authored shot id.")
+    subparser.add_argument("--range", dest="range", default=None, help="Focus a closed-open START..END window.")
+    subparser.add_argument("--at", default=None, help="Focus a timestamp.")
+    subparser.add_argument("--clip", default=None, help="Focus an authored clip id.")
+    subparser.add_argument("--asset", default=None, help="Focus a canonical asset key.")
+    subparser.add_argument("--context", type=float, default=None, help="Context seconds around a focus.")
+    subparser.add_argument("--neighbors", type=int, default=None, help="Neighbor clips retained around a focus.")
+    subparser.add_argument(
+        "--format", dest="formats", action="append", default=None,
+        metavar="FORMAT[,FORMAT...]",
+        help="Repeatable/comma-separated png, svg, md, or all (default: all).",
+    )
+    subparser.add_argument("--layout", choices=("time-scaled", "linear", "both"), default=None)
+    subparser.add_argument(
+        "--filmstrip", choices=("auto", "off", "assets", "rendered"), default=None,
+        help="Filmstrip policy for visual evidence.",
+    )
+    subparser.add_argument("--rendered-video", default=None, help="Optional project-owned rendered video path.")
+    subparser.add_argument("--from-view", default=None, help="Prior visualization manifest for frozen navigation.")
+    subparser.add_argument("--focus", default=None, help="Qualified object/timestamp focus within --from-view.")
+    subparser.add_argument(
+        "--refresh-root", action="store_true",
+        help="Refresh current state from a frozen root (requires --from-view/--focus TL01).",
+    )
+    subparser.add_argument(
+        "--out", default=None,
+        help="Optional output hint; project runs publish durable artifacts under the managed run.",
+    )
+    _add_json_flag(subparser)
+    subparser.set_defaults(handler=_cmd_visualize)
+
+
+def _configure_render(subparser: argparse.ArgumentParser) -> None:
+    _add_project_arg(subparser)
+    subparser.add_argument("ref", help="Canonical timeline UUID, ULID, or slug.")
+    subparser.add_argument(
+        "--expected-version",
+        dest="expected_version",
+        type=int,
+        default=None,
+        help="Optional exact kernel config version; stale pins fail before admission.",
+    )
+    subparser.add_argument(
+        "--backend",
+        default=None,
+        help="Qualified renderer id or supported compatibility selector.",
+    )
+    subparser.add_argument(
+        "--profile",
+        type=_parse_json_object,
+        default=None,
+        metavar="JSON",
+        help=(
+            "Flat RenderProfile v1 JSON object (no video/audio nesting). "
+            "Complete Remotion MP4 example: "
+            "{\"width\": 1920, \"height\": 1080, \"fps_rational\": [30, 1], "
+            "\"time_base\": [1, 90000], \"container\": \"mp4\", "
+            "\"video_codec\": \"h264\", \"video_profile\": null, "
+            "\"video_level\": null, \"pixel_format\": \"yuv420p\", "
+            "\"audio_codec\": \"aac\", \"audio_sample_rate\": 48000, "
+            "\"audio_channel_layout\": \"stereo\", \"duration_tolerance\": 1}. "
+            "The audio trio must be supplied together or all omitted. When omitted, the "
+            "resolved theme canvas is used (default 1920x1080 at 30 fps), "
+            "not legacy config.output resolution/fps hints. Explicit profiles must "
+            "match the authoritative theme canvas; set theme_overrides.visual.canvas "
+            "for a different size."
+        ),
+    )
+    subparser.add_argument(
+        "--output-name",
+        default=None,
+        help=(
+            "Plain output filename (default hype.mp4). A canonical timeline stamped "
+            "metadata.astrid_layer.alpha=true may request .mov for ProRes 4444/PCM output."
+        ),
+    )
+    _add_json_flag(subparser)
+    subparser.set_defaults(handler=_cmd_render)
 
 
 COMMANDS: tuple[CommandSpec, ...] = (
@@ -267,8 +573,13 @@ COMMANDS: tuple[CommandSpec, ...] = (
     ),
     CommandSpec(
         "archive",
-        help="Archive a timeline (event-backed terminal mutation).",
+        help="Archive a timeline (reversible with unarchive).",
         configure=_configure_archive,
+    ),
+    CommandSpec(
+        "unarchive",
+        help="Restore archived work; safe to repeat (changed=false when active).",
+        configure=_configure_unarchive,
     ),
     CommandSpec(
         "history",
@@ -280,13 +591,23 @@ COMMANDS: tuple[CommandSpec, ...] = (
         help="Deterministic adjacent-version diffs for one timeline.",
         configure=_configure_diff,
     ),
+    CommandSpec(
+        "visualize",
+        help="Build a timeline evidence pack synchronously through the public SDK.",
+        configure=_configure_visualize,
+    ),
+    CommandSpec(
+        "render",
+        help="Render a canonical kernel timeline with optional version pinning.",
+        configure=_configure_render,
+    ),
 )
 
 
 def build_parser(client: Any) -> argparse.ArgumentParser:
     """Build the ``timelines`` product-family parser stamped with *client*.
 
-    Exactly the seven verbs above are registered — no aliases, no legacy
+    Exactly the ten verbs above are registered — no aliases, no legacy
     migration/push/pull/sync/audit/erase/repair verbs, and no ``copy``
     (reserved for m6) — plus the manifest-declared nested ``shots`` mount
     (``astrid timelines shots <verb>``) embedded from the shots product
@@ -296,14 +617,12 @@ def build_parser(client: Any) -> argparse.ArgumentParser:
 
     def _configure_shots(subparser: argparse.ArgumentParser) -> None:
         nested = subparser.add_subparsers(dest="shot_command", required=True)
-        register_product_commands(
-            nested, shots_cli.COMMANDS, family="shots", client=client
-        )
+        register_product_commands(nested, shots_cli.COMMANDS, family="shots", client=client)
 
     parser = argparse.ArgumentParser(
         prog="astrid timelines",
         description=(
-            "Timeline create/list/show/save/archive/history/diff "
+            "Timeline create/list/show/save/archive/unarchive/history/diff/visualize/render "
             "(product family); nested shots beneath 'timelines shots'."
         ),
     )
@@ -314,7 +633,7 @@ def build_parser(client: Any) -> argparse.ArgumentParser:
             *COMMANDS,
             CommandSpec(
                 "shots",
-                help="Nested shot list/create/add/remove/reorder "
+                help="Nested project-level shot list/create/show/add/remove/reorder "
                 "(manifest-owned mount).",
                 configure=_configure_shots,
             ),

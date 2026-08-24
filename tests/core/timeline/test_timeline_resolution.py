@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
+from astrid.application import compose_standard_application
 from astrid.core.timeline.resolution import (
-    AssetIntegrity,
     classify_asset,
     classify_registry,
     resolve_asset_path,
@@ -52,6 +52,59 @@ def test_verified_original(tmp_path: Path) -> None:
         {"file": "sources/plant-frame-1.png"},
         project_root=tmp_path,
     ) == path.resolve()
+
+
+def test_hashless_owned_managed_locator_is_rebased_for_visualization(
+    tmp_path: Path,
+) -> None:
+    """A restored registry can visualize a stale CAS locator without repair."""
+
+    payload = b"restored visualization media"
+    source = tmp_path / "source.png"
+    source.write_bytes(payload)
+    with compose_standard_application(projects_root=tmp_path) as app:
+        project = app.projects_service.create(
+            slug="demo", name="Demo", idempotency_key="project"
+        )
+        assert project.ok, project.error
+        imported = app.media_service.import_file(
+            project="demo", path=source, idempotency_key="media"
+        )
+        assert imported.ok, imported.error
+        locator = str(imported.data["locations"][0]["locator"])
+
+    project_root = tmp_path / "demo"
+    result = classify_asset(
+        "frame",
+        {"file": locator, "type": "image/png"},
+        project_root=project_root,
+    )
+
+    assert result.state == "verified_original"
+    assert result.expected_sha256 == _sha256(payload)
+    assert result.observed_sha256 == _sha256(payload)
+    assert Path(result.path).is_file()
+
+    # The locator shape alone is never authorization: a foreign project is
+    # rejected before visualization can acquire or hash its bytes.
+    foreign = classify_asset(
+        "frame",
+        {"file": locator, "type": "image/png"},
+        project_root=tmp_path / "other-project",
+    )
+    assert foreign.state == "unsupported"
+    assert foreign.path is None
+
+    # A same-shaped locator is also rejected when the destination bytes no
+    # longer match the kernel's content identity.
+    Path(result.path).write_bytes(b"tampered visualization media")
+    tampered = classify_asset(
+        "frame",
+        {"file": locator, "type": "image/png"},
+        project_root=project_root,
+    )
+    assert tampered.state == "unsupported"
+    assert tampered.path is None
 
 
 # --- 2. hash mismatch -------------------------------------------------------

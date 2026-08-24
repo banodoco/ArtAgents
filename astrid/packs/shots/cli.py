@@ -16,9 +16,11 @@ handler renders through the shared product output layer
 concise human output, and stable exit codes stay aligned with the frozen SDK
 contract.
 
-Verbs (exactly these five, one SDK call each):
+Verbs (exactly these six, one SDK call each):
 
 - ``list`` — ``client.shots.list(project)`` (sort_key, then id order);
+- ``show`` — ``client.shots.show(project, shot_id)`` (ordered items, media ids,
+  positions, and best-effort media names/paths);
 - ``create`` — ``client.shots.create`` (project, name, optional
   ``--metadata`` JSON, and ``--idempotency-key``; a fresh key is generated
   and returned when absent);
@@ -93,8 +95,9 @@ def _add_idempotency_key(subparser: argparse.ArgumentParser) -> None:
 def _add_project_arg(subparser: argparse.ArgumentParser) -> None:
     subparser.add_argument(
         "--project",
-        required=True,
-        help="Owning project id or slug.",
+        required=False,
+        default=None,
+        help="Owning project id or slug (defaults to the selected project).",
     )
 
 
@@ -103,6 +106,11 @@ def _add_project_arg(subparser: argparse.ArgumentParser) -> None:
 
 def _cmd_list(parsed: argparse.Namespace) -> int:
     result = parsed.client.shots.list(parsed.project)
+    return print_result(result, as_json=parsed.json)
+
+
+def _cmd_show(parsed: argparse.Namespace) -> int:
+    result = parsed.client.shots.show(parsed.project, parsed.shot)
     return print_result(result, as_json=parsed.json)
 
 
@@ -159,6 +167,13 @@ def _configure_list(subparser: argparse.ArgumentParser) -> None:
     _add_project_arg(subparser)
     _add_json_flag(subparser)
     subparser.set_defaults(handler=_cmd_list)
+
+
+def _configure_show(subparser: argparse.ArgumentParser) -> None:
+    _add_project_arg(subparser)
+    subparser.add_argument("shot", help="Shot id.")
+    _add_json_flag(subparser)
+    subparser.set_defaults(handler=_cmd_show)
 
 
 def _configure_create(subparser: argparse.ArgumentParser) -> None:
@@ -238,6 +253,11 @@ COMMANDS: tuple[CommandSpec, ...] = (
         configure=_configure_list,
     ),
     CommandSpec(
+        "show",
+        help="Show one project-level shot with ordered items and media paths.",
+        configure=_configure_show,
+    ),
+    CommandSpec(
         "create",
         help="Create one empty shot (one SDK call, idempotency key returned).",
         configure=_configure_create,
@@ -263,12 +283,17 @@ COMMANDS: tuple[CommandSpec, ...] = (
 def build_parser(client: Any) -> argparse.ArgumentParser:
     """Build the nested ``timelines shots`` product parser stamped with *client*.
 
-    Exactly the five verbs above are registered: no aliases and no top-level
+    Exactly the six verbs above are registered: no aliases and no top-level
     exposure — this parser is only reachable beneath the timelines family.
     """
     parser = argparse.ArgumentParser(
         prog="astrid timelines shots",
-        description="Shot list/create/add/remove/reorder (nested product family).",
+        description=(
+            "Project-level reusable shots: list/create/show/add/remove/reorder "
+            "(nested product family). A shot is not implicitly attached to a "
+            "timeline; use its id in a timeline document's own config when "
+            "you want that document to reference it."
+        ),
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
     register_product_commands(

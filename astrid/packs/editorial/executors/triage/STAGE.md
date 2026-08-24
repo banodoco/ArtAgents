@@ -21,8 +21,8 @@ arrangement and refinement.
 import astrid.sdk as sdk
 result = sdk.invoke(
     "editorial.triage",
+        kind="executor", project="demo",
     inputs={"scenes": "./out/scenes.json", "shots": "./out/shots.json"},
-    out="./out",
 )
 ```
 
@@ -32,12 +32,12 @@ With an explicit env file for API credentials:
 import astrid.sdk as sdk
 result = sdk.invoke(
     "editorial.triage",
+        kind="executor", project="demo",
     inputs={
         "scenes": "./out/scenes.json",
         "shots": "./out/shots.json",
         "env_file": ".env.local",
     },
-    out="./out",
 )
 ```
 

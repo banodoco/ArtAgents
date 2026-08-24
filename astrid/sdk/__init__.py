@@ -158,6 +158,7 @@ from .invocation import (
     discover,
     get_capability,
     invoke,
+    invoke_result,
 )
 
 
@@ -208,6 +209,7 @@ __all__ = [
     "generate",
     "get_capability",
     "invoke",
+    "invoke_result",
     "read_events",
     "render",
     "renderer_main",

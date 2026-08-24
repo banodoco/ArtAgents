@@ -533,19 +533,19 @@ def main(argv: list[str] | None = None) -> int:
             _kernel_run_id: str | None = None
             _kernel_task_id: str | None = None
             try:
-                from astrid.core.foundation.project_paths import resolve_projects_root as _resolve_root  # noqa: E402
+                from astrid.core.foundation.project_paths import (
+                    resolve_projects_root as _resolve_root,  # noqa: E402
+                )
+                from astrid.core.kernel.read import (
+                    kernel_run_info as _kernel_run_info,  # noqa: E402
+                )
+
                 _root = _resolve_root(None)
-                _db = _root / "kernel.sqlite3"
-                if _db.is_file():
-                    import sqlite3 as _sqlite  # noqa: E402
-                    with _sqlite.connect(str(_db)) as _conn:
-                        _conn.row_factory = _sqlite.Row
-                        _row = _conn.execute("SELECT id FROM runs WHERE id = ? AND project_id = ?", (run_id, project_slug)).fetchone()
-                        if _row is not None:
-                            _kernel_run_id = str(_row["id"])
-                            _trow = _conn.execute("SELECT id FROM tasks WHERE run_id = ? AND project_id = ? ORDER BY run_ordinal ASC LIMIT 1", (run_id, project_slug)).fetchone()
-                            if _trow is not None:
-                                _kernel_task_id = str(_trow["id"])
+                _info = _kernel_run_info(project_slug, run_id, projects_root=_root)
+                if _info is not None:
+                    _kernel_run_id = str(_info["run_id"])
+                    if _info.get("task_id") is not None:
+                        _kernel_task_id = str(_info["task_id"])
             except Exception:
                 pass
             if _kernel_run_id is not None:

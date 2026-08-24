@@ -254,7 +254,17 @@ def compose_standard_bridge(
         owner_lock = DatabaseOwnerLock(database_path)
     except OwnerLockError as exc:
         raise ServiceUnavailableError(
-            "the database is already owned by another process"
+            "the canonical store is owned by another Astrid process. When "
+            "astrid serve is running, its bridge owns the store: use GET "
+            "/routes and its HTTP routes while it is running, or wait for a "
+            "clean shutdown. "
+            "Reads may retry after release. For writes, preserve the exact "
+            "payload and idempotency key, retry after release, and verify "
+            "state.",
+            details={
+                "reason": "store_owned",
+                "retryable": True,
+            },
         ) from exc
     writer: DatabaseWriter | None = None
     try:

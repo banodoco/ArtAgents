@@ -47,8 +47,12 @@ question belongs to, read the census first.
   exclusive-owner lock.
 - `python3 -m astrid doctor --json` is the read-only health check. It reports
   `schema_versions`, media paths, a SQLite quick-check, and foreign-key status
-  without repairing or rewriting data. A failing `schema_versions` check means
-  the database is newer or incompatible with this checkout.
+  without repairing or rewriting data. On a pristine root it returns
+  `state: "uninitialized"`, `ok: true`, and exit 0 with the create command;
+  after initialization, `state: "ready"` means all checks pass and
+  `state: "unhealthy"` means a real failure. A failing `schema_versions`
+  check on an existing root means the database is newer or incompatible with
+  this checkout.
 
 ## Start Here
 
@@ -65,28 +69,64 @@ python3 -m astrid tasks create --project demo --capability rendering.timeline_vi
 python3 -m astrid runs list --project demo --json
 ```
 
+`media import` accepts existing files and directories. Video/audio containers
+are strictly probed with `ffprobe` before import admission; a Git-LFS pointer
+or other undecodable `.mp4`/`.wav` returns a typed validation error with no
+media row, event, receipt, or managed bytes. If `ffprobe` is unavailable,
+install it from the ffmpeg package and retry. Generic files retain the
+extension-based import path.
+
 Product commands need no configuration file, credentials, or hosted service.
-`serve` is only needed when an HTTP editor client is used. `--json` is the
-stable machine surface: exactly one five-key envelope
-(`ok` / `data` / `error` / `receipt` / `idempotency_key`). Exit codes are
-stable: `0` success, `1` typed SDK error, `2` usage/parse error.
+`serve` is only needed when an HTTP editor client is used. Product and nested
+mount commands support `--json` as the stable machine surface: exactly one
+five-key envelope (`ok` / `data` / `error` / `receipt` / `idempotency_key`).
+`doctor --json` is the deliberate exception: it emits its diagnostic object
+(`state`, `checks`, `next_action`, `ok`), while `serve` and `backup` do not
+offer `--json`. Exit codes are stable: `0` success, `1` typed SDK error, `2`
+usage/parse error.
 
 ## Product families
 
 | Family | Verbs | Notes |
 | --- | --- | --- |
-| `projects` | `create`, `list`, `show`, `update`, `select` | `select` is a file-side preference only; the slug is immutable |
-| `timelines` | `create`, `list`, `show`, `save`, `archive`, `history`, `diff` | `save` is a whole-document CAS save (`--expected-version`) |
-| `media` | `import`, `list`, `show`, `verify`, `relocate`, `relate` | `verify`/`relocate` require `--realm`; `relate` has the frozen five-kind `--kind` |
+| `projects` | `create`, `list`, `show`, `update`, `select`, `current` | `select` sets a workspace/user routing preference; `current` reads it back; the slug is immutable |
+| `timelines` | `create`, `list`, `show`, `save`, `archive`, `unarchive`, `history`, `diff`, `visualize`, `render` | `list --include-archived` is the recovery read; `unarchive` is safe to repeat; `visualize` emits a run-owned evidence pack and `render` accepts a pinned canonical timeline |
+| `media` | `import`, `list`, `show`, `verify`, `relocate`, `relate` | `verify` checks every matching `--realm` location by default; use `--location-id` or `--locator` for one; `relocate` requires `--realm`; `relate` has the frozen five-kind `--kind` |
 | `tasks` | `create`, `list`, `show`, `cancel`, `retry`, `events` | `create` admits one immutable task (`--capability` + JSON `--spec`) |
 | `runs` | `list`, `show`, `cancel`, `retry-failed`, `events` | `retry-failed` is the batch-retry surface (all-failed-children or explicit `--task` subset) |
+
+`projects select` persists a file-side routing preference (workspace scope by
+default, or `--scope user`) without a database receipt. With
+`ASTRID_PROJECTS_ROOT` set and no explicit `--cwd`, the workspace preference is
+stored under that projects root, keeping disposable roots isolated; pass
+`--cwd` when you intentionally want another workspace boundary.
+`projects current`
+resolves workspace before user scope, verifies the selected ref against the
+kernel, and reports the selected project, canonical path, preference path,
+and supplying scope. Project-scoped CLI commands may omit `--project` to use
+that selection; an explicit `--project` always wins.
 
 Nested mounts (reachable only beneath their parent family, never top-level):
 
 ```bash
-python3 -m astrid media references ...      # create/update/archive/associate/link/set-primary/list/show
-python3 -m astrid timelines shots ...       # list/create/add/remove/reorder
+python3 -m astrid media references ...      # create/update/archive/unarchive/associate/link/set-primary/list/show
+python3 -m astrid timelines shots ...       # project-level reusable list/create/show/add/remove/reorder
 ```
+
+To return to paused work without remembered ids, discover archived timelines
+and references inclusively, then restore by timeline slug or an unambiguous
+project-local reference name:
+
+```bash
+python3 -m astrid timelines list --project demo --include-archived --json
+python3 -m astrid timelines unarchive primary --project demo --json
+python3 -m astrid media references list --project demo --include-archived --json
+python3 -m astrid media references unarchive "Character Name" --project demo --json
+```
+
+Both unarchive commands report `changed: false` when the item is already
+active. An ambiguous reference name fails closed with candidate ids; retry
+with one exact id from the inclusive list.
 
 ## Runs & tasks
 
@@ -113,10 +153,21 @@ python3 -m astrid runs cancel <run_id> --project demo --json
 python3 -m astrid runs retry-failed <run_id> --project demo --json
 ```
 
-A run with zero children (or all children terminal) never leaves `running`
-on its own; terminalize it through the SDK:
-`client.runs.close(project, run_id)` (the kernel `core.run.close`
-transition).
+A run with zero children (or a legacy all-terminal run) may require the
+coordinator-only SDK transition `client.runs.close(project, run_id)`. There
+is intentionally no operator CLI for `close`: operators should use
+`runs cancel` or `runs retry-failed`; coordinators use `close` only when they
+own the zero-child lifecycle. Terminal runs remain immutable and cannot be
+relabelled.
+
+For read-only event observation, `astrid.read_events(project, run_id,
+projects_root=..., verify=True)` prefers a run's optional local
+`events.jsonl` projection. When that file or run directory is absent — as is
+normal after a portable backup/restore — it falls back to the canonical
+SQLite `core.run` stream and returns `EventStreamRecord(source="kernel", ...)`.
+The fallback preserves event ids, order, kinds, and integrity hashes and
+fails closed with `CapabilityEventLogError` on a head, link, or hash mismatch;
+it never creates a projection or treats filesystem files as status authority.
 
 ## Operational families
 
@@ -126,6 +177,15 @@ python3 -m astrid doctor [--json]                                           # re
 python3 -m astrid backup create [--out PATH]                                # staged, validated backup
 python3 -m astrid backup restore <BACKUP_PATH>                              # journaled restore
 ```
+
+Backups are portable by default: readable `external_local` files are copied
+once per content hash, while every original locator remains in the backup
+manifest and restored media provenance. Restore rebases those locators to the
+verified backup-owned bytes inside the destination root atomically. If an
+external source is missing or changes while a backup is being created, the
+backup fails before publication; if a backup snapshot is missing or mutated,
+restore fails before touching the live root. Older backups without external
+snapshots restore their database but report unresolved external locators.
 
 ## The SDK is the pack surface
 
@@ -170,6 +230,15 @@ Typed facades exist for the most common surfaces: `astrid.generate.*`
 `astrid.renderer_main` / `astrid.RenderContext` (rendering), and
 `client.tasks` / `client.timelines` / `client.media` / … (the seven typed
 services). See [docs/reference/sdk.md](../../../../docs/reference/sdk.md).
+
+Rendering has two deliberately explicit contracts. `rendering.render` with
+`timeline` consumes a project-owned exported or pipeline JSON file; a value
+like `timeline="main"` is still a file path. Its `timeline_ref` input resolves
+a canonical kernel slug/UUID/ULID and optionally enforces `expected_version`;
+use `astrid timelines render <ref>` for the product CLI. Managed visualization
+likewise resolves the canonical kernel timeline and pins its actual stream
+head. Visualization's `timeline_source` remains the explicit legacy filesystem
+compatibility route.
 
 ### How capabilities execute
 
@@ -329,9 +398,36 @@ timeline + Remotion path.
 
 - `timeline.json` — defines tracks and clips. Schema: `@banodoco/timeline-schema`
   (see `remotion/node_modules/@banodoco/timeline-schema/typescript/src/schemas.ts`).
-  Top level: `{theme, theme_overrides?, tracks, clips}`. Each clip has
-  `id, at (seconds), track, clipType, asset?, hold? | from/to, text?, params?,
+  Top level: `{theme, theme_overrides?, tracks, clips, output?}`. Each clip has
+  `id, at (seconds), track, clipType?, asset?, hold? | from/to, text?, params?,
   effects?, x?/y?/width?/height?`.
+  Ordinary asset-backed clips may omit `clipType` or use the explicit
+  `media`, `video`, `image`, or `audio` spellings; Remotion treats all four as
+  built-in media, not effect ids. Structured text must use `clipType: "text"`.
+  `clip.effects` is only the fade envelope: either a numeric map such as
+  `{"fade_in": 0.2, "fade_out": 0.2}` or a list of objects containing only
+  `fade_in` / `fade_out`. It is not the reusable-element reference surface.
+  To use a registered visual element, make it the clip itself with
+  `clipType: "<effect-id>"` and optional `params: {...}`. Canonical managed
+  render rejects an unknown effect id before creating a run.
+- For a first visible render, use the canonical shape below: root `clips`, a
+  visual track, `output.resolution` as a string (for example `640x360`),
+  `output.fps`, and an `.mp4` `output.file`. A structured text payload is a
+  `clipType: "text"` clip; a clip with a `text` object but no text clip type is
+  rejected before rendering because it otherwise becomes an empty/black media
+  layer.
+
+```json
+{
+  "tracks": [{"id": "cards", "kind": "visual", "label": "Cards"}],
+  "clips": [{
+    "id": "title", "at": 0, "track": "cards", "clipType": "text",
+    "hold": 2,
+    "text": {"content": "HELLO ASTRID", "fontSize": 64, "color": "#ffffff", "align": "center"}
+  }],
+  "output": {"resolution": "640x360", "fps": 30, "file": "title.mp4"}
+}
+```
 - `assets.json` — optional media registry:
   `{"assets": {"<id>": {file?: <relative-or-absolute-path>, url?,
   content_sha256?, type?, resolution?, fps?, duration?}}}`. Include it when
@@ -375,6 +471,31 @@ result = sdk.invoke(
 For timelines with no media registry entries, omit `assets_registry`. The
 project-scoped render writes `hype.mp4` (plus its `.provenance.json`
 sidecar) into the run's output directory under `demo/runs/<run-id>/`.
+Output names must use the selected container suffix; the default H.264/AAC
+profile requires `.mp4`. The service checks this and the text-clip shape
+before creating a renderer workspace. `output.resolution` / `output.fps` are
+legacy timeline hints, not the encoder profile: Remotion renders its resolved
+theme canvas (1920x1080 at 30 fps when no canvas is configured). An explicit
+profile must match that authoritative canvas; set
+`theme_overrides.visual.canvas` when a different output size is intended.
+`--profile` is the flat RenderProfile v1 wire object; nested `video`/`audio`
+objects are invalid. A complete Remotion MP4 profile is:
+
+```json
+{"width":1920,"height":1080,"fps_rational":[30,1],"time_base":[1,90000],"container":"mp4","video_codec":"h264","video_profile":null,"video_level":null,"pixel_format":"yuv420p","audio_codec":"aac","audio_sample_rate":48000,"audio_channel_layout":"stereo","duration_tolerance":1}
+```
+
+The required flat fields are `width`, `height`, `fps_rational`, `time_base`,
+`container`, `video_codec`, `video_profile`, `video_level`, `pixel_format`, and
+`duration_tolerance`. The three `audio_*` fields must be supplied together or
+all omitted; Remotion always muxes AAC audio, so use all three as shown.
+Managed render validates missing, unknown, and invalid profile fields before
+run admission and returns null run/task ids on failure.
+Canonical create/save intentionally permit unfinished drafts. Managed render
+preflights the pinned document before run admission: `output` may be omitted,
+but when present it must contain `resolution`, `fps`, and `file`; timeline and
+registry schema errors or missing asset ids return typed validation errors
+with null run/task ids.
 Renderer authors use the typed
 `astrid.render` / `astrid.support` / `astrid.renderer_main` /
 `astrid.RenderContext` surface (see `docs/reference/sdk.md`).

@@ -20,14 +20,15 @@ python3 -m astrid doctor --json
 From any shell, run the read-only health check:
 
 ```bash
-python3 -m astrid doctor --json   # read-only health check
+python3 -m astrid doctor --json   # state=uninitialized on a pristine root
 ```
 
 Other useful zero-secret commands:
 
 ```bash
-python3 -m astrid doctor --json   # read-only health check
+python3 -m astrid doctor --json   # state=uninitialized on a pristine root
 python3 -m astrid projects list --json
+python3 -m astrid projects current --json  # inspect the selected project, if any
 ```
 
 There is no configuration file and no hosted service. The projects root is
@@ -35,11 +36,14 @@ There is no configuration file and no hosted service. The projects root is
 first product command lazily creates the kernel store at
 `$ASTRID_PROJECTS_ROOT/.astrid/astrid.sqlite3` — the SQLite database that the
 product families read and write. `doctor --json` is the first diagnostic on a
-clean machine. It reports
-`schema_versions`, media paths, SQLite quick-check, and foreign-key status
-without repairing or rewriting data. A failing `schema_versions` check means
-the database is newer or incompatible with this checkout; preserve the
-database, use a compatible checkout, or restore a known-good backup.
+clean machine. On a pristine root it reports `state: "uninitialized"` with
+`ok: true` and the create-project recovery; after initialization it reports
+`state: "ready"` when healthy and `state: "unhealthy"` only for a real
+failure. It also reports `schema_versions`, media paths, SQLite quick-check,
+and foreign-key status without repairing or rewriting data. A failing
+`schema_versions` check means the database is newer or incompatible with this
+checkout; preserve the database, use a compatible checkout, or restore a
+known-good backup.
 
 **Migrating legacy data.** Pre-kernel project trees under `projects/` are not
 read by the product families directly. Migration scripts live in
@@ -52,9 +56,35 @@ keep the local project and use the typed `unavailable` error plus the doctor
 report to decide whether to retry. No hosted dependency is needed for the
 SDK and CLI journeys.
 
+After creating a project, persist a workspace-local routing preference with
+`python3 -m astrid projects select <slug-or-id>`. Confirm it with
+`python3 -m astrid projects current --json`; the read-back reports the
+canonical project path and whether workspace or user scope supplied the
+selection. When `ASTRID_PROJECTS_ROOT` is set, the default workspace preference
+is stored inside that root, so separate disposable roots cannot overwrite one
+another's selection. Pass `--cwd` to intentionally bind a selection to another
+workspace. Project-scoped CLI commands may then omit `--project`, while an
+explicit `--project` always takes precedence.
+
 For the complete project, timeline, media, recovery, and failure journeys,
 continue with [CLI journeys](guides/cli-journeys.md). For renderer-specific
 diagnostics, see [Debugging](guides/debugging.md).
+
+### First visible timeline render
+
+When hand-authoring a timeline, start with root `clips`, a `visual` track,
+structured text marked explicitly as `clipType: "text"`, and an MP4 output:
+
+```json
+{"tracks":[{"id":"cards","kind":"visual","label":"Cards"}],
+ "clips":[{"id":"title","at":0,"track":"cards","clipType":"text","hold":2,
+   "text":{"content":"HELLO ASTRID","fontSize":64,"color":"#ffffff","align":"center"}}],
+ "output":{"resolution":"640x360","fps":30,"file":"title.mp4"}}
+```
+
+The renderer rejects a structured `text` clip without `clipType: "text"` and
+checks the default `.mp4` output suffix before starting a render, so these
+mistakes do not consume a failed attempt.
 
 ## Where to Go Next
 

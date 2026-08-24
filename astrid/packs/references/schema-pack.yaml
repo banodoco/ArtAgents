@@ -32,6 +32,7 @@ event_kinds:
   - reference.created
   - reference.updated
   - reference.archived
+  - reference.unarchived
   - reference.media_associated
   - reference.primary_changed
   - reference.linked
@@ -39,6 +40,7 @@ command_kinds:
   - reference.create
   - reference.update
   - reference.archive
+  - reference.unarchive
   - reference.associate
   - reference.set_primary
   - reference.link

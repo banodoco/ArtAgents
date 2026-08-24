@@ -20,12 +20,15 @@ cache location is consistent with other training-pack executors.
 # List cached assets (read-only, safe)
 import astrid.sdk as sdk
 result = sdk.invoke("training.asset_cache", inputs={"list": True})
+    kind="executor", project="demo",
 
 # Dry-run a prune of entries older than 30 days
 result = sdk.invoke("training.asset_cache", inputs={"prune_older_than": "30"}, dry_run=True)
+    kind="executor", project="demo",
 
 # Apply the prune (mutating — review dry-run output first)
 result = sdk.invoke("training.asset_cache", inputs={"prune_older_than": "30"})
+    kind="executor", project="demo",
 ```
 
 ## Inputs

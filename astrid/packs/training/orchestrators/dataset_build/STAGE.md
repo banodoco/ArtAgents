@@ -11,8 +11,8 @@ discarding completed work.
 import astrid.sdk as sdk
 result = sdk.invoke(
     "training.dataset_build",
-    inputs={"config": "<config.json-or-yaml>"},
-    out="runs/<dataset-run>",
+        kind="orchestrator", project="demo",
+    orchestrator_args=("--config", "<config.json-or-yaml>"),
 )
 ```
 

@@ -15,8 +15,9 @@ Dry-run through the SDK:
 import astrid.sdk as sdk
 result = sdk.invoke(
     "training.search_loras",
+    kind="executor",
+    project="demo",
     inputs={"base_model": "stabilityai/stable-diffusion-xl-base-1.0"},
-    out="runs/search-loras",
     dry_run=True,
 )
 ```
@@ -27,15 +28,16 @@ Run:
 import astrid.sdk as sdk
 result = sdk.invoke(
     "training.search_loras",
+    kind="executor",
+    project="demo",
     inputs={"base_model": "stabilityai/stable-diffusion-xl-base-1.0"},
-    out="runs/search-loras",
 )
 ```
 
-Direct run with additional options:
+Internal runner form with additional options (not a public entrypoint):
 
 ```bash
-python3 -m astrid.packs.training.executors.search_loras.run \
+ASTRID_INTERNAL_INVOCATION=1 python3 -m astrid.packs.training.executors.search_loras.run \
   --base-model stabilityai/stable-diffusion-xl-base-1.0 \
   --match "cinematic" \
   --limit 50 \
@@ -80,7 +82,7 @@ Hugging Face does not expose `base_model` as a complete tag group in
 extract their `base_model:*` tags:
 
 ```bash
-python3 -m astrid.packs.training.executors.search_loras.run \
+ASTRID_INTERNAL_INVOCATION=1 python3 -m astrid.packs.training.executors.search_loras.run \
   --list-base-models \
   --base-model-match z-image \
   --fetch-limit 1000 \

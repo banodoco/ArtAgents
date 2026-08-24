@@ -14,7 +14,9 @@ Verbs (exactly these six, one SDK call each):
 - ``import <path>`` — accepts **only files and folders**: a regular file
   routes to ``client.media.import_file`` and a directory routes to
   ``client.media.import_directory`` (each file commits its own receipt and
-  child key); any other path is a usage error before any SDK call;
+  child key); video/audio containers are strictly probed with ``ffprobe``
+  before any media/event/receipt write, and an undecodable container is a
+  typed validation failure; any other path is a usage error before any SDK call;
 - ``list`` — ``client.media.list`` (project-scoped, created_at then id);
 - ``show <ref>`` — ``client.media.show`` by exact project-scoped media id
   (aliases resolve through the repository; cross-project ids are
@@ -22,7 +24,9 @@ Verbs (exactly these six, one SDK call each):
 - ``verify <ref>`` — ``client.media.verify`` with a required ``--realm``
   (fingerprint-verified; missing/mutated bytes change zero rows);
 - ``relocate <ref>`` — ``client.media.relocate`` with a required
-  ``--realm`` and ``--locator`` (identity unchanged);
+  ``--realm`` and a realm-specific destination. ``external_local`` requires
+  ``--locator``; ``managed_local`` may take ``--source`` and rehydrate the
+  canonical digest path atomically (identity unchanged);
 - ``relate`` — ``client.media.relate`` with ``--from``/``--to``/``--kind``
   restricted to the frozen five media relation kinds (``derived_from``,
   ``variant_of``, ``uses_as_input``, ``mask_for``, ``audio_for``) plus
@@ -111,8 +115,9 @@ def _add_idempotency_key(subparser: argparse.ArgumentParser) -> None:
 def _add_project_arg(subparser: argparse.ArgumentParser) -> None:
     subparser.add_argument(
         "--project",
-        required=True,
-        help="Owning project id or slug.",
+        required=False,
+        default=None,
+        help="Owning project id or slug (defaults to the selected project).",
     )
 
 
@@ -162,22 +167,28 @@ def _cmd_show(parsed: argparse.Namespace) -> int:
 
 
 def _cmd_verify(parsed: argparse.Namespace) -> int:
-    result = parsed.client.media.verify(
-        parsed.project,
-        parsed.ref,
-        realm=parsed.realm,
-        idempotency_key=parsed.idempotency_key,
-    )
+    kwargs = {
+        "realm": parsed.realm,
+        "idempotency_key": parsed.idempotency_key,
+    }
+    if parsed.location_id is not None:
+        kwargs["location_id"] = parsed.location_id
+    if parsed.locator is not None:
+        kwargs["locator"] = parsed.locator
+    result = parsed.client.media.verify(parsed.project, parsed.ref, **kwargs)
     return print_result(result, as_json=parsed.json)
 
 
 def _cmd_relocate(parsed: argparse.Namespace) -> int:
+    kwargs = {
+        "realm": parsed.realm,
+        "locator": parsed.locator,
+        "idempotency_key": parsed.idempotency_key,
+    }
+    if parsed.source is not None:
+        kwargs["source"] = parsed.source
     result = parsed.client.media.relocate(
-        parsed.project,
-        parsed.ref,
-        realm=parsed.realm,
-        locator=parsed.locator,
-        idempotency_key=parsed.idempotency_key,
+        parsed.project, parsed.ref, **kwargs
     )
     return print_result(result, as_json=parsed.json)
 
@@ -208,7 +219,10 @@ def _configure_import(subparser: argparse.ArgumentParser) -> None:
     subparser.add_argument(
         "path",
         type=_existing_file_or_directory,
-        help="Existing file or directory to import (files/folders only).",
+        help=(
+            "Existing file or directory to import (files/folders only); "
+            "video/audio containers must be ffprobe-decodable."
+        ),
     )
     _add_realm_arg(subparser, required=False, default="managed_local")
     _add_idempotency_key(subparser)
@@ -230,22 +244,66 @@ def _configure_show(subparser: argparse.ArgumentParser) -> None:
 
 
 def _configure_verify(subparser: argparse.ArgumentParser) -> None:
+    subparser.description = (
+        "Verify every local location in the selected realm. Results are "
+        "deterministic and per-location; use one selector for a precise retry."
+    )
     _add_project_arg(subparser)
     subparser.add_argument("ref", help="Exact project-scoped media id.")
     _add_realm_arg(subparser, required=True, default=None)
+    selector = subparser.add_mutually_exclusive_group()
+    selector.add_argument(
+        "--location-id",
+        default=None,
+        help="Verify only this exact media-location id.",
+    )
+    selector.add_argument(
+        "--locator",
+        default=None,
+        help="Verify only this exact realm locator.",
+    )
     _add_idempotency_key(subparser)
     _add_json_flag(subparser)
     subparser.set_defaults(handler=_cmd_verify)
 
 
 def _configure_relocate(subparser: argparse.ArgumentParser) -> None:
+    subparser.description = (
+        "Replace a media location without changing its identity. For "
+        "external_local, pass an existing or future reference with --locator. "
+        "For managed_local recovery, pass the regular source file with "
+        "--source; Astrid verifies its SHA-256 and copies it to the canonical "
+        "managed path."
+    )
+    subparser.epilog = (
+        "Examples:\n"
+        "  external reference: media relocate M_ID --project demo "
+        "--realm external_local --locator /mnt/shots/shot.png\n"
+        "  managed recovery: media relocate M_ID --project demo "
+        "--realm managed_local --source /backup/shot.png"
+    )
     _add_project_arg(subparser)
     subparser.add_argument("ref", help="Exact project-scoped media id.")
     _add_realm_arg(subparser, required=True, default=None)
-    subparser.add_argument(
+    destination_or_source = subparser.add_mutually_exclusive_group(required=True)
+    destination_or_source.add_argument(
         "--locator",
-        required=True,
-        help="Replacement locator for the realm (identity unchanged).",
+        required=False,
+        default=None,
+        help=(
+            "Destination locator. Required for external_local. For "
+            "managed_local, omit it to use the canonical SHA-256 path."
+        ),
+    )
+    destination_or_source.add_argument(
+        "--source",
+        required=False,
+        default=None,
+        help=(
+            "Regular source file for managed_local rehydration. Its SHA-256 "
+            "must match the existing media identity; no database/file state "
+            "changes on mismatch."
+        ),
     )
     _add_idempotency_key(subparser)
     _add_json_flag(subparser)

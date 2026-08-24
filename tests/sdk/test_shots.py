@@ -349,6 +349,17 @@ def test_add_item_foreign_media_returns_validation_error(
     assert result.ok is False
     assert result.error is not None
     assert result.error.code == "validation_error"
+    assert result.error.details == {
+        "entity": "shot_media",
+        "reason": "foreign",
+        "media_id": media_id,
+        "project_id": project_b,
+        "shot_id": shot_id,
+        "recovery": (
+            "run `astrid media list --project <project>` to choose a media "
+            "id owned by the target project, then retry the shot command"
+        ),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -377,6 +388,8 @@ def test_remove_item_preserves_media_and_renormalizes(env: SimpleNamespace) -> N
     assert removed.receipt is not None
     # The removed item's media identity is carried by the receipt result.
     assert removed.data["item"]["media_id"] == media_b
+    assert removed.data["removed_item"]["id"] == item_b_id
+    assert removed.data["remaining_item_count"] == 1
     # Kernel media rows and bytes are preserved.
     assert _media_count(env) == media_before
 
@@ -446,6 +459,8 @@ def test_reorder_rejects_non_permutation_before_any_write(
         assert result.ok is False
         assert result.error is not None
         assert result.error.code == "validation_error"
+        assert result.error.details["shot_id"] == shot_id
+        assert "complete current item ids" in result.error.details["recovery"]
 
     after = env.service.show(project, shot_id).data["items"]
     assert [i["id"] for i in after] == [i["id"] for i in before]

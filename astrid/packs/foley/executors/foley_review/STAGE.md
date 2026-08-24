@@ -19,8 +19,8 @@ Run:
 import astrid.sdk as sdk
 result = sdk.invoke(
     "foley.foley_review",
+        kind="executor", project="demo",
     inputs={"manifest": "runs/foley_map/example/tiles.json"},
-    out="runs/foley_map/example/review.html",
 )
 ```
 

@@ -111,6 +111,7 @@ def discover_pack_metadata(
     local_pack_root = ensure_local_pack_for_elements(project_root=project_root)
 
     discovered: list[DiscoveredPack] = []
+    scanned_external_roots: set[Path] = set()
 
     def _add(pack: PackDefinition, source_kind: str) -> None:
         discovered.append(
@@ -133,6 +134,14 @@ def discover_pack_metadata(
         from astrid.core.pack import load_pack_manifest, pack_manifest_path
 
         resolved = _resolve_pack_root(raw_root)
+        # An SDK caller may pass a root explicitly while the same canonical
+        # root is also present in ASTRID_PACKS_PATH.  Scan it once, retaining
+        # the higher-priority explicit ``extra`` provenance instead of
+        # reporting the same pack twice (and potentially registering duplicate
+        # renderer/element candidates).
+        if resolved in scanned_external_roots:
+            return
+        scanned_external_roots.add(resolved)
         if not resolved.is_dir():
             return
         try:

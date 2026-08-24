@@ -45,7 +45,7 @@
   "isolation": {
     "binaries": [],
     "mode": "subprocess",
-    "network": false,
+    "network": true,
     "requirements": []
   },
   "keywords": [
@@ -58,7 +58,10 @@
   ],
   "kind": "built_in",
   "metadata": {
+    "env": ["OPENAI_API_KEY"],
     "output_result_manifest": true,
+    "required_permissions": ["network", "environment"],
+    "secrets_required": ["OPENAI_API_KEY"],
     "command_builder": "astrid.packs.video_editing.orchestrators.hype.run.build_pool_steps",
     "pipeline_step": "transcribe",
     "pipeline_step_order": 0,
@@ -75,11 +78,44 @@
       "path_template": "{out}/transcript.json",
       "type": "file",
       "artifact_type": "transcript"
+    },
+    {
+      "description": "Subtitle transcript with segment timestamps.",
+      "mode": "create_or_replace",
+      "name": "subtitle",
+      "path_template": "{out}/transcript.srt",
+      "type": "file",
+      "artifact_type": "subtitle"
+    },
+    {
+      "description": "Plain-text transcript.",
+      "mode": "create_or_replace",
+      "name": "transcript_text",
+      "path_template": "{out}/transcript.txt",
+      "type": "file",
+      "artifact_type": "transcript/text"
+    },
+    {
+      "description": "Chunk and silence-analysis metadata.",
+      "mode": "create_or_replace",
+      "name": "chunk_plan",
+      "path_template": "{out}/cache/chunks.json",
+      "type": "file",
+      "artifact_type": "metadata/transcript-chunks"
+    },
+    {
+      "description": "Universal result manifest.",
+      "mode": "create_or_replace",
+      "name": "manifest",
+      "path_template": "{out}/manifest.json",
+      "type": "file",
+      "artifact_type": "metadata/result-manifest"
     }
   ],
   "pipeline_requirements": [
     "source_audio"
   ],
+  "scoped_configs": ["credentials.openai"],
   "short_description": "Transcribe source audio to transcript.json via Whisper.",
   "version": "1.0"
 }

@@ -58,6 +58,56 @@ _OPEN_ENDED_RANGE_CHUNK_BYTES = 4 * 1024 * 1024
 _DIAGNOSTICS_ENABLED = os.environ.get("ASTRID_BRIDGE_DIAGNOSTICS", "0") != "0"
 
 
+def _route_schema(projects_root: Path) -> dict[str, Any]:
+    """Return the machine-readable discovery document for the bridge."""
+    database = str(projects_root / ".astrid" / "astrid.sqlite3")
+    return {
+        "version": 1,
+        "projects_root": str(projects_root),
+        "exclusive_ownership": {
+            "database": database,
+            "owner": "astrid serve",
+            "until": "shutdown",
+            "implication": (
+                "This bridge exclusively owns the project database until "
+                "shutdown; use the HTTP routes for reads and writes while it runs."
+            ),
+        },
+        "routes": [
+            {"method": "GET", "path": "/health"},
+            {"method": "GET", "path": "/routes"},
+            {"method": "GET", "path": "/projects"},
+            {"method": "GET", "path": "/projects/{project}/timelines"},
+            {"method": "GET", "path": "/projects/{project}/timelines/{timeline}"},
+            {"method": "POST", "path": "/projects/{project}/timelines/{timeline}/save"},
+            {
+                "method": "GET|HEAD",
+                "path": "/projects/{project}/timelines/{timeline}/assets/{registry_key}",
+            },
+        ],
+        "save": {
+            "method": "POST",
+            "path": "/projects/{project}/timelines/{timeline}/save",
+            "request": {
+                "config": "object",
+                "registry": "object",
+                "expected_version": "integer",
+            },
+            "response_version_field": "config_version",
+        },
+        "asset": {
+            "methods": ["GET", "HEAD"],
+            "path": "/projects/{project}/timelines/{timeline}/assets/{registry_key}",
+            "registry_path": "registry.assets.{registry_key}",
+            "key_semantics": (
+                "registry_key is the key under registry.assets; it is not "
+                "the entry's media_id"
+            ),
+            "range": "single HTTP byte range supported",
+        },
+    }
+
+
 def _classify_persisted_registry_locator(locator: str) -> str:
     """Classify a persisted-registry locator: ``http``, ``unsafe``, ``local``.
 
@@ -780,6 +830,10 @@ def make_local_bridge_handler(*, projects_root: Path):
             if parts == ["health"]:
                 status = self._bridge().health(str(projects_root))
                 self._send_json(200, status.to_dict())
+                return
+
+            if parts == ["routes"]:
+                self._send_json(200, _route_schema(projects_root))
                 return
 
             if parts == ["projects"]:

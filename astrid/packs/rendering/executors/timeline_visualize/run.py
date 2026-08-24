@@ -10,7 +10,9 @@ guard_canonical_entrypoint("rendering.timeline_visualize")
 import argparse
 from copy import deepcopy
 import hashlib
+import json
 import os
+import shutil
 import sys
 import tempfile
 from dataclasses import replace
@@ -83,9 +85,12 @@ from astrid.packs.rendering.executors.timeline_visualize.transcripts import (
     with_occurrence_ids,
 )
 from astrid.packs.rendering.executors.timeline_visualize.select import (
+    KernelTimeline,
     ManagedTimeline,
+    select_kernel_timelines,
     select_timeline,
 )
+from astrid.core.timeline.events.schema import TimelineActor, TimelineEvent, with_event_hash
 from astrid.packs.rendering.executors.timeline_visualize.thumbnails import (
     MAX_FRAMES_PER_PAGE,
     per_page_frame_budget,
@@ -96,6 +101,18 @@ from astrid.packs.rendering.executors.timeline_visualize.thumbnails import (
 
 _LAYOUTS = ("time-scaled", "linear")
 _FORMATS = frozenset({"png", "svg", "md"})
+_CROCKFORD32 = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+
+
+def _stable_kernel_event_ulid(seed: str) -> str:
+    """Return a deterministic schema-valid id for a private kernel projection."""
+
+    value = int.from_bytes(hashlib.sha256(seed.encode("utf-8")).digest()[:16], "big")
+    chars = ["0"] * 26
+    for index in range(25, -1, -1):
+        chars[index] = _CROCKFORD32[value & 31]
+        value >>= 5
+    return "".join(chars)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -104,7 +121,14 @@ def build_parser() -> argparse.ArgumentParser:
         description="Build a deterministic agent evidence pack from managed timeline event logs.",
     )
     parser.add_argument("--out", required=True, type=Path)
-    parser.add_argument("--project-slug", required=True)
+    parser.add_argument(
+        "--project-slug",
+        default=os.environ.get("ASTRID_PROJECT_SLUG"),
+        help=(
+            "Owning project slug. Defaults to the managed project attached by "
+            "the SDK/runner (ASTRID_PROJECT_SLUG)."
+        ),
+    )
     parser.add_argument("--timeline-source", action="append", type=Path, default=[])
     parser.add_argument("--timeline-slug")
     parser.add_argument("--all", action="store_true", dest="select_all")
@@ -124,7 +148,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--focus")
     parser.add_argument("--refresh-root", action="store_true")
     parser.add_argument("--layout", choices=StaticChoices((*_LAYOUTS, "both")), default="both")
-    parser.add_argument("--format", action="append", choices=StaticChoices((*sorted(_FORMATS), "all")))
+    parser.add_argument(
+        "--format",
+        action="append",
+        type=_format_argument,
+        metavar="FORMAT[,FORMAT...]",
+        help="Repeatable presentation format(s): png, svg, md, or all (default all).",
+    )
     parser.add_argument(
         "--filmstrip", choices=StaticChoices(("auto", "off", "assets", "rendered")), default="auto"
     )
@@ -162,6 +192,32 @@ def _parse_range(value: str) -> tuple[float, float]:
     if not separator or not start_raw or not end_raw:
         raise ValueError("range must be START..END")
     return _parse_time(start_raw), _parse_time(end_raw)
+
+
+def _format_argument(value: str) -> str:
+    """Validate one CLI format token while accepting comma-separated lists.
+
+    Discovery exposes the SDK field as plural ``formats`` while the runtime
+    command uses repeatable singular ``--format``.  Accepting both
+    ``--format png --format svg`` and the common ``--format png,svg`` spelling
+    keeps the two public forms semantically identical.
+    """
+
+    values = [part.strip().lower() for part in value.split(",") if part.strip()]
+    if not values:
+        raise argparse.ArgumentTypeError(
+            "format must name one or more of png, svg, md, or all"
+        )
+    invalid = sorted(set(values) - (_FORMATS | {"all"}))
+    if invalid:
+        raise argparse.ArgumentTypeError(
+            f"invalid format(s): {', '.join(invalid)}; choose png, svg, md, or all"
+        )
+    if "all" in values and len(values) > 1:
+        raise argparse.ArgumentTypeError(
+            "format 'all' cannot be combined with another format; omit the others"
+        )
+    return ",".join(values)
 
 
 def _validate_selectors(args: argparse.Namespace) -> None:
@@ -231,11 +287,27 @@ def _contained_timeline_sources(
     missing: list[str] = []
     for raw in sources:
         candidate = raw.expanduser().resolve()
-        if candidate.parent != timelines_root:
-            raise ValueError(
-                f"timeline_source escapes the project's direct timelines directory: {raw}"
+        if not candidate.is_dir() and not candidate.is_file():
+            missing.append(str(candidate))
+            continue
+        if candidate.parent == timelines_root:
+            candidate_dir = candidate
+        else:
+            candidate_dir = next(
+                (
+                    row.timeline_dir.resolve()
+                    for row in discovered
+                    if row.timeline_dir is not None
+                    and candidate.is_relative_to(row.timeline_dir.resolve())
+                ),
+                None,
             )
-        row = by_path.get(candidate)
+        if candidate_dir is None or candidate_dir.parent != timelines_root:
+            raise ValueError(
+                f"timeline_source must be a managed timeline directory or a file "
+                f"inside one under {timelines_root}: {raw}"
+            )
+        row = by_path.get(candidate_dir)
         if row is None:
             missing.append(str(candidate))
             continue
@@ -247,16 +319,124 @@ def _contained_timeline_sources(
     return [deduped[key] for key in sorted(deduped)], diagnostics
 
 
-def _select_timelines(args: argparse.Namespace, project_root: Path) -> list[ManagedTimeline]:
+def _materialize_kernel_timeline(
+    row: KernelTimeline,
+    *,
+    project_root: Path,
+    project_slug: str,
+    destination: Path,
+) -> ManagedTimeline:
+    """Project a kernel timeline row into the pack's private read boundary."""
+
+    destination.mkdir(parents=True, exist_ok=True)
+    timeline_ulid = row.timeline_ulid.upper()
+    config = dict(row.config)
+    if not isinstance(config.get("clips"), list) or not isinstance(config.get("tracks"), list):
+        raise ValueError(
+            f"kernel timeline {row.slug!r} at version {row.config_version} cannot be "
+            "visualized: canonical config must contain top-level tracks and clips arrays; "
+            "save a renderable timeline config and retry"
+        )
+    registry = row.registry.get("assets", {}) if isinstance(row.registry, Mapping) else {}
+    if not isinstance(registry, dict):
+        registry = {}
+    actor = TimelineActor(type="system", id="astrid.kernel", display="Astrid kernel")
+    timestamp = row.head_created_at
+    events: list[TimelineEvent] = []
+    for kind, payload in (
+        ("timeline.config_replaced", {"config": config, "source": "other"}),
+        ("timeline.asset_registry_replaced", {"registry": {"assets": registry}, "source": "other"}),
+    ):
+        event = TimelineEvent(
+            event_id=_stable_kernel_event_ulid(f"{row.head_event_id}:{kind}"),
+            timeline_id=row.timeline_id,
+            ts=timestamp,
+            actor=actor,
+            prev_hash=None,
+            hash=None,
+            kind=kind,
+            payload=payload,
+            expected_version=len(events),
+            source_backend="astrid.kernel",
+            source_timeline_id=row.timeline_id,
+            source_event_id=row.head_event_id,
+            source_version=row.config_version,
+            source_hash=row.head_hash,
+        )
+        event = with_event_hash(event, prev_hash=events[-1].hash if events else None)
+        events.append(event)
+    (destination / "assembly.identity.json").write_text(
+        json.dumps(
+            {
+                "backend": "astrid.kernel",
+                "created_at": timestamp,
+                "display": {
+                    "is_default": row.is_default,
+                    "name": row.name,
+                    "schema_version": 1,
+                    "slug": row.slug,
+                },
+                "schema_version": 1,
+                "timeline_id": row.timeline_id,
+                "timeline_ulid": timeline_ulid,
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    (destination / "display.json").write_text(
+        json.dumps(
+            {"is_default": row.is_default, "name": row.name, "schema_version": 1, "slug": row.slug},
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    (destination / "assembly.jsonl").write_text(
+        "\n".join(json.dumps(event.to_json_obj(), sort_keys=True, separators=(",", ":")) for event in events)
+        + "\n",
+        encoding="utf-8",
+    )
+    return ManagedTimeline(
+        timeline_dir=destination,
+        timeline_id=row.timeline_id,
+        timeline_ulid=timeline_ulid,
+        slug=row.slug,
+        is_default=row.is_default,
+        is_tombstoned=False,
+        kernel_head_version=row.config_version,
+        kernel_head_event_id=_stable_kernel_event_ulid(f"kernel:{row.head_event_id}"),
+        kernel_head_hash=row.head_hash,
+        kernel_source_event_id=row.head_event_id,
+    )
+
+
+def _select_timelines(
+    args: argparse.Namespace,
+    project_root: Path,
+    *,
+    kernel_materialization_root: Path | None = None,
+) -> list[ManagedTimeline]:
     if args.timeline_source:
         selected, diagnostics = _contained_timeline_sources(project_root, args.timeline_source)
     else:
-        selected, diagnostics = select_timeline(
+        kernel_rows, diagnostics = select_kernel_timelines(
             project_root,
+            project_slug=args.project_slug,
             slug=args.timeline_slug,
             all=args.select_all,
             default=not args.timeline_slug and not args.select_all,
         )
+        selected = []
+        if kernel_rows and kernel_materialization_root is not None:
+            selected = [
+                _materialize_kernel_timeline(
+                    row,
+                    project_root=project_root,
+                    project_slug=args.project_slug,
+                    destination=kernel_materialization_root / row.timeline_ulid.upper(),
+                )
+                for row in kernel_rows
+            ]
     if not selected:
         detail = "; ".join(diagnostics) or "no eligible managed timeline was selected"
         raise ValueError(detail)
@@ -371,7 +551,15 @@ def _pages_for(
 def _normalized_formats(raw: list[str] | None) -> frozenset[str]:
     if not raw or "all" in raw:
         return _FORMATS
-    return frozenset(raw)
+    values = {
+        part.strip().lower()
+        for token in raw
+        for part in str(token).split(",")
+        if part.strip()
+    }
+    if "all" in values:
+        return _FORMATS
+    return frozenset(values)
 
 
 def _rendered_expected_hash(
@@ -469,6 +657,11 @@ def _asset_filmstrips(
             )
         return filmstrips
     classified = classify_registry(snapshot.registry, project_root=project_root)
+    raw_assets = (
+        snapshot.registry.get("assets", {})
+        if isinstance(snapshot.registry, Mapping)
+        else {}
+    )
     filmstrips: dict[str, list[Path]] = {}
     for page in pages:
         refs = _page_asset_refs(page, model, identity_map)
@@ -494,6 +687,16 @@ def _asset_filmstrips(
             source = verified_source_path(fresh)
             if source is None:
                 continue
+            media_type: str | None = None
+            registry_entry = (
+                raw_assets.get(asset_key)
+                if isinstance(raw_assets, Mapping) and asset_key is not None
+                else None
+            )
+            if isinstance(registry_entry, Mapping):
+                raw_type = registry_entry.get("type")
+                if isinstance(raw_type, str) and raw_type.strip():
+                    media_type = raw_type.strip().lower().split("/", 1)[0]
             key = f"{page.page_id}::{ref}"
             filmstrips[key] = sample_filmstrip(
                 source,
@@ -501,6 +704,7 @@ def _asset_filmstrips(
                 n_frames=budget,
                 out_dir=sample_root,
                 page_id=f"{page.page_id}_{ref.replace('.', '_')}",
+                media_type=media_type,
                 integrity=fresh,
                 project_root=project_root,
             )
@@ -544,7 +748,7 @@ def _parent_action_index(
             "timelines",
             "visualize",
             "--from-view",
-            str(frozen.pack_root / "manifest.json"),
+            str(frozen.source_manifest or (frozen.pack_root / "manifest.json")),
             "--focus",
             parent_ref,
         ],
@@ -743,10 +947,25 @@ def _materialize_view(
                 if key in frozen_parent.ground_truth:
                     ground_truth[key] = deepcopy(frozen_parent.ground_truth[key])
             action_index = _parent_action_index(action_index, frozen_parent)
-            from_view = (
+            parent_manifest = frozen_parent.source_manifest or (
                 frozen_parent.pack_root / "manifest.json"
-            ).relative_to(project_root).as_posix()
+            )
+            try:
+                from_view = parent_manifest.relative_to(project_root).as_posix()
+            except ValueError:
+                from_view = str(parent_manifest)
             focus = args.focus
+        project_record = _read_mapping(project_root / "project.json") or {}
+        resolved_project: dict[str, str] = {"slug": args.project_slug}
+        project_id = project_record.get("project_id")
+        if isinstance(project_id, str) and project_id:
+            resolved_project["id"] = project_id
+        if args.timeline_source:
+            source_mode = "legacy"
+        elif args.from_view is not None or frozen_parent is not None:
+            source_mode = "frozen"
+        else:
+            source_mode = "kernel"
         return write_evidence_pack(
             out_root=pack_root,
             page_id_prefix="PG",
@@ -798,6 +1017,8 @@ def _materialize_view(
             filmstrips=filmstrips,
             from_view=from_view,
             focus=focus,
+            resolved_project=resolved_project,
+            source_mode=source_mode,
         )
 
 
@@ -963,6 +1184,23 @@ def _render_one(
         project_root=project_root,
         retries=2,
     )
+    if selected.kernel_head_version is not None:
+        snapshot = replace(
+            snapshot,
+            head_version=selected.kernel_head_version,
+            last_event_id=selected.kernel_head_event_id,
+            last_hash=selected.kernel_head_hash,
+            diagnostics=tuple(
+                dict.fromkeys(
+                    (
+                        *snapshot.diagnostics,
+                        "KERNEL_AUTHORITY: visualization snapshot is pinned to "
+                        f"stream version {selected.kernel_head_version}, event "
+                        f"{selected.kernel_source_event_id}, hash {selected.kernel_head_hash}",
+                    )
+                )
+            ),
+        )
     attachment, snapshot = _discover_snapshot_attachment(
         project_root=project_root,
         timeline_dir=selected.timeline_dir,
@@ -1178,6 +1416,11 @@ def _mark_run_metadata(out_root: Path, project_slug: str, timeline_ids: list[str
 def execute(argv: list[str] | None = None) -> dict[str, Any]:
     args = build_parser().parse_args(argv)
     _validate_selectors(args)
+    if not args.project_slug:
+        raise ValueError(
+            "project is required: pass --project-slug <slug>, attach "
+            "ASTRID_PROJECT_SLUG, or invoke the capability with project=<slug>"
+        )
     env_project = os.environ.get("ASTRID_PROJECT_SLUG")
     if env_project and env_project != args.project_slug:
         raise ValueError(
@@ -1254,7 +1497,12 @@ def execute(argv: list[str] | None = None) -> dict[str, Any]:
             "outputs": outputs,
         }
 
-    selected = _select_timelines(args, project_root)
+    kernel_materialization_root = out_root / ".kernel-timelines"
+    selected = _select_timelines(
+        args,
+        project_root,
+        kernel_materialization_root=kernel_materialization_root,
+    )
     timeline_ids = sorted({row.timeline_ulid for row in selected})
     _mark_run_metadata(out_root, args.project_slug, timeline_ids)
 
@@ -1294,6 +1542,7 @@ def execute(argv: list[str] | None = None) -> dict[str, Any]:
         "pages": [str(path) for path in pages],
         "file_hashes": file_hashes,
     }
+    shutil.rmtree(kernel_materialization_root, ignore_errors=True)
     return {
         "returncode": 0,
         "run_root": str(out_root),

@@ -37,13 +37,13 @@ Exactly one of `download_index` or `download_id` may be provided.
 import astrid.sdk as sdk
 result = sdk.invoke(
     "media.gif_search",
+        kind="executor", project="demo",
     inputs={
         "query": "dramatic zoom",
         "media_kind": "gif",
         "limit": "12",
         "rating": "pg-13",
     },
-    out="runs/gifs/dramatic-zoom",
 )
 ```
 

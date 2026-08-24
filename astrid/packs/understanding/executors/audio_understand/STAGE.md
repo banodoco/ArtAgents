@@ -34,8 +34,9 @@ OpenAI GPT Audio endpoint — no local model installation is required.
 import astrid.sdk as sdk
 result = sdk.invoke(
     "understanding.audio_understand",
+    kind="executor",
+    project="demo",
     inputs={"audio": "./clip.mp3"},
-    out="./out",
 )
 ```
 
@@ -45,8 +46,9 @@ With explicit model selection:
 import astrid.sdk as sdk
 result = sdk.invoke(
     "understanding.audio_understand",
+    kind="executor",
+    project="demo",
     inputs={"audio": "./clip.mp3", "model": "gpt-4o-audio-preview"},
-    out="./out",
 )
 ```
 
@@ -54,12 +56,13 @@ result = sdk.invoke(
 
 | Name  | Type | Required | Description                   |
 |-------|------|----------|-------------------------------|
-| audio | file | no       | Audio clip to inspect         |
+| audio | file | yes      | Audio clip to inspect         |
 
 ## Outputs
 
-JSON output written to stdout/stderr with audio analysis results. No sentinel
-output — this executor uses `cache.mode: none` and always runs when invoked.
+The project run contains `analysis.json` with the structured audio analysis
+and `manifest.json` with the universal result manifest. No sentinel output —
+this executor uses `cache.mode: none` and always runs when invoked.
 
 ## Pipeline position
 

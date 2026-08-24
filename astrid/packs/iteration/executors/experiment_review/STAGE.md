@@ -64,10 +64,10 @@ whether they come from Fal, OpenAI, ComfyUI, Discord, or local generators.
 import astrid.sdk as sdk
 result = sdk.invoke(
     "iteration.experiment_review",
+        kind="executor", project="demo",
     inputs={
         "review": "path/to/review.json",
         "runs_dir": "projects/my-project/runs",
     },
-    out="./out",
 )
 ```

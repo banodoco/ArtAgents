@@ -42,11 +42,13 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from astrid.core.foundation.atomic_io import write_json_atomic, write_text_atomic
-from astrid.core.foundation.project_paths import project_dir, project_json_path
-from astrid.core.preferences import set_default_project
-from astrid.core.project.project import PLAN_MD_SKELETON
-from astrid.core.project.schema import build_project
+from astrid.core.foundation.project_paths import project_dir
+from astrid.core.preferences import (
+    ConfigError,
+    resolve_default_project_info,
+    set_default_project,
+)
+from astrid.core.project.workspace import materialize_project_workspace
 from astrid.core.receipts.service import CommandReceipt, ReceiptService
 
 from astrid.core.repositories.projects import (
@@ -60,7 +62,7 @@ from astrid.sdk.contracts import (
     derive_stable_id,
     resolve_idempotency_key,
 )
-from astrid.sdk.exceptions import ServiceValidationError, map_error
+from astrid.sdk.exceptions import ServiceNotFoundError, ServiceValidationError, map_error
 from astrid.core.util.log_and_swallow import swallowing
 
 __all__ = ["ProjectsService"]
@@ -92,16 +94,12 @@ def _materialize_workspace(
     ``plan.md`` may carry human edits and ``project.json`` may carry fields
     enriched by other flows (e.g. ``default_timeline_id``).
     """
-    project_root = project_dir(slug, root=projects_root)
-    project_root.mkdir(parents=True, exist_ok=True)
-    plan_path = project_root / "plan.md"
-    if not plan_path.exists():
-        write_text_atomic(plan_path, PLAN_MD_SKELETON.format(slug=slug))
-    binding_path = project_json_path(slug, root=projects_root)
-    if not binding_path.exists():
-        payload = build_project(slug, name=name, project_id=project_id)
-        payload["kernel_authority"] = True
-        write_json_atomic(binding_path, payload)
+    materialize_project_workspace(
+        slug=slug,
+        name=name,
+        project_id=project_id,
+        projects_root=projects_root,
+    )
 
 
 class ProjectsService:
@@ -191,7 +189,7 @@ class ProjectsService:
                 projects_root=self._projects_root,
             )
         return DomainResult.success(
-            model.to_dict(),
+            self._model_dict(model),
             receipt=self._committed_receipt(model.id, key),
             idempotency_key=key,
         )
@@ -199,12 +197,20 @@ class ProjectsService:
     # -- list --------------------------------------------------------------
 
     def list(self) -> DomainResult[list[dict[str, str]]]:
-        """Return every project (slug ascending) as ``{slug, name}`` rows."""
+        """Return every project with its canonical filesystem path."""
         try:
             rows = self._projects.list(self._writer)
         except Exception as exc:  # noqa: BLE001 - centralized bounded mapping
             return DomainResult.failure(map_error(exc))
-        return DomainResult.success([row.to_dict() for row in rows])
+        return DomainResult.success(
+            [
+                {
+                    **row.to_dict(),
+                    "path": str(project_dir(row.slug, root=self._projects_root).resolve()),
+                }
+                for row in rows
+            ]
+        )
 
     # -- show --------------------------------------------------------------
 
@@ -220,7 +226,105 @@ class ProjectsService:
             model = self._projects.show(self._writer, project_id)
         except Exception as exc:  # noqa: BLE001 - centralized bounded mapping
             return DomainResult.failure(map_error(exc))
-        return DomainResult.success(model.to_dict())
+        return DomainResult.success(self._model_dict(model))
+
+    # -- current -----------------------------------------------------------
+
+    def current(
+        self, *, cwd: str | Path | None = None
+    ) -> DomainResult[dict[str, Any]]:
+        """Read the selected project and the preference scope that supplied it.
+
+        Workspace selection wins over user selection. The preference is only
+        a routing hint; the project is resolved against the kernel before the
+        successful read is returned, so stale selections fail closed.
+        """
+        selection: dict[str, str] | None = None
+        try:
+            selection = resolve_default_project_info(cwd)
+            if selection is None:
+                raise ServiceValidationError(
+                    "no current project is selected; select one before routing project-scoped commands"
+                )
+            project_id = self._projects.resolve(self._writer, selection["ref"])
+            model = self._projects.show(self._writer, project_id)
+        except ServiceValidationError as exc:
+            return DomainResult.failure(
+                map_error(
+                    exc
+                    if getattr(exc, "details", None)
+                    else ServiceValidationError(
+                        str(exc),
+                        details={
+                            "field": "project",
+                            "reason": "no_current_project",
+                            "recovery": "run `astrid projects select <slug-or-id>`",
+                        },
+                    )
+                )
+            )
+        except ConfigError as exc:
+            details = {
+                "field": "project",
+                "reason": "invalid_selection_preference",
+                "recovery": "repair or remove the malformed preference, then run `astrid projects select <slug-or-id>`",
+            }
+            if exc.scope is not None:
+                details["scope"] = exc.scope
+            if exc.path is not None:
+                details["path"] = exc.path
+            return DomainResult.failure(
+                map_error(
+                    ServiceValidationError(
+                        "the current project preference is invalid",
+                        details=details,
+                    )
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 - stale preference gets context
+            if selection is not None and getattr(exc, "project_id", None):
+                preference_path = selection.get("path")
+                scope = selection.get("scope")
+                reselect = "astrid projects select <slug-or-id>"
+                if scope in {"workspace", "user"}:
+                    reselect += f" --scope {scope}"
+                if scope == "workspace" and preference_path:
+                    # workspace_config_path(cwd) is the explicit workspace
+                    # config, or ASTRID_PROJECTS_ROOT/.astrid/config.json
+                    # when the caller isolates a projects root; include the
+                    # exact workspace when the stale preference came from
+                    # another root/shell location.
+                    workspace_dir = Path(preference_path).parent.parent
+                    reselect += f" --cwd {workspace_dir}"
+                return DomainResult.failure(
+                    map_error(
+                        ServiceNotFoundError(
+                            "the selected project no longer exists in this projects root",
+                            details={
+                                "entity": "project",
+                                "ref": selection["ref"],
+                                "scope": scope,
+                                "preference_path": preference_path,
+                                "reason": "stale_selection",
+                                "recovery": (
+                                    "run `astrid projects list --json`, then run "
+                                    f"`{reselect}` with a listed project"
+                                ),
+                            },
+                        )
+                    )
+                )
+            return DomainResult.failure(map_error(exc))
+        return DomainResult.success(
+            {
+                "project": self._model_dict(model),
+                "selection": {
+                    "ref": selection["ref"],
+                    "scope": selection["scope"],
+                    "path": selection.get("path"),
+                },
+            }
+        )
 
     # -- update ------------------------------------------------------------
 
@@ -262,7 +366,7 @@ class ProjectsService:
         except Exception as exc:  # noqa: BLE001 - centralized bounded mapping
             return DomainResult.failure(map_error(exc), idempotency_key=key)
         return DomainResult.success(
-            model.to_dict(),
+            self._model_dict(model),
             receipt=self._committed_receipt(project_id, key),
             idempotency_key=key,
         )
@@ -297,10 +401,19 @@ class ProjectsService:
         try:
             project_id = self._projects.resolve(self._writer, ref)
             model = self._projects.show(self._writer, project_id)
-            set_default_project(model.slug, scope=scope, cwd=cwd)
+            preference_path = set_default_project(model.slug, scope=scope, cwd=cwd)
         except Exception as exc:  # noqa: BLE001 - centralized bounded mapping
             return DomainResult.failure(map_error(exc))
-        return DomainResult.success(model.to_dict())
+        return DomainResult.success(
+            {
+                "project": self._model_dict(model),
+                "selection": {
+                    "ref": model.slug,
+                    "scope": scope,
+                    "path": str(preference_path.resolve()),
+                },
+            }
+        )
 
     # -- private helpers ---------------------------------------------------
 
@@ -329,3 +442,10 @@ class ProjectsService:
             return self._receipts.lookup_committed(
                 conn, project_id=project_id, idempotency_key=idempotency_key
             )
+
+    def _model_dict(self, model: Any) -> dict[str, Any]:
+        """Decorate a project read model with its canonical workspace path."""
+        return {
+            **model.to_dict(),
+            "path": str(project_dir(model.slug, root=self._projects_root).resolve()),
+        }

@@ -10,14 +10,40 @@ and returns a universal result manifest for ExecutionService re-validation.
 from __future__ import annotations
 
 import os
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext, redirect_stderr, redirect_stdout
+from io import StringIO
 from pathlib import Path
 from typing import Any, Iterator, Mapping
 
+from astrid.core.audit.util import SECRET_VALUE_RE
 from astrid.core._shared.result_manifest import validate_result_manifest
 from astrid.core.env_vars import ASTRID_INTERNAL_INVOCATION
+from astrid.core.env_vars import ASTRID_PACKS_PATH
+from astrid.core.env_vars import ASTRID_PROJECTS_ROOT
+from astrid.core.execution.executor import runner as executor_runner
 from astrid.core.io.media_import import prepare_media_file
 from astrid.core.project.run import discover_manifest_path, load_manifest_output_artifacts
+
+
+def _failure_log_detail(out_dir: Path) -> str:
+    """Return a bounded, secret-scrubbed tail from child runtime logs."""
+    log_roots = [out_dir / "logs", out_dir.parent / "logs"]
+    chunks: list[str] = []
+    paths = sorted({path for root in log_roots if root.is_dir() for path in root.rglob("*.log")})
+    for path in paths:
+        try:
+            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            continue
+        if not lines:
+            continue
+        tail = "\n".join(lines[-12:])
+        tail = SECRET_VALUE_RE.sub("<redacted>", tail)
+        for key, value in os.environ.items():
+            if value and any(token in key.upper() for token in ("KEY", "TOKEN", "SECRET", "PASSWORD")):
+                tail = tail.replace(value, "<redacted>")
+        chunks.append(f"{path.name}: {tail}")
+    return "\n".join(chunks)[:3500]
 
 
 @contextmanager
@@ -31,6 +57,39 @@ def _scoped_env(key: str, value: str) -> Iterator[None]:
             os.environ.pop(key, None)
         else:
             os.environ[key] = prev
+
+
+@contextmanager
+def _scoped_pack_roots(extra_pack_roots: Any) -> Iterator[None]:
+    """Expose invocation-selected pack roots to nested pack runtimes.
+
+    Discovery is intentionally allowed to inspect ``ASTRID_PACKS_PATH`` while
+    a task is being admitted, but the child-process policy must also carry the
+    same scope into the renderer.  Keep the overlay process-local and restore
+    the caller's environment even when a renderer fails.
+    """
+    roots = tuple(
+        str(Path(root).expanduser().resolve())
+        for root in (extra_pack_roots if isinstance(extra_pack_roots, (list, tuple)) else ())
+        if isinstance(root, (str, os.PathLike)) and str(root)
+    )
+    if not roots:
+        yield
+        return
+    previous = os.environ.get(ASTRID_PACKS_PATH)
+    existing = tuple(item for item in (previous or "").split(os.pathsep) if item)
+    merged: list[str] = []
+    for root in (*roots, *existing):
+        if root not in merged:
+            merged.append(root)
+    os.environ[ASTRID_PACKS_PATH] = os.pathsep.join(merged)
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop(ASTRID_PACKS_PATH, None)
+        else:
+            os.environ[ASTRID_PACKS_PATH] = previous
 
 
 class CapabilityTaskHandler:
@@ -64,13 +123,26 @@ class CapabilityTaskHandler:
             request_inputs = dict(spec.get("inputs") or spec.get("request_inputs") or {})
             request_outputs = dict(spec.get("outputs") or {})
             if not request_inputs and spec:
-                reserved = {"capability_id", "capability_kind", "inputs", "outputs", "project", "kind", "request"}
+                reserved = {"capability_id", "capability_kind", "inputs", "outputs", "project", "kind", "request", "extra_pack_roots"}
                 if not any(k in spec for k in reserved):
                     request_inputs = dict(spec)
                 req_env = spec.get("request")
                 if isinstance(req_env, Mapping):
                     request_inputs = dict(req_env.get("inputs") or request_inputs)
                     request_outputs = dict(req_env.get("outputs") or request_outputs)
+        # The immutable invocation spec retains the caller's requested output
+        # path.  A retry must not hand that path back to a pack runner: the
+        # runner would bypass the staging/completion fence and write a
+        # post-admission artifact directly into the project.  Preserve each
+        # declared output's filename while relocating it under this attempt's
+        # private staging directory.
+        staged_outputs: dict[str, Any] = {}
+        for name, value in request_outputs.items():
+            if isinstance(value, (str, os.PathLike)) and str(value):
+                staged_outputs[str(name)] = str(out_dir / Path(value).name)
+            else:
+                staged_outputs[str(name)] = value
+        request_outputs = staged_outputs
         project = None
         if isinstance(spec, Mapping):
             if spec.get("project") is not None:
@@ -78,15 +150,34 @@ class CapabilityTaskHandler:
             elif isinstance(spec.get("request"), Mapping):
                 project = spec.get("request", {}).get("project")
 
+        extra_pack_roots = (
+            spec.get("extra_pack_roots", ())
+            if isinstance(spec, Mapping)
+            else ()
+        )
+
         # Generic single-task admission: no ghost fan-out. All capabilities
         # (executor or orchestrator) execute via their real runner under
         # ASTRID_INTERNAL_INVOCATION=1 (staging-only, kernel-owned ledger).
-        with _scoped_env(ASTRID_INTERNAL_INVOCATION, "1"):
+        root_scope = (
+            _scoped_env(ASTRID_PROJECTS_ROOT, str(self._projects_root))
+            if self._projects_root is not None
+            else nullcontext()
+        )
+        with _scoped_pack_roots(extra_pack_roots), _scoped_env(ASTRID_INTERNAL_INVOCATION, "1"), root_scope:
             if self._kind == "executor":
 
-                req = ExecutorRunRequest(
+                req = executor_runner.ExecutorRunRequest(
                     executor_id=self._capability_id,
-                    out=None if project is not None else out_dir,
+                    # Retries must be fenced to the kernel-owned staging
+                    # directory even for project-scoped requests.  The
+                    # original invocation may have written to its requested
+                    # output, but a retry cannot publish into that path until
+                    # the completion fence commits the staged artifact.
+                    # ``project_was_auto_resolved`` below keeps this internal
+                    # staging ``out`` from triggering the public
+                    # project/out validation.
+                    out=out_dir,
                     project=project,
                     inputs=dict(request_inputs),
                     outputs=dict(request_outputs),
@@ -96,21 +187,42 @@ class CapabilityTaskHandler:
                     python_exec=None,
                     verbose=False,
                     execution_mode="in_process",
+                    project_was_auto_resolved=True,
                     argv=(),
                     invocation=self._invocation,
                     projects_root=self._projects_root,
+                    run_root=staging_dir,
                 )
-                result = run_executor(req, None)
+                child_stdout = StringIO()
+                child_stderr = StringIO()
+                # Capability entrypoints retain a useful direct-CLI stdout
+                # contract (for example, printing a rendered path).  When
+                # invoked in-process, however, stdout belongs to the outer
+                # SDK/product CLI and must remain a single machine-readable
+                # envelope.  Capture both child streams at this boundary;
+                # artifacts are discovered from the staging contract below.
+                with redirect_stdout(child_stdout), redirect_stderr(child_stderr):
+                    result = executor_runner.run_executor(req, None)
                 ok = bool(getattr(result, "ok", False))
                 if not ok:
                     msg = getattr(result, "payload", {}) or {}
+                    child_streams = []
+                    if child_stdout.getvalue().strip():
+                        child_streams.append(f"stdout: {child_stdout.getvalue().strip()}")
+                    if child_stderr.getvalue().strip():
+                        child_streams.append(f"stderr: {child_stderr.getvalue().strip()}")
+                    log_detail = "\n".join(
+                        part for part in (*child_streams, _failure_log_detail(out_dir)) if part
+                    )[:3500]
+                    if log_detail:
+                        msg = {**dict(msg), "child_logs": log_detail}
                     raise RuntimeError(f"executor {self._capability_id!r} failed: {msg}")
             else:
                 from astrid.core.execution.orchestrator.runner import OrchestratorRunRequest, run_orchestrator  # noqa: E402
 
                 req = OrchestratorRunRequest(
                     orchestrator_id=self._capability_id,
-                    out=None if project is not None else out_dir,
+                    out=out_dir,
                     project=project,
                     inputs=dict(request_inputs),
                     outputs=dict(request_outputs),
@@ -120,6 +232,7 @@ class CapabilityTaskHandler:
                     python_exec=None,
                     verbose=False,
                     execution_mode="in_process",
+                    project_was_auto_resolved=True,
                     invocation=self._invocation,
                     projects_root=self._projects_root,
                 )
@@ -145,14 +258,28 @@ class CapabilityTaskHandler:
                     if isinstance(raw, str) and raw:
                         # art path is relative to manifest dir; resolve to staging rel
                         cand = (Path(manifest_path).parent / raw).resolve()
+                        if cand.name.endswith(".lock"):
+                            continue
                         try:
                             rel = cand.relative_to(staging_dir.resolve()).as_posix()
                         except ValueError:
                             rel = raw
                         rels.append(rel)
+                # A visualization pack's hash ledger cannot list itself in
+                # manifest.outputs without creating a hash cycle, but frozen
+                # navigation needs that ledger beside the durable manifest.
+                # Publish it as a secondary kernel output explicitly.
+                if self._capability_id == "rendering.timeline_visualize":
+                    pack_hashes = Path(manifest_path).parent / "pack-hashes.json"
+                    if pack_hashes.is_file():
+                        rels.append(
+                            pack_hashes.resolve()
+                            .relative_to(staging_dir.resolve())
+                            .as_posix()
+                        )
             if not rels:
                 for p in sorted(out_dir.rglob("*")):
-                    if p.is_file():
+                    if p.is_file() and not p.name.endswith(".lock"):
                         try:
                             rels.append(p.resolve().relative_to(staging_dir.resolve()).as_posix())
                         except ValueError:
@@ -174,7 +301,7 @@ class CapabilityTaskHandler:
         else:
             search_root = out_dir if any(out_dir.iterdir()) else staging_dir
             for p in sorted(search_root.rglob("*")):
-                if p.is_file():
+                if p.is_file() and not p.name.endswith(".lock"):
                     try:
                         rels.append(p.resolve().relative_to(staging_dir.resolve()).as_posix())
                     except ValueError:

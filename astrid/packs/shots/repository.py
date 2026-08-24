@@ -206,10 +206,18 @@ class ShotMediaError(ShotRepositoryError):
     (the media row belongs to another project). Rejected before any write.
     """
 
-    def __init__(self, *, media_id: str, project_id: str, detail: str) -> None:
+    def __init__(
+        self,
+        *,
+        media_id: str,
+        project_id: str,
+        detail: str,
+        shot_id: str | None = None,
+    ) -> None:
         self.media_id: str = media_id
         self.project_id: str = project_id
         self.detail: str = detail
+        self.shot_id: str | None = shot_id
         super().__init__(
             f"shot media {media_id!r} is {detail} for project "
             f"{project_id!r}"
@@ -376,7 +384,9 @@ class ShotItemMutationReadModel:
     facts (for removal the preserved ``media_id``/``source_frame``/
     ``metadata``), ``item_ids`` the shot's ordered item ids **after** the
     mutation (stable ``sort_key``/``id`` order), and ``event_head_seq`` the
-    shot stream head after the mutation's event.
+    shot stream head after the mutation's event. Removal responses additionally
+    expose ``removed_item`` and ``remaining_item_count`` so the legacy ``item``
+    field cannot be mistaken for current shot membership.
     """
 
     shot_id: str
@@ -384,16 +394,23 @@ class ShotItemMutationReadModel:
     item: ShotItemReadModel
     item_ids: tuple[str, ...]
     event_head_seq: int
+    removed_item: ShotItemReadModel | None = None
+    remaining_item_count: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Return the JSON-safe dict persisted as the receipt result."""
-        return {
+        result = {
             "shot_id": self.shot_id,
             "project_id": self.project_id,
             "item": self.item.to_dict(),
             "item_ids": list(self.item_ids),
             "event_head_seq": self.event_head_seq,
         }
+        if self.removed_item is not None:
+            result["removed_item"] = self.removed_item.to_dict()
+        if self.remaining_item_count is not None:
+            result["remaining_item_count"] = self.remaining_item_count
+        return result
 
     @classmethod
     def from_mapping(
@@ -408,6 +425,16 @@ class ShotItemMutationReadModel:
                 str(item_id) for item_id in (value.get("item_ids") or [])
             ),
             event_head_seq=int(value["event_head_seq"]),
+            removed_item=(
+                ShotItemReadModel.from_mapping(value["removed_item"])
+                if value.get("removed_item") is not None
+                else None
+            ),
+            remaining_item_count=(
+                int(value["remaining_item_count"])
+                if value.get("remaining_item_count") is not None
+                else None
+            ),
         )
 
 
@@ -862,11 +889,17 @@ class ShotRepository:
         )
         if media_row is None:
             raise ShotMediaError(
-                media_id=media_id, project_id=project_id, detail="missing"
+                media_id=media_id,
+                project_id=project_id,
+                detail="missing",
+                shot_id=shot_id,
             )
         if str(media_row["project_id"]) != project_id:
             raise ShotMediaError(
-                media_id=media_id, project_id=project_id, detail="foreign"
+                media_id=media_id,
+                project_id=project_id,
+                detail="foreign",
+                shot_id=shot_id,
             )
 
         # Unique item identity before any write.
@@ -1177,6 +1210,8 @@ class ShotRepository:
             item=removed,
             item_ids=tuple(remaining_ids),
             event_head_seq=append.stream_seq,
+            removed_item=removed,
+            remaining_item_count=len(remaining_ids),
         )
         self._receipts.record(
             uow,

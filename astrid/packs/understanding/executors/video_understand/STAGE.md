@@ -20,8 +20,8 @@ identification, and the interplay between visual and auditory content.
 import astrid.sdk as sdk
 result = sdk.invoke(
     "understanding.video_understand",
+        kind="executor", project="demo",
     inputs={"video": "./source.mp4"},
-    out="./out",
 )
 ```
 

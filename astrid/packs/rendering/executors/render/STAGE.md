@@ -4,7 +4,8 @@
 **Status**: implemented  
 **Pipeline step**: 12 (terminal)
 
-Renders a hype timeline into `hype.mp4` through the backend-neutral
+Renders a hype timeline into opaque `hype.mp4` (or an explicitly
+alpha-stamped layer into transparent ProRes 4444 `.mov`) through the backend-neutral
 `RenderService`. This executor is the stable facade: it adapts CLI inputs into
 a protocol-v1 request while the service resolves a qualified renderer or
 planner, validates support and artifacts, performs explicit finalization when
@@ -21,6 +22,15 @@ Normal Astrid usage goes through the SDK (`astrid.sdk.invoke(...)`). The
 direct `run.py` entrypoint is a lower-level debug surface for reproducing
 runner behavior outside the Astrid executor wrapper.
 
+`rendering.render` has two explicit, mutually exclusive modes. `timeline`
+names an exported or pipeline-produced JSON file owned by the project; values
+such as `timeline="main"` remain file paths and never gain implicit canonical
+meaning. `timeline_ref` names a managed kernel slug, UUID, or ULID and may be
+paired with `expected_version`. The managed mode resolves and pins the stream
+head before admission, materializes immutable private renderer inputs, and
+stamps the canonical ID, version, tail hash, and content hashes in provenance.
+The product CLI exposes that mode as `astrid timelines render <ref>`.
+
 ## Quick-start
 
 Render a timeline with no external media registry:
@@ -29,8 +39,9 @@ Render a timeline with no external media registry:
 import astrid.sdk as sdk
 result = sdk.invoke(
     "rendering.render",
+    kind="executor",
+    project="demo",
     inputs={"timeline": "./out/hype.timeline.json"},
-    out="./out",
 )
 ```
 
@@ -41,8 +52,9 @@ Render a timeline with the optional media asset registry produced by
 import astrid.sdk as sdk
 result = sdk.invoke(
     "rendering.render",
+    kind="executor",
+    project="demo",
     inputs={"timeline": "./out/hype.timeline.json", "assets_registry": "./out/hype.assets.json"},
-    out="./out",
 )
 ```
 
@@ -52,30 +64,48 @@ With a custom theme and strict qualified renderer:
 import astrid.sdk as sdk
 result = sdk.invoke(
     "rendering.render",
+    kind="executor",
+    project="demo",
     inputs={
         "timeline": "./out/hype.timeline.json",
         "assets_registry": "./out/hype.assets.json",
         "theme": "./themes/my-theme",
         "backend": "rendering.remotion",
     },
-    out="./out",
 )
 ```
 
 The SDK invocation writes `./out/hype.mp4` and
 `./out/hype.mp4.provenance.json`.
 
+Render the current canonical kernel timeline, failing before admission if the
+caller has observed a different version:
+
+```python
+result = sdk.invoke(
+    "rendering.render",
+    kind="executor",
+    project="demo",
+    inputs={"timeline_ref": "main", "expected_version": 4},
+)
+```
+
+The equivalent product command is
+`astrid timelines render main --project demo --expected-version 4`.
+
 ## Inputs
 
 | Name            | Type   | Required | Description |
 |-----------------|--------|----------|-------------|
-| timeline        | file   | yes      | Hype timeline JSON. Pass as the `timeline` input. |
+| timeline        | file   | conditional | Explicit project-owned Hype timeline JSON; mutually exclusive with `timeline_ref`. |
+| timeline_ref    | string | conditional | Canonical kernel slug, UUID, or ULID; mutually exclusive with `timeline`. |
+| expected_version | integer | no | Positive stream-head CAS pin; valid only with `timeline_ref`. |
 | assets_registry | file   | no       | Optional Hype media asset registry JSON. Pass as the `assets_registry` input when the timeline references media assets. If omitted, the runner supplies an empty registry. |
 | theme           | file   | no       | Optional theme configuration. |
 | engine          | string | no       | Compatibility selector. Accepts legacy `remotion`, `ffmpeg`, `hybrid`, or a qualified renderer id. Legacy `remotion` preserves support-based FFmpeg auto-routing; `hybrid` selects `rendering.legacy_hybrid`. Do not combine with `backend`. |
 | backend         | string | no       | Neutral selector synonym. Prefer a qualified id such as `rendering.remotion` for strict renderer selection. Do not combine with `engine`. |
 | backend_config  | JSON   | no       | Object keyed by qualified implementation id. The service forwards only the selected implementation's namespace. |
-| output_name     | string | no       | Plain `.mp4` basename; defaults to `hype.mp4`. The video and sidecar outputs use this value. |
+| output_name     | string | no       | Plain basename; defaults to `hype.mp4`. `.mov` is admitted only when the timeline has the exact `metadata.astrid_layer.alpha: true` stamp, and an explicit profile must declare MOV/ProRes/`yuva444p12le` plus PCM S16LE/48 kHz/stereo. The video and sidecar outputs use this value. |
 | keep_previous_renders | boolean | no | Preserve prior provenance-linked sibling render outputs. |
 
 Qualified renderer selection fails closed when that implementation reports the
@@ -94,14 +124,30 @@ that tries supported FFmpeg media rendering before Remotion.
 
 The shared render-host asset layer resolves local paths relative to the asset
 registry, enforces project containment where a project is known, and stages
-local/cached files into one invocation-owned directory. Remote URLs with byte
-range support stream directly; other URLs are cached, optionally hash-checked,
-and staged. The Remotion backend serves only that staging directory on
-`127.0.0.1` through an `InvocationAssetServer` with HTTP Range support. The
-materializer, server, and stage are cleaned after success or failure.
+local/cached files into one invocation-owned directory. A project-scoped
+render may also reference a canonical `managed_local` media locator under
+`$ASTRID_PROJECTS_ROOT/.astrid/media`, but only when the exact locator is
+present in the active project's kernel media rows and its bytes still match the
+recorded content hash. Arbitrary sibling-project and unmanaged-root paths are
+rejected during renderer support, before rendering starts. Remote URLs with
+byte range support stream directly; other URLs are cached, optionally
+hash-checked, and staged.
+
+The Remotion backend serves only that staging directory on `127.0.0.1` through
+an `InvocationAssetServer` with HTTP Range support. The ephemeral server sends
+the local transport CORS headers needed when the Remotion page is hosted on
+`localhost` while the asset server binds `127.0.0.1`. The materializer, server,
+and stage are cleaned after success or failure.
 
 If `assets_registry` is omitted, the facade creates a temporary empty registry.
 This is valid for timelines that do not reference registry media.
+In `timeline_ref` mode the registry cannot be overridden: Astrid uses the
+canonical stored registry and derives current managed-media locators from its
+content hashes. Private snapshots live under
+`<project>/.astrid/render-snapshots/<authority-hash>/`; unchanged heads reuse
+one directory. They are immutable derived inputs, not timeline authority, and
+can be regenerated from the kernel. Retention tooling must retain directories
+referenced by retryable tasks before removing unreferenced versions.
 
 ## Theme support
 
@@ -177,10 +223,11 @@ reproduce failures without rerunning the editorial pipeline.
 
 Use direct module execution only when debugging the facade itself. It bypasses
 the normal Astrid executor input mapping, still delegates to `RenderService`,
-and writes to the exact `--out` path:
+and writes to the exact `--out` path. It is not a public entrypoint; the
+canonical guard requires Astrid's internal invocation marker:
 
 ```bash
-python3 -m astrid.packs.rendering.executors.render.run \
+ASTRID_INTERNAL_INVOCATION=1 python3 -m astrid.packs.rendering.executors.render.run \
   --timeline ./out/hype.timeline.json \
   --assets ./out/hype.assets.json \
   --out ./out/hype.mp4
@@ -190,7 +237,7 @@ For an asset-free debug render, omit `--assets`; the direct runner creates a
 temporary empty asset registry:
 
 ```bash
-python3 -m astrid.packs.rendering.executors.render.run \
+ASTRID_INTERNAL_INVOCATION=1 python3 -m astrid.packs.rendering.executors.render.run \
   --timeline ./out/hype.timeline.json \
   --out ./out/hype.mp4
 ```
@@ -198,7 +245,7 @@ python3 -m astrid.packs.rendering.executors.render.run \
 Free-space guard is also a direct-runner debug flag:
 
 ```bash
-python3 -m astrid.packs.rendering.executors.render.run \
+ASTRID_INTERNAL_INVOCATION=1 python3 -m astrid.packs.rendering.executors.render.run \
   --timeline ./out/hype.timeline.json \
   --assets ./out/hype.assets.json \
   --out ./out/hype.mp4 \

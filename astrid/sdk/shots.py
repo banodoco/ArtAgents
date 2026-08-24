@@ -34,6 +34,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from astrid.core.receipts.service import CommandReceipt, ReceiptService
+from astrid.core.repositories.media import MediaRepository
 from astrid.core.repositories.projects import ProjectRepository
 from astrid.core.store.uow import UnitOfWork
 from astrid.core.store.writer import DatabaseWriter
@@ -69,11 +70,16 @@ class ShotsService:
         projects: ProjectRepository,
         shots: ShotRepository,
         receipts: ReceiptService,
+        media: MediaRepository | None = None,
     ) -> None:
         self._writer = writer
         self._projects = projects
         self._shots = shots
         self._receipts = receipts
+        # Optional for backwards-compatible custom compositions/tests. The
+        # standard application wires this so ``show`` can turn opaque media
+        # ids into useful paths without a second public SDK command.
+        self._media = media
 
     # -- create ------------------------------------------------------------
 
@@ -315,7 +321,37 @@ class ShotsService:
             model = self._shots.show(self._writer, project_id, shot_id)
         except Exception as exc:  # noqa: BLE001 - centralized bounded mapping
             return DomainResult.failure(map_error(exc))
-        return DomainResult.success(model.to_dict())
+        data = model.to_dict()
+        if self._media is not None:
+            # The shot pack owns only the exact media id. Enrich the public
+            # read model at the service boundary, where the sanctioned media
+            # repository can provide the replaceable locator and imported
+            # relative name. Missing legacy media details should not make a
+            # valid shot unreadable, so enrichment is best effort.
+            for item in data["items"]:
+                try:
+                    media = self._media.show(self._writer, item["media_id"])
+                except Exception:  # noqa: BLE001 - optional read enrichment
+                    continue
+                locations = [location.to_dict() for location in media.locations]
+                first_location = locations[0] if locations else None
+                metadata = dict(media.metadata)
+                name = metadata.get("rel_path")
+                if not isinstance(name, str) or not name:
+                    name = (
+                        first_location["locator"].rsplit("/", 1)[-1]
+                        if first_location
+                        else None
+                    )
+                item["media"] = {
+                    "id": media.id,
+                    "name": name,
+                    "path": first_location["locator"] if first_location else None,
+                    "realm": first_location["realm"] if first_location else None,
+                    "media_kind": media.media_kind,
+                    "mime_type": media.mime_type,
+                }
+        return DomainResult.success(data)
 
     # -- private helpers ---------------------------------------------------
 

@@ -18,21 +18,21 @@
     {
       "name": "project_slug",
       "type": "string",
-      "required": true,
-      "description": "Owning Astrid project slug. Must match the managed invocation project."
+      "required": false,
+      "description": "Owning Astrid project slug. In a project-scoped SDK invocation this is derived from project=<slug>; pass it for a standalone runner invocation."
     },
     {
       "name": "timeline_source",
-      "type": "directory",
+      "type": "path",
       "required": false,
       "artifact_type": null,
-      "description": "Optional repeatable contained managed-timeline directory; otherwise timeline_slug, all, or the project default selects the source."
+      "description": "Optional repeatable explicit legacy path to a contained managed-timeline directory or a file inside one; otherwise timeline_slug, all, or the project default selects kernel state. The result manifest's inputs.timeline_source is a frozen-v1 project-slug compatibility field, not this raw path; use source_mode and resolved identities for provenance."
     },
     {
       "name": "timeline_slug",
       "type": "string",
       "required": false,
-      "description": "Named managed timeline; omission selects the project default."
+      "description": "Managed timeline reference by slug, UUID, or ULID; omission selects the project default."
     },
     {
       "name": "all",
@@ -123,7 +123,7 @@
       "name": "formats",
       "type": "string",
       "required": false,
-      "description": "Repeatable presentation format list from --format: png, svg, md, or all (default all). Core machine artifacts are always written."
+      "description": "Repeatable presentation format list. Pass [\"png\", \"svg\"] or a comma-separated CLI value; choices are png, svg, md, or all (default all). Core machine artifacts are always written."
     },
     {
       "name": "filmstrip",

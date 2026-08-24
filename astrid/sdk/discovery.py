@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import importlib
+import re
+from difflib import SequenceMatcher
 from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
@@ -178,9 +180,17 @@ def _apply_pack_permission_ids(
     *,
     pack_permission_ids_by_pack_id: Mapping[str, tuple[str, ...]] | None = None,
 ) -> Capability:
-    if not pack_permission_ids_by_pack_id:
-        return capability
-    permission_ids = pack_permission_ids_by_pack_id.get(capability.handle.pack_id, ())
+    permission_ids = ()
+    if pack_permission_ids_by_pack_id:
+        permission_ids = pack_permission_ids_by_pack_id.get(capability.handle.pack_id, ())
+    # A pack-level permission describes the common substrate.  A capability
+    # may additionally require a narrower permission (for example, the
+    # editorial transcription executor calls the OpenAI API while the rest of
+    # the editorial pack is local-only).  Keep those per-capability additions
+    # in the public safety block without widening every sibling capability.
+    required = capability.definition.get("metadata", {}).get("required_permissions", ())
+    if isinstance(required, (list, tuple)):
+        permission_ids = tuple(dict.fromkeys((*permission_ids, *(str(item) for item in required))))
     if not permission_ids:
         return capability
     if capability.handle.safety.permissions == permission_ids:
@@ -445,6 +455,116 @@ def _format_candidates(candidates: tuple[str, ...]) -> str:
     return ", ".join(sorted(candidates))
 
 
+_SUGGESTION_TOKEN_RE = re.compile(r"[a-z0-9]+", re.IGNORECASE)
+
+
+def _capability_suggestions(
+    capability_id: str,
+    *,
+    executor_registry: Any,
+    orchestrator_registry: Any,
+    element_registry: Any | None,
+    limit: int = 3,
+) -> tuple[str, ...]:
+    """Return a small, deterministic set of nearby public capability ids."""
+    query = str(capability_id).strip().lower()
+    if not query:
+        return ()
+    query_tokens = set(_SUGGESTION_TOKEN_RE.findall(query))
+    records: list[tuple[float, str, str]] = []
+
+    def add_registry(registry: Any, capability_type: str) -> None:
+        resolver = getattr(registry, "alias_resolver", None)
+        for definition in registry.list():
+            aliases = tuple(
+                str(record.alias) for record in resolver.get_aliases_for(definition.id)
+            ) if resolver is not None else ()
+            fields = (
+                definition.id,
+                getattr(definition, "name", ""),
+                getattr(definition, "short_description", ""),
+                getattr(definition, "description", ""),
+                *getattr(definition, "keywords", ()),
+                *aliases,
+            )
+            field_text = " ".join(fields).lower()
+            field_tokens = set(_SUGGESTION_TOKEN_RE.findall(field_text))
+            exact_tokens = len(query_tokens & field_tokens)
+            ratio = max(
+                SequenceMatcher(None, query, candidate.lower()).ratio()
+                for candidate in (definition.id, *aliases)
+            )
+            # A single generic word from a long query (for example ``edge``
+            # in ``far.unknown.capability.edge.zzzz``) is not enough to offer
+            # an unrelated capability. Keep typo/alias matches and concise
+            # natural queries, but suppress low-confidence semantic matches.
+            semantic_confidence = exact_tokens / max(len(query_tokens), 1)
+            if ratio < 0.45 and semantic_confidence < 0.5:
+                continue
+            substring = 1.0 if query in field_text else 0.0
+            score = exact_tokens * 12.0 + ratio * 8.0 + substring * 12.0
+            if score >= 10.0:
+                alias_hint = f" (alias: {aliases[0]})" if aliases else ""
+                records.append((score, f"{capability_type}:{definition.id}{alias_hint}", definition.id))
+
+    add_registry(executor_registry, "executor")
+    add_registry(orchestrator_registry, "orchestrator")
+    if element_registry is not None:
+        add_registry(element_registry, "element")
+    records.sort(key=lambda item: (-item[0], item[2]))
+    return tuple(item[1] for item in records[:limit])
+
+
+def _lookup_guidance(
+    capability_id: str,
+    *,
+    requested_kind: str | None,
+    executor_registry: Any,
+    orchestrator_registry: Any,
+    element_registry: Any | None,
+) -> str:
+    registries = (
+        ("executor", executor_registry),
+        ("orchestrator", orchestrator_registry),
+        ("element", element_registry),
+    )
+    exact_other: list[str] = []
+    for kind, registry in registries:
+        if registry is None or kind == requested_kind:
+            continue
+        if kind == "element":
+            found = any(definition.id == capability_id for definition in registry.list())
+        else:
+            try:
+                registry.get(capability_id)
+            except (KeyError, ValueError):
+                found = False
+            else:
+                found = True
+        if not found:
+            continue
+        exact_other.append(kind)
+    parts: list[str] = []
+    if exact_other and requested_kind is not None:
+        choices = ", ".join(f"kind={kind!r}" for kind in exact_other)
+        parts.append(f"registered as {', '.join(exact_other)}; retry with {choices}")
+    suggestions = _capability_suggestions(
+        capability_id,
+        executor_registry=executor_registry,
+        orchestrator_registry=orchestrator_registry,
+        element_registry=element_registry,
+    )
+    if suggestions:
+        parts.append("nearest matches: " + ", ".join(suggestions))
+    if not suggestions and not exact_other:
+        parts.append(
+            "no close catalog match; recovery: call "
+            "discover(include_installed=False) and filter capabilities by id, "
+            "name, or aliases; supported kinds: executor, orchestrator, element"
+        )
+    return "; ".join(parts)
+
+
 def _resolve_typed_capability(
     capability_id: str, registry: Any, *, capability_type: str
 ) -> Capability:
@@ -600,28 +720,76 @@ def _resolve_capability(
     element_registry: Any | None,
 ) -> Capability:
     if kind == "executor":
-        return _resolve_typed_capability(
-            capability_id, executor_registry, capability_type="executor"
-        )
+        try:
+            return _resolve_typed_capability(
+                capability_id, executor_registry, capability_type="executor"
+            )
+        except CapabilityNotFoundError as exc:
+            guidance = _lookup_guidance(
+                capability_id,
+                requested_kind="executor",
+                executor_registry=executor_registry,
+                orchestrator_registry=orchestrator_registry,
+                element_registry=element_registry,
+            )
+            if guidance:
+                raise CapabilityNotFoundError(f"{exc}; {guidance}") from exc
+            raise
     if kind == "orchestrator":
-        return _resolve_typed_capability(
-            capability_id, orchestrator_registry, capability_type="orchestrator"
-        )
+        try:
+            return _resolve_typed_capability(
+                capability_id, orchestrator_registry, capability_type="orchestrator"
+            )
+        except CapabilityNotFoundError as exc:
+            guidance = _lookup_guidance(
+                capability_id,
+                requested_kind="orchestrator",
+                executor_registry=executor_registry,
+                orchestrator_registry=orchestrator_registry,
+                element_registry=element_registry,
+            )
+            if guidance:
+                raise CapabilityNotFoundError(f"{exc}; {guidance}") from exc
+            raise
     if kind == "element":
         if element_registry is None:
             raise CapabilityNotFoundError("element registry was not loaded")
-        return _resolve_element_capability(
-            capability_id,
-            element_registry,
-            element_kind=element_kind,
-        )
+        try:
+            return _resolve_element_capability(
+                capability_id,
+                element_registry,
+                element_kind=element_kind,
+            )
+        except CapabilityNotFoundError as exc:
+            guidance = _lookup_guidance(
+                capability_id,
+                requested_kind="element",
+                executor_registry=executor_registry,
+                orchestrator_registry=orchestrator_registry,
+                element_registry=element_registry,
+            )
+            if guidance:
+                raise CapabilityNotFoundError(f"{exc}; {guidance}") from exc
+            raise
     if kind is None:
-        return _resolve_capability_kindless(
-            capability_id,
-            executor_registry=executor_registry,
-            orchestrator_registry=orchestrator_registry,
-            element_registry=element_registry,
-        )
+        try:
+            return _resolve_capability_kindless(
+                capability_id,
+                executor_registry=executor_registry,
+                orchestrator_registry=orchestrator_registry,
+                element_registry=element_registry,
+            )
+        except CapabilityNotFoundError as exc:
+            guidance = _lookup_guidance(
+                capability_id,
+                requested_kind=None,
+                executor_registry=executor_registry,
+                orchestrator_registry=orchestrator_registry,
+                element_registry=element_registry,
+            )
+            if guidance:
+                raise CapabilityNotFoundError(f"{exc}; {guidance}") from exc
+            raise
     raise CapabilityNotFoundError(
         f"unsupported capability kind {kind!r}; expected 'executor', 'orchestrator', 'element', or None"
     )

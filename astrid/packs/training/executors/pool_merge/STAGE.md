@@ -21,8 +21,8 @@ of the existing pool file).
 import astrid.sdk as sdk
 result = sdk.invoke(
     "training.pool_merge",
+        kind="executor", project="demo",
     inputs={"pool": "./out/pool.json", "theme": "./theme.json"},
-    out="./out",
 )
 ```
 

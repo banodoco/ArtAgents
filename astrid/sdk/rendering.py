@@ -551,6 +551,7 @@ def _support_report(
     candidate = _resolve_candidate(renderers, selected_backend)
     selected_service = service or RenderService(
         registries=resolved_registries,
+        extra_pack_roots=extra_pack_roots,
         **_service_injection(transport=transport, transport_factory=transport_factory),
     )
     if workspace is None:

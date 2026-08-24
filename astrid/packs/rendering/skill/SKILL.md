@@ -141,8 +141,11 @@ Requires `OPENAI_API_KEY` and `ffmpeg` on the system path.
 
 ## When to use
 
-- Use `rendering.render` to produce the final video from a timeline and,
-  only when needed, an asset registry. This is the standard rendering path.
+- Use `rendering.render` with `timeline` to produce the final video from an
+  explicit exported or pipeline-produced timeline JSON file and, only when
+  needed, an asset registry. Use its mutually exclusive `timeline_ref` input
+  (or `astrid timelines render <ref>`) for a canonical kernel slug/UUID/ULID;
+  add `expected_version` when the observed stream head must not change.
 - Use the `audio-reactive-colour` effect for frozen integer-frame colour
   markers. Keep one effect clip rather than expanding each state into a clip;
   the service selects the supporting renderer from request-sensitive evidence.
@@ -163,6 +166,45 @@ Requires `OPENAI_API_KEY` and `ffmpeg` on the system path.
 
 ## Quick-start
 
+Before invoking the renderer, make the timeline visibly renderable. The
+smallest known-good file has root `clips`, a `visual` track, structured text
+with `clipType: "text"`, and an explicit MP4 output contract:
+
+```json
+{"tracks":[{"id":"cards","kind":"visual","label":"Cards"}],
+ "clips":[{"id":"title","at":0,"track":"cards","clipType":"text","hold":2,
+   "text":{"content":"HELLO ASTRID","fontSize":64,"color":"#ffffff","align":"center"}}],
+ "output":{"resolution":"640x360","fps":30,"file":"title.mp4"}}
+```
+
+Do not write a text-shaped clip without `clipType: "text"`: Astrid rejects
+that ambiguous shape before renderer admission instead of producing an empty
+or black frame. The clip-level `effects` field is reserved for fade timing
+(`{"fade_in": 0.2, "fade_out": 0.2}` or fade-only objects). A reusable visual
+element is a clip whose `clipType` is the registered effect id and whose
+arguments live in `params`; an unknown id is rejected before managed render
+admission. The default H.264/AAC render also requires an `.mp4`
+`output_name` (or `out_path` basename); a `.mov`, extensionless, or otherwise
+incompatible name is rejected before spending a render attempt.
+
+An explicit profile is the flat RenderProfile v1 wire object, not nested
+`video` and `audio` mappings. This complete profile requests the default
+1920x1080@30 Remotion MP4 contract. It must match the authoritative theme
+canvas; set `theme_overrides.visual.canvas` when intentionally targeting a
+different size:
+
+```json
+{"width":1920,"height":1080,"fps_rational":[30,1],"time_base":[1,90000],"container":"mp4","video_codec":"h264","video_profile":null,"video_level":null,"pixel_format":"yuv420p","audio_codec":"aac","audio_sample_rate":48000,"audio_channel_layout":"stereo","duration_tolerance":1}
+```
+
+Required fields: `width`, `height`, `fps_rational`, `time_base`, `container`,
+`video_codec`, `video_profile`, `video_level`, `pixel_format`, and
+`duration_tolerance`. Supply `audio_codec`, `audio_sample_rate`, and
+`audio_channel_layout` together or omit all three. Remotion always muxes an
+AAC track, so its explicit profile should include the trio shown above.
+Managed-ref invocation rejects missing, unknown, and invalid profile fields
+before kernel admission; it does not normalize a nested convenience shape.
+
 ```python
 # Render a timeline to video
 import astrid.sdk as sdk
@@ -170,6 +212,13 @@ result = sdk.invoke(
     "rendering.render",
     inputs={"timeline": "./out/hype.timeline.json"},
     out="./out",
+)
+
+# Render a canonical managed timeline with a stream-head CAS guard
+result = sdk.invoke(
+    "rendering.render",
+    project="demo",
+    inputs={"timeline_ref": "main", "expected_version": 4},
 )
 
 # Render a timeline with a media asset registry
@@ -191,6 +240,59 @@ result = sdk.invoke(
     out="./out",
 )
 ```
+
+```python
+# Inspect a managed or kernel timeline (run-owned evidence pack)
+result = sdk.invoke(
+    "rendering.timeline_visualize",
+    kind="executor",
+    project="demo",  # supplies the owning project and managed output root
+    inputs={
+        "timeline_slug": "main",  # UUID, ULID, or slug; omit for the default
+        "formats": ["png", "svg", "md"],
+        "layout": "both",
+    },
+)
+print(result.ok, result.outputs)
+
+# The same default/slug/UUID/ULID selectors resolve the SQLite kernel timeline
+# immediately after the public
+# `client.timelines.create/save` journey; no hand-authored assembly.jsonl is
+# required. Kernel config is materialized privately and pinned to the real
+# immutable stream head version/hash for this run.
+
+# A project-owned event-log file is also accepted:
+result = sdk.invoke(
+    "rendering.timeline_visualize",
+    kind="executor",
+    project="demo",
+    inputs={
+        "timeline_source": [".../demo/timelines/<timeline-ulid>/assembly.jsonl"],
+        "formats": ["md"],
+    },
+)
+```
+
+The SDK field is plural (`formats`), while the direct runner uses repeatable
+singular `--format png --format svg` (also accepted as `--format png,svg`).
+With `project=...`, omit `out`; Astrid owns staging and publishes durable
+evidence artifacts under the project run.
+
+The public CLI equivalent is the nested timeline command (the gateway still
+has eight top-level families):
+
+```bash
+python3 -m astrid timelines visualize --project demo \
+  --timeline-slug main --format png,svg --format md --json
+```
+
+Omit `--timeline-slug` for the project default, or pass `--all` for every
+active timeline. `--timeline-source PATH` is repeatable for a project-owned
+legacy managed timeline directory/file and cannot be combined with a selector
+or `--all`. The command returns the stable five-key envelope synchronously;
+successful `data` includes run/kernel IDs and durable artifact paths, while
+invalid selectors and foreign sources return a typed validation error before
+ledger admission.
 
 Use an `engine` input of `hybrid` only when compatibility with the legacy hybrid
 planning policy is required. Legacy `engine=remotion` preserves its historical

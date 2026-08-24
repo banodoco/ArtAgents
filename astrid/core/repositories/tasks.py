@@ -40,7 +40,7 @@ import hashlib
 import sqlite3
 import uuid
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, Protocol
 
@@ -181,6 +181,18 @@ class TaskRepositoryError(RepositoryError):
 class TaskValidationError(TaskRepositoryError):
     """Raised when a task admission argument is invalid."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        details: Mapping[str, Any] | None = None,
+    ) -> None:
+        # The repository keeps the exception human-readable for direct SDK
+        # callers, while the service mapper can expose bounded, structured
+        # guidance for malformed dependency payloads.
+        self.details: dict[str, Any] = dict(details or {})
+        super().__init__(message)
+
 
 class TaskAlreadyExistsError(TaskRepositoryError):
     """Raised when admission targets an already-existing task id."""
@@ -309,6 +321,7 @@ class TaskTransitionError(TaskRepositoryError):
         self.task_id: str = task_id
         self.attempt_id: str | None = attempt_id
         self.reason: str = reason
+        self.detail: str | None = detail
         message = f"task {task_id!r} transition rejected: {reason}"
         if attempt_id is not None:
             message = f"{message} (attempt {attempt_id!r})"
@@ -407,10 +420,18 @@ class TaskReadModel:
     updated_at: str
     finished_at: str | None
     dependencies: tuple[TaskDependencyReadModel, ...] = ()
+    # These are read-time projections of the immutable dependency edges.  They
+    # are deliberately excluded from equality: admission receipts contain the
+    # immutable task shape, while show/list may add the latest prerequisite
+    # statuses without making a formerly-created task compare unequal.
+    hard_prerequisites: tuple[Mapping[str, Any], ...] = field(
+        default=(), compare=False, repr=False
+    )
+    blocked_reason: str | None = field(default=None, compare=False)
 
     def to_dict(self) -> dict[str, Any]:
         """Return the JSON-safe dict persisted as the receipt result."""
-        return {
+        result = {
             "id": self.id,
             "project_id": self.project_id,
             "capability": self.capability,
@@ -432,6 +453,13 @@ class TaskReadModel:
             "finished_at": self.finished_at,
             "dependencies": [dep.to_dict() for dep in self.dependencies],
         }
+        if self.hard_prerequisites:
+            result["hard_prerequisites"] = [
+                dict(prerequisite) for prerequisite in self.hard_prerequisites
+            ]
+        if self.blocked_reason:
+            result["blocked_reason"] = self.blocked_reason
+        return result
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> TaskReadModel:
@@ -460,6 +488,11 @@ class TaskReadModel:
                 TaskDependencyReadModel.from_mapping(dep)
                 for dep in (value.get("dependencies") or [])
             ),
+            hard_prerequisites=tuple(
+                dict(prerequisite)
+                for prerequisite in (value.get("hard_prerequisites") or [])
+            ),
+            blocked_reason=value.get("blocked_reason"),
         )
 
 
@@ -622,12 +655,14 @@ class TaskCancelReadModel:
 
     task: TaskReadModel
     attempt: TaskAttemptReadModel | None = None
+    execution_guidance: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Return the JSON-safe dict persisted as the cancel receipt result."""
         return {
             "task": self.task.to_dict(),
             "attempt": self.attempt.to_dict() if self.attempt is not None else None,
+            "execution_guidance": self.execution_guidance,
         }
 
     @classmethod
@@ -641,6 +676,7 @@ class TaskCancelReadModel:
                 if attempt is not None
                 else None
             ),
+            execution_guidance=value.get("execution_guidance"),
         )
 
 
@@ -877,9 +913,10 @@ class TaskCompleteReadModel:
 class TaskListRow:
     """One lightweight transaction-free task list row (m2 plan step 6, T10).
 
-    The list surface returns only list-relevant projection fields — no spec,
-    manifest, or dependency payload — so ``list`` and ``list_eligible`` stay
-    cheap read-only queries with no plan or step abstraction.
+    The list surface returns only list-relevant projection fields — no spec or
+    manifest — plus the small hard-prerequisite status projection needed to
+    explain blocked work. ``list`` and ``list_eligible`` remain cheap
+    read-only queries with no plan or step abstraction.
     """
 
     id: str
@@ -889,10 +926,14 @@ class TaskListRow:
     priority: int
     available_at: str
     created_at: str
+    hard_prerequisites: tuple[Mapping[str, Any], ...] = field(
+        default=(), compare=False, repr=False
+    )
+    blocked_reason: str | None = field(default=None, compare=False)
 
     def to_dict(self) -> dict[str, Any]:
         """Return the JSON-safe dict for callers and logs."""
-        return {
+        result = {
             "id": self.id,
             "project_id": self.project_id,
             "capability": self.capability,
@@ -901,6 +942,13 @@ class TaskListRow:
             "available_at": self.available_at,
             "created_at": self.created_at,
         }
+        if self.hard_prerequisites:
+            result["hard_prerequisites"] = [
+                dict(prerequisite) for prerequisite in self.hard_prerequisites
+            ]
+        if self.blocked_reason:
+            result["blocked_reason"] = self.blocked_reason
+        return result
 
 
 def compute_spec_hash(
@@ -969,20 +1017,60 @@ def _normalize_dependencies(
     if isinstance(dependencies, (str, bytes)) or not isinstance(
         dependencies, Sequence
     ):
-        raise TaskValidationError("dependencies must be a JSON array")
+        raise TaskValidationError(
+            "dependencies must be a JSON array of objects like "
+            '[{"task_id":"<task-id>","kind":"hard","ordinal":0}]',
+            details={
+                "field": "dependencies",
+                "expected": "JSON array of dependency objects",
+                "example": [{"task_id": "<task-id>", "kind": "hard", "ordinal": 0}],
+            },
+        )
     normalized: list[TaskDependencyReadModel] = []
     for index, entry in enumerate(dependencies):
         if not isinstance(entry, Mapping):
             raise TaskValidationError(
-                f"dependency at ordinal {index} must be a JSON object"
+                f"dependency at ordinal {index} must be a JSON object with a "
+                "non-empty task_id",
+                details={
+                    "field": f"dependencies[{index}]",
+                    "expected": "JSON object with task_id, optional kind and ordinal",
+                    "received_type": type(entry).__name__,
+                    "example": {"task_id": "<task-id>", "kind": "hard", "ordinal": index},
+                },
             )
         depends_on = entry.get("task_id")
         if not isinstance(depends_on, str) or not depends_on:
             raise TaskValidationError(
-                f"dependency at ordinal {index} requires a non-empty task_id"
+                f"dependency at ordinal {index} requires a non-empty task_id",
+                details={
+                    "field": f"dependencies[{index}].task_id",
+                    "expected": "non-empty task id string",
+                    "example": {"task_id": "<task-id>", "kind": "hard", "ordinal": index},
+                },
             )
         kind = entry.get("kind", "hard")
         ordinal = entry.get("ordinal", index)
+        if kind not in DEPENDENCY_KINDS:
+            raise TaskValidationError(
+                f"dependency at ordinal {index} kind must be one of "
+                f"{DEPENDENCY_KINDS}, got {kind!r}",
+                details={
+                    "field": f"dependencies[{index}].kind",
+                    "expected": list(DEPENDENCY_KINDS),
+                    "received": kind,
+                },
+            )
+        if isinstance(ordinal, bool) or not isinstance(ordinal, int) or ordinal < 0:
+            raise TaskValidationError(
+                f"dependency at ordinal {index} ordinal must be a non-negative integer, "
+                f"got {ordinal!r}",
+                details={
+                    "field": f"dependencies[{index}].ordinal",
+                    "expected": "non-negative integer",
+                    "received": ordinal,
+                },
+            )
         normalized.append(
             TaskDependencyReadModel(
                 task_id=task_id,
@@ -1210,6 +1298,58 @@ def _iso_gt(left: str, right: str) -> bool:
         return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
     return parse(left) > parse(right)
+
+
+def _blocked_reason(
+    *, task_status: str, hard_prerequisites: Sequence[Mapping[str, Any]]
+) -> str | None:
+    """Explain a blocked task from the current hard-edge read projection.
+
+    Dependency edges are immutable, so this is intentionally derived at read
+    time.  A failed or cancelled prerequisite is not merely delayed: because
+    only ``succeeded`` satisfies a hard edge, the dependent can never become
+    claimable under the current chain.
+    """
+    if task_status != "blocked" or not hard_prerequisites:
+        return None
+    unsatisfiable = [
+        prerequisite
+        for prerequisite in hard_prerequisites
+        if str(prerequisite.get("status")) in {"failed", "cancelled"}
+    ]
+    if unsatisfiable:
+        details = ", ".join(
+            f"{item['depends_on_task_id']} ({item['status']})"
+            for item in unsatisfiable
+        )
+        return (
+            "unsatisfiable: hard prerequisite "
+            f"{details} cannot satisfy this task; cancel this dependent and "
+            "create a replacement prerequisite chain"
+        )
+    details = ", ".join(
+        f"{item['depends_on_task_id']} ({item['status']})"
+        for item in hard_prerequisites
+        if str(item.get("status")) != HARD_DEPENDENCY_SATISFIED_STATUS
+    )
+    if not details:
+        return None
+    return f"blocked: waiting for hard prerequisite {details}"
+
+
+def _hard_prerequisite_projection(
+    rows: Sequence[Mapping[str, Any]],
+) -> tuple[dict[str, Any], ...]:
+    """Normalize joined hard-prerequisite rows for public show/list reads."""
+    return tuple(
+        {
+            "depends_on_task_id": str(row["depends_on_task_id"]),
+            "kind": "hard",
+            "ordinal": int(row["ordinal"]),
+            "status": str(row["status"]),
+        }
+        for row in rows
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1551,6 +1691,7 @@ class TaskRepository:
     def _row_to_read_model(
         row: Mapping[str, Any],
         dependencies: Sequence[Mapping[str, Any]],
+        hard_prerequisites: Sequence[Mapping[str, Any]] = (),
     ) -> TaskReadModel:
         """Build the frozen read model from one ``tasks`` join row."""
         return TaskReadModel(
@@ -1575,6 +1716,13 @@ class TaskRepository:
             finished_at=row["finished_at"],
             dependencies=tuple(
                 TaskDependencyReadModel.from_mapping(dep) for dep in dependencies
+            ),
+            hard_prerequisites=tuple(
+                dict(prerequisite) for prerequisite in hard_prerequisites
+            ),
+            blocked_reason=_blocked_reason(
+                task_status=str(row["status"]),
+                hard_prerequisites=hard_prerequisites,
             ),
         )
 
@@ -1605,8 +1753,20 @@ class TaskRepository:
                 "ORDER BY ordinal ASC, depends_on_task_id ASC",
                 (task_id,),
             ).fetchall()
+            prerequisite_rows = conn.execute(
+                "SELECT d.depends_on_task_id, d.ordinal, dep.status "
+                "FROM task_dependencies d "
+                "JOIN tasks dep ON dep.id = d.depends_on_task_id "
+                "WHERE d.task_id = ? AND d.kind = 'hard' "
+                "ORDER BY d.ordinal ASC, d.depends_on_task_id ASC",
+                (task_id,),
+            ).fetchall()
         return self._row_to_read_model(
-            row, [dict(dep) for dep in dependency_rows]
+            row,
+            [dict(dep) for dep in dependency_rows],
+            _hard_prerequisite_projection(
+                [dict(prerequisite) for prerequisite in prerequisite_rows]
+            ),
         )
 
     def list(self, writer: DatabaseWriter, project_id: str) -> list[TaskListRow]:
@@ -1626,6 +1786,20 @@ class TaskRepository:
                 "WHERE project_id = ? ORDER BY created_at ASC, id ASC",
                 (project_id,),
             ).fetchall()
+            prerequisite_rows = conn.execute(
+                "SELECT d.task_id, d.depends_on_task_id, d.ordinal, dep.status "
+                "FROM task_dependencies d "
+                "JOIN tasks dep ON dep.id = d.depends_on_task_id "
+                "JOIN tasks task ON task.id = d.task_id "
+                "WHERE task.project_id = ? AND d.kind = 'hard' "
+                "ORDER BY d.task_id, d.ordinal, d.depends_on_task_id",
+                (project_id,),
+            ).fetchall()
+        prerequisites_by_task: dict[str, list[dict[str, Any]]] = {}
+        for prerequisite in prerequisite_rows:
+            prerequisites_by_task.setdefault(
+                str(prerequisite["task_id"]), []
+            ).append(dict(prerequisite))
         return [
             TaskListRow(
                 id=str(row["id"]),
@@ -1635,6 +1809,15 @@ class TaskRepository:
                 priority=int(row["priority"]),
                 available_at=str(row["available_at"]),
                 created_at=str(row["created_at"]),
+                hard_prerequisites=_hard_prerequisite_projection(
+                    prerequisites_by_task.get(str(row["id"]), [])
+                ),
+                blocked_reason=_blocked_reason(
+                    task_status=str(row["status"]),
+                    hard_prerequisites=prerequisites_by_task.get(
+                        str(row["id"]), []
+                    ),
+                ),
             )
             for row in rows
         ]
@@ -2451,7 +2634,7 @@ class TaskRepository:
         candidates = uow.query(
             "SELECT a.id AS attempt_id, a.task_id, a.attempt_no, a.status, "
             "a.status_version, a.lease_id, a.lease_expires_at, "
-            "t.status AS task_status, t.max_attempts "
+            "t.status AS task_status, t.max_attempts, t.run_id AS run_id "
             "FROM execution_attempts a JOIN tasks t ON t.id = a.task_id "
             "WHERE t.project_id = ? AND a.status IN ('claimed','running') "
             "ORDER BY a.lease_expires_at ASC, a.task_id ASC, a.attempt_no ASC",
@@ -2522,6 +2705,13 @@ class TaskRepository:
                 attempt_id=attempt_id,
                 reason="task_not_running",
                 detail="task changed between the scan and the update",
+            )
+        if outcome == "failed" and row["run_id"] is not None:
+            self._update_run_projection_on_child_terminal(
+                uow,
+                run_id=str(row["run_id"]),
+                project_id=project_id,
+                stamp=stamp,
             )
         # 3. The hash-chained core.task.expired event on the task stream.
         event_data: dict[str, Any] = {
@@ -2733,48 +2923,63 @@ class TaskRepository:
         attempt_lease_expires_at: Any = None
 
         if prior_status == "running":
-            # Running cancellation terminates the owned attempt: the caller
-            # must present the exact lease/version evidence.
-            if (
+            # A worker may provide its exact fence, but an operator has no
+            # reason to know those internal values.  With no fence, the
+            # single writer still gives cancellation a safe terminal winner:
+            # a worker that is already outside SQLite may finish its handler,
+            # but its later fenced completion cannot publish media.  Partial
+            # fences remain a caller error rather than silently weakening the
+            # race protection.
+            cooperative = (
+                attempt_id is None
+                and lease_id is None
+                and expected_status_version is None
+            )
+            if not cooperative and (
                 attempt_id is None
                 or lease_id is None
                 or expected_status_version is None
             ):
                 raise TaskValidationError(
-                    "cancelling a running task requires attempt_id, "
+                    "cancelling a running task takes either no attempt fence "
+                    "(operator cooperative cancel) or all of attempt_id, "
                     "lease_id, and expected_status_version"
                 )
             attempt_row = uow.query_one(
-                "SELECT * FROM execution_attempts WHERE id = ?", (attempt_id,)
+                "SELECT * FROM execution_attempts WHERE id = ?"
+                if attempt_id is not None
+                else "SELECT * FROM execution_attempts WHERE task_id = ? "
+                "AND status IN ('claimed','running') ORDER BY attempt_no DESC LIMIT 1",
+                (attempt_id,) if attempt_id is not None else (task_id,),
             )
             if attempt_row is None:
-                raise TaskAttemptNotFoundError(attempt_id=attempt_id)
+                raise TaskAttemptNotFoundError(attempt_id=attempt_id or task_id)
             if str(attempt_row["task_id"]) != task_id:
                 raise TaskTransitionError(
                     task_id=task_id,
-                    attempt_id=attempt_id,
+                    attempt_id=attempt_id_effective,
                     reason="attempt_task_mismatch",
                 )
             if str(attempt_row["status"]) not in ("claimed", "running"):
                 raise TaskTransitionError(
                     task_id=task_id,
-                    attempt_id=attempt_id,
+                    attempt_id=attempt_id_effective,
                     reason="attempt_not_live",
                     detail=(
                         f"attempt status is {attempt_row['status']!r}, "
                         "expected 'claimed' or 'running'"
                     ),
                 )
-            if str(attempt_row["lease_id"]) != lease_id:
+            if not cooperative and str(attempt_row["lease_id"]) != lease_id:
                 raise TaskTransitionError(
                     task_id=task_id,
-                    attempt_id=attempt_id,
+                    attempt_id=attempt_id_effective,
                     reason="lease_mismatch",
                 )
-            if int(attempt_row["status_version"]) != expected_status_version:
+            if not cooperative and int(attempt_row["status_version"]) != expected_status_version:
                 raise TaskTransitionError(
                     task_id=task_id,
-                    attempt_id=attempt_id,
+                    attempt_id=str(attempt_row["id"]),
                     reason="stale_status_version",
                     detail=(
                         f"attempt status_version is "
@@ -2782,8 +2987,9 @@ class TaskRepository:
                         f"{expected_status_version}"
                     ),
                 )
+            expected_status_version = int(attempt_row["status_version"])
             next_version = expected_status_version + 1
-            attempt_id_effective = attempt_id
+            attempt_id_effective = str(attempt_row["id"])
             attempt_no = int(attempt_row["attempt_no"])
             attempt_lease_id = attempt_row["lease_id"]
             attempt_lease_expires_at = attempt_row["lease_expires_at"]
@@ -2797,7 +3003,7 @@ class TaskRepository:
                     next_version,
                     stamp,
                     stamp,
-                    attempt_id,
+                    attempt_id_effective,
                     task_id,
                     expected_status_version,
                 ),
@@ -2805,15 +3011,16 @@ class TaskRepository:
             if cursor.rowcount != 1:
                 raise TaskTransitionError(
                     task_id=task_id,
-                    attempt_id=attempt_id,
+                    attempt_id=str(attempt_row["id"]),
                     reason="stale_status_version",
                     detail="attempt changed between the fence check and the update",
                 )
             fresh = uow.query_one(
-                "SELECT * FROM execution_attempts WHERE id = ?", (attempt_id,)
+                "SELECT * FROM execution_attempts WHERE id = ?",
+                (attempt_id_effective,),
             )
             if fresh is None:  # pragma: no cover - deleted rows cannot reappear
-                raise TaskAttemptNotFoundError(attempt_id=attempt_id)
+                raise TaskAttemptNotFoundError(attempt_id=attempt_id_effective)
             attempt_model = self._attempt_read_model(fresh)
         else:
             # Queued/blocked cancellation: no attempt exists to terminate;
@@ -2885,7 +3092,17 @@ class TaskRepository:
         # 4. The complete receipt: the refreshed cancelled task plus the
         #    terminated attempt (running cancellation only).
         task_model = self._task_model(uow, task_id=task_id, project_id=project_id)
-        result = TaskCancelReadModel(task=task_model, attempt=attempt_model)
+        result = TaskCancelReadModel(
+            task=task_model,
+            attempt=attempt_model,
+            execution_guidance=(
+                "the running handler may finish its current work, but its "
+                "completion is fenced and no post-cancel artifact will be "
+                "published"
+                if prior_status == "running" and cooperative
+                else None
+            ),
+        )
         self._receipts.record(
             uow,
             project_id=project_id,
@@ -3120,6 +3337,20 @@ class TaskRepository:
                 reason="task_not_running",
                 detail="task changed between the fence read and the update",
             )
+        # A terminal child failure is also a terminal parent outcome when it
+        # exhausts this task's retry budget.  Keep the persisted run
+        # projection in lock-step with the shared read-time derivation just
+        # as completion already does.  Without this, a synchronous SDK
+        # invocation can return a failed task while leaving its run row
+        # ``running`` until a caller happens to close it.
+        run_id = task_row["run_id"]
+        if outcome == "failed" and run_id is not None:
+            self._update_run_projection_on_child_terminal(
+                uow,
+                run_id=str(run_id),
+                project_id=project_id,
+                stamp=stamp,
+            )
         # 3. The hash-chained core.task.failed event on the task stream.
         event_data: dict[str, Any] = {
             "task_id": task_id,
@@ -3314,7 +3545,7 @@ class TaskRepository:
         if task_row is None:
             raise TaskNotFoundError(task_id=task_id)
         prior_status = str(task_row["status"])
-        if prior_status not in ("queued", "blocked", "running"):
+        if prior_status not in ("queued", "blocked", "running", "failed"):
             raise TaskTransitionError(
                 task_id=task_id,
                 reason="task_terminal",
@@ -3323,15 +3554,46 @@ class TaskRepository:
                     "never resurrects"
                 ),
             )
-        if prior_status != "queued":
-            raise TaskTransitionError(
-                task_id=task_id,
-                reason="not_retryable",
-                detail=(
-                    f"task status is {prior_status!r}; retry requires a "
-                    "queued task whose latest attempt failed or expired"
-                ),
-            )
+        if prior_status not in ("queued", "failed"):
+            if prior_status == "blocked":
+                hard_prerequisite_rows = uow.query(
+                    "SELECT d.depends_on_task_id, d.ordinal, dep.status "
+                    "FROM task_dependencies d "
+                    "JOIN tasks dep ON dep.id = d.depends_on_task_id "
+                    "WHERE d.task_id = ? AND d.kind = 'hard' "
+                    "ORDER BY d.ordinal ASC, d.depends_on_task_id ASC",
+                    (task_id,),
+                )
+                prerequisites = _hard_prerequisite_projection(
+                    [dict(row) for row in hard_prerequisite_rows]
+                )
+                blocked_reason = _blocked_reason(
+                    task_status=prior_status,
+                    hard_prerequisites=prerequisites,
+                ) or (
+                    "blocked: waiting for one or more hard prerequisites; "
+                    "retry is only supported after a failed or expired attempt"
+                )
+                raise TaskTransitionError(
+                    task_id=task_id,
+                    reason="not_retryable",
+                    detail=(
+                        f"{blocked_reason}; retry is unavailable. "
+                        "Wait for every hard prerequisite to succeed, or "
+                        "cancel this dependent and create a replacement "
+                        "prerequisite chain if any prerequisite is cancelled "
+                        "or failed"
+                    ),
+                )
+            if prior_status != "failed":
+                raise TaskTransitionError(
+                    task_id=task_id,
+                    reason="not_retryable",
+                    detail=(
+                        f"task status is {prior_status!r}; retry requires a "
+                        "queued task whose latest attempt failed or expired"
+                    ),
+                )
         prior_attempt_row = uow.query_one(
             "SELECT * FROM execution_attempts WHERE task_id = ? "
             "ORDER BY attempt_no DESC LIMIT 1",
@@ -3357,7 +3619,18 @@ class TaskRepository:
             )
         max_attempts = int(task_row["max_attempts"])
         prior_attempt_no = int(prior_attempt_row["attempt_no"])
-        if prior_attempt_no >= max_attempts:
+        retried_before = uow.query_one(
+            "SELECT 1 FROM events WHERE stream_id = ? AND kind = ? LIMIT 1",
+            (f"{task_id}:{CORE_TASK_STREAM_TYPE}", CORE_TASK_RETRIED_EVENT_KIND),
+        ) is not None
+        one_shot_invocation_retry = (
+            prior_status == "failed"
+            and task_row["run_id"] is not None
+            and max_attempts == 1
+            and prior_attempt_no == 1
+            and not retried_before
+        )
+        if prior_attempt_no >= max_attempts and not one_shot_invocation_retry:
             raise TaskTransitionError(
                 task_id=task_id,
                 attempt_id=str(prior_attempt_row["id"]),
@@ -3401,16 +3674,51 @@ class TaskRepository:
 
         # 2. The task leaves the queue: running, so no claim can create a
         #    competing attempt while this retried attempt is live.
-        task_cursor = uow.execute(
-            "UPDATE tasks SET status = 'running', updated_at = ? "
-            "WHERE id = ? AND status = 'queued'",
-            (stamp, task_id),
-        )
+        if one_shot_invocation_retry:
+            task_cursor = uow.execute(
+                "UPDATE tasks SET status = 'running', max_attempts = ?, "
+                "updated_at = ? WHERE id = ? AND status = 'failed'",
+                (prior_attempt_no + 1, stamp, task_id),
+            )
+        else:
+            task_cursor = uow.execute(
+                "UPDATE tasks SET status = 'running', updated_at = ? "
+                "WHERE id = ? AND status = 'queued'",
+                (stamp, task_id),
+            )
         if task_cursor.rowcount != 1:
             raise TaskTransitionError(
                 task_id=task_id,
                 reason="task_terminal",
                 detail="task changed between the fence read and the update",
+            )
+        if one_shot_invocation_retry and task_row["run_id"] is not None:
+            # A direct ``tasks retry`` is a supported recovery surface for an
+            # invocation-created child. Reopen the failed parent projection
+            # before dispatch so the later fenced completion can terminalize
+            # it again; otherwise the child would succeed while the run row
+            # remained a contradictory terminal ``failed`` projection.
+            counts, _derived_status = derive_run_progress_counts(
+                uow,
+                run_id=str(task_row["run_id"]),
+                project_id=project_id,
+            )
+            projection = {
+                "total_children": sum(counts.values()),
+                "succeeded": counts.get("succeeded", 0),
+                "failed": counts.get("failed", 0),
+                "cancelled": counts.get("cancelled", 0),
+                "status": "running",
+            }
+            uow.execute(
+                "UPDATE runs SET result_json = ?, status = 'running', "
+                "finished_at = NULL WHERE id = ? AND project_id = ? "
+                "AND status = 'failed'",
+                (
+                    canonical_json(projection),
+                    str(task_row["run_id"]),
+                    project_id,
+                ),
             )
 
         # 3. The hash-chained core.task.retried event on the task stream.
@@ -3424,6 +3732,7 @@ class TaskRepository:
             "lease_id": lease_id,
             "lease_expires_at": lease_expires_at,
             "reason": prior_attempt_status,
+            "budget_extension": one_shot_invocation_retry,
         }
         changes: list[str] = [
             "task_status",
@@ -3436,6 +3745,8 @@ class TaskRepository:
             "lease_expires_at",
             "reason",
         ]
+        if one_shot_invocation_retry:
+            changes.append("max_attempts")
         append = self._events.append(
             uow,
             stream_id=stream_id,
@@ -3508,9 +3819,9 @@ class TaskRepository:
         if task_row is None:
             return False, "task_not_found"
         prior_status = str(task_row["status"])
-        if prior_status not in ("queued", "blocked", "running"):
+        if prior_status not in ("queued", "blocked", "running", "failed"):
             return False, "task_terminal"
-        if prior_status != "queued":
+        if prior_status not in ("queued", "failed"):
             return False, "not_retryable"
         prior_attempt_row = uow.query_one(
             "SELECT * FROM execution_attempts WHERE task_id = ? "
@@ -3522,7 +3833,21 @@ class TaskRepository:
         prior_attempt_status = str(prior_attempt_row["status"])
         if prior_attempt_status not in ("failed", "expired"):
             return False, "not_retryable"
-        if int(prior_attempt_row["attempt_no"]) >= int(task_row["max_attempts"]):
+        prior_attempt_no = int(prior_attempt_row["attempt_no"])
+        max_attempts = int(task_row["max_attempts"])
+        if (
+            prior_attempt_no >= max_attempts
+            and not (
+                prior_status == "failed"
+                and task_row["run_id"] is not None
+                and max_attempts == 1
+                and prior_attempt_no == 1
+                and uow.query_one(
+                    "SELECT 1 FROM events WHERE stream_id = ? AND kind = ? LIMIT 1",
+                    (f"{task_id}:{CORE_TASK_STREAM_TYPE}", CORE_TASK_RETRIED_EVENT_KIND),
+                ) is None
+            )
+        ):
             return False, "attempt_budget_exhausted"
         return True, ""
 
@@ -4341,8 +4666,20 @@ class TaskRepository:
             "ORDER BY ordinal ASC, depends_on_task_id ASC",
             (task_id,),
         )
+        prerequisite_rows = uow.query(
+            "SELECT d.depends_on_task_id, d.ordinal, dep.status "
+            "FROM task_dependencies d "
+            "JOIN tasks dep ON dep.id = d.depends_on_task_id "
+            "WHERE d.task_id = ? AND d.kind = 'hard' "
+            "ORDER BY d.ordinal ASC, d.depends_on_task_id ASC",
+            (task_id,),
+        )
         return self._row_to_read_model(
-            row, [dict(dep) for dep in dependency_rows]
+            row,
+            [dict(dep) for dep in dependency_rows],
+            _hard_prerequisite_projection(
+                [dict(prerequisite) for prerequisite in prerequisite_rows]
+            ),
         )
 
     @staticmethod

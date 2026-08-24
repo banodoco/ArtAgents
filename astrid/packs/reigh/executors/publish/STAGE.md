@@ -29,6 +29,7 @@ calls to the Reigh API — it requires network access (`isolation.network: true`
 ```python
 import astrid.sdk as sdk
 result = sdk.invoke("reigh.publish", inputs={
+    kind="executor", project="demo",
     "project_id": "abc123-def456",
     "timeline_id": "ghi789-jkl012",
     "timeline_file": "./out/hype.timeline.json",

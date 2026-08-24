@@ -40,10 +40,29 @@ Both calls inline files as base64 `data:` URIs (no separate upload). Requires `F
   manifest.json      # full record of both stages
 ```
 
-## Example
+## Public SDK example
+
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "video_editing.animate_image",
+    kind="orchestrator",
+    project="demo",
+    orchestrator_args=(
+        "--style-image", "style.jpg",
+        "--ref-video", "driver.mp4",
+    ),
+    dry_run=True,
+)
+```
+
+Project-scoped runs write outputs inside the project's run tree; do not pass
+`out` together with `project`.
+
+## Internal runner example (not a public entrypoint)
 
 ```bash
-python3 -m astrid.packs.video_editing.orchestrators.animate_image.run \
+ASTRID_INTERNAL_INVOCATION=1 python3 -m astrid.packs.video_editing.orchestrators.animate_image.run \
   --style-image ~/Desktop/cGh6S8rc_400x400.jpg \
   --ref-video ~/Desktop/Input.mov \
   --out runs/animate-image-001

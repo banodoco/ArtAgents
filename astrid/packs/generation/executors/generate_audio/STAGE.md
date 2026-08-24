@@ -58,32 +58,57 @@ See:
 - `docs/generation/33-music-models.md` — cloud model and local workflow reference
 - `docs/generation/` — modality contracts, manifest schema, feature list
 
-## CLI quick-start
+## SDK quick-start
+
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "generation.generate_audio",
+    kind="executor",
+    project="demo",
+    inputs={
+        "model": "stable-audio-3-medium",
+        "mode": "music",
+        "execution": "cloud",
+        "prompt": "a serene ambient drone",
+    },
+    dry_run=True,
+)
+```
+
+Project-scoped runs write outputs inside the project's run tree; do not pass
+`out` together with `project`.
+
+## Internal runner command (not a public entrypoint)
+
+The module commands below are reserved for Astrid's internal runner and are
+shown only for implementation debugging. Direct invocation is rejected by the
+canonical-entrypoint guard; use the SDK example above.
 
 ```bash
 # Cloud text-to-music (Stable Audio 3)
-python -m astrid.packs.generation.executors.generate_audio.run \
+ASTRID_INTERNAL_INVOCATION=1 python -m astrid.packs.generation.executors.generate_audio.run \
   --model stable-audio-3-medium --mode music --execution cloud \
   --prompt "a serene ambient drone" --out ./out
 
 # MiniMax with lyrics
-python -m astrid.packs.generation.executors.generate_audio.run \
+ASTRID_INTERNAL_INVOCATION=1 python -m astrid.packs.generation.executors.generate_audio.run \
   --model minimax-music-v2.6 --mode music --execution cloud \
   --prompt "upbeat synth-pop chorus" \
   --lyrics-prompt "We are the robots, beep boop" --out ./out
 
 # MiniMax instrumental (no lyrics required)
-python -m astrid.packs.generation.executors.generate_audio.run \
+ASTRID_INTERNAL_INVOCATION=1 python -m astrid.packs.generation.executors.generate_audio.run \
   --model minimax-music-v2.6 --mode music --execution cloud \
   --prompt "cinematic orchestral score" --instrumental true --out ./out
 
 # ACE-Step with duration and steps
-python -m astrid.packs.generation.executors.generate_audio.run \
+ASTRID_INTERNAL_INVOCATION=1 python -m astrid.packs.generation.executors.generate_audio.run \
   --model ace-step --mode music --execution cloud \
   --prompt "lo-fi hip hop beat" --duration 30 --steps 50 --out ./out
 
 # MiniMax Music 3 (lyrics required; section tags on their own lines)
-python -m astrid.packs.generation.executors.generate_audio.run \
+ASTRID_INTERNAL_INVOCATION=1 python -m astrid.packs.generation.executors.generate_audio.run \
   --model minimax-music-3 --mode music --execution cloud \
   --prompt "Genre: ethereal synth-pop. BPM: 112." \
   --lyrics-prompt "[verse]\nSoftly the world begins to breathe\n[chorus]\nSing it again" \

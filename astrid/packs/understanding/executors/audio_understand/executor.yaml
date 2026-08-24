@@ -7,7 +7,11 @@
     "argv": [
       "{python_exec}",
       "-m",
-      "astrid.packs.understanding.executors.audio_understand.run"
+      "astrid.packs.understanding.executors.audio_understand.run",
+      "--out-dir",
+      "{out}",
+      "--out",
+      "{analysis}"
     ]
   },
   "description": "Inspect audio clips or sampled windows with an audio-understanding model.",
@@ -16,12 +20,13 @@
     {
       "description": "Audio clip to inspect.",
       "name": "audio",
-      "required": false,
+      "required": true,
       "type": "file",
       "artifact_type": "audio"
     }
   ],
   "isolation": {
+    "network": true,
     "mode": "subprocess"
   },
   "keywords": [
@@ -34,6 +39,9 @@
   ],
   "kind": "built_in",
   "metadata": {
+    "env": ["OPENAI_API_KEY"],
+    "required_permissions": ["network", "environment"],
+    "secrets_required": ["OPENAI_API_KEY"],
     "output_result_manifest": true,
     "requires_timeline": false,
     "runtime_entrypoint": "main",
@@ -41,6 +49,22 @@
     "runtime_module": "astrid.packs.understanding.executors.audio_understand.run"
   },
   "name": "Audio Understand",
+  "outputs": [
+    {
+      "name": "analysis",
+      "type": "file",
+      "mode": "create_or_replace",
+      "path_template": "{out}/analysis.json",
+      "artifact_type": "understanding/audio"
+    },
+    {
+      "name": "manifest",
+      "type": "file",
+      "mode": "create_or_replace",
+      "path_template": "{out}/manifest.json",
+      "artifact_type": "metadata/result-manifest"
+    }
+  ],
   "short_description": "Inspect audio clips or sampled windows with an audio-understanding LLM.",
   "version": "1.0"
 }

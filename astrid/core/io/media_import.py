@@ -53,6 +53,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Mapping
 
+from astrid.core.media import MediaProbeError, ffprobe_metadata_strict
+
 # ---------------------------------------------------------------------------
 # Frozen vocabulary and layout (decision artifact sections 5 and 7)
 # ---------------------------------------------------------------------------
@@ -161,6 +163,25 @@ class MediaDigestError(MediaPreparationError):
 
 class MediaPathError(MediaPreparationError):
     """Raised when a filesystem path is missing, non-regular, or out of root."""
+
+
+class MediaDecodabilityError(MediaPreparationError):
+    """Raised when an extension-classified media file cannot be probed."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        media_kind: str,
+        mime_type: str,
+        extension: str,
+        probe_reason: str,
+    ) -> None:
+        super().__init__(message)
+        self.media_kind = media_kind
+        self.mime_type = mime_type
+        self.extension = extension
+        self.probe_reason = probe_reason
 
 
 # ---------------------------------------------------------------------------
@@ -447,6 +468,51 @@ def prepare_media_file(
     mime_type = derive_mime_type(file_path)
     media_kind = derive_media_kind(mime_type)
     probe = probe_media_file(file_path)
+    # Extension-only classification is unsafe for containers: a Git-LFS
+    # pointer (or any other text blob named .mp4/.wav) must fail before the
+    # media/event/receipt transaction rather than becoming a doomed asset.
+    # Generic files and images retain the historical lightweight probe; the
+    # strict container boundary covers video/audio where late render failure
+    # is materially expensive and ffprobe has a reliable stream contract.
+    if media_kind in {"video", "audio"}:
+        try:
+            strict_probe = ffprobe_metadata_strict(file_path)
+        except MediaProbeError as exc:
+            reason = "ffprobe_unavailable" if "not available on PATH" in str(exc) else "undecodable"
+            recovery = (
+                "install ffprobe (from the ffmpeg package) and retry"
+                if reason == "ffprobe_unavailable"
+                else "replace the file with a valid decodable media file and retry"
+            )
+            raise MediaDecodabilityError(
+                f"{file_path.suffix.lower()} media is not importable: {exc}; {recovery}",
+                media_kind=media_kind,
+                mime_type=mime_type,
+                extension=file_path.suffix.lower(),
+                probe_reason=reason,
+            ) from exc
+        required_stream = (
+            strict_probe.has_video_stream if media_kind == "video" else strict_probe.has_audio_stream
+        )
+        if not required_stream:
+            raise MediaDecodabilityError(
+                f"{file_path.suffix.lower()} media contains no {media_kind} stream; "
+                "replace the file with a valid decodable media file and retry",
+                media_kind=media_kind,
+                mime_type=mime_type,
+                extension=file_path.suffix.lower(),
+                probe_reason="missing_stream",
+            )
+        # Preserve the cheap probe keys while making successful decodability
+        # observable without changing the frozen media row schema.
+        probe = {
+            **dict(probe),
+            "decodable": True,
+            "container": strict_probe.container or strict_probe.format_name,
+            "duration_seconds": strict_probe.duration_seconds,
+            "has_video_stream": strict_probe.has_video_stream,
+            "has_audio_stream": strict_probe.has_audio_stream,
+        }
     byte_size = int(probe["byte_size"])
     return PreparedMedia(
         source_path=file_path,
@@ -1052,6 +1118,7 @@ __all__ = [
     "StagedMedia",
     "StagingGcResult",
     "MediaDigestError",
+    "MediaDecodabilityError",
     "MediaIntegrityError",
     "MediaKindError",
     "MediaLocationError",

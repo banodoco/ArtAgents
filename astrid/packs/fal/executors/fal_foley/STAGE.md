@@ -10,18 +10,19 @@ Run through the SDK:
 import astrid.sdk as sdk
 result = sdk.invoke(
     "fal.fal_foley",
+    kind="executor",
+    project="demo",
     inputs={
         "clip": "runs/tile_video/example/tiles/0_0.mp4",
         "prompt": "underwater turbulence, dense bubbles, organic motion",
     },
-    out="runs/foley/0_0.wav",
 )
 ```
 
-Direct invocation:
+Internal runner invocation (not a public entrypoint):
 
 ```bash
-python3 -m astrid.packs.fal.executors.fal_foley.run \
+ASTRID_INTERNAL_INVOCATION=1 python3 -m astrid.packs.fal.executors.fal_foley.run \
   --clip runs/tile_video/example/tiles/0_0.mp4 \
   --prompt "underwater turbulence, dense bubbles, organic motion" \
   --out runs/foley/0_0.wav \

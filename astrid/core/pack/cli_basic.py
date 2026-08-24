@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -161,12 +162,20 @@ def _filtered_packs(
     args: argparse.Namespace, *, include_hidden: bool | None = None
 ) -> list[PackDefinition]:
     show_hidden = bool(getattr(args, "show_hidden", False))
-    packs = list(
-        discover_packs(
-            packs_root(),
+    roots = [packs_root()]
+    raw_roots = [
+        *tuple(getattr(args, "pack_roots", None) or ()),
+        *(item for item in os.environ.get("ASTRID_PACKS_PATH", "").split(os.pathsep) if item),
+    ]
+    roots.extend(Path(item).expanduser() for item in raw_roots)
+    packs_by_id: dict[str, PackDefinition] = {}
+    for root in roots:
+        for pack in discover_packs(
+            root,
             include_hidden=show_hidden if include_hidden is None else include_hidden,
-        )
-    )
+        ):
+            packs_by_id.setdefault(pack.id, pack)
+    packs = list(packs_by_id.values())
     category = getattr(args, "category", None)
     status = getattr(args, "status", None)
     visibility = getattr(args, "visibility", None)

@@ -24,13 +24,11 @@ Dry-run (no API calls; writes the plan + tile crops + frames):
 import astrid.sdk as sdk
 result = sdk.invoke(
     "foley.foley_map",
-    inputs={
-        "video": "~/Downloads/DeepSeaBaby_444_TurbulentDisplace.mp4",
-        "grid": "4x4",
-        "overlap": "0.25",
-        "trim": "15",
-    },
-    out="runs/foley_map/deepsea",
+        kind="orchestrator", project="demo",
+    orchestrator_args=(
+        "--video", "~/Downloads/DeepSeaBaby_444_TurbulentDisplace.mp4",
+        "--grid", "4x4", "--overlap", "0.25", "--trim", "15",
+    ),
     dry_run=True,
 )
 ```
@@ -41,14 +39,12 @@ Run end-to-end:
 import astrid.sdk as sdk
 result = sdk.invoke(
     "foley.foley_map",
-    inputs={
-        "video": "~/Downloads/DeepSeaBaby_444_TurbulentDisplace.mp4",
-        "grid": "4x4",
-        "overlap": "0.25",
-        "trim": "15",
-        "env_file": ".env",
-    },
-    out="runs/foley_map/deepsea",
+        kind="orchestrator", project="demo",
+    orchestrator_args=(
+        "--video", "~/Downloads/DeepSeaBaby_444_TurbulentDisplace.mp4",
+        "--grid", "4x4", "--overlap", "0.25", "--trim", "15",
+        "--env-file", ".env",
+    ),
 )
 ```
 
@@ -58,11 +54,8 @@ Stop after Foley + review (skip the final viewer):
 import astrid.sdk as sdk
 result = sdk.invoke(
     "foley.foley_map",
-    inputs={
-        "video": "...",
-        "stop_after": "review",
-    },
-    out="runs/foley_map/deepsea",
+        kind="orchestrator", project="demo",
+    orchestrator_args=("--video", "...", "--stop-after", "review"),
 )
 ```
 
@@ -72,11 +65,11 @@ Re-roll only tiles flagged in `flagged.json` (downloaded from `review.html`):
 import astrid.sdk as sdk
 result = sdk.invoke(
     "foley.foley_map",
-    inputs={
-        "video": "...",
-        "retry_flagged": "runs/foley_map/deepsea/flagged.json",
-    },
-    out="runs/foley_map/deepsea",
+        kind="orchestrator", project="demo",
+    orchestrator_args=(
+        "--video", "...",
+        "--retry-flagged", "runs/foley_map/deepsea/flagged.json",
+    ),
 )
 ```
 

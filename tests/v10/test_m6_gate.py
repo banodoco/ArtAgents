@@ -148,6 +148,31 @@ def test_serve_boots_clean_project_end_to_end(tmp_path: Path) -> None:
         composition.close()
 
 
+def test_serve_route_discovery_is_machine_readable(tmp_path: Path) -> None:
+    composition = compose_standard_bridge(tmp_path)
+    try:
+        server, thread, base = _start_server(composition)
+        try:
+            with urlopen(f"{base}/routes", timeout=10) as response:  # noqa: S310
+                assert response.status == 200
+                body = json.loads(response.read().decode("utf-8"))
+            assert Path(body["projects_root"]) == tmp_path
+            assert body["exclusive_ownership"]["owner"] == "astrid serve"
+            assert body["save"]["request"] == {
+                "config": "object",
+                "registry": "object",
+                "expected_version": "integer",
+            }
+            assert body["asset"]["registry_path"] == "registry.assets.{registry_key}"
+            paths = {route["path"] for route in body["routes"]}
+            assert "/health" in paths
+            assert "/projects/{project}/timelines/{timeline}/save" in paths
+        finally:
+            _stop_server(server, thread)
+    finally:
+        composition.close()
+
+
 # ---------------------------------------------------------------------------
 # backup create -> destroy -> restore -> reopen with matching state
 # ---------------------------------------------------------------------------
@@ -225,6 +250,7 @@ def test_doctor_fails_closed_on_deleted_database(
     code, payload = _doctor_json(tmp_path, capsys)
     assert code == 1
     assert payload["ok"] is False
+    assert payload["state"] == "unhealthy"
     failed = [check for check in payload["checks"] if check["status"] == "fail"]
     assert any(check["name"] == "sqlite_quick_check" for check in failed)
     assert any(check["name"] == "fk_integrity" for check in failed)

@@ -16,6 +16,8 @@ class PipelineDispatchAliasTest(unittest.TestCase):
         help_text = stdout.getvalue()
         self.assertIn("Astrid command gateway", help_text)
         self.assertIn("python3 -m astrid is the package entry point", help_text)
+        self.assertIn("doctor emits", help_text)
+        self.assertIn("serve/backup have no --json flag", help_text)
         # The eight m6 families are all documented.
         for family in (
             "projects",

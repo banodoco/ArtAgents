@@ -238,6 +238,39 @@ def test_full_pack_all_files_exist_and_validate(pack_inputs, tmp_path) -> None:
     # Reading guide present; structure present (non-null path, null reason).
     assert (out_root / "reading-guide.md").is_file()
     manifest = json.loads((out_root / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["inputs"]["timeline_source"] == [
+        pack_inputs["snapshot"].project_slug
+    ]
+    assert manifest["inputs"]["source_mode"] == "project"
+    assert manifest["inputs"]["resolved_project"] == {
+        "slug": pack_inputs["snapshot"].project_slug
+    }
+    assert manifest["inputs"]["resolved_timelines"] == [
+        manifest["snapshots"][0]["timeline"]
+    ]
+    assert manifest["inputs"]["canonical_timeline_identities"] == [
+        {
+            **manifest["snapshots"][0]["timeline"],
+            "ulid": manifest["snapshots"][0]["timeline"]["ulid"].lower(),
+        }
+    ]
+    uppercase_user_identity = json.loads(json.dumps(manifest))
+    uppercase_user_identity["inputs"]["canonical_timeline_identities"][0][
+        "ulid"
+    ] = uppercase_user_identity["inputs"]["resolved_timelines"][0]["ulid"]
+    with pytest.raises(AssertionError, match="manifest invalid"):
+        _validate("manifest", uppercase_user_identity)
+    # The additive provenance fields are optional in schema v1 so an existing
+    # frozen pack remains valid and navigable without rewriting its bytes.
+    legacy_manifest = json.loads(json.dumps(manifest))
+    for key in (
+        "source_mode",
+        "resolved_project",
+        "resolved_timelines",
+        "canonical_timeline_identities",
+    ):
+        legacy_manifest["inputs"].pop(key)
+    _validate("manifest", legacy_manifest)
     assert manifest["entrypoints"]["structure"] == "structure.md"
     assert manifest["optional_formats"]["structure"] == {"path": "structure.md", "reason": None}
     assert manifest["entrypoints"]["reading_guide"] == "reading-guide.md"
@@ -248,6 +281,21 @@ def test_full_pack_all_files_exist_and_validate(pack_inputs, tmp_path) -> None:
     view_map = json.loads((out_root / "view-map.json").read_text(encoding="utf-8"))
     assert view_map["reading_order"] == page_ids
     assert manifest["page_count"] == len(page_ids)
+
+
+def test_manifest_records_explicit_legacy_authority_mode(pack_inputs, tmp_path) -> None:
+    _layout, out_root = _write_pack(
+        tmp_path,
+        **pack_inputs,
+        source_mode="legacy",
+    )
+
+    manifest = json.loads((out_root / "manifest.json").read_text(encoding="utf-8"))
+    _validate("manifest", manifest)
+    assert manifest["inputs"]["source_mode"] == "legacy"
+    assert manifest["inputs"]["resolved_timelines"] == [
+        manifest["snapshots"][0]["timeline"]
+    ]
 
 
 # ---------------------------------------------------------------------------

@@ -1442,7 +1442,7 @@ def test_separator_and_traversal_output_names_are_rejected_before_invocation(
     assert not list(tmp_path.glob(".*.render-service-*"))
 
 
-def test_facade_rejects_non_mp4_output_name_but_preserves_hype_default() -> None:
+def test_facade_delegates_suffix_policy_but_preserves_hype_default() -> None:
     from astrid.packs.rendering.executors.render.run import (
         DEFAULT_OUTPUT_NAME,
         validate_output_name,
@@ -1450,8 +1450,7 @@ def test_facade_rejects_non_mp4_output_name_but_preserves_hype_default() -> None
 
     assert DEFAULT_OUTPUT_NAME == "hype.mp4"
     assert validate_output_name("hype.mp4") == "hype.mp4"
-    with pytest.raises(ValueError, match=r"\.mp4"):
-        validate_output_name("out.mov")
+    assert validate_output_name("out.mov") == "out.mov"
 
 
 def test_hype_mp4_default_output_name_is_preserved(tmp_path: Path) -> None:

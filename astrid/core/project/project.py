@@ -20,6 +20,7 @@ from astrid.core.contracts.errors import AstridError
 from astrid.core.foundation import project_paths as paths
 from astrid.core.foundation.atomic_io import write_text_atomic
 from astrid.core.foundation.hash import sha256_file
+from astrid.core.kernel.database import resolve_kernel_database_authority
 from astrid.core.theme import load_theme_by_id
 from astrid.core.util.time import utc_now_seconds
 
@@ -166,11 +167,11 @@ def _kernel_or_fs_runs(slug: str, *, root: str | Path | None = None) -> list[str
 
     try:
         import sqlite3
+
         from astrid.core.kernel.read import kernel_runs_for_project
 
         projects_root = paths.resolve_projects_root(root)
-        db_candidates = [projects_root / "kernel.sqlite3", projects_root / ".astrid" / "astrid.sqlite3", projects_root / ".astrid" / "kernel.sqlite3"]
-        has_db = any(p.is_file() for p in db_candidates)
+        has_db = resolve_kernel_database_authority(projects_root).exists
         if has_db:
             ids = kernel_runs_for_project(slug, projects_root=projects_root)
             return ids

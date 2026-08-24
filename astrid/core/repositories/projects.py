@@ -117,6 +117,10 @@ class ProjectRepositoryError(RepositoryError):
 class ProjectValidationError(ProjectRepositoryError):
     """Raised when a project create/get argument is invalid."""
 
+    def __init__(self, message: str, *, details: Mapping[str, Any] | None = None) -> None:
+        self.details: dict[str, Any] = dict(details or {})
+        super().__init__(message)
+
 
 class ProjectAlreadyExistsError(ProjectRepositoryError):
     """Raised when a create targets an already-existing project id."""
@@ -132,6 +136,15 @@ class ProjectSlugConflictError(ProjectRepositoryError):
     def __init__(self, *, slug: str) -> None:
         self.slug: str = slug
         super().__init__(f"project slug already in use: {slug!r}")
+
+
+class ProjectAmbiguousError(ProjectRepositoryError):
+    """Raised when a display name matches multiple projects."""
+
+    def __init__(self, *, name: str, candidates: Sequence[Mapping[str, Any]]) -> None:
+        self.name = name
+        self.candidates = [dict(candidate) for candidate in candidates]
+        super().__init__(f"project display name is ambiguous: {name!r}")
 
 
 class ProjectNotFoundError(ProjectRepositoryError):
@@ -545,8 +558,36 @@ class ProjectRepository:
                 return str(row[0])
         if is_lowercase_ulid(ref) or _SLUG_RE.fullmatch(ref) is not None:
             raise ProjectNotFoundError(project_id=ref)
+        name_rows = reader.execute(
+            "SELECT id, slug, name FROM projects WHERE name = ? ORDER BY slug ASC",
+            (ref,),
+        ).fetchall() if hasattr(reader, "execute") else reader.query(
+            "SELECT id, slug, name FROM projects WHERE name = ? ORDER BY slug ASC",
+            (ref,),
+        )
+        if name_rows:
+            candidates = [
+                {"id": str(row["id"]), "slug": str(row["slug"]), "name": str(row["name"])}
+                for row in name_rows
+            ]
+            if len(candidates) > 1:
+                raise ProjectAmbiguousError(name=ref, candidates=candidates)
+            raise ProjectValidationError(
+                f"project display name {ref!r} is not an address; use its slug or id",
+                details={
+                    "field": "ref",
+                    "reason": "display_name_not_addressable",
+                    "candidates": candidates,
+                    "recovery": "retry with candidates[0].slug or candidates[0].id",
+                },
+            )
         raise ProjectValidationError(
-            f"project address {ref!r} is not a canonical id or slug"
+            f"project address {ref!r} is not a canonical id or slug",
+            details={
+                "field": "ref",
+                "expected": "project id or lowercase slug",
+                "recovery": "run `astrid projects list --json`, then retry with slug or id",
+            },
         )
 
     # -- eventful update (m1 plan step 12) ---------------------------------

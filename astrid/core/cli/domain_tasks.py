@@ -101,8 +101,9 @@ def _add_idempotency_key(subparser: argparse.ArgumentParser) -> None:
 def _add_project_arg(subparser: argparse.ArgumentParser) -> None:
     subparser.add_argument(
         "--project",
-        required=True,
-        help="Owning project id or slug (task ids are project-scoped).",
+        required=False,
+        default=None,
+        help="Owning project id or slug (defaults to the selected project).",
     )
 
 
@@ -130,7 +131,7 @@ def _cmd_list(parsed: argparse.Namespace) -> int:
 
 
 def _cmd_show(parsed: argparse.Namespace) -> int:
-    result = parsed.client.tasks.show(parsed.task_id)
+    result = parsed.client.tasks.show(parsed.task_id, parsed.project)
     return print_result(result, as_json=parsed.json)
 
 
@@ -153,7 +154,7 @@ def _cmd_retry(parsed: argparse.Namespace) -> int:
 
 
 def _cmd_events(parsed: argparse.Namespace) -> int:
-    result = parsed.client.tasks.events(parsed.task_id)
+    result = parsed.client.tasks.events(parsed.task_id, parsed.project)
     return print_result(result, as_json=parsed.json)
 
 
@@ -201,7 +202,11 @@ def _configure_create(subparser: argparse.ArgumentParser) -> None:
         "--dependencies",
         type=_parse_json_array,
         default=None,
-        help="Optional hard dependencies as a JSON array.",
+        help=(
+            "Optional dependency objects as a JSON array; example "
+            "'[{\"task_id\":\"<task-id>\",\"kind\":\"hard\",\"ordinal\":0}]'. "
+            "kind defaults to hard; hard deps block until succeeded, soft deps never block."
+        ),
     )
     _add_idempotency_key(subparser)
     _add_json_flag(subparser)
@@ -215,6 +220,7 @@ def _configure_list(subparser: argparse.ArgumentParser) -> None:
 
 
 def _configure_show(subparser: argparse.ArgumentParser) -> None:
+    _add_project_arg(subparser)
     subparser.add_argument("task_id", help="Exact project-scoped task id.")
     _add_json_flag(subparser)
     subparser.set_defaults(handler=_cmd_show)
@@ -237,6 +243,7 @@ def _configure_retry(subparser: argparse.ArgumentParser) -> None:
 
 
 def _configure_events(subparser: argparse.ArgumentParser) -> None:
+    _add_project_arg(subparser)
     subparser.add_argument("task_id", help="Exact project-scoped task id.")
     _add_json_flag(subparser)
     subparser.set_defaults(handler=_cmd_events)
@@ -261,7 +268,7 @@ COMMANDS: tuple[CommandSpec, ...] = (
     ),
     CommandSpec(
         "cancel",
-        help="Cancel one nonterminal task (one SDK call; no executor fence).",
+        help="Cancel one nonterminal task (running work is cooperatively fenced).",
         configure=_configure_cancel,
     ),
     CommandSpec(

@@ -1,4 +1,5 @@
 import path from 'node:path';
+import fs from 'node:fs';
 import {fileURLToPath} from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -8,6 +9,39 @@ const ASTRID_DIR = path.resolve(__dirname, '..');
 const BUILTIN_PACK_ELEMENTS_DIR = path.resolve(ASTRID_DIR, 'astrid/packs/builtin/elements');
 const RENDERING_PACK_ELEMENTS_DIR = path.resolve(ASTRID_DIR, 'astrid/packs/rendering/elements');
 const LOCAL_PACK_ELEMENTS_DIR = path.resolve(ASTRID_DIR, 'astrid/packs/local/elements');
+
+const extraPackAliases = {};
+for (const rawRoot of (process.env.ASTRID_PACKS_PATH ?? '').split(path.delimiter)) {
+  if (!rawRoot) continue;
+  const root = path.resolve(rawRoot);
+  let children = [];
+  try { children = fs.readdirSync(root); } catch { continue; }
+  for (const child of children) {
+    const packRoot = path.join(root, child);
+    let stat;
+    try { stat = fs.statSync(packRoot); } catch { continue; }
+    if (child === 'local' || !stat.isDirectory()) continue;
+    let packId = child;
+    for (const manifestName of ['pack.yaml', 'pack.yml', 'pack.json']) {
+      try {
+        const manifest = fs.readFileSync(path.join(packRoot, manifestName), 'utf8');
+        const match = manifestName === 'pack.json'
+          ? JSON.parse(manifest).id
+          : manifest.match(/^id:\s*([A-Za-z0-9_-]+)/m)?.[1];
+        if (typeof match === 'string' && match) packId = match;
+        break;
+      } catch { /* try the next manifest */ }
+    }
+    for (const kind of ['effects', 'animations', 'transitions']) {
+      const elements = path.join(packRoot, 'elements', kind);
+      try {
+        if (fs.statSync(elements).isDirectory()) {
+          extraPackAliases[`@pack-${packId}-elements-${kind}`] = elements;
+        }
+      } catch { /* absent kind root */ }
+    }
+  }
+}
 // Workspace-level effects/animations/transitions/themes/* live above the
 // Remotion project, so their nearest node_modules walks up past the
 // tools/remotion install. Add the Remotion project's node_modules to
@@ -33,7 +67,8 @@ const primitiveAliases = {
   '@pack-rendering-elements-transitions': path.resolve(RENDERING_PACK_ELEMENTS_DIR, 'transitions'),
   '@workspace-animations': path.resolve(RENDERING_PACK_ELEMENTS_DIR, 'animations'),
   '@workspace-effects': path.resolve(RENDERING_PACK_ELEMENTS_DIR, 'effects'),
-  '@workspace-transitions': path.resolve(RENDERING_PACK_ELEMENTS_DIR, 'transitions'),
+      '@workspace-transitions': path.resolve(RENDERING_PACK_ELEMENTS_DIR, 'transitions'),
+      ...extraPackAliases,
 };
 
 export const applyRemotionPrimitiveAliases = (currentConfiguration) => ({

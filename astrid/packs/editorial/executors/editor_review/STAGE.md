@@ -30,11 +30,11 @@ pass, not the interactive web UI.
 import astrid.sdk as sdk
 result = sdk.invoke(
     "editorial.editor_review",
+        kind="executor", project="demo",
     inputs={
         "brief_dir": "./out",
         "run_dir": "./runs/my-run",
     },
-    out="./out",
 )
 ```
 
@@ -44,6 +44,7 @@ With custom model and frame sampling:
 import astrid.sdk as sdk
 result = sdk.invoke(
     "editorial.editor_review",
+        kind="executor", project="demo",
     inputs={
         "brief_dir": "./out",
         "run_dir": "./runs/my-run",
@@ -52,7 +53,6 @@ result = sdk.invoke(
         "cadence_sec": "2.0",
         "env_file": ".env.local",
     },
-    out="./out",
 )
 ```
 
@@ -62,12 +62,12 @@ Skip the LLM call for a default ship verdict:
 import astrid.sdk as sdk
 result = sdk.invoke(
     "editorial.editor_review",
+        kind="executor", project="demo",
     inputs={
         "brief_dir": "./out",
         "run_dir": "./runs/my-run",
         "skip_llm": True,
     },
-    out="./out",
 )
 ```
 
@@ -77,12 +77,12 @@ Second-iteration review:
 import astrid.sdk as sdk
 result = sdk.invoke(
     "editorial.editor_review",
+        kind="executor", project="demo",
     inputs={
         "brief_dir": "./out",
         "run_dir": "./runs/my-run",
         "iteration": "2",
     },
-    out="./out",
 )
 ```
 

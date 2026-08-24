@@ -20,7 +20,7 @@ BackendAdapter        ← FalBackend (cloud) | VibeComfyBackend (local) | CodexB
 manifest.json         ← canonical record of every generation run (v2 schema)
       │
       ▼
-Per-modality contracts ← image (wired) | video (wired) | audio (forward spec)
+Per-modality contracts ← image (wired) | video (wired) | audio (cloud music wired)
 ```
 
 1. **Model registry** — `models.yaml` declares every model: its modality,
@@ -42,6 +42,15 @@ Per-modality contracts ← image (wired) | video (wired) | audio (forward spec)
    and manifest shape, request validation rules, and feature-dropping
    semantics.
 
+Before either a dry-run or live generation invocation, the SDK applies the
+shared read-only preflight in `astrid/core/generation/preflight.py`. It checks
+the model → mode → execution matrix and mode-required inputs before project
+resolution or kernel admission. Thus an FLF request missing `image_end_ref`
+and a cloud-only model requested with `execution="local"` both fail with a
+typed actionable error and leave the run ledger untouched. Local video/image
+routes additionally require the VibeComfy/ComfyUI prerequisites; Astrid never
+falls back to cloud when those are missing.
+
 ## Document index
 
 | # | Document | Scope |
@@ -51,7 +60,7 @@ Per-modality contracts ← image (wired) | video (wired) | audio (forward spec)
 | 20 | [manifest-schema](20-manifest-schema.md) | `manifest.json` v2 shape, warnings, output entries |
 | 30 | [image-contract](30-image-contract.md) | Image modes (t2i/i2i/edit wired), CLI, backends |
 | 31 | [video-contract](31-video-contract.md) | Video modes (t2v/i2v/flf wired), wired-cells table |
-| 32 | [audio-contract](32-audio-contract.md) | Forward spec — tts/music/sfx planned for Sprint 05 |
+| 32 | [audio-contract](32-audio-contract.md) | Cloud music generation; tts/sfx remain planned |
 
 ## Code map
 

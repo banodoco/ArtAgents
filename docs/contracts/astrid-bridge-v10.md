@@ -15,6 +15,7 @@
 | Route | Method(s) | Purpose |
 |---|---|---|
 | `/health` | `GET` | liveness + resolved projects root |
+| `/routes` | `GET` | machine-readable route, payload, and ownership discovery |
 | `/projects` | `GET` | sorted project list |
 | `/projects/:slug/timelines` | `GET` | timeline discovery list for one project |
 | `/projects/:slug/timelines/:ref` | `GET` | load one timeline (config + registry + version) |
@@ -25,6 +26,15 @@
 `:slug` is a validated project slug. `:ref` is a timeline address: canonical UUID, lowercase 26-character ULID, or immutable slug (see §8). `:key` is an asset key resolved from the persisted timeline asset registry.
 
 Route grammar: exactly the segments above. Any other path returns 404 with the `not_found` envelope.
+
+### 1.1 `GET /routes`
+
+Returns a small machine-readable discovery document so an editor agent does
+not need to guess route verbs, save payloads, or asset-key semantics. The
+document includes the resolved `projects_root`, the exclusive database
+ownership implication while `astrid serve` is running, the canonical routes,
+and the whole-document save request shape. Asset URLs use the `{registry_key}`
+under `registry.assets`; that key is not the entry's `media_id`.
 
 ## 2. Common behavior
 

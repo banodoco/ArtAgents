@@ -220,6 +220,7 @@ def run_orchestrator(request: OrchestratorRunRequest, registry: OrchestratorRegi
 
 def _run_orchestrator_inner(request: OrchestratorRunRequest, orchestrator: OrchestratorDefinition) -> OrchestratorRunResult:
     values = _request_values(request, orchestrator)
+    _validate_orchestrator_inputs(orchestrator, request)
     _validate_out_requirement(orchestrator, request)
     _validate_required_inputs(
         orchestrator.id, orchestrator.inputs, values, noun="orchestrator", error_cls=OrchestratorRunnerError
@@ -235,6 +236,7 @@ def build_orchestrator_command(request: OrchestratorRunRequest, registry: Orches
     active_registry = registry or load_default_registry()
     orchestrator = active_registry.get(request.orchestrator_id)
     values = _request_values(request, orchestrator)
+    _validate_orchestrator_inputs(orchestrator, request)
     _validate_out_requirement(orchestrator, request)
     _validate_required_inputs(
         orchestrator.id, orchestrator.inputs, values, noun="orchestrator", error_cls=OrchestratorRunnerError
@@ -432,6 +434,46 @@ def _expand_command_runtime(
         for key, value in command_spec.env.items()
     }
     return tuple(argv), cwd, env
+
+
+def _validate_orchestrator_inputs(
+    orchestrator: OrchestratorDefinition,
+    request: OrchestratorRunRequest,
+) -> None:
+    """Reject SDK inputs that the runtime cannot consume.
+
+    Command orchestrators only receive values represented by manifest
+    placeholders.  Historically a caller could pass ``inputs`` to an
+    orchestrator with no typed inputs (or with placeholders omitted) and the
+    runner would silently drop them.  Fail before admission and point callers
+    at the explicit ``orchestrator_args`` escape hatch.
+    """
+    provided = tuple(str(name) for name in request.inputs)
+    declared = {port.name for port in orchestrator.inputs}
+    unknown = sorted(set(provided) - declared)
+    if unknown:
+        declared_hint = ", ".join(sorted(declared)) or "none"
+        raise OrchestratorRunnerError(
+            f"orchestrator {orchestrator.id!r} does not declare SDK input(s): "
+            f"{', '.join(unknown)}; declared inputs: {declared_hint}. "
+            "recovery: pass the runtime flags through "
+            "orchestrator_args=(\"--flag\", \"value\") and retry"
+        )
+    if not provided or orchestrator.runtime.kind != "command":
+        return
+    command = orchestrator.runtime.command
+    if command is None:
+        return
+    command_text = " ".join((*command.argv, command.cwd or "", *command.env.values()))
+    placeholders = set(_PLACEHOLDER_RE.findall(command_text))
+    dropped = sorted(name for name in provided if name not in placeholders)
+    if dropped:
+        raise OrchestratorRunnerError(
+            f"orchestrator {orchestrator.id!r} declares input(s) that its command "
+            f"does not consume: {', '.join(dropped)}; "
+            "recovery: pass the runtime flags through "
+            "orchestrator_args=(\"--flag\", \"value\") and retry"
+        )
 
 
 def _normalize_python_result(

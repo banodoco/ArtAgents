@@ -236,6 +236,50 @@ def test_update_mutates_name_and_metadata_keeps_kind_and_project(
     assert row["project_id"] == seed.project.id
 
 
+def test_update_metadata_merges_delta_and_empty_object_clears(
+    env: SimpleNamespace,
+) -> None:
+    project = _create_project(env)
+    media = _import_media(env, project_id=project.id)
+    reference = UnitOfWork(env.writer).run(
+        lambda u: env.reference_repo.create(
+            u,
+            project_id=project.id,
+            kind="character",
+            name="Alice",
+            media_id=media.id,
+            metadata={"age": 30, "tag": "hero"},
+            idempotency_key="create-metadata-delta",
+            reference_id="reference-metadata-delta",
+            created_at=TS,
+        )
+    )
+
+    updated = UnitOfWork(env.writer).run(
+        lambda u: env.reference_repo.update(
+            u,
+            project_id=project.id,
+            reference_id=reference.id,
+            metadata={"age": 31, "arc": "arrival"},
+            idempotency_key="update-metadata-delta",
+            now=TS2,
+        )
+    )
+    assert updated.metadata == {"age": 31, "arc": "arrival", "tag": "hero"}
+
+    cleared = UnitOfWork(env.writer).run(
+        lambda u: env.reference_repo.update(
+            u,
+            project_id=project.id,
+            reference_id=reference.id,
+            metadata={},
+            idempotency_key="update-metadata-clear",
+            now="2026-08-18T02:00:00.000000+00:00",
+        )
+    )
+    assert cleared.metadata == {}
+
+
 def test_update_only_name_preserves_description_and_metadata(
     env: SimpleNamespace,
 ) -> None:

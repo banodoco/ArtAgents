@@ -8,15 +8,19 @@ explicit ``refresh_root`` branch.
 
 from __future__ import annotations
 
+import atexit
 import hashlib
 import hmac
 import json
 import math
 import os
+import shutil
+import sqlite3
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from types import MappingProxyType
-from typing import Any, Mapping
+from typing import Any
 
 from jsonschema import Draft202012Validator, FormatChecker
 from referencing import Registry, Resource
@@ -85,6 +89,87 @@ class FocusResolutionError(FrozenViewError):
     """A focus reference cannot be resolved within the frozen lineage."""
 
 
+def _rehydrate_managed_pack(
+    manifest_path: Path,
+    *,
+    project_root: Path,
+) -> Path | None:
+    """Reassemble a completed visualization pack from kernel-owned CAS files."""
+
+    projects_root = project_root.parent
+    database = projects_root / ".astrid" / "astrid.sqlite3"
+    if not database.is_file():
+        return None
+    conn: sqlite3.Connection | None = None
+    try:
+        conn = sqlite3.connect(f"file:{database}?mode=ro", uri=True)
+        conn.row_factory = sqlite3.Row
+        owner = conn.execute(
+            "SELECT t.id AS task_id FROM media_locations l "
+            "JOIN media m ON m.id = l.media_id "
+            "JOIN task_outputs o ON o.media_id = m.id "
+            "JOIN tasks t ON t.id = o.task_id "
+            "JOIN runs r ON r.id = t.run_id AND r.project_id = t.project_id "
+            "JOIN projects p ON p.id = t.project_id "
+            "WHERE l.realm = 'managed_local' AND l.locator = ? "
+            "AND p.slug = ? AND t.capability = 'rendering.timeline_visualize' "
+            "AND t.status = 'succeeded' AND r.status = 'succeeded' "
+            "AND o.is_primary = 1 AND o.role = 'result' LIMIT 1",
+            (str(manifest_path), project_root.name),
+        ).fetchone()
+        if owner is None:
+            return None
+        rows = conn.execute(
+            "SELECT o.params_json, m.content_hash, l.locator FROM task_outputs o "
+            "JOIN media m ON m.id = o.media_id "
+            "JOIN media_locations l ON l.media_id = m.id AND l.realm = 'managed_local' "
+            "WHERE o.task_id = ? ORDER BY o.ordinal ASC",
+            (str(owner["task_id"]),),
+        ).fetchall()
+    except sqlite3.Error:
+        return None
+    finally:
+        if conn is not None:
+            conn.close()
+
+    pack_root = Path(tempfile.mkdtemp(prefix="astrid-frozen-view-"))
+    atexit.register(shutil.rmtree, pack_root, ignore_errors=True)
+    seen: set[str] = set()
+    managed_root = (projects_root / ".astrid" / "media" / "sha256").resolve()
+    try:
+        for row in rows:
+            params = json.loads(str(row["params_json"]))
+            label = params.get("label") if isinstance(params, dict) else None
+            digest = str(row["content_hash"])
+            source = Path(str(row["locator"])).resolve(strict=True)
+            expected_source = managed_root / digest[:2] / digest[2:4] / digest
+            if (
+                not isinstance(label, str)
+                or not label
+                or Path(label).name != label
+                or label in seen
+                or source != expected_source
+                or hashlib.sha256(source.read_bytes()).hexdigest() != digest
+            ):
+                raise ContainmentError("managed visualization output set is malformed")
+            seen.add(label)
+            destination = pack_root / label
+            try:
+                os.link(source, destination)
+            except OSError:
+                shutil.copy2(source, destination)
+    except Exception:
+        shutil.rmtree(pack_root, ignore_errors=True)
+        raise
+    candidate = pack_root / MANIFEST_NAME
+    if not candidate.is_file() or PACK_HASHES_NAME not in seen:
+        shutil.rmtree(pack_root, ignore_errors=True)
+        raise FrozenIntegrityError(
+            "managed visualization pack predates durable navigation support; rerun visualization"
+        )
+    return candidate
+
+
 class _DuplicateJsonKey(ValueError):
     pass
 
@@ -104,6 +189,7 @@ class FrozenView:
     asset_index: dict
     transcript_index: dict
     diagnostics: dict
+    source_manifest: Path | None = None
 
 
 def _pairs_no_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -629,7 +715,6 @@ def _verify_run_ownership(manifest_path: Path, project_root: Path, manifest: dic
 
 def _kernel_frozen_run_info(project_slug: str, run_id: str, projects_root: Path) -> dict[str, Any] | None:
     try:
-        import sqlite3
         from astrid.core.kernel.read import kernel_run_info
 
         info = kernel_run_info(project_slug, run_id, projects_root=projects_root)
@@ -655,8 +740,21 @@ def load_frozen_view(manifest_path: Path, *, project_root: Path) -> FrozenView:
     raw_manifest = Path(manifest_path).expanduser()
     absolute_manifest = raw_manifest if raw_manifest.is_absolute() else Path.cwd() / raw_manifest
     resolved_manifest = absolute_manifest.resolve(strict=False)
+    source_manifest = resolved_manifest
+    managed_output = False
     if not resolved_manifest.is_relative_to(project):
-        raise ContainmentError("--from-view manifest must be contained by project_root")
+        rehydrated = _rehydrate_managed_pack(
+            resolved_manifest,
+            project_root=project,
+        )
+        if rehydrated is None:
+            raise ContainmentError(
+                "--from-view must be inside the project or the durable manifest "
+                "returned by a completed project visualization"
+            )
+        resolved_manifest = rehydrated
+        absolute_manifest = rehydrated
+        managed_output = True
     if absolute_manifest.is_symlink():
         raise ContainmentError("--from-view manifest must not be a symlink")
     if not resolved_manifest.is_file() or resolved_manifest.name != MANIFEST_NAME:
@@ -779,11 +877,13 @@ def load_frozen_view(manifest_path: Path, *, project_root: Path) -> FrozenView:
         asset_index=asset_index,
         transcript_index=transcript_index,
         diagnostics=core["diagnostics"],
+        source_manifest=source_manifest,
     )
     _verify_deterministic_identity_map(frozen)
 
     # 5. The pack must be owned by the exact completed project run.
-    _verify_run_ownership(resolved_manifest, project, manifest, timeline_ulid)
+    if not managed_output:
+        _verify_run_ownership(resolved_manifest, project, manifest, timeline_ulid)
     return frozen
 
 

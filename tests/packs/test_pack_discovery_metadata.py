@@ -275,6 +275,34 @@ class PackDiscoveryMetadataTest(unittest.TestCase):
         self.assertEqual([dp.id for dp in discovered], ["alpha", "gamma"])
         self.assertEqual([dp.source_kind for dp in discovered], ["source", "env"])
 
+    def test_same_canonical_external_root_is_scanned_once(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_pack = _make_pack(root / "src", "alpha")
+            external_root = root / "external"
+            external_pack = _make_pack(external_root, "gamma")
+
+            def scan(arg=None):
+                if arg is None:
+                    return (source_pack,)
+                if Path(arg).resolve() == external_root.resolve():
+                    return (external_pack,)
+                return ()
+
+            with mock.patch.dict(
+                os.environ,
+                {ASTRID_PACKS_PATH_ENV: str(external_root)},
+                clear=False,
+            ):
+                discovered = discover_pack_metadata(
+                    discover_packs_fn=scan,
+                    extra_pack_roots=(str(external_root / ".." / "external"),),
+                    include_installed=False,
+                )
+
+        self.assertEqual([dp.id for dp in discovered], ["alpha", "gamma"])
+        self.assertEqual([dp.source_kind for dp in discovered], ["source", "extra"])
+
     def test_env_layer_expands_and_resolves_after_extra_before_installed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_root = Path(tmp)

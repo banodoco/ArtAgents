@@ -20,8 +20,9 @@ no local model installation is required.
 import astrid.sdk as sdk
 result = sdk.invoke(
     "editorial.transcribe",
+    kind="executor",
+    project="demo",
     inputs={"audio": "./source.mp3"},
-    out="./out",
 )
 ```
 
@@ -31,8 +32,9 @@ With an explicit env file for API credentials:
 import astrid.sdk as sdk
 result = sdk.invoke(
     "editorial.transcribe",
+    kind="executor",
+    project="demo",
     inputs={"audio": "./source.mp3", "env_file": ".env.local"},
-    out="./out",
 )
 ```
 
@@ -48,6 +50,10 @@ result = sdk.invoke(
 | Name       | Type | Path                      | Description              |
 |------------|------|---------------------------|--------------------------|
 | transcript | file | `{out}/transcript.json`   | Structured transcript JSON |
+| subtitle   | file | `{out}/transcript.srt`    | Timestamped SRT subtitles |
+| transcript_text | file | `{out}/transcript.txt` | Plain-text transcript |
+| chunk_plan | file | `{out}/cache/chunks.json` | Silence-aware chunk metadata |
+| manifest   | file | `{out}/manifest.json`     | Universal result manifest |
 
 ## Pipeline position
 

@@ -54,7 +54,8 @@ class CanonicalAliasTest(unittest.TestCase):
 class TimelineProductParserAliasTest(unittest.TestCase):
     """The m4 product timelines parser (plan step 26, task T28) is alias-free.
 
-    Exactly the seven planned verbs are registered — plus the
+    The planned timeline verbs (including ``visualize`` and canonical ``render``)
+    are registered — plus the
     manifest-owned nested ``shots`` mount (``astrid timelines shots``,
     plan step 26, task T29) — while obsolete aliases (``ls``, ...) and the
     legacy migration/push/pull/sync/audit/erase/repair verbs are absent,
@@ -78,16 +79,27 @@ class TimelineProductParserAliasTest(unittest.TestCase):
 
         self.assertEqual(
             tuple(spec.name for spec in COMMANDS),
-            ("create", "list", "show", "save", "archive", "history", "diff"),
+            (
+                "create",
+                "list",
+                "show",
+                "save",
+                "archive",
+                "unarchive",
+                "history",
+                "diff",
+                "visualize",
+                "render",
+            ),
         )
         for spec in COMMANDS:
             with self.subTest(command=spec.name):
                 self.assertEqual(spec.aliases, ())
 
-    def test_product_timeline_parser_exposes_only_the_seven_verbs(self) -> None:
+    def test_product_timeline_parser_exposes_only_the_ten_verbs(self) -> None:
         # The manifest-owned nested ``shots`` mount is a declared parser
         # choice beneath ``timelines`` (the shots family lives only there);
-        # the seven timeline verbs are the only SDK-adapter verbs, and
+        # timeline verbs are the only SDK-adapter verbs, and
         # ``copy`` plus every legacy/obsolete alias stays absent.
         self.assertEqual(
             self._choices(),
@@ -97,8 +109,11 @@ class TimelineProductParserAliasTest(unittest.TestCase):
                 "show",
                 "save",
                 "archive",
+                "unarchive",
                 "history",
                 "diff",
+                "visualize",
+                "render",
                 "shots",
             },
         )
@@ -115,7 +130,6 @@ class TimelineProductParserAliasTest(unittest.TestCase):
             "erase",
             "repair",
             "ls",
-            "visualize",
             "rename",
             "finalize",
             "tombstone",

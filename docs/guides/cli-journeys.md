@@ -3,7 +3,8 @@
 This guide walks the five product families (`projects`, `media`, `tasks`,
 `runs`, `timelines`), the two nested mounts (`media references`, `timelines
 shots`), and the local backup/diagnostic commands. Examples use `--json` where
-the command returns an SDK envelope.
+the command returns an SDK envelope; `doctor --json` is a separate diagnostic
+object, and `serve`/`backup` are human-readable operational commands.
 
 Normative references: `docs/astrid-first-sprint-plan-20260813.md` (Sprints 5–6),
 `docs/contracts/astrid-sdk-v10.md` (envelope contract).
@@ -20,7 +21,11 @@ with the `projects` family below. Run commands from the repository root.
 # 1. Confirm the CLI is reachable (prints the product census).
 python3 -m astrid --help
 
-# 2. Inspect a concrete family and verb without side effects.
+# 2. Run the read-only first-run diagnostic (state=uninitialized is expected
+#    before the first project exists).
+python3 -m astrid doctor --json
+
+# 3. Inspect a concrete family and verb without side effects.
 python3 -m astrid projects --help
 python3 -m astrid timelines save --help
 ```
@@ -33,9 +38,10 @@ Notes:
 - **One verb = one SDK call.** Every handler parses arguments, makes exactly
   one SDK service call, and renders the result. There is no SQL or domain
   logic in the CLI layer.
-- **`--json` is the stable machine surface.** In JSON mode the CLI prints
-  exactly one envelope object (see below) to `stdout`; human mode prints one
-  concise identity line instead.
+- **`--json` is the stable product machine surface.** Product and nested-mount
+  commands print exactly one five-key envelope (see below) to `stdout`; the
+  read-only `doctor --json` diagnostic has its documented check/state shape;
+  human operational commands print concise summaries instead.
 
 ---
 
@@ -90,7 +96,7 @@ Exit codes are stable: `0` success (`ok=true`), `1` typed SDK error
 
 ---
 
-## 1. `projects` — create / list / show / update / select
+## 1. `projects` — create / list / show / update / select / current
 
 ```bash
 # create — one client.projects.create call (slug immutable, idempotency key returned)
@@ -105,13 +111,21 @@ python3 -m astrid projects show demo --json
 # update — one client.projects.update call (name and/or settings delta)
 python3 -m astrid projects update demo --name "Demo Renamed" --json
 
-# select — persist a non-authoritative default-project preference
+# select — persist a workspace/user project-routing preference
 python3 -m astrid projects select demo --scope workspace --json
+
+# current — inspect the selected project, canonical path, and supplying scope
+python3 -m astrid projects current --json
 ```
 
-`select` is a file-side preference only (workspace scope by default, or
-`--scope user`): it writes no receipt, performs no database mutation, and
-carries no authority.
+`select` is a file-side routing preference (workspace scope by default, or
+`--scope user`): it writes no receipt and performs no database mutation. The
+`current` read-back resolves workspace before user scope, verifies the selected
+ref against the kernel, and reports the selected project plus preference path
+and scope. When `ASTRID_PROJECTS_ROOT` is set and `--cwd` is omitted, the
+workspace preference lives under that projects root; pass `--cwd` to opt into a
+different intentional workspace boundary. Every project-scoped product CLI command accepts an omitted
+`--project` and uses that selection; an explicit `--project` always wins.
 
 ---
 
@@ -122,14 +136,23 @@ carries no authority.
 python3 -m astrid media import ./shot.png --project demo --json
 python3 -m astrid media import ./assets --project demo --json
 
+Video/audio containers are strictly checked with `ffprobe` before admission.
+An undecodable `.mp4`/`.wav` (including a Git-LFS pointer) returns a typed
+`validation_error` with no media row, event, receipt, or managed bytes; install
+the ffmpeg package when `ffprobe` is unavailable and retry. Generic files and
+images retain their extension-based import classification.
+
 # list — project-scoped (created_at, then id)
 python3 -m astrid media list --project demo --json
 
 # show — exact project-scoped media id
 python3 -m astrid media show M_01ABC --project demo --json
 
-# verify — fingerprint-verified; requires --realm
+# verify — fingerprint-verified; requires --realm (all matching locations)
 python3 -m astrid media verify M_01ABC --project demo --realm managed_local --json
+# verify one ambiguous realm location precisely
+python3 -m astrid media verify M_01ABC --project demo --realm external_local \
+  --location-id 01LOC... --json
 
 # relocate — identity unchanged; requires --realm and --locator
 python3 -m astrid media relocate M_01ABC --project demo \
@@ -233,6 +256,10 @@ python3 -m astrid runs list --project demo --json
 python3 -m astrid runs show --project demo RUN_01ABC --json
 python3 -m astrid runs show --project demo RUN_01ABC --evidence --json
 
+# With --evidence, successful child completion outputs are also returned:
+# media ids, roles, labels, hashes, sizes, and safe relative paths for the
+# render and provenance artifacts.
+
 # cancel — drive every eligible child to terminal cancelled
 python3 -m astrid runs cancel --project demo RUN_01ABC --json
 
@@ -260,7 +287,7 @@ There is no `--run` flag on `tasks retry`; the batch retry surface is
 
 ---
 
-## 6. `timelines` — create / list / show / save / archive / history / diff
+## 6. `timelines` — create / list / show / save / archive / unarchive / history / diff / visualize / render
 
 ```bash
 # create — one client.timelines.create call (slug immutable)
@@ -276,7 +303,7 @@ python3 -m astrid timelines show --project demo primary --json
 # save — whole-document CAS save (config and registry both required);
 # create sets config_version 1, so a fresh timeline saves with --expected-version 1
 python3 -m astrid timelines save --project demo primary \
-  --config '{"width": 1920, "height": 1080}' \
+  --config '{"tracks":[{"id":"main","kind":"visual","label":"Main"}],"clips":[],"output":{"resolution":"320x180","fps":30,"file":"primary.mp4"}}' \
   --registry '{"assets": {}}' --expected-version 1 --json
 
 # archive — event-backed terminal mutation
@@ -287,11 +314,21 @@ python3 -m astrid timelines history --project demo primary --json
 
 # diff — deterministic adjacent-version diffs (read)
 python3 -m astrid timelines diff --project demo primary --json
+
+# visualize — deterministic run-owned evidence (filmstrip off is the safe
+# first pass when no verified rendered-video source is available)
+python3 -m astrid timelines visualize primary --project demo \
+  --format md --filmstrip off --json
+
+# render — version-pinned canonical render
+python3 -m astrid timelines render primary --project demo \
+  --expected-version 1 --backend rendering.remotion \
+  --output-name primary.mp4 --json
 ```
 
 ---
 
-## 7. `timelines shots` — list / create / add / remove / reorder
+## 7. `timelines shots` — list / create / show / add / remove / reorder
 
 The `shots` family is a manifest-declared **nested mount**: it is reachable
 only beneath `timelines` (for example, `astrid timelines shots list`) and is never a
@@ -300,6 +337,9 @@ top-level command.
 ```bash
 # list — every shot in a project (sort_key, then id)
 python3 -m astrid timelines shots list --project demo --json
+
+# show — inspect one shot's ordered item/media mapping from a fresh read
+python3 -m astrid timelines shots show S_01ABC --project demo --json
 
 # create — one empty shot
 python3 -m astrid timelines shots create --project demo --name "Shot 1" --json
@@ -319,6 +359,15 @@ python3 -m astrid timelines shots reorder S_01ABC --project demo \
 `reorder` accepts a repeatable/comma-separated `--items` list naming the
 entire item-id permutation. A permutation that omits, duplicates, or adds an
 item id is rejected by the service before any write.
+
+Shots are project-level reusable records. The `timelines shots` nesting is a
+CLI mount for discoverability, not an implicit timeline association, and shot
+commands therefore do not take a timeline id. If a timeline document chooses
+to reference a shot, that relationship lives in the document's own config;
+removing a shot id from a document does not delete the reusable shot record.
+`show` returns ordered item ids, media ids, positions, and best-effort media
+name/path details so a fresh agent can inspect state without retaining a
+mutation response.
 
 ---
 
@@ -341,9 +390,15 @@ Run the read-only doctor before changing a project:
 python3 -m astrid doctor --json --projects-root ./projects
 ```
 
-An unavailable local service or owner lock is reported as the typed
-`unavailable` condition. Retry after the owning process exits; do not open a
-second writer. A doctor result with `schema_versions: fail` indicates a
+On a pristine root, `doctor --json` returns `state: "uninitialized"` with
+`ok: true` and exit 0; after the first product command it returns
+`state: "ready"` when healthy. `state: "unhealthy"` (or a failed check)
+indicates a real problem. An unavailable local service or owner lock is reported as the typed
+`unavailable` condition. When `error.details.reason` is `store_owned`,
+`astrid serve` owns the store: use `GET /routes` and its HTTP routes while it
+runs, or wait for a clean shutdown. Reads may retry after release; writes must
+preserve the exact payload and idempotency key, then verify state. Do not open
+a second writer. A doctor result with `schema_versions: fail` indicates a
 too-new migration or schema incompatibility. Keep the original project and
 select a compatible checkout or restore a compatible backup.
 
@@ -368,6 +423,13 @@ python3 -m astrid media verify M_01ABC --project demo \
   --realm managed_local --json
 ```
 
+When one media id has multiple locations in a realm, `verify` checks every
+location in deterministic creation/id order and returns per-location results.
+Healthy locations are stamped and committed independently; missing or mutated
+locations remain unchanged. A mixed result is a typed `integrity_error` whose
+details include both successes and failures, plus recovery commands. Repair a
+specific location and retry with `--location-id <id>` or `--locator <path>`.
+
 Backups are staged and validated before publication. If a restore process is
 interrupted, run the same restore command again or start the local bridge; the
 startup path reads its durable journal before opening the writer and accepts
@@ -378,3 +440,15 @@ python3 -m astrid backup create --projects-root ./projects --out ./backup
 python3 -m astrid backup restore ./backup --projects-root ./projects
 python3 -m astrid backup restore ./backup --projects-root ./projects --force  # only when the target root already holds data
 ```
+
+`backup create` also snapshots every readable `external_local` file into a
+deduplicated SHA-256 tree. The backup envelope reports the number of unique
+external snapshots and locator dependencies, and retains each original
+locator as provenance. On restore, the database locators are atomically rebased
+to the verified backup-owned bytes under the restored `.astrid/media` tree;
+the original external path is preserved in `media.metadata_json` under
+`backup_provenance.external_local`. Missing or byte-mutated external inputs
+fail backup creation, while missing or mutated snapshot bytes fail restore
+before either the database or media tree is published. Older backups without
+the external section remain supported but report unresolved external locators
+until those files are relocated or re-imported.

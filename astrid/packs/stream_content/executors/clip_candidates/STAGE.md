@@ -7,12 +7,12 @@ to produce ranked 20-90 second clip candidates.
 import astrid.sdk as sdk
 result = sdk.invoke(
     "stream_content.clip_candidates",
+        kind="executor", project="demo",
     inputs={
         "transcript": "transcript.json",
         "segment_map": "segment_map.json",
         "brief": "brief.md",
     },
-    out="runs/stream/candidates.json",
 )
 ```
 

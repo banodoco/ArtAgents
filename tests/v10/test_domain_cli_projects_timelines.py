@@ -6,7 +6,7 @@ SDK call**, returns exact envelopes and keys, persists ``select`` as the
 non-authoritative preference, and provides executable help.
 
 Task T28 (plan step 26) proves the ``timelines`` product family
-(``astrid/packs/timeline/cli.py``): exactly the seven planned verbs are
+(``astrid/packs/timeline/cli.py``): the planned timeline verbs are
 reachable through one-call SDK adapters, legacy aliases and
 migration/push/pull/sync/audit/erase/repair are absent, ``copy`` is
 absent (deferred past m6), all help is executable, and the gateway
@@ -32,6 +32,7 @@ import pytest
 
 from astrid.core.cli.domain_product import run_product_family
 from astrid.sdk.contracts import CommandReceipt, DomainResult, ErrorObject
+from astrid.sdk.results import InvocationResult
 
 ENVELOPE_KEYS = {"ok", "data", "error", "receipt", "idempotency_key"}
 
@@ -106,10 +107,17 @@ class _RecordingProjects:
         )
 
     def select(self, ref, *, scope="workspace", cwd=None):
-        self._owner.calls.append(
-            ("projects.select", {"ref": ref, "scope": scope, "cwd": cwd})
-        )
+        self._owner.calls.append(("projects.select", {"ref": ref, "scope": scope, "cwd": cwd}))
         return DomainResult.success({"slug": ref, "name": "Demo", "project_id": "P-1"})
+
+    def current(self, *, cwd=None):
+        self._owner.calls.append(("projects.current", {"cwd": cwd}))
+        return DomainResult.success(
+            {
+                "project": {"slug": "demo", "name": "Demo", "project_id": "P-1"},
+                "selection": {"ref": "demo", "scope": "workspace", "path": "/tmp/.astrid/config.json"},
+            }
+        )
 
 
 class _RecordingTimelines:
@@ -148,15 +156,16 @@ class _RecordingTimelines:
             idempotency_key=key,
         )
 
-    def list(self, project):
-        self._owner.calls.append(("timelines.list", {"project": project}))
+    def list(self, project, *, include_archived=False):
+        kwargs = {"project": project}
+        if include_archived:
+            kwargs["include_archived"] = True
+        self._owner.calls.append(("timelines.list", kwargs))
         return DomainResult.success([{"slug": "main", "name": "Main"}])
 
     def show(self, project, ref):
         self._owner.calls.append(("timelines.show", {"project": project, "ref": ref}))
-        return DomainResult.success(
-            {"slug": ref, "name": "Main", "timeline_id": "T-1"}
-        )
+        return DomainResult.success({"slug": ref, "name": "Main", "timeline_id": "T-1"})
 
     def save(
         self,
@@ -202,6 +211,20 @@ class _RecordingTimelines:
             idempotency_key=key,
         )
 
+    def unarchive(self, project, ref, *, idempotency_key=None):
+        self._owner.calls.append(
+            (
+                "timelines.unarchive",
+                {"project": project, "ref": ref, "idempotency_key": idempotency_key},
+            )
+        )
+        key = idempotency_key or "generated-key"
+        return DomainResult.success(
+            {"timeline_id": "T-1", "status": "active", "changed": True},
+            receipt=_receipt("timeline.unarchive", key),
+            idempotency_key=key,
+        )
+
     def history(self, project, ref):
         self._owner.calls.append(("timelines.history", {"project": project, "ref": ref}))
         return DomainResult.success([{"event": "timeline.created", "version": 1}])
@@ -218,6 +241,26 @@ class _RecordingShots:
     def list(self, project):
         self._owner.calls.append(("shots.list", {"project": project}))
         return DomainResult.success([{"id": "S-1", "name": "Opening"}])
+
+    def show(self, project, shot_id):
+        self._owner.calls.append(("shots.show", {"project": project, "shot_id": shot_id}))
+        return DomainResult.success(
+            {
+                "id": shot_id,
+                "name": "Opening",
+                "items": [
+                    {
+                        "id": "I-1",
+                        "media_id": "M-1",
+                        "position": 0,
+                        "media": {
+                            "name": "opening.png",
+                            "path": "/tmp/opening.png",
+                        },
+                    }
+                ],
+            }
+        )
 
     def create(self, *, project, name, metadata=None, idempotency_key=None):
         self._owner.calls.append(
@@ -318,6 +361,21 @@ class _FakeClient:
         self.timelines = _RecordingTimelines(self)
         self.shots = _RecordingShots(self)
 
+    def invoke_result(self, capability_id, **kwargs):
+        self.calls.append(("invoke_result", {"capability_id": capability_id, **kwargs}))
+        return InvocationResult(
+            capability_id=capability_id,
+            capability_type="executor",
+            native_kind="executor",
+            ok=True,
+            run_id="01RUN",
+            kernel_run_id="R-1",
+            kernel_task_id="T-1",
+            kernel_attempt_id="A-1",
+            manifest_path="/tmp/manifest.json",
+            outputs={"artifacts": ["/tmp/manifest.json"]},
+        )
+
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -340,7 +398,7 @@ def _subparser_choices(parser: argparse.ArgumentParser) -> set[str]:
 # ---------------------------------------------------------------------------
 
 
-def test_projects_parser_has_exactly_five_verbs() -> None:
+def test_projects_parser_has_exactly_six_verbs() -> None:
     from astrid.core.cli.domain_projects import COMMANDS, build_parser
 
     assert tuple(spec.name for spec in COMMANDS) == (
@@ -349,6 +407,7 @@ def test_projects_parser_has_exactly_five_verbs() -> None:
         "show",
         "update",
         "select",
+        "current",
     )
     assert _subparser_choices(build_parser(_FakeClient())) == {
         "create",
@@ -356,6 +415,7 @@ def test_projects_parser_has_exactly_five_verbs() -> None:
         "show",
         "update",
         "select",
+        "current",
     }
 
 
@@ -465,20 +525,14 @@ def test_projects_select_is_one_sdk_call_persisting_preference() -> None:
     client = _FakeClient()
     rc = _run("projects", ["select", "demo"], client=client)
     assert rc == 0
-    assert client.calls == [
-        ("projects.select", {"ref": "demo", "scope": "workspace", "cwd": None})
-    ]
+    assert client.calls == [("projects.select", {"ref": "demo", "scope": "workspace", "cwd": None})]
 
 
 def test_projects_select_scope_user_is_forwarded() -> None:
     client = _FakeClient()
-    rc = _run(
-        "projects", ["select", "demo", "--scope", "user", "--json"], client=client
-    )
+    rc = _run("projects", ["select", "demo", "--scope", "user", "--json"], client=client)
     assert rc == 0
-    assert client.calls == [
-        ("projects.select", {"ref": "demo", "scope": "user", "cwd": None})
-    ]
+    assert client.calls == [("projects.select", {"ref": "demo", "scope": "user", "cwd": None})]
 
 
 def test_projects_failure_envelope_exits_one(capsys) -> None:
@@ -532,6 +586,7 @@ def test_projects_malformed_settings_is_a_usage_error() -> None:
         ["show", "--help"],
         ["update", "--help"],
         ["select", "--help"],
+        ["current", "--help"],
     ],
 )
 def test_projects_help_is_executable(argv: list[str]) -> None:
@@ -548,7 +603,7 @@ def test_projects_help_is_executable(argv: list[str]) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_timelines_parser_has_exactly_seven_verbs_and_no_aliases() -> None:
+def test_timelines_parser_has_visualize_and_no_aliases() -> None:
     from astrid.packs.timeline.cli import COMMANDS, build_parser
 
     assert tuple(spec.name for spec in COMMANDS) == (
@@ -557,11 +612,14 @@ def test_timelines_parser_has_exactly_seven_verbs_and_no_aliases() -> None:
         "show",
         "save",
         "archive",
+        "unarchive",
         "history",
         "diff",
+        "visualize",
+        "render",
     )
     assert all(spec.aliases == () for spec in COMMANDS)
-    # The parser registers exactly the seven timeline verbs plus the
+    # The parser registers the timeline verbs plus the
     # manifest-declared nested ``shots`` mount (task T29).
     assert _subparser_choices(build_parser(_FakeClient())) == {
         "create",
@@ -569,10 +627,46 @@ def test_timelines_parser_has_exactly_seven_verbs_and_no_aliases() -> None:
         "show",
         "save",
         "archive",
+        "unarchive",
         "history",
         "diff",
+        "visualize",
+        "render",
         "shots",
     }
+
+
+def test_timelines_render_help_includes_copyable_flat_profile(capsys) -> None:
+    from astrid.packs.timeline.cli import build_parser
+
+    parser = build_parser(_FakeClient())
+    with pytest.raises(SystemExit) as exc_info:
+        parser.parse_args(["render", "--help"])
+    assert exc_info.value.code == 0
+    help_text = capsys.readouterr().out
+    normalized = " ".join(help_text.split())
+    assert "Flat RenderProfile v1 JSON object (no video/audio nesting)" in normalized
+    assert '"fps_rational": [30, 1]' in help_text
+    assert '"time_base": [1, 90000]' in help_text
+    assert '"audio_channel_layout": "stereo"' in help_text
+
+
+def test_timelines_visualize_help_separates_legacy_input_from_manifest_compatibility(
+    capsys,
+) -> None:
+    from astrid.packs.timeline.cli import build_parser
+
+    parser = build_parser(_FakeClient())
+    with pytest.raises(SystemExit) as exc_info:
+        parser.parse_args(["visualize", "--help"])
+    assert exc_info.value.code == 0
+    normalized = " ".join(capsys.readouterr().out.split())
+    assert "Explicit legacy managed timeline directory/file" in normalized
+    assert (
+        "inputs.timeline_source remains a project-slug compatibility field"
+        in normalized
+    )
+    assert "inspect source_mode and resolved identities" in normalized
 
 
 @pytest.mark.parametrize(
@@ -588,7 +682,6 @@ def test_timelines_parser_has_exactly_seven_verbs_and_no_aliases() -> None:
         "erase",
         "repair",
         "ls",
-        "visualize",
     ],
 )
 def test_timelines_forbidden_and_legacy_verbs_are_absent(forbidden: str) -> None:
@@ -673,9 +766,7 @@ def test_timelines_show_is_one_sdk_call(capsys) -> None:
     client = _FakeClient()
     rc = _run("timelines", ["show", "--project", "demo", "main"], client=client)
     assert rc == 0
-    assert client.calls == [
-        ("timelines.show", {"project": "demo", "ref": "main"})
-    ]
+    assert client.calls == [("timelines.show", {"project": "demo", "ref": "main"})]
     assert capsys.readouterr().out == "slug: main\n"
 
 
@@ -735,13 +826,38 @@ def test_timelines_archive_is_one_sdk_call(capsys) -> None:
     assert envelope["data"]["archived"] is True
 
 
+def test_timelines_inclusive_list_and_unarchive_are_one_sdk_call(capsys) -> None:
+    client = _FakeClient()
+    rc = _run(
+        "timelines",
+        ["list", "--project", "demo", "--include-archived", "--json"],
+        client=client,
+    )
+    assert rc == 0
+    assert client.calls == [("timelines.list", {"project": "demo", "include_archived": True})]
+    capsys.readouterr()
+
+    client.calls.clear()
+    rc = _run(
+        "timelines",
+        ["unarchive", "--project", "demo", "main", "--json"],
+        client=client,
+    )
+    assert rc == 0
+    assert client.calls == [
+        (
+            "timelines.unarchive",
+            {"project": "demo", "ref": "main", "idempotency_key": None},
+        )
+    ]
+    assert json.loads(capsys.readouterr().out)["data"]["status"] == "active"
+
+
 def test_timelines_history_is_one_sdk_call(capsys) -> None:
     client = _FakeClient()
     rc = _run("timelines", ["history", "--project", "demo", "main"], client=client)
     assert rc == 0
-    assert client.calls == [
-        ("timelines.history", {"project": "demo", "ref": "main"})
-    ]
+    assert client.calls == [("timelines.history", {"project": "demo", "ref": "main"})]
     assert capsys.readouterr().out == "1 result(s)\n"
 
 
@@ -749,10 +865,80 @@ def test_timelines_diff_is_one_sdk_call(capsys) -> None:
     client = _FakeClient()
     rc = _run("timelines", ["diff", "--project", "demo", "main"], client=client)
     assert rc == 0
-    assert client.calls == [
-        ("timelines.diff", {"project": "demo", "ref": "main"})
-    ]
+    assert client.calls == [("timelines.diff", {"project": "demo", "ref": "main"})]
     assert capsys.readouterr().out == "1 result(s)\n"
+
+
+def test_timelines_visualize_routes_public_sdk_and_normalizes_formats(capsys) -> None:
+    client = _FakeClient()
+    rc = _run(
+        "timelines",
+        [
+            "visualize",
+            "--project", "demo",
+            "--timeline-slug", "01TIMELINE",
+            "--format", "png,svg",
+            "--format", "md",
+            "--all",
+            "--json",
+        ],
+        client=client,
+    )
+    assert rc == 0
+    assert len(client.calls) == 1
+    verb, kwargs = client.calls[0]
+    assert verb == "invoke_result"
+    assert kwargs["capability_id"] == "rendering.timeline_visualize"
+    assert kwargs["kind"] == "executor"
+    assert kwargs["project"] == "demo"
+    assert kwargs["inputs"] == {
+        "formats": ["png", "svg", "md"],
+        "timeline_slug": "01TIMELINE",
+        "all": True,
+    }
+    envelope = json.loads(capsys.readouterr().out)
+    assert set(envelope) == ENVELOPE_KEYS
+    assert envelope["ok"] is True
+    assert envelope["data"]["run_id"] == "01RUN"
+    assert envelope["data"]["outputs"]["artifacts"] == ["/tmp/manifest.json"]
+    assert envelope["data"]["outputs"]["artifact_summary"] == {
+        "artifact_count": 1,
+        "unique_media_count": 0,
+        "unique_content_hash_count": 0,
+        "duplicate_reference_count": 0,
+        "duplicate_group_count": 0,
+        "duplicate_groups": [],
+    }
+
+
+def test_visualization_artifact_summary_groups_deduplicated_filmstrip_refs() -> None:
+    from astrid.packs.timeline.cli import _visualization_artifact_summary
+
+    summary = _visualization_artifact_summary(
+        {
+            "artifacts": [
+                {"label": "PG001_film_00.png", "media_id": "M1", "content_hash": "H1"},
+                {"label": "PG001_film_01.png", "media_id": "M1", "content_hash": "H1"},
+                {"label": "manifest.json", "media_id": "M2", "content_hash": "H2"},
+            ]
+        }
+    )
+
+    assert summary == {
+        "artifact_count": 3,
+        "unique_media_count": 2,
+        "unique_content_hash_count": 2,
+        "duplicate_reference_count": 1,
+        "duplicate_group_count": 1,
+        "duplicate_groups": [
+            {
+                "media_id": "M1",
+                "content_hash": "H1",
+                "count": 2,
+                "labels": ["PG001_film_00.png", "PG001_film_01.png"],
+            }
+        ],
+    }
 
 
 def test_timelines_save_stale_version_failure_exits_one(capsys) -> None:
@@ -895,11 +1081,12 @@ def test_dispatch_timelines_has_no_legacy_cli_fallback(monkeypatch) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_shots_parser_has_exactly_five_verbs_beneath_timelines() -> None:
+def test_shots_parser_has_exactly_six_verbs_beneath_timelines() -> None:
     from astrid.packs.shots.cli import COMMANDS, build_parser
 
     assert tuple(spec.name for spec in COMMANDS) == (
         "list",
+        "show",
         "create",
         "add",
         "remove",
@@ -910,6 +1097,7 @@ def test_shots_parser_has_exactly_five_verbs_beneath_timelines() -> None:
     assert parser.prog == "astrid timelines shots"
     assert _subparser_choices(parser) == {
         "list",
+        "show",
         "create",
         "add",
         "remove",
@@ -948,6 +1136,23 @@ def test_timelines_shots_routes_beneath_timelines_parser(capsys) -> None:
     envelope = json.loads(capsys.readouterr().out)
     assert set(envelope) == ENVELOPE_KEYS
     assert envelope["ok"] is True
+
+
+def test_shots_show_is_one_sdk_call_with_ordered_media_mapping(capsys) -> None:
+    client = _FakeClient()
+    rc = _run(
+        "timelines",
+        ["shots", "show", "S-1", "--project", "demo", "--json"],
+        client=client,
+    )
+    assert rc == 0
+    assert client.calls == [("shots.show", {"project": "demo", "shot_id": "S-1"})]
+    envelope = json.loads(capsys.readouterr().out)
+    item = envelope["data"]["items"][0]
+    assert item["id"] == "I-1"
+    assert item["media_id"] == "M-1"
+    assert item["position"] == 0
+    assert item["media"]["path"] == "/tmp/opening.png"
 
 
 def test_shots_create_is_one_sdk_call_with_exact_envelope(capsys) -> None:
@@ -1160,6 +1365,7 @@ def test_shots_unknown_verb_is_a_usage_error() -> None:
     [
         ["shots", "--help"],
         ["shots", "list", "--help"],
+        ["shots", "show", "--help"],
         ["shots", "create", "--help"],
         ["shots", "add", "--help"],
         ["shots", "remove", "--help"],

@@ -35,8 +35,8 @@ but the source video should be preserved.
 import astrid.sdk as sdk
 result = sdk.invoke(
     "media.speech_repair_lavasr",
+        kind="executor", project="demo",
     inputs={"input": "source.mp4", "start": "578.64", "dur": "151.0"},
-    out="runs/laurent-first-speech-repair",
 )
 ```
 
@@ -46,13 +46,13 @@ With the DeepFilterNet3 post-pass:
 import astrid.sdk as sdk
 result = sdk.invoke(
     "media.speech_repair_lavasr",
+        kind="executor", project="demo",
     inputs={
         "input": "source.mp4",
         "start": "578.64",
         "dur": "151.0",
         "deepfilternet3": "true",
     },
-    out="runs/laurent-first-speech-repair-deepfilter",
 )
 ```
 

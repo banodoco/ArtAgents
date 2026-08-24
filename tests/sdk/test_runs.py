@@ -19,6 +19,7 @@ the kernel :class:`~astrid.core.repositories.runs.RunRepository`:
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -304,6 +305,67 @@ def test_show_with_evidence_returns_run_evidence(env: SimpleNamespace) -> None:
     assert with_evidence.data["evidence"][1]["summary"] == "second"
 
 
+def test_show_with_evidence_includes_bounded_child_completion_outputs(
+    env: SimpleNamespace,
+) -> None:
+    project_id = _create_project(env)
+    task_id = generate_lowercase_ulid()
+    run_id, _ = _create_run(
+        env,
+        project_id=project_id,
+        children=[_child(task_id=task_id)],
+        idempotency_key="run-output-evidence-k",
+    )
+    media_id = generate_lowercase_ulid()
+    def _insert_output(session):
+        session.execute(
+            "INSERT INTO media "
+            "(id, project_id, media_kind, mime_type, byte_size, content_hash, metadata_json, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (media_id, project_id, "video", "video/mp4", 12, "b" * 64, "{}", TS),
+        )
+        session.execute(
+            "INSERT INTO task_outputs "
+            "(task_id, ordinal, role, media_id, is_primary, params_json, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                task_id,
+                0,
+                "result",
+                media_id,
+                1,
+                json.dumps(
+                    {
+                        "label": "rendered video",
+                        "path": "rendered.mp4",
+                        "content_hash": "a" * 64,
+                        "byte_size": 12,
+                    },
+                    separators=(",", ":"),
+                ),
+                TS,
+            ),
+        )
+    env.writer.submit(_insert_output)
+
+    shown = env.service.show(project_id, run_id, include_evidence=True)
+    assert shown.ok is True
+    child = shown.data["child_outputs"][0]
+    assert child["task_id"] == task_id
+    assert child["outputs"] == [
+        {
+            "ordinal": 0,
+            "role": "result",
+            "is_primary": True,
+            "media_id": media_id,
+            "label": "rendered video",
+            "path": "rendered.mp4",
+            "content_hash": "a" * 64,
+            "byte_size": 12,
+        }
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Cancel: repository selection, terminal immutability, receipts
 # ---------------------------------------------------------------------------
@@ -383,6 +445,68 @@ def test_retry_failed_restarts_failed_children(env: SimpleNamespace) -> None:
     assert retried.receipt.command_kind == "core.run.retry"
     assert retried.data["retried_task_ids"] == [t0]
     assert retried.data["skipped_task_ids"] == [t1]
+
+
+def test_retry_failed_response_refreshes_synchronous_completion_and_replay(
+    env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A batch retry response reflects the terminal run read immediately."""
+    project_id = _create_project(env)
+    task_id = generate_lowercase_ulid()
+    run_id, _ = _create_run(
+        env,
+        project_id=project_id,
+        children=[_child(task_id=task_id, max_attempts=2)],
+    )
+    _fail_child(env, project_id=project_id, task_id=task_id)
+
+    class _NoopMedia:
+        def materialize_prepared(self, *args, **kwargs):  # pragma: no cover
+            raise AssertionError("summary-only test must not materialize media")
+
+    env.service._tasks = env.tasks
+    env.service._media = _NoopMedia()
+    env.service._projects_root = "/tmp"
+
+    def _synchronous_dispatch(**kwargs):
+        attempt = kwargs["attempt"]
+        return UnitOfWork(env.writer).run(
+            lambda u: (
+                env.tasks.complete(
+                    u,
+                    project_id=project_id,
+                    task_id=task_id,
+                    attempt_id=attempt.id,
+                    lease_id=attempt.lease_id,
+                    expected_status_version=attempt.status_version,
+                    idempotency_key="fake-run-dispatch-complete",
+                    outputs=[],
+                    result={"recovered": True},
+                    media_repo=_NoopMedia(),
+                    now=TS,
+                ),
+                None,
+            )[-1]
+        )
+
+    monkeypatch.setattr(
+        "astrid.sdk.invocation.dispatch_retried_task", _synchronous_dispatch
+    )
+    first = env.service.retry_failed(
+        project_id, run_id, idempotency_key="retry-run-response-k"
+    )
+    assert first.ok is True
+    shown = env.service.show(project_id, run_id).data
+    assert first.data["run"]["status"] == shown["status"] == "succeeded"
+    assert first.data["run"]["finished_at"] == shown["finished_at"]
+    assert first.data["progress"] == shown["progress"]
+
+    replay = env.service.retry_failed(
+        project_id, run_id, idempotency_key="retry-run-response-k"
+    )
+    assert replay.ok is True
+    assert replay.data == first.data
+    assert replay.receipt.receipt_id == first.receipt.receipt_id
 
 
 def test_retry_failed_selects_explicit_subset(env: SimpleNamespace) -> None:

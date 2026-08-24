@@ -429,6 +429,45 @@ class ReceiptService:
         ).fetchone()
         return _receipt_from_row(row) if row is not None else None
 
+    def finalize_result(
+        self,
+        writer: Any,
+        *,
+        project_id: str,
+        idempotency_key: str,
+        result: Any,
+    ) -> None:
+        """Finalize a synchronous command's result without new identity.
+
+        Some SDK mutations commit an admission receipt before running a
+        fenced local handler.  Once that handler completes synchronously,
+        replace only ``result_json`` so the immutable receipt identity,
+        request hash, event ids, and project sequence remain unchanged while
+        replay exposes the terminal response rather than the admission
+        snapshot.  This is deliberately not a new receipt or event.
+        """
+        _require_non_empty_string("project_id", project_id)
+        _require_non_empty_string("idempotency_key", idempotency_key)
+        try:
+            encoded = canonical_json(result)
+        except CanonicalizationError as exc:
+            raise ReceiptValidationError(
+                f"final receipt result must be bounded JSON: {exc}"
+            ) from exc
+
+        def _update(session: Any) -> None:
+            cursor = session.execute(
+                "UPDATE command_receipts SET result_json = ? "
+                "WHERE project_id = ? AND idempotency_key = ?",
+                (encoded, project_id, idempotency_key),
+            )
+            if cursor.rowcount != 1:
+                raise ReceiptError(
+                    f"cannot finalize missing receipt {idempotency_key!r}"
+                )
+
+        writer.submit(_update)
+
     def get_committed(
         self, conn: sqlite3.Connection, *, receipt_id: str
     ) -> CommandReceipt | None:

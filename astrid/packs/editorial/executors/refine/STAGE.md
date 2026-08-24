@@ -22,6 +22,7 @@ copies of the timeline, assets, and metadata files ready for rendering.
 import astrid.sdk as sdk
 result = sdk.invoke(
     "editorial.refine",
+        kind="executor", project="demo",
     inputs={
         "arrangement": "./out/arrangement.json",
         "pool": "./out/unified_pool.json",
@@ -30,7 +31,6 @@ result = sdk.invoke(
         "metadata": "./out/hype.metadata.json",
         "transcript": "./out/transcript.json",
     },
-    out="./out",
 )
 ```
 
@@ -40,6 +40,7 @@ With an explicit env file for API credentials:
 import astrid.sdk as sdk
 result = sdk.invoke(
     "editorial.refine",
+        kind="executor", project="demo",
     inputs={
         "arrangement": "./out/arrangement.json",
         "pool": "./out/unified_pool.json",
@@ -48,7 +49,6 @@ result = sdk.invoke(
         "metadata": "./out/hype.metadata.json",
         "env_file": ".env.local",
     },
-    out="./out",
 )
 ```
 

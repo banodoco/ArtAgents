@@ -33,10 +33,14 @@ and recovery guidance.
 
 ### JSON Mode (`--json`)
 
-When `--json` is passed, stdout contains **exactly one JSON document** —
-one line, one object, terminated by a single `\n`.  No preamble, no prose,
-no separator.  This is the sole machine-contract path.  Agents reading JSON
-must parse stdout as a single JSON object.
+When a product or nested-mount command accepts `--json`, stdout contains
+**exactly one JSON document** — one line, one object, terminated by a single
+`\n`. No preamble, no prose, no separator. This is the sole five-key
+machine-contract path for those commands. `doctor --json` is intentionally a
+different read-only diagnostic surface (its object contains `state`, `checks`,
+`next_action`, and `ok`); `serve` and `backup` do not accept `--json`.
+Agents should follow each verb's help rather than assume every operational
+family has the product envelope.
 
 The JSON payload is the frozen five-key envelope:
 
@@ -82,19 +86,26 @@ These decisions are locked and must not be re-litigated:
   stderr in both modes, so the stdout contract stays parseable.
 - **SD3**: Exit-code taxonomy is `0`=success (envelope `ok=true`), `1`=typed
   SDK error (envelope `ok=false`), `2`=usage/parse error (argparse).
+- **SD4**: Help is side-effect-free. Top-level, family, and verb help parses
+  without opening, migrating, or locking the selected project database; it
+  remains printable while `astrid serve` exclusively owns that database.
 
 ## Verb Reference
 
 The gateway families and their verbs:
 
-- **`projects`** — `create`, `list`, `show`, `update`, `select`.  `select`
+- **`projects`** — `create`, `list`, `show`, `update`, `select`, `current`.  `select`
   persists a non-authoritative default-project preference (file-side only; no
   receipt, no DB mutation).
-- **`timelines`** — `create`, `list`, `show`, `save`, `archive`, `history`,
-  `diff`.  `save` is a whole-document compare-and-swap; a stale
-  `--expected-version` is the typed `stale_version` and changes nothing.
+- **`timelines`** — `create`, `list`, `show`, `save`, `archive`, `unarchive`,
+  `history`, `diff`, `visualize`, `render`.  `save` is a whole-document
+  compare-and-swap; a stale `--expected-version` is the typed
+  `stale_version` and changes nothing. `visualize` emits a run-owned evidence
+  pack, while `render` accepts a pinned canonical timeline.
 - **`media`** — `import`, `list`, `show`, `verify`, `relocate`, `relate`.
-  `verify`/`relocate` require `--realm`; `relate` has the frozen five-kind
+  `verify`/`relocate` require `--realm`; `verify` checks every matching local
+  location by default and accepts `--location-id`/`--locator` selectors;
+  `relate` has the frozen five-kind
   `--kind` (`derived_from`, `variant_of`, `uses_as_input`, `mask_for`,
   `audio_for`).
 - **`tasks`** — `create`, `list`, `show`, `cancel`, `retry`, `events`.
@@ -104,8 +115,10 @@ The gateway families and their verbs:
   explicit repeatable `--task` subset otherwise).
 - **`serve`** — start the HTTP editor bridge (`--host`, `--port`,
   `--projects-root`, `--editor-path`, `--no-open-editor`).
-- **`doctor`** — read-only health check (`schema_versions`, media paths,
-  SQLite quick-check, FK status).  `--projects-root` selects the root.
+- **`doctor`** — read-only health check (`schema_versions`, managed and
+  external media-path byte integrity, SQLite quick-check, FK status, and
+  bounded orphan-staging diagnostics). `media_paths` hashes every
+  `external_local` locator by default; `--projects-root` selects the root.
 - **`backup`** — `create` (staged, validated, `--out`) and `restore`
   (journaled, idempotent).
 
@@ -113,7 +126,7 @@ Nested mounts (manifest-declared, never top-level):
 
 - **`media references`** — `create`, `update`, `archive`, `associate`,
   `link`, `set-primary`, `list`, `show`.
-- **`timelines shots`** — `list`, `create`, `add`, `remove`, `reorder`.
+- **`timelines shots`** — project-level reusable `list`, `create`, `show`, `add`, `remove`, `reorder`.
 
 There is no `next` / `status` / `attach` / `start` / `ack` surface: the
 legacy task-mode CLI was retired with the filesystem task-run store.  Pack

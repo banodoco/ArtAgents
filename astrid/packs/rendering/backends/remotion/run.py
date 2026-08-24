@@ -92,6 +92,13 @@ _theme_slug_for_render_default = _shared._theme_slug_for_render_default
 
 BACKEND_ID = "rendering.remotion"
 BACKEND_VERSION = "1.0.0"
+
+# The timeline schema keeps ``clipType`` open for Reigh compatibility.  These
+# built-in spellings all mean an ordinary asset-backed media clip; Remotion's
+# VisualClip/AudioTrack dispatch already handles them identically.  Keep them
+# out of effect resolution so intuitive image/video/audio annotations do not
+# become false "unregistered effect" failures.
+_BUILTIN_MEDIA_CLIP_TYPES = frozenset({"media", "video", "image", "audio"})
 DEFAULT_COMPOSITION_ID = "TimelineComposition"
 _REGISTRY_STATE_PATH = ".astrid-registry-state.json"
 _CONFIG_KEYS = frozenset(
@@ -305,6 +312,78 @@ def _effect_registry_for_assets(
     return effects, aliases
 
 
+def _element_reference_ids(value: Any) -> tuple[str, ...]:
+    """Normalize a timeline animation/transition reference to element ids."""
+    values = value if isinstance(value, list) else [value]
+    ids: list[str] = []
+    for item in values:
+        if isinstance(item, str) and item:
+            ids.append(item)
+        elif isinstance(item, Mapping):
+            raw = item.get("id", item.get("type", item.get("kind")))
+            if isinstance(raw, str) and raw:
+                ids.append(raw)
+    return tuple(ids)
+
+
+def _resolve_timeline_element_references(
+    timeline_data: Mapping[str, Any],
+    *,
+    theme_path: Path | None,
+) -> dict[str, list[dict[str, Any]]]:
+    """Resolve every requested animation/transition before Remotion runs.
+
+    The generated TypeScript registry throws only when the affected clip is
+    mounted.  Support probing this same registry up front prevents a typo or
+    an unavailable external pack from becoming a successful-looking stock
+    render.
+    """
+    active_theme = _resolve_theme_path(theme_path) if theme_path is not None else None
+    registry = load_default_registry(active_theme=active_theme, project_root=REPO_ROOT)
+    clips = timeline_data.get("clips")
+    if not isinstance(clips, list):
+        return {"animations": [], "transitions": []}
+    resolved: dict[str, list[dict[str, Any]]] = {"animations": [], "transitions": []}
+    seen: set[tuple[str, str]] = set()
+    for clip in clips:
+        if not isinstance(clip, Mapping):
+            continue
+        clip_id = str(clip.get("id") or "")
+        for field, kind in (
+            ("entrance", "animations"),
+            ("exit", "animations"),
+            ("continuous", "animations"),
+            ("animations", "animations"),
+            ("transition", "transitions"),
+        ):
+            for element_id in _element_reference_ids(clip.get(field)):
+                key = (kind, element_id)
+                if key in seen:
+                    for item in resolved[kind]:
+                        if item.get("element_id") == element_id:
+                            if clip_id and clip_id not in item["clip_ids"]:
+                                item["clip_ids"].append(clip_id)
+                            break
+                    continue
+                seen.add(key)
+                try:
+                    element = registry.get(kind, element_id)
+                except (KeyError, ValueError) as exc:
+                    raise ValueError(
+                        f"timeline uses unregistered {kind[:-1]} {element_id!r}"
+                    ) from exc
+                resolved[kind].append(
+                    {
+                        "element_id": element_id,
+                        "source_pack_id": _source_pack_id(element),
+                        "source": element.source,
+                        "element_root": str(element.root),
+                        "clip_ids": [clip_id] if clip_id else [],
+                    }
+                )
+    return resolved
+
+
 def _effect_id_for_clip(
     clip: dict[str, Any],
     effects: dict[str, ElementDefinition],
@@ -345,9 +424,31 @@ def _stage_effect_assets_for_timeline(
     render_hash: str,
 ) -> dict[str, Any]:
     effects, aliases = _effect_registry_for_assets(theme_path)
+    resolved_elements = _resolve_timeline_element_references(
+        timeline_data,
+        theme_path=theme_path,
+    )
     clips = timeline_data.get("clips")
     if not isinstance(clips, list):
-        return {"root": None, "effects": []}
+        return {"root": None, "effects": [], **resolved_elements}
+
+    unknown_clip_types = sorted(
+        {
+            str(clip.get("clipType"))
+            for clip in clips
+            if isinstance(clip, Mapping)
+            and isinstance(clip.get("clipType"), str)
+            and clip.get("clipType") not in _BUILTIN_MEDIA_CLIP_TYPES
+            and clip.get("clipType") != "effect-layer"
+            and clip.get("clipType") not in effects
+            and clip.get("clipType") not in aliases
+        }
+    )
+    if unknown_clip_types:
+        raise ValueError(
+            "timeline uses unregistered effect clip type(s): "
+            + ", ".join(unknown_clip_types)
+        )
 
     used_effect_ids: set[str] = set()
     clip_effect_ids: dict[int, str] = {}
@@ -365,7 +466,7 @@ def _stage_effect_assets_for_timeline(
             clip_ids_by_effect.setdefault(effect_id, []).append(clip_id)
 
     if not used_effect_ids:
-        return {"root": None, "effects": []}
+        return {"root": None, "effects": [], **resolved_elements}
 
     public_root = project_dir / "public" / "astrid-effects" / render_hash
     staged_by_effect: dict[str, dict[str, str]] = {}
@@ -401,6 +502,7 @@ def _stage_effect_assets_for_timeline(
             }
             for effect_id in sorted(used_effect_ids)
         ],
+        **resolved_elements,
     }
 
 
@@ -807,6 +909,16 @@ def support(request: RenderRequest, *, workspace: Path) -> SupportReport:
         assets_data = _load_registry_mapping(assets_path)
     except Exception as exc:
         reasons.append(f"assets registry is not renderable: {exc}")
+    if assets_path is not None and assets_data is not None:
+        # Validate local sources during the service's support probe, before a
+        # kernel run is admitted.  AssetMaterializer applies the project-root
+        # boundary plus the exact kernel-owned managed-media allowlist; it
+        # stages only in its disposable probe directory and closes immediately.
+        try:
+            with AssetMaterializer(assets_path):
+                pass
+        except Exception as exc:
+            reasons.append(f"local assets are not renderable: {exc}")
 
     if timeline_data is not None and assets_data is not None:
         registered_assets = assets_data.get("assets", {})
@@ -828,7 +940,7 @@ def support(request: RenderRequest, *, workspace: Path) -> SupportReport:
                 str(clip.get("clipType"))
                 for clip in timeline_data.get("clips", [])
                 if isinstance(clip, dict)
-                and clip.get("clipType", "media") != "media"
+                and clip.get("clipType", "media") not in _BUILTIN_MEDIA_CLIP_TYPES
             }
         )
         if dynamic_clip_types:
@@ -847,6 +959,13 @@ def support(request: RenderRequest, *, workspace: Path) -> SupportReport:
                         "timeline uses unregistered Remotion clip types: "
                         + ", ".join(unknown_clip_types)
                     )
+        try:
+            _resolve_timeline_element_references(
+                timeline_data,
+                theme_path=settings.theme_path,
+            )
+        except Exception as exc:
+            reasons.append(str(exc))
         try:
             canonical = _canonical_profile(timeline_path, assets_data, settings.theme_path)
         except Exception as exc:

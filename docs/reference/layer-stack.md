@@ -84,6 +84,23 @@ increments toward the first (highest z = top).
 |---|---|---|
 | `z = 0` | `astrid_layer` present, `alpha: false` | Opaque (H.264 / theme background allowed) |
 | `z > 0` | `astrid_layer.alpha: true` | Transparent ProRes 4444; renderer skips the theme background |
+
+The stamp is also the public output-admission authority. A direct SDK render
+or canonical `timelines render` call may select a `.mov` basename only when
+the resolved timeline contains the exact `metadata.astrid_layer.alpha: true`
+stamp. With no explicit profile Astrid selects the truthful MOV/ProRes
+4444/`yuva444p12le` + PCM S16LE 48 kHz stereo profile. If a profile is
+supplied, those mux fields must match. Ordinary timelines continue to use
+`.mp4`; an unstamped `.mov` request is rejected before a managed run is
+admitted.
+
+For a version-pinned canonical layer:
+
+```bash
+python3 -m astrid timelines render top-layer \
+  --project demo --expected-version 3 \
+  --backend rendering.remotion --output-name top-layer.mov --json
+```
 | `layer is None` | no stamp | Fast-path opaque segment; concat, not composite |
 
 The host (`RenderService._segment_request`) stamps the metadata and
