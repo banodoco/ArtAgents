@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 
+from astrid.core.rendering.errors import RendererProtocolError
 from astrid.packs.rendering.executors.render import run as render_run
 
 
@@ -141,12 +142,20 @@ def test_render_passes_previous_outputs_when_preserving(fake_service: _FakeServi
     assert fake_service.calls[0][1]["previous_outputs"] == ()
 
 
-def test_render_validates_output_name_extension(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_render_rejects_mov_for_an_opaque_timeline_with_recovery(tmp_path: Path) -> None:
     timeline, assets, _out = _inputs(tmp_path)
     bad_out = tmp_path / "out" / "video.mov"
 
-    with pytest.raises(ValueError, match=r"\.mp4"):
+    with pytest.raises(RendererProtocolError, match="not stamped") as exc_info:
         render_run.render(timeline, assets, bad_out)
+
+    assert exc_info.value.backend == "astrid.core"
+    assert exc_info.value.details == {
+        "output_name": "video.mov",
+        "required_timeline_stamp": "metadata.astrid_layer.alpha=true",
+    }
+    assert exc_info.value.error.recovery_command is not None
+    assert ".mp4" in exc_info.value.error.recovery_command
 
 
 def test_main_accepts_output_name_and_forward_parses_any_order(
@@ -178,8 +187,11 @@ def test_main_accepts_output_name_and_forward_parses_any_order(
 
 
 def test_main_rejects_traversal_output_name(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.delenv("ASTRID_INTERNAL_INVOCATION", raising=False)
     timeline, assets, _out = _inputs(tmp_path)
 
     result = render_run.main(
@@ -200,8 +212,11 @@ def test_main_rejects_traversal_output_name(
 
 
 def test_main_rejects_conflicting_engine_and_backend(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.delenv("ASTRID_INTERNAL_INVOCATION", raising=False)
     timeline, assets, _out = _inputs(tmp_path)
 
     result = render_run.main(
