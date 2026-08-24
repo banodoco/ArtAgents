@@ -237,3 +237,20 @@ def read_bridge_registry(project_dir: Path, timeline_ulid: str) -> dict[str, Any
     """Read registry.json from a bridge project timeline."""
     path = bridge_timeline_dir(project_dir, timeline_ulid) / "registry.json"
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+@pytest.fixture(autouse=True)
+def _staged_binding_runtimes(
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Stage marker-only binding runtimes for admission-level tests."""
+    root = tmp_path_factory.mktemp("binding-runtimes")
+    vibecomfy = root / "VibeComfy"
+    vibecomfy.mkdir()
+    (vibecomfy / "pyproject.toml").write_text("", encoding="utf-8")
+    wgp = root / "Wan2GP"
+    wgp.mkdir()
+    (wgp / "worker.py").write_text("", encoding="utf-8")
+    monkeypatch.setenv("REIGH_VIBECOMFY_HOME", str(vibecomfy))
+    monkeypatch.setenv("REIGH_WGP_HOME", str(wgp))

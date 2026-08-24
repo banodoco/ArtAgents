@@ -22,7 +22,7 @@ from astrid.core.integrations.reigh.capabilities import (
     resolve_family_capability,
 )
 
-# The 19 retained flat IDs from doc 16 plus the render capability.
+# The retained flat IDs from doc 16 plus render and the generic local row.
 EXPECTED_PUBLIC_IDS = {
     "reigh.wan_2_2_t2i",
     "reigh.qwen_image",
@@ -44,6 +44,7 @@ EXPECTED_PUBLIC_IDS = {
     "reigh.animate_character",
     "reigh.flux_klein_edit",
     "rendering.timeline_visualize",
+    "local.workflow.run",
 }
 
 EXPECTED_CHILD_IDS = {
