@@ -25,7 +25,6 @@ import pytest
 
 from scripts.reshape.installed_artifact import InstalledArtifactHarness, LaneRecord, build_once
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 _READY_RE = re.compile(r"http://127\.0\.0\.1:(\d+)")
 
@@ -1548,14 +1547,21 @@ def test_one_installed_wheel_completes_the_local_first_run(
     # one allowed JSON shape is the service-materialized binding workspace
     # ``<slug>/project.json`` (kernel_authority marker; the kernel row stays
     # authoritative) — every other .json/.jsonl under the root is a leftover
-    # authority file.
+    # authority file. The boot manifest is the one sanctioned derived receipt
+    # emitted by the serve composition root.
+    sanctioned = {".astrid/boot-manifest.json"}
     authority_files = [
         str(path)
         for path in harness.roots.project.rglob("*")
         if path.is_file()
         and (
             path.suffix == ".jsonl"
-            or (path.suffix == ".json" and path.name != "project.json")
+            or (
+                path.suffix == ".json"
+                and path.name != "project.json"
+                and path.relative_to(harness.roots.project).as_posix()
+                not in sanctioned
+            )
         )
     ]
     assert authority_files == []
