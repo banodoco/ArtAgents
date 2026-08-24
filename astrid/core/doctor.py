@@ -82,7 +82,10 @@ def run_checks(
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python3 -m astrid doctor",
-        description="Check the Astrid managed data environment (read-only).",
+        description=(
+            "Check the Astrid managed data environment (read-only) or run "
+            "setup repair (``doctor setup``)."
+        ),
     )
     parser.add_argument(
         "--json", action="store_true", help="Emit machine-readable diagnostics."
@@ -97,11 +100,34 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Projects root (default: ASTRID_PROJECTS_ROOT or the default root).",
     )
+    parser.add_argument(
+        "command",
+        nargs="?",
+        choices=("setup",),
+        default=None,
+        help=(
+            "``setup`` deep re-hashes every stamped artifact against its "
+            "signed manifest, repairs corrupt artifacts (targeted re-"
+            "acquisition with --source), and reconciles a corrupted setup "
+            "journal from filesystem reality."
+        ),
+    )
+    parser.add_argument(
+        "--source",
+        default=None,
+        help=(
+            "Base URL for targeted re-acquisition during ``setup`` "
+            "(artifact id is appended); setup mode is the only sanctioned "
+            "outbound networking."
+        ),
+    )
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.command == "setup":
+        return _run_setup(args)
     checks = run_checks(projects_root=args.projects_root)
     failed = any(
         check.failed(strict_optional=args.strict_optional) for check in checks
@@ -116,6 +142,46 @@ def main(argv: list[str] | None = None) -> int:
         print("Astrid doctor")
         for check in checks:
             print(f"[{check.status}] {check.name}: {check.detail}")
+    return 1 if failed else 0
+
+
+def _run_setup(args: argparse.Namespace) -> int:
+    """``astrid doctor setup`` — deep re-hash + repair + reconciliation."""
+    from astrid.core.foundation.project_paths import resolve_projects_root
+    from astrid.core.model_setup.acquire import acquire_artifact
+    from astrid.core.model_setup.repair import doctor_setup
+
+    root = resolve_projects_root(args.projects_root)
+
+    def _acquire(manifest):  # type: ignore[no-untyped-def]
+        acquire_artifact(
+            manifest,
+            root,
+            f"{args.source.rstrip('/')}/{manifest.artifact_id}",
+        )
+
+    reports = doctor_setup(root, acquire=_acquire if args.source else None)
+    failed = any(
+        report.verdict in ("corrupt", "repair_failed", "orphaned")
+        for report in reports
+    )
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "ok": not failed,
+                    "reports": [report.to_dict() for report in reports],
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+    else:
+        print("Astrid doctor setup")
+        for report in reports:
+            print(f"[{report.verdict}] {report.artifact_id}: {report.detail}")
+        if not reports:
+            print("[ok] every stamped artifact verified; journal clean")
     return 1 if failed else 0
 
 

@@ -1,0 +1,16 @@
+## Explore E5 Report: Setup-Journal Placement
+
+**Recommendation: sidecar journal file under the managed root — replay log, never authority.**
+
+**Evidence**
+
+1. **The build contract already decided this.** `docs-corpus/27-build-spec.md` §6.1: "Setup uses a small crash-resumable journal **separate from product SQLite**. It is non-authoritative operational installation state and can be rebuilt by `doctor`; it is not a second product database." `22-codex-roadmap.md` agrees twice: acquisition is "journaled outside product SQLite" and the roadmap's risk table names a "separate resumable setup journal." A SQLite migration would contradict both authoritative inputs.
+
+2. **Pre-DB existence forces it mechanically.** Setup is the sole setup-mode outbound path and must complete before `astrid.sqlite3` need exist. The gateway already treats operational work as pre-session/pre-DB (`cli/dispatch.py`: family token validated *before* any database opens; `serve`/`doctor`/`backup` excluded from product census). Journaling into SQLite would require creating/migrating the product DB during a phase where its absence is legitimate.
+
+3. **A proven in-repo precedent exists.** Backup restore uses exactly this shape: sidecar JSON (`RESTORE_JOURNAL_NAME`/`_RestoreJournal` in `core/backup/operations.py`), atomic `write_json_atomic` updates, and boot-time replay via `recover_restore_staging(root)` called in `packs/__init__.py` *before* `derive_database_path` — crash leaves replay-or-orphan, never mixed authority. The setup journal should clone this primitive.
+
+4. **North Star compatibility.** One authority holds because the journal is not truth: "installed" is proven by on-disk artifact + manifest hash/stamp; doctor rebuilds journal state from filesystem reality (its existing read-only posture extends naturally to reconciliation). Truth stays in SQLite (capability advertisement) + media tree (artifact bytes).
+
+**Design consequence:** journal lives at e.g. `.astrid/setup/journal.jsonl`, fsync'd appends, replayed/reconciled by doctor; B-5's crash-mid-download test kills mid-append and proves resume.
+0

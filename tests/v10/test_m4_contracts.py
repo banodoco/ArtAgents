@@ -350,6 +350,11 @@ def test_reserved_copy_route_404s_on_live_server(tmp_path: Path) -> None:
         # POST /copy must 404 with the frozen not_found envelope.
         req = Request(url, data=b"{}", method="POST")
         req.add_header("Content-Type", "application/json")
+        # Local-trust posture (doc 27 §4.7): mutations must carry the
+        # per-boot request token; the launcher-delivered app presents it
+        # out of band. The unregistered route still answers the frozen
+        # catch-all 404 once the gate passes.
+        req.add_header("X-Astrid-Request-Token", server.request_token)
         with pytest.raises(HTTPError) as exc_info:
             urlopen(req)  # noqa: S310 - localhost test server only
         assert exc_info.value.code == 404

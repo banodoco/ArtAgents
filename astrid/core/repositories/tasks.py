@@ -45,7 +45,7 @@ from datetime import datetime, timedelta
 from typing import Any, Protocol
 
 from astrid.core.ids import generate_lowercase_ulid
-from astrid.core.io.media_import import PreparedMedia
+from astrid.core.io.media_import import PreparedMedia, PublishedMedia
 from astrid.core.receipts.canonical import (
     CanonicalizationError,
     canonical_bytes,
@@ -837,9 +837,13 @@ class TaskCompleteReadModel:
     event_ids: tuple[str, ...]
     run: Mapping[str, Any] | None
     result: Mapping[str, Any] | None = None
+    #: Set when the completion created the generation (doc 27 §5 step 6).
+    generation: Mapping[str, Any] | None = None
+    #: New timeline stream head when completion performed the registry
+    #: visibility merge (doc 27 §5 step 7); None when skipped.
+    timeline_head: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        """Return the JSON-safe dict persisted as the receipt result."""
         return {
             "task": self.task.to_dict(),
             "attempt": self.attempt.to_dict(),
@@ -847,6 +851,10 @@ class TaskCompleteReadModel:
             "event_ids": list(self.event_ids),
             "run": dict(self.run) if self.run is not None else None,
             "result": dict(self.result) if self.result is not None else None,
+            "generation": dict(self.generation)
+            if self.generation is not None
+            else None,
+            "timeline_head": self.timeline_head,
         }
 
     @classmethod
@@ -863,6 +871,14 @@ class TaskCompleteReadModel:
             run=dict(value["run"]) if value.get("run") is not None else None,
             result=(
                 dict(value["result"]) if value.get("result") is not None
+                else None
+            ),
+            generation=dict(value["generation"])
+            if value.get("generation") is not None
+            else None,
+            timeline_head=(
+                int(value["timeline_head"])
+                if value.get("timeline_head") is not None
                 else None
             ),
         )
@@ -3544,6 +3560,10 @@ class TaskRepository:
         actor_kind: str = "local",
         now: str | None = None,
         command_kind: str = CORE_TASK_COMPLETE_COMMAND_KIND,
+        generation_repo: Any = None,
+        generation_request: Mapping[str, Any] | None = None,
+        timeline_repo: Any = None,
+        registry_merge: Mapping[str, Any] | None = None,
     ) -> TaskCompleteReadModel:
         """Complete one owned attempt atomically into media and outputs.
 
@@ -3773,6 +3793,8 @@ class TaskRepository:
                 materialize_args["locator"] = entry["locator"]
             if entry.get("relations") is not None:
                 materialize_args["relations"] = entry["relations"]
+            if entry.get("published") is not None:
+                materialize_args["published"] = entry["published"]
             materialized_media = media_repo.materialize_prepared(
                 uow, **materialize_args
             )
@@ -3911,6 +3933,81 @@ class TaskRepository:
                 stamp=stamp,
             )
 
+        # 6.5 Generation creation when the completion requests it (doc 27
+        #     §5 step 6): one generations row plus its initial original
+        #     variant, receipt-free and event-free, inside this same unit
+        #     of work. Requires the task transition above to have committed
+        #     in-transaction (record_completion validates terminal state).
+        generation_model: Any = None
+        if generation_request is not None:
+            if not isinstance(generation_request, Mapping):
+                raise TaskValidationError(
+                    "generation_request must be a mapping when supplied"
+                )
+            if not hasattr(generation_repo, "record_completion"):
+                raise TaskValidationError(
+                    "generation_request requires a repository exposing "
+                    "record_completion"
+                )
+            gtype = generation_request.get("type")
+            if not isinstance(gtype, str) or not gtype:
+                raise TaskValidationError(
+                    "generation_request.type must be a non-empty string"
+                )
+            primary_media_id = next(
+                (
+                    entry["media_id"]
+                    for entry in materialized
+                    if entry["is_primary"]
+                ),
+                None,
+            )
+            variant: dict[str, Any] = dict(
+                generation_request.get("variant") or {}
+            )
+            variant.setdefault("media_id", primary_media_id)
+            generation_model = generation_repo.record_completion(
+                uow,
+                project_id=project_id,
+                task_id=task_id,
+                type=gtype,
+                params=generation_request.get("params"),
+                variant=variant,
+            )
+
+        # 6.7 Registry visibility merge when the completion requires it
+        #     (doc 27 §5 step 7): internal evented asset-registry merge
+        #     against the current timeline head; skipping is legal and
+        #     leaves the completion receipt valid (N1).
+        registry_head: int | None = None
+        if registry_merge is not None:
+            if not isinstance(registry_merge, Mapping):
+                raise TaskValidationError(
+                    "registry_merge must be a mapping when supplied"
+                )
+            if not hasattr(timeline_repo, "merge_registry"):
+                raise TaskValidationError(
+                    "registry_merge requires a repository exposing "
+                    "merge_registry"
+                )
+            timeline_id = registry_merge.get("timeline_id")
+            entries_payload = registry_merge.get("entries")
+            if not isinstance(timeline_id, str) or not timeline_id:
+                raise TaskValidationError(
+                    "registry_merge.timeline_id must be a non-empty string"
+                )
+            if not isinstance(entries_payload, Mapping):
+                raise TaskValidationError(
+                    "registry_merge.entries must be a JSON object"
+                )
+            registry_head = timeline_repo.merge_registry(
+                uow,
+                project_id=project_id,
+                timeline_id=timeline_id,
+                entries=entries_payload,
+                actor_kind="system" if actor_kind == "local" else actor_kind,
+            )
+
         # 7. The hash-chained core.task.completed event on the task stream.
         media_id_by_ordinal = {
             entry["ordinal"]: entry["media_id"] for entry in materialized
@@ -4002,6 +4099,13 @@ class TaskRepository:
             event_ids=event_ids,
             run=run_projection,
             result=result_summary,
+            generation=(
+                generation_model.to_dict()
+                if generation_model is not None
+                and hasattr(generation_model, "to_dict")
+                else generation_model
+            ),
+            timeline_head=registry_head,
         )
         self._receipts.record(
             uow,
@@ -4122,6 +4226,21 @@ class TaskRepository:
                             f"outputs[{index}].relations must be a sequence"
                         )
                     entry["relations"] = list(relations)
+                published = raw.get("published")
+                if published is not None:
+                    if not isinstance(published, PublishedMedia):
+                        raise TaskValidationError(
+                            f"outputs[{index}].published must be a "
+                            f"PublishedMedia record, got "
+                            f"{type(published).__name__}"
+                        )
+                    if published.digest != prepared.digest:
+                        raise TaskValidationError(
+                            f"outputs[{index}].published digest sha256:"
+                            f"{published.digest} does not match prepared "
+                            f"sha256:{prepared.digest}"
+                        )
+                    entry["published"] = published
             else:
                 declared = [
                     key

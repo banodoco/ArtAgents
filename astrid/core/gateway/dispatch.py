@@ -198,6 +198,26 @@ def _dispatch_serve(args: list[str]) -> int:
         return 1
 
     try:
+        # B9 boot manifest (plan task 11): verify-or-stamp the executor-build
+        # manifest at the composition root, BEFORE server creation — never in
+        # ``local_bridge_server`` (transport-only by construction). Registry or
+        # conformance-fixture drift since the last stamp fails startup closed.
+        from astrid.core.integrations.reigh.boot_manifest import (
+            BootManifestError,
+            stamp_boot_manifest,
+        )
+
+        try:
+            from astrid.packs.shots.conformance import capability_conformance_specs
+
+            stamp_boot_manifest(
+                composition.projects_root,
+                fixtures=capability_conformance_specs(),
+            )
+        except BootManifestError as exc:
+            print(f"serve failed: {exc}", file=sys.stderr)
+            return 1
+
         server = create_local_bridge_server(
             host=parsed.host,
             port=parsed.port,

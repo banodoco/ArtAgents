@@ -31,19 +31,31 @@ writer's read-only connection and extracts each attempt's reserved
 ``gc_unreferenced_staging`` so only staging directories unreferenced by live
 attempts are removed. No second writer, no new write authority, and the
 managed ``media/sha256`` digest tree is never touched (SD5).
+
+(BC3 ops-lens gap 1.) :func:`compose_standard_bridge` also starts the daemon
+:class:`LeaseExpirySweeper`: a background thread that, on a fixed tick,
+enumerates projects read-only and submits one receipt-protected
+``core.task.expire`` command per project through the single shared writer
+queue so a crashed executor's expired lease is transitioned (attempt
+``expired``, task requeued or failed terminally) instead of wedging forever.
+It stops cleanly when the writer closes or :meth:`LeaseExpirySweeper.stop`
+is called at the serve composition root.
 """
 
 from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 
 from astrid.core.backup.operations import recover_restore_staging
+from astrid.core.model_setup.journal import resolve_boot_state as _replay_setup_journal
 from astrid.core.events.registry import register_core_vocabulary
 from astrid.core.events.service import EventAppendService
 from astrid.core.foundation.project_paths import resolve_projects_root
+from astrid.core.ids import generate_lowercase_ulid
 from astrid.core.integrations.reigh.bridge_service import derive_database_path
 from astrid.core.io.media_import import (
     MediaPreparationError,
@@ -53,13 +65,15 @@ from astrid.core.io.media_import import (
 )
 from astrid.core.receipts import ReceiptService
 from astrid.core.repositories.projects import ProjectRepository
+from astrid.core.repositories.tasks import TaskRepository
 from astrid.core.schema_packs.manifest import load_schema_pack_manifest
 from astrid.core.schema_packs.registry import (
     FrozenSchemaPackRegistry,
     SchemaPackRegistry,
 )
 from astrid.core.store.ownership import DatabaseOwnerLock, OwnerLockError
-from astrid.core.store.writer import DatabaseWriter
+from astrid.core.store.uow import UnitOfWork
+from astrid.core.store.writer import DatabaseWriter, WriterShutdownError
 from astrid.sdk.exceptions import ServiceUnavailableError
 from astrid.packs.timeline.bridge import TimelineBridgeAdapter
 from astrid.packs.timeline.repository import TimelineRepository
@@ -185,6 +199,85 @@ def run_startup_staging_gc(
     return gc_unreferenced_staging(projects_root, live_txn_ids)
 
 
+DEFAULT_LEASE_SWEEP_INTERVAL_SECONDS = 15.0
+"""Seconds between lease-expiry sweeps (the crashed-executor recovery tick)."""
+
+
+class LeaseExpirySweeper:
+    """Daemon background thread that expires overdue attempt leases.
+
+    A crashed executor leaves its attempt live forever: heartbeat rejects an
+    already-expired lease without transitioning it, and the retry predicates
+    require a prior expired attempt — a dead end until something expires the
+    attempt. This sweeper closes that wedge by driving
+    :meth:`TaskRepository.expire_overdue` through the single shared writer
+    queue with one fresh ULID idempotency key per project per sweep (the
+    expiry request hash is empty, so a repeated key would replay the stored
+    receipt instead of sweeping again).
+
+    Projects are enumerated read-only on a separate read-only connection;
+    only the expiry commands themselves enter the writer FIFO. The thread is
+    a daemon: it stops cleanly when :meth:`stop` is called or when the writer
+    closes (the next submission raises ``WriterShutdownError``).
+    """
+
+    def __init__(
+        self,
+        writer: DatabaseWriter,
+        tasks: TaskRepository,
+        *,
+        interval_seconds: float = DEFAULT_LEASE_SWEEP_INTERVAL_SECONDS,
+    ) -> None:
+        self._writer = writer
+        self._tasks = tasks
+        self._interval_seconds = interval_seconds
+        self._stop_requested = threading.Event()
+        self._thread = threading.Thread(
+            target=self._run,
+            name="astrid-lease-expiry-sweeper",
+            daemon=True,
+        )
+        self._thread.start()
+
+    def stop(self) -> None:
+        """Signal stop and join the sweep thread (idempotent)."""
+        self._stop_requested.set()
+        if self._thread.is_alive():
+            self._thread.join()
+
+    def _run(self) -> None:
+        while not self._stop_requested.wait(self._interval_seconds):
+            if not self._sweep_once():
+                return
+
+    def _sweep_once(self) -> bool:
+        """Run one full sweep; return ``False`` only after writer close."""
+        try:
+            with self._writer.read_only_connection() as connection:
+                rows = connection.execute(
+                    "SELECT id FROM projects ORDER BY slug ASC"
+                ).fetchall()
+        except sqlite3.Error:
+            # Transient read failure (e.g. mid-checkpoint); retry next tick.
+            return True
+        for row in rows:
+            project_id = str(row[0])
+            key = generate_lowercase_ulid()
+            try:
+                UnitOfWork(self._writer).run(
+                    lambda uow, project_id=project_id, key=key: (
+                        self._tasks.expire_overdue(
+                            uow, project_id=project_id, idempotency_key=key
+                        )
+                    )
+                )
+            except WriterShutdownError:
+                return False
+            except Exception:  # noqa: BLE001 - best-effort per project
+                continue
+        return True
+
+
 @dataclass(frozen=True, slots=True)
 class StandardBridgeComposition:
     """Everything the gateway serve root constructed for the bridge."""
@@ -198,15 +291,17 @@ class StandardBridgeComposition:
     bridge: TimelineBridgeAdapter
     owner_lock: DatabaseOwnerLock | None
     """The exclusive-owner lock held for the composition's lifetime."""
+    expiry_sweeper: LeaseExpirySweeper
 
     def close(self) -> None:
-        """Close the writer, then release the owner lock.
+        """Stop background work, close the writer, then release the lock.
 
-        Mirrors ``CoreApplication.close``: the lock is released only after
-        the writer is closed, so a second owner can never acquire the
-        database while this process still holds an open writer. Both steps
-        are idempotent, so a double ``close()`` is safe.
+        The order is intentional: no sweeper callback may submit work after
+        writer shutdown, and the owner lock is held until all writable state
+        is closed. Every operation is idempotent so serve and error cleanup
+        can safely call this more than once.
         """
+        self.expiry_sweeper.stop()
         self.writer.close()
         if self.owner_lock is not None:
             self.owner_lock.release()
@@ -234,14 +329,21 @@ def compose_standard_bridge(
 
     Must be called only from the gateway serve composition root. The caller
     owns the composition lifecycle: call
-    :meth:`StandardBridgeComposition.close` on shutdown (closes the writer,
-    then releases the owner lock).
+    :meth:`StandardBridgeComposition.close` on shutdown. It stops the
+    lease-expiry sweeper, closes the writer, and only then releases the owner
+    lock.
     """
     root = resolve_projects_root(projects_root)
     # Restore recovery is a read-before-write filesystem decision. It must
     # resolve any journal left by a hard-dead restore before the database
     # writer can open and observe a mixed database/media pair.
     recover_restore_staging(root)
+    # Setup-journal boot replay (B8, doc 27 §6.1): resolve any dangling
+    # acquisition transaction BEFORE the database path is derived. The
+    # journal is a sidecar replay log, never truth; this completes or
+    # resumes interrupted installs from filesystem reality and never
+    # creates the product database.
+    _replay_setup_journal(root)
     database_path = derive_database_path(root)
     database_path.parent.mkdir(parents=True, exist_ok=True)
     if registry is None:
@@ -257,6 +359,7 @@ def compose_standard_bridge(
             "the database is already owned by another process"
         ) from exc
     writer: DatabaseWriter | None = None
+    expiry_sweeper: LeaseExpirySweeper | None = None
     try:
         writer = DatabaseWriter(database_path, registry)
         # Startup staging GC (m2 plan step 3/4): through the single writer just
@@ -290,6 +393,12 @@ def compose_standard_bridge(
             projects=projects_service,
             timelines=timelines_service,
         )
+        # Lease-expiry sweeper (BC3 ops-lens gap 1): a crashed executor must
+        # not wedge its attempt live forever. It uses the same writer queue as
+        # all other composition services and is stopped before writer close.
+        expiry_sweeper = LeaseExpirySweeper(
+            writer, TaskRepository(events=events, receipts=receipts)
+        )
         return StandardBridgeComposition(
             projects_root=root,
             database_path=database_path,
@@ -299,8 +408,11 @@ def compose_standard_bridge(
             timelines=timelines,
             bridge=bridge,
             owner_lock=owner_lock,
+            expiry_sweeper=expiry_sweeper,
         )
     except BaseException:
+        if expiry_sweeper is not None:
+            expiry_sweeper.stop()
         if writer is not None:
             writer.close()
         owner_lock.release()
@@ -308,9 +420,11 @@ def compose_standard_bridge(
 
 
 __all__: list[str] = [
+    "DEFAULT_LEASE_SWEEP_INTERVAL_SECONDS",
     "FrozenSchemaPackRegistry",
     "LIVE_ATTEMPT_STAGING_KEY",
     "LIVE_ATTEMPT_STATUSES",
+    "LeaseExpirySweeper",
     "STANDARD_SCHEMA_PACKS",
     "SchemaPackRegistry",
     "StandardBridgeComposition",

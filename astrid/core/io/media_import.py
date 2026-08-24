@@ -51,7 +51,7 @@ import re
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Mapping
+from typing import Mapping, Sequence
 
 # ---------------------------------------------------------------------------
 # Frozen vocabulary and layout (decision artifact sections 5 and 7)
@@ -971,11 +971,56 @@ def publish_prepared_media(
 ) -> PublishedMedia:
     """Stage, verify, and publish one prepared record in one helper call.
 
-    This is the in-UoW media helper repositories call for the short atomic
-    publication window: quarantine the prepared bytes, re-verify them, and
-    atomically place (or verified-reuse) the exact managed digest path.
+    This is the pre-transaction publication primitive (doc 27 §5): the
+    caller runs it *outside* any unit of work — quarantine the prepared
+    bytes, re-verify them, and atomically place (or verified-reuse) the
+    exact managed digest path — so the bytes are durable before
+    ``BEGIN IMMEDIATE`` opens. Publication is idempotent and leaves only
+    unreferenced CAS objects after a crash.
     """
     return publish_staged_media(projects_root, stage_prepared_media(projects_root, txn_id, prepared))
+
+
+def publish_prepared_for_commit(
+    projects_root: str | Path,
+    txn_id: object,
+    prepareds: Sequence[PreparedMedia],
+) -> tuple[PublishedMedia, ...]:
+    """Durably publish every prepared record BEFORE ``BEGIN IMMEDIATE``.
+
+    The amended completion ordering's publication half (doc 27 §5): for
+    each record, same-filesystem quarantine stage with file fsync,
+    staged-byte re-verification, atomic install-if-absent onto the frozen
+    hash path (or verified reuse of the existing digest object), then file
+    and parent-directory fsyncs. Idempotent; a crash here leaves only
+    unreferenced CAS objects and unopened-authority staging leftovers a
+    startup GC sweeps — never a partial digest file and never an
+    authoritative row. The returned publications feed the in-lock
+    :func:`validate_published_presence` check inside the unit of work.
+    """
+    return tuple(
+        publish_prepared_media(projects_root, txn_id, prepared)
+        for prepared in prepareds
+    )
+
+
+def validate_published_presence(projects_root: str | Path, digest: object) -> int:
+    """O(stat) presence check for one published managed digest object.
+
+    The in-lock counterpart of :func:`publish_prepared_for_commit`
+    (doc 27 §5 transaction step 3): once the bytes were durably published
+    before ``BEGIN IMMEDIATE``, validating them under the writer lock costs
+    exactly one ``stat`` — never a copy, hash, or filesystem publication.
+    Returns the object's byte size; raises :class:`MediaLocationError`
+    with ``reason="missing"`` when no regular object exists at the frozen
+    hash path, so a committed row can never point to absent bytes.
+    """
+    managed = managed_media_path(projects_root, digest)
+    try:
+        return int(managed.stat().st_size)
+    except OSError:
+        raise MediaLocationError(reason="missing", path=managed)
+
 
 
 def prepare_external_local(
@@ -1073,6 +1118,7 @@ __all__ = [
     "prepare_media_file",
     "probe_media_file",
     "publish_prepared_media",
+    "publish_prepared_for_commit",
     "publish_staged_media",
     "set_media_crash_hook",
     "sha256_file_bytes",
@@ -1081,6 +1127,7 @@ __all__ = [
     "validate_digest",
     "validate_media_kind",
     "validate_txn_id",
+    "validate_published_presence",
     "verify_managed_bytes",
     "verify_media_bytes",
     "verify_staged_media",

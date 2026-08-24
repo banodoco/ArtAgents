@@ -429,6 +429,7 @@ def _service_error_from_exception(exc: BaseException) -> ServiceError | None:
         TransactionControlError,
         WriterBusyError,
         WriterShutdownError,
+        WriterSidecarError,
     )
     from astrid.packs.references.repository import (
         ReferenceAlreadyExistsError,
@@ -534,6 +535,7 @@ def _service_error_from_exception(exc: BaseException) -> ServiceError | None:
         WriterBusyError,
         WriterShutdownError,
         TransactionControlError,
+        WriterSidecarError,
     )
     integrity = (EventChainError, MediaVerificationError, MediaIntegrityError)
 

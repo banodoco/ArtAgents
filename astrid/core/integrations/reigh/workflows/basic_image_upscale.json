@@ -1,0 +1,29 @@
+{
+  "1": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "image_upscale_input.png"
+    }
+  },
+  "2": {
+    "class_type": "ImageScaleBy",
+    "inputs": {
+      "image": [
+        "1",
+        0
+      ],
+      "scale_by": 2.0,
+      "upscale_method": "lanczos"
+    }
+  },
+  "3": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "filename_prefix": "image-upscale",
+      "images": [
+        "2",
+        0
+      ]
+    }
+  }
+}

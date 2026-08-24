@@ -6,7 +6,6 @@ callback serialization, separate read-only reads, typed busy and exception
 propagation, deterministic drain and shutdown, no connection or transaction
 escape, and the deterministic inability of concurrent semantic callers to
 obtain parallel write transactions.
-
 The concurrency tests are deterministic by construction: one writer thread
 owns one connection and one FIFO queue, so a callback that is still running
 physically blocks every later callback. Tests use ``threading.Event``
@@ -30,7 +29,10 @@ from __future__ import annotations
 
 import ast
 import inspect
+import os
 import sqlite3
+import subprocess
+import sys
 import threading
 
 import pytest
@@ -44,6 +46,7 @@ from astrid.core.store.writer import (
     WriterBusyError,
     WriterError,
     WriterShutdownError,
+    WriterSidecarError,
 )
 
 TS = "2026-08-15T00:00:00.000000+00:00"
@@ -1093,3 +1096,69 @@ def test_no_environment_controlled_crash_switches_in_kernel_store(
         )
     )
     assert head[0] == 1
+
+
+def test_writer_fails_closed_when_wal_replaced_beneath_it(
+    writer: DatabaseWriter, tmp_path
+) -> None:
+    """A foreign writable close unlinks the WAL; later writes must fail.
+
+    Regression (phase-b): a foreign process (CLI, doctor, backup, external
+    tooling) opening the database read-write and closing cleanly while the
+    long-lived writer sits idle deletes ``-wal``/``-shm`` out from under the
+    writer's connection. The writer used to keep committing into the
+    orphaned inode: every COMMIT reported success while no reader could ever
+    observe the rows — the serve HTTP save path returned ``200`` with an
+    incremented ``config_version`` but wrote nothing durable. The writer now
+    verifies the WAL identity before each callback and raises the typed
+    :class:`WriterSidecarError` instead of lying.
+    """
+    writer.submit(
+        lambda session: _insert_project(session, "proj-sidecar")
+    )
+    db_path = str(tmp_path / "writer.sqlite3")
+    # The bridge's read path churns separate read-only connections
+    # (``open_database(read_only=True)`` probe + ``mode=ro`` open/close).
+    with writer.read_only_connection() as read_conn:
+        read_conn.execute("SELECT COUNT(*) FROM projects").fetchone()
+    # A foreign process (CLI, doctor, backup, external tooling) then opens
+    # the database read-write and closes cleanly. That close checkpoints and
+    # unlinks the WAL the idle writer connection still holds open.
+    foreign_code = (
+        "import sqlite3; "
+        f"c = sqlite3.connect({db_path!r}); "
+        "c.execute('SELECT COUNT(*) FROM projects').fetchone(); "
+        "c.close()"
+    )
+    subprocess.run(
+        [sys.executable, "-c", foreign_code], check=True, timeout=60
+    )
+    assert not os.path.exists(db_path + "-wal")
+
+    # The next submission must fail closed instead of committing into the
+    # orphaned inode.
+    with pytest.raises(WriterSidecarError):
+        writer.submit(
+            lambda session: _insert_project(session, "proj-after-poison")
+        )
+    # Fail closed means fail durably: no partial rows from the poisoned
+    # attempt, and every later submission fails the same way.
+    with pytest.raises(WriterSidecarError):
+        writer.submit(
+            lambda session: session.query_one(
+                "SELECT 1 FROM projects WHERE id LIKE 'proj-after-poison%'"
+            )
+        )
+    # Every later submission keeps failing closed.
+    with pytest.raises(WriterSidecarError):
+        writer.submit(lambda session: _insert_project(session, "proj-again"))
+    # And nothing from the poisoned window reached durable state: verified
+    # through a separate read-only connection, never the poisoned writer.
+    external = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    try:
+        count = external.execute(
+            "SELECT COUNT(*) FROM projects WHERE id LIKE 'proj-after%'"
+        ).fetchone()[0]
+    finally:
+        external.close()
+    assert count == 0

@@ -5,8 +5,8 @@
   "environment": {
     "machine": "x86_64",
     "platform": "Linux-6.8.0-136-generic-x86_64-with-glibc2.35",
-    "pytest": "9.1.1",
-    "python": "3.13.6",
+    "pytest": "9.0.2",
+    "python": "3.11.11",
     "sqlite": "3.37.2",
     "system": "Linux"
   },
@@ -20,150 +20,150 @@
     "source": "tests/fixtures/v10/m7_representative.json",
     "spec_sha256": "267b31bdf2333bf81863e2e33a76f6714c1f3ed112d781bba6358955d7ffd0ab"
   },
-  "generated_at": "2026-08-20T20:53:30.434554+00:00",
+  "generated_at": "2026-08-22T18:51:51.910339+00:00",
   "operations": {
     "bootstrap": {
       "cold": {
-        "max_ms": 14.039352,
-        "median_ms": 12.861723,
-        "p95_ms": 13.921589,
+        "max_ms": 10.609361,
+        "median_ms": 9.653362,
+        "p95_ms": 10.513761,
         "sample_count": 3,
         "samples_ms": [
-          12.861723,
-          14.039352,
-          11.701545
+          9.653362,
+          7.593673,
+          10.609361
         ]
       },
       "definition": "fresh fixture root, first standard application composition",
       "warm": {
-        "max_ms": 12.840442,
-        "median_ms": 12.185954,
-        "p95_ms": 12.774993,
+        "max_ms": 9.370832,
+        "median_ms": 8.532474,
+        "p95_ms": 9.286996,
         "sample_count": 3,
         "samples_ms": [
-          12.840442,
-          10.015426,
-          12.185954
+          9.370832,
+          8.532474,
+          7.881363
         ]
       }
     },
     "change_feed": {
       "cold": {
-        "max_ms": 2.692006,
-        "median_ms": 2.334527,
-        "p95_ms": 2.656258,
+        "max_ms": 2.704039,
+        "median_ms": 2.469898,
+        "p95_ms": 2.680625,
         "sample_count": 3,
         "samples_ms": [
-          2.334527,
-          2.692006,
-          2.318017
+          2.469898,
+          2.704039,
+          2.271588
         ]
       },
       "definition": "public repository-backed operation on the fixture",
       "warm": {
-        "max_ms": 2.791456,
-        "median_ms": 2.101652,
-        "p95_ms": 2.593661,
+        "max_ms": 2.622558,
+        "median_ms": 2.166014,
+        "p95_ms": 2.493908,
         "sample_count": 8,
         "samples_ms": [
-          2.791456,
-          2.226327,
-          2.211076,
-          2.103367,
-          2.057197,
-          2.041987,
-          2.099937,
-          2.090657
+          2.622558,
+          2.254988,
+          2.201118,
+          2.192529,
+          2.139498,
+          2.108308,
+          2.115619,
+          2.115228
         ]
       }
     },
     "gallery_list": {
       "cold": {
-        "max_ms": 7.59044,
-        "median_ms": 7.439269,
-        "p95_ms": 7.575323,
+        "max_ms": 8.106644,
+        "median_ms": 8.002524,
+        "p95_ms": 8.096232,
         "sample_count": 3,
         "samples_ms": [
-          7.439269,
-          7.59044,
-          7.13107
+          8.002524,
+          7.955193,
+          8.106644
         ]
       },
       "definition": "public repository-backed operation on the fixture",
       "warm": {
-        "max_ms": 7.380141,
-        "median_ms": 7.16225,
-        "p95_ms": 7.374722,
+        "max_ms": 7.976944,
+        "median_ms": 7.678924,
+        "p95_ms": 7.971897,
         "sample_count": 8,
         "samples_ms": [
-          7.364659,
-          6.781011,
-          6.94906,
-          7.317141,
-          6.73129,
-          7.13604,
-          7.380141,
-          7.18846
+          7.976944,
+          7.497524,
+          7.962524,
+          7.923604,
+          7.558304,
+          7.771544,
+          7.586304,
+          7.423304
         ]
       }
     },
     "media_verify": {
       "cold": {
-        "max_ms": 10.312255,
-        "median_ms": 9.587357,
-        "p95_ms": 10.239765,
+        "max_ms": 11.5134,
+        "median_ms": 10.395984,
+        "p95_ms": 11.401658,
         "sample_count": 3,
         "samples_ms": [
-          10.312255,
-          8.912098,
-          9.587357
+          10.395984,
+          11.5134,
+          10.373321
         ]
       },
       "definition": "public repository-backed operation on the fixture",
       "warm": {
-        "max_ms": 11.115514,
-        "median_ms": 7.561185,
-        "p95_ms": 9.981586,
+        "max_ms": 9.967323,
+        "median_ms": 7.306404,
+        "p95_ms": 9.095925,
         "sample_count": 8,
         "samples_ms": [
-          11.115514,
-          7.87572,
-          7.53378,
-          7.07277,
-          7.330849,
-          7.58859,
-          7.76495,
-          7.148851
+          9.967323,
+          7.388934,
+          7.477614,
+          7.266535,
+          7.277775,
+          7.255615,
+          7.335033,
+          7.232804
         ]
       }
     },
     "timeline_load_save": {
       "cold": {
-        "max_ms": 10.884027,
-        "median_ms": 10.398886,
-        "p95_ms": 10.835513,
+        "max_ms": 10.889951,
+        "median_ms": 10.426122,
+        "p95_ms": 10.843568,
         "sample_count": 3,
         "samples_ms": [
-          9.550026,
-          10.398886,
-          10.884027
+          10.889951,
+          10.426122,
+          10.208981
         ]
       },
       "definition": "public repository-backed operation on the fixture",
       "warm": {
-        "max_ms": 9.848257,
-        "median_ms": 6.83816,
-        "p95_ms": 8.99023,
+        "max_ms": 10.435322,
+        "median_ms": 7.333619,
+        "p95_ms": 9.467135,
         "sample_count": 8,
         "samples_ms": [
-          9.848257,
-          6.906681,
-          6.76964,
-          7.09661,
-          6.568761,
-          6.050392,
-          6.239782,
-          7.39675
+          10.435322,
+          7.669073,
+          7.335044,
+          7.279535,
+          7.246713,
+          7.562764,
+          7.332194,
+          7.277633
         ]
       }
     }

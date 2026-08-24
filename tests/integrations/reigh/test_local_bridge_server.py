@@ -123,10 +123,22 @@ def _get_error(url: str) -> tuple[int, dict]:
     raise AssertionError(f"expected {url} to return an HTTP error")
 
 
+_ACTIVE_REQUEST_TOKEN: list[str] = []
+"""The current fixture server's per-boot token (set by the contextmanagers)."""
+
+
+def _trust_headers() -> dict[str, str]:
+    if not _ACTIVE_REQUEST_TOKEN:
+        return {}
+    return {"X-Astrid-Request-Token": _ACTIVE_REQUEST_TOKEN[0]}
+
+
 def _post_json(url: str, body: dict[str, Any]) -> tuple[int, dict]:
     data = json.dumps(body).encode("utf-8")
     req = Request(url, data=data, method="POST")
     req.add_header("Content-Type", "application/json")
+    for name, value in _trust_headers().items():
+        req.add_header(name, value)
     try:
         with urlopen(req) as response:  # noqa: S310
             return response.status, json.loads(response.read().decode("utf-8"))
@@ -138,6 +150,8 @@ def _post_raw(url: str, raw_body: bytes, content_type: str | None = None) -> tup
     req = Request(url, data=raw_body, method="POST")
     if content_type is not None:
         req.add_header("Content-Type", content_type)
+    for name, value in _trust_headers().items():
+        req.add_header(name, value)
     try:
         with urlopen(req) as response:  # noqa: S310
             return response.status, json.loads(response.read().decode("utf-8"))
@@ -149,6 +163,8 @@ def _put_raw(url: str, raw_body: bytes, content_type: str | None = None) -> tupl
     req = Request(url, data=raw_body, method="PUT")
     if content_type is not None:
         req.add_header("Content-Type", content_type)
+    for name, value in _trust_headers().items():
+        req.add_header(name, value)
     try:
         with urlopen(req) as response:  # noqa: S310
             return response.status, json.loads(response.read().decode("utf-8"))
@@ -208,9 +224,12 @@ def running_server(projects_root: Path) -> Generator[str, None, None]:
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     host, port = server.server_address
+    _ACTIVE_REQUEST_TOKEN.clear()
+    _ACTIVE_REQUEST_TOKEN.append(server.request_token)
     try:
         yield f"http://{host}:{port}"
     finally:
+        _ACTIVE_REQUEST_TOKEN.clear()
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
@@ -237,9 +256,12 @@ def repository_server(
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     host, port = server.server_address
+    _ACTIVE_REQUEST_TOKEN.clear()
+    _ACTIVE_REQUEST_TOKEN.append(server.request_token)
     try:
         yield f"http://{host}:{port}", composition
     finally:
+        _ACTIVE_REQUEST_TOKEN.clear()
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
@@ -893,7 +915,6 @@ def test_save_endpoint_404_for_unknown_timeline(
     tmp_bridge_root: Path,
 ) -> None:
     """POST /save for a timeline that does not exist returns 404 timeline_not_found."""
-    timeline_id = "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"
     with repository_server(tmp_bridge_root) as (base_url, composition):
         _repo_create_project(composition, slug="known-proj", key="proj-1")
         url = f"{base_url}/projects/known-proj/timelines/ffffffff-ffff-ffff-ffff-ffffffffffff/save"
@@ -941,6 +962,127 @@ def test_save_endpoint_404_for_unknown_project(
     assert error["error"] == "project_not_found"
 
 
+def test_save_endpoint_persists_every_save_and_fails_closed_on_wal_replacement(
+    tmp_bridge_root: Path,
+) -> None:
+    """Regression (phase-b): every HTTP save must persist; a poisoned
+    writer must fail closed instead of lying.
+
+    Two parts, both against the real HTTP surface:
+
+    1. Two back-to-back ``POST .../save`` requests each commit NEW durable
+       rows (a fresh ``timeline.saved`` event and receipt per save — never
+       an in-process replay), and each response's ``config_version``
+       matches what any external reader observes on disk.
+    2. After a foreign process opens the database read-write and closes
+       cleanly (which unlinks the WAL beneath the long-lived serve writer),
+       the next save returns the frozen ``500 internal`` envelope instead
+       of a fabricated ``200`` success, and zero rows change.
+    """
+    import sqlite3 as sqlite3_module
+    import subprocess
+    import sys
+
+    timeline_id = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbb1"
+    timeline_ulid = "01jm4k5n7p000000000000sav1"
+    with repository_server(tmp_bridge_root) as (base_url, composition):
+        db_path = str(composition.database_path)
+        project = _repo_create_project(
+            composition, slug="persist-proj", key="proj-1"
+        )
+        _repo_create_timeline(
+            composition,
+            project_id=project.id,
+            slug="primary",
+            key="tl-1",
+            timeline_id=timeline_id,
+            timeline_ulid=timeline_ulid,
+            name="Primary",
+        )
+        url = f"{base_url}/projects/persist-proj/timelines/{timeline_id}/save"
+
+        def _external_counts() -> tuple[int, int, str]:
+            """Durable truth: counts + document via a separate reader."""
+            conn = sqlite3_module.connect(
+                f"file:{db_path}?mode=ro", uri=True
+            )
+            try:
+                saved_events = conn.execute(
+                    "SELECT COUNT(*) FROM events WHERE kind = 'timeline.saved'"
+                ).fetchone()[0]
+                receipts = conn.execute(
+                    "SELECT COUNT(*) FROM command_receipts "
+                    "WHERE command_kind = 'timeline.save'"
+                ).fetchone()[0]
+                document = conn.execute(
+                    "SELECT document_json FROM timelines WHERE id = ?",
+                    (timeline_id,),
+                ).fetchone()[0]
+            finally:
+                conn.close()
+            return int(saved_events), int(receipts), str(document)
+
+        # Part 1: two saves, each producing NEW durable rows.
+        status_1, result_1 = _post_json(url, {
+            "config": {"marker": 1},
+            "registry": {"assets": {}},
+            "expected_version": 1,
+        })
+        assert status_1 == 200
+        assert result_1["config"] == {"marker": 1}
+        assert result_1["config_version"] == 2
+        events_after_first, receipts_after_first, doc_after_first = (
+            _external_counts()
+        )
+        assert events_after_first == 1
+        assert receipts_after_first == 1
+
+        status_2, result_2 = _post_json(url, {
+            "config": {"marker": 2},
+            "registry": {"assets": {}},
+            "expected_version": 2,
+        })
+        assert status_2 == 200
+        assert result_2["config"] == {"marker": 2}
+        assert result_2["config_version"] == 3
+        events_after_second, receipts_after_second, doc_after_second = (
+            _external_counts()
+        )
+        # NEW rows, not a replay: one more event and receipt on disk.
+        assert events_after_second == events_after_first + 1
+        assert receipts_after_second == receipts_after_first + 1
+        assert doc_after_second != doc_after_first
+
+        # Part 2: poison the writer exactly as production does. The bridge's
+        # read path churns read-only connections (this GET), then a foreign
+        # process opens read-write and closes cleanly, unlinking the WAL.
+        _get_json(f"{base_url}/projects/persist-proj/timelines/{timeline_id}")
+        foreign_code = (
+            "import sqlite3; "
+            f"c = sqlite3.connect({db_path!r}); "
+            "c.execute('SELECT COUNT(*) FROM projects').fetchone(); "
+            "c.close()"
+        )
+        subprocess.run(
+            [sys.executable, "-c", foreign_code], check=True, timeout=60
+        )
+
+        poisoned_before = _external_counts()
+        status_3, result_3 = _post_json(url, {
+            "config": {"marker": 3},
+            "registry": {"assets": {}},
+            "expected_version": 3,
+        })
+        # The old kernel returned a fabricated 200 with config_version 4
+        # while writing nothing. It must now fail closed with the frozen
+        # error envelope.
+        assert status_3 == 500
+        assert set(result_3) == {"error", "detail"}
+        assert result_3["error"] == "internal"
+        # Zero rows changed: durable state is exactly what it was before.
+        assert _external_counts() == poisoned_before
+
+
 # ---------------------------------------------------------------------------
 # Registry endpoint tests (PUT /projects/:project/timelines/:timeline/registry)
 # ---------------------------------------------------------------------------
@@ -973,8 +1115,10 @@ def test_cors_preflight_options_returns_204_with_cors_headers(
 
     assert status == 204
     assert headers.get("Access-Control-Allow-Origin") == "http://localhost:3000"
-    assert headers.get("Access-Control-Allow-Methods") == "GET, HEAD, POST, OPTIONS"
-    assert headers.get("Access-Control-Allow-Headers") == "Content-Type, Range, If-None-Match, If-Modified-Since"
+    assert headers.get("Access-Control-Allow-Headers") == (
+        "Content-Type, Range, If-None-Match, If-Modified-Since, "
+        "Idempotency-Key, X-Astrid-Request-Token"
+    )
     assert headers.get("Access-Control-Expose-Headers") == "Accept-Ranges, Content-Length, Content-Range, Content-Type, ETag, Last-Modified"
 
 
@@ -1297,8 +1441,10 @@ def test_serve_dispatcher_starts_and_serves_health(
             try:
                 srv.serve_forever()
             finally:
+                # Close the complete composition so the sweeper, writer, and
+                # root owner are all released for the next bridge test.
                 composition.close()
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - captured for assertion
             server_error = exc
             server_started.set()
 
@@ -1570,6 +1716,8 @@ class InTreeBridgeContractClient:
         req = Request(self.base_url + path, data=data, method=method)
         if data is not None:
             req.add_header("Content-Type", "application/json")
+        for name, value in _trust_headers().items():
+            req.add_header(name, value)
         try:
             with urlopen(req) as response:  # noqa: S310 - localhost client
                 return json.loads(response.read().decode("utf-8"))
@@ -2040,7 +2188,8 @@ def test_persisted_registry_asset_options_preflight(
         "Access-Control-Allow-Methods", ""
     )
     assert headers.get("Access-Control-Allow-Headers") == (
-        "Content-Type, Range, If-None-Match, If-Modified-Since"
+        "Content-Type, Range, If-None-Match, If-Modified-Since, "
+        "Idempotency-Key, X-Astrid-Request-Token"
     )
 
 

@@ -561,8 +561,9 @@ def _declared_tables(root: Path) -> dict[str, str]:
         if not manifest_path.is_file():
             continue
         manifest = load_schema_pack_manifest(manifest_path)
-        for table in manifest.migrations[0].tables:
-            declared[table] = manifest.id
+        for migration in manifest.migrations:
+            for table in migration.tables:
+                declared[table] = manifest.id
     return declared
 
 

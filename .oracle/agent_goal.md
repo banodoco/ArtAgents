@@ -1,91 +1,70 @@
-# Agent Goal — unified execution (megado run)
+# Agent Goal — integrated Astrid execution and Phase B
 
 [North Star](./northstar.md)
 
-## Objective and end-state contribution
+## Unified end-state
 
 Make the kernel task system the **ONE execution path** for every Astrid capability,
-retiring the filesystem `run.json` ledger as an authority. This run advances the
-North Star by collapsing the two-ledger split into a single event-sourced execution
-record: every invocation becomes a kernel run+task with events, receipts, attempts,
-and managed outputs; `sdk.invoke` becomes the thin admission wrapper; the FS ledger
-becomes a derived projection or disappears.
+retiring the filesystem `run.json` ledger as an authority. Every invocation becomes
+a kernel run+task with events, receipts, attempts, and managed outputs; `sdk.invoke`
+is the thin admission wrapper; the filesystem ledger is only a derived projection
+or is retired. This is the integration-level goal for the two completed workstreams
+recorded below.
 
-## North Star link
+## Integrated workstreams
 
-This run is the direct implementation of the "ONE store and ONE execution path"
-pillar: it removes the second ledger and the "consistency by convention" fiction,
-and makes every execution observable in the kernel event stream.
+### Main-line unified execution workstream
 
-## Authoritative inputs and immutable source ref
+1. Relax completion so evidence/attachments do not require content-addressed media.
+2. Provide one generic `TaskHandler` adapter that classifies media-like outputs as
+   managed media and other files as evidence.
+3. Route executor and orchestrator `sdk.invoke` calls through kernel admission and
+   execution; remove filesystem-ledger authority semantics.
+4. Align run-ledger contracts, SKILL/docs, tests, and empirical process runs with
+   the single-ledger model.
 
-- Source ref: `b4c70e0ac766c69de0298fa19f3d7fede796a97c` (main @ b4c70e0a), worktree
-  `../Astrid-unified-oracle` (branch `oracle-unified-execution`).
-- Custody baseline: `.oracle/custody.md`.
-- The unified-execution design brief (from the host's earlier exploration) is an
-  input artifact; the planner revises it, never treats it as authority.
+### Phase B product workstream
 
-## In-scope work
+Phase B turns the foundation into the working product surface:
 
-1. Completion-contract relaxation: `task.complete` must accept non-media outputs
-   (evidence/attachments) without forcing every output into content-addressed media;
-   `task_outputs` DDL reviewed and migrated if needed (kernel migration 0002).
-2. One generic TaskHandler adapter that invokes the capability runner in-process,
-   classifies outputs (media-like → managed media; files → evidence), and completes
-   under the relaxed contract — no per-executor adapters.
-3. `sdk.invoke` (executor and orchestrator) admits a kernel run+task and executes via
-   the generic adapter; every call path that currently writes run.json is rewired.
-4. The FS `run.json` ledger: becomes a derived projection of the kernel run or is
-   retired; all tests and docs that assert run.json as an authority are migrated.
-5. Docs: run-ledger-contract.md v2 (single ledger), SKILL.md, async-completion,
-   creating-tools; task-execution claims become true, not "test-wired only."
-6. Verification: full suite + empirical process runs (the 20/50-flow pattern) proving
-   every invocation lands as a kernel run+task with correct events/receipts.
+- **B-1:** digest-pinned generic VibeComfy executor binding with typed ports.
+- **B-2:** declarative capability fan-out, validators, and conformance fixtures.
+- **B-3:** leased orchestrator children with attempt-independent deterministic keys,
+  receipted admission, replay coordination, checked transitions, and deterministic
+  interleaving coverage for travel/join/edit.
+- **B-4:** Wan2GP binding with five-gate upgrade and rollback proof.
+- **B-5:** signed model acquisition manifest, setup journal/state machine, disk
+  preflight, doctor repair, and truthful availability advertisement.
+- **B-6:** capability conformance completion and boot-manifest digest fencing.
 
-## Non-goals / open boundaries
+Phase B is a product-surface workstream, not a replacement for the single-ledger
+goal. Its handlers, orchestrators, setup lifecycle, and bridge routes must preserve
+the kernel writer, receipts, events, leases, and atomic completion invariants.
 
-- No per-executor TaskHandler adapters (the generic adapter replaces the need).
-- No serve/GPU process-supervision infrastructure beyond what the kernel task system
-  already provides (leases/attempts) — out of scope unless the design proves it
-  blocks unified execution.
-- No unrelated kernel changes; the existing verified kernel behavior is the substrate.
-- The two existing bespoke adapters (generate_image, timeline_visualize) are kept if
-  they add value; the generic adapter must at minimum make them unnecessary for new
-  capabilities.
+## Authoritative provenance
 
-## Authorization boundaries
+- Unified-execution source ref: `b4c70e0ac766c69de0298fa19f3d7fede796a97c`, worktree
+  `../Astrid-unified-oracle`, branch `oracle-unified-execution`.
+- Phase-B source ref: `origin/phase-b` at integration time; its frozen goal and
+  plan are preserved in `.oracle/plan-v1.txt` and the merge parent history.
+- Custody record: `.oracle/custody.md`.
+- The design/build briefs are inputs; code, tests, and receipts are authority.
 
-- **Mutation**: only inside the worktree `../Astrid-unified-oracle`.
-- **Commits**: after each passed batch gate; stage only reviewed paths.
-- **Sync/promotion**: push `oracle-unified-execution` to origin after the final gate
-  passes; merge to main after the final overall review passes — this is recorded
-  authorization from the user's standing directive this session ("push everything to
-  main" after everything is verified). No other remotes/branches.
-- The user's uncommitted in-flight files in the MAIN worktree are protected and must
-  never be touched by this run (see custody).
+## Shared boundaries and validation
 
-## Model policy (user-declared)
-
-- Normal tasks → `openrouter:stealth/ox-alpha`.
-- `[XHARD]` tasks → `openrouter:stealth/ox-alpha` (user-selected for both classes).
-- Oracle (planner, check-ins, final review) → `openrouter:stealth/ox-alpha`.
-- No automatic switching; a pinned model change requires user approval.
-
-## Done and stop criteria
-
-Done: every capability invocation runs as a kernel run+task (verified by process
-runs: events + receipts + terminal status); no code path writes run.json as an
-authority; full suite green; docs honest (task execution is real, single-ledger
-contract); kernel migration verified; oracle final review PASS.
-
-Stop conditions classified explicitly: `blocked` (missing authority/prereq),
-`failed` (reproducible unmet criterion), `undetermined` (insufficient evidence),
-`retryable` (owned safe retry), `escalate` (risk/authority exceeds role).
+- No second authority, silent divergence, ghost verbs, or transport-coupled
+  correctness. No unrequested multi-user/cloud/GPU supervision scope.
+- CPU-only limitations are recorded as blocked where GPU evidence is impossible;
+  they do not justify silent fallback or scope expansion.
+- Done requires the combined suite, empirical process runs, docs alignment,
+  migration/registry verification, and oracle review to pass.
+- Stop conditions are explicit: `blocked`, `failed`, `undetermined`, `retryable`,
+  or `escalate`.
 
 ## Final validation
 
-- `pytest tests/` green (host runs the full suite once at the end).
-- Empirical process run: invoke ≥6 representative capabilities (media, file-only,
-  generation, timeline, orchestrator) → each is a kernel run+task with correct
-  events/receipts/terminal state; zero run.json writes as authority.
-- `python3 -m astrid --help` + docs-alignment test green.
+- `pytest tests/` green (apart from explicitly documented pre-existing failures).
+- Representative media, file-only, generation, timeline, and orchestrator process
+  runs each land as kernel run+task records with correct events/receipts/terminal
+  state and no authoritative `run.json` writes.
+- `python3 -m astrid --help` and docs-alignment checks are green.

@@ -1,0 +1,39 @@
+{
+  "1": {
+    "class_type": "VHS_LoadVideo",
+    "inputs": {
+      "video": "video_enhance_input.mp4"
+    }
+  },
+  "2": {
+    "class_type": "ImageScaleBy",
+    "inputs": {
+      "image": [
+        "1",
+        0
+      ],
+      "scale_by": 2.0,
+      "upscale_method": "lanczos"
+    }
+  },
+  "3": {
+    "class_type": "VHS_VideoCombine",
+    "inputs": {
+      "audio": [
+        "1",
+        2
+      ],
+      "crf": 19,
+      "filename_prefix": "video-enhance",
+      "format": "video/h264-mp4",
+      "frame_rate": 16,
+      "images": [
+        "2",
+        0
+      ],
+      "pix_fmt": "yuv420p",
+      "save_metadata": true,
+      "trim_to_audio": false
+    }
+  }
+}

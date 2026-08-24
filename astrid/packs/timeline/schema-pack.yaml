@@ -26,6 +26,7 @@ event_kinds:
   - timeline.saved
   - timeline.archived
   - timeline.config_replaced
+  - timeline.registry_merged
 command_kinds:
   - timeline.create
   - timeline.save

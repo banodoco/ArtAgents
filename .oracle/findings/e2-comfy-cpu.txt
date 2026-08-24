@@ -1,0 +1,14 @@
+## E2 Findings — ComfyUI CPU-mode viability
+
+**Verdict: YES — real subprocess binding satisfiable on this box, no stub shim needed.** Proven end-to-end today: a 2-node weightless workflow ran through the real ComfyUI execution engine on this GPU-less box.
+
+**Ranked findings**
+
+1. **CPU mode is implicit and works.** VibeComfy passes no device flag anywhere (`runtime/session.py:1417-1443` argv builder has no `--cpu`); none needed — ComfyUI's `model_management` auto-falls back to CPU when CUDA is absent (observed warning "returning a CPU torch device"). 16 cores/30 GB RAM.
+2. **Minimal deterministic workflow proven.** `ready_templates/smoke/empty_image_red.py`: EmptyImage→SaveImage, zero model weights. Ran via API-format JSON (`python -m vibecomfy.cli run wf.json`, exactly the shape the astrid executor passes): **~13 s/call warm, ~21 s cold** (embedded runtime); decoded-pixel SHA-256 identical across 3 runs (`ba1897db6a16`, pure red 64×64). Second weightless template: `image/basic_image_upscale` (LoadImage+lanczos ImageScaleBy+SaveImage). All other templates (z_image, qwen, flux_klein, wan) need multi-GB weights.
+3. **Runtime modes.** Default `auto` works (~13 s, falls back to embedded); `--runtime embedded` avoids server-session machinery; `validate` is fully offline (~8 s, returns "ok").
+4. **Install recipe** (worked, ~3 min): venv + `torch/torchvision/torchaudio` **CPU wheels** from download.pytorch.org/whl/cpu (version-matched — mixing CUDA torchvision against +cpu torch fails with `torchvision::nms does not exist`), then `pip install vibecomfy @ git+...` + `comfyui==0.26.0` from AppMana index. Minor: some comfy_extras audio node-packs fail import; harmless for these workflows.
+5. **Binding constraint:** vibecomfy must be imported *from a checkout* — `find_repo_root()` (`utils.py:17-25`) requires `pyproject.toml` above the package; wheel-only installs raise `RuntimeError: not inside vibecomfy repo`. So B-1 must pin a clone (SHA-digestible, satisfying E1 pinning) and run the subprocess with `cwd=<checkout>` or `PYTHONPATH`.
+
+**How:** executor spawns `{python} -m vibecomfy.cli run {workflow}.json --runtime embedded` with cwd at a digest-pinned VibeComfy checkout; smoke workflow = B-1 done-criterion #1 vehicle.
+0

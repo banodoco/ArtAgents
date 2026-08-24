@@ -1,0 +1,12 @@
+Findings saved to `.oracle/findings/e1-vibecomfy-pinning.txt`. Ranked summary:
+
+**1. What gets digested: the ready-template *Python emitter source*, not YAML or resolved JSON.** `template_hash` = "SHA-256 of the template source file" (docs/generation/10-registry-schema.md:173). Templates are `ready_templates/<kind>/<id>.py` modules; `workflow_from_ready` importlib-exec's the `.py` and calls its `build()` at runtime (external `vibecomfy/registry/ready.py:113–146`). Resolved workflow JSON is never digested. **Verified against downloaded v2.8.0:** none of models.yaml's pinned hashes match current `.py` or `.layout.json` bytes (e.g. z_image pins `a8bb7f53…`, actual `1021529f…`) — stale pins against unknown old HEAD.
+
+**2. Templates live EXTERNALLY.** All three requirements.txt use `vibecomfy @ git+https://github.com/peteromallet/VibeComfy.git` with no ref — floating branch HEAD (packs/vibecomfy/executors/{run,validate}, packs/comfy_wrap/executors/run). Build contract requires in-repo shipped workflows (docs-corpus/27-build-spec.md:16,127).
+
+**3. Offline verification: NO.** Bytes are outside the repo, dep is unpinned, and nothing verifies anyway: `template_hash` is parsed + CLI-printed only (core/model_catalog/schema.py:367-368/432-433, cli.py:228-258) with zero comparison code; `CapabilityEntry.template (path, sha256)` exists but every construction omits it (integrations/reigh/capabilities.py:122-123 vs :269-406).
+
+Also: "scratchpad" = VibeComfy's user-saved-workflow concept (`scratchpad_exec` gate op); comfy_wrap.run injects into raw workflow JSON from disk (comfy_wrap/run.py:26-31). ⚠️ docs-corpus/31-forward-map.md doesn't exist despite being agent_goal's authoritative plan.
+
+**Recommended B-1 mechanism:** digest *data*, not code — vendor workflows as Comfy API-format JSON in-repo, pin canonical-bytes SHA-256 via the dead `CapabilityEntry.template` field, verify at executor-gate admission + boot manifest (fail closed per B-6), snapshot user workflow bytes at admission (pattern proven in bridge_service.py:1136-1160), and commit-SHA-pin the vibecomfy requirement regardless.
+0

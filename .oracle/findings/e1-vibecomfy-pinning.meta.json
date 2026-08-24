@@ -1,0 +1,21 @@
+{
+  "brief": "/workspace/reigh-phase-a-20260822/Astrid/.oracle/briefs/explore/e1-vibecomfy-pinning.md",
+  "elapsed_s": 370.091,
+  "error": null,
+  "error_class": null,
+  "finish_reason": null,
+  "finished_at": "2026-08-22T13:23:03Z",
+  "meta_file": "/workspace/reigh-phase-a-20260822/Astrid/.oracle/findings/e1-vibecomfy-pinning.meta.json",
+  "model": "stealth/ox-alpha",
+  "pid": 452123,
+  "raw_result_keys": [
+    "stdout"
+  ],
+  "response_chars": 2108,
+  "response_file": "/workspace/reigh-phase-a-20260822/Astrid/.oracle/findings/e1-vibecomfy-pinning.txt",
+  "started_at": "2026-08-22T13:16:53Z",
+  "status": "ok",
+  "stem": "e1-vibecomfy-pinning",
+  "task_timeout_s": 1800,
+  "tool_calls": 0
+}

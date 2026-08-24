@@ -93,7 +93,12 @@ DOMAIN_PACKS: tuple[str, ...] = ("timeline", "shots", "references")
 
 PACK_TABLES: dict[str, tuple[str, ...]] = {
     "timeline": ("timelines",),
-    "shots": ("shots", "shot_items"),
+    "shots": (
+        "shots",
+        "shot_items",
+        "generations",
+        "generation_variants",
+    ),
     "references": ("project_references", "media_references", "reference_links"),
 }
 """Tables each domain pack declares through its manifest migrations (frozen

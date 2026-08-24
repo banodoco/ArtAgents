@@ -46,8 +46,10 @@ columns by name or position.
 
 from __future__ import annotations
 
+import os
 import queue
 import sqlite3
+import sys
 import threading
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
@@ -88,6 +90,26 @@ class TransactionControlError(WriterError):
     rejects such statements, and its private transaction methods raise
     this error on invalid transitions (begin-within-transaction, or
     commit/rollback with no active transaction).
+    """
+
+
+class WriterSidecarError(WriterError):
+    """Raised when the WAL sidecar was replaced beneath the live writer.
+
+    SQLite deletes ``-wal``/``-shm`` on the clean close of a writable
+    connection. When a *foreign* process (CLI, doctor, backup, external
+    tooling) opens the database read-write and closes cleanly while the
+    long-lived serve writer sits idle between transactions, that close
+    unlinks the very WAL file the writer connection has open. The writer
+    then keeps committing into the orphaned inode: every COMMIT reports
+    success, but no new reader can ever observe the rows — invisible
+    divergence until restart.
+
+    The writer therefore verifies the WAL's file identity before each
+    submitted callback and fails closed with this typed error once the
+    sidecar no longer backs its connection, converting the silent loss
+    into a visible failure. Restarting the process reattaches a fresh
+    writer to the current database files.
     """
 
 
@@ -313,6 +335,12 @@ class DatabaseWriter:
         self._pending = 0
         self._started = threading.Event()
         self._startup_error: BaseException | None = None
+        # WAL sidecar guard: (st_dev, st_ino) of the ``-wal`` file backing
+        # the owned connection as of the last completed callback; ``None``
+        # while no WAL has been observed yet. Touched only on the writer
+        # thread.
+        self._wal_identity: tuple[int, int] | None = None
+        self._sidecar_fault_reported = False
         self._thread = threading.Thread(
             target=self._run,
             name="astrid-sqlite-writer",
@@ -421,6 +449,14 @@ class DatabaseWriter:
         finally:
             conn.close()
 
+    def _wal_sidecar_identity(self) -> tuple[int, int] | None:
+        """Return ``(st_dev, st_ino)`` of the ``-wal`` file, or ``None``."""
+        try:
+            stat = os.stat(f"{self._path}-wal")
+        except OSError:
+            return None
+        return (stat.st_dev, stat.st_ino)
+
     # -- writer thread -----------------------------------------------------
 
     def _run(self) -> None:
@@ -435,6 +471,7 @@ class DatabaseWriter:
         # and position. The connection stays owned by this thread.
         self._connection.row_factory = sqlite3.Row
         self._started.set()
+        self._wal_identity = self._wal_sidecar_identity()
         try:
             while True:
                 item = self._queue.get()
@@ -442,8 +479,33 @@ class DatabaseWriter:
                     self._queue.task_done()
                     break
                 try:
+                    # Sidecar guard: between callbacks the writer holds no
+                    # locks, so a foreign writable close can unlink the WAL.
+                    # A changed or missing file past the first observation
+                    # means this connection no longer backs durable state:
+                    # commits would keep landing in a WAL nobody can read,
+                    # so every later submission fails the same way.
+                    identity = self._wal_sidecar_identity()
+                    if identity != self._wal_identity:
+                        if not self._sidecar_fault_reported:
+                            self._sidecar_fault_reported = True
+                            print(
+                                "astrid-sqlite-writer: database WAL was "
+                                f"replaced beneath the live writer "
+                                f"(observed {self._wal_identity}, now "
+                                f"{identity}); writes fail closed until "
+                                f"restart",
+                                file=sys.stderr,
+                            )
+                        raise WriterSidecarError(
+                            "the database WAL was replaced beneath the live "
+                            "writer (a foreign process closed a writable "
+                            "connection); writes cannot be durable — restart "
+                            "astrid serve"
+                        )
                     session = WriterSession(self._connection)
                     item.result = item.callback(session)
+                    self._wal_identity = self._wal_sidecar_identity()
                 except sqlite3.OperationalError as exc:
                     if "locked" in str(exc).lower():
                         item.error = WriterBusyError(
@@ -468,7 +530,7 @@ __all__ = [
     "DatabaseWriter",
     "TransactionControlError",
     "WriterBusyError",
-    "WriterError",
+    "WriterSidecarError",
     "WriterSession",
     "WriterShutdownError",
 ]

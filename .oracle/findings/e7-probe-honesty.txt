@@ -1,0 +1,28 @@
+**E7 report — availability-probe honesty**
+
+## Current state
+`AVAILABILITY_PROBES = {"always_available": lambda: True}` (`capabilities.py:443`) and all 24 `REGISTRY` entries use the default `probe="always_available"` (`:125`). `check_available` (`:596`) raises `CapabilityUnavailable` carrying only a generic hint; `_validate_registry` (`:490`) enforces probe names exist. No `astrid/core/model_setup/` yet (B-5 pending).
+
+## What each family actually requires (evidence)
+- **wgp** (7 entries incl. children): Wan2GP in-process — pinned build dir/import, ckpt weights on disk, `decord`+`smplfitter` wheels (doc 03 §3.4; doc 30 §52 flags decord wheel gaps + headless risk). **CPU-only viable** via tiny/stub models (agent_goal non-goals; plan task 9 acceptance).
+- **vibecomfy** (12 entries): subprocess `python -m vibecomfy.cli run <workflow>` (`packs/vibecomfy/executors/run/run.py:26`) → ComfyUI install + custom nodes + per-workflow checkpoint weights + pinned template digest (`CapabilityEntry.template`). Image families are CPU-runnable (slow); `video_enhance` interpolation additionally wants ffmpeg.
+- **astrid_remotion** (1 entry): Node + Remotion bundle + ffmpeg. No weights; fully CPU.
+
+No probe may test for CUDA — that would permanently disable wgp/vibecomfy catalogs on this box against the sanctioned CPU path.
+
+## Recommended predicates
+Gate on **verified-installation stamps from the B-5 setup journal** (state `installed(verified)`, doc 27 §6.1), never hardware:
+
+| Probe | Predicate |
+|---|---|
+| `wgp_runtime` | pinned Wan2GP tree + import smoke + decord/smplfitter importable |
+| `wgp_weights:<model>` | journal stamp `installed(verified)` for that ckpt hash set |
+| `vibecomfy_runtime` | vibecomfy pkg importable + ComfyUI reachable + declared custom nodes present |
+| `vc_weights:<template>` | template sha256 matches + its checkpoint stamps verified |
+| `remotion_ready` | node binary + remotion bundle + ffmpeg on PATH |
+
+Per-entry probe = binding-runtime predicate ∧ its weight/template predicate. Composition keeps ~5 primitives instead of 24.
+
+## Partial availability
+Change probe signature to return `(ok, missing: list[str])`; `check_available` emits `missing_prerequisites` naming exact artifacts plus one actionable command (`astrid doctor setup --artifact X`). Entries stay registered and advertised-gated at boot/admission time (doc 27 §6), so completing setup flips them available without code changes — hidden-with-setup-hint, not disabled (doc 24 Q3).
+0

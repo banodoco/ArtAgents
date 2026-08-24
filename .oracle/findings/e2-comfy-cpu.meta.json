@@ -1,0 +1,21 @@
+{
+  "brief": "/workspace/reigh-phase-a-20260822/Astrid/.oracle/briefs/explore/e2-comfy-cpu.md",
+  "elapsed_s": 828.43,
+  "error": null,
+  "error_class": null,
+  "finish_reason": null,
+  "finished_at": "2026-08-22T13:30:41Z",
+  "meta_file": "/workspace/reigh-phase-a-20260822/Astrid/.oracle/findings/e2-comfy-cpu.meta.json",
+  "model": "stealth/ox-alpha",
+  "pid": 452126,
+  "raw_result_keys": [
+    "stdout"
+  ],
+  "response_chars": 2250,
+  "response_file": "/workspace/reigh-phase-a-20260822/Astrid/.oracle/findings/e2-comfy-cpu.txt",
+  "started_at": "2026-08-22T13:16:53Z",
+  "status": "ok",
+  "stem": "e2-comfy-cpu",
+  "task_timeout_s": 1800,
+  "tool_calls": 0
+}

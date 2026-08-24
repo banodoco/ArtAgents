@@ -237,3 +237,32 @@ def read_bridge_registry(project_dir: Path, timeline_ulid: str) -> dict[str, Any
     """Read registry.json from a bridge project timeline."""
     path = bridge_timeline_dir(project_dir, timeline_ulid) / "registry.json"
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+# Availability-probe staging (B3 probe predicate foundation)
+# ---------------------------------------------------------------------------
+@pytest.fixture(autouse=True)
+def _staged_binding_runtimes(
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Stage the per-binding runtime prerequisites these tests admit under.
+
+    The B3 availability probes gate bridge admission on installable
+    artifacts. These tests exercise routes/admission, never the real
+    subprocess handlers, so marker-only stub trees satisfy the runtime
+    presence probes hermetically (real-checkout journeys live in
+    ``tests/v10`` and stage or skip on their own). Staging lives in its
+    own temp base — never beside a test's ``tmp_path`` — so directory
+    emptiness/isolation assertions stay untouched.
+    """
+    root = tmp_path_factory.mktemp("binding-runtimes")
+    vibecomfy = root / "VibeComfy"
+    vibecomfy.mkdir()
+    (vibecomfy / "pyproject.toml").write_text("", encoding="utf-8")
+    wgp = root / "Wan2GP"
+    wgp.mkdir()
+    (wgp / "wgp.py").write_text("", encoding="utf-8")
+    (wgp / "defaults").mkdir()
+    monkeypatch.setenv("REIGH_VIBECOMFY_HOME", str(vibecomfy))
+    monkeypatch.setenv("REIGH_WGP_HOME", str(wgp))

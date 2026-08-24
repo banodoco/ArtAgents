@@ -235,6 +235,7 @@ def _render_animation_reference_list_alias() -> str:
 
 
 def generate() -> str:
+    canonical_names = {name for name, _typed_dict in _ORDERED_CANONICAL}
     blocks = [BANNER, "", _render_animation_reference_list_alias()]
     for canonical_name, typed_dict in _ORDERED_CANONICAL:
         blocks.append("")
@@ -244,7 +245,12 @@ def generate() -> str:
             blocks.append(f"export type {alias_name} = {canonical_name};")
         if canonical_name == "SharedTimelineClip":
             aliases = _ALIASES_BY_ID.get(id(typed_dict), [])
-            if "Clip" not in aliases:
+            # The legacy ``Clip`` name is only ours to alias when nothing
+            # else emitted it: with the shared schema package installed the
+            # annotation walk discovers the upstream ``Clip`` TypedDict and
+            # emits its interface, so a second ``Clip`` binding here would
+            # be a TS2300 duplicate identifier.
+            if "Clip" not in aliases and "Clip" not in canonical_names:
                 blocks.append("")
                 blocks.append("export type Clip = SharedTimelineClip;")
     blocks.append("")

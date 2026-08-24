@@ -4,8 +4,8 @@
 # exactly the 11 snake_case top-level fields of the frozen schema-pack
 # contract and is validated by astrid.core.schema_packs.manifest.
 #
-# The shots pack owns exactly two tables (shots, shot_items) and declares the
-# m3 namespaced shot vocabulary: the pack-owned aggregate stream type
+# The shots pack owns exactly four tables (shots, shot_items,
+# generations, generation_variants) and declares the m3 namespaced shot
 # ``shot.shot`` (one stream per shot, registered so events can identify shot
 # subjects without adding pack vocabulary to kernel DDL), the receipt-backed
 # create/add/remove/reorder commands and events, and the executable
@@ -14,7 +14,7 @@
 # (astrid.core.events.registry.STREAM_AGGREGATE_RULES) owns the shot
 # aggregate semantics.
 id: shots
-version: 1
+version: 2
 depends_on:
   - core >= 1
 migrations:
@@ -24,6 +24,12 @@ migrations:
     tables:
       - shots
       - shot_items
+  - version: 2
+    name: generations
+    path: migrations/0002_generations.sql
+    tables:
+      - generations
+      - generation_variants
 stream_types:
   - shot.shot
 event_kinds:
@@ -38,6 +44,7 @@ command_kinds:
   - shot.reorder
 repositories:
   - ShotRepository
+  - GenerationRepository
 conformance:
   - replay
   - mismatch_before_mutation

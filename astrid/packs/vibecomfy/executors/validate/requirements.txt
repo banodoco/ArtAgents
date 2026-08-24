@@ -1,1 +1,1 @@
-vibecomfy @ git+https://github.com/peteromallet/VibeComfy.git
+vibecomfy @ git+https://github.com/peteromallet/VibeComfy.git@054bce5bdc9c63d68ac7e6141063e1f029a70dcb

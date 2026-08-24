@@ -60,7 +60,6 @@ def yaml_section(text, field):
     next_field = re.search(r"(?m)^[a-z_]+:\s*", remainder)
     return remainder if next_field is None else remainder[:next_field.start()]
 
-
 def manifest_catalog(relative):
     text = resource_text(relative)
     mounts = dict(
@@ -69,18 +68,21 @@ def manifest_catalog(relative):
             yaml_section(text, "cli_mounts"),
         )
     )
-    tables_section = re.search(
-        r"(?ms)^migrations:\s*\n.*?^\s+tables:\s*\n((?:^\s+-\s+[^\n]+\n?)+)",
-        text,
-    )
-    if tables_section is None:
-        raise AssertionError(f"missing migration tables in {relative}")
-    tables = tuple(
-        line.strip()[2:].strip()
-        for line in tables_section.group(1).splitlines()
-        if line.strip().startswith("-")
-    )
-    return {"mounts": mounts, "tables": tables, "text": text}
+    migrations_section = yaml_section(text, "migrations")
+    migrations = []
+    for entry in re.split(r"(?m)^\s{2}-\s+version:\s*", migrations_section)[1:]:
+        version = int(entry.splitlines()[0].strip())
+        path = re.search(r"(?m)^\s{4}path:\s*(\S+)", entry).group(1)
+        tables_block = re.search(
+            r"(?ms)^\s{4}tables:\s*\n((?:^\s{6}-\s+[^\n]+\n?)+)", entry
+        )
+        tables = tuple(
+            line.strip()[2:].strip()
+            for line in tables_block.group(1).splitlines()
+            if line.strip().startswith("-")
+        )
+        migrations.append({"version": version, "path": path, "tables": tables})
+    return {"mounts": mounts, "migrations": migrations, "text": text}
 
 
 def sql_tables(relative):
@@ -147,24 +149,39 @@ core_sql = "core/migrations/sql/core/0001_initial.sql"
 core_tables = set(sql_tables(core_sql))
 assert len(core_tables) == 14, sorted(core_tables)
 
-pack_specs = {
-    "timeline": "migrations/0001_initial.sql",
-    "shots": "migrations/0001_initial.sql",
-    "references": "migrations/0001_initial.sql",
+pack_migrations = {
+    pack: [
+        (m["version"], m["path"], m["tables"])
+        for m in manifest_catalogs[pack]["migrations"]
+    ]
+    for pack in manifest_files
 }
 pack_resource_paths = {
-    pack: f"packs/{pack}/{path}"
-    for pack, path in pack_specs.items()
+    pack: [f"packs/{pack}/{path}" for _, path, _ in migs]
+    for pack, migs in pack_migrations.items()
 }
 pack_catalog = {
     pack: {
-        "manifest_tables": sorted(manifest_catalogs[pack]["tables"]),
-        "sql_tables": sorted(sql_tables(path)),
+        "manifest_tables": sorted(
+            table for _, _, tables in pack_migrations[pack] for table in tables
+        ),
+        "sql_tables": sorted(
+            {
+                table
+                for path in pack_resource_paths[pack]
+                for table in sql_tables(path)
+            }
+        ),
     }
-    for pack, path in pack_resource_paths.items()
+    for pack in pack_migrations
 }
 for pack, catalog in pack_catalog.items():
     assert catalog["manifest_tables"] == catalog["sql_tables"], (pack, catalog)
+
+
+def _migration_name(path):
+    stem = path.rsplit("/", 1)[-1].removesuffix(".sql")
+    return stem.split("_", 1)[1]
 
 
 class InstalledRegistry:
@@ -175,28 +192,32 @@ class InstalledRegistry:
                 pack: SimpleNamespace(
                     depends_on=(SimpleNamespace(pack="core"),)
                 )
-                for pack in pack_specs
+                for pack in pack_migrations
             },
         }
-        specs = [("core", "initial", "sql/core/0001_initial.sql")]
-        specs.extend(
-            (pack, "initial", path) for pack, path in pack_specs.items()
-        )
+        specs = [
+            ("core", 1, "initial", "sql/core/0001_initial.sql", tuple(sorted(core_tables)))
+        ]
+        for pack, migs in pack_migrations.items():
+            for version, path, tables in migs:
+                specs.append(
+                    (
+                        pack,
+                        version,
+                        _migration_name(path),
+                        path,
+                        tuple(sorted(tables)),
+                    )
+                )
         self.migrations = tuple(
             RegisteredMigration(
                 pack=pack,
-                version=1,
+                version=version,
                 name=name,
                 path=path,
-                tables=tuple(
-                    sorted(
-                        core_tables
-                        if pack == "core"
-                        else manifest_catalogs[pack]["tables"]
-                    )
-                ),
+                tables=tables,
             )
-            for pack, name, path in specs
+            for pack, version, name, path, tables in specs
         )
 
     def migration(self, pack, version):
@@ -246,7 +267,13 @@ expected_tables = core_tables | {
     for table in catalog["manifest_tables"]
 }
 assert tables == expected_tables, sorted(tables ^ expected_tables)
-assert migration_rows == {("core", 1), ("timeline", 1), ("shots", 1), ("references", 1)}
+assert migration_rows == {
+    ("core", 1),
+    ("timeline", 1),
+    ("shots", 1),
+    ("shots", 2),
+    ("references", 1),
+}
 assert {(row.pack, row.version) for row in applied} == migration_rows
 
 
@@ -320,6 +347,7 @@ def test_installed_contract_uses_manifest_runtime_and_migration_evidence(
         ("core", 1),
         ("timeline", 1),
         ("shots", 1),
+        ("shots", 2),
         ("references", 1),
     }
     for evidence in payload["too_new"].values():

@@ -1,0 +1,276 @@
+[launch_hermes_agent] model=stealth/ox-alpha → resolved=stealth/ox-alpha toolsets=['file', 'web'] max_tokens=65536 context_budget_tokens=(auto)
+[launch_hermes_agent] NOTE: omp gives the full toolset (Bash, Read, Edit, web, …); the file/web/terminal subset is a superset here.
+[launch_hermes_agent] cwd=/workspace/reigh-phase-a-20260822/Astrid
+Working...
+# Phase B Tasklist — Frozen-Ready Batches (v1, from STABLE plan v3)
+
+**Binding order:** B-1 → B-2 fan-out → B-3 orchestrators → B-4 Wan gates → B-5 acquisition → B-6 conformance last.
+**Branch discipline:** all work on `phase-b`; commit at every batch checkpoint; push only at phase exit; never merge to main.
+**Model policy (user-pinned, all classes incl. [XHARD]):** stealth/ox-alpha.
+
+---
+
+## HUGE-RUN CUMULATIVE REVIEW BOUNDARIES (predeclared)
+
+| Boundary | After batch | Rationale |
+|---|---|---|
+| **Review 1** | Batch B3 (completes workstream B-2) | **Catalog seam** — registry schema, validators, and fixture shape are now load-bearing for every later batch; drift here propagates into B-3 keys, B-5 probes, and B-6 digest. Cheapest point to freeze the catalog contract. |
+| **Review 2** | Batch B6 (completes workstream B-3) | **Distributed-systems seam** — child-key determinism, fence completeness, and the interleaving invariant (zero duplicates + exactly-one parent-terminal) are the hardest-to-reverse correctness claims in the phase. Also the designated point to confirm the edit-family-childless reading of 27 §3.1 against the goal text ("edit" among ported families). |
+| **Review 3** | Batch B8 (completes workstream B-5) | **Upstream-dependency seam** — B-4 (Wan2GP) and B-5 (setup journal/manifest) together define every external artifact the product trusts: pinned SHAs, submodule bytes, signed manifests, journal stamps. One review covers both halves of the upstream trust chain. |
+
+At each boundary: full-suite run, docs-of-record updated, checkpoint committed, review verdict recorded before next batch starts.
+
+---
+
+## Batch B1 — Baseline lock + pin the data (plan tasks 1, 2)
+
+**Tasks**
+- **T1.1 (normal)** B-0 Baseline lock: run full `python3 -m pytest tests -q`; archive output ledger including the two documented collection errors as the pre-existing-failure baseline (DC-6 reference).
+- **T1.2 (normal)** B-1a Pin the data, not the code: vendor shipped workflows as Comfy API-format JSON under `astrid/core/integrations/reigh/workflows/*.json`; populate dead `CapabilityEntry.template = (path, sha256)` with canonical-bytes digests; admission (`bridge_service.admit`) snapshots workflow bytes into attempt params/spec_json provenance (pattern `bridge_service.py:1136-1160`); commit-SHA-pin the floating `vibecomfy @ git+…` requirement; provision pinned checkout via existing `core/execution/executor/install.py` clone-with-`commit_sha`.
+  - **Ordering constraint:** pin the vibecomfy commit FIRST, then validate vendored digests against the pinned commit's bytes — digests are untrustworthy against floating HEAD.
+
+**Checkpoint acceptance (oracle-verified exactly)**
+- Tampered workflow file ⇒ execution refuses fail-closed before any byte write (named digest-fence test).
+- `grep` over requirements files shows zero floating refs (`git+` without `@<sha>` absent).
+- `CapabilityEntry.template` populated for every shipped workflow-backed entry; digest matches vendored bytes on disk.
+- B-0 ledger file exists with full-suite output and the two collection errors recorded verbatim.
+
+**Agent-goal criteria advanced:** DC-1 groundwork (digest pinning verified mechanism); Done-6 baseline established.
+
+**North Star in play:** *Correctness by primitives* — digest fence is a primitive with a named test (tampered-file fail-closed). *Anti-pattern rejected:* digest-the-code pinning (external `.py` emitters, stale `models.yaml` pins, zero comparison code) — in-repo data bytes only. *One authority:* workflow truth = vendored bytes + recorded digest.
+
+**Sync point:** `capabilities.py` registry mutations begin here; all later registry edits (B2, B4, B8, B9) go through the single writer queue — no parallel registry edits.
+
+**Validation:** `python3 -m pytest tests/v10 tests/integrations/reigh tests/packs -x -q` plus the new digest-fence test file.
+
+---
+
+## Batch B2 — Generic handler + end-to-end journey (plan tasks 3, 4) — completes workstream B-1
+
+**Tasks**
+- **T2.1 ([XHARD])** B-1b Generic VibeComfy handler behind the `TaskHandler` protocol: load vendored workflow JSON, verify SHA-256 against `entry.template[1]` before any execution; inject typed ports (prompt/image/mask/seed/size per `required_inputs`) reusing `backends/vibecomfy.py` injection logic; spawn `{python} -m vibecomfy.cli run wf.json --runtime embedded` with `cwd=<pinned checkout>`. Register in `task_executor/service.py`. Real subprocess on CPU — no stub shim (E2 verdict); filter harmless audio-node import noise; CPU-torch/torchvision version-matched from `+cpu` index; `comfyui==0.260` pin honored.
+- **T2.2 (normal)** B-1c End-to-end journey (DC-1) + custom-workflow YAML path (27 §3.3): trimmed YAML `{id, ports, workflow_path, digest, output_policy}` → admission snapshots + hashes bytes → `local.<slug>` capability feeding the same generic handler; no runtime Python/plugin loading, no promotion service. Journey vehicle: weightless `EmptyImage→SaveImage` workflow through the real subprocess. Weighted z_image/qwen journeys validate via B-5 probes, not generation here.
+
+**Checkpoint acceptance**
+- Digest mismatch ⇒ handler refuses to run (asserted before subprocess spawn).
+- Typed-port injection covers t2i/i2i/edit shapes (three named tests).
+- CPU smoke run deterministic across 3 invocations (~13 s warm, decoded-pixel SHA stable).
+- Journey green end-to-end: R1 → claim → real subprocess → multipart complete → generation row + media atomic; custom-YAML round-trip exercises the identical handler. **DC-1 satisfied with zero recorded exceptions.**
+
+**Agent-goal criteria advanced:** Done-1 complete (non-Wan capability end-to-end through real binding with digest pinning).
+
+**North Star in play:** *Growth by declaration* — custom workflows are data (YAML rows) through one generic handler; no plugin loading, no promotion service (*speculative machinery rejected*). *Invisible failure default:* digest mismatch is a typed refusal, never a silent fallback or cloud swap. *Honest latency:* polling budgets (2 s/10 s/30 s) and claim loop untouched.
+
+**[XHARD] justification (T2.1):** first real-subprocess binding; exceptional paths (digest tamper, missing checkout, malformed workflow) must each carry full fail-closed evidence before the pattern is replicated by B-2/B-4.
+
+**Sync point:** B2 consumes B1's pinned checkout + vendored JSON; nothing in B3 may start until this batch's journey is green — the handler is the single execution path all later fixtures assume.
+
+**Validation:** `python3 -m pytest tests/v10 tests/integrations/reigh tests/packs -x -q` plus `tests/v10/test_multi_task_journey.py` (extended) and the new binding test file.
+
+---
+
+## Batch B3 — Capability fan-out (plan task 5) — completes workstream B-2 → **CUMULATIVE REVIEW 1 (catalog seam)**
+
+**Tasks**
+- **T3.1 (normal)** ~15 remaining capabilities (qwen family, z_image+i2i, upscale, flux_klein, video_enhance, animate_character, inpaint/annotated): `FAMILY_VALIDATORS` extension in `capabilities.py`; conformance fixture per capability in `packs/shots/conformance.py` covering: accepted input, completion-manifest file count/media shape, required provenance, error-category mapping, and **truthful-unavailability when a prerequisite is removed** (27 §3.6 — contractual leg, not extra).
+- **T3.2 (normal)** Probe predicate foundation (E7 fold-in, shared with B5): probe signature returns `(ok, missing: list[str])`; `check_available` emits `missing_prerequisites` naming exact artifacts + one `doctor setup` command. Entries stay registered and advertised-gated.
+
+**Checkpoint acceptance**
+- Fixture per capability green including the unavailability leg (removing a prerequisite flips the entry to unavailable with named `missing_prerequisites`, zero code changes).
+- Import-time registry validation still compiler-enforced (no runtime relaxation introduced).
+- Probe signature change landed; all existing probe call sites migrated (clean cutover, no dual signature).
+
+**Agent-goal criteria advanced:** Done-2 complete (all listed capabilities registered with validators + fixtures green).
+
+**North Star in play:** *Growth by declaration* — capabilities land as REGISTRY rows + validator/fixture data, not new executors. *Invisible failure default* — unavailability is truthful and actionable, never silently available. *Anti-pattern rejected:* CUDA-presence probes (would permanently disable the catalog on the sanctioned CPU path).
+
+**Sync point:** fixture shape defined here is the input B6's dual-scope digest hashes and the probe table B8 completes — fixture format frozen at this batch's checkpoint; changes after Review 1 require re-approval.
+
+**→ CUMULATIVE REVIEW 1:** full suite, catalog contract frozen, docs-of-record updated.
+
+**Validation:** `python3 -m pytest tests/v10 tests/integrations/reigh tests/packs -x -q`; conformance module scoped: `python3 -m pytest tests/packs -q -k conformance`.
+
+---
+
+## Batch B4 — Child-gate closure (plan task 6)
+
+**Tasks**
+- **T4.1 (normal)** B-3a proof-work (E4: deterministic key `reigh.orch:v1:{parent_task_id}:{role}:{index}` already exists and is attempt-independent at `bridge_service.py:674` — work is tests, not design): replay-coordinator tests (201→200 same-key; parent retry N+1 resolves to the *same* child row; zero duplicates); every fence branch (expired lease 409, non-running parent 409, wrong slug 404, unknown parent/attempt, forged executor/lease/status_version 403); cross-parent/cross-role key isolation; duplicate concurrent `(role,index)` admission ⇒ single row; `dependant_on` → hard-dep wiring.
+- **T4.2 (normal)** Registry consistency: `travel_stitch` / `join_clips_orchestrator` gain `child_only=True` (aligning with `:414-433`). **Edit family stays childless** — 27 §3.1 allowlist is exhaustive, contains no `edit_*` child; `edit_video_orchestrator` completes explicitly without child admission (surfaced for confirmation at Review 2).
+
+**Checkpoint acceptance**
+- Every fence branch individually asserted with its exact status code.
+- Replay determinism across attempts proven (same child row on retry N+1).
+- Concurrent duplicate admission yields exactly one row (race fixture).
+- `child_only=True` present on both orchestrator-child entries; registry import-time validation still green.
+
+**Agent-goal criteria advanced:** Done-3 groundwork (gated R1 child admission with deterministic keys — proof half).
+
+**North Star in play:** *Correctness by primitives* — each fence branch is a named primitive test; replay determinism is a named test. *One authority* — the deterministic key derivation is the sole child identity source; no parallel key scheme.
+
+**Validation:** `python3 -m pytest tests/v10 tests/integrations/reigh tests/packs -x -q`; scoped: `python3 -m pytest tests/integrations/reigh/test_task_routes.py -q`.
+
+---
+
+## Batch B5 — Transition table + interleaving suite (plan task 7)
+
+**Tasks**
+- **T5.1 ([XHARD])** B-3b: checked parent/child transition table; new `tests/v10/test_orchestrator_interleaving.py` — adversary scheduler proving **zero duplicates + exactly-one parent-terminal** across crash/retry/race schedules, deterministically enumerated.
+
+**Checkpoint acceptance**
+- Deterministic schedule enumeration: every enumerated adversary schedule passes; suite is reproducible (fixed seeds, no wall-clock dependence).
+- Invariant holds on every schedule: no duplicate child rows, exactly one parent terminal state.
+- Crash-mid-orchestration schedules produce orphan-or-replay, never mixed state.
+
+**Agent-goal criteria advanced:** Done-3 invariant half.
+
+**North Star in play:** *Invisible failure default* — adversary proof that failures degrade to orphan-or-replay, never silent mixed state. *Correctness by primitives* — the interleaving invariant is one named property test over enumerated schedules.
+
+**[XHARD] justification:** this is the phase's central correctness claim; exceptional-threshold evidence (crash/retry/race enumeration) is the deliverable itself.
+
+**Sync point:** consumes T4.1's fence tests; B6's porting may not begin until this suite is green — the invariant must exist before families ride on it.
+
+**Validation:** `python3 -m pytest tests/v10 tests/integrations/reigh tests/packs -x -q`; scoped: `python3 -m pytest tests/v10/test_orchestrator_interleaving.py -q`.
+
+---
+
+## Batch B6 — Port orchestrator families (plan task 8) — completes workstream B-3 → **CUMULATIVE REVIEW 2 (distributed-systems seam)**
+
+**Tasks**
+- **T6.1 (normal)** B-3c: port travel/join families onto gated child admission end-to-end (orchestrator runner module + bridge routes); port edit family as single-attempt orchestrator with explicit parent terminal (per T4.2 reading).
+
+**Checkpoint acceptance**
+- Journey test per family (travel, join, edit) green through gated admission.
+- **DC-3 complete:** deterministic interleaving invariants hold on the ported families, not just the test harness.
+
+**Agent-goal criteria advanced:** Done-3 complete.
+
+**North Star in play:** *Growth by declaration* — families port by routing through the existing gated path; no per-family admission logic. *Honest latency* — no transport-coupled correctness introduced by the runner module.
+
+**Sync point:** travel/join/edit converge on the one orchestrator runner; the runner is the only new module this batch.
+
+**→ CUMULATIVE REVIEW 2:** full suite; confirm edit-family-childless interpretation against goal text ("edit" among ported families) and record the decision; docs-of-record updated.
+
+**Validation:** `python3 -m pytest tests/v10 tests/integrations/reigh tests/packs -x -q`; family journeys scoped: `python3 -m pytest tests/v10 -q -k "journey"`.
+
+---
+
+## Batch B7 — Wan2GP binding + five gates (plan task 9) — workstream B-4
+
+**Tasks**
+- **T7.1 (normal)** Vendor the submodule first (prerequisite, plan §2.3): fork rebased at pinned SHA `181bb71a…`; `wgp_config.json` key schema reconstructed against the pinned bytes — exists nowhere else; do this as the first step, not mid-pipeline.
+- **T7.2 ([XHARD])** Five-gate pipeline (27 §9:349):
+  1. Hermetic rebase — `wgp_patches.py` applies clean, submodule bump reproducible.
+  2. Path/import/config contract tests — `ensure_wan2gp_on_path`, `cwd=Wan2GP/`, `sys.argv=["worker.py"]`, `import wgp`, config-rewrite-only, `server_config` overrides.
+  3. Dependency resolution per platform incl. `decord`/`smplfitter` stub story.
+  4. Conversion fixtures byte-identical (param whitelist, `video_length=1` forcing, LoRA download, defaults).
+  5. Fixed-seed output-shape + semantic-diff corpus — shape assertions where CPU-feasible; semantic baselines recorded `blocked` (CUDA) per stop conditions.
+  Plus: rollout drains WGP work, swaps sole build manifest `{wan2gp_sha, upstream_base, patchset_hash, worker_contract_version, checkpoint hashes}`, retains prior build; `TASK_TYPE_TO_MODEL` preset mapping declarative; `bindings/wgp_binding.py` as the second `TaskHandler` implementation.
+
+**Checkpoint acceptance**
+- Gates ①–④ run mechanically green on CPU.
+- **Rollback drill passes: N+1 accepted ⇒ roll back to N proven** (named drill test).
+- Gate ⑤: CPU-feasible shape assertions green; semantic-baseline remainder recorded `blocked` with stop-condition note.
+- Sole build manifest swapped atomically; prior build retained and restorable.
+
+**Agent-goal criteria advanced:** Done-4 complete.
+
+**North Star in play:** *One authority* — the build manifest is the sole Wan2GP build truth; no mirrored version state. *Anti-pattern rejected:* silent swaps — rollback is an explicit drill, never automatic fallback. *Correctness by primitives* — each gate is a named test; the rollback drill is a named test.
+
+**[XHARD] justification:** upgrade/rollback is the highest-blast-radius exceptional path in the phase; full drill evidence required.
+
+**Sync point:** consumes B2's `TaskHandler` pattern (second binding proves the seam's option-value); vendored submodule (T7.1) gates all of T7.2 internally — serialize within the batch.
+
+**Validation:** `python3 -m pytest tests/v10 tests/integrations/reigh tests/packs -x -q`; scoped gate tests: `python3 -m pytest tests/v10 -q -k "wgp or wan"`.
+
+---
+
+## Batch B8 — Setup journal + honest advertisement (plan task 10) — completes workstream B-5 → **CUMULATIVE REVIEW 3 (upstream-dependency seam)**
+
+**Tasks**
+- **T8.1 ([XHARD])** Sidecar setup journal (placement resolved, E5 — never SQLite): `<root>/.astrid/setup/journal.jsonl`, fsync'd appends, boot-time replay before `derive_database_path`; state machine `absent→downloading(offset)→verifying→staged→installed(verified)` / `corrupt(reason)→repairing`. New `astrid/core/model_setup/` (journal, manifest, preflight); clones proven `core/backup/operations.py` replay pattern.
+- **T8.2 (normal)** Signed versioned distribution manifest (hash, size, license identity/text hash, OS/arch, tier deps); tier discovery; Range resume; disk preflight (download + working + output headroom).
+- **T8.3 (normal)** `doctor` deep re-hash + targeted repair + journal reconciliation from filesystem reality; probe registrations per E7 table (`wgp_runtime`, `wgp_weights:<model>`, `vibecomfy_runtime`, `vc_weights:<template>`, `remotion_ready`) — **never test for CUDA**. Stamp fast-path vs deep re-hash interplay pinned: boot reads stored stamp + size; `doctor` re-hashes; probes read one place.
+
+**Checkpoint acceptance**
+- Kill-mid-download / kill-mid-verify / kill-mid-rename fixtures green including Range resume from recorded offset.
+- Hash-mismatch, disk-full, and repair fixtures green; `doctor` reconciles a hand-corrupted journal to filesystem truth.
+- Uninstalled capability advertises unavailable; attempt returns `422 capability_unavailable` naming `missing_prerequisites` + one actionable `doctor setup` command.
+- Completing setup flips capabilities available with **zero code changes** (declaration-only growth proven).
+
+**Agent-goal criteria advanced:** Done-5 complete.
+
+**North Star in play:** *One authority* — journal is a replay log, NOT truth; installed-ness proven by artifact bytes + manifest stamps + SQLite advertisement; doctor rebuilds from filesystem. *Anti-patterns rejected:* second authority (SQLite journal / mirrored state), cloud fallback (outbound networking setup-mode-only per 27 §6.1). *Invisible failure default* — honest advertisement, never lying available.
+
+**[XHARD] justification:** crash-mid-write resume and corruption repair are exceptional-path primitives; each named fixture must carry full evidence.
+
+**Sync point:** consumes B3's probe signature (`(ok, missing)`) and B1's pinned checkout; `capabilities.py` probe registrations merge here — writer queue again (registry touched by B1, B3, B4, B8, B9 sequentially only).
+
+**→ CUMULATIVE REVIEW 3:** full suite; upstream trust chain (pinned SHAs from B1/B7 + manifests/journal from B8) reviewed as one seam; docs-of-record updated.
+
+**Validation:** `python3 -m pytest tests/v10 tests/integrations/reigh tests/packs -x -q`; scoped: `python3 -m pytest tests/v10 -q -k "setup or journal or doctor or preflight"`.
+
+---
+
+## Batch B9 — Conformance completion + boot manifest (plan task 11) — workstream B-6
+
+**Tasks**
+- **T9.1 ([XHARD])** New `astrid/core/integrations/reigh/boot_manifest.py`: pure `compute_registry_digest(REGISTRY, fixtures)` over canonical JSON of derived entry fields `{capability_id → definition_version, binding, output_policy, probe}` **plus** per-capability fixture digests (dual scope: registry-only misses fixture drift; fixtures-only misses admission-semantics drift). Emitted by `_dispatch_serve` after `compose_standard_bridge()`, before server creation — **not** `local_bridge_server` (transport-only by construction). Lives at `${ASTRID_PROJECTS_ROOT}/.astrid/boot-manifest.json` beside `astrid.sqlite3`; secret-free.
+- **T9.2 (normal)** Startup recomputes digest and **fails closed** (exit 1, typed message) on registry/fixture disagreement. Completion provenance names the manifest hash in the attempt-completion result — **`CommandReceipt`'s frozen 9-key set is NOT extended**.
+- **T9.3 (normal)** Conformance completion sweep: fixture per shipped capability confirmed present (closes the B3 fan-out against the final registry state).
+
+**Checkpoint acceptance**
+- Manifest stamped at boot; mutating registry or any fixture ⇒ startup refuses with exit 1 and typed message (named test both directions).
+- Digest is dual-scope: fixture-only drift AND registry-only drift each independently detected (two named tests).
+- Manifest file secret-free (asserted); completion provenance carries manifest hash; receipt schema byte-identical to frozen 9-key set.
+- Every shipped capability has a conformance fixture (Done-2/DC-5 closure).
+
+**Agent-goal criteria advanced:** Done-6 groundwork; B-6 workstream complete.
+
+**North Star in play:** *One authority* — boot manifest is derived, secret-free, sibling to the DB; not a second truth, a receipt over the one truth. *Invisible failure default* — drift fails startup closed, never warns-and-continues. *Anti-pattern rejected:* `CommandReceipt` extension (frozen contract stays frozen).
+
+**[XHARD] justification:** fail-closed startup is the phase's last-line invariant; both drift directions need full evidence.
+
+**Sync point:** terminal consumer of everything — registry (B1/B3/B4/B8), fixtures (B3/B9.3), WGP manifest (B7), probes (B8). Nothing parallel mutates registry/fixture state during this batch.
+
+**Validation:** `python3 -m pytest tests/v10 tests/integrations/reigh tests/packs -x -q`; scoped: `python3 -m pytest tests/v10 tests/packs/shots -q -k "manifest or boot or digest"`.
+
+---
+
+## Batch B10 — Phase exit verification (plan task 12)
+
+**Tasks**
+- **T10.1 (normal)** Full `python3 -m pytest tests -q` green minus the B-0 ledger (the two documented collection errors); all batch checkpoints committed on `phase-b`; push `phase-b` to origin; never merge to main.
+
+**Checkpoint acceptance**
+- Full-suite output diffed against B-0 ledger: zero new failures, zero new collection errors.
+- `git log` shows one commit per batch checkpoint on `phase-b`; `origin/phase-b` up to date; `main` untouched.
+
+**Agent-goal criteria advanced:** Done-6 complete → phase done per criteria 1–6.
+
+**Validation:** `python3 -m pytest tests -q` (full, unscoped).
+
+---
+
+## Dependency graph
+
+```mermaid
+graph LR
+    B1[B1 pin data] --> B2[B2 handler + journey]
+    B2 --> B3[B3 fan-out ★R1]
+    B3 --> B4[B4 child-gate proof]
+    B4 --> B5[B5 interleaving]
+    B5 --> B6[B6 port families ★R2]
+    B2 --> B7[B7 WGP gates]
+    B3 --> B8[B8 setup journal ★R3]
+    B7 --> B8
+    B3 --> B9[B9 boot manifest]
+    B6 --> B9
+    B7 --> B9
+    B8 --> B9
+    B9 --> B10[B10 phase exit]
+```
+
+**Serialization rule:** `capabilities.py`, `conformance.py`, and the fixtures tree are single-writer surfaces — batches touching them (B1, B3, B4, B8, B9) never overlap in time; everything else may overlap per the graph above.
+[launch_hermes_agent] done in 115.6s (exit=0)
+0

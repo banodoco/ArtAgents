@@ -88,11 +88,21 @@ def _is_legacy_authority_import(module: str) -> bool:
     return False
 
 
-def _post_json(url: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
-    """POST one JSON body and return (status, parsed response)."""
+def _post_json(
+    url: str, body: dict[str, Any], *, token: str | None = None
+) -> tuple[int, dict[str, Any]]:
+    """POST one JSON body and return (status, parsed response).
+
+    *token* carries the server's per-boot request token (doc 27 §4.7):
+    the local-trust gate rejects any token-less mutation with 403 before
+    routing, so live-server callers must present the boot token exactly
+    as the launcher-delivered app/worker would.
+    """
     data = json.dumps(body).encode("utf-8")
     req = Request(url, data=data, method="POST")
     req.add_header("Content-Type", "application/json")
+    if token is not None:
+        req.add_header("X-Astrid-Request-Token", token)
     try:
         with urlopen(req) as response:  # noqa: S310 - local test server only
             return response.status, json.loads(response.read().decode("utf-8"))
@@ -188,7 +198,7 @@ def test_bridge_sdk_cli_saves_reach_one_service_command_one_writer(
 
             # 1) Bridge save over HTTP.
             status, body = _post_json(
-                f"{base}/projects/demo/timelines/main/save", payload
+                f"{base}/projects/demo/timelines/main/save", payload, token=server.request_token
             )
             assert status == 200, body
             assert body["config_version"] == 2
@@ -323,7 +333,7 @@ def test_fresh_saves_from_each_surface_commit_equivalent_receipts(
 
             # Bridge saves its timeline (derived key).
             status, body = _post_json(
-                f"{base}/projects/demo/timelines/alpha/save", payload
+                f"{base}/projects/demo/timelines/alpha/save", payload, token=server.request_token
             )
             assert status == 200, body
             bridge_key = adapter._derive_bridge_save_key(  # noqa: SLF001

@@ -101,9 +101,20 @@ class CompositionElementTest(unittest.TestCase):
         source_path = _timeline_composition_source()
         source = source_path.read_text(encoding="utf-8")
         self.assertIn("TimelineCompositionProps", source)
-        self.assertIn("getTimelineDurationInFrames", source)
         if source_path.name == "TimelineComposition.tsx":
-            self.assertIn("export default TimelineComposition", source)
+            # Packaged layout: the duration helper lives beside the
+            # composition and is re-exported from the package index; the
+            # component is exported by name (no default export).
+            pkg_src = source_path.parent
+            surface = [source]
+            for sibling in (pkg_src / "index.ts", pkg_src / "lib" / "duration.ts"):
+                if sibling.is_file():
+                    surface.append(sibling.read_text(encoding="utf-8"))
+            self.assertIn("getTimelineDurationInFrames", "\n".join(surface))
+            self.assertRegex(source, r"export\s+(?:default\s+)?(?:const|function)\s+TimelineComposition\b")
+        else:
+            # In-tree shell: both symbols are imported from the package.
+            self.assertIn("getTimelineDurationInFrames", source)
 
 
 if __name__ == "__main__":

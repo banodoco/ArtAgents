@@ -1,0 +1,13 @@
+Report (full detail in `.oracle/findings/e3-wgp-contract.md`):
+
+**Ranked findings**
+
+1. **Entry points**: `HeadlessTaskQueue.submit_task` → `process_task_impl` → `WanOrchestrator.generate` (`source.runtime.entrypoints.headless_wgp`); inside: `orchestrator.load_model(model_key)` then `wgp.generate_video`/`wgp.load_models`. Path chosen by capability: `generate_vace` (needs `video_guide`) / `generate_flux` / `generate_t2v` (wgp-report §3; doc 03 §3.2, `task_processor.py:500-570`).
+2. **cwd/sys.path**: boot adds Wan2GP to path (`server.py:105-140`), then `os.chdir(wan2gp_path)`, `sys.argv=["worker.py"]`, `import wgp`, `--wgp-*` overrides onto `wgp.server_config`; failure ⇒ exit(1). Spoofs `WORKER_ID`, `WAN2GP_WORKER_MODE=true`. Global patches under lock with `finally` restore.
+3. **wgp_config.json keys [GAP]**: no repo artifact lists the key schema — boot "rewrites" it only (wgp-report §3, doc 26). Must be reconstructed against pinned SHA `181bb71a…` of banodoco/Wan2GP; submodule absent on this machine.
+4. **TASK_TYPE_TO_MODEL**: `wan_2_2_t2i`→`t2v_2_2` (t2i forces `video_length=1`), `wan_2_2_i2v`→`i2v_14B`, vace→`vace_14B_cocktail_2_2`, travel/inpaint/join segments→`wan_2_2_vace_lightning_baseline_2_2_2`; profile-1 preload same lightning i2v preset.
+5. **Checkpoints**: presets `Wan2GP/defaults/<key>.json` + `finetunes/`; weights auto-download to `Wan2GP/ckpts/`; LoRAs from task URLs at conversion time; outputs moved to `<main_output_dir>/<task_type>/`.
+6. **CUDA-blocked** (mark): real `load_models`/`generate_video`, VRAM profiles, ckpts download integrity, SIGALRM-under-generation, gate-5 semantic baselines.
+
+**Five gates** (doc 27 §9): ① hermetic rebase + `wgp_patches.py` applies clean; ② path/import/config contract tests (cwd, spoof, import wgp, config rewrite); ③ per-platform dependency resolution (decord/smplfitter stubs); ④ unchanged conversion fixtures (param whitelist, defaults, LoRA download); ⑤ fixed-seed output-shape + semantic-diff corpus — gates 1–4 reject mechanically, 5 may need human review; rollout drains queue, swaps build manifest `{wan2gp_sha, upstream_base, patchset_hash, worker_contract_version, checkpoint hashes}`, retains prior build for rollback drill.
+0

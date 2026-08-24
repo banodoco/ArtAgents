@@ -209,12 +209,17 @@ class DeterministicUnderstandingProvider:
         }
 
 
-def http_json(url, method="GET", body=None):
+def http_json(url, method="GET", body=None, token=None):
+    headers = {"Content-Type": "application/json"} if body is not None else {}
+    if token is not None:
+        # Local-trust posture (doc 27 §4.7): mutations carry the per-boot
+        # request token the launcher delivers out of band.
+        headers["X-Astrid-Request-Token"] = token
     request = Request(
         url,
         data=(json.dumps(body, sort_keys=True).encode() if body is not None else None),
         method=method,
-        headers={"Content-Type": "application/json"} if body is not None else {},
+        headers=headers,
     )
     try:
         with urlopen(request, timeout=10) as response:
@@ -681,6 +686,7 @@ try:
                                 **body_base,
                                 "config": {"fps": 24, "contender": index},
                             },
+                            token=server.request_token,
                         )
                         with lock:
                             responses.append((status, payload))
@@ -987,6 +993,10 @@ try:
         }
 
     run_item(10, "clean credential-free dogfood", item_10, lambda: ROOT.stat().st_mtime_ns)
+    # Item 9's backup is journey scratch, not product output: remove it so
+    # the shared module-scoped harness project root stays free of JSON
+    # artifacts for later lanes that assert repository-only files.
+    shutil.rmtree(backup_path, ignore_errors=True)
     evidence = make_evidence()
     assert set(evidence["ga_items"]) == {str(index) for index in range(1, 11)}
     print(json.dumps(evidence, sort_keys=True))
@@ -1021,6 +1031,7 @@ class RunningBridge:
 
     process: subprocess.Popen[str]
     base_url: str
+    request_token: str
     stdout_path: Path
     stderr_path: Path
     command: tuple[str, ...]
@@ -1146,9 +1157,15 @@ def _installed_bridge(
         )
         match = _READY_RE.search(ready_line)
         assert match, ready_line
+        # The launcher delivers the per-boot request token out of band
+        # (doc 27 §4.7.2); the app reads it from the managed root exactly
+        # as here before issuing mutations.
         yield RunningBridge(
             process=process,
             base_url=f"http://127.0.0.1:{match.group(1)}",
+            request_token=(
+                harness.roots.project / ".astrid" / "request-token"
+            ).read_text(encoding="utf-8").strip(),
             stdout_path=stdout_path,
             stderr_path=stderr_path,
             command=command,
@@ -1173,10 +1190,14 @@ def _http_request(
     body: dict[str, Any] | None = None,
     headers: dict[str, str] | None = None,
 ) -> tuple[int, dict[str, str], bytes]:
+    request_headers = dict(headers or {})
+    if method not in ("GET", "HEAD", "OPTIONS"):
+        # Local-trust posture (doc 27 §4.7): mutations carry the boot token.
+        request_headers["X-Astrid-Request-Token"] = bridge.request_token
     request = urllib.request.Request(
         bridge.base_url + path,
         data=(json.dumps(body).encode("utf-8") if body is not None else None),
-        headers=headers or {},
+        headers=request_headers,
         method=method,
     )
     try:
@@ -1543,20 +1564,19 @@ def test_one_installed_wheel_completes_the_local_first_run(
     assert doctor["ok"] is True
     assert {check["status"] for check in doctor["checks"]} == {"ok"}
 
-    # Repository-backed state is the only semantic authority in this journey:
-    # no project/timeline JSONL or sidecar files were produced beside it. The
-    # one allowed JSON shape is the service-materialized binding workspace
-    # ``<slug>/project.json`` (kernel_authority marker; the kernel row stays
-    # authoritative) — every other .json/.jsonl under the root is a leftover
-    # authority file.
+    # No project/timeline JSONL or sidecar files were produced beside the
+    # repository-backed authority. The service-materialized ``project.json``
+    # binding projection and Phase-B's digest-only boot manifest are the two
+    # sanctioned derived JSON shapes; everything else is a leftover authority
+    # artifact. The kernel row remains authoritative in both cases.
+    sanctioned = {".astrid/boot-manifest.json"}
     authority_files = [
         str(path)
         for path in harness.roots.project.rglob("*")
         if path.is_file()
-        and (
-            path.suffix == ".jsonl"
-            or (path.suffix == ".json" and path.name != "project.json")
-        )
+        and path.suffix in {".json", ".jsonl"}
+        and path.name != "project.json"
+        and path.relative_to(harness.roots.project).as_posix() not in sanctioned
     ]
     assert authority_files == []
     assert not any(

@@ -4,13 +4,13 @@
   "failed_count": 0,
   "isolation": "threads",
   "max_tokens": 65536,
-  "max_workers": 2,
+  "max_workers": 7,
   "model_map": [],
-  "output_dir": "/Users/peteromalley/Documents/reigh-workspace/Astrid-unified-oracle/.oracle/findings",
-  "project_dir": "/Users/peteromalley/Documents/reigh-workspace/Astrid-unified-oracle",
+  "output_dir": "/private/tmp/astrid-phase-b-integration.XnwUwK/.oracle/findings",
+  "project_dir": "/private/tmp/astrid-phase-b-integration.XnwUwK",
   "stopped_by_signal": false,
-  "succeeded_count": 2,
-  "sum_agent_seconds": 2440.529,
+  "succeeded_count": 9,
+  "sum_agent_seconds": 4523.237,
   "task_timeout_s": 2400,
   "tasks": [
     {
@@ -32,7 +32,8 @@
       "status": "ok",
       "stem": "b11-relax-complete",
       "task_timeout_s": 2400,
-      "tool_calls": 0
+      "tool_calls": 0,
+      "source_run": "unified-execution"
     },
     {
       "brief": "/Users/peteromalley/Documents/reigh-workspace/Astrid-unified-oracle/.oracle/briefs/b12-docs-v2.md",
@@ -53,7 +54,162 @@
       "status": "ok",
       "stem": "b12-docs-v2",
       "task_timeout_s": 2400,
-      "tool_calls": 0
+      "tool_calls": 0,
+      "source_run": "unified-execution"
+    },
+    {
+      "brief": "/workspace/reigh-phase-a-20260822/Astrid/.oracle/briefs/explore/e1-vibecomfy-pinning.md",
+      "elapsed_s": 370.091,
+      "error": null,
+      "error_class": null,
+      "finish_reason": null,
+      "finished_at": "2026-08-22T13:23:03Z",
+      "meta_file": "/workspace/reigh-phase-a-20260822/Astrid/.oracle/findings/e1-vibecomfy-pinning.meta.json",
+      "model": "stealth/ox-alpha",
+      "pid": 452123,
+      "raw_result_keys": [
+        "stdout"
+      ],
+      "response_chars": 2108,
+      "response_file": "/workspace/reigh-phase-a-20260822/Astrid/.oracle/findings/e1-vibecomfy-pinning.txt",
+      "started_at": "2026-08-22T13:16:53Z",
+      "status": "ok",
+      "stem": "e1-vibecomfy-pinning",
+      "task_timeout_s": 1800,
+      "tool_calls": 0,
+      "source_run": "phase-b"
+    },
+    {
+      "brief": "/workspace/reigh-phase-a-20260822/Astrid/.oracle/briefs/explore/e2-comfy-cpu.md",
+      "elapsed_s": 828.43,
+      "error": null,
+      "error_class": null,
+      "finish_reason": null,
+      "finished_at": "2026-08-22T13:30:41Z",
+      "meta_file": "/workspace/reigh-phase-a-20260822/Astrid/.oracle/findings/e2-comfy-cpu.meta.json",
+      "model": "stealth/ox-alpha",
+      "pid": 452126,
+      "raw_result_keys": [
+        "stdout"
+      ],
+      "response_chars": 2250,
+      "response_file": "/workspace/reigh-phase-a-20260822/Astrid/.oracle/findings/e2-comfy-cpu.txt",
+      "started_at": "2026-08-22T13:16:53Z",
+      "status": "ok",
+      "stem": "e2-comfy-cpu",
+      "task_timeout_s": 1800,
+      "tool_calls": 0,
+      "source_run": "phase-b"
+    },
+    {
+      "brief": "/workspace/reigh-phase-a-20260822/Astrid/.oracle/briefs/explore/e3-wgp-contract.md",
+      "elapsed_s": 273.667,
+      "error": null,
+      "error_class": null,
+      "finish_reason": null,
+      "finished_at": "2026-08-22T13:21:26Z",
+      "meta_file": "/workspace/reigh-phase-a-20260822/Astrid/.oracle/findings/e3-wgp-contract.meta.json",
+      "model": "stealth/ox-alpha",
+      "pid": 452128,
+      "raw_result_keys": [
+        "stdout"
+      ],
+      "response_chars": 2213,
+      "response_file": "/workspace/reigh-phase-a-20260822/Astrid/.oracle/findings/e3-wgp-contract.txt",
+      "started_at": "2026-08-22T13:16:53Z",
+      "status": "ok",
+      "stem": "e3-wgp-contract",
+      "task_timeout_s": 1800,
+      "tool_calls": 0,
+      "source_run": "phase-b"
+    },
+    {
+      "brief": "/workspace/reigh-phase-a-20260822/Astrid/.oracle/briefs/explore/e4-child-envelope.md",
+      "elapsed_s": 166.87,
+      "error": null,
+      "error_class": null,
+      "finish_reason": null,
+      "finished_at": "2026-08-22T13:19:39Z",
+      "meta_file": "/workspace/reigh-phase-a-20260822/Astrid/.oracle/findings/e4-child-envelope.meta.json",
+      "model": "stealth/ox-alpha",
+      "pid": 452130,
+      "raw_result_keys": [
+        "stdout"
+      ],
+      "response_chars": 3093,
+      "response_file": "/workspace/reigh-phase-a-20260822/Astrid/.oracle/findings/e4-child-envelope.txt",
+      "started_at": "2026-08-22T13:16:53Z",
+      "status": "ok",
+      "stem": "e4-child-envelope",
+      "task_timeout_s": 1800,
+      "tool_calls": 0,
+      "source_run": "phase-b"
+    },
+    {
+      "brief": "/workspace/reigh-phase-a-20260822/Astrid/.oracle/briefs/explore/e5-setup-journal.md",
+      "elapsed_s": 97.884,
+      "error": null,
+      "error_class": null,
+      "finish_reason": null,
+      "finished_at": "2026-08-22T13:18:30Z",
+      "meta_file": "/workspace/reigh-phase-a-20260822/Astrid/.oracle/findings/e5-setup-journal.meta.json",
+      "model": "stealth/ox-alpha",
+      "pid": 452131,
+      "raw_result_keys": [
+        "stdout"
+      ],
+      "response_chars": 2106,
+      "response_file": "/workspace/reigh-phase-a-20260822/Astrid/.oracle/findings/e5-setup-journal.txt",
+      "started_at": "2026-08-22T13:16:53Z",
+      "status": "ok",
+      "stem": "e5-setup-journal",
+      "task_timeout_s": 1800,
+      "tool_calls": 0,
+      "source_run": "phase-b"
+    },
+    {
+      "brief": "/workspace/reigh-phase-a-20260822/Astrid/.oracle/briefs/explore/e6-boot-manifest.md",
+      "elapsed_s": 154.688,
+      "error": null,
+      "error_class": null,
+      "finish_reason": null,
+      "finished_at": "2026-08-22T13:19:27Z",
+      "meta_file": "/workspace/reigh-phase-a-20260822/Astrid/.oracle/findings/e6-boot-manifest.meta.json",
+      "model": "stealth/ox-alpha",
+      "pid": 452129,
+      "raw_result_keys": [
+        "stdout"
+      ],
+      "response_chars": 2380,
+      "response_file": "/workspace/reigh-phase-a-20260822/Astrid/.oracle/findings/e6-boot-manifest.txt",
+      "started_at": "2026-08-22T13:16:53Z",
+      "status": "ok",
+      "stem": "e6-boot-manifest",
+      "task_timeout_s": 1800,
+      "tool_calls": 0,
+      "source_run": "phase-b"
+    },
+    {
+      "brief": "/workspace/reigh-phase-a-20260822/Astrid/.oracle/briefs/explore/e7-probe-honesty.md",
+      "elapsed_s": 191.078,
+      "error": null,
+      "error_class": null,
+      "finish_reason": null,
+      "finished_at": "2026-08-22T13:20:04Z",
+      "meta_file": "/workspace/reigh-phase-a-20260822/Astrid/.oracle/findings/e7-probe-honesty.meta.json",
+      "model": "stealth/ox-alpha",
+      "pid": 452132,
+      "raw_result_keys": [
+        "stdout"
+      ],
+      "response_chars": 2489,
+      "response_file": "/workspace/reigh-phase-a-20260822/Astrid/.oracle/findings/e7-probe-honesty.txt",
+      "started_at": "2026-08-22T13:16:53Z",
+      "status": "ok",
+      "stem": "e7-probe-honesty",
+      "task_timeout_s": 1800,
+      "tool_calls": 0,
+      "source_run": "phase-b"
     }
   ],
   "toolsets": [
@@ -61,6 +217,29 @@
     "'web'",
     "'terminal')"
   ],
-  "total_count": 2,
-  "wall_clock_s": 1674.806
+  "total_count": 9,
+  "wall_clock_s": 2503.24,
+  "wall_clock_basis": "sum_of_source_reports",
+  "source_reports": [
+    {
+      "name": "unified-execution",
+      "source_branch": "oracle-unified-execution",
+      "source_head": "b4c70e0ac766c69de0298fa19f3d7fede796a97c",
+      "total_count": 2,
+      "succeeded_count": 2,
+      "failed_count": 0,
+      "sum_agent_seconds": 2440.529,
+      "wall_clock_s": 1674.806
+    },
+    {
+      "name": "phase-b",
+      "source_branch": "phase-b",
+      "source_head": "c8b68b994eae6ca50c33fd395d2207a377515c7e",
+      "total_count": 7,
+      "succeeded_count": 7,
+      "failed_count": 0,
+      "sum_agent_seconds": 2082.708,
+      "wall_clock_s": 828.434
+    }
+  ]
 }

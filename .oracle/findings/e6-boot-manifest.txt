@@ -1,0 +1,18 @@
+## Findings
+
+**No boot manifest exists** — confirmed by grep across `astrid/`, `.oracle/plan.md:31`.
+
+**Emitter must be the application composition root, not `local_bridge_server`.**
+- `_dispatch_serve` is documented as "the single application composition root" (`astrid/core/gateway/dispatch.py:131-138`); it calls `compose_standard_bridge()` (`dispatch.py:190`) which owns the projects root, DB path, writer, and packs (`astrid/packs/__init__.py:299-331`). Process-level facts (Wan SHA, node versions, template digests) live exactly here.
+- `local_bridge_server` is deliberately transport-only: bridge/writer/db are **constructor-injected**, never assigned post-hoc (`local_bridge_server.py:210-214`, `dispatch.py:205-212`). Giving it manifest authority would create a second composition seam.
+
+**Location:** sibling to the single authority — `${ASTRID_PROJECTS_ROOT}/.astrid/boot-manifest.json` next to `astrid.sqlite3` (`packs/__init__.py:17,300`).
+
+**Digest scope — both, deterministically.** `REGISTRY` (`capabilities.py:267-436`) is compiler-enforced at import (`_validate_registry()`, `capabilities.py:469-511`) but its dict identity isn't stable across refactors; the digest must be canonical JSON of derived entry fields (`capability_id → {definition_version, binding, output_policy, probe}`), **plus** per-capability conformance-fixture digests (doc 27 §3.2: each shipped capability lands with a representative fixture, `docs-corpus/27-build-spec.md:161`; B-6 stamps "conformance-hash" into the manifest, `agent_goal.md:12`). Registry-only would miss fixture drift; fixtures-only misses admission-semantics drift.
+
+**Receipts carry no manifest provenance.** `CommandReceipt` is a frozen 9-key closed set (`request_hash` etc., `receipts/service.py:119-158`) — do not extend it; completion provenance naming the boot-manifest hash belongs in the attempt-completion result per doc 27 (`27-build-spec.md:161`).
+
+## Recommended design
+
+New `astrid/core/integrations/reigh/boot_manifest.py`: pure `compute_registry_digest(REGISTRY, fixtures)` + `emit(path)` writing secret-free canonical JSON. `_dispatch_serve` emits after successful `compose_standard_bridge`, before `create_local_bridge_server`; startup recomputes and fails closed (exit 1, typed message) on digest disagreement with the stored stamp — mirroring the existing typed-failure style (`dispatch.py:189-198`).
+0
