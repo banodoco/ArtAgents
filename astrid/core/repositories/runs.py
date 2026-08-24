@@ -270,6 +270,21 @@ class RunTerminalError(RunRepositoryError):
         )
 
 
+class RunRetryIneligibleError(RunValidationError):
+    """Raised when a nonterminal run has no child eligible for retry.
+
+    Group retry intentionally skips ineligible children in all-child mode,
+    but a command that skips every child has no useful success result. Keep
+    the skipped ids on the typed exception so the public mapper can explain
+    what to inspect without exposing repository internals.
+    """
+
+    def __init__(self, *, run_id: str, skipped_task_ids: Sequence[str]) -> None:
+        self.run_id: str = run_id
+        self.skipped_task_ids: tuple[str, ...] = tuple(skipped_task_ids)
+        super().__init__(f"run {run_id!r} has no eligible children to retry")
+
+
 class RunStaleHeadError(RunRepositoryError):
     """Raised when a continuation CAS targets a stale expected run head.
 
@@ -2246,8 +2261,9 @@ class RunRepository:
             )
             retried.append(child_id)
         if not retried:
-            raise RunValidationError(
-                f"run {run_id!r} has no eligible children to retry"
+            raise RunRetryIneligibleError(
+                run_id=run_id,
+                skipped_task_ids=skipped,
             )
 
         # 2. Recompute the run projection from the child rows.
@@ -2685,6 +2701,7 @@ __all__ = [
     "RunRepository",
     "RunRepositoryError",
     "RunRetryReadModel",
+    "RunRetryIneligibleError",
     "RunStaleHeadError",
     "RunTerminalError",
     "RunValidationError",

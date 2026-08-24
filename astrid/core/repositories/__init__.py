@@ -106,6 +106,7 @@ __all__ = [
     "RunReadModel",
     "RunRepository",
     "RunRepositoryError",
+    "RunRetryIneligibleError",
     "RunStaleHeadError",
     "RunValidationError",
     "StreamAgreementError",
@@ -200,6 +201,7 @@ _LAZY_RUN_NAMES = frozenset(
         "RunReadModel",
         "RunRepository",
         "RunRepositoryError",
+        "RunRetryIneligibleError",
         "RunStaleHeadError",
         "RunValidationError",
     }

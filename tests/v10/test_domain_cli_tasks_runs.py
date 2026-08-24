@@ -1013,6 +1013,17 @@ def test_runs_retry_failed_help_is_executable(capsys) -> None:
     assert "--idempotency-key" in out
 
 
+def test_runs_events_help_explains_run_and_child_event_scope(capsys) -> None:
+    client = _FakeClient()
+    with pytest.raises(SystemExit) as excinfo:
+        _run("runs", ["events", "--help"], client=client)
+    assert excinfo.value.code == 0
+    out = capsys.readouterr().out
+    assert "run-level" in out
+    assert "tasks events" in out
+    assert client.calls == []
+
+
 
 # ---------------------------------------------------------------------------
 # Project slug pass-through and loud unknown-address failure (v10 sensecheck)

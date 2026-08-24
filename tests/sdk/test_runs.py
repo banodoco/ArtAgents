@@ -550,6 +550,37 @@ def test_retry_failed_terminal_run_returns_terminal_state(env: SimpleNamespace) 
     assert retried.error.code == "terminal_state"
 
 
+def test_retry_failed_without_eligible_children_returns_actionable_details(
+    env: SimpleNamespace,
+) -> None:
+    project_id = _create_project(env)
+    task_id = generate_lowercase_ulid()
+    run_id, _ = _create_run(
+        env,
+        project_id=project_id,
+        children=[_child(task_id=task_id, max_attempts=1)],
+    )
+    _fail_child(env, project_id=project_id, task_id=task_id)
+
+    retried = env.service.retry_failed(project_id, run_id)
+
+    assert retried.ok is False
+    assert retried.error is not None
+    assert retried.error.code == "validation_error"
+    assert retried.error.message.startswith("run retry found no eligible")
+    assert retried.error.details == {
+        "entity": "run_retry",
+        "run_id": run_id,
+        "reason": "no_eligible_children",
+        "skipped_task_ids": [task_id],
+        "recovery": (
+            "run `astrid runs show <run> --project <project>` to inspect child "
+            "progress, then retry only after a child is failed or expired and "
+            "still within its attempt budget"
+        ),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Ordered events
 # ---------------------------------------------------------------------------

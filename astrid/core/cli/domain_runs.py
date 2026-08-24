@@ -24,7 +24,8 @@ Verbs (exactly these five, one SDK call each):
   repeatable ``--task <id>`` restricts the retry to an explicit ordinal
   subset, and when omitted every eligible failed/expired child is retried;
 - ``events <run_id>`` — one ``client.runs.events`` call returning the run's
-  ordered ``core.run`` stream events (read, no key).
+  ordered run-level ``core.run`` lifecycle events (read, no key). Child task
+  transitions are separate; use ``tasks events <task_id>`` for those details.
 
 The singular ``run`` alias is **not** a product family (frozen census,
 plan step 24) and is not registered here: the parser exposes exactly the
@@ -160,6 +161,10 @@ def _configure_retry_failed(subparser: argparse.ArgumentParser) -> None:
 
 
 def _configure_events(subparser: argparse.ArgumentParser) -> None:
+    subparser.description = (
+        "Show run-level core.run lifecycle events. Child task transitions "
+        "are separate; use `tasks events <task_id>` for those details."
+    )
     _add_project_arg(subparser)
     subparser.add_argument("run_id", help="Exact project-scoped run id.")
     _add_json_flag(subparser)
@@ -191,7 +196,10 @@ COMMANDS: tuple[CommandSpec, ...] = (
     ),
     CommandSpec(
         "events",
-        help="Show one run's ordered core.run stream events.",
+        help=(
+            "Show run-level core.run lifecycle events; use tasks events for "
+            "child transitions."
+        ),
         configure=_configure_events,
     ),
 )

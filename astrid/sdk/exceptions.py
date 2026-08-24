@@ -509,6 +509,7 @@ def _service_error_from_exception(exc: BaseException) -> ServiceError | None:
     from astrid.core.repositories.runs import (
         RunAlreadyExistsError,
         RunNotFoundError,
+        RunRetryIneligibleError,
         RunStaleHeadError,
         RunTerminalError,
         RunValidationError,
@@ -867,6 +868,22 @@ def _service_error_from_exception(exc: BaseException) -> ServiceError | None:
         return ServiceValidationError(str(exc), details=dict(exc.details))
     if isinstance(exc, TimelineValidationError) and getattr(exc, "details", None):
         return ServiceValidationError(str(exc), details=dict(exc.details))
+
+    if isinstance(exc, RunRetryIneligibleError):
+        return ServiceValidationError(
+            "run retry found no eligible failed or expired children; inspect child task state before retrying",
+            details={
+                "entity": "run_retry",
+                "run_id": exc.run_id,
+                "reason": "no_eligible_children",
+                "skipped_task_ids": list(exc.skipped_task_ids),
+                "recovery": (
+                    "run `astrid runs show <run> --project <project>` to inspect "
+                    "child progress, then retry only after a child is failed or expired "
+                    "and still within its attempt budget"
+                ),
+            },
+        )
 
     for error_type, code in (
         (not_found, "not_found"),
