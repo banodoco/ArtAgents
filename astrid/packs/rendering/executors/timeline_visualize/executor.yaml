@@ -97,7 +97,7 @@
       "type": "file",
       "required": false,
       "artifact_type": null,
-      "description": "Contained prior visualization manifest used by snapshot-safe navigation."
+      "description": "Prior visualization manifest used by snapshot-safe navigation. Pass the durable manifest_path returned by the SDK, not the browse-only manifest copy under pack_root."
     },
     {
       "name": "focus",
@@ -147,7 +147,7 @@
       "mode": "create_or_replace",
       "path_template": "{out}/agent-view",
       "artifact_type": "evidence/timeline-visualization",
-      "description": "Run-owned deterministic evidence-pack directory."
+      "description": "Browsable deterministic evidence-pack directory. Kernel SDK invocations materialize this as a durable, non-authoritative project cache; use manifest_path for navigation authority."
     },
     {
       "name": "manifest_path",
@@ -155,7 +155,7 @@
       "mode": "create_or_replace",
       "path_template": "{out}/agent-view/manifest.json",
       "artifact_type": "metadata/result-manifest",
-      "description": "Universal result manifest and agent navigation root."
+      "description": "Durable managed result manifest and authoritative agent navigation handle."
     }
   ],
   "command": {

@@ -97,7 +97,10 @@ def _add_project_arg(subparser: argparse.ArgumentParser) -> None:
         "--project",
         required=False,
         default=None,
-        help="Owning project id or slug (defaults to the selected project).",
+        help=(
+            "Owning project id or slug (required unless ASTRID_PROJECT_SLUG "
+            "provides an attached project)."
+        ),
     )
 
 
@@ -496,7 +499,10 @@ def _configure_visualize(subparser: argparse.ArgumentParser) -> None:
     )
     subparser.add_argument(
         "--out", default=None,
-        help="Optional output hint; project runs publish durable artifacts under the managed run.",
+        help=(
+            "Unsupported compatibility option; project visualization owns output. "
+            "Omit it and use the returned durable manifest_path."
+        ),
     )
     _add_json_flag(subparser)
     subparser.set_defaults(handler=_cmd_visualize)

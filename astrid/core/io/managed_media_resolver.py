@@ -129,6 +129,59 @@ def resolve_owned_managed_media(
     return canonical
 
 
+def _resolve_owned_managed_media_id(
+    *,
+    projects_root: str | Path,
+    project_ref: str,
+    media_id: object,
+    recorded_digest: object = None,
+) -> tuple[Path, str, str] | None:
+    """Resolve one project-owned media ID to verified CAS path/hash/MIME."""
+
+    if not isinstance(media_id, str) or not media_id.strip():
+        return None
+    root = resolve_projects_root(projects_root)
+    database = derive_database_path(root)
+    if not database.is_file():
+        return None
+    try:
+        conn = sqlite3.connect(read_only_uri(database), uri=True)
+    except sqlite3.Error:
+        return None
+    try:
+        row = conn.execute(
+            "SELECT m.content_hash, m.mime_type FROM media AS m "
+            "JOIN projects AS p ON p.id = m.project_id "
+            "WHERE (p.slug = ? OR p.id = ?) AND m.id = ?",
+            (project_ref, project_ref, media_id),
+        ).fetchone()
+    except sqlite3.Error:
+        return None
+    finally:
+        conn.close()
+    if row is None:
+        return None
+    try:
+        digest = validate_digest(row[0])
+    except (TypeError, ValueError):
+        return None
+    if recorded_digest is not None:
+        try:
+            if validate_digest(recorded_digest) != digest:
+                return None
+        except (TypeError, ValueError):
+            return None
+    resolved = resolve_owned_managed_media(
+        projects_root=root,
+        project_ref=project_ref,
+        content_hash=digest,
+    )
+    mime_type = row[1]
+    if resolved is None or not isinstance(mime_type, str) or not mime_type.strip():
+        return None
+    return resolved, digest, mime_type
+
+
 def rebase_timeline_registry_managed_assets(
     registry: Mapping[str, Any],
     *,
@@ -137,13 +190,15 @@ def rebase_timeline_registry_managed_assets(
 ) -> dict[str, Any]:
     """Return a derived registry with stale managed CAS locators refreshed.
 
-    Only entries that use Astrid's complete absolute managed digest-tree shape
-    are eligible.  An explicit registry hash must agree with the locator; when
-    it is absent, the strict ``sha256/aa/bb/<digest>`` locator supplies the
-    candidate digest.  The destination kernel row, canonical locator, regular
-    file, and current bytes must still prove that digest before rebasing.  The
-    returned copy changes no kernel row, timeline event, history snapshot, or
-    command receipt.
+    Entries may identify managed bytes either by Astrid's complete absolute
+    digest-tree shape or by a project-owned kernel ``media_id`` when no file
+    locator is supplied. An explicit registry hash must agree with the locator
+    or media row; when it is absent, the strict ``sha256/aa/bb/<digest>``
+    locator or owned media row supplies the candidate digest. The destination
+    kernel row, canonical locator, regular file, and current bytes must still
+    prove that digest before rebasing. The returned copy changes no kernel row,
+    timeline event, history snapshot, or command receipt. Explicit non-managed
+    file locators are left untouched.
     """
 
     rebased = copy.deepcopy(dict(registry))
@@ -153,12 +208,26 @@ def rebase_timeline_registry_managed_assets(
     for entry in raw_assets.values():
         if not isinstance(entry, dict):
             continue
-        locator_digest = _managed_locator_digest(entry.get("file"))
-        if locator_digest is None:
-            continue
         recorded_digest = (
             entry.get("content_sha256") or entry.get("sha256") or entry.get("hash")
         )
+        raw_file = entry.get("file")
+        locator_digest = _managed_locator_digest(raw_file)
+        if locator_digest is None:
+            if isinstance(raw_file, str) and raw_file.strip():
+                continue
+            resolved_by_id = _resolve_owned_managed_media_id(
+                projects_root=projects_root,
+                project_ref=project_ref,
+                media_id=entry.get("media_id"),
+                recorded_digest=recorded_digest,
+            )
+            if resolved_by_id is not None:
+                resolved, digest, mime_type = resolved_by_id
+                entry["file"] = str(resolved)
+                entry.setdefault("content_sha256", digest)
+                entry.setdefault("type", mime_type)
+            continue
         if recorded_digest is not None:
             try:
                 valid_digest = validate_digest(recorded_digest)

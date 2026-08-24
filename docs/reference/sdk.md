@@ -322,9 +322,11 @@ See [platform-contract.md](../contracts/platform-contract.md).
 
 `manifest_path` is an additive optional pointer to a universal
 `manifest.json` emitted by the invoked capability. When present it is an
-absolute path. The SDK derives it from the normalized payload when the payload
-already exposes a universal manifest pointer, otherwise it falls back to
-discovering `{out}/manifest.json`.
+absolute path. For kernel-managed invocations it may be the managed-CAS path
+published at completion; callers must not infer a logical pack root from that
+file's hash-fanout parent. The SDK derives it from the normalized payload when
+the payload already exposes a universal manifest pointer, otherwise it falls
+back to discovering `{out}/manifest.json`.
 
 The discovery follows a two-step fallback:
 

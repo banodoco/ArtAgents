@@ -16,7 +16,9 @@ import math
 import os
 import shutil
 import sqlite3
+import stat
 import tempfile
+import threading
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from types import MappingProxyType
@@ -89,6 +91,114 @@ class FocusResolutionError(FrozenViewError):
     """A focus reference cannot be resolved within the frozen lineage."""
 
 
+_REHYDRATED_PACKS_LOCK = threading.Lock()
+_REHYDRATED_PACKS: dict[Path, tuple[int, int, int, int]] = {}
+
+
+def _register_rehydrated_pack(root: Path) -> None:
+    """Record one exact temp root created by this process."""
+
+    stat = root.lstat()
+    with _REHYDRATED_PACKS_LOCK:
+        _REHYDRATED_PACKS[root] = (
+            os.getpid(),
+            threading.get_ident(),
+            stat.st_dev,
+            stat.st_ino,
+        )
+
+
+def _discard_rehydrated_root(root: Path) -> None:
+    """Delete *root* only when it is an exact process-owned reconstruction."""
+
+    with _REHYDRATED_PACKS_LOCK:
+        ownership = _REHYDRATED_PACKS.pop(root, None)
+    if ownership is None:
+        return
+    creator_pid, _thread_id, expected_device, expected_inode = ownership
+    if creator_pid != os.getpid():
+        return
+    _remove_owned_directory(
+        root,
+        expected_device=expected_device,
+        expected_inode=expected_inode,
+    )
+
+
+def _remove_owned_directory(
+    root: Path,
+    *,
+    expected_device: int,
+    expected_inode: int,
+) -> None:
+    """Remove one exact directory through no-follow descriptors.
+
+    The root pathname is used only to open and finally unlink the directory.
+    All recursive deletion stays attached to the verified inode. If another
+    process swaps the pathname, a non-empty replacement is never traversed or
+    deleted; the original may be left empty at its moved location instead.
+    """
+
+    open_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    open_flags |= getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    parent_fd: int | None = None
+    root_fd: int | None = None
+
+    def clear(directory_fd: int) -> None:
+        for name in os.listdir(directory_fd):
+            try:
+                before = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+            except OSError:
+                continue
+            if stat.S_ISDIR(before.st_mode):
+                child_fd: int | None = None
+                try:
+                    child_fd = os.open(name, open_flags, dir_fd=directory_fd)
+                    opened = os.fstat(child_fd)
+                    if (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino):
+                        continue
+                    clear(child_fd)
+                    current = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+                    if (current.st_dev, current.st_ino) == (opened.st_dev, opened.st_ino):
+                        os.rmdir(name, dir_fd=directory_fd)
+                except OSError:
+                    continue
+                finally:
+                    if child_fd is not None:
+                        os.close(child_fd)
+            else:
+                try:
+                    current = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+                    if (current.st_dev, current.st_ino) == (before.st_dev, before.st_ino):
+                        os.unlink(name, dir_fd=directory_fd)
+                except OSError:
+                    continue
+
+    try:
+        parent_fd = os.open(root.parent, open_flags)
+        root_fd = os.open(root.name, open_flags, dir_fd=parent_fd)
+        opened_root = os.fstat(root_fd)
+        if (opened_root.st_dev, opened_root.st_ino) != (
+            expected_device,
+            expected_inode,
+        ):
+            return
+        clear(root_fd)
+        current_root = os.stat(root.name, dir_fd=parent_fd, follow_symlinks=False)
+        if (current_root.st_dev, current_root.st_ino) == (
+            expected_device,
+            expected_inode,
+        ):
+            os.rmdir(root.name, dir_fd=parent_fd)
+    except OSError:
+        return
+    finally:
+        if root_fd is not None:
+            os.close(root_fd)
+        if parent_fd is not None:
+            os.close(parent_fd)
+
+
 def _rehydrate_managed_pack(
     manifest_path: Path,
     *,
@@ -105,7 +215,8 @@ def _rehydrate_managed_pack(
         conn = sqlite3.connect(f"file:{database}?mode=ro", uri=True)
         conn.row_factory = sqlite3.Row
         owner = conn.execute(
-            "SELECT t.id AS task_id FROM media_locations l "
+            "SELECT t.id AS task_id, o.params_json AS output_params_json "
+            "FROM media_locations l "
             "JOIN media m ON m.id = l.media_id "
             "JOIN task_outputs o ON o.media_id = m.id "
             "JOIN tasks t ON t.id = o.task_id "
@@ -114,7 +225,10 @@ def _rehydrate_managed_pack(
             "WHERE l.realm = 'managed_local' AND l.locator = ? "
             "AND p.slug = ? AND t.capability = 'rendering.timeline_visualize' "
             "AND t.status = 'succeeded' AND r.status = 'succeeded' "
-            "AND o.is_primary = 1 AND o.role = 'result' LIMIT 1",
+            "AND o.role IN ('result', 'output') "
+            "AND (json_extract(o.params_json, '$.label') = 'manifest.json' "
+            "OR json_extract(o.params_json, '$.label') LIKE '%/manifest.json') "
+            "ORDER BY t.finished_at DESC, t.id DESC, o.ordinal ASC LIMIT 1",
             (str(manifest_path), project_root.name),
         ).fetchone()
         if owner is None:
@@ -132,42 +246,241 @@ def _rehydrate_managed_pack(
         if conn is not None:
             conn.close()
 
-    pack_root = Path(tempfile.mkdtemp(prefix="astrid-frozen-view-"))
-    atexit.register(shutil.rmtree, pack_root, ignore_errors=True)
+    pack_root = Path(tempfile.mkdtemp(prefix="astrid-frozen-view-")).resolve()
+    _register_rehydrated_pack(pack_root)
+    atexit.register(_discard_rehydrated_root, pack_root)
     seen: set[str] = set()
     managed_root = (projects_root / ".astrid" / "media" / "sha256").resolve()
     try:
+        owner_params = json.loads(str(owner["output_params_json"]))
+        requested_label = owner_params.get("label") if isinstance(owner_params, dict) else None
         for row in rows:
             params = json.loads(str(row["params_json"]))
             label = params.get("label") if isinstance(params, dict) else None
             digest = str(row["content_hash"])
             source = Path(str(row["locator"])).resolve(strict=True)
             expected_source = managed_root / digest[:2] / digest[2:4] / digest
+            label_path = Path(label) if isinstance(label, str) else None
             if (
-                not isinstance(label, str)
+                label_path is None
                 or not label
-                or Path(label).name != label
+                or label == "."
+                or "\\" in label
+                or label_path.is_absolute()
+                or ".." in label_path.parts
+                or label_path.as_posix() != label
                 or label in seen
                 or source != expected_source
                 or hashlib.sha256(source.read_bytes()).hexdigest() != digest
             ):
                 raise ContainmentError("managed visualization output set is malformed")
             seen.add(label)
-            destination = pack_root / label
-            try:
-                os.link(source, destination)
-            except OSError:
-                shutil.copy2(source, destination)
-    except Exception:
-        shutil.rmtree(pack_root, ignore_errors=True)
+            destination = (pack_root / label_path).resolve()
+            if not destination.is_relative_to(pack_root):
+                raise ContainmentError("managed visualization output set is malformed")
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            # A caller-visible frozen view must never share an inode with
+            # managed CAS. An accidental write to the view must not mutate
+            # the authoritative object.
+            shutil.copy2(source, destination)
+    except FrozenViewError:
+        _discard_rehydrated_root(pack_root)
         raise
-    candidate = pack_root / MANIFEST_NAME
-    if not candidate.is_file() or PACK_HASHES_NAME not in seen:
-        shutil.rmtree(pack_root, ignore_errors=True)
+    except (OSError, TypeError, ValueError) as exc:
+        _discard_rehydrated_root(pack_root)
+        raise FrozenIntegrityError(
+            f"managed visualization output set cannot be reconstructed: {exc}"
+        ) from exc
+    requested_path = Path(requested_label) if isinstance(requested_label, str) else None
+    if (
+        requested_path is None
+        or requested_path.is_absolute()
+        or ".." in requested_path.parts
+        or requested_path.name != MANIFEST_NAME
+        or requested_path.as_posix() != requested_label
+    ):
+        _discard_rehydrated_root(pack_root)
+        raise ContainmentError("selected managed output is not a visualization manifest")
+    root_candidate = pack_root / MANIFEST_NAME
+    candidate = pack_root / requested_path
+    try:
+        root_manifest = json.loads(root_candidate.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        root_manifest = None
+    has_navigation_ledger = PACK_HASHES_NAME in seen
+    if (
+        isinstance(root_manifest, dict)
+        and root_manifest.get("kind") == "timeline_visualize_project"
+    ):
+        reading_order = root_manifest.get("reading_order")
+        has_navigation_ledger = bool(reading_order) and isinstance(reading_order, list)
+        if has_navigation_ledger:
+            for raw_child in reading_order:
+                child = Path(raw_child) if isinstance(raw_child, str) else None
+                if (
+                    child is None
+                    or child.is_absolute()
+                    or ".." in child.parts
+                    or child.name != MANIFEST_NAME
+                    or child.as_posix() != raw_child
+                    or raw_child not in seen
+                    or (child.parent / PACK_HASHES_NAME).as_posix() not in seen
+                ):
+                    has_navigation_ledger = False
+                    break
+    if not candidate.is_file() or not has_navigation_ledger:
+        _discard_rehydrated_root(pack_root)
         raise FrozenIntegrityError(
             "managed visualization pack predates durable navigation support; rerun visualization"
         )
     return candidate
+
+
+def discard_rehydrated_pack(path: Path) -> None:
+    """Remove a temporary managed-pack reconstruction, if *path* belongs to one."""
+
+    candidate = Path(path).expanduser().resolve(strict=False)
+    with _REHYDRATED_PACKS_LOCK:
+        roots = tuple(_REHYDRATED_PACKS)
+    for root in roots:
+        if candidate == root or candidate.is_relative_to(root):
+            _discard_rehydrated_root(root)
+            return
+
+
+def rehydrate_managed_pack(
+    manifest_path: Path,
+    *,
+    project_root: Path,
+) -> Path:
+    """Reassemble a completed kernel visualization output as a logical pack.
+
+    Unlike :func:`load_frozen_view`, this accepts both a single-timeline leaf
+    manifest and a multi-timeline project manifest. Ownership and every CAS
+    member digest are verified by the kernel task-output reconstruction; the
+    returned directory is a copied, disposable view and never shares inodes
+    with managed media.
+    """
+
+    durable_manifest = Path(manifest_path).expanduser().resolve(strict=False)
+    project = Path(project_root).expanduser().resolve(strict=True)
+    manifest = _rehydrate_managed_pack(
+        durable_manifest,
+        project_root=project,
+    )
+    if manifest is None:
+        raise ContainmentError(
+            "manifest is not the durable output of a completed project visualization"
+        )
+    try:
+        document = _load_json_file(
+            manifest,
+            label="managed visualization manifest",
+            error_type=FrozenSchemaError,
+        )
+        kind = document.get("kind")
+        if kind == "timeline_visualize":
+            # Re-enter through the complete leaf verifier: schema, full pack
+            # ledger, cross-artifact identity, and project ownership all run
+            # before this directory is exposed to the SDK.
+            verified = load_frozen_view(
+                durable_manifest,
+                project_root=project,
+            )
+            discard_rehydrated_pack(manifest)
+            return verified.pack_root
+        if kind != "timeline_visualize_project":
+            raise FrozenSchemaError(f"managed visualization manifest has unsupported kind {kind!r}")
+
+        inputs = document.get("inputs")
+        if not isinstance(inputs, dict) or inputs.get("project_slug") != project.name:
+            raise ContainmentError(
+                "managed project visualization identity disagrees with its owning project"
+            )
+        reading_order = document.get("reading_order")
+        timeline_ids = document.get("timeline_ids")
+        outputs = document.get("outputs")
+        entrypoints = document.get("entrypoints")
+        if (
+            document.get("schema_version") != 1
+            or not isinstance(reading_order, list)
+            or not reading_order
+            or not isinstance(timeline_ids, list)
+            or not all(isinstance(item, str) and item for item in timeline_ids)
+            or len(set(timeline_ids)) != len(timeline_ids)
+            or len(timeline_ids) != len(reading_order)
+            or not isinstance(outputs, list)
+            or len(outputs) != len(reading_order)
+            or not isinstance(entrypoints, dict)
+        ):
+            raise FrozenSchemaError("managed project visualization has an invalid project index")
+        root = manifest.parent
+        managed_root = (project.parent / ".astrid" / "media" / "sha256").resolve()
+        child_ids: list[str] = []
+        declared_roots: set[str] = set()
+        for index, raw_child in enumerate(reading_order, start=1):
+            root_name = f"TL{index:02d}"
+            declared_output = outputs[index - 1]
+            child = Path(raw_child) if isinstance(raw_child, str) else None
+            if (
+                not isinstance(declared_output, dict)
+                or declared_output.get("name") != root_name
+                or declared_output.get("path") != root_name
+                or declared_output.get("type") != "directory"
+                or (
+                    "manifest_sha256" in declared_output
+                    and not isinstance(declared_output.get("manifest_sha256"), str)
+                )
+                or entrypoints.get(root_name) != raw_child
+                or child is None
+                or child.is_absolute()
+                or ".." in child.parts
+                or child.parent.as_posix() != root_name
+                or child.name != MANIFEST_NAME
+                or child.as_posix() != raw_child
+            ):
+                raise FrozenSchemaError(
+                    "managed project visualization has an invalid child manifest path"
+                )
+            child_path = (root / child).resolve(strict=True)
+            if not child_path.is_relative_to(root):
+                raise ContainmentError("managed project visualization child escapes the pack")
+            child_digest = hashlib.sha256(child_path.read_bytes()).hexdigest()
+            if (
+                "manifest_sha256" in declared_output
+                and declared_output["manifest_sha256"] != child_digest
+            ):
+                raise FrozenIntegrityError(
+                    "project manifest child digest disagrees with its declared output"
+                )
+            child_cas = managed_root / child_digest[:2] / child_digest[2:4] / child_digest
+            child_view = load_frozen_view(child_cas, project_root=project)
+            child_ids.append(child_view.timeline_ulid)
+            discard_rehydrated_pack(child_view.pack_root)
+            declared_roots.add(child.parts[0])
+        if len(set(child_ids)) != len(child_ids):
+            raise FrozenIntegrityError(
+                "project manifest resolves more than one root to the same timeline"
+            )
+        if timeline_ids != child_ids:
+            raise FrozenIntegrityError(
+                "project manifest timeline_ids disagree with verified child packs"
+            )
+        actual_roots = {path.name for path in root.iterdir() if path.is_dir()}
+        actual_files = {path.name for path in root.iterdir() if path.is_file()}
+        if actual_roots != declared_roots or actual_files != {MANIFEST_NAME}:
+            raise FrozenIntegrityError(
+                "managed project visualization contains undeclared root artifacts"
+            )
+        return root
+    except FrozenViewError:
+        discard_rehydrated_pack(manifest)
+        raise
+    except (OSError, TypeError, ValueError) as exc:
+        discard_rehydrated_pack(manifest)
+        raise FrozenIntegrityError(
+            f"managed project visualization cannot be verified: {exc}"
+        ) from exc
 
 
 class _DuplicateJsonKey(ValueError):
@@ -302,7 +615,9 @@ def _verify_pack(pack_root: Path) -> tuple[dict, dict[str, bytes]]:
         "reading_guide": "reading-guide.md",
     }
     if coverage != expected_coverage:
-        raise FrozenIntegrityError("pack-hashes.json coverage does not name every mandatory core artifact")
+        raise FrozenIntegrityError(
+            "pack-hashes.json coverage does not name every mandatory core artifact"
+        )
     files = ledger.get("files")
     if not isinstance(files, dict) or not files:
         raise FrozenIntegrityError("pack-hashes.json files must be a non-empty object")
@@ -344,7 +659,9 @@ def _verify_pack(pack_root: Path) -> tuple[dict, dict[str, bytes]]:
             payload = path.read_bytes()
         except OSError as exc:
             raise FrozenIntegrityError(f"cannot read hashed artifact {raw}: {exc}") from exc
-        if len(payload) != expected_bytes or not hmac.compare_digest(_sha256(payload), expected_hash):
+        if len(payload) != expected_bytes or not hmac.compare_digest(
+            _sha256(payload), expected_hash
+        ):
             raise FrozenIntegrityError(f"sha256/byte-count mismatch for {raw}")
         payloads[rel] = payload
 
@@ -371,14 +688,18 @@ def _verify_pack(pack_root: Path) -> tuple[dict, dict[str, bytes]]:
         if not isinstance(ledger_record, dict):
             raise FrozenIntegrityError(f"manifest output is not covered by pack hashes: {raw_path}")
         if record.get("bytes") != ledger_record.get("bytes"):
-            raise FrozenIntegrityError(f"manifest byte count disagrees with pack hashes: {raw_path}")
+            raise FrozenIntegrityError(
+                f"manifest byte count disagrees with pack hashes: {raw_path}"
+            )
         raw_digest = record.get("sha256")
         content_hash = record.get("content_hash")
         expected_digest = ledger_record.get("sha256")
         if raw_digest is not None and raw_digest != expected_digest:
             raise FrozenIntegrityError(f"manifest sha256 disagrees with pack hashes: {raw_path}")
         if content_hash != f"sha256:{expected_digest}":
-            raise FrozenIntegrityError(f"manifest content_hash disagrees with pack hashes: {raw_path}")
+            raise FrozenIntegrityError(
+                f"manifest content_hash disagrees with pack hashes: {raw_path}"
+            )
     if declared != [MANIFEST_NAME, *output_paths]:
         raise FrozenIntegrityError("pack-hashes.json reading order disagrees with manifest outputs")
     return manifest, payloads
@@ -391,13 +712,14 @@ def _schema_registry() -> tuple[dict[str, dict], Registry]:
     for name, descriptor in SCHEMAS.items():
         documents[name] = descriptor.load()
     resources = [
-        (document["$id"], Resource.from_contents(document))
-        for document in documents.values()
+        (document["$id"], Resource.from_contents(document)) for document in documents.values()
     ]
     return documents, Registry().with_resources(resources)
 
 
-def _validate_schema(name: str, value: dict, documents: dict[str, dict], registry: Registry) -> None:
+def _validate_schema(
+    name: str, value: dict, documents: dict[str, dict], registry: Registry
+) -> None:
     validator = Draft202012Validator(
         documents[name],
         registry=registry,
@@ -436,11 +758,15 @@ def _reconstruct_identity_map(ground_truth: dict, snapshot: dict) -> IdentityMap
 
     allocator = RootIdMap()
     ordinary_rows = ground_truth.get("objects")
-    ordinary_by_ref = {
-        row.get("qualified_ref"): row
-        for row in ordinary_rows
-        if isinstance(row, dict) and isinstance(row.get("qualified_ref"), str)
-    } if isinstance(ordinary_rows, list) else {}
+    ordinary_by_ref = (
+        {
+            row.get("qualified_ref"): row
+            for row in ordinary_rows
+            if isinstance(row, dict) and isinstance(row.get("qualified_ref"), str)
+        }
+        if isinstance(ordinary_rows, list)
+        else {}
+    )
     seen_rows: dict[str, dict] = {}
     for index, row in enumerate(rows):
         if not isinstance(row, dict):
@@ -465,7 +791,9 @@ def _reconstruct_identity_map(ground_truth: dict, snapshot: dict) -> IdentityMap
         try:
             allocator.add(identity, display_id)  # validates grammar/kind/ordinals
         except (TypeError, ValueError) as exc:
-            raise FrozenIntegrityError(f"invalid frozen identity allocation {display_id}: {exc}") from exc
+            raise FrozenIntegrityError(
+                f"invalid frozen identity allocation {display_id}: {exc}"
+            ) from exc
         seen_rows[display_id] = row
     for ref, row in ordinary_by_ref.items():
         if ref not in seen_rows or seen_rows[ref] != row:
@@ -482,7 +810,10 @@ def _reconstruct_identity_map(ground_truth: dict, snapshot: dict) -> IdentityMap
     ).child_copy()
     timeline_display = timeline.get("qualified_ref")
     expected_timeline_identity = (timeline_uuid, "timeline", timeline_uuid)
-    if timeline_display != timeline.get("stable_id") or identity_map.lookup_display(timeline_display) != expected_timeline_identity:
+    if (
+        timeline_display != timeline.get("stable_id")
+        or identity_map.lookup_display(timeline_display) != expected_timeline_identity
+    ):
         raise FrozenIntegrityError("snapshot timeline identity disagrees with the frozen ID map")
     return identity_map
 
@@ -492,7 +823,9 @@ def _verify_model_refs(ground_truth: dict, identity_map: IdentityMap) -> None:
     if not isinstance(timeline, dict):
         raise FrozenIntegrityError("ground-truth.json has no frozen timeline model")
     timeline_ref = timeline.get("timeline_ref")
-    timeline_identity = identity_map.lookup_display(timeline_ref) if isinstance(timeline_ref, str) else None
+    timeline_identity = (
+        identity_map.lookup_display(timeline_ref) if isinstance(timeline_ref, str) else None
+    )
     if timeline_identity is None or timeline_identity[1] != "timeline":
         raise FrozenIntegrityError("frozen timeline_ref does not resolve through the ID map")
 
@@ -525,8 +858,14 @@ def _verify_model_refs(ground_truth: dict, identity_map: IdentityMap) -> None:
                 raise FrozenIntegrityError(f"frozen timeline {collection} contains a non-object")
             ref = row.get("qualified_ref")
             identity = identity_map.lookup_display(ref) if isinstance(ref, str) else None
-            if identity is None or identity[1] != expected_kind or row.get("canonical_ref") != _canonical_ref(identity):
-                raise FrozenIntegrityError(f"frozen timeline ref does not match the ID map: {ref!r}")
+            if (
+                identity is None
+                or identity[1] != expected_kind
+                or row.get("canonical_ref") != _canonical_ref(identity)
+            ):
+                raise FrozenIntegrityError(
+                    f"frozen timeline ref does not match the ID map: {ref!r}"
+                )
             typed_rows.append(row)
             refs.add(ref)
             if collection == "clips":
@@ -567,7 +906,11 @@ def _verify_model_refs(ground_truth: dict, identity_map: IdentityMap) -> None:
         for row in rows:
             ref = row.get("qualified_ref") if isinstance(row, dict) else None
             identity = identity_map.lookup_display(ref) if isinstance(ref, str) else None
-            if identity is None or identity[1] != expected_kind or row.get("canonical_ref") != _canonical_ref(identity):
+            if (
+                identity is None
+                or identity[1] != expected_kind
+                or row.get("canonical_ref") != _canonical_ref(identity)
+            ):
                 raise FrozenIntegrityError(f"{key} ref does not match the ID map: {ref!r}")
             if key == "frozen_shots":
                 for clip_id in row.get("member_clip_ids", []):
@@ -585,7 +928,9 @@ def _verify_action_refs(action_index: dict, identity_map: IdentityMap) -> None:
     for ref, entry in entries.items():
         identity = identity_map.lookup_display(ref)
         if identity is None:
-            raise FrozenIntegrityError(f"action-index entry does not resolve through ground truth: {ref}")
+            raise FrozenIntegrityError(
+                f"action-index entry does not resolve through ground truth: {ref}"
+            )
         if not isinstance(entry, dict) or entry.get("canonical_ref") != _canonical_ref(identity):
             raise FrozenIntegrityError(f"action-index canonical_ref disagrees for {ref}")
         relations = entry.get("relations")
@@ -609,21 +954,32 @@ def _verify_action_refs(action_index: dict, identity_map: IdentityMap) -> None:
             try:
                 parsed = parse_qualified_ref(focus)
             except ValueError as exc:
-                raise FrozenIntegrityError(f"action {ref}.{action_name} has malformed focus") from exc
+                raise FrozenIntegrityError(
+                    f"action {ref}.{action_name} has malformed focus"
+                ) from exc
             if not parsed.is_timestamp and identity_map.lookup_display(str(parsed)) is None:
-                raise FrozenIntegrityError(f"action {ref}.{action_name} focus is absent from ground truth")
+                raise FrozenIntegrityError(
+                    f"action {ref}.{action_name} focus is absent from ground truth"
+                )
             timeline_identity = identity_map.lookup_display(parsed.timeline_id)
             if timeline_identity is None or timeline_identity[1] != "timeline":
                 raise FrozenIntegrityError(f"action {ref}.{action_name} targets another timeline")
 
 
-def _verify_run_ownership(manifest_path: Path, project_root: Path, manifest: dict, timeline_ulid: str) -> None:
+def _verify_run_ownership(
+    manifest_path: Path, project_root: Path, manifest: dict, timeline_ulid: str
+) -> None:
     try:
         relative = manifest_path.relative_to(project_root)
     except ValueError as exc:
         raise ContainmentError("manifest is not project-owned") from exc
     parts = relative.parts
-    if len(parts) < 4 or parts[0] != "runs" or parts[2] != "agent-view" or parts[-1] != MANIFEST_NAME:
+    if (
+        len(parts) < 4
+        or parts[0] != "runs"
+        or parts[2] != "agent-view"
+        or parts[-1] != MANIFEST_NAME
+    ):
         raise ContainmentError("manifest is not inside a project-owned visualization run")
     run_id = parts[1]
     runs_root = (project_root / "runs").resolve(strict=True)
@@ -642,7 +998,9 @@ def _verify_run_ownership(manifest_path: Path, project_root: Path, manifest: dic
     kernel_info = _kernel_frozen_run_info(project_slug, run_id, project_root.parent)
     if kernel_info is not None:
         if kernel_info.get("status") not in ("succeeded", "completed"):
-            raise ContainmentError("kernel run does not own this timeline visualization pack (not completed)")
+            raise ContainmentError(
+                "kernel run does not own this timeline visualization pack (not completed)"
+            )
         if kernel_info.get("capability") not in (None, "rendering.timeline_visualize"):
             # Enforce when capability known
             if kernel_info.get("capability") != "rendering.timeline_visualize":
@@ -696,7 +1054,9 @@ def _verify_run_ownership(manifest_path: Path, project_root: Path, manifest: dic
                 error_type=ContainmentError,
             )
             reading_order = root_manifest.get("reading_order")
-            if root_manifest.get("kind") != "timeline_visualize_project" or not isinstance(reading_order, list):
+            if root_manifest.get("kind") != "timeline_visualize_project" or not isinstance(
+                reading_order, list
+            ):
                 raise ContainmentError("leaf pack is not declared by its run manifest")
             declared: set[Path] = set()
             for raw_child in reading_order:
@@ -713,7 +1073,9 @@ def _verify_run_ownership(manifest_path: Path, project_root: Path, manifest: dic
         raise ContainmentError("manifest project identity disagrees with its owning run")
 
 
-def _kernel_frozen_run_info(project_slug: str, run_id: str, projects_root: Path) -> dict[str, Any] | None:
+def _kernel_frozen_run_info(
+    project_slug: str, run_id: str, projects_root: Path
+) -> dict[str, Any] | None:
     try:
         from astrid.core.kernel.read import kernel_run_info
 
@@ -728,7 +1090,8 @@ def _kernel_frozen_run_info(project_slug: str, run_id: str, projects_root: Path)
     except sqlite3.Error:
         return None
 
-def load_frozen_view(manifest_path: Path, *, project_root: Path) -> FrozenView:
+
+def _load_frozen_view_impl(manifest_path: Path, *, project_root: Path) -> FrozenView:
     """Verify and load a frozen evidence pack for drill-down.
 
     Preflight order is deliberate: project containment, complete pack hashes,
@@ -739,6 +1102,8 @@ def load_frozen_view(manifest_path: Path, *, project_root: Path) -> FrozenView:
     project = Path(project_root).expanduser().resolve(strict=True)
     raw_manifest = Path(manifest_path).expanduser()
     absolute_manifest = raw_manifest if raw_manifest.is_absolute() else Path.cwd() / raw_manifest
+    if absolute_manifest.is_symlink():
+        raise ContainmentError("--from-view manifest must not be a symlink")
     resolved_manifest = absolute_manifest.resolve(strict=False)
     source_manifest = resolved_manifest
     managed_output = False
@@ -755,8 +1120,6 @@ def load_frozen_view(manifest_path: Path, *, project_root: Path) -> FrozenView:
         resolved_manifest = rehydrated
         absolute_manifest = rehydrated
         managed_output = True
-    if absolute_manifest.is_symlink():
-        raise ContainmentError("--from-view manifest must not be a symlink")
     if not resolved_manifest.is_file() or resolved_manifest.name != MANIFEST_NAME:
         raise FrozenIntegrityError("--from-view must name an existing manifest.json")
     pack_root = resolved_manifest.parent.resolve(strict=True)
@@ -795,6 +1158,8 @@ def load_frozen_view(manifest_path: Path, *, project_root: Path) -> FrozenView:
 
     # 4. Cross-artifact chain of trust and deterministic ID reconstruction.
     ground_truth = core["ground-truth"]
+    if ground_truth.get("project_slug") != project.name:
+        raise ContainmentError("ground-truth project identity disagrees with its owning project")
     action_index = core["action-index"]
     for key, expected_type in (
         ("frozen_objects", list),
@@ -826,15 +1191,25 @@ def load_frozen_view(manifest_path: Path, *, project_root: Path) -> FrozenView:
     for asset in asset_index.get("assets", []):
         ref = asset.get("qualified_ref") if isinstance(asset, dict) else None
         identity = identity_map.lookup_display(ref) if isinstance(ref, str) else None
-        if identity is None or identity[1] != "asset" or asset.get("canonical_ref") != _canonical_ref(identity):
-            raise FrozenIntegrityError(f"asset-index ref does not resolve through ground truth: {ref!r}")
+        if (
+            identity is None
+            or identity[1] != "asset"
+            or asset.get("canonical_ref") != _canonical_ref(identity)
+        ):
+            raise FrozenIntegrityError(
+                f"asset-index ref does not resolve through ground truth: {ref!r}"
+            )
 
     transcript_index = core["transcript-index"]
     source_refs: set[str] = set()
     for source in transcript_index.get("sources", []):
         ref = source.get("qualified_ref") if isinstance(source, dict) else None
         identity = identity_map.lookup_display(ref) if isinstance(ref, str) else None
-        asset_identity = identity_map.lookup_display(source.get("asset_ref")) if isinstance(source, dict) else None
+        asset_identity = (
+            identity_map.lookup_display(source.get("asset_ref"))
+            if isinstance(source, dict)
+            else None
+        )
         if (
             identity is None
             or identity[1] != "transcript_source_segment"
@@ -847,8 +1222,16 @@ def load_frozen_view(manifest_path: Path, *, project_root: Path) -> FrozenView:
     for occurrence in transcript_index.get("speech_occurrences", []):
         ref = occurrence.get("qualified_ref") if isinstance(occurrence, dict) else None
         identity = identity_map.lookup_display(ref) if isinstance(ref, str) else None
-        clip_identity = identity_map.lookup_display(occurrence.get("clip_ref")) if isinstance(occurrence, dict) else None
-        asset_identity = identity_map.lookup_display(occurrence.get("asset_ref")) if isinstance(occurrence, dict) else None
+        clip_identity = (
+            identity_map.lookup_display(occurrence.get("clip_ref"))
+            if isinstance(occurrence, dict)
+            else None
+        )
+        asset_identity = (
+            identity_map.lookup_display(occurrence.get("asset_ref"))
+            if isinstance(occurrence, dict)
+            else None
+        )
         if (
             identity is None
             or identity[1] != "speech_occurrence"
@@ -882,9 +1265,39 @@ def load_frozen_view(manifest_path: Path, *, project_root: Path) -> FrozenView:
     _verify_deterministic_identity_map(frozen)
 
     # 5. The pack must be owned by the exact completed project run.
-    if not managed_output:
+    if managed_output:
+        inputs = manifest.get("inputs")
+        if not isinstance(inputs, dict) or inputs.get("timeline_source") != [project.name]:
+            raise ContainmentError(
+                "managed visualization identity disagrees with its owning project"
+            )
+    else:
         _verify_run_ownership(resolved_manifest, project, manifest, timeline_ulid)
     return frozen
+
+
+def load_frozen_view(manifest_path: Path, *, project_root: Path) -> FrozenView:
+    """Load a view and reclaim any managed reconstruction when verification fails."""
+
+    owner = threading.get_ident()
+    with _REHYDRATED_PACKS_LOCK:
+        before = {
+            root
+            for root, ownership in _REHYDRATED_PACKS.items()
+            if ownership[0] == os.getpid() and ownership[1] == owner
+        }
+    try:
+        return _load_frozen_view_impl(manifest_path, project_root=project_root)
+    except Exception:
+        with _REHYDRATED_PACKS_LOCK:
+            after = {
+                root
+                for root, ownership in _REHYDRATED_PACKS.items()
+                if ownership[0] == os.getpid() and ownership[1] == owner
+            }
+        for root in after - before:
+            _discard_rehydrated_root(root)
+        raise
 
 
 def _frozen_timeline(frozen: FrozenView) -> dict:
@@ -946,9 +1359,7 @@ def model_from_frozen(frozen: FrozenView) -> TimelineInspectionModel:
             float(row["at_seconds"]) + float(source_bounds["duration_seconds"]),
         )
         frames = IntervalFrames(int(row["start_frame"]), int(row["end_frame"]), fps)
-        mounted = _interval_frames(
-            row["mounted_interval"], fps=fps, label="mounted_interval"
-        )
+        mounted = _interval_frames(row["mounted_interval"], fps=fps, label="mounted_interval")
         if mounted is None:  # schema plus preflight make this unreachable
             raise FrozenIntegrityError("mounted_interval must not be null")
         transition_document = row.get("transition")
@@ -1038,11 +1449,7 @@ def model_from_frozen(frozen: FrozenView) -> TimelineInspectionModel:
     composition = durations["all_track_composition"]
     visual = durations["frame_quantized_visual_end"]
     audible_frames = max(
-        (
-            clip.frames.end_frame
-            for clip in clips
-            if track_kinds.get(clip.track_id) == "audio"
-        ),
+        (clip.frames.end_frame for clip in clips if track_kinds.get(clip.track_id) == "audio"),
         default=0,
     )
     extents = ModelExtents(
@@ -1144,9 +1551,7 @@ def _verify_deterministic_identity_map(frozen: FrozenView) -> None:
 
     actual_semantic = dict(frozen.identity_map.semantic_to_display)
     expected_semantic = dict(rebuilt.semantic_to_display)
-    actual_order = [
-        row["qualified_ref"] for row in frozen.ground_truth["frozen_objects"]
-    ]
+    actual_order = [row["qualified_ref"] for row in frozen.ground_truth["frozen_objects"]]
     expected_order = list(rebuilt.display_to_semantic)
     if actual_semantic != expected_semantic or actual_order != expected_order:
         raise FrozenIntegrityError(
@@ -1209,11 +1614,20 @@ def snapshot_from_frozen(frozen: FrozenView, model: TimelineInspectionModel) -> 
         "tracks": assembly_tracks,
         "clips": assembly_clips,
         "pinnedShotGroups": [
-            {"shotId": shot.shot_id, "clipIds": list(shot.member_clip_ids)}
-            for shot in model.shots
+            {"shotId": shot.shot_id, "clipIds": list(shot.member_clip_ids)} for shot in model.shots
         ],
     }
     registry_assets: dict[str, dict[str, Any]] = {}
+    frozen_media_types: dict[str, str] = {}
+    for row in frozen.asset_index.get("assets", []):
+        identity = frozen.identity_map.lookup_display(row.get("qualified_ref"))
+        media_type = row.get("media_type")
+        if (
+            identity is not None
+            and identity[1] == "asset"
+            and media_type in {"image", "video", "audio"}
+        ):
+            frozen_media_types[identity[2]] = media_type
     for key, integrity in model.media_integrity.items():
         entry: dict[str, Any] = {"role": integrity.role}
         if integrity.path is not None:
@@ -1224,6 +1638,8 @@ def snapshot_from_frozen(frozen: FrozenView, model: TimelineInspectionModel) -> 
             entry["sourceId"] = integrity.source_id
         if integrity.source_version is not None:
             entry["sourceVersion"] = integrity.source_version
+        if key in frozen_media_types:
+            entry["type"] = frozen_media_types[key]
         registry_assets[key] = entry
     head = frozen.manifest["snapshots"][0]["event_head"]
     return TimelineSnapshot(
@@ -1277,7 +1693,9 @@ def resolve_focus(
         raise FocusResolutionError(str(exc)) from exc
     timeline_identity = frozen.identity_map.lookup_display(parsed.timeline_id)
     if timeline_identity is None or timeline_identity[1] != "timeline":
-        raise FocusResolutionError(f"timeline display id {parsed.timeline_id!r} is not in this snapshot")
+        raise FocusResolutionError(
+            f"timeline display id {parsed.timeline_id!r} is not in this snapshot"
+        )
     if neighbors is not None and (
         isinstance(neighbors, bool) or not isinstance(neighbors, int) or neighbors < 0
     ):
@@ -1306,9 +1724,7 @@ def resolve_focus(
         return select_scope(model, kind="timeline", ref=str(parsed), context_seconds=0, neighbors=0)
     if parsed.kind in {"TS", "SP"}:
         identity = frozen.identity_map.lookup_display(str(parsed))
-        expected = (
-            "transcript_source_segment" if parsed.kind == "TS" else "speech_occurrence"
-        )
+        expected = "transcript_source_segment" if parsed.kind == "TS" else "speech_occurrence"
         if identity is None or identity[1] != expected:
             noun = "transcript segment" if parsed.kind == "TS" else "mapped speech occurrence"
             raise FocusResolutionError(f"{noun} {focus_ref!r} is not available in this snapshot")
@@ -1352,7 +1768,9 @@ def resolve_focus(
 
     identity = frozen.identity_map.lookup_display(str(parsed))
     if identity is None:
-        raise FocusResolutionError(f"display id {focus_ref!r} is not present in the frozen identity map")
+        raise FocusResolutionError(
+            f"display id {focus_ref!r} is not present in the frozen identity map"
+        )
     expected_kind = {"CL": "clip", "SH": "shot", "RG": "range", "AS": "asset"}.get(parsed.kind)
     if identity[1] != expected_kind:
         raise FocusResolutionError(f"display id {focus_ref!r} has the wrong semantic kind")

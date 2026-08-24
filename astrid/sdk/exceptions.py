@@ -115,6 +115,8 @@ def _looks_like_missing_input(message: str) -> bool:
 def _sdk_error_from_exception(exc: Any) -> AstridSDKError | None:
     if isinstance(exc, AstridSDKError):
         return exc
+    if isinstance(exc, ProjectPathError):
+        return CapabilityValidationError(str(exc))
 
     from astrid.core.contracts.event_log_error import EventLogError
     from astrid.core.events import NotWriterError, StaleEpochError, StaleTailError

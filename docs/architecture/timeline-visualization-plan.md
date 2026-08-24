@@ -91,11 +91,13 @@ astrid timelines visualize plant-growth-storyboard \
 
 # Snapshot-consistent drill-down from an existing visualization run
 astrid timelines visualize \
+  --project desert-plant-growth \
   --from-view /absolute/path/to/agent-view/manifest.json \
   --focus TL01.CL03
 
 # An arbitrary timestamp inside that same frozen snapshot
 astrid timelines visualize \
+  --project desert-plant-growth \
   --from-view /absolute/path/to/agent-view/manifest.json \
   --focus TL01@00:12.000
 
@@ -181,6 +183,7 @@ uses one learned operation:
 
 ```bash
 astrid timelines visualize \
+  --project desert-plant-growth \
   --from-view /absolute/path/to/agent-view/manifest.json \
   --focus TL01.CL03 \
   --context 2
@@ -247,6 +250,7 @@ shell-escaped strings:
         "kind": "visualize",
         "argv": [
           "python3", "-m", "astrid", "timelines", "visualize",
+          "--project", "desert-plant-growth",
           "--from-view", "/absolute/.../manifest.json",
           "--focus", "TL01.CL03",
           "--context", "2"

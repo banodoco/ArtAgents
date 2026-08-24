@@ -154,6 +154,7 @@ class ExecutorRunRequest:
     run_root: Path | str | None = None
     run_id: str | None = None
     project_run_metadata: Mapping[str, Any] = field(default_factory=dict)
+    expected_executor_version: str | None = None
 
 
 @dataclass(frozen=True)
@@ -197,6 +198,16 @@ class ExecutorCapabilityRunner(CapabilityRunner[ExecutorRunRequest, ExecutorRunR
 
     def request_id(self, request: ExecutorRunRequest) -> str:
         return request.executor_id
+
+    def validate_definition(
+        self, request: ExecutorRunRequest, definition: ExecutorDefinition
+    ) -> None:
+        expected = request.expected_executor_version
+        actual = executor_definition_digest(definition)
+        if expected is not None and expected != actual:
+            raise ExecutorRunnerError(
+                f"executor definition changed after admission for {definition.id!r}; retry the invocation"
+            )
 
     def build_command(
         self, request: ExecutorRunRequest, registry: ExecutorRegistry | None = None

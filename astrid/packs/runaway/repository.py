@@ -56,7 +56,7 @@ import sqlite3
 import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from astrid.core.ids import generate_lowercase_ulid
 from astrid.core.receipts.canonical import (
@@ -68,6 +68,9 @@ from astrid.core.receipts.canonical import (
 from astrid.core.repositories.errors import RepositoryError
 from astrid.core.store.uow import UnitOfWork
 from astrid.core.util.time import utc_now_iso
+
+if TYPE_CHECKING:
+    from astrid.core.receipts.service import ReceiptService
 
 RUNAWAY_CREATE_COMMAND_KIND = "runaway.create"
 """The runaway command kind that transition-create receipts are keyed on."""

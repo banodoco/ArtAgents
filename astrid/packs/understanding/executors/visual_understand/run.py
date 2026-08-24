@@ -20,11 +20,14 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 import jsonschema
+
+if TYPE_CHECKING:
+    from PIL import Image, ImageFont
 
 from astrid.core._shared.result_manifest import build_manifest, write_manifest
 from astrid.core.cli_choices import add_choice_arg

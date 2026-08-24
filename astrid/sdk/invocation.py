@@ -7,8 +7,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
+import os
+import shutil
+import tempfile
 from collections.abc import Mapping
-from contextlib import nullcontext, redirect_stdout
+from contextlib import contextmanager, nullcontext, redirect_stdout
 from io import StringIO
 from pathlib import Path
 from typing import Any
@@ -60,9 +64,9 @@ def dispatch_retried_task(
     worker implementations. Callers must invoke this only for a fresh retry
     receipt; exact receipt replays are read-only and must not dispatch again.
     """
-    from astrid.core.task_executor import CapabilityTaskHandler, ExecutionService
     from astrid.core.kernel.read import schema_registry_context
     from astrid.core.store.uow import UnitOfWork
+    from astrid.core.task_executor import CapabilityTaskHandler, ExecutionService
 
     spec = dict(getattr(task, "spec", {}) or {})
     capability_kind = str(spec.get("kind") or "executor")
@@ -71,6 +75,7 @@ def dispatch_retried_task(
         capability_id=str(task.capability),
         projects_root=projects_root,
         invocation="sdk",
+        require_executor_version=True,
     )
     service = ExecutionService(projects_root=projects_root, task_repo=task_repo)
     with schema_registry_context(registry) if registry is not None else nullcontext():
@@ -241,9 +246,7 @@ def get_capability(
     )
     return sdk_module._apply_pack_permission_ids(
         resolved,
-        pack_permission_ids_by_pack_id=sdk_module._pack_permission_ids_by_pack_id(
-            discovered_packs
-        ),
+        pack_permission_ids_by_pack_id=sdk_module._pack_permission_ids_by_pack_id(discovered_packs),
     )
 
 
@@ -279,6 +282,7 @@ def _validate_timeline_visualize_inputs(
     *,
     project: str | None,
     project_root: str | Path | None = None,
+    out: str | Path | None = None,
 ) -> dict[str, Any]:
     """Validate visualization's selector/ownership contract before admission.
 
@@ -302,6 +306,10 @@ def _validate_timeline_visualize_inputs(
             for part in str(token).split(",")
             if part.strip()
         }
+        if not formats:
+            raise CapabilityValidationError(
+                "rendering.timeline_visualize formats must contain png, svg, md, or all"
+            )
         allowed = {"png", "svg", "md", "all"}
         invalid = sorted(formats - allowed)
         if invalid:
@@ -313,8 +321,20 @@ def _validate_timeline_visualize_inputs(
             raise CapabilityValidationError(
                 "visualization format 'all' cannot be combined with another format"
             )
+    if out not in (None, ""):
+        raise CapabilityValidationError(
+            "--out is not supported for project timeline visualization; "
+            "omit it and use the returned durable manifest_path"
+        )
     source = values.get("timeline_source")
-    has_source = bool(source)
+    source_supplied = "timeline_source" in values and source is not None
+    if source_supplied and (
+        source == ""
+        or isinstance(source, (list, tuple, set))
+        and not source
+    ):
+        raise CapabilityValidationError("timeline_source must contain at least one path")
+    has_source = source_supplied
     has_ref = values.get("timeline_slug") not in (None, "")
     select_all = bool(values.get("all", False))
     if has_source and (has_ref or select_all):
@@ -332,8 +352,94 @@ def _validate_timeline_visualize_inputs(
         raise CapabilityValidationError(
             "from_view and focus must be supplied together for visualization navigation"
         )
+    cold_selectors = [
+        name
+        for name in ("shot", "range", "at", "clip", "asset")
+        if values.get(name) not in (None, "")
+    ]
+    if len(cold_selectors) > 1:
+        raise CapabilityValidationError(
+            "cold selectors are mutually exclusive: "
+            + ", ".join(f"--{name}" for name in cold_selectors)
+        )
+    refresh_root = bool(values.get("refresh_root", False))
+    if refresh_root and not from_view:
+        raise CapabilityValidationError("refresh_root requires from_view and focus")
+    if from_view:
+        conflicts = [
+            name
+            for name, present in (
+                ("timeline_source", has_source),
+                ("timeline_slug", has_ref),
+                ("all", select_all),
+                *((name, name in cold_selectors) for name in cold_selectors),
+            )
+            if present
+        ]
+        if conflicts:
+            raise CapabilityValidationError(
+                "from_view/focus cannot be combined with "
+                + ", ".join(f"--{name.replace('_', '-')}" for name in conflicts)
+            )
+    filmstrip = values.get("filmstrip")
+    rendered_video = values.get("rendered_video")
+    layout = values.get("layout")
+    if layout is not None and (
+        not isinstance(layout, str) or layout not in {"time-scaled", "linear", "both"}
+    ):
+        raise CapabilityValidationError(
+            "layout must be time-scaled, linear, or both"
+        )
+    if filmstrip is not None and (
+        not isinstance(filmstrip, str)
+        or filmstrip not in {"auto", "off", "assets", "rendered"}
+    ):
+        raise CapabilityValidationError(
+            "filmstrip must be auto, off, assets, or rendered"
+        )
+    scope = values.get("scope")
+    if scope is not None and (
+        not isinstance(scope, str)
+        or scope not in {
+            "project",
+            "timeline",
+            "shot",
+            "range",
+            "clip",
+            "asset",
+            "timestamp",
+        }
+    ):
+        raise CapabilityValidationError(
+            "scope must be project, timeline, shot, range, clip, asset, or timestamp"
+        )
+    raw_context = values.get("context", 3.0)
+    if (
+        isinstance(raw_context, bool)
+        or not isinstance(raw_context, (int, float))
+        or not math.isfinite(float(raw_context))
+        or float(raw_context) < 0
+    ):
+        raise CapabilityValidationError("context must be a finite non-negative number")
+    raw_neighbors = values.get("neighbors", 0)
+    if (
+        isinstance(raw_neighbors, bool)
+        or not isinstance(raw_neighbors, int)
+        or raw_neighbors < 0
+    ):
+        raise CapabilityValidationError("neighbors must be a non-negative integer")
+    if rendered_video not in (None, "") and filmstrip not in (None, "auto", "rendered"):
+        raise CapabilityValidationError(
+            "rendered_video requires filmstrip auto or rendered"
+        )
+    if filmstrip == "rendered" and rendered_video in (None, ""):
+        raise CapabilityValidationError("filmstrip rendered requires rendered_video")
     requested_project = values.get("project_slug")
-    if requested_project not in (None, "") and project not in (None, "") and requested_project != project:
+    if (
+        requested_project not in (None, "")
+        and project not in (None, "")
+        and requested_project != project
+    ):
         raise CapabilityValidationError(
             f"project_slug {requested_project!r} does not match project {project!r}"
         )
@@ -346,15 +452,19 @@ def _validate_timeline_visualize_inputs(
     # Resolve the same project root the kernel will bind, without opening the
     # ledger.  This keeps pre-admission ownership checks independent of the
     # ambient workspace and makes foreign absolute paths fail closed.
-    from astrid.core.foundation.project_paths import project_dir
+    from astrid.core.foundation.project_paths import ProjectPathError, project_dir
     from astrid.core.project.ownership import ProjectOwnershipError, require_project_owned_artifact
     from astrid.packs.rendering.executors.timeline_visualize.select import (
+        discover_timelines,
         select_kernel_timelines,
         select_timeline,
     )
 
     bound_root = _resolve_projects_root(project_root, project)
-    managed_project = project_dir(project, root=bound_root).resolve()
+    try:
+        managed_project = project_dir(project, root=bound_root).resolve()
+    except ProjectPathError as exc:
+        raise CapabilityValidationError(str(exc)) from exc
     if not (managed_project / "project.json").is_file():
         raise CapabilityValidationError(
             f"project not found: {project!r}; create it before visualizing a timeline"
@@ -362,16 +472,50 @@ def _validate_timeline_visualize_inputs(
 
     if from_view:
         raw_view = Path(str(values["from_view"])).expanduser()
-        view_path = (raw_view if raw_view.is_absolute() else Path.cwd() / raw_view).resolve()
+        view_path = raw_view if raw_view.is_absolute() else Path.cwd() / raw_view
         if not view_path.is_file():
             raise CapabilityValidationError(
                 f"from_view must name an existing visualization manifest: {view_path}"
             )
-        return {
-            "mode": "frozen_view",
-            "manifest_sha256": hashlib.sha256(view_path.read_bytes()).hexdigest(),
-            "focus": str(values["focus"]),
-        }
+        from astrid.packs.rendering.executors.timeline_visualize.frozen import (
+            FrozenViewError,
+            discard_rehydrated_pack,
+            load_frozen_view,
+            resolve_focus,
+        )
+        from astrid.packs.rendering.executors.timeline_visualize.ids import (
+            parse_qualified_ref,
+        )
+
+        try:
+            frozen = load_frozen_view(view_path, project_root=managed_project)
+        except FrozenViewError as exc:
+            raise CapabilityValidationError(f"from_view rejected: {exc}") from exc
+        try:
+            try:
+                resolved_focus = resolve_focus(
+                    frozen,
+                    str(values["focus"]),
+                    context_seconds=float(raw_context),
+                    neighbors=raw_neighbors,
+                )
+                parsed_focus = parse_qualified_ref(str(values["focus"]))
+            except (KeyError, TypeError, ValueError) as exc:
+                raise CapabilityValidationError(f"focus rejected: {exc}") from exc
+            if refresh_root and (
+                parsed_focus.kind != "TL" or resolved_focus.kind != "timeline"
+            ):
+                raise CapabilityValidationError(
+                    "refresh_root focus must be the frozen timeline reference"
+                )
+            return {
+                "mode": "frozen_view",
+                "manifest_sha256": hashlib.sha256(view_path.read_bytes()).hexdigest(),
+                "focus": str(values["focus"]),
+                "snapshot_sns": frozen.snapshot_sns,
+            }
+        finally:
+            discard_rehydrated_pack(frozen.pack_root)
 
     selected: list[Any] = []
     diagnostics: list[str] = []
@@ -412,8 +556,10 @@ def _validate_timeline_visualize_inputs(
         )
 
     timelines, diagnostics = select_timeline(managed_project, all=True)
+    discovered_timelines = discover_timelines(managed_project)
     timelines_root = (managed_project / "timelines").resolve()
     legacy_heads: list[dict[str, str]] = []
+    selected_legacy_ids: set[str] = set()
     for raw in source_items:
         if not isinstance(raw, (str, Path)) or not str(raw).strip():
             raise CapabilityValidationError(
@@ -437,10 +583,24 @@ def _validate_timeline_visualize_inputs(
                 f"timeline_source must be inside the project's managed timelines: {candidate}"
             )
         if not any(
-            row.timeline_dir is not None
-            and candidate.is_relative_to(row.timeline_dir.resolve())
+            row.timeline_dir is not None and candidate.is_relative_to(row.timeline_dir.resolve())
             for row in timelines
         ):
+            tombstoned = next(
+                (
+                    row
+                    for row in discovered_timelines
+                    if row.is_tombstoned
+                    and row.timeline_dir is not None
+                    and candidate.is_relative_to(row.timeline_dir.resolve())
+                ),
+                None,
+            )
+            if tombstoned is not None:
+                raise CapabilityValidationError(
+                    f"timeline_source belongs to tombstoned timeline "
+                    f"{tombstoned.timeline_ulid!r}: {candidate}"
+                )
             detail = "; ".join(diagnostics) or "not a live managed timeline"
             raise CapabilityValidationError(
                 f"timeline_source is not a managed timeline directory/file for project {project!r}: "
@@ -449,21 +609,28 @@ def _validate_timeline_visualize_inputs(
         timeline_dir = next(
             row.timeline_dir.resolve()
             for row in timelines
-            if row.timeline_dir is not None
-            and candidate.is_relative_to(row.timeline_dir.resolve())
+            if row.timeline_dir is not None and candidate.is_relative_to(row.timeline_dir.resolve())
         )
         eventlog = timeline_dir / "assembly.jsonl"
         if not eventlog.is_file():
             raise CapabilityValidationError(
                 f"legacy timeline_source has no assembly.jsonl event log: {timeline_dir}"
             )
+        if timeline_dir.name in selected_legacy_ids:
+            raise CapabilityValidationError(
+                f"timeline_source selects timeline {timeline_dir.name!r} more than once"
+            )
+        selected_legacy_ids.add(timeline_dir.name)
         legacy_heads.append(
             {
                 "timeline_ulid": timeline_dir.name,
                 "eventlog_sha256": hashlib.sha256(eventlog.read_bytes()).hexdigest(),
             }
         )
-    return {"mode": "legacy_file", "timelines": sorted(legacy_heads, key=lambda row: row["timeline_ulid"])}
+    return {
+        "mode": "legacy_file",
+        "timelines": sorted(legacy_heads, key=lambda row: row["timeline_ulid"]),
+    }
 
 
 def _payload_manifest_path(raw_result: Mapping[str, Any]) -> str | None:
@@ -675,13 +842,12 @@ def _prepare_managed_render_inputs(
             "registry is pinned with the snapshot"
         )
     if project is None or not str(project).strip():
-        raise CapabilityValidationError(
-            "rendering.render timeline_ref requires project=<slug>"
-        )
+        raise CapabilityValidationError("rendering.render timeline_ref requires project=<slug>")
     if not isinstance(timeline_ref, str) or not timeline_ref.strip():
         raise CapabilityValidationError("timeline_ref must be a non-empty slug, UUID, or ULID")
     if expected_version is not None and (
-        isinstance(expected_version, bool) or not isinstance(expected_version, int)
+        isinstance(expected_version, bool)
+        or not isinstance(expected_version, int)
         or expected_version < 1
     ):
         raise CapabilityValidationError("expected_version must be a positive integer")
@@ -781,6 +947,8 @@ def _invocation_outputs(
     raw_result: Mapping[str, Any],
     *,
     manifest_path: str | None,
+    project_root: Path | None = None,
+    capability_id: str | None = None,
 ) -> dict[str, Any]:
     outputs: dict[str, Any] = {}
     declared = raw_result.get("outputs")
@@ -795,38 +963,236 @@ def _invocation_outputs(
             document = json.loads(manifest.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             document = None
-        if isinstance(document, dict) and document.get("kind") in {
+        is_timeline_manifest = isinstance(document, dict) and document.get("kind") in {
             "timeline_visualize",
             "timeline_visualize_project",
-        }:
+        }
+        if capability_id == "rendering.timeline_visualize" or is_timeline_manifest:
             pack_root = manifest.parent
-            outputs.setdefault("pack_root", str(pack_root))
-            outputs.setdefault("manifest_path", str(manifest))
-            outputs.setdefault(
-                "pages",
-                [str(path) for path in sorted(pack_root.rglob("PG*.png"))],
-            )
-            outputs.setdefault(
-                "file_hashes",
-                {
-                    path.relative_to(pack_root).as_posix(): hashlib.sha256(
-                        path.read_bytes()
-                    ).hexdigest()
-                    for path in sorted(pack_root.rglob("*"))
-                    if path.is_file()
-                },
-            )
+            # Kernel completion publishes every evidence-pack member as its
+            # own managed CAS object and removes private staging.  The parent
+            # of the durable manifest is therefore a hash fan-out directory,
+            # not the logical pack root.  Reuse the frozen loader's verified
+            # task-output rehydration so the long-standing ``pack_root`` SDK
+            # convenience remains an actually navigable directory.
+            if project_root is not None and not manifest.is_relative_to(project_root):
+                from astrid.packs.rendering.executors.timeline_visualize.frozen import (
+                    discard_rehydrated_pack,
+                    rehydrate_managed_pack,
+                )
+
+                rehydrated = rehydrate_managed_pack(
+                    manifest,
+                    project_root=project_root,
+                )
+                try:
+                    pack_root = _persist_visualization_pack(
+                        rehydrated,
+                        project_root=project_root,
+                        manifest=manifest,
+                    )
+                finally:
+                    discard_rehydrated_pack(rehydrated)
+            elif project_root is not None and capability_id == "rendering.timeline_visualize":
+                from astrid.packs.rendering.executors.timeline_visualize.frozen import (
+                    discard_rehydrated_pack,
+                    load_frozen_view,
+                )
+
+                frozen = load_frozen_view(
+                    manifest,
+                    project_root=project_root,
+                )
+                try:
+                    pack_root = _persist_visualization_pack(
+                        frozen.pack_root,
+                        project_root=project_root,
+                        manifest=manifest,
+                    )
+                finally:
+                    discard_rehydrated_pack(frozen.pack_root)
+            elif capability_id == "rendering.timeline_visualize":
+                raise CapabilityInvocationError(
+                    "timeline visualization result cannot be verified without a project root"
+                )
+            outputs["pack_root"] = str(pack_root)
+            outputs["manifest_path"] = str(manifest)
+            outputs["pages"] = [
+                str(path)
+                for path in sorted(pack_root.rglob("PG*.png"))
+                if "filmstrip" not in path.relative_to(pack_root).parts
+            ]
+            outputs["file_hashes"] = {
+                path.relative_to(pack_root).as_posix(): hashlib.sha256(
+                    path.read_bytes()
+                ).hexdigest()
+                for path in sorted(pack_root.rglob("*"))
+                if path.is_file()
+            }
     return _json_safe_mapping(outputs)
+
+
+def _persist_visualization_pack(
+    source: Path,
+    *,
+    project_root: Path,
+    manifest: Path,
+) -> Path:
+    """Copy a verified CAS pack into a durable, non-authoritative view cache.
+
+    ``load_frozen_view`` deliberately rehydrates managed outputs in a private
+    temporary directory. Public SDK results routinely cross a CLI process
+    boundary, so returning that temporary path would immediately produce a
+    dangling ``pack_root``. The cache is keyed by the durable manifest bytes,
+    never linked to CAS, and remains a derived convenience: ``manifest_path``
+    is still the authoritative navigation handle.
+    """
+
+    project = Path(project_root).resolve(strict=True)
+    digest = hashlib.sha256(manifest.read_bytes()).hexdigest()
+    cache_parent = project
+    for part in (".astrid", "views", "timeline_visualize"):
+        cache_parent = cache_parent / part
+        if cache_parent.is_symlink():
+            raise CapabilityInvocationError(
+                f"visualization cache path must not contain symlinks: {cache_parent}"
+            )
+        cache_parent.mkdir(exist_ok=True)
+        if cache_parent.resolve() != cache_parent or not cache_parent.is_relative_to(project):
+            raise CapabilityInvocationError("visualization cache path escapes its owning project")
+    destination = cache_parent / digest
+
+    def _tree_state(root: Path) -> dict[str, str]:
+        paths = sorted(root.rglob("*"))
+        symlinks = [path for path in paths if path.is_symlink()]
+        if symlinks:
+            raise CapabilityInvocationError(
+                f"visualization cache tree must not contain symlinks: {symlinks[0]}"
+            )
+        state: dict[str, str] = {}
+        for path in paths:
+            relative = path.relative_to(root).as_posix()
+            if path.is_dir():
+                state[f"{relative}/"] = "directory"
+            elif path.is_file():
+                state[relative] = hashlib.sha256(path.read_bytes()).hexdigest()
+            else:
+                raise CapabilityInvocationError(
+                    f"visualization cache tree contains a non-regular entry: {path}"
+                )
+        return state
+
+    source_state = _tree_state(source)
+    with _visualization_cache_lock(cache_parent / f".{digest}.lock"):
+        if destination.is_symlink():
+            raise CapabilityInvocationError(
+                f"visualization cache destination must not be a symlink: {destination}"
+            )
+        destination_identity: tuple[int, int] | None = None
+        destination_state: dict[str, str] | None = None
+        if destination.is_dir():
+            before = destination.lstat()
+            destination_identity = (before.st_dev, before.st_ino)
+            destination_state = _tree_state(destination)
+            after = destination.lstat()
+            if (after.st_dev, after.st_ino) != destination_identity:
+                raise CapabilityInvocationError(
+                    "visualization cache destination changed during verification"
+                )
+            if destination_state == source_state:
+                return destination
+        if destination.exists() and not destination.is_dir():
+            raise CapabilityInvocationError(
+                f"visualization cache destination is not a directory: {destination}"
+            )
+
+        staging_parent = Path(tempfile.mkdtemp(prefix=f".{digest}.", dir=cache_parent)).resolve()
+        staging = staging_parent / "pack"
+        quarantined_original: Path | None = None
+        quarantine_parent: Path | None = None
+        try:
+            shutil.copytree(source, staging)
+            if _tree_state(staging) != source_state:
+                raise CapabilityInvocationError(
+                    "visualization cache source changed while it was being copied"
+                )
+            if destination.exists():
+                # This digest-keyed directory is generated cache, not project
+                # authority. Atomically quarantine the exact inode that was
+                # inspected. A concurrent replacement is restored and rejected
+                # rather than recursively deleted through a stale pathname.
+                if destination_identity is None:
+                    raise CapabilityInvocationError(
+                        "visualization cache destination appeared during repair"
+                    )
+                quarantine_parent = Path(
+                    tempfile.mkdtemp(prefix=f".corrupt-{digest}.", dir=cache_parent)
+                ).resolve()
+                quarantine = quarantine_parent / "pack"
+                os.replace(destination, quarantine)
+                quarantined = quarantine.lstat()
+                if (quarantined.st_dev, quarantined.st_ino) != destination_identity:
+                    if not destination.exists():
+                        os.replace(quarantine, destination)
+                        os.rmdir(quarantine_parent)
+                    raise CapabilityInvocationError(
+                        "visualization cache destination changed during repair; preserved replacement"
+                    )
+                # Keep the corrupt derived tree as a forensic quarantine. It
+                # is never authority and, crucially, Astrid does not path-delete
+                # it after a non-atomic identity check.
+                quarantined_original = quarantine
+            os.replace(staging, destination)
+        except Exception:
+            if quarantined_original is not None and not destination.exists():
+                os.replace(quarantined_original, destination)
+                if quarantine_parent is not None:
+                    os.rmdir(quarantine_parent)
+            raise
+        finally:
+            shutil.rmtree(staging_parent, ignore_errors=True)
+    return destination
+
+
+@contextmanager
+def _visualization_cache_lock(path: Path):
+    """Hold a persistent-inode exclusive lock for one cache digest."""
+
+    try:
+        import fcntl
+    except ImportError as exc:  # pragma: no cover - frozen release matrix is POSIX
+        raise CapabilityInvocationError(
+            "durable visualization cache requires POSIX file locking"
+        ) from exc
+    flags = os.O_CREAT | os.O_RDWR
+    if hasattr(os, "O_CLOEXEC"):
+        flags |= os.O_CLOEXEC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(path, flags, 0o600)
+    except OSError as exc:
+        raise CapabilityInvocationError(
+            f"cannot open visualization cache lock {path}: {exc}"
+        ) from exc
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        yield
+    finally:
+        fcntl.flock(descriptor, fcntl.LOCK_UN)
+        os.close(descriptor)
 
 
 def _resolve_projects_root(project_root: str | Path | None, project: str | None) -> Path:
     from astrid.core.foundation.project_paths import resolve_projects_root
+
     if project_root is not None:
         return Path(project_root).expanduser().resolve()
     try:
         return resolve_projects_root(None)
     except Exception:
         return Path.cwd().expanduser().resolve()
+
 
 def _kernel_invoke(
     capability: Any,
@@ -841,19 +1207,19 @@ def _kernel_invoke(
     registry: FrozenSchemaPackRegistry | None = None,
 ) -> tuple[str, str, str, Path | None, dict[str, Any], bool, Any]:
     """Real kernel admission: RunRepository.create with compute_spec_hash idempotency, claim/start, handler, execute/complete."""
-    from astrid.core.repositories.tasks import compute_spec_hash
+    from astrid.core.events.service import EventAppendService
+    from astrid.core.integrations.reigh.bridge_service import derive_database_path
+    from astrid.core.io.media_import import managed_media_path
+    from astrid.core.kernel.read import schema_registry_context
+    from astrid.core.receipts.service import ReceiptService
+    from astrid.core.repositories.media import MediaRepository
+    from astrid.core.repositories.projects import ProjectRepository
+    from astrid.core.repositories.runs import RunRepository
+    from astrid.core.repositories.tasks import TaskRepository, compute_spec_hash
     from astrid.core.store.uow import UnitOfWork
     from astrid.core.store.writer import open_database_writer
-    from astrid.core.events.service import EventAppendService
-    from astrid.core.receipts.service import ReceiptService
-    from astrid.core.repositories.runs import RunRepository
-    from astrid.core.repositories.tasks import TaskRepository
-    from astrid.core.repositories.projects import ProjectRepository
-    from astrid.core.repositories.media import MediaRepository
-    from astrid.core.io.media_import import managed_media_path
     from astrid.core.task_executor import CapabilityTaskHandler, ExecutionService
-    from astrid.core.kernel.read import schema_registry_context
-    from astrid.core.integrations.reigh.bridge_service import derive_database_path
+
     if registry is None:
         from astrid.core.schema_packs.standard import build_standard_registry
 
@@ -870,36 +1236,75 @@ def _kernel_invoke(
         media_repo = MediaRepository(events=events, receipts=receipts, projects_root=projects_root)
         project_id = project if project else "default"
         try:
-            UnitOfWork(writer).run(lambda u: projects.create(u, slug=project_id, name=project_id, settings={}, idempotency_key=f"proj:{project_id}", project_id=project_id))
+            UnitOfWork(writer).run(
+                lambda u: projects.create(
+                    u,
+                    slug=project_id,
+                    name=project_id,
+                    settings={},
+                    idempotency_key=f"proj:{project_id}",
+                    project_id=project_id,
+                )
+            )
         except Exception:
             pass
         # Public SDK callers address projects by slug or id.  RunRepository
         # stores the canonical project id, so resolve the reference after the
         # idempotent create attempt rather than leaking a slug into runs.
         project_id = projects.resolve(writer, project_id)
-        spec_payload = {"capability_id": capability.id, "inputs": dict(inputs or {}), "outputs": dict(outputs or {}), "project": project, "kind": str(kind), "extra_pack_roots": list(extra_pack_roots)}
+        spec_payload = {
+            "capability_id": capability.id,
+            "inputs": dict(inputs or {}),
+            "outputs": dict(outputs or {}),
+            "project": project,
+            "kind": str(kind),
+            "extra_pack_roots": list(extra_pack_roots),
+        }
         idempotency_payload = dict(spec_payload)
         if idempotency_context is not None:
             idempotency_payload["authority_context"] = dict(idempotency_context)
+        authority_context = dict(idempotency_context or {})
+        stored_executor_version = authority_context.get("executor_version")
+        if not isinstance(stored_executor_version, str) or not stored_executor_version:
+            stored_executor_version = None
         idempotency_key = compute_spec_hash(idempotency_payload, [])
         # Deterministic ids for idempotent replay: run_id derived from
         # idempotency_key so identical retry returns same run_id via receipt
         # (request_hash includes run_id). Child task_id also deterministic
         # so request identity is stable; receipt replay returns same ids.
         deterministic_run_id = hashlib.sha256(f"run:{idempotency_key}".encode()).hexdigest()[:26]
-        deterministic_task_id = hashlib.sha256(f"task:{idempotency_key}:0".encode()).hexdigest()[:26]
-        child_spec = {"capability_id": capability.id, "inputs": dict(inputs or {}), "outputs": dict(outputs or {}), "project": project, "kind": str(kind), "extra_pack_roots": list(extra_pack_roots)}
+        deterministic_task_id = hashlib.sha256(f"task:{idempotency_key}:0".encode()).hexdigest()[
+            :26
+        ]
+        child_spec = {
+            "capability_id": capability.id,
+            "inputs": dict(inputs or {}),
+            "outputs": dict(outputs or {}),
+            "project": project,
+            "kind": str(kind),
+            "extra_pack_roots": list(extra_pack_roots),
+            "authority_context": authority_context,
+        }
+
         def _create(u):
             return runs.create(
                 u,
                 project_id=project_id,
-                children=[{"capability": capability.id, "spec": child_spec, "input_manifest": [], "task_id": deterministic_task_id}],
+                children=[
+                    {
+                        "capability": capability.id,
+                        "spec": child_spec,
+                        "input_manifest": [],
+                        "task_id": deterministic_task_id,
+                    }
+                ],
                 idempotency_key=idempotency_key,
                 kind=capability.capability_type,
                 title=capability.id,
                 input=child_spec,
                 run_id=deterministic_run_id,
             )
+
         fanout = UnitOfWork(writer).run(_create)
         run_id = fanout.run_id
         task_id = fanout.task_ids[0] if fanout.task_ids else None
@@ -908,11 +1313,39 @@ def _kernel_invoke(
         # If run already terminal (idempotent replay after success), skip re-drive.
         # Query run status without receipt side-effects.
         try:
-            row = UnitOfWork(writer).run(lambda u: u.query_one("SELECT status FROM runs WHERE id = ?", (run_id,)))
+            row = UnitOfWork(writer).run(
+                lambda u: u.query_one("SELECT status FROM runs WHERE id = ?", (run_id,))
+            )
             if row is not None and row["status"] in ("succeeded", "failed", "cancelled"):
                 # Derive winning attempt for stable return.
-                trow = UnitOfWork(writer).run(lambda u: u.query_one("SELECT winning_attempt_id FROM tasks WHERE id = ?", (task_id,)))
-                winning = trow["winning_attempt_id"] if trow is not None and trow["winning_attempt_id"] else f"{idempotency_key}:complete"
+                trow = UnitOfWork(writer).run(
+                    lambda u: u.query_one(
+                        "SELECT winning_attempt_id, spec_json FROM tasks WHERE id = ?", (task_id,)
+                    )
+                )
+                replay_executor_version = stored_executor_version
+                if trow is not None:
+                    try:
+                        persisted_spec = json.loads(str(trow["spec_json"]))
+                    except (TypeError, ValueError):
+                        persisted_spec = None
+                    persisted_context = (
+                        persisted_spec.get("authority_context")
+                        if isinstance(persisted_spec, Mapping)
+                        else None
+                    )
+                    persisted_version = (
+                        persisted_context.get("executor_version")
+                        if isinstance(persisted_context, Mapping)
+                        else None
+                    )
+                    if isinstance(persisted_version, str) and persisted_version:
+                        replay_executor_version = persisted_version
+                winning = (
+                    trow["winning_attempt_id"]
+                    if trow is not None and trow["winning_attempt_id"]
+                    else f"{idempotency_key}:complete"
+                )
                 terminal_attempt = None
                 if row["status"] != "succeeded":
                     terminal_attempt = UnitOfWork(writer).run(
@@ -925,7 +1358,14 @@ def _kernel_invoke(
                     )
                     if terminal_attempt is not None:
                         winning = str(terminal_attempt["id"])
-                raw_result = {"ok": row["status"] == "succeeded", "run_id": run_id, "kernel_run_id": run_id, "kernel_task_id": task_id, "kernel_attempt_id": winning}
+                raw_result = {
+                    "ok": row["status"] == "succeeded",
+                    "run_id": run_id,
+                    "kernel_run_id": run_id,
+                    "kernel_task_id": task_id,
+                    "kernel_attempt_id": winning,
+                    "executor_version": replay_executor_version,
+                }
                 if row["status"] == "succeeded":
                     # Exact replay returns the durable stored output set, not
                     # an empty success envelope whose artifacts vanished with
@@ -962,7 +1402,15 @@ def _kernel_invoke(
                         if label == "manifest.json":
                             mpath = Path(locator)
                     raw_result["outputs"] = {"artifacts": artifacts}
-                    return run_id, task_id, winning, mpath, raw_result, row["status"] == "succeeded", None
+                    return (
+                        run_id,
+                        task_id,
+                        winning,
+                        mpath,
+                        raw_result,
+                        row["status"] == "succeeded",
+                        None,
+                    )
                 if terminal_attempt is not None:
                     try:
                         terminal_error = json.loads(str(terminal_attempt["error_json"]))
@@ -974,13 +1422,26 @@ def _kernel_invoke(
         except Exception:
             pass
         claim_key = f"{idempotency_key}:claim"
-        claim = UnitOfWork(writer).run(lambda u: tasks.claim(u, project_id=project_id, idempotency_key=claim_key))
+        claim = UnitOfWork(writer).run(
+            lambda u: tasks.claim(u, project_id=project_id, idempotency_key=claim_key)
+        )
         if claim is None:
             # Idempotent replay after task already succeeded but run not yet
             # marked terminal (task succeeded before run derived status).
-            raw_result: dict[str, Any] = {"ok": True, "run_id": run_id, "kernel_run_id": run_id, "kernel_task_id": task_id, "kernel_attempt_id": claim_key}
+            raw_result: dict[str, Any] = {
+                "ok": True,
+                "run_id": run_id,
+                "kernel_run_id": run_id,
+                "kernel_task_id": task_id,
+                "kernel_attempt_id": claim_key,
+                "executor_version": stored_executor_version,
+            }
             return run_id, task_id, claim_key, None, raw_result, True, None
-        handler = CapabilityTaskHandler(capability_kind=capability.capability_type, capability_id=capability.id, projects_root=projects_root)
+        handler = CapabilityTaskHandler(
+            capability_kind=capability.capability_type,
+            capability_id=capability.id,
+            projects_root=projects_root,
+        )
         svc = ExecutionService(projects_root=projects_root, task_repo=tasks)
         with schema_registry_context(registry):
             exec_res = svc.execute(
@@ -994,7 +1455,15 @@ def _kernel_invoke(
                 handler=handler,
             )
         if exec_res.outcome == "failed":
-            raw_result: dict[str, Any] = {"ok": False, "run_id": run_id, "kernel_run_id": run_id, "kernel_task_id": task_id, "kernel_attempt_id": claim.attempt.id, "error": exec_res.error}
+            raw_result: dict[str, Any] = {
+                "ok": False,
+                "run_id": run_id,
+                "kernel_run_id": run_id,
+                "kernel_task_id": task_id,
+                "kernel_attempt_id": claim.attempt.id,
+                "error": exec_res.error,
+                "executor_version": stored_executor_version,
+            }
             return run_id, task_id, claim.attempt.id, None, raw_result, False, None
         if exec_res.outcome == "cancelled":
             raw_result = {
@@ -1003,28 +1472,45 @@ def _kernel_invoke(
                 "kernel_run_id": run_id,
                 "kernel_task_id": task_id,
                 "kernel_attempt_id": claim.attempt.id,
-                "error": exec_res.error or {
+                "error": exec_res.error
+                or {
                     "reason": "cancelled",
                     "message": "operator cancellation won; no artifact was published",
                 },
+                "executor_version": stored_executor_version,
             }
             return run_id, task_id, claim.attempt.id, None, raw_result, False, None
         assert exec_res.prepared is not None
         prepared = exec_res.prepared
         with schema_registry_context(registry):
-            comp = svc.complete(UnitOfWork(writer), prepared=prepared, media_repo=media_repo, idempotency_key=f"{idempotency_key}:complete")
+            comp = svc.complete(
+                UnitOfWork(writer),
+                prepared=prepared,
+                media_repo=media_repo,
+                idempotency_key=f"{idempotency_key}:complete",
+            )
         ok = comp.outcome == "completed"
         # A kernel invocation has no durable filesystem run root. The attempt
         # directory is a private publication fence and is removed after CAS
         # completion; exposing it as ``run_root`` leaves callers holding a
         # path that is guaranteed to be stale. Durable locators are returned
         # under outputs.artifacts instead.
-        raw_result = {"ok": ok, "run_id": run_id, "kernel_run_id": run_id, "kernel_task_id": task_id, "kernel_attempt_id": prepared.attempt.id}
+        raw_result = {
+            "ok": ok,
+            "run_id": run_id,
+            "kernel_run_id": run_id,
+            "kernel_task_id": task_id,
+            "kernel_attempt_id": prepared.attempt.id,
+            "executor_version": stored_executor_version,
+        }
         if comp.outcome != "completed":
-            raw_result["error"] = dict(comp.error or {
-                "reason": "cancelled",
-                "message": "operator cancellation won; no artifact was published",
-            })
+            raw_result["error"] = dict(
+                comp.error
+                or {
+                    "reason": "cancelled",
+                    "message": "operator cancellation won; no artifact was published",
+                }
+            )
         durable_manifest_path = None
         if comp.completed is not None:
             # The universal manifest is intentionally held in the kernel
@@ -1033,9 +1519,7 @@ def _kernel_invoke(
             # pretending the first artifact is a JSON manifest (rendering
             # outputs are commonly MP4s, with a provenance sidecar alongside).
             artifacts: list[dict[str, Any]] = []
-            for prepared_output, stored_output in zip(
-                prepared.outputs, comp.completed.outputs
-            ):
+            for prepared_output, stored_output in zip(prepared.outputs, comp.completed.outputs):
                 digest = (
                     prepared_output.prepared.digest
                     if prepared_output.prepared is not None
@@ -1046,9 +1530,7 @@ def _kernel_invoke(
                 # for materialized media so callers can open the artifact
                 # after the invocation has finished.
                 durable_path = (
-                    str(managed_media_path(projects_root, digest))
-                    if digest is not None
-                    else None
+                    str(managed_media_path(projects_root, digest)) if digest is not None else None
                 )
                 artifact: dict[str, Any] = {
                     "path": durable_path,
@@ -1064,9 +1546,7 @@ def _kernel_invoke(
                 if isinstance(requested_name, str) and requested_name:
                     artifact["requested_output_name"] = requested_name
                 artifacts.append(artifact)
-            raw_result["outputs"] = {
-                "artifacts": artifacts
-            }
+            raw_result["outputs"] = {"artifacts": artifacts}
         mpath = None
         # CapabilityTaskHandler returns an in-memory universal manifest. If an
         # executor produced its own manifest, expose the durable managed media
@@ -1147,6 +1627,7 @@ def invoke(
             inputs,
             project=project,
             project_root=project_root,
+            out=out,
         )
     elif capability.id == "rendering.render":
         inputs, invocation_authority_context = _prepare_managed_render_inputs(
@@ -1197,6 +1678,7 @@ def invoke(
         try:
             if capability.capability_type == "executor":
                 from astrid.core.execution.executor.runner import ExecutorRunRequest
+
                 executor_registry, _, _ = registries
                 request = ExecutorRunRequest(
                     executor_id=capability.id,
@@ -1219,6 +1701,7 @@ def invoke(
                 raw_result = _normalize_executor_result(result)
             else:
                 from astrid.core.execution.orchestrator.runner import OrchestratorRunRequest
+
                 _, orchestrator_registry, _ = registries
                 request = OrchestratorRunRequest(
                     orchestrator_id=capability.id,
@@ -1244,9 +1727,15 @@ def invoke(
             mapped = _sdk_error_from_exception(exc)
             if mapped is not None:
                 raise mapped from exc
-            raise CapabilityInvocationError(f"failed to invoke {capability.capability_type} {capability.id!r}") from exc
+            raise CapabilityInvocationError(
+                f"failed to invoke {capability.capability_type} {capability.id!r}"
+            ) from exc
         internal_error = _internal_error_from_result(result)
-        error = _error_payload_from_internal_error(internal_error, json_safe=_json_safe) if internal_error is not None else None
+        error = (
+            _error_payload_from_internal_error(internal_error, json_safe=_json_safe)
+            if internal_error is not None
+            else None
+        )
         manifest_path = _discover_invocation_manifest_path(raw_result, out=out)
         run_id_raw = raw_result.get("run_id")
         run_root_raw = raw_result.get("run_root")
@@ -1260,9 +1749,22 @@ def invoke(
             manifest_path=manifest_path,
             raw_result=raw_result,
             run_id=run_id_raw if isinstance(run_id_raw, str) and run_id_raw else None,
-            run_root=str(Path(run_root_raw).expanduser().resolve()) if isinstance(run_root_raw, str) and run_root_raw else None,
-            outputs=_invocation_outputs(raw_result, manifest_path=manifest_path),
-            executor_version=executor_version_raw if isinstance(executor_version_raw, str) and executor_version_raw else None,
+            run_root=str(Path(run_root_raw).expanduser().resolve())
+            if isinstance(run_root_raw, str) and run_root_raw
+            else None,
+            outputs=_invocation_outputs(
+                raw_result,
+                manifest_path=manifest_path,
+                project_root=(
+                    (_resolve_projects_root(project_root, project) / project).resolve()
+                    if project is not None
+                    else None
+                ),
+                capability_id=capability.id,
+            ),
+            executor_version=executor_version_raw
+            if isinstance(executor_version_raw, str) and executor_version_raw
+            else None,
             kernel_run_id=None,
             kernel_task_id=None,
             kernel_attempt_id=None,
@@ -1275,10 +1777,20 @@ def invoke(
 
     resolved_project, _src = selected_project(project)
     if resolved_project is None:
-        raise CapabilityValidationError(format_project_required_guidance(operation=f"{capability.capability_type} run"))
+        raise CapabilityValidationError(
+            format_project_required_guidance(operation=f"{capability.capability_type} run")
+        )
     # Use resolved project (handles auto-resolved via selected_project)
     project = resolved_project
     projects_root = _resolve_projects_root(project_root, project)
+    kernel_capability_version: str | None = None
+    if capability.capability_type == "executor":
+        from astrid.core.io.cas import executor_definition_digest
+
+        executor_registry, _, _ = registries
+        kernel_capability_version = executor_definition_digest(executor_registry.get(capability.id))
+        invocation_authority_context = dict(invocation_authority_context or {})
+        invocation_authority_context["executor_version"] = kernel_capability_version
     try:
         # Keep the private seam backwards-compatible for callers that replace
         # it with a narrow test double, while still forwarding an explicitly
@@ -1300,14 +1812,18 @@ def invoke(
             capability,
             **kernel_kwargs,
         )
-        executor_version_raw = raw_result.get("executor_version") if isinstance(raw_result, dict) else None
         run_id_raw = raw_result.get("run_id") if isinstance(raw_result, dict) else None
         run_root_raw = raw_result.get("run_root") if isinstance(raw_result, dict) else None
         raw_result = dict(raw_result) if isinstance(raw_result, dict) else {}
+        if kernel_capability_version is not None:
+            raw_result.setdefault("executor_version", kernel_capability_version)
+        executor_version_raw = raw_result.get("executor_version")
         raw_result.setdefault("kernel_run_id", kr)
         raw_result.setdefault("kernel_task_id", kt)
         raw_result.setdefault("kernel_attempt_id", ka)
-        manifest_path = str(mpath) if mpath else _discover_invocation_manifest_path(raw_result, out=out)
+        manifest_path = (
+            str(mpath) if mpath else _discover_invocation_manifest_path(raw_result, out=out)
+        )
         return InvocationResult(
             capability_id=capability.id,
             capability_type=capability.capability_type,
@@ -1338,8 +1854,15 @@ def invoke(
                 if isinstance(run_root_raw, str) and run_root_raw
                 else None
             ),
-            outputs=_invocation_outputs(raw_result, manifest_path=manifest_path),
-            executor_version=executor_version_raw if isinstance(executor_version_raw, str) and executor_version_raw else None,
+            outputs=_invocation_outputs(
+                raw_result,
+                manifest_path=manifest_path,
+                project_root=(projects_root / project).resolve(),
+                capability_id=capability.id,
+            ),
+            executor_version=executor_version_raw
+            if isinstance(executor_version_raw, str) and executor_version_raw
+            else None,
             kernel_run_id=kr,
             kernel_task_id=kt,
             kernel_attempt_id=ka,
@@ -1350,7 +1873,9 @@ def invoke(
         mapped = _sdk_error_from_exception(exc)
         if mapped is not None:
             raise mapped from exc
-        raise CapabilityInvocationError(f"failed to invoke {capability.capability_type} {capability.id!r}") from exc
+        raise CapabilityInvocationError(
+            f"failed to invoke {capability.capability_type} {capability.id!r}"
+        ) from exc
 
 
 def invoke_result(

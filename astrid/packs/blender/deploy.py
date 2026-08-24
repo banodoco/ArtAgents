@@ -620,7 +620,7 @@ def cmd_runpod_render(args: argparse.Namespace) -> int:
 
 
 def cmd_teardown_runpod(args: argparse.Namespace) -> int:
-    from runpod_lifecycle import Pod  # type: ignore
+    from runpod_lifecycle import Pod, RunPodConfig  # type: ignore
 
     os.environ.setdefault("RUNPOD_API_KEY", _load_runpod_api_key())
     if not args.pod_id:

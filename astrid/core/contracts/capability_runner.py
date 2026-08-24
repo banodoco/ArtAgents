@@ -50,6 +50,9 @@ class CapabilityRunner(Generic[RequestT, ResultT, DefinitionT]):
     def request_id(self, request: RequestT) -> str:
         raise NotImplementedError
 
+    def validate_definition(self, request: RequestT, definition: DefinitionT) -> None:
+        """Fence an admitted request to the registry definition it selected."""
+
     # -- command building --------------------------------------------------
 
     def build_command(self, request: RequestT, registry: object | None = None) -> tuple[str, ...]:
@@ -107,6 +110,7 @@ class CapabilityRunner(Generic[RequestT, ResultT, DefinitionT]):
         self.maybe_gate(request)
         active_registry = registry if registry is not None else self.load_default_registry()
         definition = active_registry.get(self.request_id(request))
+        self.validate_definition(request, definition)
         resolved_request = self.resolve_project_request(request, definition)
         if self.is_dry_run(resolved_request, definition):
             return self.run_inner(

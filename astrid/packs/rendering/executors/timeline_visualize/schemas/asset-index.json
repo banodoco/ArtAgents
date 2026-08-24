@@ -48,6 +48,11 @@
             ]
           },
           "role": {"$ref": "_defs.json#/$defs/asset_role"},
+          "media_type": {
+            "description": "Frozen coarse media kind used when a verified managed-CAS locator has no filename suffix.",
+            "type": ["string", "null"],
+            "enum": ["image", "video", "audio", null]
+          },
           "integrity_state": {"$ref": "_defs.json#/$defs/integrity_state"},
           "expected_sha256": {"$ref": "_defs.json#/$defs/nullable_raw_sha256"},
           "observed_sha256": {

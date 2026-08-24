@@ -13,12 +13,21 @@ from __future__ import annotations
 
 import errno
 import json
-import os
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
+from astrid.core._shared.jsonio import (
+    ProjectJsonError,
+)
+from astrid.core._shared.jsonio import (
+    read_json as project_read_json,
+)
+from astrid.core._shared.jsonio import (
+    write_json_atomic as project_write_json_atomic,
+)
+from astrid.core.contracts.errors import AstridError
 from astrid.core.foundation.atomic_io import (
     AtomicWriteError,
     _fsync_dir,
@@ -29,12 +38,6 @@ from astrid.core.foundation.atomic_io import (
     write_json_atomic,
     write_text_atomic,
 )
-from astrid.core._shared.jsonio import (
-    ProjectJsonError,
-    read_json as project_read_json,
-    write_json_atomic as project_write_json_atomic,
-)
-
 
 # ---------------------------------------------------------------------------
 # Successful writes
@@ -123,6 +126,16 @@ class TestReadJson:
         target.write_text("{invalid", encoding="utf-8")
         with pytest.raises(ValueError, match="invalid JSON"):
             read_json(target)
+
+    def test_os_error_uses_recoverable_astrid_error(self, tmp_path: Path) -> None:
+        target = tmp_path / "unreadable.json"
+        with patch.object(Path, "read_text", side_effect=OSError(errno.EIO, "I/O error")):
+            with pytest.raises(AstridError, match="failed to read") as raised:
+                read_json(target)
+
+        assert raised.value.recovery_command == (
+            "check file permissions and disk health, then retry"
+        )
 
 
 # ---------------------------------------------------------------------------

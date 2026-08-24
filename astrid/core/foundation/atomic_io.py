@@ -7,6 +7,7 @@ readers never observe a partially-written file.
 from __future__ import annotations
 
 import errno
+import importlib
 import json
 import os
 import tempfile
@@ -142,6 +143,13 @@ def read_json(path: str | Path) -> Any:
     except json.JSONDecodeError as exc:
         raise ValueError(f"invalid JSON in {json_path}: {exc.msg}") from exc
     except OSError as exc:
+        # Keep foundation import-neutral: contracts already depend on this
+        # package, so the recoverability type is loaded only on the cold error
+        # path rather than creating an import-time package cycle.
+        AstridError = importlib.import_module(
+            "astrid.core.contracts.errors"
+        ).AstridError
+
         raise AstridError(
             f"failed to read {json_path}: {exc}",
             recovery_command="check file permissions and disk health, then retry",

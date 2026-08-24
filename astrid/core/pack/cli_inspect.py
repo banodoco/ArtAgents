@@ -12,7 +12,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from astrid.core.contracts.errors import AstridError
 from astrid.core.pack import (
@@ -28,6 +28,9 @@ from astrid.core.pack.validate import (
 )
 
 from ._cli_shared import _pack_payload, _pack_taxonomy, _print_taxonomy_block
+
+if TYPE_CHECKING:
+    from astrid.core.pack.store import InstallRecord
 
 # ---------------------------------------------------------------------------
 # pack inspect

@@ -151,3 +151,80 @@ def test_registry_rebase_fails_closed_for_non_managed_path(tmp_path: Path) -> No
         projects_root=root,
         project_ref="demo",
     ) == registry
+
+
+def test_media_id_derives_verified_locator_hash_and_type_without_event_mutation(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "root"
+    payload = b"project-owned managed bytes"
+    source = tmp_path / "frame.png"
+    source.write_bytes(payload)
+    with compose_standard_application(projects_root=root) as app:
+        project = app.projects_service.create(
+            slug="demo", name="Demo", idempotency_key="project"
+        )
+        assert project.ok, project.error
+        imported = app.media_service.import_file(
+            project="demo", path=source, idempotency_key="media"
+        )
+        assert imported.ok, imported.error
+        media_id = imported.data["id"]
+        digest = imported.data["content_hash"]
+
+    registry = {
+        "assets": {
+            "frame": {
+                "media_id": media_id,
+                "content_sha256": digest,
+            }
+        }
+    }
+    derived = rebase_timeline_registry_managed_assets(
+        registry,
+        projects_root=root,
+        project_ref="demo",
+    )
+
+    assert "file" not in registry["assets"]["frame"]
+    assert Path(derived["assets"]["frame"]["file"]).read_bytes() == payload
+    assert derived["assets"]["frame"]["content_sha256"] == digest
+    assert derived["assets"]["frame"]["type"].startswith("image/")
+
+
+def test_media_id_resolution_rejects_foreign_project_and_hash_mismatch(tmp_path: Path) -> None:
+    root = tmp_path / "root"
+    source = tmp_path / "frame.png"
+    source.write_bytes(b"project-owned managed bytes")
+    with compose_standard_application(projects_root=root) as app:
+        for slug in ("owner", "other"):
+            project = app.projects_service.create(
+                slug=slug, name=slug, idempotency_key=f"project:{slug}"
+            )
+            assert project.ok, project.error
+        imported = app.media_service.import_file(
+            project="owner", path=source, idempotency_key="media"
+        )
+        assert imported.ok, imported.error
+        media_id = imported.data["id"]
+
+    foreign = {"assets": {"frame": {"media_id": media_id}}}
+    assert rebase_timeline_registry_managed_assets(
+        foreign,
+        projects_root=root,
+        project_ref="other",
+    ) == foreign
+
+    mismatch = {
+        "assets": {
+            "frame": {
+                "media_id": media_id,
+                "content_sha256": "0" * 64,
+            }
+        }
+    }
+    assert rebase_timeline_registry_managed_assets(
+        mismatch,
+        projects_root=root,
+        project_ref="owner",
+    ) == mismatch

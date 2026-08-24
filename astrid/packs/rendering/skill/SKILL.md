@@ -242,7 +242,7 @@ result = sdk.invoke(
 ```
 
 ```python
-# Inspect a managed or kernel timeline (run-owned evidence pack)
+# Inspect a managed or kernel timeline (kernel-owned CAS evidence pack)
 result = sdk.invoke(
     "rendering.timeline_visualize",
     kind="executor",
@@ -260,6 +260,10 @@ print(result.ok, result.outputs)
 # `client.timelines.create/save` journey; no hand-authored assembly.jsonl is
 # required. Kernel config is materialized privately and pinned to the real
 # immutable stream head version/hash for this run.
+# A project-owned registry `media_id` is enough for visualization to derive
+# and verify the current managed-CAS locator; do not copy `.astrid/media`
+# hash-fanout paths into timeline state. Explicit `file` remains appropriate
+# for project-owned legacy/external sources.
 
 # A project-owned event-log file is also accepted:
 result = sdk.invoke(
@@ -275,8 +279,17 @@ result = sdk.invoke(
 
 The SDK field is plural (`formats`), while the direct runner uses repeatable
 singular `--format png --format svg` (also accepted as `--format png,svg`).
-With `project=...`, omit `out`; Astrid owns staging and publishes durable
-evidence artifacts under the project run.
+With `project=...`, omit `out`; Astrid owns staging and publishes each durable
+evidence artifact to managed CAS. Treat `result.manifest_path` as the durable
+navigation handle. `result.outputs["pack_root"]` is a verified, browsable copy
+under `.astrid/views/timeline_visualize/`, not a second authority; private
+attempt staging is removed and `result.run_root` is therefore `None`.
+Admission freezes the selected timeline/event-log or frozen-manifest identity
+and the executor-definition digest into the kernel task. The runner checks that
+authority again before materialization; if the head, event-log bytes, frozen
+manifest, focus, or executor definition changed meanwhile, retry the invocation
+instead of treating the failed run as a view of either state. Exact terminal
+replays report the executor version stored with the original task.
 
 The public CLI equivalent is the nested timeline command (the gateway still
 has eight top-level families):

@@ -21,8 +21,15 @@ from typing import Any, Mapping
 import pytest
 
 import astrid.packs
-from astrid.core.contracts.schema import CommandInputArg, CommandSpec, IsolationMetadata, Output, Port
+from astrid.core.contracts.schema import (
+    CommandInputArg,
+    CommandSpec,
+    IsolationMetadata,
+    Output,
+    Port,
+)
 from astrid.core.execution.executor import runner as executor_runner
+from astrid.core.execution.executor.argv import executor_argv, resolve_executor_runtime_module
 from astrid.core.execution.executor.registry import ExecutorRegistry, load_default_registry
 from astrid.core.execution.executor.runner import (
     ExecutorRunnerError,
@@ -31,9 +38,13 @@ from astrid.core.execution.executor.runner import (
     evaluate_conditions,
     run_executor,
 )
-from astrid.core.execution.executor.schema import ConditionSpec, ExecutorDefinition, ExecutorValidationError
+from astrid.core.execution.executor.schema import (
+    ConditionSpec,
+    ExecutorDefinition,
+    ExecutorValidationError,
+)
+from astrid.core.io.cas import executor_definition_digest
 from astrid.core.pack.resolver import PackResolverError
-from astrid.core.execution.executor.argv import executor_argv, resolve_executor_runtime_module
 
 
 @pytest.fixture(autouse=True)
@@ -109,6 +120,27 @@ def _extend_packs_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
         [str(pack_root), *list(astrid.packs.__path__)],
     )
     return pack_root
+
+
+def test_admitted_executor_version_is_fenced_before_execution(tmp_path: Path) -> None:
+    marker = tmp_path / "must-not-run"
+    executor = _executor(
+        argv=(sys.executable, "-c", f"from pathlib import Path; Path({str(marker)!r}).touch()"),
+    )
+    actual = executor_definition_digest(executor)
+    assert actual != "0" * 64
+
+    with pytest.raises(ExecutorRunnerError, match="changed after admission"):
+        run_executor(
+            ExecutorRunRequest(
+                executor_id=executor.id,
+                out=tmp_path / "out",
+                expected_executor_version="0" * 64,
+            ),
+            _registry(executor),
+        )
+
+    assert not marker.exists()
 
 
 def test_command_input_args_expand_repeated_and_optional_values_in_order(tmp_path: Path) -> None:

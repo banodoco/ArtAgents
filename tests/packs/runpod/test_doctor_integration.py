@@ -10,8 +10,9 @@ the v10 rewrite. This module now asserts the new six-check doctor surface:
 - ``data_paths`` — projects root and ``.astrid/`` accessibility;
 - ``python_version`` — the Python 3.10+ floor.
 
-plus the stable ``{"ok": bool, "checks": [...]}`` JSON envelope and fail-closed
-exit codes on a missing/corrupt database.
+plus the stable ``{"ok": bool, "state": str, "checks": [...],
+"next_action": str | null}`` JSON envelope and fail-closed exit codes on a
+missing/corrupt database.
 """
 
 from __future__ import annotations
@@ -71,7 +72,7 @@ def test_doctor_reports_six_v10_checks() -> None:
 
 
 def test_doctor_json_envelope_is_stable() -> None:
-    """--json emits the stable {ok, checks:[{name,status,detail,required}]} shape."""
+    """--json emits state and recovery guidance beside the six checks."""
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         _fresh_project(root)
@@ -79,8 +80,10 @@ def test_doctor_json_envelope_is_stable() -> None:
 
     assert code == 0
     payload = json.loads(out)
-    assert set(payload) == {"ok", "checks"}
+    assert set(payload) == {"ok", "state", "checks", "next_action"}
     assert payload["ok"] is True
+    assert payload["state"] == "ready"
+    assert payload["next_action"] is None
     assert len(payload["checks"]) == 6
     for item in payload["checks"]:
         assert set(item) == {"name", "status", "detail", "required"}

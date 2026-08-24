@@ -40,6 +40,15 @@ The shared `write_manifest()` validator rejects any manifest missing these
 six fields. Executors may include **extra top-level fields** beyond this core
 set — the validator passes them through unchanged.
 
+The SDK's `InvocationResult.executor_version` is the SHA-256 identity of the
+executor definition admitted into the immutable kernel task. It is not a
+late lookup of whichever definition happens to be installed when a terminal
+result is replayed. A queued task is fenced before execution if that definition
+has changed; a new public invocation under the new definition receives a new
+idempotency identity. A retry of a historical executor task admitted before
+this identity was recorded fails closed before executor invocation and directs
+the caller to submit a new invocation.
+
 ## Kind vocabulary
 
 The `kind` field is an **open vocabulary** — no central registry gates it.
@@ -202,7 +211,10 @@ This makes the M1 adoption boundary machine-verifiable.
 
 After invocation, the SDK returns an `InvocationResult` with an optional
 `manifest_path` field — an absolute path to the universal `manifest.json`
-produced by the invocation:
+produced by the invocation. Kernel-managed execution may publish this file to
+managed CAS and remove private attempt staging; in that case `manifest_path`
+remains durable while `run_root` is `None`. A CAS hash-fanout parent is not a
+logical output directory.
 
 ```python
 import astrid

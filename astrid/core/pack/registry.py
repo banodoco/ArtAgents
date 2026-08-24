@@ -13,6 +13,10 @@ from astrid.core.pack._common import (
 )
 
 if TYPE_CHECKING:
+    from astrid.core.contracts.artifact_types import (
+        ArtifactTypeDescriptor,
+        ArtifactTypeRegistry,
+    )
     from astrid.core.pack.definition import PackDefinition
 
 

@@ -8,14 +8,15 @@ from astrid.core.pack.entrypoint import guard_canonical_entrypoint
 guard_canonical_entrypoint("rendering.timeline_visualize")
 
 import argparse
-from copy import deepcopy
 import hashlib
 import json
 import os
 import shutil
 import sys
 import tempfile
+from copy import deepcopy
 from dataclasses import replace
+from operator import itemgetter
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
@@ -24,12 +25,13 @@ from astrid.core._shared.result_manifest import build_manifest, write_manifest
 from astrid.core.cli_choices import StaticChoices
 from astrid.core.foundation.project_paths import project_dir
 from astrid.core.project.schema import validate_run_record
+from astrid.core.timeline.events.schema import TimelineActor, TimelineEvent, with_event_hash
 from astrid.core.timeline.resolution import classify_registry
 from astrid.core.timeline.snapshot import TimelineSnapshot, acquire_snapshot
 from astrid.packs.rendering.executors.timeline_visualize.assets import (
     guard_sampling,
-    verify_now,
     verified_source_path,
+    verify_now,
 )
 from astrid.packs.rendering.executors.timeline_visualize.emit import (
     FROZEN_AT_SENTINEL,
@@ -48,6 +50,7 @@ from astrid.packs.rendering.executors.timeline_visualize.evidence_pack import (
 )
 from astrid.packs.rendering.executors.timeline_visualize.frozen import (
     FrozenView,
+    discard_rehydrated_pack,
     load_frozen_view,
     model_from_frozen,
     resolve_focus,
@@ -71,6 +74,19 @@ from astrid.packs.rendering.executors.timeline_visualize.render_svg import (
     render_page_svg_bytes,
 )
 from astrid.packs.rendering.executors.timeline_visualize.scope import select_scope
+from astrid.packs.rendering.executors.timeline_visualize.select import (
+    KernelTimeline,
+    ManagedTimeline,
+    select_kernel_timelines,
+    select_timeline,
+)
+from astrid.packs.rendering.executors.timeline_visualize.thumbnails import (
+    MAX_FRAMES_PER_PAGE,
+    per_page_frame_budget,
+    sample_filmstrip,
+    sample_rendered_filmstrip,
+    verify_rendered_output,
+)
 from astrid.packs.rendering.executors.timeline_visualize.transcript_attach import (
     TranscriptAttachment,
     discover_attachment,
@@ -84,20 +100,78 @@ from astrid.packs.rendering.executors.timeline_visualize.transcripts import (
     speech_occurrence_authored_id,
     with_occurrence_ids,
 )
-from astrid.packs.rendering.executors.timeline_visualize.select import (
-    KernelTimeline,
-    ManagedTimeline,
-    select_kernel_timelines,
-    select_timeline,
-)
-from astrid.core.timeline.events.schema import TimelineActor, TimelineEvent, with_event_hash
-from astrid.packs.rendering.executors.timeline_visualize.thumbnails import (
-    MAX_FRAMES_PER_PAGE,
-    per_page_frame_budget,
-    sample_filmstrip,
-    sample_rendered_filmstrip,
-    verify_rendered_output,
-)
+
+_AUTHORITY_CONTEXT_ENV = "ASTRID_TIMELINE_VISUALIZE_AUTHORITY_CONTEXT"
+
+
+def _execution_authority_context() -> dict[str, Any] | None:
+    raw = os.environ.get(_AUTHORITY_CONTEXT_ENV)
+    if raw is None:
+        return None
+    try:
+        value = json.loads(raw)
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise ValueError("timeline visualization execution authority is invalid JSON") from exc
+    if not isinstance(value, dict):
+        raise ValueError("timeline visualization execution authority must be an object")
+    return value
+
+
+def _verify_frozen_execution_authority(
+    manifest_path: Path,
+    frozen: FrozenView,
+    authority: Mapping[str, Any] | None,
+) -> None:
+    if authority is None:
+        return
+    if authority.get("mode") != "frozen_view":
+        raise ValueError("timeline visualization authority mode changed before execution")
+    expected_digest = authority.get("manifest_sha256")
+    actual_digest = hashlib.sha256(Path(manifest_path).expanduser().read_bytes()).hexdigest()
+    if expected_digest != actual_digest:
+        raise ValueError("frozen visualization manifest changed after admission")
+    if authority.get("snapshot_sns") != frozen.snapshot_sns:
+        raise ValueError("frozen visualization snapshot changed after admission")
+
+
+def _verify_selected_execution_authority(
+    selected: list[ManagedTimeline],
+    authority: Mapping[str, Any] | None,
+) -> None:
+    if authority is None:
+        return
+    mode = authority.get("mode")
+    expected_rows = authority.get("timelines")
+    if mode not in {"kernel", "legacy_file"} or not isinstance(expected_rows, list):
+        raise ValueError("timeline visualization authority mode changed before execution")
+    if mode == "kernel":
+        actual_rows = [
+            {
+                "timeline_id": row.timeline_id,
+                "head_version": row.kernel_head_version,
+                "head_event_id": row.kernel_source_event_id,
+                "head_hash": row.kernel_head_hash,
+            }
+            for row in selected
+        ]
+        sort_field = "timeline_id"
+    else:
+        actual_rows = []
+        for row in selected:
+            if row.timeline_dir is None:
+                raise ValueError("legacy timeline authority lost its managed directory")
+            eventlog = row.timeline_dir / "assembly.jsonl"
+            actual_rows.append(
+                {
+                    "timeline_ulid": row.timeline_ulid,
+                    "eventlog_sha256": hashlib.sha256(eventlog.read_bytes()).hexdigest(),
+                }
+            )
+        sort_field = "timeline_ulid"
+    if sorted(expected_rows, key=itemgetter(sort_field)) != sorted(
+        actual_rows, key=itemgetter(sort_field)
+    ):
+        raise ValueError("timeline authority changed after admission; retry visualization")
 
 _LAYOUTS = ("time-scaled", "linear")
 _FORMATS = frozenset({"png", "svg", "md"})
@@ -1175,6 +1249,7 @@ def _render_one(
     selected: ManagedTimeline,
     project_root: Path,
     pack_root: Path,
+    execution_authority: Mapping[str, Any] | None = None,
 ) -> PackLayout:
     if selected.timeline_dir is None:
         raise ValueError("cold visualization requires a managed timeline directory")
@@ -1184,6 +1259,20 @@ def _render_one(
         project_root=project_root,
         retries=2,
     )
+    if execution_authority is not None and execution_authority.get("mode") == "legacy_file":
+        expected = next(
+            (
+                row
+                for row in execution_authority.get("timelines", [])
+                if isinstance(row, Mapping)
+                and row.get("timeline_ulid") == selected.timeline_ulid
+            ),
+            None,
+        )
+        eventlog = selected.timeline_dir / "assembly.jsonl"
+        actual_digest = hashlib.sha256(eventlog.read_bytes()).hexdigest()
+        if not isinstance(expected, Mapping) or expected.get("eventlog_sha256") != actual_digest:
+            raise ValueError("timeline authority changed while acquiring its snapshot; retry")
     if selected.kernel_head_version is not None:
         snapshot = replace(
             snapshot,
@@ -1373,8 +1462,9 @@ def _write_project_index(
             "name": f"TL{index:02d}",
             "path": f"TL{index:02d}",
             "type": "directory",
+            "manifest_sha256": hashlib.sha256(child.manifest_path.read_bytes()).hexdigest(),
         }
-        for index in range(1, len(children) + 1)
+        for index, child in enumerate(children, start=1)
     ]
     manifest = build_manifest(
         kind="timeline_visualize_project",
@@ -1413,29 +1503,19 @@ def _mark_run_metadata(out_root: Path, project_slug: str, timeline_ids: list[str
     write_json_atomic(run_path, validate_run_record(record))
 
 
-def execute(argv: list[str] | None = None) -> dict[str, Any]:
-    args = build_parser().parse_args(argv)
-    _validate_selectors(args)
-    if not args.project_slug:
-        raise ValueError(
-            "project is required: pass --project-slug <slug>, attach "
-            "ASTRID_PROJECT_SLUG, or invoke the capability with project=<slug>"
-        )
-    env_project = os.environ.get("ASTRID_PROJECT_SLUG")
-    if env_project and env_project != args.project_slug:
-        raise ValueError(
-            f"project_slug {args.project_slug!r} does not match managed project {env_project!r}"
-        )
-    project_root = project_dir(args.project_slug).resolve()
-    if not project_root.is_dir():
-        raise ValueError(f"project not found: {args.project_slug}")
-    out_root = args.out.expanduser().resolve()
-    pack_root = out_root / "agent-view"
-    if pack_root.exists() and any(pack_root.iterdir()):
-        raise ValueError(f"evidence pack output is not empty: {pack_root}")
-
-    if args.from_view is not None:
-        frozen = load_frozen_view(args.from_view, project_root=project_root)
+def _execute_from_frozen(
+    *,
+    args: argparse.Namespace,
+    project_root: Path,
+    out_root: Path,
+    pack_root: Path,
+    execution_authority: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    frozen = load_frozen_view(args.from_view, project_root=project_root)
+    try:
+        _verify_frozen_execution_authority(args.from_view, frozen, execution_authority)
+        if execution_authority is not None and execution_authority.get("focus") != args.focus:
+            raise ValueError("frozen visualization focus changed after admission")
         if frozen.ground_truth.get("project_slug") != args.project_slug:
             raise ValueError("frozen view project does not match project_slug input")
         timeline_ids = [frozen.timeline_ulid]
@@ -1481,13 +1561,11 @@ def execute(argv: list[str] | None = None) -> dict[str, Any]:
                 transcript_asset_key=transcript_asset_key,
             )
         manifest_path = layout.manifest_path
-        pages = list(layout.pages)
-        file_hashes = dict(layout.file_hashes)
         outputs: dict[str, Any] = {
             "pack_root": str(pack_root),
             "manifest_path": str(manifest_path),
-            "pages": [str(path) for path in pages],
-            "file_hashes": file_hashes,
+            "pages": [str(path) for path in layout.pages],
+            "file_hashes": dict(layout.file_hashes),
         }
         return {
             "returncode": 0,
@@ -1496,6 +1574,40 @@ def execute(argv: list[str] | None = None) -> dict[str, Any]:
             "timeline_ids": timeline_ids,
             "outputs": outputs,
         }
+    finally:
+        discard_rehydrated_pack(frozen.pack_root)
+
+
+def execute(argv: list[str] | None = None) -> dict[str, Any]:
+    args = build_parser().parse_args(argv)
+    _validate_selectors(args)
+    if not args.project_slug:
+        raise ValueError(
+            "project is required: pass --project-slug <slug>, attach "
+            "ASTRID_PROJECT_SLUG, or invoke the capability with project=<slug>"
+        )
+    env_project = os.environ.get("ASTRID_PROJECT_SLUG")
+    if env_project and env_project != args.project_slug:
+        raise ValueError(
+            f"project_slug {args.project_slug!r} does not match managed project {env_project!r}"
+        )
+    project_root = project_dir(args.project_slug).resolve()
+    if not project_root.is_dir():
+        raise ValueError(f"project not found: {args.project_slug}")
+    out_root = args.out.expanduser().resolve()
+    pack_root = out_root / "agent-view"
+    execution_authority = _execution_authority_context()
+    if pack_root.exists() and any(pack_root.iterdir()):
+        raise ValueError(f"evidence pack output is not empty: {pack_root}")
+
+    if args.from_view is not None:
+        return _execute_from_frozen(
+            args=args,
+            project_root=project_root,
+            out_root=out_root,
+            pack_root=pack_root,
+            execution_authority=execution_authority,
+        )
 
     kernel_materialization_root = out_root / ".kernel-timelines"
     selected = _select_timelines(
@@ -1503,6 +1615,7 @@ def execute(argv: list[str] | None = None) -> dict[str, Any]:
         project_root,
         kernel_materialization_root=kernel_materialization_root,
     )
+    _verify_selected_execution_authority(selected, execution_authority)
     timeline_ids = sorted({row.timeline_ulid for row in selected})
     _mark_run_metadata(out_root, args.project_slug, timeline_ids)
 
@@ -1512,6 +1625,7 @@ def execute(argv: list[str] | None = None) -> dict[str, Any]:
             selected=selected[0],
             project_root=project_root,
             pack_root=pack_root,
+            execution_authority=execution_authority,
         )
         manifest_path = layout.manifest_path
         pages = list(layout.pages)
@@ -1524,6 +1638,7 @@ def execute(argv: list[str] | None = None) -> dict[str, Any]:
                 selected=row,
                 project_root=project_root,
                 pack_root=pack_root / f"TL{index:02d}",
+                execution_authority=execution_authority,
             )
             for index, row in enumerate(selected, start=1)
         ]

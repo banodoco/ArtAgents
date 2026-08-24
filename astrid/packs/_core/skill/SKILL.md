@@ -103,8 +103,9 @@ stored under that projects root, keeping disposable roots isolated; pass
 `projects current`
 resolves workspace before user scope, verifies the selected ref against the
 kernel, and reports the selected project, canonical path, preference path,
-and supplying scope. Project-scoped CLI commands may omit `--project` to use
-that selection; an explicit `--project` always wins.
+and supplying scope. That preference is orientation state, not execution
+authority: project-scoped CLI commands still require explicit `--project`
+unless `ASTRID_PROJECT_SLUG` supplies an attached project.
 
 Nested mounts (reachable only beneath their parent family, never top-level):
 

@@ -191,6 +191,16 @@ def test_every_artifact_validates_against_its_schema(desert) -> None:
         _validate(name, instance)
 
 
+def test_asset_index_freezes_media_type_for_extensionless_managed_locators(desert) -> None:
+    model, identity_map, snapshot, _project_root = desert
+    assets = emit_asset_index(model, identity_map, snapshot)["assets"]
+    media_types = {
+        row["canonical_ref"]["authored_id"]: row["media_type"] for row in assets
+    }
+    assert media_types["plant-frame-1"] == "image"
+    assert media_types["toccata-fugue"] == "audio"
+
+
 def test_desert_frozen_facts(desert) -> None:
     model, identity_map, snapshot, _project_root = desert
     ground = emit_ground_truth(model, identity_map, snapshot)
@@ -311,6 +321,7 @@ def test_cross_artifact_join(desert) -> None:
             if action["focus"] is not None:
                 assert "--from-view" in action["argv"]
                 assert "--focus" in action["argv"]
+                assert action["argv"][action["argv"].index("--project") + 1] == PROJECT_SLUG
                 focus_value = action["argv"][action["argv"].index("--focus") + 1]
                 assert focus_value == action["focus"]
                 assert _QUALIFIED_RE.fullmatch(focus_value) or _TIMESTAMP_RE.fullmatch(

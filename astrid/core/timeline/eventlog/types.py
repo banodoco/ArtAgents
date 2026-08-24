@@ -4,10 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from astrid.core.contracts.event_log_error import EventLogError as _EventLogErrorBase
 from astrid.core.timeline.events.schema import TimelineActor
+
+if TYPE_CHECKING:
+    from astrid.core.timeline.events.schema.types import TimelineEvent
 
 BackendName = Literal["local_fs", "supabase"]
 

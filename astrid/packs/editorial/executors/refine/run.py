@@ -11,6 +11,7 @@ import argparse
 import copy
 import json
 import subprocess
+import sys
 import tempfile
 from datetime import datetime, timezone
 from functools import partial

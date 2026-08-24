@@ -17,6 +17,7 @@ import sys
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
+from astrid.core.cli_choices import add_choice_arg
 from astrid.core.foundation.hash import sha256_file
 from astrid.core.foundation.project_paths import project_dir, resolve_projects_root
 from astrid.core.project.kernel_admission import admit_orchestrator_project_run

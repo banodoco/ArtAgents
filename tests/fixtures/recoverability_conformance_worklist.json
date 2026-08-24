@@ -3076,7 +3076,7 @@
       "builder": "build_parser",
       "path": "astrid/packs/rendering/executors/timeline_visualize/run.py",
       "prog": "rendering.timeline_visualize",
-      "enum_arg_count": 4
+      "enum_arg_count": 3
     },
     {
       "module": "astrid.packs.runpod.executors._common",

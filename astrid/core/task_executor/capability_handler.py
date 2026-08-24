@@ -9,20 +9,21 @@ and returns a universal result manifest for ExecutionService re-validation.
 
 from __future__ import annotations
 
+import json
 import os
 from contextlib import contextmanager, nullcontext, redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
 from typing import Any, Iterator, Mapping
 
-from astrid.core.audit.util import SECRET_VALUE_RE
 from astrid.core._shared.result_manifest import validate_result_manifest
-from astrid.core.env_vars import ASTRID_INTERNAL_INVOCATION
-from astrid.core.env_vars import ASTRID_PACKS_PATH
-from astrid.core.env_vars import ASTRID_PROJECTS_ROOT
+from astrid.core.audit.util import SECRET_VALUE_RE
+from astrid.core.env_vars import ASTRID_INTERNAL_INVOCATION, ASTRID_PACKS_PATH, ASTRID_PROJECTS_ROOT
 from astrid.core.execution.executor import runner as executor_runner
 from astrid.core.io.media_import import prepare_media_file
 from astrid.core.project.run import discover_manifest_path, load_manifest_output_artifacts
+
+_TIMELINE_VISUALIZE_AUTHORITY_ENV = "ASTRID_TIMELINE_VISUALIZE_AUTHORITY_CONTEXT"
 
 
 def _failure_log_detail(out_dir: Path) -> str:
@@ -40,7 +41,9 @@ def _failure_log_detail(out_dir: Path) -> str:
         tail = "\n".join(lines[-12:])
         tail = SECRET_VALUE_RE.sub("<redacted>", tail)
         for key, value in os.environ.items():
-            if value and any(token in key.upper() for token in ("KEY", "TOKEN", "SECRET", "PASSWORD")):
+            if value and any(
+                token in key.upper() for token in ("KEY", "TOKEN", "SECRET", "PASSWORD")
+            ):
                 tail = tail.replace(value, "<redacted>")
         chunks.append(f"{path.name}: {tail}")
     return "\n".join(chunks)[:3500]
@@ -102,15 +105,21 @@ class CapabilityTaskHandler:
         capability_id: str,
         projects_root: str | Path | None = None,
         invocation: str = "sdk",
+        require_executor_version: bool = False,
     ) -> None:
         if capability_kind not in ("executor", "orchestrator"):
-            raise ValueError(f"capability_kind must be executor/orchestrator, got {capability_kind!r}")
+            raise ValueError(
+                f"capability_kind must be executor/orchestrator, got {capability_kind!r}"
+            )
         if not capability_id:
             raise ValueError("capability_id must be non-empty")
         self._kind = capability_kind
         self._capability_id = capability_id
-        self._projects_root = Path(projects_root).expanduser().resolve() if projects_root is not None else None
+        self._projects_root = (
+            Path(projects_root).expanduser().resolve() if projects_root is not None else None
+        )
         self._invocation = invocation
+        self._require_executor_version = require_executor_version
 
     def execute(self, *, task: Any, staging_dir: Path) -> Mapping[str, Any]:
         staging_dir = Path(staging_dir)
@@ -123,7 +132,17 @@ class CapabilityTaskHandler:
             request_inputs = dict(spec.get("inputs") or spec.get("request_inputs") or {})
             request_outputs = dict(spec.get("outputs") or {})
             if not request_inputs and spec:
-                reserved = {"capability_id", "capability_kind", "inputs", "outputs", "project", "kind", "request", "extra_pack_roots"}
+                reserved = {
+                    "capability_id",
+                    "capability_kind",
+                    "inputs",
+                    "outputs",
+                    "project",
+                    "kind",
+                    "request",
+                    "extra_pack_roots",
+                    "authority_context",
+                }
                 if not any(k in spec for k in reserved):
                     request_inputs = dict(spec)
                 req_env = spec.get("request")
@@ -150,11 +169,26 @@ class CapabilityTaskHandler:
             elif isinstance(spec.get("request"), Mapping):
                 project = spec.get("request", {}).get("project")
 
-        extra_pack_roots = (
-            spec.get("extra_pack_roots", ())
-            if isinstance(spec, Mapping)
-            else ()
+        extra_pack_roots = spec.get("extra_pack_roots", ()) if isinstance(spec, Mapping) else ()
+        authority_context = (
+            spec.get("authority_context") if isinstance(spec, Mapping) else None
         )
+        admitted_executor_version = (
+            authority_context.get("executor_version")
+            if isinstance(authority_context, Mapping)
+            and isinstance(authority_context.get("executor_version"), str)
+            and authority_context.get("executor_version")
+            else None
+        )
+        if (
+            self._kind == "executor"
+            and self._require_executor_version
+            and admitted_executor_version is None
+        ):
+            raise executor_runner.ExecutorRunnerError(
+                "cannot retry an executor task admitted before executor-version fencing; "
+                "submit a new invocation"
+            )
 
         # Generic single-task admission: no ghost fan-out. All capabilities
         # (executor or orchestrator) execute via their real runner under
@@ -164,9 +198,22 @@ class CapabilityTaskHandler:
             if self._projects_root is not None
             else nullcontext()
         )
-        with _scoped_pack_roots(extra_pack_roots), _scoped_env(ASTRID_INTERNAL_INVOCATION, "1"), root_scope:
+        authority_scope = (
+            _scoped_env(
+                _TIMELINE_VISUALIZE_AUTHORITY_ENV,
+                json.dumps(dict(authority_context), sort_keys=True, separators=(",", ":")),
+            )
+            if self._capability_id == "rendering.timeline_visualize"
+            and isinstance(authority_context, Mapping)
+            else nullcontext()
+        )
+        with (
+            _scoped_pack_roots(extra_pack_roots),
+            _scoped_env(ASTRID_INTERNAL_INVOCATION, "1"),
+            root_scope,
+            authority_scope,
+        ):
             if self._kind == "executor":
-
                 req = executor_runner.ExecutorRunRequest(
                     executor_id=self._capability_id,
                     # Retries must be fenced to the kernel-owned staging
@@ -192,6 +239,9 @@ class CapabilityTaskHandler:
                     invocation=self._invocation,
                     projects_root=self._projects_root,
                     run_root=staging_dir,
+                    expected_executor_version=(
+                        admitted_executor_version
+                    ),
                 )
                 child_stdout = StringIO()
                 child_stderr = StringIO()
@@ -218,7 +268,10 @@ class CapabilityTaskHandler:
                         msg = {**dict(msg), "child_logs": log_detail}
                     raise RuntimeError(f"executor {self._capability_id!r} failed: {msg}")
             else:
-                from astrid.core.execution.orchestrator.runner import OrchestratorRunRequest, run_orchestrator  # noqa: E402
+                from astrid.core.execution.orchestrator.runner import (  # noqa: E402
+                    OrchestratorRunRequest,
+                    run_orchestrator,
+                )
 
                 req = OrchestratorRunRequest(
                     orchestrator_id=self._capability_id,
@@ -242,7 +295,12 @@ class CapabilityTaskHandler:
                     raise RuntimeError(f"orchestrator {self._capability_id!r} failed: {result}")
         manifest_path = discover_manifest_path(out_dir, fallback_root=staging_dir)
         if manifest_path is None:
-            for cand in (staging_dir / "manifest.json", out_dir / "manifest.json", staging_dir / "agent-view" / "manifest.json", out_dir / "agent-view" / "manifest.json"):
+            for cand in (
+                staging_dir / "manifest.json",
+                out_dir / "manifest.json",
+                staging_dir / "agent-view" / "manifest.json",
+                out_dir / "agent-view" / "manifest.json",
+            ):
                 if cand.is_file():
                     manifest_path = cand
                     break
@@ -260,11 +318,28 @@ class CapabilityTaskHandler:
                         cand = (Path(manifest_path).parent / raw).resolve()
                         if cand.name.endswith(".lock"):
                             continue
-                        try:
-                            rel = cand.relative_to(staging_dir.resolve()).as_posix()
-                        except ValueError:
-                            rel = raw
-                        rels.append(rel)
+                        staging_root = staging_dir.resolve()
+                        if not cand.is_relative_to(staging_root):
+                            raise RuntimeError(f"manifest output escapes kernel staging: {raw!r}")
+                        if cand.is_dir():
+                            # Project-level visualization manifests declare
+                            # TLxx directories. Kernel publication still owns
+                            # concrete files, so expand those directories
+                            # deterministically instead of passing a directory
+                            # to the media importer.
+                            for child in sorted(cand.rglob("*")):
+                                resolved_child = child.resolve()
+                                if not child.is_file():
+                                    continue
+                                if not resolved_child.is_relative_to(staging_root):
+                                    raise RuntimeError(
+                                        "manifest directory output contains a file "
+                                        f"outside kernel staging: {raw!r}"
+                                    )
+                                rels.append(resolved_child.relative_to(staging_root).as_posix())
+                            continue
+                        if cand.is_file():
+                            rels.append(cand.relative_to(staging_root).as_posix())
                 # A visualization pack's hash ledger cannot list itself in
                 # manifest.outputs without creating a hash cycle, but frozen
                 # navigation needs that ledger beside the durable manifest.
@@ -273,9 +348,7 @@ class CapabilityTaskHandler:
                     pack_hashes = Path(manifest_path).parent / "pack-hashes.json"
                     if pack_hashes.is_file():
                         rels.append(
-                            pack_hashes.resolve()
-                            .relative_to(staging_dir.resolve())
-                            .as_posix()
+                            pack_hashes.resolve().relative_to(staging_dir.resolve()).as_posix()
                         )
             if not rels:
                 for p in sorted(out_dir.rglob("*")):
@@ -284,7 +357,11 @@ class CapabilityTaskHandler:
                             rels.append(p.resolve().relative_to(staging_dir.resolve()).as_posix())
                         except ValueError:
                             continue
-            primary_rel = Path(manifest_path).resolve().relative_to(staging_dir.resolve()).as_posix() if Path(manifest_path).resolve().is_relative_to(staging_dir.resolve()) else Path(manifest_path).name
+            primary_rel = (
+                Path(manifest_path).resolve().relative_to(staging_dir.resolve()).as_posix()
+                if Path(manifest_path).resolve().is_relative_to(staging_dir.resolve())
+                else Path(manifest_path).name
+            )
             if primary_rel not in rels:
                 rels.append(primary_rel)
             uniq: list[str] = []
@@ -312,7 +389,7 @@ class CapabilityTaskHandler:
         if not ordered:
             # Evidence-only: batch-1 relaxed contract — allow empty outputs as evidence manifest.
             created = getattr(task, "created_at", "") or ""
-            return {
+            empty_manifest: dict[str, Any] = {
                 "schema_version": 1,
                 "kind": self._capability_id,
                 "inputs": dict(request_inputs),
@@ -320,11 +397,24 @@ class CapabilityTaskHandler:
                 "created": created,
                 "warnings": [],
             }
+            capability_version = getattr(result, "executor_version", None)
+            if isinstance(capability_version, str) and capability_version:
+                empty_manifest["executor_version"] = capability_version
+            return empty_manifest
 
         outputs: list[dict[str, Any]] = []
         for ordinal, rel in enumerate(ordered):
             path = staging_dir / rel
             prepared = prepare_media_file(path, root=staging_dir)
+            label = Path(rel).name
+            if self._capability_id == "rendering.timeline_visualize" and manifest_path is not None:
+                pack_root = Path(manifest_path).parent.resolve()
+                resolved_path = path.resolve()
+                if resolved_path.is_relative_to(pack_root):
+                    # Preserve the logical path inside the evidence pack. CAS
+                    # stores each member independently, so a basename alone
+                    # cannot reconstruct nested filmstrip assets safely.
+                    label = resolved_path.relative_to(pack_root).as_posix()
             outputs.append(
                 {
                     "path": rel,
@@ -333,7 +423,7 @@ class CapabilityTaskHandler:
                     "ordinal": ordinal,
                     "is_primary": ordinal == 0,
                     "role": "result" if ordinal == 0 else "output",
-                    "label": Path(rel).name,
+                    "label": label,
                 }
             )
         created = getattr(task, "created_at", "") or ""
@@ -345,6 +435,9 @@ class CapabilityTaskHandler:
             "created": created,
             "warnings": [],
         }
+        capability_version = getattr(result, "executor_version", None)
+        if isinstance(capability_version, str) and capability_version:
+            raw_manifest["executor_version"] = capability_version
         # Reuse service validation — don't reimplement, just ensure it passes here.
         validate_result_manifest(raw_manifest, staging_root=staging_dir)
         return raw_manifest

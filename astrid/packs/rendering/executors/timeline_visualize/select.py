@@ -253,8 +253,21 @@ def select_kernel_timelines(
         conn.close()
 
     timelines: list[KernelTimeline] = []
+    archived_aliases: list[tuple[str, str, str]] = []
     for row in rows:
         if row["state_kind"] == "timeline.archived":
+            if (
+                isinstance(row["id"], str)
+                and isinstance(row["timeline_ulid"], str)
+                and isinstance(row["slug"], str)
+            ):
+                archived_aliases.append(
+                    (
+                        str(row["id"]),
+                        str(row["timeline_ulid"]),
+                        str(row["slug"]),
+                    )
+                )
             continue
         try:
             config = json.loads(str(row["document_json"]))
@@ -312,6 +325,11 @@ def select_kernel_timelines(
             return matches, diagnostics
         if len(matches) > 1:
             return [], [f"ambiguous timeline ref {slug!r}"]
+        if any(
+            needle in {timeline_id.lower(), timeline_ulid.lower(), alias.lower()}
+            for timeline_id, timeline_ulid, alias in archived_aliases
+        ):
+            return [], [f"kernel timeline with ref {slug!r} is archived"]
         return [], [f"no kernel timeline with ref {slug!r}"]
     if all:
         return timelines, diagnostics

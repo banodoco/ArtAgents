@@ -23,8 +23,8 @@ from pathlib import Path
 
 import pytest
 
-import astrid
 from astrid.packs.rendering.executors.timeline_visualize.frozen import (
+    ContainmentError,
     FrozenIntegrityError,
     load_frozen_view,
 )
@@ -52,9 +52,11 @@ from astrid.packs.rendering.executors.timeline_visualize.transcripts import (
 from astrid.packs.understanding.executors.visual_understand.run import (
     OrderedImageEvidence,
 )
+from astrid.sdk import invoke_result
 from tests.packs.rendering.test_timeline_visualize_executor import _rewrite_registry_event
 from tests.packs.rendering.test_timeline_visualize_frozen import (
     _append_v160,
+    _editable_manifest,
     _invoke,
     _prepare_project,
 )
@@ -397,8 +399,7 @@ def test_image_order_swap_is_recorded_and_never_a_silent_duplicate_session() -> 
         _ordered_evidence(pack_order, answers=case["fixture"]["answers"])
     )
     assert detect_divergences(gate, declared_image_hashes=pack_order) == [
-        "image-order-divergence: "
-        f"declared={list(pack_order)!r}, observed={list(gate_order)!r}"
+        f"image-order-divergence: declared={list(pack_order)!r}, observed={list(gate_order)!r}"
     ]
 
 
@@ -535,10 +536,15 @@ def test_clip_removal_dangles_sp_with_diagnostic(tmp_projects_root: Path) -> Non
     # SP loudly with a diagnostic naming it.
     transcript_index = deepcopy(frozen.transcript_index)
     transcript_index["speech_occurrences"][0]["clip_ref"] = case["mutation"]["dangling_clip_ref"]
-    _rewrite_pack_file_with_valid_hashes(root_manifest, "transcript-index.json", transcript_index)
+    editable_manifest = _editable_manifest(root, project_root)
+    _rewrite_pack_file_with_valid_hashes(
+        editable_manifest,
+        "transcript-index.json",
+        transcript_index,
+    )
 
     with pytest.raises(FrozenIntegrityError, match="speech occurrence ref does not resolve") as exc:
-        load_frozen_view(root_manifest, project_root=project_root)
+        load_frozen_view(editable_manifest, project_root=project_root)
     assert case["mutation"]["affected_speech_ref"] in str(exc.value)
 
 
@@ -548,10 +554,125 @@ def test_clip_removal_dangles_sp_with_diagnostic(tmp_projects_root: Path) -> Non
 
 
 @pytest.mark.hermetic
+def test_foreign_from_view_is_rejected_before_kernel_admission(
+    tmp_projects_root: Path,
+) -> None:
+    slug = "adversarial-foreign-view"
+    _prepare_project(tmp_projects_root, slug)
+    foreign = tmp_projects_root / "foreign.json"
+    foreign.write_text("{}", encoding="utf-8")
+
+    refused = invoke_result(
+        "rendering.timeline_visualize",
+        kind="executor",
+        include_installed=False,
+        project=slug,
+        inputs={
+            "project_slug": slug,
+            "layout": "time-scaled",
+            "formats": ["md"],
+            "filmstrip": "off",
+            "from_view": str(foreign),
+            "focus": "TL01",
+        },
+    )
+
+    assert refused.ok is False
+    assert refused.run_id is None
+    assert refused.kernel_task_id is None
+    assert refused.error is not None
+    assert refused.error["sdk_category"] == "validation"
+    assert "from_view rejected" in refused.error["message"]
+
+
+@pytest.mark.hermetic
+def test_project_contained_malformed_view_is_rejected_before_kernel_admission(
+    tmp_projects_root: Path,
+) -> None:
+    slug = "adversarial-contained-view"
+    project_root, _timeline = _prepare_project(tmp_projects_root, slug)
+    forged = project_root / "runs" / "forged" / "agent-view" / "manifest.json"
+    forged.parent.mkdir(parents=True)
+    forged.write_text('{"kind":"timeline_visualize"}', encoding="utf-8")
+
+    refused = invoke_result(
+        "rendering.timeline_visualize",
+        kind="executor",
+        include_installed=False,
+        project=slug,
+        inputs={
+            "project_slug": slug,
+            "layout": "time-scaled",
+            "formats": ["md"],
+            "filmstrip": "off",
+            "from_view": str(forged),
+            "focus": "TL01",
+        },
+    )
+
+    assert refused.ok is False
+    assert refused.run_id is None
+    assert refused.kernel_task_id is None
+    assert refused.error is not None
+    assert refused.error["sdk_category"] == "validation"
+    assert "from_view rejected" in refused.error["message"]
+
+
+@pytest.mark.hermetic
+def test_symlinked_durable_view_is_rejected_before_kernel_admission(
+    tmp_projects_root: Path,
+) -> None:
+    slug = "adversarial-symlinked-view"
+    project_root, _timeline, root = _root_view(tmp_projects_root, slug)
+    alias = project_root / "manifest-link.json"
+    alias.symlink_to(Path(root.manifest_path or ""))
+
+    refused = invoke_result(
+        "rendering.timeline_visualize",
+        kind="executor",
+        include_installed=False,
+        project=slug,
+        inputs={
+            "project_slug": slug,
+            "layout": "time-scaled",
+            "formats": ["md"],
+            "filmstrip": "off",
+            "from_view": str(alias),
+            "focus": "TL01",
+        },
+    )
+
+    assert refused.ok is False
+    assert refused.run_id is None
+    assert refused.kernel_task_id is None
+    assert refused.error is not None
+    assert refused.error["sdk_category"] == "validation"
+    assert "must not be a symlink" in refused.error["message"]
+
+
+@pytest.mark.hermetic
+def test_ground_truth_project_identity_cannot_be_rehashed_into_another_project(
+    tmp_projects_root: Path,
+) -> None:
+    slug = "adversarial-project-identity"
+    project_root, _timeline, root = _root_view(tmp_projects_root, slug)
+    editable_manifest = _editable_manifest(root, project_root)
+    ground_truth = _json(editable_manifest.parent / "ground-truth.json")
+    ground_truth["project_slug"] = "another-project"
+    _rewrite_pack_file_with_valid_hashes(
+        editable_manifest,
+        "ground-truth.json",
+        ground_truth,
+    )
+
+    with pytest.raises(ContainmentError, match="project identity disagrees"):
+        load_frozen_view(editable_manifest, project_root=project_root)
+
+
+@pytest.mark.hermetic
 def test_tombstone_frozen_lineage_resolves_and_refresh_surfaces_tombstone(
     tmp_projects_root: Path,
 ) -> None:
-    case = _case("tombstone")
     slug = "adversarial-tombstone"
     project_root, timeline, root = _root_view(tmp_projects_root, slug)
     root_manifest = Path(root.manifest_path or "").resolve()
@@ -587,9 +708,9 @@ def test_tombstone_frozen_lineage_resolves_and_refresh_surfaces_tombstone(
     assert after.ok is True, after.error
     assert _pack_bytes(Path(after.outputs["pack_root"])) == before_bytes
 
-    # Any fresh render of the live timeline surfaces the tombstone state.  The
-    # executor fails selection and writes the diagnostic to its stderr log.
-    refused = astrid.invoke(
+    # Any fresh render of the live timeline surfaces the tombstone state at
+    # read-only SDK admission, before a task or private staging root exists.
+    refused = invoke_result(
         "rendering.timeline_visualize",
         kind="executor",
         include_installed=False,
@@ -599,15 +720,15 @@ def test_tombstone_frozen_lineage_resolves_and_refresh_surfaces_tombstone(
             "layout": "time-scaled",
             "formats": ["md"],
             "filmstrip": "off",
-            "timeline_slug": case["mutation"]["slug"],
+            "timeline_source": str(timeline),
         },
         execution_mode="subprocess",
     )
     assert refused.ok is False
-    stderr = (Path(refused.run_root or "") / "logs" / "stderr.log").read_text(
-        encoding="utf-8", errors="replace"
-    )
-    assert "tombstoned" in stderr
+    assert refused.run_id is None
+    assert refused.error is not None
+    assert refused.error["sdk_category"] == "validation"
+    assert "tombstoned" in refused.error["message"]
 
 
 def _root_view(projects_root: Path, slug: str):

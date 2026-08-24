@@ -5,6 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
+from astrid.core.execution.executor.runner import ExecutorRunnerError
 from astrid.core.task_executor.capability_handler import CapabilityTaskHandler
 
 
@@ -40,3 +43,20 @@ def test_executor_stdout_is_captured_from_outer_product_cli(
     assert captured.out == ""
     assert captured.err == ""
     assert [item["path"] for item in manifest["outputs"]] == ["out/result.txt"]
+
+
+def test_retried_legacy_executor_task_fails_closed_without_version(
+    tmp_path: Path,
+) -> None:
+    handler = CapabilityTaskHandler(
+        capability_kind="executor",
+        capability_id="testing.legacy",
+        projects_root=tmp_path,
+        require_executor_version=True,
+    )
+
+    with pytest.raises(ExecutorRunnerError, match="submit a new invocation"):
+        handler.execute(
+            task=SimpleNamespace(spec={"inputs": {}}, created_at="2026-08-24T00:00:00Z"),
+            staging_dir=tmp_path / "staging",
+        )

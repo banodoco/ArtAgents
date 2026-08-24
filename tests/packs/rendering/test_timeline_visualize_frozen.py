@@ -15,15 +15,18 @@ from astrid.core.foundation.project_paths import project_dir
 from astrid.core.project.project import create_project
 from astrid.core.timeline.eventlog.local_fs import LocalFsBackend
 from astrid.core.timeline.events.schema import TimelineActor
+from astrid.packs.rendering.executors.timeline_visualize import frozen as frozen_module
 from astrid.packs.rendering.executors.timeline_visualize import run as run_module
 from astrid.packs.rendering.executors.timeline_visualize.frozen import (
     ContainmentError,
     FocusResolutionError,
     FrozenIntegrityError,
+    discard_rehydrated_pack,
     load_frozen_view,
+    model_from_frozen,
     resolve_focus,
+    snapshot_from_frozen,
 )
-
 
 TESTS_ROOT = Path(__file__).resolve().parents[2]
 SLICE_DIR = TESTS_ROOT / "fixtures" / "timeline_visualize" / "desert_slice"
@@ -69,6 +72,77 @@ def _root_view(projects_root: Path, slug: str):
     result = _invoke(slug, timeline_source=str(timeline_dir))
     assert result.ok is True, result.error
     return project_root, timeline_dir, result
+
+
+def test_discard_never_deletes_user_owned_prefix_path(tmp_path: Path) -> None:
+    user_root = tmp_path / "astrid-frozen-view-user-owned"
+    nested = user_root / "nested" / "manifest.json"
+    nested.parent.mkdir(parents=True)
+    nested.write_text("user bytes", encoding="utf-8")
+
+    discard_rehydrated_pack(nested)
+
+    assert nested.read_text(encoding="utf-8") == "user bytes"
+
+
+def test_failed_managed_load_reclaims_its_rehydrated_temp_root(
+    tmp_projects_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root, _timeline, result = _root_view(
+        tmp_projects_root, "timeline-frozen-failed-cleanup"
+    )
+    before = set(frozen_module._REHYDRATED_PACKS)
+
+    def reject(_pack_root: Path):
+        raise FrozenIntegrityError("forced verifier failure")
+
+    monkeypatch.setattr(frozen_module, "_verify_pack", reject)
+    with pytest.raises(FrozenIntegrityError, match="forced verifier failure"):
+        load_frozen_view(Path(result.manifest_path or ""), project_root=project_root)
+
+    assert set(frozen_module._REHYDRATED_PACKS) == before
+
+
+def test_discard_does_not_delete_a_same_path_replacement(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owned = tmp_path / "owned"
+    owned.mkdir()
+    (owned / "original").write_text("derived", encoding="utf-8")
+    moved = tmp_path / "moved-owned"
+    frozen_module._register_rehydrated_pack(owned)
+    real_fstat = frozen_module.os.fstat
+    swapped = False
+
+    def swap_after_open(fd: int):
+        nonlocal swapped
+        result = real_fstat(fd)
+        if not swapped:
+            swapped = True
+            owned.rename(moved)
+            owned.mkdir()
+            (owned / "user-sentinel").write_text("preserve", encoding="utf-8")
+        return result
+
+    monkeypatch.setattr(frozen_module.os, "fstat", swap_after_open)
+    discard_rehydrated_pack(owned)
+
+    assert (owned / "user-sentinel").read_text(encoding="utf-8") == "preserve"
+
+
+def test_frozen_snapshot_preserves_registry_media_types(tmp_projects_root: Path) -> None:
+    project_root, _timeline, root = _root_view(
+        tmp_projects_root, "timeline-frozen-media-types"
+    )
+    frozen = load_frozen_view(Path(root.manifest_path or ""), project_root=project_root)
+    snapshot = snapshot_from_frozen(frozen, model_from_frozen(frozen))
+    media_types = {
+        key: entry.get("type") for key, entry in snapshot.registry["assets"].items()
+    }
+    assert media_types["plant-frame-1"] == "image"
+    assert media_types["toccata-fugue"] == "audio"
 
 
 def _editable_manifest(result: Any, project_root: Path) -> Path:

@@ -73,9 +73,19 @@ Severity is `F0` blocking/data-risk, `F1` major wrong-turn or source-dive,
 - CLI and editor-bridge writes converge on one kernel timeline stream. Default
   selection is kernel-only; explicit legacy and frozen inputs now declare
   `source_mode` accurately and cannot mutate or outrank kernel state.
-- Final stable changed-area verification: **504 passed, 25 subtests passed**;
-  `compileall` and `git diff --check` are clean.
-- Evidence corpus: **83 live waves, 44 finding/fix reports, 3 maps**.
+- The Phase-B integration replay adds fresh eight-family CLI/SDK, timeline
+  event-log/render/restore, and Reigh HTTP/task/gallery acceptance.  It also
+  regenerated the real stacked-render proof and adversarially closed timeline,
+  backup, setup, trust, and serve-composition authority gaps.
+- A final fresh CLI replay proved executor/head-aware idempotency: exact v2
+  authority reused one run and artifact set, a v3 save produced a new pinned
+  run, durable frozen drill-down succeeded, and temp reconstruction cleanup
+  left no residue.
+- The final integrated automated counts are recorded in
+  `findings/phase-b-combined-integration-verdict.md`; `make check`, focused
+  release-contract lanes, and live acceptance are blocking evidence rather
+  than the earlier campaign-only changed-area count.
+- Evidence corpus: **93 live waves, 58 finding/fix reports, 3 maps**.
 
 The original P0 scout hypotheses about split SDK/CLI ledgers, the missing
 capability-handler symbol, FLF end-frame admission, and pack-root propagation

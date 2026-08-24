@@ -153,6 +153,18 @@ def _normalize_media_type(source_path: Path, media_type: str | None) -> str:
             return "video"
         if suffix in _AUDIO_SUFFIXES:
             return "audio"
+        # Managed CAS locators are deliberately content-addressed and carry
+        # no filename suffix. Frozen packs created before media_type was
+        # recorded still retain verified bytes, so preserve image drill-down
+        # compatibility by asking Pillow to identify the already-verified
+        # payload rather than guessing from its hash-shaped name.
+        try:
+            with Image.open(source_path) as image:
+                image.verify()
+        except OSError:
+            pass
+        else:
+            return "image"
         raise ValueError(
             f"cannot infer media type from {source_path.name!r}; pass media_type explicitly"
         )

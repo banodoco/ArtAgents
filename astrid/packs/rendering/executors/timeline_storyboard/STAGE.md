@@ -22,7 +22,7 @@ Build all pinned shots:
 import astrid.sdk as sdk
 result = sdk.invoke(
     "rendering.timeline_storyboard",
-        kind="executor", project="demo",
+    kind="executor", project="demo",
     inputs={"timeline": "path/to/timeline.json", "assets_registry": "path/to/assets.json"},
 )
 ```
@@ -33,7 +33,7 @@ Build one shot:
 import astrid.sdk as sdk
 result = sdk.invoke(
     "rendering.timeline_storyboard",
-        kind="executor", project="demo",
+    kind="executor", project="demo",
     inputs={
         "timeline": "path/to/timeline.json",
         "assets_registry": "path/to/assets.json",

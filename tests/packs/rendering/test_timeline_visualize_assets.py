@@ -14,8 +14,8 @@ from astrid.core.timeline.resolution import AssetIntegrity, classify_asset
 from astrid.packs.rendering.executors.timeline_visualize.assets import (
     guard_sampling,
     source_card,
-    verify_now,
     verified_source_path,
+    verify_now,
 )
 from astrid.packs.rendering.executors.timeline_visualize.layout import (
     Box,
@@ -24,7 +24,6 @@ from astrid.packs.rendering.executors.timeline_visualize.layout import (
 )
 from astrid.packs.rendering.executors.timeline_visualize.thumbnails import (
     AUDIO_FILMSTRIP_NOTE,
-    FILMSTRIP_COLUMNS,
     FILMSTRIP_FRAME_H,
     FILMSTRIP_FRAME_W,
     FILMSTRIP_GAP,
@@ -243,6 +242,19 @@ def test_sample_filmstrip_static_image_returns_verified_original(tmp_path: Path)
     assert result == [image_path]
     # The verified original is returned as-is; nothing is written anywhere.
     assert not out_dir.exists()
+
+
+def test_sample_filmstrip_identifies_extensionless_verified_image(tmp_path: Path) -> None:
+    image_path = tmp_path / "431ced6916a2a21a156e38701afe55bbd7f88969fbbfc56d7fe099d47f265460"
+    Image.new("RGB", (10, 10), (10, 20, 30)).save(image_path, format="PNG")
+
+    result = sample_filmstrip(
+        image_path,
+        out_dir=tmp_path / "film",
+        page_id="PG001",
+    )
+
+    assert result == [image_path]
 
 
 def test_sample_filmstrip_animated_gif_even_frames(tmp_path: Path) -> None:

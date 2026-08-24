@@ -24,6 +24,7 @@ from astrid.core.foundation.hash import sha256_file
 from astrid.packs.training.executors.asset_cache import run as asset_cache
 
 from .config import STEP_ORDER
+from .steps import PER_BRIEF_SENTINELS, Step
 
 
 def _compute_plan_hash(plan_path: str | Path) -> str:

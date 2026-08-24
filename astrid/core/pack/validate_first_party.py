@@ -9,8 +9,6 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from astrid.core.pack.validate_layout import LayoutValidationIssue
-
 # ---------------------------------------------------------------------------
 # Known first-party pack IDs and internal directories
 # ---------------------------------------------------------------------------
@@ -41,7 +39,7 @@ _FIRST_PARTY_PACK_IDS = (
 # Internal (non-capability) directories that are allowed in the first-party
 # packs root: the ``_core`` skill-only shell plus the v10 schema packs that
 # own domain tables/repositories (not pack.yaml capability packs).
-_FIRST_PARTY_INTERNAL_DIRS = {"_core", "references", "shots", "timeline"}
+_FIRST_PARTY_INTERNAL_DIRS = {"_core", "references", "runaway", "shots", "timeline"}
 _IGNORED_PACKS_ROOT_DIRS = {"__pycache__"}
 
 

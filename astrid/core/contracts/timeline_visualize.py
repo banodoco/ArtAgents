@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 ASTRID_GATEWAY_RESOLVED_PROJECT_ENV = "ASTRID_GATEWAY_RESOLVED_PROJECT"
 
+@dataclass(frozen=True)
 class TimelineVisualizeViewContext:
     """Trusted owner coordinates for one prior visualization manifest."""
 
@@ -104,17 +107,20 @@ def _validated_timeline_visualize_view_context(
         return None
 
     try:
-        from astrid.core.foundation.project_paths import resolve_projects_root
         from astrid.core.contracts.run_record import (
             load_run_record_unvalidated as load_run_record,
+        )
+        from astrid.core.contracts.run_record import (
             resolve_record_path,
+        )
+        from astrid.core.foundation.project_paths import resolve_projects_root
+        from astrid.packs.rendering.executors.timeline_visualize.frozen import (
+            discard_rehydrated_pack,
+            load_frozen_view,
+            resolve_focus,
         )
         from astrid.packs.rendering.executors.timeline_visualize.ids import (
             parse_qualified_ref,
-        )
-        from astrid.packs.rendering.executors.timeline_visualize.frozen import (
-            load_frozen_view,
-            resolve_focus,
         )
         from astrid.packs.rendering.executors.timeline_visualize.select import (
             select_from_manifest,
@@ -239,13 +245,16 @@ def _validated_timeline_visualize_view_context(
             manifest_path,
             project_root=projects_root / project_slug,
         )
-        parsed_focus = parse_qualified_ref(focus_values[0])
-        if "--refresh-root" in raw:
-            refresh_scope = resolve_focus(frozen, focus_values[0])
-            if parsed_focus.kind != "TL" or refresh_scope.kind != "timeline":
-                return None
-        else:
-            resolve_focus(frozen, focus_values[0])
+        try:
+            parsed_focus = parse_qualified_ref(focus_values[0])
+            if "--refresh-root" in raw:
+                refresh_scope = resolve_focus(frozen, focus_values[0])
+                if parsed_focus.kind != "TL" or refresh_scope.kind != "timeline":
+                    return None
+            else:
+                resolve_focus(frozen, focus_values[0])
+        finally:
+            discard_rehydrated_pack(frozen.pack_root)
     except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError):
         return None
 
@@ -259,6 +268,7 @@ def _validated_timeline_visualize_view_context(
 def _kernel_visualize_run_info(project_slug: str, run_id: str, projects_root: Path) -> dict[str, Any] | None:
     try:
         import sqlite3
+
         from astrid.core.kernel.read import kernel_run_info
 
         info = kernel_run_info(project_slug, run_id, projects_root=projects_root)

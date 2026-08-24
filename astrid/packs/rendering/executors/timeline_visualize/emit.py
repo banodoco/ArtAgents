@@ -64,6 +64,10 @@ from astrid.packs.rendering.executors.timeline_visualize.navigation import (
     assign_range_ids,
 )
 from astrid.packs.rendering.executors.timeline_visualize.scope import Scope
+from astrid.packs.rendering.executors.timeline_visualize.snapshot_digest import (
+    canonical_json_bytes,
+    sha256_bytes,
+)
 from astrid.packs.rendering.executors.timeline_visualize.transcript_attach import (
     TranscriptAttachment,
 )
@@ -72,10 +76,6 @@ from astrid.packs.rendering.executors.timeline_visualize.transcripts import (
     TranscriptSegment,
     speech_occurrence_authored_id,
     transcript_segment_authored_id,
-)
-from astrid.packs.rendering.executors.timeline_visualize.snapshot_digest import (
-    canonical_json_bytes,
-    sha256_bytes,
 )
 
 SCHEMA_VERSION = 1
@@ -1304,7 +1304,12 @@ def _relations(
     }
 
 
-def _focus_context_action(manifest_path: str, ref: str, scope_kind: str) -> dict[str, Any]:
+def _focus_context_action(
+    project_slug: str,
+    manifest_path: str,
+    ref: str,
+    scope_kind: str,
+) -> dict[str, Any]:
     return {
         "kind": "visualize",
         "argv": [
@@ -1313,6 +1318,8 @@ def _focus_context_action(manifest_path: str, ref: str, scope_kind: str) -> dict
             "astrid",
             "timelines",
             "visualize",
+            "--project",
+            project_slug,
             "--from-view",
             manifest_path,
             "--focus",
@@ -1337,7 +1344,10 @@ def _timestamp_locator(seconds: float, timeline_ref: str) -> str:
 
 
 def _focus_timestamp_action(
-    model: TimelineInspectionModel, manifest_path: str, ref: str
+    model: TimelineInspectionModel,
+    project_slug: str,
+    manifest_path: str,
+    ref: str,
 ) -> dict[str, Any]:
     locator = _timestamp_locator(model.extents.composition_seconds / 2.0, ref)
     return {
@@ -1348,6 +1358,8 @@ def _focus_timestamp_action(
             "astrid",
             "timelines",
             "visualize",
+            "--project",
+            project_slug,
             "--from-view",
             manifest_path,
             "--focus",
@@ -1363,7 +1375,7 @@ def _focus_timestamp_action(
     }
 
 
-def _refresh_root_action(manifest_path: str) -> dict[str, Any]:
+def _refresh_root_action(project_slug: str, manifest_path: str) -> dict[str, Any]:
     return {
         "kind": "visualize",
         "argv": [
@@ -1372,6 +1384,8 @@ def _refresh_root_action(manifest_path: str) -> dict[str, Any]:
             "astrid",
             "timelines",
             "visualize",
+            "--project",
+            project_slug,
             "--from-view",
             manifest_path,
             "--focus",
@@ -1416,6 +1430,7 @@ def _inspect_unavailable_reason(state: str) -> str:
 def _inspect_original_action(
     model: TimelineInspectionModel,
     identity_map: Any,
+    project_slug: str,
     manifest_path: str,
     ref: str,
 ) -> dict[str, Any]:
@@ -1432,6 +1447,8 @@ def _inspect_original_action(
             "astrid",
             "timelines",
             "visualize",
+            "--project",
+            project_slug,
             "--from-view",
             manifest_path,
             "--focus",
@@ -1457,24 +1474,36 @@ def _actions(
     parsed = parse_qualified_ref(ref)
     actions: dict[str, dict[str, Any]] = {}
     if parsed.kind == "TL":
-        actions["focus_timestamp"] = _focus_timestamp_action(model, manifest_path, ref)
-        actions["refresh_root"] = _refresh_root_action(manifest_path)
+        actions["focus_timestamp"] = _focus_timestamp_action(
+            model, snapshot.project_slug, manifest_path, ref
+        )
+        actions["refresh_root"] = _refresh_root_action(snapshot.project_slug, manifest_path)
     elif parsed.kind == "CL":
-        actions["focus_context"] = _focus_context_action(manifest_path, ref, "clip")
+        actions["focus_context"] = _focus_context_action(
+            snapshot.project_slug, manifest_path, ref, "clip"
+        )
     elif parsed.kind == "SH":
-        actions["focus_context"] = _focus_context_action(manifest_path, ref, "shot")
+        actions["focus_context"] = _focus_context_action(
+            snapshot.project_slug, manifest_path, ref, "shot"
+        )
     elif parsed.kind == "RG":
-        actions["focus_context"] = _focus_context_action(manifest_path, ref, "range")
+        actions["focus_context"] = _focus_context_action(
+            snapshot.project_slug, manifest_path, ref, "range"
+        )
     elif parsed.kind == "AS":
-        actions["focus_context"] = _focus_context_action(manifest_path, ref, "asset")
-        actions["inspect_original"] = _inspect_original_action(model, identity_map, manifest_path, ref)
+        actions["focus_context"] = _focus_context_action(
+            snapshot.project_slug, manifest_path, ref, "asset"
+        )
+        actions["inspect_original"] = _inspect_original_action(
+            model, identity_map, snapshot.project_slug, manifest_path, ref
+        )
     elif parsed.kind == "TS":
         actions["focus_occurrences"] = _focus_context_action(
-            manifest_path, ref, "text"
+            snapshot.project_slug, manifest_path, ref, "text"
         )
     elif parsed.kind == "SP":
         actions["focus_clip_context"] = _focus_context_action(
-            manifest_path, ref, "speech"
+            snapshot.project_slug, manifest_path, ref, "speech"
         )
     return actions
 
@@ -1530,6 +1559,7 @@ def emit_asset_index(
     snapshot: TimelineSnapshot,
 ) -> dict[str, Any]:
     """Return the ``asset-index.json`` content for one root visualization."""
+    registry_assets = snapshot.registry.get("assets", snapshot.registry)
     assets: list[dict[str, Any]] = []
     for key in sorted(model.registry_keys):
         ref = _lookup_semantic(identity_map, "asset", key)
@@ -1537,6 +1567,13 @@ def emit_asset_index(
             raise ValueError(f"asset {key!r} has no display id in the identity map")
         integrity = model.media_integrity[key]
         parsed = parse_qualified_ref(ref)
+        media_type: str | None = None
+        raw_entry = registry_assets.get(key) if isinstance(registry_assets, Mapping) else None
+        raw_type = raw_entry.get("type") if isinstance(raw_entry, Mapping) else None
+        if isinstance(raw_type, str):
+            candidate = raw_type.strip().lower().split("/", 1)[0]
+            if candidate in {"image", "video", "audio"}:
+                media_type = candidate
         assets.append(
             {
                 "stable_id": parsed.stable_id,
@@ -1545,6 +1582,7 @@ def emit_asset_index(
                 "source_id": integrity.source_id,
                 "source_version": integrity.source_version,
                 "role": _schema_role(integrity.role),
+                "media_type": media_type,
                 "integrity_state": integrity.state,
                 "expected_sha256": integrity.expected_sha256,
                 "observed_sha256": integrity.observed_sha256,

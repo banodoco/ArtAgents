@@ -17,19 +17,25 @@ snapshot:
 astrid timelines visualize --project <slug>
 ```
 
-- **stdout** is exactly one compact JSON object (`sort_keys`, no newline):
-  `run_id`, `run_root`, `manifest_path`, `pages`, plus `entrypoints` and
-  `formats` summaries. This JSON is the agent's *only* input; it must never be
-  derived from repository knowledge.
-- **The evidence pack** is the run-owned directory `run_root/agent-view/`
-  (the path of `manifest.json` is in stdout). It contains nine mandatory core
+- **stdout** is exactly one compact JSON object (`sort_keys`, no newline).
+  Kernel-managed invocation returns a stable `run_id`, a durable
+  `manifest_path`, and SDK outputs including `pack_root`, `pages`, and
+  `file_hashes`; `run_root` is `null` because private attempt staging is
+  removed after publication. This JSON is the agent's *only* input; it must
+  never be derived from repository knowledge.
+- **The authoritative evidence pack** is published as independently managed
+  CAS objects. `manifest_path` is its durable navigation handle. For browsing,
+  the SDK verifies and copies the logical pack to the derived project cache at
+  `.astrid/views/timeline_visualize/<manifest-digest>/`; that directory is
+  returned as `outputs.pack_root`, never shares inodes with CAS, and may be
+  safely regenerated. It contains nine mandatory core
   artifacts: `manifest.json`, `ground-truth.json`, `view-map.json`,
   `action-index.json`, `asset-index.json`, `transcript-index.json`,
   `diagnostics.json`, `metric-definitions.json`, `reading-guide.md`, plus
   optional `structure.md`, `PG*.png`, `PG*.svg`, and `filmstrip/*.png`
   (ledger: `pack-hashes.json`).
-- **The drill-down operation** is `astrid timelines visualize --from-view
-  <manifest> --focus <ref>`: it re-validates the prior pack (containment,
+- **The drill-down operation** is `astrid timelines visualize --project
+  <slug> --from-view <manifest_path> --focus <ref>`: it rehydrates and re-validates the prior pack (containment,
   full hash ledger, schemas, run ownership — `frozen.load_frozen_view`),
   rebuilds the model *exclusively from hashed frozen facts*, and emits a new
   child pack. Children copy the root-lineage substrate byte-for-byte
@@ -57,7 +63,7 @@ Location: `astrid/packs/rendering/executors/timeline_visualize/schemas/`.
 | ground-truth | `ground-truth.json` | `schema_version`, `snapshots`, `project_slug`, `scope`, `objects` (identity triples), `timelines[]` (`timeline_ref`, `durations` (3 named extents), `tracks`, `clips`, `assets`), `frozen_objects`, `frozen_timeline`, `frozen_shots`, `frozen_ranges`, `timestamps.frozen_at` (sentinel, never SNS) |
 | view-map | `view-map.json` | `schema_version`, `snapshots`, `pages[]` (`page_id`, `dimensions`, `layout`, `scope`, `time_bounds`, `object_boxes`, `labels`, `continuation_links`, `reading_order`), `reading_order` |
 | action-index | `action-index.json` | `schema_version`, `snapshots`, `entries{ref: {canonical_ref, relations, actions}}` |
-| asset-index | `asset-index.json` | `schema_version`, `snapshots`, `assets[]` (`stable_id`, `qualified_ref`, `canonical_ref`, `source_id`, `source_version`, `role`, `integrity_state`, `expected_sha256`, `observed_sha256`, `contained_path`) |
+| asset-index | `asset-index.json` | `schema_version`, `snapshots`, `assets[]` (`stable_id`, `qualified_ref`, `canonical_ref`, `source_id`, `source_version`, `role`, optional frozen `media_type`, `integrity_state`, `expected_sha256`, `observed_sha256`, `contained_path`) |
 | transcript-index | `transcript-index.json` | `schema_version`, `snapshots`, `sources[]` (TS), `speech_occurrences[]` (SP). **Empty arrays are valid in M1**; M2 fills them without changing the v1 shape |
 | diagnostics | `diagnostics.json` | `schema_version`, `snapshots`, `diagnostics[]` (`severity` warning/error, `code` `[A-Z][A-Z0-9_]*`, `message`, `object_ref` nullable) |
 | metric-definitions | `metric-definitions.json` | `schema_version` (1), `kind` (`timeline_visualize_metric_definitions`), `compositor_version` (`0.0.6`), `metrics[]` (14 fixed, ordered) |
@@ -72,6 +78,23 @@ kernel spelling for comparison with public timeline CLI/SDK DTOs. The required
 `timeline_source` field is historical compatibility data containing the
 project slug, not the raw CLI/SDK legacy path, and must not be used to infer
 source authority.
+
+SDK admission records a read-only authority envelope in the immutable task
+spec: the executor-definition digest plus either kernel stream head
+(version/event/hash), legacy event-log SHA-256, or frozen manifest SHA-256,
+focus, and SNS. The executor definition is fenced before project preparation;
+the visualization runner then checks the selected source again at its actual
+load boundary. This closes the admission-to-execution gap without making the
+derived browse cache or `assembly.json` a second authority. A changed source
+produces a typed failed task whose remedy is a fresh invocation.
+
+New multi-timeline project indexes bind every child manifest by SHA-256. Older
+schema-v1 indexes did not carry those additive fields; they remain readable by
+deterministically reconstructing one completed owning task and fully verifying
+each child pack, but the old root digest alone cannot distinguish two historical
+tasks whose root bytes were identical. Rerun an old project-level visualization
+before relying on it as exact multi-timeline provenance. Leaf packs and all newly
+emitted project indexes retain exact hash-bound navigation.
 
 ## 3. Display-id grammar
 
@@ -127,6 +150,7 @@ Each `action-index.json` entry: `canonical_ref`, `relations`, `actions`.
   `inspect_media` (`inspect_original`). Every `visualize` action with a
   non-null `focus` carries exactly one `--from-view` and one `--focus`
   (schema-enforced); action `argv` is prefixed `python3 -m astrid` and
+  carries the owning `--project` explicitly. The
   `--from-view` is **pack-relative** (`manifest.json`) so packs relocate.
 - Per-entry actions: `TL01` → `focus_timestamp` (whole-timeline midpoint,
   `--context 3`), `refresh_root`; `CL/SH/RG/AS` → `focus_context`
@@ -158,10 +182,10 @@ astrid timelines visualize --project desert --asset plant-frame-3
 --filmstrip auto|off|assets|rendered        # rendered requires --rendered-video PATH
 
 # drill-down (the only navigation form)
-astrid timelines visualize --from-view <root>/agent-view/manifest.json --focus TL01.CL03 --context 2
+astrid timelines visualize --project desert --from-view <root>/agent-view/manifest.json --focus TL01.CL03 --context 2
 
 # frozen-lineage transition
-astrid timelines visualize --from-view <root>/agent-view/manifest.json --focus TL01 --refresh-root
+astrid timelines visualize --project desert --from-view <root>/agent-view/manifest.json --focus TL01 --refresh-root
 ```
 
 Rules: `--from-view` and `--focus` must be supplied together; neither can be
