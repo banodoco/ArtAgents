@@ -29,6 +29,7 @@ import pytest
 
 from astrid.application import compose_standard_application
 from astrid.core.backup import (
+    BackupError,
     RestoreValidationError,
     create_backup,
     restore_backup,
@@ -340,6 +341,55 @@ def test_backup_excludes_env_and_secret_files_and_staging(tmp_path: Path) -> Non
     path_parts = {part for p in dest_media.rglob("*") for part in p.parts}
     assert ".staging" not in path_parts
     assert "cache" not in path_parts
+
+
+def test_backup_rejects_symlinked_managed_media(tmp_path: Path) -> None:
+    """Managed-media backup must not follow a link outside its owned tree."""
+    _seed_project(tmp_path)
+    outside = tmp_path / "outside-secret.txt"
+    outside.write_text("must not enter backup", encoding="utf-8")
+    link = tmp_path / ".astrid" / "media" / "sha256" / "aa" / "bb" / "untrusted"
+    link.parent.mkdir(parents=True, exist_ok=True)
+    link.symlink_to(outside)
+
+    with pytest.raises(BackupError, match="unsafe non-regular file"):
+        create_backup(projects_root=tmp_path, dest_path=tmp_path / "backup")
+
+    assert not (tmp_path / "backup").exists()
+
+
+def test_restore_rejects_symlinked_backup_media(tmp_path: Path) -> None:
+    """Restore must not follow links in an untrusted backup directory."""
+    source = tmp_path / "source"
+    _seed_project(source)
+    backup = tmp_path / "backup"
+    create_backup(projects_root=source, dest_path=backup)
+
+    outside = tmp_path / "outside-secret.txt"
+    outside.write_text("must not enter restore", encoding="utf-8")
+    link = backup / "media" / "untrusted"
+    link.symlink_to(outside)
+
+    target = tmp_path / "target"
+    with pytest.raises(RestoreValidationError, match="unsafe non-regular file"):
+        restore_backup(backup, projects_root=target)
+    assert not (target / ".astrid" / "astrid.sqlite3").exists()
+
+
+def test_restore_rejects_symlinked_backup_database(tmp_path: Path) -> None:
+    """Restore must not read a database through an untrusted backup link."""
+    source = tmp_path / "source"
+    _seed_project(source)
+    backup = tmp_path / "backup"
+    create_backup(projects_root=source, dest_path=backup)
+
+    outside = tmp_path / "outside.sqlite3"
+    outside.write_bytes((backup / "astrid.sqlite3").read_bytes())
+    (backup / "astrid.sqlite3").unlink()
+    (backup / "astrid.sqlite3").symlink_to(outside)
+
+    with pytest.raises(RestoreValidationError, match="missing astrid.sqlite3"):
+        restore_backup(backup, projects_root=tmp_path / "target")
 
 
 # ---------------------------------------------------------------------------

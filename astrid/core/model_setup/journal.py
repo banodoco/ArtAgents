@@ -127,6 +127,32 @@ def tmp_dir(projects_root: str | Path) -> Path:
     return setup_dir(projects_root) / TMP_DIR_NAME
 
 
+def _assert_setup_tree_is_owned(projects_root: str | Path) -> None:
+    """Reject setup storage links before any journal or artifact I/O.
+
+    The setup paths are an ownership boundary.  Following a pre-existing
+    ``.astrid/setup/tmp`` or ``artifacts`` symlink would let a resumable
+    download write bytes outside the selected projects root, while following
+    a journal/manifests link would import state from an unrelated tree.
+    """
+    root = Path(projects_root)
+    managed = root / MANAGED_DIR_NAME
+    setup = managed / SETUP_DIR_NAME
+    candidates = (
+        ("managed root", managed),
+        ("setup directory", setup),
+        ("setup journal", setup / JOURNAL_NAME),
+        ("artifact directory", setup / ARTIFACTS_DIR_NAME),
+        ("manifest directory", setup / MANIFESTS_DIR_NAME),
+        ("temporary directory", setup / TMP_DIR_NAME),
+    )
+    for label, path in candidates:
+        if path.is_symlink():
+            raise SetupJournalError(
+                f"setup {label} must not be a symlink: {path}"
+            )
+
+
 def artifact_path(projects_root: str | Path, artifact_id: str) -> Path:
     """Final installed path of one artifact id."""
     _validate_artifact_id(artifact_id)
@@ -217,6 +243,8 @@ class SetupJournal:
     """Fsync'd JSONL appender over one setup journal."""
 
     def __init__(self, projects_root: str | Path) -> None:
+        _assert_setup_tree_is_owned(projects_root)
+        self._projects_root = Path(projects_root)
         self._path = journal_path(projects_root)
         self._seq = 0
         # Replay first so appended sequences continue the durable order.
@@ -228,6 +256,7 @@ class SetupJournal:
 
     def append(self, artifact: str, event: str, **fields: Any) -> None:
         """Append one fsync'd transition record for *artifact*."""
+        _assert_setup_tree_is_owned(self._projects_root)
         self._path.parent.mkdir(parents=True, exist_ok=True)
         record: dict[str, Any] = {
             "schema": JOURNAL_SCHEMA,

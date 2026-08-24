@@ -376,10 +376,6 @@ def make_local_bridge_handler(
             if request_token is None:
                 return True
             command = getattr(self, "command", "") or ""
-            if command == "OPTIONS":
-                # CORS preflight is exempt (doc 27 §4.7.3): it carries no
-                # token and must stay answerable for allowed origins.
-                return True
             expected_host = self._expected_loopback_host()
             host = self.headers.get("Host")
             if host is None or not hmac.compare_digest(
@@ -391,6 +387,11 @@ def make_local_bridge_handler(
                     "DNS-rebinding and spoofed hosts are rejected"
                 )
                 return False
+            if command == "OPTIONS":
+                # CORS preflight is exempt (doc 27 §4.7.3) from the mutation
+                # token, but still has to prove the bound Host just like
+                # every other request.
+                return True
             if command in ("GET", "HEAD"):
                 return True
             token = self.headers.get(TRUST_TOKEN_HEADER)

@@ -222,6 +222,20 @@ def test_options_preflight_exempt_from_gate(tmp_bridge_root: Path) -> None:
     assert "Idempotency-Key" in allow_headers
 
 
+def test_options_preflight_still_rejects_spoofed_host(tmp_bridge_root: Path) -> None:
+    """Preflight skips the token, not the loopback Host trust boundary."""
+    with trusted_server(tmp_bridge_root) as (authority, _token):
+        status, _headers, payload = _raw(
+            authority,
+            "OPTIONS",
+            "/anything/at/all",
+            host_header=f"attacker.example:{authority.split(':')[1]}",
+            headers={"Origin": "http://localhost:5173"},
+        )
+    assert status == 403
+    assert json.loads(payload)["error"] == "forbidden"
+
+
 def test_no_cors_browser_post_is_blocked(tmp_bridge_root: Path) -> None:
     """A hostile page's no-cors POST carries no token header -> blocked."""
     with trusted_server(tmp_bridge_root) as (authority, _token):

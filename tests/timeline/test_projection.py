@@ -26,7 +26,7 @@ from astrid.core._shared.jsonio import read_json, write_json_atomic
 from astrid.core.foundation import project_paths
 from astrid.core.project.project import create_project
 from astrid.core.timeline.crud import create_timeline
-from astrid.core.timeline.eventlog import LocalFsBackend
+from astrid.core.timeline.eventlog import EventLogError, LocalFsBackend
 from astrid.core.timeline.events.schema import (
     TimelineActor,
     TimelineEvent,
@@ -1556,6 +1556,30 @@ class TestRepairPaths:
         monkeypatch.setattr("astrid.core.timeline.projection.regenerate_projection", raising_regenerate)
 
         with pytest.raises(ProjectionError, match="projection failed"):
+            load_assembly_json_with_repair(tdir)
+
+    def test_load_assembly_json_with_repair_never_serves_stale_blob_on_bad_log(
+        self, tmp_path: Path
+    ) -> None:
+        """A corrupt canonical log must fail closed instead of serving assembly.json."""
+        tdir = tmp_path / "timeline"
+        tdir.mkdir()
+        write_json_atomic(
+            tdir / "assembly.identity.json",
+            {"timeline_id": "00000000-0000-0000-0000-000000000001"},
+        )
+
+        # Keep a valid-looking compatibility blob that would be dangerous to
+        # return if the event-log read failed open.
+        write_json_atomic(
+            tdir / "assembly.json",
+            {"tracks": [], "clips": [], "theme": "stale-compatibility-blob"},
+        )
+        (tdir / "assembly.jsonl").write_text("not-json\n", encoding="utf-8")
+
+        from astrid.core.timeline.paths import load_assembly_json_with_repair
+
+        with pytest.raises(EventLogError, match="invalid JSON"):
             load_assembly_json_with_repair(tdir)
 
 

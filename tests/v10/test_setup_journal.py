@@ -22,6 +22,7 @@ from astrid.core.model_setup.acquire import (
 )
 from astrid.core.model_setup.journal import (
     SetupJournal,
+    SetupJournalError,
     artifact_path,
     journal_path,
     part_path,
@@ -186,6 +187,19 @@ def test_boot_replay_refreshes_download_offset_from_filesystem(
     state = snapshot.states[ARTIFACT]
     assert state.phase == "downloading"
     assert state.offset == 777  # filesystem wins over the recorded offset
+
+
+def test_boot_rejects_symlinked_setup_storage(tmp_path: Path) -> None:
+    """Setup I/O must not follow a storage directory outside the project root."""
+    setup = tmp_path / ".astrid" / "setup"
+    setup.mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (setup / "tmp").symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(SetupJournalError, match="temporary directory must not be a symlink"):
+        resolve_boot_state(tmp_path)
+    assert not list(outside.iterdir())
 
 
 def test_installed_fast_path_is_stat_only_and_drift_flips_corrupt(

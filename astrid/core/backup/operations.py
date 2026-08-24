@@ -391,6 +391,15 @@ def _copy_media_tree(projects_root: Path, dest_media: Path) -> int:
             if _is_excluded_file(name):
                 continue
             source_file = Path(dirpath) / name
+            # The managed tree is expected to contain only owned regular
+            # files.  ``shutil.copy2`` follows file symlinks, so accepting one
+            # here could snapshot bytes from outside the managed root (and
+            # then make those bytes portable through restore).  Fail closed,
+            # matching the external-media backup contract.
+            if source_file.is_symlink() or not source_file.is_file():
+                raise BackupError(
+                    f"managed media contains an unsafe non-regular file: {source_file}"
+                )
             relative = source_file.relative_to(source_media)
             dest_file = dest_media / relative
             dest_file.parent.mkdir(parents=True, exist_ok=True)
@@ -1088,13 +1097,13 @@ def recover_interrupted_restores(projects_root: str | Path | None = None) -> int
 
 
 def _validate_backup_layout(backup: Path) -> None:
-    if not backup.is_dir():
+    if backup.is_symlink() or not backup.is_dir():
         raise RestoreValidationError(f"backup path is not a directory: {backup}")
-    if not (backup / BACKUP_DATABASE_NAME).is_file():
+    if not _restore_is_file(backup / BACKUP_DATABASE_NAME):
         raise RestoreValidationError(
             f"backup is missing {BACKUP_DATABASE_NAME}: {backup}"
         )
-    if not (backup / BACKUP_METADATA_NAME).is_file():
+    if not _restore_is_file(backup / BACKUP_METADATA_NAME):
         raise RestoreValidationError(
             f"backup is missing {BACKUP_METADATA_NAME}: {backup}"
         )
@@ -1102,6 +1111,20 @@ def _validate_backup_layout(backup: Path) -> None:
         raise RestoreValidationError(
             f"backup is missing {BACKUP_MEDIA_DIR}: {backup}"
         )
+    media = backup / BACKUP_MEDIA_DIR
+    for dirpath, dirnames, filenames in os.walk(media, followlinks=False):
+        for name in sorted(dirnames):
+            candidate = Path(dirpath) / name
+            if candidate.is_symlink() or not candidate.is_dir():
+                raise RestoreValidationError(
+                    f"backup media contains an unsafe directory: {candidate}"
+                )
+        for name in sorted(filenames):
+            candidate = Path(dirpath) / name
+            if candidate.is_symlink() or not candidate.is_file():
+                raise RestoreValidationError(
+                    f"backup media contains an unsafe non-regular file: {candidate}"
+                )
 
 
 def _count_files(directory: Path) -> int:

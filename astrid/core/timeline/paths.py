@@ -275,9 +275,9 @@ def load_assembly_json_with_repair(
     ``assembly.json`` is regenerated from the canonical event stream on
     every Astrid-owned read/export entry point.
     """
-    from .eventlog import LocalFsBackend
+    from .eventlog import EventLogError, LocalFsBackend
     from .model import TimelineValidationError, validate_timeline_config_json
-    from .projection import ErasedPayloadProjectionError, ProjectionError, regenerate_projection
+    from .projection import regenerate_projection
 
     timeline_dir_path = Path(timeline_home)
     assembly_file = timeline_dir_path / "assembly.json"
@@ -308,35 +308,19 @@ def load_assembly_json_with_repair(
     if not isinstance(timeline_id, str):
         return None
 
-    # Resolve backend and regenerate projection from events.
+    # Resolve backend and regenerate projection from events.  Once the event
+    # log exists it is the canonical source of truth: a parse, chain, or
+    # projection failure must not be hidden by serving a stale compatibility
+    # snapshot from assembly.json.
     backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=timeline_dir_path)
-    try:
-        inner_assembly = regenerate_projection(
-            timeline_id, backend, timeline_home=timeline_dir_path,
+    verification = backend.verify_chain()
+    if not verification.ok:
+        raise EventLogError(
+            verification.error or "timeline event log hash-chain verification failed"
         )
-    except (ErasedPayloadProjectionError, ProjectionError):
-        # ErasedPayloadProjectionError MUST NOT fall back to stale assembly.json.
-        # Projection errors from the canonical event stream must surface on
-        # user-facing reads rather than silently serving stale compatibility
-        # snapshots from assembly.json.
-        raise
-    except TimelineValidationError:
-        raise
-    except Exception:
-        # If projection fails for other reasons, fall back to reading
-        # assembly.json directly.  This preserves backward compatibility
-        # for non-erasure-related projection failures while ensuring
-        # erased content is never silently served.
-        if assembly_file.is_file():
-            try:
-                raw = read_json(assembly_file)
-            except (ProjectJsonError, FileNotFoundError):
-                return None
-            try:
-                return validate_timeline_config_json(raw)
-            except TimelineValidationError:
-                return None
-        return None
+    inner_assembly = regenerate_projection(
+        timeline_id, backend, timeline_home=timeline_dir_path,
+    )
 
     try:
         return validate_timeline_config_json(inner_assembly)
