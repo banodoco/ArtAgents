@@ -8,6 +8,9 @@ from pathlib import Path
 
 PROJECTS_ROOT_ENV = "ASTRID_PROJECTS_ROOT"
 
+ASTROID_DIR_NAME = ".astrid"
+ASTROID_DATABASE_NAME = "astrid.sqlite3"
+
 
 def _default_projects_root() -> Path:
     # paths.py lives at astrid/core/project/paths.py -> parents[3] is the repo root.
@@ -19,6 +22,16 @@ def _default_projects_root() -> Path:
 
 
 DEFAULT_PROJECTS_ROOT = _default_projects_root()
+
+
+def derive_database_path(projects_root: str | Path) -> Path:
+    """Return the kernel database path for a projects root.
+
+    The parent directory is intentionally not created by this pure path
+    helper; the writer/bootstrap boundary owns creation.
+    """
+
+    return Path(projects_root) / ASTROID_DIR_NAME / ASTROID_DATABASE_NAME
 
 _SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,62}$")
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")

@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from astrid.core.events.registry import register_core_vocabulary
+from astrid.core.schema_packs.core import register_core_vocabulary
 from astrid.core.schema_packs.manifest import load_schema_pack_manifest
 from astrid.core.schema_packs.registry import (
     FrozenSchemaPackRegistry,

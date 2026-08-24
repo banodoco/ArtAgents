@@ -1280,16 +1280,25 @@ def invoke(
     project = resolved_project
     projects_root = _resolve_projects_root(project_root, project)
     try:
+        # Keep the private seam backwards-compatible for callers that replace
+        # it with a narrow test double, while still forwarding an explicitly
+        # composed registry for long-lived clients.  ``None`` means the
+        # kernel will build its normal standard composition; passing it as a
+        # keyword adds no information and needlessly breaks older doubles.
+        kernel_kwargs: dict[str, Any] = {
+            "kind": kind,
+            "project": project,
+            "projects_root": projects_root,
+            "inputs": inputs,
+            "outputs": outputs,
+            "extra_pack_roots": extra_pack_roots,
+            "idempotency_context": invocation_authority_context,
+        }
+        if registry is not None:
+            kernel_kwargs["registry"] = registry
         kr, kt, ka, mpath, raw_result, ok, _ = _kernel_invoke(
             capability,
-            kind=kind,
-            project=project,
-            projects_root=projects_root,
-            inputs=inputs,
-            outputs=outputs,
-            extra_pack_roots=extra_pack_roots,
-            idempotency_context=invocation_authority_context,
-            registry=registry,
+            **kernel_kwargs,
         )
         executor_version_raw = raw_result.get("executor_version") if isinstance(raw_result, dict) else None
         run_id_raw = raw_result.get("run_id") if isinstance(raw_result, dict) else None

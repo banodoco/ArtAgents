@@ -126,6 +126,33 @@ class SchemaContractTest(unittest.TestCase):
             {"fade_in", "fade_out"},
         )
 
+    def test_editor_app_extensions_roundtrip_through_shared_validator(self) -> None:
+        config = {
+            "app": {"com.reigh.scene-phase-markers": {"sceneMarkers": []}},
+            "tracks": [
+                {
+                    "id": "visual",
+                    "kind": "visual",
+                    "label": "Visual",
+                    "app": {"scaleAppliesToPositionedClips": True},
+                }
+            ],
+            "clips": [
+                {
+                    "id": "title",
+                    "at": 0,
+                    "track": "visual",
+                    "clipType": "text",
+                    "text": {"content": "hello"},
+                    "app": {"editorOnly": True},
+                }
+            ],
+        }
+
+        # ``app`` is opaque editor metadata: the upstream schema rejects it,
+        # but Astrid must preserve it while validating the renderable shape.
+        self.assertEqual(timeline.canonical_timeline_config(config), config)
+
     def test_generation_defaults_roundtrip_preserves_nested_object(self) -> None:
         config = {
             "theme": "banodoco-default",

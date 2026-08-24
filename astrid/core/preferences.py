@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any
 
 from astrid.core._shared.jsonio import ProjectJsonError, read_json, write_json_atomic
-from astrid.core.session.paths import user_config_path, workspace_config_path
+from astrid.core.foundation.user_paths import user_config_path, workspace_config_path
 
 __all__ = [
     "ConfigError",

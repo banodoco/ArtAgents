@@ -45,13 +45,13 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Mapping
 
-from astrid.core.migrations.catalog import CORE_MIGRATIONS
-from astrid.core.repositories.errors import (
+from astrid.core.contracts.vocabulary import (
     CommandVocabularyError,
     EventVocabularyError,
     StreamAgreementError,
     StreamVocabularyError,
 )
+from astrid.core.migrations.catalog import CORE_MIGRATIONS
 from astrid.core.schema_packs.manifest import (
     SchemaPackManifest,
     parse_schema_pack_manifest,

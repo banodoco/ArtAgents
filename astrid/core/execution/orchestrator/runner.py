@@ -599,8 +599,14 @@ def _placeholder_values(orchestrator: OrchestratorDefinition, request: Orchestra
         "orchestrator_args": " ".join(request.orchestrator_args),
         "verbose": str(bool(values.get("verbose", request.verbose))).lower(),
     }
-    if request.out is not None:
-        placeholders["out"] = str(Path(request.out).expanduser().resolve())
+    # Kernel-owned invocations may deliberately omit the public ``out``
+    # argument and provide their private attempt directory as ``run_root``.
+    # Resolve both through one placeholder so command runtimes cannot escape
+    # the kernel staging fence or fail merely because the public output path
+    # is intentionally absent.
+    effective_out = request.out if request.out not in (None, "") else request.run_root
+    if effective_out is not None:
+        placeholders["out"] = str(Path(effective_out).expanduser().resolve())
     brief = values.get("brief") or request.brief
     if brief is not None:
         placeholders["brief"] = str(Path(str(brief)).expanduser().resolve())
@@ -635,6 +641,11 @@ def _prepare_project_request(
         raise OrchestratorRunnerError(
             f"--project cannot be combined with passthrough --out for {orchestrator.id}"
         )
+    # A kernel worker may pass only its private attempt directory. It is the
+    # equivalent of an explicit ``out`` for runtime expansion, but is not a
+    # public user-selected output path and therefore must remain staging-only.
+    if request.out in (None, "") and request.run_root not in (None, ""):
+        return None, request
     # No kernel run available and no explicit --out: fail closed.
     # The unified execution path requires a kernel run for every invocation;
     # storage-only run directories without a kernel row are not created.
@@ -751,7 +762,7 @@ def _command_subprocess_env(
 
 
 def _validate_out_requirement(orchestrator: OrchestratorDefinition, request: OrchestratorRunRequest) -> None:
-    if request.out is not None:
+    if request.out not in (None, "") or request.run_root not in (None, ""):
         return
     if _orchestrator_requires_output_path(orchestrator):
         raise OrchestratorRunnerError(f"--out is required for {orchestrator.id}")

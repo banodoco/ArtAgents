@@ -455,7 +455,33 @@ def _normalize_clip_for_validation(clip: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 def _known_timeline_payload(config: Mapping[str, Any]) -> dict[str, Any]:
-    return {key: value for key, value in config.items() if key in _TIMELINE_TOP_ALLOWED}
+    """Build the shared-schema view without editor-owned opaque metadata.
+
+    The canonical Banodoco schema intentionally has no ``app`` extension
+    fields, while the Reigh editor persists opaque application metadata at
+    the timeline, clip, and track levels.  Astrid must retain those fields in
+    the returned timeline, but must not ask the upstream validator to accept
+    them as part of its stricter wire contract.  Keep this projection local
+    to validation; never mutate the caller's config or strip the metadata from
+    the persisted representation.
+    """
+    known = {
+        key: value for key, value in config.items() if key in _TIMELINE_TOP_ALLOWED
+    }
+    known.pop("app", None)
+    for collection in ("clips", "tracks"):
+        entries = known.get(collection)
+        if not isinstance(entries, list):
+            continue
+        known[collection] = [
+            (
+                {key: value for key, value in entry.items() if key != "app"}
+                if isinstance(entry, Mapping)
+                else entry
+            )
+            for entry in entries
+        ]
+    return known
 
 def _json_safe_copy(value: Any) -> Any:
     """Return a deep JSON-compatible copy using the persisted serialization contract."""

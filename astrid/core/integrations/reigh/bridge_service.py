@@ -28,15 +28,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, ClassVar
 
+from astrid.core.foundation.project_paths import (
+    ASTROID_DATABASE_NAME,
+    ASTROID_DIR_NAME,
+    derive_database_path,
+)
+
 # ---------------------------------------------------------------------------
 # Wire constants (frozen contract §2, §9)
 # ---------------------------------------------------------------------------
-
-ASTROID_DIR_NAME = ".astrid"
-"""Managed-data directory under the projects root (decision artifact §5)."""
-
-ASTROID_DATABASE_NAME = "astrid.sqlite3"
-"""The repository-backed bridge database file (decision artifact §5)."""
 
 BRIDGE_ERROR_ENVELOPE_KEYS: tuple[str, ...] = ("error", "detail")
 """Every error body is exactly ``{"error", "detail"}`` plus status extras."""
@@ -56,21 +56,6 @@ RECEIPT_SECRECY_FIELDS: frozenset[str] = frozenset(
     }
 )
 """Receipt/event internals that must never appear in any bridge response."""
-
-# ---------------------------------------------------------------------------
-# Path derivation
-# ---------------------------------------------------------------------------
-
-
-def derive_database_path(projects_root: str | Path) -> Path:
-    """Return the repository-backed database path for a projects root.
-
-    ``${ASTRID_PROJECTS_ROOT}/.astrid/astrid.sqlite3`` (decision artifact
-    §5). The parent directory is *not* created here — the serve composition
-    root creates it when the writer opens the database.
-    """
-    return Path(projects_root) / ASTROID_DIR_NAME / ASTROID_DATABASE_NAME
-
 
 # ---------------------------------------------------------------------------
 # Frozen DTOs

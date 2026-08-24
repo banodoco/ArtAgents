@@ -276,6 +276,44 @@ def test_command_orchestrator_in_process_mode_avoids_subprocess_and_returns_resu
     assert result.errors == ()
 
 
+def test_kernel_run_root_substitutes_for_out_in_process_mode(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Kernel workers may omit public ``out`` while supplying attempt staging."""
+    projects_root = tmp_path / "projects"
+    create_project("demo", root=projects_root)
+    orch = _command_orchestrator(
+        orchestrator_id="test.kernel_staging",
+        argv=(sys.executable, "-m", "fake.module", "{out}"),
+        metadata={"runtime_module": "fake.module", "runtime_entrypoint": "main"},
+    )
+    seen: dict[str, Any] = {}
+
+    def _fake_in_process(argv: tuple[str, ...], **kwargs: Any) -> types.SimpleNamespace:
+        seen["argv"] = argv
+        return types.SimpleNamespace(returncode=0)
+
+    import astrid.core.execution.orchestrator.runner as runner_mod
+
+    monkeypatch.setattr(runner_mod, "invoke_in_process_command", _fake_in_process)
+    run_root = tmp_path / "attempt"
+    result = run_orchestrator(
+        OrchestratorRunRequest(
+            orchestrator_id=orch.id,
+            project="demo",
+            project_was_auto_resolved=True,
+            projects_root=projects_root,
+            run_root=run_root,
+            execution_mode="in_process",
+        ),
+        _registry(orch),
+    )
+
+    assert result.ok
+    assert seen["argv"][-1] == str(run_root.resolve())
+
+
 def test_command_orchestrator_default_mode_remains_subprocess_first(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

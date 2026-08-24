@@ -14,8 +14,10 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from astrid.core.foundation.project_paths import resolve_projects_root
-from astrid.core.integrations.reigh.bridge_service import derive_database_path
+from astrid.core.foundation.project_paths import (
+    derive_database_path,
+    resolve_projects_root,
+)
 from astrid.core.io.media_import import (
     managed_media_path,
     sha256_file_bytes,

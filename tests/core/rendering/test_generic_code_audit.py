@@ -46,15 +46,17 @@ BACKEND_NAMES = ("remotion", "ffmpeg", "legacy_hybrid", "ffmpeg-finalizer")
 #: audit and stale allowlist entries are caught.
 ALLOWED: dict[tuple[str, int], str] = {
     # --- service: legacy-selector compatibility shim ---------------------
-    ("astrid/core/rendering/service.py", 134): "legacy compatibility shim (docstring)",
-    ("astrid/core/rendering/service.py", 144): "legacy compatibility shim (default selector)",
-    ("astrid/core/rendering/service.py", 145): "legacy compatibility shim (legacy ffmpeg selector)",
-    ("astrid/core/rendering/service.py", 146): "registry/default wiring (qualified id)",
-    ("astrid/core/rendering/service.py", 147): "legacy compatibility shim (legacy remotion selector)",
-    ("astrid/core/rendering/service.py", 151): "registry/default wiring (fallback pair)",
-    ("astrid/core/rendering/service.py", 158): "registry/default wiring (legacy_hybrid planner)",
-    ("astrid/core/rendering/service.py", 179): "legacy compatibility shim (recovery text)",
-    ("astrid/core/rendering/service.py", 183): "legacy compatibility shim (legacy_selectors data)",
+    ("astrid/core/rendering/service.py", 158): "legacy compatibility shim (docstring)",
+    ("astrid/core/rendering/service.py", 168): "legacy compatibility shim (default selector)",
+    ("astrid/core/rendering/service.py", 169): "legacy compatibility shim (legacy ffmpeg selector)",
+    ("astrid/core/rendering/service.py", 170): "registry/default wiring (qualified id)",
+    ("astrid/core/rendering/service.py", 171): "legacy compatibility shim (legacy remotion selector)",
+    ("astrid/core/rendering/service.py", 175): "registry/default wiring (fallback pair)",
+    ("astrid/core/rendering/service.py", 182): "registry/default wiring (legacy_hybrid planner)",
+    ("astrid/core/rendering/service.py", 203): "legacy compatibility shim (recovery text)",
+    ("astrid/core/rendering/service.py", 207): "legacy compatibility shim (legacy_selectors data)",
+    # --- SDK validation error recovery text -------------------------------
+    ("astrid/sdk/exceptions.py", 560): "legacy compatibility shim (ffprobe recovery text)",
     # --- provenance: legacy-engine projection compatibility shim ---------
     ("astrid/core/rendering/provenance.py", 114): "legacy compatibility shim (docstring)",
     ("astrid/core/rendering/provenance.py", 146): "legacy compatibility shim (docstring)",

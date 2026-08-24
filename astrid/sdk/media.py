@@ -379,7 +379,7 @@ class MediaService:
             subkey = f"{key}:location:{selected.id}"
             try:
                 verified = UnitOfWork(self._writer).run(
-                    lambda uow, selected=selected, fingerprint=fingerprint, subkey=subkey: self._media.verify(
+                    lambda uow: self._media.verify(
                         uow,
                         project_id=project_id,
                         media_id=media_id,

@@ -34,16 +34,17 @@ from astrid.core.contracts.run_status import RunStatus
 from astrid.core.contracts.scoped_config import SCOPE_REGISTRY, ScopeRequest
 from astrid.core.env_vars import ASTRID_INTERNAL_INVOCATION, HYPE_ACTIVE_THEME
 from astrid.core.foundation.paths import REPO_ROOT
+from astrid.core.pack.resolver import resolve_callable_from_metadata
+from astrid.core.project.guidance import (
+    format_project_required_guidance,
+    selected_project,
+)
+from astrid.core.project.ownership import require_project_owned_artifact
 from astrid.core.project.run import (
     ProjectRunContext,
     _project_subprocess_env,
     project_run_env,
     reject_project_with_out,
-)
-from astrid.core.project.ownership import require_project_owned_artifact
-from astrid.core.project.guidance import (
-    format_project_required_guidance,
-    selected_project,
 )
 from astrid.core.runtime import (
     InProcessExecutionPreconditionError,
@@ -679,7 +680,13 @@ def _run_in_process_executor_command(
         kind=executor.kind,
         command=command,
         cwd=cwd,
-        env=dict(effective_env),
+        # ``effective_env`` is the private child-process environment and may
+        # contain safe inherited process variables (PATH, HOME, project
+        # routing, etc.).  It is an execution detail, not the executor's
+        # declared environment.  Returning it here leaked parent state into
+        # result envelopes and made in-process results disagree with the
+        # subprocess path, which already reports only declared values.
+        env=dict(env),
         payload=_merge_runner_payload(
             result.payload,
             executor_id=executor.id,

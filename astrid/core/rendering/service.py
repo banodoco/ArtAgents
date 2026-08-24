@@ -386,6 +386,11 @@ class RenderService:
         """Execute the frozen selection lifecycle for one protocol request."""
 
         self._last_invocation = None
+        # Support evidence is request-scoped.  Keeping a prior invocation's
+        # report would make a later support/render failure appear to have
+        # passed admission for the current request, producing misleading
+        # replay metadata (especially when a backend fails during support).
+        self._support_reports.clear()
         try:
             parsed = (
                 request
@@ -431,17 +436,26 @@ class RenderService:
             # ``.<output>.replay`` tree even though no renderer was admitted.
             # Runtime/backend failures still use the output-local workspace
             # and retain their replay evidence through the inner try/finally.
+            self._active_output = output
             with _pack_discovery_scope(self.extra_pack_roots):
                 with TemporaryDirectory(prefix="astrid-render-support-") as support_text:
-                    preselected = self._select(
-                        localized,
-                        policy=policy,
-                        workspace=Path(support_text),
-                    )
+                    try:
+                        preselected = self._select(
+                            localized,
+                            policy=policy,
+                            workspace=Path(support_text),
+                        )
+                    except RendererException as exc:
+                        # Support is a real backend invocation.  It runs in
+                        # the admission workspace before the render workspace
+                        # exists, so capture its failure here rather than
+                        # letting the outer validation handler lose the
+                        # invocation context.
+                        self._capture_failure_bundle(exc, request=localized)
+                        raise
 
             workspace_parent = output.resolve(strict=False).parent
             workspace_parent.mkdir(parents=True, exist_ok=True)
-            self._active_output = output
             with TemporaryDirectory(
                 prefix=f".{output.name}.render-service-",
                 dir=str(workspace_parent),

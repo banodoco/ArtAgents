@@ -269,7 +269,7 @@ class LeaseExpirySweeper:
             key = generate_lowercase_ulid()
             try:
                 UnitOfWork(self._writer).run(
-                    lambda uow, project_id=project_id, key=key: (
+                    lambda uow: (
                         self._tasks.expire_overdue(
                             uow, project_id=project_id, idempotency_key=key
                         )
