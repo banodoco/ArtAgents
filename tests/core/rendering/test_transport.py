@@ -19,13 +19,27 @@ from astrid.core.rendering.errors import (
     RendererProtocolError,
     RendererTimeoutError,
 )
-from astrid.core.rendering.transport import CommandTransport
+from astrid.core.rendering.transport import CommandTransport, _resolve_executable
 
 
 FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures"
 WIRE_FIXTURE_DIR = FIXTURE_DIR / "v1"
 BACKEND_SCRIPT = FIXTURE_DIR / "transport_backend.py"
 RENDERER_ID = "acme.visual"
+
+
+def test_absolute_executable_symlink_is_preserved(tmp_path: Path) -> None:
+    executable = tmp_path / "python"
+    executable.symlink_to(sys.executable)
+
+    resolved = _resolve_executable(
+        str(executable),
+        cwd=tmp_path,
+        child_env={"PATH": os.defpath},
+        backend=RENDERER_ID,
+    )
+
+    assert resolved == str(executable)
 
 
 def _wire_fixture(name: str) -> dict[str, Any]:

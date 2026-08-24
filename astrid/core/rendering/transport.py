@@ -371,7 +371,11 @@ def _resolve_executable(
     if path_like:
         raw = Path(executable).expanduser()
         if raw.is_absolute():
-            candidate = raw.resolve(strict=False)
+            # Preserve an absolute executable symlink.  Virtual environments
+            # rely on launching ``<venv>/bin/python`` through that symlink so
+            # Python discovers the venv's ``pyvenv.cfg`` and site-packages;
+            # resolving it to the base interpreter silently drops the venv.
+            candidate = Path(os.path.abspath(raw))
         else:
             candidate = (cwd / raw).resolve(strict=False)
             try:

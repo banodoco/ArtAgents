@@ -27,7 +27,10 @@ def _execution_env():
         if shutil.which("node")
         else ""
     )
-    python_bin = str(Path(sys.executable).resolve().parent)
+    # Do not resolve the interpreter symlink: in a virtual environment the
+    # resolved binary lives in the base Python installation, while the
+    # sibling ``python3`` we need is in the venv's own ``bin`` directory.
+    python_bin = str(Path(sys.executable).parent)
     old_path = os.environ.get("PATH", "")
     os.environ["PATH"] = ":".join(
         [d for d in (python_bin, node_bin) if d] + [old_path]
