@@ -573,7 +573,38 @@ def _probe_remotion_ready() -> tuple[bool, list[str]]:
         for name in ("node", "ffmpeg")
         if shutil.which(name) is None
     ]
-    return not missing, missing
+    return (not missing), missing
+
+
+def _setup_stamp_probe(
+    name: str, runtime_probe: Callable[[], tuple[bool, list[str]]]
+) -> Callable[[], tuple[bool, list[str]]]:
+    """Probe runtime closure plus the exact installed setup stamp."""
+
+    def _probe() -> tuple[bool, list[str]]:
+        from astrid.core.foundation.project_paths import resolve_projects_root
+        from astrid.core.model_setup.journal import read_stamp
+
+        _, runtime_missing = runtime_probe()
+        _, stamp_missing = read_stamp(resolve_projects_root(), (name,))
+        missing = [*runtime_missing, *stamp_missing]
+        return (not missing), missing
+
+    return _probe
+
+
+def resolve_probe(name: str) -> Callable[[], tuple[bool, list[str]]] | None:
+    """Resolve exact or parameterized setup probes without side effects."""
+    exact = AVAILABILITY_PROBES.get(name)
+    if exact is not None:
+        return exact
+    prefix, sep, param = name.partition(":")
+    if sep and param:
+        if prefix == "wgp_weights":
+            return _setup_stamp_probe(name, _probe_wgp_runtime)
+        if prefix == "vc_weights":
+            return _setup_stamp_probe(name, _probe_vibecomfy_runtime)
+    return None
 
 
 AVAILABILITY_PROBES: dict[str, Callable[[], tuple[bool, list[str]]]] = {
@@ -687,7 +718,7 @@ def _validate_registry() -> None:
                 f"child-only capability {entry.capability_id!r} is outside "
                 "the worker-child allowlist"
             )
-        if entry.probe not in AVAILABILITY_PROBES:
+        if resolve_probe(entry.probe) is None:
             raise RuntimeError(
                 f"capability {entry.capability_id!r} references unknown "
                 f"probe {entry.probe!r}"
@@ -836,7 +867,7 @@ def check_available(entry: CapabilityEntry) -> None:
     Raises :class:`CapabilityUnavailable` naming ``missing_prerequisites``
     when the probe fails (doc 27 §6).
     """
-    probe = AVAILABILITY_PROBES.get(entry.probe)
+    probe = resolve_probe(entry.probe)
     ok, missing = (
         probe() if probe is not None else (False, [f"unknown probe {entry.probe!r}"])
     )

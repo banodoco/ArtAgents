@@ -54,6 +54,7 @@ from astrid.core.io.media_import import (
     gc_unreferenced_staging,
     validate_txn_id,
 )
+from astrid.core.model_setup.journal import resolve_boot_state as _replay_setup_journal
 from astrid.core.receipts import ReceiptService
 from astrid.core.repositories.evidence import EvidenceRepository
 from astrid.core.repositories.projects import ProjectRepository
@@ -316,6 +317,10 @@ def compose_standard_bridge(
     # resolve any journal left by a hard-dead restore before the database
     # writer can open and observe a mixed database/media pair.
     recover_restore_staging(root)
+    # Setup-journal boot replay: resolve dangling acquisition transactions
+    # before deriving/opening the product database. The journal is a replay
+    # log, never a second database, and this call does not create the DB.
+    _replay_setup_journal(root)
     database_path = derive_database_path(root)
     database_path.parent.mkdir(parents=True, exist_ok=True)
     if registry is None:
