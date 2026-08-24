@@ -120,7 +120,8 @@ def _install_prerequisite(
     elif entry.probe == "wgp_runtime":
         tree = tmp_path / "Wan2GP"
         tree.mkdir()
-        (tree / "worker.py").write_text("", encoding="utf-8")
+        (tree / "wgp.py").write_text("", encoding="utf-8")
+        (tree / "defaults").mkdir()
         monkeypatch.setenv(WGP_CHECKOUT_ENV, str(tree))
     elif entry.probe == "remotion_ready":
         bin_dir = tmp_path / "bin"
