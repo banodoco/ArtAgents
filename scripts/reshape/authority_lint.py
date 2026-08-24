@@ -399,7 +399,7 @@ def lint_writer_authority(root: Path) -> list[str]:
 
     ``astrid/core/store`` owns every writable connection. Two documented
     exemptions exist: the conformance kit (``astrid/core/conformance/kit.py``)
-    constructs scratch ``DatabaseWriter``\ s on its own temp databases to
+    constructs scratch ``DatabaseWriter`` instances on its own temp databases to
     prove crash atomicity of the kernel store — that is conformance testing
     of the store, never a second write authority; and
     ``astrid/packs/__init__.py`` is the standard composition root itself,

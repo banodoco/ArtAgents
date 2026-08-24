@@ -1288,7 +1288,7 @@ aliases:
     canonical_id: builtin.y
 """,
             )
-            with self.assertRaisesRegex(PackValidationError, "missing required field pack.aliases\[0\].kind"):
+            with self.assertRaisesRegex(PackValidationError, r"missing required field pack.aliases\[0\].kind"):
                 load_pack_manifest(pack_manifest_path(pack_root))
 
     def test_alias_missing_alias_rejected(self) -> None:
@@ -1302,7 +1302,7 @@ aliases:
     canonical_id: builtin.y
 """,
             )
-            with self.assertRaisesRegex(PackValidationError, "missing required field pack.aliases\[0\].alias"):
+            with self.assertRaisesRegex(PackValidationError, r"missing required field pack.aliases\[0\].alias"):
                 load_pack_manifest(pack_manifest_path(pack_root))
 
     def test_alias_missing_canonical_id_rejected(self) -> None:
@@ -1316,7 +1316,10 @@ aliases:
     alias: builtin.x
 """,
             )
-            with self.assertRaisesRegex(PackValidationError, "missing required field pack.aliases\[0\].canonical_id"):
+            with self.assertRaisesRegex(
+                PackValidationError,
+                r"missing required field pack.aliases\[0\].canonical_id",
+            ):
                 load_pack_manifest(pack_manifest_path(pack_root))
 
     def test_alias_empty_string_alias_rejected(self) -> None:
