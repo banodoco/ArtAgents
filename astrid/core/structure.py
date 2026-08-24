@@ -18,6 +18,7 @@ from astrid.core.pack import (
     load_pack_manifest,
     pack_manifest_path,
 )
+from astrid.core.schema_packs.manifest import load_schema_pack_manifest
 
 LEGACY_PUBLIC_DIRS = ("conductors", "performers", "instruments", "primitives", "executors", "orchestrators")
 LEGACY_LOCAL_DIRS = ("performers", "conductors", "nodes", "instruments", "primitives")
@@ -91,7 +92,10 @@ def validate_import_layering(root: str | Path = REPO_ROOT) -> list[str]:
             for module in imported:
                 if not _is_forbidden_core_import(module):
                     continue
-                if not _is_import_layering_exempt(path, repo_root):
+                if not (
+                    _is_import_layering_exempt(path, repo_root)
+                    or _is_declared_cli_mount_import(repo_root, _repo_rel(path, repo_root), module)
+                ):
                     violations.append(f"{rel}:{node.lineno} imports forbidden module {module!r}")
             for module in _dynamic_imported_modules_from_node(node):
                 if (
@@ -556,6 +560,34 @@ def _is_forbidden_core_import(module: str) -> bool:
     return not any(
         module.startswith(prefix) for prefix in _LEGACY_PACK_PREFIXES
     )
+
+
+def _is_declared_cli_mount_import(root: Path, rel: str, module: str) -> bool:
+    """Allow only schema-pack CLI mounts declared by the target manifest.
+
+    A kernel family CLI may compose a nested schema-pack parser, but the
+    target pack must explicitly declare the host family in ``cli_mounts``.
+    This keeps the core-to-pack boundary closed for all other imports.
+    """
+    if not (module == "astrid.packs" or module.startswith("astrid.packs.")):
+        return False
+    parts = module.split(".")
+    if len(parts) < 3 or (len(parts) > 3 and parts[3] != "cli"):
+        return False
+    manifest_path = root / "astrid" / "packs" / parts[2] / "schema-pack.yaml"
+    if not manifest_path.is_file():
+        return False
+    try:
+        manifest = load_schema_pack_manifest(manifest_path)
+    except Exception:  # noqa: BLE001 - malformed manifests fail elsewhere
+        return False
+    families = {
+        token
+        for mount in manifest.cli_mounts.values()
+        for token in (mount.split()[:1])
+    }
+    prefix = "astrid/core/cli/domain_"
+    return rel.startswith(prefix) and rel.endswith(".py") and rel[len(prefix) : -3] in families
 
 
 def _is_concrete_pack_implementation_module(module: str) -> bool:
