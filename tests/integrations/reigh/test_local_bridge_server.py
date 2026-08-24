@@ -962,6 +962,127 @@ def test_save_endpoint_404_for_unknown_project(
     assert error["error"] == "project_not_found"
 
 
+def test_save_endpoint_persists_every_save_and_fails_closed_on_wal_replacement(
+    tmp_bridge_root: Path,
+) -> None:
+    """Regression (phase-b): every HTTP save must persist; a poisoned
+    writer must fail closed instead of lying.
+
+    Two parts, both against the real HTTP surface:
+
+    1. Two back-to-back ``POST .../save`` requests each commit NEW durable
+       rows (a fresh ``timeline.saved`` event and receipt per save — never
+       an in-process replay), and each response's ``config_version``
+       matches what any external reader observes on disk.
+    2. After a foreign process opens the database read-write and closes
+       cleanly (which unlinks the WAL beneath the long-lived serve writer),
+       the next save returns the frozen ``500 internal`` envelope instead
+       of a fabricated ``200`` success, and zero rows change.
+    """
+    import sqlite3 as sqlite3_module
+    import subprocess
+    import sys
+
+    timeline_id = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbb1"
+    timeline_ulid = "01jm4k5n7p000000000000sav1"
+    with repository_server(tmp_bridge_root) as (base_url, composition):
+        db_path = str(composition.database_path)
+        project = _repo_create_project(
+            composition, slug="persist-proj", key="proj-1"
+        )
+        _repo_create_timeline(
+            composition,
+            project_id=project.id,
+            slug="primary",
+            key="tl-1",
+            timeline_id=timeline_id,
+            timeline_ulid=timeline_ulid,
+            name="Primary",
+        )
+        url = f"{base_url}/projects/persist-proj/timelines/{timeline_id}/save"
+
+        def _external_counts() -> tuple[int, int, str]:
+            """Durable truth: counts + document via a separate reader."""
+            conn = sqlite3_module.connect(
+                f"file:{db_path}?mode=ro", uri=True
+            )
+            try:
+                saved_events = conn.execute(
+                    "SELECT COUNT(*) FROM events WHERE kind = 'timeline.saved'"
+                ).fetchone()[0]
+                receipts = conn.execute(
+                    "SELECT COUNT(*) FROM command_receipts "
+                    "WHERE command_kind = 'timeline.save'"
+                ).fetchone()[0]
+                document = conn.execute(
+                    "SELECT document_json FROM timelines WHERE id = ?",
+                    (timeline_id,),
+                ).fetchone()[0]
+            finally:
+                conn.close()
+            return int(saved_events), int(receipts), str(document)
+
+        # Part 1: two saves, each producing NEW durable rows.
+        status_1, result_1 = _post_json(url, {
+            "config": {"marker": 1},
+            "registry": {"assets": {}},
+            "expected_version": 1,
+        })
+        assert status_1 == 200
+        assert result_1["config"] == {"marker": 1}
+        assert result_1["config_version"] == 2
+        events_after_first, receipts_after_first, doc_after_first = (
+            _external_counts()
+        )
+        assert events_after_first == 1
+        assert receipts_after_first == 1
+
+        status_2, result_2 = _post_json(url, {
+            "config": {"marker": 2},
+            "registry": {"assets": {}},
+            "expected_version": 2,
+        })
+        assert status_2 == 200
+        assert result_2["config"] == {"marker": 2}
+        assert result_2["config_version"] == 3
+        events_after_second, receipts_after_second, doc_after_second = (
+            _external_counts()
+        )
+        # NEW rows, not a replay: one more event and receipt on disk.
+        assert events_after_second == events_after_first + 1
+        assert receipts_after_second == receipts_after_first + 1
+        assert doc_after_second != doc_after_first
+
+        # Part 2: poison the writer exactly as production does. The bridge's
+        # read path churns read-only connections (this GET), then a foreign
+        # process opens read-write and closes cleanly, unlinking the WAL.
+        _get_json(f"{base_url}/projects/persist-proj/timelines/{timeline_id}")
+        foreign_code = (
+            "import sqlite3; "
+            f"c = sqlite3.connect({db_path!r}); "
+            "c.execute('SELECT COUNT(*) FROM projects').fetchone(); "
+            "c.close()"
+        )
+        subprocess.run(
+            [sys.executable, "-c", foreign_code], check=True, timeout=60
+        )
+
+        poisoned_before = _external_counts()
+        status_3, result_3 = _post_json(url, {
+            "config": {"marker": 3},
+            "registry": {"assets": {}},
+            "expected_version": 3,
+        })
+        # The old kernel returned a fabricated 200 with config_version 4
+        # while writing nothing. It must now fail closed with the frozen
+        # error envelope.
+        assert status_3 == 500
+        assert set(result_3) == {"error", "detail"}
+        assert result_3["error"] == "internal"
+        # Zero rows changed: durable state is exactly what it was before.
+        assert _external_counts() == poisoned_before
+
+
 # ---------------------------------------------------------------------------
 # Registry endpoint tests (PUT /projects/:project/timelines/:timeline/registry)
 # ---------------------------------------------------------------------------
