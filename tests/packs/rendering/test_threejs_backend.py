@@ -36,8 +36,8 @@ import yaml
 from astrid.core.rendering.contracts import (
     SCHEMA_VERSION,
     FrameWindow,
-    RenderRequest,
     RendererManifest,
+    RenderRequest,
 )
 from astrid.core.rendering.errors import RendererUnsupportedError
 from astrid.core.rendering.registry import load_default_registries
@@ -340,7 +340,14 @@ def test_threejs_support_rejects_unsupported_timelines_with_clip_reasons(
 
     # Audio tracks and audible clips.
     reasons = reasons_for(
-        {"id": "c", "at": 0, "track": "a1", "clipType": "text", "hold": 1},
+        {
+            "id": "c",
+            "at": 0,
+            "track": "a1",
+            "clipType": "text",
+            "hold": 1,
+            "text": {"content": "x"},
+        },
         tracks=[
             {"id": "v1", "kind": "visual", "label": "V"},
             {"id": "a1", "kind": "audio", "label": "A"},
