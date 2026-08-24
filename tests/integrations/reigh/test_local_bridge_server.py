@@ -1220,7 +1220,8 @@ def test_asset_lookup_after_registry_write(
 
     The registry write commits through the bridge POST (the combined save;
     the standalone PUT /registry route is gone), and the asset endpoint
-    resolves the saved ``file`` alias through the kernel media location.
+    resolves the saved canonical ``media_id`` through the kernel media
+    location.
     """
     timeline_id = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1"
     timeline_ulid = "01JM4K5N7P00000000000RARW1"
@@ -1240,20 +1241,19 @@ def test_asset_lookup_after_registry_write(
         asset_path = _write_source_file(
             composition, "rarw-proj", "rarw-clip.bin", asset_content
         )
-        _repo_import_media(
+        media = _repo_import_media(
             composition,
             project_id=project.id,
             path=asset_path,
             key="media-1",
             realm="managed_local",
-            locator="rarw-clip.bin",
         )
 
         # Step 1: Write the registry through the combined save.
         save_url = f"{base_url}/projects/rarw-proj/timelines/{timeline_id}/save"
         save_status, save_result = _post_json(save_url, {
             "config": {"clips": [], "tracks": []},
-            "registry": {"assets": {"rarw-clip": {"file": "rarw-clip.bin"}}},
+            "registry": {"assets": {"rarw-clip": {"media_id": media.id}}},
             "expected_version": 1,
         })
         assert save_status == 200
@@ -1272,7 +1272,7 @@ def test_asset_lookup_after_registry_write(
 def test_asset_lookup_after_registry_write_sources_relative(
     tmp_bridge_root: Path,
 ) -> None:
-    """Registry ``file`` aliases resolve through nested media locations."""
+    """A nested source resolves through the canonical media identity."""
     timeline_id = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbb2"
     timeline_ulid = "01JM4K5N7P00000000000RARW2"
     asset_content = b"Nested file content.\n"
@@ -1291,20 +1291,19 @@ def test_asset_lookup_after_registry_write_sources_relative(
         asset_path = _write_source_file(
             composition, "rarw-src-proj", "nested/deep.bin", asset_content
         )
-        _repo_import_media(
+        media = _repo_import_media(
             composition,
             project_id=project.id,
             path=asset_path,
             key="media-1",
             realm="managed_local",
-            locator="nested/deep.bin",
         )
         save_url = (
             f"{base_url}/projects/rarw-src-proj/timelines/{timeline_id}/save"
         )
         save_status, save_result = _post_json(save_url, {
             "config": {"clips": [], "tracks": []},
-            "registry": {"assets": {"deep-asset": {"file": "nested/deep.bin"}}},
+            "registry": {"assets": {"deep-asset": {"media_id": media.id}}},
             "expected_version": 1,
         })
         assert save_status == 200
@@ -1814,8 +1813,9 @@ def _repo_import_media(
     ``core.media`` stream, and a receipt in one unit of work. For the
     default ``managed_local`` realm the bytes are copied into the frozen
     digest tree, so serving resolves the managed path from the content
-    hash; the explicit *locator* is stored as the replaceable alias that
-    the timeline registry ``file`` value matches (m4 plan step 22).
+    hash. Managed callers omit *locator* so the repository derives the
+    canonical CAS path; fixture callers that need a replaceable source
+    alias use the explicit ``external_local`` realm.
     """
     from astrid.core.events.service import EventAppendService
     from astrid.core.io.media_import import prepare_media_file
@@ -1854,12 +1854,26 @@ def _repo_seed_asset_timeline(
 
     *media* maps an asset key to ``(content, locator)``: each entry is
     written under the project sources dir and imported through the kernel
-    media repository with a ``managed_local`` location whose alias equals
-    the locator, so the registry ``file`` value resolves project-scoped
-    through ``media_locations`` (m4 plan step 22). The registry entry for
-    the same key must carry ``{"file": <locator>}`` (or ``media_id``).
+    media repository as canonical ``managed_local`` bytes. The registry
+    entry is rewritten to the imported ``media_id`` because managed
+    locations must use the digest-derived locator (m4 plan step 22), while
+    arbitrary file aliases are reserved for explicit ``external_local``
+    references.
     """
     project = _repo_create_project(composition, slug=slug, key=f"proj-{slug}")
+    for index, (asset_key, (content, locator)) in enumerate((media or {}).items()):
+        path = _write_source_file(composition, slug, locator, content)
+        imported = _repo_import_media(
+            composition,
+            project_id=project.id,
+            path=path,
+            key=f"media-{slug}-{index}",
+            realm="managed_local",
+        )
+        entry = registry.get("assets", {}).get(asset_key)
+        if isinstance(entry, dict) and entry.get("file") == locator:
+            entry.pop("file", None)
+            entry["media_id"] = imported.id
     _repo_create_timeline(
         composition,
         project_id=project.id,
@@ -1869,16 +1883,6 @@ def _repo_seed_asset_timeline(
         timeline_ulid=timeline_ulid,
         registry=registry,
     )
-    for index, (content, locator) in enumerate((media or {}).values()):
-        path = _write_source_file(composition, slug, locator, content)
-        _repo_import_media(
-            composition,
-            project_id=project.id,
-            path=path,
-            key=f"media-{slug}-{index}",
-            realm="managed_local",
-            locator=locator,
-        )
     return project
 
 
@@ -2274,7 +2278,6 @@ def test_persisted_registry_asset_serves_registered_media_id(
             path=asset_path,
             key="media-1",
             realm="managed_local",
-            locator="mid.bin",
         )
         _repo_create_timeline(
             composition,
@@ -2318,7 +2321,7 @@ def test_persisted_registry_asset_404_cross_project_locator_alias(
             project_id=other.id,
             path=other_path,
             key="media-other",
-            realm="managed_local",
+            realm="external_local",
             locator="shared.bin",
         )
         own = _repo_create_project(composition, slug="own-proj", key="proj-own")
@@ -2358,7 +2361,6 @@ def test_persisted_registry_asset_404_cross_project_media_id(
             path=other_path,
             key="media-foreign",
             realm="managed_local",
-            locator="foreign.bin",
         )
         own = _repo_create_project(composition, slug="ref-proj", key="proj-ref")
         _repo_create_timeline(

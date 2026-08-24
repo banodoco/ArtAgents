@@ -843,7 +843,7 @@ def _kernel_invoke(
     """Real kernel admission: RunRepository.create with compute_spec_hash idempotency, claim/start, handler, execute/complete."""
     from astrid.core.repositories.tasks import compute_spec_hash
     from astrid.core.store.uow import UnitOfWork
-    from astrid.core.store.writer import DatabaseWriter
+    from astrid.core.store.writer import open_database_writer
     from astrid.core.events.service import EventAppendService
     from astrid.core.receipts.service import ReceiptService
     from astrid.core.repositories.runs import RunRepository
@@ -860,7 +860,7 @@ def _kernel_invoke(
         registry = build_standard_registry()
     db_path = derive_database_path(projects_root)
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    writer = DatabaseWriter(db_path, registry)
+    writer = open_database_writer(db_path, registry)
     try:
         events = EventAppendService(registry)
         receipts = ReceiptService()

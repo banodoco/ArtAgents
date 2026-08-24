@@ -550,8 +550,23 @@ class DatabaseWriter:
             self._connection.close()
 
 
+def open_database_writer(
+    path: str | Path, registry: FrozenSchemaPackRegistry
+) -> DatabaseWriter:
+    """Open the canonical SQLite writer for a supplied schema registry.
+
+    All application compositions pass through this store-owned seam. Keeping
+    construction here preserves the single-writer authority while allowing
+    callers that already own the registry to propagate that exact registry
+    without importing the standard pack composition.
+    """
+
+    return DatabaseWriter(path, registry)
+
+
 __all__ = [
     "DatabaseWriter",
+    "open_database_writer",
     "TransactionControlError",
     "WriterBusyError",
     "WriterSidecarError",

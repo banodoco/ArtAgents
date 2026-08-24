@@ -59,13 +59,13 @@ def admit_orchestrator_project_run(
         from astrid.core.repositories.runs import RunRepository
         from astrid.core.repositories.tasks import compute_spec_hash
         from astrid.core.store.uow import UnitOfWork
-        from astrid.core.store.writer import DatabaseWriter
+        from astrid.core.store.writer import open_database_writer
 
         idempotency_key = compute_spec_hash(spec_payload, [])
 
         registry = core_only_registry()
         db_path = Path(root) / "kernel.sqlite3"
-        writer = DatabaseWriter(db_path, registry)
+        writer = open_database_writer(db_path, registry)
         try:
             events = EventAppendService(registry)  # type: ignore[arg-type]
             receipts = ReceiptService()

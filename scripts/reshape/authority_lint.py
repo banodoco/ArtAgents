@@ -404,8 +404,8 @@ def lint_writer_authority(root: Path) -> list[str]:
     of the store, never a second write authority; and
     ``astrid/packs/__init__.py`` is the standard composition root itself,
     the single place that constructs the standard database/writer at the
-    gateway serve composition root. Read-only URI probes (``mode=ro``) are
-    not writers and are never flagged.
+    gateway serve composition root. Read-only URI probes (``mode=ro``) and the
+    canonical ``read_only_uri`` helper are not writers and are never flagged.
     """
     errors: list[str] = []
     store_root = root / "astrid" / "core" / "store"
@@ -426,7 +426,11 @@ def lint_writer_authority(root: Path) -> list[str]:
                 f"{rel}: SQLite writer construction outside the kernel store"
             )
             continue
-        if "sqlite3.connect(" in source and "mode=ro" not in source:
+        if (
+            "sqlite3.connect(" in source
+            and "mode=ro" not in source
+            and "read_only_uri(" not in source
+        ):
             errors.append(
                 f"{rel}: SQLite writer construction outside the kernel store"
             )

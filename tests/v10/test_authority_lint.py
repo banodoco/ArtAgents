@@ -498,6 +498,20 @@ def test_read_only_probe_is_not_a_writer(tmp_path: Path) -> None:
     assert errors == [], errors
 
 
+def test_canonical_read_only_uri_probe_is_not_a_writer(tmp_path: Path) -> None:
+    """The shared read-only URI helper must stay outside writer authority."""
+    _bootstrap(tmp_path)
+    _write(
+        tmp_path,
+        "astrid/core/reader.py",
+        "import sqlite3\n"
+        "from astrid.core.migrations.runner import read_only_uri\n"
+        "conn = sqlite3.connect(read_only_uri('/tmp/db.sqlite3'), uri=True)\n",
+    )
+    errors = lint_writer_authority(tmp_path)
+    assert errors == [], errors
+
+
 def test_conformance_kit_scratch_writer_is_exempt(tmp_path: Path) -> None:
     _bootstrap(tmp_path)
     _write(

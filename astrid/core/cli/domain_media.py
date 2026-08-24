@@ -48,11 +48,13 @@ envelope.
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 from pathlib import Path
 from typing import Any
 
 from astrid.core.cli.domain_output import print_result
+from astrid.core.cli.domain_product import FAMILY_PARSER_MODULES
 from astrid.core.cli.registration import CommandSpec, register_product_commands
 
 __all__ = ["COMMANDS", "build_parser"]
@@ -393,7 +395,10 @@ def build_parser(client: Any) -> argparse.ArgumentParser:
     embedded from the references product parser. There is no top-level
     references family.
     """
-    from astrid.packs.references import cli as references_cli
+    # Resolve the manifest-owned nested parser through the static product
+    # registry. The core media adapter must not import a concrete pack
+    # implementation directly.
+    references_cli = importlib.import_module(FAMILY_PARSER_MODULES["references"])
 
     def _configure_references(subparser: argparse.ArgumentParser) -> None:
         nested = subparser.add_subparsers(dest="reference_command", required=True)

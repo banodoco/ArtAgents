@@ -98,10 +98,6 @@ RESTORE_SWAP_BOUNDARIES = (
 )
 """Observable hard-death boundaries used by the restore crash matrix."""
 
-# Keep a descriptive alias for callers that use the recovery terminology.
-RESTORE_RECOVERY_BOUNDARIES = RESTORE_SWAP_BOUNDARIES
-"""Alias for :data:`RESTORE_SWAP_BOUNDARIES`."""
-
 _RESTORE_KILL_ENV = "ASTRID_RESTORE_KILL_BOUNDARY"
 _RESTORE_RUNTIME_LOG_ENV = "ASTRID_RESTORE_RUNTIME_LOG"
 _RESTORE_PHASES = frozenset(
@@ -2022,7 +2018,6 @@ __all__ = [
     "BACKUP_PUBLICATION_SCHEMA",
     "RESTORE_JOURNAL_NAME",
     "RESTORE_JOURNAL_SCHEMA",
-    "RESTORE_RECOVERY_BOUNDARIES",
     "RESTORE_SWAP_BOUNDARIES",
     "BackupError",
     "BackupResult",

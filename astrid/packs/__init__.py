@@ -73,7 +73,11 @@ from astrid.core.schema_packs.registry import (
 )
 from astrid.core.store.ownership import DatabaseOwnerLock, OwnerLockError
 from astrid.core.store.uow import UnitOfWork
-from astrid.core.store.writer import DatabaseWriter, WriterShutdownError
+from astrid.core.store.writer import (
+    DatabaseWriter,
+    WriterShutdownError,
+    open_database_writer,
+)
 from astrid.sdk.exceptions import ServiceUnavailableError
 from astrid.packs.timeline.bridge import TimelineBridgeAdapter
 from astrid.packs.timeline.repository import TimelineRepository
@@ -141,7 +145,7 @@ def open_standard_writer(
     """
     if registry is None:
         registry = build_standard_registry()
-    return DatabaseWriter(database_path, registry)
+    return open_database_writer(database_path, registry)
 
 
 def collect_live_staging_txn_ids(writer: DatabaseWriter) -> set[str]:
