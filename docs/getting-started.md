@@ -70,6 +70,29 @@ For the complete project, timeline, media, recovery, and failure journeys,
 continue with [CLI journeys](guides/cli-journeys.md). For renderer-specific
 diagnostics, see [Debugging](guides/debugging.md).
 
+### Canonical timeline schema
+
+The canonical `banodoco_timeline_schema` package is an optional external
+dependency. Astrid's default Python install intentionally does not vendor or
+declare this private Banodoco workspace package, so clean installs can use the
+non-schema surfaces and import Astrid without that checkout. Timeline document
+validation, managed rendering/visualization, and the exact canonical-schema
+parity assertions require it and fail closed when it is unavailable.
+
+Install the package from a compatible Banodoco workspace checkout with the same
+interpreter used to run Astrid:
+
+```bash
+python -m pip install -e /path/to/banodoco-workspace/packages/timeline-schema/python
+python -c "import banodoco_timeline_schema; print('timeline schema available')"
+```
+
+The Astrid checkout does not contain `packages/timeline-schema/python`; replace
+the placeholder with the path to the external workspace. If the package is not
+installed, the timeline parity module remains collectible and skips only its
+parameterized canonical-schema checks; its independent compositor checks still
+run.
+
 ### First visible timeline render
 
 When hand-authoring a timeline, start with root `clips`, a `visual` track,

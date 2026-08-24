@@ -2,10 +2,11 @@
 """Timeline schema mirroring reigh-app's TimelineConfig.
 
 TimelineConfig / TimelineClip / ThemeOverrides / TimelineOutput / AssetEntry /
-Theme are re-exported from `banodoco_timeline_schema` (see
-`packages/timeline-schema/`); the JSON-Schema validator there is the canonical
-shape check. Everything else in this file (pool/arrangement/metadata/registry
-types, transition validation, effect-id registry checks) is Banodoco-only.
+Theme are re-exported from `banodoco_timeline_schema` (the Python package in
+the external Banodoco workspace's `packages/timeline-schema/python/` tree); the
+JSON-Schema validator there is the canonical shape check. Everything else in
+this file (pool/arrangement/metadata/registry types, transition validation,
+effect-id registry checks) is Banodoco-only.
 """
 
 from __future__ import annotations
@@ -52,7 +53,7 @@ except ImportError:  # pragma: no cover
     # invalid timelines — the exact class of bug behind the save incident.
     # Without the contract package, typing degrades to plain dicts and
     # validation fails loudly with install instructions. Install with:
-    #   pip install -e packages/timeline-schema/python
+    #   python -m pip install -e /path/to/banodoco-workspace/packages/timeline-schema/python
     SharedTimelineOutput = dict  # type: ignore[assignment,misc]
     SharedTimelineClip = dict  # type: ignore[assignment,misc]
     SharedThemeOverrides = dict  # type: ignore[assignment,misc]
@@ -67,21 +68,22 @@ except ImportError:  # pragma: no cover
         fps = float(canvas.get("fps", 30)) if isinstance(canvas, dict) else 30.0
         return {"resolution": f"{width}x{height}", "fps": fps, "file": "output.mp4"}
 
+    _MISSING_SCHEMA_MESSAGE = (
+        "banodoco_timeline_schema is required for timeline validation. Install "
+        "the external shared package from a Banodoco workspace checkout, for "
+        "example: python -m pip install -e "
+        "/path/to/banodoco-workspace/packages/timeline-schema/python. "
+        "Astrid does not vendor this package; see "
+        "docs/getting-started.md#canonical-timeline-schema. Without the "
+        "canonical JSON Schema artifact, validation is refused, not silently "
+        "degraded."
+    )
+
     def _shared_validate_timeline(config: Any, *, strict: bool = True) -> None:
-        raise ImportError(
-            "banodoco_timeline_schema is required for timeline validation — "
-            "pip install -e packages/timeline-schema/python. Without the "
-            "canonical JSON Schema artifact, validation is refused, not "
-            "silently degraded."
-        )
+        raise ImportError(_MISSING_SCHEMA_MESSAGE)
 
     def _shared_load_schema() -> dict[str, Any]:
-        raise ImportError(
-            "banodoco_timeline_schema is required for timeline validation — "
-            "pip install -e packages/timeline-schema/python. Without the "
-            "canonical JSON Schema artifact, validation is refused, not "
-            "silently degraded."
-        )
+        raise ImportError(_MISSING_SCHEMA_MESSAGE)
 
 
 TimelineClip = SharedTimelineClip
