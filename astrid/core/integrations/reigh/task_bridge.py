@@ -1069,6 +1069,20 @@ class ReighTaskBridge:
         _cleanup_staged(staged_files)
         payload = result.to_dict()
         payload.pop("event_ids", None)  # receipt secrecy by construction
+        # Completion provenance names the immutable build receipt that was
+        # verified at serve composition. It remains outside the frozen
+        # nine-key CommandReceipt shape and is omitted when serve has not
+        # stamped a manifest (for example, direct library usage in tests).
+        from astrid.core.integrations.reigh.boot_manifest import (
+            load_boot_manifest_hash,
+        )
+
+        boot_hash = load_boot_manifest_hash(self._projects_root)
+        if boot_hash is not None:
+            payload["provenance"] = {
+                "kind": "reigh.boot_manifest",
+                "sha256": boot_hash,
+            }
         return payload
 
     # -- R8: fenced failure (server applies max_attempts; doc 27 §4.5) -------

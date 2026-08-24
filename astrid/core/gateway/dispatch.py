@@ -210,6 +210,27 @@ def _dispatch_serve(args: list[str]) -> int:
         )
         return 1
 
+    # Verify-or-stamp the executor build receipt at the serve composition
+    # root, before transport creation. Pack conformance rows are supplied
+    # here at the sanctioned kernel/pack boundary; registry or fixture drift
+    # fails startup closed instead of being silently restamped.
+    from astrid.core.integrations.reigh.boot_manifest import (
+        BootManifestError,
+        stamp_boot_manifest,
+    )
+
+    try:
+        from astrid.packs.shots.conformance import capability_conformance_specs
+
+        stamp_boot_manifest(
+            composition.projects_root,
+            fixtures=capability_conformance_specs(),
+        )
+    except BootManifestError as exc:
+        print(f"serve failed: {exc}", file=sys.stderr)
+        composition.close()
+        return 1
+
     try:
         try:
             server = create_local_bridge_server(
