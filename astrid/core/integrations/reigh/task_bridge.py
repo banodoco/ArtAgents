@@ -413,6 +413,25 @@ class ReighTaskBridge:
         # still return the original row, without re-paying the old fence.
         parent = self._task_row(parent_task_id)
         project_id = str(parent["project_id"])
+        task_input = body.get("input")
+        if not isinstance(task_input, dict):
+            task_input = {}
+        dependant_on = task_input.get("dependant_on", [])
+        dependencies: list[dict[str, Any]] = []
+        if isinstance(dependant_on, list):
+            for ordinal, dep in enumerate(dependant_on):
+                if isinstance(dep, str) and dep:
+                    dependencies.append(
+                        {"task_id": dep, "kind": "hard", "ordinal": ordinal}
+                    )
+        expected_spec = {
+            "schema_version": 1,
+            "family": entry.family,
+            "source_task_type": entry.capability_id,
+            "definition_version": entry.definition_version,
+            "params": dict(task_input),
+            "output_policy": dict(entry.output_policy),
+        }
         with self._writer.read_only_connection() as conn:
             conn.row_factory = _sqlite_row_factory
             receipt = conn.execute(
@@ -433,6 +452,16 @@ class ReighTaskBridge:
             if not isinstance(result, dict):
                 raise BridgeInternalError(
                     "child admission receipt contains invalid task data"
+                )
+            if (
+                result.get("capability") != entry.capability_id
+                or result.get("spec") != expected_spec
+                or result.get("input_manifest") != []
+                or result.get("max_attempts") != 3
+            ):
+                raise BridgeTaskMismatchError(
+                    "this child idempotency key was already committed with "
+                    "different canonical request bytes"
                 )
             return 200, {"task": result}
 
@@ -481,25 +510,7 @@ class ReighTaskBridge:
                 attempt=_attempt_wire_shape(attempt),
             )
 
-        task_input = body.get("input")
-        if not isinstance(task_input, dict):
-            task_input = {}
-        dependant_on = task_input.get("dependant_on", [])
-        dependencies: list[dict[str, Any]] = []
-        if isinstance(dependant_on, list):
-            for ordinal, dep in enumerate(dependant_on):
-                if isinstance(dep, str) and dep:
-                    dependencies.append(
-                        {"task_id": dep, "kind": "hard", "ordinal": ordinal}
-                    )
-        spec = {
-            "schema_version": 1,
-            "family": entry.family,
-            "source_task_type": entry.capability_id,
-            "definition_version": entry.definition_version,
-            "params": dict(task_input),
-            "output_policy": dict(entry.output_policy),
-        }
+        spec = expected_spec
         tasks, _media, _receipts = self._services()
         def command(uow):
             # Supply the committed task id on the tiny race where another
