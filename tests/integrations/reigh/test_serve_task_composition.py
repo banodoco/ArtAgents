@@ -237,6 +237,39 @@ def test_python_module_serve_composes_authenticated_task_routes(
         )
         assert status == 426, incompatible
         assert incompatible["error"] == "protocol_version_mismatch"
+
+        # Current release-mode auth remains in force while exercising the
+        # WAL-sidecar failure path: a foreign writable close must make the
+        # next authenticated mutation fail closed, not fabricate success.
+        database_path = tmp_path / ".astrid" / "astrid.sqlite3"
+        subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import sqlite3; "
+                    f"c = sqlite3.connect({str(database_path)!r}); "
+                    "c.execute('SELECT COUNT(*) FROM projects').fetchone(); "
+                    "c.close()"
+                ),
+            ],
+            check=True,
+        )
+        wal_path = Path(f"{database_path}-wal")
+        if wal_path.exists():
+            wal_path.unlink()
+        status, poisoned = _request_json(
+            base_url,
+            "/projects/bridge-project/tasks",
+            method="POST",
+            key="production-cli-after-wal-poison",
+            body={
+                "family": "image_upscale",
+                "input": {"image_url": "https://example.invalid/after.png"},
+            },
+        )
+        assert status == 500, poisoned
+        assert poisoned["error"] == "internal"
     finally:
         if process.poll() is None:
             process.send_signal(signal.SIGTERM)
