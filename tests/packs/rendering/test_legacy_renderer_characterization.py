@@ -18,10 +18,8 @@ from unittest.mock import patch
 
 import pytest
 
-from astrid.packs.rendering.executors.render import audio_reactive_colour
-from astrid.packs.rendering.executors.render import legacy_engine
+from astrid.packs.rendering.executors.render import audio_reactive_colour, legacy_engine
 from astrid.packs.rendering.executors.render import run as render_run
-
 
 # ---------------------------------------------------------------------------
 # fixture builders (plain dicts, no subprocesses)
@@ -421,6 +419,10 @@ def test_render_provenance_v1_key_set(tmp_path: Path) -> None:
         "registry_state",
         "resolved_effect_ids",
         "resolved_effects",
+        "resolved_animation_ids",
+        "resolved_animations",
+        "resolved_transition_ids",
+        "resolved_transitions",
         "source_pack_ids",
         "element_roots",
         "staged_asset_ids",
