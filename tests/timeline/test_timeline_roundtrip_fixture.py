@@ -49,6 +49,21 @@ _SHARED_SCHEMA_CANDIDATES = (
 
 
 def _load_shared_schema() -> dict | None:
+    # Prefer the package actually used by Astrid's runtime validator.  The
+    # Remotion tree may contain an older copied schema (for example, one that
+    # predates the top-level ``app`` extension), so filesystem order is not a
+    # reliable indicator of the canonical contract.
+    try:
+        from banodoco_timeline_schema import load_schema
+    except ModuleNotFoundError as exc:
+        if exc.name != "banodoco_timeline_schema":
+            raise
+    else:
+        return load_schema()
+
+    # Keep the source-checkout fallbacks for environments that deliberately do
+    # not install the optional Python package.  If neither artifact exists,
+    # the caller skips this one external-schema parity assertion.
     for candidate in _SHARED_SCHEMA_CANDIDATES:
         if candidate.is_file():
             return json.loads(candidate.read_text(encoding="utf-8"))
