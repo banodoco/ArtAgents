@@ -27,7 +27,7 @@ from astrid.core.repositories.media import (
     MANAGED_LOCAL_REALM,
 )
 from astrid.core.store.uow import UnitOfWork
-from astrid.packs import compose_standard_bridge
+from astrid.packs import build_standard_registry, compose_standard_bridge
 from tests.v10._m7_fixture import build_m7_fixture
 
 _PNG_PREFIX = b"\x89PNG\r\n\x1a\n"
@@ -623,7 +623,11 @@ def test_migration_statement_crashes_reopen_as_complete_schema(
                         "SELECT name FROM sqlite_master WHERE type = 'table'"
                     ).fetchall()
                 }
-            assert len(migrations) == 5
+            expected_migrations = [
+                (migration.pack, migration.version)
+                for migration in build_standard_registry().migrations
+            ]
+            assert migrations == expected_migrations
             assert {"projects", "events", "timelines", "shots", "project_references"} <= tables
         finally:
             composition.close()
