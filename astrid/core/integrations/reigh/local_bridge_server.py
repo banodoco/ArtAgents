@@ -316,6 +316,14 @@ def make_local_bridge_handler(*, projects_root: Path):
     """Build a request handler bound to one resolved projects root."""
 
     class Handler(BaseHTTPRequestHandler):
+        # The editor talks to the bridge through an HTTP/1.1 proxy.  The
+        # default BaseHTTPRequestHandler protocol is HTTP/1.0, which makes a
+        # response close-delimited unless every intermediary happens to infer
+        # the framing correctly.  Keep-alive is safe here because every
+        # response path below supplies an explicit Content-Length (or is a
+        # bodyless HTTP status such as 204/304).
+        protocol_version = "HTTP/1.1"
+
         def setup(self) -> None:
             super().setup()
             self.connection.settimeout(_REQUEST_SOCKET_TIMEOUT_SEC)
@@ -913,8 +921,10 @@ def make_local_bridge_handler(*, projects_root: Path):
             if match is None:
                 self.send_response(400)
                 self.send_header("Content-Type", "text/plain")
+                body = b"invalid Range header"
+                self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
-                self.wfile.write(b"invalid Range header")
+                self.wfile.write(body)
                 return
 
             range_start_str = match.group(1)
@@ -923,8 +933,10 @@ def make_local_bridge_handler(*, projects_root: Path):
             if range_start_str == "" and range_end_str == "":
                 self.send_response(400)
                 self.send_header("Content-Type", "text/plain")
+                body = b"empty Range"
+                self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
-                self.wfile.write(b"empty Range")
+                self.wfile.write(body)
                 return
 
             # ---- suffix range: bytes=-N  (last N bytes) ----

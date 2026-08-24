@@ -10,6 +10,7 @@ import hashlib
 import json
 import threading
 from contextlib import contextmanager
+from http.client import HTTPConnection
 from pathlib import Path
 from typing import Any, Generator
 from urllib.error import HTTPError
@@ -606,3 +607,86 @@ def test_media_content_unknown_foreign_and_missing_bytes(env) -> None:
 
     status, _, _ = _request(env, "GET", "/projects/media-a/media//content")
     assert status == 404
+
+
+def test_media_content_http11_frames_proxy_and_keepalive_responses(env) -> None:
+    """Every media response is self-delimiting on a reused HTTP/1.1 socket.
+
+    Vite's proxy keeps the upstream connection alive while it probes media
+    capabilities and then asks for bytes.  Use the stdlib HTTP/1.1 client
+    (rather than the test helper's one-request urllib calls) to catch the
+    original ``Data after Connection: close`` class of framing failures.
+    """
+    composition = env["composition"]
+    project_id = _create_project(composition, "demo-project")
+    payload = b"proxy-compatible-media"
+    media_id = _seed_media(composition, project_id, payload)
+    content_path = f"/projects/demo-project/media/{media_id}/content"
+    missing_path = (
+        "/projects/demo-project/media/__reigh_capability_probe__/content"
+    )
+    host, port = env["base_url"].removeprefix("http://").rsplit(":", 1)
+    connection = HTTPConnection(host, int(port), timeout=5)
+
+    def request(
+        method: str,
+        path: str,
+        *,
+        extra_headers: dict[str, str] | None = None,
+    ) -> tuple[Any, bytes]:
+        connection.request(method, path, headers=extra_headers or {})
+        response = connection.getresponse()
+        body = response.read()
+        return response, body
+
+    try:
+        missing, missing_body = request("GET", missing_path)
+        assert missing.version == 11
+        assert missing.status == 404
+        assert json.loads(missing_body)["error"] == "media_not_found"
+        assert missing.getheader("Content-Length") == str(len(missing_body))
+        assert missing.getheader("Transfer-Encoding") is None
+
+        head, head_body = request("HEAD", content_path)
+        assert head.version == 11
+        assert head.status == 200
+        assert head_body == b""
+        assert head.getheader("Content-Length") == str(len(payload))
+        etag = head.getheader("ETag")
+        assert etag
+
+        ranged_head, ranged_head_body = request(
+            "HEAD", content_path, extra_headers={"Range": "bytes=2-7"}
+        )
+        assert ranged_head.version == 11
+        assert ranged_head.status == 206
+        assert ranged_head_body == b""
+        assert ranged_head.getheader("Content-Length") == "6"
+        assert ranged_head.getheader("Content-Range") == f"bytes 2-7/{len(payload)}"
+
+        ranged, ranged_body = request(
+            "GET", content_path, extra_headers={"Range": "bytes=2-7"}
+        )
+        assert ranged.version == 11
+        assert ranged.status == 206
+        assert ranged_body == payload[2:8]
+        assert ranged.getheader("Content-Length") == str(len(ranged_body))
+        assert ranged.getheader("Content-Range") == f"bytes 2-7/{len(payload)}"
+
+        not_modified, not_modified_body = request(
+            "GET", content_path, extra_headers={"If-None-Match": etag}
+        )
+        assert not_modified.version == 11
+        assert not_modified.status == 304
+        assert not_modified_body == b""
+        assert not_modified.getheader("Transfer-Encoding") is None
+
+        malformed, malformed_body = request(
+            "GET", content_path, extra_headers={"Range": "bytes=not-a-range"}
+        )
+        assert malformed.version == 11
+        assert malformed.status == 400
+        assert malformed.getheader("Content-Length") == str(len(malformed_body))
+        assert malformed_body == b"invalid Range header"
+    finally:
+        connection.close()
