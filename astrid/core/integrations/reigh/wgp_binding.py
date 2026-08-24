@@ -50,6 +50,8 @@ from .wgp_bridge import (
 )
 from .wgp_build import (
     PINNED_WAN2GP_SHA,
+    UPSTREAM_BASE_SHA,
+    WORKER_CONTRACT_VERSION,
     BuildManifestError,
     BuildManifestStore,
 )
@@ -88,7 +90,7 @@ def build_store() -> BuildManifestStore:
 
 
 def _fence_build(store: BuildManifestStore) -> tuple[Any, str]:
-    """Prove the installed build matches the vendored pin; return digest."""
+    """Prove every build identity component matches this binding pin."""
     try:
         manifest = store.require_current()
     except BuildManifestError as exc:
@@ -98,6 +100,29 @@ def _fence_build(store: BuildManifestStore) -> tuple[Any, str]:
             f"installed build manifest targets {manifest.wan2gp_sha} but "
             f"the vendored tree is pinned at {PINNED_WAN2GP_SHA}; run the "
             "five-gate pipeline and swap the build explicitly"
+        )
+    mismatches = []
+    if manifest.upstream_base != UPSTREAM_BASE_SHA:
+        mismatches.append(
+            f"upstream_base={manifest.upstream_base} (expected {UPSTREAM_BASE_SHA})"
+        )
+    from .wgp_patches import patchset_hash
+
+    expected_patchset = patchset_hash()
+    if manifest.patchset_hash != expected_patchset:
+        mismatches.append(
+            f"patchset_hash={manifest.patchset_hash} (expected {expected_patchset})"
+        )
+    if manifest.worker_contract_version != WORKER_CONTRACT_VERSION:
+        mismatches.append(
+            "worker_contract_version="
+            f"{manifest.worker_contract_version} "
+            f"(expected {WORKER_CONTRACT_VERSION})"
+        )
+    if mismatches:
+        raise BuildFenceMismatch(
+            "installed Wan2GP build manifest disagrees with the binding fence: "
+            + "; ".join(mismatches)
         )
     return manifest, manifest.digest()
 
