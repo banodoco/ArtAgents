@@ -443,6 +443,14 @@ def make_local_bridge_handler(*, projects_root: Path):
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Referrer-Policy", "no-referrer")
             self.end_headers()
+            # ``HEAD`` carries the same headers (including the GET-sized
+            # Content-Length) but never a response body.  BaseHTTPRequest-
+            # Handler does not suppress writes for HEAD automatically, and
+            # leaking this JSON onto a keep-alive socket makes the next Node
+            # proxy response start with ``{\"error\"...`` instead of
+            # ``HTTP/1.1``.
+            if self.command == "HEAD":
+                return
             try:
                 self.wfile.write(body)
             except (BrokenPipeError, ConnectionResetError):
@@ -924,7 +932,8 @@ def make_local_bridge_handler(*, projects_root: Path):
                 body = b"invalid Range header"
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
-                self.wfile.write(body)
+                if self.command != "HEAD":
+                    self.wfile.write(body)
                 return
 
             range_start_str = match.group(1)
@@ -936,7 +945,8 @@ def make_local_bridge_handler(*, projects_root: Path):
                 body = b"empty Range"
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
-                self.wfile.write(body)
+                if self.command != "HEAD":
+                    self.wfile.write(body)
                 return
 
             # ---- suffix range: bytes=-N  (last N bytes) ----

@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
+import subprocess
 import threading
 from contextlib import contextmanager
 from http.client import HTTPConnection
@@ -26,6 +28,67 @@ from astrid.core.store.uow import UnitOfWork
 from astrid.packs import compose_standard_bridge
 
 TS = "2026-08-15T00:00:00.000000+00:00"
+
+
+_NODE_HTTP11_KEEPALIVE_PROBE = r"""
+const http = require("http");
+const [host, port, mediaId] = process.argv.slice(1);
+const agent = new http.Agent({ keepAlive: true, maxSockets: 1 });
+
+function request(method, path, headers = {}) {
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      { host, port: Number(port), path, method, agent, headers },
+      (res) => {
+        const chunks = [];
+        const socketId = res.socket && res.socket.localPort;
+        res.on("data", (chunk) => chunks.push(chunk));
+        res.on("end", () => resolve({
+          status: res.statusCode,
+          version: res.httpVersion,
+          body: Buffer.concat(chunks),
+          contentLength: res.headers["content-length"] || null,
+          contentRange: res.headers["content-range"] || null,
+          etag: res.headers.etag || null,
+          socketId,
+        }));
+      },
+    );
+    req.on("error", reject);
+    req.end();
+  });
+}
+
+(async () => {
+  try {
+    const contentPath = `/projects/demo-project/media/${mediaId}/content`;
+    const missingPath = "/projects/demo-project/media/__reigh_capability_probe__/content";
+    const results = [];
+    results.push(await request("HEAD", missingPath));
+    const head = await request("HEAD", contentPath);
+    results.push(head);
+    results.push(await request("HEAD", contentPath, { Range: "bytes=2-5" }));
+    results.push(await request("HEAD", contentPath, { Range: "bytes=not-a-range" }));
+    results.push(await request("GET", contentPath, { Range: "bytes=2-5" }));
+    results.push(await request("GET", contentPath, { "If-None-Match": head.etag }));
+    console.log(JSON.stringify(results.map((result) => ({
+      status: result.status,
+      version: result.version,
+      bodyLength: result.body.length,
+      contentLength: result.contentLength,
+      contentRange: result.contentRange,
+      etag: result.etag,
+      body: result.body.toString(),
+      socketId: result.socketId,
+    }))));
+    agent.destroy();
+  } catch (error) {
+    console.error(error && error.stack ? error.stack : error);
+    agent.destroy();
+    process.exitCode = 1;
+  }
+})();
+"""
 
 
 # ---------------------------------------------------------------------------
@@ -690,3 +753,59 @@ def test_media_content_http11_frames_proxy_and_keepalive_responses(env) -> None:
         assert malformed_body == b"invalid Range header"
     finally:
         connection.close()
+
+
+def test_media_content_node_http_proxy_head_error_does_not_leak_body(env) -> None:
+    """Node's HTTP parser can reuse the socket after every HEAD/error path."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is required for the proxy-compatible framing test")
+
+    composition = env["composition"]
+    project_id = _create_project(composition, "demo-project")
+    payload = b"node-proxy-test"
+    media_id = _seed_media(composition, project_id, payload)
+    host, port = env["base_url"].removeprefix("http://").rsplit(":", 1)
+    completed = subprocess.run(
+        [node, "-e", _NODE_HTTP11_KEEPALIVE_PROBE, host, port, media_id],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+    assert completed.returncode == 0, completed.stderr
+    results = json.loads(completed.stdout)
+    assert len(results) == 6
+    assert {result["version"] for result in results} == {"1.1"}
+    assert len({result["socketId"] for result in results}) == 1
+
+    missing, head, ranged_head, malformed_head, ranged, not_modified = results
+    assert missing["status"] == 404
+    assert missing["bodyLength"] == 0
+    expected_missing_body = json.dumps(
+        {
+            "error": "media_not_found",
+            "detail": (
+                "media '__reigh_capability_probe__' was not found in project "
+                "'demo-project'"
+            ),
+        }
+    ).encode()
+    assert missing["contentLength"] == str(len(expected_missing_body))
+    assert head["status"] == 200
+    assert head["bodyLength"] == 0
+    assert head["contentLength"] == str(len(payload))
+    assert head["etag"]
+    assert ranged_head["status"] == 206
+    assert ranged_head["bodyLength"] == 0
+    assert ranged_head["contentLength"] == "4"
+    assert ranged_head["contentRange"] == f"bytes 2-5/{len(payload)}"
+    assert malformed_head["status"] == 400
+    assert malformed_head["bodyLength"] == 0
+    assert malformed_head["contentLength"] == str(len(b"invalid Range header"))
+    assert ranged["status"] == 206
+    assert ranged["body"] == payload[2:6].decode()
+    assert ranged["bodyLength"] == 4
+    assert ranged["contentLength"] == "4"
+    assert not_modified["status"] == 304
+    assert not_modified["bodyLength"] == 0
