@@ -45,188 +45,28 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Mapping
 
-from astrid.core.migrations.catalog import CORE_MIGRATIONS
-from astrid.core.repositories.errors import (
+from astrid.core.contracts.vocabulary_errors import (
     CommandVocabularyError,
     EventVocabularyError,
     StreamAgreementError,
     StreamVocabularyError,
 )
-from astrid.core.schema_packs.manifest import (
-    SchemaPackManifest,
-    parse_schema_pack_manifest,
-)
 from astrid.core.schema_packs.registry import (
     FrozenSchemaPackRegistry,
     SchemaPackRegistry,
 )
-
-CORE_PACK_ID = "core"
-"""Pack id used for the code-declared kernel manifest and migration rows."""
-
-CORE_MANIFEST_VERSION = 1
-"""Independent forward-only version of the code-declared core manifest."""
-
-CORE_STREAM_TYPES: tuple[str, ...] = (
-    "core.project",
-    "core.task",
-    "core.run",
-    "core.media",
+from astrid.core.schema_packs.core import (
+    CORE_COMMAND_KINDS,
+    CORE_CONFORMANCE_DIMENSIONS,
+    CORE_EVENT_KINDS,
+    CORE_MANIFEST_VERSION,
+    CORE_PACK_ID,
+    CORE_REPOSITORIES,
+    CORE_STREAM_TYPES,
+    core_only_registry,
+    core_schema_pack_manifest,
+    register_core_vocabulary,
 )
-"""The kernel stream types core registers (v10 section 2.3; m2 plan step 1
-adds ``core.media`` as kernel citizenship alongside the task and run types)."""
-
-CORE_REPOSITORIES: tuple[str, ...] = (
-    "ProjectRepository",
-    "TaskRepository",
-    "MediaRepository",
-    "RunRepository",
-)
-"""The kernel repository implementations the code-declared core manifest
-declares. m1 implements the project vertical; m2 adds the task, media, and run
-repositories. Packs declare their own repositories through ``schema-pack.yaml``;
-core declares its surface here so the composed registry owns every repository
-name exactly once."""
-
-CORE_CONFORMANCE_DIMENSIONS: tuple[str, ...] = (
-    "replay",
-    "mismatch_before_mutation",
-    "same_project",
-    "vocabulary",
-    "writer_ownership",
-    "crash_atomicity",
-    "hash_chain",
-)
-"""The seven conformance dimensions the kernel commands must satisfy, in the
-canonical order shared with ``astrid.core.conformance.kit``. Declaring them on
-the core manifest makes the composed registry the single source of which
-dimensions the kernel commands are measured against."""
-
-CORE_EVENT_KINDS: tuple[str, ...] = (
-    # m1 core event kinds: the project vertical's created/updated events.
-    "core.project.created",
-    "core.project.updated",
-    # m2 task lifecycle events (admission, claim, start, expiry, cancellation,
-    # failure, retry, completion). Heartbeat deliberately has no event kind.
-    "core.task.created",
-    "core.task.claimed",
-    "core.task.started",
-    "core.task.expired",
-    "core.task.cancelled",
-    "core.task.failed",
-    "core.task.retried",
-    "core.task.completed",
-    # m2 run events: fan-out creation, the group cancel/retry effects, and
-    # the terminal close for runs that own no non-terminal child work.
-    "core.run.created",
-    "core.run.cancelled",
-    "core.run.retried",
-    "core.run.closed",
-    # m3 run continuation: one event per receipt-linked continuation chunk,
-    # appended on the run stream before the chunk's child creation events.
-    "core.run.continued",
-    # m3 evidence: one event per recorded evidence item, appended on the run
-    # stream (the evidence repository is kernel-owned; the run stream carries
-    # the subject and the evidence rows are kernel tables).
-    "core.evidence.recorded",
-    # m2 media events: import, location replacement, and relations.
-    "core.media.imported",
-    "core.media.location_replaced",
-    "core.media.related",
-    # m4 media event: stable byte-verified verification (plan step 10).
-    "core.media.verified",
-)
-"""Core event kinds: the m1 project vertical plus the exact m2 task, run, and
-media event kinds consumed by admission, lifecycle transitions, fan-out,
-import, location replacement, relations, and completion. Heartbeat is the
-deliberate non-event exception and never appears here."""
-
-CORE_COMMAND_KINDS: tuple[str, ...] = (
-    # m1 core command kinds: the project vertical's create/update commands.
-    "core.project.create",
-    "core.project.update",
-    # m2 task lifecycle commands. Claim/start are internal attempt-fencing
-    # commands; expiry, cancellation, failure, retry, and completion are the
-    # receipt-protected transition commands.
-    "core.task.create",
-    "core.task.claim",
-    "core.task.start",
-    "core.task.expire",
-    "core.task.cancel",
-    "core.task.fail",
-    "core.task.retry",
-    "core.task.complete",
-    # m2 run commands: one-transaction fan-out creation, group operations,
-    # and the terminal close for runs that own no non-terminal child work.
-    "core.run.create",
-    "core.run.cancel",
-    "core.run.retry",
-    "core.run.close",
-    # m3 run continuation: the expected-head CAS command that extends an
-    # existing run with a bounded chunk of child task specs and edges.
-    "core.run.continue",
-    # m3 evidence: the receipt-backed command that records one evidence
-    # item (observation/measurement/validation/decision/error) on a run.
-    "core.evidence.record",
-    # m2 media commands: import, location replacement, and relations.
-    "core.media.import",
-    "core.media.replace_location",
-    "core.media.relate",
-    # m4 media command: stable byte-verified verification (plan step 10).
-    "core.media.verify",
-)
-"""Core command kinds: the m1 project vertical plus the exact m2 task, run,
-and media command kinds. Follows the v10 law-5 namespaced-verb grammar used by
-pack commands (``timeline.save``, ``shot.add_item``,
-``reference.set_primary``). Heartbeat is a non-event update and gets no
-command kind."""
-
-
-def core_schema_pack_manifest() -> SchemaPackManifest:
-    """Build the strict, validated kernel (core) manifest without any YAML.
-
-    The kernel pack is code-declared: the single migration descriptor mirrors
-    ``astrid.core.migrations.catalog.CORE_MIGRATIONS`` so the registry's owned
-    tables are exactly the audited 14 kernel tables.
-    """
-    core_migration = CORE_MIGRATIONS[0]
-    return parse_schema_pack_manifest(
-        {
-            "id": CORE_PACK_ID,
-            "version": CORE_MANIFEST_VERSION,
-            "depends_on": [],
-            "migrations": [
-                {
-                    "version": core_migration.version,
-                    "name": core_migration.name,
-                    "path": core_migration.path,
-                    "tables": sorted(core_migration.owned_tables),
-                }
-            ],
-            "stream_types": list(CORE_STREAM_TYPES),
-            "event_kinds": list(CORE_EVENT_KINDS),
-            "command_kinds": list(CORE_COMMAND_KINDS),
-            "repositories": list(CORE_REPOSITORIES),
-            "conformance": list(CORE_CONFORMANCE_DIMENSIONS),
-            "cli_mounts": {},
-            "bridge_mounts": [],
-        },
-        source_path=None,
-    )
-
-
-def register_core_vocabulary(registry: SchemaPackRegistry) -> SchemaPackRegistry:
-    """Register the kernel vocabulary into ``registry`` independently.
-
-    This is the core-only composition path: it never touches Astrid packs, so a
-    kernel-only registry builds without any in-tree pack present.
-    """
-    return registry.register_pack(core_schema_pack_manifest())
-
-
-def core_only_registry() -> FrozenSchemaPackRegistry:
-    """Compose the frozen kernel-only registry (no Astrid packs)."""
-    return register_core_vocabulary(SchemaPackRegistry()).freeze()
 
 
 # ---------------------------------------------------------------------------

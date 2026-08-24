@@ -73,7 +73,7 @@ INTEGRITY_KEY = "_integrity"
 PREVIOUS_EVENT_HASH_KEY = "previous_event_hash"
 EVENT_HASH_KEY = "event_hash"
 
-from astrid.core.repositories.errors import ACTOR_KINDS  # noqa: F401  (re-export; canonical home: repositories.errors)
+from astrid.core.contracts.vocabulary_errors import ACTOR_KINDS  # noqa: F401
 """The exact ``events.actor_kind`` vocabulary baked into the v10 DDL CHECK."""
 
 # ---------------------------------------------------------------------------
