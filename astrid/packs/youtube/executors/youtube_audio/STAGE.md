@@ -18,8 +18,8 @@ when you want the video file.
 import astrid.sdk as sdk
 result = sdk.invoke(
     "youtube.youtube_audio",
+        kind="executor", project="demo",
     inputs={"query": "Moby Extreme Ways official audio"},
-    out="runs/audio/extreme-ways",
 )
 ```
 
@@ -46,8 +46,8 @@ automatically when no extension is given).
 import astrid.sdk as sdk
 result = sdk.invoke(
     "youtube.youtube_audio",
+        kind="executor", project="demo",
     inputs={"query": "seinfeld jerry kramer apartment scene", "mode": "video"},
-    out="runs/seinfeld/clip-01",
 )
 ```
 
@@ -59,8 +59,8 @@ Output is `runs/seinfeld/clip-01.mp4`. No ffmpeg needed in video mode.
 import astrid.sdk as sdk
 result = sdk.invoke(
     "youtube.youtube_audio",
+        kind="executor", project="demo",
     inputs={"url": "https://www.youtube.com/watch?v=...", "mode": "video"},
-    out="runs/seinfeld/clip-02",
 )
 ```
 
@@ -81,8 +81,8 @@ Most useful as a one-shot before a render:
 import astrid.sdk as sdk
 result = sdk.invoke(
     "youtube.youtube_audio",
+        kind="executor", project="demo",
     inputs={"query": "lo-fi study beat"},
-    out="runs/audio/lofi",
 )
 ```
 

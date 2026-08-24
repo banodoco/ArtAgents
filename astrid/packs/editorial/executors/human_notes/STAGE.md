@@ -31,12 +31,12 @@ Translate human notes into structured editor_review.json:
 import astrid.sdk as sdk
 result = sdk.invoke(
     "editorial.human_notes",
+        kind="executor", project="demo",
     inputs={
         "instructions": "./notes.txt",
         "arrangement": "./out/arrangement.json",
         "pool": "./out/pool.json",
     },
-    out="./out",
 )
 ```
 
@@ -46,6 +46,7 @@ With full pipeline application after translation:
 import astrid.sdk as sdk
 result = sdk.invoke(
     "editorial.human_notes",
+        kind="executor", project="demo",
     inputs={
         "instructions": "./notes.txt",
         "arrangement": "./out/arrangement.json",
@@ -57,7 +58,6 @@ result = sdk.invoke(
         "video": "./source.mp4",
         "env_file": ".env.local",
     },
-    out="./out",
 )
 ```
 

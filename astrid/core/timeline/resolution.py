@@ -18,8 +18,10 @@ Classification rules (in priority order):
    hash is required.
 2. **Remote** — an http/https/data (or any other non-empty scheme) reference
    with no usable local file is ``remote``; media is never fetched.
-3. **Containment** — a local reference must resolve beneath
-   ``project_root/sources``.  A path that escapes ``project_root`` is
+3. **Containment** — an ordinary local reference must resolve beneath
+   ``project_root/sources``.  Kernel timelines may additionally use an exact
+   absolute managed CAS locator; it is admitted only after project ownership
+   and current-byte verification.  A path that escapes ``project_root`` is
    ``unsupported`` ("path escapes project root"); one that stays inside
    ``project_root`` but outside ``sources`` is ``unsupported`` ("path outside
    sources"); a symlink inside ``sources`` that resolves outside ``sources``
@@ -46,6 +48,10 @@ from typing import Any, Iterable
 from urllib.parse import urlparse
 
 from astrid.core.foundation.hash import sha256_file
+from astrid.core.io.managed_media_resolver import (
+    managed_locator_digest,
+    resolve_owned_managed_media,
+)
 
 _READ_CHUNK = 1024 * 1024
 
@@ -276,6 +282,40 @@ def resolve_asset_local_path(
         return None
 
 
+def resolve_asset_authorized_path(
+    asset_file: str,
+    *,
+    project_root: Path,
+    expected_sha256: str | None = None,
+) -> Path | None:
+    """Resolve a project source or exact project-owned managed CAS asset.
+
+    The historical local contract remains ``project_root/sources``.  Kernel
+    timelines may additionally name Astrid's shared managed-media tree; that
+    path is accepted only when the active project's kernel row owns the
+    recorded digest and the current bytes verify.  When an entry omitted an
+    explicit hash, an exact managed CAS locator supplies only a candidate
+    digest; it is still authorized through the same ownership and byte-hash
+    checks.  Arbitrary paths, foreign locators, and tampered bytes fail closed.
+    """
+
+    contained = resolve_asset_local_path_contained(
+        asset_file,
+        project_root=project_root,
+    )
+    if contained is not None:
+        return contained
+    digest = expected_sha256 or managed_locator_digest(asset_file)
+    if digest is None:
+        return None
+    return resolve_owned_managed_media(
+        projects_root=Path(project_root).resolve().parent,
+        project_ref=Path(project_root).name,
+        content_hash=digest,
+        requested_path=asset_file,
+    )
+
+
 def _resolve_local_path(
     entry: dict[str, Any],
     project_root: Path,
@@ -367,6 +407,36 @@ def classify_asset(
         )
 
     path, failure = _resolve_local_path(entry, project_root)
+
+    # Kernel-managed timelines may reference the root-level content-addressed
+    # media tree rather than ``project_root/sources``.  Admit only the exact
+    # current locator owned by this project and verified against the entry's
+    # recorded digest; all ordinary escape/outside-source paths still fail.
+    expected = _expected_hash(entry)
+    local_ref = _local_ref(entry)
+    if (
+        path is None
+        and local_ref is not None
+        and (expected is not None or managed_locator_digest(local_ref) is not None)
+    ):
+        managed = resolve_asset_authorized_path(
+            local_ref,
+            project_root=project_root,
+            expected_sha256=expected,
+        )
+        if managed is not None:
+            managed_digest = expected or managed_locator_digest(local_ref)
+            return AssetIntegrity(
+                asset_key=key,
+                role=role,
+                state="verified_original",
+                expected_sha256=managed_digest,
+                observed_sha256=managed_digest,
+                path=str(managed),
+                reason="project-owned managed media matches expected sha256",
+                source_id=source_id,
+                source_version=source_version,
+            )
 
     # Rule 2: remote references are never fetched.
     if failure == "remote":
@@ -618,5 +688,6 @@ __all__ = [
     "classify_registry",
     "resolve_asset_local_path",
     "resolve_asset_local_path_contained",
+    "resolve_asset_authorized_path",
     "resolve_asset_path",
 ]

@@ -95,6 +95,12 @@ python3 -m astrid.core.pack.cli status --json
 python3 -m astrid.core.pack.cli status --show-hidden
 ```
 
+The pack CLI is an internal module surface; `packs` is intentionally not a
+ninth top-level gateway family. `list`, `status`, and `inspect` include
+additional pack collections from `ASTRID_PACKS_PATH` (colon-separated) or an
+explicit repeatable `--pack-root PATH` flag. These scopes match SDK discovery
+and render invocation scope; they do not modify the repository's local pack.
+
 `packs status` annotates packs whose `agent.purpose` is
 `"TODO: describe what this pack is for"` with an effective status of
 `stub`. This annotation is runtime-only — no manifest files are

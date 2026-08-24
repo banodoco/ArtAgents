@@ -118,6 +118,36 @@ def _resolve_execution(
     )
 
 
+def _resolve_requested_execution(
+    execution: str | None,
+    backend: str | None,
+) -> str | None:
+    """Resolve the public ``execution`` spelling and legacy ``backend`` alias.
+
+    ``execution`` is the canonical generation vocabulary.  ``backend`` was
+    historically accepted accidentally through ``**inputs`` and therefore
+    silently ignored, which could turn an explicit local preference into the
+    inferred cloud backend.  Keep the spelling usable for callers while
+    making it participate in the same pre-admission validation as
+    ``execution``.
+    """
+    if backend is None:
+        return execution
+    if not isinstance(backend, str) or not backend.strip():
+        raise CapabilityValidationError(
+            "generation backend must be a non-empty string; use one of "
+            "the model's declared backends via execution='local', "
+            "execution='cloud', or execution='codex'"
+        )
+    backend = backend.strip()
+    if execution is not None and execution != backend:
+        raise CapabilityValidationError(
+            f"conflicting generation backend selections: execution={execution!r} "
+            f"and backend={backend!r}; provide only one or make them match"
+        )
+    return backend
+
+
 def _resolve_invoke_destination(
     *,
     out: Path | str | None,
@@ -165,7 +195,7 @@ class GenerationFacade:
             hint = f" Available plugin verbs: {', '.join(known)}." if known else ""
             raise AttributeError(
                 f"'GenerationFacade' has no attribute {name!r}. "
-                f"Built-in methods: image, video.{hint}"
+                f"Built-in methods: image, audio, video.{hint}"
             ) from None
 
     def image(
@@ -174,6 +204,7 @@ class GenerationFacade:
         model: str,
         mode: str | None = None,
         execution: str | None = None,
+        backend: str | None = None,
         out: Path | str | None = None,
         project: str | None = None,
         project_root: str | Path | None = None,
@@ -190,6 +221,7 @@ class GenerationFacade:
         argv: tuple[str, ...] = (),
         **inputs: Any,
     ) -> Any:
+        execution = _resolve_requested_execution(execution, backend)
         if execution == "openai":
             raise CapabilityPreconditionError(
                 "astrid.generate.image does not support execution='openai'; use executor "
@@ -219,6 +251,33 @@ class GenerationFacade:
             execution,
             model=model,
         )
+        from astrid.core.generation.preflight import validate_generation_request
+
+        validate_generation_request(
+            registry,
+            model=model,
+            mode=resolved_mode,
+            execution=resolved_execution,
+            inputs={"model": model, "mode": resolved_mode, **inputs},
+            modality="image",
+            # Keep the image facade's historic deferred prompt validation: the
+            # executor owns image prompt semantics, while the matrix and local
+            # readiness checks remain pre-admission.
+            required_features=(),
+        )
+        if resolved_execution == "local":
+            from astrid.core.generation.preflight import (
+                require_local_generation_readiness,
+            )
+
+            # This read-only check must happen before destination resolution
+            # and invoke/admission.  It reports missing local installation
+            # prerequisites without creating a run, task, or staging tree.
+            require_local_generation_readiness(
+                model_entry,
+                resolved_mode,
+                python_executable=python_exec,
+            )
         invoke_out, invoke_project = _resolve_invoke_destination(
             out=out,
             project=project,
@@ -259,6 +318,7 @@ class GenerationFacade:
         model: str,
         mode: str | None = None,
         execution: str | None = None,
+        backend: str | None = None,
         out: Path | str | None = None,
         project: str | None = None,
         project_root: str | Path | None = None,
@@ -275,6 +335,7 @@ class GenerationFacade:
         argv: tuple[str, ...] = (),
         **inputs: Any,
     ) -> Any:
+        execution = _resolve_requested_execution(execution, backend)
         sdk_module = importlib.import_module(self.sdk_module_name)
         resolved_mode = sdk_module._infer_video_mode(mode, inputs)
         registry = sdk_module._load_model_registry(
@@ -293,6 +354,40 @@ class GenerationFacade:
             execution,
             model=model,
         )
+        from astrid.core.generation.preflight import (
+            require_local_generation_readiness,
+            validate_generation_request,
+        )
+
+        # FLF's defining frame pair must be rejected before dry-run/live
+        # invocation.  The prompt remains executor-owned for compatibility
+        # with existing facade callers that only exercise routing.
+        flf_required = None
+        if resolved_mode == "flf" and (
+            inputs.get("image_ref") is not None
+            or inputs.get("image_end_ref") is not None
+        ):
+            flf_required = ("image_ref", "image_end_ref")
+        validate_generation_request(
+            registry,
+            model=model,
+            mode=resolved_mode,
+            execution=resolved_execution,
+            inputs={"model": model, "mode": resolved_mode, **inputs},
+            modality="video",
+            # The typed facade historically defers prompt validation to the
+            # executor; when FLF refs are supplied, however, enforce the
+            # defining frame pair before dry-run/live admission.
+            required_features=flf_required or (),
+        )
+        if resolved_execution == "local":
+            # Keep local video on the same actionable, read-only prerequisite
+            # gate as image generation. No cloud fallback is attempted.
+            require_local_generation_readiness(
+                model_entry,
+                resolved_mode,
+                python_executable=python_exec,
+            )
         invoke_out, invoke_project = _resolve_invoke_destination(
             out=out,
             project=project,
@@ -300,6 +395,117 @@ class GenerationFacade:
         )
         result = self._invoke(
             "generation.generate_video",
+            kind="executor",
+            project_root=project_root,
+            extra_pack_roots=extra_pack_roots,
+            include_installed=include_installed,
+            banodoco_config=banodoco_config,
+            active_theme=active_theme,
+            include_missing_roots=include_missing_roots,
+            out=invoke_out,
+            project=invoke_project,
+            inputs={
+                "model": model,
+                "mode": resolved_mode,
+                "execution": resolved_execution,
+                **inputs,
+            },
+            brief=brief,
+            dry_run=dry_run,
+            check_binaries=check_binaries,
+            python_exec=python_exec,
+            verbose=verbose,
+            execution_mode="in_process",
+            argv=argv,
+        )
+        if dry_run:
+            return result
+        return _reconstruct_generation_result(result)
+
+    def audio(
+        self,
+        *,
+        model: str,
+        mode: str | None = None,
+        execution: str | None = None,
+        backend: str | None = None,
+        out: Path | str | None = None,
+        project: str | None = None,
+        project_root: str | Path | None = None,
+        extra_pack_roots: tuple[str, ...] = (),
+        include_installed: bool = True,
+        banodoco_config: Any | None = None,
+        active_theme: str | Path | None = None,
+        include_missing_roots: bool = False,
+        brief: Path | str | None = None,
+        dry_run: bool = False,
+        check_binaries: bool = False,
+        python_exec: str | None = None,
+        verbose: bool = False,
+        argv: tuple[str, ...] = (),
+        **inputs: Any,
+    ) -> Any:
+        """Generate audio through the same typed preflight as image/video."""
+
+        execution = _resolve_requested_execution(execution, backend)
+        sdk_module = importlib.import_module(self.sdk_module_name)
+        registry = sdk_module._load_model_registry(
+            project_root=project_root,
+            extra_pack_roots=extra_pack_roots,
+            include_installed=include_installed,
+        )
+        try:
+            model_entry = registry.get(model)
+        except KeyError as exc:
+            raise CapabilityValidationError(str(exc)) from exc
+
+        # Audio models currently expose one canonical mode (music). Infer it
+        # when omitted so the facade remains ergonomic while still validating
+        # the resolved model → mode → backend cell.
+        resolved_mode = mode
+        if resolved_mode is None:
+            if len(model_entry.modes) == 1:
+                resolved_mode = next(iter(model_entry.modes))
+            else:
+                available_modes = ", ".join(sorted(model_entry.modes))
+                raise CapabilityValidationError(
+                    f"Ambiguous audio mode for model {model!r}. "
+                    f"Available modes: {available_modes}. Please specify mode."
+                )
+
+        resolved_execution = sdk_module._resolve_execution(
+            model_entry,
+            resolved_mode,
+            execution,
+            model=model,
+        )
+        from astrid.core.generation.preflight import (
+            require_local_generation_readiness,
+            validate_generation_request,
+        )
+
+        validate_generation_request(
+            registry,
+            model=model,
+            mode=resolved_mode,
+            execution=resolved_execution,
+            inputs={"model": model, "mode": resolved_mode, **inputs},
+            modality="audio",
+        )
+        if resolved_execution == "local":
+            require_local_generation_readiness(
+                model_entry,
+                resolved_mode,
+                python_executable=python_exec,
+            )
+
+        invoke_out, invoke_project = _resolve_invoke_destination(
+            out=out,
+            project=project,
+            project_root=project_root,
+        )
+        result = self._invoke(
+            "generation.generate_audio",
             kind="executor",
             project_root=project_root,
             extra_pack_roots=extra_pack_roots,

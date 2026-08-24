@@ -20,10 +20,44 @@
       "name": "mode",
       "required": true,
       "type": "string"
+    },
+    {
+      "description": "Audio input required when mode=audio.",
+      "name": "audio",
+      "required": false,
+      "type": "file",
+      "artifact_type": "audio"
+    },
+    {
+      "description": "Image input required when mode=image or visual.",
+      "name": "image",
+      "required": false,
+      "type": "file",
+      "artifact_type": "image"
+    },
+    {
+      "description": "Video input required when mode=video.",
+      "name": "video",
+      "required": false,
+      "type": "file",
+      "artifact_type": "video/clip"
+    },
+    {
+      "description": "Optional timestamp or query forwarded to the selected modality executor.",
+      "name": "at",
+      "required": false,
+      "type": "string"
+    },
+    {
+      "description": "Optional question forwarded to the selected modality executor.",
+      "name": "query",
+      "required": false,
+      "type": "string"
     }
   ],
   "isolation": {
-    "mode": "subprocess"
+    "mode": "subprocess",
+    "network": true
   },
   "keywords": [
     "understand",
@@ -35,6 +69,19 @@
   ],
   "kind": "built_in",
   "metadata": {
+    "env": ["OPENAI_API_KEY"],
+    "input_choices": {
+      "mode": ["audio", "image", "video", "visual"]
+    },
+    "input_requirements_by_choice": {
+      "mode": {
+        "audio": ["audio"],
+        "image": ["image"],
+        "visual": ["image"],
+        "video": ["video"]
+      }
+    },
+    "secrets_required": ["OPENAI_API_KEY"],
     "requires_timeline": false,
     "runtime_entrypoint": "main",
     "runtime_file": "run.py",

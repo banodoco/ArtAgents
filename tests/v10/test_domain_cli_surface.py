@@ -407,6 +407,87 @@ def test_dispatch_product_routes_family_and_closes_client(monkeypatch) -> None:
     assert _FakeClient.closed
 
 
+def test_dispatch_product_owner_contention_is_typed_json(monkeypatch, capsys) -> None:
+    """A held serve owner is a retryable product error, not a gateway bug."""
+    import astrid.sdk.client as sdk_client
+    from astrid.core.gateway import dispatch
+    from astrid.sdk.exceptions import ServiceUnavailableError
+
+    def _raise_open(cls, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
+        raise ServiceUnavailableError(
+            "the Astrid serve bridge owns the store; use GET /routes and its "
+            "HTTP routes while it is running, or wait for a clean shutdown.",
+            details={"reason": "store_owned", "retryable": True},
+        )
+
+    monkeypatch.setattr(
+        sdk_client.AstridClient, "open", classmethod(_raise_open)
+    )
+
+    assert dispatch._dispatch_product(["projects", "list", "--json"]) == 1
+    output = capsys.readouterr()
+    assert output.err == ""
+    payload = json.loads(output.out)
+    assert set(payload) == {
+        "ok",
+        "data",
+        "error",
+        "receipt",
+        "idempotency_key",
+    }
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "unavailable"
+    assert payload["error"]["details"] == {
+        "reason": "store_owned",
+        "retryable": True,
+    }
+
+
+def test_dispatch_product_owner_contention_human_guidance(monkeypatch, capsys) -> None:
+    """Human contention output names the bridge handoff and safe retry rule."""
+    import astrid.sdk.client as sdk_client
+    from astrid.core.gateway import dispatch
+    from astrid.sdk.exceptions import ServiceUnavailableError
+
+    def _raise_open(cls, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
+        raise ServiceUnavailableError(
+            "the Astrid serve bridge owns the store; use GET /routes and its "
+            "HTTP routes while it is running, or wait for a clean shutdown. "
+            "Reads may retry after release. For writes, preserve the exact "
+            "payload and idempotency key, then verify state.",
+            details={"reason": "store_owned", "retryable": True},
+        )
+
+    monkeypatch.setattr(
+        sdk_client.AstridClient, "open", classmethod(_raise_open)
+    )
+
+    assert dispatch._dispatch_product(["projects", "list"]) == 1
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert "error unavailable:" in output.err
+    assert "GET /routes" in output.err
+    assert "clean shutdown" in output.err
+    assert "exact payload and idempotency key" in output.err
+
+
+def test_dispatch_product_help_does_not_open_client(monkeypatch, capsys) -> None:
+    """Family/verb help remains available without touching the store."""
+    import astrid.sdk.client as sdk_client
+
+    def _fail_open(cls, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
+        raise AssertionError("help must not compose an AstridClient")
+
+    monkeypatch.setattr(sdk_client.AstridClient, "open", classmethod(_fail_open))
+
+    from astrid.core.gateway import dispatch
+
+    with pytest.raises(SystemExit) as excinfo:
+        dispatch._dispatch_product(["timelines", "save", "--help"])
+    assert excinfo.value.code == 0
+    assert "astrid timelines save" in capsys.readouterr().out
+
+
 def test_dispatch_product_rejects_excluded_commands_before_opening(
     monkeypatch,
 ) -> None:
@@ -671,6 +752,26 @@ def test_product_help_documents_json_envelope_convention() -> None:
     text = _product_help_text()
     assert "--json" in text
     assert "ok/data/error/receipt/idempotency_key" in text
+    assert "doctor emits" in text
+    assert "serve/backup have no --json flag" in text
+
+
+def test_product_help_lists_current_timeline_visualize_and_render_verbs() -> None:
+    text = _product_help_text()
+    assert "projects    [kernel] project create/list/show/update/select/current" in text
+    assert (
+        "timeline create/list/show/save/archive/unarchive/history/diff/visualize/render"
+        in text
+    )
+
+
+def test_product_help_documents_store_handoff() -> None:
+    text = _product_help_text()
+    assert "astrid serve" in text
+    assert "GET" in text and "/routes" in text
+    assert "clean" in text and "shutdown" in text
+    assert "exact payload and idempotency key" in text
+    assert "error.details.reason=store_owned" in text
 
 
 def test_print_product_help_prints_to_stdout(capsys) -> None:

@@ -4,10 +4,11 @@ Chains `iteration.prepare`, `iteration.assemble`, and `rendering.render` to crea
 
 The render handoff is explicit: assemble writes `hype.timeline.json` and `hype.assets.json`, then `rendering.render` consumes those exact files and publishes `iteration.mp4` plus `iteration.mp4.provenance.json` directly alongside the canonical iteration metadata.
 
-Inspect first when provenance quality is uncertain:
+Inspect first when provenance quality is uncertain (internal runner command;
+not a public entrypoint):
 
 ```bash
-python3 -m astrid.packs.video_editing.orchestrators.iteration_video.run inspect @active --no-content
+ASTRID_INTERNAL_INVOCATION=1 python3 -m astrid.packs.video_editing.orchestrators.iteration_video.run inspect @active --no-content
 ```
 
 Run through the SDK. The pack-level `--thread` is a lineage
@@ -17,8 +18,8 @@ selector passed as an input; it is not a generic Astrid session binding flag.
 import astrid.sdk as sdk
 result = sdk.invoke(
     "video_editing.iteration_video",
-    inputs={"thread": "@active", "max_iterations": "20"},
-    out="runs/iteration_video",
+        kind="orchestrator", project="demo",
+    inputs={"thread": "@active"},
 )
 ```
 

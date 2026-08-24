@@ -27,13 +27,14 @@ SDK form:
 import astrid.sdk as sdk
 result = sdk.invoke(
     "iteration.prepare",
+    kind="executor",
+    project="demo",
     inputs={"target_run_id": "<run-id>"},
-    out="runs/prepare",
 )
 ```
 
-Direct form:
+Internal runner form (not a public entrypoint):
 
 ```bash
-python3 -m astrid.packs.iteration.executors.prepare.run --target-run-id <run-id> --out runs/prepare
+ASTRID_INTERNAL_INVOCATION=1 python3 -m astrid.packs.iteration.executors.prepare.run --target-run-id <run-id> --out runs/prepare
 ```

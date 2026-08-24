@@ -9,28 +9,66 @@ and resolve ``slug ↔ ULID`` project identity once.
 from __future__ import annotations
 
 import sqlite3
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from astrid.core.foundation.project_paths import resolve_projects_root
+from astrid.core.kernel.database import resolve_kernel_database_path
+from astrid.core.schema_packs.registry import FrozenSchemaPackRegistry
+
+_ACTIVE_SCHEMA_REGISTRY: ContextVar[FrozenSchemaPackRegistry | None] = ContextVar(
+    "astrid_active_schema_registry", default=None
+)
 
 
 def _db_path(projects_root: Path) -> Path | None:
-    # Canonical layouts:
-    # - tests / legacy:  <root>/kernel.sqlite3
-    # - app:             <root>/.astrid/astrid.sqlite3  or  <root>/.astrid/kernel.sqlite3
-    # Prefer the file that exists; fall back to kernel.sqlite3 default for callers that check is_file.
-    candidates = [
-        projects_root / "kernel.sqlite3",
-        projects_root / ".astrid" / "astrid.sqlite3",
-        projects_root / ".astrid" / "kernel.sqlite3",
-        projects_root / "astrid.sqlite3",
-    ]
-    for cand in candidates:
-        if cand.is_file():
-            return cand
-    # default probe location for open_database error path
-    return candidates[0]
+    """Compatibility wrapper around the shared database-authority policy."""
+
+    return resolve_kernel_database_path(projects_root)
+
+
+def _read_registry(
+    registry: FrozenSchemaPackRegistry | None,
+) -> FrozenSchemaPackRegistry:
+    """Return the database composition used by this read.
+
+    Project databases are the standard Astrid composition, not core-only
+    stores: their migration ledger includes the in-tree timeline, shots, and
+    references packs.  Core-only readers therefore fail with
+    ``MigrationTooNewError`` as soon as one of those packs has been used.  A
+    caller handling an explicitly extended composition can still provide its
+    already-composed registry; the default only chooses the standard in-tree
+    composition and never weakens migration validation.
+    """
+
+    if registry is None:
+        registry = _ACTIVE_SCHEMA_REGISTRY.get()
+    if registry is not None:
+        return registry
+    from astrid.core.schema_packs.standard import build_standard_registry
+
+    return build_standard_registry()
+
+
+@contextmanager
+def schema_registry_context(
+    registry: FrozenSchemaPackRegistry,
+) -> Iterator[None]:
+    """Bind one composed registry to nested canonical kernel reads.
+
+    Capability execution can perform a read after the outer SDK has admitted
+    the task.  A context variable carries the client's exact composition into
+    those in-process reads without a process-global mutable registry or an
+    ambient auto-discovery of arbitrary schemas.
+    """
+
+    token = _ACTIVE_SCHEMA_REGISTRY.set(registry)
+    try:
+        yield
+    finally:
+        _ACTIVE_SCHEMA_REGISTRY.reset(token)
 
 
 def _resolve_project_id(conn: sqlite3.Connection, slug: str) -> str | None:
@@ -50,6 +88,7 @@ def kernel_run_info(
     *,
     projects_root: str | Path | None = None,
     root: str | Path | None = None,
+    registry: FrozenSchemaPackRegistry | None = None,
 ) -> dict[str, Any] | None:
     """Return kernel run info for one project/run, or None.
 
@@ -64,11 +103,9 @@ def kernel_run_info(
     if db_path is None or not db_path.is_file():
         return None
     try:
-        from astrid.core.events.registry import core_only_registry
         from astrid.core.store.database import open_database
 
-        registry = core_only_registry()
-        conn = open_database(db_path, registry, read_only=True)
+        conn = open_database(db_path, _read_registry(registry), read_only=True)
     except (sqlite3.Error, FileNotFoundError, OSError):
         return None
     try:
@@ -136,6 +173,7 @@ def kernel_runs_for_project(
     *,
     projects_root: str | Path | None = None,
     root: str | Path | None = None,
+    registry: FrozenSchemaPackRegistry | None = None,
 ) -> list[str]:
     """Return ordered run ids for one project slug (kernel-first, empty if no DB)."""
     raw_root = projects_root if projects_root is not None else root
@@ -144,11 +182,9 @@ def kernel_runs_for_project(
     if db_path is None or not db_path.is_file():
         return []
     try:
-        from astrid.core.events.registry import core_only_registry
         from astrid.core.store.database import open_database
 
-        registry = core_only_registry()
-        conn = open_database(db_path, registry, read_only=True)
+        conn = open_database(db_path, _read_registry(registry), read_only=True)
     except (sqlite3.Error, FileNotFoundError, OSError):
         return []
     try:

@@ -1,4 +1,5 @@
 import {Config} from '@remotion/cli/config';
+import fs from 'node:fs';
 import path from 'node:path';
 
 const projectDir = process.cwd();
@@ -7,6 +8,43 @@ const astridDir = path.resolve(projectDir, '..');
 const builtinPackElementsDir = path.resolve(astridDir, 'astrid/packs/builtin/elements');
 const renderingPackElementsDir = path.resolve(astridDir, 'astrid/packs/rendering/elements');
 const localPackElementsDir = path.resolve(astridDir, 'astrid/packs/local/elements');
+
+// SDK invocations may explicitly add external pack roots.  The generated
+// element registry uses one alias per owning pack; keep those aliases scoped
+// to this render process so external components can be bundled without
+// changing the durable local/builtin pack layout.
+const extraPackAliases: Record<string, string> = {};
+for (const rawRoot of (process.env.ASTRID_PACKS_PATH ?? '').split(path.delimiter)) {
+  if (!rawRoot) continue;
+  const root = path.resolve(rawRoot);
+  let children: string[] = [];
+  try { children = fs.readdirSync(root); } catch { continue; }
+  for (const child of children) {
+    const packRoot = path.join(root, child);
+    let packStat;
+    try { packStat = fs.statSync(packRoot); } catch { continue; }
+    if (child === 'local' || !packStat.isDirectory()) continue;
+    let packId = child;
+    for (const manifestName of ['pack.yaml', 'pack.yml', 'pack.json']) {
+      try {
+        const manifest = fs.readFileSync(path.join(packRoot, manifestName), 'utf8');
+        const match = manifestName === 'pack.json'
+          ? JSON.parse(manifest).id
+          : manifest.match(/^id:\s*([A-Za-z0-9_-]+)/m)?.[1];
+        if (typeof match === 'string' && match) packId = match;
+        break;
+      } catch { /* try the next manifest */ }
+    }
+    for (const kind of ['effects', 'animations', 'transitions']) {
+      const elements = path.join(packRoot, 'elements', kind);
+      try {
+        if (fs.statSync(elements).isDirectory()) {
+        extraPackAliases[`@pack-${packId}-elements-${kind}`] = elements;
+        }
+      } catch { /* absent kind root */ }
+    }
+  }
+}
 
 Config.setVideoImageFormat('jpeg');
 Config.setOverwriteOutput(true);
@@ -36,6 +74,7 @@ Config.overrideWebpackConfig((currentConfiguration) => ({
       '@workspace-animations': path.resolve(renderingPackElementsDir, 'animations'),
       '@workspace-effects': path.resolve(renderingPackElementsDir, 'effects'),
       '@workspace-transitions': path.resolve(renderingPackElementsDir, 'transitions'),
+      ...extraPackAliases,
     },
     modules: [
       ...(currentConfiguration.resolve?.modules ?? ['node_modules']),

@@ -1484,6 +1484,8 @@ class MediaRepository:
         realm: str,
         idempotency_key: str,
         fingerprint: MediaFingerprint,
+        location_id: str | None = None,
+        locator: str | None = None,
         actor_kind: str = "local",
         created_at: str | None = None,
         command_kind: str = CORE_MEDIA_VERIFY_COMMAND_KIND,
@@ -1495,9 +1497,10 @@ class MediaRepository:
         :class:`MediaFingerprint` of ``(path, byte_size, mtime_ns, digest)``.
         Inside the caller's unit of work this then:
 
-        1. resolves *media_id* project-scoped and loads the single
+        1. resolves *media_id* project-scoped and loads the addressed
            ``realm`` location (a cross-project id is indistinguishable from
            an unknown one — :class:`MediaNotFoundError`, no existence leak);
+           callers may select one row by ``location_id`` or ``locator``;
         2. **re-stats** the fingerprint path (missing → ``not_found``;
            changed size/mtime → :class:`MediaVerificationError`) and
            **re-hashes** it (changed bytes → :class:`MediaVerificationError`),
@@ -1542,7 +1545,14 @@ class MediaRepository:
         # project is indistinguishable from an unknown one.
         media_id = self.resolve_media(uow, project_id=project_id, media_id=media_id)
 
-        # The media row and its single realm location are the authority.
+        if location_id is not None and locator is not None:
+            raise MediaValidationError(
+                "verify accepts at most one location_id or locator selector"
+            )
+
+        # The media row and its realm locations are the authority.  A
+        # selector addresses one location; without one the service layer may
+        # fan out over every deterministic location in the realm.
         media_row = uow.query_one(
             "SELECT content_hash FROM media WHERE id = ? AND project_id = ?",
             (media_id, project_id),
@@ -1551,14 +1561,22 @@ class MediaRepository:
             raise MediaNotFoundError(media_id=media_id)
         content_hash = str(media_row["content_hash"])
 
-        location_rows = uow.query(
+        location_sql = (
             "SELECT id, realm, locator, verified_at FROM media_locations "
-            "WHERE media_id = ? AND realm = ? ORDER BY created_at ASC, id ASC",
-            (media_id, realm),
+            "WHERE media_id = ? AND realm = ?"
         )
+        location_params: list[object] = [media_id, realm]
+        if location_id is not None:
+            location_sql += " AND id = ?"
+            location_params.append(location_id)
+        elif locator is not None:
+            location_sql += " AND locator = ?"
+            location_params.append(locator)
+        location_sql += " ORDER BY created_at ASC, id ASC"
+        location_rows = uow.query(location_sql, tuple(location_params))
         if not location_rows:
             raise MediaLocationNotFoundError(media_id=media_id, realm=realm)
-        if len(location_rows) > 1:
+        if location_id is None and locator is None and len(location_rows) > 1:
             raise MediaConflictError(
                 media_id=media_id,
                 reason="multiple_locations",
@@ -1592,6 +1610,8 @@ class MediaRepository:
             "media_id": media_id,
             "realm": realm,
             "content_hash": content_hash,
+            "location_id": location_id,
+            "locator": locator,
         }
         try:
             request_digest = request_hash(command_kind, request)

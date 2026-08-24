@@ -23,6 +23,20 @@
   "child_orchestrators": [],
   "description": "Orchestrates the built-in hype editing pipeline.",
   "id": "video_editing.hype",
+  "inputs": [
+    {
+      "name": "video",
+      "type": "file",
+      "required": true,
+      "description": "Source video to edit."
+    },
+    {
+      "name": "brief",
+      "type": "file",
+      "required": true,
+      "description": "Editorial brief for the hype pipeline."
+    }
+  ],
   "keywords": [
     "hype",
     "pipeline",
@@ -50,6 +64,10 @@
         "{python_exec}",
         "-m",
         "astrid.packs.video_editing.orchestrators.hype.run",
+        "--video",
+        "{video}",
+        "--brief",
+        "{brief}",
         "{orchestrator_args}"
       ]
     },

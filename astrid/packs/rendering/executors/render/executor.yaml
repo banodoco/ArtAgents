@@ -54,6 +54,11 @@
         "optional": true
       },
       {
+        "input": "profile",
+        "flag": "--profile",
+        "optional": true
+      },
+      {
         "input": "output_name",
         "flag": "--output-name",
         "optional": true
@@ -62,10 +67,15 @@
         "input": "keep_previous_renders",
         "flag": "--keep-previous-renders",
         "optional": true
+      },
+      {
+        "input": "timeline_authority",
+        "flag": "--timeline-authority",
+        "optional": true
       }
     ]
   },
-  "description": "Render the brief timeline to an .mp4 output through the selected backend.",
+  "description": "Render the brief timeline through the selected backend. Opaque output defaults to MP4; explicitly alpha-stamped layers may publish ProRes 4444 MOV.",
   "graph": {
     "consumes": [],
     "depends_on": [
@@ -91,9 +101,30 @@
     {
       "description": "",
       "name": "timeline",
-      "required": true,
+      "required": false,
       "type": "file",
       "artifact_type": "timeline"
+    },
+    {
+      "description": "Explicit canonical kernel timeline slug, UUID, or ULID. Mutually exclusive with timeline file mode.",
+      "name": "timeline_ref",
+      "required": false,
+      "type": "string",
+      "artifact_type": null
+    },
+    {
+      "description": "Optional CAS pin for timeline_ref mode; stale values fail before run admission.",
+      "name": "expected_version",
+      "required": false,
+      "type": "integer",
+      "artifact_type": null
+    },
+    {
+      "description": "Kernel-resolved timeline identity and content hashes stamped into render provenance.",
+      "name": "timeline_authority",
+      "required": false,
+      "type": "json",
+      "artifact_type": null
     },
     {
       "description": "",
@@ -123,15 +154,22 @@
       "type": "string",
       "artifact_type": null
     },
+      {
+        "description": "JSON object keyed by qualified backend id with per-backend configuration. The facade forwards only the selected implementation's namespace.",
+        "name": "backend_config",
+        "required": false,
+        "type": "json",
+        "artifact_type": null
+      },
+      {
+        "description": "Requested render profile mapping. The selected backend validates it against the media it can actually produce.",
+        "name": "profile",
+        "required": false,
+        "type": "json",
+        "artifact_type": null
+      },
     {
-      "description": "JSON object keyed by qualified backend id with per-backend configuration. The facade forwards only the selected implementation's namespace.",
-      "name": "backend_config",
-      "required": false,
-      "type": "json",
-      "artifact_type": null
-    },
-    {
-      "description": "Output file name. Plain .mp4 file name only: no path separators, no traversal, .mp4 extension required. Defaults to hype.mp4.",
+      "description": "Plain output filename with no separators or traversal. Defaults to hype.mp4. A timeline stamped metadata.astrid_layer.alpha=true may request .mov for ProRes 4444/PCM output; an explicit profile must match that alpha mux.",
       "name": "output_name",
       "required": false,
       "type": "string",
@@ -194,6 +232,6 @@
     "assets",
     "theme"
   ],
-  "short_description": "Render a hype timeline to an .mp4 output through the selected backend.",
+  "short_description": "Render a hype timeline to opaque MP4 or explicitly stamped alpha MOV through the selected backend.",
   "version": "1.0"
 }

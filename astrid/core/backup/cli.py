@@ -31,7 +31,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    create = sub.add_parser("create", help="Create a backup.")
+    create = sub.add_parser(
+        "create",
+        help=(
+            "Create a self-contained backup; readable external_local files are "
+            "snapshotted and their original locators are retained as provenance."
+        ),
+    )
     create.add_argument("--out", dest="out", default=None, help="Backup directory.")
     create.add_argument(
         "--projects-root",
@@ -39,7 +45,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Projects root (default: ASTRID_PROJECTS_ROOT or the default root).",
     )
 
-    restore = sub.add_parser("restore", help="Restore a backup.")
+    restore = sub.add_parser(
+        "restore",
+        help=(
+            "Restore a backup atomically; portable external snapshots are "
+            "rebased inside the restored root."
+        ),
+    )
     restore.add_argument("backup_path", help="Path to the backup directory.")
     restore.add_argument(
         "--force",
@@ -83,6 +95,12 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print(f"backup created at {result.dest_path}")
             print(f"  media files: {result.media_files}")
+            if result.external_dependencies:
+                print(
+                    "  external snapshots: "
+                    f"{result.external_media_files} for "
+                    f"{result.external_dependencies} locator(s)"
+                )
             print(f"  sqlite pages: {result.sqlite_pages}")
         return 0
 
@@ -112,6 +130,17 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print(f"restore complete: {result.database_path}")
             print(f"  restored media files: {result.restored_media_files}")
+            print(
+                "  restored project workspaces: "
+                f"{result.restored_project_workspaces}"
+            )
+            if result.restored_external_files or result.unresolved_external_locators:
+                print(
+                    "  external snapshots: "
+                    f"{result.restored_external_files}; rebased locators: "
+                    f"{result.rebased_external_locators}; unresolved: "
+                    f"{result.unresolved_external_locators}"
+                )
         return 0
 
     return 2

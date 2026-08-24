@@ -15,8 +15,8 @@ Wraps OpenAI's `/v1/responses` vision API. Pass an image (or a video plus
 import astrid.sdk as sdk
 result = sdk.invoke(
     "understanding.visual_understand",
+        kind="executor", project="demo",
     inputs={"image": "path/to.jpg", "query": "Describe this scene in one sentence."},
-    out="runs/x/answer.json",
 )
 ```
 
@@ -28,12 +28,12 @@ OpenAI Responses API `text.format = json_schema` (strict mode).
 import astrid.sdk as sdk
 result = sdk.invoke(
     "understanding.visual_understand",
+        kind="executor", project="demo",
     inputs={
         "image": "path/to.jpg",
         "query": "Classify into one bucket from this list.",
         "response_schema": "my_schema.json",
     },
-    out="runs/x/answer.json",
 )
 ```
 
@@ -86,6 +86,7 @@ multiple models.
 import astrid.sdk as sdk
 result = sdk.invoke(
     "understanding.visual_understand",
+        kind="executor", project="demo",
     inputs={"video": "clip.mp4", "query": "What's happening at these moments?", "at": "0:05,0:12,0:20"},
 )
 ```

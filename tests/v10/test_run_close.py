@@ -102,7 +102,7 @@ def _close(
     *,
     project_id: str,
     run_id: str,
-    outcome: str = "succeeded",
+    outcome: str | None = None,
     idempotency_key: str,
     now: str | None = "2026-08-16T01:00:00.000000+00:00",
 ):
@@ -307,6 +307,61 @@ def test_close_outcome_variants(run_env) -> None:
         closed_data = json.loads(events[1]["payload_json"])["data"]
         assert closed_data["outcome"] == outcome
         assert closed_data["status"] == outcome
+
+
+def test_close_default_derives_failed_child_outcome(run_env) -> None:
+    """Omitted close outcome cannot relabel a terminal failed child."""
+    project = _create_project(run_env)
+    child_id = generate_lowercase_ulid()
+    created = _create_run(
+        run_env,
+        project_id=project.id,
+        children=[_child(task_id=child_id)],
+        idempotency_key="stale-failed-run-k",
+    )
+    # Reproduce a legacy/stale parent row: the child is terminal but the run
+    # projection has not yet been recomputed.
+    UnitOfWork(run_env.writer).run(
+        lambda u: u.execute(
+            "UPDATE tasks SET status = 'failed', finished_at = ? WHERE id = ?",
+            ("2026-08-16T01:00:00.000000+00:00", child_id),
+        )
+    )
+
+    result = _close(
+        run_env,
+        project_id=project.id,
+        run_id=created.run_id,
+        idempotency_key=f"core.run.close:{project.id}:{created.run_id}",
+    )
+    assert result.outcome == "failed"
+    assert result.run["status"] == "failed"
+    assert _run_row(run_env.writer, created.run_id)["status"] == "failed"
+
+    # Even an explicitly-successful close cannot contradict terminal child
+    # outcomes on a still-running legacy row.
+    project2 = _create_project(run_env, slug="pilot-two")
+    child2 = generate_lowercase_ulid()
+    created2 = _create_run(
+        run_env,
+        project_id=project2.id,
+        children=[_child(task_id=child2)],
+        idempotency_key="stale-failed-run-explicit-k",
+    )
+    UnitOfWork(run_env.writer).run(
+        lambda u: u.execute(
+            "UPDATE tasks SET status = 'failed', finished_at = ? WHERE id = ?",
+            ("2026-08-16T01:00:00.000000+00:00", child2),
+        )
+    )
+    with pytest.raises(RunValidationError, match="cannot close it as 'succeeded'"):
+        _close(
+            run_env,
+            project_id=project2.id,
+            run_id=created2.run_id,
+            outcome="succeeded",
+            idempotency_key=f"core.run.close:{project2.id}:{created2.run_id}",
+        )
 
 
 def test_close_replay_under_same_key(run_env) -> None:

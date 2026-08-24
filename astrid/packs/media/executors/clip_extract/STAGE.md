@@ -28,8 +28,8 @@ Via the Astrid SDK (recommended):
 import astrid.sdk as sdk
 result = sdk.invoke(
     "media.clip_extract",
+        kind="executor", project="demo",
     inputs={"input": "source.mp4", "start": "10", "dur": "5"},
-    out="runs/my_clip",
 )
 ```
 

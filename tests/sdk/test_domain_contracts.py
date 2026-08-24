@@ -497,6 +497,29 @@ def test_map_error_maps_known_kernel_errors_to_frozen_codes() -> None:
         assert mapped.message  # stable non-empty message
 
 
+def test_timeline_stale_version_mapping_is_actionable_and_typed() -> None:
+    from astrid.packs.timeline.repository import TimelineVersionConflictError
+
+    mapped = map_error(
+        TimelineVersionConflictError(
+            project_id="p1",
+            timeline_id="timeline-1",
+            expected_version=1,
+            current_version=2,
+        )
+    )
+
+    assert mapped.code == "stale_version"
+    assert mapped.details == {"expected_version": 1, "current_version": 2}
+    assert "no write occurred" in mapped.message
+    assert "show the current timeline" in mapped.message
+    assert "merge your changes" in mapped.message
+    assert "config_version" in mapped.message
+    assert "same idempotency key" in mapped.message
+    assert "fresh key" in mapped.message
+    assert len(mapped.message) < MAX_ERROR_MESSAGE_LENGTH
+
+
 def test_map_error_maps_receipt_validation_to_validation_error() -> None:
     mapped = map_error(ReceiptValidationError("bad receipt"))
     assert mapped.code == "validation_error"

@@ -259,6 +259,30 @@ def _dispatch_serve(args: list[str]) -> int:
                     f"No editor bundle located; open the bridge manually at "
                     f"http://{host}:{port}"
                 )
+        print(f"Projects root: {composition.projects_root}")
+        print(
+            "Database ownership: exclusive to this bridge until shutdown; "
+            "use the HTTP routes while it is running."
+        )
+        print(
+            "HTTP discovery: GET /routes (machine-readable route and schema "
+            "document)"
+        )
+        print(
+            "HTTP routes: GET /health, GET /projects, "
+            "GET /projects/{project}/timelines, "
+            "GET /projects/{project}/timelines/{timeline}, "
+            "POST /projects/{project}/timelines/{timeline}/save, "
+            "GET|HEAD /projects/{project}/timelines/{timeline}/assets/{registry_key}"
+        )
+        print(
+            'Save JSON: {"config": object, "registry": object, '
+            '"expected_version": integer}'
+        )
+        print(
+            "Asset URLs take the registry key under registry.assets "
+            "(not the media_id)."
+        )
 
         def _shutdown(_signum: int, _frame: Any) -> None:
             print("\nShutting down...", flush=True)
@@ -321,10 +345,38 @@ def _dispatch_product(args: list[str]) -> int:
             state_snapshot={"command": family},
         )
 
+    # Help is documentation, not a product operation. Build and parse the
+    # family parser without composing an AstridClient so ``family --help``
+    # and ``family verb --help`` remain usable while ``astrid serve`` owns the
+    # store, or when the selected root has migrations this checkout cannot
+    # open. argparse exits while rendering help, so no handler can run in
+    # this branch; normal commands retain the one-client composition below.
+    if any(token in {"-h", "--help"} for token in rest):
+        return run_product_family(family, rest, client=None)
+
     from astrid.sdk.client import AstridClient
 
-    with AstridClient.open() as client:
-        return run_product_family(family, rest, client=client)
+    try:
+        with AstridClient.open() as client:
+            return run_product_family(family, rest, client=client)
+    except Exception as exc:
+        # Composition happens before the family parser/handler can render a
+        # result.  Owner contention is nevertheless a normal, retryable
+        # product failure: preserve the five-key SDK envelope under --json
+        # instead of letting the gateway's degraded renderer call it a bug.
+        # Keep this narrow so unexpected composition failures still fail
+        # through the universal degraded-error path.
+        from astrid.sdk.exceptions import ServiceUnavailableError
+
+        if not isinstance(exc, ServiceUnavailableError):
+            raise
+        from astrid.core.cli.domain_output import print_result
+        from astrid.sdk.contracts import DomainResult
+
+        return print_result(
+            DomainResult.failure(exc.to_error_object()),
+            as_json="--json" in rest,
+        )
 
 
 def _product_top_level_commands() -> frozenset[str]:

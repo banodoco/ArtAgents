@@ -15,8 +15,9 @@ Remotion-rendered hype video with cache-aware step resume.
 import astrid.sdk as sdk
 result = sdk.invoke(
     "video_editing.hype",
+    kind="orchestrator",
+    project="demo",
     inputs={"video": "source.mp4", "brief": "brief.txt"},
-    out="runs/my_hype",
 )
 ```
 

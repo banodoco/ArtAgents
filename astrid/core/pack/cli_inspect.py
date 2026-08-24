@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any, Optional
@@ -114,6 +115,10 @@ def cmd_inspect(argv: list[str]) -> int:
         action="store_true",
         dest="json",
         help="Output as JSON.",
+    )
+    parser.add_argument(
+        "--pack-root", action="append", dest="pack_roots",
+        help="Additional pack collection root (also honors ASTRID_PACKS_PATH).",
     )
     args = parser.parse_args(argv)
     return _inspect_installed_pack(
@@ -732,9 +737,18 @@ def _print_full_inspect(data: dict) -> None:
         print("    ℹ Permissions are disclosure-only. No sandboxing or runtime enforcement in v1.")
 
 
-def _inspect_discovered_pack(*, pack_id: str, agent: bool, json_output: bool) -> int:
+def _inspect_discovered_pack(*, pack_id: str, agent: bool, json_output: bool, pack_roots: tuple[str, ...] = ()) -> int:
     """Render discovery-backed inspect output for non-installed packs."""
-    packs = {pack.id: pack for pack in discover_packs(packs_root(), include_hidden=True)}
+    roots = [packs_root(), *[Path(item).expanduser() for item in pack_roots]]
+    roots.extend(
+        Path(item).expanduser()
+        for item in os.environ.get("ASTRID_PACKS_PATH", "").split(os.pathsep)
+        if item
+    )
+    packs: dict[str, PackDefinition] = {}
+    for root in roots:
+        for pack in discover_packs(root, include_hidden=True):
+            packs.setdefault(pack.id, pack)
     pack = packs.get(pack_id)
     if pack is None:
         raise AstridError(
@@ -776,6 +790,7 @@ def _handle_inspect(args: argparse.Namespace) -> int:
             pack_id=args.pack_id,
             agent=bool(args.agent),
             json_output=bool(args.json),
+            pack_roots=tuple(args.pack_roots or ()),
         )
 
     return _inspect_installed_pack(

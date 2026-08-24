@@ -11,20 +11,21 @@ Run through the SDK:
 import astrid.sdk as sdk
 result = sdk.invoke(
     "foley.tile_video",
+    kind="executor",
+    project="demo",
     inputs={
         "video": "path/to/source.mp4",
         "grid": "4x4",
         "overlap": "0.25",
         "trim": "15",
     },
-    out="runs/tile_video/example",
 )
 ```
 
-Direct invocation:
+Internal runner invocation (not a public entrypoint):
 
 ```bash
-python3 -m astrid.packs.foley.executors.tile_video.run \
+ASTRID_INTERNAL_INVOCATION=1 python3 -m astrid.packs.foley.executors.tile_video.run \
   --video path/to/source.mp4 \
   --out runs/tile_video/example \
   --grid 4x4 --overlap 0.25 --trim 15

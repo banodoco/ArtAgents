@@ -9,8 +9,8 @@ Dry-run first:
 import astrid.sdk as sdk
 result = sdk.invoke(
     "rendering.sprite_sheet",
+        kind="executor", project="demo",
     inputs={"animation": "wave", "subject": "neon courier"},
-    out="runs/sprites/wave",
     dry_run=True,
 )
 ```
@@ -23,12 +23,12 @@ instructions in the prompt, then uses the existing slice/preview/export path:
 import astrid.sdk as sdk
 result = sdk.invoke(
     "rendering.sprite_sheet",
+        kind="executor", project="demo",
     inputs={
         "animation": "right claw pincer open-close snap loop",
         "subject": "blue circuit crab mascot",
         "reference_image": "refs/crab.png",
     },
-    out="runs/sprites/crab-pincer",
 )
 ```
 

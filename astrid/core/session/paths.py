@@ -11,6 +11,7 @@ from pathlib import Path
 
 ASTRID_HOME_ENV = "ASTRID_HOME"
 ASTRID_WORKSPACE_CONFIG_DIR_ENV = "ASTRID_WORKSPACE_CONFIG_DIR"
+ASTRID_PROJECTS_ROOT_ENV = "ASTRID_PROJECTS_ROOT"
 _DEFAULT_ASTRID_HOME = Path("~/.astrid")
 
 SESSIONS_DIRNAME = "sessions"
@@ -49,7 +50,19 @@ def workspace_config_path(cwd: str | Path | None = None) -> Path:
     override = os.environ.get(ASTRID_WORKSPACE_CONFIG_DIR_ENV)
     if override and cwd is None:
         return Path(override).expanduser().resolve() / WORKSPACE_CONFIG_FILENAME
-    base = Path(cwd) if cwd is not None else Path.cwd()
+    if cwd is None:
+        projects_root = os.environ.get(ASTRID_PROJECTS_ROOT_ENV)
+        if projects_root:
+            # A selected project is a workspace preference. When the caller
+            # explicitly isolates the kernel with ASTRID_PROJECTS_ROOT, use
+            # that root as the workspace boundary too; otherwise two roots
+            # launched from one checkout would overwrite one another's
+            # selection file.
+            base = Path(projects_root).expanduser().resolve()
+        else:
+            base = Path.cwd()
+    else:
+        base = Path(cwd)
     return base / WORKSPACE_CONFIG_DIRNAME / WORKSPACE_CONFIG_FILENAME
 
 

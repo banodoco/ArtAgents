@@ -179,10 +179,10 @@ RUN_STATUSES: tuple[str, ...] = ("running", "succeeded", "failed", "cancelled")
 CLOSED_RUN_OUTCOMES: tuple[str, ...] = ("succeeded", "failed", "cancelled")
 """The terminal outcomes :meth:`RunRepository.close` accepts.
 
-The caller of ``close`` declares the terminal outcome for work the run
-owns outright (no child task completed it) — every value is also a valid
-``runs.status`` terminal value, so the outcome writes straight through to
-the run status and projection.
+Callers may omit the outcome; for runs with terminal children the repository
+derives it from those child statuses, while a zero-child run retains the
+historical ``succeeded`` default. Explicit outcomes that contradict terminal
+children are rejected rather than relabeling the run.
 """
 
 TERMINAL_TASK_STATUSES: tuple[str, ...] = ("succeeded", "failed", "cancelled")
@@ -536,6 +536,7 @@ class RunCancelReadModel:
     cancelled_task_ids: tuple[str, ...]
     skipped_task_ids: tuple[str, ...]
     cancel_request_id: str
+    cooperative_task_ids: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         """Return the JSON-safe dict persisted as the receipt result."""
@@ -545,6 +546,7 @@ class RunCancelReadModel:
             "cancelled_task_ids": list(self.cancelled_task_ids),
             "skipped_task_ids": list(self.skipped_task_ids),
             "cancel_request_id": self.cancel_request_id,
+            "cooperative_task_ids": list(self.cooperative_task_ids),
         }
 
     @classmethod
@@ -560,6 +562,9 @@ class RunCancelReadModel:
                 str(task_id) for task_id in value["skipped_task_ids"]
             ),
             cancel_request_id=str(value["cancel_request_id"]),
+            cooperative_task_ids=tuple(
+                str(task_id) for task_id in (value.get("cooperative_task_ids") or [])
+            ),
         )
 
 
@@ -1902,6 +1907,7 @@ class RunRepository:
             else generate_lowercase_ulid()
         )
         cancelled: list[str] = []
+        cooperative_cancelled: list[str] = []
         skipped: list[str] = []
         txn_id = uuid.uuid4().hex
         head_before = int(
@@ -1914,7 +1920,7 @@ class RunRepository:
         # 1. Shared task-cancel predicate per eligible child, ordinal order.
         for ordinal, child in enumerate(children):
             child_id = str(child["id"])
-            if str(child["status"]) in ("queued", "blocked"):
+            if str(child["status"]) in ("queued", "blocked", "running"):
                 task_repo.cancel(
                     uow,
                     project_id=project_id,
@@ -1926,6 +1932,8 @@ class RunRepository:
                     command_kind=CORE_TASK_CANCEL_COMMAND_KIND,
                 )
                 cancelled.append(child_id)
+                if str(child["status"]) == "running":
+                    cooperative_cancelled.append(child_id)
             else:
                 skipped.append(child_id)
         if not cancelled:
@@ -1996,6 +2004,7 @@ class RunRepository:
             cancelled_task_ids=tuple(cancelled),
             skipped_task_ids=tuple(skipped),
             cancel_request_id=effective_cancel_request_id,
+            cooperative_task_ids=tuple(cooperative_cancelled),
         )
         self._receipts.record(
             uow,
@@ -2142,8 +2151,9 @@ class RunRepository:
         )
         if run_row is None:
             raise RunNotFoundError(run_id=run_id)
-        if str(run_row["status"]) != "running":
-            raise RunTerminalError(run_id=run_id, status=str(run_row["status"]))
+        run_status_before_retry = str(run_row["status"])
+        if run_status_before_retry not in ("running", "failed"):
+            raise RunTerminalError(run_id=run_id, status=run_status_before_retry)
 
         children = uow.query(
             "SELECT id, run_ordinal, status FROM tasks "
@@ -2163,6 +2173,16 @@ class RunRepository:
                     "selected task ids are not direct children of run "
                     f"{run_id!r}: {unknown}"
                 )
+        if run_status_before_retry == "failed":
+            # Failed invocation runs are deliberately recoverable once: the
+            # child retry predicate extends the default single-attempt
+            # budget and all later retries remain budget-fenced.  A
+            # succeeded/cancelled run never reopens.
+            uow.execute(
+                "UPDATE runs SET status = 'running', finished_at = NULL "
+                "WHERE id = ? AND project_id = ? AND status = 'failed'",
+                (run_id, project_id),
+            )
         retried: list[str] = []
         skipped: list[str] = []
         txn_id = uuid.uuid4().hex
@@ -2296,7 +2316,7 @@ class RunRepository:
         *,
         project_id: str,
         run_id: str,
-        outcome: str,
+        outcome: str | None = None,
         idempotency_key: str,
         actor_kind: str = "local",
         now: str | None = None,
@@ -2305,7 +2325,8 @@ class RunRepository:
         """Terminally close one run that owns no non-terminal child work.
 
         Inside the caller's active unit of work this transitions a
-        ``running`` run to the caller-declared terminal *outcome*
+        ``running`` run to the caller-declared (or child-derived) terminal
+        *outcome*
         (``succeeded``/``failed``/``cancelled``): the ``runs.status`` and
         ``finished_at`` columns are written, the outcome is folded into
         ``runs.result_json`` (every existing projection key preserved,
@@ -2347,7 +2368,7 @@ class RunRepository:
             "idempotency_key", idempotency_key
         )
         command_kind = _require_non_empty_string("command_kind", command_kind)
-        if outcome not in CLOSED_RUN_OUTCOMES:
+        if outcome is not None and outcome not in CLOSED_RUN_OUTCOMES:
             raise RunValidationError(
                 f"outcome must be one of {CLOSED_RUN_OUTCOMES}, got {outcome!r}"
             )
@@ -2359,7 +2380,14 @@ class RunRepository:
 
         # Semantic request identity: the run and the declared outcome;
         # generated state never participates.
-        request: dict[str, Any] = {"run_id": run_id, "outcome": outcome}
+        # ``None`` is the public default: derive the terminal outcome from
+        # child tasks once they are known to be terminal.  The sentinel is
+        # stable in the request identity so replaying an inferred close does
+        # not depend on generated state or on the first caller's child count.
+        request: dict[str, Any] = {
+            "run_id": run_id,
+            "outcome": outcome if outcome is not None else "derived",
+        }
         try:
             request_digest = request_hash(command_kind, request)
         except CanonicalizationError as exc:
@@ -2407,6 +2435,26 @@ class RunRepository:
                 "closing the run"
             )
 
+        counts, derived_status = derive_run_progress_counts(
+            uow, run_id=run_id, project_id=project_id
+        )
+        if outcome is None:
+            # Zero-child runs are the sole non-terminal derived case; their
+            # lifecycle default remains the historical ``succeeded`` close.
+            outcome = (
+                derived_status
+                if derived_status in CLOSED_RUN_OUTCOMES
+                else "succeeded"
+            )
+        elif derived_status in CLOSED_RUN_OUTCOMES and outcome != derived_status:
+            # A caller must never be able to relabel terminal child failure
+            # (or cancellation) as success.  This also protects legacy rows
+            # that were left ``running`` before child-failure recomputation.
+            raise RunValidationError(
+                f"run child outcomes derive {derived_status!r}; "
+                f"cannot close it as {outcome!r}"
+            )
+
         # Projection: preserve every existing result_json key, fold in the
         # derived counts (matching the shared projection recompute's key
         # shape), the terminal status, and the outcome.
@@ -2414,9 +2462,6 @@ class RunRepository:
         existing = parse_json(str(run_row["result_json"])) if run_row["result_json"] else {}
         if isinstance(existing, Mapping):
             projection.update(dict(existing))
-        counts, _run_status = derive_run_progress_counts(
-            uow, run_id=run_id, project_id=project_id
-        )
         projection.update(
             {
                 "total_children": sum(counts.values()),

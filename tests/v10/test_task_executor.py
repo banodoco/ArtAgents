@@ -35,6 +35,7 @@ from astrid.core.repositories.media import (
     MANAGED_LOCAL_REALM,
     MediaRepository,
 )
+from astrid.core.io.media_import import staging_path
 from astrid.core.repositories.tasks import (
     CORE_TASK_COMPLETED_EVENT_KIND,
     CORE_TASK_FAILED_EVENT_KIND,
@@ -400,11 +401,121 @@ def test_handler_error_routes_through_failure_command(env) -> None:
         "type": "RuntimeError",
         "message": "renderer boom",
     }
+    assert not staging_path(
+        env.projects_root, result.failure.attempt.progress[STAGING_TXN_ID_KEY]
+    ).exists()
     assert _receipt_count(env.writer, project.id) == receipts_before + 2  # start + fail
 
     stream_id = f"{task.id}:core.task"
     events = _event_rows(env.writer, stream_id)
     assert events[-1]["kind"] == CORE_TASK_FAILED_EVENT_KIND
+
+
+def test_terminal_handler_failure_updates_parent_run(env) -> None:
+    """A terminal child failure closes its parent run truthfully."""
+    from astrid.core.repositories.runs import RunRepository
+
+    project = _create_project(env)
+    child_id = generate_lowercase_ulid()
+    runs = RunRepository(events=env.task_repo._events, receipts=env.task_repo._receipts)
+    fan = UnitOfWork(env.writer).run(
+        lambda u: runs.create(
+            u,
+            project_id=project.id,
+            children=[
+                {
+                    "capability": "generation.generate_image",
+                    "spec": dict(SPEC_A),
+                    "input_manifest": [],
+                    "task_id": child_id,
+                    "max_attempts": 1,
+                }
+            ],
+            idempotency_key="terminal-failure-run-k",
+            created_at=TS,
+        )
+    )
+    claim = _claim(env, project_id=project.id, idempotency_key="terminal-failure-claim-k")
+    assert claim is not None and claim.task.id == child_id
+    result = _execute(
+        env,
+        project_id=project.id,
+        claim=claim,
+        handler=FakeHandler({}, error=RuntimeError("generation failed")),
+    )
+    assert result.outcome == "failed"
+    assert result.failure is not None and result.failure.outcome == "failed"
+    run_row = env.writer.submit(
+        lambda session: session.query_one(
+            "SELECT status, result_json FROM runs WHERE id = ?", (fan.run_id,)
+        )
+    )
+    assert run_row["status"] == "failed"
+    assert json.loads(run_row["result_json"])["failed"] == 1
+
+
+def test_one_shot_invocation_retry_reopens_parent_projection(env) -> None:
+    """A public recovery retry reopens a failed invocation run before dispatch."""
+    from astrid.core.repositories.runs import RunRepository
+
+    project = _create_project(env)
+    child_id = generate_lowercase_ulid()
+    runs = RunRepository(events=env.task_repo._events, receipts=env.task_repo._receipts)
+    fan = UnitOfWork(env.writer).run(
+        lambda u: runs.create(
+            u,
+            project_id=project.id,
+            children=[
+                {
+                    "capability": "media.clip_extract",
+                    "spec": dict(SPEC_A),
+                    "input_manifest": [],
+                    "task_id": child_id,
+                    "max_attempts": 1,
+                }
+            ],
+            idempotency_key="one-shot-retry-run-k",
+            created_at=TS,
+        )
+    )
+    claim = _claim(env, project_id=project.id, idempotency_key="one-shot-retry-claim-k")
+    assert claim is not None and claim.task.id == child_id
+    failed = _execute(
+        env,
+        project_id=project.id,
+        claim=claim,
+        handler=FakeHandler({}, error=RuntimeError("missing external input")),
+    )
+    assert failed.outcome == "failed"
+    before = env.writer.submit(
+        lambda session: session.query_one(
+            "SELECT status, finished_at FROM runs WHERE id = ?", (fan.run_id,)
+        )
+    )
+    assert before["status"] == "failed"
+    assert before["finished_at"] is not None
+
+    retried = UnitOfWork(env.writer).run(
+        lambda u: env.task_repo.retry(
+            u,
+            project_id=project.id,
+            task_id=child_id,
+            idempotency_key="one-shot-retry-task-k",
+            now=TS2,
+        )
+    )
+    assert retried.task.status == "running"
+    after = env.writer.submit(
+        lambda session: session.query_one(
+            "SELECT status, finished_at, result_json FROM runs WHERE id = ?",
+            (fan.run_id,),
+        )
+    )
+    assert after["status"] == "running"
+    assert after["finished_at"] is None
+    projection = json.loads(after["result_json"])
+    assert projection["status"] == "running"
+    assert projection["failed"] == 0
 
 
 def test_invalid_manifest_routes_through_failure_command(env) -> None:

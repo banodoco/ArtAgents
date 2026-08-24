@@ -7,12 +7,12 @@ timeline.
 import astrid.sdk as sdk
 result = sdk.invoke(
     "stream_content.segment_map",
+        kind="executor", project="demo",
     inputs={
         "video": "source.mp4",
         "transcript": "transcript.json",
         "scenes": "scenes.json",
     },
-    out="runs/stream/segment_map.json",
 )
 ```
 

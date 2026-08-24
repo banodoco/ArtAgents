@@ -16,6 +16,7 @@ import os
 import re
 import warnings
 from collections.abc import Callable, Iterable, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from fractions import Fraction
@@ -23,7 +24,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, Literal
 
-from astrid.core.env_vars import ASTRID_TASK_PROJECT, ASTRID_TASK_RUN_ID
+from astrid.core.env_vars import ASTRID_PACKS_PATH, ASTRID_TASK_PROJECT, ASTRID_TASK_RUN_ID
 from astrid.core.foundation.atomic_io import write_json_atomic
 from astrid.core.foundation.hash import sha256_file
 from astrid.core.foundation.project_paths import resolve_projects_root, run_dir
@@ -37,10 +38,10 @@ from .contracts import (
     FinalizerResolution,
     FrameWindow,
     PlannerResolution,
+    RendererResolution,
     RenderPlan,
     RenderRequest,
     RenderResult,
-    RendererResolution,
     RenderSegment,
     SupportReport,
     compute_request_digest,
@@ -53,6 +54,7 @@ from .errors import (
     raise_renderer_error,
     raise_unsupported_error,
 )
+from .output_policy import RenderOutputPolicyError, validate_render_output_policy
 from .provenance import assemble_provenance_v2
 from .publication import publish_render_result
 from .registry import (
@@ -70,7 +72,6 @@ from .replay import (
 )
 from .transport import CommandTransport
 
-
 _QUALIFIED_ID_RE = re.compile(
     r"^[a-z0-9][a-z0-9_-]*(?:\.[a-z0-9][a-z0-9_-]*)+$"
 )
@@ -85,6 +86,29 @@ _DIRECT_FINALIZER_DIGEST = hashlib.sha256(
 CapabilityKind = Literal["renderer", "planner", "finalizer"]
 StageObserver = Callable[[str, Mapping[str, Any]], None]
 AudioCompleter = Callable[..., RenderResult]
+
+
+@contextmanager
+def _pack_discovery_scope(extra_pack_roots: Sequence[str]) -> Any:
+    """Carry explicit SDK pack roots into nested renderer processes."""
+    roots = tuple(str(Path(root).expanduser().resolve()) for root in extra_pack_roots if root)
+    if not roots:
+        yield
+        return
+    previous = os.environ.get(ASTRID_PACKS_PATH)
+    existing = tuple(item for item in (previous or "").split(os.pathsep) if item)
+    merged: list[str] = []
+    for root in (*roots, *existing):
+        if root not in merged:
+            merged.append(root)
+    os.environ[ASTRID_PACKS_PATH] = os.pathsep.join(merged)
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop(ASTRID_PACKS_PATH, None)
+        else:
+            os.environ[ASTRID_PACKS_PATH] = previous
 
 
 class LegacyRenderRoutingWarning(UserWarning):
@@ -238,6 +262,7 @@ class RenderService:
             else:
                 registries = supplied  # type: ignore[assignment]
         self.renderers, self.planners, self.finalizers = registries
+        self.extra_pack_roots = tuple(str(root) for root in extra_pack_roots)
         self.renderer_registry = self.renderers
         self.planner_registry = self.planners
         self.finalizer_registry = self.finalizers
@@ -279,6 +304,7 @@ class RenderService:
         sidecar_path: str | Path | None = None,
         backend_config: Mapping[str, Mapping[str, Any]] | None = None,
         audio: AudioOwnership | str | None = None,
+        profile: Any | None = None,
         metadata: Mapping[str, str] | None = None,
         previous_outputs: Iterable[object] = (),
         v1_compatibility: Mapping[str, Any] | None = None,
@@ -324,7 +350,7 @@ class RenderService:
                     "audio": (
                         audio.value if isinstance(audio, AudioOwnership) else audio
                     ),
-                    "profile": None,
+                    "profile": profile,
                     "backend_config": {
                         str(key): dict(value)
                         for key, value in (backend_config or {}).items()
@@ -366,6 +392,7 @@ class RenderService:
                 if isinstance(request, RenderRequest)
                 else RenderRequest.from_dict(request)
             )
+            self._validate_output_name(parsed)
             localized = self._absolute_input_paths(parsed)
             # Keep the caller's absolute-but-unresolved spellings for the
             # publication layer's symlink guard.  The private workspace uses
@@ -397,6 +424,21 @@ class RenderService:
                 targets=list(policy.targets),
                 auto_route=policy.auto_route,
             )
+            # Request-sensitive support is a deterministic admission check.
+            # Run it in an OS temporary directory before creating anything
+            # below the caller's output parent.  Otherwise an unsupported
+            # timeline can trigger replay capture and leave a
+            # ``.<output>.replay`` tree even though no renderer was admitted.
+            # Runtime/backend failures still use the output-local workspace
+            # and retain their replay evidence through the inner try/finally.
+            with _pack_discovery_scope(self.extra_pack_roots):
+                with TemporaryDirectory(prefix="astrid-render-support-") as support_text:
+                    preselected = self._select(
+                        localized,
+                        policy=policy,
+                        workspace=Path(support_text),
+                    )
+
             workspace_parent = output.resolve(strict=False).parent
             workspace_parent.mkdir(parents=True, exist_ok=True)
             self._active_output = output
@@ -406,15 +448,17 @@ class RenderService:
             ) as workspace_text:
                 workspace = Path(workspace_text)
                 try:
-                    published = self._render_in_workspace(
-                        localized,
-                        policy=policy,
-                        workspace=workspace,
-                        out_path=output,
-                        sidecar_path=sidecar,
-                        previous_outputs=tuple(previous_outputs),
-                        v1_compatibility=v1_compatibility,
-                    )
+                    with _pack_discovery_scope(self.extra_pack_roots):
+                        published = self._render_in_workspace(
+                            localized,
+                            policy=policy,
+                            selected=preselected,
+                            workspace=workspace,
+                            out_path=output,
+                            sidecar_path=sidecar,
+                            previous_outputs=tuple(previous_outputs),
+                            v1_compatibility=v1_compatibility,
+                        )
                 except RendererException as exc:
                     self._capture_failure_bundle(exc, request=localized)
                     raise
@@ -467,6 +511,23 @@ class RenderService:
         return supplied[0]
 
     @staticmethod
+    def _validate_output_name(request: RenderRequest) -> None:
+        """Apply the shared output/alpha policy before creating a workspace."""
+        try:
+            validate_render_output_policy(
+                request.output_name,
+                timeline=request.timeline_path,
+                profile=request.profile,
+            )
+        except RenderOutputPolicyError as exc:
+            raise_protocol_error(
+                backend=_CORE_BACKEND_ID,
+                message=str(exc),
+                recovery_command=exc.recovery_command,
+                details=exc.details,
+            )
+
+    @staticmethod
     def _absolute_input_paths(request: RenderRequest) -> RenderRequest:
         timeline = Path(request.timeline_path).expanduser()
         assets = (
@@ -487,13 +548,14 @@ class RenderService:
         request: RenderRequest,
         *,
         policy: _SelectionPolicy,
+        selected: _ResolvedCapability | None = None,
         workspace: Path,
         out_path: Path,
         sidecar_path: Path,
         previous_outputs: tuple[object, ...],
         v1_compatibility: Mapping[str, Any] | None,
     ) -> Path:
-        selected = self._select(request, policy=policy, workspace=workspace)
+        selected = selected or self._select(request, policy=policy, workspace=workspace)
         if policy.kind == "planner":
             plan, segment_results, pinned_finalizer = self._execute_planner(
                 request,
@@ -963,6 +1025,24 @@ class RenderService:
             return [f"timeline cannot be evaluated against static support: {exc}"]
 
         reasons: list[str] = []
+        for index, clip in enumerate(raw_clips):
+            if not isinstance(clip, Mapping):
+                continue
+            clip_type = clip.get("clipType")
+            text = clip.get("text")
+            if isinstance(text, Mapping) and clip_type != "text":
+                reasons.append(
+                    f"clips[{index}] contains structured text but is missing clipType: 'text'"
+                )
+            elif clip_type == "text":
+                if not isinstance(text, Mapping):
+                    reasons.append(
+                        f"clips[{index}].text must be an object for clipType: 'text'"
+                    )
+                elif not isinstance(text.get("content"), str):
+                    reasons.append(
+                        f"clips[{index}].text.content must be a string for clipType: 'text'"
+                    )
         declared_clips = capabilities.get("clip_types")
         if clip_types:
             if not isinstance(declared_clips, list):

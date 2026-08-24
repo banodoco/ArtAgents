@@ -30,6 +30,8 @@ import pytest
 from astrid.core.events.registry import core_only_registry
 from astrid.core.events.service import EventAppendService
 from astrid.core.ids import generate_lowercase_ulid
+from astrid.core.media import MediaProbeError
+import astrid.core.io.media_import as media_import
 from astrid.core.receipts.service import ReceiptService
 from astrid.core.repositories.media import (
     CORE_MEDIA_IMPORT_COMMAND_KIND,
@@ -151,6 +153,76 @@ def test_read_envelopes_carry_null_receipt(env: SimpleNamespace) -> None:
         assert result.ok is True
         assert result.receipt is None
         assert result.idempotency_key == ""
+
+
+def test_undecodable_container_fails_before_media_event_or_receipt(
+    env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = _create_project(env)
+    pointer = _write(env.root, "pointer.mp4", b"version https://git-lfs.github.com/spec/v1\n")
+
+    def _fail_probe(path):  # noqa: ANN001
+        raise MediaProbeError("ffprobe failed with exit 1")
+
+    monkeypatch.setattr(media_import, "ffprobe_metadata_strict", _fail_probe)
+    result = _import_one(env, project, path=pointer, idempotency_key="bad-video")
+
+    assert result.ok is False
+    assert result.error is not None
+    assert result.error.code == "validation_error"
+    assert result.error.details["reason"] == "undecodable"
+    assert result.error.details["media_kind"] == "video"
+    assert "replace the file" in result.error.details["recovery"]
+    assert _media_count(env) == 0
+    assert _event_count(env) == 1  # project.created only
+    assert result.receipt is None
+    assert not list((env.root / ".astrid" / "media" / "sha256").rglob("*"))
+
+
+def test_missing_ffprobe_is_actionable_and_pre_admission(
+    env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = _create_project(env)
+    source = _write(env.root, "missing-probe.wav", b"not a wav")
+
+    def _missing_probe(path):  # noqa: ANN001
+        raise MediaProbeError("ffprobe is not available on PATH")
+
+    monkeypatch.setattr(media_import, "ffprobe_metadata_strict", _missing_probe)
+    result = _import_one(env, project, path=source, idempotency_key="no-ffprobe")
+
+    assert result.ok is False
+    assert result.error is not None
+    assert result.error.code == "validation_error"
+    assert result.error.details["reason"] == "ffprobe_unavailable"
+    assert "install ffprobe" in result.error.details["recovery"]
+    assert _media_count(env) == 0
+    assert _event_count(env) == 1
+
+
+def test_directory_container_probe_failure_is_all_prepared_before_writes(
+    env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = _create_project(env)
+    directory = env.root / "bad-bundle"
+    _write(directory, "00-bad.mp4", b"pointer")
+    _write(directory, "01-generic.txt", b"safe generic content")
+
+    def _fail_probe(path):  # noqa: ANN001
+        raise MediaProbeError("ffprobe unavailable")
+
+    monkeypatch.setattr(media_import, "ffprobe_metadata_strict", _fail_probe)
+    result = env.service.import_directory(
+        project=project, directory=directory, idempotency_key="bad-directory"
+    )
+
+    assert result.ok is False
+    assert result.error is not None
+    assert result.error.code == "validation_error"
+    assert result.error.details["reason"] == "undecodable"
+    assert _media_count(env) == 0
+    assert _event_count(env) == 1
+    assert not list((env.root / ".astrid" / "media" / "sha256").rglob("*"))
 
 
 # ---------------------------------------------------------------------------
@@ -367,6 +439,57 @@ def test_verify_cross_project_returns_not_found(env: SimpleNamespace) -> None:
     assert result.error.code == "not_found"
 
 
+def test_verify_deduplicated_media_verifies_all_locations(env: SimpleNamespace) -> None:
+    project = _create_project(env)
+    first_path = _write(env.root, "in/first.bin", b"duplicate external")
+    second_path = _write(env.root, "in/second.bin", b"duplicate external")
+    first = _import_one(env, project, path=first_path, realm="external_local")
+    second = _import_one(env, project, path=second_path, realm="external_local")
+    assert first.data["id"] == second.data["id"]
+
+    result = env.service.verify(
+        project, first.data["id"], realm="external_local", idempotency_key="v-all"
+    )
+    assert result.ok is True
+    assert result.data["verified_count"] == 2
+    assert result.data["failed_count"] == 0
+    assert [item["location_id"] for item in result.data["locations"]] == sorted(
+        item["location_id"] for item in result.data["locations"]
+    )
+    assert all(item["ok"] for item in result.data["locations"])
+
+
+def test_verify_multiple_locations_reports_partial_success(env: SimpleNamespace) -> None:
+    project = _create_project(env)
+    first_path = _write(env.root, "in/first.bin", b"duplicate external")
+    second_path = _write(env.root, "in/second.bin", b"duplicate external")
+    first = _import_one(env, project, path=first_path, realm="external_local")
+    _import_one(env, project, path=second_path, realm="external_local")
+    first_path.unlink()
+
+    result = env.service.verify(
+        project, first.data["id"], realm="external_local", idempotency_key="v-partial"
+    )
+    assert result.ok is False
+    assert result.error.code == "integrity_error"
+    details = result.error.details
+    assert details["verified_count"] == 1
+    assert details["failed_count"] == 1
+    assert details["partial_success"] is True
+    assert details["mutation_policy"].startswith("successful locations")
+    assert {item["ok"] for item in details["locations"]} == {True, False}
+
+    healthy = next(item for item in details["locations"] if item["ok"])
+    precise = env.service.verify(
+        project,
+        first.data["id"],
+        realm="external_local",
+        location_id=healthy["location_id"],
+        idempotency_key="v-precise",
+    )
+    assert precise.ok is True
+
+
 # ---------------------------------------------------------------------------
 # Relocate and relate
 # ---------------------------------------------------------------------------
@@ -390,6 +513,51 @@ def test_relocate_replaces_location_identity_unchanged(env: SimpleNamespace) -> 
     assert result.ok is True
     assert result.receipt is not None
     assert result.data["content_hash"] == original_hash
+
+
+def test_managed_rehydrate_recovers_missing_copy_and_rejects_wrong_bytes(
+    env: SimpleNamespace,
+) -> None:
+    """The public managed recovery path is hash-checked and atomic."""
+    project = _create_project(env)
+    source = _write(env.root, "in/shot.png", PNG_BYTES)
+    created = _import_one(env, project, path=source)
+    media_id = created.data["id"]
+    canonical = Path(created.data["locations"][0]["locator"])
+    held = env.root / "held-shot.png"
+    canonical.rename(held)
+
+    missing = env.service.verify(project, media_id, realm="managed_local")
+    assert missing.ok is False
+    assert missing.error.code == "integrity_error"
+    assert missing.error.details["media_id"] == media_id
+    assert missing.error.details["realm"] == "managed_local"
+    assert "--source <source-file>" in missing.error.details["recovery"]
+
+    recovered = env.service.relocate(
+        project,
+        media_id,
+        realm="managed_local",
+        source=held,
+        idempotency_key="managed-rehydrate",
+    )
+    assert recovered.ok is True
+    assert recovered.data["id"] == media_id
+    assert recovered.data["content_hash"] == created.data["content_hash"]
+    assert canonical.read_bytes() == PNG_BYTES
+
+    before = canonical.read_bytes()
+    wrong = _write(env.root, "wrong.png", b"wrong media bytes")
+    rejected = env.service.relocate(
+        project,
+        media_id,
+        realm="managed_local",
+        source=wrong,
+        idempotency_key="managed-rehydrate-wrong",
+    )
+    assert rejected.ok is False
+    assert rejected.error.code == "integrity_error"
+    assert canonical.read_bytes() == before
 
 
 def test_relate_accepts_frozen_kind_and_delegates_rules(

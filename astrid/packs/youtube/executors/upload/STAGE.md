@@ -26,6 +26,7 @@ server with a public tunnel).
 import astrid.sdk as sdk
 result = sdk.invoke(
     "youtube.upload",
+        kind="executor", project="demo",
     inputs={
         "video_url": "https://example.com/hype.mp4",
         "title": "My Hype Video",
@@ -41,6 +42,7 @@ With privacy and playlist:
 import astrid.sdk as sdk
 result = sdk.invoke(
     "youtube.upload",
+        kind="executor", project="demo",
     inputs={
         "video_url": "https://example.com/hype.mp4",
         "title": "My Hype Video",

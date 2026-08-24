@@ -13,6 +13,9 @@ description: Render complete Astrid timelines with TimelineComposition and Remot
 capabilities:
   clip_types:
     - media
+    - video
+    - image
+    - audio
     - text
   track_types:
     - visual

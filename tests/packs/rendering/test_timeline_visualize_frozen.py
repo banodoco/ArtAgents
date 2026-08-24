@@ -71,6 +71,16 @@ def _root_view(projects_root: Path, slug: str):
     return project_root, timeline_dir, result
 
 
+def _editable_manifest(result: Any, project_root: Path) -> Path:
+    """Restore a durable CAS pack to its kernel-owned run path for forgery tests."""
+
+    durable = Path(result.manifest_path or "").resolve()
+    frozen = load_frozen_view(durable, project_root=project_root)
+    target = project_root / "runs" / str(result.run_id) / "agent-view"
+    shutil.copytree(frozen.pack_root, target, dirs_exist_ok=True)
+    return target / "manifest.json"
+
+
 def _append_v160(timeline_dir: Path) -> None:
     backend = LocalFsBackend(timeline_id=TIMELINE_UUID, timeline_home=timeline_dir)
     head = backend.head()
@@ -158,9 +168,12 @@ def test_valid_drill_down_keeps_root_ids_sns_and_exact_parent(
         "frozen_objects"
     ]
     manifest = child_frozen.manifest
-    assert manifest["inputs"]["from_view"] == root_manifest.relative_to(
-        project_root
-    ).as_posix()
+    expected_parent = (
+        root_manifest.relative_to(project_root).as_posix()
+        if root_manifest.is_relative_to(project_root)
+        else str(root_manifest)
+    )
+    assert manifest["inputs"]["from_view"] == expected_parent
     assert manifest["inputs"]["focus"] == "TL01.CL03"
     parent = child_frozen.action_index["entries"]["TL01"]["actions"][
         "parent_view"
@@ -182,7 +195,8 @@ def test_cold_range_root_mints_rg_and_is_a_valid_frozen_parent(
     )
     assert root.ok is True, root.error
     root_manifest = Path(root.manifest_path or "").resolve()
-    ground_truth = _json(root_manifest.parent / "ground-truth.json")
+    root_frozen = load_frozen_view(root_manifest, project_root=project_root)
+    ground_truth = root_frozen.ground_truth
 
     assert ground_truth["scope"] == {
         "kind": "range",
@@ -208,7 +222,6 @@ def test_cold_range_root_mints_rg_and_is_a_valid_frozen_parent(
         }
     ]
 
-    root_frozen = load_frozen_view(root_manifest, project_root=project_root)
     child = _invoke(slug, from_view=str(root_manifest), focus="TL01.RG01")
     assert child.ok is True, child.error
     child_manifest = Path(child.manifest_path or "").resolve()
@@ -243,8 +256,10 @@ def test_cold_range_root_id_is_deterministic_across_selector_spellings(
             range=selector,
         )
         assert result.ok is True, result.error
-        pack_root = Path(result.manifest_path or "").resolve().parent
-        ground_truths.append(_json(pack_root / "ground-truth.json"))
+        frozen = load_frozen_view(
+            Path(result.manifest_path or ""), project_root=_project_root
+        )
+        ground_truths.append(frozen.ground_truth)
 
     assert [ground_truth["scope"]["ref"] for ground_truth in ground_truths] == [
         "TL01.RG01",
@@ -295,7 +310,7 @@ def test_containment_and_full_hash_preflight_reject_forgery(
     with pytest.raises(ContainmentError):
         load_frozen_view(outside, project_root=project_root)
 
-    root_manifest = Path(root.manifest_path or "").resolve()
+    root_manifest = _editable_manifest(root, project_root)
     ledger_path = root_manifest.parent / "pack-hashes.json"
     ledger = _json(ledger_path)
     ledger["files"]["ground-truth.json"]["sha256"] = "0" * 64
@@ -312,7 +327,7 @@ def test_hash_valid_dangling_frozen_clip_track_is_rejected(
     project_root, _timeline, root = _root_view(
         tmp_projects_root, "timeline-frozen-dangling-track"
     )
-    root_manifest = Path(root.manifest_path or "").resolve()
+    root_manifest = _editable_manifest(root, project_root)
     ground_truth = _json(root_manifest.parent / "ground-truth.json")
     clip = ground_truth["frozen_timeline"]["clips"][0]
     clip_ref = clip["qualified_ref"]
@@ -331,7 +346,7 @@ def test_hash_valid_dangling_frozen_shot_member_is_rejected(
     project_root, _timeline, root = _root_view(
         tmp_projects_root, "timeline-frozen-dangling-shot-member"
     )
-    root_manifest = Path(root.manifest_path or "").resolve()
+    root_manifest = _editable_manifest(root, project_root)
     ground_truth = _json(root_manifest.parent / "ground-truth.json")
     shot_ref = "TL01.SH01"
     canonical_ref = {

@@ -7,12 +7,12 @@ or webinars that need to become reviewable publishing material.
 import astrid.sdk as sdk
 result = sdk.invoke(
     "stream_content.distill",
+        kind="orchestrator", project="demo",
     inputs={
         "video": "sources/event.mp4",
         "transcript": "runs/transcript.json",
         "brief": "brief.md",
     },
-    out="runs/stream-content",
 )
 ```
 

@@ -19,8 +19,8 @@ ffmpeg. The `scenes.json` sentinel gates cache invalidation for this step.
 import astrid.sdk as sdk
 result = sdk.invoke(
     "editorial.scenes",
+        kind="executor", project="demo",
     inputs={"video": "./source.mp4"},
-    out="./out",
 )
 ```
 

@@ -49,6 +49,7 @@ short repository operations through them (single-writer architecture).
 
 from __future__ import annotations
 
+import shutil
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -228,7 +229,9 @@ class ExecutionResult:
     validated and prepared) or ``"failed"`` (a handler/manifest/
     preparation failure was routed through the repository failure command;
     ``failure`` carries the fenced failure receipt and ``error`` the
-    bounded payload). Only these two typed outcomes are ever produced —
+    bounded payload), or ``"cancelled"`` when an operator won the terminal
+    cancellation fence while the handler was outside SQLite. Only these
+    typed outcomes are ever produced —
     never a raw SQLite busy error and never an un-routed handler error.
     """
 
@@ -238,9 +241,10 @@ class ExecutionResult:
     error: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
-        if self.outcome not in ("prepared", "failed"):
+        if self.outcome not in ("prepared", "failed", "cancelled"):
             raise TaskExecutorError(
-                f"execution outcome must be 'prepared' or 'failed', "
+                f"execution outcome must be 'prepared', 'failed', or "
+                f"'cancelled', "
                 f"got {self.outcome!r}"
             )
         if self.outcome == "prepared" and self.prepared is None:
@@ -250,6 +254,10 @@ class ExecutionResult:
         if self.outcome == "failed" and self.failure is None:
             raise TaskExecutorError(
                 "a failed outcome must carry the routed failure receipt"
+            )
+        if self.outcome == "cancelled" and self.failure is not None:
+            raise TaskExecutorError(
+                "a cancelled outcome does not carry a failure receipt"
             )
 
 
@@ -406,23 +414,43 @@ class ExecutionService:
         except Exception as exc:  # noqa: BLE001 - routed through fail
             # 3. Short caller UoW: route the failure through the fenced
             #    repository failure command (post-start status version).
-            failure = self._route_failure(
-                uow,
-                project_id=project_id,
-                task_id=task_id,
-                attempt_id=attempt_id,
-                lease_id=lease_id,
-                status_version=started.attempt.status_version,
-                # The start receipt already consumed the caller-supplied key
-                # (kind core.task.start); the failure command must use a
-                # distinct key or the receipt service rejects the second
-                # request as an idempotency-key reuse with a different kind.
-                idempotency_key=f"{idempotency_key}:fail",
-                actor_kind=actor_kind,
-                now=stamp,
-                exc=exc,
-                command_kind=command_kind,
-            )
+            try:
+                failure = self._route_failure(
+                    uow,
+                    project_id=project_id,
+                    task_id=task_id,
+                    attempt_id=attempt_id,
+                    lease_id=lease_id,
+                    status_version=started.attempt.status_version,
+                    # The start receipt already consumed the caller-supplied key
+                    # (kind core.task.start); the failure command must use a
+                    # distinct key or the receipt service rejects the second
+                    # request as an idempotency-key reuse with a different kind.
+                    idempotency_key=f"{idempotency_key}:fail",
+                    actor_kind=actor_kind,
+                    now=stamp,
+                    exc=exc,
+                    command_kind=command_kind,
+                )
+            except TaskTransitionError as transition:
+                if transition.reason != "task_not_running":
+                    raise
+                self.cleanup_staging(staging_dir)
+                return ExecutionResult(
+                    outcome="cancelled",
+                    error={
+                        "reason": "cancelled",
+                        "message": (
+                            "operator cancellation won while the handler was "
+                            "running; no artifact was published"
+                        ),
+                    },
+                )
+            # A failed attempt no longer owns its quarantine.  Remove only
+            # the exact per-attempt directory created above; startup GC still
+            # handles crash leftovers, while synchronous failures must not
+            # leave a misleading doctor warning behind.
+            self.cleanup_staging(staging_dir)
             error = {
                 "reason": "handler_failed",
                 "type": type(exc).__name__,
@@ -441,6 +469,26 @@ class ExecutionService:
                 outputs=outputs,
             ),
         )
+
+    @staticmethod
+    def cleanup_staging(staging_dir: Path) -> None:
+        """Best-effort removal of one terminal attempt's staging directory.
+
+        This path is generated by the kernel and is never caller supplied.
+        Refuse symlinks so cleanup cannot follow an executor-created escape;
+        an unusual filesystem failure is left for the next startup GC pass.
+        """
+        try:
+            if staging_dir.is_dir() and not staging_dir.is_symlink():
+                shutil.rmtree(staging_dir)
+        except OSError:
+            # Failure state is already durably recorded.  Retaining an
+            # unremovable directory is safer than masking that outcome.
+            return
+
+    # Kept as a private compatibility alias for callers that used the old
+    # failure-specific helper while the service was still staging-only.
+    _cleanup_failed_staging = cleanup_staging
 
     def complete(
         self,

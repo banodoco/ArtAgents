@@ -35,7 +35,7 @@ from typing import Any, Mapping
 
 from astrid.core.timeline.resolution import (
     AssetIntegrity,
-    resolve_asset_local_path_contained,
+    resolve_asset_authorized_path,
 )
 
 #: Integrity state that unlocks original inspection and sampling.
@@ -226,7 +226,11 @@ def verify_now(
             reason="unsupported — no contained local path is recorded; sampling blocked",
             path=None,
         )
-    contained = resolve_asset_local_path_contained(raw_path, project_root=root)
+    contained = resolve_asset_authorized_path(
+        raw_path,
+        project_root=root,
+        expected_sha256=integrity.expected_sha256,
+    )
     if contained is None:
         return _fresh_integrity(
             integrity,

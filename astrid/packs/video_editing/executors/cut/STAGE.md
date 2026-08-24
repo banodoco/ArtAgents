@@ -30,13 +30,13 @@ present to satisfy the cache hit.
 import astrid.sdk as sdk
 result = sdk.invoke(
     "video_editing.cut",
+        kind="executor", project="demo",
     inputs={
         "pool": "./out/pool.json",
         "arrangement": "./out/arrangement.json",
         "brief": "./brief.json",
         "theme": "./themes/my-theme",
     },
-    out="./out",
 )
 ```
 
@@ -46,6 +46,7 @@ With optional video/audio sources:
 import astrid.sdk as sdk
 result = sdk.invoke(
     "video_editing.cut",
+        kind="executor", project="demo",
     inputs={
         "pool": "./out/pool.json",
         "arrangement": "./out/arrangement.json",
@@ -54,7 +55,6 @@ result = sdk.invoke(
         "audio": "./source.mp3",
         "theme": "./themes/my-theme",
     },
-    out="./out",
 )
 ```
 

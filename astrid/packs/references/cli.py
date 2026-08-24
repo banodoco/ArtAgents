@@ -17,15 +17,17 @@ handler renders through the shared product output layer
 concise human output, and stable exit codes stay aligned with the frozen SDK
 contract.
 
-Verbs (exactly these eight, one SDK call each):
+Verbs (exactly these nine, one SDK call each):
 
 - ``create`` — ``client.references.create`` (project, frozen ``--kind``,
   ``--name``, exact same-project ``--media`` id, optional
   ``--description``/``--metadata``, and ``--idempotency-key``);
 - ``update <ref>`` — ``client.references.update`` (name/description/metadata
   delta; kind and project stay immutable);
-- ``archive <ref>`` — ``client.references.archive`` (soft terminal
-  mutation; every byte and association is preserved);
+- ``archive <ref>`` — ``client.references.archive`` (reversible soft archive;
+  every byte and association is preserved);
+- ``unarchive <ref>`` — ``client.references.unarchive`` (id or unambiguous
+  project-local name; safe to repeat);
 - ``associate <ref>`` — ``client.references.associate`` (exact ``--media``
   id, frozen ``--role``, optional ``--context-task``/``--ordinal``/
   ``--metadata``);
@@ -69,9 +71,7 @@ def _parse_json_object(value: str) -> dict[str, Any]:
     try:
         parsed = json.loads(value)
     except json.JSONDecodeError as exc:
-        raise argparse.ArgumentTypeError(
-            f"invalid JSON object: {exc.msg}"
-        ) from exc
+        raise argparse.ArgumentTypeError(f"invalid JSON object: {exc.msg}") from exc
     if not isinstance(parsed, dict):
         raise argparse.ArgumentTypeError("must be a JSON object")
     return parsed
@@ -97,8 +97,9 @@ def _add_idempotency_key(subparser: argparse.ArgumentParser) -> None:
 def _add_project_arg(subparser: argparse.ArgumentParser) -> None:
     subparser.add_argument(
         "--project",
-        required=True,
-        help="Owning project id or slug.",
+        required=False,
+        default=None,
+        help="Owning project id or slug (defaults to the selected project).",
     )
 
 
@@ -132,6 +133,15 @@ def _cmd_update(parsed: argparse.Namespace) -> int:
 
 def _cmd_archive(parsed: argparse.Namespace) -> int:
     result = parsed.client.references.archive(
+        parsed.project,
+        parsed.ref,
+        idempotency_key=parsed.idempotency_key,
+    )
+    return print_result(result, as_json=parsed.json)
+
+
+def _cmd_unarchive(parsed: argparse.Namespace) -> int:
+    result = parsed.client.references.unarchive(
         parsed.project,
         parsed.ref,
         idempotency_key=parsed.idempotency_key,
@@ -176,9 +186,7 @@ def _cmd_set_primary(parsed: argparse.Namespace) -> int:
 
 
 def _cmd_list(parsed: argparse.Namespace) -> int:
-    result = parsed.client.references.list(
-        parsed.project, include_archived=parsed.include_archived
-    )
+    result = parsed.client.references.list(parsed.project, include_archived=parsed.include_archived)
     return print_result(result, as_json=parsed.json)
 
 
@@ -196,8 +204,7 @@ def _configure_create(subparser: argparse.ArgumentParser) -> None:
         "--kind",
         choices=REFERENCE_KINDS,
         required=True,
-        help="Frozen reference kind "
-        f"(choices: {', '.join(REFERENCE_KINDS)}).",
+        help=f"Frozen reference kind (choices: {', '.join(REFERENCE_KINDS)}).",
     )
     subparser.add_argument("--name", required=True, help="Reference name.")
     subparser.add_argument(
@@ -249,9 +256,29 @@ def _configure_archive(subparser: argparse.ArgumentParser) -> None:
     subparser.set_defaults(handler=_cmd_archive)
 
 
+def _configure_unarchive(subparser: argparse.ArgumentParser) -> None:
+    _add_project_arg(subparser)
+    subparser.add_argument(
+        "ref",
+        help=(
+            "Reference id or exact project-local name. Ambiguous names fail "
+            "with candidate ids from list --include-archived."
+        ),
+    )
+    _add_idempotency_key(subparser)
+    _add_json_flag(subparser)
+    subparser.set_defaults(handler=_cmd_unarchive)
+
+
 def _configure_associate(subparser: argparse.ArgumentParser) -> None:
     _add_project_arg(subparser)
-    subparser.add_argument("ref", help="Reference id.")
+    subparser.add_argument(
+        "ref",
+        help=(
+            "Reference id or exact project-local name; ambiguous names fail "
+            "with candidate ids."
+        ),
+    )
     subparser.add_argument(
         "--media",
         required=True,
@@ -261,8 +288,7 @@ def _configure_associate(subparser: argparse.ArgumentParser) -> None:
         "--role",
         choices=MEDIA_REFERENCE_ROLES,
         required=True,
-        help="Frozen media-reference role "
-        f"(choices: {', '.join(MEDIA_REFERENCE_ROLES)}).",
+        help=f"Frozen media-reference role (choices: {', '.join(MEDIA_REFERENCE_ROLES)}).",
     )
     subparser.add_argument(
         "--context-task",
@@ -305,8 +331,7 @@ def _configure_link(subparser: argparse.ArgumentParser) -> None:
         "--kind",
         choices=REFERENCE_LINK_KINDS,
         required=True,
-        help="Frozen reference-link kind "
-        f"(choices: {', '.join(REFERENCE_LINK_KINDS)}).",
+        help=f"Frozen reference-link kind (choices: {', '.join(REFERENCE_LINK_KINDS)}).",
     )
     subparser.add_argument(
         "--metadata",
@@ -359,14 +384,18 @@ COMMANDS: tuple[CommandSpec, ...] = (
     ),
     CommandSpec(
         "update",
-        help="Update name/description/metadata "
-        "(kind and project stay immutable).",
+        help="Update name/description/metadata (kind and project stay immutable).",
         configure=_configure_update,
     ),
     CommandSpec(
         "archive",
-        help="Soft-archive one reference (every byte and association stays).",
+        help="Soft-archive one reference (reversible; associations stay).",
         configure=_configure_archive,
+    ),
+    CommandSpec(
+        "unarchive",
+        help="Restore by id/name; safe to repeat (changed=false when active).",
+        configure=_configure_unarchive,
     ),
     CommandSpec(
         "associate",
@@ -400,19 +429,18 @@ COMMANDS: tuple[CommandSpec, ...] = (
 def build_parser(client: Any) -> argparse.ArgumentParser:
     """Build the nested ``media references`` product parser stamped with *client*.
 
-    Exactly the eight verbs above are registered: no aliases and no
+    Exactly the nine verbs above are registered: no aliases and no
     top-level exposure — this parser is only reachable beneath the media
     family.
     """
     parser = argparse.ArgumentParser(
         prog="astrid media references",
         description=(
-            "Reference create/update/archive/associate/link/set-primary/list/show "
+            "Reference create/update/archive/unarchive/associate/link/"
+            "set-primary/list/show "
             "(nested product family)."
         ),
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
-    register_product_commands(
-        subparsers, COMMANDS, family=_FAMILY, client=client
-    )
+    register_product_commands(subparsers, COMMANDS, family=_FAMILY, client=client)
     return parser

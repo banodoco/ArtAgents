@@ -60,7 +60,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     parser = RecoverableArgumentParser(
-        prog="python3 -m astrid packs",
+        prog="python3 -m astrid.core.pack.cli",
         description="Manage and validate Astrid packs.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -87,6 +87,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     list_parser.add_argument(
         "--json", action="store_true", help="Emit machine-readable JSON."
+    )
+    list_parser.add_argument(
+        "--pack-root", action="append", dest="pack_roots",
+        help="Additional pack collection root (repeatable; also honors ASTRID_PACKS_PATH).",
     )
     list_parser.add_argument("--category", help="Filter by metadata.category.")
     _add_taxonomy_filter_args(list_parser)
@@ -122,6 +126,10 @@ def build_parser() -> argparse.ArgumentParser:
         dest="json",
         help="Output as JSON.",
     )
+    inspect_parser.add_argument(
+        "--pack-root", action="append", dest="pack_roots",
+        help="Additional pack collection root (also honors ASTRID_PACKS_PATH).",
+    )
     inspect_parser.set_defaults(handler=_handle_inspect)
 
     status_parser = subparsers.add_parser(
@@ -129,6 +137,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     status_parser.add_argument(
         "--json", action="store_true", help="Emit machine-readable JSON."
+    )
+    status_parser.add_argument(
+        "--pack-root", action="append", dest="pack_roots",
+        help="Additional pack collection root (repeatable; also honors ASTRID_PACKS_PATH).",
     )
     status_parser.add_argument("--category", help="Filter by metadata.category.")
     _add_taxonomy_filter_args(status_parser)

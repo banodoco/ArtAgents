@@ -52,7 +52,8 @@
     }
   ],
   "isolation": {
-    "mode": "subprocess"
+    "mode": "subprocess",
+    "network": true
   },
   "keywords": [
     "video",
@@ -64,6 +65,8 @@
   ],
   "kind": "built_in",
   "metadata": {
+    "env": ["OPENAI_API_KEY"],
+    "secrets_required": ["OPENAI_API_KEY"],
     "output_result_manifest": true,
     "requires_timeline": false,
     "runtime_entrypoint": "main",

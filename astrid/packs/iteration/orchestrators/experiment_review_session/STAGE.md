@@ -72,12 +72,12 @@ then re-validated semantically against the experiment rubric.
 import astrid.sdk as sdk
 result = sdk.invoke(
     "iteration.experiment_review_session",
-    inputs={
-        "experiment": "path/to/experiment.json",
-        "runs_dir": "projects/my-project/runs",
-        "reviewer_id": "peter",
-        "no_open": True,
-    },
-    out="./session",
+        kind="orchestrator", project="demo",
+    orchestrator_args=(
+        "--experiment", "path/to/experiment.json",
+        "--runs-dir", "projects/my-project/runs",
+        "--reviewer-id", "peter",
+        "--no-open",
+    ),
 )
 ```

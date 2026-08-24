@@ -158,10 +158,11 @@ of an existing project).
 
 ### Regular Invocation
 
-A real executor run addressed with `project=` writes its outputs inside the
-project's own `runs/<run-id>/` tree — do **not** pass `out=` together with
-`project=` (the two are mutually exclusive; `out=` is only for project-less
-tooling runs):
+A real executor run addressed with `project=` executes inside a private,
+attempt-owned staging directory and publishes successful outputs to managed
+content-addressed media. The staging directory is removed after completion;
+durable locators are returned in `result.outputs`. Do **not** pass `out=`
+together with `project=` (the two are mutually exclusive):
 
 ```python
 import astrid
@@ -174,14 +175,44 @@ result = astrid.invoke(
     inputs={"review": "experiments/prompt-brevity/review.json"},
 )
 print(result.ok)        # True on success
-print(result.run_id)    # the project-scoped run id under demo/runs/
-print(result.outputs)   # {"review_html": ..., "review_summary": ...}
+print(result.run_id)    # durable kernel run identity
+print(result.run_root)  # None for kernel-managed invocations; staging is private
+print(result.outputs)   # durable managed-media artifacts/locators
 print(result.error)     # error mapping if not ok
 ```
 
 Orchestrator invocations take the same arguments minus `out` (their outputs
 also land in the project run tree); `brief` and `orchestrator_args` are
 orchestrator-specific options.
+
+For maker-facing loops that need one JSON-safe branch for both pre-admission
+and runtime failures, use `invoke_result`. It preserves the typed exception
+API of `invoke` while serializing a validation/precondition failure into the
+same `InvocationResult` error mapping, without admitting a run:
+
+```python
+import astrid.sdk as sdk
+
+result = sdk.invoke_result(
+    "generation.generate_image",
+    kind="executor",
+    project="demo",
+    inputs={
+        "model": "not-a-real-model",
+        "mode": "text-to-image",
+        "execution": "cloud",
+        "prompt": "a blue square",
+    },
+)
+print(result.ok)                      # False
+print(result.error["sdk_category"])  # validation
+print(result.to_dict())               # JSON-safe structured result
+```
+
+`astrid.sdk.invoke` and the typed `astrid.generate.*` facades intentionally keep
+raising `AstridSDKError` subclasses for code that wants precise recovery
+branches. `invoke_result` is the canonical agent-loop boundary when catching
+and serializing those typed failures is preferable.
 
 ### Typed Error Handling
 
@@ -226,8 +257,12 @@ except astrid.CapabilityInvocationError as e:
 ### Event Observation
 
 `read_events()` returns a verified, read-only snapshot of a completed run's
-event stream. `subscribe_events()` yields events from an in-progress run as
-they are appended.
+event stream. A filesystem `events.jsonl` projection is preferred when it is
+present. If that optional local-process projection is absent — for example
+after a portable backup/restore — the SDK reads the canonical SQLite
+`core.run` stream instead, so restored runs remain observable. The fallback
+does not create or repair a projection. `subscribe_events()` yields the
+filesystem stream for an in-progress run as it is appended.
 
 ```python
 import astrid
@@ -257,15 +292,18 @@ Each event is an `EventStreamRecord` with fields:
 
 | Field | Type | Description |
 |---|---|---|
-| `source` | `str` | `"task"` or `"audit"` |
+| `source` | `str` | `"task"`, `"audit"`, or `"kernel"` for the canonical restored-run fallback |
 | `line` | `int` | One-indexed line number in the event log |
 | `timestamp` | `str \| None` | ISO-8601 timestamp from the event |
 | `kind` | `str \| None` | Event kind (`"run_started"`, `"step_dispatched"`, `"run_completed"`, etc.) |
 | `hash` | `str \| None` | SHA-256 hash for chain verification |
-| `payload` | `dict[str, Any]` | The raw event dict from the JSONL file |
+| `payload` | `dict[str, Any]` | The raw JSONL event, or the canonical kernel event fields (including `event_id`, `seq`, `data`, and integrity hashes) |
 
-When `verify=True` (the default), both functions validate the hash chain
-before returning or yielding. A broken chain raises `CapabilityEventLogError`.
+When `verify=True` (the default), the selected source is verified before
+returning or yielding. Filesystem streams validate their JSONL chain; kernel
+fallback streams validate the SQLite stream head, contiguous sequence, every
+previous-hash link, and every recomputed event hash. A broken or mismatched
+chain raises `CapabilityEventLogError`.
 An invalid project slug raises `CapabilityPreconditionError`.
 
 `subscribe_events()` accepts two additional keyword arguments:

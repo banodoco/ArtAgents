@@ -14,19 +14,25 @@ selected executor. Inspect the underlying executors' inputs through the SDK.
 ## Examples
 
 The SDK form passes only the `mode` selector through the executor registry.
-Modality-specific flags (`--video`, `--image`, `--at`, `--query`,
-…) are not declared as registry inputs, so for any non-trivial call invoke
-the dispatcher module directly:
+Every invocation is attached to a project; project-scoped runs write inside
+that project's run tree. Modality-specific flags (`--video`, `--image`, `--at`,
+`--query`, …) are not declared as registry inputs, so use the underlying
+modality capability for any non-trivial call. The dispatcher SDK form is useful
+for dry runs, scripting, and CI shape checks:
 
 ```python
 # SDK form — useful for dry runs, scripting, and CI shape checks.
 import astrid.sdk as sdk
-result = sdk.invoke("understanding.understand", inputs={"mode": "video"}, dry_run=True)
+result = sdk.invoke(
+    "understanding.understand",
+    kind="executor",
+    project="demo",
+    inputs={"mode": "video", "video": "source.mp4", "at": "01:20"},
+    dry_run=True,
+)
 ```
 
-```bash
-# Canonical form — full modality-specific flag passthrough.
-python3 -m astrid.packs.understanding.executors.understand.run --mode image --image frame.jpg
-python3 -m astrid.packs.understanding.executors.understand.run --mode audio --audio clip.wav
-python3 -m astrid.packs.understanding.executors.understand.run --mode video --video source.mp4 --at 01:20
-```
+The direct module commands previously shown here are internal runner commands,
+not public entrypoints; the canonical-entrypoint guard rejects direct
+invocation. Invoke the underlying public capability after inspecting its
+schema when modality-specific inputs are needed.

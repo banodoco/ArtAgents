@@ -9,10 +9,27 @@ Reusable HTTP server for human-in-loop steps. Any orchestrator that needs a
 human to look at something and produce a structured decision passes its own
 HTML page + JSON data, and gets back validated JSON.
 
-## CLI
+## Public SDK shape
+
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "editorial.human_review",
+    kind="executor",
+    project="demo",
+    inputs={"html": "review/index.html", "data": "review/data.json"},
+    dry_run=True,
+)
+```
+
+## Internal runner CLI (not a public entrypoint)
+
+The flexible HTTP flags below are retained for Astrid's internal runner and
+debugging. Direct module invocation is rejected unless the internal invocation
+marker is set; public callers should use the SDK shape above.
 
 ```
-python3 -m astrid.packs.editorial.executors.human_review.run \
+ASTRID_INTERNAL_INVOCATION=1 python3 -m astrid.packs.editorial.executors.human_review.run \
   --html <path>            # file or dir; served at /
   --data <path>            # JSON file, served at /data.json (read-only)
   --serve /prefix=<dir>    # repeatable; static mount

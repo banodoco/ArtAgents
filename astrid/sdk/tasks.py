@@ -43,6 +43,7 @@ never opens its own writer or connection.
 
 from __future__ import annotations
 
+import sqlite3
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -56,6 +57,7 @@ from astrid.core.repositories.tasks import (
 )
 from astrid.core.store.uow import UnitOfWork
 from astrid.core.store.writer import DatabaseWriter
+from astrid.core.schema_packs.registry import FrozenSchemaPackRegistry
 from astrid.sdk.contracts import (
     DomainResult,
     derive_stable_id,
@@ -83,12 +85,20 @@ class TasksService:
         tasks: TaskRepository,
         receipts: ReceiptService,
         event_log: EventRepository,
+        media: Any | None = None,
+        projects_root: str | None = None,
+        runs: Any | None = None,
+        registry: FrozenSchemaPackRegistry | None = None,
     ) -> None:
         self._writer = writer
         self._projects = projects
         self._tasks = tasks
         self._receipts = receipts
         self._event_log = event_log
+        self._media = media
+        self._projects_root = projects_root
+        self._runs = runs
+        self._registry = registry
 
     # -- create ------------------------------------------------------------
 
@@ -177,13 +187,21 @@ class TasksService:
 
     # -- show --------------------------------------------------------------
 
-    def show(self, task_id: str) -> DomainResult[dict[str, Any]]:
+    def show(
+        self, task_id: str, project_id: str | None = None
+    ) -> DomainResult[dict[str, Any]]:
         """Return one task's full immutable read model by id.
 
         A missing task is a typed ``not_found``.
         """
         try:
             model = self._tasks.show(self._writer, task_id)
+            if project_id is not None:
+                resolved = self._projects.resolve(self._writer, project_id)
+                if model.project_id != resolved:
+                    raise ServiceValidationError(
+                        f"task {task_id!r} does not belong to project {project_id!r}"
+                    )
         except Exception as exc:  # noqa: BLE001 - centralized bounded mapping
             return DomainResult.failure(map_error(exc))
         return DomainResult.success(model.to_dict())
@@ -203,11 +221,12 @@ class TasksService:
     ) -> DomainResult[dict[str, Any]]:
         """Cancel one nonterminal task and return its committed receipt.
 
-        A queued/blocked task is cancelled directly. A running task requires
-        the executor-owned attempt fence (``attempt_id``/``lease_id``/
-        ``expected_status_version``); presenting none against a running task
-        is a typed ``validation_error``, and a terminal task is a typed
-        ``terminal_state`` — the repository's writer-order terminal
+        A queued/blocked task is cancelled directly. An operator may cancel a
+        running task without executor-owned fence values: the writer fences
+        the terminal winner and a later completion cannot publish outputs.
+        Internal workers may still provide the exact
+        ``attempt_id``/``lease_id``/``expected_status_version`` fence. A
+        terminal task is a typed ``terminal_state`` — writer-order terminal
         immutability (SD1) is preserved unchanged.
         """
         try:
@@ -269,6 +288,8 @@ class TasksService:
             return DomainResult.failure(
                 map_error(exc), idempotency_key=idempotency_key or ""
             )
+        prior_receipt = self._committed_receipt(project_id, key)
+        was_replay = prior_receipt is not None
         try:
             model = UnitOfWork(self._writer).run(
                 lambda uow: self._tasks.retry(
@@ -280,21 +301,114 @@ class TasksService:
             )
         except Exception as exc:  # noqa: BLE001 - centralized bounded mapping
             return DomainResult.failure(map_error(exc), idempotency_key=key)
+        # A finalized receipt is the stable replay result.  Do not re-read
+        # mutable event-head metadata on replay: unrelated later events must
+        # not make an identical mutation appear to have changed.
+        finalized_replay = (
+            was_replay
+            and prior_receipt is not None
+            and isinstance(prior_receipt.result, Mapping)
+            and "run" in prior_receipt.result
+        )
+        result_data = (
+            dict(prior_receipt.result)
+            if finalized_replay and prior_receipt is not None
+            else model.to_dict()
+        )
+        if not finalized_replay:
+            if (
+                not was_replay
+                and self._media is not None
+                and self._projects_root is not None
+            ):
+                try:
+                    from astrid.sdk.invocation import dispatch_retried_task
+
+                    dispatch_retried_task(
+                        writer=self._writer,
+                        task_repo=self._tasks,
+                        media_repo=self._media,
+                        projects_root=self._projects_root,
+                        task=model.task,
+                        attempt=model.attempt,
+                        idempotency_key=key,
+                        registry=self._registry,
+                    )
+                except Exception as exc:  # noqa: BLE001 - typed retry execution failure
+                    return DomainResult.failure(map_error(exc), idempotency_key=key)
+            # Repository admission records its receipt before the synchronous
+            # handler runs. Re-read task/attempt and append an explicit nullable
+            # parent projection so this public response is unambiguously the
+            # current result for both invocation and standalone tasks.
+            try:
+                current_task = self._tasks.show(self._writer, task_id)
+                with self._writer.read_only_connection() as conn:
+                    conn.row_factory = sqlite3.Row
+                    current_attempt = conn.execute(
+                        "SELECT * FROM execution_attempts WHERE task_id = ? "
+                        "ORDER BY attempt_no DESC LIMIT 1",
+                        (task_id,),
+                    ).fetchone()
+                result_data["task"] = current_task.to_dict()
+                if current_attempt is not None:
+                    from astrid.core.repositories.tasks import TaskAttemptReadModel
+
+                    result_data["attempt"] = TaskAttemptReadModel.from_mapping(
+                        dict(current_attempt)
+                    ).to_dict()
+                result_data["run"] = None
+                result_data["progress"] = None
+                result_data["result"] = None
+                if current_task.run_id is not None and self._runs is not None:
+                    parent = self._runs.show(project_id, current_task.run_id)
+                    if not parent.ok:
+                        raise RuntimeError(
+                            "parent run disappeared while finalizing task retry"
+                        )
+                    result_data["run"] = parent.data
+                    result_data["progress"] = parent.data.get("progress")
+                    result_data["result"] = parent.data.get("result")
+            except Exception as exc:  # noqa: BLE001 - typed retry execution failure
+                return DomainResult.failure(map_error(exc), idempotency_key=key)
+
+            # Finalize only the receipt payload. Receipt identity, request
+            # hash, event ids, and project sequence remain immutable; no
+            # second receipt or event is created. This makes future exact-key
+            # replays return the same logically final result.
+            try:
+                self._receipts.finalize_result(
+                    self._writer,
+                    project_id=project_id,
+                    idempotency_key=key,
+                    result=result_data,
+                )
+            except Exception as exc:  # noqa: BLE001 - typed receipt failure
+                return DomainResult.failure(map_error(exc), idempotency_key=key)
+        receipt = self._committed_receipt(project_id, key)
         return DomainResult.success(
-            model.to_dict(),
-            receipt=self._committed_receipt(project_id, key),
+            result_data,
+            receipt=receipt,
             idempotency_key=key,
         )
 
     # -- events ------------------------------------------------------------
 
-    def events(self, task_id: str) -> DomainResult[list[dict[str, Any]]]:
+    def events(
+        self, task_id: str, project_id: str | None = None
+    ) -> DomainResult[list[dict[str, Any]]]:
         """Return the task's ordered ``core.task`` stream events.
 
         A read-only, transaction-free read through the ordered event
         repository (``seq`` order within the task stream).
         """
         try:
+            if project_id is not None:
+                model = self._tasks.show(self._writer, task_id)
+                resolved = self._projects.resolve(self._writer, project_id)
+                if model.project_id != resolved:
+                    raise ServiceValidationError(
+                        f"task {task_id!r} does not belong to project {project_id!r}"
+                    )
             models = self._event_log.list_events(
                 stream_id=f"{task_id}:{CORE_TASK_STREAM_TYPE}"
             )

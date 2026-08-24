@@ -22,8 +22,8 @@ Run:
 import astrid.sdk as sdk
 result = sdk.invoke(
     "reigh.spatial_audio_page",
+        kind="executor", project="demo",
     inputs={"manifest": "runs/foley_map/example/tiles.json"},
-    out="runs/foley_map/example/page",
 )
 ```
 

@@ -2,21 +2,21 @@
 name: generation
 description: >
   Generate images and videos from text prompts using the elegant
-  `astrid.generate` facade.  Image and video generation route through
+  `astrid.generate` facade.  Image, audio, and video generation route through
   the same executor code path (SDK, project-bound, or ad-hoc output
   directory).  Covers generate_image, generate_video, and
-  generate_image_openai (executor-only).
+  generate_audio, and generate_image_openai (executor-only).
 ---
 
 # Generation
 
-The generation pack provides a first-class **library facade** for image and
-video generation and also exposes the underlying executors for direct (SDK)
+The generation pack provides a first-class **library facade** for image, audio,
+and video generation and also exposes the underlying executors for direct (SDK)
 and automation use.
 
 ## Quick-start — the `astrid.generate` facade
 
-Import `astrid` and call `.image()` or `.video()`.  Every call returns a typed
+Import `astrid` and call `.image()`, `.audio()`, or `.video()`.  Every call returns a typed
 `GenerationResult` with `.path`, `.ok`, `.image_paths` / `.video_paths`,
 `.model_actual`, `.seed_used`, `.manifest`, and `.run_dir`.
 
@@ -58,6 +58,12 @@ img = astrid.generate.image(
 )
 ```
 
+`execution` is the canonical facade parameter.  `backend` is accepted as a
+compatibility alias, but it is resolved before invocation admission and is
+never ignored: an unavailable model/backend pair (for example
+`model="flux-schnell", backend="local"`) fails with the valid backend list
+and creates no run.  If both spellings are supplied, they must match.
+
 > **Note:** `edit`, `inpaint`, `outpaint`, and `upscale` always require an
 > explicit `mode` argument — they cannot be inferred from inputs (SD-002).
 
@@ -73,6 +79,26 @@ clip = astrid.generate.video(
 clip.path          # first output .mp4
 clip.video_paths   # list[Path] — same object as .image_paths
 ```
+
+### Audio
+
+```python
+# Audio currently has a cloud-only `music` route in the model catalog.
+sound = astrid.generate.audio(
+    model="stable-audio-3-medium",
+    prompt="a two-second gentle water splash",
+    duration=2.0,
+    execution="cloud",
+)
+sound.ok
+```
+
+All three typed facades run the same read-only preflight before dry-run or
+live admission.  It validates the model → mode → execution matrix and required
+inputs.  In particular, `mode="flf"` requires both `image_ref` and
+`image_end_ref`; a missing end frame is a typed `CapabilityMissingInputError`
+and creates no run.  Local routes also require the VibeComfy/ComfyUI runtime;
+the preflight reports an install command and never falls back to cloud.
 
 ```python
 # Image-to-video

@@ -91,6 +91,14 @@ Edit).  These are separate model IDs from text-to-image checkpoints
 
 ## Request validation (hard-fail BEFORE the generation loop)
 
+The typed `astrid.generate.image()` facade uses `execution` as its canonical
+backend-selection parameter.  It also accepts `backend` as a compatibility
+alias; the alias is resolved before kernel admission and can never silently
+fall back to an inferred backend.  Supplying an unavailable pair such as
+`model="flux-schnell", backend="local"` fails with the model's valid backend
+list and creates no run.  If both `execution` and `backend` are supplied, they
+must name the same backend.
+
 1. **Missing `--mode`**: Rejected at argparse (required argument).
 2. **Unknown (model, mode) pair**: Exits non-zero with a clear error.
 3. **Backend not available**: If the chosen (model, mode) has no

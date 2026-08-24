@@ -80,7 +80,7 @@ prepare/review path never branches on provider.
 import astrid.sdk as sdk
 result = sdk.invoke(
     "iteration.experiment_import",
+        kind="executor", project="demo",
     inputs={"root": "path/to/discord-command-poc"},
-    out="./out",
 )
 ```

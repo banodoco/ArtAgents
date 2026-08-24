@@ -12,8 +12,16 @@ Use the read-only doctor first, with a disposable or explicit projects root:
 python3 -m astrid doctor --json --projects-root ./projects
 ```
 
-Treat `schema_versions: fail` as a migration or schema incompatibility, and
-`unavailable` as a local service or owner-lock condition. Keep the original
+On a pristine root, `state: "uninitialized"` with `ok: true` is expected and
+the report tells you to create a project; it is not a hidden store failure.
+After initialization, `state: "ready"` means healthy and `state:
+"unhealthy"` or a failed check means investigate. Treat `schema_versions: fail`
+as a migration or schema incompatibility. If a
+product CLI command returns `error.code=unavailable` with
+`error.details.reason=store_owned`, `astrid serve` owns the store: use `GET
+/routes` and its HTTP routes while it runs, or wait for a clean shutdown.
+Reads may retry after release. For writes, keep the exact payload and
+idempotency key, retry only after release, and verify state. Keep the original
 project unchanged while selecting a compatible checkout or retrying after the
 owner exits. A stale timeline save is expected to return
 `timeline_version_conflict` over HTTP 409 or `stale_version` through the SDK;

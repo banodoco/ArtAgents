@@ -35,6 +35,7 @@ from astrid.core.backup import (
 )
 from astrid.core.backup import cli as backup_cli
 from astrid.core.backup.operations import recover_backup_publication
+from astrid.core import doctor
 
 _PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
 
@@ -94,6 +95,105 @@ def test_backup_restore_round_trip(tmp_path: Path) -> None:
             project_count = conn.execute("SELECT COUNT(*) FROM projects").fetchone()[0]
     assert project_count == 1
     assert any(p.is_file() for p in sha256_tree.rglob("*"))
+
+
+def test_restore_rebases_managed_media_for_a_different_projects_root(
+    tmp_path: Path,
+) -> None:
+    """Cross-root restore publishes a self-contained managed media locator."""
+    source = tmp_path / "source"
+    target = tmp_path / "target"
+    _seed_project(source)
+    backup = tmp_path / "backup"
+    create_backup(projects_root=source, dest_path=backup)
+
+    restored = restore_backup(backup, projects_root=target)
+    assert restored.rebased_media_locators == 1
+    assert restored.restored_project_workspaces == 1
+    binding = json.loads((target / "demo" / "project.json").read_text(encoding="utf-8"))
+    assert binding["slug"] == "demo"
+    assert binding["kernel_authority"] is True
+    assert (target / "demo" / "plan.md").is_file()
+
+    source_db = sqlite3.connect(source / ".astrid" / "astrid.sqlite3")
+    target_db = sqlite3.connect(target / ".astrid" / "astrid.sqlite3")
+    try:
+        source_locator = source_db.execute(
+            "SELECT locator FROM media_locations WHERE realm = 'managed_local'"
+        ).fetchone()[0]
+        target_locator = target_db.execute(
+            "SELECT locator FROM media_locations WHERE realm = 'managed_local'"
+        ).fetchone()[0]
+    finally:
+        source_db.close()
+        target_db.close()
+
+    assert source_locator != target_locator
+    assert str(target) in target_locator
+    assert Path(target_locator).is_file()
+
+    held_source = Path(source_locator).with_name(".source-held")
+    Path(source_locator).rename(held_source)
+    try:
+        with compose_standard_application(projects_root=target) as app:
+            listed = app.media_service.list("demo")
+            assert listed.ok, listed.error
+            media_id = listed.data[0]["id"]
+            shown = app.media_service.show("demo", media_id)
+            assert shown.ok, shown.error
+            verified = app.media_service.verify(
+                "demo",
+                shown.data["id"],
+                realm="managed_local",
+                idempotency_key="cross-root-verify",
+            )
+            assert verified.ok, verified.error
+    finally:
+        held_source.rename(Path(source_locator))
+
+
+def test_doctor_rejects_stale_managed_media_locator(tmp_path: Path) -> None:
+    """A stale absolute managed locator is unhealthy even when the tree exists."""
+    _seed_project(tmp_path)
+    db_path = tmp_path / ".astrid" / "astrid.sqlite3"
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            "UPDATE media_locations SET locator = ? WHERE realm = 'managed_local'",
+            (str(tmp_path / "old-root" / "media.bin"),),
+        )
+        conn.commit()
+        conn.execute("PRAGMA journal_mode=DELETE")
+    finally:
+        conn.close()
+    for suffix in ("-wal", "-shm"):
+        Path(f"{db_path}{suffix}").unlink(missing_ok=True)
+
+    checks = {check.name: check for check in doctor.run_checks(projects_root=tmp_path)}
+    assert checks["media_paths"].status == "fail"
+    assert "points outside this root" in checks["media_paths"].detail
+
+
+def test_restore_rejects_missing_managed_media_before_publishing(
+    tmp_path: Path,
+) -> None:
+    """A missing copied blob fails atomically with an actionable error."""
+    source = tmp_path / "source"
+    target = tmp_path / "target"
+    _seed_project(source)
+    _seed_project(target)
+    backup = tmp_path / "backup"
+    create_backup(projects_root=source, dest_path=backup)
+    digest_file = next(
+        path for path in (backup / "media" / "sha256").rglob("*") if path.is_file()
+    )
+    digest_file.unlink()
+
+    live_db = target / ".astrid" / "astrid.sqlite3"
+    before = live_db.read_bytes()
+    with pytest.raises(RestoreValidationError, match="restore was not published"):
+        restore_backup(backup, projects_root=target, allow_overwrite=True)
+    assert live_db.read_bytes() == before
 
 
 # ---------------------------------------------------------------------------

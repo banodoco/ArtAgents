@@ -245,6 +245,19 @@ def test_replace_config_commits_event_and_canonical_receipt(
     assert replaced_count == 1
     assert replaced_seq == 2
 
+    history = repo.history(writer, project_id, "main")
+    assert [(entry.version, entry.kind) for entry in history] == [
+        (1, "timeline.created"),
+        (2, TIMELINE_CONFIG_REPLACED_EVENT_KIND),
+    ]
+    assert history[1].config == REPLACED_CONFIG
+    assert history[1].registry == {"assets": REPLACED_ASSETS}
+    diffs = repo.diff(writer, project_id, "main")
+    assert len(diffs) == 1
+    assert diffs[0].from_version == 1
+    assert diffs[0].to_version == 2
+    assert diffs[0].to_kind == TIMELINE_CONFIG_REPLACED_EVENT_KIND
+
 
 def test_stale_expected_version_conflicts_with_zero_mutation(
     repo, writer, project_repo

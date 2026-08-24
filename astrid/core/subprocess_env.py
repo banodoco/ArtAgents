@@ -44,6 +44,9 @@ from astrid.core.env_vars import (
 from astrid.core.env_vars import (
     ASTRID_THEMES_ROOT as THEMES_ROOT_ENV,
 )
+from astrid.core.env_vars import (
+    ASTRID_PACKS_PATH as PACKS_PATH_ENV,
+)
 
 _SAFE_BASE_ENV = frozenset(
     {
@@ -81,6 +84,7 @@ _ASTRID_PROPAGATED_ENV = frozenset(
         TASK_ITEM_ID_ENV,
         TASK_ITERATION_ENV,
         THEMES_ROOT_ENV,
+        PACKS_PATH_ENV,
     }
 )
 

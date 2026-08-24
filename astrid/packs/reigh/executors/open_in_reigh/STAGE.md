@@ -18,12 +18,14 @@ the assets JSON) to a staging location suitable for import.
 ```python
 import astrid.sdk as sdk
 result = sdk.invoke("reigh.open_in_reigh", inputs={"timeline": "./out/hype.timeline.json"})
+    kind="executor", project="demo",
 ```
 
 With explicit assets file:
 
 ```python
 result = sdk.invoke("reigh.open_in_reigh", inputs={
+    kind="executor", project="demo",
     "timeline": "./out/hype.timeline.json",
     "assets": "./out/hype.assets.json",
 })

@@ -357,4 +357,54 @@ def run_product_family(
         raise ProductRegistryError(
             f"family {family!r} parser did not configure a handler"
         )
+    # Project-scoped product commands may omit ``--project`` when a
+    # workspace/user selection exists. Resolve only the preference here; the
+    # single SDK service call in the handler still resolves the selected ref
+    # against the bound kernel and therefore fails closed if it is stale.
+    if hasattr(parsed, "project") and parsed.project is None:
+        selected_project = getattr(client, "selected_project_ref", None)
+        try:
+            selected = selected_project() if callable(selected_project) else None
+        except ValueError as exc:
+            from astrid.core.cli.domain_output import print_result
+            from astrid.sdk.contracts import DomainResult, ErrorObject
+
+            details = {
+                "field": "project",
+                "reason": "invalid_selection_preference",
+                "recovery": "repair or remove the malformed preference, then run `astrid projects select <slug-or-id>`",
+            }
+            for key in ("scope", "path"):
+                value = getattr(exc, key, None)
+                if value is not None:
+                    details[key] = value
+            return print_result(
+                DomainResult.failure(
+                    ErrorObject(
+                        code="validation_error",
+                        message="the current project preference is invalid",
+                        details=details,
+                    )
+                ),
+                as_json=bool(getattr(parsed, "json", False)),
+            )
+        if selected is None:
+            from astrid.core.cli.domain_output import print_result
+            from astrid.sdk.contracts import DomainResult, ErrorObject
+
+            return print_result(
+                DomainResult.failure(
+                    ErrorObject(
+                        code="validation_error",
+                        message="no current project is selected; pass --project or run projects select",
+                        details={
+                            "field": "project",
+                            "reason": "no_current_project",
+                            "recovery": "run `astrid projects select <slug-or-id>` or pass --project",
+                        },
+                    )
+                ),
+                as_json=bool(getattr(parsed, "json", False)),
+            )
+        parsed.project = selected
     return int(handler(parsed))

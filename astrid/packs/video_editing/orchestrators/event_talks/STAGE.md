@@ -20,14 +20,15 @@ holding-screen detection, and render.
 import astrid.sdk as sdk
 result = sdk.invoke(
     "video_editing.event_talks",
-    inputs={"source": "long_recording.mp4"},
-    out="runs/event_talks",
+    kind="orchestrator",
+    project="demo",
+    orchestrator_args=("--source", "long_recording.mp4"),
 )
 ```
 
 ```bash
-# Individual subcommand (step executor mode):
-python3 -m astrid.packs.video_editing.orchestrators.event_talks.run \
+# Individual subcommand (internal runner step mode; not a public entrypoint):
+ASTRID_INTERNAL_INVOCATION=1 python3 -m astrid.packs.video_editing.orchestrators.event_talks.run \
   ados-sunday-template --out runs/talks/template.json
 ```
 

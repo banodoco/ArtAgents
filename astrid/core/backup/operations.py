@@ -31,6 +31,7 @@ and leaves the live database and media tree untouched.
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import shutil
 import sqlite3
@@ -43,6 +44,12 @@ from pathlib import Path
 from astrid.core.foundation.atomic_io import write_json_atomic
 from astrid.core.foundation.project_paths import resolve_projects_root
 from astrid.core.integrations.reigh.bridge_service import derive_database_path
+from astrid.core.io.media_import import (
+    managed_media_path,
+    sha256_file_bytes,
+    validate_digest,
+)
+from astrid.core.project.workspace import materialize_project_workspace
 from astrid.core.migrations.runner import (
     MigrationError,
     probe_database,
@@ -114,6 +121,12 @@ MANAGED_DIR_NAME = ".astrid"
 MEDIA_DIR_NAME = "media"
 """The managed-media tree name under ``.astrid``."""
 
+EXTERNAL_MEDIA_DIR_NAME = "external"
+"""Backup-owned bytes for reference-in-place ``external_local`` media."""
+
+EXTERNAL_MEDIA_TREE_NAME = "sha256"
+"""Digest tree below :data:`EXTERNAL_MEDIA_DIR_NAME`."""
+
 # ---------------------------------------------------------------------------
 # Exclusion rules (SD2): the managed-media copy never carries staging, caches,
 # logs, pack outputs, or secrets.
@@ -164,6 +177,28 @@ class RestoreValidationError(BackupError):
 
 
 @dataclass(frozen=True, slots=True)
+class _ExternalDependency:
+    """One external-local locator captured in a self-contained backup."""
+
+    location_id: str
+    media_id: str
+    original_locator: str
+    content_hash: str
+    byte_size: int
+    media_path: str
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "location_id": self.location_id,
+            "media_id": self.media_id,
+            "original_locator": self.original_locator,
+            "content_hash": self.content_hash,
+            "byte_size": self.byte_size,
+            "media_path": self.media_path,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class BackupResult:
     """Outcome of :func:`create_backup` (also the ``backup.json`` shape)."""
 
@@ -172,10 +207,14 @@ class BackupResult:
     packs: tuple[tuple[str, int, str, str], ...]  # (pack, version, name, checksum)
     media_files: int
     sqlite_pages: int
+    external_media_files: int = 0
+    external_dependencies: int = 0
+    external_dependencies_unresolved: int = 0
+    external_manifest: tuple[dict[str, object], ...] = ()
 
     def to_dict(self) -> dict[str, object]:
         """Return the JSON-safe envelope written as ``backup.json``."""
-        return {
+        payload: dict[str, object] = {
             "version": BACKUP_FORMAT_VERSION,
             "created_at": self.created_at,
             "packs": [
@@ -185,6 +224,22 @@ class BackupResult:
             "media_files": self.media_files,
             "sqlite_pages": self.sqlite_pages,
         }
+        # Keep the original v1 envelope unchanged for backups with no
+        # reference-in-place media.  The additive section is emitted only
+        # when it carries useful external dependency evidence.
+        if self.external_dependencies or self.external_media_files:
+            payload.update(
+                {
+                    "external_media_files": self.external_media_files,
+                    "external_dependencies": self.external_dependencies,
+                    "external_dependencies_unresolved": self.external_dependencies_unresolved,
+                    "external": {
+                        "mode": "self_contained",
+                        "files": list(self.external_manifest),
+                    },
+                }
+            )
+        return payload
 
 
 @dataclass(frozen=True, slots=True)
@@ -194,13 +249,23 @@ class RestoreResult:
     projects_root: Path
     database_path: Path
     restored_media_files: int
+    rebased_media_locators: int
     restored_at: str
+    restored_project_workspaces: int = 0
+    restored_external_files: int = 0
+    rebased_external_locators: int = 0
+    unresolved_external_locators: int = 0
 
     def to_dict(self) -> dict[str, object]:
         return {
             "projects_root": str(self.projects_root),
             "database_path": str(self.database_path),
             "restored_media_files": self.restored_media_files,
+            "rebased_media_locators": self.rebased_media_locators,
+            "restored_project_workspaces": self.restored_project_workspaces,
+            "restored_external_files": self.restored_external_files,
+            "rebased_external_locators": self.rebased_external_locators,
+            "unresolved_external_locators": self.unresolved_external_locators,
             "restored_at": self.restored_at,
         }
 
@@ -336,6 +401,140 @@ def _copy_media_tree(projects_root: Path, dest_media: Path) -> int:
             shutil.copy2(source_file, dest_file)
             count += 1
     return count
+
+
+def _path_is_within(path: Path, directory: Path) -> bool:
+    """Return whether *path* is below *directory* without following files."""
+    try:
+        path.resolve().relative_to(directory.resolve())
+    except ValueError:
+        return False
+    return True
+
+
+def _external_snapshot_path(media_root: Path, digest: str) -> Path:
+    """Return the backup-owned digest path for one external byte snapshot."""
+    valid = validate_digest(digest)
+    return (
+        media_root
+        / EXTERNAL_MEDIA_DIR_NAME
+        / EXTERNAL_MEDIA_TREE_NAME
+        / valid[:2]
+        / valid[2:4]
+        / valid
+    )
+
+
+def _copy_external_media(
+    staged_db: Path,
+    *,
+    dest_media: Path,
+    backup_destination: Path,
+) -> tuple[tuple[_ExternalDependency, ...], int]:
+    """Snapshot every readable external-local dependency into the backup.
+
+    External media is reference-in-place during normal editing, but a backup
+    is expected to be portable.  We therefore verify each source against the
+    recorded media digest, copy each digest once, and retain every original
+    locator in the envelope.  A missing, symlinked, or mutated source fails
+    before the staged backup can be published.
+    """
+    try:
+        conn = sqlite3.connect(read_only_uri(staged_db), uri=True)
+    except sqlite3.Error as exc:
+        raise BackupError(f"cannot inspect external media for backup: {exc}") from exc
+
+    dependencies: list[_ExternalDependency] = []
+    copied: set[str] = set()
+    try:
+        try:
+            rows = conn.execute(
+                "SELECT l.id, l.media_id, l.locator, m.content_hash, m.byte_size "
+                "FROM media_locations AS l JOIN media AS m ON m.id = l.media_id "
+                "WHERE l.realm = 'external_local' ORDER BY l.id"
+            ).fetchall()
+        except sqlite3.Error as exc:
+            raise BackupError(f"cannot inspect external media for backup: {exc}") from exc
+    finally:
+        conn.close()
+
+    for location_id, media_id, locator, content_hash, byte_size in rows:
+        digest = validate_digest(content_hash)
+        source = Path(str(locator)).expanduser()
+        if source.is_symlink() or not source.is_file():
+            raise BackupError(
+                "external_local backup dependency is unavailable: "
+                f"media {media_id}, location {location_id}, source {source}; "
+                "restore the external file or relocate it before backing up"
+            )
+        if _path_is_within(source, backup_destination):
+            raise BackupError(
+                "external_local backup dependency points inside the backup "
+                f"destination ({source}); refusing to snapshot its own output"
+            )
+        try:
+            source_hash = sha256_file_bytes(source)
+        except OSError as exc:
+            raise BackupError(
+                f"cannot read external_local backup dependency {source}: {exc}"
+            ) from exc
+        if source_hash != digest:
+            raise BackupError(
+                "external_local backup dependency changed: "
+                f"media {media_id}, location {location_id}, source {source}; "
+                f"expected {digest}, found {source_hash}; no backup was published"
+            )
+
+        # If the managed digest tree already contains the exact bytes, point
+        # the manifest at it. Otherwise materialize one external snapshot per
+        # digest. This dedupes same-content external locations and across
+        # managed/external realms without changing the source file.
+        managed_candidate = dest_media / "sha256" / digest[:2] / digest[2:4] / digest
+        if managed_candidate.is_file() and not managed_candidate.is_symlink():
+            try:
+                managed_valid = sha256_file_bytes(managed_candidate) == digest
+            except OSError:
+                managed_valid = False
+        else:
+            managed_valid = False
+        if managed_valid:
+            relative = managed_candidate.relative_to(dest_media).as_posix()
+        else:
+            target = _external_snapshot_path(dest_media, digest)
+            relative = target.relative_to(dest_media).as_posix()
+            if digest not in copied:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                fd, tmp_name = tempfile.mkstemp(
+                    prefix=f".{digest}.", suffix=".tmp", dir=target.parent
+                )
+                os.close(fd)
+                temp_target = Path(tmp_name)
+                try:
+                    shutil.copyfile(source, temp_target)
+                    copied_hash = sha256_file_bytes(temp_target)
+                    if copied_hash != digest:
+                        raise BackupError(
+                            "external_local backup dependency changed while copying: "
+                            f"{source}; expected {digest}, found {copied_hash}; "
+                            "no backup was published"
+                        )
+                    os.replace(temp_target, target)
+                finally:
+                    temp_target.unlink(missing_ok=True)
+                copied.add(digest)
+
+        dependencies.append(
+            _ExternalDependency(
+                location_id=str(location_id),
+                media_id=str(media_id),
+                original_locator=str(locator),
+                content_hash=digest,
+                byte_size=int(byte_size),
+                media_path=relative,
+            )
+        )
+
+    return tuple(dependencies), len({item.content_hash for item in dependencies})
 
 
 # ---------------------------------------------------------------------------
@@ -971,6 +1170,11 @@ def create_backup(
             # child that died before the managed-media stage was materialized.
             dest_media.mkdir(parents=True, exist_ok=True)
             media_files = _copy_media_tree(root, dest_media)
+            external_dependencies, external_media_files = _copy_external_media(
+                dest_db,
+                dest_media=dest_media,
+                backup_destination=dest,
+            )
             created_at = _utc_now()
             result = BackupResult(
                 dest_path=dest,
@@ -978,6 +1182,11 @@ def create_backup(
                 packs=packs,
                 media_files=media_files,
                 sqlite_pages=sqlite_pages,
+                external_media_files=external_media_files,
+                external_dependencies=len(external_dependencies),
+                external_manifest=tuple(
+                    item.to_dict() for item in external_dependencies
+                ),
             )
             # The marker is written only after every database, managed-media,
             # and metadata byte is complete in the sibling staging directory.
@@ -1085,6 +1294,463 @@ def _validate_staged_database(staged_db: Path) -> None:
         raise RestoreValidationError(
             f"schema-version incompatibility: {exc}"
         ) from exc
+
+
+def _normalize_staged_database_journal(staged_db: Path) -> None:
+    """Ensure a staged DB can be opened read-only without WAL sidecars."""
+    try:
+        conn = sqlite3.connect(str(staged_db), isolation_level=None)
+    except sqlite3.Error as exc:
+        raise RestoreValidationError(
+            f"cannot normalize staged database journal mode: {exc}"
+        ) from exc
+    try:
+        try:
+            mode = conn.execute("PRAGMA journal_mode=DELETE").fetchone()[0]
+        except sqlite3.Error as exc:
+            raise RestoreValidationError(
+                f"cannot normalize staged database journal mode: {exc}"
+            ) from exc
+        if str(mode).lower() != "delete":
+            raise RestoreValidationError(
+                f"staged database retained unsupported journal mode: {mode!r}"
+            )
+    finally:
+        conn.close()
+    for suffix in _RESTORE_DATABASE_SIDECARS:
+        Path(f"{staged_db}{suffix}").unlink(missing_ok=True)
+
+
+def _materialize_restored_project_workspaces(
+    staged_db: Path,
+    *,
+    projects_root: Path,
+) -> int:
+    """Rebuild file-oriented project bindings from the staged kernel rows.
+
+    The files are derived projections, so this reads only authoritative
+    project rows/settings and never replays or edits an event.  ``plan.md`` is
+    created only when absent; an existing human plan is preserved.  Existing
+    binding extension fields are preserved while kernel identity/default
+    fields are reconciled atomically.
+    """
+
+    try:
+        conn = sqlite3.connect(read_only_uri(staged_db), uri=True)
+        conn.row_factory = sqlite3.Row
+    except sqlite3.Error as exc:
+        raise RestoreValidationError(
+            f"cannot inspect restored projects for workspace materialization: {exc}"
+        ) from exc
+    try:
+        try:
+            rows = conn.execute(
+                "SELECT p.id, p.slug, p.name, p.settings_json, p.created_at, "
+                "p.updated_at, json_extract(created.payload_json, "
+                "'$.data.timeline_ulid') AS default_timeline_ulid "
+                "FROM projects AS p "
+                "LEFT JOIN timelines AS t ON t.id = "
+                "json_extract(p.settings_json, '$.default_timeline_id') "
+                "LEFT JOIN events AS created ON created.stream_id = t.event_stream_id "
+                "AND created.kind = 'timeline.created' "
+                "ORDER BY p.slug"
+            ).fetchall()
+        except sqlite3.Error as exc:
+            raise RestoreValidationError(
+                f"cannot inspect restored projects for workspace materialization: {exc}"
+            ) from exc
+    finally:
+        conn.close()
+
+    count = 0
+    for row in rows:
+        try:
+            settings = json.loads(str(row["settings_json"]))
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise RestoreValidationError(
+                f"restored project {row['slug']!r} has invalid settings JSON"
+            ) from exc
+        try:
+            materialize_project_workspace(
+                slug=str(row["slug"]),
+                name=str(row["name"]),
+                project_id=str(row["id"]),
+                projects_root=projects_root,
+                created_at=str(row["created_at"]),
+                updated_at=str(row["updated_at"]),
+                # Kernel defaults are UUID-backed settings.  The legacy file
+                # schema accepts only its old uppercase filesystem ULID and is
+                # not timeline authority; keep this derived sentinel null.
+                default_timeline_id=None,
+                reconcile_binding=True,
+            )
+        except (OSError, TypeError, ValueError) as exc:
+            raise RestoreValidationError(
+                "cannot materialize restored project workspace "
+                f"{row['slug']!r}: {exc}"
+            ) from exc
+        count += 1
+    return count
+
+
+def _rebase_staged_managed_media(
+    staged_db: Path,
+    *,
+    projects_root: Path,
+    staged_media: Path,
+) -> int:
+    """Rebase and verify every managed-local locator in a staged database.
+
+    Managed media locators historically contain absolute paths.  A database
+    snapshot can therefore carry a source-root path even when its bytes are
+    copied into a different restore root.  The digest is the durable identity
+    and defines the only valid managed path, so rewrite those projections in
+    the staged copy before publication.  Every rewritten target is checked
+    for regular-file status and byte identity while the live tree is still
+    untouched; a failure leaves the transaction unpublished.
+    """
+    try:
+        conn = sqlite3.connect(str(staged_db))
+    except sqlite3.Error as exc:
+        raise RestoreValidationError(
+            f"cannot open staged database for managed-media rebase: {exc}"
+        ) from exc
+
+    try:
+        try:
+            rows = conn.execute(
+                "SELECT l.id, l.media_id, l.locator, m.content_hash "
+                "FROM media_locations AS l "
+                "JOIN media AS m ON m.id = l.media_id "
+                "WHERE l.realm = 'managed_local' "
+                "ORDER BY l.id"
+            ).fetchall()
+        except sqlite3.Error as exc:
+            raise RestoreValidationError(
+                f"cannot inspect staged managed-media locators: {exc}"
+            ) from exc
+
+        updates: list[tuple[str, str]] = []
+        target_keys: set[tuple[str, str]] = set()
+        for location_id, media_id, _old_locator, content_hash in rows:
+            try:
+                canonical = managed_media_path(projects_root, content_hash)
+            except (TypeError, ValueError) as exc:
+                raise RestoreValidationError(
+                    "cannot rebase managed media location "
+                    f"{location_id}: invalid content hash {content_hash!r}"
+                ) from exc
+
+            digest = str(content_hash)
+            staged_file = staged_media / "sha256" / digest[:2] / digest[2:4] / digest
+            if staged_file.is_symlink() or not staged_file.is_file():
+                raise RestoreValidationError(
+                    "managed media restore is incomplete: "
+                    f"media {media_id} expects {staged_file}, but the copied "
+                    "file is missing or is not a regular file; restore was not published"
+                )
+            try:
+                actual_hash = sha256_file_bytes(staged_file)
+            except OSError as exc:
+                raise RestoreValidationError(
+                    f"cannot verify copied managed media {staged_file}: {exc}"
+                ) from exc
+            if actual_hash != digest:
+                raise RestoreValidationError(
+                    "managed media restore failed integrity verification: "
+                    f"{staged_file} hashes to {actual_hash}, expected {digest}; "
+                    "restore was not published"
+                )
+
+            target_key = (str(media_id), str(canonical))
+            if target_key in target_keys:
+                raise RestoreValidationError(
+                    "cannot rebase managed media locations: duplicate canonical "
+                    f"target {canonical} for media {media_id}"
+                )
+            target_keys.add(target_key)
+            if str(_old_locator) != str(canonical):
+                updates.append((str(canonical), str(location_id)))
+
+        if not updates:
+            return 0
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.executemany(
+                "UPDATE media_locations SET locator = ? WHERE id = ?", updates
+            )
+            conn.commit()
+        except sqlite3.Error as exc:
+            conn.rollback()
+            raise RestoreValidationError(
+                "cannot persist managed-media locator rebase; "
+                f"restore was not published: {exc}"
+            ) from exc
+        return len(updates)
+    finally:
+        conn.close()
+
+
+def _read_external_manifest(backup: Path) -> tuple[_ExternalDependency, ...]:
+    """Read and constrain the optional self-contained external section."""
+    try:
+        payload = json.loads(
+            (backup / BACKUP_METADATA_NAME).read_text(encoding="utf-8")
+        )
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RestoreValidationError(f"invalid backup metadata: {backup}") from exc
+    if not isinstance(payload, dict):
+        raise RestoreValidationError(f"backup metadata is not an object: {backup}")
+    section = payload.get("external")
+    if section is None:
+        return ()
+    if not isinstance(section, dict) or section.get("mode") != "self_contained":
+        raise RestoreValidationError(
+            "backup external section is not a self-contained snapshot"
+        )
+    raw_files = section.get("files")
+    if not isinstance(raw_files, list):
+        raise RestoreValidationError("backup external section has no files list")
+
+    result: list[_ExternalDependency] = []
+    seen_locations: set[str] = set()
+    media_root = (backup / BACKUP_MEDIA_DIR).resolve()
+    for raw in raw_files:
+        if not isinstance(raw, dict):
+            raise RestoreValidationError("backup external manifest entry is not an object")
+        try:
+            location_id = str(raw["location_id"])
+            media_id = str(raw["media_id"])
+            original_locator = str(raw["original_locator"])
+            digest = validate_digest(raw["content_hash"])
+            byte_size = int(raw["byte_size"])
+            media_path = str(raw["media_path"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise RestoreValidationError(
+                "backup external manifest entry is incomplete"
+            ) from exc
+        if not location_id or not media_id or not original_locator or byte_size < 0:
+            raise RestoreValidationError("backup external manifest entry has invalid identity")
+        if location_id in seen_locations:
+            raise RestoreValidationError(
+                f"backup external manifest repeats location {location_id}"
+            )
+        seen_locations.add(location_id)
+        relative = Path(media_path)
+        if relative.is_absolute() or ".." in relative.parts:
+            raise RestoreValidationError(
+                f"backup external manifest path escapes media tree: {media_path}"
+            )
+        staged_file = (media_root / relative).resolve()
+        try:
+            staged_file.relative_to(media_root)
+        except ValueError as exc:
+            raise RestoreValidationError(
+                f"backup external manifest path escapes media tree: {media_path}"
+            ) from exc
+        if staged_file.is_symlink() or not staged_file.is_file():
+            raise RestoreValidationError(
+                "backup external snapshot is missing: "
+                f"{media_path} for location {location_id}; restore was not published"
+            )
+        try:
+            actual_size = staged_file.stat().st_size
+            actual_hash = sha256_file_bytes(staged_file)
+        except OSError as exc:
+            raise RestoreValidationError(
+                f"cannot verify backup external snapshot {staged_file}: {exc}"
+            ) from exc
+        if actual_size != byte_size or actual_hash != digest:
+            raise RestoreValidationError(
+                "backup external snapshot failed integrity verification: "
+                f"{media_path} hashes to {actual_hash} ({actual_size} bytes), "
+                f"expected {digest} ({byte_size} bytes); restore was not published"
+            )
+        result.append(
+            _ExternalDependency(
+                location_id=location_id,
+                media_id=media_id,
+                original_locator=original_locator,
+                content_hash=digest,
+                byte_size=byte_size,
+                media_path=relative.as_posix(),
+            )
+        )
+    return tuple(result)
+
+
+def _rebase_staged_external_media(
+    staged_db: Path,
+    *,
+    projects_root: Path,
+    staged_media: Path,
+    dependencies: tuple[_ExternalDependency, ...],
+) -> tuple[int, int, int]:
+    """Point restored external locations at verified backup-owned bytes.
+
+    The source locator is retained in ``media.metadata_json`` as explicit
+    backup provenance.  Distinct location rows that share one content digest
+    receive hard-link aliases under ``external/locators``; the byte snapshot
+    itself remains deduplicated and every update occurs before publication.
+    """
+    try:
+        conn = sqlite3.connect(str(staged_db))
+    except sqlite3.Error as exc:
+        raise RestoreValidationError(
+            f"cannot open staged database for external-media rebase: {exc}"
+        ) from exc
+    try:
+        try:
+            rows = conn.execute(
+                "SELECT l.id, l.media_id, l.locator, m.content_hash "
+                "FROM media_locations AS l JOIN media AS m ON m.id = l.media_id "
+                "WHERE l.realm = 'external_local' ORDER BY l.id"
+            ).fetchall()
+        except sqlite3.Error as exc:
+            raise RestoreValidationError(
+                f"cannot inspect staged external-media locators: {exc}"
+            ) from exc
+
+        row_by_location = {
+            str(location_id): (str(media_id), str(locator), str(content_hash))
+            for location_id, media_id, locator, content_hash in rows
+        }
+        dependency_by_location = {item.location_id: item for item in dependencies}
+        unknown = sorted(set(dependency_by_location) - set(row_by_location))
+        if unknown:
+            raise RestoreValidationError(
+                "backup external manifest references unknown location(s): "
+                + ", ".join(unknown)
+            )
+
+        updates: list[tuple[str, str]] = []
+        metadata_updates: dict[str, str] = {}
+        metadata_cache: dict[str, dict[str, object]] = {}
+        used_targets: dict[str, str] = {}
+        rebased = 0
+        restored_files = len({item.content_hash for item in dependencies})
+
+        for item in dependencies:
+            media_id, old_locator, db_digest = row_by_location[item.location_id]
+            if media_id != item.media_id or db_digest != item.content_hash:
+                raise RestoreValidationError(
+                    "backup external manifest does not match staged media identity "
+                    f"for location {item.location_id}; restore was not published"
+                )
+            source = staged_media / item.media_path
+            if source.is_symlink() or not source.is_file():
+                raise RestoreValidationError(
+                    f"staged external snapshot is unavailable: {source}; "
+                    "restore was not published"
+                )
+            target_relative = item.media_path
+            prior_location = used_targets.get(target_relative)
+            if prior_location is not None:
+                # SQLite forbids two rows with the same (media, realm,
+                # locator). Keep one deduplicated snapshot and make a stable
+                # hard-link alias for the additional location row.
+                alias_name = hashlib.sha256(
+                    item.location_id.encode("utf-8")
+                ).hexdigest()
+                alias_relative = (
+                    Path(EXTERNAL_MEDIA_DIR_NAME)
+                    / "locators"
+                    / alias_name
+                )
+                alias = staged_media / alias_relative
+                alias.parent.mkdir(parents=True, exist_ok=True)
+                if alias.exists() or alias.is_symlink():
+                    if alias.is_symlink() or not alias.is_file():
+                        raise RestoreValidationError(
+                            f"external locator alias collision: {alias}"
+                        )
+                    if sha256_file_bytes(alias) != item.content_hash:
+                        raise RestoreValidationError(
+                            f"external locator alias has the wrong bytes: {alias}"
+                        )
+                else:
+                    try:
+                        os.link(source, alias)
+                    except OSError as exc:
+                        raise RestoreValidationError(
+                            f"cannot create deduplicated external locator alias {alias}: {exc}"
+                        ) from exc
+                target_relative = alias_relative.as_posix()
+                source = alias
+            else:
+                used_targets[target_relative] = item.location_id
+
+            final_locator = str(
+                (projects_root / MANAGED_DIR_NAME / MEDIA_DIR_NAME / target_relative).resolve()
+            )
+            if old_locator != final_locator:
+                updates.append((final_locator, item.location_id))
+                rebased += 1
+
+            if item.media_id in metadata_cache:
+                metadata = metadata_cache[item.media_id]
+            else:
+                try:
+                    row = conn.execute(
+                        "SELECT metadata_json FROM media WHERE id = ?", (item.media_id,)
+                    ).fetchone()
+                    raw_metadata = json.loads(row[0]) if row is not None else {}
+                except (sqlite3.Error, TypeError, json.JSONDecodeError) as exc:
+                    raise RestoreValidationError(
+                        f"cannot preserve external locator provenance for media {item.media_id}"
+                    ) from exc
+                if isinstance(raw_metadata, dict):
+                    metadata = raw_metadata
+                else:
+                    metadata = {"original_metadata": raw_metadata}
+                metadata_cache[item.media_id] = metadata
+            provenance = metadata.setdefault("backup_provenance", {})
+            if not isinstance(provenance, dict):
+                provenance = {"original_backup_provenance": provenance}
+                metadata["backup_provenance"] = provenance
+            records = provenance.setdefault("external_local", [])
+            if not isinstance(records, list):
+                records = []
+                provenance["external_local"] = records
+            record = {
+                "location_id": item.location_id,
+                "original_locator": item.original_locator,
+                "content_hash": item.content_hash,
+                "restored_locator": final_locator,
+            }
+            if not any(
+                isinstance(existing, dict)
+                and existing.get("location_id") == item.location_id
+                for existing in records
+            ):
+                records.append(record)
+            metadata_updates[item.media_id] = json.dumps(
+                metadata, sort_keys=True, separators=(",", ":")
+            )
+
+        unresolved = len(set(row_by_location) - set(dependency_by_location))
+        if updates or metadata_updates:
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                if updates:
+                    conn.executemany(
+                        "UPDATE media_locations SET locator = ? WHERE id = ?", updates
+                    )
+                if metadata_updates:
+                    conn.executemany(
+                        "UPDATE media SET metadata_json = ? WHERE id = ?",
+                        [(value, media_id) for media_id, value in metadata_updates.items()],
+                    )
+                conn.commit()
+            except sqlite3.Error as exc:
+                conn.rollback()
+                raise RestoreValidationError(
+                    "cannot persist external-media locator rebase; restore was not published: "
+                    f"{exc}"
+                ) from exc
+        return restored_files, rebased, unresolved
+    finally:
+        conn.close()
 
 
 def _atomic_swap(
@@ -1227,6 +1893,12 @@ def restore_backup(
     live_media = root / MANAGED_DIR_NAME / MEDIA_DIR_NAME
     backup_media = backup / BACKUP_MEDIA_DIR
     restored_media_files = _count_files(backup_media)
+    rebased_media_locators = 0
+    external_dependencies = _read_external_manifest(backup)
+    restored_external_files = len({item.content_hash for item in external_dependencies})
+    rebased_external_locators = 0
+    unresolved_external_locators = 0
+    restored_project_workspaces = 0
 
     lock = DatabaseOwnerLock(live_db)
     try:
@@ -1255,6 +1927,22 @@ def restore_backup(
             staged_media = txn_dir / BACKUP_MEDIA_DIR
             shutil.copy2(backup / BACKUP_DATABASE_NAME, staged_db)
             shutil.copytree(backup_media, staged_media)
+            rebased_media_locators = _rebase_staged_managed_media(
+                staged_db,
+                projects_root=root,
+                staged_media=staged_media,
+            )
+            (
+                restored_external_files,
+                rebased_external_locators,
+                unresolved_external_locators,
+            ) = _rebase_staged_external_media(
+                staged_db,
+                projects_root=root,
+                staged_media=staged_media,
+                dependencies=external_dependencies,
+            )
+            _normalize_staged_database_journal(staged_db)
             _validate_staged_database(staged_db)
             previous_dir = txn_dir / "previous"
             previous_dir.mkdir(parents=True, exist_ok=True)
@@ -1283,6 +1971,25 @@ def restore_backup(
                 staged_media,
                 journal_path=journal_path,
             )
+            # Project workspaces are derived from kernel rows, but they live
+            # outside the journaled database/media pair.  Materialize them
+            # only after that pair has published successfully so a validation
+            # or swap failure never mutates the target workspace.  The helper
+            # is idempotent: if the process is interrupted here, repeating the
+            # same restore with ``--force`` safely reconciles the projections;
+            # existing human-authored plan.md files are never overwritten.
+            try:
+                restored_project_workspaces = _materialize_restored_project_workspaces(
+                    live_db,
+                    projects_root=root,
+                )
+            except RestoreValidationError as exc:
+                raise BackupError(
+                    "database and media restore succeeded, but a derived project "
+                    "workspace could not be reconciled; fix the reported filesystem "
+                    "problem and repeat this same backup restore with --force: "
+                    f"{exc}"
+                ) from exc
         finally:
             # Hard-death tests bypass this finally. If an ordinary failure
             # recovered successfully (or staging validation failed before a
@@ -1297,6 +2004,11 @@ def restore_backup(
         projects_root=root,
         database_path=live_db,
         restored_media_files=restored_media_files,
+        rebased_media_locators=rebased_media_locators,
+        restored_project_workspaces=restored_project_workspaces,
+        restored_external_files=restored_external_files,
+        rebased_external_locators=rebased_external_locators,
+        unresolved_external_locators=unresolved_external_locators,
         restored_at=_utc_now(),
     )
 

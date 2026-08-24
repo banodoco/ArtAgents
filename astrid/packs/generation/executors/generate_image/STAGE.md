@@ -89,44 +89,69 @@ See:
 - `astrid/packs/external/vibecomfy/STAGE.md` — VibeComfy workflow runner
 - `docs/generation/` — modality contracts, manifest schema, feature list
 
-## CLI quick-start
+## SDK quick-start
+
+Use the public SDK; every executor invocation is attached to a project and
+project-scoped runs write their outputs under that project's run tree.
+
+```python
+import astrid.sdk as sdk
+result = sdk.invoke(
+    "generation.generate_image",
+    kind="executor",
+    project="demo",
+    inputs={
+        "model": "z-image",
+        "mode": "t2i",
+        "execution": "local",
+        "prompt": "a serene mountain lake at dawn",
+    },
+    dry_run=True,
+)
+```
+
+## Internal runner command (not a public entrypoint)
+
+The following module command is reserved for Astrid's internal runner and is
+shown only for implementation debugging. Direct invocation is rejected by the
+canonical-entrypoint guard; use the SDK example above.
 
 ```bash
 # Cloud text-to-image
-python -m astrid.packs.generation.executors.generate_image.run \
+ASTRID_INTERNAL_INVOCATION=1 python -m astrid.packs.generation.executors.generate_image.run \
   --model flux-dev --mode t2i --execution cloud \
   --prompt "a serene mountain lake at dawn" --out ./out
 
 # Local text-to-image (requires vibecomfy + ComfyUI)
-python -m astrid.packs.generation.executors.generate_image.run \
+ASTRID_INTERNAL_INVOCATION=1 python -m astrid.packs.generation.executors.generate_image.run \
   --model z-image --mode t2i --execution local \
   --prompt "a serene mountain lake at dawn" --out ./out
 
 # Image-to-image (cloud)
-python -m astrid.packs.generation.executors.generate_image.run \
+ASTRID_INTERNAL_INVOCATION=1 python -m astrid.packs.generation.executors.generate_image.run \
   --model flux-dev --mode i2i --execution cloud \
   --prompt "turn this into a watercolor painting" \
   --image-ref ./input.png --out ./out
 
 # Image-to-image (local)
-python -m astrid.packs.generation.executors.generate_image.run \
+ASTRID_INTERNAL_INVOCATION=1 python -m astrid.packs.generation.executors.generate_image.run \
   --model z-image --mode i2i --execution local \
   --prompt "turn this into a watercolor painting" \
   --image-ref ./input.png --out ./out
 
 # Instruction-guided edit
-python -m astrid.packs.generation.executors.generate_image.run \
+ASTRID_INTERNAL_INVOCATION=1 python -m astrid.packs.generation.executors.generate_image.run \
   --model qwen-image-edit --mode edit --execution cloud \
   --prompt "replace the background with a forest" \
   --image-ref ./input.png --out ./out
 
 # Multiple images with seed
-python -m astrid.packs.generation.executors.generate_image.run \
+ASTRID_INTERNAL_INVOCATION=1 python -m astrid.packs.generation.executors.generate_image.run \
   --model flux-schnell --mode t2i --execution cloud \
   --prompt "cyberpunk city" --count 3 --seed 42 --out ./out
 
 # Codex text-to-image (no OpenAI API key)
-python -m astrid.packs.generation.executors.generate_image.run \
+ASTRID_INTERNAL_INVOCATION=1 python -m astrid.packs.generation.executors.generate_image.run \
   --model flux-dev --mode t2i --execution codex \
   --prompt "a tiny blue teapot" --size 1024x1024 --quality low --out ./out
 ```

@@ -44,6 +44,8 @@ from astrid.core.store.uow import UnitOfWork
 from astrid.core.store.writer import DatabaseWriter
 from astrid.packs.references.repository import (
     REFERENCE_CREATE_COMMAND_KIND,
+    ReferenceAmbiguousError,
+    ReferenceNotFoundError,
     ReferenceRepository,
 )
 from astrid.sdk.contracts import (
@@ -51,9 +53,47 @@ from astrid.sdk.contracts import (
     derive_stable_id,
     resolve_idempotency_key,
 )
-from astrid.sdk.exceptions import ServiceValidationError, map_error
+from astrid.sdk.exceptions import ServiceNotFoundError, ServiceValidationError, map_error
 
 __all__ = ["ReferencesService"]
+
+
+def _reference_address_failure(
+    exc: ReferenceAmbiguousError | ReferenceNotFoundError,
+    *,
+    idempotency_key: str,
+) -> DomainResult[dict[str, Any]]:
+    """Return a typed, recovery-oriented error for project-local ref lookup."""
+    if isinstance(exc, ReferenceAmbiguousError):
+        error = ServiceValidationError(
+            "reference name is ambiguous; retry with one exact id",
+            details={
+                "entity": "reference",
+                "field": "ref",
+                "reason": "ambiguous_display_name",
+                "ref": exc.ref,
+                "candidate_ids": list(exc.candidate_ids),
+                "recovery": (
+                    "run `astrid media references list --project <project> "
+                    "--include-archived` and retry with one exact id"
+                ),
+            },
+        )
+    else:
+        error = ServiceNotFoundError(
+            "reference does not exist in this project; verify the project and ref",
+            details={
+                "entity": "reference",
+                "ref": exc.reference_id,
+                "project_id": exc.project_id,
+                "reason": exc.detail,
+                "recovery": (
+                    "run `astrid media references list --project <project> "
+                    "--include-archived` and retry with a listed id or name"
+                ),
+            },
+        )
+    return DomainResult.failure(map_error(error), idempotency_key=idempotency_key)
 
 
 class ReferencesService:
@@ -106,13 +146,9 @@ class ReferencesService:
             key = self._resolve_key(idempotency_key)
             project_id = self._projects.resolve(self._writer, project)
         except ServiceValidationError as exc:
-            return DomainResult.failure(
-                map_error(exc), idempotency_key=idempotency_key or ""
-            )
+            return DomainResult.failure(map_error(exc), idempotency_key=idempotency_key or "")
         except Exception as exc:  # noqa: BLE001 - centralized bounded mapping
-            return DomainResult.failure(
-                map_error(exc), idempotency_key=idempotency_key or ""
-            )
+            return DomainResult.failure(map_error(exc), idempotency_key=idempotency_key or "")
         reference_id = derive_stable_id(
             command_kind=REFERENCE_CREATE_COMMAND_KIND,
             scope=project_id,
@@ -133,6 +169,8 @@ class ReferencesService:
                     reference_id=reference_id,
                 )
             )
+        except (ReferenceAmbiguousError, ReferenceNotFoundError) as exc:
+            return _reference_address_failure(exc, idempotency_key=key)
         except Exception as exc:  # noqa: BLE001 - centralized bounded mapping
             return DomainResult.failure(map_error(exc), idempotency_key=key)
         return DomainResult.success(
@@ -164,13 +202,9 @@ class ReferencesService:
             key = self._resolve_key(idempotency_key)
             project_id = self._projects.resolve(self._writer, project)
         except ServiceValidationError as exc:
-            return DomainResult.failure(
-                map_error(exc), idempotency_key=idempotency_key or ""
-            )
+            return DomainResult.failure(map_error(exc), idempotency_key=idempotency_key or "")
         except Exception as exc:  # noqa: BLE001 - centralized bounded mapping
-            return DomainResult.failure(
-                map_error(exc), idempotency_key=idempotency_key or ""
-            )
+            return DomainResult.failure(map_error(exc), idempotency_key=idempotency_key or "")
         try:
             model = UnitOfWork(self._writer).run(
                 lambda uow: self._references.update(
@@ -183,6 +217,8 @@ class ReferencesService:
                     idempotency_key=key,
                 )
             )
+        except (ReferenceAmbiguousError, ReferenceNotFoundError) as exc:
+            return _reference_address_failure(exc, idempotency_key=key)
         except Exception as exc:  # noqa: BLE001 - centralized bounded mapping
             return DomainResult.failure(map_error(exc), idempotency_key=key)
         return DomainResult.success(
@@ -211,13 +247,9 @@ class ReferencesService:
             key = self._resolve_key(idempotency_key)
             project_id = self._projects.resolve(self._writer, project)
         except ServiceValidationError as exc:
-            return DomainResult.failure(
-                map_error(exc), idempotency_key=idempotency_key or ""
-            )
+            return DomainResult.failure(map_error(exc), idempotency_key=idempotency_key or "")
         except Exception as exc:  # noqa: BLE001 - centralized bounded mapping
-            return DomainResult.failure(
-                map_error(exc), idempotency_key=idempotency_key or ""
-            )
+            return DomainResult.failure(map_error(exc), idempotency_key=idempotency_key or "")
         try:
             model = UnitOfWork(self._writer).run(
                 lambda uow: self._references.archive(
@@ -227,6 +259,57 @@ class ReferencesService:
                     idempotency_key=key,
                 )
             )
+        except (ReferenceAmbiguousError, ReferenceNotFoundError) as exc:
+            return _reference_address_failure(exc, idempotency_key=key)
+        except Exception as exc:  # noqa: BLE001 - centralized bounded mapping
+            return DomainResult.failure(map_error(exc), idempotency_key=key)
+        return DomainResult.success(
+            model.to_dict(),
+            receipt=self._committed_receipt(project_id, key),
+            idempotency_key=key,
+        )
+
+    def unarchive(
+        self,
+        project: str,
+        ref: str,
+        *,
+        idempotency_key: str | None = None,
+    ) -> DomainResult[dict[str, Any]]:
+        """Restore an archived reference by id or unambiguous local name."""
+        try:
+            key = self._resolve_key(idempotency_key)
+            project_id = self._projects.resolve(self._writer, project)
+        except Exception as exc:  # noqa: BLE001 - centralized bounded mapping
+            return DomainResult.failure(map_error(exc), idempotency_key=idempotency_key or "")
+        try:
+            model = UnitOfWork(self._writer).run(
+                lambda uow: self._references.unarchive(
+                    uow,
+                    project_id=project_id,
+                    ref=ref,
+                    idempotency_key=key,
+                )
+            )
+        except ReferenceAmbiguousError as exc:
+            return DomainResult.failure(
+                map_error(
+                    ServiceValidationError(
+                        "reference recovery name is ambiguous; use an exact id",
+                        details={
+                            "ref": exc.ref,
+                            "candidate_ids": list(exc.candidate_ids),
+                            "recovery": (
+                                "run 'media references list --include-archived' "
+                                "and retry unarchive with one exact id"
+                            ),
+                        },
+                    )
+                ),
+                idempotency_key=key,
+            )
+        except (ReferenceAmbiguousError, ReferenceNotFoundError) as exc:
+            return _reference_address_failure(exc, idempotency_key=key)
         except Exception as exc:  # noqa: BLE001 - centralized bounded mapping
             return DomainResult.failure(map_error(exc), idempotency_key=key)
         return DomainResult.success(
@@ -251,6 +334,9 @@ class ReferencesService:
     ) -> DomainResult[dict[str, Any]]:
         """Associate one exact media row with an active reference atomically.
 
+        ``ref`` accepts an exact id or one exact project-local name; an
+        ambiguous name fails with candidate ids and no rows are changed.
+
         Every exact-media and context-task rule (same-project ownership, role
         vocabulary, exact provenance through ``task_outputs``, duplicate
         rejection) is delegated to the repository, which evaluates it before
@@ -260,13 +346,9 @@ class ReferencesService:
             key = self._resolve_key(idempotency_key)
             project_id = self._projects.resolve(self._writer, project)
         except ServiceValidationError as exc:
-            return DomainResult.failure(
-                map_error(exc), idempotency_key=idempotency_key or ""
-            )
+            return DomainResult.failure(map_error(exc), idempotency_key=idempotency_key or "")
         except Exception as exc:  # noqa: BLE001 - centralized bounded mapping
-            return DomainResult.failure(
-                map_error(exc), idempotency_key=idempotency_key or ""
-            )
+            return DomainResult.failure(map_error(exc), idempotency_key=idempotency_key or "")
         try:
             model = UnitOfWork(self._writer).run(
                 lambda uow: self._references.associate(
@@ -281,6 +363,8 @@ class ReferencesService:
                     idempotency_key=key,
                 )
             )
+        except (ReferenceAmbiguousError, ReferenceNotFoundError) as exc:
+            return _reference_address_failure(exc, idempotency_key=key)
         except Exception as exc:  # noqa: BLE001 - centralized bounded mapping
             return DomainResult.failure(map_error(exc), idempotency_key=key)
         return DomainResult.success(
@@ -310,13 +394,9 @@ class ReferencesService:
             key = self._resolve_key(idempotency_key)
             project_id = self._projects.resolve(self._writer, project)
         except ServiceValidationError as exc:
-            return DomainResult.failure(
-                map_error(exc), idempotency_key=idempotency_key or ""
-            )
+            return DomainResult.failure(map_error(exc), idempotency_key=idempotency_key or "")
         except Exception as exc:  # noqa: BLE001 - centralized bounded mapping
-            return DomainResult.failure(
-                map_error(exc), idempotency_key=idempotency_key or ""
-            )
+            return DomainResult.failure(map_error(exc), idempotency_key=idempotency_key or "")
         try:
             model = UnitOfWork(self._writer).run(
                 lambda uow: self._references.set_primary(
@@ -357,13 +437,9 @@ class ReferencesService:
             key = self._resolve_key(idempotency_key)
             project_id = self._projects.resolve(self._writer, project)
         except ServiceValidationError as exc:
-            return DomainResult.failure(
-                map_error(exc), idempotency_key=idempotency_key or ""
-            )
+            return DomainResult.failure(map_error(exc), idempotency_key=idempotency_key or "")
         except Exception as exc:  # noqa: BLE001 - centralized bounded mapping
-            return DomainResult.failure(
-                map_error(exc), idempotency_key=idempotency_key or ""
-            )
+            return DomainResult.failure(map_error(exc), idempotency_key=idempotency_key or "")
         try:
             model = UnitOfWork(self._writer).run(
                 lambda uow: self._references.link(
@@ -376,6 +452,8 @@ class ReferencesService:
                     idempotency_key=key,
                 )
             )
+        except (ReferenceAmbiguousError, ReferenceNotFoundError) as exc:
+            return _reference_address_failure(exc, idempotency_key=key)
         except Exception as exc:  # noqa: BLE001 - centralized bounded mapping
             return DomainResult.failure(map_error(exc), idempotency_key=key)
         return DomainResult.success(
@@ -406,15 +484,53 @@ class ReferencesService:
     # -- show --------------------------------------------------------------
 
     def show(self, project: str, ref: str) -> DomainResult[dict[str, Any]]:
-        """Return one reference's full read model by id.
+        """Return one reference's full read model by id or local name.
 
         ``show`` always returns archived references (SD1 — archive hides rows
-        only from ordinary lists). A missing or foreign reference is a typed
-        ``not_found``.
+        only from ordinary lists). Exact ids win; an unambiguous exact
+        project-local name is also accepted. A missing or foreign reference
+        is a typed ``not_found`` with bounded recovery guidance, while an
+        ambiguous name returns candidate ids rather than guessing.
         """
         try:
             project_id = self._projects.resolve(self._writer, project)
             model = self._references.show(self._writer, project_id, ref)
+        except ReferenceAmbiguousError as exc:
+            return DomainResult.failure(
+                map_error(
+                    ServiceValidationError(
+                        "reference name is ambiguous; retry with one exact id",
+                        details={
+                            "entity": "reference",
+                            "field": "ref",
+                            "reason": "ambiguous_display_name",
+                            "ref": exc.ref,
+                            "candidate_ids": list(exc.candidate_ids),
+                            "recovery": (
+                                "run `astrid media references list --project <project> "
+                                "--include-archived` and retry with one exact id"
+                            ),
+                        },
+                    )
+                )
+            )
+        except ReferenceNotFoundError as exc:
+            return DomainResult.failure(
+                map_error(
+                    ServiceNotFoundError(
+                        "reference does not exist in this project; verify the project and ref",
+                        details={
+                            "entity": "reference",
+                            "ref": exc.reference_id,
+                            "project_id": exc.project_id,
+                            "recovery": (
+                                "run `astrid media references list --project <project> "
+                                "--include-archived` and retry with a listed id or name"
+                            ),
+                        },
+                    )
+                )
+            )
         except Exception as exc:  # noqa: BLE001 - centralized bounded mapping
             return DomainResult.failure(map_error(exc))
         return DomainResult.success(model.to_dict())
@@ -433,9 +549,7 @@ class ReferencesService:
         except ValueError as exc:
             raise ServiceValidationError(str(exc)) from exc
 
-    def _committed_receipt(
-        self, project_id: str, idempotency_key: str
-    ) -> CommandReceipt | None:
+    def _committed_receipt(self, project_id: str, idempotency_key: str) -> CommandReceipt | None:
         """Read-only lookup of the committed receipt for a mutation."""
         with self._writer.read_only_connection() as conn:
             return self._receipts.lookup_committed(

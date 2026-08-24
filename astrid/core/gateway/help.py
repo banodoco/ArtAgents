@@ -55,6 +55,10 @@ Product families:
   python3 -m astrid tasks ...
   python3 -m astrid runs ...
 
+Timeline evidence:
+  python3 -m astrid timelines visualize --project PROJECT [--timeline-slug REF]
+      [--format FORMAT[,FORMAT...]] [--json]
+
 Operational families:
   python3 -m astrid serve [--host HOST] [--port PORT] [--projects-root PATH]
   python3 -m astrid doctor [--json]
@@ -66,13 +70,22 @@ Nested mounts (manifest-owned):
   python3 -m astrid media references ...
 
 Options:
-  --json      print the exact SDK envelope (ok/data/error/receipt/idempotency_key)
+  --json      product commands print the five-key SDK envelope
+              (ok/data/error/receipt/idempotency_key); doctor emits its
+              diagnostic object (serve/backup have no --json flag)
   -h, --help  show help
 
 Notes:
   python3 -m astrid is the package entry point.
   Use ``python3 -m astrid help`` for the full family census, kernel/pack
   ownership, nested mounts, and stable exit codes.
+
+Ownership handoff:
+  ``astrid serve`` exclusively owns the store while it runs. Use ``GET
+  /routes`` and the HTTP routes for reads/writes during that session, or wait
+  for a clean shutdown before using product CLI commands. Reads may retry;
+  writes must preserve the exact payload and idempotency key, then verify
+  state after release.
 """
     )
 
@@ -101,11 +114,11 @@ Usage:
 Family census (exactly eight families): {families}
 
 Product families:
-  projects    [kernel] project create/list/show/update/select
+  projects    [kernel] project create/list/show/update/select/current
   media       [kernel] media import/list/show/verify/relocate/relate
   tasks       [kernel] task create/list/show/cancel/retry/events
   runs        [kernel] run list/show/cancel/retry-failed/events
-  timelines   [pack: timeline] timeline create/list/show/save/archive/history/diff
+  timelines   [pack: timeline] timeline create/list/show/save/archive/unarchive/history/diff/visualize/render
 
 Operational families:
   serve       [kernel] start the local repository bridge
@@ -113,17 +126,27 @@ Operational families:
   backup      [kernel] create/restore SQLite + managed-media backups
 
 Nested mounts (manifest-owned):
-  timelines shots       [pack: shots] shot list/create/add/remove/reorder
+  timelines shots       [pack: shots] project-level reusable shot list/create/show/add/remove/reorder
   media references      [pack: references] reference create/update/archive/associate/link/set-primary/list/show
 
 Options:
-  --json      print the exact SDK envelope (ok/data/error/receipt/idempotency_key)
+  --json      product commands print the five-key SDK envelope
+              (ok/data/error/receipt/idempotency_key); doctor emits its
+              diagnostic object (serve/backup have no --json flag)
   -h, --help  show help
 
 Exit codes:
   0  success (envelope ok=true)
   1  typed SDK error (envelope ok=false)
   2  usage/parse error
+
+Ownership handoff:
+  ``astrid serve`` exclusively owns the store while it runs. Use ``GET
+  /routes`` and the HTTP routes during that session, or wait for a clean
+  shutdown before using product CLI commands. Reads may retry; writes must
+  preserve the exact payload and idempotency key, then verify state after
+  release. Owner contention is ``error.code=unavailable`` with
+  ``error.details.reason=store_owned``.
 """
 
 

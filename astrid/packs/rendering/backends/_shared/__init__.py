@@ -158,6 +158,8 @@ def _render_provenance_payload(
     active_pack_order: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     effects = list(stage_summary.get("effects") or [])
+    animations = list(stage_summary.get("animations") or [])
+    transitions = list(stage_summary.get("transitions") or [])
     payload: dict[str, Any] = {
         "schema_version": 1,
         "engine": engine,
@@ -178,11 +180,24 @@ def _render_provenance_payload(
             str(effect["effect_id"]) for effect in effects if "effect_id" in effect
         ],
         "resolved_effects": effects,
+        "resolved_animation_ids": [
+            str(item["element_id"]) for item in animations if "element_id" in item
+        ],
+        "resolved_animations": animations,
+        "resolved_transition_ids": [
+            str(item["element_id"]) for item in transitions if "element_id" in item
+        ],
+        "resolved_transitions": transitions,
         "source_pack_ids": sorted(
             {
                 str(effect["source_pack_id"])
                 for effect in effects
                 if isinstance(effect, dict) and effect.get("source_pack_id")
+            }
+            | {
+                str(item["source_pack_id"])
+                for item in (*animations, *transitions)
+                if isinstance(item, dict) and item.get("source_pack_id")
             }
         ),
         "element_roots": sorted(
@@ -190,6 +205,11 @@ def _render_provenance_payload(
                 str(effect["element_root"])
                 for effect in effects
                 if isinstance(effect, dict) and effect.get("element_root")
+            }
+            | {
+                str(item["element_root"])
+                for item in (*animations, *transitions)
+                if isinstance(item, dict) and item.get("element_root")
             }
         ),
         "staged_asset_ids": sorted(
@@ -310,9 +330,12 @@ def _remotion_mux_profile(profile: RenderProfile, *, alpha: bool = False) -> Ren
             video_profile=None,
             video_level=None,
             pixel_format="yuva444p12le",
-            audio_codec=profile.audio_codec or "pcm_s16le",
-            audio_sample_rate=profile.audio_sample_rate or 48000,
-            audio_channel_layout=profile.audio_channel_layout or "stereo",
+            # Remotion's ProRes MOV path truthfully probes as PCM regardless
+            # of whether the source timeline itself carries audio.  Do not
+            # inherit the opaque MP4 profile's AAC declarations here.
+            audio_codec="pcm_s16le",
+            audio_sample_rate=48000,
+            audio_channel_layout="stereo",
         )
     return replace(
         profile,

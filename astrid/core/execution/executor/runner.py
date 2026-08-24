@@ -40,6 +40,7 @@ from astrid.core.project.run import (
     project_run_env,
     reject_project_with_out,
 )
+from astrid.core.project.ownership import require_project_owned_artifact
 from astrid.core.project.guidance import (
     format_project_required_guidance,
     selected_project,
@@ -85,7 +86,20 @@ def _pipeline_module(runtime_module: str):
     """
     if not isinstance(runtime_module, str) or not runtime_module:
         raise ExecutorRunnerError("pipeline executor manifest is missing metadata.pipeline_module")
-    return import_module(runtime_module)
+    # Pipeline drivers are implementation modules shared by the canonical
+    # runner and the lower-level orchestrator.  Their module files retain the
+    # public-entrypoint guard, so importing one for SDK dispatch must carry the
+    # same internal marker as the runner's subprocess command without leaking
+    # that marker into the caller's environment.
+    previous = os.environ.get(ASTRID_INTERNAL_INVOCATION)
+    os.environ[ASTRID_INTERNAL_INVOCATION] = "1"
+    try:
+        return import_module(runtime_module)
+    finally:
+        if previous is None:
+            os.environ.pop(ASTRID_INTERNAL_INVOCATION, None)
+        else:
+            os.environ[ASTRID_INTERNAL_INVOCATION] = previous
 
 
 @lru_cache(maxsize=1)
@@ -189,7 +203,8 @@ class ExecutorCapabilityRunner(CapabilityRunner[ExecutorRunRequest, ExecutorRunR
     ) -> tuple[str, ...]:
         active_registry = registry or self.load_default_registry()
         executor = active_registry.get(request.executor_id)
-        values = _request_values(request)
+        values = _request_values(request, executor)
+        _validate_declared_input_choices(executor, values)
         _validate_required_inputs(
             executor.id, executor.inputs, values, noun="executor", error_cls=ExecutorRunnerError
         )
@@ -256,7 +271,8 @@ def _run_executor_inner(request: ExecutorRunRequest, executor: ExecutorDefinitio
     _validate_scoped_configs_at_dispatch(executor)
     if executor.id == "youtube.upload":
         return _run_upload_youtube(request, executor)
-    values = _request_values(request)
+    values = _request_values(request, executor)
+    _validate_declared_input_choices(executor, values)
     _validate_required_inputs(
         executor.id, executor.inputs, values, noun="executor", error_cls=ExecutorRunnerError
     )
@@ -421,8 +437,13 @@ def build_pipeline_context(request: ExecutorRunRequest, executor: ExecutorDefini
     from astrid.core.theme import resolve_theme_dir, resolve_themes_root
     from astrid.core.theme.scope import resolve_style_scope
 
-    values = _request_values(request)
-    out = Path(request.out).expanduser().resolve()
+    values = _request_values(request, executor)
+    effective_out = request.out if request.out not in (None, "") else request.run_root
+    if effective_out in (None, ""):
+        raise ExecutorRunnerError(
+            f"executor {request.executor_id!r} requires an output or staging path"
+        )
+    out = Path(effective_out).expanduser().resolve()
     brief = _optional_path(values.get("brief") or request.brief)
     if brief is None:
         brief = (out / "brief.txt").resolve()
@@ -496,7 +517,7 @@ def build_executor_command(request: ExecutorRunRequest, registry: ExecutorRegist
 
 def _run_builtin_executor(executor: ExecutorDefinition, request: ExecutorRunRequest) -> ExecutorRunResult:
     if executor.command is not None:
-        return _run_explicit_command_executor(executor, request, _request_values(request))
+        return _run_explicit_command_executor(executor, request, _request_values(request, executor))
     pipeline = _pipeline_module_for_executor(executor)
     step = _step_for_executor(executor)
     args = build_pipeline_context(request, executor)
@@ -603,6 +624,11 @@ def _run_in_process_executor_command(
     cwd: str | None,
     env: Mapping[str, str],
 ) -> ExecutorRunResult:
+    # Keep in-process and subprocess lanes on the same project-scoped
+    # environment.  In particular, SDK-bound ``projects_root`` must reach
+    # timeline/generation packs; otherwise an in-process invocation silently
+    # resolves the user's default workspace instead of its bound root.
+    effective_env = _command_subprocess_env(executor, request, env)
     log_capture = (
         open_run_log_capture(request.run_root)
         if request.run_root is not None and not request.project_was_auto_resolved
@@ -615,7 +641,7 @@ def _run_in_process_executor_command(
                 metadata=executor.metadata,
                 owner_id=executor.id,
                 cwd=cwd,
-                env=env,
+                env=effective_env,
                 parent_env=os.environ,
                 stdout_log=None if log_capture is None else log_capture.stdout,
                 stderr_log=None if log_capture is None else log_capture.stderr,
@@ -653,7 +679,7 @@ def _run_in_process_executor_command(
         kind=executor.kind,
         command=command,
         cwd=cwd,
-        env=dict(env),
+        env=dict(effective_env),
         payload=_merge_runner_payload(
             result.payload,
             executor_id=executor.id,
@@ -914,6 +940,7 @@ def _validate_project_owned_inputs(
                 request.project,
                 normalized,
                 _stringify_value(item),
+                root=request.projects_root,
             )
 
 
@@ -999,6 +1026,57 @@ def _validate_scoped_configs_at_dispatch(executor: ExecutorDefinition) -> None:
             )
 
 
+def _validate_declared_input_choices(
+    executor: ExecutorDefinition, values: Mapping[str, Any]
+) -> None:
+    """Validate manifest-declared input enums before command construction.
+
+    Most constrained inputs are enforced by a capability's own argparse
+    parser.  Dry-run intentionally does not start that subprocess, however,
+    so small dispatcher capabilities can declare their enum in metadata and
+    receive the same typed validation before a command is admitted or built.
+    """
+    choices = executor.metadata.get("input_choices")
+    if isinstance(choices, Mapping):
+        for input_name, raw_options in choices.items():
+            if not isinstance(input_name, str) or not isinstance(raw_options, (list, tuple)):
+                continue
+            value = values.get(input_name)
+            if value is None:
+                continue
+            options = tuple(str(option) for option in raw_options)
+            if str(value) in options:
+                continue
+            rendered = ", ".join(options)
+            raise ExecutorRunnerError(
+                f"invalid {input_name} {value!r} for executor {executor.id!r}; "
+                f"valid options: {rendered}; "
+                f"recovery: retry with --{input_name.replace('_', '-')} "
+                f"<one of: {rendered}>"
+            )
+
+    requirements = executor.metadata.get("input_requirements_by_choice")
+    if not isinstance(requirements, Mapping):
+        return
+    for selector, raw_requirements in requirements.items():
+        selected = values.get(str(selector))
+        if selected is None or not isinstance(raw_requirements, Mapping):
+            continue
+        required_inputs = raw_requirements.get(str(selected))
+        if not isinstance(required_inputs, (list, tuple)):
+            continue
+        missing = [
+            str(name) for name in required_inputs
+            if not _has_value(values.get(str(name)))
+        ]
+        if missing:
+            names = ", ".join(missing)
+            raise ExecutorRunnerError(
+                f"missing required input(s) for {selector} {selected!r}: {names}; "
+                f"recovery: provide --{missing[0].replace('_', '-')} and retry"
+            )
+
+
 def _emit_scoped_config_env(
     executor: ExecutorDefinition, request: ExecutorRunRequest
 ) -> dict[str, str]:
@@ -1011,7 +1089,7 @@ def _emit_scoped_config_env(
         return {}
     import astrid.core.theme.scope  # noqa: F401 — ensure registration if called standalone
     import astrid.core.util.credentials_scope  # noqa: F401
-    values = _request_values(request)
+    values = _request_values(request, executor)
     explicit: dict[str, Any] = {}
     theme_val = values.get("theme")
     if theme_val is not None:
@@ -1083,7 +1161,12 @@ def _external_pack_pythonpath_env(
 
 
 def _placeholder_values(executor: ExecutorDefinition, request: ExecutorRunRequest, values: Mapping[str, Any]) -> dict[str, str]:
-    out = Path(request.out).expanduser().resolve()
+    effective_out = request.out if request.out not in (None, "") else request.run_root
+    if effective_out in (None, ""):
+        raise ExecutorRunnerError(
+            f"executor {executor.id!r} requires an output or staging path"
+        )
+    out = Path(effective_out).expanduser().resolve()
     placeholders: dict[str, str] = {
         "out": str(out),
     }
@@ -1241,12 +1324,25 @@ def _step_for_executor(executor: ExecutorDefinition) -> Any:
     return steps[step_name]
 
 
-def _request_values(request: ExecutorRunRequest) -> dict[str, Any]:
+def _request_values(request: ExecutorRunRequest, executor: ExecutorDefinition | None = None) -> dict[str, Any]:
     values = dict(request.inputs)
     if request.brief is not None and "brief" not in values:
         values["brief"] = request.brief
     if request.python_exec is not None and "python_exec" not in values:
         values["python_exec"] = request.python_exec
+    # A managed executor may expose its owning project as an explicit input
+    # (for example timeline visualization's ``project_slug``) while the
+    # public SDK carries the same identity in ``project=``.  Derive the
+    # declared field before command expansion so in-process and subprocess
+    # runners receive identical argv; callers can still override it when the
+    # manifest deliberately allows a different standalone value.
+    if (
+        executor is not None
+        and request.project
+        and "project_slug" in {port.name for port in executor.inputs}
+        and "project_slug" not in values
+    ):
+        values["project_slug"] = request.project
     values.setdefault("verbose", request.verbose)
     return values
 

@@ -213,15 +213,17 @@ for event in events:
 ```
 
 Each event is an `EventStreamRecord` with fields:
-- `source` — `"task"` or `"audit"`
+- `source` — `"task"`, `"audit"`, or `"kernel"` when the canonical SQLite run stream is used because the optional filesystem projection is absent
 - `line` — one-indexed line number in the event log
 - `timestamp` — ISO-8601 timestamp string (or `None`)
 - `kind` — event kind string (e.g. `"run_started"`, `"step_dispatched"`, `"run_completed"`)
 - `hash` — SHA-256 hash for chain verification (or `None`)
-- `payload` — the raw event dict from the JSONL file
+- `payload` — the raw JSONL event, or canonical kernel fields including the event id, stream sequence, domain data, and integrity hashes
 
 When `verify=True` (the default), `read_events()` validates the hash
-chain before returning.  A broken chain raises `CapabilityEventLogError`.
+chain before returning. For restored runs this verifies the canonical SQLite
+stream head, sequence, previous-hash links, and recomputed event hashes. A
+broken or mismatched chain raises `CapabilityEventLogError`.
 
 ### Live event observation
 

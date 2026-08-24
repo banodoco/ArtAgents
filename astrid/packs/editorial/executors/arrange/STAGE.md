@@ -24,13 +24,13 @@ timeline assembly.
 import astrid.sdk as sdk
 result = sdk.invoke(
     "editorial.arrange",
+        kind="executor", project="demo",
     inputs={
         "pool": "./out/unified_pool.json",
         "brief": "./briefs/my-hype.md",
         "theme": "./themes/default.json",
         "target_duration": "60",
     },
-    out="./out",
 )
 ```
 
@@ -40,12 +40,12 @@ With an explicit env file for API credentials:
 import astrid.sdk as sdk
 result = sdk.invoke(
     "editorial.arrange",
+        kind="executor", project="demo",
     inputs={
         "pool": "./out/unified_pool.json",
         "brief": "./briefs/my-hype.md",
         "env_file": ".env.local",
     },
-    out="./out",
 )
 ```
 

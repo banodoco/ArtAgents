@@ -34,6 +34,7 @@ Inspect a run directory:
 import astrid.sdk as sdk
 result = sdk.invoke(
     "editorial.inspect_cut",
+        kind="executor", project="demo",
     inputs={"run_dir": "./runs/my-run"},
 )
 ```
@@ -44,6 +45,7 @@ Inspect a specific clip (by arrangement order):
 import astrid.sdk as sdk
 result = sdk.invoke(
     "editorial.inspect_cut",
+        kind="executor", project="demo",
     inputs={"run_dir": "./runs/my-run", "clip": "3"},
 )
 ```
@@ -54,6 +56,7 @@ Machine-readable JSON output:
 import astrid.sdk as sdk
 result = sdk.invoke(
     "editorial.inspect_cut",
+        kind="executor", project="demo",
     inputs={"run_dir": "./runs/my-run", "json": True},
 )
 ```
@@ -64,6 +67,7 @@ Inspect a brief output directory (post-cut):
 import astrid.sdk as sdk
 result = sdk.invoke(
     "editorial.inspect_cut",
+        kind="executor", project="demo",
     inputs={"run_dir": "./out", "no_color": True},
 )
 ```

@@ -321,7 +321,17 @@ def compose_standard_application(
         owner_lock = DatabaseOwnerLock(db_path)
     except OwnerLockError as exc:
         raise ServiceUnavailableError(
-            "the database is already owned by another process"
+            "the canonical store is owned by another Astrid process. When "
+            "astrid serve is running, its bridge owns the store: use GET "
+            "/routes and its HTTP routes while it is running, or wait for a "
+            "clean shutdown. "
+            "Reads may retry after release. For writes, preserve the exact "
+            "payload and idempotency key, retry after release, and verify "
+            "state.",
+            details={
+                "reason": "store_owned",
+                "retryable": True,
+            },
         ) from exc
     writer: DatabaseWriter | None = None
     try:
@@ -355,16 +365,33 @@ def compose_standard_application(
         # single timeline service before it commits through the one writer.
         timeline_save_calls = _instrument_timeline_save(timelines_service)
         media_service = MediaService(writer, projects, media, receipts)
-        tasks_service = TasksService(
-            writer, projects, tasks, receipts, event_log
-        )
         runs_service = RunsService(
-            writer, projects, runs, receipts, evidence, event_log
+            writer,
+            projects,
+            runs,
+            receipts,
+            evidence,
+            event_log,
+            tasks=tasks,
+            media=media,
+            projects_root=str(root),
+            registry=registry,
+        )
+        tasks_service = TasksService(
+            writer,
+            projects,
+            tasks,
+            receipts,
+            event_log,
+            media=media,
+            projects_root=str(root),
+            runs=runs_service,
+            registry=registry,
         )
         references_service = ReferencesService(
             writer, projects, references, receipts
         )
-        shots_service = ShotsService(writer, projects, shots, receipts)
+        shots_service = ShotsService(writer, projects, shots, receipts, media)
         return StandardApplication(
             projects_root=root,
             registry=registry,

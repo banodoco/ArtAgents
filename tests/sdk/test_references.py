@@ -363,6 +363,23 @@ def test_update_after_archive_returns_terminal_state(env: SimpleNamespace) -> No
     assert result.error.code == "terminal_state"
 
 
+def test_associate_after_archive_returns_recovery_details(env: SimpleNamespace) -> None:
+    project = _create_project(env)
+    media_id = _import_media(env, project)
+    created = _create_reference(env, project, media_id=media_id)
+    ref_id = created.data["id"]
+
+    assert env.service.archive(project, ref_id).ok is True
+    result = env.service.associate(
+        project, ref_id, media_id=media_id, role="depicts"
+    )
+    assert result.ok is False
+    assert result.error is not None
+    assert result.error.code == "terminal_state"
+    assert result.error.details["reference_id"] == ref_id
+    assert "unarchive" in result.error.details["recovery"]
+
+
 # ---------------------------------------------------------------------------
 # Association and primary replacement
 # ---------------------------------------------------------------------------
@@ -501,6 +518,67 @@ def test_show_missing_returns_not_found(env: SimpleNamespace) -> None:
     assert result.error.code == "not_found"
 
 
+def test_show_resolves_unambiguous_name_and_reports_ambiguous_recovery(
+    env: SimpleNamespace,
+) -> None:
+    project_id = _create_project(env)
+    media_id = _import_media(env, project_id)
+    first = _create_reference(env, project_id, media_id=media_id, name="Field note")
+
+    by_name = env.service.show(project_id, "Field note")
+    assert by_name.ok is True
+    assert by_name.data["id"] == first.data["id"]
+
+    second_media = _import_media(env, project_id, data=PNG_BYTES + b"second")
+    second = _create_reference(
+        env, project_id, media_id=second_media, name="Field note", idempotency_key="ref-second"
+    )
+    ambiguous = env.service.show(project_id, "Field note")
+    assert ambiguous.ok is False
+    assert ambiguous.error is not None
+    assert ambiguous.error.code == "validation_error"
+    assert ambiguous.error.details["reason"] == "ambiguous_display_name"
+    assert ambiguous.error.details["candidate_ids"] == sorted(
+        [first.data["id"], second.data["id"]]
+    )
+
+    missing = env.service.show(project_id, "No such field note")
+    assert missing.ok is False
+    assert missing.error is not None
+    assert missing.error.code == "not_found"
+    assert missing.error.details["entity"] == "reference"
+
+
+def test_show_name_and_id_return_equivalent_enriched_associations(
+    env: SimpleNamespace,
+) -> None:
+    project_id = _create_project(env)
+    primary_media = _import_media(env, project_id)
+    secondary_media = _import_media(env, project_id, data=PNG_BYTES + b"secondary")
+    created = _create_reference(
+        env, project_id, media_id=primary_media, name="Unique Hero"
+    )
+    reference_id = created.data["id"]
+    associated = env.service.associate(
+        project_id,
+        reference_id,
+        media_id=secondary_media,
+        role="depicts",
+        idempotency_key="unique-hero-secondary",
+    )
+    assert associated.ok is True
+
+    by_id = env.service.show(project_id, reference_id)
+    by_name = env.service.show(project_id, "Unique Hero")
+    assert by_id.ok is True
+    assert by_name.ok is True
+    assert by_name.data == by_id.data
+    assert [entry["media_id"] for entry in by_name.data["media"]] == [
+        primary_media,
+        secondary_media,
+    ]
+
+
 def test_show_cross_project_returns_not_found(env: SimpleNamespace) -> None:
     project_a = _create_project(env, slug="alpha")
     project_b = _create_project(env, slug="beta")
@@ -524,6 +602,16 @@ def test_create_with_foreign_media_returns_validation_error(
     assert result.ok is False
     assert result.error is not None
     assert result.error.code == "validation_error"
+    assert result.error.details == {
+        "entity": "reference_media",
+        "reason": "foreign",
+        "media_id": media_id,
+        "project_id": project_b,
+        "recovery": (
+            "run `astrid media list --project <project>` and retry with "
+            "a media id owned by that project"
+        ),
+    }
 
 
 # ---------------------------------------------------------------------------

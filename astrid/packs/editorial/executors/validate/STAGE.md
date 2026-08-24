@@ -24,8 +24,8 @@ flags the clip with a `note` indicating likely misalignment.
 import astrid.sdk as sdk
 result = sdk.invoke(
     "editorial.validate",
+        kind="executor", project="demo",
     inputs={"video": "./out/hype.mp4"},
-    out="./out",
 )
 ```
 
@@ -35,13 +35,13 @@ With explicit timeline and metadata paths:
 import astrid.sdk as sdk
 result = sdk.invoke(
     "editorial.validate",
+        kind="executor", project="demo",
     inputs={
         "video": "./out/hype.mp4",
         "timeline": "./out/hype.timeline.json",
         "metadata": "./out/hype.metadata.json",
         "threshold": "0.6",
     },
-    out="./out",
 )
 ```
 
@@ -51,12 +51,12 @@ With an env file for the Whisper API key and skipping re-transcription:
 import astrid.sdk as sdk
 result = sdk.invoke(
     "editorial.validate",
+        kind="executor", project="demo",
     inputs={
         "video": "./out/hype.mp4",
         "env_file": ".env.local",
         "skip_transcribe": True,
     },
-    out="./out",
 )
 ```
 

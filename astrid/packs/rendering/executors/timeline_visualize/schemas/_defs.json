@@ -80,7 +80,13 @@
     },
     "ulid": {
       "type": "string",
-      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$",
+      "description": "Frozen timeline-visualize v1 ULID spelling. Uppercase is retained for immutable evidence-pack compatibility; public kernel timeline DTOs use the equivalent lowercase spelling."
+    },
+    "kernel_ulid": {
+      "type": "string",
+      "pattern": "^[0-9a-hjkmnp-tv-z]{26}$",
+      "description": "Canonical user-facing v10 kernel ULID spelling (lowercase Crockford base32)."
     },
     "uuid": {
       "type": "string",
@@ -208,6 +214,22 @@
         "qualified_ref": {"$ref": "#/$defs/timeline_id"},
         "uuid": {"$ref": "#/$defs/uuid"},
         "ulid": {"$ref": "#/$defs/ulid"},
+        "slug": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"
+        }
+      },
+      "additionalProperties": false
+    },
+    "canonical_timeline_identity": {
+      "description": "Comparison-safe user-facing projection of a frozen timeline identity. UUID and slug are unchanged; ULID uses the lowercase kernel spelling.",
+      "type": "object",
+      "required": ["stable_id", "qualified_ref", "uuid", "ulid", "slug"],
+      "properties": {
+        "stable_id": {"$ref": "#/$defs/timeline_id"},
+        "qualified_ref": {"$ref": "#/$defs/timeline_id"},
+        "uuid": {"$ref": "#/$defs/uuid"},
+        "ulid": {"$ref": "#/$defs/kernel_ulid"},
         "slug": {
           "type": "string",
           "pattern": "^[a-z0-9]+(?:[-_][a-z0-9]+)*$"

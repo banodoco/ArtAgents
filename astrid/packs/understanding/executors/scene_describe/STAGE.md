@@ -20,8 +20,8 @@ arrangement. The `scene_descriptions.json` sentinel gates cache invalidation.
 import astrid.sdk as sdk
 result = sdk.invoke(
     "understanding.scene_describe",
+        kind="executor", project="demo",
     inputs={"video": "./source.mp4", "scenes": "./out/scenes.json", "triage": "./out/triage.json"},
-    out="./out",
 )
 ```
 
@@ -31,13 +31,13 @@ With explicit API credentials:
 import astrid.sdk as sdk
 result = sdk.invoke(
     "understanding.scene_describe",
+        kind="executor", project="demo",
     inputs={
         "video": "./source.mp4",
         "scenes": "./out/scenes.json",
         "triage": "./out/triage.json",
         "env_file": ".env.local",
     },
-    out="./out",
 )
 ```
 

@@ -18,6 +18,7 @@ Run through the SDK:
 import astrid.sdk as sdk
 result = sdk.invoke(
     "fal.h3_video",
+        kind="executor", project="demo",
     inputs={
         "project": "<slug>",
         "mode": "text-to-video",
@@ -34,6 +35,7 @@ For reference mode, repeat ordered inputs:
 import astrid.sdk as sdk
 result = sdk.invoke(
     "fal.h3_video",
+        kind="executor", project="demo",
     inputs={
         "project": "<slug>",
         "mode": "reference-to-video",

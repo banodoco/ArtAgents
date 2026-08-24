@@ -250,6 +250,22 @@ def validate_timeline(config: Any, *, strict: bool = True) -> None:
         clip_type = clip.get("clipType", "media")
         if not isinstance(clip_type, str):
             raise ValueError(f"clips[{index}].clipType must be a string")
+        # A structured text payload without an explicit text clip type is
+        # accepted by the shared compatibility schema as a media clip. That
+        # silently renders as an empty/black layer in Remotion, so fail close
+        # while the maker is still editing the timeline.
+        if isinstance(clip.get("text"), dict) and clip_type != "text":
+            raise ValueError(
+                f"clips[{index}] contains structured text; set clipType to 'text'"
+            )
+        if clip_type == "text":
+            text_payload = clip.get("text")
+            if not isinstance(text_payload, dict):
+                raise ValueError(f"clips[{index}].text must be an object for clipType 'text'")
+            if not isinstance(text_payload.get("content"), str):
+                raise ValueError(
+                    f"clips[{index}].text.content must be a string for clipType 'text'"
+                )
         # Active theme slug from the timeline lets effect-id scans pick up
         # theme-scoped clipTypes (e.g. 2rp's section-hook). Open-string
         # clipTypes that are not registered effects remain opaque.

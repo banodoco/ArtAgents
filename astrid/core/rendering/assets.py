@@ -8,12 +8,13 @@ server and staging directory are deterministically cleaned up.
 
 from __future__ import annotations
 
-import copy
 import contextlib
+import copy
 import hashlib
 import os
 import re
 import shutil
+import sqlite3
 import stat
 import tempfile
 import threading
@@ -34,8 +35,8 @@ from astrid.core.env_vars import (
     ASTRID_PROJECT_SLUG,
 )
 from astrid.core.foundation.project_paths import project_dir, resolve_projects_root
+from astrid.core.kernel.database import resolve_kernel_database_authority
 from astrid.core.rendering import asset_cache
-
 
 AssetKind = Literal["local", "cached", "remote"]
 
@@ -110,6 +111,74 @@ def _default_allowed_root(registry_path: Path) -> Path | None:
     return None
 
 
+def _kernel_database_path(projects_root: Path) -> Path | None:
+    """Return the canonical read-only kernel path, if this root is bootstrapped."""
+
+    authority = resolve_kernel_database_authority(projects_root)
+    return authority.selected_path if authority.exists else None
+
+
+def _owned_managed_locators(
+    requested: set[Path],
+    *,
+    projects_root: Path,
+    project_slug: str | None,
+) -> dict[Path, str]:
+    """Return exact managed locators owned by the active project.
+
+    A project render may consume Astrid's shared CAS media directory, but it
+    must not turn that directory into a general read root.  The registry's
+    exact absolute paths are intersected with the kernel's ``media`` ownership
+    rows for the active project.  The content hash is retained so the source
+    can be checked again immediately before staging.
+    """
+
+    if not requested or not project_slug:
+        return {}
+    database = _kernel_database_path(projects_root)
+    if database is None:
+        return {}
+    managed_root = (projects_root / ".astrid" / "media").resolve(strict=False)
+    try:
+        from astrid.core.schema_packs.standard import build_standard_registry
+        from astrid.core.store.database import open_database
+
+        connection = open_database(database, build_standard_registry(), read_only=True)
+    except (OSError, sqlite3.Error, ValueError):
+        return {}
+    try:
+        connection.row_factory = sqlite3.Row
+        project = connection.execute(
+            "SELECT id FROM projects WHERE slug = ? OR id = ? LIMIT 1",
+            (project_slug, project_slug),
+        ).fetchone()
+        if project is None:
+            return {}
+        rows = connection.execute(
+            "SELECT l.locator, m.content_hash "
+            "FROM media_locations AS l JOIN media AS m ON m.id = l.media_id "
+            "WHERE m.project_id = ? AND l.realm = 'managed_local'",
+            (str(project["id"]),),
+        ).fetchall()
+    except sqlite3.Error:
+        return {}
+    finally:
+        connection.close()
+
+    authorized: dict[Path, str] = {}
+    for row in rows:
+        try:
+            locator = Path(str(row["locator"])).expanduser().resolve(strict=False)
+            content_hash = str(row["content_hash"])
+        except (OSError, TypeError, ValueError):
+            continue
+        # The ownership row alone is not enough: only canonical files inside
+        # this root's managed CAS namespace can be opened by a renderer.
+        if locator in requested and _contained(locator, managed_root):
+            authorized[locator] = content_hash
+    return authorized
+
+
 def _safe_staging_name(key: str, reference: str, index: int) -> str:
     parsed = urllib.parse.urlparse(reference)
     candidate = Path(urllib.parse.unquote(parsed.path)).name if parsed.scheme else Path(reference).name
@@ -124,6 +193,14 @@ def _hardlink_or_copy(source: Path, destination: Path) -> None:
         os.link(source, destination)
     except OSError:
         shutil.copy2(source, destination)
+
+
+def _sha256_file(source: Path) -> str:
+    digest = hashlib.sha256()
+    with source.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _hardlink_or_copy_checked(source: Path, destination: Path) -> None:
@@ -180,6 +257,7 @@ class AssetMaterializer:
         registry_path: str | Path,
         *,
         allowed_root: str | Path | None = None,
+        allowed_managed_paths: Mapping[str | Path, str] | None = None,
         staging_parent: str | Path | None = None,
         cache_fetch: Callable[..., Path] | None = None,
         remote_probe: Callable[[str], bool] | None = None,
@@ -196,6 +274,14 @@ class AssetMaterializer:
         if resolved_root is not None and not resolved_root.is_dir():
             raise NotADirectoryError(f"Asset root is not a directory: {resolved_root}")
         self.allowed_root = resolved_root
+        managed_root = (resolve_projects_root() / ".astrid" / "media").resolve(
+            strict=False
+        )
+        self.allowed_managed_paths = {}
+        for path, content_hash in (allowed_managed_paths or {}).items():
+            candidate = Path(path).expanduser().resolve(strict=False)
+            if _contained(candidate, managed_root):
+                self.allowed_managed_paths[candidate] = str(content_hash)
 
         parent: Path | None = None
         if staging_parent is not None:
@@ -247,10 +333,25 @@ class AssetMaterializer:
             try:
                 resolved_relative = resolved.relative_to(containment_root)
             except ValueError as exc:
-                raise ValueError(
-                    f"Asset {key!r} at {resolved} is outside the allowed project root "
-                    f"{containment_root}"
-                ) from exc
+                expected_hash = self.allowed_managed_paths.get(resolved)
+                if expected_hash is None:
+                    raise ValueError(
+                        f"Asset {key!r} at {resolved} is outside the allowed project root "
+                        f"{containment_root} and is not an owned managed media locator"
+                    ) from exc
+                actual_hash = _sha256_file(resolved)
+                if actual_hash != expected_hash:
+                    raise ValueError(
+                        f"Asset {key!r} managed media locator failed integrity check: "
+                        f"expected {expected_hash}, got {actual_hash}"
+                    )
+                return self._stage(
+                    key,
+                    file_value,
+                    resolved,
+                    index,
+                    trusted_source=True,
+                )
             return self._stage_contained_local(
                 key,
                 file_value,
@@ -389,6 +490,26 @@ class AssetMaterializer:
                 f"Asset registry {self.registry_path} is outside the allowed project root "
                 f"{self.allowed_root}"
             )
+        requested_managed_paths: set[Path] = set()
+        for entry in loaded.get("assets", {}).values():
+            if not isinstance(entry, Mapping) or isinstance(entry.get("url"), str):
+                continue
+            file_value = entry.get("file")
+            if not isinstance(file_value, str) or not file_value:
+                continue
+            raw = Path(file_value).expanduser()
+            requested_managed_paths.add(
+                (raw if raw.is_absolute() else self.registry_path.parent / raw)
+                .resolve(strict=False)
+            )
+        self.allowed_managed_paths.update(
+            _owned_managed_locators(
+                requested_managed_paths,
+                projects_root=resolve_projects_root(),
+                project_slug=os.environ.get(ASTRID_PROJECT_SLUG)
+                or os.environ.get(ASTRID_GATEWAY_RESOLVED_PROJECT),
+            )
+        )
         now = datetime.now(timezone.utc)
         for index, (key, entry) in enumerate(loaded["assets"].items()):
             descriptor = copy.deepcopy(entry)
@@ -507,6 +628,30 @@ class RangeHTTPRequestHandler(SimpleHTTPRequestHandler):
         self.send_header("Accept-Ranges", "bytes")
         self.send_header("Content-Range", f"bytes */{size}")
         self.send_header("Content-Length", "0")
+        self._send_cors_headers()
+        self.end_headers()
+
+    def _send_cors_headers(self) -> None:
+        """Permit the invocation's browser page to consume loopback assets.
+
+        The renderer page may be hosted by Remotion on ``localhost`` while
+        the bounded file server binds ``127.0.0.1``.  The server exposes only
+        its private invocation directory, so wildcard origin is the narrow
+        CORS policy appropriate to this ephemeral local transport.
+        """
+
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Range, Content-Type")
+        self.send_header(
+            "Access-Control-Expose-Headers",
+            "Accept-Ranges, Content-Length, Content-Range",
+        )
+
+    def do_OPTIONS(self) -> None:  # noqa: N802 - stdlib handler API
+        self.send_response(204)
+        self.send_header("Content-Length", "0")
+        self._send_cors_headers()
         self.end_headers()
 
     def _resolved_file(self) -> Path | None:
@@ -578,6 +723,7 @@ class RangeHTTPRequestHandler(SimpleHTTPRequestHandler):
             self.send_header("Accept-Ranges", "bytes")
             self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
             self.send_header("Content-Length", str(length))
+            self._send_cors_headers()
             self.end_headers()
             return source
 
@@ -586,6 +732,7 @@ class RangeHTTPRequestHandler(SimpleHTTPRequestHandler):
         self.send_header("Content-Type", self.guess_type(str(path)))
         self.send_header("Accept-Ranges", "bytes")
         self.send_header("Content-Length", str(size))
+        self._send_cors_headers()
         self.end_headers()
         return source
 

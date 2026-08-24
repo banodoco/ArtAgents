@@ -3,6 +3,7 @@ name: vibecomfy
 description: >-
   Escape hatch. For standard image generation use the generate-image skill and
   the SDK (astrid.sdk.invoke("generation.generate_image", ...)). Reach for
+      kind="executor", project="demo",
   vibecomfy directly when you need LoRAs, IP-adapter, controlnet, custom
   samplers, graph composition, or any path the registry does not cover.
 ---
@@ -11,6 +12,7 @@ description: >-
 
 For standard image generation use the `generate-image` skill and the SDK
 (`astrid.sdk.invoke("generation.generate_image", ...)`).  Reach for this skill
+    kind="executor", project="demo",
 when you need
 LoRAs, IP-adapter, controlnet, custom samplers, graph composition, or any
 path the registry doesn't cover.

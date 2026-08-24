@@ -14,6 +14,10 @@ permissions:
     reason: Runs audio, visual, and video understanding executors.
   - id: project_files
     reason: Reads audio, video, and image files for analysis.
+  - id: network
+    reason: Sends media to OpenAI understanding APIs for audio, image, and video analysis.
+  - id: environment
+    reason: Reads the OpenAI API credential used by understanding executors.
 description: LLM-based audio, image, and video understanding — caption, query, and structured extraction over media.
 keywords:
 - understanding

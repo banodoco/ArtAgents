@@ -14,6 +14,7 @@ Use fake mode for no-network smoke tests:
 import astrid.sdk as sdk
 result = sdk.invoke(
     "editorial.script_pipeline",
+        kind="executor", project="demo",
     inputs={
         "preset": "seinfeld",
         "produces_dir": "runs/script-pipeline/produces",

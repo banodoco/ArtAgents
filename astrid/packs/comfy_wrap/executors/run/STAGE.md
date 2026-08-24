@@ -34,6 +34,7 @@ the workflow through vibecomfy, and copies the first output image to the
 ```python
 import astrid.sdk as sdk
 result = sdk.invoke("comfy_wrap.run", inputs={"prompt": "your prompt"}, out="path/to/output.png")
+    kind="executor", project="demo",
 ```
 
 ## Error recovery

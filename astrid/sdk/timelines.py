@@ -165,11 +165,13 @@ class TimelinesService:
 
     # -- list --------------------------------------------------------------
 
-    def list(self, project: str) -> DomainResult[list[dict[str, Any]]]:
-        """Return every active timeline in *project* (slug ascending)."""
+    def list(
+        self, project: str, *, include_archived: bool = False
+    ) -> DomainResult[list[dict[str, Any]]]:
+        """Return timelines in *project*, optionally including archived work."""
         try:
             project_id = self._projects.resolve(self._writer, project)
-            rows = self._timelines.list(self._writer, project_id)
+            rows = self._timelines.list(self._writer, project_id, include_archived=include_archived)
         except Exception as exc:  # noqa: BLE001 - centralized bounded mapping
             return DomainResult.failure(map_error(exc))
         return DomainResult.success([row.to_dict() for row in rows])
@@ -224,9 +226,7 @@ class TimelinesService:
                 )
             )
         except TimelineArchivedError as exc:
-            return DomainResult.failure(
-                self._archived_error(exc), idempotency_key=key
-            )
+            return DomainResult.failure(self._archived_error(exc), idempotency_key=key)
         except Exception as exc:  # noqa: BLE001 - centralized bounded mapping
             return DomainResult.failure(map_error(exc), idempotency_key=key)
         return DomainResult.success(
@@ -263,8 +263,37 @@ class TimelinesService:
                 )
             )
         except TimelineArchivedError as exc:
-            return DomainResult.failure(
-                self._archived_error(exc), idempotency_key=key
+            return DomainResult.failure(self._archived_error(exc), idempotency_key=key)
+        except Exception as exc:  # noqa: BLE001 - centralized bounded mapping
+            return DomainResult.failure(map_error(exc), idempotency_key=key)
+        return DomainResult.success(
+            model.to_dict(),
+            receipt=self._committed_receipt(project_id, key),
+            idempotency_key=key,
+        )
+
+    def unarchive(
+        self,
+        project: str,
+        ref: str,
+        *,
+        idempotency_key: str | None = None,
+    ) -> DomainResult[dict[str, Any]]:
+        """Restore *ref* to active state; repeat calls are successful no-ops."""
+        key = self._caller_key_or_empty(idempotency_key)
+        try:
+            key = self._resolve_key(idempotency_key)
+            project_id = self._projects.resolve(self._writer, project)
+        except Exception as exc:  # noqa: BLE001 - centralized bounded mapping
+            return DomainResult.failure(map_error(exc), idempotency_key=key)
+        try:
+            model = UnitOfWork(self._writer).run(
+                lambda uow: self._timelines.unarchive(
+                    uow,
+                    project_id=project_id,
+                    ref=ref,
+                    idempotency_key=key,
+                )
             )
         except Exception as exc:  # noqa: BLE001 - centralized bounded mapping
             return DomainResult.failure(map_error(exc), idempotency_key=key)
@@ -276,9 +305,7 @@ class TimelinesService:
 
     # -- history -----------------------------------------------------------
 
-    def history(
-        self, project: str, ref: str
-    ) -> DomainResult[list[dict[str, Any]]]:
+    def history(self, project: str, ref: str) -> DomainResult[list[dict[str, Any]]]:
         """Return the ordered lifecycle event history for *ref*."""
         try:
             project_id = self._projects.resolve(self._writer, project)
@@ -315,8 +342,8 @@ class TimelinesService:
     def _archived_error(exc: TimelineArchivedError) -> Any:
         """Map an archived-timeline mutation to the frozen terminal_state code.
 
-        ``TimelineArchivedError`` is a terminal mutation fence: an archived
-        timeline rejects later saves and a second archive. The centralized
+        ``TimelineArchivedError`` is a mutation fence while a timeline remains
+        archived. The centralized
         mapper does not yet carry this pack error, so the service maps it
         narrowly to the frozen ``terminal_state`` error object (SDK contract
         section 2) without leaking the internal timeline id.
@@ -340,9 +367,7 @@ class TimelinesService:
         except ValueError as exc:
             raise ServiceValidationError(str(exc)) from exc
 
-    def _committed_receipt(
-        self, project_id: str, idempotency_key: str
-    ) -> CommandReceipt | None:
+    def _committed_receipt(self, project_id: str, idempotency_key: str) -> CommandReceipt | None:
         """Read-only lookup of the committed receipt for a mutation."""
         with self._writer.read_only_connection() as conn:
             return self._receipts.lookup_committed(

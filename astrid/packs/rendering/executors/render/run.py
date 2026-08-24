@@ -9,6 +9,7 @@ guard_canonical_entrypoint('rendering.render')
 
 import argparse
 import ast
+import hashlib
 import json
 import os
 import sys
@@ -18,13 +19,19 @@ from typing import Any, Mapping, Sequence
 
 from astrid.core import timeline
 from astrid.core.foundation.paths import REPO_ROOT
+from astrid.core.foundation.project_paths import resolve_projects_root
+from astrid.core.io.media_import import managed_media_path
+from astrid.core.rendering.output_policy import (
+    DEFAULT_RENDER_OUTPUT_NAME,
+    validate_output_basename,
+)
 from astrid.core.rendering.service import RenderService
 
 # The Hype pipeline's default output file name.  The executor manifest exposes
 # an ``output_name`` input defaulting to this sentinel; non-default names are
-# validated (plain file name, ``.mp4`` extension) and flow through the same
+# validated as plain file names and flow through the same
 # placeholder expansion and declared-output resolution as the default.
-DEFAULT_OUTPUT_NAME = "hype.mp4"
+DEFAULT_OUTPUT_NAME = DEFAULT_RENDER_OUTPUT_NAME
 
 _SERVICE: RenderService | None = None
 
@@ -45,33 +52,13 @@ def _default_service() -> RenderService:
 
 
 def validate_output_name(name: str) -> str:
-    """Validate an ``output_name``: a plain ``.mp4`` file name.
+    """Validate only portable-basename safety at the executor boundary.
 
-    Rejects empty names, path separators (``/`` and ``\\``), directory
-    traversal (``.``, ``..``, or any ``..``-prefixed component), absolute
-    paths, and anything that does not end in ``.mp4``.  The Hype default
-    ``hype.mp4`` validates unchanged.
+    The shared RenderService policy owns the media suffix decision because it
+    can inspect the timeline's alpha stamp and explicit render profile.
     """
-    text = str(name)
-    if text == "":
-        raise ValueError("output_name must not be empty")
-    if text in {".", ".."} or text.startswith(".."):
-        raise ValueError(
-            f"output_name must not traverse directories, got {name!r}"
-        )
-    if "/" in text or "\\" in text or text.startswith(os.sep):
-        raise ValueError(
-            f"output_name must be a plain file name without path separators, got {name!r}"
-        )
-    if Path(text).name != text:
-        raise ValueError(
-            f"output_name must be a plain file name, got {name!r}"
-        )
-    if not text.endswith(".mp4"):
-        raise ValueError(
-            f"output_name must end with .mp4, got {name!r}"
-        )
-    return text
+
+    return validate_output_basename(name)
 
 
 def _legacy_backend_config(
@@ -130,6 +117,89 @@ def _parse_backend_config(value: str | None) -> dict[str, dict[str, Any]]:
     return {str(key): dict(item) for key, item in parsed.items() if item is not None}
 
 
+def _parse_profile(value: str | Mapping[str, Any] | None) -> Mapping[str, Any] | None:
+    """Parse the public render-profile input before request admission."""
+    if value is None or value == "":
+        return None
+    if isinstance(value, Mapping):
+        return dict(value)
+    text = str(value).strip()
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        try:
+            parsed = ast.literal_eval(text)
+        except (ValueError, SyntaxError) as exc:
+            raise ValueError("--profile must be a JSON object describing a render profile") from exc
+    if not isinstance(parsed, Mapping):
+        raise ValueError("--profile must be a JSON object describing a render profile")
+    return dict(parsed)
+
+
+def _rewrite_provenance_output_path(
+    output: Path,
+    *,
+    timeline_authority: Mapping[str, Any] | None = None,
+) -> None:
+    """Point internal-render provenance at the durable managed media path.
+
+    RenderService creates its sidecar beside the staging output, which is the
+    right workspace for backend validation but not a durable public locator.
+    Once the published media bytes exist its digest-derived managed path is deterministic;
+    rewrite only the sidecar's top-level ``output`` fact before the kernel
+    materializes both files. Direct, non-kernel renders retain the historical
+    workspace path.
+    """
+    if os.environ.get("ASTRID_INTERNAL_INVOCATION") != "1":
+        return
+    sidecar = Path(f"{output}.provenance.json")
+    if not output.is_file() or not sidecar.is_file():
+        if timeline_authority is not None:
+            raise RuntimeError(
+                "canonical timeline render did not produce the provenance sidecar "
+                "required to stamp its pinned kernel authority"
+            )
+        return
+    try:
+        payload = json.loads(sidecar.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError("render provenance must be a JSON object")
+        digest = hashlib.sha256(output.read_bytes()).hexdigest()
+        durable = str(managed_media_path(resolve_projects_root(None), digest))
+        old = str(output)
+
+        def replace_locator(value: Any) -> Any:
+            if isinstance(value, Mapping):
+                return {key: replace_locator(item) for key, item in value.items()}
+            if isinstance(value, list):
+                return [replace_locator(item) for item in value]
+            if value == old:
+                return durable
+            if (
+                isinstance(value, str)
+                and Path(value).name == output.name
+                and ".render-service-" in value
+            ):
+                return durable
+            return value
+
+        payload = replace_locator(payload)
+        payload["output"] = durable
+        if timeline_authority is not None:
+            payload["canonical_timeline"] = dict(timeline_authority)
+        sidecar.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        if timeline_authority is not None:
+            raise RuntimeError(
+                "canonical timeline render could not stamp its pinned kernel authority "
+                "into provenance"
+            ) from exc
+        # The sidecar remains governed by the renderer's own validation; this
+        # additive locator rewrite must never hide a successful render or
+        # turn an otherwise useful artifact into a kernel failure.
+        return
+
+
 def _write_empty_asset_registry(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     timeline.save_registry({"assets": {}}, path)
@@ -186,6 +256,8 @@ def render(
     min_free_gb: float | None = None,
     keep_previous_renders: bool = False,
     backend_config: Mapping[str, Mapping[str, Any]] | None = None,
+    profile: Mapping[str, Any] | None = None,
+    timeline_authority: Mapping[str, Any] | None = None,
 ) -> Path:
     """Render through :class:`RenderService` and publish one locked pair.
 
@@ -221,14 +293,20 @@ def render(
             overlaid = dict(existing)
             overlaid.update({k: v for k, v in value.items() if v is not None})
             config[str(key)] = overlaid
-    return _default_service().render(
+    output = _default_service().render(
         timeline_path,
         assets_path,
         out_path,
         selector=engine,
         backend_config=config,
+        profile=profile,
         previous_outputs=previous_outputs,
     )
+    _rewrite_provenance_output_path(
+        Path(output),
+        timeline_authority=timeline_authority,
+    )
+    return output
 
 
 _DEFAULT_THEME_PATH = REPO_ROOT / "themes" / "banodoco-default" / "theme.json"
@@ -272,9 +350,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="JSON object keyed by qualified backend id with per-backend configuration.",
     )
     parser.add_argument(
+        "--profile",
+        default=None,
+        help="JSON object describing the requested render profile.",
+    )
+    parser.add_argument(
+        "--timeline-authority",
+        default=None,
+        help="Kernel-resolved canonical timeline authority JSON (managed ref mode only).",
+    )
+    parser.add_argument(
         "--output-name",
         default=None,
-        help="Output file name (default hype.mp4); plain .mp4 file name only.",
+        help=(
+            "Plain output filename (default hype.mp4). An alpha-stamped timeline may "
+            "request .mov for truthful ProRes 4444 output."
+        ),
     )
     parser.add_argument("--project-dir", type=Path, default=REPO_ROOT / "remotion")
     parser.add_argument("--composition", default="TimelineComposition")
@@ -320,6 +411,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             else (args.engine if args.engine is not None else "remotion")
         )
         config = _parse_backend_config(args.backend_config)
+        profile = _parse_profile(args.profile)
+        timeline_authority = _parse_profile(args.timeline_authority)
         if args.assets is None:
             with TemporaryDirectory(prefix="astrid-render-assets-") as tmp_text:
                 assets_path = Path(tmp_text) / "hype.assets.json"
@@ -335,6 +428,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                     min_free_gb=args.min_free_gb,
                     keep_previous_renders=args.keep_previous_renders,
                     backend_config=config,
+                    profile=profile,
+                    timeline_authority=timeline_authority,
                 )
         else:
             output = render(
@@ -348,9 +443,26 @@ def main(argv: Sequence[str] | None = None) -> int:
                 min_free_gb=args.min_free_gb,
                 keep_previous_renders=args.keep_previous_renders,
                 backend_config=config,
+                profile=profile,
+                timeline_authority=timeline_authority,
             )
     except Exception as exc:  # pragma: no cover - CLI path
         print(str(exc), file=sys.stderr)
+        # The kernel's in-process capability path needs the structured
+        # exception to reach its handler boundary; otherwise a support
+        # rejection is flattened into a bare return code and the SDK can only
+        # report "executor failed".  Preserve the traditional CLI exit code
+        # for external callers while retaining actionable typed failure text
+        # for project-scoped SDK invocations.
+        if os.environ.get("ASTRID_INTERNAL_INVOCATION") == "1":
+            structured = getattr(exc, "error", None)
+            details = getattr(structured, "details", None)
+            reasons = details.get("reasons") if isinstance(details, Mapping) else None
+            if isinstance(reasons, (list, tuple)) and reasons:
+                raise RuntimeError(
+                    f"{exc}: " + "; ".join(str(reason) for reason in reasons)
+                ) from exc
+            raise
         return 1
     print(output)
     return 0
