@@ -29,7 +29,7 @@ import pytest
 
 from astrid.core.rendering.registry import load_default_registries
 from astrid.sdk.rendering import render, support
-from tests.packs.rendering._helpers import _source_video
+from tests.packs.rendering._helpers import _execution_env, _source_video
 
 ROOT = Path(__file__).resolve().parents[3]
 PACK_ROOT = ROOT / "tests" / "fixtures" / "renderer_packs"
@@ -263,7 +263,7 @@ def test_hyperframes_real_render_through_public_service(tmp_path: Path) -> None:
     timeline = _text_timeline(tmp_path)
     output = tmp_path / "hyperframes.mp4"
     try:
-        with _node_on_path(node):
+        with _execution_env(), _node_on_path(node):
             published = render(
                 timeline_path=timeline,
                 assets_registry_path=None,
@@ -359,7 +359,7 @@ def test_hyperframes_real_media_render_through_public_service(tmp_path: Path) ->
     )
     output = tmp_path / "hyperframes-media.mp4"
     try:
-        with _node_on_path(node):
+        with _execution_env(), _node_on_path(node):
             published = render(
                 timeline_path=timeline,
                 assets_registry_path=assets,
@@ -505,7 +505,7 @@ def test_hyperframes_remotion_combined_render(tmp_path: Path) -> None:
     timeline = _combined_timeline(tmp_path)
     output = tmp_path / "combined.mp4"
     try:
-        with _node_on_path(node):
+        with _execution_env(), _node_on_path(node):
             published = render(
                 timeline_path=timeline,
                 assets_registry_path=assets,
