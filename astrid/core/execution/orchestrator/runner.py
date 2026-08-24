@@ -21,15 +21,14 @@ from astrid.core._shared.capability_common import (
 )
 from astrid.core.contracts.capability_runner import CapabilityRunner
 from astrid.core.contracts.run_status import RunStatus
-from astrid.core.project.run import (
-    ProjectRunContext,
-    _project_subprocess_env,
-    project_run_env,
-    reject_project_with_out,
-)
 from astrid.core.project.guidance import (
     format_project_required_guidance,
     selected_project,
+)
+from astrid.core.project.run import (
+    ProjectRunContext,
+    _project_subprocess_env,
+    reject_project_with_out,
 )
 from astrid.core.runtime import (
     InProcessExecutionPreconditionError,
@@ -645,7 +644,7 @@ def _prepare_project_request(
     # equivalent of an explicit ``out`` for runtime expansion, but is not a
     # public user-selected output path and therefore must remain staging-only.
     if request.out in (None, "") and request.run_root not in (None, ""):
-        return None, request
+        return None, _request_with_effective_out(request, orchestrator, request.run_root)
     # No kernel run available and no explicit --out: fail closed.
     # The unified execution path requires a kernel run for every invocation;
     # storage-only run directories without a kernel row are not created.
