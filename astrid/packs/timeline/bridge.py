@@ -72,6 +72,11 @@ from astrid.core.integrations.reigh.bridge_service import (
     TimelineRow,
     TimelineSaveRequest,
 )
+from astrid.core.integrations.reigh.timeline_bundle import (
+    BUNDLE_MISSING,
+    TimelineBundleValidationError,
+    validate_timeline_bundle,
+)
 from astrid.core.receipts import ReceiptMismatchError
 from astrid.core.receipts.canonical import CanonicalizationError, request_hash
 from astrid.core.repositories.errors import RepositoryError
@@ -406,9 +411,10 @@ class TimelineBridgeAdapter:
                     u,
                     project_id=project_id,
                     ref=ref,
-                    config=request.config,
+                    config=self._persisted_config(request.config),
                     registry=request.registry,
                     expected_version=request.expected_version,
+                    bundle=request.bundle,
                 )
             )
         except TimelineVersionConflictError as exc:
@@ -455,9 +461,10 @@ class TimelineBridgeAdapter:
         result = self._timelines.save(
             project_slug,
             ref,
-            config=request.config,
+            config=self._persisted_config(request.config),
             registry=request.registry,
             expected_version=request.expected_version,
+            bundle=request.bundle,
             idempotency_key=derived_key,
         )
         if not result.ok:
@@ -534,9 +541,14 @@ class TimelineBridgeAdapter:
                 ],
             )
         payload = {
-            "config": dict(request.config),
+            "config": self._persisted_config(request.config),
             "registry": {"assets": dict(assets)},
             "expected_version": request.expected_version,
+            "bundle": (
+                "__omitted__"
+                if request.bundle is BUNDLE_MISSING
+                else request.bundle
+            ),
         }
         try:
             digest = request_hash(TIMELINE_SAVE_COMMAND_KIND, payload)
@@ -631,9 +643,27 @@ class TimelineBridgeAdapter:
         return ref
 
     @staticmethod
+    def _persisted_config(config: Mapping[str, Any]) -> dict[str, Any]:
+        """Drop only derived render output; retain opaque authored bags."""
+        return {key: value for key, value in config.items() if key != "output"}
+
+    @staticmethod
     def _to_load(data: Any) -> TimelineLoad:
         """Wrap a read model (service dict or repository dataclass) in the
         frozen load DTO."""
+        def bundle_value(value: Any) -> Mapping[str, Any] | None:
+            if value is None:
+                return None
+            try:
+                return validate_timeline_bundle(value)
+            except TimelineBundleValidationError as exc:
+                raise BridgeSchemaIncompatibleError(
+                    "bundle failed schema validation",
+                    issues=[
+                        BridgeIssue(pointer=exc.pointer, message=exc.message)
+                    ],
+                ) from exc
+
         if isinstance(data, Mapping):
             return TimelineLoad(
                 timeline_id=data["timeline_id"],
@@ -644,6 +674,7 @@ class TimelineBridgeAdapter:
                 config=dict(data["config"]),
                 registry=dict(data["registry"]),
                 config_version=int(data["config_version"]),
+                bundle=bundle_value(data.get("bundle")),
             )
         return TimelineLoad(
             timeline_id=data.timeline_id,
@@ -654,6 +685,7 @@ class TimelineBridgeAdapter:
             config=dict(data.config),
             registry=dict(data.registry),
             config_version=data.config_version,
+            bundle=bundle_value(data.bundle),
         )
 
 
