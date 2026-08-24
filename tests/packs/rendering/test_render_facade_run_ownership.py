@@ -1,26 +1,10 @@
-"""Facade-boundary run-ownership characterization for ``rendering.render`` (T1.1).
+"""Kernel/runner ownership boundary for the ``rendering.render`` facade.
 
-Issue 1 rework: the leaf module
-``astrid/packs/rendering/executors/render/run.py`` never calls
-``prepare_project_run`` (pinned by ``test_run_module_never_prepares_project_run``
-in ``test_legacy_renderer_characterization.py``), but the PUBLIC facade —
-``run_executor(ExecutorRunRequest(executor_id="rendering.render", ...))``, i.e.
-``astrid executors run rendering.render`` — goes through the executor runner,
-which DOES own a project run whenever a project is resolved
-(``astrid/core/execution/executor/runner.py::_prepare_project_request`` →
-``astrid/core/project/run.py::prepare_project_run``; the gate lives in
-``astrid/core/contracts/capability_runner.py::CapabilityRunner.run``).
-``metadata.requires_timeline: false`` only skips timeline resolution; it does
-not disable run ownership.
-
-These tests pin that facade behavior. No real render ever happens: the render
-subprocess (``python -m astrid.packs.rendering.executors.render.run``) is
-replaced by a test-only no-op that writes ``hype.mp4`` at the ``--out`` path
-and returns 0. The real ``rendering.render`` ExecutorDefinition is loaded from
-the default registry so the runner, project-prepare, command expansion, and
-finalize paths are the production ones.
-
-Baseline recorded in ``.oracle/baseline.md`` (section 10).
+Phase B made the kernel the only authoritative run/task ledger writer.  The
+lower-level executor runner therefore consumes a kernel-supplied staging root;
+it neither invents that root nor writes ``run.json``.  These tests exercise the
+real command expansion and publication paths with only the media subprocess
+replaced by a no-op.
 """
 
 from __future__ import annotations
@@ -35,12 +19,15 @@ import pytest
 from astrid.core.contracts.run_status import RunStatus
 from astrid.core.execution.executor import runner as executor_runner
 from astrid.core.execution.executor.registry import load_default_registry
-from astrid.core.execution.executor.runner import ExecutorRunnerError, ExecutorRunRequest, run_executor
+from astrid.core.execution.executor.runner import (
+    ExecutorRunnerError,
+    ExecutorRunRequest,
+    run_executor,
+)
 from astrid.core.foundation import project_paths as paths
 from astrid.core.project.project import create_project
-from astrid.core.project.run import resolve_record_path, write_run_record
+from astrid.core.project.run import step_dir_for, write_run_record
 from astrid.core.subprocess_env import TASK_PROJECT_ENV, TASK_RUN_ID_ENV, TASK_STEP_ID_ENV
-from astrid.core.project.run import step_dir_for
 from astrid.core.timeline.crud import create_timeline
 
 PARENT_RUN_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAT"
@@ -165,28 +152,42 @@ def _run_jsons(projects_root: Path) -> list[Path]:
     return sorted((projects_root / "demo" / "runs").glob("**/run.json"))
 
 
-def _run_json(projects_root: Path) -> dict:
-    jsons = _run_jsons(projects_root)
-    assert len(jsons) == 1, f"expected exactly one run.json, found {len(jsons)}"
-    return json.loads(jsons[0].read_text(encoding="utf-8"))
-
-
 # ---------------------------------------------------------------------------
 # standalone facade ownership
 # ---------------------------------------------------------------------------
 
 
-def test_facade_standalone_with_project_creates_one_run_json_and_rewrites_out_to_run_root(
+def test_lower_level_facade_requires_kernel_supplied_staging_root(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`astrid executors run rendering.render --project demo` owns a project run.
-
-    The runner's prepare step creates exactly one ``run.json`` at the run root
-    and rewrites ``request.out`` (None) to ``context.run_root``, so the spawned
-    render argv targets ``<run_root>/hype.mp4``.
-    """
+    """A direct runner call cannot silently recreate the retired ledger path."""
     projects_root, _ = _setup_project(tmp_path, monkeypatch)
     inputs = _write_project_inputs(projects_root)
+    commands: list = []
+    _noop_render_subprocess(monkeypatch, commands)
+
+    with pytest.raises(ExecutorRunnerError, match="output or staging path"):
+        run_executor(
+            ExecutorRunRequest(
+                executor_id="rendering.render",
+                out=None,
+                project="demo",
+                inputs=inputs,
+            ),
+            load_default_registry(),
+        )
+
+    assert commands == []
+    assert _run_jsons(projects_root) == []
+
+
+def test_lower_level_facade_preserves_kernel_staging_without_writing_a_ledger(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The runner uses, but never takes ownership of, supplied staging."""
+    projects_root, _ = _setup_project(tmp_path, monkeypatch)
+    inputs = _write_project_inputs(projects_root)
+    staging_root = tmp_path / "kernel-staging"
     commands: list = []
     _noop_render_subprocess(monkeypatch, commands)
 
@@ -195,66 +196,24 @@ def test_facade_standalone_with_project_creates_one_run_json_and_rewrites_out_to
             executor_id="rendering.render",
             out=None,
             project="demo",
+            run_root=staging_root,
             inputs=inputs,
         ),
         load_default_registry(),
     )
 
     assert result.returncode == 0
-    record = _run_json(projects_root)
-    assert record["status"] == "completed"
-    assert record["tool_id"] == "rendering.render"
-    assert record["kind"] == "executor"
-    assert record["metadata"]["project_resolution"] == "explicit"
-    run_root = resolve_record_path(record["out"], "demo", root=projects_root)
-    assert run_root == _run_jsons(projects_root)[0].parent
-    assert result.run_root == run_root
-    # The render subprocess wrote its output into the run root (out rewritten).
-    assert (run_root / "hype.mp4").read_bytes() == b"fake-mp4"
-    assert result.outputs["video"] == str(run_root / "hype.mp4")
-    # The spawned argv targets the run root, not any caller-supplied out.
-    assert len(commands) == 1
-    argv = commands[0][0]
-    out_value = argv[argv.index("--out") + 1]
-    assert Path(out_value).resolve() == (run_root / "hype.mp4").resolve()
-    # The render subprocess env carries the project-run marker.
-    env = commands[0][2]
+    assert result.run_root == staging_root
+    assert (staging_root / "hype.mp4").read_bytes() == b"fake-mp4"
+    assert result.outputs["video"] == str(staging_root / "hype.mp4")
+    assert _run_jsons(projects_root) == []
+    assert not (staging_root / "run.json").exists()
+    argv, _cwd, env = commands[0]
+    assert Path(argv[argv.index("--out") + 1]).resolve() == (
+        staging_root / "hype.mp4"
+    ).resolve()
     assert env.get("ASTRID_PROJECT_RUN") == "1"
     assert env.get("ASTRID_PROJECT_SLUG") == "demo"
-
-
-def test_facade_run_root_in_request_is_replaced_by_run_context_root(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A caller-supplied ``run_root`` is ignored for run creation.
-
-    ``_prepare_project_request`` replaces ``request.run_root`` with the actual
-    project run root (``projects/<slug>/runs/<run_id>``); the ledger is created
-    there, never at the caller's path.
-    """
-    projects_root, _ = _setup_project(tmp_path, monkeypatch)
-    inputs = _write_project_inputs(projects_root)
-    caller_run_root = tmp_path / "caller-run-root"
-    _noop_render_subprocess(monkeypatch, [])
-
-    result = run_executor(
-        ExecutorRunRequest(
-            executor_id="rendering.render",
-            out=None,
-            project="demo",
-            run_root=caller_run_root,
-            inputs=inputs,
-        ),
-        load_default_registry(),
-    )
-
-    assert result.returncode == 0
-    record = _run_json(projects_root)
-    run_root = resolve_record_path(record["out"], "demo", root=projects_root)
-    assert result.run_root == run_root
-    assert run_root != caller_run_root.resolve()
-    assert not (caller_run_root / "run.json").exists()
-    assert not caller_run_root.exists() or list(caller_run_root.iterdir()) == []
 
 
 # ---------------------------------------------------------------------------
@@ -273,6 +232,9 @@ def test_facade_task_attached_reuses_run_context_without_new_run_json(
     projects_root, timeline = _setup_project(tmp_path, monkeypatch)
     _attach_task_run(monkeypatch, projects_root, timeline)
     inputs = _write_project_inputs(projects_root)
+    step_root = step_dir_for(
+        "demo", PARENT_RUN_ID, TASK_STEP_ID, step_version=1, root=projects_root
+    )
     commands: list = []
     _noop_render_subprocess(monkeypatch, commands)
 
@@ -281,14 +243,14 @@ def test_facade_task_attached_reuses_run_context_without_new_run_json(
             executor_id="rendering.render",
             out=None,
             project="demo",
+            run_root=step_root,
             inputs=inputs,
         ),
         load_default_registry(),
     )
 
     assert result.returncode == 0
-    step_root = step_dir_for("demo", PARENT_RUN_ID, TASK_STEP_ID, step_version=1, root=projects_root)
-    # Orchestrator's run context is reused.
+    # The kernel-supplied task step staging root is reused.
     assert result.run_root == step_root
     # No NEW run.json: only the orchestrator's parent run record exists.
     assert _run_jsons(projects_root) == [projects_root / "demo" / "runs" / PARENT_RUN_ID / "run.json"]
@@ -299,14 +261,10 @@ def test_facade_task_attached_reuses_run_context_without_new_run_json(
     assert Path(out_value).resolve() == (step_root / "hype.mp4").resolve()
 
 
-def test_facade_task_attached_retains_caller_selected_output(
+def test_auto_resolved_facade_retains_caller_selected_output_without_new_ledger(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Under attachment with an auto-resolved project, a caller-selected ``out``
-    is RETAINED (not rewritten to the run root): the runner passes it through
-    as ``record_out``/effective out while the ledger still attaches to the
-    orchestrator's task step root.
-    """
+    """Auto-resolution may retain output, but never makes the runner a ledger owner."""
     projects_root, timeline = _setup_project(tmp_path, monkeypatch)
     _attach_task_run(monkeypatch, projects_root, timeline)
     # Auto-resolve the project the way a session binding would.
@@ -331,15 +289,13 @@ def test_facade_task_attached_retains_caller_selected_output(
     )
 
     assert result.returncode == 0
-    step_root = step_dir_for("demo", PARENT_RUN_ID, TASK_STEP_ID, step_version=1, root=projects_root)
-    # Run context is still the orchestrator's task step root.
-    assert result.run_root == step_root
+    assert result.run_root is None
     # The caller-selected output is retained: render wrote under caller_out.
     assert (caller_out / "hype.mp4").read_bytes() == b"fake-mp4"
     argv = commands[0][0]
     out_value = argv[argv.index("--out") + 1]
     assert Path(out_value).resolve().is_relative_to(caller_out.resolve())
-    # Still no NEW run.json.
+    # The pre-existing parent remains the only authoritative ledger.
     assert _run_jsons(projects_root) == [projects_root / "demo" / "runs" / PARENT_RUN_ID / "run.json"]
 
 
