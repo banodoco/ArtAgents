@@ -46,8 +46,10 @@ columns by name or position.
 
 from __future__ import annotations
 
+import os
 import queue
 import sqlite3
+import sys
 import threading
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
@@ -89,6 +91,10 @@ class TransactionControlError(WriterError):
     this error on invalid transitions (begin-within-transaction, or
     commit/rollback with no active transaction).
     """
+
+
+class WriterSidecarError(WriterError):
+    """Raised when the WAL sidecar is replaced beneath the live writer."""
 
 
 # Statements that would seize or release transaction control. Any SQL
@@ -313,6 +319,8 @@ class DatabaseWriter:
         self._pending = 0
         self._started = threading.Event()
         self._startup_error: BaseException | None = None
+        self._wal_identity: tuple[int, int] | None = None
+        self._sidecar_fault_reported = False
         self._thread = threading.Thread(
             target=self._run,
             name="astrid-sqlite-writer",
@@ -421,6 +429,13 @@ class DatabaseWriter:
         finally:
             conn.close()
 
+    def _wal_sidecar_identity(self) -> tuple[int, int] | None:
+        try:
+            info = os.stat(f"{self._path}-wal")
+        except OSError:
+            return None
+        return (info.st_dev, info.st_ino)
+
     # -- writer thread -----------------------------------------------------
 
     def _run(self) -> None:
@@ -435,6 +450,7 @@ class DatabaseWriter:
         # and position. The connection stays owned by this thread.
         self._connection.row_factory = sqlite3.Row
         self._started.set()
+        self._wal_identity = self._wal_sidecar_identity()
         try:
             while True:
                 item = self._queue.get()
@@ -442,8 +458,23 @@ class DatabaseWriter:
                     self._queue.task_done()
                     break
                 try:
+                    identity = self._wal_sidecar_identity()
+                    if identity != self._wal_identity:
+                        if not self._sidecar_fault_reported:
+                            self._sidecar_fault_reported = True
+                            print(
+                                "astrid-sqlite-writer: database WAL was "
+                                "replaced beneath the live writer; writes "
+                                "fail closed until restart",
+                                file=sys.stderr,
+                            )
+                        raise WriterSidecarError(
+                            "the database WAL was replaced beneath the live "
+                            "writer; restart astrid serve"
+                        )
                     session = WriterSession(self._connection)
                     item.result = item.callback(session)
+                    self._wal_identity = self._wal_sidecar_identity()
                 except sqlite3.OperationalError as exc:
                     if "locked" in str(exc).lower():
                         item.error = WriterBusyError(
@@ -469,6 +500,7 @@ __all__ = [
     "TransactionControlError",
     "WriterBusyError",
     "WriterError",
+    "WriterSidecarError",
     "WriterSession",
     "WriterShutdownError",
 ]

@@ -57,12 +57,14 @@ from astrid.core.io.media_import import (
     MEDIA_LOCATION_REALMS,
     MediaPathError,
     PreparedMedia,
+    PublishedMedia,
     managed_media_path,
     media_crash_point,
     publish_prepared_media,
     sha256_file_bytes,
     validate_digest,
     validate_media_kind,
+    validate_published_presence,
 )
 from astrid.core.receipts.canonical import (
     CanonicalizationError,
@@ -735,6 +737,38 @@ class MediaRepository:
 
     # -- prepared import ---------------------------------------------------
 
+    def _resolve_publication(
+        self,
+        *,
+        prepared: PreparedMedia,
+        realm: str,
+        txn_id: str,
+        published: PublishedMedia | None,
+    ) -> bool | None:
+        """Resolve managed publication before or inside the writer lock."""
+        if realm != MANAGED_LOCAL_REALM:
+            return None
+        if published is not None:
+            if not isinstance(published, PublishedMedia):
+                raise MediaValidationError(
+                    "published must be a PublishedMedia record or None, got "
+                    f"{type(published).__name__}"
+                )
+            if published.digest != prepared.digest:
+                raise MediaValidationError(
+                    "published digest "
+                    f"sha256:{published.digest} does not match prepared "
+                    f"bytes sha256:{prepared.digest}"
+                )
+            validate_published_presence(self._projects_root, prepared.digest)
+            media_crash_point("repo.published")
+            return published.reused
+        published_media = publish_prepared_media(
+            self._projects_root, txn_id, prepared
+        )
+        media_crash_point("repo.published")
+        return published_media.reused
+
     def import_prepared(
         self,
         uow: UnitOfWork,
@@ -746,6 +780,7 @@ class MediaRepository:
         media_id: str | None = None,
         realm: str = MANAGED_LOCAL_REALM,
         locator: str | None = None,
+        published: PublishedMedia | None = None,
         created_at: str | None = None,
         command_kind: str = CORE_MEDIA_IMPORT_COMMAND_KIND,
     ) -> MediaReadModel:
@@ -886,6 +921,7 @@ class MediaRepository:
             request_digest=request_digest,
             command_kind=command_kind,
             actor_kind=actor_kind,
+            published=published,
             created_at=created_at,
         )
 
@@ -1621,6 +1657,7 @@ class MediaRepository:
         media_id: str | None = None,
         realm: str = MANAGED_LOCAL_REALM,
         locator: str | None = None,
+        published: PublishedMedia | None = None,
         relations: Sequence[Mapping[str, Any]] | None = None,
         created_at: str | None = None,
         command_kind: str = CORE_MEDIA_IMPORT_COMMAND_KIND,
@@ -1798,16 +1835,14 @@ class MediaRepository:
         if not isinstance(stamp, str) or not stamp:
             raise MediaValidationError("created_at must be a non-empty string")
 
-        # 1. The short materialization boundary: publish verified bytes (or
-        #    verified-reuse the existing digest) before any semantic write.
-        published_reused: bool | None = None
-        if realm == MANAGED_LOCAL_REALM:
-            published = publish_prepared_media(self._projects_root, txn_id, prepared)
-            published_reused = published.reused
-            # Repository-visible seam (plan step 16): the verified managed
-            # digest exists (or was verified-reused) before any projection
-            # write; a crash here leaves SQL old plus a reusable orphan.
-            media_crash_point("repo.published")
+        # 1. Managed publication is normally supplied before BEGIN IMMEDIATE;
+        #    the in-lock operation is then one O(stat) presence check.
+        published_reused = self._resolve_publication(
+            prepared=prepared,
+            realm=realm,
+            txn_id=txn_id,
+            published=published,
+        )
 
         # 2. The media row, created only when this project+digest is new.
         media_row = uow.query_one(
@@ -2148,6 +2183,7 @@ class MediaRepository:
         request_digest: str,
         command_kind: str,
         actor_kind: str,
+        published: PublishedMedia | None,
         created_at: str | None,
     ) -> MediaReadModel:
         """Persist the import writes inside the caller's UoW."""
@@ -2159,19 +2195,14 @@ class MediaRepository:
         if not isinstance(stamp, str) or not stamp:
             raise MediaValidationError("created_at must be a non-empty string")
 
-        # 1. The short materialization boundary: publish verified bytes (or
-        #    verified-reuse the existing digest) before any semantic write.
-        #    external_local is reference-in-place and publishes nothing.
-        published_reused: bool | None = None
-        if realm == MANAGED_LOCAL_REALM:
-            published = publish_prepared_media(
-                self._projects_root, txn_id, prepared
-            )
-            published_reused = published.reused
-            # Repository-visible seam (plan step 16): the verified managed
-            # digest exists (or was verified-reused) before any projection
-            # write; a crash here leaves SQL old plus a reusable orphan.
-            media_crash_point("repo.published")
+        # 1. Managed publication is normally supplied before BEGIN IMMEDIATE;
+        #    the in-lock operation is then one O(stat) presence check.
+        published_reused = self._resolve_publication(
+            prepared=prepared,
+            realm=realm,
+            txn_id=txn_id,
+            published=published,
+        )
 
         # 2. The media row, created only when this project+digest is new.
         media_row = uow.query_one(

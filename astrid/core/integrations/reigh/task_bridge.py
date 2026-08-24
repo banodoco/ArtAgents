@@ -9,6 +9,7 @@ from __future__ import annotations
 import dataclasses
 import re
 import threading
+import uuid
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
@@ -878,6 +879,19 @@ class ReighTaskBridge:
             raise BridgeBodyError(
                 "exactly one manifest.outputs entry must be primary"
             )
+
+        # Durable media publication is deliberately outside the writer UoW.
+        # A crash after this point may leave an unreferenced CAS object, but
+        # can never leave a committed row pointing at a partial object.
+        from astrid.core.io.media_import import publish_prepared_for_commit
+
+        publications = publish_prepared_for_commit(
+            self._projects_root,
+            uuid.uuid4().hex,
+            [entry["prepared"] for entry in entries],
+        )
+        for entry, publication in zip(entries, publications):
+            entry["published"] = publication
 
         import json as _json
 

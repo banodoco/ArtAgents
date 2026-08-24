@@ -383,6 +383,7 @@ def _service_error_from_exception(exc: BaseException) -> ServiceError | None:
         EventStreamNotFoundError,
         EventValidationError,
     )
+    from astrid.core.io.media_import import MediaIntegrityError
     from astrid.core.receipts.service import (
         ReceiptMismatchError,
         ReceiptValidationError,
@@ -394,7 +395,6 @@ def _service_error_from_exception(exc: BaseException) -> ServiceError | None:
         StreamVocabularyError,
     )
     from astrid.core.repositories.evidence import EvidenceValidationError
-    from astrid.core.io.media_import import MediaIntegrityError
     from astrid.core.repositories.media import (
         MediaAlreadyExistsError,
         MediaConflictError,
@@ -429,6 +429,7 @@ def _service_error_from_exception(exc: BaseException) -> ServiceError | None:
         TransactionControlError,
         WriterBusyError,
         WriterShutdownError,
+        WriterSidecarError,
     )
     from astrid.packs.references.repository import (
         ReferenceAlreadyExistsError,
@@ -532,6 +533,7 @@ def _service_error_from_exception(exc: BaseException) -> ServiceError | None:
     unavailable = (
         NotWriterError,
         WriterBusyError,
+        WriterSidecarError,
         WriterShutdownError,
         TransactionControlError,
     )

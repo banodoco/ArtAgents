@@ -45,7 +45,7 @@ from datetime import datetime, timedelta
 from typing import Any, Protocol
 
 from astrid.core.ids import generate_lowercase_ulid
-from astrid.core.io.media_import import PreparedMedia
+from astrid.core.io.media_import import PreparedMedia, PublishedMedia
 from astrid.core.receipts.canonical import (
     CanonicalizationError,
     canonical_bytes,
@@ -3684,6 +3684,8 @@ class TaskRepository:
                 materialize_args["locator"] = entry["locator"]
             if entry.get("relations") is not None:
                 materialize_args["relations"] = entry["relations"]
+            if entry.get("published") is not None:
+                materialize_args["published"] = entry["published"]
             materialized_media = media_repo.materialize_prepared(uow, **materialize_args)
             materialized.append(
                 {
@@ -4093,6 +4095,20 @@ class TaskRepository:
                     if not isinstance(relations, Sequence) or isinstance(relations, (str, bytes)):
                         raise TaskValidationError(f"outputs[{index}].relations must be a sequence")
                     entry["relations"] = list(relations)
+                published = raw.get("published")
+                if published is not None:
+                    if not isinstance(published, PublishedMedia):
+                        raise TaskValidationError(
+                            f"outputs[{index}].published must be a PublishedMedia "
+                            f"record, got {type(published).__name__}"
+                        )
+                    if published.digest != prepared.digest:
+                        raise TaskValidationError(
+                            f"outputs[{index}].published digest sha256:"
+                            f"{published.digest} does not match prepared "
+                            f"sha256:{prepared.digest}"
+                        )
+                    entry["published"] = published
             else:
                 declared = [
                     key

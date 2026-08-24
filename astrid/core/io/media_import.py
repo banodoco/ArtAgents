@@ -49,9 +49,10 @@ import mimetypes
 import os
 import re
 import shutil
+import stat
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Mapping
+from typing import Callable, Mapping, Sequence
 
 # ---------------------------------------------------------------------------
 # Frozen vocabulary and layout (decision artifact sections 5 and 7)
@@ -978,6 +979,37 @@ def publish_prepared_media(
     return publish_staged_media(projects_root, stage_prepared_media(projects_root, txn_id, prepared))
 
 
+def publish_prepared_for_commit(
+    projects_root: str | Path,
+    txn_id: object,
+    prepareds: Sequence[PreparedMedia],
+) -> tuple[PublishedMedia, ...]:
+    """Durably publish prepared media before opening the writer transaction.
+
+    Publication is intentionally idempotent: a crash before the SQL
+    authority commits leaves a reusable content-addressed orphan, never a
+    partial digest object.  Callers pass the returned records through to the
+    repository, which performs only an O(stat) presence check under the
+    writer lock.
+    """
+    return tuple(
+        publish_prepared_media(projects_root, txn_id, prepared)
+        for prepared in prepareds
+    )
+
+
+def validate_published_presence(projects_root: str | Path, digest: object) -> int:
+    """Validate one managed digest object with a single O(stat) operation."""
+    managed = managed_media_path(projects_root, digest)
+    try:
+        info = os.lstat(managed)
+    except OSError as exc:
+        raise MediaLocationError(reason="missing", path=managed) from exc
+    if not stat.S_ISREG(info.st_mode):
+        raise MediaLocationError(reason="missing", path=managed)
+    return int(info.st_size)
+
+
 def prepare_external_local(
     path: str | Path, *, root: str | Path | None = None
 ) -> PreparedMedia:
@@ -1073,12 +1105,14 @@ __all__ = [
     "prepare_media_file",
     "probe_media_file",
     "publish_prepared_media",
+    "publish_prepared_for_commit",
     "publish_staged_media",
     "set_media_crash_hook",
     "sha256_file_bytes",
     "stage_prepared_media",
     "staging_path",
     "validate_digest",
+    "validate_published_presence",
     "validate_media_kind",
     "validate_txn_id",
     "verify_managed_bytes",
