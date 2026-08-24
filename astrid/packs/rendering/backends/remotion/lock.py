@@ -76,11 +76,21 @@ class _FcntlLock:
 
 
 def _lock_for(path: Path) -> Any:
-    """Return a cross-process lock for the exact path supplied."""
+    """Return a cross-process lock for the exact path supplied.
 
-    if FileLock is not None:
+    Prefer the local ``fcntl`` implementation on POSIX.  Recent ``filelock``
+    releases unlink a Unix lock file during release; a process already waiting
+    on that inode can then overlap a newcomer that creates and locks a different
+    inode at the same path.  Keeping the file in place gives every contender a
+    stable kernel lock identity.  ``filelock`` remains the Windows path where
+    ``fcntl`` is unavailable.
+    """
+
+    if fcntl is not None:
+        return _FcntlLock(path)
+    if FileLock is not None:  # pragma: no cover - Windows path.
         return FileLock(str(path))
-    return _FcntlLock(path)
+    return _FcntlLock(path)  # pragma: no cover - raises a focused error.
 
 
 def _resolved_lock_path() -> Path:
