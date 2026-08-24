@@ -200,6 +200,7 @@ class StandardBridgeComposition:
     runaway: Any | None
     runaway_evidence: EvidenceRepository | None
     bridge: TimelineBridgeAdapter
+    task_bridge: Any
     owner_lock: DatabaseOwnerLock | None
     """The exclusive-owner lock held for the composition's lifetime."""
 
@@ -306,6 +307,21 @@ def compose_standard_bridge(
             runaway=runaway,
             runaway_evidence=runaway_evidence,
         )
+        # Build-task, gallery, and managed-media routes share this exact
+        # writer/registry lifetime. Pack repositories are stateless adapters
+        # injected from this sole composition boundary; no handler opens a
+        # second database or writer.
+        from astrid.core.integrations.reigh.task_bridge import ReighTaskBridge
+        from astrid.packs.shots.generation_repository import GenerationRepository
+
+        generation_repository = GenerationRepository()
+        task_bridge = ReighTaskBridge(
+            writer=writer,
+            registry=registry,
+            projects_root=root,
+            generation_repo_factory=lambda: generation_repository,
+            timeline_repo_factory=lambda: timelines,
+        )
         return StandardBridgeComposition(
             projects_root=root,
             database_path=database_path,
@@ -316,6 +332,7 @@ def compose_standard_bridge(
             runaway=runaway,
             runaway_evidence=runaway_evidence,
             bridge=bridge,
+            task_bridge=task_bridge,
             owner_lock=owner_lock,
         )
     except BaseException:

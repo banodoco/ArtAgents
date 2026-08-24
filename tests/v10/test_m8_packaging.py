@@ -56,6 +56,7 @@ EXPECTED_RESOURCES = {
     "astrid/packs/timeline/migrations/0001_initial.sql",
     "astrid/packs/shots/schema-pack.yaml",
     "astrid/packs/shots/migrations/0001_initial.sql",
+    "astrid/packs/shots/migrations/0002_generations.sql",
     "astrid/packs/references/schema-pack.yaml",
     "astrid/packs/references/migrations/0001_initial.sql",
     "astrid/packs/runaway/schema-pack.yaml",

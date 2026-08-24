@@ -812,6 +812,8 @@ class TaskCompleteReadModel:
     event_ids: tuple[str, ...]
     run: Mapping[str, Any] | None
     result: Mapping[str, Any] | None = None
+    generation: Mapping[str, Any] | None = None
+    timeline_head: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Return the JSON-safe dict persisted as the receipt result."""
@@ -822,6 +824,10 @@ class TaskCompleteReadModel:
             "event_ids": list(self.event_ids),
             "run": dict(self.run) if self.run is not None else None,
             "result": dict(self.result) if self.result is not None else None,
+            "generation": (
+                dict(self.generation) if self.generation is not None else None
+            ),
+            "timeline_head": self.timeline_head,
         }
 
     @classmethod
@@ -836,6 +842,16 @@ class TaskCompleteReadModel:
             event_ids=tuple(str(event_id) for event_id in (value.get("event_ids") or [])),
             run=dict(value["run"]) if value.get("run") is not None else None,
             result=(dict(value["result"]) if value.get("result") is not None else None),
+            generation=(
+                dict(value["generation"])
+                if value.get("generation") is not None
+                else None
+            ),
+            timeline_head=(
+                int(value["timeline_head"])
+                if value.get("timeline_head") is not None
+                else None
+            ),
         )
 
 
@@ -3432,6 +3448,10 @@ class TaskRepository:
         actor_kind: str = "local",
         now: str | None = None,
         command_kind: str = CORE_TASK_COMPLETE_COMMAND_KIND,
+        generation_repo: Any = None,
+        generation_request: Mapping[str, Any] | None = None,
+        timeline_repo: Any = None,
+        registry_merge: Mapping[str, Any] | None = None,
     ) -> TaskCompleteReadModel:
         """Complete one owned attempt atomically into media and outputs.
 
@@ -3523,6 +3543,16 @@ class TaskRepository:
             raise TaskValidationError(
                 "complete requires at least one materialized output or a non-empty result summary"
             )
+        if generation_request is not None and not isinstance(
+            generation_request, Mapping
+        ):
+            raise TaskValidationError(
+                "generation_request must be a mapping when supplied"
+            )
+        if registry_merge is not None and not isinstance(registry_merge, Mapping):
+            raise TaskValidationError(
+                "registry_merge must be a mapping when supplied"
+            )
 
         # Semantic request identity: the fenced transition plus every
         # caller-supplied output fact. Generated state (media/location ids,
@@ -3542,6 +3572,10 @@ class TaskRepository:
         }
         if result_summary is not None:
             request["result"] = result_summary
+        if generation_request is not None:
+            request["generation_request"] = dict(generation_request)
+        if registry_merge is not None:
+            request["registry_merge"] = dict(registry_merge)
         try:
             request_digest = request_hash(command_kind, request)
         except CanonicalizationError as exc:
@@ -3780,6 +3814,89 @@ class TaskRepository:
                 stamp=stamp,
             )
 
+        # Generation identity and initial primary variant are part of the
+        # same completion transaction. The completion receipt is their
+        # atomicity/idempotency record; the generation repository is
+        # intentionally receipt- and event-free.
+        generation_model: Any = None
+        if generation_request is not None:
+            if not hasattr(generation_repo, "record_completion"):
+                raise TaskValidationError(
+                    "generation_request requires a repository exposing "
+                    "record_completion"
+                )
+            generation_type = generation_request.get("type")
+            if not isinstance(generation_type, str) or not generation_type:
+                raise TaskValidationError(
+                    "generation_request.type must be a non-empty string"
+                )
+            primary_media_id = next(
+                (
+                    entry["media_id"]
+                    for entry in materialized
+                    if entry["is_primary"]
+                ),
+                None,
+            )
+            variant = dict(generation_request.get("variant") or {})
+            variant.setdefault("media_id", primary_media_id)
+            generation_model = generation_repo.record_completion(
+                uow,
+                project_id=project_id,
+                task_id=task_id,
+                type=generation_type,
+                params=generation_request.get("params"),
+                variant=variant,
+            )
+
+        # Managed outputs become addressable by the editor by additively
+        # merging registry entries against the current timeline head. This
+        # advances the same CAS stream without replacing editor document JSON.
+        registry_head: int | None = None
+        if registry_merge is not None:
+            if not hasattr(timeline_repo, "merge_registry"):
+                raise TaskValidationError(
+                    "registry_merge requires a repository exposing merge_registry"
+                )
+            timeline_id = registry_merge.get("timeline_id")
+            entries_payload = registry_merge.get("entries")
+            if not isinstance(timeline_id, str) or not timeline_id:
+                raise TaskValidationError(
+                    "registry_merge.timeline_id must be a non-empty string"
+                )
+            if not isinstance(entries_payload, Mapping):
+                raise TaskValidationError(
+                    "registry_merge.entries must be a JSON object"
+                )
+            resolved_entries: dict[str, Any] = {}
+            media_id_by_ordinal = {
+                entry["ordinal"]: entry["media_id"] for entry in materialized
+            }
+            for asset_key, raw_entry in entries_payload.items():
+                if not isinstance(raw_entry, Mapping):
+                    resolved_entries[asset_key] = raw_entry
+                    continue
+                entry = dict(raw_entry)
+                output_ordinal = entry.pop("task_output_ordinal", None)
+                if output_ordinal is not None:
+                    if (
+                        isinstance(output_ordinal, bool)
+                        or not isinstance(output_ordinal, int)
+                        or output_ordinal not in media_id_by_ordinal
+                    ):
+                        raise TaskValidationError(
+                            "registry_merge entry references an unknown task output ordinal"
+                        )
+                    entry["media_id"] = media_id_by_ordinal[output_ordinal]
+                resolved_entries[asset_key] = entry
+            registry_head = timeline_repo.merge_registry(
+                uow,
+                project_id=project_id,
+                timeline_id=timeline_id,
+                entries=resolved_entries,
+                actor_kind="system" if actor_kind == "local" else actor_kind,
+            )
+
         # 7. The hash-chained core.task.completed event on the task stream.
         media_id_by_ordinal = {entry["ordinal"]: entry["media_id"] for entry in materialized}
         event_outputs: list[dict[str, Any]] = []
@@ -3866,6 +3983,13 @@ class TaskRepository:
             event_ids=event_ids,
             run=run_projection,
             result=result_summary,
+            generation=(
+                generation_model.to_dict()
+                if generation_model is not None
+                and hasattr(generation_model, "to_dict")
+                else generation_model
+            ),
+            timeline_head=registry_head,
         )
         self._receipts.record(
             uow,

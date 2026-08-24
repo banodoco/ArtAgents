@@ -368,18 +368,18 @@ def test_media_is_kernel_citizenship(core_database, core_registry) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Section 6: the standard 14+1+2+3+1 composition
+# Section 6: the standard 14+1+4+3+1 composition
 # ---------------------------------------------------------------------------
 
 
-def test_standard_database_contains_14_plus_1_plus_2_plus_3_tables(
+def test_standard_database_contains_14_plus_1_plus_4_plus_3_tables(
     standard_database,
     standard_registry,
 ) -> None:
     conn, _ = standard_database
     # Counts are derived from the composed registry, not from a fixed "20".
     expected = len(standard_registry.tables)
-    assert expected == len(CORE_TABLES) + 1 + 2 + 3 + 1
+    assert expected == len(CORE_TABLES) + 1 + 4 + 3 + 1
     assert _table_names(conn) == set(standard_registry.tables)
     assert len(_table_names(conn)) == expected
 
@@ -526,12 +526,14 @@ def test_pack_indexes_match_their_declarations(standard_database) -> None:
 
 def test_pack_tables_never_gain_kernel_or_foreign_tables(standard_database) -> None:
     conn, _ = standard_database
-    # The four packs add exactly their seven owned tables and nothing else.
+    # The four packs add exactly their nine owned tables and nothing else.
     pack_tables = _table_names(conn) - set(CORE_TABLES)
     assert pack_tables == {
         "timelines",
         "shots",
         "shot_items",
+        "generations",
+        "generation_variants",
         "project_references",
         "media_references",
         "reference_links",

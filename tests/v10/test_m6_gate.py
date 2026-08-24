@@ -44,7 +44,7 @@ EXPECTED_FAMILIES: frozenset[str] = frozenset(
 )
 """The exactly-eight top-level families (five product + three operational)."""
 
-EXPECTED_TABLE_COUNT = 21
+EXPECTED_TABLE_COUNT = 23
 """The frozen v10 schema table count (core + four standard packs)."""
 
 

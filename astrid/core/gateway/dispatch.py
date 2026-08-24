@@ -222,6 +222,7 @@ def _dispatch_serve(args: list[str]) -> int:
                 # HTTP server never gains a second authority. The writer stays
                 # owned by this root and is closed on shutdown below.
                 bridge=composition.bridge,
+                task_bridge=composition.task_bridge,
                 writer=composition.writer,
                 database_path=composition.database_path,
                 release_mode=parsed.release_mode,

@@ -19,6 +19,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 from astrid.core.integrations.reigh.bridge_service import (
     BridgeAuthenticationError,
+    BridgeBodyError,
     BridgeCursorError,
     BridgeError,
     BridgeForbiddenError,
@@ -182,6 +183,7 @@ class LocalBridgeHTTPServer(ThreadingHTTPServer):
             "bridge",
             "bridge_writer",
             "bridge_database_path",
+            "task_bridge",
             "bridge_auth_token",
             "bridge_release_mode",
             "bridge_protocol_version",
@@ -197,6 +199,7 @@ class LocalBridgeHTTPServer(ThreadingHTTPServer):
         bridge: Any | None,
         bridge_writer: Any | None,
         bridge_database_path: str | Path | None,
+        task_bridge: Any | None = None,
         bridge_auth_token: str | None = None,
         bridge_release_mode: bool = False,
         max_concurrent_requests: int = _DEFAULT_MAX_CONCURRENT_REQUESTS,
@@ -219,6 +222,7 @@ class LocalBridgeHTTPServer(ThreadingHTTPServer):
         self.bridge = bridge
         self.bridge_writer = bridge_writer
         self.bridge_database_path = bridge_database_path
+        self.task_bridge = task_bridge
         self.bridge_auth_token = bridge_auth_token
         self.bridge_release_mode = bridge_release_mode
         self.bridge_protocol_version = _BRIDGE_PROTOCOL_VERSION
@@ -258,6 +262,7 @@ def create_local_bridge_server(
     host: str = "127.0.0.1",
     port: int = 0,
     bridge: Any | None = None,
+    task_bridge: Any | None = None,
     writer: Any | None = None,
     database_path: str | Path | None = None,
     auth_token: str | None = None,
@@ -296,6 +301,7 @@ def create_local_bridge_server(
         (host, port),
         handler,
         bridge=bridge,
+        task_bridge=task_bridge,
         bridge_writer=writer,
         bridge_database_path=database_path,
         bridge_auth_token=auth_token,
@@ -655,6 +661,76 @@ def make_local_bridge_handler(*, projects_root: Path):
                 raise MediaNotFoundError(media_id=locator)
             raise last_error
 
+        def _serve_media_content(
+            self,
+            project_slug: str,
+            media_id: str,
+            *,
+            head_only: bool = False,
+        ) -> None:
+            """Serve verified managed-media bytes by project-scoped id."""
+            import sqlite3
+
+            from astrid.core.repositories.media import MediaNotFoundError
+            from astrid.core.repositories.projects import ProjectNotFoundError
+
+            try:
+                writer = self._bridge_writer()
+                project_id = self._projects_repository().resolve(
+                    writer, project_slug
+                )
+            except BridgeError as exc:
+                self._send_bridge_error(exc)
+                return
+            except ProjectNotFoundError:
+                self._send_error(
+                    404,
+                    "project_not_found",
+                    f"project {project_slug!r} was not found",
+                )
+                return
+
+            media = self._media_repository()
+            try:
+                with writer.read_only_connection() as conn:
+                    conn.row_factory = sqlite3.Row
+                    resolved_media_id = media.resolve_media(
+                        conn,
+                        project_id=project_id,
+                        media_id=media_id,
+                    )
+                media_model = media.show(writer, resolved_media_id)
+            except MediaNotFoundError:
+                self._send_error(
+                    404,
+                    "media_not_found",
+                    f"media {media_id!r} was not found in project {project_slug!r}",
+                )
+                return
+
+            verified = self._resolve_verified_local_location(media_model)
+            if verified is None:
+                self._send_error(
+                    404,
+                    "media_bytes_missing",
+                    f"media {resolved_media_id!r} has no verified local bytes",
+                )
+                return
+
+            local_path, file_size = verified
+            stat = local_path.stat()
+            content_type = media_model.mime_type or "application/octet-stream"
+            etag = f'"{stat.st_mtime_ns:x}-{file_size:x}"'
+            last_modified = formatdate(stat.st_mtime, usegmt=True)
+            self._serve_resolved_asset(
+                local_path,
+                file_size,
+                content_type,
+                etag,
+                last_modified,
+                head_only=head_only,
+            )
+
         def _projects_repository(self) -> ProjectRepository:
             """Read-only project resolution over the injected single writer.
 
@@ -940,6 +1016,104 @@ def make_local_bridge_handler(*, projects_root: Path):
             """Serialize a typed bridge error with its frozen envelope."""
             self._send_json(error.status_code, error.to_dict())
 
+        def _task_bridge(self) -> Any:
+            bridge = getattr(self.server, "task_bridge", None)
+            if bridge is None:
+                raise BridgeInternalError(
+                    "the task bridge is not composed on this server"
+                )
+            return bridge
+
+        def _send_task_error(self, exc: BaseException) -> None:
+            """Map repository failures to the public, bounded error contract."""
+            from astrid.core.integrations.reigh.task_bridge import (
+                BridgeConflictError,
+            )
+            from astrid.core.receipts.service import ReceiptMismatchError
+            from astrid.core.repositories.tasks import (
+                TaskAttemptNotFoundError,
+                TaskNotFoundError,
+                TaskTransitionError,
+                TaskValidationError,
+            )
+
+            if _DIAGNOSTICS_ENABLED:
+                import traceback
+
+                traceback.print_exception(exc)
+
+            if isinstance(exc, BridgeError):
+                self._send_bridge_error(exc)
+            elif isinstance(exc, ReceiptMismatchError):
+                self._send_error(
+                    409,
+                    "idempotency_mismatch",
+                    "this idempotency key was already committed with different canonical request bytes",
+                )
+            elif isinstance(exc, (TaskNotFoundError, TaskAttemptNotFoundError)):
+                self._send_error(404, "not_found", str(exc))
+            elif isinstance(exc, TaskValidationError):
+                self._send_error(400, "invalid_body", str(exc))
+            elif isinstance(exc, TaskTransitionError):
+                conflict = BridgeConflictError(
+                    str(getattr(exc, "reason", "conflict")),
+                    attempt=self._task_bridge()._current_attempt_extra(
+                        getattr(exc, "attempt_id", None)
+                    ),
+                )
+                self._send_bridge_error(conflict)
+            else:
+                self._send_error(
+                    500, "internal", "unexpected task route failure"
+                )
+
+        def _require_idempotency_key(self) -> str | None:
+            key = self.headers.get("Idempotency-Key")
+            if key is None or not key.strip():
+                self._send_error(
+                    400,
+                    "invalid_body",
+                    "the Idempotency-Key header is required for this route",
+                )
+                return None
+            key = key.strip()
+            if len(key) > 200 or not all(32 <= ord(char) <= 126 for char in key):
+                self._send_error(
+                    400,
+                    "invalid_body",
+                    "Idempotency-Key must be 1-200 printable ASCII chars",
+                )
+                return None
+            return key
+
+        def _read_json_body_capped(
+            self, *, max_bytes: int
+        ) -> dict[str, Any] | None:
+            raw_header = self.headers.get("Content-Length")
+            if raw_header is None:
+                return None
+            try:
+                length = int(raw_header)
+            except (TypeError, ValueError):
+                return None
+            if length <= 0:
+                return None
+            if length > max_bytes:
+                raise BridgePayloadTooLargeError(
+                    f"request body exceeds {max_bytes} bytes"
+                )
+            try:
+                raw = self.rfile.read(length)
+            except TimeoutError:
+                return None
+            if len(raw) != length:
+                return None
+            try:
+                payload = json.loads(raw.decode("utf-8"))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                return None
+            return payload if isinstance(payload, dict) else None
+
         def _authorize_request(self, *, require_token: bool = True) -> bool:
             """Apply bounded admission, local-origin, auth, and version gates."""
 
@@ -1117,6 +1291,121 @@ def make_local_bridge_handler(*, projects_root: Path):
                 self._serve_asset(route_parts[1], route_parts[3], route_parts[5])
                 return
 
+            if (
+                len(route_parts) == 3
+                and route_parts[0] == "projects"
+                and route_parts[2] == "tasks"
+            ):
+                query = parse_qs(parsed_url.query, keep_blank_values=True)
+                unknown = set(query).difference({"limit", "offset"})
+                if unknown:
+                    self._send_error(
+                        400,
+                        "invalid_body",
+                        f"unsupported query parameter(s): {', '.join(sorted(unknown))}",
+                    )
+                    return
+                try:
+                    if any(len(query.get(name, [])) > 1 for name in ("limit", "offset")):
+                        raise ValueError
+                    limit = int(query.get("limit", ["50"])[0])
+                    offset = int(query.get("offset", ["0"])[0])
+                    payload = self._task_bridge().list_tasks(
+                        slug=route_parts[1], limit=limit, offset=offset
+                    )
+                except ValueError:
+                    self._send_error(400, "invalid_body", "bad paging param")
+                    return
+                except Exception as exc:  # noqa: BLE001
+                    self._send_task_error(exc)
+                    return
+                self._send_json(200, payload)
+                return
+
+            if (
+                len(route_parts) == 4
+                and route_parts[0] == "projects"
+                and route_parts[2] == "tasks"
+            ):
+                try:
+                    payload = self._task_bridge().task_detail(
+                        slug=route_parts[1], task_id=route_parts[3]
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    self._send_task_error(exc)
+                    return
+                self._send_json(200, payload)
+                return
+
+            if (
+                len(route_parts) == 3
+                and route_parts[0] == "projects"
+                and route_parts[2] == "generations"
+            ):
+                query = parse_qs(parsed_url.query, keep_blank_values=True)
+                unknown = set(query).difference({"limit", "cursor", "starred"})
+                if unknown:
+                    self._send_error(
+                        400,
+                        "invalid_body",
+                        f"unsupported query parameter(s): {', '.join(sorted(unknown))}",
+                    )
+                    return
+                try:
+                    if any(len(values) > 1 for values in query.values()):
+                        raise ValueError
+                    limit = int(query.get("limit", ["50"])[0])
+                    cursor = query.get("cursor", [None])[0]
+                    if cursor == "":
+                        raise ValueError
+                    starred_raw = query.get("starred", [None])[0]
+                    if starred_raw is None:
+                        starred = None
+                    elif starred_raw.lower() in ("true", "1"):
+                        starred = True
+                    elif starred_raw.lower() in ("false", "0"):
+                        starred = False
+                    else:
+                        raise ValueError
+                    payload = self._task_bridge().list_generations(
+                        slug=route_parts[1],
+                        limit=limit,
+                        cursor=cursor,
+                        starred=starred,
+                    )
+                except ValueError:
+                    self._send_error(400, "invalid_body", "bad paging param")
+                    return
+                except Exception as exc:  # noqa: BLE001
+                    self._send_task_error(exc)
+                    return
+                self._send_json(200, payload)
+                return
+
+            if (
+                len(route_parts) == 4
+                and route_parts[0] == "projects"
+                and route_parts[2] == "generations"
+            ):
+                try:
+                    payload = self._task_bridge().generation_detail(
+                        slug=route_parts[1], generation_id=route_parts[3]
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    self._send_task_error(exc)
+                    return
+                self._send_json(200, payload)
+                return
+
+            if (
+                len(route_parts) == 5
+                and route_parts[0] == "projects"
+                and route_parts[2] == "media"
+                and route_parts[4] == "content"
+            ):
+                self._serve_media_content(route_parts[1], route_parts[3])
+                return
+
             self._send_error(404, "not_found", f"unknown route: {path}")
 
         def do_HEAD(self) -> None:  # noqa: N802
@@ -1134,6 +1423,17 @@ def make_local_bridge_handler(*, projects_root: Path):
             ):
                 self._serve_asset(
                     route_parts[1], route_parts[3], route_parts[5], head_only=True
+                )
+                return
+
+            if (
+                len(route_parts) == 5
+                and route_parts[0] == "projects"
+                and route_parts[2] == "media"
+                and route_parts[4] == "content"
+            ):
+                self._serve_media_content(
+                    route_parts[1], route_parts[3], head_only=True
                 )
                 return
 
@@ -1225,7 +1525,264 @@ def make_local_bridge_handler(*, projects_root: Path):
                 self._send_json(200, result.to_dict())
                 return
 
+            max_json_body_bytes = 1024 * 1024
+
+            if (
+                len(route_parts) == 3
+                and route_parts[0] == "projects"
+                and route_parts[2] == "tasks"
+            ):
+                key = self._require_idempotency_key()
+                if key is None:
+                    return
+                try:
+                    body = self._read_json_body_capped(
+                        max_bytes=max_json_body_bytes
+                    )
+                except BridgePayloadTooLargeError as exc:
+                    self._send_bridge_error(exc)
+                    return
+                if body is None:
+                    self._send_error(
+                        400,
+                        "invalid_body",
+                        "request body must be a JSON object of at most 1 MiB",
+                    )
+                    return
+                try:
+                    bridge = self._task_bridge()
+                    if "child_admission" in body:
+                        payload = bridge.admit_child(
+                            slug=route_parts[1],
+                            body=body,
+                            idempotency_key=key,
+                        )
+                        self._send_json(201, payload)
+                        return
+                    status, payload = bridge.admit(
+                        slug=route_parts[1],
+                        body=body,
+                        idempotency_key=key,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    self._send_task_error(exc)
+                    return
+                self._send_json(status, payload)
+                return
+
+            if route_parts == ["queue", "claim"]:
+                try:
+                    body = self._read_json_body_capped(
+                        max_bytes=max_json_body_bytes
+                    )
+                except BridgePayloadTooLargeError as exc:
+                    self._send_bridge_error(exc)
+                    return
+                if body is None:
+                    self._send_error(400, "invalid_body", "request body must be JSON")
+                    return
+                try:
+                    won = self._task_bridge().claim(
+                        executor_id=body.get("executor_id"),
+                        capabilities=body.get("capabilities"),
+                        lease_seconds=body.get("lease_seconds", 300),
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    self._send_task_error(exc)
+                    return
+                if won is None:
+                    self.send_response(204)
+                    self._set_cors_headers()
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
+                self._send_json(200, won)
+                return
+
+            if (
+                len(route_parts) == 5
+                and route_parts[0] == "tasks"
+                and route_parts[2] == "attempts"
+            ):
+                try:
+                    attempt_no = int(route_parts[3])
+                except ValueError:
+                    self._send_error(
+                        400, "invalid_body", "attempt_no must be an integer"
+                    )
+                    return
+                self._dispatch_attempt_route(
+                    route_parts[1], attempt_no, route_parts[4]
+                )
+                return
+
+            if (
+                len(route_parts) == 5
+                and route_parts[0] == "projects"
+                and route_parts[2] == "tasks"
+                and route_parts[4] == "cancel"
+            ):
+                try:
+                    body = self._read_optional_request_body()
+                    if body is None:
+                        raise BridgeBodyError(
+                            "request body must be a JSON object when present"
+                        )
+                    payload = self._task_bridge().cancel(
+                        slug=route_parts[1], task_id=route_parts[3], body=body
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    self._send_task_error(exc)
+                    return
+                self._send_json(200, payload)
+                return
+
             self._send_error(404, "not_found", f"unknown POST route: {path}")
+
+        def _dispatch_attempt_route(
+            self, task_id: str, attempt_no: int, verb: str
+        ) -> None:
+            if verb == "heartbeat":
+                try:
+                    body = self._read_json_body_capped(max_bytes=1024 * 1024)
+                except BridgePayloadTooLargeError as exc:
+                    self._send_bridge_error(exc)
+                    return
+                if body is None:
+                    self._send_error(400, "invalid_body", "request body must be JSON")
+                    return
+                attempt_id = body.get("attempt_id")
+                lease_id = body.get("lease_id")
+                status_version = body.get("status_version")
+                if not isinstance(attempt_id, str) or not attempt_id:
+                    self._send_error(400, "invalid_body", "attempt_id is required")
+                    return
+                if not isinstance(lease_id, str) or not lease_id:
+                    self._send_error(400, "invalid_body", "lease_id is required")
+                    return
+                if (
+                    isinstance(status_version, bool)
+                    or not isinstance(status_version, int)
+                    or status_version <= 0
+                ):
+                    self._send_error(400, "invalid_body", "status_version is required")
+                    return
+                try:
+                    payload = self._task_bridge().heartbeat(
+                        task_id=task_id,
+                        attempt_no=attempt_no,
+                        attempt_id=attempt_id,
+                        lease_id=lease_id,
+                        expected_status_version=status_version,
+                        lease_seconds=body.get("lease_seconds", 300),
+                        progress=body.get("progress"),
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    self._send_task_error(exc)
+                    return
+                self._send_json(200, payload)
+                return
+
+            if verb == "complete":
+                self._handle_complete(task_id, attempt_no)
+                return
+
+            if verb == "fail":
+                key = self._require_idempotency_key()
+                if key is None:
+                    return
+                try:
+                    body = self._read_json_body_capped(max_bytes=1024 * 1024)
+                except BridgePayloadTooLargeError as exc:
+                    self._send_bridge_error(exc)
+                    return
+                if body is None:
+                    self._send_error(400, "invalid_body", "request body must be JSON")
+                    return
+                try:
+                    payload = self._task_bridge().fail(
+                        task_id=task_id,
+                        attempt_no=attempt_no,
+                        idempotency_key=key,
+                        body=body,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    self._send_task_error(exc)
+                    return
+                self._send_json(200, payload)
+                return
+
+            self._send_error(404, "not_found", f"unknown attempt verb {verb!r}")
+
+        def _handle_complete(self, task_id: str, attempt_no: int) -> None:
+            import uuid as _uuid
+
+            from astrid.core.integrations.reigh.multipart import (
+                MultipartError,
+                parse_multipart,
+            )
+            from astrid.core.io.media_import import staging_path
+
+            key = self._require_idempotency_key()
+            if key is None:
+                return
+            max_request = int(
+                os.environ.get(
+                    "ASTRID_BRIDGE_MAX_STAGING_REQUEST_BYTES",
+                    str(2 * 1024 * 1024 * 1024),
+                )
+            )
+            txn_id = _uuid.uuid4().hex
+            staging_dir = staging_path(str(projects_root), txn_id)
+            try:
+                parsed = parse_multipart(
+                    self.rfile,
+                    content_type=self.headers.get("Content-Type"),
+                    content_length=self.headers.get("Content-Length"),
+                    transfer_encoding=self.headers.get("Transfer-Encoding"),
+                    staging_dir=staging_dir,
+                    max_body_bytes=max_request,
+                )
+            except MultipartError as exc:
+                status = 413 if exc.wire_code == "payload_too_large" else 400
+                self._cleanup_staging_dir(staging_dir)
+                self._send_error(status, exc.wire_code, str(exc))
+                return
+            try:
+                manifest = json.loads(parsed.fields.get("manifest", "{}"))
+                if not isinstance(manifest, dict):
+                    raise ValueError
+            except (json.JSONDecodeError, ValueError):
+                self._cleanup_staging_dir(staging_dir)
+                self._send_error(
+                    400, "invalid_body", "the manifest part must be JSON"
+                )
+                return
+            try:
+                payload = self._task_bridge().complete(
+                    task_id=task_id,
+                    attempt_no=attempt_no,
+                    idempotency_key=key,
+                    fence={
+                        "lease_id": manifest.get("lease_id"),
+                        "status_version": manifest.get("status_version"),
+                        "attempt_id": manifest.get("attempt_id"),
+                    },
+                    output_specs=manifest.get("outputs") or [],
+                    staged_files=parsed.files,
+                )
+            except Exception as exc:  # noqa: BLE001
+                self._cleanup_staging_dir(staging_dir)
+                self._send_task_error(exc)
+                return
+            self._cleanup_staging_dir(staging_dir)
+            self._send_json(200, payload)
+
+        @staticmethod
+        def _cleanup_staging_dir(staging_dir: Path) -> None:
+            import shutil
+
+            shutil.rmtree(staging_dir, ignore_errors=True)
 
         # Request helpers
         # ------------------------------------------------------------------
@@ -1266,7 +1823,16 @@ def make_local_bridge_handler(*, projects_root: Path):
                 return None
             if length <= 0:
                 return {}
-            raw = self.rfile.read(length)
+            if length > _MAX_REQUEST_BODY_BYTES:
+                raise BridgePayloadTooLargeError(
+                    f"request body exceeds {_MAX_REQUEST_BODY_BYTES} bytes"
+                )
+            try:
+                raw = self.rfile.read(length)
+            except TimeoutError:
+                return None
+            if len(raw) != length:
+                return None
             try:
                 payload = json.loads(raw.decode("utf-8"))
             except (json.JSONDecodeError, UnicodeDecodeError):

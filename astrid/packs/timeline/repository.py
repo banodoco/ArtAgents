@@ -131,6 +131,15 @@ authority for archived state (there is no column and no second authority).
 Archived timelines disappear from ordinary lists and reject further saves,
 while direct historical lookup (show/history/diff) keeps working."""
 
+TIMELINE_REGISTRY_MERGED_EVENT_KIND = "timeline.registry_merged"
+"""Completion-time additive registry merge event.
+
+Worker completion may add managed-media entries without replacing the
+editor-owned document. Existing registry keys are never overwritten; this
+event advances the same timeline stream head and therefore participates in
+the next whole-document CAS version.
+"""
+
 _TIMELINE_HISTORY_KINDS: tuple[str, ...] = (
     TIMELINE_CREATED_EVENT_KIND,
     TIMELINE_SAVED_EVENT_KIND,
@@ -1119,6 +1128,118 @@ class TimelineRepository:
         )
         return read_model
 
+    # -- internal asset-registry merge (completion UoW; no receipt) ---------
+
+    def merge_registry(
+        self,
+        uow: UnitOfWork,
+        *,
+        project_id: str,
+        timeline_id: str,
+        entries: Mapping[str, Any],
+        actor_kind: str = "system",
+        created_at: str | None = None,
+    ) -> int:
+        """Add missing registry entries inside a task-completion UoW.
+
+        The current stream head is read and fenced inside the caller's one
+        transaction. Existing keys remain editor authority, document JSON is
+        untouched, archived timelines reject the merge, and a fully
+        redundant merge is a no-op. The surrounding completion receipt is
+        the atomicity record, so this internal helper creates no receipt.
+        """
+        project_id = _require_non_empty_string("project_id", project_id)
+        timeline_id = _require_non_empty_string("timeline_id", timeline_id)
+        if not isinstance(entries, Mapping):
+            raise TimelineValidationError("entries must be a JSON object")
+        for key in entries:
+            _require_non_empty_string("entry key", key)
+
+        row = uow.query_one(
+            "SELECT t.id, t.project_id, t.event_stream_id "
+            "FROM timelines t WHERE t.id = ? AND t.project_id = ?",
+            (timeline_id, project_id),
+        )
+        if row is None:
+            raise TimelineNotFoundError(ref=timeline_id, project_id=project_id)
+        stream = uow._stream_row(str(row["event_stream_id"]))
+        if stream is None:
+            raise TimelineRepositoryError(
+                f"timeline {timeline_id!r} is missing its event stream"
+            )
+        base_head = int(stream["head_seq"])
+
+        if (
+            uow.query_one(
+                "SELECT 1 FROM events WHERE stream_id = ? AND kind = ? LIMIT 1",
+                (row["event_stream_id"], TIMELINE_ARCHIVED_EVENT_KIND),
+            )
+            is not None
+        ):
+            raise TimelineArchivedError(
+                timeline_id=timeline_id, project_id=project_id
+            )
+
+        registry_row = uow.query_one(
+            "SELECT asset_registry_json FROM timelines WHERE id = ?",
+            (timeline_id,),
+        )
+        if registry_row is None:
+            raise TimelineNotFoundError(ref=timeline_id, project_id=project_id)
+        existing = self._parse_document(
+            str(registry_row["asset_registry_json"]), timeline_id
+        )
+        added_keys = sorted(key for key in entries if key not in existing)
+        if not added_keys:
+            return base_head
+
+        merged_assets = {
+            **existing,
+            **{key: entries[key] for key in added_keys},
+        }
+        try:
+            assets_json = canonical_json(merged_assets)
+        except CanonicalizationError as exc:
+            raise TimelineValidationError(
+                f"cannot canonicalize merged asset registry: {exc}"
+            ) from exc
+
+        stamp = created_at if created_at is not None else utc_now_iso()
+        if not isinstance(stamp, str) or not stamp:
+            raise TimelineValidationError("created_at must be a non-empty string")
+
+        changed = uow.update_projection(
+            "timelines",
+            {"asset_registry_json": assets_json, "updated_at": stamp},
+            {"id": timeline_id, "project_id": project_id},
+        )
+        if changed != 1:
+            raise TimelineNotFoundError(ref=timeline_id, project_id=project_id)
+
+        append = self._events.append(
+            uow,
+            stream_id=str(row["event_stream_id"]),
+            project_id=project_id,
+            event_kind=TIMELINE_REGISTRY_MERGED_EVENT_KIND,
+            data={
+                "timeline_id": timeline_id,
+                "assets": merged_assets,
+                "added_keys": added_keys,
+                "base_head": base_head,
+            },
+            changes=["registry"],
+            idempotency_key=(
+                f"{TIMELINE_REGISTRY_MERGED_EVENT_KIND}:{project_id}:"
+                f"{timeline_id}:{base_head}"
+            ),
+            txn_id=uuid.uuid4().hex,
+            event_id=uuid.uuid4().hex,
+            actor_kind=actor_kind,
+            expected_head_seq=base_head,
+            created_at=stamp,
+        )
+        return append.stream_seq
+
     # -- whole-config replacement (m2; the lossless full-replacement path) --
 
     def replace_config(
@@ -1541,6 +1662,64 @@ class TimelineRepository:
 
     # -- address resolution ------------------------------------------------
 
+    def assert_current_version(
+        self,
+        uow: UnitOfWork,
+        *,
+        project_id: str,
+        ref: str,
+        expected_version: int,
+    ) -> str:
+        """Fence a dependent command against one active timeline head.
+
+        This check is deliberately UoW-only. A caller that validates here and
+        then writes its dependent row in the same ``BEGIN IMMEDIATE``
+        transaction cannot race a concurrent timeline save between validation
+        and admission. It returns the canonical timeline id and mutates no
+        timeline state.
+        """
+        _require_non_empty_string("project_id", project_id)
+        _require_non_empty_string("ref", ref)
+        if isinstance(expected_version, bool) or not isinstance(
+            expected_version, int
+        ) or expected_version < 0:
+            raise TimelineValidationError(
+                "expected_version must be a non-negative integer"
+            )
+        timeline_id = self._resolve_id(uow, project_id, ref)
+        row = uow.query_one(
+            "SELECT event_stream_id FROM timelines "
+            "WHERE id = ? AND project_id = ?",
+            (timeline_id, project_id),
+        )
+        if row is None:  # pragma: no cover - resolved in this transaction
+            raise TimelineNotFoundError(ref=ref, project_id=project_id)
+        stream_id = str(row["event_stream_id"])
+        if (
+            uow.query_one(
+                "SELECT 1 FROM events WHERE stream_id = ? AND kind = ? LIMIT 1",
+                (stream_id, TIMELINE_ARCHIVED_EVENT_KIND),
+            )
+            is not None
+        ):
+            raise TimelineArchivedError(
+                timeline_id=timeline_id, project_id=project_id
+            )
+        stream = uow._stream_row(stream_id)
+        if stream is None:
+            raise TimelineRepositoryError(
+                f"timeline {timeline_id!r} is missing its event stream"
+            )
+        current_version = int(stream["head_seq"])
+        if current_version != expected_version:
+            raise TimelineVersionConflictError(
+                project_id=project_id,
+                timeline_id=timeline_id,
+                expected_version=expected_version,
+                current_version=current_version,
+            )
+        return timeline_id
+
     def resolve(self, writer: DatabaseWriter, project_id: str, ref: str) -> str:
         """Resolve a UUID, lowercase ULID, or slug to a timeline id.
 
@@ -1945,6 +2124,7 @@ __all__ = [
     "TIMELINE_ARCHIVE_COMMAND_KIND",
     "TIMELINE_ARCHIVED_EVENT_KIND",
     "TIMELINE_CONFIG_REPLACED_EVENT_KIND",
+    "TIMELINE_REGISTRY_MERGED_EVENT_KIND",
     "TIMELINE_CREATE_COMMAND_KIND",
     "TIMELINE_CREATED_EVENT_KIND",
     "TIMELINE_REPLACE_CONFIG_COMMAND_KIND",
