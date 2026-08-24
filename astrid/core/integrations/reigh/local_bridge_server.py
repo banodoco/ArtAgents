@@ -216,16 +216,48 @@ def _require_loopback_bind_host(host: str) -> None:
 
 
 def _is_loopback_host_header(value: str) -> bool:
-    """Validate Host without DNS resolution (DNS-rebinding protection)."""
+    """Validate one Host value without DNS resolution.
 
-    raw = value.strip()
-    if not raw:
+    Host is an authority, not a URL, so parse it explicitly instead of using
+    a permissive URL helper.  In particular, an IPv6 literal with a port must
+    be bracketed and a port must be numeric and in range.  Bare IPv6 literals
+    are accepted for compatibility with clients that omit the optional port.
+    """
+
+    if not isinstance(value, str):
         return False
+    raw = value.strip()
+    if not raw or raw != value or any(char in raw for char in ",/@\\"):
+        return False
+
+    hostname: str
+    port: str | None = None
     if raw.startswith("["):
         end = raw.find("]")
-        hostname = raw[1:end] if end >= 0 else ""
+        if end <= 1:
+            return False
+        hostname = raw[1:end]
+        suffix = raw[end + 1 :]
+        if suffix:
+            if not suffix.startswith(":"):
+                return False
+            port = suffix[1:]
+    elif raw.count(":") == 0:
+        hostname = raw
+    elif raw.count(":") == 1:
+        hostname, port = raw.rsplit(":", 1)
     else:
-        hostname = raw.rsplit(":", 1)[0]
+        # A bare IPv6 literal has no unambiguous port delimiter.  Accept it
+        # only when it is itself a valid loopback address; callers needing a
+        # port must use the bracketed form above.
+        hostname = raw
+
+    if port is not None:
+        if not port or not port.isascii() or not port.isdigit():
+            return False
+        if int(port) > 65535:
+            return False
+
     if hostname.lower() == "localhost":
         return True
     try:
@@ -1247,8 +1279,18 @@ def make_local_bridge_handler(*, projects_root: Path):
             if len(self.path.encode("utf-8", errors="replace")) > _MAX_REQUEST_TARGET_BYTES:
                 self._send_error(414, "uri_too_long", "request target exceeds the bridge limit")
                 return False
-            host = self.headers.get("Host", "")
-            if not _is_loopback_host_header(host):
+            host_values = self.headers.get_all("Host", [])
+            # Do not accept the first value from a duplicate Host field:
+            # different HTTP stacks/proxies disagree about which value wins.
+            # Forwarded host metadata is similarly never an authority for
+            # this local-only server and is rejected to avoid proxy ambiguity.
+            forwarded_headers = self.headers.get_all("Forwarded", [])
+            forwarded_headers += self.headers.get_all("X-Forwarded-Host", [])
+            if (
+                len(host_values) != 1
+                or not _is_loopback_host_header(host_values[0])
+                or forwarded_headers
+            ):
                 self._send_bridge_error(
                     BridgeForbiddenError("Host must identify a loopback address")
                 )

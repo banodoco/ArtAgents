@@ -15,7 +15,10 @@ from urllib.request import Request, urlopen
 
 from astrid.core.events.service import EventAppendService
 from astrid.core.integrations.reigh.bridge_service import HealthStatus
-from astrid.core.integrations.reigh.local_bridge_server import create_local_bridge_server
+from astrid.core.integrations.reigh.local_bridge_server import (
+    _is_loopback_host_header,
+    create_local_bridge_server,
+)
 from astrid.core.receipts.service import ReceiptService
 from astrid.core.repositories.runs import RunRepository
 from astrid.core.store.uow import UnitOfWork
@@ -746,6 +749,110 @@ def test_bridge_refuses_non_loopback_bind_and_enforces_optional_bearer(
     assert denied["error"] == "unauthorized"
     assert allowed_status == 200
     assert allowed["ok"] is True
+
+
+def test_loopback_host_header_parser_handles_ipv4_ipv6_ports_and_malformed_values() -> None:
+    for value in (
+        "localhost",
+        "localhost:0",
+        "127.0.0.1",
+        "127.0.0.1:65535",
+        "[::1]",
+        "[::1]:8080",
+        "::1",
+    ):
+        assert _is_loopback_host_header(value), value
+
+    for value in (
+        "attacker.invalid",
+        "attacker.invalid:80",
+        "127.0.0.1:65536",
+        "127.0.0.1:not-a-port",
+        "127.0.0.1:",
+        "[::1",
+        "[::1]oops",
+        "[::1]:-1",
+        "127.0.0.1:80:90",
+        "127.0.0.1, attacker.invalid",
+        " 127.0.0.1",
+        "127.0.0.1 ",
+    ):
+        assert not _is_loopback_host_header(value), value
+
+    # The public request path only supplies strings, but the helper also fails
+    # closed if called with an unexpected value by a future caller.
+    assert not _is_loopback_host_header(None)  # type: ignore[arg-type]
+
+
+def test_bridge_rejects_duplicate_host_and_forwarded_host_headers(
+    tmp_bridge_root: Path,
+) -> None:
+    """Proxy/header ambiguity must not turn a hostile request into a 200."""
+
+    from http.client import HTTPConnection
+
+    composition = compose_standard_bridge(tmp_bridge_root)
+    server = create_local_bridge_server(
+        projects_root=tmp_bridge_root,
+        bridge=composition.bridge,
+        writer=composition.writer,
+        database_path=composition.database_path,
+        auth_token="ship-secret",
+        release_mode=True,
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    port = server.server_address[1]
+
+    def request(
+        *,
+        host_value: str | None = None,
+        duplicate_host: bool = False,
+        forwarded: bool = False,
+        missing_host: bool = False,
+    ):
+        connection = HTTPConnection("127.0.0.1", port, timeout=5)
+        try:
+            connection.putrequest("GET", "/v1/health", skip_host=True)
+            if not missing_host:
+                connection.putheader("Host", host_value or f"127.0.0.1:{port}")
+            if duplicate_host:
+                connection.putheader("Host", "attacker.invalid")
+            if forwarded:
+                connection.putheader("X-Forwarded-Host", "attacker.invalid")
+            connection.putheader("Authorization", "Bearer ship-secret")
+            connection.putheader("X-Astrid-Bridge-Version", "v1")
+            connection.endheaders()
+            response = connection.getresponse()
+            return response.status, json.loads(response.read().decode("utf-8"))
+        finally:
+            connection.close()
+
+    try:
+        duplicate_status, duplicate_body = request(duplicate_host=True)
+        disallowed_status, disallowed_body = request(host_value="attacker.invalid")
+        forwarded_status, forwarded_body = request(forwarded=True)
+        missing_status, missing_body = request(missing_host=True)
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+        composition.close()
+
+    assert (
+        duplicate_status
+        == disallowed_status
+        == forwarded_status
+        == missing_status
+        == 403
+    )
+    assert (
+        duplicate_body["error"]
+        == disallowed_body["error"]
+        == forwarded_body["error"]
+        == missing_body["error"]
+        == "forbidden"
+    )
 
 
 def test_release_mode_fails_closed_and_requires_auth_and_protocol_version(
