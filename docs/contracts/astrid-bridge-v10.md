@@ -78,6 +78,12 @@ local clients:
   `426 protocol_version_mismatch`. Omitting release mode retains the explicit
   development/test compatibility behavior in which a configured token is
   enforced but an absent token does not silently create a release server.
+- When bearer auth is configured, serve boot rotates a private
+  `.astrid/bridge-boot-secret` integrity record. The managed directory is
+  `0700`, the record is `0600`, and it is atomically replaced and fsynced on
+  every boot. The record never appears in HTTP responses or replaces the
+  bearer token; if it is missing, tampered with, or has unsafe permissions,
+  authenticated requests fail closed with `500 internal`.
 - Request targets are capped at 8 KiB, JSON request bodies at 8 MiB, request
   socket reads at 15 seconds, and Runaway pages at 1,000 rows.
 - Request admission is bounded to eight concurrent handlers and a process-local

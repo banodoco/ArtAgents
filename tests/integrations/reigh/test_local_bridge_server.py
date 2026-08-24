@@ -802,6 +802,63 @@ def test_release_mode_fails_closed_and_requires_auth_and_protocol_version(
     assert response_version == "v1"
 
 
+def test_release_boot_secret_is_private_rotated_and_integrity_checked(
+    tmp_bridge_root: Path,
+) -> None:
+    import os
+    import stat
+
+    import pytest
+
+    composition = compose_standard_bridge(tmp_bridge_root)
+    first = create_local_bridge_server(
+        projects_root=tmp_bridge_root,
+        bridge=composition.bridge,
+        writer=composition.writer,
+        database_path=composition.database_path,
+        auth_token="ship-secret",
+        release_mode=True,
+    )
+    secret_path = tmp_bridge_root / ".astrid" / "bridge-boot-secret"
+    first_payload = secret_path.read_bytes()
+    assert stat.S_IMODE(secret_path.stat().st_mode) == 0o600
+    assert stat.S_IMODE(secret_path.parent.stat().st_mode) == 0o700
+    first.server_close()
+    composition.close()
+
+    composition = compose_standard_bridge(tmp_bridge_root)
+    second = create_local_bridge_server(
+        projects_root=tmp_bridge_root,
+        bridge=composition.bridge,
+        writer=composition.writer,
+        database_path=composition.database_path,
+        auth_token="ship-secret",
+        release_mode=True,
+    )
+    thread: threading.Thread | None = None
+    try:
+        assert secret_path.read_bytes() != first_payload
+        secret_path.write_bytes(b"tampered\n")
+        os.chmod(secret_path, 0o600)
+        thread = threading.Thread(target=second.serve_forever, daemon=True)
+        thread.start()
+        base = f"http://{second.server_address[0]}:{second.server_address[1]}"
+        request = Request(f"{base}/v1/health")
+        request.add_header("Authorization", "Bearer ship-secret")
+        request.add_header("X-Astrid-Bridge-Version", "v1")
+        with pytest.raises(HTTPError) as error:
+            urlopen(request)  # noqa: S310 - loopback test server
+        body = json.loads(error.value.read().decode("utf-8"))
+        assert error.value.code == 500
+        assert body["error"] == "internal"
+    finally:
+        second.shutdown()
+        second.server_close()
+        if thread is not None:
+            thread.join(timeout=5)
+        composition.close()
+
+
 def test_bridge_rate_budget_rejects_with_retry_after(tmp_bridge_root: Path) -> None:
     import pytest
 

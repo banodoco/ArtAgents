@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import hashlib
 import hmac
 import ipaddress
 import json
 import mimetypes
 import os
 import re
+import secrets
+import stat
+import tempfile
 import threading
 import time
 from collections.abc import Mapping
@@ -66,8 +70,86 @@ _DIAGNOSTICS_ENABLED = os.environ.get("ASTRID_BRIDGE_DIAGNOSTICS", "0") != "0"
 _MAX_REQUEST_BODY_BYTES = 8 * 1024 * 1024
 _MAX_REQUEST_TARGET_BYTES = 8 * 1024
 _REQUEST_SOCKET_TIMEOUT_SEC = 15.0
+_BOOT_SECRET_FILENAME = "bridge-boot-secret"
+_PRIVATE_DIR_MODE = 0o700
+_PRIVATE_FILE_MODE = 0o600
 _DEFAULT_RUNAWAY_PAGE_SIZE = 1_000
 _MAX_RUNAWAY_PAGE_SIZE = 1_000
+
+
+class _BootSecret:
+    """Private per-boot integrity record for the bearer-auth server."""
+
+    def __init__(self, path: Path, payload_digest: bytes) -> None:
+        self.path = path
+        self._payload_digest = payload_digest
+
+    def verify(self) -> bool:
+        try:
+            parent_info = self.path.parent.lstat()
+            fd = os.open(
+                self.path,
+                os.O_RDONLY
+                | getattr(os, "O_CLOEXEC", 0)
+                | getattr(os, "O_NOFOLLOW", 0),
+            )
+            try:
+                info = os.fstat(fd)
+                payload = os.read(fd, 4096)
+            finally:
+                os.close(fd)
+        except OSError:
+            return False
+        return (
+            stat.S_ISDIR(parent_info.st_mode)
+            and stat.S_IMODE(parent_info.st_mode) == _PRIVATE_DIR_MODE
+            and stat.S_ISREG(info.st_mode)
+            and stat.S_IMODE(info.st_mode) == _PRIVATE_FILE_MODE
+            and hmac.compare_digest(
+                hashlib.sha256(payload).digest(), self._payload_digest
+            )
+        )
+
+
+def _rotate_boot_secret(projects_root: Path, auth_token: str) -> _BootSecret:
+    managed_root = projects_root / ".astrid"
+    managed_root.mkdir(parents=True, exist_ok=True)
+    os.chmod(managed_root, _PRIVATE_DIR_MODE)
+    payload = (
+        secrets.token_urlsafe(32)
+        + "\n"
+        + hashlib.sha256(auth_token.encode("utf-8")).hexdigest()
+        + "\n"
+    ).encode("utf-8")
+    fd, temporary_name = tempfile.mkstemp(
+        prefix=f".{_BOOT_SECRET_FILENAME}-", dir=managed_root
+    )
+    temporary_path = Path(temporary_name)
+    try:
+        os.fchmod(fd, _PRIVATE_FILE_MODE)
+        written = 0
+        while written < len(payload):
+            written += os.write(fd, payload[written:])
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    try:
+        os.replace(temporary_path, managed_root / _BOOT_SECRET_FILENAME)
+        directory_fd = os.open(managed_root, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    finally:
+        try:
+            temporary_path.unlink()
+        except FileNotFoundError:
+            pass
+    path = managed_root / _BOOT_SECRET_FILENAME
+    os.chmod(path, _PRIVATE_FILE_MODE)
+    return _BootSecret(path, hashlib.sha256(payload).digest())
+
+
 _BRIDGE_PROTOCOL_VERSION = "v1"
 _DEFAULT_MAX_CONCURRENT_REQUESTS = 8
 _DEFAULT_RATE_LIMIT_CAPACITY = 32
@@ -185,6 +267,7 @@ class LocalBridgeHTTPServer(ThreadingHTTPServer):
             "bridge_database_path",
             "task_bridge",
             "bridge_auth_token",
+            "bridge_boot_secret",
             "bridge_release_mode",
             "bridge_protocol_version",
             "bridge_admission",
@@ -201,6 +284,7 @@ class LocalBridgeHTTPServer(ThreadingHTTPServer):
         bridge_database_path: str | Path | None,
         task_bridge: Any | None = None,
         bridge_auth_token: str | None = None,
+        bridge_boot_secret: _BootSecret | None = None,
         bridge_release_mode: bool = False,
         max_concurrent_requests: int = _DEFAULT_MAX_CONCURRENT_REQUESTS,
         rate_limit_capacity: int = _DEFAULT_RATE_LIMIT_CAPACITY,
@@ -224,6 +308,7 @@ class LocalBridgeHTTPServer(ThreadingHTTPServer):
         self.bridge_database_path = bridge_database_path
         self.task_bridge = task_bridge
         self.bridge_auth_token = bridge_auth_token
+        self.bridge_boot_secret = bridge_boot_secret
         self.bridge_release_mode = bridge_release_mode
         self.bridge_protocol_version = _BRIDGE_PROTOCOL_VERSION
         self.bridge_shutdown_event = threading.Event()
@@ -296,6 +381,11 @@ def create_local_bridge_server(
         raise ValueError(
             "release bridge mode requires ASTRID_BRIDGE_TOKEN to be set"
         )
+    boot_secret = (
+        _rotate_boot_secret(resolved_root, auth_token)
+        if auth_token is not None
+        else None
+    )
     handler = make_local_bridge_handler(projects_root=resolved_root)
     return LocalBridgeHTTPServer(
         (host, port),
@@ -305,6 +395,7 @@ def create_local_bridge_server(
         bridge_writer=writer,
         bridge_database_path=database_path,
         bridge_auth_token=auth_token,
+        bridge_boot_secret=boot_secret,
         bridge_release_mode=release_mode,
         max_concurrent_requests=max_concurrent_requests,
         rate_limit_capacity=rate_limit_capacity,
@@ -1171,6 +1262,14 @@ def make_local_bridge_handler(*, projects_root: Path):
             token = getattr(self.server, "bridge_auth_token", None)
             release_mode = bool(getattr(self.server, "bridge_release_mode", False))
             if require_token and (token is not None or release_mode):
+                boot_secret = getattr(self.server, "bridge_boot_secret", None)
+                if boot_secret is not None and not boot_secret.verify():
+                    self._send_bridge_error(
+                        BridgeInternalError(
+                            "the bridge boot-secret integrity check failed"
+                        )
+                    )
+                    return False
                 supplied = self.headers.get("Authorization", "")
                 expected = f"Bearer {token}"
                 if not hmac.compare_digest(supplied, expected):
