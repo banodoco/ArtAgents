@@ -17,13 +17,13 @@ from astrid.core import timeline
 from astrid.core.element.schema import ElementAsset, ElementDefinition
 from astrid.core.pack.discovery import discover_pack_metadata
 from astrid.core.rendering.contracts import (
+    SCHEMA_VERSION,
     AudioOwnership,
     FrameWindow,
+    RendererManifest,
     RenderProfile,
     RenderRequest,
     RenderResult,
-    RendererManifest,
-    SCHEMA_VERSION,
     SupportReport,
 )
 from astrid.core.rendering.transport import CommandTransport
@@ -31,7 +31,6 @@ from astrid.packs.rendering.backends.remotion import run as remotion
 from astrid.packs.rendering.executors.render import run as facade
 from astrid.sdk.rendering import render
 from tests.packs.rendering._helpers import _execution_env, _probe
-
 
 ROOT = Path(__file__).resolve().parents[3]
 LOCAL_EFFECT_SMOKE_FIXTURE = ROOT / "tests" / "fixtures" / "local_effect_smoke"
@@ -320,13 +319,14 @@ def test_manifest_command_runs_from_owning_pack_root(tmp_path: Path) -> None:
     )
     pack_root = ROOT / "astrid" / "packs" / "rendering"
 
-    report = CommandTransport(remotion.BACKEND_ID).run(
-        "support",
-        ("python3", "run.py"),
-        request_path=request_path,
-        result_path=result_path,
-        cwd=pack_root,
-    )
+    with _execution_env():
+        report = CommandTransport(remotion.BACKEND_ID).run(
+            "support",
+            ("python3", "run.py"),
+            request_path=request_path,
+            result_path=result_path,
+            cwd=pack_root,
+        )
 
     assert isinstance(report, SupportReport)
     assert report.supported is True
