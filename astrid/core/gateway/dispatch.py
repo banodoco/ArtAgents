@@ -218,6 +218,28 @@ def _dispatch_serve(args: list[str]) -> int:
             print(f"serve failed: {exc}", file=sys.stderr)
             return 1
 
+        # Compose the task/executor bridge alongside the timeline bridge. The
+        # HTTP discovery document advertises task admission, queue, and
+        # fenced-attempt routes; leaving this constructor input unset makes
+        # those public routes fail closed even though the kernel has all of
+        # the required repositories. Keep pack-owned imports in this
+        # composition root and reuse the composition's single repositories
+        # and writer for completion-time generation/timeline settlement.
+        from astrid.core.integrations.reigh.bridge_service import ReighTaskBridge
+
+        def _generation_repo_factory() -> object:
+            from astrid.packs.shots.generation_repository import GenerationRepository
+
+            return GenerationRepository()
+
+        task_bridge = ReighTaskBridge(
+            writer=composition.writer,
+            registry=composition.registry,
+            projects_root=composition.projects_root,
+            generation_repo_factory=_generation_repo_factory,
+            timeline_repo_factory=lambda: composition.timelines,
+        )
+
         server = create_local_bridge_server(
             host=parsed.host,
             port=parsed.port,
@@ -230,6 +252,7 @@ def _dispatch_serve(args: list[str]) -> int:
             bridge=composition.bridge,
             writer=composition.writer,
             database_path=composition.database_path,
+            task_bridge=task_bridge,
         )
         host, port = server.server_address
 
