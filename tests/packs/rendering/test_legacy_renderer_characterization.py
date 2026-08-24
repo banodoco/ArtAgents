@@ -389,6 +389,22 @@ def test_render_provenance_v1_key_set(tmp_path: Path) -> None:
     assets_path = tmp_path / "hype.assets.json"
     timeline_path.write_text("{}", encoding="utf-8")
     assets_path.write_text("{}", encoding="utf-8")
+    effect = {
+        "effect_id": "blur",
+        "source_pack_id": "pack.effects",
+        "element_root": "/elements/effects",
+        "staged_asset_ids": ["asset-b", "asset-a"],
+    }
+    animation = {
+        "element_id": "fade-in",
+        "source_pack_id": "pack.motion",
+        "element_root": "/elements/motion",
+    }
+    transition = {
+        "element_id": "crossfade",
+        "source_pack_id": "pack.motion",
+        "element_root": "/elements/motion",
+    }
 
     with patch.object(legacy_engine, "_active_pack_order_for_provenance", return_value=[]):
         sidecar = legacy_engine._write_render_provenance(
@@ -401,7 +417,12 @@ def test_render_provenance_v1_key_set(tmp_path: Path) -> None:
             theme_path=None,
             active_theme=None,
             registry_state={"hash": "abc123"},
-            stage_summary={"root": None, "effects": []},
+            stage_summary={
+                "root": "/staged/assets",
+                "effects": [effect],
+                "animations": [animation],
+                "transitions": [transition],
+            },
         )
 
     payload = json.loads(sidecar.read_text(encoding="utf-8"))
@@ -432,6 +453,16 @@ def test_render_provenance_v1_key_set(tmp_path: Path) -> None:
     assert payload["engine"] == "remotion"
     assert payload["registry_hash"] == "abc123"
     assert payload["active_theme"] == {"id": "banodoco-default", "path": None}
+    assert payload["resolved_effect_ids"] == ["blur"]
+    assert payload["resolved_effects"] == [effect]
+    assert payload["resolved_animation_ids"] == ["fade-in"]
+    assert payload["resolved_animations"] == [animation]
+    assert payload["resolved_transition_ids"] == ["crossfade"]
+    assert payload["resolved_transitions"] == [transition]
+    assert payload["source_pack_ids"] == ["pack.effects", "pack.motion"]
+    assert payload["element_roots"] == ["/elements/effects", "/elements/motion"]
+    assert payload["staged_asset_ids"] == ["asset-a", "asset-b"]
+    assert payload["staged_asset_root"] == "/staged/assets"
 
 
 def test_render_provenance_hybrid_adds_segment_keys(tmp_path: Path) -> None:
