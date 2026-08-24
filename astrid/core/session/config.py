@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from astrid.core.preferences import (
+from astrid.core.preferences_store import (
     ConfigError,
     load_user_config,
     load_workspace_config,
