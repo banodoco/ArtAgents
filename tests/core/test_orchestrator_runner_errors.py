@@ -283,6 +283,10 @@ def test_kernel_run_root_substitutes_for_out_in_process_mode(
     """Kernel workers may omit public ``out`` while supplying attempt staging."""
     projects_root = tmp_path / "projects"
     create_project("demo", root=projects_root)
+    monkeypatch.setenv(
+        project_paths.PROJECTS_ROOT_ENV,
+        str(tmp_path / "unrelated-ambient-root"),
+    )
     orch = _command_orchestrator(
         orchestrator_id="test.kernel_staging",
         argv=(sys.executable, "-m", "fake.module", "{out}"),
@@ -292,6 +296,8 @@ def test_kernel_run_root_substitutes_for_out_in_process_mode(
 
     def _fake_in_process(argv: tuple[str, ...], **kwargs: Any) -> types.SimpleNamespace:
         seen["argv"] = argv
+        seen["env"] = kwargs["env"]
+        seen["parent_env"] = kwargs["parent_env"]
         return types.SimpleNamespace(returncode=0)
 
     import astrid.core.execution.orchestrator.runner as runner_mod
@@ -312,6 +318,10 @@ def test_kernel_run_root_substitutes_for_out_in_process_mode(
 
     assert result.ok
     assert seen["argv"][-1] == str(run_root.resolve())
+    assert seen["env"][project_paths.PROJECTS_ROOT_ENV] == str(projects_root.resolve())
+    assert seen["parent_env"][project_paths.PROJECTS_ROOT_ENV] == str(
+        projects_root.resolve()
+    )
 
 
 def test_command_orchestrator_default_mode_remains_subprocess_first(

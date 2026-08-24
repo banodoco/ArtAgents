@@ -188,6 +188,7 @@ def test_lower_level_facade_preserves_kernel_staging_without_writing_a_ledger(
     projects_root, _ = _setup_project(tmp_path, monkeypatch)
     inputs = _write_project_inputs(projects_root)
     staging_root = tmp_path / "kernel-staging"
+    monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(tmp_path / "unrelated-ambient-root"))
     commands: list = []
     _noop_render_subprocess(monkeypatch, commands)
 
@@ -196,6 +197,7 @@ def test_lower_level_facade_preserves_kernel_staging_without_writing_a_ledger(
             executor_id="rendering.render",
             out=None,
             project="demo",
+            projects_root=projects_root,
             run_root=staging_root,
             inputs=inputs,
         ),
@@ -214,6 +216,7 @@ def test_lower_level_facade_preserves_kernel_staging_without_writing_a_ledger(
     ).resolve()
     assert env.get("ASTRID_PROJECT_RUN") == "1"
     assert env.get("ASTRID_PROJECT_SLUG") == "demo"
+    assert env.get(paths.PROJECTS_ROOT_ENV) == str(projects_root.resolve())
 
 
 # ---------------------------------------------------------------------------

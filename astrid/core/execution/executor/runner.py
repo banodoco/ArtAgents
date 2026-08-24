@@ -13,7 +13,7 @@ from functools import lru_cache
 from importlib import import_module
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Literal, Mapping, Sequence
+from typing import Any, Literal, Mapping
 
 from astrid.core._shared.capability_common import (
     _PLACEHOLDER_RE,
@@ -24,7 +24,6 @@ from astrid.core._shared.capability_common import (
     _validate_required_inputs,
 )
 from astrid.core.contracts.capability_runner import CapabilityRunner
-from astrid.core.io.cas import executor_definition_digest
 from astrid.core.contracts.exec_error import (
     ExecError,
     error_from_missing_binaries,
@@ -34,6 +33,7 @@ from astrid.core.contracts.run_status import RunStatus
 from astrid.core.contracts.scoped_config import SCOPE_REGISTRY, ScopeRequest
 from astrid.core.env_vars import ASTRID_INTERNAL_INVOCATION, HYPE_ACTIVE_THEME
 from astrid.core.foundation.paths import REPO_ROOT
+from astrid.core.io.cas import executor_definition_digest
 from astrid.core.pack.resolver import resolve_callable_from_metadata
 from astrid.core.project.guidance import (
     format_project_required_guidance,
@@ -43,7 +43,6 @@ from astrid.core.project.ownership import require_project_owned_artifact
 from astrid.core.project.run import (
     ProjectRunContext,
     _project_subprocess_env,
-    project_run_env,
     reject_project_with_out,
 )
 from astrid.core.runtime import (
@@ -643,7 +642,10 @@ def _run_in_process_executor_command(
                 owner_id=executor.id,
                 cwd=cwd,
                 env=effective_env,
-                parent_env=os.environ,
+                # ``effective_env`` already contains the request-authoritative
+                # project routing. Reusing it as the propagated parent keeps
+                # the in-process policy pass from restoring ambient routing.
+                parent_env=effective_env,
                 stdout_log=None if log_capture is None else log_capture.stdout,
                 stderr_log=None if log_capture is None else log_capture.stderr,
             )
@@ -1129,11 +1131,17 @@ def _command_subprocess_env(
     command_env: Mapping[str, str],
 ) -> dict[str, str]:
     external_pack_env = _external_pack_pythonpath_env(executor, command_env)
+    project_env = _project_subprocess_env(request)
     return build_child_subprocess_env(
+        # Project routing attached to the admitted request is authoritative.
+        # Overlay it onto the parent invariants as well as the explicit child
+        # environment so an unrelated ambient ASTRID_PROJECTS_ROOT cannot
+        # redirect execution after the request has been bound.
+        parent={**os.environ, **project_env},
         explicit_env={
             **command_env,
             **external_pack_env,
-            **_project_subprocess_env(request),
+            **project_env,
             **_emit_scoped_config_env(executor, request),  # scoped-config emit
             "ASTRID_INTERNAL_INVOCATION": "1",
         },

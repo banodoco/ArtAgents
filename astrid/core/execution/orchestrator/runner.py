@@ -347,7 +347,7 @@ def _run_in_process_command_orchestrator(
                 owner_id=orchestrator.id,
                 cwd=cwd,
                 env=effective_env,
-                parent_env=os.environ,
+                parent_env=effective_env,
                 stdout_log=None if log_capture is None else log_capture.stdout,
                 stderr_log=None if log_capture is None else log_capture.stderr,
             )
@@ -749,10 +749,12 @@ def _command_subprocess_env(
     request: OrchestratorRunRequest,
     command_env: Mapping[str, str],
 ) -> dict[str, str]:
+    project_env = _project_subprocess_env(request)
     return build_child_subprocess_env(
+        parent={**os.environ, **project_env},
         explicit_env={
             **command_env,
-            **_project_subprocess_env(request),
+            **project_env,
             "ASTRID_INTERNAL_INVOCATION": "1",
         },
         passthrough=orchestrator.isolation.env_passthrough,
