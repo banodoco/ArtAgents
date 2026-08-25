@@ -12,6 +12,7 @@ import os
 import shutil
 import stat
 import tempfile
+import warnings
 from collections.abc import Mapping
 from contextlib import contextmanager, nullcontext, redirect_stdout
 from io import StringIO
@@ -831,6 +832,16 @@ def _prepare_managed_render_inputs(
             )
         except RenderOutputPolicyError as exc:
             raise CapabilityValidationError(str(exc), details=exc.details) from exc
+        warnings.warn(
+            "rendering.render raw-file mode (timeline=<path>) keys idempotency by file "
+            "path, not timeline content: editing the timeline at the same path and "
+            "re-invoking returns the cached run without recomputing. Use the canonical "
+            "managed path for iteration instead: timelines create/save + timelines "
+            "render <timeline_ref>, or pass timeline_ref=<ref>, so renders are "
+            "content-hashed and never serve stale results.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
         return values, None
     if values.get("timeline") not in (None, ""):
         raise CapabilityValidationError(

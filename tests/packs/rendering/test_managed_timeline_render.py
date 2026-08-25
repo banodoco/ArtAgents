@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import warnings
 from pathlib import Path
 
 import pytest
@@ -566,3 +567,35 @@ def test_managed_render_does_not_treat_opaque_params_as_element_references(
 
     assert Path(prepared["timeline"]).is_file()
     assert authority is not None
+
+
+def test_raw_file_render_warns_but_managed_timeline_ref_does_not(tmp_path: Path) -> None:
+    raw_timeline = tmp_path / "hype.timeline.json"
+    raw_timeline.write_text(json.dumps({"tracks": [], "clips": []}), encoding="utf-8")
+
+    with pytest.warns(RuntimeWarning) as raw_recorded:
+        values, authority = _prepare_managed_render_inputs(
+            {"timeline": str(raw_timeline)},
+            project=None,
+            project_root=None,
+        )
+    assert authority is None
+    assert "idempotency" in str(raw_recorded[0].message).lower()
+    assert "stale" in str(raw_recorded[0].message)
+
+    _managed_timeline(tmp_path)
+    with warnings.catch_warnings(record=True) as managed_recorded:
+        warnings.simplefilter("always")
+        prepared, managed_authority = _prepare_managed_render_inputs(
+            {"timeline_ref": "main"},
+            project="demo",
+            project_root=tmp_path,
+        )
+    assert managed_authority is not None
+    stale = [
+        warning
+        for warning in managed_recorded
+        if issubclass(warning.category, RuntimeWarning)
+        and "idempotency" in str(warning.message)
+    ]
+    assert stale == []

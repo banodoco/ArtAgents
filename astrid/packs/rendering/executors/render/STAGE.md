@@ -45,6 +45,12 @@ result = sdk.invoke(
 )
 ```
 
+Note: raw-file `timeline=<path>` mode keys idempotency by path, not content —
+editing the timeline at the same path and re-invoking returns the cached render
+without recomputing. For iterative edit/re-render workflows use the canonical
+managed path (`timelines create`/`save` + `timelines render <timeline_ref>`) or pass
+`timeline_ref=` so renders are content-hashed and never serve stale results.
+
 Render a timeline with the optional media asset registry produced by
 `video_editing.cut`:
 

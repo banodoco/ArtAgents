@@ -199,13 +199,12 @@ class TimelineRoundTripFixtureTest(unittest.TestCase):
         # The shared schema is the source of truth (per astrid/timeline.py
         # docstring: "the JSON-Schema validator there is the canonical shape
         # check"). Astrid' frozensets must match exactly.
-        # These are editor-owned opaque extensions retained by Astrid but
-        # intentionally stripped from the canonical shared-schema view before
-        # validation. The shared package currently exposes ``app`` at
-        # clip/track level but not the top-level/clip ``label`` extension.
-        editor_top_extensions = {"app"}
-        editor_clip_extensions = {"label"}
-        editor_track_extensions = set()
+        # ``app`` and clip ``label`` were adopted by the shared schema after
+        # Astrid first preserved them as opaque editor extensions. Keep the
+        # parity gate valid for both supported schema generations: subtract
+        # only an extension the active schema does not yet declare.
+        editor_top_extensions = {"app"} - shared_top
+        editor_clip_extensions = {"label"} - shared_clip
         self.assertEqual(
             set(_TIMELINE_TOP_ALLOWED) - editor_top_extensions,
             shared_top,
@@ -223,12 +222,12 @@ class TimelineRoundTripFixtureTest(unittest.TestCase):
             f"only-in-schema={shared_clip - (set(_CLIP_ALLOWED) - editor_clip_extensions)}",
         )
         self.assertEqual(
-            set(_TRACK_ALLOWED) - editor_track_extensions,
+            set(_TRACK_ALLOWED),
             shared_track,
             "Track allowlist drift between Astrid (_TRACK_ALLOWED) and "
             "shared schema (TimelineConfig.tracks[]). "
-            f"only-in-astrid={set(_TRACK_ALLOWED) - editor_track_extensions - shared_track}, "
-            f"only-in-schema={shared_track - (set(_TRACK_ALLOWED) - editor_track_extensions)}",
+            f"only-in-astrid={set(_TRACK_ALLOWED) - shared_track}, "
+            f"only-in-schema={shared_track - set(_TRACK_ALLOWED)}",
         )
 
 

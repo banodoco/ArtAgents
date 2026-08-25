@@ -47,6 +47,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from astrid.core.events.registry import register_core_vocabulary
 from astrid.core.events.service import EventAppendService
 from astrid.core.receipts import ReceiptService
@@ -1101,6 +1103,7 @@ _EVIDENCE_EXPORT_DIR = (
 )
 
 
+@pytest.mark.timeout(900)
 def test_phase_a_extended_fault_matrix(tmp_path: Path) -> None:
     """T13: ≥100 crashes across the seven §5 fault classes — abrupt death
     at every labeled point, injected SQLITE_IOERR/FULL, real filesystem
