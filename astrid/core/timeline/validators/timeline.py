@@ -209,6 +209,11 @@ def validate_timeline(config: Any, *, strict: bool = True) -> None:
     # then run the Banodoco-only semantic checks (effect-id registry,
     # transition durations).
     normalized_for_shared = _known_timeline_payload(config)
+    # Top-level ``app`` is the editor-extension metadata namespace owned by
+    # Astrid's container contract. The currently pinned shared render schema
+    # does not declare that namespace, so validate the renderable subset while
+    # retaining ``app`` unchanged for the caller and event-log round trip.
+    normalized_for_shared.pop("app", None)
     if isinstance(normalized_for_shared.get("clips"), list):
         normalized_for_shared["clips"] = [
             _normalize_clip_for_validation(c) if isinstance(c, dict) else c

@@ -28,6 +28,7 @@ from astrid.core.integrations.reigh.remotion_runtime import (
 )
 from astrid.core.integrations.reigh.task_bridge import ReighTaskBridge
 from astrid.core.io.media_import import managed_media_path, sha256_file_bytes
+from astrid.core.project.project import create_project
 from astrid.core.receipts import ReceiptService
 from astrid.core.repositories import ProjectRepository
 from astrid.core.repositories.media import MediaRepository
@@ -36,6 +37,7 @@ from astrid.core.store.uow import UnitOfWork
 from astrid.core.store.writer import DatabaseWriter
 from astrid.core.task_executor import ExecutionService
 from astrid.packs.rendering.backends.remotion import run as remotion_run
+from astrid.packs.rendering.executors.render import task_adapter as task_adapter_module
 from astrid.packs.rendering.executors.render.task_adapter import (
     RenderExportExecutionContext,
     RenderExportRefused,
@@ -108,7 +110,7 @@ def _task(*, root: Path, project_slug: str = "render-project") -> SimpleNamespac
 
 
 def test_render_export_adapter_writes_real_mp4_and_is_callable(tmp_path: Path) -> None:
-    (tmp_path / "render-project").mkdir()
+    create_project("render-project", name="Render Project", root=tmp_path)
     task = _task(root=tmp_path)
     manifest = execute_render_export_task(
         task=task,
@@ -131,12 +133,84 @@ def test_render_export_adapter_writes_real_mp4_and_is_callable(tmp_path: Path) -
     assert manifest["outputs"][0]["content_hash"] == f"sha256:{hashlib.sha256(raw).hexdigest()}"
 
 
+def test_renderer_inputs_are_inode_isolated_and_cleaned(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Renderer writes cannot mutate managed media or durable staging evidence."""
+
+    create_project("render-project", name="Render Project", root=tmp_path)
+    task = _task(root=tmp_path)
+    digest = task.spec["timeline_snapshot"]["registry"]["assets"]["source"][
+        "content_sha256"
+    ].removeprefix("sha256:")
+    managed = managed_media_path(tmp_path, digest)
+    captured: dict[str, Path] = {}
+
+    def fake_run_executor(request, _registry):
+        owned_registry_path = Path(request.inputs["assets_registry"])
+        owned_registry = json.loads(owned_registry_path.read_text(encoding="utf-8"))
+        owned_asset = Path(owned_registry["assets"]["source"]["file"])
+        staged_registry = json.loads(
+            (tmp_path / "staging" / "render-inputs" / "assets.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        staged_asset = Path(staged_registry["assets"]["source"]["file"])
+        input_inodes = {
+            managed.stat().st_ino,
+            staged_asset.stat().st_ino,
+            owned_asset.stat().st_ino,
+        }
+        assert len(input_inodes) == 3
+
+        captured["owned_root"] = owned_registry_path.parent
+        captured["staged_asset"] = staged_asset
+        owned_asset.write_bytes(b"renderer mutated its private input")
+        output = Path(request.out) / request.inputs["output_name"]
+        output.write_bytes(b"\x00\x00\x00\x18ftyp")
+        return SimpleNamespace(
+            ok=True,
+            error=None,
+            payload={},
+            outputs={"video": output},
+        )
+
+    monkeypatch.setattr(task_adapter_module, "run_executor", fake_run_executor)
+    monkeypatch.setattr(task_adapter_module, "load_default_registry", lambda: object())
+
+    RenderExportTaskAdapter(projects_root=tmp_path).execute(
+        task=task,
+        staging_dir=tmp_path / "staging",
+    )
+
+    assert sha256_file_bytes(managed) == digest
+    assert sha256_file_bytes(captured["staged_asset"]) == digest
+    assert not captured["owned_root"].exists()
+
+
+def test_owned_input_setup_failure_is_cleaned(tmp_path: Path) -> None:
+    create_project("render-project", name="Render Project", root=tmp_path)
+    task = _task(root=tmp_path)
+    task.spec["params"] = {
+        **task.spec["params"],
+        "output_filename": "../escape.mp4",
+    }
+
+    with pytest.raises(RenderExportRefused, match="plain .mp4 filename"):
+        RenderExportTaskAdapter(projects_root=tmp_path).execute(
+            task=task,
+            staging_dir=tmp_path / "staging",
+        )
+
+    assert list((tmp_path / "render-project").glob(".render-inputs-*")) == []
+
+
 def test_forced_caption_uses_server_owned_installed_remotion_runtime(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A clean deployment runtime, not the source ``remotion/`` checkout, renders text."""
 
-    (tmp_path / "render-project").mkdir()
+    create_project("render-project", name="Render Project", root=tmp_path)
     runtime = tmp_path / "installed-remotion"
     (runtime / "node_modules" / "@banodoco").mkdir(parents=True)
     for package in ("timeline-composition", "timeline-schema", "timeline-theme-2rp"):
@@ -298,8 +372,10 @@ def test_forced_caption_uses_server_owned_installed_remotion_runtime(
 def test_forced_caption_fails_before_renderer_without_server_runtime(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    (tmp_path / "render-project").mkdir()
-    monkeypatch.delenv("ASTRID_REMOTION_PROJECT_DIR", raising=False)
+    create_project("render-project", name="Render Project", root=tmp_path)
+    # Make the absence explicit: the source checkout may itself contain a
+    # valid Remotion bundle during the pinned CI run.
+    monkeypatch.setenv("ASTRID_REMOTION_PROJECT_DIR", str(tmp_path / "missing-remotion"))
     task = _task(root=tmp_path)
     snapshot = dict(task.spec["timeline_snapshot"])
     config = dict(snapshot["config"])
@@ -460,7 +536,7 @@ def test_render_export_adapter_fails_closed_without_snapshot_or_project(tmp_path
 def test_render_export_adapter_has_cooperative_cancel_and_progress_seam(
     tmp_path: Path,
 ) -> None:
-    (tmp_path / "render-project").mkdir()
+    create_project("render-project", name="Render Project", root=tmp_path)
     task = _task(root=tmp_path)
     seen: list[dict] = []
     context = RenderExportExecutionContext.bounded(
@@ -491,7 +567,7 @@ def test_render_export_adapter_has_cooperative_cancel_and_progress_seam(
 def test_render_export_adapter_fails_closed_on_missing_asset_or_renderer(
     tmp_path: Path, change: str, expected: str
 ) -> None:
-    (tmp_path / "render-project").mkdir()
+    create_project("render-project", name="Render Project", root=tmp_path)
     task = _task(root=tmp_path)
     task.spec = dict(task.spec)
     snapshot = dict(task.spec["timeline_snapshot"])
@@ -536,7 +612,7 @@ def test_render_export_round_trip_materializes_mp4_media_id(tmp_path: Path) -> N
                 created_at=TS,
             )
         )
-        (tmp_path / "render-project").mkdir(exist_ok=True)
+        create_project("render-project", name="Render Project", root=tmp_path, exist_ok=True)
         task = _task(root=tmp_path)
         admitted = UnitOfWork(writer).run(
             lambda u: tasks.create(

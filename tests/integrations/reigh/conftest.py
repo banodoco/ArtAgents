@@ -99,8 +99,15 @@ def make_registry_json(
 
 @pytest.fixture
 def tmp_bridge_root(tmp_path: Path) -> Path:
-    """Temporary directory serving as the projects root for bridge tests."""
-    return tmp_path
+    """Return a fixture-owned, empty projects root for bridge tests.
+
+    The repository-wide autouse sandbox creates ``workspace-config``,
+    ``astrid-home``, and ``projects`` beside ``tmp_path``. Keep the bridge
+    root nested so tests can distinguish fixture setup from seed mutations.
+    """
+    root = tmp_path / "bridge-projects"
+    root.mkdir()
+    return root
 
 
 # ---------------------------------------------------------------------------

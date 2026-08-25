@@ -270,7 +270,10 @@ def _setup_project_env(
     with_timeline: bool = True,
 ) -> tuple[Path, Path]:
     """Set up a temp project and return (projects_root, project_path)."""
-    projects_root = tmp_path / "projects"
+    # The repository-wide sandbox owns ``tmp_path / "projects"``. Keep this
+    # helper's explicitly controlled root nested so setup ownership cannot
+    # collide with the autouse safety fixture.
+    projects_root = tmp_path / "ledger-projects"
     projects_root.mkdir()
     monkeypatch.setenv(project_paths.PROJECTS_ROOT_ENV, str(projects_root))
     create_project(project_slug)

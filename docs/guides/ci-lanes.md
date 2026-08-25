@@ -46,8 +46,8 @@ The script exercises seven stable lanes, plus an optional `--changed` fast path:
 |------|-------------------|------|
 | `baselines` | ruff, mypy, repo hygiene | Plain (exit-code) |
 | `docs` | `tests/verify_docs_commands.sh` | Plain (exit-code) |
-| `reshape` | `tests/reshape/` + hype regression fixture + concurrency smoke | pytest |
-| `blocking` | Targeted tests, all `tests/core/rendering`, and the pinned Remotion renderer-parity gate | pytest |
+| `reshape` | `tests/reshape/` + hype regression fixture | pytest |
+| `blocking` | Current executor/orchestrator environment contracts, all `tests/core/rendering`, and the pinned Remotion renderer-parity gate | pytest |
 | `broad` | Full suite: `-m "not integration and not opt_in"` | pytest |
 | `remotion_typecheck` | Pinned Node/npm, lockfile `npm ci` when needed, generated types, then `npm run typecheck` | Plain (exit-code) |
 | `quarantine` | `QUARANTINE_TESTS` (opt-in, non-blocking) | pytest (per-file) |

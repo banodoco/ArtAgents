@@ -342,7 +342,10 @@ def test_freeze_attached_render_creates_only_its_intended_ledger(
 def test_freeze_unbound_attached_falls_back_without_any_ledger(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    projects_root = tmp_path / "projects"
+    # The autouse suite sandbox already creates ``tmp_path / "projects"``;
+    # use a never-created caller-owned root so this test proves the unbound
+    # fallback does not initialize it.
+    projects_root = tmp_path / "unbound-projects"
     monkeypatch.setenv("ASTRID_PROJECTS_ROOT", str(projects_root))
     for name in (TASK_PROJECT_ENV, TASK_RUN_ID_ENV, TASK_STEP_ID_ENV):
         monkeypatch.delenv(name, raising=False)

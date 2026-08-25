@@ -185,8 +185,23 @@ def _configured_project_dir() -> tuple[Path | None, str | None]:
     return (REPO_ROOT / "remotion").resolve(), None
 
 
-def remotion_runtime_status() -> RemotionRuntimeStatus:
-    """Inspect the trusted runtime without mutating it or running npm."""
+def remotion_runtime_status(
+    *, require_explicit_project: bool = False
+) -> RemotionRuntimeStatus:
+    """Inspect the trusted runtime without mutating it or running npm.
+
+    Development render helpers may use the checkout's conventional ``remotion``
+    directory, but admission and worker execution must use an explicitly
+    provisioned server-owned project. The strict mode makes that distinction
+    explicit without weakening the development parity lane.
+    """
+
+    if require_explicit_project and not os.environ.get(REMOTION_PROJECT_DIR_ENV, "").strip():
+        return RemotionRuntimeStatus(
+            False,
+            None,
+            f"{REMOTION_PROJECT_DIR_ENV} must point to the server-owned Remotion project",
+        )
 
     project_dir, config_error = _configured_project_dir()
     if config_error:

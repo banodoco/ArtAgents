@@ -5,8 +5,8 @@ import sys
 import tempfile
 import unittest
 from collections import Counter
-from unittest import mock
 from pathlib import Path
+from unittest import mock
 
 from astrid.core import timeline
 from astrid.core.timeline import banodoco_schema
@@ -173,6 +173,20 @@ class SchemaContractTest(unittest.TestCase):
         # Persisted timelines may omit `theme`; renderable default is injected
         # at render time via Timeline.for_render(), never written back.
         timeline.validate_timeline({"clips": [], "tracks": []}, strict=False)
+
+    def test_container_validation_preserves_editor_app_metadata(self) -> None:
+        config = {
+            "clips": [],
+            "tracks": [],
+            "app": {"com.example.extension": {"marker": "kept"}},
+        }
+
+        validated = timeline.validate_timeline_config_for_container(config)
+
+        # ``app`` is Astrid/editor extension metadata, not an upstream render
+        # schema field. It must survive round-trip while remaining excluded
+        # from the strict shared-schema payload.
+        self.assertEqual(validated["app"], config["app"])
 
     def test_canonical_empty_timeline_is_raw_runtime_container(self) -> None:
         config = timeline.canonical_empty_timeline()

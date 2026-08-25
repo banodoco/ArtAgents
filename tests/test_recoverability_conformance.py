@@ -39,6 +39,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 ASTRID_ROOT = ROOT / "astrid"
 FIXTURE_PATH = ROOT / "tests" / "fixtures" / "recoverability_conformance_worklist.json"
@@ -558,6 +560,7 @@ def _load_fixture() -> dict[str, object]:
     return json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
 
 
+@pytest.mark.timeout(300)
 def test_recoverability_conformance_zero_mode() -> None:
     """Final zero mode: the scanner must produce zero findings across ALL categories.
 

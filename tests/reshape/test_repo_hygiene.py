@@ -40,6 +40,24 @@ def test_unknown_root_entries_flag_unapproved_root_files_and_dirs(
     assert findings == ["idea.md", "out/"]
 
 
+def test_intentional_tracked_root_inputs_are_allowed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tracked_paths = [
+        ".node-version",
+        ".vscode/settings.json",
+        "artifacts/m4/baseline.json",
+        "planning/phase2-execution-plan.md",
+        "requirements/runtime.lock",
+    ]
+    for relpath in tracked_paths:
+        _touch(tmp_path, relpath)
+
+    monkeypatch.setattr(check_repo_hygiene, "REPO_ROOT", tmp_path)
+
+    assert check_repo_hygiene.find_unknown_root_entries(tracked_paths) == []
+
+
 def test_find_tracked_ignored_artifacts_classifies_synthetic_filenames(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -116,6 +134,46 @@ def test_allowlists_preserve_legitimate_tracked_fixtures_and_source_files(
         "docs/assets/astrid-orchestration.png",
         "tests/fixtures/reshape/hype_regression/main.mp4",
         "tests/packs/builtin/generate_image/fixtures/tiny.png",
+    ]
+    for relpath in tracked_paths:
+        _touch(tmp_path, relpath)
+
+    monkeypatch.setattr(check_repo_hygiene, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(check_repo_hygiene, "_tracked_files", lambda: tracked_paths)
+
+    assert check_repo_hygiene.find_tracked_ignored_artifacts() == []
+
+
+def test_durable_megaplan_assets_are_allowed_but_runtime_state_is_not(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    durable = [
+        ".megaplan/initiatives/astrid-first/README.md",
+        ".megaplan/initiatives/astrid-first/briefs/m1.md",
+        ".megaplan/plans/m7-dogfood-and-hardening-20260820-0835/plan_v2.md",
+        ".megaplan/plans/m7-dogfood-and-hardening-20260820-0835/state.json",
+    ]
+    runtime = [
+        ".megaplan/initiatives/astrid-first/.process_adapter_wbc/events.ndjson",
+        ".megaplan/plans/unapproved-runtime/state.json",
+    ]
+    tracked_paths = durable + runtime
+    for relpath in tracked_paths:
+        _touch(tmp_path, relpath)
+
+    monkeypatch.setattr(check_repo_hygiene, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(check_repo_hygiene, "_tracked_files", lambda: tracked_paths)
+
+    findings = check_repo_hygiene.find_tracked_ignored_artifacts()
+    assert sorted({path for _category, path in findings}) == sorted(runtime)
+
+
+def test_secret_named_test_sources_are_allowed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tracked_paths = [
+        "tests/sdk/test_zero_secret_smoke.py",
+        "tests/v10/test_m6_secret_sink.py",
     ]
     for relpath in tracked_paths:
         _touch(tmp_path, relpath)

@@ -468,7 +468,7 @@ class ReighTaskBridge:
                 )
 
                 if timeline_requires_remotion(current.config):
-                    runtime = remotion_runtime_status()
+                    runtime = remotion_runtime_status(require_explicit_project=True)
                     if not runtime.available:
                         raise BridgeCapabilityUnavailableError(
                             "rendering.render: server-owned Remotion runtime "

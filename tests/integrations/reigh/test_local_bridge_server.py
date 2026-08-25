@@ -200,7 +200,7 @@ def _repo_db_snapshot(composition) -> dict[str, Any]:
 
 
 def _get_json(url: str) -> tuple[int, dict]:
-    with urlopen(url) as response:  # noqa: S310 - localhost test server only
+    with urlopen(url, timeout=5) as response:  # noqa: S310 - localhost test server only
         return response.status, json.loads(response.read().decode("utf-8"))
 
 
@@ -2004,9 +2004,10 @@ def test_serve_dispatcher_starts_and_serves_health(
     server_started = threading.Event()
     server_error: Exception | None = None
     server_address: tuple[str, int] | None = None
+    server = None
 
     def _run_serve():
-        nonlocal server_error
+        nonlocal server, server_address, server_error
         try:
             # We need to override serve_forever to signal when the server is ready.
             from astrid.core.integrations.reigh.local_bridge_server import (
@@ -2022,7 +2023,7 @@ def test_serve_dispatcher_starts_and_serves_health(
             srv.bridge = composition.bridge
             srv.bridge_writer = composition.writer
             srv.bridge_database_path = composition.database_path
-            nonlocal server_address
+            server = srv
             server_address = srv.server_address
             server_started.set()
             try:
@@ -2045,19 +2046,17 @@ def test_serve_dispatcher_starts_and_serves_health(
     host, port = server_address
     base_url = f"http://{host}:{port}"
 
-    # Hit the health endpoint.
-    health_status, health = _get_json(f"{base_url}/health")
-    assert health_status == 200
-    assert health["ok"] is True
-    assert health["projects_root"] == str(tmp_bridge_root.resolve())
-
-    # Shut down cleanly.
-    # Send SIGTERM-like shutdown by directly shutting down the server.
-    # Since we used a daemon thread, we can't easily get the server reference.
-    # Instead, test that the server responds and then let the daemon thread
-    # exit when the test process exits.
-    # For proper cleanup, we'll use the running_server fixture pattern.
-    thread.join(timeout=1)
+    try:
+        health_status, health = _get_json(f"{base_url}/health")
+        assert health_status == 200
+        assert health["ok"] is True
+        assert health["projects_root"] == str(tmp_bridge_root.resolve())
+    finally:
+        assert server is not None
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+    assert not thread.is_alive(), "serve dispatcher thread did not shut down"
 
 
 def test_serve_dispatcher_with_host_port_and_projects_root_args(

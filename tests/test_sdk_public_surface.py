@@ -562,10 +562,11 @@ def test_invoke_rejects_elements_and_missing_executor_project(
 
 def test_invoke_executor_project_routing_supplies_kernel_staging_in_process(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     """Kernel admission owns the output path even for in-process execution."""
     astrid = _import_public_module()
-    from astrid.core.execution.executor import runner as executor_runner
+    from astrid.core.task_executor import capability_handler
 
     captured_request: dict[str, Any] = {}
 
@@ -585,7 +586,7 @@ def test_invoke_executor_project_routing_supplies_kernel_staging_in_process(
             returncode=0,
         )
 
-    monkeypatch.setattr(executor_runner, "run_executor", _fake_run_executor)
+    monkeypatch.setattr(capability_handler, "run_executor", _fake_run_executor)
 
     result = astrid.invoke(
         "editorial.arrange",
@@ -594,6 +595,7 @@ def test_invoke_executor_project_routing_supplies_kernel_staging_in_process(
         out=None,
         execution_mode="in_process",
         include_installed=False,
+        project_root=tmp_path / "sdk-projects",
     )
 
     assert captured_request["executor_id"] == "editorial.arrange"

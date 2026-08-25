@@ -31,7 +31,7 @@ structure:
 	@echo "✓ repo structure (canonical top-level dirs)"
 
 doctor:
-	@$(PY) -m astrid doctor --json >/dev/null
+	@$(PY) scripts/reshape/ci_doctor.py
 	@echo "✓ doctor (deploy health gate)"
 
 ruff:

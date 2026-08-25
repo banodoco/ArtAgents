@@ -16,12 +16,17 @@ import json
 import mimetypes
 import os
 import shutil
+import tempfile
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping
 from urllib.parse import urlparse
+
+from astrid.core.env_vars import ASTRID_REMOTION_PROJECT_DIR
+from astrid.core.execution.executor.registry import load_default_registry
+from astrid.core.execution.executor.runner import ExecutorRunRequest, run_executor
 
 PACK_ID = "rendering.render"
 FAMILY = "render_export"
@@ -177,10 +182,11 @@ def _stage_managed_registry(
                 f"render_export managed media {media_id!r} digest mismatch"
             )
         destination = staged_assets / f"{ordinal:04d}{_asset_extension(raw_asset)}"
-        try:
-            os.link(source, destination)
-        except OSError:
-            shutil.copyfile(source, destination)
+        # Managed media is immutable authority. A writable hard link in task
+        # staging would let any downstream in-place write corrupt the CAS
+        # inode, so always create an independent file (fast-copy/COW where the
+        # platform supports it).
+        shutil.copyfile(source, destination)
         staged_digest, staged_size = _digest_file(destination)
         if staged_digest != expected or staged_size != size:
             raise RenderExportRefused(
@@ -281,7 +287,7 @@ class RenderExportTaskAdapter:
             timeline_requires_remotion,
         )
 
-        remotion_status = remotion_runtime_status()
+        remotion_status = remotion_runtime_status(require_explicit_project=True)
         if timeline_requires_remotion(config) and not remotion_status.available:
             raise RenderExportRefused(
                 "server-owned Remotion runtime unavailable: "
@@ -313,44 +319,90 @@ class RenderExportTaskAdapter:
         _write_json(timeline_path, config)
         _write_json(assets_path, staged_registry)
 
-        # The server owns renderer selection; a caller cannot downgrade or
-        # inject backend configuration.
-        engine = DEFAULT_ENGINE
-        if "output_name" in params:
-            raise RenderExportRefused("render_export uses output_filename")
-        output_name = params.get("output_filename", DEFAULT_OUTPUT_NAME)
-        if not isinstance(output_name, str) or Path(output_name).name != output_name or not output_name.endswith(".mp4"):
-            raise RenderExportRefused("render_export output_filename must be a plain .mp4 filename")
-        output_path = staging_dir / output_name
-
-        # Import lazily so an unavailable renderer fails at execution time and
-        # is routed through ExecutionService's fenced failure command.
-        context.report("render", 10)
+        # The canonical executor enforces that declared timeline artifacts are
+        # project-owned. Keep the externally-visible staging pack unchanged,
+        # but provide short-lived owned copies for dispatch.
+        owned_inputs_dir = Path(tempfile.mkdtemp(prefix=".render-inputs-", dir=project_root))
         try:
-            from astrid.core.pack.entrypoint import canonical_runtime_entrypoint
+            owned_timeline_path = owned_inputs_dir / "timeline.json"
+            owned_assets_path = owned_inputs_dir / "assets.json"
+            shutil.copy2(timeline_path, owned_timeline_path)
+            owned_assets = owned_inputs_dir / "assets"
+            owned_assets.mkdir(mode=0o700)
+            owned_registry = json.loads(assets_path.read_text(encoding="utf-8"))
+            for asset in owned_registry.get("assets", {}).values():
+                source = Path(asset["file"])
+                destination = owned_assets / source.name
+                # The renderer receives a writable private copy, never a hard
+                # link to managed media or the durable staging evidence.
+                shutil.copyfile(source, destination)
+                asset["file"] = str(destination)
+            _write_json(owned_assets_path, owned_registry)
 
+            # The server owns renderer selection; a caller cannot downgrade or
+            # inject backend configuration.
+            engine = DEFAULT_ENGINE
+            if "output_name" in params:
+                raise RenderExportRefused("render_export uses output_filename")
+            output_name = params.get("output_filename", DEFAULT_OUTPUT_NAME)
+            if (
+                not isinstance(output_name, str)
+                or Path(output_name).name != output_name
+                or not output_name.endswith(".mp4")
+            ):
+                raise RenderExportRefused(
+                    "render_export output_filename must be a plain .mp4 filename"
+                )
+            output_path = staging_dir / output_name
+
+            # Route through the canonical executor registry so this pack adapter
+            # never imports the facade runtime directly. The executor manifest is
+            # the ownership boundary for dispatch; this adapter supplies only the
+            # immutable, server-owned inputs admitted above.
+            context.report("render", 10)
             with (
                 _project_env(project_root),
                 _scoped_env("ASTRID_RENDER_INHERIT_PROCESS_GROUP", "1"),
-                canonical_runtime_entrypoint(PACK_ID),
+                _scoped_env(
+                    ASTRID_REMOTION_PROJECT_DIR,
+                    str(remotion_status.project_dir),
+                ),
             ):
-                from astrid.packs.rendering.executors.render.run import render
-
-                rendered = render(
-                    timeline_path,
-                    assets_path,
-                    output_path,
-                    engine=engine,
-                    # This is deployment configuration, never a task field.
-                    # Ordinary media-only timelines may still auto-route to
-                    # FFmpeg when no Remotion bundle is installed.
-                    project_dir=remotion_status.project_dir,
-                    keep_previous_renders=True,
+                result = run_executor(
+                    ExecutorRunRequest(
+                        executor_id=PACK_ID,
+                        out=staging_dir,
+                        project=project_slug,
+                        inputs={
+                            "timeline": str(owned_timeline_path),
+                            "assets_registry": str(owned_assets_path),
+                            "output_name": output_name,
+                            "engine": engine,
+                            "backend_config": {
+                                "rendering.remotion": {
+                                    # This is deployment configuration, never
+                                    # a task field.
+                                    "project_dir": str(remotion_status.project_dir),
+                                }
+                            },
+                            "keep_previous_renders": True,
+                        },
+                        project_was_auto_resolved=True,
+                        projects_root=self._projects_root,
+                        invocation="render-export-task",
+                    ),
+                    load_default_registry(),
                 )
+            if not result.ok:
+                detail = result.error.message if result.error is not None else result.payload
+                raise RenderExportRefused(f"render_export executor failed: {detail}")
+            rendered = result.outputs.get("video", output_path)
         except RenderExportRefused:
             raise
         except Exception as exc:  # noqa: BLE001 - typed by the task boundary
             raise RenderExportRefused(f"render_export renderer failed: {exc}") from exc
+        finally:
+            shutil.rmtree(owned_inputs_dir, ignore_errors=True)
 
         context.report("validate_output", 90)
         rendered_path = Path(rendered).resolve()

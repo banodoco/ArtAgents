@@ -218,7 +218,7 @@ class TestSyncAssetRegistry:
         """Asset key ≠ source id mapping works."""
         from astrid.core.project.project import create_project as _create_project
 
-        projects_root = tmp_path / "projects"
+        projects_root = tmp_path / "asset-sync-projects"
         projects_root.mkdir(parents=True)
         monkeypatch.setenv("ASTRID_PROJECTS_ROOT", str(projects_root))
 
@@ -285,7 +285,7 @@ class TestSyncAssetRegistry:
         """Merge preserves unrelated entries; no implicit pruning."""
         from astrid.core.project.project import create_project as _create_project
 
-        projects_root = tmp_path / "projects"
+        projects_root = tmp_path / "asset-sync-projects"
         projects_root.mkdir(parents=True)
         monkeypatch.setenv("ASTRID_PROJECTS_ROOT", str(projects_root))
 
@@ -329,7 +329,7 @@ class TestSyncAssetRegistry:
         """No-op skipped when merged registry equals current."""
         from astrid.core.project.project import create_project as _create_project
 
-        projects_root = tmp_path / "projects"
+        projects_root = tmp_path / "asset-sync-projects"
         projects_root.mkdir(parents=True)
         monkeypatch.setenv("ASTRID_PROJECTS_ROOT", str(projects_root))
 
@@ -363,7 +363,7 @@ class TestSyncAssetRegistry:
         from astrid.core.project.project import create_project as _create_project
         from astrid.core.timeline.eventlog import EventLogStaleVersionError
 
-        projects_root = tmp_path / "projects"
+        projects_root = tmp_path / "asset-sync-projects"
         projects_root.mkdir(parents=True)
         monkeypatch.setenv("ASTRID_PROJECTS_ROOT", str(projects_root))
 
@@ -396,7 +396,7 @@ class TestSyncAssetRegistry:
         """Containment rejection: file outside sources/ root."""
         from astrid.core.project.project import create_project as _create_project
 
-        projects_root = tmp_path / "projects"
+        projects_root = tmp_path / "asset-sync-projects"
         projects_root.mkdir(parents=True)
         monkeypatch.setenv("ASTRID_PROJECTS_ROOT", str(projects_root))
 
@@ -413,7 +413,7 @@ class TestSyncAssetRegistry:
         """URL and local mappings work."""
         from astrid.core.project.project import create_project as _create_project
 
-        projects_root = tmp_path / "projects"
+        projects_root = tmp_path / "asset-sync-projects"
         projects_root.mkdir(parents=True)
         monkeypatch.setenv("ASTRID_PROJECTS_ROOT", str(projects_root))
 

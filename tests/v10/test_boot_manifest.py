@@ -267,7 +267,8 @@ def _task_bridge(tmp_path: Path):
         UnitOfWork(composition.writer).run(command)
         yield bridge, composition
     finally:
-        composition.writer.close()
+        composition.close()
+        assert not composition.expiry_sweeper._thread.is_alive()
 
 
 def _staged(tmp_path: Path, field_name: str, payload: bytes) -> Any:

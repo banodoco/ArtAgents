@@ -230,9 +230,9 @@ jobs:
 
       - name: Run doctor check
         run: |
-          # Blocking: on a CI runner with no .env on disk, the env-template check
-          # reports advisory-only, so a clean checkout exits 0.
-          python -m astrid doctor --json
+          # Blocking: make doctor owns a disposable initialized projects root;
+          # the check must not depend on an ambient checkout database.
+          make doctor PY=python
 
       - name: Fresh-clone core smoke (advisory)
         continue-on-error: true

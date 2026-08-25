@@ -105,6 +105,10 @@ _FROZEN_REL_PATHS = (
 _FROZEN_LEGITIMATE_UPDATES = {
     "astrid/packs/rendering/executors/timeline_storyboard/STAGE.md": "b768588e",
     "astrid/core/timeline/_shared.py": "b768588e",
+    # 2ea0d0da added the explicit timeline-schema import path used by the
+    # server-owned render worker. Its parent snapshot is the pre-update blob;
+    # later commits must remain byte-identical to the reviewed 2ea0d0da bytes.
+    "astrid/core/timeline/banodoco_schema.py": "b768588e",
 }
 
 REPO_ROOT = TESTS_ROOT.parent

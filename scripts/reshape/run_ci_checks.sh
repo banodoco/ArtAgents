@@ -37,9 +37,12 @@ if $CHANGED_MODE || [ "${ASTRID_CI_SKIP_COVERAGE:-}" = "1" ]; then
 fi
 
 TARGETED_BLOCKING_TESTS=(
-  tests/spikes/test_env_inheritance.py
+  tests/core/test_executor_runner_errors.py::test_external_executor_env_includes_definition_env
+  tests/core/test_executor_runner_errors.py::test_external_executor_env_inherits_os_environ
+  tests/core/test_executor_runner_errors.py::test_external_executor_does_not_inherit_undeclared_host_env
+  tests/core/test_orchestrator_runner_errors.py::test_command_orchestrator_preserves_declared_passthrough_env
+  tests/core/test_orchestrator_runner_errors.py::test_command_orchestrator_does_not_spread_undeclared_host_env
   tests/packs/test_composition_elements.py
-  tests/test_for_each_autoclose.py
   tests/test_schema_contract.py
   tests/core/rendering
   tests/packs/rendering/test_builtin_registration.py
@@ -48,6 +51,19 @@ TARGETED_BLOCKING_TESTS=(
 RENDERER_PARITY_TESTS=(
   tests/packs/test_renderer_parity.py
 )
+
+_validate_lane_manifest() {
+  local _path _file_path
+  for _path in "${TARGETED_BLOCKING_TESTS[@]}" "${RENDERER_PARITY_TESTS[@]}"; do
+    _file_path="${_path%%::*}"
+    if [ ! -e "$_file_path" ]; then
+      echo "CI lane manifest references missing path: $_path" >&2
+      return 4
+    fi
+  done
+}
+
+_validate_lane_manifest
 
 QUARANTINE_TESTS=(
   "tests/agentic/test_agent_probe_regression.py|author-test|builtin.agent_probe negative-revert coverage still depends on the legacy compiled author-test start path.|2026-06-11"
@@ -309,9 +325,14 @@ _OVERALL_EXIT=0
 
 _accum() {
   local _lane="$1" _p="$2" _f="$3" _s="$4"
-  eval "_LP_${_lane}=\$((_LP_${_lane} + _p))"
-  eval "_LF_${_lane}=\$((_LF_${_lane} + _f))"
-  eval "_LS_${_lane}=\$((_LS_${_lane} + _s))"
+  local _p_var="_LP_${_lane}" _f_var="_LF_${_lane}" _s_var="_LS_${_lane}"
+  local _current_p=0 _current_f=0 _current_s=0
+  eval "_current_p=\${${_p_var}:-0}"
+  eval "_current_f=\${${_f_var}:-0}"
+  eval "_current_s=\${${_s_var}:-0}"
+  eval "${_p_var}=\$((_current_p + _p))"
+  eval "${_f_var}=\$((_current_f + _f))"
+  eval "${_s_var}=\$((_current_s + _s))"
 }
 
 # Parse a junit XML file; print "<passed> <failed> <skipped>" to stdout.
@@ -370,14 +391,10 @@ _run_plain docs bash tests/verify_docs_commands.sh
 echo "--- reshape ---" >&2
 _run_pytest reshape tests/reshape -q
 _run_pytest reshape tests/reshape/test_hype_regression_fixture.py -q
-_run_pytest reshape tests/concurrency/test_two_tab_harness_smoke.py -q
-
 echo "--- blocking ---" >&2
 _run_pytest blocking "${TARGETED_BLOCKING_TESTS[@]}" -q
-_rc=0
-{ "$PYTHON_BIN" scripts/reshape/remotion_gate.py install; } >&2 2>&1 || _rc=$?
-if [ "$_rc" -ne 0 ]; then _OVERALL_EXIT=1; fi
-_run_plain renderer_parity "$PYTHON_BIN" scripts/reshape/remotion_gate.py parity --reuse-installed
+_run_plain blocking "$PYTHON_BIN" scripts/reshape/remotion_gate.py install
+_run_plain blocking "$PYTHON_BIN" scripts/reshape/remotion_gate.py parity --reuse-installed
 
 echo "--- broad ---" >&2
 if [ "${ASTRID_CI_SKIP_BROAD:-}" = "1" ]; then
