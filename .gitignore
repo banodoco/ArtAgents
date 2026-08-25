@@ -85,16 +85,12 @@ plan_v1.revised.md
 mgt-*/
 *.bak
 
-# Durable inputs for prepared megaplan initiatives.
-# Generated .megaplan plan/run state remains ignored.
+# Generated .megaplan plan/run state remains ignored. Individual durable
+# initiatives are allowlisted explicitly below only while they are active.
 !.megaplan/
 .megaplan/*
 !.megaplan/initiatives/
 .megaplan/initiatives/*
-!.megaplan/initiatives/timeline-visualization/
-!.megaplan/initiatives/timeline-visualization/**
-!.megaplan/initiatives/pluggable-timeline-renderers/
-!.megaplan/initiatives/pluggable-timeline-renderers/**
 
 # Local scratch pack (gitignored)
 /astrid/packs/local/
