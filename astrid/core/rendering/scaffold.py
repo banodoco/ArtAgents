@@ -215,7 +215,7 @@ def _pack_id_from_dest(dest: Path) -> str:
             f"destination directory name {pack_id!r} is not a valid pack id; "
             "pack ids must match [a-z][a-z0-9_]* and the scaffold folder "
             "must be named exactly like the desired pack id (e.g. "
-            "'astrid renderers create wave acme_wave' writes "
+            "'python3 -m astrid.core.rendering.cli create wave acme_wave' writes "
             "acme_wave/pack.yaml with id: acme_wave)"
         )
     if pack_id == _DEFAULT_PACK_ID:

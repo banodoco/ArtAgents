@@ -1,4 +1,4 @@
-"""T6.5 — four-file renderer scaffold and the ``astrid renderers create`` route.
+"""T6.5 — four-file renderer scaffold and the internal authoring CLI route.
 
 Locks the exact scaffold contract:
 

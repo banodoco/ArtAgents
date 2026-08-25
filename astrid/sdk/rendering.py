@@ -42,7 +42,7 @@ Worked example (scaffold → SDK renderer):
 1. Scaffold the four-file pack, then point the manifest command at this
    module's entrypoint instead of the generated ``render.py``::
 
-       python3 -m astrid renderers create wave acme_wave
+       python3 -m astrid.core.rendering.cli create wave acme_wave
        # acme_wave/renderer.yaml: command: [python3, -m, astrid.sdk.rendering]
 
 2. From Python, render through the shared service — the SDK builds a frozen

@@ -1,6 +1,6 @@
 """T7.1 — renderer CLI discovery and smoke verbs.
 
-Locks the ``astrid renderers`` verbs ``list``, ``inspect``, ``validate``,
+Locks the internal renderer-authoring verbs ``list``, ``inspect``, ``validate``,
 and ``smoke`` alongside the existing ``create``:
 
 * ``list`` prints every discovered renderer/planner/finalizer qualified id
@@ -108,7 +108,7 @@ def test_inspect_unknown_id_fails_with_message(capsys) -> None:
     assert renderers_cli_main(["inspect", "no.such.renderer"]) == 2
     message = _stderr(capsys)
     assert "unknown renderer/planner/finalizer id 'no.such.renderer'" in message
-    assert "renderers list" in message
+    assert "astrid.core.rendering.cli list" in message
 
 
 # ---------------------------------------------------------------------------
@@ -227,7 +227,7 @@ def test_bad_args_exit_nonzero(argv: list[str]) -> None:
     assert excinfo.value.code == 2
 
 
-def test_dispatch_renderers_routes_list_and_smoke(
+def test_internal_renderer_cli_routes_list_and_smoke(
     tmp_path: Path,
     capsys,
 ) -> None:

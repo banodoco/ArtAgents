@@ -1,8 +1,9 @@
-# Timeline Visualization — Agent Navigation (M1 → M2 handoff)
+# Timeline Visualization — Agent Navigation Contract
 
-*Status: M1 complete (R18). Binding input to M2 (R19+). Schema versions cited
-from `astrid/packs/rendering/executors/timeline_visualize/schemas/` — every
-claim below is grounded in the actual code, not the plan.*
+*Status: M1 and M2 complete. Schema versions cited from
+`astrid/packs/rendering/executors/timeline_visualize/schemas/` — every claim
+below is grounded in the shipped code and release evidence, not the historical
+plan.*
 *Source of truth: this document + the schemas + the emitted artifacts of a
 real run (see §1 for how to produce one).*
 
@@ -64,7 +65,7 @@ Location: `astrid/packs/rendering/executors/timeline_visualize/schemas/`.
 | view-map | `view-map.json` | `schema_version`, `snapshots`, `pages[]` (`page_id`, `dimensions`, `layout`, `scope`, `time_bounds`, `object_boxes`, `labels`, `continuation_links`, `reading_order`), `reading_order` |
 | action-index | `action-index.json` | `schema_version`, `snapshots`, `entries{ref: {canonical_ref, relations, actions}}` |
 | asset-index | `asset-index.json` | `schema_version`, `snapshots`, `assets[]` (`stable_id`, `qualified_ref`, `canonical_ref`, `source_id`, `source_version`, `role`, optional frozen `media_type`, `integrity_state`, `expected_sha256`, `observed_sha256`, `contained_path`) |
-| transcript-index | `transcript-index.json` | `schema_version`, `snapshots`, `sources[]` (TS), `speech_occurrences[]` (SP). **Empty arrays are valid in M1**; M2 fills them without changing the v1 shape |
+| transcript-index | `transcript-index.json` | `schema_version`, `snapshots`, `sources[]` (TS), `speech_occurrences[]` (SP). Empty arrays remain valid when no explicit transcript evidence is attached; populated arrays preserve the same v1 shape |
 | diagnostics | `diagnostics.json` | `schema_version`, `snapshots`, `diagnostics[]` (`severity` warning/error, `code` `[A-Z][A-Z0-9_]*`, `message`, `object_ref` nullable) |
 | metric-definitions | `metric-definitions.json` | `schema_version` (1), `kind` (`timeline_visualize_metric_definitions`), `compositor_version` (`0.0.6`), `metrics[]` (14 fixed, ordered) |
 
@@ -110,7 +111,7 @@ emitted project indexes retain exact hash-bound navigation.
   (`navigation.build_identity_map`): `TL01` always the timeline; `CL` in
   compositor clip order; `AS` in sorted registry-key order; `SH` in
   `pinnedShotGroups` order; `RG` minted by `assign_range_ids` in start-time
-  order; `TS`/`SP` emitted by M2 transcript attachment (R20).
+  order; `TS`/`SP` emitted by transcript attachment (R20).
 - **Children never renumber**: scoped emissions filter entries; ordinals are
   never re-allocated (verified by the frozen child copying `frozen_objects`
   byte-for-byte).
@@ -144,8 +145,8 @@ Each `action-index.json` entry: `canonical_ref`, `relations`, `actions`.
 - Relations (v1): `parent` (null at TL01), `previous`, `next` (same-track
   clip ordering), `children`. `parent`/`children` and `previous`/`next` are
   reciprocal; targets outside a scoped emission are reported `null` (never
-  dangling). The plan's `timeline_media`/`mapped_speech` relations are NOT
-  part of v1 — they await the TS/SP extension points (§10).
+  dangling). The plan's `timeline_media`/`mapped_speech` relation names are
+  not part of v1; TS/SP navigation uses the shipped action graph in §10.
 - Action kinds: `visualize` (`--from-view --focus` drill-downs) and
   `inspect_media` (`inspect_original`). Every `visualize` action with a
   non-null `focus` carries exactly one `--from-view` and one `--focus`
@@ -260,7 +261,7 @@ transition grouping mounts source `[F, F+Df)`, destination
   `project_root/sources/…` with the registry EVENT hashes aligned (see
   `test_timeline_visualize_journey.py::_write_verified_media`).
 
-## 10. M2 interface (what R19+ consumes)
+## 10. Transcript and speech interface (shipped in M2)
 
 R20 identity rule: `TS` display ordinals remain lineage-local (`TL01.TS01`,
 ...), while their canonical authored identity is
@@ -278,11 +279,10 @@ separate occurrence and reuse never collapses.
    asset_ref, authored_mapping, effective_mapping) — `authored_mapping`
    preserves source-to-timeline arithmetic before compositor transitions;
    `effective_mapping` records the retimed/clipped presentation.
-3. Action-index extension points for TS/SP: relations and actions keyed by
-   `TL01.TSxx`/`TL01.SPxx` refs (schema already accepts the pattern; M2 adds
-   e.g. text/speech focus actions while keeping v1 shape).
-4. `reads: "current"` remains reserved for `refresh_root`; all M2 navigation
-   stays snapshot-read-only.
+3. Action-index entries for TS/SP use `TL01.TSxx`/`TL01.SPxx` refs and add
+   text/speech focus actions while keeping the v1 shape.
+4. `reads: "current"` remains reserved for `refresh_root`; all transcript and
+   speech navigation stays snapshot-read-only.
 5. Cold `--range` scopes mint RG ids at root creation (e.g. `TL01.RG01`,
    ordered by start time, deterministic per bounds) so RANGE focus is
    navigable through the frozen preflight; see the implemented

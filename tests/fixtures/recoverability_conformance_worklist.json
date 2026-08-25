@@ -2774,7 +2774,7 @@
       "module": "astrid.core.rendering.cli",
       "builder": "build_parser",
       "path": "astrid/core/rendering/cli.py",
-      "prog": "astrid renderers",
+      "prog": "python3 -m astrid.core.rendering.cli",
       "enum_arg_count": 0
     },
     {

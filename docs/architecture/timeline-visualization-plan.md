@@ -1,5 +1,12 @@
 # Timeline visualization plan
 
+> Historical design record. The epic is complete; current implementation and
+> proof live in `timeline-visualization-agent-navigation.md` and
+> `timeline-visualization-release-evidence.md`. Where the original plan spoke
+> about repairing a projected `assembly.json`, the shipped kernel integration
+> instead replays and verifies the authoritative event stream without repair
+> or mutation.
+
 ## Outcome
 
 Add a durable read-only command:
@@ -419,7 +426,7 @@ manifest file.
 ```text
 event-sourced managed timeline(s)
         │
-        │ read/repair projection through timeline CRUD
+        │ replay and verify the authoritative event stream (read-only)
         ▼
 resolved timeline source(s)
         │
@@ -453,12 +460,13 @@ JSON would eventually produce three subtly different explanations.
 
 - `rendering.timeline_visualize` owns normalization, layout, thumbnails,
   rendering, evidence-pack assembly, diagnostics, and output manifests.
-- `astrid timelines visualize` owns project/session resolution, projection
-  repair, timeline selection, argument validation, managed executor invocation,
-  and compact result reporting.
-- Existing event-sourced timeline code remains authoritative. The visualizer
-  reads `assembly.json` only after the normal read path has repaired it from
-  `assembly.jsonl` when required.
+- `astrid timelines visualize` owns project resolution, authoritative timeline
+  selection, argument validation, managed executor invocation, and compact
+  result reporting.
+- Kernel event streams remain authoritative. Managed visualization replays and
+  verifies the selected stream and event head without repairing a projection,
+  trusting a stale sidecar, or mutating timeline state. Explicit legacy and
+  frozen inputs remain separately declared compatibility modes.
 - The existing storyboard continues to exist as the focused "generation input
   images" view. Shared duration and asset-resolution helpers should be
   extracted rather than copied.
@@ -1044,7 +1052,8 @@ only if repeated use shows it is valuable.
 - `refresh_root` creates a distinct current-state lineage;
 - explicit project and attached-session behavior;
 - project-owned run creation;
-- projection repair before visualization;
+- event-log replay and head verification before visualization, with no
+  projection repair or mutation;
 - compact result summary names every mandatory core entrypoint, plus
   primary-image and factual-Markdown entrypoints when present and explicit
   `null`/reason fields when a requested presentation format omits them.
@@ -1117,12 +1126,11 @@ Expected implementation effort is approximately **15–22 focused days**:
 - 6–9 days for journey fixtures, VLM evaluation, repeated live iteration, and
   hardening.
 
-This is best executed as a two-milestone epic. Milestone one establishes the
-complete visualization and snapshot-safe navigation spine through original
-media. Milestone two adds transcript/text mapping and proves the entire journey
-through adversarial VLM comprehension and freshness/integrity fixtures. The
-second milestone consumes the first milestone's written navigation contract
-instead of redesigning it.
+This was executed as a two-milestone epic. Milestone one established the
+visualization and snapshot-safe navigation spine through original media;
+milestone two added transcript/text mapping and proved the full journey through
+adversarial VLM comprehension and freshness/integrity fixtures. See the release
+evidence for the landed gates and subsequent kernel-authority integration.
 
 ## Explicit non-goals for the first release
 

@@ -1,8 +1,8 @@
-"""CLI for ``astrid renderers`` — pluggable timeline renderers.
+"""Internal module CLI for pluggable timeline-renderer authoring.
 
-The gateway dispatches the ``renderers`` top-level command here
-(``gateway/dispatch.py::_dispatch_renderers``).  ``main`` routes each
-sub-verb:
+Invoke it as ``python3 -m astrid.core.rendering.cli``. Renderer authoring is
+deliberately outside Astrid's eight-family product gateway. ``main`` routes
+each sub-verb:
 
 * ``create`` — write the exact four-file renderer scaffold (``pack.yaml``,
   ``renderer.yaml``, ``render.py``, ``test_renderer.py``);
@@ -69,13 +69,13 @@ def main(argv: list[str] | None = None) -> int:
         # JSON mode handles them inside the handler with the verb shape.
         raise AstridError(
             str(exc),
-            recovery_command="astrid renderers create --help",
+            recovery_command="python3 -m astrid.core.rendering.cli create --help",
         ) from exc
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="astrid renderers",
+        prog="python3 -m astrid.core.rendering.cli",
         description="Manage pluggable timeline renderers.",
     )
     sub = parser.add_subparsers(dest="command")
@@ -331,7 +331,7 @@ def _cmd_create(args: argparse.Namespace) -> int:
                             else "invalid"
                         ),
                         "message": str(exc),
-                        "recovery_command": "astrid renderers create --help",
+                        "recovery_command": "python3 -m astrid.core.rendering.cli create --help",
                     },
                 },
                 stream=sys.stderr,
@@ -447,7 +447,10 @@ def _cmd_inspect(args: argparse.Namespace) -> int:
     )
     if resolved is None:
         message = f"unknown renderer/planner/finalizer id '{args.renderer_id}'"
-        hint = "run 'astrid renderers list' to see available renderer ids"
+        hint = (
+            "run 'python3 -m astrid.core.rendering.cli list' to see available "
+            "renderer ids"
+        )
         if args.json:
             _emit_json(
                 {
@@ -455,7 +458,7 @@ def _cmd_inspect(args: argparse.Namespace) -> int:
                     "error": {
                         "kind": "unknown",
                         "message": f"{message}; {hint}",
-                        "recovery_command": "astrid renderers list",
+                        "recovery_command": "python3 -m astrid.core.rendering.cli list",
                     },
                 },
                 stream=sys.stderr,
@@ -652,7 +655,7 @@ def _smoke_failure(
                     "message": (
                         message if hint is None else f"{message}; {hint}"
                     ),
-                    "recovery_command": "astrid renderers list",
+                    "recovery_command": "python3 -m astrid.core.rendering.cli list",
                 },
             },
             stream=sys.stderr,
@@ -699,7 +702,8 @@ def _cmd_smoke(args: argparse.Namespace) -> int:
                         "kind": "ineligible",
                         "message": message,
                         "recovery_command": (
-                            "run 'astrid renderers inspect <id>' to review why "
+                            "run 'python3 -m astrid.core.rendering.cli inspect "
+                            "<id>' to review why "
                             "the renderer is not execution-eligible"
                         ),
                     },

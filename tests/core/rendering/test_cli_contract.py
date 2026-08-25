@@ -1,6 +1,6 @@
 """T7.2 — frozen renderer CLI JSON and error contract.
 
-Locks the ``astrid renderers`` ``--json`` output shapes and error behavior:
+Locks the internal renderer-authoring CLI ``--json`` shapes and error behavior:
 
 * every verb (``create``, ``list``, ``inspect``, ``validate``, ``smoke``,
   plus the ``support`` verb) emits a STABLE, verb-specific JSON object on
@@ -407,7 +407,9 @@ def test_create_conflict_emits_structured_error_json(tmp_path: Path) -> None:
     assert set(error.keys()) == {"kind", "message", "recovery_command"}
     assert error["kind"] == "conflict"
     assert "refusing to overwrite" in error["message"]
-    assert error["recovery_command"] == "astrid renderers create --help"
+    assert error["recovery_command"] == (
+        "python3 -m astrid.core.rendering.cli create --help"
+    )
 
 
 def test_create_conflict_plain_mode_keeps_clear_text(tmp_path: Path) -> None:
