@@ -36,3 +36,20 @@ before the installed/browser lanes can be accepted.
 the installed `playwright-core/browsers.json`, not inferred from a moving
 "current stable" label.
 
+## Remotion adapter provisioning
+
+The optional Remotion adapter is a separate, lockfile-owned Node closure. A
+clean checkout must use Node **20.19.4** and npm **10.8.2**, recorded in the
+repository `.node-version` and enforced by `remotion/package.json` plus
+`remotion/.npmrc`. After installing that toolchain, run from the repository
+root:
+
+```sh
+python3 scripts/reshape/remotion_gate.py all
+```
+
+The gate runs `npm ci` (never `npm install` or `npx`) from `remotion/`, checks
+free space before and after installation, generates the renderer types, runs
+`npm run typecheck`, and executes the blocking renderer-parity selector. It
+refuses to start the install below 2 GiB free and does not provision or commit
+`node_modules/`. CI uses the same exact Node/npm versions and lockfile.

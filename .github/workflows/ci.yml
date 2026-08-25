@@ -136,17 +136,14 @@ jobs:
       - name: Set up Node for repository typecheck
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "20.19.4"
           cache: npm
           cache-dependency-path: remotion/package-lock.json
 
-      - name: Install pinned Remotion toolchain
+      - name: Run pinned Remotion gate
         working-directory: remotion
-        run: npm ci
-
-      - name: Remotion typecheck
-        working-directory: remotion
-        run: npm run typecheck
+        run: |
+          python ../scripts/reshape/remotion_gate.py all
 
       - name: Revalidate admission immediately before m7 publication
         run: |
@@ -252,13 +249,13 @@ jobs:
       - name: Set up Node for blocking Remotion typecheck
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "20.19.4"
           cache: npm
           cache-dependency-path: remotion/package-lock.json
 
-      - name: Install pinned Remotion toolchain
+      - name: Provision pinned Remotion closure
         working-directory: remotion
-        run: npm ci
+        run: python ../scripts/reshape/remotion_gate.py install
 
       - name: Run local CI mirror
         env:
@@ -285,12 +282,9 @@ jobs:
           path: out/s1-gate/latest
           if-no-files-found: ignore
 
-      - name: Remotion typecheck (blocking, explicit)
+      - name: Remotion gate (blocking, explicit)
         working-directory: remotion
-        run: npm run typecheck
-
-      - name: Renderer parity (blocking, explicit)
-        run: python -m pytest -q -m renderer_parity tests/packs/test_renderer_parity.py
+        run: python ../scripts/reshape/remotion_gate.py all --reuse-installed
 
       - name: Upload coverage report
         if: always()

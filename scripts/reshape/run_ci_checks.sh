@@ -258,7 +258,10 @@ if ! $JSON_MODE; then
   "$PYTHON_BIN" -m pytest tests/reshape -q
   "$PYTHON_BIN" -m pytest tests/reshape/test_hype_regression_fixture.py -q
   "$PYTHON_BIN" -m pytest "${TARGETED_BLOCKING_TESTS[@]}" -q
-  "$PYTHON_BIN" -m pytest -q -m renderer_parity "${RENDERER_PARITY_TESTS[@]}"
+  # Provision and validate the authoritative npm closure before the parity
+  # lane; subsequent gate calls reuse the cryptographically checked closure.
+  "$PYTHON_BIN" scripts/reshape/remotion_gate.py install
+  "$PYTHON_BIN" scripts/reshape/remotion_gate.py parity --reuse-installed
   "$PYTHON_BIN" -m pytest "${BROAD_PYTEST_ARGS[@]}" $COV_ARGS
 
   # m1 S1 gate (plan step 23): the twelve focused m1 lanes via the SAME make
@@ -274,15 +277,10 @@ if ! $JSON_MODE; then
     make s1-gate PY="$PYTHON_BIN"
   fi
 
-  # Named Remotion typecheck lane.
-  if [ ! -d remotion/node_modules ]; then
-    echo "LANE remotion-typecheck: SKIP (remotion/node_modules absent; run 'cd remotion && npm ci' to enable)"
-  elif [ ! -f remotion/src/types.augmentations.d.ts ]; then
-    echo "LANE remotion-typecheck: SKIP (remotion/src/types.augmentations.d.ts absent; generated augmentation surface not provisioned)"
-  else
-    echo "LANE remotion-typecheck: running (remotion/node_modules + generated surface present)"
-    (cd remotion && npm run typecheck)
-  fi
+  # Named Remotion typecheck lane. The gate provisions the exact lockfile
+  # closure when needed and exports the validated absolute Node executable.
+  echo "LANE remotion-typecheck: running (pinned Node/npm + npm ci + generated types)"
+  "$PYTHON_BIN" scripts/reshape/remotion_gate.py typecheck --reuse-installed
 
   for entry in "${QUARANTINE_TESTS[@]}"; do
     IFS='|' read -r path owner reason expiry <<<"$entry"
@@ -376,7 +374,10 @@ _run_pytest reshape tests/concurrency/test_two_tab_harness_smoke.py -q
 
 echo "--- blocking ---" >&2
 _run_pytest blocking "${TARGETED_BLOCKING_TESTS[@]}" -q
-_run_pytest blocking -q -m renderer_parity "${RENDERER_PARITY_TESTS[@]}"
+_rc=0
+{ "$PYTHON_BIN" scripts/reshape/remotion_gate.py install; } >&2 2>&1 || _rc=$?
+if [ "$_rc" -ne 0 ]; then _OVERALL_EXIT=1; fi
+_run_plain renderer_parity "$PYTHON_BIN" scripts/reshape/remotion_gate.py parity --reuse-installed
 
 echo "--- broad ---" >&2
 if [ "${ASTRID_CI_SKIP_BROAD:-}" = "1" ]; then
@@ -387,20 +388,11 @@ else
 fi
 
 echo "--- remotion_typecheck ---" >&2
-if [ ! -d remotion/node_modules ]; then
-  echo "LANE remotion-typecheck: SKIP (remotion/node_modules absent; run 'cd remotion && npm ci' to enable)" >&2
-  _accum remotion_typecheck 0 0 1
-elif [ ! -f remotion/src/types.augmentations.d.ts ]; then
-  echo "LANE remotion-typecheck: SKIP (remotion/src/types.augmentations.d.ts absent; generated augmentation surface not provisioned)" >&2
-  _accum remotion_typecheck 0 0 1
-else
-  echo "LANE remotion-typecheck: running (remotion/node_modules + generated surface present)" >&2
-  _rc=0
-  # SD-003: capture stdout of this stdout-leaking lane, reroute to stderr.
-  { (cd remotion && npm run typecheck); } >&2 2>&1 || _rc=$?
-  if [ "$_rc" -eq 0 ]; then _accum remotion_typecheck 1 0 0; else _accum remotion_typecheck 0 1 0; fi
-  [ "$_rc" -eq 0 ] || _OVERALL_EXIT=1
-fi
+echo "LANE remotion-typecheck: running (pinned Node/npm + npm ci + generated types)" >&2
+_rc=0
+{ "$PYTHON_BIN" scripts/reshape/remotion_gate.py typecheck --reuse-installed; } >&2 2>&1 || _rc=$?
+if [ "$_rc" -eq 0 ]; then _accum remotion_typecheck 1 0 0; else _accum remotion_typecheck 0 1 0; fi
+[ "$_rc" -eq 0 ] || _OVERALL_EXIT=1
 
 echo "--- quarantine ---" >&2
 # SD-003: capture stdout of run_quarantine_lane, reroute to stderr.

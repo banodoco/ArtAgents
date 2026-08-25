@@ -137,9 +137,25 @@ wheel install) must never require Node.js, npm, Remotion, or any
 `@banodoco` package.** The render path is an optional runtime adapter
 that users opt into by:
 
-1. Installing Node.js and npm
-2. Running `npm install` in `remotion/`
-3. Invoking `rendering.render`
+1. Installing the pinned Node.js **20.19.4** toolchain (which supplies npm
+   **10.8.2**; `.node-version` records the pin)
+2. Running `python3 scripts/reshape/remotion_gate.py install` from the repo
+   root. This runs `npm ci` against `remotion/package-lock.json`, with a
+   2-GiB free-space safety floor, and never uses `npx`.
+3. Invoking `rendering.render` with `ASTRID_NODE_EXECUTABLE` set to that
+   absolute Node path (the gate exports this for its test process)
+
+The reproducible verification command is:
+
+```sh
+python3 scripts/reshape/remotion_gate.py all
+```
+
+It provisions the lockfile closure when absent, generates the renderer type
+surface, runs the Remotion typecheck, and then runs the complete renderer-
+parity selector. `remotion/package.json` and `remotion/.npmrc` reject other
+Node/npm versions; `node_modules/` remains ignored and must never be
+committed.
 
 The selected Remotion backend fails closed — if `node_modules/` is absent or
 any required `@banodoco/*` package directory is missing, it raises

@@ -8,7 +8,7 @@
 
 PY ?= python3
 
-.PHONY: help check ci structure doctor ruff mypy cycles remotion-typecheck renderer-parity wheel ci-mirror editable lock-build lock-runtime lock-validate toolchain-record s1-gate m4-baseline m4-gate m7-gate m8-gate
+.PHONY: help check ci structure doctor ruff mypy cycles remotion-install remotion-typecheck renderer-parity wheel ci-mirror editable lock-build lock-runtime lock-validate toolchain-record s1-gate m4-baseline m4-gate m7-gate m8-gate
 
 help:
 	@echo "make check   - blocking gates: structure, doctor, ruff, mypy, cycles, Remotion, renderer parity"
@@ -20,7 +20,7 @@ help:
 	@echo "make m8-gate - m8 packaged GA evidence: digest validation + atomic six-file release publication (set M8_EVIDENCE=... to publish a bundle)"
 	@echo "make lock-runtime / lock-build - refresh universal SHA-256 dependency locks with uv"
 	@echo "make lock-validate - validate exact pins, hashes, and direct dependency coverage"
-	@echo "make <gate>  - run one gate: structure | doctor | ruff | mypy | cycles | remotion-typecheck | renderer-parity | wheel | ci-mirror | editable | s1-gate | m4-baseline | m4-gate | m7-gate | m8-gate"
+	@echo "make <gate>  - run one gate: structure | doctor | ruff | mypy | cycles | remotion-install | remotion-typecheck | renderer-parity | wheel | ci-mirror | editable | s1-gate | m4-baseline | m4-gate | m7-gate | m8-gate"
 
 # --- Fast gates: catch the common deploy blockers in seconds. Run before every push. ---
 check: structure doctor ruff mypy cycles remotion-typecheck renderer-parity
@@ -46,16 +46,14 @@ cycles:
 	@$(PY) -m scripts.reshape.import_cycles --baseline scripts/reshape/baselines/import_cycles.json
 	@echo "✓ import cycles (no new cross-package cycle)"
 
+remotion-install:
+	@$(PY) scripts/reshape/remotion_gate.py install
+
 remotion-typecheck:
-	@if [ -d remotion/node_modules ]; then \
-		$(PY) scripts/gen_remotion_types.py && \
-		cd remotion && npm run typecheck; \
-	else \
-		echo "LANE remotion-typecheck: SKIP (remotion/node_modules absent; run 'cd remotion && npm ci' to enable)"; \
-	fi
+	@$(PY) scripts/reshape/remotion_gate.py typecheck
 
 renderer-parity:
-	@$(PY) -m pytest -q -m renderer_parity tests/packs/test_renderer_parity.py
+	@$(PY) scripts/reshape/remotion_gate.py parity
 
 # --- Full mirror of the CI deploy job (slow). Run before a release / when in doubt. ---
 ci: check editable wheel ci-mirror
