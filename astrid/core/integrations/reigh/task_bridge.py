@@ -90,6 +90,13 @@ def _attempt_wire_shape(row: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _task_output_wire_shape(row: Mapping[str, Any]) -> dict[str, Any]:
+    """Project SQLite's integer flags to the JSON task-output contract."""
+    output = dict(row)
+    output["is_primary"] = bool(output["is_primary"])
+    return output
+
+
 class ReighTaskBridge:
     """The task/executor bridge over the one kernel writer (doc 27 §§3-5).
 
@@ -1444,7 +1451,7 @@ class ReighTaskBridge:
                 ).fetchall()
             ]
             outputs = [
-                dict(row)
+                _task_output_wire_shape(row)
                 for row in conn.execute(
                     "SELECT ordinal, role, media_id, is_primary, "
                     "params_json FROM task_outputs "

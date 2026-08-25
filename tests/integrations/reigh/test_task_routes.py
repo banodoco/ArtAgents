@@ -997,6 +997,11 @@ class TestCompletion:
             _db_count(composition, "SELECT COUNT(*) FROM task_outputs") == 1
         )
         assert _db_count(composition, "SELECT COUNT(*) FROM media") == 1
+        dstatus, detail = _get(
+            env, f"/projects/complete-proj/tasks/{claimed['task_id']}"
+        )
+        assert dstatus == 200, detail
+        assert detail["task"]["outputs"][0]["is_primary"] is True
         # Staged bytes are cleaned up.
         assert not list((composition.projects_root / ".astrid").rglob("*out0*"))
 
