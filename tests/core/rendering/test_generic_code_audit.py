@@ -56,7 +56,7 @@ ALLOWED: dict[tuple[str, int], str] = {
     ("astrid/core/rendering/service.py", 203): "legacy compatibility shim (recovery text)",
     ("astrid/core/rendering/service.py", 207): "legacy compatibility shim (legacy_selectors data)",
     # --- SDK validation error recovery text -------------------------------
-    ("astrid/sdk/exceptions.py", 560): "legacy compatibility shim (ffprobe recovery text)",
+    ("astrid/sdk/exceptions.py", 563): "legacy compatibility shim (ffprobe recovery text)",
     # --- provenance: legacy-engine projection compatibility shim ---------
     ("astrid/core/rendering/provenance.py", 114): "legacy compatibility shim (docstring)",
     ("astrid/core/rendering/provenance.py", 146): "legacy compatibility shim (docstring)",

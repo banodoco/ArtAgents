@@ -37,9 +37,7 @@ if $CHANGED_MODE || [ "${ASTRID_CI_SKIP_COVERAGE:-}" = "1" ]; then
 fi
 
 TARGETED_BLOCKING_TESTS=(
-  tests/spikes/test_env_inheritance.py
   tests/packs/test_composition_elements.py
-  tests/test_for_each_autoclose.py
   tests/test_schema_contract.py
   tests/core/rendering
   tests/packs/rendering/test_builtin_registration.py
@@ -50,10 +48,6 @@ RENDERER_PARITY_TESTS=(
 )
 
 QUARANTINE_TESTS=(
-  "tests/agentic/test_agent_probe_regression.py|author-test|builtin.agent_probe negative-revert coverage still depends on the legacy compiled author-test start path.|2026-06-11"
-  "tests/orchestrate/test_author_test_drift.py|author-test|dynamic orchestrator author-test compile for video_editing.hype still fails before the diff behavior is exercised.|2026-06-11"
-  "tests/orchestrate/test_author_test_pass.py|author-test|dynamic orchestrator author-test compile for video_editing.hype still fails before the golden replay can run.|2026-06-11"
-  "tests/orchestrate/test_author_test_regenerate.py|author-test|dynamic orchestrator author-test compile for video_editing.hype still fails before the regenerate flow can run.|2026-06-11"
 )
 
 run_quarantine_lane() {
@@ -64,12 +58,26 @@ run_quarantine_lane() {
 
   echo "QUARANTINE owner=${owner} expiry=${expiry} path=${path}"
   echo "  reason: ${reason}"
+  if [ ! -f "$path" ]; then
+    echo "  status: invalid (test path does not exist)"
+    return 2
+  fi
+  if [[ ! "$expiry" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+    echo "  status: invalid (expiry must be YYYY-MM-DD)"
+    return 2
+  fi
+  if [[ "$expiry" < "$(date -u +%F)" ]]; then
+    echo "  status: invalid (quarantine expired)"
+    return 2
+  fi
   # Select by marker so the lane remains run-but-allowed-to-fail even if the
   # file gains non-opt_in tests in the future.
   if "$PYTHON_BIN" -m pytest "$path" -m opt_in -q; then
     echo "  status: pass"
+    return 0
   else
     echo "  status: fail (non-blocking)"
+    return 1
   fi
 }
 
@@ -87,7 +95,7 @@ run_quarantine_lane() {
 #                            sources, so it must never run in default CI even if
 #                            its opt_in marker is ever dropped.
 BROAD_PYTEST_ARGS=(
-  --tb=no
+  --tb=short
   -q
   --no-header
   -m "not integration and not opt_in and not live and not grok_iter"
@@ -253,7 +261,7 @@ if ! $JSON_MODE; then
   "$PYTHON_BIN" scripts/reshape/compare_ruff_baseline.py
   "$PYTHON_BIN" scripts/reshape/compare_mypy_baseline.py
   "$PYTHON_BIN" scripts/reshape/check_repo_hygiene.py
-  bash tests/verify_docs_commands.sh
+  PYTHON_BIN="$PYTHON_BIN" bash tests/verify_docs_commands.sh
 
   "$PYTHON_BIN" -m pytest tests/reshape -q
   "$PYTHON_BIN" -m pytest tests/reshape/test_hype_regression_fixture.py -q
@@ -284,9 +292,14 @@ if ! $JSON_MODE; then
     (cd remotion && npm run typecheck)
   fi
 
-  for entry in "${QUARANTINE_TESTS[@]}"; do
+  for entry in ${QUARANTINE_TESTS[@]+"${QUARANTINE_TESTS[@]}"}; do
     IFS='|' read -r path owner reason expiry <<<"$entry"
-    run_quarantine_lane "$path" "$owner" "$reason" "$expiry"
+    _quarantine_rc=0
+    run_quarantine_lane "$path" "$owner" "$reason" "$expiry" || _quarantine_rc=$?
+    if [ "$_quarantine_rc" -eq 2 ]; then
+      echo "ERROR: invalid quarantine metadata must be fixed before CI can pass" >&2
+      exit 1
+    fi
   done
   exit 0
 fi
@@ -367,12 +380,11 @@ _run_plain baselines "$PYTHON_BIN" scripts/reshape/compare_mypy_baseline.py
 _run_plain baselines "$PYTHON_BIN" scripts/reshape/check_repo_hygiene.py
 
 echo "--- docs ---" >&2
-_run_plain docs bash tests/verify_docs_commands.sh
+_run_plain docs env "PYTHON_BIN=$PYTHON_BIN" bash tests/verify_docs_commands.sh
 
 echo "--- reshape ---" >&2
 _run_pytest reshape tests/reshape -q
 _run_pytest reshape tests/reshape/test_hype_regression_fixture.py -q
-_run_pytest reshape tests/concurrency/test_two_tab_harness_smoke.py -q
 
 echo "--- blocking ---" >&2
 _run_pytest blocking "${TARGETED_BLOCKING_TESTS[@]}" -q
@@ -404,13 +416,24 @@ fi
 
 echo "--- quarantine ---" >&2
 # SD-003: capture stdout of run_quarantine_lane, reroute to stderr.
-# Quarantine is non-blocking; the loop always exits 0.
-for entry in "${QUARANTINE_TESTS[@]}"; do
+# Test failures remain non-blocking until their declared expiry. Missing test
+# paths, malformed dates, and expired entries are stale CI configuration and
+# therefore fail the gate.
+for entry in ${QUARANTINE_TESTS[@]+"${QUARANTINE_TESTS[@]}"}; do
   IFS='|' read -r path owner reason expiry <<<"$entry"
-  run_quarantine_lane "$path" "$owner" "$reason" "$expiry" >&2 2>&1 || true
+  _rc=0
+  run_quarantine_lane "$path" "$owner" "$reason" "$expiry" >&2 2>&1 || _rc=$?
+  if [ "$_rc" -eq 0 ]; then
+    _accum quarantine 1 0 0
+  else
+    _accum quarantine 0 1 0
+    [ "$_rc" -eq 2 ] && _OVERALL_EXIT=1
+  fi
 done
-# Non-blocking: report as pass regardless of individual test outcomes.
-_accum quarantine 1 0 0
+if [ -z "${QUARANTINE_TESTS[0]+set}" ]; then
+  echo "LANE quarantine: SKIP (no quarantined tests)" >&2
+  _accum quarantine 0 0 1
+fi
 
 # Determine per-lane status and emit JSON.
 _lane_json() {

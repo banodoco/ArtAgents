@@ -57,6 +57,27 @@ class TestTimelineConfigJson:
         assert config == {"tracks": [], "clips": []}
         assert config is not original
 
+    def test_clip_label_is_retained_but_excluded_from_shared_schema_view(self) -> None:
+        original = {
+            "tracks": [{"id": "visual", "kind": "visual", "label": "Visual"}],
+            "clips": [
+                {
+                    "id": "title",
+                    "at": 0,
+                    "track": "visual",
+                    "clipType": "text",
+                    "hold": 1,
+                    "text": {"content": "Hello"},
+                    "label": "Editor title",
+                }
+            ],
+        }
+
+        config = validate_timeline_config_json(original)
+
+        assert config["clips"][0]["label"] == "Editor title"
+        assert original["clips"][0]["label"] == "Editor title"
+
     def test_round_trip_write_read(self, tmp_path: Path) -> None:
         config = {"tracks": [], "clips": []}
         path = tmp_path / "assembly.json"

@@ -21,14 +21,23 @@ COMMAND = [
 
 
 def _run() -> dict[str, Any]:
-    proc = subprocess.run(COMMAND, capture_output=True, text=True, check=False)
+    try:
+        proc = subprocess.run(COMMAND, capture_output=True, text=True, check=False)
+    except OSError as exc:
+        raise RuntimeError(f"ruff failed to execute: {exc}") from exc
     if proc.returncode not in (0, 1):
-        if proc.stdout:
-            sys.stdout.write(proc.stdout)
-        if proc.stderr:
-            sys.stderr.write(proc.stderr)
-        raise SystemExit(proc.returncode)
-    findings = json.loads(proc.stdout or "[]")
+        detail = (proc.stderr or proc.stdout).strip() or "no diagnostic output"
+        raise RuntimeError(f"ruff failed to execute (exit {proc.returncode}): {detail}")
+    try:
+        findings = json.loads(proc.stdout or "[]")
+    except json.JSONDecodeError as exc:
+        detail = (proc.stderr or proc.stdout).strip() or "invalid JSON output"
+        raise RuntimeError(f"ruff failed to execute: {detail}") from exc
+    if not isinstance(findings, list):
+        raise RuntimeError("ruff failed to execute: expected a JSON findings list")
+    if proc.returncode == 1 and not findings:
+        detail = (proc.stderr or proc.stdout).strip() or "no diagnostic output"
+        raise RuntimeError(f"ruff failed to execute (exit 1): {detail}")
     return {
         "tool": "ruff",
         "scope": ["pyproject.toml [tool.ruff].include"],
@@ -44,7 +53,11 @@ def main() -> int:
     parser.add_argument("--write-baseline", action="store_true")
     args = parser.parse_args()
 
-    current = _run()
+    try:
+        current = _run()
+    except RuntimeError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
     if args.write_baseline:
         args.baseline.write_text(json.dumps(current, indent=2) + "\n")
         print(f"Wrote Ruff baseline to {args.baseline} ({current['finding_count']} findings)")

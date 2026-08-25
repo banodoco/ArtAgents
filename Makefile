@@ -6,9 +6,9 @@
 # `make check` green ≈ the CI "Python quality gates" deploy job will pass its fast gates.
 # These run the SAME scripts CI runs (see .github/workflows/ci.yml), so they stay in lockstep.
 
-PY ?= python3
+PY ?= $(if $(wildcard .venv/bin/python),.venv/bin/python,python3)
 
-.PHONY: help check ci structure doctor ruff mypy cycles remotion-typecheck renderer-parity wheel ci-mirror editable s1-gate m4-baseline m4-gate m7-gate m8-gate
+.PHONY: help check ci preflight structure doctor ruff mypy cycles remotion-typecheck renderer-parity wheel ci-mirror editable s1-gate m4-baseline m4-gate m7-gate m8-gate
 
 help:
 	@echo "make check   - blocking gates: structure, doctor, ruff, mypy, cycles, Remotion, renderer parity"
@@ -18,11 +18,25 @@ help:
 	@echo "make m4-gate - m4 Step 33: 13 focused lanes + authority lint + drift rejection + feasibility admission (fails closed)"
 	@echo "make m7-gate - m7 GA evidence: admitted selectors 1-10 + provisional/retained dispositions (fails closed)"
 	@echo "make m8-gate - m8 packaged GA evidence: digest validation + atomic six-file release publication (set M8_EVIDENCE=... to publish a bundle)"
-	@echo "make <gate>  - run one gate: structure | doctor | ruff | mypy | cycles | remotion-typecheck | renderer-parity | wheel | ci-mirror | editable | s1-gate | m4-baseline | m4-gate | m7-gate | m8-gate"
+	@echo "make <gate>  - run one gate: preflight | structure | doctor | ruff | mypy | cycles | remotion-typecheck | renderer-parity | wheel | ci-mirror | editable | s1-gate | m4-baseline | m4-gate | m7-gate | m8-gate"
 
 # --- Fast gates: catch the common deploy blockers in seconds. Run before every push. ---
-check: structure doctor ruff mypy cycles remotion-typecheck renderer-parity
+check: preflight structure doctor ruff mypy cycles remotion-typecheck renderer-parity
 	@echo "✅ make check: blocking pre-deploy gates passed"
+
+preflight:
+	@$(PY) -c "import importlib.util, sys; required=('pytest','pytest_cov','pytest_timeout','mypy','ruff','build','banodoco_timeline_schema'); missing=[name for name in required if importlib.util.find_spec(name) is None]; problems=[]; sys.version_info < (3,11) and problems.append('Python >=3.11 is required (found %s)' % sys.version.split()[0]); missing and problems.append('missing Python modules: %s (run %s -m pip install -e \'.[dev]\')' % (', '.join(missing), sys.executable)); problems and sys.exit('PREFLIGHT FAILED: ' + '; '.join(problems))"
+	@for tool in ffmpeg ffprobe node npm; do \
+		if ! command -v "$$tool" >/dev/null 2>&1; then \
+			echo "PREFLIGHT FAILED: '$$tool' is required; install it and retry (macOS: brew install ffmpeg node)" >&2; \
+			exit 1; \
+		fi; \
+	done
+	@if [ ! -d remotion/node_modules ]; then \
+		echo "PREFLIGHT FAILED: remotion/node_modules is absent; run 'cd remotion && npm ci' and retry" >&2; \
+		exit 1; \
+	fi
+	@echo "✓ local gate preflight ($(PY))"
 
 structure:
 	@$(PY) -c "import sys; from astrid.core.structure import validate_repo_structure as v; r=v(); [print('STRUCTURE ERROR:', e) for e in r.errors]; sys.exit(1 if r.errors else 0)"
@@ -63,10 +77,10 @@ editable:
 	@$(PY) -c "import astrid; print('✓ editable install imports')"
 
 wheel:
-	bash scripts/smoke_wheel_install.sh
+	PYTHON_BIN="$(PY)" bash scripts/smoke_wheel_install.sh
 
 ci-mirror:
-	bash scripts/reshape/run_ci_checks.sh
+	PYTHON_BIN="$(PY)" bash scripts/reshape/run_ci_checks.sh
 
 # --- m1 S1 gate (plan step 23): the twelve focused m1 lanes, one command ---
 # Runs the complete fresh-database, conformance, crash, contention, lint,

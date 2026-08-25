@@ -538,7 +538,7 @@ class TestProjectToAssembly:
                         event_id="01AAAAAAAAAAAAAAAAAAAAAA12"),
             _make_event("clip.added", {
                 "clip_id": "c1",
-                "kind": "visual",
+                "kind": "text",
                 "track_id": "v1",
                 "asset_id": "asset-1",
                 "position": None,
@@ -566,7 +566,7 @@ class TestProjectToAssembly:
             "id": "c1",
             "at": 1.5,
             "track": "v2",
-            "clipType": "media",
+            "clipType": "text",
             "asset": "asset-2",
             "hold": 4.0,
             "text": {"content": "hello"},

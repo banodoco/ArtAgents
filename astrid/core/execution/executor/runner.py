@@ -904,7 +904,15 @@ def _prepare_project_request(
     _validate_project_owned_inputs(request, executor)
     if not request.project_was_auto_resolved:
         reject_project_with_out(request.project, request.out)
-    # Validate timeline requirement without writing a project run record.
+    # A project-scoped lower-level call may use caller output or a kernel-owned
+    # staging root, but it must never mint a project run directory itself. The
+    # SDK/kernel admission path supplies ``run_root`` before reaching here;
+    # without either path, fail closed rather than creating an orphaned second
+    # ledger surface under ``project/runs``.
+    if request.out in (None, "") and request.run_root in (None, ""):
+        raise ExecutorRunnerError(
+            f"executor {request.executor_id!r} requires an output or staging path"
+        )
     # Keep out unchanged as staging/output; run dir is output/staging only.
     return None, request
 

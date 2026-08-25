@@ -373,9 +373,10 @@ class TestExecutorCLIProject:
 
         projects_root, _ = _setup_project_env(tmp_path, monkeypatch, "demo")
         registry = ExecutorRegistry([_make_minimal_executor("test.noop")])
+        staging = tmp_path / "kernel-staging"
 
         result = run_executor(
-            ExecutorRunRequest("test.noop", out="", project="demo"), registry
+            ExecutorRunRequest("test.noop", out="", project="demo", run_root=staging), registry
         )
         assert result.returncode == 0
 
@@ -391,13 +392,14 @@ class TestExecutorCLIProject:
         from astrid.core.execution.executor.runner import ExecutorRunRequest, ExecutorRunnerError, run_executor
 
         projects_root, _ = _setup_project_env(tmp_path, monkeypatch, "demo")
+        staging = tmp_path / "kernel-staging"
 
         requires_exec = _make_minimal_requires_executor("test.requires")
         registry = ExecutorRegistry([requires_exec])
 
         with pytest.raises(ExecutorRunnerError, match="missing required input"):
             run_executor(
-                ExecutorRunRequest("test.requires", out="", project="demo"), registry
+                ExecutorRunRequest("test.requires", out="", project="demo", run_root=staging), registry
             )
 
         records = _project_run_records(projects_root)
@@ -479,9 +481,13 @@ class TestSDKImageProject:
 
         projects_root, _ = _setup_project_env(tmp_path, monkeypatch, "demo")
         registry = ExecutorRegistry([_make_minimal_executor("generation.generate_image")])
+        staging = tmp_path / "kernel-staging"
 
         result = run_executor(
-            ExecutorRunRequest("generation.generate_image", out="", project="demo"), registry
+            ExecutorRunRequest(
+                "generation.generate_image", out="", project="demo", run_root=staging
+            ),
+            registry,
         )
         assert result.returncode == 0
 

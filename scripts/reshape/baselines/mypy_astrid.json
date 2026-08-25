@@ -5,15 +5,37 @@
     "scripts/reshape"
   ],
   "command": [
-    "/Users/peteromalley/.pyenv/versions/3.11.11/bin/python",
+    "/Users/peteromalley/.pyenv/versions/3.11.11/bin/python3.11",
     "-m",
     "mypy",
     "astrid",
     "scripts/reshape",
     "--hide-error-context",
     "--no-color-output",
+    "--no-pretty",
     "--show-error-codes"
   ],
-  "finding_count": 0,
-  "findings": []
+  "finding_count": 956,
+  "code_counts": {
+    "arg-type": 320,
+    "assignment": 70,
+    "attr-defined": 50,
+    "call-arg": 13,
+    "call-overload": 11,
+    "dict-item": 5,
+    "import-untyped": 14,
+    "index": 50,
+    "misc": 20,
+    "no-redef": 19,
+    "operator": 10,
+    "override": 8,
+    "return": 1,
+    "return-value": 126,
+    "str-bytes-safe": 3,
+    "type-var": 4,
+    "typeddict-item": 4,
+    "union-attr": 199,
+    "valid-type": 14,
+    "var-annotated": 15
+  }
 }

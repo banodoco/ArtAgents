@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import collections
 import json
 import re
 import subprocess
@@ -17,20 +18,17 @@ COMMAND = [
     "scripts/reshape",
     "--hide-error-context",
     "--no-color-output",
+    "--no-pretty",
     "--show-error-codes",
 ]
 ERROR_RE = re.compile(r"^(.*?):(\d+):(?:(\d+):)? error: (.*?)\s+\[(.*?)\]$")
 
 
 def _run() -> dict[str, Any]:
-    proc = subprocess.run(COMMAND, capture_output=True, text=True, check=False)
-    if proc.returncode not in (0, 1, 2):
-        if proc.stdout:
-            sys.stdout.write(proc.stdout)
-        if proc.stderr:
-            sys.stderr.write(proc.stderr)
-        raise SystemExit(proc.returncode)
-
+    try:
+        proc = subprocess.run(COMMAND, capture_output=True, text=True, check=False)
+    except OSError as exc:
+        raise RuntimeError(f"mypy failed to execute: {exc}") from exc
     findings = []
     for line in (proc.stdout.splitlines() + proc.stderr.splitlines()):
         match = ERROR_RE.match(line)
@@ -45,12 +43,17 @@ def _run() -> dict[str, Any]:
                 "code": match.group(5),
             }
         )
+    if proc.returncode not in (0, 1) or (proc.returncode == 1 and not findings):
+        detail = (proc.stderr or proc.stdout).strip() or "no diagnostic output"
+        raise RuntimeError(f"mypy failed to execute (exit {proc.returncode}): {detail}")
     return {
         "tool": "mypy",
         "scope": COMMAND[3:5],
         "command": COMMAND,
         "finding_count": len(findings),
-        "findings": findings,
+        "code_counts": dict(
+            sorted(collections.Counter(item["code"] for item in findings).items())
+        ),
     }
 
 
@@ -60,7 +63,11 @@ def main() -> int:
     parser.add_argument("--write-baseline", action="store_true")
     args = parser.parse_args()
 
-    current = _run()
+    try:
+        current = _run()
+    except RuntimeError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
     if args.write_baseline:
         args.baseline.write_text(json.dumps(current, indent=2) + "\n")
         print(f"Wrote mypy baseline to {args.baseline} ({current['finding_count']} findings)")

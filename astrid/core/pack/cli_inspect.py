@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 
 from astrid.core.contracts.errors import AstridError
+from astrid.core.env_vars import ASTRID_PACKS_PATH
 from astrid.core.pack import (
     PackDefinition,
     discover_packs,
@@ -745,7 +746,7 @@ def _inspect_discovered_pack(*, pack_id: str, agent: bool, json_output: bool, pa
     roots = [packs_root(), *[Path(item).expanduser() for item in pack_roots]]
     roots.extend(
         Path(item).expanduser()
-        for item in os.environ.get("ASTRID_PACKS_PATH", "").split(os.pathsep)
+        for item in os.environ.get(ASTRID_PACKS_PATH, "").split(os.pathsep)
         if item
     )
     packs: dict[str, PackDefinition] = {}

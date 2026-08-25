@@ -211,7 +211,13 @@ def validate_timeline(config: Any, *, strict: bool = True) -> None:
     normalized_for_shared = _known_timeline_payload(config)
     if isinstance(normalized_for_shared.get("clips"), list):
         normalized_for_shared["clips"] = [
-            _normalize_clip_for_validation(c) if isinstance(c, dict) else c
+            (
+                _normalize_clip_for_validation(
+                    {key: value for key, value in c.items() if key != "label"}
+                )
+                if isinstance(c, dict)
+                else c
+            )
             for c in normalized_for_shared["clips"]
         ]
     _validate_shared_timeline(normalized_for_shared)

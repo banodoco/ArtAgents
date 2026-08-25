@@ -198,6 +198,46 @@ def test_non_busy_sqlite_errors_propagate(writer: DatabaseWriter) -> None:
         writer.submit(lambda session: session.execute("INSERT INTO missing (id) VALUES (1)"))
 
 
+def test_sqlite_error_during_wal_replacement_is_typed_sidecar_failure(
+    writer: DatabaseWriter, tmp_path
+) -> None:
+    """A SQLite error must not hide a simultaneous lost-WAL durability fault."""
+    writer.submit(lambda session: _insert_project(session, "proj-before-race"))
+    started = threading.Event()
+    release = threading.Event()
+    outcome: list[BaseException] = []
+
+    def fail_after_replacement(_session) -> None:
+        started.set()
+        assert release.wait(10)
+        raise sqlite3.OperationalError("synthetic disk I/O error")
+
+    def submit() -> None:
+        try:
+            writer.submit(fail_after_replacement)
+        except BaseException as exc:  # noqa: BLE001 - asserted below
+            outcome.append(exc)
+
+    thread = threading.Thread(target=submit)
+    thread.start()
+    try:
+        assert started.wait(10)
+        wal_path = tmp_path / "writer.sqlite3-wal"
+        replacement = wal_path.with_suffix(".replacement")
+        shutil.copyfile(wal_path, replacement)
+        os.replace(replacement, wal_path)
+    finally:
+        release.set()
+        thread.join(10)
+
+    assert not thread.is_alive()
+    assert len(outcome) == 1
+    assert isinstance(outcome[0], WriterSidecarError)
+    assert isinstance(outcome[0].__cause__, sqlite3.OperationalError)
+    with pytest.raises(WriterSidecarError):
+        writer.submit(lambda session: _insert_project(session, "proj-after-race"))
+
+
 # ---------------------------------------------------------------------------
 # Drain and shutdown behavior
 # ---------------------------------------------------------------------------

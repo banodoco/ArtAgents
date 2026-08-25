@@ -483,6 +483,12 @@ def set_clip_text(
         raise ClipEditError("clip_id must be a non-empty string")
     if not isinstance(text, str):
         raise ClipEditError("text must be a string")
+    assembly = _load_current_assembly(project_slug, slug, root=root)
+    clip = _require_clip_exists(assembly, clip_id=clip_id)
+    if clip.get("clipType") != "text":
+        raise ClipEditError(
+            f"clip '{clip_id}' is not a text clip; clip.text_set only accepts text clips"
+        )
 
     act = actor or _default_actor("set_clip_text")
     event = backend.append_event(

@@ -25,8 +25,10 @@ from astrid.packs.runaway.repository import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-MANIFEST_PATH = REPO_ROOT / "projects" / "runaway-piano-colour-demo" / "deliverables" / "timing-manifest.json"
-AUDIO_REACTIVE_PATH = REPO_ROOT / "projects" / "runaway-piano-colour-demo" / "timeline" / "audio-reactive-v1.json"
+# Keep release inputs under the test fixture tree. The historical project
+# workspace is user data and is intentionally not part of a clean checkout.
+MANIFEST_PATH = REPO_ROOT / "tests" / "fixtures" / "runaway_release" / "timing-manifest.json"
+AUDIO_REACTIVE_PATH = REPO_ROOT / "tests" / "fixtures" / "runaway_release" / "audio-reactive-v1.json"
 
 
 def _build_registry():
@@ -349,7 +351,9 @@ def test_roundtrip_timing_manifest_to_kernel(env):
             assert row.metadata["colour_name"] == raw["colour_name"]
             assert row.ordinal == idx
 
-    # Evidence with kind runaway_timing_migrated
+    # The kernel evidence vocabulary is intentionally closed; retain the
+    # migration subtype in canonical measurement data instead of inventing a
+    # pack-specific evidence kind.
     from astrid.core.repositories.evidence import EvidenceRepository
 
     def _record(uow: UnitOfWork):
@@ -358,16 +362,20 @@ def test_roundtrip_timing_manifest_to_kernel(env):
             uow,
             project_id=project_id,
             run_id=run_id,
-            kind="runaway_timing_migrated",
+            kind="measurement",
             summary="Runaway timing v1 round-trip",
-            data={"frame_count": 8085, "transition_count": 566},
+            data={
+                "subtype": "runaway_timing_migrated",
+                "frame_count": 8085,
+                "transition_count": 566,
+            },
             idempotency_key=f"test:evidence:{run_id}",
         )
 
     UnitOfWork(writer).run(_record)
     with writer.read_only_connection() as conn:
         conn.row_factory = sqlite3.Row
-        ev = conn.execute("SELECT kind, data_json FROM evidence_items WHERE run_id = ? AND kind = ?", (run_id, "runaway_timing_migrated")).fetchall()
+        ev = conn.execute("SELECT kind, data_json FROM evidence_items WHERE run_id = ? AND kind = ?", (run_id, "measurement")).fetchall()
         assert len(ev) == 1
         data = json.loads(ev[0]["data_json"])
         assert data["frame_count"] == 8085

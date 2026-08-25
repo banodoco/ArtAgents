@@ -531,7 +531,31 @@ class DatabaseWriter:
                         )
                     self._wal_identity = after_identity
                 except sqlite3.OperationalError as exc:
-                    if "locked" in str(exc).lower():
+                    # Replacing a live WAL can make SQLite fail before the
+                    # normal post-callback identity check runs (commonly as
+                    # ``disk I/O error``).  The lost sidecar is the durable
+                    # fault in that case, so do not leak a build/load-timing
+                    # dependent raw SQLite exception to callers.
+                    after_identity = self._wal_sidecar_identity()
+                    if (
+                        before_identity is not None
+                        and after_identity != before_identity
+                    ):
+                        if not self._sidecar_fault_reported:
+                            self._sidecar_fault_reported = True
+                            print(
+                                "astrid-sqlite-writer: database WAL was "
+                                "replaced during a live callback; writes "
+                                "fail closed until restart",
+                                file=sys.stderr,
+                            )
+                        item.error = WriterSidecarError(
+                            "the database WAL was replaced during a live "
+                            "callback; writes cannot be durable — restart "
+                            "astrid serve"
+                        )
+                        item.error.__cause__ = exc
+                    elif "locked" in str(exc).lower():
                         item.error = WriterBusyError(
                             f"sqlite writer busy: {exc}"
                         )

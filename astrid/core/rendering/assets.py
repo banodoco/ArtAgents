@@ -34,6 +34,7 @@ from astrid.core.env_vars import (
     ASTRID_GATEWAY_RESOLVED_PROJECT,
     ASTRID_PROJECT_SLUG,
 )
+from astrid.core.foundation.hash import sha256_file
 from astrid.core.foundation.project_paths import project_dir, resolve_projects_root
 from astrid.core.kernel.database import resolve_kernel_database_authority
 from astrid.core.rendering import asset_cache
@@ -195,14 +196,6 @@ def _hardlink_or_copy(source: Path, destination: Path) -> None:
         shutil.copy2(source, destination)
 
 
-def _sha256_file(source: Path) -> str:
-    digest = hashlib.sha256()
-    with source.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 def _hardlink_or_copy_checked(source: Path, destination: Path) -> None:
     """Stage a validated local file without following a later symlink swap."""
 
@@ -339,7 +332,7 @@ class AssetMaterializer:
                         f"Asset {key!r} at {resolved} is outside the allowed project root "
                         f"{containment_root} and is not an owned managed media locator"
                     ) from exc
-                actual_hash = _sha256_file(resolved)
+                actual_hash = sha256_file(resolved)
                 if actual_hash != expected_hash:
                     raise ValueError(
                         f"Asset {key!r} managed media locator failed integrity check: "

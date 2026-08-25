@@ -104,6 +104,11 @@ def _identity_summary(data: object) -> str:
             value = data.get(key)
             if isinstance(value, str) and value:
                 return f"{key}: {value}"
+        # Selection/current project responses wrap the identity under
+        # ``project`` while retaining additional preference metadata.
+        nested_project = data.get("project")
+        if isinstance(nested_project, Mapping):
+            return _identity_summary(nested_project)
         return "ok"
     return str(data)
 

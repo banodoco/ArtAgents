@@ -45,7 +45,13 @@ def test_wal_replacement_during_callback_is_not_adopted_as_new_baseline(
 
         def callback(session) -> None:
             entered.set()
-            assert release.wait(10)
+            # The main thread owns release in a try/finally below. Do not add
+            # a shorter competing deadline here: this test runs immediately
+            # after the fault matrix has spawned and killed 100+ processes,
+            # so process startup can legitimately exceed ten seconds on a
+            # loaded CI host. The suite-level timeout remains the deadlock
+            # fence, and the finally block always releases this callback.
+            release.wait()
             _insert_project(session, "during")
 
         outcome: list[BaseException] = []
@@ -58,7 +64,7 @@ def test_wal_replacement_during_callback_is_not_adopted_as_new_baseline(
 
         thread = threading.Thread(target=submit_callback)
         thread.start()
-        assert entered.wait(10)
+        assert entered.wait(60), "writer callback did not start within 60 seconds"
         subprocess.run(
             [
                 sys.executable,
@@ -77,8 +83,8 @@ def test_wal_replacement_during_callback_is_not_adopted_as_new_baseline(
         replacement.write_bytes(wal_path.read_bytes())
         replacement.replace(wal_path)
         release.set()
-        thread.join(10)
-        assert not thread.is_alive()
+        thread.join(60)
+        assert not thread.is_alive(), "writer callback did not finish within 60 seconds"
         assert len(outcome) == 1
         assert isinstance(outcome[0], WriterSidecarError)
         with pytest.raises(WriterSidecarError):

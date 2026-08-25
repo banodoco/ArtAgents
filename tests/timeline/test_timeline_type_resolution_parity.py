@@ -135,6 +135,8 @@ def _clip(
 ) -> dict:
     """Return a minimal clip dict."""
     result: dict = {"id": clip_id, "at": at, "track": track, "clipType": clip_type, "to": to}
+    if clip_type == "text":
+        result["text"] = {"content": ""}
     result.update(kwargs)
     return result
 

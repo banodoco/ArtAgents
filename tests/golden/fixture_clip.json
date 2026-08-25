@@ -15,7 +15,7 @@
       "kind": "clip.added",
       "payload": {
         "clip_id": "clip-1",
-        "kind": "visual", "track_id": "visual", "asset_id": "asset-a",
+        "kind": "text", "track_id": "visual", "asset_id": "asset-a",
         "position": null
       },
       "expected_version": null,
@@ -227,7 +227,7 @@
         "id": "clip-1",
         "at": 2.5,
         "track": "visual",
-        "clipType": "media",
+        "clipType": "text",
         "asset": "asset-a",
         "hold": 10.0,
         "text": {

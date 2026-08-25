@@ -576,6 +576,30 @@ class TestSetClipText:
         event = set_clip_text("demo", "primary", clip_id="t1", text="", actor=_actor(), root=demo_timeline["root"])
         assert event.payload.text == ""
 
+    def test_set_text_rejects_non_text_clip_without_appending(self, demo_timeline: dict) -> None:
+        add_clip(
+            "demo",
+            "primary",
+            kind="visual",
+            asset_id="v1",
+            actor=_actor(),
+            root=demo_timeline["root"],
+        )
+        tdir = timeline_dir("demo", demo_timeline["ulid"], root=demo_timeline["root"])
+        before = _read_assembly_json(tdir)
+
+        with pytest.raises(ClipEditError, match="only accepts text clips"):
+            set_clip_text(
+                "demo",
+                "primary",
+                clip_id="v1",
+                text="invalid",
+                actor=_actor(),
+                root=demo_timeline["root"],
+            )
+
+        assert _read_assembly_json(tdir) == before
+
 
 # ── annotate_clip ───────────────────────────────────────────────────────────
 
@@ -756,6 +780,17 @@ class TestSupabaseSelectedPaths:
         self, demo_timeline: dict, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """All 8 clip.* verbs raise typed missing-config errors on unconfigured Supabase."""
+        # State-sensitive edit validation still runs against the local
+        # materialized projection before the selected backend is asked to
+        # append. Seed a text clip so clip.text_set reaches the backend too.
+        add_clip(
+            "demo",
+            "primary",
+            kind="text",
+            asset_id="x",
+            actor=_actor(),
+            root=demo_timeline["root"],
+        )
         # Force Supabase selection
         def fake_select(*, timeline_id, timeline_home=None, preferred_backend=None):
             return (
@@ -764,11 +799,6 @@ class TestSupabaseSelectedPaths:
             )
 
         monkeypatch.setattr("astrid.core.timeline._edit_helpers.select_timeline_backend", fake_select)
-
-        # First add a clip on local_fs so we have something to operate on for remove/move/etc.
-        # We need to bypass the monkeypatch for setup
-        # Actually, we just test that each function hits the Supabase stub.
-        # For operations that need existing clips, we test only the call path.
 
         ops = [
             lambda: add_clip("demo", "primary", kind="visual", asset_id="x", actor=_actor(), root=demo_timeline["root"]),

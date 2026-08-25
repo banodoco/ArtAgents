@@ -10,6 +10,7 @@ import json
 import math
 import os
 import shutil
+import stat
 import tempfile
 from collections.abc import Mapping
 from contextlib import contextmanager, nullcontext, redirect_stdout
@@ -1084,15 +1085,18 @@ def _persist_visualization_pack(
 
     source_state = _tree_state(source)
     with _visualization_cache_lock(cache_parent / f".{digest}.lock"):
-        if destination.is_symlink():
+        try:
+            destination_stat = destination.lstat()
+        except FileNotFoundError:
+            destination_stat = None
+        if destination_stat is not None and stat.S_ISLNK(destination_stat.st_mode):
             raise CapabilityInvocationError(
                 f"visualization cache destination must not be a symlink: {destination}"
             )
         destination_identity: tuple[int, int] | None = None
         destination_state: dict[str, str] | None = None
-        if destination.is_dir():
-            before = destination.lstat()
-            destination_identity = (before.st_dev, before.st_ino)
+        if destination_stat is not None and stat.S_ISDIR(destination_stat.st_mode):
+            destination_identity = (destination_stat.st_dev, destination_stat.st_ino)
             destination_state = _tree_state(destination)
             after = destination.lstat()
             if (after.st_dev, after.st_ino) != destination_identity:
@@ -1101,7 +1105,7 @@ def _persist_visualization_pack(
                 )
             if destination_state == source_state:
                 return destination
-        if destination.exists() and not destination.is_dir():
+        if destination_stat is not None and not stat.S_ISDIR(destination_stat.st_mode):
             raise CapabilityInvocationError(
                 f"visualization cache destination is not a directory: {destination}"
             )

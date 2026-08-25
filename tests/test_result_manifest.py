@@ -301,13 +301,20 @@ def test_output_result_registry_conformance_covers_default_registry() -> None:
         assert payload["exemptions"][executor_id]["reasons"] == ["external-escape-hatch"]
 
 
-def test_output_result_registry_explicitly_covers_understanding_trio_without_declared_outputs() -> None:
+def test_output_result_registry_explicitly_covers_understanding_trio() -> None:
     registry = load_default_registry()
     payload = json.loads(Path("astrid/core/contracts/output_result_exemptions.json").read_text(encoding="utf-8"))
     non_exempt_ids = set(payload["non_exempt"])
 
+    # Audio now declares the two concrete files its runtime receives through
+    # placeholders.  Visual/video retain their manifest-only contract because
+    # their runtimes choose their result path dynamically.
+    audio = registry.get("understanding.audio_understand")
+    assert tuple(output.name for output in audio.outputs) == ("analysis", "manifest")
+    assert audio.metadata.get("output_result_manifest") is True
+    assert "understanding.audio_understand" in non_exempt_ids
+
     for executor_id in (
-        "understanding.audio_understand",
         "understanding.visual_understand",
         "understanding.video_understand",
     ):

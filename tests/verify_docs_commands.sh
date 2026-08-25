@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # verify_docs_commands.sh
-# Extract command shapes from README.md and docs/templates/**/STAGE.md,
+# Extract gateway command shapes from the canonical CLI journey and README,
 # skip placeholders/assets, and verify each unique subcommand path exists
 # by running it with --help (or directly for doctor).
 #
@@ -19,17 +19,21 @@ trap 'rm -f "$TMPFILE"' EXIT
 echo "=== verify_docs_commands.sh ==="
 echo "Extracting command shapes from docs..."
 
-# 1. Extract python3 -m astrid lines from README.md text block
-if [ -f "$REPO_ROOT/README.md" ]; then
-  awk '/^```text$/{found=1; next} /^```$/{found=0} found' "$REPO_ROOT/README.md" | \
-    grep -Eo 'python3 -m astrid [^ ]+( [^ ]+)?' >> "$TMPFILE" || true
+# Extract from the canonical user-facing CLI guide. README's command is embedded
+# in HTML, and template STAGE files demonstrate internal module entry points,
+# so neither is an authoritative census of the public gateway.
+CLI_GUIDE="$REPO_ROOT/docs/guides/cli-journeys.md"
+if [ ! -f "$CLI_GUIDE" ]; then
+  echo "FAILED: canonical CLI guide is missing: $CLI_GUIDE" >&2
+  exit 1
 fi
+awk '/^```bash$/{found=1; next} /^```$/{found=0} found' "$CLI_GUIDE" | \
+  grep -Eo 'python3 -m astrid [^ ]+( [^ ]+)?' >> "$TMPFILE" || true
 
-# 2. Extract bash fenced blocks from docs/templates/**/STAGE.md
-while IFS= read -r -d '' stage_file; do
-  awk '/^```bash$/{found=1; next} /^```$/{found=0} found' "$stage_file" | \
-    grep -Eo 'python3 -m astrid [^ ]+( [^ ]+)?' >> "$TMPFILE" || true
-done < <(find "$REPO_ROOT/docs/templates" -name 'STAGE.md' -print0 2>/dev/null || true)
+if [ ! -s "$TMPFILE" ]; then
+  echo "FAILED: extracted zero public Astrid command shapes from $CLI_GUIDE" >&2
+  exit 1
+fi
 
 echo ""
 echo "Raw extracted command prefixes (before dedup):"
@@ -47,7 +51,7 @@ sort -u -o "$TMPFILE" "$TMPFILE"
 EXPANDED="$(mktemp)"
 trap 'rm -f "$TMPFILE" "$EXPANDED"' EXIT
 
-python3 - "$TMPFILE" "$EXPANDED" <<'PYEOF'
+"$PYTHON_BIN" - "$TMPFILE" "$EXPANDED" <<'PYEOF'
 import sys, re
 
 with open(sys.argv[1]) as f:
@@ -92,9 +96,10 @@ while IFS= read -r cmd_prefix; do
   fi
 
   # doctor: run directly (safe health check)
-  if [ "$cmd_prefix" = "python3 -m astrid doctor" ]; then
+  if [ "$cmd_prefix" = "python3 -m astrid doctor" ] || \
+     [ "$cmd_prefix" = "python3 -m astrid doctor --json" ]; then
     echo -n "  RUN   $cmd_prefix ... "
-    if OPENAI_API_KEY="${OPENAI_API_KEY:-docs-command-smoke}" $cmd_prefix >/dev/null 2>&1; then
+    if OPENAI_API_KEY="${OPENAI_API_KEY:-docs-command-smoke}" "$PYTHON_BIN" -m astrid doctor >/dev/null 2>&1; then
       echo "OK"
     else
       echo "FAILED (exit=$?)"
@@ -104,8 +109,16 @@ while IFS= read -r cmd_prefix; do
   fi
 
   # All other commands: verify subcommand path exists via --help
-  echo -n "  HELP  $cmd_prefix --help ... "
-  if $cmd_prefix --help >/dev/null 2>&1; then
+  echo -n "  HELP  $cmd_prefix ... "
+  command_args="${cmd_prefix#python3 }"
+  read -r -a command_argv <<< "$command_args"
+  command_ok=0
+  if [[ " $command_args " == *" --help "* ]]; then
+    "$PYTHON_BIN" "${command_argv[@]}" >/dev/null 2>&1 && command_ok=1
+  else
+    "$PYTHON_BIN" "${command_argv[@]}" --help >/dev/null 2>&1 && command_ok=1
+  fi
+  if [ "$command_ok" -eq 1 ]; then
     echo "OK"
   else
     echo "FAILED (exit=$?)"

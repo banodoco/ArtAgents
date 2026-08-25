@@ -1092,7 +1092,9 @@ def test_invoke_defaults_to_subprocess_execution_mode(
 
     assert seen["project"] == "demo-project"
     assert seen["extra_pack_roots"] == ()
-    assert seen["idempotency_context"] is None
+    assert isinstance(seen["idempotency_context"], dict)
+    assert isinstance(seen["idempotency_context"].get("executor_version"), str)
+    assert seen["idempotency_context"]["executor_version"]
     assert result.ok is True
 
 
@@ -1279,7 +1281,16 @@ def test_invoke_reuses_loaded_registries_and_preserves_runner_exception_cause(
     astrid = _import_public_module()
     sdk = importlib.import_module("astrid.sdk")
     import astrid.sdk.invocation as inv_mod
-    executor_registry = object()
+    class _FakeExecutorDefinition:
+        def to_dict(self) -> dict[str, str]:
+            return {"id": "editorial.arrange", "version": "1.0.0"}
+
+    class _FakeExecutorRegistry:
+        def get(self, capability_id: str) -> _FakeExecutorDefinition:
+            assert capability_id == "editorial.arrange"
+            return _FakeExecutorDefinition()
+
+    executor_registry = _FakeExecutorRegistry()
     orchestrator_registry = object()
     registries = (executor_registry, orchestrator_registry, None)
     seen: dict[str, Any] = {"load_calls": 0}

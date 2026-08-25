@@ -133,6 +133,16 @@ def test_ci_json_stdout_is_pure_json_and_contract_matches() -> None:
                 f"{passed + failed}"
             )
 
+    # The retired author-test runtime has no remaining quarantined tests.
+    # Keep the lane in the stable wire contract, but do not manufacture a
+    # passing test count when nothing ran.
+    assert lanes["quarantine"] == {
+        "passed": 0,
+        "failed": 0,
+        "skipped": 1,
+        "status": "skip",
+    }
+
     # ── stderr sanity ──────────────────────────────────────────────────
     # stderr may (and should) contain human-readable progress messages.
     # We don't assert content, but it should not be empty for a real run.

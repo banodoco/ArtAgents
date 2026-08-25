@@ -156,6 +156,11 @@ def test_live_append_transport_appends_config_and_registry_batch(monkeypatch) ->
 
 
 def test_event_schema_version_matches_sql_contract_seed_value() -> None:
+    if not _SQL_CONTRACT_MIGRATION.is_file():
+        pytest.skip(
+            "external reigh-app SQL contract is not mounted; set up the sibling "
+            "reigh-app checkout to enable this integration assertion"
+        )
     migration_sql = _SQL_CONTRACT_MIGRATION.read_text(encoding="utf-8")
     match = re.search(
         r"insert into public\.timeline_event_contract \(id, current_schema_version\)\s+values \(1, (\d+)\)",

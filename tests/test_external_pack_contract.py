@@ -310,9 +310,9 @@ if __name__ == "__main__":
             f"External Python pack failed validation\nSTDOUT:\n{validate.stdout}\nSTDERR:\n{validate.stderr}"
         )
 
-        # Run the executor through the project-scoped runner: project runs own
-        # their output directory, so ``out`` stays unset and the run record is
-        # created under an isolated ASTRID_PROJECTS_ROOT.
+        # Run the executor through the lower-level project-scoped runner with
+        # an explicit kernel-like staging root.  The runner may consume that
+        # root but never creates an authoritative project run record itself.
         projects_root = tmp_path / "projects"
         run_script = tmp_path / "run_executor.py"
         run_script.write_text(
@@ -324,6 +324,7 @@ if __name__ == "__main__":
             "from astrid.core.timeline.crud import create_timeline\n"
             "create_project('demo')\n"
             "create_timeline('demo', 'main', is_default=True)\n"
+            "staging = Path(sys.argv[1]) / 'kernel-staging'\n"
             "from astrid.core.execution.executor.registry import load_default_registry\n"
             "from astrid.core.execution.executor.runner import ExecutorRunRequest, run_executor\n"
             "registry = load_default_registry(include_installed=False)\n"
@@ -333,6 +334,7 @@ if __name__ == "__main__":
             "        out=None,\n"
             "        project='demo',\n"
             "        python_exec=sys.executable,\n"
+            "        run_root=staging,\n"
             "    ),\n"
             "    registry,\n"
             ")\n"
@@ -354,10 +356,8 @@ if __name__ == "__main__":
         assert run.returncode == 0, (
             f"External Python executor failed\nSTDOUT:\n{run.stdout}\nSTDERR:\n{run.stderr}"
         )
-        assert any(
-            (run_dir / "result.json").is_file()
-            for run_dir in (projects_root / "demo" / "runs").glob("*")
-        )
+        assert (tmp_path / "kernel-staging" / "result.json").is_file()
+        assert not list((projects_root / "demo" / "runs").glob("*/run.json"))
 
 
 def test_test_file_itself_avoids_internal_imports() -> None:
