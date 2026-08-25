@@ -1,14 +1,13 @@
 import importlib.util
+import re
 import sys
 import unittest
 from pathlib import Path
 
-from astrid.core.element import catalog as effects_catalog
 from astrid.core import timeline
-
+from astrid.core.element import catalog as effects_catalog
 
 ROOT = Path(__file__).resolve().parents[2]
-WORKSPACE = ROOT.parent
 GENERATOR = ROOT / "scripts" / "gen_effect_registry.py"
 
 _GENERATOR_SPEC = importlib.util.spec_from_file_location("gen_effect_registry_for_elements", GENERATOR)
@@ -20,14 +19,26 @@ _GENERATOR_SPEC.loader.exec_module(gen_effect_registry)
 
 
 def _timeline_composition_source() -> Path:
-    candidates = (
-        WORKSPACE / "packages" / "timeline-composition" / "typescript" / "src" / "TimelineComposition.tsx",
-        ROOT / "remotion" / "node_modules" / "@banodoco" / "timeline-composition" / "typescript" / "src" / "TimelineComposition.tsx",
+    candidate = (
+        ROOT
+        / "remotion"
+        / "node_modules"
+        / "@banodoco"
+        / "timeline-composition"
+        / "typescript"
+        / "src"
+        / "TimelineComposition.tsx"
     )
-    for candidate in candidates:
-        if candidate.is_file():
-            return candidate
-    return ROOT / "remotion" / "src" / "Root.tsx"
+    if not candidate.is_file():
+        raise AssertionError(
+            "npm-installed @banodoco/timeline-composition is required; "
+            f"missing {candidate}"
+        )
+    return candidate
+
+
+def _timeline_composition_public_index() -> Path:
+    return _timeline_composition_source().with_name("index.ts")
 
 
 class CompositionElementTest(unittest.TestCase):
@@ -100,10 +111,26 @@ class CompositionElementTest(unittest.TestCase):
     def test_hype_composition_preserves_absolute_sequence_path_with_transition_series(self) -> None:
         source_path = _timeline_composition_source()
         source = source_path.read_text(encoding="utf-8")
-        self.assertIn("TimelineCompositionProps", source)
-        self.assertIn("getTimelineDurationInFrames", source)
-        if source_path.name == "TimelineComposition.tsx":
-            self.assertIn("export default TimelineComposition", source)
+        for required_symbol in (
+            "TimelineCompositionProps",
+            "TransitionSeries",
+            "AbsoluteFill",
+            "Sequence",
+        ):
+            self.assertIn(required_symbol, source)
+
+        public_index = _timeline_composition_public_index().read_text(encoding="utf-8")
+        self.assertRegex(
+            public_index,
+            re.compile(r"export\s*\{[^}]*\bTimelineComposition\b[^}]*\}", re.DOTALL),
+        )
+        self.assertRegex(
+            public_index,
+            re.compile(
+                r"export\s*\{[^}]*\bgetTimelineDurationInFrames\b[^}]*\}",
+                re.DOTALL,
+            ),
+        )
 
 
 if __name__ == "__main__":
