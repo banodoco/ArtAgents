@@ -131,6 +131,8 @@ class CapabilityEntry:
     probe: str = "always_available"
     #: Monotonic definition revision used by boot manifests and provenance.
     definition_version: int = 1
+    #: Optional transport-neutral pack task handler id.
+    task_handler: str | None = None
 
 
 def _policy(**overrides: Any) -> dict[str, Any]:
@@ -243,6 +245,29 @@ def _validate_render_export(input: dict[str, Any]) -> None:
         raise CapabilityInputError(
             "expected_version must be a non-negative integer"
         )
+    forbidden = sorted(
+        {"engine", "backend", "backend_config", "project_dir"}.intersection(input)
+    )
+    if forbidden:
+        raise CapabilityInputError(
+            "render_export renderer parameters are server-owned: "
+            + ", ".join(forbidden)
+        )
+    filename = input.get("output_filename")
+    if filename is not None:
+        if (
+            not isinstance(filename, str)
+            or not filename
+            or filename != os.path.basename(filename)
+            or "/" in filename
+            or "\\" in filename
+            or not filename.endswith(".mp4")
+            or filename in {".", ".."}
+            or filename.startswith("..")
+        ):
+            raise CapabilityInputError(
+                "output_filename must be a plain .mp4 filename"
+            )
 
 
 #: Per-family input validators (required-field gates beyond the generic
@@ -284,12 +309,12 @@ FAMILY_DERIVATIONS: dict[
     ),
     FAMILY_CHARACTER_ANIMATE: _derive_single("reigh.animate_character"),
     FAMILY_KLEIN_EDIT: _derive_single("reigh.flux_klein_edit"),
-    FAMILY_RENDER_EXPORT: _derive_single("rendering.timeline_visualize"),
+    FAMILY_RENDER_EXPORT: _derive_single("rendering.render"),
     FAMILY_LOCAL_WORKFLOW: _derive_local_workflow,
 }
 
 # ---------------------------------------------------------------------------
-# The registry: 19 retained IDs from doc 16 + rendering.timeline_visualize,
+# The registry: 19 retained IDs from doc 16 + the dedicated render executor,
 # plus the child-only worker entries (doc 27 §3.1).
 # ---------------------------------------------------------------------------
 
@@ -478,7 +503,7 @@ REGISTRY: dict[str, CapabilityEntry] = {
             ),
         ),
         CapabilityEntry(
-            "rendering.timeline_visualize",
+            "rendering.render",
             FAMILY_RENDER_EXPORT,
             BINDING_ASTRID_REMOTION,
             _policy(
@@ -486,6 +511,7 @@ REGISTRY: dict[str, CapabilityEntry] = {
                 managed_media_role="render",
             ),
             required_inputs={"timeline_ref": str},
+            task_handler="render_export",
         ),
         # Worker-child-only entries: executor envelope admission exclusively.
         CapabilityEntry(
@@ -727,6 +753,14 @@ def _validate_registry() -> None:
             raise RuntimeError(
                 f"capability {entry.capability_id!r} output_policy must be "
                 "an object"
+            )
+        if entry.task_handler is not None and (
+            entry.task_handler != "render_export"
+            or entry.capability_id != "rendering.render"
+        ):
+            raise RuntimeError(
+                f"capability {entry.capability_id!r} has an unsupported "
+                f"task handler {entry.task_handler!r}"
             )
         seen_families.add(entry.family)
         if (

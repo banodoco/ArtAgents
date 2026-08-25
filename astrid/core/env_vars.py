@@ -31,6 +31,14 @@ subcommands to resolve the current session without a filesystem walk."""
 ASTRID_PROJECTS_ROOT = "ASTRID_PROJECTS_ROOT"
 """Override for the projects root directory. Set by tests and CI environments."""
 
+ASTRID_REMOTION_PROJECT_DIR = "ASTRID_REMOTION_PROJECT_DIR"
+"""Absolute server-owned Remotion project/runtime directory for rendering.
+The render task API never accepts this value from callers."""
+
+ASTRID_TIMELINE_SCHEMA_PYTHONPATH = "ASTRID_TIMELINE_SCHEMA_PYTHONPATH"
+"""Absolute server-owned Python install root containing
+``banodoco_timeline_schema`` for Remotion timeline validation."""
+
 ASTRID_GATEWAY_RESOLVED_PROJECT = "ASTRID_GATEWAY_RESOLVED_PROJECT"
 """Project slug resolved by the gateway for the current request. Set by
 ``gateway._dispatch_with_resolved_project``; read by executor/orchestrator CLI
@@ -197,6 +205,8 @@ __all__ = [
     "ASTRID_PROJECT_RUN",
     "ASTRID_PROJECT_SLUG",
     "ASTRID_PROJECTS_ROOT",
+    "ASTRID_REMOTION_PROJECT_DIR",
+    "ASTRID_TIMELINE_SCHEMA_PYTHONPATH",
     "ASTRID_REPO_ROOT",
     "ASTRID_SESSION_ID",
     "ASTRID_STATE_HOME",

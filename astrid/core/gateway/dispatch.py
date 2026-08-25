@@ -189,7 +189,29 @@ def _dispatch_serve(args: list[str]) -> int:
             "protocol header; fail before binding when the token is absent."
         ),
     )
+    parser.add_argument(
+        "--no-render-worker",
+        action="store_true",
+        help="Do not start Astrid's serve-owned rendering.render worker.",
+    )
+    parser.add_argument(
+        "--render-worker-poll-seconds",
+        type=float,
+        default=1.0,
+        help="Render worker queue poll interval (default: 1 second).",
+    )
+    parser.add_argument(
+        "--render-worker-deadline-seconds",
+        type=float,
+        default=30 * 60,
+        help="Per-render worker deadline (default: 1800 seconds).",
+    )
     parsed = parser.parse_args(args)
+
+    if parsed.render_worker_poll_seconds <= 0:
+        parser.error("--render-worker-poll-seconds must be positive")
+    if parsed.render_worker_deadline_seconds <= 0:
+        parser.error("--render-worker-deadline-seconds must be positive")
 
     # Typed failure: a missing explicit editor path never silently falls back.
     if parsed.editor_path is not None and not Path(parsed.editor_path).exists():
@@ -232,6 +254,8 @@ def _dispatch_serve(args: list[str]) -> int:
         return 1
 
     try:
+        render_worker = None
+        server = None
         try:
             server = create_local_bridge_server(
                 host=parsed.host,
@@ -280,16 +304,59 @@ def _dispatch_serve(args: list[str]) -> int:
                     f"http://{host}:{port}"
                 )
 
+        if not parsed.no_render_worker:
+            from astrid.core.integrations.reigh.render_export_worker import (
+                HttpRenderExportWorkerTransport,
+                RenderExportServeWorker,
+            )
+
+            worker_host = host
+            if ":" in worker_host and not worker_host.startswith("["):
+                worker_host = f"[{worker_host}]"
+            render_worker = RenderExportServeWorker(
+                HttpRenderExportWorkerTransport(
+                    f"http://{worker_host}:{port}",
+                    token=getattr(server, "bridge_auth_token", None) or "",
+                    require_auth=getattr(server, "bridge_auth_token", None) is not None,
+                    timeout_seconds=5.0,
+                ),
+                projects_root=composition.projects_root,
+                executor_id=f"astrid-serve-render-{os.getpid()}",
+                poll_interval_seconds=parsed.render_worker_poll_seconds,
+                deadline_seconds=parsed.render_worker_deadline_seconds,
+            )
+            render_worker.start()
+
+        shutdown_started = threading.Event()
+
         def _shutdown(_signum: int, _frame: Any) -> None:
+            if shutdown_started.is_set():
+                return
+            shutdown_started.set()
             print("\nShutting down...", flush=True)
-            # http.server contract: ``shutdown()`` blocks until the
-            # ``serve_forever()`` loop exits, so calling it from the signal
-            # handler on the serving thread deadlocks. Run it on a helper
-            # thread instead; the main thread then falls out of
-            # ``serve_forever()`` and closes the server normally.
+
+            def _coordinate_shutdown() -> None:
+                # Keep the bridge serving while the worker interrupts its
+                # child, reconciles any in-flight completion, and releases
+                # its claim.  The signal handler itself must return quickly:
+                # it runs on the serve_forever thread, which must continue
+                # accepting the worker's final heartbeat/ACK requests.
+                if render_worker is not None:
+                    try:
+                        render_worker.stop()
+                    except Exception as exc:  # noqa: BLE001 - fail visibly, retry in finally
+                        print(
+                            f"render worker shutdown failed: {type(exc).__name__}: {exc}",
+                            file=sys.stderr,
+                            flush=True,
+                        )
+                # ``shutdown()`` is called off the serving thread, as required
+                # by http.server, and only after worker settlement is stopped.
+                server.shutdown()
+
             threading.Thread(
-                target=server.shutdown,
-                name="astrid-serve-shutdown",
+                target=_coordinate_shutdown,
+                name="astrid-serve-shutdown-coordinator",
                 daemon=True,
             ).start()
 
@@ -300,12 +367,18 @@ def _dispatch_serve(args: list[str]) -> int:
             server.serve_forever()
         except KeyboardInterrupt:
             pass
-        finally:
-            server.server_close()
     finally:
-        # Closes the writer, then releases the exclusive-owner lock held
-        # since composition (StandardBridgeComposition.close contract).
-        composition.close()
+        try:
+            if render_worker is not None:
+                render_worker.stop()
+        finally:
+            try:
+                if server is not None:
+                    server.server_close()
+            finally:
+                # Closes the writer, then releases the exclusive-owner lock
+                # held since composition (StandardBridgeComposition.close).
+                composition.close()
 
     return 0
 

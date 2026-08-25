@@ -166,7 +166,11 @@ def _db_count(composition, sql: str, params: tuple = ()) -> int:
 
 
 def _create_timeline(
-    composition: Any, project_id: str, *, slug: str = "render-source"
+    composition: Any,
+    project_id: str,
+    *,
+    slug: str = "render-source",
+    config: dict[str, Any] | None = None,
 ) -> Any:
     return UnitOfWork(composition.writer).run(
         lambda uow: composition.timelines.create(
@@ -174,7 +178,7 @@ def _create_timeline(
             project_id=project_id,
             slug=slug,
             name="Render Source",
-            config={"clips": []},
+            config=config or {"clips": []},
             registry={"assets": {}},
             idempotency_key=f"timeline-{slug}",
             created_at=TS,
@@ -240,6 +244,35 @@ def _post_multipart(
 
 
 class TestAdmission:
+    def test_render_export_caption_requires_server_remotion_before_claim(
+        self, tmp_bridge_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("ASTRID_REMOTION_PROJECT_DIR", raising=False)
+        with task_server(tmp_bridge_root) as env:
+            composition = env["composition"]
+            slug = "caption-render-proj"
+            project_id = _create_project(composition, slug)
+            timeline = _create_timeline(
+                composition,
+                project_id,
+                config={"clips": [{"id": "caption", "clipType": "text-card"}]},
+            )
+            status, body = _post(
+                env,
+                f"/projects/{slug}/tasks",
+                key="caption-render-unavailable",
+                body={
+                    "family": "render_export",
+                    "input": {
+                        "timeline_ref": timeline.slug,
+                        "expected_version": 1,
+                    },
+                },
+            )
+            assert status == 422
+            assert body["error"] == "capability_unavailable"
+            assert _db_count(composition, "SELECT COUNT(*) FROM tasks") == 0
+
     def test_trio_201_then_200_replay_then_409_mismatch(
         self, tmp_bridge_root: Path
     ) -> None:
@@ -357,6 +390,9 @@ class TestAdmission:
             status, admitted = admit("render-at-head-1", 1)
             assert status == 201, admitted
             task_id = admitted["task"]["id"]
+            assert admitted["task"]["capability"] == "rendering.render"
+            assert admitted["task"]["spec"]["project_slug"] == slug
+            assert admitted["task"]["spec"]["timeline_snapshot"]["config_version"] == 1
 
             next_head = UnitOfWork(composition.writer).run(
                 lambda uow: composition.timelines.merge_registry(
@@ -378,6 +414,133 @@ class TestAdmission:
             assert status == 409, now_stale
             assert now_stale["config_version"] == 2
             assert _db_count(composition, "SELECT COUNT(*) FROM tasks") == 1
+
+    def test_render_export_replay_compares_full_caller_envelope(
+        self, tmp_bridge_root: Path
+    ) -> None:
+        with task_server(tmp_bridge_root) as env:
+            composition = env["composition"]
+            slug = "render-envelope-proj"
+            project_id = _create_project(composition, slug)
+            timeline = _create_timeline(composition, project_id)
+            path = f"/projects/{slug}/tasks"
+            base = {
+                "family": "render_export",
+                "input": {
+                    "timeline_ref": timeline.slug,
+                    "expected_version": 1,
+                    "destination": "download",
+                    "output_filename": "first.mp4",
+                },
+            }
+            status, first = _post(env, path, key="render-envelope", body=base)
+            assert status == 201, first
+            changed = json.loads(json.dumps(base))
+            changed["input"]["output_filename"] = "second.mp4"
+            status, mismatch = _post(env, path, key="render-envelope", body=changed)
+            assert status == 409, mismatch
+            assert mismatch["error"] == "idempotency_mismatch"
+            changed_materialized = json.loads(json.dumps(base))
+            changed_materialized["materialized_inputs"] = [
+                {"target": "source", "media_id": "foreign-or-missing"}
+            ]
+            status, mismatch = _post(
+                env, path, key="render-envelope", body=changed_materialized
+            )
+            assert status == 409, mismatch
+            assert mismatch["error"] == "idempotency_mismatch"
+
+    def test_render_export_freezes_project_managed_media_only(
+        self, tmp_bridge_root: Path
+    ) -> None:
+        from astrid.core.events.service import EventAppendService
+        from astrid.core.io.media_import import prepare_media_file
+        from astrid.core.receipts import ReceiptService
+        from astrid.core.repositories.media import MediaRepository
+
+        fixture = Path(__file__).resolve().parents[2] / "fixtures" / "reshape" / "hype_regression" / "broll.mp4"
+        with task_server(tmp_bridge_root) as env:
+            composition = env["composition"]
+            slug = "render-managed-assets"
+            project_id = _create_project(composition, slug)
+            timeline = _create_timeline(composition, project_id)
+            media_repo = MediaRepository(
+                events=EventAppendService(composition.registry),
+                receipts=ReceiptService(),
+                projects_root=composition.projects_root,
+            )
+            media = UnitOfWork(composition.writer).run(
+                lambda u: media_repo.import_prepared(
+                    u,
+                    project_id=project_id,
+                    prepared=prepare_media_file(fixture),
+                    idempotency_key="render-managed-media",
+                )
+            )
+            UnitOfWork(composition.writer).run(
+                lambda u: composition.timelines.merge_registry(
+                    u,
+                    project_id=project_id,
+                    timeline_id=timeline.timeline_id,
+                    entries={
+                        "source": {
+                            "media_id": media.id,
+                            "content_sha256": f"sha256:{media.content_hash}",
+                            "file": "clips/source.mp4",
+                            "type": "video/mp4",
+                        }
+                    },
+                    created_at=TS,
+                )
+            )
+            status, admitted = _post(
+                env,
+                f"/projects/{slug}/tasks",
+                key="render-managed-admit",
+                body={
+                    "family": "render_export",
+                    "input": {
+                        "timeline_ref": timeline.slug,
+                        "expected_version": 2,
+                        "output_filename": "managed.mp4",
+                    },
+                },
+            )
+            assert status == 201, admitted
+            frozen = admitted["task"]["spec"]["timeline_snapshot"]["registry"]["assets"]["source"]
+            assert frozen["media_id"] == media.id
+            assert "file" not in frozen
+
+            # A path/URL is display metadata only when relative; absolute
+            # locators fail before a task row is created.
+            UnitOfWork(composition.writer).run(
+                lambda u: composition.timelines.merge_registry(
+                    u,
+                    project_id=project_id,
+                    timeline_id=timeline.timeline_id,
+                    entries={
+                        "escape": {
+                            "media_id": media.id,
+                            "file": "/tmp/escape.mp4",
+                            "type": "video/mp4",
+                        }
+                    },
+                    created_at="2026-08-15T00:00:02.000000+00:00",
+                )
+            )
+            status, rejected = _post(
+                env,
+                f"/projects/{slug}/tasks",
+                key="render-managed-absolute",
+                body={
+                    "family": "render_export",
+                    "input": {
+                        "timeline_ref": timeline.slug,
+                        "expected_version": 3,
+                    },
+                },
+            )
+            assert status == 400, rejected
 
     def test_child_family_via_browser_path_is_forbidden(
         self, tmp_bridge_root: Path

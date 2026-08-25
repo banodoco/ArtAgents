@@ -1087,7 +1087,7 @@ def _capability_fixtures() -> tuple[CapabilityConformance, ...]:
         ),
         # -- render export -----------------------------------------------------
         CapabilityConformance(
-            "rendering.timeline_visualize",
+            "rendering.render",
             "render_export",
             {"timeline_ref": "tl-1", "expected_version": 0},
             {"files": 1, "media": "video"},

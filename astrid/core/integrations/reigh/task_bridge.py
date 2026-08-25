@@ -7,12 +7,14 @@ opens a second write authority.
 from __future__ import annotations
 
 import dataclasses
+import json
 import re
 import threading
 import uuid
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from astrid.core.integrations.reigh.bridge_service import (
     BridgeBodyError,
@@ -190,6 +192,127 @@ class ReighTaskBridge:
         row = self._attempt_row(attempt_id)
         return _attempt_wire_shape(row) if row is not None else None
 
+    def _resolve_render_registry(
+        self,
+        project_id: str,
+        registry: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Freeze render assets as verified, project-owned managed media.
+
+        Timeline registries are intentionally broader than the render task
+        contract and historically allowed paths/URLs.  A render admission
+        cannot carry those locators across a queue boundary: only a media id,
+        its byte digest, and the canonical managed location are admitted.
+        The adapter re-verifies the digest and stages a private copy before
+        invoking a renderer.
+        """
+        from astrid.core.io.media_import import managed_media_path, sha256_file_bytes
+
+        assets = registry.get("assets")
+        if not isinstance(assets, Mapping):
+            raise BridgeBodyError("render_export timeline registry assets must be an object")
+        rewritten: dict[str, Any] = {}
+        with self._writer.read_only_connection() as conn:
+            conn.row_factory = _sqlite_row_factory
+            for asset_key, raw_asset in assets.items():
+                if not isinstance(asset_key, str) or not asset_key:
+                    raise BridgeBodyError("render_export asset keys must be non-empty strings")
+                if not isinstance(raw_asset, Mapping):
+                    raise BridgeBodyError(f"render_export asset {asset_key!r} must be an object")
+                display_file = raw_asset.get("file")
+                if display_file is not None:
+                    if not isinstance(display_file, str) or not display_file:
+                        raise BridgeBodyError(
+                            f"render_export asset {asset_key!r} file must be a string"
+                        )
+                    parsed = urlparse(display_file)
+                    parts = Path(display_file).parts
+                    if (
+                        Path(display_file).is_absolute()
+                        or parsed.scheme
+                        or parsed.netloc
+                        or display_file.startswith("//")
+                        or "\x00" in display_file
+                        or ".." in parts
+                    ):
+                        raise BridgeBodyError(
+                            f"render_export asset {asset_key!r} file must be a safe relative display name"
+                        )
+                if any(key in raw_asset for key in ("path", "url", "uri")):
+                    raise BridgeBodyError(
+                        f"render_export asset {asset_key!r} contains an unmanaged locator"
+                    )
+                media_id = raw_asset.get("media_id")
+                if not isinstance(media_id, str) or not media_id:
+                    raise BridgeBodyError(
+                        f"render_export asset {asset_key!r} requires a project media_id"
+                    )
+                rows = conn.execute(
+                    "SELECT m.id, m.content_hash, m.byte_size, m.mime_type, "
+                    "l.realm, l.locator FROM media m "
+                    "LEFT JOIN media_locations l ON l.media_id = m.id "
+                    "WHERE m.id = ? AND m.project_id = ? "
+                    "ORDER BY l.realm ASC, l.locator ASC",
+                    (media_id, project_id),
+                ).fetchall()
+                if not rows:
+                    raise BridgeBodyError(
+                        f"render_export asset {asset_key!r} references unknown or foreign media"
+                    )
+                media = rows[0]
+                digest = str(media["content_hash"])
+                declared = raw_asset.get("content_sha256")
+                if declared is not None:
+                    if not isinstance(declared, str):
+                        raise BridgeBodyError(
+                            f"render_export asset {asset_key!r} content_sha256 must be a string"
+                        )
+                    declared_digest = declared.removeprefix("sha256:")
+                    if declared_digest != digest:
+                        raise BridgeBodyError(
+                            f"render_export asset {asset_key!r} digest does not match managed media"
+                        )
+                canonical = managed_media_path(self._projects_root, digest).resolve()
+                managed_locations = [
+                    row for row in rows
+                    if str(row["realm"] or "") == "managed_local"
+                ]
+                if not managed_locations or any(
+                    str(row["locator"]) != str(canonical) for row in managed_locations
+                ):
+                    raise BridgeBodyError(
+                        f"render_export asset {asset_key!r} has no canonical managed location"
+                    )
+                if canonical.is_symlink() or not canonical.is_file():
+                    raise BridgeBodyError(
+                        f"render_export asset {asset_key!r} managed bytes are missing"
+                    )
+                try:
+                    actual = sha256_file_bytes(canonical)
+                except OSError as exc:
+                    raise BridgeBodyError(
+                        f"render_export asset {asset_key!r} managed bytes are unreadable"
+                    ) from exc
+                if actual != digest:
+                    raise BridgeBodyError(
+                        f"render_export asset {asset_key!r} managed bytes have a digest mismatch"
+                    )
+                rewritten[asset_key] = {
+                    key: value
+                    for key, value in raw_asset.items()
+                    if key not in {"file", "path", "url", "uri"}
+                }
+                rewritten[asset_key].update(
+                    {
+                        "media_id": media_id,
+                        "content_sha256": f"sha256:{digest}",
+                        "type": raw_asset.get("type") or str(media["mime_type"]),
+                    }
+                )
+        result = dict(registry)
+        result["assets"] = rewritten
+        return result
+
     # -- R1: public family admission (doc 27 §3.5, §4.1) --------------------
 
     def admit(
@@ -255,7 +378,100 @@ class ReighTaskBridge:
             raise BridgeChildAdmissionForbiddenError(str(exc)) from None
 
         project_id = self.resolve_project_id(slug)
+        # Build the caller envelope before resolving any derived media.  A
+        # reused render key must report an idempotency mismatch for a changed
+        # materialized input (even when that new media id is itself invalid),
+        # rather than leaking a validation result from a different request.
+        request_envelope = json.loads(
+            json.dumps(dict(body), sort_keys=True, separators=(",", ":"))
+        )
+        existing_render_receipt = None
+        if family == "render_export":
+            with self._writer.read_only_connection() as conn:
+                conn.row_factory = _sqlite_row_factory
+                existing_render_receipt = conn.execute(
+                    "SELECT primary_stream_id FROM command_receipts "
+                    "WHERE project_id = ? AND idempotency_key = ? "
+                    "AND command_kind = 'core.task.create' LIMIT 1",
+                    (project_id, idempotency_key),
+                ).fetchone()
+            if existing_render_receipt is not None:
+                prior_task_id = str(existing_render_receipt["primary_stream_id"]).removesuffix(":core.task")
+                with self._writer.read_only_connection() as conn:
+                    conn.row_factory = _sqlite_row_factory
+                    prior_row = conn.execute(
+                        "SELECT spec_json FROM tasks WHERE id = ?", (prior_task_id,)
+                    ).fetchone()
+                if prior_row is not None:
+                    prior_spec = json.loads(str(prior_row["spec_json"]))
+                    if (
+                        not isinstance(prior_spec, dict)
+                        or prior_spec.get("request_envelope") != request_envelope
+                    ):
+                        raise BridgeTaskMismatchError(
+                            "this render_export idempotency key was already committed "
+                            "with a different caller request"
+                        )
         manifest = self._resolve_materialized_inputs(project_id, materialized)
+        timeline_snapshot = None
+        if family == "render_export":
+            # A replay must reuse the original request bytes even if the
+            # timeline advanced after the first response. Avoid reading a new
+            # snapshot when this idempotency key already has a receipt.
+            if existing_render_receipt is None:
+                if self._timeline_repo_factory is None:
+                    raise BridgeInternalError(
+                        "render_export admission requires a composed timeline "
+                        "repository factory"
+                    )
+                try:
+                    current = self._timeline_repo_factory().show(
+                        self._writer,
+                        project_id,
+                        str(task_input["timeline_ref"]),
+                    )
+                except Exception as exc:  # noqa: BLE001 - normalize below
+                    if type(exc).__name__ == "TimelineNotFoundError":
+                        raise BridgeNotFoundError(str(exc)) from None
+                    if type(exc).__name__ == "TimelineValidationError":
+                        raise BridgeBodyError(str(exc)) from None
+                    raise BridgeInternalError(str(exc)) from None
+                if int(task_input["expected_version"]) != int(current.config_version):
+                    raise BridgeConflictError(
+                        "render_export timeline version is stale",
+                        config_version=int(current.config_version),
+                    )
+                timeline_snapshot = {
+                    "timeline_id": current.timeline_id,
+                    "timeline_ulid": current.timeline_ulid,
+                    "slug": current.slug,
+                    "config": dict(current.config),
+                    "registry": self._resolve_render_registry(
+                        project_id, dict(current.registry)
+                    ),
+                    "config_version": current.config_version,
+                }
+                # A text/effect timeline is Remotion-only.  Check the
+                # server-owned runtime while the request is still admission,
+                # before a task can be claimed by a worker.  Media-only
+                # timelines retain the existing FFmpeg fallback contract.
+                from astrid.core.integrations.reigh.remotion_runtime import (
+                    remotion_runtime_status,
+                    timeline_requires_remotion,
+                )
+
+                if timeline_requires_remotion(current.config):
+                    runtime = remotion_runtime_status()
+                    if not runtime.available:
+                        raise BridgeCapabilityUnavailableError(
+                            "rendering.render: server-owned Remotion runtime "
+                            "is unavailable: "
+                            + (runtime.reason or "unknown reason")
+                        )
+        # Keep the exact public caller envelope beside the generated snapshot.
+        # On replay this is compared before the old snapshot is reused, so a
+        # changed filename/correlation/fence/destination/materialized input
+        # cannot be smuggled through by the snapshot replay path.
         spec = {
             "schema_version": 1,
             "family": entry.family,
@@ -264,6 +480,10 @@ class ReighTaskBridge:
             "params": dict(task_input),
             "output_policy": dict(entry.output_policy),
         }
+        if timeline_snapshot is not None:
+            spec["project_slug"] = slug
+            spec["timeline_snapshot"] = timeline_snapshot
+            spec["request_envelope"] = request_envelope
         if workflow_snapshot is not None:
             spec["workflow"] = workflow_snapshot
         tasks, _media, _receipts = self._services()
@@ -281,6 +501,31 @@ class ReighTaskBridge:
                 (project_id, idempotency_key),
             )
             stable_id = existing["task_id"] if existing is not None else None
+            if existing is not None and entry.family == "render_export":
+                prior = uow.query_one(
+                    "SELECT spec_json, input_manifest_json FROM tasks WHERE id = ?",
+                    (stable_id,),
+                )
+                if prior is None:
+                    raise BridgeInternalError("task receipt points to a missing task")
+                try:
+                    prior_spec = json.loads(str(prior["spec_json"]))
+                    prior_envelope = (
+                        prior_spec.get("request_envelope")
+                        if isinstance(prior_spec, dict)
+                        else None
+                    )
+                    if prior_envelope != request_envelope:
+                        raise BridgeTaskMismatchError(
+                            "this render_export idempotency key was already committed "
+                            "with a different caller request"
+                        )
+                    spec.clear()
+                    spec.update(prior_spec)
+                    manifest.clear()
+                    manifest.extend(json.loads(str(prior["input_manifest_json"])))
+                except (TypeError, ValueError, json.JSONDecodeError) as exc:
+                    raise BridgeInternalError("stored render task request is malformed") from exc
             if existing is None and entry.family == "render_export":
                 self._assert_render_export_current(
                     uow,

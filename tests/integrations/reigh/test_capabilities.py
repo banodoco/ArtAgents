@@ -43,7 +43,7 @@ EXPECTED_PUBLIC_IDS = {
     "reigh.edit_video_orchestrator",
     "reigh.animate_character",
     "reigh.flux_klein_edit",
-    "rendering.timeline_visualize",
+    "rendering.render",
     "local.workflow.run",
 }
 
@@ -80,7 +80,7 @@ def test_every_entry_has_exactly_one_binding_and_policy() -> None:
 
 
 def test_render_capability_uses_remotion_and_no_generation() -> None:
-    entry = REGISTRY["rendering.timeline_visualize"]
+    entry = REGISTRY["rendering.render"]
     assert entry.binding == BINDING_ASTRID_REMOTION
     assert entry.output_policy["create_generation"] is False
     assert entry.output_policy["managed_media_role"] == "render"
@@ -175,7 +175,7 @@ def test_input_validation_rejects_missing_required_fields() -> None:
             "render_export",
             {"timeline_ref": "main", "expected_version": 1},
         ).capability_id
-        == "rendering.timeline_visualize"
+        == "rendering.render"
     )
 
 

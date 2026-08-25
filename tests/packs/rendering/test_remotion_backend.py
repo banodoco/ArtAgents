@@ -17,13 +17,13 @@ from astrid.core import timeline
 from astrid.core.element.schema import ElementAsset, ElementDefinition
 from astrid.core.pack.discovery import discover_pack_metadata
 from astrid.core.rendering.contracts import (
+    SCHEMA_VERSION,
     AudioOwnership,
     FrameWindow,
+    RendererManifest,
     RenderProfile,
     RenderRequest,
     RenderResult,
-    RendererManifest,
-    SCHEMA_VERSION,
     SupportReport,
 )
 from astrid.core.rendering.transport import CommandTransport
@@ -32,10 +32,16 @@ from astrid.packs.rendering.executors.render import run as facade
 from astrid.sdk.rendering import render
 from tests.packs.rendering._helpers import _execution_env, _probe
 
-
 ROOT = Path(__file__).resolve().parents[3]
 LOCAL_EFFECT_SMOKE_FIXTURE = ROOT / "tests" / "fixtures" / "local_effect_smoke"
 render_remotion = remotion
+
+
+@pytest.fixture(autouse=True)
+def _remotion_exec_env():
+    """Ensure protocol children use the schema-bearing test interpreter."""
+    with _execution_env():
+        yield
 
 
 def _write_fake_remotion_output(command: list[str]) -> Path:

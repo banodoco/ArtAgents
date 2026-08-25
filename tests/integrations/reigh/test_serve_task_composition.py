@@ -200,7 +200,7 @@ def test_python_module_serve_composes_authenticated_task_routes(
             },
         )
         assert status == 201, render
-        assert render["task"]["capability"] == "rendering.timeline_visualize"
+        assert render["task"]["capability"] == "rendering.render"
 
         # Every new editor route crosses the same release-mode auth and
         # protocol gates before route matching, including byte routes and

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib
 import json
 import os
 import shutil
@@ -36,17 +37,20 @@ from astrid.core.element.registry import load_default_registry
 from astrid.core.element.schema import ElementDefinition
 from astrid.core.foundation.atomic_io import write_json_atomic
 from astrid.core.foundation.paths import REPO_ROOT, WORKSPACE_ROOT
+from astrid.core.integrations.reigh.remotion_runtime import (
+    TIMELINE_SCHEMA_PYTHONPATH_ENV,
+)
+from astrid.core.rendering import assets as _rendering_assets
 from astrid.core.rendering.artifacts import validate_render_result
 from astrid.core.rendering.assets import (
     AssetMaterializer,
     InvocationAssetServer,
-    RangeHTTPRequestHandler as _RangeHTTPRequestHandler,
 )
 from astrid.core.rendering.contracts import (
+    SCHEMA_VERSION,
     AudioOwnership,
     RenderRequest,
     RenderResult,
-    SCHEMA_VERSION,
     SupportReport,
     VideoArtifact,
 )
@@ -75,7 +79,17 @@ from astrid.packs.rendering.backends._shared import (
     _timeline_alpha,
 )
 from astrid.packs.rendering.backends.remotion import lock as remotion_lock
-from scripts import gen_effect_registry
+
+# Release wheels intentionally exclude authoring scripts.  A provisioned
+# server-owned Remotion bundle carries its generated registry outputs.
+try:
+    gen_effect_registry = importlib.import_module("scripts.gen_effect_registry")
+except ModuleNotFoundError:  # pragma: no cover - exercised by wheel installs
+    gen_effect_registry = None
+
+
+_SHIM_EXTENSIONS = (".ts", ".js", ".d.ts", ".js.map", ".d.ts.map")
+_RangeHTTPRequestHandler = _rendering_assets.RangeHTTPRequestHandler
 
 # Re-export-only names: legacy_engine.py and tests alias ``remotion._X`` for
 # these provenance/theme helpers, so they stay bound on this module even
@@ -167,11 +181,20 @@ def _registry_output_paths(project_dir: Path) -> list[Path]:
         package_src / f"{kind}.generated.ts"
         for kind in ("effects", "animations", "transitions")
     ]
-    remotion_src = REPO_ROOT / "remotion" / "src"
+    remotion_src = (
+        REPO_ROOT / "remotion" / "src"
+        if gen_effect_registry is not None
+        else project_dir / "src"
+    )
     for kind in ("effects", "animations", "transitions"):
         base = remotion_src / f"{kind}.generated"
         paths.extend(
-            Path(f"{base}{extension}") for extension in gen_effect_registry.SHIM_EXTENSIONS
+            Path(f"{base}{extension}")
+            for extension in (
+                gen_effect_registry.SHIM_EXTENSIONS
+                if gen_effect_registry
+                else _SHIM_EXTENSIONS
+            )
         )
     return paths
 
@@ -181,6 +204,8 @@ def _registry_outputs_exist(project_dir: Path) -> bool:
 
 
 def _active_theme_pointer_current(theme_path: Path | None) -> bool:
+    if gen_effect_registry is None:
+        return True
     link = gen_effect_registry.ACTIVE_THEME_LINK
     pointer = gen_effect_registry.ACTIVE_THEME_POINTER
     if theme_path is None:
@@ -201,6 +226,8 @@ def _active_theme_pointer_current(theme_path: Path | None) -> bool:
 
 
 def _effective_registry_state(theme_path: Path | None) -> dict[str, Any]:
+    if gen_effect_registry is None:
+        return {"version": 1, "hash": "server-provisioned"}
     theme_file = _resolve_theme_path(theme_path) if theme_path is not None else None
     return gen_effect_registry.compute_generated_registry_state(theme_dir=theme_file)
 
@@ -238,6 +265,13 @@ def _regenerate_element_registries_locked(
     theme_path: Path | None,
 ) -> None:
     """Regenerate shared registries while the caller owns the Remotion lock."""
+
+    if gen_effect_registry is None:
+        if not _registry_outputs_exist(project_dir):
+            raise RuntimeError(
+                "installed Remotion bundle is missing generated element registries"
+            )
+        return
 
     state = _effective_registry_state(theme_path)
     cached_state = _read_registry_state(project_dir)
@@ -569,6 +603,13 @@ def _execute_remotion_locked(
             staged_video.parent.mkdir(parents=True, exist_ok=True)
             props_path.write_text(json.dumps(merged_props), encoding="utf-8")
             remotion_env_additions: dict[str, str] = {}
+            schema_pythonpath = os.environ.get(TIMELINE_SCHEMA_PYTHONPATH_ENV)
+            if schema_pythonpath:
+                remotion_env_additions["PYTHONPATH"] = os.pathsep.join(
+                    path
+                    for path in (schema_pythonpath, os.environ.get("PYTHONPATH"))
+                    if path
+                )
             composition_src = _timeline_composition_src(project_dir)
             if composition_src is not None:
                 remotion_env_additions["ASTRID_TIMELINE_COMPOSITION_SRC"] = str(
@@ -801,11 +842,11 @@ def support(request: RenderRequest, *, workspace: Path) -> SupportReport:
     assets_data: dict[str, Any] | None = None
     try:
         timeline_data = _serialize_timeline(timeline_path)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - support report normalizes renderer failures
         reasons.append(f"timeline is not renderable: {exc}")
     try:
         assets_data = _load_registry_mapping(assets_path)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - support report normalizes renderer failures
         reasons.append(f"assets registry is not renderable: {exc}")
 
     if timeline_data is not None and assets_data is not None:
@@ -834,7 +875,7 @@ def support(request: RenderRequest, *, workspace: Path) -> SupportReport:
         if dynamic_clip_types:
             try:
                 effects, aliases = _effect_registry_for_assets(settings.theme_path)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - support report normalizes registry failures
                 reasons.append(f"Remotion element registry cannot be resolved: {exc}")
             else:
                 unknown_clip_types = [
@@ -849,7 +890,7 @@ def support(request: RenderRequest, *, workspace: Path) -> SupportReport:
                     )
         try:
             canonical = _canonical_profile(timeline_path, assets_data, settings.theme_path)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - support report normalizes profile failures
             reasons.append(f"canonical Remotion profile cannot be resolved: {exc}")
         else:
             # Remotion ALWAYS muxes an audio track (silent when the timeline

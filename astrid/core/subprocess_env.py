@@ -10,6 +10,7 @@ from astrid.core.env_vars import (
     ASTRID_ACTOR,
     ASTRID_AUTHOR_TEST,
     ASTRID_INTERNAL_INVOCATION,
+    ASTRID_TIMELINE_SCHEMA_PYTHONPATH,
 )
 from astrid.core.env_vars import (
     ASTRID_HOME as ASTRID_HOME_ENV,
@@ -81,6 +82,7 @@ _ASTRID_PROPAGATED_ENV = frozenset(
         TASK_ITEM_ID_ENV,
         TASK_ITERATION_ENV,
         THEMES_ROOT_ENV,
+        ASTRID_TIMELINE_SCHEMA_PYTHONPATH,
     }
 )
 
