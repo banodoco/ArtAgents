@@ -6,6 +6,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -17,9 +18,13 @@ import pytest
 from astrid.core.events.registry import core_only_registry
 from astrid.core.events.service import EventAppendService
 from astrid.core.ids import generate_lowercase_ulid
+from astrid.core.integrations.reigh import remotion_runtime
 from astrid.core.integrations.reigh.remotion_runtime import (
+    NODE_EXECUTABLE_ENV,
+    REMOTION_CLI_RELATIVE_PATH,
     TIMELINE_SCHEMA_PYTHONPATH_ENV,
     remotion_runtime_status,
+    resolve_remotion_runtime_tools,
 )
 from astrid.core.integrations.reigh.task_bridge import ReighTaskBridge
 from astrid.core.io.media_import import managed_media_path, sha256_file_bytes
@@ -152,30 +157,77 @@ def test_forced_caption_uses_server_owned_installed_remotion_runtime(
                 "export {};\n", encoding="utf-8"
             )
     (runtime / "package.json").write_text('{"private":true}\n', encoding="utf-8")
+    cli = runtime / REMOTION_CLI_RELATIVE_PATH
+    cli.parent.mkdir(parents=True)
+    cli.write_text("// pinned local Remotion CLI\n", encoding="utf-8")
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     (fake_bin / "python3").symlink_to(Path(sys.executable).resolve())
-    (fake_bin / "node").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    real_ffprobe = shutil.which("ffprobe")
+    if real_ffprobe is None:
+        pytest.fail("the installed ffprobe binary is required for this integration test")
+    real_ffmpeg = shutil.which("ffmpeg")
+    if real_ffmpeg is None:
+        pytest.fail("the installed ffmpeg binary is required for this integration test")
     source_video = tmp_path / "source.mp4"
     source_video.write_bytes(FIXTURE_VIDEO.read_bytes())
-    (fake_bin / "npx").write_text(
+    trusted_node = tmp_path / "trusted-node"
+    trusted_node.write_text(
         "#!/usr/bin/env python3\n"
         "import pathlib, subprocess, sys\n"
+        "if sys.argv[1:] == ['--version']:\n"
+        "    print('v20.19.4')\n"
+        "    raise SystemExit(0)\n"
         "args = sys.argv[1:]\n"
         "out = pathlib.Path(args[args.index('--output') + 1])\n"
-        f"subprocess.run(['ffmpeg', '-loglevel', 'error', '-y', '-i', {str(source_video)!r}, '-vf', 'scale=1920:1080', '-r', '30', '-video_track_timescale', '90000', str(out)], check=True)\n",
+        f"subprocess.run([{str(real_ffmpeg)!r}, '-loglevel', 'error', '-y', '-i', {str(source_video)!r}, '-c', 'copy', '-video_track_timescale', '90000', str(out)], check=True)\n",
         encoding="utf-8",
     )
-    for executable in (fake_bin / "node", fake_bin / "npx"):
+    (fake_bin / "npx").write_text(
+        "#!/usr/bin/env python3\n"
+        "import pathlib\n"
+        f"pathlib.Path({str(tmp_path / 'npx-used')!r}).write_text('unexpected npx')\n"
+        "raise SystemExit(97)\n",
+        encoding="utf-8",
+    )
+    # Keep the deployment-shaped PATH free of node while still exposing the
+    # real media probe through an explicit, trusted binary path.
+    (fake_bin / "ffprobe").write_text(
+        f"#!/bin/sh\nexec {shlex.quote(real_ffprobe)} \"$@\"\n", encoding="utf-8"
+    )
+    for executable in (trusted_node, fake_bin / "npx", fake_bin / "ffprobe"):
         executable.chmod(0o755)
     monkeypatch.setenv("ASTRID_REMOTION_PROJECT_DIR", str(runtime))
-    monkeypatch.setenv("PATH", f"{fake_bin}:{os.environ['PATH']}")
+    monkeypatch.setenv(NODE_EXECUTABLE_ENV, str(trusted_node))
+    monkeypatch.setenv("PATH", str(fake_bin))
+    assert shutil.which("python3") is not None
+    assert shutil.which("ffprobe") is not None
+    assert shutil.which("node") is None
     schema_spec = importlib.util.find_spec("banodoco_timeline_schema")
     if schema_spec is None or schema_spec.origin is None:
         pytest.fail("the pinned timeline-schema dependency is required for this integration test")
     schema_install = tmp_path / "installed-python"
     schema_package = schema_install / "banodoco_timeline_schema"
     shutil.copytree(Path(schema_spec.origin).parent, schema_package)
+    # The clean readiness probe intentionally ignores ambient/user site
+    # packages. Provision the small jsonschema dependency closure beside the
+    # trusted schema so this test models an installed runtime rather than an
+    # editable checkout.
+    for dependency in (
+        "jsonschema",
+        "jsonschema_specifications",
+        "referencing",
+        "rpds",
+        "attrs",
+        "attr",
+    ):
+        dependency_spec = importlib.util.find_spec(dependency)
+        if dependency_spec is None or dependency_spec.submodule_search_locations is None:
+            pytest.fail(f"the pinned {dependency} dependency is required for this integration test")
+        shutil.copytree(
+            Path(next(iter(dependency_spec.submodule_search_locations))),
+            schema_install / dependency,
+        )
     monkeypatch.setenv(TIMELINE_SCHEMA_PYTHONPATH_ENV, str(schema_install))
     monkeypatch.setenv(
         "PYTHONPATH",
@@ -210,6 +262,15 @@ def test_forced_caption_uses_server_owned_installed_remotion_runtime(
     task = _task(root=tmp_path)
     snapshot = dict(task.spec["timeline_snapshot"])
     config = dict(snapshot["config"])
+    # The fixture MP4 is 1280x720; keep the declared render profile aligned so
+    # ffprobe validates the artifact produced by the trusted Node harness.
+    config["theme_overrides"] = {
+        **config["theme_overrides"],
+        "visual": {
+            **config["theme_overrides"]["visual"],
+            "canvas": {"width": 1280, "height": 720, "fps": 24},
+        },
+    }
     config["clips"] = [
         {
             "id": "caption",
@@ -231,6 +292,7 @@ def test_forced_caption_uses_server_owned_installed_remotion_runtime(
     output = tmp_path / "staging" / manifest["outputs"][0]["path"]
     assert output.read_bytes()[4:8] == b"ftyp"
     assert manifest["inputs"]["engine"] == "remotion"
+    assert not (tmp_path / "npx-used").exists()
 
 
 def test_forced_caption_fails_before_renderer_without_server_runtime(
@@ -275,18 +337,114 @@ def test_trusted_schema_readiness_requires_complete_install(
         package_dir.mkdir()
         package_dir.joinpath("package.json").write_text("{}", encoding="utf-8")
     (runtime / "package.json").write_text("{}", encoding="utf-8")
+    cli = runtime / REMOTION_CLI_RELATIVE_PATH
+    cli.parent.mkdir(parents=True)
+    cli.write_text("// pinned local Remotion CLI\n", encoding="utf-8")
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
-    for executable in ("node", "npx"):
-        path = fake_bin / executable
-        path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-        path.chmod(0o755)
+    trusted_node = fake_bin / "node"
+    trusted_node.write_text(
+        "#!/bin/sh\n"
+        "if [ \"$1\" = \"--version\" ]; then printf 'v20.19.4\\n'; fi\n"
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    trusted_node.chmod(0o755)
     monkeypatch.setenv("ASTRID_REMOTION_PROJECT_DIR", str(runtime))
+    monkeypatch.setenv(NODE_EXECUTABLE_ENV, str(trusted_node))
     monkeypatch.setenv(TIMELINE_SCHEMA_PYTHONPATH_ENV, str(schema_install))
     monkeypatch.setenv("PATH", f"{fake_bin}:{os.environ['PATH']}")
     status = remotion_runtime_status()
     assert not status.available
     assert missing_file in (status.reason or "")
+
+
+def _runtime_with_locked_packages(tmp_path: Path) -> Path:
+    runtime = tmp_path / "runtime"
+    packages_root = runtime / "node_modules" / "@banodoco"
+    for package in ("timeline-composition", "timeline-schema", "timeline-theme-2rp"):
+        package_dir = packages_root / package
+        package_dir.mkdir(parents=True)
+        (package_dir / "package.json").write_text("{}", encoding="utf-8")
+    (runtime / "package.json").write_text("{}", encoding="utf-8")
+    return runtime
+
+
+def _version_node(path: Path, *, marker: Path | None = None) -> None:
+    marker_line = (
+        f"pathlib.Path({str(marker)!r}).write_text('used')\n" if marker else ""
+    )
+    path.write_text(
+        "#!/usr/bin/env python3\n"
+        "import pathlib, sys\n"
+        "if sys.argv[1:] == ['--version']:\n"
+        "    print('v20.19.4')\n"
+        "    raise SystemExit(0)\n"
+        + marker_line
+        + "raise SystemExit(97)\n",
+        encoding="utf-8",
+    )
+    path.chmod(0o755)
+
+
+def test_remotion_readiness_requires_exact_locked_local_cli(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = _runtime_with_locked_packages(tmp_path)
+    node = tmp_path / "trusted-node"
+    _version_node(node)
+    monkeypatch.setenv("ASTRID_REMOTION_PROJECT_DIR", str(runtime))
+    monkeypatch.setenv(NODE_EXECUTABLE_ENV, str(node))
+
+    status = remotion_runtime_status()
+    assert not status.available
+    assert "locked Remotion CLI is missing" in (status.reason or "")
+
+    wrong_cli = runtime / "node_modules" / "@remotion" / "cli" / "wrong.js"
+    wrong_cli.parent.mkdir(parents=True)
+    wrong_cli.write_text("// wrong entrypoint\n", encoding="utf-8")
+    status = remotion_runtime_status()
+    assert not status.available
+    assert "locked Remotion CLI is missing" in (status.reason or "")
+
+
+def test_remotion_runtime_uses_absolute_node_not_hostile_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = _runtime_with_locked_packages(tmp_path)
+    cli = runtime / REMOTION_CLI_RELATIVE_PATH
+    cli.parent.mkdir(parents=True)
+    cli.write_text("// pinned local CLI\n", encoding="utf-8")
+    trusted_node = tmp_path / "trusted-node"
+    _version_node(trusted_node)
+    fake_node = tmp_path / "fake-node"
+    marker = tmp_path / "fake-node-used"
+    _version_node(fake_node, marker=marker)
+    monkeypatch.setenv("ASTRID_REMOTION_PROJECT_DIR", str(runtime))
+    monkeypatch.setenv(NODE_EXECUTABLE_ENV, str(trusted_node))
+    monkeypatch.setenv("PATH", str(tmp_path) + os.pathsep + os.environ.get("PATH", ""))
+
+    tools, error = resolve_remotion_runtime_tools(runtime)
+    assert error is None
+    assert tools is not None
+    assert tools.node_executable == trusted_node.resolve()
+    assert tools.remotion_cli == cli.resolve()
+    assert not marker.exists()
+
+
+def test_remotion_node_version_probe_is_bounded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def timeout(*args, **kwargs):
+        raise subprocess.TimeoutExpired(args[0], 5)
+
+    monkeypatch.setattr(remotion_runtime.subprocess, "run", timeout)
+    version, error = remotion_runtime._probe_node(
+        tmp_path / "trusted-node", cwd=tmp_path
+    )
+    assert version is None
+    assert error is not None
+    assert "version probe failed" in error
 
 
 def test_render_export_adapter_fails_closed_without_snapshot_or_project(tmp_path: Path) -> None:

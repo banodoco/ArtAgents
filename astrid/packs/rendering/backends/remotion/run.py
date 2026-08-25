@@ -18,7 +18,7 @@ import shutil
 import subprocess
 import sys
 from contextlib import ExitStack
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, Mapping, Sequence
@@ -39,6 +39,8 @@ from astrid.core.foundation.atomic_io import write_json_atomic
 from astrid.core.foundation.paths import REPO_ROOT, WORKSPACE_ROOT
 from astrid.core.integrations.reigh.remotion_runtime import (
     TIMELINE_SCHEMA_PYTHONPATH_ENV,
+    RemotionRuntimeTools,
+    resolve_remotion_runtime_tools,
 )
 from astrid.core.rendering import assets as _rendering_assets
 from astrid.core.rendering.artifacts import validate_render_result
@@ -126,9 +128,10 @@ class _ExecutionDetails:
     active_theme: dict[str, Any]
     registry_state: dict[str, Any]
     stage_summary: dict[str, Any]
+    runtime: dict[str, str] = field(default_factory=dict)
 
 
-def _validate_project_dir(project_dir: Path) -> None:
+def _validate_project_dir(project_dir: Path) -> RemotionRuntimeTools:
     if not project_dir.exists():
         raise FileNotFoundError(f"Remotion project directory not found: {project_dir}")
     package_json = project_dir / "package.json"
@@ -158,6 +161,11 @@ def _validate_project_dir(project_dir: Path) -> None:
             "These packages are adapter-required and not published to a public npm registry. "
             "See docs/reference/render-adapter.md for adapter install instructions."
         )
+    runtime_tools, tools_error = resolve_remotion_runtime_tools(project_dir)
+    if tools_error:
+        raise FileNotFoundError(tools_error)
+    assert runtime_tools is not None
+    return runtime_tools
 
 
 def _timeline_composition_src(project_dir: Path) -> Path | None:
@@ -536,7 +544,7 @@ def _execute_remotion_locked(
 ) -> _ExecutionDetails:
     """Execute one render while the caller owns the non-recursive outer lock."""
 
-    _validate_project_dir(project_dir)
+    runtime_tools = _validate_project_dir(project_dir)
     _regenerate_element_registries(project_dir, theme_path)
     registry_state = _effective_registry_state(theme_path)
     _require_free_space(provenance_out_path.parent, min_free_gb)
@@ -605,19 +613,18 @@ def _execute_remotion_locked(
             remotion_env_additions: dict[str, str] = {}
             schema_pythonpath = os.environ.get(TIMELINE_SCHEMA_PYTHONPATH_ENV)
             if schema_pythonpath:
-                remotion_env_additions["PYTHONPATH"] = os.pathsep.join(
-                    path
-                    for path in (schema_pythonpath, os.environ.get("PYTHONPATH"))
-                    if path
-                )
+                # The renderer receives only the validated server-owned schema
+                # root.  Ambient PYTHONPATH entries can point at editable
+                # worktrees and must never be inherited by the render child.
+                remotion_env_additions["PYTHONPATH"] = schema_pythonpath
             composition_src = _timeline_composition_src(project_dir)
             if composition_src is not None:
                 remotion_env_additions["ASTRID_TIMELINE_COMPOSITION_SRC"] = str(
                     composition_src
                 )
             remotion_args = [
-                "npx",
-                "remotion",
+                str(runtime_tools.node_executable),
+                str(runtime_tools.remotion_cli),
                 "render",
                 composition_id,
                 "--props",
@@ -658,6 +665,11 @@ def _execute_remotion_locked(
                 active_theme=theme_for_props,
                 registry_state=registry_state,
                 stage_summary=stage_summary,
+                runtime={
+                    "node_executable": str(runtime_tools.node_executable),
+                    "node_version": runtime_tools.node_version,
+                    "remotion_cli": str(runtime_tools.remotion_cli),
+                },
             )
         finally:
             props_path.unlink(missing_ok=True)
@@ -713,6 +725,7 @@ def render(
             active_theme=details.active_theme,
             registry_state=details.registry_state,
             stage_summary=details.stage_summary,
+            runtime=details.runtime or None,
             active_pack_order=_active_pack_order_for_provenance(),
         )
         output = publish_render_result(
@@ -919,9 +932,6 @@ def support(request: RenderRequest, *, workspace: Path) -> SupportReport:
         _validate_project_dir(settings.project_dir)
     except (FileNotFoundError, OSError) as exc:
         reasons.append(str(exc))
-    for binary in ("node", "npx"):
-        if shutil.which(binary) is None:
-            reasons.append(f"required binary is unavailable: {binary}")
 
     return SupportReport(
         schema_version=SCHEMA_VERSION,
@@ -1013,6 +1023,7 @@ def _protocol_render(request: RenderRequest, *, workspace: Path) -> RenderResult
             active_theme=details.active_theme,
             registry_state=details.registry_state,
             stage_summary=details.stage_summary,
+            runtime=details.runtime or None,
             active_pack_order=_active_pack_order_for_provenance(),
         )
         video = VideoArtifact.from_file(

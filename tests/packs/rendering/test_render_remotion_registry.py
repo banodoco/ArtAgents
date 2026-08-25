@@ -8,13 +8,35 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+import pytest
+
 from astrid.core import timeline
+from astrid.core.integrations.reigh import remotion_runtime
 from astrid.packs.rendering.backends.remotion import run as render_remotion
 from astrid.packs.rendering.executors.render import legacy_engine
 from astrid.packs.rendering.executors.render import run as render_facade
 
 ROOT = Path(__file__).resolve().parents[3]
 LOCAL_EFFECT_SMOKE_FIXTURE = ROOT / "tests" / "fixtures" / "local_effect_smoke"
+
+
+@pytest.fixture(autouse=True)
+def _trusted_node_for_render_tests(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    node = tmp_path / "node"
+    node.write_text(
+        "#!/bin/sh\n"
+        "if [ \"$1\" = \"--version\" ]; then printf 'v20.19.4\\n'; fi\n"
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    node.chmod(0o755)
+    configured_node = shutil.which("node") or str(node)
+    monkeypatch.setenv("ASTRID_NODE_EXECUTABLE", str(Path(configured_node).resolve()))
+    monkeypatch.setattr(
+        remotion_runtime,
+        "_probe_node",
+        lambda node_executable, *, cwd: ("v20.19.4", None),
+    )
 
 
 def _write_fake_remotion_output(command: list[str]) -> Path:
@@ -50,6 +72,9 @@ class RenderRemotionRegistryGenerationTest(unittest.TestCase):
         (banodoco_root / "timeline-schema").mkdir(parents=True)
         (banodoco_root / "timeline-theme-2rp").mkdir(parents=True)
         (project_dir / "package.json").write_text('{"scripts":{}}\n', encoding="utf-8")
+        cli = project_dir / "node_modules" / "@remotion" / "cli" / "remotion-cli.js"
+        cli.parent.mkdir(parents=True)
+        cli.write_text("// locked test CLI\n", encoding="utf-8")
         return project_dir, composition_src
 
     def _copy_local_effect_smoke_project(self, tmp: Path) -> tuple[Path, Path, Path, Path]:
@@ -99,7 +124,14 @@ class RenderRemotionRegistryGenerationTest(unittest.TestCase):
 
             def fake_run(cmd, **kwargs):
                 command = [str(part) for part in cmd]
-                if command[:3] == ["npx", "remotion", "render"]:
+                if (
+                    len(command) >= 3
+                    and Path(command[0]).name == "node"
+                    and command[1].endswith(
+                        "node_modules/@remotion/cli/remotion-cli.js"
+                    )
+                    and command[2] == "render"
+                ):
                     props_path = Path(command[command.index("--props") + 1])
                     props = json.loads(props_path.read_text(encoding="utf-8"))
                     props_payloads.append(props)

@@ -35,6 +35,11 @@ ASTRID_REMOTION_PROJECT_DIR = "ASTRID_REMOTION_PROJECT_DIR"
 """Absolute server-owned Remotion project/runtime directory for rendering.
 The render task API never accepts this value from callers."""
 
+ASTRID_NODE_EXECUTABLE = "ASTRID_NODE_EXECUTABLE"
+"""Absolute server-owned Node executable used by the Remotion renderer.
+The render task API never accepts this value from callers and the renderer
+never resolves Node through the ambient ``PATH``."""
+
 ASTRID_TIMELINE_SCHEMA_PYTHONPATH = "ASTRID_TIMELINE_SCHEMA_PYTHONPATH"
 """Absolute server-owned Python install root containing
 ``banodoco_timeline_schema`` for Remotion timeline validation."""
@@ -205,6 +210,7 @@ __all__ = [
     "ASTRID_PROJECT_RUN",
     "ASTRID_PROJECT_SLUG",
     "ASTRID_PROJECTS_ROOT",
+    "ASTRID_NODE_EXECUTABLE",
     "ASTRID_REMOTION_PROJECT_DIR",
     "ASTRID_TIMELINE_SCHEMA_PYTHONPATH",
     "ASTRID_REPO_ROOT",

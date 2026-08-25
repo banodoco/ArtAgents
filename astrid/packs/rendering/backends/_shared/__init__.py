@@ -7,7 +7,8 @@ backend module itself.
 
 Deliberately NOT included here (backend-specific, see the C0 plan's LEAVE
 table): ``_execute_remotion`` (owns the Remotion render lock and the
-``npx remotion render`` invocation), settings parsers, project validation,
+trusted Node + project-local Remotion CLI invocation), settings parsers,
+project validation,
 and the ffmpeg backend's probe-form ``_duration_frames``.
 """
 
@@ -153,6 +154,7 @@ def _render_provenance_payload(
     active_theme: dict[str, Any] | None,
     registry_state: dict[str, Any],
     stage_summary: dict[str, Any],
+    runtime: Mapping[str, Any] | None = None,
     segments: list[dict[str, float | str]] | None = None,
     segment_provenance: list[dict[str, Any]] | None = None,
     active_pack_order: list[dict[str, Any]] | None = None,
@@ -202,6 +204,8 @@ def _render_provenance_payload(
         ),
         "staged_asset_root": stage_summary.get("root"),
     }
+    if runtime is not None:
+        payload["runtime"] = dict(runtime)
     if segments is not None:
         payload["segments"] = segments
     if segment_provenance is not None:

@@ -64,15 +64,19 @@ package.
 The Python wheel intentionally does not bundle the Remotion checkout or its
 Node dependencies. A release worker that must render text/effect timelines
 must set `ASTRID_REMOTION_PROJECT_DIR` to an absolute, server-owned Remotion
-project containing the pinned `node_modules` closure. The worker validates
-that directory, `node`, `npx`, and all three required `@banodoco/*` packages
-before admitting a Remotion-only timeline. Set
-`ASTRID_TIMELINE_SCHEMA_PYTHONPATH` to the separate server-owned Python
-install root containing `banodoco_timeline_schema`; its module origin is
-checked before admission and propagated to renderer children. The public task
-envelope cannot override either path. Media-only timelines may continue
-through the existing FFmpeg fallback when the optional Remotion runtime is
-absent.
+project containing the pinned `node_modules` closure and set
+`ASTRID_NODE_EXECUTABLE` to the absolute, server-owned Node executable. The
+worker validates the executable with a bounded `--version` probe, requires the
+locked local CLI at
+`node_modules/@remotion/cli/remotion-cli.js`, and validates all three required
+`@banodoco/*` packages before admitting a Remotion-only timeline. Rendering
+invokes `[ASTRID_NODE_EXECUTABLE, <project>/node_modules/@remotion/cli/remotion-cli.js, "render", ...]`; it never resolves `node`, `npx`, or `remotion` through
+the ambient `PATH`. Set `ASTRID_TIMELINE_SCHEMA_PYTHONPATH` to the separate
+server-owned Python install root containing `banodoco_timeline_schema`; its
+module origin is checked before admission and propagated to renderer children.
+The public task envelope cannot override these paths. Media-only timelines may
+continue through the existing FFmpeg fallback when the optional Remotion
+runtime is absent.
 
 ## Owner Actions Required Before Publishing Can Replace the Adapter Path
 

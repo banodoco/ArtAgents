@@ -8,7 +8,7 @@ server-owned Remotion bundle.  No task/request value is ever consulted here.
 from __future__ import annotations
 
 import os
-import shutil
+import re
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -16,13 +16,17 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from astrid.core.env_vars import (
+    ASTRID_NODE_EXECUTABLE,
     ASTRID_REMOTION_PROJECT_DIR,
     ASTRID_TIMELINE_SCHEMA_PYTHONPATH,
 )
 from astrid.core.foundation.paths import REPO_ROOT
 
 REMOTION_PROJECT_DIR_ENV = ASTRID_REMOTION_PROJECT_DIR
+NODE_EXECUTABLE_ENV = ASTRID_NODE_EXECUTABLE
 TIMELINE_SCHEMA_PYTHONPATH_ENV = ASTRID_TIMELINE_SCHEMA_PYTHONPATH
+REMOTION_CLI_RELATIVE_PATH = Path("node_modules/@remotion/cli/remotion-cli.js")
+_NODE_PROBE_TIMEOUT_SECONDS = 5
 _REQUIRED_PACKAGES = (
     "timeline-composition",
     "timeline-schema",
@@ -69,6 +73,90 @@ class RemotionRuntimeStatus:
     available: bool
     project_dir: Path | None
     reason: str | None = None
+    node_executable: Path | None = None
+    node_version: str | None = None
+    remotion_cli: Path | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class RemotionRuntimeTools:
+    """Validated server-owned executables for one Remotion project."""
+
+    node_executable: Path
+    node_version: str
+    remotion_cli: Path
+
+
+def _configured_node_executable() -> tuple[Path | None, str | None]:
+    raw = os.environ.get(NODE_EXECUTABLE_ENV, "").strip()
+    if not raw:
+        return None, f"{NODE_EXECUTABLE_ENV} must point to the server-owned Node executable"
+    candidate = Path(raw).expanduser()
+    if not candidate.is_absolute():
+        return None, f"{NODE_EXECUTABLE_ENV} must be an absolute path"
+    try:
+        resolved = candidate.resolve(strict=True)
+    except OSError as exc:
+        return None, f"{NODE_EXECUTABLE_ENV} is not a readable file: {exc}"
+    if not resolved.is_file():
+        return None, f"{NODE_EXECUTABLE_ENV} is not a file: {resolved}"
+    if not os.access(resolved, os.X_OK):
+        return None, f"{NODE_EXECUTABLE_ENV} is not executable: {resolved}"
+    return resolved, None
+
+
+def _probe_node(node_executable: Path, *, cwd: Path) -> tuple[str | None, str | None]:
+    """Bounded version probe for the trusted Node executable."""
+
+    probe_env = {
+        key: value
+        for key, value in os.environ.items()
+        if key in {"HOME", "LANG", "LC_ALL", "LC_CTYPE", "PATH", "TMPDIR"}
+    }
+    try:
+        probe = subprocess.run(
+            [str(node_executable), "--version"],
+            cwd=str(cwd),
+            env=probe_env,
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=_NODE_PROBE_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return None, f"trusted Node version probe failed: {exc}"
+    version = probe.stdout.strip().splitlines()[0] if probe.stdout.strip() else ""
+    if probe.returncode != 0 or not re.fullmatch(r"v\d+\.\d+\.\d+(?:[-+].*)?", version):
+        detail = probe.stderr.strip().splitlines()[-1:] or ["invalid version output"]
+        return None, f"trusted Node version probe failed: {detail[0]}"
+    return version, None
+
+
+def resolve_remotion_runtime_tools(
+    project_dir: Path,
+) -> tuple[RemotionRuntimeTools | None, str | None]:
+    """Resolve and validate the server-owned Node + locked local CLI pair."""
+
+    node_executable, reason = _configured_node_executable()
+    if reason:
+        return None, reason
+    assert node_executable is not None
+    node_version, reason = _probe_node(node_executable, cwd=project_dir)
+    if reason:
+        return None, reason
+    assert node_version is not None
+    cli_path = (project_dir / REMOTION_CLI_RELATIVE_PATH)
+    try:
+        cli_resolved = cli_path.resolve(strict=True)
+    except OSError as exc:
+        return None, f"locked Remotion CLI is missing: {cli_path} ({exc})"
+    if not cli_resolved.is_file():
+        return None, f"locked Remotion CLI is not a file: {cli_path}"
+    try:
+        cli_resolved.relative_to(project_dir.resolve())
+    except ValueError:
+        return None, f"locked Remotion CLI escapes the server-owned project: {cli_path}"
+    return RemotionRuntimeTools(node_executable, node_version, cli_resolved), None
 
 
 def timeline_requires_remotion(config: Mapping[str, Any]) -> bool:
@@ -123,13 +211,14 @@ def remotion_runtime_status() -> RemotionRuntimeStatus:
             project_dir,
             "required Remotion package(s) missing: " + ", ".join(missing),
         )
-    missing_bins = [name for name in ("node", "npx") if shutil.which(name) is None]
-    if missing_bins:
+    runtime_tools, tools_error = resolve_remotion_runtime_tools(project_dir)
+    if tools_error:
         return RemotionRuntimeStatus(
             False,
             project_dir,
-            "required runtime binary unavailable: " + ", ".join(missing_bins),
+            tools_error,
         )
+    assert runtime_tools is not None
     schema_root_raw = os.environ.get(TIMELINE_SCHEMA_PYTHONPATH_ENV, "").strip()
     if not schema_root_raw:
         return RemotionRuntimeStatus(
@@ -184,13 +273,23 @@ def remotion_runtime_status() -> RemotionRuntimeStatus:
             project_dir,
             "timeline schema clean-interpreter probe failed: " + detail[0],
         )
-    return RemotionRuntimeStatus(True, project_dir)
+    return RemotionRuntimeStatus(
+        True,
+        project_dir,
+        node_executable=runtime_tools.node_executable,
+        node_version=runtime_tools.node_version,
+        remotion_cli=runtime_tools.remotion_cli,
+    )
 
 
 __all__ = [
+    "NODE_EXECUTABLE_ENV",
+    "REMOTION_CLI_RELATIVE_PATH",
     "REMOTION_PROJECT_DIR_ENV",
+    "RemotionRuntimeTools",
     "TIMELINE_SCHEMA_PYTHONPATH_ENV",
     "RemotionRuntimeStatus",
+    "resolve_remotion_runtime_tools",
     "remotion_runtime_status",
     "timeline_requires_remotion",
 ]

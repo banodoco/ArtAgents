@@ -244,7 +244,8 @@ result = sdk.invoke(
 
 ## Dependencies
 
-- **Remotion** (`npx remotion render`) — must be installed in the `remotion/` project directory
+- **Remotion** — requires server-owned `ASTRID_REMOTION_PROJECT_DIR` and
+  `ASTRID_NODE_EXECUTABLE`; the locked project-local CLI is invoked directly
 - **Node.js / npm** — `npm install` must have been run in the Remotion project
 - **ffmpeg/ffprobe** — required by the FFmpeg renderer/finalizer and media probing
 

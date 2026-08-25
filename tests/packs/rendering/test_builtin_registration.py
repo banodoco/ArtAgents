@@ -3,6 +3,7 @@ from __future__ import annotations
 import builtins
 import importlib
 import json
+import os
 import shutil
 import subprocess
 import threading
@@ -13,10 +14,9 @@ import pytest
 
 from astrid.core.media import ffprobe_metadata_strict
 from astrid.core.pack.validate import validate_pack
-from astrid.core.rendering.contracts import RenderRequest, RenderResult, SCHEMA_VERSION
+from astrid.core.rendering.contracts import SCHEMA_VERSION, RenderRequest, RenderResult
 from astrid.core.rendering.registry import load_default_registries
 from astrid.core.rendering.transport import CommandTransport
-
 
 ROOT = Path(__file__).resolve().parents[3]
 RENDERING_PACK = ROOT / "astrid" / "packs" / "rendering"
@@ -113,11 +113,18 @@ def _write_request(path: Path, request: RenderRequest) -> None:
 def _missing_remotion_dependencies() -> list[str]:
     missing = [
         f"{binary} executable"
-        for binary in ("node", "npx", "ffprobe")
+        for binary in ("ffprobe",)
         if shutil.which(binary) is None
     ]
+    node = os.environ.get("ASTRID_NODE_EXECUTABLE", "").strip()
+    if not node or not Path(node).is_file():
+        missing.append("ASTRID_NODE_EXECUTABLE")
     if not (REMOTION_PROJECT / "node_modules").is_dir():
         missing.append("remotion/node_modules")
+    if not (
+        REMOTION_PROJECT / "node_modules" / "@remotion" / "cli" / "remotion-cli.js"
+    ).is_file():
+        missing.append("remotion local CLI")
     return missing
 
 
@@ -182,7 +189,7 @@ def test_builtin_registration_and_inspection_are_static(
         "rendering.ffmpeg-finalizer",
     ]
     assert [candidate.manifest.required_binaries for candidate in resolved] == [
-        ("node", "npx", "ffprobe"),
+        ("ffprobe",),
         ("ffmpeg", "ffprobe"),
         ("ffmpeg", "ffprobe"),
     ]
