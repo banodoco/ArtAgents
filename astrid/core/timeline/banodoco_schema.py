@@ -373,7 +373,7 @@ _CLIP_ALLOWED = frozenset(
         "volume", "x", "y", "width", "height", "cropTop", "cropBottom",
         "cropLeft", "cropRight", "opacity", "params", "text", "entrance", "exit",
         "continuous", "transition", "effects", "source_uuid", "generation",
-        "pool_id", "clip_order", "app", "label", "keyframes", "derived_output",
+        "pool_id", "clip_order", "app",
     }
 )
 _TRACK_ALLOWED = frozenset({"id", "kind", "label", "scale", "fit", "opacity", "volume", "muted", "blendMode", "app"})
