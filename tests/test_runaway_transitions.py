@@ -25,8 +25,9 @@ from astrid.packs.runaway.repository import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-MANIFEST_PATH = REPO_ROOT / "projects" / "runaway-piano-colour-demo" / "deliverables" / "timing-manifest.json"
-AUDIO_REACTIVE_PATH = REPO_ROOT / "projects" / "runaway-piano-colour-demo" / "timeline" / "audio-reactive-v1.json"
+RUNAWAY_RELEASE_FIXTURE_ROOT = REPO_ROOT / "tests" / "fixtures" / "runaway_release"
+MANIFEST_PATH = RUNAWAY_RELEASE_FIXTURE_ROOT / "timing-manifest.json"
+AUDIO_REACTIVE_PATH = RUNAWAY_RELEASE_FIXTURE_ROOT / "audio-reactive-v1.json"
 
 
 def _build_registry():
@@ -299,6 +300,16 @@ def test_prompts_deterministic_and_sample(env):
     s02_idx = next(i for i, t in enumerate(transitions) if t["segment_id"] == "S02")
     assert transitions[s02_idx]["timing_mode"] == "section_clock"
     assert "section_clock" in prompts[s02_idx]
+
+
+def test_release_inputs_are_tracked_fixtures_not_ignored_project_data():
+    """Release tests must work from a clean checkout without ``projects/`` data."""
+    assert MANIFEST_PATH == REPO_ROOT / "tests/fixtures/runaway_release/timing-manifest.json"
+    assert AUDIO_REACTIVE_PATH == REPO_ROOT / "tests/fixtures/runaway_release/audio-reactive-v1.json"
+    assert "projects" not in MANIFEST_PATH.relative_to(REPO_ROOT).parts
+    assert "projects" not in AUDIO_REACTIVE_PATH.relative_to(REPO_ROOT).parts
+    assert MANIFEST_PATH.is_file()
+    assert AUDIO_REACTIVE_PATH.is_file()
 
 
 def test_roundtrip_timing_manifest_to_kernel(env):

@@ -21,20 +21,9 @@ from astrid.packs.typed_timeline.mapper import TypedDataTimelineMapper
 from scripts.migrations.runaway_v1_migrate import manifest_to_transitions
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-MANIFEST = (
-    REPO_ROOT
-    / "projects"
-    / "runaway-piano-colour-demo"
-    / "deliverables"
-    / "timing-manifest.json"
-)
-AUDIO_REACTIVE = (
-    REPO_ROOT
-    / "projects"
-    / "runaway-piano-colour-demo"
-    / "timeline"
-    / "audio-reactive-v1.json"
-)
+RUNAWAY_RELEASE_FIXTURE_ROOT = REPO_ROOT / "tests" / "fixtures" / "runaway_release"
+MANIFEST = RUNAWAY_RELEASE_FIXTURE_ROOT / "timing-manifest.json"
+AUDIO_REACTIVE = RUNAWAY_RELEASE_FIXTURE_ROOT / "audio-reactive-v1.json"
 RUNAWAY_COLOUR_GOLDEN_SHA256 = (
     "02c09dace0a838b56655beac58ad930b43089877d1d0803aca9dc99065f40481"
 )
