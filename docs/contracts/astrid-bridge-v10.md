@@ -34,6 +34,12 @@ Route grammar: exactly the segments above. Any other path returns 404 with the `
 
 All JSON responses use `Content-Type: application/json`, `Cache-Control: no-store`, and UTF-8 bodies.
 
+Every data response carries `X-Astrid-Bridge-Version: v1`,
+`X-Content-Type-Options: nosniff`, and `Referrer-Policy: no-referrer`. This
+includes JSON responses and asset `200`, `206`, `304`, `400`, and `416`
+responses, so clients can verify the protocol version before consuming either
+structured data or media bytes. CORS preflight remains version-neutral.
+
 ### 2.2 Error envelope
 
 Every error response is a JSON object with exactly:
@@ -90,14 +96,15 @@ local clients:
   token bucket (burst 32, refill 16 requests/second). Exhaustion is
   `429 rate_limited` with `Retry-After`; disconnect and shutdown cancellation
   stops chunked asset streaming and always releases the admission permit.
-- JSON responses carry `X-Astrid-Bridge-Version: v1`,
+- JSON and asset data responses carry `X-Astrid-Bridge-Version: v1`,
   `X-Content-Type-Options: nosniff`, and `Referrer-Policy: no-referrer`.
 
 ### 2.4 Cache headers
 
 - JSON routes: `Cache-Control: no-store` on every response (including errors).
 - Asset routes: `Cache-Control: private, no-cache`.
-- `304` responses carry `ETag`, `Last-Modified`, and `Cache-Control: private, no-cache`.
+- `304` responses carry `X-Astrid-Bridge-Version: v1`, `ETag`, `Last-Modified`,
+  and `Cache-Control: private, no-cache`.
 
 ## 3. `GET /health`
 

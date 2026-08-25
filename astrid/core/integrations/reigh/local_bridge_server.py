@@ -89,9 +89,7 @@ class _BootSecret:
             parent_info = self.path.parent.lstat()
             fd = os.open(
                 self.path,
-                os.O_RDONLY
-                | getattr(os, "O_CLOEXEC", 0)
-                | getattr(os, "O_NOFOLLOW", 0),
+                os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
             )
             try:
                 info = os.fstat(fd)
@@ -105,9 +103,7 @@ class _BootSecret:
             and stat.S_IMODE(parent_info.st_mode) == _PRIVATE_DIR_MODE
             and stat.S_ISREG(info.st_mode)
             and stat.S_IMODE(info.st_mode) == _PRIVATE_FILE_MODE
-            and hmac.compare_digest(
-                hashlib.sha256(payload).digest(), self._payload_digest
-            )
+            and hmac.compare_digest(hashlib.sha256(payload).digest(), self._payload_digest)
         )
 
 
@@ -121,9 +117,7 @@ def _rotate_boot_secret(projects_root: Path, auth_token: str) -> _BootSecret:
         + hashlib.sha256(auth_token.encode("utf-8")).hexdigest()
         + "\n"
     ).encode("utf-8")
-    fd, temporary_name = tempfile.mkstemp(
-        prefix=f".{_BOOT_SECRET_FILENAME}-", dir=managed_root
-    )
+    fd, temporary_name = tempfile.mkstemp(prefix=f".{_BOOT_SECRET_FILENAME}-", dir=managed_root)
     temporary_path = Path(temporary_name)
     try:
         os.fchmod(fd, _PRIVATE_FILE_MODE)
@@ -185,9 +179,7 @@ class _RequestAdmissionController:
             )
             self._updated_at = now
             if self._tokens < 1.0:
-                retry_after = max(
-                    1, int((1.0 - self._tokens) / self._refill_per_second) + 1
-                )
+                retry_after = max(1, int((1.0 - self._tokens) / self._refill_per_second) + 1)
                 return False, retry_after
             self._tokens -= 1.0
         if not self._semaphore.acquire(blocking=False):
@@ -210,8 +202,7 @@ def _require_loopback_bind_host(host: str) -> None:
     except ValueError:
         pass
     raise ValueError(
-        "Astrid's editor bridge is local-only; --host must be localhost, "
-        "127.0.0.1, or ::1"
+        "Astrid's editor bridge is local-only; --host must be localhost, 127.0.0.1, or ::1"
     )
 
 
@@ -351,10 +342,7 @@ class LocalBridgeHTTPServer(ThreadingHTTPServer):
         )
 
     def __setattr__(self, name: str, value: Any) -> None:
-        if (
-            name in self._BRIDGE_AUTHORITY_ATTRIBUTES
-            and getattr(self, "_serving", False)
-        ):
+        if name in self._BRIDGE_AUTHORITY_ATTRIBUTES and getattr(self, "_serving", False):
             raise AttributeError(
                 f"{name!r} is constructor-injected on the bridge server and "
                 "cannot be reassigned while the server is serving"
@@ -410,14 +398,8 @@ def create_local_bridge_server(
     elif not isinstance(auth_token, str) or not auth_token.strip():
         raise ValueError("auth_token must be a non-empty string when provided")
     if release_mode and auth_token is None:
-        raise ValueError(
-            "release bridge mode requires ASTRID_BRIDGE_TOKEN to be set"
-        )
-    boot_secret = (
-        _rotate_boot_secret(resolved_root, auth_token)
-        if auth_token is not None
-        else None
-    )
+        raise ValueError("release bridge mode requires ASTRID_BRIDGE_TOKEN to be set")
+    boot_secret = _rotate_boot_secret(resolved_root, auth_token) if auth_token is not None else None
     handler = make_local_bridge_handler(projects_root=resolved_root)
     return LocalBridgeHTTPServer(
         (host, port),
@@ -547,6 +529,12 @@ def make_local_bridge_handler(*, projects_root: Path):
                 self.send_header("Access-Control-Max-Age", "86400")
                 self.send_header("Vary", "Origin")
 
+        def _set_protocol_response_headers(self) -> None:
+            """Identify and harden every bridge data response."""
+            self.send_header("X-Astrid-Bridge-Version", _BRIDGE_PROTOCOL_VERSION)
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Referrer-Policy", "no-referrer")
+
         def _send_json(
             self,
             status: int,
@@ -560,11 +548,9 @@ def make_local_bridge_handler(*, projects_root: Path):
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
-            self.send_header("X-Astrid-Bridge-Version", _BRIDGE_PROTOCOL_VERSION)
+            self._set_protocol_response_headers()
             for name, value in (headers or {}).items():
                 self.send_header(name, value)
-            self.send_header("X-Content-Type-Options", "nosniff")
-            self.send_header("Referrer-Policy", "no-referrer")
             self.end_headers()
             # ``HEAD`` carries the same headers (including the GET-sized
             # Content-Length) but never a response body.  BaseHTTPRequest-
@@ -665,7 +651,11 @@ def make_local_bridge_handler(*, projects_root: Path):
                 else None
             )
             raw_locator = entry.get("file")
-            locator = raw_locator.strip() if isinstance(raw_locator, str) and raw_locator.strip() else None
+            locator = (
+                raw_locator.strip()
+                if isinstance(raw_locator, str) and raw_locator.strip()
+                else None
+            )
             if media_id_ref is None and locator is None:
                 self._send_error(
                     404,
@@ -815,9 +805,7 @@ def make_local_bridge_handler(*, projects_root: Path):
 
             try:
                 writer = self._bridge_writer()
-                project_id = self._projects_repository().resolve(
-                    writer, project_slug
-                )
+                project_id = self._projects_repository().resolve(writer, project_slug)
             except BridgeError as exc:
                 self._send_bridge_error(exc)
                 return
@@ -910,9 +898,7 @@ def make_local_bridge_handler(*, projects_root: Path):
             """The single repository writer injected at the serve root."""
             writer = getattr(self.server, "bridge_writer", None)
             if writer is None:
-                raise BridgeInternalError(
-                    "the repository writer is not composed on this server"
-                )
+                raise BridgeInternalError("the repository writer is not composed on this server")
             return writer
 
         def _resolve_verified_local_location(
@@ -979,6 +965,7 @@ def make_local_bridge_handler(*, projects_root: Path):
                 content_range: str | None = None,
             ) -> None:
                 self._set_cors_headers()
+                self._set_protocol_response_headers()
                 self.send_header("Content-Type", content_type)
                 self.send_header("Content-Length", str(content_length))
                 if content_range is not None:
@@ -1012,6 +999,7 @@ def make_local_bridge_handler(*, projects_root: Path):
                 if self.headers.get("If-None-Match") == etag:
                     self.send_response(304)
                     self._set_cors_headers()
+                    self._set_protocol_response_headers()
                     self.send_header("ETag", etag)
                     self.send_header("Last-Modified", last_modified)
                     self.send_header("Cache-Control", "private, no-cache")
@@ -1051,6 +1039,8 @@ def make_local_bridge_handler(*, projects_root: Path):
             match = _RANGE_RE.match(range_header)
             if match is None:
                 self.send_response(400)
+                self._set_cors_headers()
+                self._set_protocol_response_headers()
                 self.send_header("Content-Type", "text/plain")
                 body = b"invalid Range header"
                 self.send_header("Content-Length", str(len(body)))
@@ -1064,6 +1054,8 @@ def make_local_bridge_handler(*, projects_root: Path):
 
             if range_start_str == "" and range_end_str == "":
                 self.send_response(400)
+                self._set_cors_headers()
+                self._set_protocol_response_headers()
                 self.send_header("Content-Type", "text/plain")
                 body = b"empty Range"
                 self.send_header("Content-Length", str(len(body)))
@@ -1130,6 +1122,7 @@ def make_local_bridge_handler(*, projects_root: Path):
         ) -> None:
             self.send_response(416)
             self._set_cors_headers()
+            self._set_protocol_response_headers()
             self.send_header("Content-Range", f"bytes */{file_size}")
             self.send_header("Content-Type", "text/plain")
             self.send_header("Accept-Ranges", "bytes")
@@ -1152,9 +1145,7 @@ def make_local_bridge_handler(*, projects_root: Path):
             """
             bridge = getattr(self.server, "bridge", None)
             if bridge is None:
-                raise BridgeInternalError(
-                    "the repository bridge is not composed on this server"
-                )
+                raise BridgeInternalError("the repository bridge is not composed on this server")
             return bridge
 
         def _send_bridge_error(self, error: BridgeError) -> None:
@@ -1164,9 +1155,7 @@ def make_local_bridge_handler(*, projects_root: Path):
         def _task_bridge(self) -> Any:
             bridge = getattr(self.server, "task_bridge", None)
             if bridge is None:
-                raise BridgeInternalError(
-                    "the task bridge is not composed on this server"
-                )
+                raise BridgeInternalError("the task bridge is not composed on this server")
             return bridge
 
         def _send_task_error(self, exc: BaseException) -> None:
@@ -1208,9 +1197,7 @@ def make_local_bridge_handler(*, projects_root: Path):
                 )
                 self._send_bridge_error(conflict)
             else:
-                self._send_error(
-                    500, "internal", "unexpected task route failure"
-                )
+                self._send_error(500, "internal", "unexpected task route failure")
 
         def _require_idempotency_key(self) -> str | None:
             key = self.headers.get("Idempotency-Key")
@@ -1231,9 +1218,7 @@ def make_local_bridge_handler(*, projects_root: Path):
                 return None
             return key
 
-        def _read_json_body_capped(
-            self, *, max_bytes: int
-        ) -> dict[str, Any] | None:
+        def _read_json_body_capped(self, *, max_bytes: int) -> dict[str, Any] | None:
             raw_header = self.headers.get("Content-Length")
             if raw_header is None:
                 return None
@@ -1244,9 +1229,7 @@ def make_local_bridge_handler(*, projects_root: Path):
             if length <= 0:
                 return None
             if length > max_bytes:
-                raise BridgePayloadTooLargeError(
-                    f"request body exceeds {max_bytes} bytes"
-                )
+                raise BridgePayloadTooLargeError(f"request body exceeds {max_bytes} bytes")
             try:
                 raw = self.rfile.read(length)
             except TimeoutError:
@@ -1265,9 +1248,7 @@ def make_local_bridge_handler(*, projects_root: Path):
             if not self._bridge_admitted:
                 admitted, retry_after = self.server.bridge_admission.try_acquire()
                 if not admitted:
-                    error = BridgeRateLimitError(
-                        "the local bridge request budget is exhausted"
-                    )
+                    error = BridgeRateLimitError("the local bridge request budget is exhausted")
                     self._send_json(
                         error.status_code,
                         error.to_dict(),
@@ -1307,9 +1288,7 @@ def make_local_bridge_handler(*, projects_root: Path):
                 boot_secret = getattr(self.server, "bridge_boot_secret", None)
                 if boot_secret is not None and not boot_secret.verify():
                     self._send_bridge_error(
-                        BridgeInternalError(
-                            "the bridge boot-secret integrity check failed"
-                        )
+                        BridgeInternalError("the bridge boot-secret integrity check failed")
                     )
                     return False
                 supplied = self.headers.get("Authorization", "")
@@ -1349,32 +1328,33 @@ def make_local_bridge_handler(*, projects_root: Path):
 
             if route_parts == ["projects"]:
                 try:
-                    rows = [
-                        row.to_dict() for row in self._bridge().list_projects()
-                    ]
+                    rows = [row.to_dict() for row in self._bridge().list_projects()]
                 except BridgeError as exc:
                     self._send_bridge_error(exc)
                     return
                 self._send_json(200, {"projects": rows})
                 return
 
-            if len(route_parts) == 3 and route_parts[0] == "projects" and route_parts[2] == "timelines":
+            if (
+                len(route_parts) == 3
+                and route_parts[0] == "projects"
+                and route_parts[2] == "timelines"
+            ):
                 try:
-                    rows = [
-                        row.to_dict()
-                        for row in self._bridge().list_timelines(route_parts[1])
-                    ]
+                    rows = [row.to_dict() for row in self._bridge().list_timelines(route_parts[1])]
                 except BridgeError as exc:
                     self._send_bridge_error(exc)
                     return
                 self._send_json(200, {"timelines": rows})
                 return
 
-            if len(route_parts) == 4 and route_parts[0] == "projects" and route_parts[2] == "timelines":
+            if (
+                len(route_parts) == 4
+                and route_parts[0] == "projects"
+                and route_parts[2] == "timelines"
+            ):
                 try:
-                    payload = self._bridge().load_timeline(
-                        route_parts[1], route_parts[3]
-                    ).to_dict()
+                    payload = self._bridge().load_timeline(route_parts[1], route_parts[3]).to_dict()
                 except BridgeError as exc:
                     self._send_bridge_error(exc)
                     return
@@ -1398,9 +1378,7 @@ def make_local_bridge_handler(*, projects_root: Path):
                     return
                 run_ids = query.get("run_id", [])
                 if len(run_ids) > 1 or (run_ids and not run_ids[0]):
-                    self._send_error(
-                        400, "invalid_run", "run_id must be a non-empty string"
-                    )
+                    self._send_error(400, "invalid_run", "run_id must be a non-empty string")
                     return
                 limits = query.get("limit", [])
                 if len(limits) > 1:
@@ -1413,9 +1391,7 @@ def make_local_bridge_handler(*, projects_root: Path):
                     return
                 if not 1 <= limit <= _MAX_RUNAWAY_PAGE_SIZE:
                     self._send_bridge_error(
-                        BridgeLimitError(
-                            f"limit must be between 1 and {_MAX_RUNAWAY_PAGE_SIZE}"
-                        )
+                        BridgeLimitError(f"limit must be between 1 and {_MAX_RUNAWAY_PAGE_SIZE}")
                     )
                     return
                 cursors = query.get("cursor", [])
@@ -1454,11 +1430,7 @@ def make_local_bridge_handler(*, projects_root: Path):
                 self._serve_asset(route_parts[1], route_parts[3], route_parts[5])
                 return
 
-            if (
-                len(route_parts) == 3
-                and route_parts[0] == "projects"
-                and route_parts[2] == "tasks"
-            ):
+            if len(route_parts) == 3 and route_parts[0] == "projects" and route_parts[2] == "tasks":
                 query = parse_qs(parsed_url.query, keep_blank_values=True)
                 unknown = set(query).difference({"limit", "offset"})
                 if unknown:
@@ -1485,11 +1457,7 @@ def make_local_bridge_handler(*, projects_root: Path):
                 self._send_json(200, payload)
                 return
 
-            if (
-                len(route_parts) == 4
-                and route_parts[0] == "projects"
-                and route_parts[2] == "tasks"
-            ):
+            if len(route_parts) == 4 and route_parts[0] == "projects" and route_parts[2] == "tasks":
                 try:
                     payload = self._task_bridge().task_detail(
                         slug=route_parts[1], task_id=route_parts[3]
@@ -1584,9 +1552,7 @@ def make_local_bridge_handler(*, projects_root: Path):
                 and route_parts[2] == "timelines"
                 and route_parts[4] == "assets"
             ):
-                self._serve_asset(
-                    route_parts[1], route_parts[3], route_parts[5], head_only=True
-                )
+                self._serve_asset(route_parts[1], route_parts[3], route_parts[5], head_only=True)
                 return
 
             if (
@@ -1595,9 +1561,7 @@ def make_local_bridge_handler(*, projects_root: Path):
                 and route_parts[2] == "media"
                 and route_parts[4] == "content"
             ):
-                self._serve_media_content(
-                    route_parts[1], route_parts[3], head_only=True
-                )
+                self._serve_media_content(route_parts[1], route_parts[3], head_only=True)
                 return
 
             self.send_response(404)
@@ -1646,9 +1610,7 @@ def make_local_bridge_handler(*, projects_root: Path):
                     self._send_bridge_error(exc)
                     return
                 if body is None:
-                    self._send_error(
-                        400, "invalid_body", "request body must be valid JSON"
-                    )
+                    self._send_error(400, "invalid_body", "request body must be valid JSON")
                     return
                 # Route-level wire validation (contract §6.1): object
                 # config/registry and integer-only expected_version map to
@@ -1670,9 +1632,7 @@ def make_local_bridge_handler(*, projects_root: Path):
                     return
                 try:
                     bridge = self._bridge()
-                    result = bridge.save_timeline(
-                        project_slug, timeline_ref, request
-                    )
+                    result = bridge.save_timeline(project_slug, timeline_ref, request)
                 except BridgeError as exc:
                     self._send_bridge_error(exc)
                     return
@@ -1690,18 +1650,12 @@ def make_local_bridge_handler(*, projects_root: Path):
 
             max_json_body_bytes = 1024 * 1024
 
-            if (
-                len(route_parts) == 3
-                and route_parts[0] == "projects"
-                and route_parts[2] == "tasks"
-            ):
+            if len(route_parts) == 3 and route_parts[0] == "projects" and route_parts[2] == "tasks":
                 key = self._require_idempotency_key()
                 if key is None:
                     return
                 try:
-                    body = self._read_json_body_capped(
-                        max_bytes=max_json_body_bytes
-                    )
+                    body = self._read_json_body_capped(max_bytes=max_json_body_bytes)
                 except BridgePayloadTooLargeError as exc:
                     self._send_bridge_error(exc)
                     return
@@ -1735,9 +1689,7 @@ def make_local_bridge_handler(*, projects_root: Path):
 
             if route_parts == ["queue", "claim"]:
                 try:
-                    body = self._read_json_body_capped(
-                        max_bytes=max_json_body_bytes
-                    )
+                    body = self._read_json_body_capped(max_bytes=max_json_body_bytes)
                 except BridgePayloadTooLargeError as exc:
                     self._send_bridge_error(exc)
                     return
@@ -1762,21 +1714,13 @@ def make_local_bridge_handler(*, projects_root: Path):
                 self._send_json(200, won)
                 return
 
-            if (
-                len(route_parts) == 5
-                and route_parts[0] == "tasks"
-                and route_parts[2] == "attempts"
-            ):
+            if len(route_parts) == 5 and route_parts[0] == "tasks" and route_parts[2] == "attempts":
                 try:
                     attempt_no = int(route_parts[3])
                 except ValueError:
-                    self._send_error(
-                        400, "invalid_body", "attempt_no must be an integer"
-                    )
+                    self._send_error(400, "invalid_body", "attempt_no must be an integer")
                     return
-                self._dispatch_attempt_route(
-                    route_parts[1], attempt_no, route_parts[4]
-                )
+                self._dispatch_attempt_route(route_parts[1], attempt_no, route_parts[4])
                 return
 
             if (
@@ -1788,9 +1732,7 @@ def make_local_bridge_handler(*, projects_root: Path):
                 try:
                     body = self._read_optional_request_body()
                     if body is None:
-                        raise BridgeBodyError(
-                            "request body must be a JSON object when present"
-                        )
+                        raise BridgeBodyError("request body must be a JSON object when present")
                     payload = self._task_bridge().cancel(
                         slug=route_parts[1], task_id=route_parts[3], body=body
                     )
@@ -1802,9 +1744,7 @@ def make_local_bridge_handler(*, projects_root: Path):
 
             self._send_error(404, "not_found", f"unknown POST route: {path}")
 
-        def _dispatch_attempt_route(
-            self, task_id: str, attempt_no: int, verb: str
-        ) -> None:
+        def _dispatch_attempt_route(self, task_id: str, attempt_no: int, verb: str) -> None:
             if verb == "heartbeat":
                 try:
                     body = self._read_json_body_capped(max_bytes=1024 * 1024)
@@ -1917,9 +1857,7 @@ def make_local_bridge_handler(*, projects_root: Path):
                     raise ValueError
             except (json.JSONDecodeError, ValueError):
                 self._cleanup_staging_dir(staging_dir)
-                self._send_error(
-                    400, "invalid_body", "the manifest part must be JSON"
-                )
+                self._send_error(400, "invalid_body", "the manifest part must be JSON")
                 return
             try:
                 payload = self._task_bridge().complete(

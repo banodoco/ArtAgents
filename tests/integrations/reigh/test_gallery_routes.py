@@ -265,9 +265,7 @@ def _seed_generation(
     return UnitOfWork(composition.writer).run(command)
 
 
-def _seed_timeline_document(
-    composition, project_id: str, document: dict[str, Any]
-) -> str:
+def _seed_timeline_document(composition, project_id: str, document: dict[str, Any]) -> str:
     """One timeline row carrying a document with placement nodes."""
     stream_id = generate_lowercase_ulid()
     timeline_id = generate_lowercase_ulid()
@@ -301,6 +299,7 @@ def _seed_timeline_document(
 def env(tmp_path: Path) -> Generator[dict[str, Any], None, None]:
     with gallery_server(tmp_path) as handle:
         yield handle
+
 
 def _create_project(composition, slug: str) -> str:
     def command(uow):
@@ -388,46 +387,34 @@ def test_gallery_list_paging_with_opaque_cursor(env) -> None:
         for index in range(1, 6)
     ]
 
-    status, first = _get_json(
-        env, "/projects/page-proj/generations?limit=2"
-    )
+    status, first = _get_json(env, "/projects/page-proj/generations?limit=2")
     assert status == 200
-    assert [item["generation_id"] for item in first["generations"]] == ids[
-        4:2:-1
-    ]
+    assert [item["generation_id"] for item in first["generations"]] == ids[4:2:-1]
     assert first["next_cursor"]
 
     status, second = _get_json(
         env,
-        "/projects/page-proj/generations?limit=2&cursor="
-        + first["next_cursor"],
+        "/projects/page-proj/generations?limit=2&cursor=" + first["next_cursor"],
     )
     assert status == 200
-    assert [
-        item["generation_id"] for item in second["generations"]
-    ] == ids[2:0:-1]
+    assert [item["generation_id"] for item in second["generations"]] == ids[2:0:-1]
     assert second["next_cursor"]
 
     status, third = _get_json(
         env,
-        "/projects/page-proj/generations?limit=2&cursor="
-        + second["next_cursor"],
+        "/projects/page-proj/generations?limit=2&cursor=" + second["next_cursor"],
     )
     assert status == 200
     assert [item["generation_id"] for item in third["generations"]] == [ids[0]]
     assert third["next_cursor"] is None
 
     # A tampered cursor is a typed 400, never a 500.
-    status, bad = _get_json(
-        env, "/projects/page-proj/generations?cursor=not-a-cursor"
-    )
+    status, bad = _get_json(env, "/projects/page-proj/generations?cursor=not-a-cursor")
     assert status == 400
     assert bad["error"] == "invalid_body"
 
     # The limit is hard-bounded at 200.
-    status, clamped = _get_json(
-        env, "/projects/page-proj/generations?limit=100000"
-    )
+    status, clamped = _get_json(env, "/projects/page-proj/generations?limit=100000")
     assert status == 200, clamped
 
 
@@ -448,27 +435,17 @@ def test_gallery_list_starred_filter_and_unknown_project(env) -> None:
             }
         ],
     )
-    _seed_generation(
-        composition, project_id, created_at="2026-04-02T00:00:00+00:00"
-    )
+    _seed_generation(composition, project_id, created_at="2026-04-02T00:00:00+00:00")
 
-    status, body = _get_json(
-        env, "/projects/star-proj/generations?starred=true"
-    )
+    status, body = _get_json(env, "/projects/star-proj/generations?starred=true")
     assert status == 200
-    assert [item["generation_id"] for item in body["generations"]] == [
-        starred_id
-    ]
+    assert [item["generation_id"] for item in body["generations"]] == [starred_id]
 
-    status, body = _get_json(
-        env, "/projects/star-proj/generations?starred=false"
-    )
+    status, body = _get_json(env, "/projects/star-proj/generations?starred=false")
     assert status == 200
     assert len(body["generations"]) == 2
 
-    status, bad = _get_json(
-        env, "/projects/star-proj/generations?starred=yes"
-    )
+    status, bad = _get_json(env, "/projects/star-proj/generations?starred=yes")
     assert status == 400
     assert bad["error"] == "invalid_body"
 
@@ -530,9 +507,7 @@ def test_generation_detail_variants_items_and_misses(env) -> None:
         },
     )
 
-    status, body = _get_json(
-        env, f"/projects/detail-proj/generations/{generation_id}"
-    )
+    status, body = _get_json(env, f"/projects/detail-proj/generations/{generation_id}")
     assert status == 200, body
     detail = body["generation"]
     assert detail["generation_id"] == generation_id
@@ -540,9 +515,7 @@ def test_generation_detail_variants_items_and_misses(env) -> None:
     assert detail["variants"][1]["is_primary"] is True
     assert detail["items"] == [{"shot_id": "shot-9", "timeline_frame": 96}]
 
-    status, missing = _get_json(
-        env, "/projects/detail-proj/generations/01UNKNOWNGENER"
-    )
+    status, missing = _get_json(env, "/projects/detail-proj/generations/01UNKNOWNGENER")
     assert status == 404
     assert missing["error"] == "generation_not_found"
 
@@ -564,9 +537,7 @@ def test_generation_detail_is_project_scoped(env) -> None:
             }
         ],
     )
-    status, body = _get_json(
-        env, f"/projects/scope-b/generations/{foreign_id}"
-    )
+    status, body = _get_json(env, f"/projects/scope-b/generations/{foreign_id}")
     assert status == 404
     assert body["error"] == "generation_not_found"
 
@@ -582,11 +553,12 @@ def test_media_content_full_range_etag_head(env) -> None:
     payload = b"0123456789abcdef"
     media_id = _seed_media(composition, project_id, payload)
 
-    status, headers, body = _request(
-        env, "GET", f"/projects/media-proj/media/{media_id}/content"
-    )
+    status, headers, body = _request(env, "GET", f"/projects/media-proj/media/{media_id}/content")
     assert status == 200
     assert body == payload
+    assert headers["X-Astrid-Bridge-Version"] == "v1"
+    assert headers["X-Content-Type-Options"] == "nosniff"
+    assert headers["Referrer-Policy"] == "no-referrer"
     assert headers["Content-Type"] == "image/png"
     etag = headers["ETag"]
     assert headers["Accept-Ranges"] == "bytes"
@@ -600,10 +572,11 @@ def test_media_content_full_range_etag_head(env) -> None:
     )
     assert status == 206
     assert partial == payload[4:10]
+    assert headers_206["X-Astrid-Bridge-Version"] == "v1"
     assert headers_206["Content-Range"] == f"bytes 4-9/{len(payload)}"
     assert headers_206["Content-Length"] == "6"
 
-    status, _, not_modified = _request(
+    status, not_modified_headers, not_modified = _request(
         env,
         "GET",
         f"/projects/media-proj/media/{media_id}/content",
@@ -611,6 +584,7 @@ def test_media_content_full_range_etag_head(env) -> None:
     )
     assert status == 304
     assert not_modified == b""
+    assert not_modified_headers["X-Astrid-Bridge-Version"] == "v1"
 
     status, suffix_headers, suffix = _request(
         env,
@@ -620,8 +594,9 @@ def test_media_content_full_range_etag_head(env) -> None:
     )
     assert status == 206
     assert suffix == payload[-4:]
+    assert suffix_headers["X-Astrid-Bridge-Version"] == "v1"
 
-    status, _, malformed = _request(
+    status, malformed_headers, malformed = _request(
         env,
         "GET",
         f"/projects/media-proj/media/{media_id}/content",
@@ -629,12 +604,14 @@ def test_media_content_full_range_etag_head(env) -> None:
     )
     assert status == 416
     assert malformed == b""
+    assert malformed_headers["X-Astrid-Bridge-Version"] == "v1"
 
     status, head_headers, head_body = _request(
         env, "HEAD", f"/projects/media-proj/media/{media_id}/content"
     )
     assert status == 200
     assert head_body == b""
+    assert head_headers["X-Astrid-Bridge-Version"] == "v1"
     assert head_headers["Content-Length"] == str(len(payload))
     assert head_headers["ETag"] == etag
 
@@ -645,13 +622,9 @@ def test_media_content_unknown_foreign_and_missing_bytes(env) -> None:
     _create_project(composition, "media-b")
     media_id = _seed_media(composition, project_a, b"served-bytes")
 
-    status, _, _ = _request(
-        env, "GET", "/projects/media-a/media/01UNKNOWNMEDIA/content"
-    )
+    status, _, _ = _request(env, "GET", "/projects/media-a/media/01UNKNOWNMEDIA/content")
     assert status == 404
-    status, _, body = _request(
-        env, "GET", f"/projects/media-b/media/{media_id}/content"
-    )
+    status, _, body = _request(env, "GET", f"/projects/media-b/media/{media_id}/content")
     assert status == 404
     assert json.loads(body)["error"] == "media_not_found"
 
@@ -662,9 +635,7 @@ def test_media_content_unknown_foreign_and_missing_bytes(env) -> None:
         composition.projects_root,
         hashlib.sha256(b"served-bytes").hexdigest(),
     ).unlink()
-    status, _, body = _request(
-        env, "GET", f"/projects/media-a/media/{media_id}/content"
-    )
+    status, _, body = _request(env, "GET", f"/projects/media-a/media/{media_id}/content")
     assert status == 404
     assert json.loads(body)["error"] == "media_bytes_missing"
 
@@ -685,9 +656,7 @@ def test_media_content_http11_frames_proxy_and_keepalive_responses(env) -> None:
     payload = b"proxy-compatible-media"
     media_id = _seed_media(composition, project_id, payload)
     content_path = f"/projects/demo-project/media/{media_id}/content"
-    missing_path = (
-        "/projects/demo-project/media/__reigh_capability_probe__/content"
-    )
+    missing_path = "/projects/demo-project/media/__reigh_capability_probe__/content"
     host, port = env["base_url"].removeprefix("http://").rsplit(":", 1)
     connection = HTTPConnection(host, int(port), timeout=5)
 
@@ -727,9 +696,7 @@ def test_media_content_http11_frames_proxy_and_keepalive_responses(env) -> None:
         assert ranged_head.getheader("Content-Length") == "6"
         assert ranged_head.getheader("Content-Range") == f"bytes 2-7/{len(payload)}"
 
-        ranged, ranged_body = request(
-            "GET", content_path, extra_headers={"Range": "bytes=2-7"}
-        )
+        ranged, ranged_body = request("GET", content_path, extra_headers={"Range": "bytes=2-7"})
         assert ranged.version == 11
         assert ranged.status == 206
         assert ranged_body == payload[2:8]
@@ -786,8 +753,7 @@ def test_media_content_node_http_proxy_head_error_does_not_leak_body(env) -> Non
         {
             "error": "media_not_found",
             "detail": (
-                "media '__reigh_capability_probe__' was not found in project "
-                "'demo-project'"
+                "media '__reigh_capability_probe__' was not found in project 'demo-project'"
             ),
         }
     ).encode()

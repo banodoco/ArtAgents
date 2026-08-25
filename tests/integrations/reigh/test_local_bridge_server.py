@@ -53,12 +53,10 @@ def test_runaway_cursor_accepts_binary_signature_containing_delimiter() -> None:
         "q": "run",
         "i": "id",
     }
-    raw = json.dumps(
-        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True
-    ).encode("utf-8")
-    signature = hmac.digest(key, raw, "sha256")[
-        : timeline_bridge._RUNAWAY_CURSOR_SIGNATURE_BYTES
-    ]
+    raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode(
+        "utf-8"
+    )
+    signature = hmac.digest(key, raw, "sha256")[: timeline_bridge._RUNAWAY_CURSOR_SIGNATURE_BYTES]
     assert b"." in signature  # deterministic counterexample to delimiter splitting
 
     cursor = timeline_bridge._encode_runaway_cursor(payload, key=key)
@@ -91,15 +89,11 @@ def test_runaway_cursor_round_trip_and_tamper_properties() -> None:
 
     payload = _cursor_payload(513, "wrong-delimiter")
     key = hashlib.sha256(b"wrong-delimiter").digest()
-    raw = json.dumps(
-        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True
-    ).encode("utf-8")
-    signature = hmac.digest(key, raw, "sha256")[
-        : timeline_bridge._RUNAWAY_CURSOR_SIGNATURE_BYTES
-    ]
-    malformed = base64.urlsafe_b64encode(raw + b":" + signature).rstrip(b"=").decode(
-        "ascii"
+    raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode(
+        "utf-8"
     )
+    signature = hmac.digest(key, raw, "sha256")[: timeline_bridge._RUNAWAY_CURSOR_SIGNATURE_BYTES]
+    malformed = base64.urlsafe_b64encode(raw + b":" + signature).rstrip(b"=").decode("ascii")
     with pytest.raises(timeline_bridge.BridgeCursorError):
         timeline_bridge._decode_runaway_cursor(malformed, key=key)
 
@@ -174,9 +168,7 @@ def _repo_db_snapshot(composition) -> dict[str, Any]:
             snapshot[f"count:{table}"] = int(row[0])
         snapshot["heads"] = {
             str(row[0]): int(row[1])
-            for row in conn.execute(
-                "SELECT id, head_seq FROM event_streams ORDER BY id"
-            ).fetchall()
+            for row in conn.execute("SELECT id, head_seq FROM event_streams ORDER BY id").fetchall()
         }
         snapshot["docs"] = {
             str(row[0]): (str(row[1]), str(row[2]), str(row[3]))
@@ -186,14 +178,11 @@ def _repo_db_snapshot(composition) -> dict[str, Any]:
             ).fetchall()
         }
         snapshot["saved_events"] = int(
-            conn.execute(
-                "SELECT COUNT(*) FROM events WHERE kind = 'timeline.saved'"
-            ).fetchone()[0]
+            conn.execute("SELECT COUNT(*) FROM events WHERE kind = 'timeline.saved'").fetchone()[0]
         )
         snapshot["save_receipts"] = int(
             conn.execute(
-                "SELECT COUNT(*) FROM command_receipts "
-                "WHERE command_kind = 'timeline.save'"
+                "SELECT COUNT(*) FROM command_receipts WHERE command_kind = 'timeline.save'"
             ).fetchone()[0]
         )
     return snapshot
@@ -342,9 +331,7 @@ def test_health_and_timeline_endpoints_repository_backed(
     timeline_id = "11111111-1111-1111-1111-111111111111"
     timeline_ulid = "01jm4k5n7p0000000000000001"
     with repository_server(tmp_bridge_root) as (base_url, composition):
-        project = _repo_create_project(
-            composition, slug="ados-talks", key="proj-1"
-        )
+        project = _repo_create_project(composition, slug="ados-talks", key="proj-1")
         _repo_create_timeline(
             composition,
             project_id=project.id,
@@ -360,9 +347,7 @@ def test_health_and_timeline_endpoints_repository_backed(
             f"{base_url}/projects/ados-talks/timelines/{timeline_id}",
         )
         projects_status, projects = _get_json(f"{base_url}/projects")
-        timelines_status, timelines = _get_json(
-            f"{base_url}/projects/ados-talks/timelines"
-        )
+        timelines_status, timelines = _get_json(f"{base_url}/projects/ados-talks/timelines")
 
     assert health_status == 200
     assert health == {"ok": True, "projects_root": str(tmp_bridge_root.resolve())}
@@ -378,13 +363,15 @@ def test_health_and_timeline_endpoints_repository_backed(
 
     assert timelines_status == 200
     assert timelines == {
-        "timelines": [{
-            "timeline_id": timeline_id,
-            "timeline_ulid": timeline_ulid,
-            "slug": "intro-cut",
-            "name": "Intro Cut",
-            "is_default": True,
-        }],
+        "timelines": [
+            {
+                "timeline_id": timeline_id,
+                "timeline_ulid": timeline_ulid,
+                "slug": "intro-cut",
+                "name": "Intro Cut",
+                "is_default": True,
+            }
+        ],
     }
 
 
@@ -421,9 +408,7 @@ def test_projects_timelines_list_route_envelope(
     timeline_id = "44444444-4444-4444-4444-444444444444"
     timeline_ulid = "01jm4k5n7p0000000000000004"
     with repository_server(tmp_bridge_root) as (base_url, composition):
-        project = _repo_create_project(
-            composition, slug="listed-proj", key="proj-1"
-        )
+        project = _repo_create_project(composition, slug="listed-proj", key="proj-1")
         _repo_create_timeline(
             composition,
             project_id=project.id,
@@ -437,13 +422,15 @@ def test_projects_timelines_list_route_envelope(
 
     assert status == 200
     assert body == {
-        "timelines": [{
-            "timeline_id": timeline_id,
-            "timeline_ulid": timeline_ulid,
-            "slug": "primary",
-            "name": "Primary",
-            "is_default": True,
-        }],
+        "timelines": [
+            {
+                "timeline_id": timeline_id,
+                "timeline_ulid": timeline_ulid,
+                "slug": "primary",
+                "name": "Primary",
+                "is_default": True,
+            }
+        ],
     }
 
 
@@ -462,9 +449,7 @@ def test_projects_timelines_list_route_unknown_project_returns_404(
     tmp_bridge_root: Path,
 ) -> None:
     with repository_server(tmp_bridge_root) as (base_url, _composition):
-        status, error = _get_error(
-            f"{base_url}/projects/no-such-project/timelines"
-        )
+        status, error = _get_error(f"{base_url}/projects/no-such-project/timelines")
 
     assert status == 404
     assert error["error"] == "project_not_found"
@@ -485,9 +470,7 @@ def test_runaway_transitions_route_returns_typed_rows_filter_and_evidence(
 ) -> None:
     """The editor route is repository-backed and preserves typed provenance."""
     with repository_server(tmp_bridge_root) as (base_url, composition):
-        project = _repo_create_project(
-            composition, slug="runaway-demo", key="proj-runaway"
-        )
+        project = _repo_create_project(composition, slug="runaway-demo", key="proj-runaway")
         run_id = "01j5runawaytimingv1000000000000"
         runs = RunRepository(
             events=EventAppendService(composition.registry),
@@ -545,9 +528,7 @@ def test_runaway_transitions_route_returns_typed_rows_filter_and_evidence(
             )
 
         UnitOfWork(composition.writer).run(_seed)
-        status, body = _get_json(
-            f"{base_url}/projects/runaway-demo/runaway-transitions"
-        )
+        status, body = _get_json(f"{base_url}/projects/runaway-demo/runaway-transitions")
         filtered_status, filtered = _get_json(
             f"{base_url}/projects/runaway-demo/runaway-transitions?run_id={run_id}"
         )
@@ -575,9 +556,7 @@ def test_runaway_transitions_route_empty_unknown_and_invalid_filter(
 ) -> None:
     with repository_server(tmp_bridge_root) as (base_url, composition):
         _repo_create_project(composition, slug="empty-runaway", key="proj-empty")
-        empty_status, empty = _get_json(
-            f"{base_url}/projects/empty-runaway/runaway-transitions"
-        )
+        empty_status, empty = _get_json(f"{base_url}/projects/empty-runaway/runaway-transitions")
         missing_status, missing = _get_error(
             f"{base_url}/projects/no-such-project/runaway-transitions"
         )
@@ -609,12 +588,8 @@ def test_runaway_v1_pagination_is_snapshot_consistent_and_scope_bound(
     """Opaque cursors freeze inserts and cannot cross project boundaries."""
 
     with repository_server(tmp_bridge_root) as (base_url, composition):
-        project = _repo_create_project(
-            composition, slug="runaway-page", key="proj-page"
-        )
-        other = _repo_create_project(
-            composition, slug="runaway-other", key="proj-other"
-        )
+        project = _repo_create_project(composition, slug="runaway-page", key="proj-page")
+        other = _repo_create_project(composition, slug="runaway-other", key="proj-other")
         run_id = "01j5runawaypage000000000000000"
         other_run_id = "01j5runawayother00000000000000"
         runs = RunRepository(
@@ -657,8 +632,7 @@ def test_runaway_v1_pagination_is_snapshot_consistent_and_scope_bound(
 
         UnitOfWork(composition.writer).run(_seed)
         status, first = _get_json(
-            f"{base_url}/v1/projects/runaway-page/runaway-transitions"
-            f"?run_id={run_id}&limit=2"
+            f"{base_url}/v1/projects/runaway-page/runaway-transitions?run_id={run_id}&limit=2"
         )
         cursor = first["page"]["next_cursor"]
         assert status == 200
@@ -702,8 +676,7 @@ def test_runaway_v1_pagination_is_snapshot_consistent_and_scope_bound(
         assert third["page"]["next_cursor"] is None
 
         cross_status, cross = _get_error(
-            f"{base_url}/v1/projects/runaway-other/runaway-transitions"
-            f"?limit=2&cursor={cursor}"
+            f"{base_url}/v1/projects/runaway-other/runaway-transitions?limit=2&cursor={cursor}"
         )
         bad_status, bad = _get_error(
             f"{base_url}/v1/projects/runaway-page/runaway-transitions"
@@ -839,13 +812,7 @@ def test_bridge_rejects_duplicate_host_and_forwarded_host_headers(
         thread.join(timeout=5)
         composition.close()
 
-    assert (
-        duplicate_status
-        == disallowed_status
-        == forwarded_status
-        == missing_status
-        == 403
-    )
+    assert duplicate_status == disallowed_status == forwarded_status == missing_status == 403
     assert (
         duplicate_body["error"]
         == disallowed_body["error"]
@@ -1051,8 +1018,7 @@ def test_projects_timeline_load_missing_project_returns_project_not_found(
     """A nonexistent project is 404 project_not_found, never an empty view."""
     with repository_server(tmp_bridge_root) as (base_url, _composition):
         status, error = _get_error(
-            f"{base_url}/projects/no-such/timelines/"
-            "33333333-3333-3333-3333-333333333333"
+            f"{base_url}/projects/no-such/timelines/33333333-3333-3333-3333-333333333333"
         )
 
     assert status == 404
@@ -1064,9 +1030,7 @@ def test_server_returns_normal_http_errors_for_unknown_or_invalid_resources(
 ) -> None:
     timeline_id = "22222222-2222-2222-2222-222222222222"
     with repository_server(tmp_bridge_root) as (base_url, composition):
-        project = _repo_create_project(
-            composition, slug="ados-talks", key="proj-1"
-        )
+        project = _repo_create_project(composition, slug="ados-talks", key="proj-1")
         _repo_create_timeline(
             composition,
             project_id=project.id,
@@ -1076,12 +1040,10 @@ def test_server_returns_normal_http_errors_for_unknown_or_invalid_resources(
             timeline_ulid="01jm4k5n7p0000000000000002",
         )
         missing_timeline_status, missing_timeline = _get_error(
-            f"{base_url}/projects/ados-talks/timelines/"
-            "33333333-3333-3333-3333-333333333333",
+            f"{base_url}/projects/ados-talks/timelines/33333333-3333-3333-3333-333333333333",
         )
         invalid_timeline_status, invalid_timeline = _get_error(
-            f"{base_url}/projects/ados-talks/timelines/"
-            "not%20a%20valid%20selector",
+            f"{base_url}/projects/ados-talks/timelines/not%20a%20valid%20selector",
         )
         unknown_route_status, unknown_route = _get_error(
             f"{base_url}/projects/ados-talks/assets/bad-key",
@@ -1137,6 +1099,9 @@ def test_asset_200_full_response_with_correct_headers(
         status, headers, body = _get_bytes(url)
 
     assert status == 200
+    assert headers.get("X-Astrid-Bridge-Version") == "v1"
+    assert headers.get("X-Content-Type-Options") == "nosniff"
+    assert headers.get("Referrer-Policy") == "no-referrer"
     assert headers.get("Accept-Ranges") == "bytes"
     assert headers.get("Cache-Control") == "private, no-cache"
     assert headers.get("ETag")
@@ -1162,13 +1127,11 @@ def test_asset_head_response_with_media_headers(
             registry=registry,
             media={"clip-head": (asset_content, "clip-head.mp4")},
         )
-        url = (
-            f"{base_url}/projects/head-media-proj/timelines/{timeline_id}"
-            "/assets/clip-head"
-        )
+        url = f"{base_url}/projects/head-media-proj/timelines/{timeline_id}/assets/clip-head"
         status, headers = _head(url)
 
     assert status == 200
+    assert headers.get("X-Astrid-Bridge-Version") == "v1"
     assert headers.get("Accept-Ranges") == "bytes"
     assert headers.get("Cache-Control") == "private, no-cache"
     assert headers.get("ETag")
@@ -1198,6 +1161,7 @@ def test_asset_206_byte_range(
         status, headers, body = _get_bytes(url, range_header="bytes=5-14")
 
     assert status == 206
+    assert headers.get("X-Astrid-Bridge-Version") == "v1"
     assert headers.get("Content-Range") == "bytes 5-14/26"
     assert headers.get("Cache-Control") == "private, no-cache"
     assert headers.get("ETag")
@@ -1206,7 +1170,8 @@ def test_asset_206_byte_range(
 
 
 def test_asset_range_less_large_response_returns_initial_partial_chunk(
-    tmp_bridge_root: Path, monkeypatch,
+    tmp_bridge_root: Path,
+    monkeypatch,
 ) -> None:
     """Large range-less asset fetches should not stream the whole source file."""
     import astrid.core.integrations.reigh.local_bridge_server as bridge_server
@@ -1227,10 +1192,7 @@ def test_asset_range_less_large_response_returns_initial_partial_chunk(
             registry=registry,
             media={"large": (asset_content, "large.mp4")},
         )
-        url = (
-            f"{base_url}/projects/large-media-proj/timelines/{timeline_id}"
-            "/assets/large"
-        )
+        url = f"{base_url}/projects/large-media-proj/timelines/{timeline_id}/assets/large"
         status, headers, body = _get_bytes(url)
 
     assert status == 206
@@ -1313,6 +1275,7 @@ def test_asset_416_range_not_satisfiable_start_beyond_size(
         status, headers, body = _get_bytes(url, range_header="bytes=10-20")
 
     assert status == 416
+    assert headers.get("X-Astrid-Bridge-Version") == "v1"
     assert headers.get("Content-Range") == "bytes */5"
 
 
@@ -1343,9 +1306,7 @@ def test_asset_404_for_http_only_asset(
     """HTTP-referenced asset (not local) returns 404 JSON error."""
     timeline_id = "11111111-1111-1111-1111-1111111111ab"
     timeline_ulid = "01JM4K5N7P00000000000000FF"
-    registry = {
-        "assets": {"remote-one": {"file": "https://example.com/video.mp4"}}
-    }
+    registry = {"assets": {"remote-one": {"file": "https://example.com/video.mp4"}}}
     with repository_server(tmp_bridge_root) as (base_url, composition):
         _repo_seed_asset_timeline(
             composition,
@@ -1405,7 +1366,8 @@ def test_asset_404_for_invalid_timeline(
 
 
 def test_asset_fails_closed_without_composed_bridge(
-    seed_bridge_project, tmp_bridge_root: Path,
+    seed_bridge_project,
+    tmp_bridge_root: Path,
 ) -> None:
     """A server without the repository bridge fails closed with 500 internal.
 
@@ -1442,9 +1404,7 @@ def test_save_endpoint_200_for_valid_config(
     timeline_id = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaa01"
     timeline_ulid = "01jm4k5n7p000000000000save"
     with repository_server(tmp_bridge_root) as (base_url, composition):
-        project = _repo_create_project(
-            composition, slug="save-proj", key="proj-1"
-        )
+        project = _repo_create_project(composition, slug="save-proj", key="proj-1")
         _repo_create_timeline(
             composition,
             project_id=project.id,
@@ -1464,16 +1424,17 @@ def test_save_endpoint_200_for_valid_config(
         new_registry = {"assets": {"a1": {"file": "a1.mp4", "type": "video/mp4"}}}
 
         url = f"{base_url}/projects/save-proj/timelines/{timeline_id}/save"
-        status, result = _post_json(url, {
-            "config": new_config,
-            "registry": new_registry,
-            "expected_version": 1,
-        })
+        status, result = _post_json(
+            url,
+            {
+                "config": new_config,
+                "registry": new_registry,
+                "expected_version": 1,
+            },
+        )
 
         # Read back the committed projection through the repository.
-        loaded = _repo_load_timeline(
-            composition, project.id, timeline_id
-        )
+        loaded = _repo_load_timeline(composition, project.id, timeline_id)
 
     assert status == 200
     assert result["timeline_id"] == timeline_id
@@ -1501,16 +1462,18 @@ def test_save_endpoint_bundle_cas_round_trip_clear_and_schema_guard(
     bundle = {
         "schema_version": 1,
         "itemsBySchemaRef": {
-            "reigh.transcript_segment/v1": [{
-                "id": "assetA:src:0",
-                "shape": "interval",
-                "domain": "source_seconds",
-                "extent": {"start": 0, "end": 1.5},
-                "schemaRef": "reigh.transcript_segment/v1",
-                "payload": {"text": "hello", "app": {"opaque": True}},
-                "sourceArtifactRef": {"assetId": "assetA"},
-                "provenance": {"adapterId": "reigh.adaptTranscript", "adapterVersion": "1"},
-            }],
+            "reigh.transcript_segment/v1": [
+                {
+                    "id": "assetA:src:0",
+                    "shape": "interval",
+                    "domain": "source_seconds",
+                    "extent": {"start": 0, "end": 1.5},
+                    "schemaRef": "reigh.transcript_segment/v1",
+                    "payload": {"text": "hello", "app": {"opaque": True}},
+                    "sourceArtifactRef": {"assetId": "assetA"},
+                    "provenance": {"adapterId": "reigh.adaptTranscript", "adapterVersion": "1"},
+                }
+            ],
         },
         "app": {"extension": {"opaque": "authored"}},
     }
@@ -1526,42 +1489,54 @@ def test_save_endpoint_bundle_cas_round_trip_clear_and_schema_guard(
             name="Primary",
         )
         url = f"{base_url}/projects/bundle-proj/timelines/{timeline_id}/save"
-        status, saved = _post_json(url, {
-            "config": {"clips": [], "tracks": [], "output": {"derived": True}},
-            "registry": {"assets": {}},
-            "expected_version": 1,
-            "bundle": bundle,
-        })
+        status, saved = _post_json(
+            url,
+            {
+                "config": {"clips": [], "tracks": [], "output": {"derived": True}},
+                "registry": {"assets": {}},
+                "expected_version": 1,
+                "bundle": bundle,
+            },
+        )
         assert status == 200
         assert saved["bundle"] == bundle
 
         # Omitted means preserve the bridge-owned document lane.
-        status, preserved = _post_json(url, {
-            "config": {"clips": [{"id": "authored"}], "tracks": []},
-            "registry": {"assets": {}},
-            "expected_version": 2,
-        })
+        status, preserved = _post_json(
+            url,
+            {
+                "config": {"clips": [{"id": "authored"}], "tracks": []},
+                "registry": {"assets": {}},
+                "expected_version": 2,
+            },
+        )
         assert status == 200
         assert preserved["bundle"] == bundle
 
         # Explicit null clears it atomically.
-        status, cleared = _post_json(url, {
-            "config": {"clips": [], "tracks": []},
-            "registry": {"assets": {}},
-            "expected_version": 3,
-            "bundle": None,
-        })
+        status, cleared = _post_json(
+            url,
+            {
+                "config": {"clips": [], "tracks": []},
+                "registry": {"assets": {}},
+                "expected_version": 3,
+                "bundle": None,
+            },
+        )
         assert status == 200
         assert "bundle" not in cleared
         assert _repo_load_timeline(composition, project.id, timeline_id).bundle is None
 
         before = _repo_db_snapshot(composition)
-        status, invalid = _post_json(url, {
-            "config": {"clips": [], "tracks": []},
-            "registry": {"assets": {}},
-            "expected_version": 4,
-            "bundle": {"schema_version": 99, "itemsBySchemaRef": {}},
-        })
+        status, invalid = _post_json(
+            url,
+            {
+                "config": {"clips": [], "tracks": []},
+                "registry": {"assets": {}},
+                "expected_version": 4,
+                "bundle": {"schema_version": 99, "itemsBySchemaRef": {}},
+            },
+        )
         after = _repo_db_snapshot(composition)
 
     assert status == 422
@@ -1571,7 +1546,8 @@ def test_save_endpoint_bundle_cas_round_trip_clear_and_schema_guard(
 
 
 def test_save_endpoint_400_for_malformed_body_not_json(
-    seed_bridge_project, tmp_bridge_root: Path,
+    seed_bridge_project,
+    tmp_bridge_root: Path,
 ) -> None:
     """POST /save with a non-JSON body returns 400."""
     timeline_id = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
@@ -1586,7 +1562,8 @@ def test_save_endpoint_400_for_malformed_body_not_json(
 
 
 def test_save_endpoint_400_for_missing_expected_version(
-    seed_bridge_project, tmp_bridge_root: Path,
+    seed_bridge_project,
+    tmp_bridge_root: Path,
 ) -> None:
     """POST /save with JSON that lacks an 'expected_version' returns 400."""
     timeline_id = "cccccccc-cccc-cccc-cccc-cccccccccccc"
@@ -1594,17 +1571,21 @@ def test_save_endpoint_400_for_missing_expected_version(
 
     with running_server(tmp_bridge_root) as base_url:
         url = f"{base_url}/projects/no-version-proj/timelines/{timeline_id}/save"
-        status, error = _post_json(url, {
-            "config": {"tracks": []},
-            "registry": {"assets": {}},
-        })
+        status, error = _post_json(
+            url,
+            {
+                "config": {"tracks": []},
+                "registry": {"assets": {}},
+            },
+        )
 
     assert status == 400
     assert error["error"] == "invalid_expected_version"
 
 
 def test_save_endpoint_400_for_missing_registry(
-    seed_bridge_project, tmp_bridge_root: Path,
+    seed_bridge_project,
+    tmp_bridge_root: Path,
 ) -> None:
     """POST /save with JSON that lacks a 'registry' returns 400."""
     timeline_id = "dddddddd-dddd-dddd-dddd-dddddddddddd"
@@ -1612,10 +1593,13 @@ def test_save_endpoint_400_for_missing_registry(
 
     with running_server(tmp_bridge_root) as base_url:
         url = f"{base_url}/projects/no-registry-proj/timelines/{timeline_id}/save"
-        status, error = _post_json(url, {
-            "config": {"tracks": []},
-            "expected_version": 1,
-        })
+        status, error = _post_json(
+            url,
+            {
+                "config": {"tracks": []},
+                "expected_version": 1,
+            },
+        )
 
     assert status == 400
     assert error["error"] == "invalid_registry"
@@ -1628,11 +1612,14 @@ def test_save_endpoint_404_for_unknown_timeline(
     with repository_server(tmp_bridge_root) as (base_url, composition):
         _repo_create_project(composition, slug="known-proj", key="proj-1")
         url = f"{base_url}/projects/known-proj/timelines/ffffffff-ffff-ffff-ffff-ffffffffffff/save"
-        status, error = _post_json(url, {
-            "config": {"tracks": []},
-            "registry": {"assets": {}},
-            "expected_version": 1,
-        })
+        status, error = _post_json(
+            url,
+            {
+                "config": {"tracks": []},
+                "registry": {"assets": {}},
+                "expected_version": 1,
+            },
+        )
 
     assert status == 404
     assert error["error"] == "timeline_not_found"
@@ -1645,11 +1632,14 @@ def test_save_endpoint_400_for_invalid_project_slug(
     timeline_id = "11111111-1111-1111-1111-111111111111"
     with repository_server(tmp_bridge_root) as (base_url, _composition):
         url = f"{base_url}/projects/%2E%2E/timelines/{timeline_id}/save"
-        status, error = _post_json(url, {
-            "config": {"tracks": []},
-            "registry": {"assets": {}},
-            "expected_version": 1,
-        })
+        status, error = _post_json(
+            url,
+            {
+                "config": {"tracks": []},
+                "registry": {"assets": {}},
+                "expected_version": 1,
+            },
+        )
 
     assert status == 400
     assert error["error"] == "invalid_project"
@@ -1662,11 +1652,14 @@ def test_save_endpoint_404_for_unknown_project(
     timeline_id = "22222222-2222-2222-2222-222222222222"
     with repository_server(tmp_bridge_root) as (base_url, _composition):
         url = f"{base_url}/projects/no-such-proj/timelines/{timeline_id}/save"
-        status, error = _post_json(url, {
-            "config": {"tracks": []},
-            "registry": {"assets": {}},
-            "expected_version": 1,
-        })
+        status, error = _post_json(
+            url,
+            {
+                "config": {"tracks": []},
+                "registry": {"assets": {}},
+                "expected_version": 1,
+            },
+        )
 
     assert status == 404
     assert error["error"] == "project_not_found"
@@ -1677,21 +1670,14 @@ def test_save_endpoint_404_for_unknown_project(
 # ---------------------------------------------------------------------------
 
 
-
-
-
-
-
-
-
-
 # ---------------------------------------------------------------------------
 # CORS preflight tests (OPTIONS)
 # ---------------------------------------------------------------------------
 
 
 def test_cors_preflight_options_returns_204_with_cors_headers(
-    seed_bridge_project, tmp_bridge_root: Path,
+    seed_bridge_project,
+    tmp_bridge_root: Path,
 ) -> None:
     """OPTIONS request returns 204 with correct CORS headers for allowed origins."""
     timeline_id = "11111111-1111-1111-1111-1111cors01"
@@ -1705,12 +1691,19 @@ def test_cors_preflight_options_returns_204_with_cors_headers(
     assert status == 204
     assert headers.get("Access-Control-Allow-Origin") == "http://localhost:3000"
     assert headers.get("Access-Control-Allow-Methods") == "GET, HEAD, POST, OPTIONS"
-    assert headers.get("Access-Control-Allow-Headers") == "Authorization, Content-Type, Range, If-None-Match, If-Modified-Since, X-Astrid-Bridge-Version"
-    assert headers.get("Access-Control-Expose-Headers") == "Accept-Ranges, Content-Length, Content-Range, Content-Type, ETag, Last-Modified, X-Astrid-Bridge-Version"
+    assert (
+        headers.get("Access-Control-Allow-Headers")
+        == "Authorization, Content-Type, Range, If-None-Match, If-Modified-Since, X-Astrid-Bridge-Version"
+    )
+    assert (
+        headers.get("Access-Control-Expose-Headers")
+        == "Accept-Ranges, Content-Length, Content-Range, Content-Type, ETag, Last-Modified, X-Astrid-Bridge-Version"
+    )
 
 
 def test_cors_preflight_no_origin_omits_cors_headers(
-    seed_bridge_project, tmp_bridge_root: Path,
+    seed_bridge_project,
+    tmp_bridge_root: Path,
 ) -> None:
     """OPTIONS without an Origin header omits CORS response headers."""
     timeline_id = "22222222-2222-2222-2222-2222cors02"
@@ -1725,7 +1718,8 @@ def test_cors_preflight_no_origin_omits_cors_headers(
 
 
 def test_cors_preflight_disallowed_origin_is_rejected(
-    seed_bridge_project, tmp_bridge_root: Path,
+    seed_bridge_project,
+    tmp_bridge_root: Path,
 ) -> None:
     """OPTIONS from a non-whitelisted origin is rejected before routing."""
     timeline_id = "33333333-3333-3333-3333-3333cors03"
@@ -1757,9 +1751,7 @@ def test_asset_lookup_after_registry_write(
     timeline_ulid = "01JM4K5N7P00000000000RARW1"
     asset_content = b"Registry-written asset content for readback verification.\n" * 5
     with repository_server(tmp_bridge_root) as (base_url, composition):
-        project = _repo_create_project(
-            composition, slug="rarw-proj", key="proj-1"
-        )
+        project = _repo_create_project(composition, slug="rarw-proj", key="proj-1")
         _repo_create_timeline(
             composition,
             project_id=project.id,
@@ -1768,9 +1760,7 @@ def test_asset_lookup_after_registry_write(
             timeline_id=timeline_id,
             timeline_ulid=timeline_ulid,
         )
-        asset_path = _write_source_file(
-            composition, "rarw-proj", "rarw-clip.webm", asset_content
-        )
+        asset_path = _write_source_file(composition, "rarw-proj", "rarw-clip.webm", asset_content)
         _repo_import_media(
             composition,
             project_id=project.id,
@@ -1782,11 +1772,14 @@ def test_asset_lookup_after_registry_write(
 
         # Step 1: Write the registry through the combined save.
         save_url = f"{base_url}/projects/rarw-proj/timelines/{timeline_id}/save"
-        save_status, save_result = _post_json(save_url, {
-            "config": {"clips": [], "tracks": []},
-            "registry": {"assets": {"rarw-clip": {"file": "rarw-clip.webm"}}},
-            "expected_version": 1,
-        })
+        save_status, save_result = _post_json(
+            save_url,
+            {
+                "config": {"clips": [], "tracks": []},
+                "registry": {"assets": {"rarw-clip": {"file": "rarw-clip.webm"}}},
+                "expected_version": 1,
+            },
+        )
         assert save_status == 200
         assert save_result["config_version"] == 2
 
@@ -1808,9 +1801,7 @@ def test_asset_lookup_after_registry_write_sources_relative(
     timeline_ulid = "01JM4K5N7P00000000000RARW2"
     asset_content = b"Nested file content.\n"
     with repository_server(tmp_bridge_root) as (base_url, composition):
-        project = _repo_create_project(
-            composition, slug="rarw-src-proj", key="proj-1"
-        )
+        project = _repo_create_project(composition, slug="rarw-src-proj", key="proj-1")
         _repo_create_timeline(
             composition,
             project_id=project.id,
@@ -1830,14 +1821,15 @@ def test_asset_lookup_after_registry_write_sources_relative(
             realm="managed_local",
             locator="nested/deep.bin",
         )
-        save_url = (
-            f"{base_url}/projects/rarw-src-proj/timelines/{timeline_id}/save"
+        save_url = f"{base_url}/projects/rarw-src-proj/timelines/{timeline_id}/save"
+        save_status, save_result = _post_json(
+            save_url,
+            {
+                "config": {"clips": [], "tracks": []},
+                "registry": {"assets": {"deep-asset": {"file": "nested/deep.bin"}}},
+                "expected_version": 1,
+            },
         )
-        save_status, save_result = _post_json(save_url, {
-            "config": {"clips": [], "tracks": []},
-            "registry": {"assets": {"deep-asset": {"file": "nested/deep.bin"}}},
-            "expected_version": 1,
-        })
         assert save_status == 200
         assert save_result["config_version"] == 2
 
@@ -1847,14 +1839,6 @@ def test_asset_lookup_after_registry_write_sources_relative(
     assert asset_status == 200
     assert int(asset_headers.get("Content-Length", "0")) == len(asset_content)
     assert asset_body == asset_content
-
-
-
-
-
-
-
-
 
 
 # ---------------------------------------------------------------------------
@@ -1870,9 +1854,7 @@ def test_save_endpoint_409_for_stale_expected_version(
     timeline_id = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaa409"
     timeline_ulid = "01jm4k5n7p00000000000409sav"
     with repository_server(tmp_bridge_root) as (base_url, composition):
-        project = _repo_create_project(
-            composition, slug="conflict-proj", key="proj-1"
-        )
+        project = _repo_create_project(composition, slug="conflict-proj", key="proj-1")
         _repo_create_timeline(
             composition,
             project_id=project.id,
@@ -1888,11 +1870,14 @@ def test_save_endpoint_409_for_stale_expected_version(
         before = _repo_db_snapshot(composition)
         url = f"{base_url}/projects/conflict-proj/timelines/{timeline_id}/save"
         # expected_version=999 is far in the future → stale
-        status, error = _post_json(url, {
-            "config": config,
-            "registry": registry,
-            "expected_version": 999,
-        })
+        status, error = _post_json(
+            url,
+            {
+                "config": config,
+                "registry": registry,
+                "expected_version": 999,
+            },
+        )
         after = _repo_db_snapshot(composition)
 
     assert status == 409
@@ -1915,9 +1900,7 @@ def test_two_concurrent_saves_exactly_one_wins(
     timeline_id = "cccccccc-cccc-cccc-cccc-cccccccccc01"
     timeline_ulid = "01jm4k5n7p00000000000race01"
     with repository_server(tmp_bridge_root) as (base_url, composition):
-        project = _repo_create_project(
-            composition, slug="race-proj", key="proj-1"
-        )
+        project = _repo_create_project(composition, slug="race-proj", key="proj-1")
         _repo_create_timeline(
             composition,
             project_id=project.id,
@@ -1942,11 +1925,14 @@ def test_two_concurrent_saves_exactly_one_wins(
 
         def do_save(cfg: dict) -> None:
             url = f"{base_url}/projects/race-proj/timelines/{timeline_id}/save"
-            status, body = _post_json(url, {
-                "config": cfg,
-                "registry": registry,
-                "expected_version": 1,
-            })
+            status, body = _post_json(
+                url,
+                {
+                    "config": cfg,
+                    "registry": registry,
+                    "expected_version": 1,
+                },
+            )
             results.append((status, body))
 
         t1 = threading.Thread(target=do_save, args=(config_a,))
@@ -1987,15 +1973,16 @@ def test_two_concurrent_saves_exactly_one_wins(
 def test_serve_command_is_registered_in_top_level_handlers() -> None:
     """`astrid serve` must be a recognised top-level command."""
     from astrid.core.gateway.dispatch import _top_level_commands
+
     commands = _top_level_commands()
     assert "serve" in commands
 
 
 def test_serve_dispatcher_starts_and_serves_health(
-    seed_bridge_project, tmp_bridge_root: Path,
+    seed_bridge_project,
+    tmp_bridge_root: Path,
 ) -> None:
     """_dispatch_serve creates a working server that responds to /health."""
-
 
     timeline_id = "11111111-1111-1111-1111-111111111111"
     seed_bridge_project(slug="ados-talks", timeline_id=timeline_id)
@@ -2060,10 +2047,10 @@ def test_serve_dispatcher_starts_and_serves_health(
 
 
 def test_serve_dispatcher_with_host_port_and_projects_root_args(
-    tmp_path: Path, seed_bridge_project,
+    tmp_path: Path,
+    seed_bridge_project,
 ) -> None:
     """_dispatch_serve accepts --host, --port, and --projects-root arguments."""
-
 
     projects_dir = tmp_path / "serve-test-projects"
     projects_dir.mkdir()
@@ -2073,13 +2060,16 @@ def test_serve_dispatcher_with_host_port_and_projects_root_args(
     # Instead, verify the argument parser accepts the expected flags.
     import argparse as _argparse
 
-
-    parser = _argparse.ArgumentParser(prog="astrid serve", description="Start the Astrid local read bridge.")
+    parser = _argparse.ArgumentParser(
+        prog="astrid serve", description="Start the Astrid local read bridge."
+    )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=0)
     parser.add_argument("--projects-root", default=None)
 
-    parsed = parser.parse_args(["--host", "0.0.0.0", "--port", "9999", "--projects-root", str(projects_dir)])
+    parsed = parser.parse_args(
+        ["--host", "0.0.0.0", "--port", "9999", "--projects-root", str(projects_dir)]
+    )
     assert parsed.host == "0.0.0.0"
     assert parsed.port == 9999
     assert parsed.projects_root == str(projects_dir)
@@ -2098,9 +2088,7 @@ def test_save_endpoint_422_for_schema_incompatible_config(
     timeline_id = "cccccccc-cccc-cccc-cccc-cccccccccc01"
     timeline_ulid = "01jm4k5n7p0000000000004221"
     with repository_server(tmp_bridge_root) as (base_url, composition):
-        project = _repo_create_project(
-            composition, slug="save-422-proj", key="proj-1"
-        )
+        project = _repo_create_project(composition, slug="save-422-proj", key="proj-1")
         _repo_create_timeline(
             composition,
             project_id=project.id,
@@ -2115,11 +2103,14 @@ def test_save_endpoint_422_for_schema_incompatible_config(
         bad_registry = {"assets": "not-an-object"}
 
         url = f"{base_url}/projects/save-422-proj/timelines/{timeline_id}/save"
-        status, result = _post_json(url, {
-            "config": {"clips": [], "tracks": []},
-            "registry": bad_registry,
-            "expected_version": 1,
-        })
+        status, result = _post_json(
+            url,
+            {
+                "config": {"clips": [], "tracks": []},
+                "registry": bad_registry,
+                "expected_version": 1,
+            },
+        )
 
     assert status == 422
     assert result["error"] == "schema_incompatible"
@@ -2136,11 +2127,14 @@ def test_save_endpoint_400_for_boolean_expected_version(
     timeline_id = "dddddddd-dddd-dddd-dddd-dddddddddddd"
     with repository_server(tmp_bridge_root) as (base_url, _composition):
         url = f"{base_url}/projects/no-such/timelines/{timeline_id}/save"
-        status, error = _post_json(url, {
-            "config": {"tracks": []},
-            "registry": {"assets": {}},
-            "expected_version": True,
-        })
+        status, error = _post_json(
+            url,
+            {
+                "config": {"tracks": []},
+                "registry": {"assets": {}},
+                "expected_version": True,
+            },
+        )
 
     assert status == 400
     assert error["error"] == "invalid_expected_version"
@@ -2156,9 +2150,7 @@ def test_save_stale_and_malformed_requests_make_zero_database_changes(
     timeline_id = "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"
     timeline_ulid = "01jm4k5n7p00000000000zeromut"
     with repository_server(tmp_bridge_root) as (base_url, composition):
-        project = _repo_create_project(
-            composition, slug="zero-mut-proj", key="proj-1"
-        )
+        project = _repo_create_project(composition, slug="zero-mut-proj", key="proj-1")
         _repo_create_timeline(
             composition,
             project_id=project.id,
@@ -2185,18 +2177,22 @@ def test_save_stale_and_malformed_requests_make_zero_database_changes(
         # Boolean version (400 invalid_expected_version).
         attempt({"config": {}, "registry": {"assets": {}}, "expected_version": False})
         # Schema-incompatible registry (422 schema_incompatible).
-        status, body = attempt({
-            "config": {},
-            "registry": {"assets": "oops"},
-            "expected_version": 1,
-        })
+        status, body = attempt(
+            {
+                "config": {},
+                "registry": {"assets": "oops"},
+                "expected_version": 1,
+            }
+        )
         assert (status, body["error"]) == (422, "schema_incompatible")
         # Stale expected version (409 timeline_version_conflict).
-        status, body = attempt({
-            "config": {"tracks": []},
-            "registry": {"assets": {}},
-            "expected_version": 999,
-        })
+        status, body = attempt(
+            {
+                "config": {"tracks": []},
+                "registry": {"assets": {}},
+                "expected_version": 999,
+            }
+        )
         assert (status, body["error"]) == (409, "timeline_version_conflict")
         # Unknown timeline (404 timeline_not_found).
         status, body = _post_json(
@@ -2257,14 +2253,10 @@ class InTreeBridgeContractClient:
         return self._request_json("GET", "/projects")["projects"]
 
     def list_timelines(self, project_slug: str) -> list[dict[str, Any]]:
-        return self._request_json(
-            "GET", f"/projects/{project_slug}/timelines"
-        )["timelines"]
+        return self._request_json("GET", f"/projects/{project_slug}/timelines")["timelines"]
 
     def load_timeline(self, project_slug: str, ref: str) -> dict[str, Any]:
-        return self._request_json(
-            "GET", f"/projects/{project_slug}/timelines/{ref}"
-        )
+        return self._request_json("GET", f"/projects/{project_slug}/timelines/{ref}")
 
     def reload_timeline(self, project_slug: str, ref: str) -> dict[str, Any]:
         """Load again after a save — the provider's reload contract."""
@@ -2313,9 +2305,7 @@ class InTreeBridgeContractClient:
 # ---------------------------------------------------------------------------
 
 
-def _write_source_file(
-    composition, slug: str, rel_path: str, content: bytes
-) -> Path:
+def _write_source_file(composition, slug: str, rel_path: str, content: bytes) -> Path:
     """Write one real media file under the project sources dir on disk."""
     path = composition.projects_root / slug / "sources" / rel_path
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -2425,10 +2415,7 @@ def test_persisted_registry_asset_200_full_response_with_headers(
             registry=registry,
             media={"clip-a": (asset_content, "clip-a.mp4")},
         )
-        url = (
-            f"{base_url}/projects/media-proj/timelines/{timeline_id}"
-            "/assets/clip-a"
-        )
+        url = f"{base_url}/projects/media-proj/timelines/{timeline_id}/assets/clip-a"
         status, headers, body = _get_bytes(url)
 
     assert status == 200
@@ -2491,15 +2478,9 @@ def test_persisted_registry_asset_206_byte_ranges(
         )
         url = f"{base_url}/projects/range-proj/timelines/{timeline_id}/assets/alpha"
 
-        closed_status, closed_headers, closed_body = _get_bytes(
-            url, range_header="bytes=5-14"
-        )
-        open_status, open_headers, open_body = _get_bytes(
-            url, range_header="bytes=20-"
-        )
-        suffix_status, suffix_headers, suffix_body = _get_bytes(
-            url, range_header="bytes=-4"
-        )
+        closed_status, closed_headers, closed_body = _get_bytes(url, range_header="bytes=5-14")
+        open_status, open_headers, open_body = _get_bytes(url, range_header="bytes=20-")
+        suffix_status, suffix_headers, suffix_body = _get_bytes(url, range_header="bytes=-4")
 
     assert closed_status == 206
     assert closed_headers.get("Content-Range") == "bytes 5-14/26"
@@ -2539,17 +2520,18 @@ def test_persisted_registry_asset_304_when_if_none_match_matches(
         assert status == 200
         assert etag
 
-        not_modified_status, not_modified_headers, not_modified_body = (
-            _get_bytes(url, if_none_match=etag)
+        not_modified_status, not_modified_headers, not_modified_body = _get_bytes(
+            url, if_none_match=etag
         )
 
     assert not_modified_status == 304
     assert not_modified_body == b""
+    assert not_modified_headers.get("X-Astrid-Bridge-Version") == "v1"
+    assert not_modified_headers.get("X-Content-Type-Options") == "nosniff"
+    assert not_modified_headers.get("Referrer-Policy") == "no-referrer"
     assert not_modified_headers.get("ETag") == etag
     assert not_modified_headers.get("Last-Modified")
-    assert (
-        not_modified_headers.get("Cache-Control") == "private, no-cache"
-    )
+    assert not_modified_headers.get("Cache-Control") == "private, no-cache"
 
 
 def test_persisted_registry_asset_400_for_malformed_range(
@@ -2568,10 +2550,7 @@ def test_persisted_registry_asset_400_for_malformed_range(
             registry=registry,
             media={"clip": (b"x" * 8, "clip.bin")},
         )
-        url = (
-            f"{base_url}/projects/badrange-proj/timelines/{timeline_id}"
-            "/assets/clip"
-        )
+        url = f"{base_url}/projects/badrange-proj/timelines/{timeline_id}/assets/clip"
         for bad_range in (
             "bytes=abc",
             "items=0-1",
@@ -2579,8 +2558,16 @@ def test_persisted_registry_asset_400_for_malformed_range(
             "bytes=",
             "bytes=-",
         ):
-            status, _headers, body = _get_bytes(url, range_header=bad_range)
+            status, headers, body = _get_bytes(
+                url,
+                range_header=bad_range,
+                origin="http://localhost:3000",
+            )
             assert status == 400, bad_range
+            assert headers.get("X-Astrid-Bridge-Version") == "v1", bad_range
+            assert headers.get("Access-Control-Allow-Origin") == ("http://localhost:3000"), (
+                bad_range
+            )
             assert body in (b"invalid Range header", b"empty Range"), bad_range
 
 
@@ -2608,6 +2595,7 @@ def test_persisted_registry_asset_416_when_range_start_beyond_size(
         )
 
     assert status == 416
+    assert headers.get("X-Astrid-Bridge-Version") == "v1"
     assert headers.get("Content-Range") == "bytes */5"
     assert headers.get("Accept-Ranges") == "bytes"
     assert headers.get("Cache-Control") == "private, no-cache"
@@ -2630,10 +2618,7 @@ def test_persisted_registry_asset_404_for_missing_key(
             timeline_ulid=timeline_ulid,
             registry={"assets": {}},
         )
-        url = (
-            f"{base_url}/projects/nokey-proj/timelines/{timeline_id}"
-            "/assets/no-such-key"
-        )
+        url = f"{base_url}/projects/nokey-proj/timelines/{timeline_id}/assets/no-such-key"
         status, error = _get_error(url)
 
     assert status == 404
@@ -2646,9 +2631,7 @@ def test_persisted_registry_asset_404_for_http_only_locator(
     """HTTP locators are never local: 404 asset_not_local."""
     timeline_id = "aaaaaaa8-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
     timeline_ulid = "01jm4k5n7p0000000000000pa8"
-    registry = {
-        "assets": {"remote": {"file": "https://example.com/video.mp4"}}
-    }
+    registry = {"assets": {"remote": {"file": "https://example.com/video.mp4"}}}
     with repository_server(tmp_bridge_root) as (base_url, composition):
         _repo_seed_asset_timeline(
             composition,
@@ -2692,18 +2675,12 @@ def test_persisted_registry_asset_404_for_unsafe_or_missing_locator(
         # nested file exists inside sources; only the clean one is served.
         (tmp_bridge_root / "escape.png").write_bytes(b"outside")
         for key in ("escape", "absolute", "ghost"):
-            url = (
-                f"{base_url}/projects/unsafe-proj/timelines/{timeline_id}"
-                f"/assets/{key}"
-            )
+            url = f"{base_url}/projects/unsafe-proj/timelines/{timeline_id}/assets/{key}"
             status, error = _get_error(url)
             assert status == 404, key
             assert error["error"] == "asset_not_found", key
 
-        clean_url = (
-            f"{base_url}/projects/unsafe-proj/timelines/{timeline_id}"
-            "/assets/clean"
-        )
+        clean_url = f"{base_url}/projects/unsafe-proj/timelines/{timeline_id}/assets/clean"
         clean_status, _headers, clean_body = _get_bytes(clean_url)
 
     assert clean_status == 200
@@ -2725,24 +2702,17 @@ def test_persisted_registry_asset_project_and_timeline_errors(
             registry={"assets": {}},
         )
 
-        status, error = _get_error(
-            f"{base_url}/projects/%2E%2E/timelines/{timeline_id}/assets/k"
-        )
+        status, error = _get_error(f"{base_url}/projects/%2E%2E/timelines/{timeline_id}/assets/k")
         assert (status, error["error"]) == (400, "invalid_project")
 
-        status, error = _get_error(
-            f"{base_url}/projects/nope/timelines/{timeline_id}/assets/k"
-        )
+        status, error = _get_error(f"{base_url}/projects/nope/timelines/{timeline_id}/assets/k")
         assert (status, error["error"]) == (404, "project_not_found")
 
-        status, error = _get_error(
-            f"{base_url}/projects/ok-proj/timelines/!!!bad!!!/assets/k"
-        )
+        status, error = _get_error(f"{base_url}/projects/ok-proj/timelines/!!!bad!!!/assets/k")
         assert (status, error["error"]) == (400, "invalid_timeline")
 
         status, error = _get_error(
-            f"{base_url}/projects/ok-proj/timelines/"
-            "ffffffff-ffff-ffff-ffff-ffffffffffff/assets/k"
+            f"{base_url}/projects/ok-proj/timelines/ffffffff-ffff-ffff-ffff-ffffffffffff/assets/k"
         )
         assert (status, error["error"]) == (404, "timeline_not_found")
 
@@ -2766,9 +2736,7 @@ def test_persisted_registry_asset_options_preflight(
 
     assert status == 204
     assert headers.get("Access-Control-Allow-Origin") == "http://localhost:3000"
-    assert "GET, HEAD, POST, OPTIONS" in headers.get(
-        "Access-Control-Allow-Methods", ""
-    )
+    assert "GET, HEAD, POST, OPTIONS" in headers.get("Access-Control-Allow-Methods", "")
     assert headers.get("Access-Control-Allow-Headers") == (
         "Authorization, Content-Type, Range, If-None-Match, If-Modified-Since, "
         "X-Astrid-Bridge-Version"
@@ -2788,12 +2756,8 @@ def test_persisted_registry_asset_serves_registered_media_id(
     timeline_ulid = "01jm4k5n7p0000000000000pc1"
     asset_content = b"served through the registered media id\n" * 8
     with repository_server(tmp_bridge_root) as (base_url, composition):
-        project = _repo_create_project(
-            composition, slug="mediaid-proj", key="proj-1"
-        )
-        asset_path = _write_source_file(
-            composition, "mediaid-proj", "mid.bin", asset_content
-        )
+        project = _repo_create_project(composition, slug="mediaid-proj", key="proj-1")
+        asset_path = _write_source_file(composition, "mediaid-proj", "mid.bin", asset_content)
         media = _repo_import_media(
             composition,
             project_id=project.id,
@@ -2833,12 +2797,8 @@ def test_persisted_registry_asset_404_cross_project_locator_alias(
     timeline_ulid = "01jm4k5n7p0000000000000pc2"
     asset_content = b"owned by the other project\n"
     with repository_server(tmp_bridge_root) as (base_url, composition):
-        other = _repo_create_project(
-            composition, slug="other-proj", key="proj-other"
-        )
-        other_path = _write_source_file(
-            composition, "other-proj", "shared.bin", asset_content
-        )
+        other = _repo_create_project(composition, slug="other-proj", key="proj-other")
+        other_path = _write_source_file(composition, "other-proj", "shared.bin", asset_content)
         _repo_import_media(
             composition,
             project_id=other.id,
@@ -2872,12 +2832,8 @@ def test_persisted_registry_asset_404_cross_project_media_id(
     timeline_ulid = "01jm4k5n7p0000000000000pc3"
     asset_content = b"foreign media bytes\n"
     with repository_server(tmp_bridge_root) as (base_url, composition):
-        other = _repo_create_project(
-            composition, slug="foreign-proj", key="proj-foreign"
-        )
-        other_path = _write_source_file(
-            composition, "foreign-proj", "foreign.bin", asset_content
-        )
+        other = _repo_create_project(composition, slug="foreign-proj", key="proj-foreign")
+        other_path = _write_source_file(composition, "foreign-proj", "foreign.bin", asset_content)
         foreign_media = _repo_import_media(
             composition,
             project_id=other.id,
@@ -2917,12 +2873,8 @@ def test_persisted_registry_asset_404_when_local_bytes_do_not_match_hash(
     timeline_ulid = "01jm4k5n7p0000000000000pc4"
     asset_content = b"immutable registered bytes\n" * 6
     with repository_server(tmp_bridge_root) as (base_url, composition):
-        project = _repo_create_project(
-            composition, slug="ext-proj", key="proj-1"
-        )
-        asset_path = _write_source_file(
-            composition, "ext-proj", "ext.bin", asset_content
-        )
+        project = _repo_create_project(composition, slug="ext-proj", key="proj-1")
+        asset_path = _write_source_file(composition, "ext-proj", "ext.bin", asset_content)
         media = _repo_import_media(
             composition,
             project_id=project.id,
@@ -2961,7 +2913,9 @@ def test_persisted_registry_asset_404_when_local_bytes_do_not_match_hash(
 
 
 def test_in_tree_client_completes_provider_restart_journey(
-    tmp_bridge_root: Path, monkeypatch, capsys,
+    tmp_bridge_root: Path,
+    monkeypatch,
+    capsys,
 ) -> None:
     """The in-tree contract client proves the complete HTTP journey.
 
@@ -2985,9 +2939,7 @@ def test_in_tree_client_completes_provider_restart_journey(
         # Fresh database: empty project list.
         assert client.list_projects() == []
 
-        project = _repo_create_project(
-            composition, slug="journey-proj", key="proj-1"
-        )
+        project = _repo_create_project(composition, slug="journey-proj", key="proj-1")
         _repo_create_timeline(
             composition,
             project_id=project.id,
@@ -2999,9 +2951,7 @@ def test_in_tree_client_completes_provider_restart_journey(
         )
 
         # list: project and timeline discovery rows.
-        assert [row["slug"] for row in client.list_projects()] == [
-            "journey-proj"
-        ]
+        assert [row["slug"] for row in client.list_projects()] == ["journey-proj"]
         timeline_rows = client.list_timelines("journey-proj")
         assert [row["timeline_id"] for row in timeline_rows] == [timeline_id]
         assert timeline_rows[0]["is_default"] is False
@@ -3058,13 +3008,16 @@ def test_in_tree_client_completes_provider_restart_journey(
 
         def race(cfg: dict[str, Any]) -> None:
             try:
-                outcome: tuple[int, dict[str, Any]] = (200, client.save_timeline(
-                    "journey-proj",
-                    timeline_id,
-                    config=cfg,
-                    registry={"assets": {}},
-                    expected_version=2,
-                ))
+                outcome: tuple[int, dict[str, Any]] = (
+                    200,
+                    client.save_timeline(
+                        "journey-proj",
+                        timeline_id,
+                        config=cfg,
+                        registry={"assets": {}},
+                        expected_version=2,
+                    ),
+                )
             except BridgeClientHTTPError as exc:
                 outcome = (exc.status, exc.payload)
             with outcomes_lock:
@@ -3089,9 +3042,7 @@ def test_in_tree_client_completes_provider_restart_journey(
         snapshot = _repo_db_snapshot(composition)
         assert snapshot["saved_events"] == 2  # the v2 save + one race winner
         assert snapshot["save_receipts"] == 2
-        final_config = client.reload_timeline(
-            "journey-proj", timeline_id
-        )["config"]
+        final_config = client.reload_timeline("journey-proj", timeline_id)["config"]
         assert final_config in (config_3a, config_3b)
 
         # Runtime diagnostics recorded the whole journey.
@@ -3107,12 +3058,8 @@ def test_in_tree_client_completes_provider_restart_journey(
     # save (finding CF-F7D02052E469F1116F83 durability evidence).
     with repository_server(tmp_bridge_root) as (base_url2, _composition2):
         client2 = InTreeBridgeContractClient(base_url2)
-        assert [row["slug"] for row in client2.list_projects()] == [
-            "journey-proj"
-        ]
-        reloaded_after_restart = client2.load_timeline(
-            "journey-proj", timeline_id
-        )
+        assert [row["slug"] for row in client2.list_projects()] == ["journey-proj"]
+        reloaded_after_restart = client2.load_timeline("journey-proj", timeline_id)
         assert reloaded_after_restart["config_version"] == 3
         assert reloaded_after_restart["config"] in (config_3a, config_3b)
 
@@ -3169,9 +3116,7 @@ def test_serve_editor_path_opens_and_prints_readiness(
     assert opened == [editor.resolve()]
 
 
-def test_serve_no_open_editor_skips_editor(
-    tmp_bridge_root: Path, monkeypatch, capsys
-) -> None:
+def test_serve_no_open_editor_skips_editor(tmp_bridge_root: Path, monkeypatch, capsys) -> None:
     import astrid.core.gateway.dispatch as dispatch_mod
 
     opened: list[Path] = []
@@ -3189,9 +3134,7 @@ def test_serve_no_open_editor_skips_editor(
     assert opened == []
 
 
-def test_serve_missing_editor_path_exits_one(
-    tmp_bridge_root: Path, monkeypatch, capsys
-) -> None:
+def test_serve_missing_editor_path_exits_one(tmp_bridge_root: Path, monkeypatch, capsys) -> None:
     import astrid.core.gateway.dispatch as dispatch_mod
 
     missing = tmp_bridge_root / "does-not-exist"
@@ -3205,15 +3148,11 @@ def test_serve_missing_editor_path_exits_one(
     assert "--editor-path does not exist" in err
 
 
-def test_serve_unopenable_database_exits_one(
-    tmp_bridge_root: Path, monkeypatch, capsys
-) -> None:
+def test_serve_unopenable_database_exits_one(tmp_bridge_root: Path, monkeypatch, capsys) -> None:
     import astrid.core.gateway.dispatch as dispatch_mod
 
     (tmp_bridge_root / ".astrid").mkdir()
-    (tmp_bridge_root / ".astrid" / "astrid.sqlite3").write_bytes(
-        b"not a sqlite database"
-    )
+    (tmp_bridge_root / ".astrid" / "astrid.sqlite3").write_bytes(b"not a sqlite database")
     code = dispatch_mod._dispatch_serve(["--projects-root", str(tmp_bridge_root)])
     err = capsys.readouterr().err
 
@@ -3222,9 +3161,7 @@ def test_serve_unopenable_database_exits_one(
     assert "cannot open the Astrid database" in err
 
 
-def test_serve_readiness_without_editor_bundle(
-    tmp_bridge_root: Path, monkeypatch, capsys
-) -> None:
+def test_serve_readiness_without_editor_bundle(tmp_bridge_root: Path, monkeypatch, capsys) -> None:
     import astrid.core.gateway.dispatch as dispatch_mod
 
     opened: list[Path] = []
