@@ -106,9 +106,12 @@ _FROZEN_LEGITIMATE_UPDATES = {
     "astrid/packs/rendering/executors/timeline_storyboard/STAGE.md": "b768588e",
     "astrid/core/timeline/_shared.py": "b768588e",
     # 2ea0d0da added the explicit timeline-schema import path used by the
-    # server-owned render worker. Its parent snapshot is the pre-update blob;
-    # later commits must remain byte-identical to the reviewed 2ea0d0da bytes.
-    "astrid/core/timeline/banodoco_schema.py": "b768588e",
+    # server-owned render worker. bd5998ae then made the reviewed narrowing
+    # of the clip allowlist to match the pinned schema (retiring the legacy
+    # ``keyframes`` and ``derived_output`` fields). Treat 2ea0d0da as the
+    # pre-update authoritative snapshot; later commits must remain
+    # byte-identical to the current reviewed bytes.
+    "astrid/core/timeline/banodoco_schema.py": "2ea0d0da",
 }
 
 REPO_ROOT = TESTS_ROOT.parent
@@ -1816,7 +1819,10 @@ class TestImmutabilityFence:
             commits = [line.split()[0] for line in out.stdout.strip().splitlines() if line.strip()]
             for commit in commits:
                 if commit == legit_update_at:
-                    continue
+                    # ``git log`` is newest-first: older history is the
+                    # pre-update baseline and is not compared to current
+                    # bytes.
+                    break
                 committed = subprocess.run(
                     ["git", "show", f"{commit}:{rel}"],
                     capture_output=True,
