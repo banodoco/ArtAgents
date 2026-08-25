@@ -9,7 +9,6 @@ import pytest
 
 from scripts.reshape.installed_artifact import InstalledArtifactHarness, build_once
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -77,13 +76,14 @@ def manifest_catalog(relative):
         tables_block = re.search(
             r"(?ms)^\s{4}tables:\s*\n((?:^\s{6}-\s+[^\n]+\n?)+)", entry
         )
-        if tables_block is None:
+        empty_tables = re.search(r"(?m)^\s{4}tables:\s*\[\s*\]\s*$", entry)
+        if tables_block is None and empty_tables is None:
             raise AssertionError(f"missing migration tables in {relative}")
         tables = tuple(
             line.strip()[2:].strip()
             for line in tables_block.group(1).splitlines()
             if line.strip().startswith("-")
-        )
+        ) if tables_block is not None else ()
         migrations.append({"version": version, "path": path, "tables": tables})
     return {"mounts": mounts, "migrations": migrations, "text": text}
 
@@ -267,6 +267,7 @@ assert tables == expected_tables, sorted(tables ^ expected_tables)
 assert migration_rows == {
     ("core", 1),
     ("timeline", 1),
+    ("timeline", 2),
     ("shots", 1),
     ("shots", 2),
     ("references", 1),
@@ -343,6 +344,7 @@ def test_installed_contract_uses_manifest_runtime_and_migration_evidence(
     assert {tuple(row) for row in payload["migration_rows"]} == {
         ("core", 1),
         ("timeline", 1),
+        ("timeline", 2),
         ("shots", 1),
         ("shots", 2),
         ("references", 1),

@@ -177,6 +177,24 @@ def test_standard_composition_derives_23_table_catalog() -> None:
     assert frozen.tables["runaway_transitions"] == "runaway"
 
 
+def test_timeline_project_data_migration_declares_no_new_owned_table() -> None:
+    """An ALTER-only migration keeps ownership on the original table.
+
+    ``tables`` describes tables introduced by each migration, so the v2
+    project-data migration is deliberately empty while its SQL alters the
+    already-owned ``timelines`` table. The installed contract probe must
+    preserve this distinction instead of requiring a duplicate owner.
+    """
+    registry = SchemaPackRegistry()
+    register_standard_schema_packs(registry)
+    frozen = registry.freeze()
+    migration = frozen.migration("timeline", 2)
+    assert migration is not None
+    assert migration.name == "project-data"
+    assert migration.tables == ()
+    assert frozen.tables["timelines"] == "timeline"
+
+
 def test_standard_composition_declares_pack_vocabulary_and_mounts() -> None:
     registry = SchemaPackRegistry()
     register_core_vocabulary(registry)

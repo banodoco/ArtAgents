@@ -1494,6 +1494,22 @@ def test_one_installed_wheel_completes_the_local_first_run(
         ],
     )
     assert after_backup["ok"] is True
+    refused_restore = _run_expected_failure(
+        harness,
+        records,
+        "backup-restore-without-force",
+        [
+            "backup",
+            "restore",
+            str(backup_path),
+            "--projects-root",
+            str(harness.roots.project),
+            "--json",
+        ],
+    )
+    assert refused_restore["ok"] is False
+    assert refused_restore["error"] == "restore_validation"
+    assert "--force" in refused_restore["detail"]
     restored = _run_json(
         harness,
         records,
@@ -1504,6 +1520,7 @@ def test_one_installed_wheel_completes_the_local_first_run(
             str(backup_path),
             "--projects-root",
             str(harness.roots.project),
+            "--force",
             "--json",
         ],
     )
