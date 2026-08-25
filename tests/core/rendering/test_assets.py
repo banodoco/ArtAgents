@@ -23,8 +23,17 @@ def _write_registry(path: Path, assets: dict[str, dict[str, object]]) -> Path:
     return path
 
 
-def _read(url: str, *, range_header: str | None = None) -> tuple[int, object, bytes]:
-    headers = {} if range_header is None else {"Range": range_header}
+def _read(
+    url: str,
+    *,
+    range_header: str | None = None,
+    origin: str | None = None,
+) -> tuple[int, object, bytes]:
+    headers = {}
+    if range_header is not None:
+        headers["Range"] = range_header
+    if origin is not None:
+        headers["Origin"] = origin
     request = urllib.request.Request(url, headers=headers)
     with urllib.request.urlopen(request, timeout=5) as response:
         return response.status, response.headers, response.read()
@@ -314,6 +323,45 @@ def test_server_binds_once_to_loopback_port_zero_and_joins_thread(tmp_path: Path
     assert thread is not None and not thread.is_alive()
     server.close()
     assert not thread.is_alive()
+
+
+def test_asset_server_allows_only_owned_remotion_browser_origin(tmp_path: Path) -> None:
+    staging = tmp_path / "stage"
+    staging.mkdir()
+    asset = staging / "asset.bin"
+    asset.write_bytes(b"cors-scoped asset")
+
+    with _running_server(staging) as server:
+        status, headers, body = _read(
+            server.local_url(asset),
+            origin=asset_service.REMOTION_BROWSER_ORIGIN,
+        )
+        assert status == 200
+        assert body == asset.read_bytes()
+        assert headers["Access-Control-Allow-Origin"] == asset_service.REMOTION_BROWSER_ORIGIN
+        assert headers["Vary"] == "Origin"
+
+
+@pytest.mark.parametrize("origin", [
+    "http://127.0.0.1:3000",
+    "http://localhost:5173",
+    "https://localhost:3000",
+    "https://attacker.example",
+])
+def test_asset_server_does_not_advertise_cors_to_unowned_origins(
+    tmp_path: Path,
+    origin: str,
+) -> None:
+    staging = tmp_path / "stage"
+    staging.mkdir()
+    asset = staging / "asset.bin"
+    asset.write_bytes(b"cors-private asset")
+
+    with _running_server(staging) as server:
+        status, headers, body = _read(server.local_url(asset), origin=origin)
+        assert status == 200
+        assert body == asset.read_bytes()
+        assert headers.get("Access-Control-Allow-Origin") is None
 
 
 def test_bound_socket_is_closed_when_thread_construction_fails(

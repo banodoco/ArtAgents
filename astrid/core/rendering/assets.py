@@ -494,6 +494,7 @@ class AssetMaterializer:
 
 
 _RANGE_RE = re.compile(r"^bytes=(\d*)-(\d*)$")
+REMOTION_BROWSER_ORIGIN = "http://localhost:3000"
 
 
 class RangeHTTPRequestHandler(SimpleHTTPRequestHandler):
@@ -502,11 +503,25 @@ class RangeHTTPRequestHandler(SimpleHTTPRequestHandler):
     def log_message(self, format: str, *args: object) -> None:  # noqa: A002
         return
 
+    def _send_renderer_cors_headers(self) -> None:
+        """Allow only the server-owned Remotion browser to read an asset.
+
+        The renderer's Chromium page is served from this fixed local origin.
+        Do not reflect arbitrary ``Origin`` values: this server exposes
+        invocation-scoped media and is intentionally not a general CORS
+        endpoint.
+        """
+
+        if self.headers.get("Origin") == REMOTION_BROWSER_ORIGIN:
+            self.send_header("Access-Control-Allow-Origin", REMOTION_BROWSER_ORIGIN)
+            self.send_header("Vary", "Origin")
+
     def _send_416(self, size: int) -> None:
         self.send_response(416, "Range Not Satisfiable")
         self.send_header("Accept-Ranges", "bytes")
         self.send_header("Content-Range", f"bytes */{size}")
         self.send_header("Content-Length", "0")
+        self._send_renderer_cors_headers()
         self.end_headers()
 
     def _resolved_file(self) -> Path | None:
@@ -578,6 +593,7 @@ class RangeHTTPRequestHandler(SimpleHTTPRequestHandler):
             self.send_header("Accept-Ranges", "bytes")
             self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
             self.send_header("Content-Length", str(length))
+            self._send_renderer_cors_headers()
             self.end_headers()
             return source
 
@@ -586,6 +602,7 @@ class RangeHTTPRequestHandler(SimpleHTTPRequestHandler):
         self.send_header("Content-Type", self.guess_type(str(path)))
         self.send_header("Accept-Ranges", "bytes")
         self.send_header("Content-Length", str(size))
+        self._send_renderer_cors_headers()
         self.end_headers()
         return source
 
@@ -728,4 +745,5 @@ __all__ = [
     "InvocationAssetServer",
     "MaterializedAsset",
     "RangeHTTPRequestHandler",
+    "REMOTION_BROWSER_ORIGIN",
 ]
