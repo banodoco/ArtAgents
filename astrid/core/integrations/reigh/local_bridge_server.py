@@ -735,9 +735,12 @@ def make_local_bridge_handler(*, projects_root: Path):
 
             local_path, file_size = verified
             stat = local_path.stat()
-            content_type, _ = mimetypes.guess_type(str(local_path))
-            if content_type is None:
-                content_type = "application/octet-stream"
+            # Managed media lives at content-addressed paths whose basename has
+            # no useful extension.  Guessing from that storage path silently
+            # downgraded typed audio/video assets to application/octet-stream.
+            # The repository row is the authoritative media contract and is
+            # already project-scoped and content-verified above.
+            content_type = media_model.mime_type or "application/octet-stream"
             etag = f'"{stat.st_mtime_ns:x}-{file_size:x}"'
             last_modified = formatdate(stat.st_mtime, usegmt=True)
             self._serve_resolved_asset(

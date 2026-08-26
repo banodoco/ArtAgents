@@ -1106,7 +1106,7 @@ def test_asset_200_full_response_with_correct_headers(
     assert headers.get("Cache-Control") == "private, no-cache"
     assert headers.get("ETag")
     assert headers.get("Last-Modified")
-    assert headers.get("Content-Type") in ("video/mp4", "application/octet-stream")
+    assert headers.get("Content-Type") == "video/mp4"
     assert int(headers.get("Content-Length", "0")) == len(asset_content)
     assert body == asset_content
 
@@ -1136,7 +1136,47 @@ def test_asset_head_response_with_media_headers(
     assert headers.get("Cache-Control") == "private, no-cache"
     assert headers.get("ETag")
     assert headers.get("Last-Modified")
+    assert headers.get("Content-Type") == "video/mp4"
     assert int(headers.get("Content-Length", "0")) == len(asset_content)
+
+
+def test_typed_audio_asset_preserves_repository_mime_for_get_head_and_range(
+    tmp_bridge_root: Path,
+) -> None:
+    """Content-addressed storage must not erase a typed audio transport contract."""
+    timeline_id = "a1a1a1a1-a1a1-a1a1-a1a1-a1a1a1a1a1a1"
+    timeline_ulid = "01JM4K5N7P0000000000000A1A"
+    registry = {"assets": {"carrier": {"file": "carrier.aac", "type": "audio/aac"}}}
+    asset_content = b"aac-carrier-bytes-for-range-proof"
+    with repository_server(tmp_bridge_root) as (base_url, composition):
+        _repo_seed_asset_timeline(
+            composition,
+            slug="audio-media-proj",
+            timeline_id=timeline_id,
+            timeline_ulid=timeline_ulid,
+            registry=registry,
+            media={"carrier": (asset_content, "carrier.aac")},
+        )
+        url = f"{base_url}/projects/audio-media-proj/timelines/{timeline_id}/assets/carrier"
+        status, headers, body = _get_bytes(url)
+        head_status, head_headers = _head(url)
+        range_status, range_headers, range_body = _get_bytes(
+            url,
+            range_header="bytes=4-10",
+        )
+
+    assert status == 200
+    assert headers.get("Content-Type") == "audio/x-aac"
+    assert body == asset_content
+    assert head_status == 200
+    assert head_headers.get("Content-Type") == "audio/x-aac"
+    assert int(head_headers.get("Content-Length", "0")) == len(asset_content)
+    assert range_status == 206
+    assert range_headers.get("Content-Type") == "audio/x-aac"
+    assert range_headers.get("Content-Range") == (
+        f"bytes 4-10/{len(asset_content)}"
+    )
+    assert range_body == asset_content[4:11]
 
 
 def test_asset_206_byte_range(
@@ -2423,10 +2463,7 @@ def test_persisted_registry_asset_200_full_response_with_headers(
     assert headers.get("Cache-Control") == "private, no-cache"
     assert headers.get("ETag")
     assert headers.get("Last-Modified")
-    assert headers.get("Content-Type") in (
-        "video/mp4",
-        "application/octet-stream",
-    )
+    assert headers.get("Content-Type") == "video/mp4"
     assert int(headers.get("Content-Length", "0")) == len(asset_content)
     assert body == asset_content
 
@@ -2456,6 +2493,7 @@ def test_persisted_registry_asset_head_returns_headers_without_body(
     assert headers.get("Cache-Control") == "private, no-cache"
     assert headers.get("ETag")
     assert headers.get("Last-Modified")
+    assert headers.get("Content-Type") == "application/octet-stream"
     assert int(headers.get("Content-Length", "0")) == len(asset_content)
 
 
