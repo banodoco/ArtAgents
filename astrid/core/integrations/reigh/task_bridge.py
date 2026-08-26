@@ -126,13 +126,20 @@ _DIAGNOSTIC_SECRET_KEY_PARTS = frozenset(
 _DIAGNOSTIC_SECRET_TEXT_RE = re.compile(
     r"(?ix)"
     r"(?:"
-    r"(?:\b(?:authorization|bearer)\s*[:=]\s*(?:bearer\s+)?|"
+    r"(?P<url_scheme>\b[a-z][a-z0-9+.-]*://)[^@\s/]+@"
+    r"|\b(?:AKIA|ASIA|AIDA|AROA)[A-Z0-9]{16}\b"
+    r"|\bAIza[0-9A-Za-z_-]{35}\b"
+    r"|(?:\b(?:authorization|bearer)\s*[:=]\s*(?:bearer\s+)?|"
     r"\bbearer\s+|"
     r"\b(?:access[_ -]?token|api[_ -]?(?:key|token)|password|refresh[_ -]?token|secret|token)\s*[:=]\s*)"
     r"[^\s,;]+"
     r"|\b(?:api[_ -]?token|secret|token)\s+(?:is\s+)?[^\s,;]+"
     r"|\b(?:sk|rk|pk|gh[pousr]|glpat|xox[baprs])[-_][A-Za-z0-9._-]+"
     r"|\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}(?:\.[A-Za-z0-9_-]{10,})?"
+    r"|\bfile://[^\s,;\"'<>)]*"
+    r"|(?<![\w./:])/(?:Users|private/|tmp/|var/|home/|mnt/|Volumes/|opt/|Applications/|System/|usr/|etc/|workspace/|workspaces/)[^\s,;\"'<>)]*"
+    r"|(?<![\w./:])/(?:[^/\s]+/)*\.astrid/staging[^\s,;\"'<>)]*"
+    r"|\b[A-Z]:[\\/][^\s,;\"'<>)]*"
     r")"
 )
 
@@ -144,7 +151,16 @@ def _diagnostic_secret_key(key: str) -> bool:
 
 def _redact_diagnostic_text(value: str, *, limit: int) -> str:
     bounded = value[:limit]
-    return _DIAGNOSTIC_SECRET_TEXT_RE.sub("[redacted]", bounded)
+
+    def replace(match: re.Match[str]) -> str:
+        scheme = match.groupdict().get("url_scheme")
+        if scheme:
+            # Preserve the useful host/path portion of a URL while removing
+            # userinfo (which may contain a password or access token).
+            return f"{scheme}[redacted]@"
+        return "[redacted]"
+
+    return _DIAGNOSTIC_SECRET_TEXT_RE.sub(replace, bounded)
 
 
 def _safe_diagnostic_value(value: Any, *, depth: int = 0) -> Any:

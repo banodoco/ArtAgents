@@ -1052,6 +1052,75 @@ class TestTaskReads:
             assert "details" not in diagnostics["error"]
             assert diagnostics["progress"]["phase"] == "render"
 
+    def test_detail_diagnostics_redact_urls_cloud_keys_and_local_paths(
+        self, tmp_bridge_root: Path
+    ) -> None:
+        with task_server(tmp_bridge_root) as env:
+            slug = "adversarial-diagnostics-proj"
+            composition = env["composition"]
+            _create_project(composition, slug)
+            _, admitted = _admit_simple(env, slug, "adversarial-diagnostics-admit")
+            task_id = admitted["task"]["id"]
+            _, claim = _post(
+                env,
+                "/queue/claim",
+                body={
+                    "executor_id": "render-worker",
+                    "capabilities": ["reigh.image_upscale"],
+                },
+            )
+            attempt_id = claim["attempt"]["id"]
+            url_secret = "local-password"
+            aws_access_key = "AKIAIOSFODNN7EXAMPLE"
+            google_api_key = "AIza" + ("A" * 35)
+            local_path = "/Users/alice/project/.astrid/staging/txn-123/output.mp4"
+            windows_path = r"C:\Users\alice\project\output.mp4"
+            failure_message = (
+                "useful renderer context; "
+                f"endpoint https://alice:{url_secret}@example.com/render; "
+                f"aws {aws_access_key}; google {google_api_key}; "
+                f"artifact {local_path}; windows {windows_path}"
+            )
+            UnitOfWork(composition.writer).run(
+                lambda uow: uow.execute(
+                    "UPDATE execution_attempts SET progress_json = ?, error_json = ? WHERE id = ?",
+                    (
+                        json.dumps(
+                            {
+                                "phase": "render",
+                                "endpoint": f"https://alice:{url_secret}@example.com/render",
+                                "artifact": local_path,
+                            }
+                        ),
+                        json.dumps(
+                            {
+                                "code": "render_export_failed",
+                                "message": failure_message,
+                                "retryable": False,
+                            }
+                        ),
+                        attempt_id,
+                    ),
+                )
+            )
+
+            detail_status, detail = _get(env, f"/projects/{slug}/tasks/{task_id}")
+            assert detail_status == 200
+            diagnostics = detail["task"]["attempts"][0]["diagnostics"]
+            serialized = json.dumps(diagnostics)
+            assert "useful renderer context" in serialized
+            assert "example.com/render" in serialized
+            for secret in (
+                url_secret,
+                aws_access_key,
+                google_api_key,
+                local_path,
+                windows_path,
+            ):
+                assert secret not in serialized
+            assert "endpoint" in diagnostics["progress"]
+            assert "artifact" in diagnostics["progress"]
+
 
 # ---------------------------------------------------------------------------
 # T7: atomic multipart completion + fenced failure
