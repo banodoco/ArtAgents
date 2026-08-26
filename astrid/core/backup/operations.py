@@ -398,6 +398,31 @@ def _remove_publication_path(path: Path) -> None:
         path.unlink(missing_ok=True)
 
 
+def _read_backup_metadata(path: Path) -> dict[str, object]:
+    """Read and validate one backup envelope before it can be restored."""
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RestoreValidationError(
+            f"invalid backup metadata: {path}"
+        ) from exc
+    if not isinstance(payload, dict):
+        raise RestoreValidationError(
+            f"invalid backup metadata shape: {path} (expected an object)"
+        )
+    version = payload.get("version")
+    if not isinstance(version, int) or isinstance(version, bool):
+        raise RestoreValidationError(
+            f"invalid backup metadata version: {path} (expected an integer)"
+        )
+    if version != BACKUP_FORMAT_VERSION:
+        raise RestoreValidationError(
+            f"unsupported backup metadata version {version} in {path}; "
+            f"expected {BACKUP_FORMAT_VERSION}"
+        )
+    return payload
+
+
 def _backup_artifact_complete(path: Path) -> bool:
     """Return whether *path* has the complete directory-level layout."""
     if not path.is_dir():
@@ -409,12 +434,10 @@ def _backup_artifact_complete(path: Path) -> bool:
     if not (path / BACKUP_MEDIA_DIR).is_dir():
         return False
     try:
-        payload = json.loads(
-            (path / BACKUP_METADATA_NAME).read_text(encoding="utf-8")
-        )
-    except (OSError, json.JSONDecodeError):
+        _read_backup_metadata(path / BACKUP_METADATA_NAME)
+    except RestoreValidationError:
         return False
-    return isinstance(payload, dict) and payload.get("version") == BACKUP_FORMAT_VERSION
+    return True
 
 
 def _read_publication_marker(marker: Path, dest: Path) -> dict[str, object]:
@@ -903,6 +926,7 @@ def _validate_backup_layout(backup: Path) -> None:
         raise RestoreValidationError(
             f"backup is missing {BACKUP_MEDIA_DIR}: {backup}"
         )
+    _read_backup_metadata(backup / BACKUP_METADATA_NAME)
 
 
 def _count_files(directory: Path) -> int:
