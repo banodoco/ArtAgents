@@ -12,6 +12,7 @@ import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -144,7 +145,7 @@ def test_renderer_inputs_are_inode_isolated_and_cleaned(
         "content_sha256"
     ].removeprefix("sha256:")
     managed = managed_media_path(tmp_path, digest)
-    captured: dict[str, Path] = {}
+    captured: dict[str, Any] = {}
 
     def fake_run_executor(request, _registry):
         owned_registry_path = Path(request.inputs["assets_registry"])
@@ -165,6 +166,7 @@ def test_renderer_inputs_are_inode_isolated_and_cleaned(
 
         captured["owned_root"] = owned_registry_path.parent
         captured["staged_asset"] = staged_asset
+        captured["execution_mode"] = request.execution_mode
         owned_asset.write_bytes(b"renderer mutated its private input")
         output = Path(request.out) / request.inputs["output_name"]
         output.write_bytes(b"\x00\x00\x00\x18ftyp")
@@ -186,6 +188,7 @@ def test_renderer_inputs_are_inode_isolated_and_cleaned(
     assert sha256_file_bytes(managed) == digest
     assert sha256_file_bytes(captured["staged_asset"]) == digest
     assert not captured["owned_root"].exists()
+    assert captured["execution_mode"] == "in_process"
 
 
 def test_owned_input_setup_failure_is_cleaned(tmp_path: Path) -> None:

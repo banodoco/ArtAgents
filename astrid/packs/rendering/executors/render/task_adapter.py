@@ -390,6 +390,15 @@ class RenderExportTaskAdapter:
                         project_was_auto_resolved=True,
                         projects_root=self._projects_root,
                         invocation="render-export-task",
+                        # The bridge worker already isolates this adapter in a
+                        # dedicated subprocess.  Running the pack entrypoint in
+                        # that process keeps the exact Astrid source/runtime
+                        # pin that admitted the task.  A second ``python -m``
+                        # hop drops the source checkout from the canonical
+                        # child environment and can import an unrelated
+                        # editable Astrid installation, whose schema-pack
+                        # composition may reject the project's migrations.
+                        execution_mode="in_process",
                     ),
                     load_default_registry(),
                 )
