@@ -28,10 +28,58 @@ from tempfile import TemporaryDirectory
 from typing import Any, Callable, Mapping, Protocol
 from urllib.parse import urlsplit
 
+from astrid.core.subprocess_env import build_child_subprocess_env
+
 _LOG = logging.getLogger(__name__)
 _MAX_OUTPUT_BYTES = 2 * 1024 * 1024 * 1024
 _PROCESS_POLL_SECONDS = 0.25
 _PROCESS_TERM_GRACE_SECONDS = 3.0
+_CHILD_DIAGNOSTIC_TAIL_BYTES = 64 * 1024
+_CHILD_FAILURE_MESSAGE_CHARS = 3_500
+
+
+class _BoundedByteTail:
+    """Continuously drain a byte stream while retaining only its bounded tail."""
+
+    def __init__(self, max_bytes: int = _CHILD_DIAGNOSTIC_TAIL_BYTES) -> None:
+        self._max_bytes = max(1, int(max_bytes))
+        self._data = bytearray()
+
+    def append(self, chunk: bytes) -> None:
+        self._data.extend(chunk)
+        overflow = len(self._data) - self._max_bytes
+        if overflow > 0:
+            del self._data[:overflow]
+
+    def text(self) -> str:
+        return bytes(self._data).decode("utf-8", errors="replace").strip()
+
+
+def _drain_child_stream(stream: Any, tail: _BoundedByteTail) -> None:
+    if stream is None:
+        return
+    try:
+        while True:
+            chunk = stream.read(8192)
+            if not chunk:
+                return
+            tail.append(chunk)
+    finally:
+        stream.close()
+
+
+def _bounded_child_failure(returncode: int, stdout: str, stderr: str) -> str:
+    """Format actionable child diagnostics within the bridge error contract."""
+
+    parts = [f"render_export child exited with code {returncode}"]
+    if stderr:
+        parts.append(f"stderr tail:\n{stderr[-2_700:]}")
+    if stdout:
+        parts.append(f"stdout tail:\n{stdout[-500:]}")
+    message = "\n".join(parts)
+    if len(message) <= _CHILD_FAILURE_MESSAGE_CHARS:
+        return message
+    return message[:120] + "\n…diagnostic tail truncated…\n" + message[-3_300:]
 
 
 class RenderExportWorkerTransport(Protocol):
@@ -443,13 +491,13 @@ class RenderExportWorker:
             "--deadline-seconds",
             str(self._deadline_seconds),
         ]
-        child_env = os.environ.copy()
+        # Use the canonical child environment allowlist. In particular, a
+        # renderer must not inherit ambient API keys/tokens merely because the
+        # serve process has them; diagnostics can therefore be surfaced safely.
+        child_env = build_child_subprocess_env(base=os.environ, parent=os.environ)
         schema_pythonpath = child_env.get("ASTRID_TIMELINE_SCHEMA_PYTHONPATH")
         if schema_pythonpath:
-            existing_pythonpath = child_env.get("PYTHONPATH")
-            child_env["PYTHONPATH"] = os.pathsep.join(
-                path for path in (schema_pythonpath, existing_pythonpath) if path
-            )
+            child_env["PYTHONPATH"] = schema_pythonpath
         # The renderer child has no bridge authority and must not inherit the
         # serve bearer token.  It receives only the frozen task JSON and the
         # validated projects-root argument.
@@ -459,12 +507,28 @@ class RenderExportWorker:
             cwd=str(Path(__file__).resolve().parents[4]),
             env=child_env,
             stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            # Do not leave a pipe undrained while a renderer is running; a
-            # noisy child must never deadlock the lease owner.
-            stderr=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             start_new_session=True,
         )
+        stdout_tail = _BoundedByteTail()
+        stderr_tail = _BoundedByteTail()
+        diagnostic_threads = (
+            threading.Thread(
+                target=_drain_child_stream,
+                args=(child.stdout, stdout_tail),
+                name="astrid-render-export-stdout",
+                daemon=True,
+            ),
+            threading.Thread(
+                target=_drain_child_stream,
+                args=(child.stderr, stderr_tail),
+                name="astrid-render-export-stderr",
+                daemon=True,
+            ),
+        )
+        for thread in diagnostic_threads:
+            thread.start()
         containment = _ProcessContainment(child.pid)
         deadline = time.monotonic() + float(self._deadline_seconds)
         if self._run_deadline_at is not None:
@@ -482,9 +546,25 @@ class RenderExportWorker:
                     heartbeat({"phase": "render", "percent": 10})
                     next_heartbeat = now + 5.0
                 time.sleep(_PROCESS_POLL_SECONDS)
-            child.communicate(timeout=1)
-            if child.returncode != 0:
-                raise RenderExportWorkerError("render_export child failed")
+            returncode = int(child.returncode or 0)
+            # Descendants may inherit the pipes after the direct child exits.
+            # Terminate the complete observed scope before joining drainers so
+            # a detached renderer cannot hold diagnostics open forever.
+            containment.terminate()
+            for thread in diagnostic_threads:
+                thread.join(timeout=_PROCESS_TERM_GRACE_SECONDS)
+            if any(thread.is_alive() for thread in diagnostic_threads):
+                raise RenderExportWorkerError(
+                    "render_export child diagnostics did not drain after containment"
+                )
+            if returncode != 0:
+                raise RenderExportWorkerError(
+                    _bounded_child_failure(
+                        returncode,
+                        stdout_tail.text(),
+                        stderr_tail.text(),
+                    )
+                )
         except BaseException:  # noqa: BLE001 - clear deadline on interruption too
             containment.terminate()
             try:
@@ -498,12 +578,13 @@ class RenderExportWorker:
                 except ProcessLookupError:
                     pass
                 child.wait(timeout=_PROCESS_TERM_GRACE_SECONDS)
+            for thread in diagnostic_threads:
+                thread.join(timeout=_PROCESS_TERM_GRACE_SECONDS)
             raise
         # A renderer may report success while a descendant it spawned is
         # still alive (or has detached into another session).  The containment
         # pass is therefore mandatory on the success path too, before the
         # staging directory is read/removed and the claim can be settled.
-        containment.terminate()
         manifest = json.loads((staging_dir / "manifest.json").read_text(encoding="utf-8"))
         if not isinstance(manifest, Mapping):
             raise RenderExportWorkerError("render_export child manifest is invalid")

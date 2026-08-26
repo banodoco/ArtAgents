@@ -370,11 +370,11 @@ _LEGACY_CONTAINER_KEYS = frozenset({"schema_version", "assembly", "pool", "arran
 _THEME_OVERRIDES_ALLOWED = frozenset({"visual", "generation", "voice", "audio", "pacing"})
 _CLIP_ALLOWED = frozenset(
     {
-        "id", "at", "track", "clipType", "asset", "from", "to", "speed", "hold",
+        "id", "at", "track", "clipType", "label", "asset", "from", "to", "speed", "hold",
         "volume", "x", "y", "width", "height", "cropTop", "cropBottom",
         "cropLeft", "cropRight", "opacity", "params", "text", "entrance", "exit",
         "continuous", "transition", "effects", "source_uuid", "generation",
-        "pool_id", "clip_order", "app",
+        "pool_id", "clip_order", "app", "keyframes",
     }
 )
 _TRACK_ALLOWED = frozenset({"id", "kind", "label", "scale", "fit", "opacity", "volume", "muted", "blendMode", "app"})

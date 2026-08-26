@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 
+from astrid.core.rendering.errors import raise_unsupported_error
 from astrid.packs.rendering.executors.render import run as render_run
 
 
@@ -221,6 +222,40 @@ def test_main_rejects_conflicting_engine_and_backend(
 
     assert result == 1
     assert "conflict" in capsys.readouterr().err
+
+
+def test_main_surfaces_bounded_structured_renderer_reasons(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    timeline, assets, out = _inputs(tmp_path)
+
+    class UnsupportedService:
+        def render(self, *args, **kwargs):
+            raise_unsupported_error(
+                backend="rendering.remotion",
+                message="Remotion does not support this render request",
+                details={"reasons": ["timeline clip label is not admitted", "x" * 5_000]},
+            )
+
+    monkeypatch.setattr(render_run, "_default_service", lambda: UnsupportedService())
+    result = render_run.main(
+        [
+            "--timeline",
+            str(timeline),
+            "--assets",
+            str(assets),
+            "--out",
+            str(out),
+        ]
+    )
+
+    stderr = capsys.readouterr().err
+    assert result == 1
+    assert "timeline clip label is not admitted" in stderr
+    assert "renderer detail truncated" in stderr
+    assert len(stderr) <= 3_501
 
 
 def test_main_engine_defaults_to_remotion_when_absent(

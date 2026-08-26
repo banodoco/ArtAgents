@@ -18,6 +18,7 @@ from typing import Any, Mapping, Sequence
 
 from astrid.core import timeline
 from astrid.core.foundation.paths import REPO_ROOT
+from astrid.core.rendering.errors import RendererException
 from astrid.core.rendering.service import RenderService
 
 # The Hype pipeline's default output file name.  The executor manifest exposes
@@ -27,6 +28,23 @@ from astrid.core.rendering.service import RenderService
 DEFAULT_OUTPUT_NAME = "hype.mp4"
 
 _SERVICE: RenderService | None = None
+_MAX_CLI_ERROR_CHARS = 3_500
+
+
+def _renderer_cli_error(exc: RendererException) -> str:
+    """Keep structured renderer reasons actionable across the CLI boundary."""
+
+    lines = [str(exc)]
+    reasons = exc.error.details.get("reasons")
+    if isinstance(reasons, list):
+        for reason in reasons:
+            text = str(reason).strip()
+            if text:
+                lines.append(f"reason: {text}")
+    message = "\n".join(lines)
+    if len(message) <= _MAX_CLI_ERROR_CHARS:
+        return message
+    return message[:_MAX_CLI_ERROR_CHARS - 30] + "\n…renderer detail truncated…"
 
 
 def _default_service() -> RenderService:
@@ -349,6 +367,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 keep_previous_renders=args.keep_previous_renders,
                 backend_config=config,
             )
+    except RendererException as exc:  # pragma: no cover - CLI path
+        print(_renderer_cli_error(exc), file=sys.stderr)
+        return 1
     except Exception as exc:  # pragma: no cover - CLI path
         print(str(exc), file=sys.stderr)
         return 1

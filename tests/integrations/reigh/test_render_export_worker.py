@@ -18,6 +18,7 @@ from astrid.core.integrations.reigh.render_export_worker import (
     HttpRenderExportWorkerTransport,
     RenderExportServeWorker,
     RenderExportWorker,
+    RenderExportWorkerError,
     _ProcessContainment,
     _stream_digest,
 )
@@ -483,6 +484,103 @@ def test_run_child_cleans_descendants_after_successful_parent_exit(
         time.sleep(0.03)
     else:
         pytest.fail("successful child cleanup left detached renderer descendant alive")
+
+
+def test_run_child_surfaces_bounded_stdout_and_stderr_tails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    real_popen = worker_module.subprocess.Popen
+    observed_env: dict[str, str] = {}
+    schema_root = tmp_path / "installed-schema"
+    monkeypatch.setenv("ASTRID_TIMELINE_SCHEMA_PYTHONPATH", str(schema_root))
+    monkeypatch.setenv("ASTRID_BRIDGE_TOKEN", "bridge-secret")
+    monkeypatch.setenv("UNRELATED_API_KEY", "ambient-secret")
+
+    def fake_popen(command, **kwargs):
+        if "--staging-dir" not in command:
+            return real_popen(command, **kwargs)
+        observed_env.update(kwargs["env"])
+        code = (
+            "import sys\n"
+            "sys.stdout.write('useful-stdout-marker\\n')\n"
+            "sys.stdout.flush()\n"
+            "sys.stderr.write('useful-stderr-marker\\n')\n"
+            "sys.stderr.flush()\n"
+            "raise SystemExit(7)\n"
+        )
+        return real_popen([sys.executable, "-c", code], **kwargs)
+
+    monkeypatch.setattr(worker_module.subprocess, "Popen", fake_popen)
+    worker = RenderExportWorker(
+        _IdleTransport(),
+        projects_root=tmp_path,
+        executor_id="render-worker",
+        deadline_seconds=5,
+    )
+    staging = tmp_path / "diagnostic-staging"
+    staging.mkdir()
+    claim = type("Claim", (), {"task_id": "task", "spec": {}})()
+
+    with pytest.raises(RenderExportWorkerError) as caught:
+        worker._run_child(
+            claim=claim,
+            staging_dir=staging,
+            heartbeat=lambda _payload: None,
+            cancelled=lambda: False,
+        )
+
+    message = str(caught.value)
+    assert "code 7" in message
+    assert "useful-stdout-marker" in message
+    assert "useful-stderr-marker" in message
+    assert observed_env["PYTHONPATH"] == str(schema_root)
+    assert "ASTRID_BRIDGE_TOKEN" not in observed_env
+    assert "UNRELATED_API_KEY" not in observed_env
+
+
+def test_run_child_drains_noisy_output_and_retains_only_bounded_tail(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    real_popen = worker_module.subprocess.Popen
+
+    def fake_popen(command, **kwargs):
+        if "--staging-dir" not in command:
+            return real_popen(command, **kwargs)
+        code = (
+            "import sys\n"
+            "sys.stdout.buffer.write(b'stdout-begin-' + b'x' * 100000 + b'-stdout-tail')\n"
+            "sys.stdout.flush()\n"
+            "sys.stderr.buffer.write(b'stderr-begin-' + b'y' * 100000 + b'-stderr-tail')\n"
+            "sys.stderr.flush()\n"
+            "raise SystemExit(9)\n"
+        )
+        return real_popen([sys.executable, "-c", code], **kwargs)
+
+    monkeypatch.setattr(worker_module.subprocess, "Popen", fake_popen)
+    worker = RenderExportWorker(
+        _IdleTransport(),
+        projects_root=tmp_path,
+        executor_id="render-worker",
+        deadline_seconds=5,
+    )
+    staging = tmp_path / "noisy-staging"
+    staging.mkdir()
+    claim = type("Claim", (), {"task_id": "task", "spec": {}})()
+
+    with pytest.raises(RenderExportWorkerError) as caught:
+        worker._run_child(
+            claim=claim,
+            staging_dir=staging,
+            heartbeat=lambda _payload: None,
+            cancelled=lambda: False,
+        )
+
+    message = str(caught.value)
+    assert len(message) <= 3_500
+    assert "stdout-tail" in message
+    assert "stderr-tail" in message
+    assert "stdout-begin" not in message
+    assert "stderr-begin" not in message
 
 
 @pytest.mark.parametrize(
