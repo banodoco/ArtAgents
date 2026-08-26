@@ -14,6 +14,7 @@ import shutil
 import signal
 import stat
 import subprocess
+import sys
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
@@ -131,6 +132,15 @@ class CommandTransport:
             )
         normalized_timeout = _validate_timeout(timeout, backend=selected_backend)
         argv_prefix = _normalize_command(command, backend=selected_backend)
+        # Source-pack manifests deliberately use a portable bare ``python3``
+        # token.  Resolve that generic token to the interpreter that owns this
+        # Astrid runtime instead of consulting the sanitized child PATH.  A
+        # PATH-selected interpreter can have a different ABI while PYTHONPATH
+        # still points at this runtime's site-packages (for example CPython
+        # 3.14 trying to import a CPython 3.11 native wheel).  Explicit paths
+        # and version-qualified commands remain caller-controlled.
+        if argv_prefix[0].casefold() in {"python", "python.exe", "python3", "python3.exe"}:
+            argv_prefix[0] = sys.executable
         cwd_path = _resolve_cwd(cwd, backend=selected_backend)
         request = _absolute_path(request_path)
         result = _absolute_path(result_path)

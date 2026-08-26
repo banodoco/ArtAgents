@@ -15,12 +15,10 @@ from astrid.core.rendering import RenderPlan, RenderResult, SupportReport
 from astrid.core.rendering.errors import (
     RendererBinaryMissingError,
     RendererInternalError,
-    RendererInvalidArtifactError,
     RendererProtocolError,
     RendererTimeoutError,
 )
 from astrid.core.rendering.transport import CommandTransport
-
 
 FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures"
 WIRE_FIXTURE_DIR = FIXTURE_DIR / "v1"
@@ -99,6 +97,59 @@ def test_successful_render_uses_authoritative_result_file(tmp_path: Path) -> Non
     assert transport.last_logs == {"stdout": "", "stderr": ""}
 
 
+def test_bare_python3_uses_the_runtime_interpreter_not_child_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_bin = tmp_path / "fake-bin"
+    fake_bin.mkdir()
+    fake_python = fake_bin / "python3"
+    fake_python.write_text("#!/bin/sh\nexit 97\n", encoding="utf-8")
+    fake_python.chmod(0o755)
+    monkeypatch.setenv("PATH", str(fake_bin))
+
+    result = CommandTransport(RENDERER_ID).run(
+        "render",
+        ["python3", BACKEND_SCRIPT],
+        request_path=_request(
+            tmp_path,
+            {"action": "result", "payload": _wire_fixture("result.json")},
+        ),
+        result_path=tmp_path / "result.json",
+        cwd=FIXTURE_DIR,
+        timeout=5,
+    )
+
+    assert isinstance(result, RenderResult)
+
+
+@pytest.mark.parametrize("command_name", ["python3.11", "custom-python"])
+def test_explicit_or_versioned_python_command_is_not_rewritten(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    command_name: str,
+) -> None:
+    fake_bin = tmp_path / "fake-bin"
+    fake_bin.mkdir()
+    fake_python = fake_bin / command_name
+    fake_python.write_text("#!/bin/sh\nexit 97\n", encoding="utf-8")
+    fake_python.chmod(0o755)
+    monkeypatch.setenv("PATH", str(fake_bin))
+    command = str(fake_python) if command_name == "custom-python" else command_name
+
+    with pytest.raises(RendererInternalError) as caught:
+        CommandTransport(RENDERER_ID).run(
+            "render",
+            [command, BACKEND_SCRIPT],
+            request_path=_request(tmp_path, {"action": "absent"}),
+            result_path=tmp_path / "result.json",
+            cwd=FIXTURE_DIR,
+            timeout=5,
+        )
+
+    assert caught.value.details["returncode"] == 97
+
+
 @pytest.mark.parametrize(
     ("verb", "fixture_name", "backend", "result_type"),
     [
@@ -167,7 +218,6 @@ def test_timeout_kills_process_group_and_reaps_direct_child(tmp_path: Path) -> N
         _run(tmp_path, payload, timeout=0.5)
 
     parent_pid = int(parent_pid_path.read_text(encoding="utf-8"))
-    child_pid = int(child_pid_path.read_text(encoding="utf-8"))
     assert caught.value.error.kind == "timeout"
     assert caught.value.error.backend == RENDERER_ID
     with pytest.raises(ChildProcessError):
