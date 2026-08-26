@@ -340,8 +340,8 @@ def test_real_remotion_render_through_registered_backend(
     real_server = remotion_backend.InvocationAssetServer
 
     class TrackedAssetServer(real_server):
-        def __init__(self, staging_dir: str | Path) -> None:
-            super().__init__(staging_dir)
+        def __init__(self, staging_dir: str | Path, *, allowed_origin: str) -> None:
+            super().__init__(staging_dir, allowed_origin=allowed_origin)
             asset_servers.append(self)
 
     monkeypatch.setattr(remotion_backend, "InvocationAssetServer", TrackedAssetServer)
