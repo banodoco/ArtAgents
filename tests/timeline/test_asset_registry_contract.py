@@ -13,6 +13,7 @@ def _base_registry() -> dict[str, object]:
         "assets": {
             "main": {
                 "file": "main.mp4",
+                "media_id": "01jpairedreleaseasset000001",
                 "url": "https://example.com/assets/main.mp4",
                 "etag": '"main-etag"',
                 "content_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
@@ -55,6 +56,21 @@ def test_roundtrip_preserves_url(tmp_path) -> None:
             "a": {
                 "file": "a.mp4",
                 "url": "https://cdn.example.com/a.mp4",
+            }
+        }
+    }
+    path = tmp_path / "registry.json"
+    timeline.save_registry(registry, path)
+    loaded = timeline.load_registry(path)
+    assert loaded == registry
+
+
+def test_roundtrip_preserves_media_id(tmp_path) -> None:
+    registry: dict[str, object] = {
+        "assets": {
+            "a": {
+                "file": "a.mp4",
+                "media_id": "01jpairedreleaseasset000001",
             }
         }
     }
@@ -249,6 +265,15 @@ def test_validate_registry_rejects_invalid_etag() -> None:
     registry["assets"]["main"]["etag"] = ""  # type: ignore[index]
 
     with pytest.raises(ValueError, match="etag"):
+        validate_registry(registry)
+
+
+@pytest.mark.parametrize("bad_media_id", ["", "   ", 123])
+def test_validate_registry_rejects_invalid_media_id(bad_media_id) -> None:
+    registry = _base_registry()
+    registry["assets"]["main"]["media_id"] = bad_media_id  # type: ignore[index]
+
+    with pytest.raises(ValueError, match="media_id"):
         validate_registry(registry)
 
 

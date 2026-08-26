@@ -134,6 +134,7 @@ class DerivedFrom(TypedDict, total=False):
 
 class SharedAssetEntry(TypedDict, total=False):
     file: str
+    media_id: str
     url: str
     etag: str
     content_sha256: str
@@ -380,6 +381,7 @@ _TRACK_ALLOWED = frozenset({"id", "kind", "label", "scale", "fit", "opacity", "v
 _ASSET_ENTRY_ALLOWED = frozenset(
     {
         "file",
+        "media_id",
         "url",
         "etag",
         "content_sha256",

@@ -43,6 +43,11 @@ def validate_registry(registry: Any) -> None:
         _raise_unknown_keys(f"Asset registry.assets[{key!r}]", entry, _ASSET_ENTRY_ALLOWED)
         if "file" not in entry and "url" not in entry:
             raise ValueError(f"Asset {key!r} must have 'file' or 'url'")
+        media_id = entry.get("media_id")
+        if media_id is not None and (
+            not isinstance(media_id, str) or not media_id.strip()
+        ):
+            raise ValueError(f"Asset {key!r}.media_id must be a non-empty string")
         url = entry.get("url")
         if url is not None and (not isinstance(url, str) or not url.startswith(("http://", "https://"))):
             raise ValueError(f"Asset {key!r}.url must be an http(s) URL")
