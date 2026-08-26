@@ -342,10 +342,39 @@ def test_asset_server_allows_only_owned_remotion_browser_origin(tmp_path: Path) 
         assert headers["Vary"] == "Origin"
 
 
+def test_asset_server_allows_only_configured_remotion_browser_origin(tmp_path: Path) -> None:
+    staging = tmp_path / "stage"
+    staging.mkdir()
+    asset = staging / "asset.bin"
+    asset.write_bytes(b"dynamic-port asset")
+
+    origin = "http://localhost:3001"
+    with InvocationAssetServer(staging, allowed_origin=origin) as server:
+        status, headers, body = _read(server.local_url(asset), origin=origin)
+        assert status == 200
+        assert body == asset.read_bytes()
+        assert headers["Access-Control-Allow-Origin"] == origin
+        assert headers["Vary"] == "Origin"
+
+        for denied_origin in (
+            "http://localhost:3000",
+            "http://localhost:5173",
+            "http://127.0.0.1:3001",
+            "https://localhost:3001",
+            "http://user:pass@localhost:3001",
+            "http://localhost.evil:3001",
+        ):
+            _, denied_headers, _ = _read(
+                server.local_url(asset), origin=denied_origin
+            )
+            assert denied_headers.get("Access-Control-Allow-Origin") is None
+
+
 @pytest.mark.parametrize("origin", [
     "http://127.0.0.1:3000",
-    "http://localhost:5173",
+    "http://localhost",
     "https://localhost:3000",
+    "http://localhost.evil:3001",
     "https://attacker.example",
 ])
 def test_asset_server_does_not_advertise_cors_to_unowned_origins(

@@ -8,8 +8,8 @@ server and staging directory are deterministically cleaned up.
 
 from __future__ import annotations
 
-import copy
 import contextlib
+import copy
 import hashlib
 import os
 import re
@@ -35,7 +35,6 @@ from astrid.core.env_vars import (
 )
 from astrid.core.foundation.project_paths import project_dir, resolve_projects_root
 from astrid.core.rendering import asset_cache
-
 
 AssetKind = Literal["local", "cached", "remote"]
 
@@ -500,20 +499,30 @@ REMOTION_BROWSER_ORIGIN = "http://localhost:3000"
 class RangeHTTPRequestHandler(SimpleHTTPRequestHandler):
     """File-only HTTP handler with single-range byte serving."""
 
+    def __init__(
+        self,
+        *args: Any,
+        allowed_origin: str = REMOTION_BROWSER_ORIGIN,
+        **kwargs: Any,
+    ) -> None:
+        self.allowed_origin = allowed_origin
+        super().__init__(*args, **kwargs)
+
     def log_message(self, format: str, *args: object) -> None:  # noqa: A002
         return
 
     def _send_renderer_cors_headers(self) -> None:
         """Allow only the server-owned Remotion browser to read an asset.
 
-        The renderer's Chromium page is served from this fixed local origin.
-        Do not reflect arbitrary ``Origin`` values: this server exposes
-        invocation-scoped media and is intentionally not a general CORS
-        endpoint.
+        The renderer's Chromium page is served from one exact, invocation-owned
+        local origin.  Do not reflect arbitrary ``Origin`` values: this server
+        exposes invocation-scoped media and is intentionally not a general
+        CORS endpoint.
         """
 
-        if self.headers.get("Origin") == REMOTION_BROWSER_ORIGIN:
-            self.send_header("Access-Control-Allow-Origin", REMOTION_BROWSER_ORIGIN)
+        origin = self.headers.get("Origin")
+        if origin == self.allowed_origin:
+            self.send_header("Access-Control-Allow-Origin", origin)
             self.send_header("Vary", "Origin")
 
     def _send_416(self, size: int) -> None:
@@ -637,13 +646,19 @@ class InvocationAssetServer:
     host = "127.0.0.1"
     bind_port = 0
 
-    def __init__(self, staging_dir: str | Path) -> None:
+    def __init__(
+        self,
+        staging_dir: str | Path,
+        *,
+        allowed_origin: str = REMOTION_BROWSER_ORIGIN,
+    ) -> None:
         self.staging_dir = Path(staging_dir).resolve(strict=True)
         if not self.staging_dir.is_dir():
             raise NotADirectoryError(f"Asset staging path is not a directory: {self.staging_dir}")
         self._server: ThreadingHTTPServer | None = None
         self.thread: threading.Thread | None = None
         self._closed = False
+        self.allowed_origin = allowed_origin
 
     @property
     def port(self) -> int:
@@ -666,7 +681,11 @@ class InvocationAssetServer:
             raise RuntimeError("Invocation asset server is closed")
         if self._server is not None:
             return self
-        handler = partial(RangeHTTPRequestHandler, directory=str(self.staging_dir))
+        handler = partial(
+            RangeHTTPRequestHandler,
+            directory=str(self.staging_dir),
+            allowed_origin=self.allowed_origin,
+        )
         server = ThreadingHTTPServer((self.host, self.bind_port), handler)
         try:
             thread = threading.Thread(

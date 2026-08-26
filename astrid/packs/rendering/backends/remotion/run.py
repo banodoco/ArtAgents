@@ -15,6 +15,7 @@ import importlib
 import json
 import os
 import shutil
+import socket
 import subprocess
 import sys
 from contextlib import ExitStack
@@ -505,6 +506,14 @@ def _require_free_space(path: Path, min_free_gb: float | None) -> None:
         )
 
 
+def _available_remotion_port() -> int:
+    """Select an available loopback port for Remotion's browser server."""
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        return int(probe.getsockname()[1])
+
+
 def _execute_remotion(
     timeline_path: Path,
     assets_path: Path,
@@ -548,6 +557,8 @@ def _execute_remotion_locked(
     _regenerate_element_registries(project_dir, theme_path)
     registry_state = _effective_registry_state(theme_path)
     _require_free_space(provenance_out_path.parent, min_free_gb)
+    remotion_port = _available_remotion_port()
+    remotion_origin = f"http://localhost:{remotion_port}"
     props_path = (provenance_out_path.parent / ".remotion-props.json").resolve()
     render_hash = _render_asset_stage_hash(
         timeline_path,
@@ -562,7 +573,10 @@ def _execute_remotion_locked(
             if materializer.needs_server:
                 try:
                     asset_server = asset_lifecycle.enter_context(
-                        InvocationAssetServer(materializer.staging_dir)
+                        InvocationAssetServer(
+                            materializer.staging_dir,
+                            allowed_origin=remotion_origin,
+                        )
                     )
                 except OSError as exc:
                     raise RuntimeError(
@@ -633,6 +647,7 @@ def _execute_remotion_locked(
                 str(staged_video),
                 "--allow-html-in-canvas",
                 "--enforce-audio-track",
+                f"--port={remotion_port}",
             ]
             if alpha:
                 # ProRes 4444 is the only engine-native alpha mux in remotion

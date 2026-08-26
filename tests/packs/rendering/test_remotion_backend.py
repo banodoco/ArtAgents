@@ -299,6 +299,50 @@ def test_render_preserves_props_command_cleanup_and_provenance(tmp_path: Path) -
     )
 
 
+def test_render_binds_asset_cors_to_selected_remotion_port(tmp_path: Path) -> None:
+    timeline_path, assets_path = _write_inputs(tmp_path)
+    source = tmp_path / "asset.png"
+    source.write_bytes(b"asset bytes")
+    timeline.save_registry(
+        {"assets": {"asset": {"file": str(source), "type": "image/png"}}},
+        assets_path,
+    )
+    project = _write_project(tmp_path)
+    output_path = tmp_path / "output" / "hype.mp4"
+    seen_commands: list[list[str]] = []
+    seen_origins: list[str] = []
+    real_server = remotion.InvocationAssetServer
+
+    class TrackingAssetServer(real_server):
+        def __init__(self, *args, **kwargs):
+            seen_origins.append(kwargs["allowed_origin"])
+            super().__init__(*args, **kwargs)
+
+    def fake_run(command, **kwargs):
+        normalized = [str(part) for part in command]
+        if _is_remotion_render_command(normalized):
+            seen_commands.append(normalized)
+            _write_fake_remotion_output(normalized)
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    with (
+        mock.patch.object(remotion, "_regenerate_element_registries"),
+        mock.patch.object(
+            remotion,
+            "_effective_registry_state",
+            return_value={"version": 1, "hash": "registry-hash"},
+        ),
+        mock.patch.object(remotion, "_available_remotion_port", return_value=3001),
+        mock.patch.object(remotion, "InvocationAssetServer", TrackingAssetServer),
+        mock.patch.object(remotion.subprocess, "run", side_effect=fake_run),
+    ):
+        remotion.render(timeline_path, assets_path, output_path, project_dir=project)
+
+    assert seen_origins == ["http://localhost:3001"]
+    assert len(seen_commands) == 1
+    assert "--port=3001" in seen_commands[0]
+
+
 def test_protocol_render_returns_valid_namespaced_artifact_shape(tmp_path: Path) -> None:
     timeline_path, assets_path = _write_inputs(tmp_path)
     project = _write_project(tmp_path)
@@ -1210,6 +1254,7 @@ def test_alpha_stamp_appends_transparent_flags_to_remotion_cli(
                 "_effective_registry_state",
                 return_value={"version": 1, "hash": "registry-hash"},
             ),
+            mock.patch.object(remotion, "_available_remotion_port", return_value=3001),
             mock.patch.object(remotion.subprocess, "run", side_effect=fake_run),
         ):
             remotion.render(
@@ -1228,6 +1273,10 @@ def test_alpha_stamp_appends_transparent_flags_to_remotion_cli(
     for dead_flag in ("--codec=vp9", "--pixel-format=yuva420p"):
         assert dead_flag not in alpha_cmd
         assert dead_flag not in opaque_cmd
+    assert sum(part.startswith("--port=") for part in opaque_cmd) == 1
+    assert sum(part.startswith("--port=") for part in alpha_cmd) == 1
+    assert "--port=3001" in opaque_cmd
+    assert "--port=3001" in alpha_cmd
     # Stamped renders are remapped to the ProRes .mov container name.
     alpha_output = Path(alpha_cmd[alpha_cmd.index("--output") + 1])
     assert alpha_output.suffix == ".mov"
