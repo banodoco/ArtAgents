@@ -910,6 +910,148 @@ class TestTaskReads:
             assert detail["task"]["attempts"] == []
             assert detail["task"]["outputs"] == []
 
+    def test_detail_exposes_bounded_renderer_failure_diagnostics(
+        self, tmp_bridge_root: Path
+    ) -> None:
+        with task_server(tmp_bridge_root) as env:
+            slug = "diagnostics-proj"
+            composition = env["composition"]
+            _create_project(composition, slug)
+            _, admitted = _admit_simple(env, slug, "diagnostics-admit")
+            task_id = admitted["task"]["id"]
+            _, claim = _post(
+                env,
+                "/queue/claim",
+                body={
+                    "executor_id": "render-worker",
+                    "capabilities": ["reigh.image_upscale"],
+                },
+            )
+            attempt = claim["attempt"]
+            failure_message = (
+                "render_export child exited with code 7\n"
+                "stderr tail:\nuseful renderer failure marker"
+            )
+            fail_status, _ = _post(
+                env,
+                f"/tasks/{task_id}/attempts/1/fail",
+                key="diagnostics-fail",
+                body={
+                    "attempt_id": attempt["id"],
+                    "lease_id": attempt["lease_id"],
+                    "status_version": attempt["status_version"],
+                    "error": {
+                        "code": "render_export_failed",
+                        "message": failure_message,
+                        "retryable": False,
+                    },
+                },
+            )
+            assert fail_status == 200
+
+            detail_status, detail = _get(env, f"/projects/{slug}/tasks/{task_id}")
+            assert detail_status == 200
+            diagnostics = detail["task"]["attempts"][0]["diagnostics"]
+            assert diagnostics["error"] == {
+                "code": "render_export_failed",
+                "message": failure_message,
+                "retryable": False,
+            }
+
+    def test_detail_bounds_long_attempt_diagnostics(
+        self, tmp_bridge_root: Path
+    ) -> None:
+        with task_server(tmp_bridge_root) as env:
+            slug = "long-diagnostics-proj"
+            composition = env["composition"]
+            _create_project(composition, slug)
+            _, admitted = _admit_simple(env, slug, "long-diagnostics-admit")
+            task_id = admitted["task"]["id"]
+            _, claim = _post(
+                env,
+                "/queue/claim",
+                body={
+                    "executor_id": "render-worker",
+                    "capabilities": ["reigh.image_upscale"],
+                },
+            )
+            attempt_id = claim["attempt"]["id"]
+            long_message = "renderer-output-" + ("x" * 10_000)
+            UnitOfWork(composition.writer).run(
+                lambda uow: uow.execute(
+                    "UPDATE execution_attempts SET error_json = ? WHERE id = ?",
+                    (
+                        json.dumps(
+                            {
+                                "code": "render_export_failed",
+                                "message": long_message,
+                                "retryable": False,
+                            }
+                        ),
+                        attempt_id,
+                    ),
+                )
+            )
+
+            detail_status, detail = _get(env, f"/projects/{slug}/tasks/{task_id}")
+            assert detail_status == 200
+            message = detail["task"]["attempts"][0]["diagnostics"]["error"]["message"]
+            assert len(message) == 4_000
+            assert message == long_message[:4_000]
+
+    def test_detail_diagnostics_redact_secret_fields_and_tokens(
+        self, tmp_bridge_root: Path
+    ) -> None:
+        with task_server(tmp_bridge_root) as env:
+            slug = "secret-diagnostics-proj"
+            composition = env["composition"]
+            _create_project(composition, slug)
+            _, admitted = _admit_simple(env, slug, "secret-diagnostics-admit")
+            task_id = admitted["task"]["id"]
+            _, claim = _post(
+                env,
+                "/queue/claim",
+                body={
+                    "executor_id": "render-worker",
+                    "capabilities": ["reigh.image_upscale"],
+                },
+            )
+            attempt_id = claim["attempt"]["id"]
+            secret = "super-secret-render-token"
+            UnitOfWork(composition.writer).run(
+                lambda uow: uow.execute(
+                    "UPDATE execution_attempts SET progress_json = ?, error_json = ? WHERE id = ?",
+                    (
+                        json.dumps(
+                            {
+                                "phase": "render",
+                                "api_token": secret,
+                                "nested": {"authorization": f"Bearer {secret}"},
+                            }
+                        ),
+                        json.dumps(
+                            {
+                                "code": "render_export_failed",
+                                "message": f"renderer failed with token: {secret}",
+                                "retryable": False,
+                                "details": {"api_key": secret},
+                            }
+                        ),
+                        attempt_id,
+                    ),
+                )
+            )
+
+            detail_status, detail = _get(env, f"/projects/{slug}/tasks/{task_id}")
+            assert detail_status == 200
+            diagnostics = detail["task"]["attempts"][0]["diagnostics"]
+            serialized = json.dumps(diagnostics)
+            assert secret not in serialized
+            assert "api_token" not in serialized
+            assert "authorization" not in serialized
+            assert "details" not in diagnostics["error"]
+            assert diagnostics["progress"]["phase"] == "render"
+
 
 # ---------------------------------------------------------------------------
 # T7: atomic multipart completion + fenced failure

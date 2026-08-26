@@ -13,7 +13,7 @@ import threading
 import uuid
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 from urllib.parse import urlparse
 
 from astrid.core.integrations.reigh.bridge_service import (
@@ -74,6 +74,165 @@ class BridgeCapabilityUnavailableError(BridgeError):
 class BridgeChildAdmissionForbiddenError(BridgeError):
     status_code = 403
     code = "child_admission_forbidden"
+
+
+class AttemptErrorDiagnostics(TypedDict, total=False):
+    """Allowlisted error fields persisted by task executors."""
+
+    code: str
+    reason: str
+    type: str
+    message: str
+    retryable: bool
+
+
+class AttemptDiagnostics(TypedDict):
+    """Safe, bounded diagnostics exposed on task-detail attempts.
+
+    The database columns are JSON blobs because executors may report
+    capability-specific runtime state.  They are deliberately not exposed
+    as-is: this public shape is the small, stable projection consumed by the
+    editor and keeps leases, staging identifiers, and arbitrary executor
+    metadata out of the detail response.
+    """
+
+    progress: dict[str, Any]
+    error: AttemptErrorDiagnostics
+
+
+_DIAGNOSTIC_MAX_DEPTH = 5
+_DIAGNOSTIC_MAX_ITEMS = 100
+_DIAGNOSTIC_MAX_VALUE_CHARS = 1000
+_DIAGNOSTIC_MAX_PROGRESS_BYTES = 16 * 1024
+_DIAGNOSTIC_MAX_ERROR_MESSAGE_CHARS = 4000
+_DIAGNOSTIC_SECRET_KEY_PARTS = frozenset(
+    {
+        "accesskey",
+        "accesstoken",
+        "apikey",
+        "authorization",
+        "bearer",
+        "cookie",
+        "credential",
+        "jwt",
+        "password",
+        "privatekey",
+        "refreshtoken",
+        "secret",
+        "stagingtxn",
+        "token",
+    }
+)
+_DIAGNOSTIC_SECRET_TEXT_RE = re.compile(
+    r"(?ix)"
+    r"(?:"
+    r"(?:\b(?:authorization|bearer)\s*[:=]\s*(?:bearer\s+)?|"
+    r"\bbearer\s+|"
+    r"\b(?:access[_ -]?token|api[_ -]?(?:key|token)|password|refresh[_ -]?token|secret|token)\s*[:=]\s*)"
+    r"[^\s,;]+"
+    r"|\b(?:api[_ -]?token|secret|token)\s+(?:is\s+)?[^\s,;]+"
+    r"|\b(?:sk|rk|pk|gh[pousr]|glpat|xox[baprs])[-_][A-Za-z0-9._-]+"
+    r"|\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}(?:\.[A-Za-z0-9_-]{10,})?"
+    r")"
+)
+
+
+def _diagnostic_secret_key(key: str) -> bool:
+    normalized = re.sub(r"[^a-z0-9]", "", key.lower())
+    return any(part in normalized for part in _DIAGNOSTIC_SECRET_KEY_PARTS)
+
+
+def _redact_diagnostic_text(value: str, *, limit: int) -> str:
+    bounded = value[:limit]
+    return _DIAGNOSTIC_SECRET_TEXT_RE.sub("[redacted]", bounded)
+
+
+def _safe_diagnostic_value(value: Any, *, depth: int = 0) -> Any:
+    """Return JSON-safe diagnostics without secret-bearing fields."""
+
+    if depth > _DIAGNOSTIC_MAX_DEPTH:
+        return "[truncated]"
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    if isinstance(value, str):
+        return _redact_diagnostic_text(value, limit=_DIAGNOSTIC_MAX_VALUE_CHARS)
+    if isinstance(value, Mapping):
+        safe: dict[str, Any] = {}
+        for raw_key, raw_value in list(value.items())[:_DIAGNOSTIC_MAX_ITEMS]:
+            key = str(raw_key)
+            if _diagnostic_secret_key(key):
+                continue
+            safe[key] = _safe_diagnostic_value(raw_value, depth=depth + 1)
+        if len(value) > _DIAGNOSTIC_MAX_ITEMS:
+            safe["_truncated"] = True
+        return safe
+    if isinstance(value, (list, tuple)):
+        safe_items = [
+            _safe_diagnostic_value(item, depth=depth + 1)
+            for item in value[:_DIAGNOSTIC_MAX_ITEMS]
+        ]
+        if len(value) > _DIAGNOSTIC_MAX_ITEMS:
+            safe_items.append("[truncated]")
+        return safe_items
+    return _redact_diagnostic_text(str(value), limit=_DIAGNOSTIC_MAX_VALUE_CHARS)
+
+
+def _diagnostic_json_object(raw: Any) -> dict[str, Any]:
+    if not isinstance(raw, str) or not raw:
+        return {}
+    try:
+        value = json.loads(raw)
+    except (TypeError, ValueError):
+        return {}
+    return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _attempt_diagnostics_wire_shape(row: Mapping[str, Any]) -> AttemptDiagnostics:
+    """Project persisted progress/error JSON into a safe detail-only shape."""
+
+    progress = _safe_diagnostic_value(
+        _diagnostic_json_object(row.get("progress_json")),
+    )
+    if not isinstance(progress, dict):  # pragma: no cover - mapping input
+        progress = {}
+    try:
+        progress_size = len(
+            json.dumps(progress, ensure_ascii=False, separators=(",", ":")).encode(
+                "utf-8"
+            )
+        )
+    except (TypeError, ValueError):  # pragma: no cover - sanitizer is JSON-safe
+        progress_size = _DIAGNOSTIC_MAX_PROGRESS_BYTES + 1
+    if progress_size > _DIAGNOSTIC_MAX_PROGRESS_BYTES:
+        progress = {"_truncated": True}
+
+    raw_error = _diagnostic_json_object(row.get("error_json"))
+    error: AttemptErrorDiagnostics = {}
+    # These are the two persisted error vocabularies: the task executor's
+    # reason/type/message form and the bridge's code/message/retryable form.
+    for key in ("code", "reason", "type"):
+        value = raw_error.get(key)
+        if isinstance(value, str) and not _diagnostic_secret_key(key):
+            error[key] = _redact_diagnostic_text(
+                value, limit=_DIAGNOSTIC_MAX_VALUE_CHARS
+            )
+    message = raw_error.get("message")
+    if isinstance(message, str):
+        error["message"] = _redact_diagnostic_text(
+            message, limit=_DIAGNOSTIC_MAX_ERROR_MESSAGE_CHARS
+        )
+    retryable = raw_error.get("retryable")
+    if isinstance(retryable, bool):
+        error["retryable"] = retryable
+    return {"progress": progress, "error": error}
+
+
+def _attempt_detail_wire_shape(row: Mapping[str, Any]) -> dict[str, Any]:
+    """The detail-only attempt projection, including safe diagnostics."""
+
+    attempt = _attempt_wire_shape(row)
+    attempt["diagnostics"] = _attempt_diagnostics_wire_shape(row)
+    return attempt
 
 
 def _attempt_wire_shape(row: Mapping[str, Any]) -> dict[str, Any]:
@@ -1443,7 +1602,7 @@ class ReighTaskBridge:
         with self._writer.read_only_connection() as conn:
             conn.row_factory = _sqlite_row_factory
             attempts = [
-                _attempt_wire_shape(dict(row))
+                _attempt_detail_wire_shape(dict(row))
                 for row in conn.execute(
                     "SELECT * FROM execution_attempts WHERE task_id = ? "
                     "ORDER BY attempt_no ASC",
