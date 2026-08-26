@@ -36,7 +36,6 @@ from PIL import Image
 import astrid
 from astrid.core.foundation.project_paths import project_dir
 from astrid.core.project.project import create_project
-from astrid.core.timeline.banodoco_schema import validate_timeline_config_for_container
 from astrid.core.timeline.duration import (
     clip_end_frame,
     clip_start_frame,
@@ -49,12 +48,12 @@ from astrid.core.timeline.events.schema import TimelineActor
 from astrid.core.timeline.events.schema.serialize import with_event_hash
 from astrid.core.timeline.events.schema.types import TimelineEvent
 from astrid.core.timeline.snapshot import ConcurrentAppendError, acquire_snapshot
-from astrid.packs.rendering.executors.timeline_visualize import validate_structural
 from astrid.packs.rendering.executors.timeline_visualize import run as run_module
+from astrid.packs.rendering.executors.timeline_visualize import validate_structural
 from astrid.packs.rendering.executors.timeline_visualize.assets import (
     guard_sampling,
-    verify_now,
     verified_source_path,
+    verify_now,
 )
 from astrid.packs.rendering.executors.timeline_visualize.frozen import (
     load_frozen_view,
@@ -105,13 +104,12 @@ _FROZEN_REL_PATHS = (
 _FROZEN_LEGITIMATE_UPDATES = {
     "astrid/packs/rendering/executors/timeline_storyboard/STAGE.md": "b768588e",
     "astrid/core/timeline/_shared.py": "b768588e",
-    # 2ea0d0da added the explicit timeline-schema import path used by the
-    # server-owned render worker. bd5998ae then made the reviewed narrowing
-    # of the clip allowlist to match the pinned schema (retiring the legacy
-    # ``keyframes`` and ``derived_output`` fields). Treat 2ea0d0da as the
-    # pre-update authoritative snapshot; later commits must remain
-    # byte-identical to the current reviewed bytes.
-    "astrid/core/timeline/banodoco_schema.py": "2ea0d0da",
+    # The schema received several reviewed, additive/narrowing updates during
+    # the epic (the explicit schema import path, media identity, and the
+    # pinned clip allowlist).  ``git log`` is newest-first, so anchor at the
+    # newest reviewed revision; all older pre-update history is ignored while
+    # every later revision must remain byte-identical to the current bytes.
+    "astrid/core/timeline/banodoco_schema.py": "0d8ac242",
 }
 
 REPO_ROOT = TESTS_ROOT.parent
@@ -1118,7 +1116,6 @@ class TestTransitionRetiming:
 
     def test_f7_rendered_pages_show_retimed_overlap(self, tmp_projects_root: Path) -> None:
         config = self._f7_config()
-        fps = _fps(config)
         _project_root, timeline_dir = _prepare_project(tmp_projects_root, "matrix-f7-pages")
         _write_synthetic_log(timeline_dir, config)
 
