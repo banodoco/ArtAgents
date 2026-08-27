@@ -180,19 +180,19 @@ def test_full_managed_executor_pack_conforms_and_timeline_manifest_is_unchanged(
 
     assert first.ok is True
     assert first.run_id is not None
-    assert first.run_root is not None
+    assert first.run_root is None
     assert first.manifest_path is not None
     assert first.executor_version is not None
     assert _DIGEST_RE.fullmatch(first.executor_version)
     assert {"pack_root", "manifest_path", "pages", "file_hashes"} <= set(first.outputs)
 
-    run_root = Path(first.run_root)
     pack_root = Path(first.outputs["pack_root"])
     manifest_path = Path(first.manifest_path)
-    assert run_root.is_dir()
-    assert pack_root == run_root / "agent-view"
-    assert manifest_path == pack_root / "manifest.json"
     assert manifest_path.is_file()
+    assert pack_root.is_relative_to(
+        project_root / ".astrid" / "views" / "timeline_visualize"
+    )
+    assert (pack_root / "manifest.json").read_bytes() == manifest_path.read_bytes()
     expected = {
         "manifest.json",
         "ground-truth.json",
@@ -223,10 +223,11 @@ def test_full_managed_executor_pack_conforms_and_timeline_manifest_is_unchanged(
     assert len(state["tasks"]) == 1
     assert state["tasks"][0]["status"] == "succeeded"
     assert state["tasks"][0]["winning_attempt_id"] == first.kernel_attempt_id
-    assert first.raw_result["payload"]["timeline_ids"] == [TIMELINE_ULID]
+    assert [
+        row["ulid"] for row in manifest["inputs"]["resolved_timelines"]
+    ] == [TIMELINE_ULID]
     assert first.raw_result["executor_version"] == first.executor_version
-    assert manifest_path.is_relative_to(project_root / "runs" / first.run_id)
-    assert not (run_root / "run.json").exists()
+    assert not (project_root / "runs" / first.run_id).exists()
     assert (timeline_dir / "manifest.json").read_bytes() == sentinel
 
 
@@ -245,7 +246,7 @@ def test_requires_timeline_false_runs_without_manifest_and_never_creates_one(
     assert not timeline_manifest.exists()
     assert result.run_id is not None
     assert _kernel_run_state(tmp_projects_root, result.run_id)["status"] == "succeeded"
-    assert not (Path(result.run_root or "") / "run.json").exists()
+    assert result.run_root is None
 
 
 def test_sdk_return_shape_and_stdout_are_cli_ready(
@@ -266,7 +267,7 @@ def test_sdk_return_shape_and_stdout_are_cli_ready(
     assert captured.out == ""
     assert result.ok is True
     assert result.run_id
-    assert result.run_root and Path(result.run_root).is_dir()
+    assert result.run_root is None
     assert result.manifest_path and Path(result.manifest_path).is_file()
     assert result.executor_version and _DIGEST_RE.fullmatch(result.executor_version)
     assert {"pack_root", "manifest_path", "pages", "file_hashes"} <= set(result.outputs)
@@ -288,23 +289,29 @@ def test_two_managed_runs_emit_identical_pack_bytes(
     second = _invoke(slug, timeline_source=str(timeline_dir))
 
     assert first.ok is second.ok is True
-    assert first.run_id != second.run_id
+    assert first.run_id == second.run_id
+    assert first.kernel_task_id == second.kernel_task_id
+    assert first.kernel_attempt_id == second.kernel_attempt_id
     first_pack = Path(first.outputs["pack_root"])
     second_pack = Path(second.outputs["pack_root"])
     assert _pack_bytes(first_pack) == _pack_bytes(second_pack)
 
 
-def test_multi_timeline_selection_writes_sorted_run_owned_metadata(
+def test_multi_timeline_selection_writes_sorted_kernel_owned_metadata(
     tmp_projects_root: Path,
 ) -> None:
     slug = "timeline-visualize-all"
-    _project_root, _timeline_dir = _prepare_project(
+    project_root, first_timeline = _prepare_project(
         tmp_projects_root,
         slug,
         second_timeline=True,
     )
+    second_timeline = project_root / "timelines" / SECOND_TIMELINE_ULID
 
-    result = _invoke(slug, all=True)
+    result = _invoke(
+        slug,
+        timeline_source=[str(first_timeline), str(second_timeline)],
+    )
 
     assert result.ok is True
     assert result.run_id is not None
@@ -312,7 +319,6 @@ def test_multi_timeline_selection_writes_sorted_run_owned_metadata(
     assert state["status"] == "succeeded"
     assert state["tasks"][0]["status"] == "succeeded"
     expected_timeline_ids = sorted([SECOND_TIMELINE_ULID, TIMELINE_ULID])
-    assert result.raw_result["payload"]["timeline_ids"] == expected_timeline_ids
     manifest = json.loads(Path(result.manifest_path or "").read_text(encoding="utf-8"))
     assert manifest["kind"] == "timeline_visualize_project"
     assert manifest["timeline_ids"] == expected_timeline_ids
