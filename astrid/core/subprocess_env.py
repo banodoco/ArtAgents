@@ -10,6 +10,8 @@ from astrid.core.env_vars import (
     ASTRID_ACTOR,
     ASTRID_AUTHOR_TEST,
     ASTRID_INTERNAL_INVOCATION,
+    ASTRID_NODE_EXECUTABLE,
+    ASTRID_REMOTION_PROJECT_DIR,
 )
 from astrid.core.env_vars import (
     ASTRID_HOME as ASTRID_HOME_ENV,
@@ -89,6 +91,8 @@ _ASTRID_PROPAGATED_ENV = frozenset(
         TASK_ITERATION_ENV,
         THEMES_ROOT_ENV,
         PACKS_PATH_ENV,
+        ASTRID_NODE_EXECUTABLE,
+        ASTRID_REMOTION_PROJECT_DIR,
     }
 )
 
@@ -137,9 +141,9 @@ def build_child_subprocess_env(
 
     env.pop(ASTRID_ACTOR, None)
     for key in sorted(_ASTRID_PROPAGATED_ENV):
-        value = parent_env.get(key)
-        if value is not None:
-            env[key] = str(value)
+        parent_value = parent_env.get(key)
+        if parent_value is not None:
+            env[key] = str(parent_value)
     return env
 
 
@@ -164,6 +168,8 @@ __all__ = [
     "ASTRID_ACTOR",
     "ASTRID_AUTHOR_TEST",
     "ASTRID_INTERNAL_INVOCATION",
+    "ASTRID_NODE_EXECUTABLE",
+    "ASTRID_REMOTION_PROJECT_DIR",
     "SubprocessEnvPolicyError",
     "TASK_ITEM_ID_ENV",
     "TASK_ITERATION_ENV",

@@ -353,3 +353,30 @@ def test_environment_is_allowlisted_and_host_secrets_are_not_passed(
         "secret_value": "absent",
         "safe_value": "transport-safe-locale",
     }
+
+
+def test_pinned_renderer_runtime_is_propagated_to_protocol_child(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ASTRID_NODE_EXECUTABLE", "/srv/astrid/node")
+    monkeypatch.setenv("ASTRID_REMOTION_PROJECT_DIR", "/srv/astrid/remotion")
+    monkeypatch.setenv(
+        "ASTRID_TIMELINE_SCHEMA_PYTHONPATH", "/srv/astrid/timeline-schema"
+    )
+
+    _, result = _run(
+        tmp_path,
+        {
+            "action": "environment",
+            "name": "ASTRID_NODE_EXECUTABLE",
+            "safe_name": "ASTRID_REMOTION_PROJECT_DIR",
+            "payload": _wire_fixture("result.json"),
+        },
+    )
+
+    assert isinstance(result, RenderResult)
+    assert result.metadata == {
+        "secret_value": "/srv/astrid/node",
+        "safe_value": "/srv/astrid/remotion",
+    }

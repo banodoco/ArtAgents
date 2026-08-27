@@ -587,6 +587,7 @@ def test_public_facade_standalone_and_attached_run_ownership(
     output_name: str,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    parity_media: Path,
 ) -> None:
     projects_root = tmp_path / "projects"
     monkeypatch.setenv(project_paths.PROJECTS_ROOT_ENV, str(projects_root))
@@ -597,11 +598,13 @@ def test_public_facade_standalone_and_attached_run_ownership(
     inputs_root.mkdir(parents=True)
     timeline = inputs_root / "hype.timeline.json"
     assets = inputs_root / "hype.assets.json"
-    timeline.write_text(
-        json.dumps({"theme": "banodoco-default", "tracks": [], "clips": []}),
-        encoding="utf-8",
-    )
-    assets.write_text('{"assets": {}}', encoding="utf-8")
+    # The ownership assertion must reach the runner's staging boundary with a
+    # renderer-valid request; an empty timeline is correctly rejected before
+    # the fake child process can exercise ownership behavior.
+    shutil.copy2(parity_media / "media-only.timeline.json", timeline)
+    shutil.copy2(parity_media / "assets.json", assets)
+    shutil.copy2(parity_media / "black.mp4", inputs_root / "black.mp4")
+    shutil.copy2(parity_media / "silence.m4a", inputs_root / "silence.m4a")
     inputs = {
         "timeline": str(timeline),
         "assets_registry": str(assets),
@@ -641,9 +644,10 @@ def test_public_facade_standalone_and_attached_run_ownership(
     result = run_executor(
         ExecutorRunRequest(
             executor_id="rendering.render",
-            out=None,
+            out=staging_root,
             project="demo",
             inputs=inputs,
+            project_was_auto_resolved=True,
             run_root=staging_root,
         ),
         load_default_registry(),
