@@ -24,6 +24,7 @@ from pathlib import Path
 import pytest
 
 import astrid
+from astrid.sdk.exceptions import CapabilityValidationError
 from astrid.packs.rendering.executors.timeline_visualize.frozen import (
     FrozenIntegrityError,
     load_frozen_view,
@@ -551,7 +552,6 @@ def test_clip_removal_dangles_sp_with_diagnostic(tmp_projects_root: Path) -> Non
 def test_tombstone_frozen_lineage_resolves_and_refresh_surfaces_tombstone(
     tmp_projects_root: Path,
 ) -> None:
-    case = _case("tombstone")
     slug = "adversarial-tombstone"
     project_root, timeline, root = _root_view(tmp_projects_root, slug)
     root_manifest = Path(root.manifest_path or "").resolve()
@@ -587,25 +587,27 @@ def test_tombstone_frozen_lineage_resolves_and_refresh_surfaces_tombstone(
     assert after.ok is True, after.error
     assert _pack_bytes(Path(after.outputs["pack_root"])) == before_bytes
 
-    # Any fresh render of the live timeline surfaces the tombstone state in
-    # the kernel-owned failure payload; failed staging is never promoted.
-    refused = astrid.invoke(
-        "rendering.timeline_visualize",
-        kind="executor",
-        include_installed=False,
-        project=slug,
-        inputs={
-            "project_slug": slug,
-            "layout": "time-scaled",
-            "formats": ["md"],
-            "filmstrip": "off",
-            "timeline_slug": case["mutation"]["slug"],
-        },
-        execution_mode="subprocess",
-    )
-    assert refused.ok is False
-    assert refused.run_root is None
-    assert "tombstoned" in json.dumps(refused.error)
+    # Any fresh render of this legacy source is rejected before kernel
+    # admission.  Slug selection is now reserved for kernel timeline rows;
+    # the explicit managed source preserves this adversarial fixture's legacy
+    # tombstone proof without creating failed staging.
+    run_roots_before = set((project_root / "runs").iterdir())
+    with pytest.raises(CapabilityValidationError, match="tombstoned"):
+        astrid.invoke(
+            "rendering.timeline_visualize",
+            kind="executor",
+            include_installed=False,
+            project=slug,
+            inputs={
+                "project_slug": slug,
+                "layout": "time-scaled",
+                "formats": ["md"],
+                "filmstrip": "off",
+                "timeline_source": str(timeline),
+            },
+            execution_mode="subprocess",
+        )
+    assert set((project_root / "runs").iterdir()) == run_roots_before
 
 
 def _root_view(projects_root: Path, slug: str):
