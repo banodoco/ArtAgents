@@ -1,10 +1,29 @@
-// Loads the Google Fonts referenced by themes/2rp/theme.json so that
-// theme.type.families.{heading,body,mono} actually resolve at render time.
-// Importing this module triggers font loading as a side effect.
-import {loadFont as loadSixtyfour} from '@remotion/google-fonts/Sixtyfour';
-import {loadFont as loadInter} from '@remotion/google-fonts/Inter';
-import {loadFont as loadJetBrainsMono} from '@remotion/google-fonts/JetBrainsMono';
+// Self-hosted font loading — ZERO network requests at render time.
+// Font files are committed in remotion/public/fonts/ and served by Remotion's
+// static file server. Uses @remotion/fonts loadFont() which registers fonts
+// via the FontFace API (synchronous from Remotion's perspective — it blocks
+// until ready via delayRender internally).
 
-loadSixtyfour();
-loadInter();
-loadJetBrainsMono();
+import {staticFile} from 'remotion';
+import {loadFont} from '@remotion/fonts';
+
+loadFont({
+  family: 'Inter',
+  url: staticFile('fonts/Inter-Regular.woff2'),
+  weight: '400',
+});
+loadFont({
+  family: 'Inter',
+  url: staticFile('fonts/Inter-Bold.woff2'),
+  weight: '700',
+});
+loadFont({
+  family: 'JetBrains Mono',
+  url: staticFile('fonts/JetBrainsMono-Regular.woff2'),
+  weight: '400',
+});
+loadFont({
+  family: 'JetBrains Mono',
+  url: staticFile('fonts/JetBrainsMono-Bold.woff2'),
+  weight: '700',
+});
