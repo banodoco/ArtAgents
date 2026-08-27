@@ -14,6 +14,10 @@ permissions:
     reason: Runs editorial executors as subprocesses for transcription, review, and arrangement.
   - id: project_files
     reason: Reads and writes transcripts, scenes, arrangements, and review artifacts.
+  - id: network
+    reason: Sends source audio to the configured transcription provider.
+  - id: environment
+    reason: Reads scoped transcription-provider credentials from the environment.
 description: Transcript-to-cut editorial pipeline — transcribe, detect scenes/shots, arrange clip pools, run heuristic and human review, and validate the rendered cut.
 keywords: [transcribe, scenes, shots, arrange, review, validate, transcript, editorial]
 capabilities: [transcribe_audio, detect_scenes, slice_shots, arrange_clips, refine_arrangement, grade_quality_zones, run_editor_review, collect_human_review, ingest_human_notes, scout_quotes, generate_script, inspect_cut, validate_cut]

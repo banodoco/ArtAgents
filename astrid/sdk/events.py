@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from astrid.core.foundation.project_paths import run_dir as project_run_dir
+from astrid.core.foundation.project_paths import derive_database_path
 from astrid.core.foundation.project_paths import resolve_projects_root
 from astrid.core.foundation.project_paths import validate_project_slug
 from astrid.core.events import EVENTS_FILENAME, EventLogError
@@ -22,7 +23,6 @@ from astrid.core.events.service import (
     PREVIOUS_EVENT_HASH_KEY,
     payload_event_hash,
 )
-from astrid.core.integrations.reigh.bridge_service import derive_database_path
 from astrid.core.receipts.canonical import CanonicalizationError, parse_json
 
 from ._module import _sdk_module

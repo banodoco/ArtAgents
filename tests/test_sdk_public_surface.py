@@ -216,8 +216,21 @@ def test_discover_and_get_capability_expose_public_dtos() -> None:
             "id": "project_files",
             "reason": "Reads and writes transcripts, scenes, arrangements, and review artifacts.",
         },
+        {
+            "id": "network",
+            "reason": "Sends source audio to the configured transcription provider.",
+        },
+        {
+            "id": "environment",
+            "reason": "Reads scoped transcription-provider credentials from the environment.",
+        },
     ]
-    assert editorial_pack["permission_ids"] == ["subprocess", "project_files"]
+    assert editorial_pack["permission_ids"] == [
+        "subprocess",
+        "project_files",
+        "network",
+        "environment",
+    ]
     assert editorial_pack["trust"] == {
         "sandbox": "none",
         "runs_with_user_process_permissions": True,
@@ -229,7 +242,12 @@ def test_discover_and_get_capability_expose_public_dtos() -> None:
         for capability in inventory.capabilities
         if capability.handle.pack_id == "editorial"
     )
-    assert editorial_capability.handle.safety.permissions == ("subprocess", "project_files")
+    assert editorial_capability.handle.safety.permissions == (
+        "subprocess",
+        "project_files",
+        "network",
+        "environment",
+    )
     assert all(
         isinstance(permission_id, str)
         for permission_id in editorial_capability.handle.safety.permissions
@@ -586,7 +604,7 @@ def test_invoke_executor_project_routing_supplies_kernel_staging_in_process(
             returncode=0,
         )
 
-    monkeypatch.setattr(capability_handler, "run_executor", _fake_run_executor)
+    monkeypatch.setattr(capability_handler.executor_runner, "run_executor", _fake_run_executor)
 
     result = astrid.invoke(
         "editorial.arrange",
@@ -858,7 +876,7 @@ def test_invoke_executor_prefers_universal_manifest_path_from_payload(
     import uuid as _uuid
     universal_manifest = tmp_path / "nested" / "manifest.json"
 
-    def fake_kernel_invoke(capability, *, kind, project, projects_root, inputs, outputs):
+    def fake_kernel_invoke(capability, *, kind, project, projects_root, inputs, outputs, **_kwargs):
         run_id = generate_lowercase_ulid()
         task_id = generate_lowercase_ulid()
         attempt_id = _uuid.uuid4().hex
@@ -891,7 +909,7 @@ def test_invoke_executor_discovers_universal_manifest_from_out_dir(
     manifest_path = tmp_path / "manifest.json"
     manifest_path.write_text("{}", encoding="utf-8")
 
-    def fake_kernel_invoke(capability, *, kind, project, projects_root, inputs, outputs):
+    def fake_kernel_invoke(capability, *, kind, project, projects_root, inputs, outputs, **_kwargs):
         run_id = generate_lowercase_ulid()
         task_id = generate_lowercase_ulid()
         attempt_id = _uuid.uuid4().hex
@@ -925,7 +943,7 @@ def test_invoke_executor_ignores_domain_manifest_payload_paths(
     universal_manifest.write_text("{}", encoding="utf-8")
     domain_manifest = tmp_path / "iteration.manifest.json"
 
-    def fake_kernel_invoke(capability, *, kind, project, projects_root, inputs, outputs):
+    def fake_kernel_invoke(capability, *, kind, project, projects_root, inputs, outputs, **_kwargs):
         run_id = generate_lowercase_ulid()
         task_id = generate_lowercase_ulid()
         attempt_id = _uuid.uuid4().hex
@@ -1014,7 +1032,7 @@ def test_invoke_defaults_to_subprocess_execution_mode(
 
     seen: dict[str, Any] = {}
 
-    def fake_kernel_invoke(capability, *, kind, project, projects_root, inputs, outputs):
+    def fake_kernel_invoke(capability, *, kind, project, projects_root, inputs, outputs, **_kwargs):
         seen["project"] = project
         # mimic execution_mode default check: if project was None, would have failed earlier
         run_id = generate_lowercase_ulid()
@@ -1046,7 +1064,7 @@ def test_invoke_executor_allows_project_without_explicit_out(
     import uuid as _uuid
     seen: dict[str, Any] = {}
 
-    def fake_kernel_invoke(capability, *, kind, project, projects_root, inputs, outputs):
+    def fake_kernel_invoke(capability, *, kind, project, projects_root, inputs, outputs, **_kwargs):
         seen["project"] = project
         seen["projects_root"] = projects_root
         run_id = generate_lowercase_ulid()
@@ -1210,7 +1228,11 @@ def test_invoke_reuses_loaded_registries_and_preserves_runner_exception_cause(
     astrid = _import_public_module()
     sdk = importlib.import_module("astrid.sdk")
     import astrid.sdk.invocation as inv_mod
-    executor_registry = object()
+    class _ExecutorRegistryStub:
+        def get(self, _capability_id: str) -> object:
+            return object()
+
+    executor_registry = _ExecutorRegistryStub()
     orchestrator_registry = object()
     registries = (executor_registry, orchestrator_registry, None)
     seen: dict[str, Any] = {"load_calls": 0}
@@ -1224,13 +1246,17 @@ def test_invoke_reuses_loaded_registries_and_preserves_runner_exception_cause(
         assert kwargs["_registries"] is registries
         return _make_capability(astrid, capability_id, "executor")
 
-    def fake_kernel_invoke(capability, *, kind, project, projects_root, inputs, outputs):
+    def fake_kernel_invoke(capability, *, kind, project, projects_root, inputs, outputs, **_kwargs):
         assert project == "demo-project"
         raise ValueError("boom")
 
     monkeypatch.setattr(sdk, "_load_registries", fake_load_registries)
     monkeypatch.setattr(sdk, "get_capability", fake_get_capability)
     monkeypatch.setattr(inv_mod, "_kernel_invoke", fake_kernel_invoke)
+    monkeypatch.setattr(
+        "astrid.core.io.cas.executor_definition_digest",
+        lambda _definition: "a" * 64,
+    )
 
     with pytest.raises(astrid.CapabilityInvocationError) as excinfo:
         astrid.invoke(
@@ -1261,7 +1287,7 @@ def test_invoke_maps_typed_sdk_exceptions_from_internal_failures(
     )
 
     for internal_error, expected in cases:
-        def fake_kernel_invoke(capability, *, kind, project, projects_root, inputs, outputs, _internal_error=internal_error) -> Any:
+        def fake_kernel_invoke(capability, *, kind, project, projects_root, inputs, outputs, _internal_error=internal_error, **_kwargs) -> Any:
             raise _internal_error
 
         monkeypatch.setattr(inv_mod, "_kernel_invoke", fake_kernel_invoke)
@@ -1282,7 +1308,7 @@ def test_invoke_missing_input_runner_errors_raise_sdk_missing_input(
     astrid = _import_public_module()
     import astrid.sdk.invocation as inv_mod
 
-    def fake_kernel_invoke(capability, *, kind, project, projects_root, inputs, outputs) -> Any:
+    def fake_kernel_invoke(capability, *, kind, project, projects_root, inputs, outputs, **_kwargs) -> Any:
         from astrid.core.execution.executor.runner import ExecutorRunnerError
 
         raise ExecutorRunnerError("executor 'editorial.arrange' missing required input(s): brief")
@@ -1308,7 +1334,7 @@ def test_invoke_maps_executor_result_error_into_public_taxonomy(
     from astrid.core.ids import generate_lowercase_ulid
     import uuid as _uuid
 
-    def fake_kernel_invoke(capability, *, kind, project, projects_root, inputs, outputs):
+    def fake_kernel_invoke(capability, *, kind, project, projects_root, inputs, outputs, **_kwargs):
         run_id = generate_lowercase_ulid()
         task_id = generate_lowercase_ulid()
         attempt_id = _uuid.uuid4().hex
@@ -1566,7 +1592,7 @@ def test_invoke_maps_orchestrator_result_errors_into_public_taxonomy(
     from astrid.core.ids import generate_lowercase_ulid
     import uuid as _uuid
 
-    def fake_kernel_invoke(capability, *, kind, project, projects_root, inputs, outputs):
+    def fake_kernel_invoke(capability, *, kind, project, projects_root, inputs, outputs, **_kwargs):
         run_id = generate_lowercase_ulid()
         task_id = generate_lowercase_ulid()
         attempt_id = _uuid.uuid4().hex
@@ -2451,8 +2477,14 @@ def test_video_execution_inference_single_backend(
     """Video mode with a single backend auto-infers execution."""
     astrid = _import_public_module()
     sdk = importlib.import_module("astrid.sdk")
+    preflight = importlib.import_module("astrid.core.generation.preflight")
     fake_invoke, seen = _make_success_invoke(astrid, tmp_path)
     monkeypatch.setattr(sdk, "invoke", fake_invoke)
+    monkeypatch.setattr(
+        preflight,
+        "require_local_generation_readiness",
+        lambda *_args, **_kwargs: None,
+    )
 
     # ltx-2.3 flf only has local
     result = astrid.generate.video(
