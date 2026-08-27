@@ -37,10 +37,10 @@ def test_make_doctor_owns_disposable_root_when_ambient_root_is_missing(
     assert not ambient_root.exists()
 
 
-def test_doctor_still_fails_closed_for_an_uninitialized_explicit_root(
+def test_doctor_reports_an_uninitialized_explicit_root(
     tmp_path: Path,
 ) -> None:
-    """The CI wrapper must not weaken doctor’s missing-database contract."""
+    """An untouched explicit root is a first-run state, not an unhealthy store."""
     missing_root = tmp_path / "missing-projects-root"
     result = subprocess.run(
         [
@@ -58,10 +58,11 @@ def test_doctor_still_fails_closed_for_an_uninitialized_explicit_root(
         timeout=30,
     )
 
-    assert result.returncode == 1
+    assert result.returncode == 0
     payload = json.loads(result.stdout)
-    assert payload["ok"] is False
-    assert {check["name"] for check in payload["checks"] if check["status"] == "fail"} >= {
+    assert payload["ok"] is True
+    assert payload["state"] == "uninitialized"
+    assert {check["name"] for check in payload["checks"] if check["status"] == "uninitialized"} >= {
         "data_paths",
         "sqlite_quick_check",
         "fk_integrity",

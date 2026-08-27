@@ -1,11 +1,10 @@
 """Run the deploy doctor against a disposable, initialized CI data root.
 
-The normal ``astrid doctor`` command intentionally fails closed when a
-projects root or database is absent.  That is the correct operator behavior,
-but a clean checkout has no ambient ``projects/.astrid`` database for the
-Makefile's pre-CI doctor target to inspect.  This helper owns a temporary root,
-initializes it through the public projects CLI, and then runs the unchanged
-read-only doctor against that exact root.
+The normal ``astrid doctor`` command reports an absent projects root or
+database as an explicit first-run ``uninitialized`` state.  The Makefile's
+pre-CI target needs a ready store with all checks exercised, so this helper
+owns a temporary root, initializes it through the public projects CLI, and
+then runs the unchanged read-only doctor against that exact root.
 """
 
 from __future__ import annotations
