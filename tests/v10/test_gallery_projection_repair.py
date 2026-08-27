@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -155,3 +157,29 @@ def test_projection_id_and_timestamp_are_stable(desert_fixture: Path) -> None:
         variant = conn.execute("SELECT id, variant_type, created_at FROM generation_variants").fetchone()
     assert generation == (generation_id_for("desert-project", "task-video"), "task-video", TS2, TS2)
     assert variant[1:] == ("original", TS2)
+
+
+def test_documented_cli_runs_without_an_installed_astrid_package(
+    desert_fixture: Path,
+) -> None:
+    """The migration must work from a clean shell, not only pytest's path."""
+
+    repo_root = Path(__file__).resolve().parents[2]
+    script = repo_root / "scripts" / "migrations" / "v10" / "repair_generation_gallery.py"
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "--root",
+            str(desert_fixture),
+            "--project",
+            "desert-plant-growth",
+        ],
+        cwd=desert_fixture,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    report = json.loads(completed.stdout)
+    assert report["mode"] == "dry-run"
+    assert report["totals"]["projected"] == 1

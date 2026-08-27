@@ -38,7 +38,10 @@ import sys
 from pathlib import Path
 from typing import Any
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+SCRIPT_DIR = Path(__file__).resolve().parent
+REPOSITORY_ROOT = SCRIPT_DIR.parents[2]
+sys.path.insert(0, str(SCRIPT_DIR))
+sys.path.insert(0, str(REPOSITORY_ROOT))
 
 from _common import derive_ulid  # noqa: E402, I001
 
