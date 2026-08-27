@@ -1,11 +1,11 @@
 import importlib.util
+import re
 import sys
 import unittest
 from pathlib import Path
 
-from astrid.core.element import catalog as effects_catalog
 from astrid.core import timeline
-
+from astrid.core.element import catalog as effects_catalog
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKSPACE = ROOT.parent
@@ -111,7 +111,21 @@ class CompositionElementTest(unittest.TestCase):
                 if sibling.is_file():
                     surface.append(sibling.read_text(encoding="utf-8"))
             self.assertIn("getTimelineDurationInFrames", "\n".join(surface))
-            self.assertRegex(source, r"export\s+(?:default\s+)?(?:const|function)\s+TimelineComposition\b")
+            declaration = re.search(
+                r"(?m)^\s*export\s+(?:default\s+)?(?:const|function)\s+"
+                r"TimelineComposition\b|^\s*(?:const|function)\s+"
+                r"TimelineComposition\b",
+                source,
+            )
+            self.assertIsNotNone(
+                declaration,
+                "TimelineComposition must have a const/function declaration",
+            )
+            if not declaration.group(0).lstrip().startswith("export"):
+                self.assertRegex(
+                    source,
+                    r"(?m)^\s*export\s+default\s+TimelineComposition\b",
+                )
         else:
             # In-tree shell: both symbols are imported from the package.
             self.assertIn("getTimelineDurationInFrames", source)
