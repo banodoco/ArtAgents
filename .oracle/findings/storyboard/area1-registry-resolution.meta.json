@@ -1,0 +1,21 @@
+{
+  "brief": "/Users/peteromalley/Documents/reigh-workspace/Astrid-megado/.oracle/briefs/storyboard/area1-registry-resolution.md",
+  "elapsed_s": 57.212,
+  "error": null,
+  "error_class": null,
+  "finish_reason": null,
+  "finished_at": "2026-08-27T11:24:22Z",
+  "meta_file": "/Users/peteromalley/Documents/reigh-workspace/Astrid-megado/.oracle/findings/storyboard/area1-registry-resolution.meta.json",
+  "model": "zhipu:glm-5.3",
+  "pid": 43777,
+  "raw_result_keys": [
+    "stdout"
+  ],
+  "response_chars": 2868,
+  "response_file": "/Users/peteromalley/Documents/reigh-workspace/Astrid-megado/.oracle/findings/storyboard/area1-registry-resolution.txt",
+  "started_at": "2026-08-27T11:23:24Z",
+  "status": "ok",
+  "stem": "area1-registry-resolution",
+  "task_timeout_s": 1500,
+  "tool_calls": 0
+}

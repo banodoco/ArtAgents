@@ -1,0 +1,24 @@
+## Area 3 — generation-id: verified facts
+
+**1. `_common.py`** (`astrid/packs/generation/executors/_common.py`)
+- `build_generation_manifest` (:29–85) wraps `core/_shared/result_manifest.py:build_manifest` (:174) at `schema_version=2`.
+- Manifest fields: `modality, model, mode_used, model_actual, execution, request, seed` (:55–63) + optional `dropped_features, applied_features, cost_usd, duration_ms, request_id, source_urls` (:64–75). Helpers: `_load_prompts` (:174), `_normalise_prompts` (:203), `_resolve_seed` (:162), `_manifest_path_for_run_dir` (:339) → `run_dir/manifest.json`.
+
+**2. Manifest identities**
+- Required core: `schema_version, kind, inputs, outputs, created, warnings` (`result_manifest.py:29–31`); outputs auto-enriched `path, content_hash (sha256:…), bytes, type` (:89–135).
+- `request_id` = backend request id, optional. **No `generation_id`/`run_id` key exists in any manifest.** Only stable output identity = `content_hash`.
+- PNG tEXt chunks: `astrid_prompt, astrid_model, astrid_model_actual, astrid_seed, astrid_request_id, astrid_created, astrid_loras` (`generation/skill/SKILL.md:173–179`).
+
+**3. `AssetEntry.generationId` — nothing satisfies it.**
+- Declared `banodoco_schema.py:131`, allowed `:377`. Sole code reference: `_PRESERVED_REGISTRY_FIELDS` (`cut/registry.py:18–27`) → `_carry_forward_registry_metadata` (:68–79) copies prior value matched by url/file. No Astrid writer ever sets it fresh.
+
+**4. History fields (prompts/variants)**
+- `manifest.json`: full canonical `request` (prompt, refs, seed) per run dir.
+- `.astrid.variants.json` (`variants.py:18`): artifacts `{role: variant|other, group, group_index, duration, variant_meta, path}` (:292–300); refs `{run_id (ULID), artifact_index, kind, sha256, label}` (:309–319); append-only selections (`keep_selection` :119). Writers: `generate_image_openai/run.py:425`, `iteration_video/run.py:341`, `logo_ideas/run.py:511` — **core image/video executors don't write it**.
+- OpenAI executor adds audit lineage prompt→asset (`generate_image_openai/run.py:360–389`).
+
+**Unknowns:** intro project registry may hold externally-authored `generationId` values (outside repo, read-only).
+**Risk:** using `content_hash` as generationId collides on identical bytes; kernel run id lives in run.json, not manifest.
+
+**Approach (ONE-store/KISS):** compiler sets `AssetEntry.generationId` = kernel run id (survives cut carry-forward, registry.py:25); storyboard `variants[]/active_index` maps to variant-group artifacts + latest selection; prompts sourced from manifest `request` + tEXt. No new store.
+0

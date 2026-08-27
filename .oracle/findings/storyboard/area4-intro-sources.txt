@@ -1,0 +1,14 @@
+## area4-intro-sources — verified facts
+
+**1. slides-manifest.json** (`build/slides-manifest.json`): header `video: astrid-intro-final.mp4`, `timeline: "main v13"` (:2-3); 25 slide entries (:5-379), uniform shape: `slug, start, duration, vo_text, caption, image(build/final-slides/<slug>.png), alt_render(build/slides-pyramid-full/<slug>.png), image_prompt, generator{tool,backend,style}` (:6-17). `vo_text==caption` in all entries shown; spot-checked `vo_text` identical to plan.json text for open/two_ideas/recap1/recap2. `image_prompt` = `pyramid-prompts.txt` line for that slug (prefix + per-slug "Visual:" mink prose). No structured pose/anchor/scale anywhere — mink pose is prose only (foundation-prompts.txt:1-20).
+
+**2. build_timeline.py**: 4 tracks (brand/captions/broll visual + a1 audio, reversed z-order, :31-36); per segment: VO media clip w/ explicit from/to (:45-49), caption text clip VERBATIM from `s["text"]` (:54-68), broll media clip (:70-73); +1 brand wordmark clip (:75-80). Holds = `dur+GAP(0.35)`; FADE 0.2 (:25-26). Emits exactly **25×3+1=76 clips, 25×2=50 assets**, total 177.53s → `build/timeline/{timeline,assets}.json` sidecar (:94-95). Theme banodoco-default, 1920×1080@30 (:81-92).
+
+**3. make_slide_html.py**: title/bullets source = `CONTENT` dict (:17-44); nav tab groups OVERVIEW/PILLAR1/PILLAR2 (:13-15) — matches tab states baked into prompts ("equally bright"/"1 highlighted"/"2 highlighted"). `idea2_example` (:30) is dead — no such segment.
+
+**4. plan.json** (`build/segments/plan.json`): 25 segments `{index,slug,text,start,duration}`, `total:177.53` (:179). Starts are cumulative `dur+0.35` (0→5.664→7.625…); last cta 168.081+9.099=177.18. Em-dashes are `\u2014` — preserve verbatim.
+
+**5. Parity-safe rule (recommendation)**: PNGs bake title/bullets/mink → storyboard carries title/bullets/mink as *declarative metadata* on the image block (regen spec only); compiler emits exactly 3 clips/section + brand = 76/50. `alt_render` = ready-made `variants[]` entry; `active_index`→final-slides satisfies criterion 4 byte-neutrally.
+
+**Unknowns**: whether all 25 `vo_text` strings byte-match plan.json (spot-check only — assert in compiler). **Risk**: sidecar `build/timeline/` is a second ledger; D3 must emit managed timeline only.
+0

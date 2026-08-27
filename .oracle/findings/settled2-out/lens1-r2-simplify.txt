@@ -1,0 +1,14 @@
+**Ranked cuts (all simplifications, no scope adds):**
+
+1. **Cut the `storyboard.schema.json` artifact — keep one validator module** (B1). Nothing consumes the JSON Schema: no editor (non-goal), no external tool. Schema + loader = two artifacts that must agree. A typed `loader.validate()` raising `StoryboardError` with all problems satisfies every acceptance criterion alone.
+
+2. **Delete the `timing.hold` per-block/section override machinery** (D3, B2). The intro — the only application — uses `--vo-align` exclusively; every hold-override path is dead code at ship. Keep `meta.timing.default_hold` + vo-align; add overrides when a second storyboard exists.
+
+3. **Drop the paid-generation branch of the resolution contract** (canonical data model, B3). No acceptance criterion exercises "ELSE invoke generation executor once" — the fixture and flip proof both use `alt_render_path`. v1: gen variants require `alt_render_path`; the executor path is an untested, unexercised branch carrying paid-call risk.
+
+4. **Collapse D2 as a deliverable**. Amendment 1 cut shots; non-goals ban prompt sidecars; transcript timing = vo-align (B2); prompt persistence = `origin` (B3). D2 is now three pointers to other batches — vestigial structure, cut it from the deliverable list.
+
+5. **Kill the dual-mode validation** (B1 "OPTIONAL pre / REQUIRED post", B3 test 4). Assert `resolved[]`/registry invariants inside `compile_storyboard` directly; one validation mode, no schema-nullability duality to test.
+
+Cuts 1+2+5 remove ~half of B1/B2's surface with zero criterion impact; 3 removes the only unexercised runtime path.
+0

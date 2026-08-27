@@ -1,0 +1,18 @@
+# AREA 1 — Registry resolution: verified facts
+
+**1. `validators/registry.py`** — `validate_registry` (registry.py:33-80): registry must be `{"assets": {key: entry}}`; entry keys restricted to `_ASSET_ENTRY_ALLOWED` (imported from `banodoco_schema.py:364-381`); entry needs `file` **or** `url` (:44-45); `url` must be http(s) (:47); optional `origin`, `content_sha256` (64-hex, :54-58), `derivedFrom`, `url_expires_at`, `etag` checks. **`generationId`/`variantId` pass through unvalidated** (allowed, not checked).
+
+**2. `banodoco_schema.py`** (lives at `astrid/core/timeline/banodoco_schema.py`, *not* under `validators/`): `SharedAssetEntry` TypedDict fields :119-133 (`file,url,etag,content_sha256,url_expires_at,type,duration,resolution,fps,origin,derivedFrom,generationId,variantId,thumbnailUrl`); timeline container validated via shared JSON-Schema package (`banodoco_timeline_schema`, :23-56, no silent fallback).
+
+**3. `sdk/media.py`** — `MediaService.import_file` (:115-170): hashes/probes outside txn, derives deterministic media_id from `(core.media.import, project scope, key)` (:147-152), commits media row + location + receipt in one UoW (:154-163). `import_directory` = per-file child keys `parent#index` (:174-239). Project-scoped `show` (:254-262).
+
+**4. Managed resolver** — `astrid/core/io/managed_media_resolver.py`: strict CAS locator shape `<root>/.astrid/media/sha256/aa/bb/<digest>` (:27-44); `resolve_owned_managed_media` (:59-127) fails closed unless kernel row (`media_locations.realm='managed_local'` joined to project, :97-104) exists, locator==canonical, bytes re-hash to digest (:118-126). `rebase_timeline_registry_managed_assets` (:130-176) refreshes stale `file` locators only, deriving digest from `content_sha256|sha256|hash` or the locator itself.
+
+**5. media→render-valid entry**: `MediaService.import_file` → kernel media row + `managed_local` location; registry entry `{file: <absolute CAS path>, content_sha256: digest}` satisfies `validate_registry`; render path (`render/managed_timeline.py:209-232,297-320`) validates, checks clip-referenced asset ids exist, rebases locators via ownership check, writes `timeline.json/assets.json/authority.json` (:337-343). Alternative: `sources/`-relative `file` (`resolution.py:285-316`, contained-path fast path).
+
+**Unknowns**: none material.
+
+**Risks** (ranked): (1) absolute `file` locators are root-dependent — always pair with `content_sha256` so rebase works; (2) `sources/` files bypass digest verification (`resolve_asset_authorized_path` :302-307); (3) missing-asset check is clip-reference only — unreferenced entries silently kept.
+
+**Approach (ONE-store/KISS)**: compiler emits `{file: managed_media_path(root, digest), content_sha256: digest, generationId?}`; import via `sdk media import-file` once per gen asset; rely on existing rebase at render. No new resolver code.
+0

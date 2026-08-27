@@ -295,9 +295,12 @@ def _render_asset_stage_hash(
 
 def _effect_registry_for_assets(
     theme_path: Path | None,
+    *,
+    registry: Any | None = None,
 ) -> tuple[dict[str, ElementDefinition], dict[str, str]]:
     active_theme = _resolve_theme_path(theme_path) if theme_path is not None else None
-    registry = load_default_registry(active_theme=active_theme, project_root=REPO_ROOT)
+    if registry is None:
+        registry = load_default_registry(active_theme=active_theme, project_root=REPO_ROOT)
     effects = {element.id: element for element in registry.list(kind="effects")}
     aliases: dict[str, str] = {}
     if "text-card" in effects:
@@ -330,6 +333,7 @@ def _resolve_timeline_element_references(
     timeline_data: Mapping[str, Any],
     *,
     theme_path: Path | None,
+    registry: Any | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
     """Resolve every requested animation/transition before Remotion runs.
 
@@ -338,8 +342,9 @@ def _resolve_timeline_element_references(
     an unavailable external pack from becoming a successful-looking stock
     render.
     """
-    active_theme = _resolve_theme_path(theme_path) if theme_path is not None else None
-    registry = load_default_registry(active_theme=active_theme, project_root=REPO_ROOT)
+    if registry is None:
+        active_theme = _resolve_theme_path(theme_path) if theme_path is not None else None
+        registry = load_default_registry(active_theme=active_theme, project_root=REPO_ROOT)
     clips = timeline_data.get("clips")
     if not isinstance(clips, list):
         return {"animations": [], "transitions": []}
@@ -423,10 +428,18 @@ def _stage_effect_assets_for_timeline(
     theme_path: Path | None,
     render_hash: str,
 ) -> dict[str, Any]:
-    effects, aliases = _effect_registry_for_assets(theme_path)
+    # Resolve one immutable element registry for this render.  Effects and
+    # animation/transition references must agree even if the filesystem pack
+    # inventory changes between support probing and execution; loading the
+    # registry twice here also made the combined render path needlessly
+    # discover every local pack twice.
+    active_theme = _resolve_theme_path(theme_path) if theme_path is not None else None
+    registry = load_default_registry(active_theme=active_theme, project_root=REPO_ROOT)
+    effects, aliases = _effect_registry_for_assets(theme_path, registry=registry)
     resolved_elements = _resolve_timeline_element_references(
         timeline_data,
         theme_path=theme_path,
+        registry=registry,
     )
     clips = timeline_data.get("clips")
     if not isinstance(clips, list):

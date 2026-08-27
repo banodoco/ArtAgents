@@ -1,0 +1,365 @@
+# SETTLED-PLAN CRITIQUE WAVE (round 1)
+
+## NORTH STAR (complete)
+# North Star — Astrid unified execution
+
+## The desirable end state
+
+Astrid v10 as **ONE store and ONE execution path**: every durable fact lives in the
+SQLite kernel (projects, timelines, shots, references, tasks, runs, media, evidence,
+receipts, events); every capability invocation — executor or orchestrator — runs as a
+kernel run+task (admit → claim → start → execute → complete|fail) with hash-chained
+events, receipts, attempts/leases, and managed outputs. `sdk.invoke` is the thin
+admission wrapper. The filesystem `run.json` is at most a derived projection of the
+kernel run — never an independent authority. Docs describe exactly what ships; the
+suite and empirical process runs prove it.
+
+## Enduring qualities and invariants to preserve
+
+- **Single authority**: the kernel writer + UnitOfWork + receipts + events is the only
+  state. No second store, no silent divergence path, no eventlog-only escape for an
+  existing kernel timeline.
+- **Every run is observable**: leases, attempts, retries, expiry, and the full event
+  chain make any execution auditable, resumable, and replayable.
+- **Honest docs**: no overclaims (e.g. "admitted tasks run" only when a driver ships);
+  documented limitations are real limitations.
+- **Elegance**: KISS / YAGNI. One generic adapter beats 50 bespoke ones; relax the
+  completion contract minimally; cut scope that isn't pulling its weight.
+- **Verified empirically**: every claim backed by a runnable process, test, or probe —
+  not narrative.
+
+## Anti-patterns to avoid
+
+- A second ledger that must be kept "consistent by convention."
+- Kernel/eventlog divergence (orphaned receipts, silent downgrades).
+- Ghost verbs or docs that claim behavior that does not exist.
+- Per-executor adapters where one generic path would do.
+- Scope creep disguised as architecture (serve/GPU supervision beyond what execution needs).
+
+## What aligned progress looks like
+
+Each batch leaves the kernel as the single execution authority: more invocation paths
+admitted as kernel tasks, fewer places that write run.json, docs and tests converging
+on one ledger, and every gate (suite, process runs, oracle review) passing before the
+next batch starts.
+
+
+## AGENT GOAL (frozen)
+# Agent Goal — declarative storyboard layer (megado run)
+
+[North Star](./northstar.md) — adopted in place from prior campaign; sha256 recorded in custody.md. This run advances the ONE-store principle by making the kernel-managed timeline the compiled output of a versioned storyboard source, with generations/prompts/variations first-class instead of sidecar convention.
+
+## Objective
+Deliver a general, versioned **storyboard data layer** plus compiler inside the Astrid repo, proven end-to-end by re-rendering the existing Astrid intro (astrid-intro project) from it.
+
+Deliverables
+- D1 `storyboard.schema.json` + loader/validator: meta(canvas/style) ; sections[] with nav tabs-state, ordered typed blocks: title, bullets, text, image(gen|asset), vo(text), video(gen|asset), mink slot directive {pose,anchor,scale}; every gen carries full spec {prompt,model,refs,seed?} and resolution fields (media_id|content_hash|path) + variants[] + active_index.
+- D2 Enrichment/linkage conventions documented + implemented where cheap: vo blocks ↔ transcript timing (plan.json), images ↔ prompts persisted beside assets, timeline asset entries use AssetEntry.generationId when the image came from an Astrid generation, section→shot registration via `timelines shots` mount behind a flag.
+- D3 Compiler `scripts/build_storyboard.py`: storyboard.json → managed timeline config+registry → `timelines save <slug>` (+`--render`). Timing model: default constant hold; `timing.hold` per block/section overrides; optional `--vo-align plan.json` snapping section starts to VO segment times (independent-of-length editing requirement).
+- D4 Intro application: author `build/astrid-intro.storyboard.json` (25 slides: verbatim vo_text+captions from plan.json/captions, pyramid title/bullets equivalents, image=final-slides png as asset, original codex prompt preserved under history) → compile → save → render → open.
+
+## Non-goals
+No UI editor; no kernel core schema changes beyond using existing fields/mounts; no migration of other projects; English only; no style redesign.
+
+## Model policy (user-pinned)
+- Oracle/planner/[XHARD]: **grok-4.6** (grok CLI). Fallback if unavailable: GPT-5.6 Sol via `codex exec`.
+- Explorer/normal executor: **GLM-5.3 Flash** (`launch_hermes_agent.py --model=zhipu:glm-5.3`, fallback `zhipu:glm-5.2`).
+No automatic routing; pinned models authoritative unless evidence shows unavailability (then report + fallback as declared above).
+
+## Done criteria
+1. Validator accepts sample + intro storyboards; rejects malformed (missing nav/blocks/dup slug).
+2. Compiler compiles intro storyboard to a NEW managed timeline; `timelines show` reports ≥76 clips… expected exact = current main content parity (76 clips/50 assets ± documented deltas).
+3. Render of that timeline ≈177±3s, plays, contains all 25 slide visuals (spot-check 3 frames).
+4. One regeneration variant demonstrably recorded (variant entry + picked active) without changing bytes of others.
+5. Evidence matrix maps every criterion → command/path/result. grok oracle PASS per batch + final review (≤3 passes).
+
+## Validation commands
+- `python3 scripts/build_storyboard.py validate build/astrid-intro.storyboard.json`
+- compile/save/render pipeline as in D3/D4 against ASTRID_PROJECTS_ROOT=/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects
+- focused pytest for schema/validator (new tests/test_storyboard_schema.py)
+
+## Sync/authorization
+Commit batches on branch megado/oracle-run-storyboard; push that branch to origin authorized at finish. Opening local videos/files authorized. Never merge to main.
+
+## Stop conditions
+Blocked if grok AND codex both unavailable for oracle (report + halt after safe checkpoint). Escalate scope expansion beyond D1–D5.
+
+
+## PLAN UNDER REVIEW (immutable snapshot)
+# 1) TASKLIST
+
+Execution policy: all implementation tasks are proposed **normal**, assigned to GLM-5.3 Flash with the declared GLM-5.2 fallback only upon demonstrated unavailability. No task meets the exceptional `[XHARD]` threshold: the work decomposes into bounded schema, compiler, SDK-linkage, fixture, and empirical-validation units whose failures are locally observable. Grok-4.6 performs each batch gate and final review, with the declared GPT-5.6 Sol fallback. Each batch ends in a reviewed commit; no dependent batch begins before its checkpoint is `PASS`.
+
+## Batch 0 — Freeze compiler semantics and protect the baseline
+
+Tasks:
+
+- Reconcile `.oracle/custody.md`, current dirty paths, carried-forward fixes, branch/ref, and the external intro-project mount. Preserve unrelated work without folding it accidentally into storyboard commits.
+- Verify the intro store’s exclusive-owner state before any later mutation; decide whether execution must stop the owner or use its supported route.
+- Record settled answers for block-to-clip behavior, generation identity, prompt persistence, intro storyboard location, and rerun-safe shot registration.
+- Lock a parity oracle from:
+  - `build/slides-manifest.json`
+  - `build/segments/plan.json`
+  - `build/make_slide_html.py`
+  - `build/build_timeline.py`
+  - current kernel timeline `main`
+- Define the exact timing rules: section-start calculation, default hold, section/block override precedence, VO-aligned starts, and how multiple video blocks within one section are placed.
+
+Checkpoint acceptance criteria:
+
+- Read-only probes confirm 25 sections, 76 clips, 50 assets, 177.53s authored duration, and current `main` version/content.
+- The semantics above are written unambiguously and preserve exact intro parity without ignored renderable blocks or duplicated baked text.
+- No intro kernel mutation occurred; protected dirty paths remain intact.
+- Grok oracle `PASS`.
+
+Classification: **normal** — contract reconciliation over existing, inspectable APIs and fixtures.
+
+## Batch 1 — Versioned storyboard schema and reusable loader
+
+Tasks:
+
+- Add `astrid/core/storyboard/storyboard.schema.json` with an exact `schema_version` and strict object shapes for:
+  - `meta.canvas` and `meta.style`
+  - ordered `sections[]` with unique semantic slug
+  - required navigation tab-state
+  - section/block timing
+  - ordered typed blocks: `title`, `bullets`, `text`, `image`, `vo`, `video`, and `mink`
+  - `mink` directive `{pose, anchor, scale}`
+  - asset and generation forms for image/video
+  - complete generation specifications `{prompt, model, refs, seed?}`
+  - exactly one resolution route from `media_id`, `content_hash`, or `path`
+  - `variants[]`, `active_index`, and prompt/history provenance
+  - VO text/caption plus the settled optional audio-resolution form required for intro parity
+- Add `astrid/core/storyboard/{__init__.py,loader.py}` with `StoryboardValidationError`, deterministic JSON-schema errors, semantic duplicate-slug checks, active-index bounds, and storyboard-relative path resolution without mutating the authored document.
+- Add a small general-purpose fixture such as `examples/storyboards/minimal.storyboard.json`.
+- Add `tests/test_storyboard_schema.py` covering:
+  - schema self-validation
+  - valid minimal/sample storyboard
+  - missing nav
+  - missing/empty blocks
+  - duplicate section slug
+  - invalid block discriminator
+  - incomplete generation spec
+  - missing/ambiguous resolution
+  - out-of-range `active_index`
+- Verify the packaged wheel includes the schema.
+
+Checkpoint acceptance criteria:
+
+- The sample validates through the public loader.
+- Every required malformed case fails with a deterministic path/message and no writes.
+- Schema and loader ship in the installed package.
+- No timeline/kernel schema changes were introduced.
+- Focused pytest passes and Grok oracle `PASS`.
+
+Classification: **normal** — established JSON-schema and semantic-validation patterns already exist in the repo.
+
+## Batch 2 — Pure storyboard-to-timeline compiler and timing model
+
+Tasks:
+
+- Add `astrid/core/storyboard/compiler.py` with a pure `compile_storyboard(...) -> (config, registry, linkage_plan)` boundary.
+- Compile deterministic tracks, clip IDs, registry keys, ordering, output canvas/fps, and timing without writing the kernel.
+- Implement:
+  - default constant section hold
+  - section `timing.hold`
+  - block `timing.hold`
+  - settled override precedence
+  - `--vo-align` input normalization for the intro’s `segments[].text/start/duration`
+  - exact section-start snapping by slug
+  - text/VO consistency checks
+  - multiple video blocks per section
+  - active-variant selection
+- Compile VO into the settled audio/caption representation and preserve verbatim spoken/caption text.
+- Map generation provenance into existing valid surfaces:
+  - prompt/model/refs/seed in `clip.generation`
+  - `generationId`/`variantId` in `AssetEntry` only when authentic
+  - `content_hash` normalized to registry `content_sha256`
+- Handle title/bullets/text/mink according to Batch 0’s parity-safe rule, ensuring ordinary non-baked storyboards produce edited material while the intro does not double-render content already baked into final-slide images.
+- Validate compiled output with `canonical_timeline_config`/timeline validation and `validate_registry` before returning it.
+- Add pure tests for deterministic compilation, stable IDs/order, timing precedence, VO alignment, multiple videos, active variants, invalid references, and repeat-byte equality.
+
+Checkpoint acceptance criteria:
+
+- The compiler produces render-valid timeline and registry objects without side effects.
+- Timing changes alter timing only, not prompts or asset bytes.
+- Switching one `active_index` changes only the selected asset/clip provenance.
+- Multiple video blocks survive as distinct edited clips.
+- Focused tests pass and Grok oracle `PASS`.
+
+Classification: **normal** — deterministic transformation with canonical validators and golden tests.
+
+## Batch 3 — Kernel linkage, managed media, shots, and executable script
+
+Tasks:
+
+- Add the thin checkout entry point `scripts/build_storyboard.py` with:
+  - `validate <storyboard>`
+  - compile/save arguments for project, new timeline slug/name, default hold, and projects root
+  - `--vo-align <plan.json>`
+  - `--register-shots`
+  - `--render`
+- Use `AstridClient.open(...)`; do not add a ninth gateway family.
+- Implement resolution through sanctioned services:
+  - `media_id` → same-project `client.media.show`
+  - `content_hash` → normalized hash lookup through `client.media.list`
+  - `path` → `client.media.import_file(..., realm="managed_local")`
+- Emit renderable registry entries using a managed/project-owned locator, raw `content_sha256`, media type/probe metadata, and authentic generation/variant IDs. Never copy invalid `media_id`, `content_hash`, prompt, or history keys into `AssetEntry`.
+- Preflight the full timeline and registry before mutation.
+- For a new target: create a blank named timeline, then perform a version-1 CAS save so the required `timeline.saved` event exists. For reruns: show the existing target and CAS-save its returned version. Never overwrite `main`.
+- Implement `--register-shots` behind the flag:
+  - one deterministic/versioned project shot per section
+  - ordered active image/video media items
+  - rerun-safe reconciliation without duplicate/orphan growth
+  - matching `pinnedShotGroups` linkage in the timeline
+- Implement `--render` through the canonical managed `timeline_ref` execution path.
+- Document transcript/image/generation/variant/shot/clip enrichment conventions and honest limitations, including generation-ID semantics and mink’s role.
+- Add temporary-root integration tests for import/dedupe, create→save→show, CAS failure, validation-before-write, hash-prefix normalization, shot linkage, rerun behavior, and kernel receipts/events.
+
+Checkpoint acceptance criteria:
+
+- The exact validation command works:
+  `python3 scripts/build_storyboard.py validate <storyboard>`.
+- A temp-root compile yields one kernel timeline with a `timeline.saved` event and receipt; malformed input changes no kernel state.
+- All referenced local media is kernel-managed and render containment passes.
+- Flag-off creates no shots; flag-on creates linked, ordered, rerun-safe shots.
+- Rendering is admitted as a kernel run/task through the existing generic capability handler.
+- Focused tests pass and Grok oracle `PASS`.
+
+Classification: **normal** — existing media, timeline, shot, render, UnitOfWork, and receipt APIs cover the work.
+
+## Batch 4 — Author and lock the 25-section Astrid intro storyboard
+
+Tasks:
+
+- Author the approved `build/astrid-intro.storyboard.json` location from:
+  - `slides-manifest.json` for consolidated VO/caption/image/prompt/history data
+  - `plan.json` for order/start/duration
+  - `make_slide_html.py` for title, bullets, and nav-state
+  - `pyramid-prompts.txt` for prompt-order parity
+- Include exactly 25 ordered unique sections.
+- Preserve byte-identical VO and captions.
+- Use `final-slides/<slug>.png` as each active image.
+- Record `slides-pyramid-full/<slug>.png` as the historical/original Codex variant where applicable, preserve the complete original prompt/model history, and do not invent `generationId`.
+- Include the settled pyramid title/bullet equivalents and mink directives without altering the existing visual design.
+- Point VO blocks to the 25 existing WAV files.
+- Extend `tests/test_storyboard_schema.py` or add a focused intro-parity test that loads the real storyboard and verifies all paths, prompt slugs, starts, durations, VO/caption equality, variants, and active indices.
+
+Checkpoint acceptance criteria:
+
+- Validator accepts both sample and intro storyboards.
+- Exactly 25 active images and 25 VO assets exist.
+- Section slug/order equals `plan.json`; prompt slug/order equals the 25 prompt records.
+- Authored duration remains 177.53s and the chosen block mapping predicts 76 clips/50 active registry assets.
+- No source PNG/WAV bytes changed.
+- Focused tests pass and Grok oracle `PASS`.
+
+Classification: **normal** — mechanical authoring from verified source maps with parity assertions.
+
+## Batch 5 — Live compile, variant, and kernel-parity proof
+
+Tasks:
+
+- Confirm the intro store is safely writable through its exclusive owner.
+- Set `ASTRID_PROJECTS_ROOT=/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects`.
+- Run the required validator.
+- Compile with `--vo-align` to a new slug such as `astrid-intro-storyboard`; exercise `--register-shots` only in its intended flag-on proof.
+- Capture `timelines show`, `history`, receipts/events, media identities, and shots linkage.
+- Assert from show JSON:
+  - exactly 76 clips and 50 active registry assets, or an explicitly pre-approved/documented delta
+  - 25 VO, 25 caption, 25 b-roll/slide clips, and one brand clip
+  - exact section starts and verbatim caption/VO linkage
+  - no mutation of `main`
+- Demonstrate one variant selection change:
+  - hash every source variant beforehand
+  - change one section’s `active_index`
+  - revalidate and CAS-recompile
+  - prove no source bytes changed
+  - prove the other 24 registry entries and clips remained identical
+  - prove the chosen variant and active provenance are persisted
+
+Checkpoint acceptance criteria:
+
+- New kernel timeline exists with full receipt/event history and exact parity.
+- Optional section shots are linked through `pinnedShotGroups`, not merely created at project scope.
+- Variant evidence satisfies done criterion 4 without fabricated generation linkage.
+- Source timeline `main` and all source media bytes remain unchanged.
+- Grok oracle `PASS`.
+
+Classification: **normal** — empirical SDK/CLI exercise with deterministic comparison scripts.
+
+## Batch 6 — Render, evidence matrix, documentation convergence, and sync
+
+Tasks:
+
+- Render the new timeline through `timelines render`/`--render` using the shown pinned version and a fresh output name.
+- Capture kernel run/task/attempt IDs, lifecycle events, receipt, managed outputs, hashes, and authority stamp.
+- Use `ffprobe` to verify playable H.264/AAC output, 1920×1080/30fps where expected, and duration `177±3s`.
+- Extract and open three representative frames near the midpoints of `open`, `idea2_contribute`, and `cta`. Also assert structurally that all 25 slide assets/clips occur; do not depend on unavailable vision-understanding.
+- Run focused storyboard tests, relevant timeline/render integration tests, and one authoritative broad suite.
+- Produce `.oracle/evidence/` artifacts and a matrix mapping every done criterion to command, path, result, and reviewer disposition.
+- Reconcile docs so every stated capability ships and every limitation is explicit.
+- Obtain the final Grok oracle review using one to three passes total; route accepted findings through normal rework and fresh review.
+- Commit only reviewed paths, explicitly push `HEAD:megado/oracle-run-storyboard` to origin, never merge main, and open the final local video/workspace.
+
+Checkpoint acceptance criteria:
+
+- Render is playable, `177±3s`, and contains all 25 slide clips with three opened spot-check frames.
+- Evidence matrix covers all five done criteria with command/path/result evidence.
+- Tests and final oracle review pass; no North Star anti-pattern or undocumented limitation remains.
+- Reviewed branch is pushed to the authorized ref only.
+
+Classification: **normal** — standard render, inspection, evidence, documentation, and authorized Git operations.
+
+# 2) ADDITIONAL AREAS TO EXPLORE before/during execution
+
+1. `astrid/core/timeline/validators/registry.py`, `banodoco_schema.py`, `astrid/sdk/media.py`, and `managed_media_resolver.py`: prove the exact conversion from storyboard `media_id|content_hash|path` to a render-valid, project-owned registry entry.
+
+2. `astrid/sdk/shots.py`, `astrid/packs/shots/repository.py`, and timeline `pinnedShotGroups`: verify deterministic rerun semantics because shots have no update/delete or unique-name guarantee.
+
+3. Generation manifests in `astrid/packs/generation/executors/_common.py` and current kernel run/task/output identities: determine whether any field legitimately satisfies `AssetEntry.generationId`; otherwise omit it and document the limitation.
+
+4. Intro `slides-manifest.json`, `make_slide_html.py`, `build_timeline.py`, and `plan.json`: settle title/bullets/mink materialization and timing without breaking the 76/50 parity oracle.
+
+5. Intro kernel exclusive-owner/bridge state plus render asset containment: confirm the supported mutation route and that repo-external PNG/WAV files are imported into managed media before render.
+
+6. `pyproject.toml`, `.gitignore`, `.oracle/custody.md`, and the external project mount: verify schema packaging, storyboard artifact custody, and separation of carried-forward dirty changes from storyboard commits.
+
+# 3) OPEN QUESTIONS
+
+1. How should title, bullets, text, and mink directives compile when the active `final-slides` PNG already contains them? The decision must avoid duplicate pixels while ensuring supported block types are not silently ignored.
+
+2. What is the authoritative v10 meaning of `AssetEntry.generationId` when generation manifests expose kernel run/request identities but no canonical generation table ID? If none qualifies, may the intro leave it absent while retaining prompt/history and variant linkage?
+
+3. Is `build/astrid-intro.storyboard.json` intentionally project-local under `/Users/peteromalley/Documents/reigh-workspace/astrid-intro-projects/astrid-intro/build/`, or must a reviewable source copy also live in a tracked repo path because top-level repo `build/` is ignored?
+
+4. Does “prompts persisted beside assets” mean co-location inside storyboard variant records plus compiled `clip.generation`, or is a physical `<asset>.prompt.json` companion required? Any physical companion must be explicitly derived to avoid becoming a second authority.
+
+5. For `--register-shots`, should recompilation reconcile stable per-section shots or create storyboard-versioned shots? Stable reconciliation is cleaner but needs explicit handling for removed/reordered media with the existing six-verb shots surface.
+
+# 4) NORTH STAR check
+
+This plan advances ONE-store execution by treating the storyboard as version-controlled declarative source and the kernel timeline as its only executable compiled state. Media enters through kernel import; timelines and shots mutate only through typed SDK services and UnitOfWork; render runs through the canonical kernel run/task lifecycle. Any compiled files are derived inspection artifacts, never authorities.
+
+It explicitly avoids:
+
+- **A second ledger:** no runtime storyboard database, independent eventlog, or authoritative compiled JSON is introduced. The storyboard is source; SQLite remains execution authority.
+- **Kernel/eventlog divergence:** no direct SQLite, eventlog, receipt, registry-projection, or `run.json` writes; validation fails before SDK mutation, and there is no silent filesystem downgrade.
+- **Ghost verbs or dishonest docs:** no ninth gateway family is added. The requested script, flags, schema, linkage behavior, and limitations are all exercised empirically before documentation claims them.
+- **Per-executor adapters:** compilation uses one generic storyboard transformer and the existing media/timeline/shots services plus generic render capability handler.
+- **Scope creep disguised as architecture:** no UI editor, kernel-core schema change, new execution supervisor, serve redesign, GPU management, other-project migration, localization, or style redesign is included.
+
+The staged transcript→images→generations→variants→shots→clips enrichment remains traceable, timing stays independently editable, multiple video blocks remain supported, and future input formats can normalize through the loader boundary without adding a speculative plugin framework.
+
+# 5) EFFORT ESTIMATE vs >2 weeks huge-run threshold
+
+Best estimate: **9–12 engineering days**, including implementation, intro authoring, live render, oracle gates, likely rework, documentation, and evidence capture. This is at or below two working weeks, so it is **not currently a huge run** and does not activate periodic cumulative big-batch reviews.
+
+If execution discovers that authentic generation linkage requires a kernel schema change, or rerun-safe shots require new verbs, that exceeds the frozen non-goals rather than silently expanding the estimate. The run should escalate/stop for scope reconciliation; if authorized scope later pushes the estimate above two weeks, mark it huge before the next batch and predeclare cumulative review boundaries.
+
+
+
+# YOUR LENS
+LENS: KISS/scope-cut — flag anything ceremonial, redundant with existing mechanisms (managed timelines, shots mount, render pipeline), or over-generalized for a single-project use case. Rank concrete cuts with evidence.
+
+Rules: do NOT widen scope or invent architecture; rank CONCRETE simplifications citing plan section names; <300 words; take positions.

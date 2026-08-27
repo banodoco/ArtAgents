@@ -1,0 +1,41 @@
+# Megado plan — declarative storyboard layer (v4 canonical, post settled-wave)
+
+Batch order: B1 → B2 → B3 → B4 → B5 → B6. All tasks `normal` unless marked otherwise. Corrections A–G from exploration remain binding constraints.
+
+## B1 — Versioned storyboard schema + loader + validator
+- Files: `astrid/core/storyboard/__init__.py`, `schema.json`, `loader.py`, `tests/core/storyboard/test_storyboard_schema.py`
+- JSON Schema: version:int; meta{title,canvas:"1920x1080@30",style,timing{default_hold:3.0}}; sections[] {id, nav:{tabs[2],active:0|1}, timing:{hold?}, blocks[]}; block types: title{text}, bullets{items[]}, text{text}, image{text alt, asset?:<file>, gen?:{prompt,model,refs[],seed?}, variants:[{path,label}][+optional gen variant], active_index:int, provenance:{prompt,model} — resolution fields media_id|content_hash|path are FILLED BY THE COMPILER after managed import}, vo{text, audio:{asset:<slug>.wav}}, video{asset?|gen?:{prompt,model,refs[],duration}}, mink{pose,anchor,scale}(inert provenance metadata)
+- Validation: required fields, unique section ids, nav active ∈ 0..1, asset refs resolve to files or managed media, gen blocks require prompt
+- Acceptance: valid intro sample passes; malformed (dup id / bad nav / unresolved asset) raises typed StoryboardError
+- No wheel-verification step (packaging smoke covers it)
+
+## B2 — Pure compiler + golden parity tests (folds former Batch 0 semantics)
+- File: `scripts/build_storyboard.py` core function `compile_storyboard(story, *, plan=None) -> (config, registry)`; `--vo-align` supplies the plan.json path which fills resolution fields and snaps timing; timing model: default hold from meta/section timing override; `--vo-align plan.json` maps section starts to VO segment starts while preserving order and hold defaults
+- VO/audio: each vo block resolves its wav via `audio.asset` relative to `build/segments/`, imported to managed media with the images; durations come from ffprobe of that wav, and `--vo-align <plan.json>` snaps section starts to plan segment starts
+- Intro parity rule: sections whose image asset has baked text/mink compile to EXACTLY 3 clips per section (broll plate, caption, VO audio) + brand wordmark clip ⇒ 76 clips / 50 assets / 177.53s for the current intro set; live-text storyboards compile title/bullets/mink as text clips instead
+- Golden parity tests asserting the 25-section reference → 76 clips / 50 assets / total ≥177s
+- Acceptance: compile returns deterministic (config, registry); parity test passes on committed fixture
+
+## B3 — Kernel linkage + executable CLI
+- Managed media import of each referenced PNG via `MediaService.import_file`; registry entries use returned CAS path + content_sha256; timeline save then render uses kernel-owned locators only (correction A)
+- Compiler returns `(config, registry)` only — no linkage_plan member
+- CLI surface: `validate`, `compile`, `compile --vo-align <plan.json>`, thin `--render` passthrough to `timelines render`
+- Integration tests trimmed to 3 storyboard-specific deltas: preflight-before-write, create→CAS-save→version bump, rerun byte-equality of config+registry
+- No `--register-shots`; no physical prompt sidecars; prompts persist inside section records
+
+## B4 — Author tracked intro storyboard
+- File: `storyboards/astrid-intro.storyboard.json` (tracked; authoritative source), 25 sections in VO order covering all slugs from plan.json (idea2_example excluded as dead); title/bullets drawn from FRAME_CONTENT equivalents; every gen-capable block carries the original codex pixel-slide prompt under provenance
+- Image blocks: variants [0]={path build/final-slides/<slug>.png,label "final-html"}, [1]={path build/slides-pyramid-full/<slug>.png,label "codex-pyramid"}, active_index 0; provenance.prompt = original codex slide prompt
+- Acceptance: schema-valid; 25 sections; every slug matched one-to-one to plan.json; rendered HTML screenshot dir matches 1:1
+
+## B5 — Compile live, variant proof, parity assertions, render, evidence matrix
+- Run compiler live against projects root: managed import of images, CAS save → version bump, flip `active_index` to pyramid variant then back to final-slides (done criterion 4 — others byte-neutral)
+- Parity assertion script `scripts/check_parity.py`: asserts 25 slides / 76 clips / 50 assets / 177.53±0.5s against kernel state at B5 and again after render
+- Render `astrid-intro-storyboard.mp4` via `timelines render`; OCR spot-check headline+bullets on 3 frames (open, idea1_vc, cta_agents)
+- Evidence matrix `.oracle/evidence/final-matrix.md`
+
+## B6 — Docs convergence, commit/sync, final review support
+- README snippet for storyboard layer usage; pointers from build scripts
+- Commit batches already made; push branch megado/oracle-run-storyboard to origin (authorized); final oracle review support artifacts staged
+
+Estimate: ~3–5 days elapsed-equivalent ⇒ below huge-run threshold.

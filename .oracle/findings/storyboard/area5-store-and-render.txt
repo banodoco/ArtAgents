@@ -1,0 +1,22 @@
+**Area 5 — store & render: verified facts**
+
+**1. Exclusive-owner/bridge state.** One `DatabaseOwnerLock` per DB: `fcntl.flock(LOCK_EX|LOCK_NB)` on `<root>/.astrid/astrid.sqlite3.lock`, process-lifetime (`astrid/core/store/ownership.py:19-25,66-69`). Standard composition acquires it *before* opening the writer and releases only after writer close (`astrid/core/application.py:38-46,146-150,317-328`). `astrid serve` is the owner until shutdown (`astrid/core/gateway/dispatch.py:190,244-245,289-292`); advertised at `GET /routes` (`local_bridge_server.py:67-75`). Documented as temporary SD3-m4 deviation; m6 loopback-RPC removal is future work (`ownership.py:11-15`).
+
+**2. Mutation route while serve runs.** Exactly one: `POST /projects/:p/timelines/:t/save` (CAS, `expected_version`) — `local_bridge_server.py:924-975`; every other POST → 404 (:977). No HTTP route for media import, tasks, or runs. CLI/SDK writes compose the app → blocked with typed `unavailable` (`application.py:324-328`); timeline writes fail **closed**, refusing eventlog-only downgrade when the DB exists (`astrid/core/timeline/kernel_binding.py:146-171`). Read-only URIs bypass the lock (`core/migrations/runner.py:281`; used by resolver `io/managed_media_resolver.py:93`, database.py:88-90).
+
+**3. Render asset containment.** Registry `file` refs anchor at `project_root/sources` only; absolute refs accepted only beneath that anchor; `..`/symlink escapes rejected (`core/timeline/resolution.py:179-226,250-282`). Kernel timelines may additionally use an exact managed CAS locator — only if the project's kernel media row owns the digest and bytes verify (`resolution.py:285-316`); snapshot resolution goes through this (`core/timeline/snapshot.py:462-466`). Render outputs are themselves published to managed CAS (`packs/rendering/executors/render/run.py:167-171`). **Repo-external PNG/WAV cannot be referenced in place.**
+
+**4. Import-to-managed-media.** `prepare → stage (fsync) → re-hash verify → atomic publish` into `${root}/.astrid/media/sha256/…` (`core/io/media_import.py:835-1044`); `MediaRepository.import_prepared` commits media row + `media_locations` + `core.media` event in one UoW, publishing verified bytes before projections (`core/repositories/media.py:738,1842-1846`). SDK: `media.import_file`/`import_directory` (`sdk/media.py:115,174`). `external_local` reference-in-place exists but is explicit opt-in (`media_import.py:608-611,1047-1060`).
+
+**Unknowns:** none blocking; serve-side task/run admission routes not found (appear not to exist).
+
+**Risks (ranked):**
+1. Serve holding the lock blocks the whole D3/D4 pipeline (save, media import, render admission) — no loopback RPC yet.
+2. External assets referenced by path silently fail render resolution (unsupported), not imported.
+3. `external_local` opt-in would create a second unmanaged authority — anti-North-Star.
+
+**Suggested approach (ranked, KISS/ONE-store):**
+1. Run compile/save/render with serve stopped; CLI composes the single writer.
+2. Compiler imports every PNG/WAV via `sdk.media.import_file` (managed CAS), registry entries carry digest locators — no `sources/` copying, no `external_local`.
+3. If serve must stay up, use only the timeline-save POST route; treat lock contention as a stop-and-retry, not a bypass.
+0

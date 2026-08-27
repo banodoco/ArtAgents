@@ -87,7 +87,8 @@ class OSKeychainProvider:
 # ---------------------------------------------------------------------------
 
 
-def read_env_value(env_path: Path, key: str) -> str:
+def read_env_value(env_path: Path | str, key: str) -> str:
+    env_path = Path(env_path)
     if not env_path.is_file():
         return ""
     for raw in env_path.read_text(encoding="utf-8").splitlines():

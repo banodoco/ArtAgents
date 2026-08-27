@@ -1,0 +1,64 @@
+{
+  "briefs_dir": "/Users/peteromalley/Documents/reigh-workspace/Astrid-megado/.oracle/findings/settled1",
+  "default_model": "zhipu:glm-5.3",
+  "failed_count": 0,
+  "isolation": "threads",
+  "max_tokens": 65536,
+  "max_workers": 2,
+  "model_map": [],
+  "output_dir": "/Users/peteromalley/Documents/reigh-workspace/Astrid-megado/.oracle/findings/settled1-out",
+  "project_dir": "/Users/peteromalley/Documents/reigh-workspace/Astrid-megado",
+  "stopped_by_signal": false,
+  "succeeded_count": 2,
+  "sum_agent_seconds": 136.81,
+  "task_timeout_s": 900,
+  "tasks": [
+    {
+      "brief": "/Users/peteromalley/Documents/reigh-workspace/Astrid-megado/.oracle/findings/settled1/lens1-simplicity.md",
+      "elapsed_s": 71.397,
+      "error": null,
+      "error_class": null,
+      "finish_reason": null,
+      "finished_at": "2026-08-27T11:32:33Z",
+      "meta_file": "/Users/peteromalley/Documents/reigh-workspace/Astrid-megado/.oracle/findings/settled1-out/lens1-simplicity.meta.json",
+      "model": "zhipu:glm-5.3",
+      "pid": 50693,
+      "raw_result_keys": [
+        "stdout"
+      ],
+      "response_chars": 1886,
+      "response_file": "/Users/peteromalley/Documents/reigh-workspace/Astrid-megado/.oracle/findings/settled1-out/lens1-simplicity.txt",
+      "started_at": "2026-08-27T11:31:21Z",
+      "status": "ok",
+      "stem": "lens1-simplicity",
+      "task_timeout_s": 900,
+      "tool_calls": 0
+    },
+    {
+      "brief": "/Users/peteromalley/Documents/reigh-workspace/Astrid-megado/.oracle/findings/settled1/lens2-scope-kiss.md",
+      "elapsed_s": 65.413,
+      "error": null,
+      "error_class": null,
+      "finish_reason": null,
+      "finished_at": "2026-08-27T11:32:27Z",
+      "meta_file": "/Users/peteromalley/Documents/reigh-workspace/Astrid-megado/.oracle/findings/settled1-out/lens2-scope-kiss.meta.json",
+      "model": "zhipu:glm-5.3",
+      "pid": 50694,
+      "raw_result_keys": [
+        "stdout"
+      ],
+      "response_chars": 1976,
+      "response_file": "/Users/peteromalley/Documents/reigh-workspace/Astrid-megado/.oracle/findings/settled1-out/lens2-scope-kiss.txt",
+      "started_at": "2026-08-27T11:31:21Z",
+      "status": "ok",
+      "stem": "lens2-scope-kiss",
+      "task_timeout_s": 900,
+      "tool_calls": 0
+    }
+  ],
+  "toolsets": [
+    "file"
+  ],
+  "total_count": 2,
+  "wall_clock_s": 71.4
+}

@@ -1,0 +1,16 @@
+**Ranked cuts (KISS lens):**
+
+1. **Cut `--register-shots` reconciliation entirely (Batch 3, Batch 5 flag-on proof, Open Q5, Area 2).** The plan's own Area 2 concedes shots have no update/delete and no unique-name guarantee; building rerun-safe reconciliation against that surface is an idempotency layer the kernel doesn't support — a second-consistency-by-convention mechanism, exactly the North Star anti-pattern. Position: drop the flag. Done criteria (1–5) never mention shots; D2's "where cheap" is demonstrably false here. If wanted, a one-shot non-idempotent demo suffices, documented as such.
+
+2. **Merge Batch 0 into Batch 2 (golden parity tests).** Batch 0 is a written-semantics memo plus read-only probes — that's the spec for Batch 2's golden tests, not a batch. Folding it saves one full grok gate out of ~7.
+
+3. **Shrink variants to `{path, label}[] + active_index` (Batch 1 schema, Batch 4).** Batch 5 never regenerates — it flips `active_index` between two existing PNGs. Per-variant full spec `{prompt,model,refs,seed?}` plus "complete original prompt/model history" is speculative machinery for a single historical Codex image. Keep prompt text as provenance on the section; drop the rest. Done criterion 4 is still satisfied.
+
+4. **Make `mink` inert metadata (Batch 1, Open Q1).** Open Q1 already establishes the pixels are baked into final PNGs; any compiler semantics for `{pose,anchor,scale}` would double-render or be a no-op passthrough dressed as a feature. Keep the field, compile nothing.
+
+5. **Trim Batch 3 integration tests 8→3.** Import/dedupe, CAS, hash-prefix normalization are SDK behaviors with existing coverage; keep only storyboard-specific deltas: preflight-before-write, create→CAS-save, rerun byte-equality.
+
+6. **Drop wheel verification (Batch 1).** `smoke_wheel_install.sh` already covers packaging; one `package_data` line + existing smoke is enough.
+
+Keep: pure compiler boundary, `--vo-align`, evidence matrix — all pull weight.
+0
