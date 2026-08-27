@@ -39,6 +39,8 @@ GENERATION_COUNT = 12
 VARIANTS_PER_GENERATION = 2
 SHOT_COUNT = 4
 STAMP = "2026-08-27T12:00:00.000Z"
+MUSIC_PROJECT_SLUG = "music3-cybernetic"
+MUSIC_TIMELINE_SLUG = "gallery-acceptance"
 
 
 def _chunk(kind: bytes, payload: bytes) -> bytes:
@@ -123,6 +125,73 @@ def _require_ok(result: Any, operation: str) -> dict[str, Any]:
         detail = result.error.as_dict() if result.error is not None else None
         raise RuntimeError(f"{operation} failed: {detail}")
     return dict(result.data)
+
+
+def _ensure_music_acceptance_timeline(client: Any) -> bool:
+    """Give the real migrated cover-image generation one honest shot proof.
+
+    The music project is optional in isolated tests.  When present, its one
+    historical image generation is already projected by
+    ``repair_generation_gallery.py``; this adds only a document timeline that
+    references that exact primary media row.
+    """
+
+    from astrid.packs.shots.generation_repository import GenerationRepository
+
+    shown = client.projects.show(MUSIC_PROJECT_SLUG)
+    if not shown.ok or shown.data is None:
+        return False
+    project_id = str(shown.data["id"])
+    rows = GenerationRepository().list(
+        client.app.writer,
+        project_id,
+        type="image",
+        limit=10,
+    )
+    primary = next((row for row in rows if row.primary_media_id), None)
+    if primary is None or primary.primary_media_id is None:
+        return False
+    _require_ok(
+        client.timelines.create(
+            project=project_id,
+            slug=MUSIC_TIMELINE_SLUG,
+            name="Music cover gallery acceptance",
+            config={
+                "tracks": [{"id": "V1", "kind": "visual", "label": "Cover art"}],
+                "clips": [{
+                    "id": "cover-image",
+                    "at": 0,
+                    "track": "V1",
+                    "clipType": "media",
+                    "asset": "cover-image",
+                    "hold": 4,
+                    "label": "Generated cover",
+                }],
+                "pinnedShotGroups": [{
+                    "shotId": "music-cover-shot",
+                    "name": "Generated Cover",
+                    "trackId": "V1",
+                    "clipIds": ["cover-image"],
+                    "mode": "images",
+                }],
+                "theme": "banodoco-default",
+                "theme_overrides": {"visual": {"canvas": {"width": 1280, "height": 720, "fps": 24}}},
+            },
+            registry={
+                "assets": {
+                    "cover-image": {
+                        "media_id": primary.primary_media_id,
+                        "type": "image/png",
+                        "generationId": primary.id,
+                    }
+                }
+            },
+            set_default=True,
+            idempotency_key="fixture:reigh-gallery:music-timeline:v1",
+        ),
+        "music acceptance timeline create",
+    )
+    return True
 
 
 def _apply(root: Path) -> None:
@@ -283,6 +352,7 @@ def _apply(root: Path) -> None:
             ),
             "timeline create",
         )
+        _ensure_music_acceptance_timeline(client)
 
 
 def seed_reigh_gallery_acceptance(root: Path, *, apply: bool = False) -> dict[str, Any]:
