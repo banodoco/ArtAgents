@@ -34,6 +34,7 @@ from astrid.packs.rendering.backends.ffmpeg import run as ffmpeg_backend
 from astrid.packs.rendering.backends.remotion import run as remotion_backend
 from astrid.packs.rendering.finalizers.ffmpeg import run as ffmpeg_finalizer
 from astrid.packs.rendering.planners.legacy_hybrid.run import (
+    _complex_clip_windows,
     _hybrid_segments,
 )
 
