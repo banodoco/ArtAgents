@@ -1,4 +1,4 @@
-# Status — megado storyboard run
-phase: 1 (plan) — planner launching (Grok oracle per user pin)
-huge_run_estimate: <2 weeks (~3-5 days) ⇒ no cumulative-boundary policy
-next: plan.md v1 → explore fan (5 areas, GLM-5.3 Flash) → revise→STABLE
+# Status — megado storyboard run (FINAL)
+phase: 6 complete — B1-B6 executed, oracle gates run, branch synced
+deliverables: storyboard loader/validator + tests (B1), compiler CLI + golden parity (B2), managed-only imports + CAS saves (B3), tracked storyboards/astrid-intro.storyboard.json (B4), amendment-4 regeneration variant rendered (B5), docs + pushed branch d29ed3d5 (B6)
+videos: astrid-intro-final.mp4 (177.58s HTML-slides), astrid-intro-storyboard.mp4 (177.58s pixel-regen)
