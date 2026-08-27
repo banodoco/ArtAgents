@@ -29,8 +29,19 @@ from astrid.core.media import ffprobe_metadata_strict
 from astrid.core.project.project import create_project
 from astrid.core.project.run import step_dir_for, write_run_record
 from astrid.core.rendering.artifacts import validate_render_result
-from astrid.core.rendering.contracts import SCHEMA_VERSION, AudioOwnership, RenderRequest
-from astrid.core.rendering.errors import RendererException
+from astrid.core.rendering.contracts import (
+    SCHEMA_VERSION,
+    AudioOwnership,
+    RendererErrorKind,
+    RenderRequest,
+)
+from astrid.core.rendering.errors import (
+    RendererException,
+    RendererInternalError,
+    RendererTimeoutError,
+    exception_from_error,
+    make_renderer_error,
+)
 from astrid.core.rendering.registry import load_default_registries
 from astrid.core.rendering.service import LegacyRenderRoutingWarning, RenderService
 from astrid.core.rendering.transport import CommandTransport
@@ -242,15 +253,77 @@ def _render(
     return output, payload
 
 
+def _is_managed_chromium_denial(exc: RendererException) -> bool:
+    """Identify only the expected host sandbox's Chromium bootstrap denial."""
+
+    message = str(exc)
+    return (
+        exc.error.kind == "internal"
+        and "MachPortRendezvousServer" in message
+        and "Permission denied (1100): local HTTP asset server blocked:" in message
+    )
+
+
 def _assert_managed_chromium_denial(exc: RendererException, output: Path) -> None:
     """Accept only the host sandbox's macOS bootstrap denial, never render errors."""
 
-    message = str(exc)
-    assert "MachPortRendezvousServer" in message
-    assert "Permission denied (1100)" in message
+    assert _is_managed_chromium_denial(exc)
     assert not output.exists()
     assert not Path(f"{output}.provenance.json").exists()
     assert not list(output.parent.glob(f".{output.name}.render-service-*"))
+
+
+@pytest.mark.parametrize(
+    ("kind", "message", "expected_type"),
+    (
+        (
+            "timeout",
+            "render service failed: Timeout (>120.0s) from pytest-timeout.",
+            RendererTimeoutError,
+        ),
+        (
+            "internal",
+            "render service failed: Remotion exited without producing an artifact.",
+            RendererInternalError,
+        ),
+        (
+            "internal",
+            "render service failed: Permission denied (1100): unrelated renderer failure.",
+            RendererInternalError,
+        ),
+    ),
+)
+def test_non_denial_renderer_errors_are_not_masked(
+    kind: RendererErrorKind,
+    message: str,
+    expected_type: type[RendererException],
+) -> None:
+    """The denial compatibility path must preserve every other failure."""
+
+    original = exception_from_error(
+        make_renderer_error(
+            kind,
+            backend="rendering.remotion",
+            message=message,
+            details={"sentinel": "preserve-me"},
+        )
+    )
+    assert isinstance(original, expected_type)
+    assert not _is_managed_chromium_denial(original)
+
+    with pytest.raises(expected_type) as caught:
+        try:
+            raise original
+        except RendererException as exc:
+            # This mirrors both Remotion call sites.  A non-denial error must
+            # use a bare raise so pytest-timeout/internal details survive.
+            if _is_managed_chromium_denial(exc):
+                _assert_managed_chromium_denial(exc, Path("/unreachable/output.mp4"))
+                return
+            raise
+
+    assert caught.value is original
+    assert caught.value.error.details["sentinel"] == "preserve-me"
 
 
 def _assert_tiny_semantic_video(path: Path, *, duration: float) -> None:
@@ -337,6 +410,8 @@ def test_real_remotion_renders_each_semantic_variant(
             },
         )
     except RendererException as exc:
+        if not _is_managed_chromium_denial(exc):
+            raise
         _assert_managed_chromium_denial(exc, expected_output)
         return
     duration = 2.0 if fixture == "transition-windows" else 0.6
@@ -439,6 +514,8 @@ def test_real_mixed_hybrid_uses_transition_windows(
             },
         )
     except RendererException as exc:
+        if not _is_managed_chromium_denial(exc):
+            raise
         _assert_managed_chromium_denial(exc, expected_output)
         return
     _assert_tiny_semantic_video(output, duration=2.0)
