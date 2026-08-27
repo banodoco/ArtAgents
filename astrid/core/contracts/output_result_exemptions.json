@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
   "description": "Committed output-result exemption list. Every executor in the default registry either writes a universal result manifest (non-exempt) or appears here with a specific M2-approved reason. The registry conformance gate uses this list to allow non-conforming executors while making the gap visible.",
-  "last_registry_snapshot": "2026-08-21T00:00:00Z",
-  "total_executors": 70,
-  "m1_adopters": 41,
-  "exempted": 29,
+  "last_registry_snapshot": "2026-08-23T00:00:00Z",
+  "total_executors": 74,
+  "m1_adopters": 42,
+  "exempted": 32,
   "non_exempt": [
     "editorial.arrange",
     "editorial.boundary_candidates",
@@ -41,6 +41,7 @@
     "rendering.timeline_visualize",
     "training.pool_build",
     "training.pool_merge",
+    "typed_timeline.map",
     "understanding.audio_understand",
     "understanding.scene_describe",
     "understanding.video_understand",
@@ -89,9 +90,17 @@
       "reasons": ["external-escape-hatch"],
       "note": "External installed pack (hivemind) with outputs controlled by the external pack."
     },
+    "hivemind.refresh_media": {
+      "reasons": ["external-escape-hatch"],
+      "note": "External installed pack (hivemind) with outputs controlled by the external pack."
+    },
     "hivemind.search": {
       "reasons": ["external-escape-hatch"],
       "note": "External installed pack (hivemind) with outputs controlled by the external pack."
+    },
+    "discord_local.command": {
+      "reasons": ["external-escape-hatch"],
+      "note": "Optional external Discord-local pack; its output contract is controlled outside Astrid."
     },
     "moirae.moirae": {
       "reasons": ["paid", "GPU", "external-escape-hatch"],
@@ -132,6 +141,10 @@
     "runpod.teardown": {
       "reasons": ["paid", "external-escape-hatch"],
       "note": "Terminates RunPod pods requiring paid RunPod account."
+    },
+    "seedance_local.reference_video": {
+      "reasons": ["external-escape-hatch"],
+      "note": "Optional external Seedance-local pack; its output contract is controlled outside Astrid."
     },
     "stream_content.clip_candidates": {
       "reasons": ["no-artifact"],

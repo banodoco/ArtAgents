@@ -30,12 +30,9 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from astrid.core.migrations.catalog import CORE_PACK
-from astrid.core.schema_packs.registry import (
-    FrozenSchemaPackRegistry,
-    RegisteredMigration,
-)
 
 # ---------------------------------------------------------------------------
 # Errors
@@ -124,7 +121,7 @@ def pack_resource_root(pack_id: str) -> Path:
     return Path(__file__).resolve().parents[2] / "packs" / pack_id
 
 
-def read_migration_bytes(registered: RegisteredMigration) -> bytes:
+def read_migration_bytes(registered: Any) -> bytes:
     """Read the exact bytes of one registered migration's SQL resource.
 
     Raises :class:`MigrationError` when the declared resource is missing.
@@ -144,8 +141,8 @@ def read_migration_bytes(registered: RegisteredMigration) -> bytes:
 
 
 def topological_migration_order(
-    registry: FrozenSchemaPackRegistry,
-) -> tuple[RegisteredMigration, ...]:
+    registry: Any,
+) -> tuple[Any, ...]:
     """Return every registered migration in deterministic forward-only order.
 
     Pack order is a post-order DFS over the ``depends_on`` graph (dependencies
@@ -190,7 +187,7 @@ def topological_migration_order(
         if color[pack_id] == white:
             visit(pack_id, [])
 
-    ordered: list[RegisteredMigration] = []
+    ordered: list[Any] = []
     for pack_id in pack_order:
         ordered.extend(
             sorted(
@@ -232,7 +229,7 @@ def read_schema_migrations(conn: sqlite3.Connection) -> tuple[AppliedMigration, 
 
 def _validate_applied_migrations(
     applied: tuple[AppliedMigration, ...],
-    registry: FrozenSchemaPackRegistry,
+    registry: Any,
 ) -> None:
     """Reject too-new schemas, name drift, and checksum drift (no mutation)."""
     per_pack: dict[str, list[AppliedMigration]] = {}
@@ -300,7 +297,7 @@ def read_only_uri(db_path: Path) -> str:
 
 def probe_database(
     path: str | Path,
-    registry: FrozenSchemaPackRegistry,
+    registry: Any,
 ) -> DatabaseProbe:
     """Probe a database read-only and reject incompatible applied state.
 
@@ -386,7 +383,7 @@ def _utc_now() -> str:
 
 def apply_pending_migrations(
     conn: sqlite3.Connection,
-    registry: FrozenSchemaPackRegistry,
+    registry: Any,
     probe: DatabaseProbe,
 ) -> tuple[AppliedMigration, ...]:
     """Apply every pending registered migration exactly once, transactionally.

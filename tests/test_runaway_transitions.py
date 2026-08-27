@@ -25,10 +25,9 @@ from astrid.packs.runaway.repository import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-# Keep release inputs under the test fixture tree. The historical project
-# workspace is user data and is intentionally not part of a clean checkout.
-MANIFEST_PATH = REPO_ROOT / "tests" / "fixtures" / "runaway_release" / "timing-manifest.json"
-AUDIO_REACTIVE_PATH = REPO_ROOT / "tests" / "fixtures" / "runaway_release" / "audio-reactive-v1.json"
+RUNAWAY_RELEASE_FIXTURE_ROOT = REPO_ROOT / "tests" / "fixtures" / "runaway_release"
+MANIFEST_PATH = RUNAWAY_RELEASE_FIXTURE_ROOT / "timing-manifest.json"
+AUDIO_REACTIVE_PATH = RUNAWAY_RELEASE_FIXTURE_ROOT / "audio-reactive-v1.json"
 
 
 def _build_registry():
@@ -59,7 +58,7 @@ def env(tmp_path: Path):
             "receipts": receipts,
             "project_repo": ProjectRepository(events=events, receipts=receipts),
             "run_repo": RunRepository(events=events, receipts=receipts),
-            "runaway_repo": RunawayRepository(receipts=receipts),
+            "runaway_repo": RunawayRepository(receipts=receipts, events=events),
         }
     finally:
         writer.close()
@@ -303,6 +302,16 @@ def test_prompts_deterministic_and_sample(env):
     assert "section_clock" in prompts[s02_idx]
 
 
+def test_release_inputs_are_tracked_fixtures_not_ignored_project_data():
+    """Release tests must work from a clean checkout without ``projects/`` data."""
+    assert MANIFEST_PATH == REPO_ROOT / "tests/fixtures/runaway_release/timing-manifest.json"
+    assert AUDIO_REACTIVE_PATH == REPO_ROOT / "tests/fixtures/runaway_release/audio-reactive-v1.json"
+    assert "projects" not in MANIFEST_PATH.relative_to(REPO_ROOT).parts
+    assert "projects" not in AUDIO_REACTIVE_PATH.relative_to(REPO_ROOT).parts
+    assert MANIFEST_PATH.is_file()
+    assert AUDIO_REACTIVE_PATH.is_file()
+
+
 def test_roundtrip_timing_manifest_to_kernel(env):
     assert MANIFEST_PATH.is_file()
     assert AUDIO_REACTIVE_PATH.is_file()
@@ -351,9 +360,7 @@ def test_roundtrip_timing_manifest_to_kernel(env):
             assert row.metadata["colour_name"] == raw["colour_name"]
             assert row.ordinal == idx
 
-    # The kernel evidence vocabulary is intentionally closed; retain the
-    # migration subtype in canonical measurement data instead of inventing a
-    # pack-specific evidence kind.
+    # Domain subtype lives inside the frozen generic evidence vocabulary.
     from astrid.core.repositories.evidence import EvidenceRepository
 
     def _record(uow: UnitOfWork):
@@ -364,11 +371,7 @@ def test_roundtrip_timing_manifest_to_kernel(env):
             run_id=run_id,
             kind="measurement",
             summary="Runaway timing v1 round-trip",
-            data={
-                "subtype": "runaway_timing_migrated",
-                "frame_count": 8085,
-                "transition_count": 566,
-            },
+            data={"subtype": "runaway_timing_migrated", "frame_count": 8085, "transition_count": 566},
             idempotency_key=f"test:evidence:{run_id}",
         )
 
@@ -388,3 +391,144 @@ def test_old_files_not_deleted():
     manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
     assert len(manifest["transitions"]) == 566
     assert "G-sharp 4 at 2:06.293" in manifest.get("intent", "")
+
+
+def test_migration_apply_is_receipt_idempotent_portable_and_exact(tmp_path: Path):
+    from scripts.migrations.runaway_v1_migrate import migrate
+
+    before_manifest = MANIFEST_PATH.read_bytes()
+    before_audio = AUDIO_REACTIVE_PATH.read_bytes()
+    first = migrate(
+        projects_root=tmp_path,
+        manifest_path=MANIFEST_PATH,
+        audio_reactive_path=AUDIO_REACTIVE_PATH,
+        apply=True,
+    )
+    second = migrate(
+        projects_root=tmp_path,
+        manifest_path=MANIFEST_PATH,
+        audio_reactive_path=AUDIO_REACTIVE_PATH,
+        apply=True,
+    )
+    assert first["stored_count"] == second["stored_count"] == 566
+    assert first["evidence_count"] == second["evidence_count"] == 1
+    assert first["event_count"] == second["event_count"] == 1
+    assert first["receipt_count"] == second["receipt_count"] == 1
+    assert first["stored_sample_prompts"] == second["stored_sample_prompts"]
+    assert first["manifest_sha256"] == second["manifest_sha256"]
+    assert first["manifest_path"] == "external/timing-manifest.json"
+    assert str(tmp_path) not in json.dumps(first)
+
+    db = tmp_path / ".astrid" / "astrid.sqlite3"
+    with sqlite3.connect(f"file:{db}?mode=ro", uri=True) as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM events WHERE kind = 'runaway.created'"
+        ).fetchone()[0] == 1
+        assert conn.execute(
+            "SELECT COUNT(*) FROM command_receipts WHERE command_kind = 'runaway.create'"
+        ).fetchone()[0] == 1
+        assert conn.execute(
+            "SELECT COUNT(*) FROM runaway_transitions"
+        ).fetchone()[0] == 566
+    assert MANIFEST_PATH.read_bytes() == before_manifest
+    assert AUDIO_REACTIVE_PATH.read_bytes() == before_audio
+
+
+def test_migration_rejects_corrupt_manifest_before_creating_database(tmp_path: Path):
+    from scripts.migrations.runaway_v1_migrate import migrate
+
+    corrupt = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+    corrupt["transition_count"] = 565
+    corrupt_path = tmp_path / "corrupt-manifest.json"
+    corrupt_path.write_text(json.dumps(corrupt), encoding="utf-8")
+    with pytest.raises(ValueError, match="transition_count"):
+        migrate(
+            projects_root=tmp_path / "projects",
+            manifest_path=corrupt_path,
+            audio_reactive_path=AUDIO_REACTIVE_PATH,
+            apply=True,
+        )
+    assert not (tmp_path / "projects" / ".astrid" / "astrid.sqlite3").exists()
+
+
+def test_migration_outcome_callback_is_bounded_content_free_and_exactly_once(
+    tmp_path: Path,
+):
+    from scripts.migrations.runaway_v1_migrate import migrate
+
+    success: list[dict[str, str]] = []
+    result = migrate(
+        projects_root=tmp_path / "success-projects",
+        manifest_path=MANIFEST_PATH,
+        audio_reactive_path=AUDIO_REACTIVE_PATH,
+        outcome_callback=success.append,
+    )
+    assert success == [result["migration_outcome"]]
+    assert success == [
+        {
+            "schema": "astrid.migration_outcome.v1",
+            "migration": "runaway_v1",
+            "mode": "dry_run",
+            "outcome": "success",
+            "error_kind": "none",
+        }
+    ]
+    serialized = json.dumps(success)
+    assert "runaway-piano-colour-demo" not in serialized
+    assert str(tmp_path) not in serialized
+    assert "prompt" not in serialized
+
+    corrupt = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+    corrupt["transition_count"] = 565
+    corrupt_path = tmp_path / "private-corrupt-manifest.json"
+    corrupt_path.write_text(json.dumps(corrupt), encoding="utf-8")
+    failure: list[dict[str, str]] = []
+    with pytest.raises(ValueError, match="transition_count"):
+        migrate(
+            projects_root=tmp_path / "failure-projects",
+            manifest_path=corrupt_path,
+            audio_reactive_path=AUDIO_REACTIVE_PATH,
+            apply=True,
+            outcome_callback=failure.append,
+        )
+    assert failure == [
+        {
+            "schema": "astrid.migration_outcome.v1",
+            "migration": "runaway_v1",
+            "mode": "apply",
+            "outcome": "failure",
+            "error_kind": "input",
+        }
+    ]
+
+
+def test_migration_outcome_callback_cannot_change_the_migration_result(tmp_path: Path):
+    from scripts.migrations.runaway_v1_migrate import migrate
+
+    def broken_sink(_outcome: dict[str, str]) -> None:
+        raise RuntimeError("telemetry unavailable")
+
+    result = migrate(
+        projects_root=tmp_path,
+        manifest_path=MANIFEST_PATH,
+        audio_reactive_path=AUDIO_REACTIVE_PATH,
+        outcome_callback=broken_sink,
+    )
+    assert result["migration_outcome"]["outcome"] == "success"
+
+
+def test_migration_refuses_a_concurrent_store_owner(tmp_path: Path):
+    from astrid.core.store.ownership import DatabaseOwnerLock, OwnerLockError
+    from scripts.migrations.runaway_v1_migrate import migrate
+
+    projects_root = tmp_path / "projects"
+    database = projects_root / ".astrid" / "astrid.sqlite3"
+    with DatabaseOwnerLock(database):
+        with pytest.raises(OwnerLockError):
+            migrate(
+                projects_root=projects_root,
+                manifest_path=MANIFEST_PATH,
+                audio_reactive_path=AUDIO_REACTIVE_PATH,
+                apply=True,
+            )
+    assert not database.exists()

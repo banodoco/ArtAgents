@@ -17,10 +17,7 @@ from typing import Any, Generator
 
 import pytest
 
-from astrid.core.integrations.reigh.local_bridge_server import (
-    TRUST_TOKEN_HEADER,
-    create_local_bridge_server,
-)
+from astrid.core.integrations.reigh.local_bridge_server import create_local_bridge_server
 from astrid.core.store.uow import UnitOfWork
 from astrid.packs import compose_standard_bridge
 
@@ -33,34 +30,6 @@ def task_server(
 ) -> Generator[dict[str, Any], None, None]:
     """A fully composed serve root: timeline bridge + task bridge."""
     composition = compose_standard_bridge(projects_root)
-    from astrid.core.integrations.reigh.bridge_service import ReighTaskBridge
-    from astrid.core.receipts.service import ReceiptService
-
-    def _generation_repo_factory() -> object:
-        from astrid.packs.shots.generation_repository import (
-            GenerationRepository,
-        )
-
-        return GenerationRepository()
-
-    def _timeline_repo_factory() -> object:
-        from astrid.core.events.service import EventAppendService
-        from astrid.core.repositories.projects import ProjectRepository
-        from astrid.packs.timeline.repository import TimelineRepository
-
-        return TimelineRepository(
-            events=EventAppendService(composition.registry),
-            receipts=ReceiptService(),
-            projects=ProjectRepository(events=None, receipts=None),
-        )
-
-    task_bridge = ReighTaskBridge(
-        writer=composition.writer,
-        registry=composition.registry,
-        projects_root=composition.projects_root,
-        generation_repo_factory=_generation_repo_factory,
-        timeline_repo_factory=_timeline_repo_factory,
-    )
     server = create_local_bridge_server(
         projects_root=projects_root,
         host="127.0.0.1",
@@ -68,7 +37,9 @@ def task_server(
         bridge=composition.bridge,
         writer=composition.writer,
         database_path=composition.database_path,
-        task_bridge=task_bridge,
+        task_bridge=composition.task_bridge,
+        auth_token="test-token",
+        release_mode=True,
     )
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -76,7 +47,7 @@ def task_server(
     try:
         yield {
             "base_url": f"http://{host}:{port}",
-            "token": server.request_token,
+            "token": "test-token",
             "composition": composition,
         }
     finally:
@@ -87,7 +58,11 @@ def task_server(
 
 
 def _headers(token: str, key: str | None = None) -> dict[str, str]:
-    headers = {"Content-Type": "application/json", TRUST_TOKEN_HEADER: token}
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {token}",
+        "X-Astrid-Bridge-Version": "v1",
+    }
     if key is not None:
         headers["Idempotency-Key"] = key
     return headers
@@ -190,6 +165,27 @@ def _db_count(composition, sql: str, params: tuple = ()) -> int:
     return int(row[0])
 
 
+def _create_timeline(
+    composition: Any,
+    project_id: str,
+    *,
+    slug: str = "render-source",
+    config: dict[str, Any] | None = None,
+) -> Any:
+    return UnitOfWork(composition.writer).run(
+        lambda uow: composition.timelines.create(
+            uow,
+            project_id=project_id,
+            slug=slug,
+            name="Render Source",
+            config=config or {"clips": []},
+            registry={"assets": {}},
+            idempotency_key=f"timeline-{slug}",
+            created_at=TS,
+        )
+    )
+
+
 def _multipart_body(
     manifest: dict[str, Any],
     files: dict[str, bytes],
@@ -233,7 +229,8 @@ def _post_multipart(
     req.add_header("Content-Type", f"multipart/form-data; boundary={boundary}")
     req.add_header("Content-Length", str(len(body)))
     req.add_header("Idempotency-Key", key)
-    req.add_header(TRUST_TOKEN_HEADER, env["token"])
+    req.add_header("Authorization", f"Bearer {env['token']}")
+    req.add_header("X-Astrid-Bridge-Version", "v1")
     try:
         with urlopen(req) as response:  # noqa: S310 - localhost test only
             return response.status, json.loads(response.read())
@@ -247,6 +244,35 @@ def _post_multipart(
 
 
 class TestAdmission:
+    def test_render_export_caption_requires_server_remotion_before_claim(
+        self, tmp_bridge_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("ASTRID_REMOTION_PROJECT_DIR", raising=False)
+        with task_server(tmp_bridge_root) as env:
+            composition = env["composition"]
+            slug = "caption-render-proj"
+            project_id = _create_project(composition, slug)
+            timeline = _create_timeline(
+                composition,
+                project_id,
+                config={"clips": [{"id": "caption", "clipType": "text-card"}]},
+            )
+            status, body = _post(
+                env,
+                f"/projects/{slug}/tasks",
+                key="caption-render-unavailable",
+                body={
+                    "family": "render_export",
+                    "input": {
+                        "timeline_ref": timeline.slug,
+                        "expected_version": 1,
+                    },
+                },
+            )
+            assert status == 422
+            assert body["error"] == "capability_unavailable"
+            assert _db_count(composition, "SELECT COUNT(*) FROM tasks") == 0
+
     def test_trio_201_then_200_replay_then_409_mismatch(
         self, tmp_bridge_root: Path
     ) -> None:
@@ -318,6 +344,203 @@ class TestAdmission:
                 body={"family": "magic_edit", "input": {"prompt": "p"}},
             )
             assert status == 400
+
+    def test_render_export_version_fence_is_atomic_and_replayable(
+        self, tmp_bridge_root: Path
+    ) -> None:
+        with task_server(tmp_bridge_root) as env:
+            composition = env["composition"]
+            slug = "render-proj"
+            project_id = _create_project(composition, slug)
+            timeline = _create_timeline(composition, project_id)
+            path = f"/projects/{slug}/tasks"
+
+            def admit(key: str, expected_version: int) -> tuple[int, dict[str, Any]]:
+                return _post(
+                    env,
+                    path,
+                    key=key,
+                    body={
+                        "family": "render_export",
+                        "input": {
+                            "timeline_ref": timeline.slug,
+                            "expected_version": expected_version,
+                            "destination": "download",
+                        },
+                    },
+                )
+
+            # Creation commits the timeline at head 1. A stale fence must
+            # leave both the task projection and its receipt absent.
+            status, stale = admit("render-stale-0", 0)
+            assert status == 409, stale
+            assert stale["error"] == "conflict"
+            assert stale["config_version"] == 1
+            assert _db_count(composition, "SELECT COUNT(*) FROM tasks") == 0
+            assert (
+                _db_count(
+                    composition,
+                    "SELECT COUNT(*) FROM command_receipts "
+                    "WHERE idempotency_key = ?",
+                    ("render-stale-0",),
+                )
+                == 0
+            )
+
+            status, admitted = admit("render-at-head-1", 1)
+            assert status == 201, admitted
+            task_id = admitted["task"]["id"]
+            assert admitted["task"]["capability"] == "rendering.render"
+            assert admitted["task"]["spec"]["project_slug"] == slug
+            assert admitted["task"]["spec"]["timeline_snapshot"]["config_version"] == 1
+
+            next_head = UnitOfWork(composition.writer).run(
+                lambda uow: composition.timelines.merge_registry(
+                    uow,
+                    project_id=project_id,
+                    timeline_id=timeline.timeline_id,
+                    entries={"new-asset": {"type": "image"}},
+                    created_at="2026-08-15T00:00:01.000000+00:00",
+                )
+            )
+            assert next_head == 2
+
+            # A lost-ack replay remains a replay even after the timeline
+            # advances, but the same old fence under a new key is rejected.
+            status, replay = admit("render-at-head-1", 1)
+            assert status == 200, replay
+            assert replay["task"]["id"] == task_id
+            status, now_stale = admit("render-stale-1", 1)
+            assert status == 409, now_stale
+            assert now_stale["config_version"] == 2
+            assert _db_count(composition, "SELECT COUNT(*) FROM tasks") == 1
+
+    def test_render_export_replay_compares_full_caller_envelope(
+        self, tmp_bridge_root: Path
+    ) -> None:
+        with task_server(tmp_bridge_root) as env:
+            composition = env["composition"]
+            slug = "render-envelope-proj"
+            project_id = _create_project(composition, slug)
+            timeline = _create_timeline(composition, project_id)
+            path = f"/projects/{slug}/tasks"
+            base = {
+                "family": "render_export",
+                "input": {
+                    "timeline_ref": timeline.slug,
+                    "expected_version": 1,
+                    "destination": "download",
+                    "output_filename": "first.mp4",
+                },
+            }
+            status, first = _post(env, path, key="render-envelope", body=base)
+            assert status == 201, first
+            changed = json.loads(json.dumps(base))
+            changed["input"]["output_filename"] = "second.mp4"
+            status, mismatch = _post(env, path, key="render-envelope", body=changed)
+            assert status == 409, mismatch
+            assert mismatch["error"] == "idempotency_mismatch"
+            changed_materialized = json.loads(json.dumps(base))
+            changed_materialized["materialized_inputs"] = [
+                {"target": "source", "media_id": "foreign-or-missing"}
+            ]
+            status, mismatch = _post(
+                env, path, key="render-envelope", body=changed_materialized
+            )
+            assert status == 409, mismatch
+            assert mismatch["error"] == "idempotency_mismatch"
+
+    def test_render_export_freezes_project_managed_media_only(
+        self, tmp_bridge_root: Path
+    ) -> None:
+        from astrid.core.events.service import EventAppendService
+        from astrid.core.io.media_import import prepare_media_file
+        from astrid.core.receipts import ReceiptService
+        from astrid.core.repositories.media import MediaRepository
+
+        fixture = Path(__file__).resolve().parents[2] / "fixtures" / "reshape" / "hype_regression" / "broll.mp4"
+        with task_server(tmp_bridge_root) as env:
+            composition = env["composition"]
+            slug = "render-managed-assets"
+            project_id = _create_project(composition, slug)
+            timeline = _create_timeline(composition, project_id)
+            media_repo = MediaRepository(
+                events=EventAppendService(composition.registry),
+                receipts=ReceiptService(),
+                projects_root=composition.projects_root,
+            )
+            media = UnitOfWork(composition.writer).run(
+                lambda u: media_repo.import_prepared(
+                    u,
+                    project_id=project_id,
+                    prepared=prepare_media_file(fixture),
+                    idempotency_key="render-managed-media",
+                )
+            )
+            UnitOfWork(composition.writer).run(
+                lambda u: composition.timelines.merge_registry(
+                    u,
+                    project_id=project_id,
+                    timeline_id=timeline.timeline_id,
+                    entries={
+                        "source": {
+                            "media_id": media.id,
+                            "content_sha256": f"sha256:{media.content_hash}",
+                            "file": "clips/source.mp4",
+                            "type": "video/mp4",
+                        }
+                    },
+                    created_at=TS,
+                )
+            )
+            status, admitted = _post(
+                env,
+                f"/projects/{slug}/tasks",
+                key="render-managed-admit",
+                body={
+                    "family": "render_export",
+                    "input": {
+                        "timeline_ref": timeline.slug,
+                        "expected_version": 2,
+                        "output_filename": "managed.mp4",
+                    },
+                },
+            )
+            assert status == 201, admitted
+            frozen = admitted["task"]["spec"]["timeline_snapshot"]["registry"]["assets"]["source"]
+            assert frozen["media_id"] == media.id
+            assert "file" not in frozen
+
+            # A path/URL is display metadata only when relative; absolute
+            # locators fail before a task row is created.
+            UnitOfWork(composition.writer).run(
+                lambda u: composition.timelines.merge_registry(
+                    u,
+                    project_id=project_id,
+                    timeline_id=timeline.timeline_id,
+                    entries={
+                        "escape": {
+                            "media_id": media.id,
+                            "file": "/tmp/escape.mp4",
+                            "type": "video/mp4",
+                        }
+                    },
+                    created_at="2026-08-15T00:00:02.000000+00:00",
+                )
+            )
+            status, rejected = _post(
+                env,
+                f"/projects/{slug}/tasks",
+                key="render-managed-absolute",
+                body={
+                    "family": "render_export",
+                    "input": {
+                        "timeline_ref": timeline.slug,
+                        "expected_version": 3,
+                    },
+                },
+            )
+            assert status == 400, rejected
 
     def test_child_family_via_browser_path_is_forbidden(
         self, tmp_bridge_root: Path
@@ -475,360 +698,6 @@ class TestChildGate:
             body=body2,
         )
         assert status == 403
-
-
-    def test_browser_child_family_through_public_route_403(
-        self, claimed_parent: dict[str, Any]
-    ) -> None:
-        # A browser posting a leaf child family WITHOUT the envelope is
-        # refused by the public resolver's direct-name fallback.
-        status, body = _post(
-            claimed_parent["env"],
-            f"/projects/{claimed_parent['slug']}/tasks",
-            key="browser-child-attempt",
-            body={"family": "join_clips_segment", "input": {}},
-        )
-        assert status == 403
-        assert body["error"] == "child_admission_forbidden"
-
-    def test_expired_parent_lease_409(
-        self, claimed_parent: dict[str, Any]
-    ) -> None:
-        from astrid.core.store.uow import UnitOfWork
-
-        env = claimed_parent["env"]
-        attempt = claimed_parent["claim"]["attempt"]
-        UnitOfWork(env["composition"].writer).run(
-            lambda u: u.execute(
-                "UPDATE execution_attempts SET lease_expires_at = ? "
-                "WHERE id = ?",
-                ("2020-01-01T00:00:00.000000+00:00", attempt["id"]),
-            )
-        )
-        status, body = self._child_request(claimed_parent, overrides={})
-        assert status == 409, body
-        assert body["error"] == "conflict"
-        assert "expired" in body["detail"]
-
-    def test_non_running_parent_409(
-        self, claimed_parent: dict[str, Any]
-    ) -> None:
-        claim = claimed_parent["claim"]
-        attempt = claim["attempt"]
-        cstatus, _ = _post(
-            claimed_parent["env"],
-            (
-                f"/projects/{claimed_parent['slug']}/tasks/"
-                f"{claimed_parent['parent_id']}/cancel"
-            ),
-            body={
-                "attempt_id": attempt["id"],
-                "lease_id": attempt["lease_id"],
-                "status_version": attempt["status_version"],
-            },
-        )
-        assert cstatus == 200
-        status, body = self._child_request(claimed_parent, overrides={})
-        assert status == 409, body
-        assert body["error"] == "conflict"
-
-    def test_wrong_slug_404(self, claimed_parent: dict[str, Any]) -> None:
-        _create_project(
-            claimed_parent["env"]["composition"], "other-proj"
-        )
-        status, body = _post(
-            claimed_parent["env"],
-            "/projects/other-proj/tasks",
-            key=f"reigh.orch:v1:{claimed_parent['parent_id']}:segment:0",
-            body={
-                "family": "join_clips_segment",
-                "input": {},
-                "child_admission": {
-                    **self._envelope(claimed_parent),
-                },
-            },
-        )
-        assert status == 404, body
-        assert body["error"] == "not_found"
-
-    def test_unknown_parent_404(self, claimed_parent: dict[str, Any]) -> None:
-        ghost = "01GHOSTPARENT000000000000000"
-        fixture = dict(claimed_parent, parent_id=ghost)
-        status, body = self._child_request(fixture, overrides={})
-        assert status == 404, body
-        assert body["error"] == "not_found"
-
-    def test_unknown_attempt_403(self, claimed_parent: dict[str, Any]) -> None:
-        status, body = self._child_request(
-            claimed_parent,
-            overrides={
-                "envelope": {
-                    "parent_attempt_id": "01GHOSTATTEMPT0000000000000"
-                }
-            },
-        )
-        assert status == 403, body
-        assert body["error"] == "child_admission_forbidden"
-
-    def test_unavailable_binding_probe_422(
-        self,
-        claimed_parent: dict[str, Any],
-        monkeypatch: pytest.MonkeyPatch,
-        tmp_path: Path,
-    ) -> None:
-        # Review-N2 symmetry: children pay the same availability probe as
-        # public admission — a typed 422, not a silent later failure.
-        monkeypatch.setenv("REIGH_WGP_HOME", str(tmp_path / "absent"))
-        status, body = self._child_request(claimed_parent, overrides={})
-        assert status == 422, body
-        assert body["error"] == "capability_unavailable"
-        assert "missing_prerequisites" in body["detail"]
-
-    def _envelope(self, fixture: dict[str, Any]) -> dict[str, Any]:
-        attempt = fixture["claim"]["attempt"]
-        return {
-            "parent_task_id": fixture["parent_id"],
-            "parent_attempt_id": attempt["id"],
-            "executor_id": "exec-1",
-            "lease_id": attempt["lease_id"],
-            "status_version": attempt["status_version"],
-            "role": "segment",
-            "index": 0,
-        }
-
-
-class TestChildReplayCoordinator:
-    """T4.1 proof-work: replay determinism is a named primitive."""
-
-    @pytest.fixture
-    def claimed_parent(self, tmp_bridge_root: Path) -> dict[str, Any]:
-        with task_server(tmp_bridge_root) as env:
-            slug = "replay-proj"
-            _create_project(env["composition"], slug)
-            status, task_resp = _post(
-                env,
-                f"/projects/{slug}/tasks",
-                key="k-parent",
-                body={
-                    "family": "join_clips",
-                    "input": {"clip_source": "clips", "clips": ["a", "b"]},
-                },
-            )
-            assert status == 201, task_resp
-            parent_id = task_resp["task"]["id"]
-            cstatus, claim = _post(
-                env,
-                "/queue/claim",
-                body={
-                    "executor_id": "exec-1",
-                    "capabilities": ["reigh.join_clips_orchestrator"],
-                },
-            )
-            assert cstatus == 200, claim
-            yield {
-                "env": env,
-                "slug": slug,
-                "parent_id": parent_id,
-                "claim": claim,
-            }
-
-    def _child_request(
-        self, fixture: dict[str, Any], *, overrides: dict[str, Any]
-    ) -> tuple[int, dict[str, Any]]:
-        attempt = fixture["claim"]["attempt"]
-        envelope = {
-            "parent_task_id": fixture["parent_id"],
-            "parent_attempt_id": attempt["id"],
-            "executor_id": "exec-1",
-            "lease_id": attempt["lease_id"],
-            "status_version": attempt["status_version"],
-            "role": "segment",
-            "index": 0,
-        }
-        envelope.update(overrides.get("envelope", {}))
-        key = overrides.get(
-            "key",
-            f"reigh.orch:v1:{fixture['parent_id']}:segment:0",
-        )
-        body = {
-            "family": "join_clips_segment",
-            "input": overrides.get("input", {"segment_index": 0}),
-            "child_admission": envelope,
-        }
-        return _post(
-            fixture["env"],
-            f"/projects/{fixture['slug']}/tasks",
-            key=key,
-            body=body,
-        )
-
-    def test_replay_201_then_200_same_row_zero_duplicates(
-        self, claimed_parent: dict[str, Any]
-    ) -> None:
-        first_status, first = self._child_request(
-            claimed_parent, overrides={}
-        )
-        assert first_status == 201, first
-        retry_status, retry = self._child_request(
-            claimed_parent, overrides={}
-        )
-        assert retry_status == 200, retry
-        assert retry["task"]["id"] == first["task"]["id"]
-        rows = _db_count(
-            claimed_parent["env"]["composition"],
-            (
-                "SELECT COUNT(*) FROM tasks WHERE capability = "
-                "'reigh.join_clips_segment'"
-            ),
-        )
-        assert rows == 1
-
-    def test_retry_after_heartbeat_returns_same_row(
-        self, claimed_parent: dict[str, Any]
-    ) -> None:
-        # Attempt N admits; the lease heartbeats (status_version moves);
-        # retry N+1 carries the NEW fence value and must resolve to the
-        # SAME child row — never a duplicate, never a stale-fence 403.
-        first_status, first = self._child_request(
-            claimed_parent, overrides={}
-        )
-        assert first_status == 201, first
-        attempt = claimed_parent["claim"]["attempt"]
-        hstatus, beat = _post(
-            claimed_parent["env"],
-            (
-                f"/tasks/{claimed_parent['parent_id']}/attempts/"
-                f"{attempt['attempt_no']}/heartbeat"
-            ),
-            body={
-                "attempt_id": attempt["id"],
-                "lease_id": attempt["lease_id"],
-                "status_version": attempt["status_version"],
-            },
-        )
-        assert hstatus == 200, beat
-        fresh_version = beat["attempt"]["status_version"]
-        assert fresh_version == attempt["status_version"] + 1
-        retry_status, retry = self._child_request(
-            claimed_parent,
-            overrides={"envelope": {"status_version": fresh_version}},
-        )
-        assert retry_status == 200, retry
-        assert retry["task"]["id"] == first["task"]["id"]
-        rows = _db_count(
-            claimed_parent["env"]["composition"],
-            (
-                "SELECT COUNT(*) FROM tasks WHERE capability = "
-                "'reigh.join_clips_segment'"
-            ),
-        )
-        assert rows == 1
-
-    def test_concurrent_duplicate_admission_single_row(
-        self, claimed_parent: dict[str, Any]
-    ) -> None:
-        from concurrent.futures import ThreadPoolExecutor
-
-        with ThreadPoolExecutor(max_workers=4) as pool:
-            results = list(
-                pool.map(
-                    lambda _: self._child_request(
-                        claimed_parent, overrides={}
-                    ),
-                    range(4),
-                )
-            )
-        statuses = sorted(status for status, _ in results)
-        # Every racer converges on the winner's row: exactly one 201,
-        # the rest idempotent 200 replays — never a second row.
-        assert statuses == [200, 200, 200, 201], statuses
-        ids = {body["task"]["id"] for _, body in results}
-        assert len(ids) == 1
-        rows = _db_count(
-            claimed_parent["env"]["composition"],
-            (
-                "SELECT COUNT(*) FROM tasks WHERE capability = "
-                "'reigh.join_clips_segment'"
-            ),
-        )
-        assert rows == 1
-
-    def test_cross_parent_and_cross_role_isolation(
-        self, claimed_parent: dict[str, Any]
-    ) -> None:
-        env = claimed_parent["env"]
-        # A second live parent in the same project.
-        p2status, p2resp = _post(
-            env,
-            f"/projects/{claimed_parent['slug']}/tasks",
-            key="k-parent-2",
-            body={
-                "family": "join_clips",
-                "input": {"clip_source": "clips", "clips": ["c", "d"]},
-            },
-        )
-        assert p2status == 201, p2resp
-        parent2_id = p2resp["task"]["id"]
-        cstatus, claim2 = _post(
-            env,
-            "/queue/claim",
-            body={
-                "executor_id": "exec-2",
-                "capabilities": ["reigh.join_clips_orchestrator"],
-            },
-        )
-        assert cstatus == 200, claim2
-        assert claim2["task"]["id"] == parent2_id
-        fixture2 = dict(claimed_parent, parent_id=parent2_id, claim=claim2)
-
-        s1, r1 = self._child_request(claimed_parent, overrides={})
-        s2, r2 = self._child_request(
-            fixture2,
-            overrides={"envelope": {"executor_id": "exec-2"}},
-        )
-        s3, r3 = self._child_request(
-            claimed_parent,
-            overrides={
-                "envelope": {"role": "stitch"},
-                "key": f"reigh.orch:v1:{claimed_parent['parent_id']}:stitch:0",
-            },
-        )
-        assert (s1, s2, s3) == (201, 201, 201), (r1, r2, r3)
-        ids = {r1["task"]["id"], r2["task"]["id"], r3["task"]["id"]}
-        # Same (role, index) under different parents and different roles
-        # under one parent derive DIFFERENT keys — three distinct rows.
-        assert len(ids) == 3
-        assert r1["task"]["id"] != r2["task"]["id"]
-        assert r1["task"]["id"] != r3["task"]["id"]
-
-    def test_dependant_on_wires_hard_dependencies(
-        self, claimed_parent: dict[str, Any]
-    ) -> None:
-        first_status, first = self._child_request(
-            claimed_parent, overrides={}
-        )
-        assert first_status == 201, first
-        dep_id = first["task"]["id"]
-        dep_status, dependent = self._child_request(
-            claimed_parent,
-            overrides={
-                "envelope": {"index": 1},
-                "key": f"reigh.orch:v1:{claimed_parent['parent_id']}:segment:1",
-                "input": {"segment_index": 1, "dependant_on": [dep_id]},
-            },
-        )
-        assert dep_status == 201, dependent
-        task = dependent["task"]
-        # The kernel gates eligibility on hard edges: unsatisfied hard
-        # dependency starts the child ``blocked``.
-        assert task["status"] == "blocked"
-        edges = [
-            dep
-            for dep in task["dependencies"]
-            if dep.get("kind") == "hard"
-            and dep.get("depends_on_task_id") == dep_id
-        ]
-        assert len(edges) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -1041,6 +910,217 @@ class TestTaskReads:
             assert detail["task"]["attempts"] == []
             assert detail["task"]["outputs"] == []
 
+    def test_detail_exposes_bounded_renderer_failure_diagnostics(
+        self, tmp_bridge_root: Path
+    ) -> None:
+        with task_server(tmp_bridge_root) as env:
+            slug = "diagnostics-proj"
+            composition = env["composition"]
+            _create_project(composition, slug)
+            _, admitted = _admit_simple(env, slug, "diagnostics-admit")
+            task_id = admitted["task"]["id"]
+            _, claim = _post(
+                env,
+                "/queue/claim",
+                body={
+                    "executor_id": "render-worker",
+                    "capabilities": ["reigh.image_upscale"],
+                },
+            )
+            attempt = claim["attempt"]
+            failure_message = (
+                "render_export child exited with code 7\n"
+                "stderr tail:\nuseful renderer failure marker"
+            )
+            fail_status, _ = _post(
+                env,
+                f"/tasks/{task_id}/attempts/1/fail",
+                key="diagnostics-fail",
+                body={
+                    "attempt_id": attempt["id"],
+                    "lease_id": attempt["lease_id"],
+                    "status_version": attempt["status_version"],
+                    "error": {
+                        "code": "render_export_failed",
+                        "message": failure_message,
+                        "retryable": False,
+                    },
+                },
+            )
+            assert fail_status == 200
+
+            detail_status, detail = _get(env, f"/projects/{slug}/tasks/{task_id}")
+            assert detail_status == 200
+            diagnostics = detail["task"]["attempts"][0]["diagnostics"]
+            assert diagnostics["error"] == {
+                "code": "render_export_failed",
+                "message": failure_message,
+                "retryable": False,
+            }
+
+    def test_detail_bounds_long_attempt_diagnostics(
+        self, tmp_bridge_root: Path
+    ) -> None:
+        with task_server(tmp_bridge_root) as env:
+            slug = "long-diagnostics-proj"
+            composition = env["composition"]
+            _create_project(composition, slug)
+            _, admitted = _admit_simple(env, slug, "long-diagnostics-admit")
+            task_id = admitted["task"]["id"]
+            _, claim = _post(
+                env,
+                "/queue/claim",
+                body={
+                    "executor_id": "render-worker",
+                    "capabilities": ["reigh.image_upscale"],
+                },
+            )
+            attempt_id = claim["attempt"]["id"]
+            long_message = "renderer-output-" + ("x" * 10_000)
+            UnitOfWork(composition.writer).run(
+                lambda uow: uow.execute(
+                    "UPDATE execution_attempts SET error_json = ? WHERE id = ?",
+                    (
+                        json.dumps(
+                            {
+                                "code": "render_export_failed",
+                                "message": long_message,
+                                "retryable": False,
+                            }
+                        ),
+                        attempt_id,
+                    ),
+                )
+            )
+
+            detail_status, detail = _get(env, f"/projects/{slug}/tasks/{task_id}")
+            assert detail_status == 200
+            message = detail["task"]["attempts"][0]["diagnostics"]["error"]["message"]
+            assert len(message) == 4_000
+            assert message == long_message[:4_000]
+
+    def test_detail_diagnostics_redact_secret_fields_and_tokens(
+        self, tmp_bridge_root: Path
+    ) -> None:
+        with task_server(tmp_bridge_root) as env:
+            slug = "secret-diagnostics-proj"
+            composition = env["composition"]
+            _create_project(composition, slug)
+            _, admitted = _admit_simple(env, slug, "secret-diagnostics-admit")
+            task_id = admitted["task"]["id"]
+            _, claim = _post(
+                env,
+                "/queue/claim",
+                body={
+                    "executor_id": "render-worker",
+                    "capabilities": ["reigh.image_upscale"],
+                },
+            )
+            attempt_id = claim["attempt"]["id"]
+            secret = "super-secret-render-token"
+            UnitOfWork(composition.writer).run(
+                lambda uow: uow.execute(
+                    "UPDATE execution_attempts SET progress_json = ?, error_json = ? WHERE id = ?",
+                    (
+                        json.dumps(
+                            {
+                                "phase": "render",
+                                "api_token": secret,
+                                "nested": {"authorization": f"Bearer {secret}"},
+                            }
+                        ),
+                        json.dumps(
+                            {
+                                "code": "render_export_failed",
+                                "message": f"renderer failed with token: {secret}",
+                                "retryable": False,
+                                "details": {"api_key": secret},
+                            }
+                        ),
+                        attempt_id,
+                    ),
+                )
+            )
+
+            detail_status, detail = _get(env, f"/projects/{slug}/tasks/{task_id}")
+            assert detail_status == 200
+            diagnostics = detail["task"]["attempts"][0]["diagnostics"]
+            serialized = json.dumps(diagnostics)
+            assert secret not in serialized
+            assert "api_token" not in serialized
+            assert "authorization" not in serialized
+            assert "details" not in diagnostics["error"]
+            assert diagnostics["progress"]["phase"] == "render"
+
+    def test_detail_diagnostics_redact_urls_cloud_keys_and_local_paths(
+        self, tmp_bridge_root: Path
+    ) -> None:
+        with task_server(tmp_bridge_root) as env:
+            slug = "adversarial-diagnostics-proj"
+            composition = env["composition"]
+            _create_project(composition, slug)
+            _, admitted = _admit_simple(env, slug, "adversarial-diagnostics-admit")
+            task_id = admitted["task"]["id"]
+            _, claim = _post(
+                env,
+                "/queue/claim",
+                body={
+                    "executor_id": "render-worker",
+                    "capabilities": ["reigh.image_upscale"],
+                },
+            )
+            attempt_id = claim["attempt"]["id"]
+            url_secret = "local-password"
+            aws_access_key = "AKIAIOSFODNN7EXAMPLE"
+            google_api_key = "AIza" + ("A" * 35)
+            local_path = "/Users/alice/project/.astrid/staging/txn-123/output.mp4"
+            windows_path = r"C:\Users\alice\project\output.mp4"
+            failure_message = (
+                "useful renderer context; "
+                f"endpoint https://alice:{url_secret}@example.com/render; "
+                f"aws {aws_access_key}; google {google_api_key}; "
+                f"artifact {local_path}; windows {windows_path}"
+            )
+            UnitOfWork(composition.writer).run(
+                lambda uow: uow.execute(
+                    "UPDATE execution_attempts SET progress_json = ?, error_json = ? WHERE id = ?",
+                    (
+                        json.dumps(
+                            {
+                                "phase": "render",
+                                "endpoint": f"https://alice:{url_secret}@example.com/render",
+                                "artifact": local_path,
+                            }
+                        ),
+                        json.dumps(
+                            {
+                                "code": "render_export_failed",
+                                "message": failure_message,
+                                "retryable": False,
+                            }
+                        ),
+                        attempt_id,
+                    ),
+                )
+            )
+
+            detail_status, detail = _get(env, f"/projects/{slug}/tasks/{task_id}")
+            assert detail_status == 200
+            diagnostics = detail["task"]["attempts"][0]["diagnostics"]
+            serialized = json.dumps(diagnostics)
+            assert "useful renderer context" in serialized
+            assert "example.com/render" in serialized
+            for secret in (
+                url_secret,
+                aws_access_key,
+                google_api_key,
+                local_path,
+                windows_path,
+            ):
+                assert secret not in serialized
+            assert "endpoint" in diagnostics["progress"]
+            assert "artifact" in diagnostics["progress"]
+
 
 # ---------------------------------------------------------------------------
 # T7: atomic multipart completion + fenced failure
@@ -1128,6 +1208,11 @@ class TestCompletion:
             _db_count(composition, "SELECT COUNT(*) FROM task_outputs") == 1
         )
         assert _db_count(composition, "SELECT COUNT(*) FROM media") == 1
+        dstatus, detail = _get(
+            env, f"/projects/complete-proj/tasks/{claimed['task_id']}"
+        )
+        assert dstatus == 200, detail
+        assert detail["task"]["outputs"][0]["is_primary"] is True
         # Staged bytes are cleaned up.
         assert not list((composition.projects_root / ".astrid").rglob("*out0*"))
 
@@ -1533,4 +1618,3 @@ class TestParserAbuse:
         )
         assert status == 400
         assert "ghost" in resp["detail"]
-

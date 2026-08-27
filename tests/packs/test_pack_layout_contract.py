@@ -62,6 +62,7 @@ _SHIPPED_PACK_IDS = frozenset({
     "runpod",
     "stream_content",
     "training",
+    "typed_timeline",
     "understanding",
     "vibecomfy",
     "video_editing",

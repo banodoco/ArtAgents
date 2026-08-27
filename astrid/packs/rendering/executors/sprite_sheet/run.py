@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
 """Generate a GPT Image sprite sheet, slice frames, and assemble previews."""
 
+# The canonical-entrypoint guard intentionally runs before imports.
+# ruff: noqa: E402
+
 from __future__ import annotations
 
 from astrid.core.pack.entrypoint import guard_canonical_entrypoint
 
-guard_canonical_entrypoint('rendering.sprite_sheet')
+guard_canonical_entrypoint("rendering.sprite_sheet")
 
 # Re-exports from focused modules
 import argparse
 import json
-import os
 import sys
 import time
 from datetime import datetime, timezone
@@ -84,33 +86,56 @@ from .web_outputs import (  # noqa: F401
 
 def build(args: argparse.Namespace) -> int:
     input_sheet = args.input_sheet.expanduser().resolve() if args.input_sheet is not None else None
-    reference_image = Path(args.reference_image).expanduser().resolve() if args.reference_image else None
+    reference_image = (
+        Path(args.reference_image).expanduser().resolve() if args.reference_image else None
+    )
     if reference_image is not None and not reference_image.is_file():
         from astrid.core.contracts.die import pack_die as _die
+
         _die(f"--reference-image not found: {reference_image}")
     if input_sheet is not None and reference_image is not None:
         from astrid.core.contracts.die import pack_die as _die
-        _die("--reference-image generates a new sheet and cannot be combined with --input-sheet post-processing")
+
+        _die(
+            "--reference-image generates a new sheet and cannot be combined with --input-sheet post-processing"
+        )
     inferred_cols = args.cols
     inferred_rows = args.rows
     if input_sheet is not None:
         if not input_sheet.is_file():
             from astrid.core.contracts.die import pack_die as _die
+
             _die(f"--input-sheet not found: {input_sheet}")
         input_width, input_height = _png_dimensions(input_sheet)
         if inferred_cols is None:
             if input_width % args.frame_width:
                 from astrid.core.contracts.die import pack_die as _die
-                _die("--input-sheet width is not divisible by --frame-width; pass --cols explicitly or adjust frame size")
+
+                _die(
+                    "--input-sheet width is not divisible by --frame-width; pass --cols explicitly or adjust frame size"
+                )
             inferred_cols = input_width // args.frame_width
         if inferred_rows is None:
             if input_height % args.frame_height:
                 from astrid.core.contracts.die import pack_die as _die
-                _die("--input-sheet height is not divisible by --frame-height; pass --rows explicitly or adjust frame size")
+
+                _die(
+                    "--input-sheet height is not divisible by --frame-height; pass --rows explicitly or adjust frame size"
+                )
             inferred_rows = input_height // args.frame_height
 
-    requested_frames = args.frames if args.frames is not None else ((inferred_cols or 4) * (inferred_rows or 4) if inferred_cols or inferred_rows else 16)
-    planned = choose_layout(requested_frames, frame_width=args.frame_width, frame_height=args.frame_height, fixed_cols=inferred_cols, fixed_rows=inferred_rows)
+    requested_frames = (
+        args.frames
+        if args.frames is not None
+        else ((inferred_cols or 4) * (inferred_rows or 4) if inferred_cols or inferred_rows else 16)
+    )
+    planned = choose_layout(
+        requested_frames,
+        frame_width=args.frame_width,
+        frame_height=args.frame_height,
+        fixed_cols=inferred_cols,
+        fixed_rows=inferred_rows,
+    )
     cols = planned["cols"]
     rows = planned["rows"]
     frame_count = planned["frame_count"]
@@ -126,6 +151,7 @@ def build(args: argparse.Namespace) -> int:
         _call_image_api,
         _validate_payload,
     )
+
     _validate_payload(validation_payload)
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
@@ -162,9 +188,16 @@ def build(args: argparse.Namespace) -> int:
                 {
                     "endpoint": "postprocess"
                     if input_sheet is not None
-                    else (EDIT_API_URL if reference_image is not None or (args.use_layout_guide and args.model != DEFAULT_MODEL) else API_URL),
+                    else (
+                        EDIT_API_URL
+                        if reference_image is not None
+                        or (args.use_layout_guide and args.model != DEFAULT_MODEL)
+                        else API_URL
+                    ),
                     "input_sheet": str(input_sheet) if input_sheet is not None else None,
-                    "reference_image": str(reference_image) if reference_image is not None else None,
+                    "reference_image": str(reference_image)
+                    if reference_image is not None
+                    else None,
                     "layout_guide": str(guide_path),
                     "sprite_sheet": str(input_sheet or sheet_path),
                     "alpha_sprite_sheet": str(alpha_sheet_path) if args.transparent else None,
@@ -173,7 +206,9 @@ def build(args: argparse.Namespace) -> int:
                     "master_video": str(master_video_path),
                     "web_dir": str(web_dir) if args.web else None,
                     "ai_upscale_provider": args.ai_upscale_provider,
-                    "ai_upscale_model": args.ai_upscale_model if args.ai_upscale_provider != "none" else None,
+                    "ai_upscale_model": args.ai_upscale_model
+                    if args.ai_upscale_provider != "none"
+                    else None,
                     "manifest": str(manifest_path),
                     **request_payload,
                 },
@@ -199,7 +234,9 @@ def build(args: argparse.Namespace) -> int:
     else:
         print(f"Post-processing existing sprite sheet {input_sheet}", file=sys.stderr)
 
-    validate_sheet_dimensions(source_sheet_path, expected_width=sheet_width, expected_height=sheet_height)
+    validate_sheet_dimensions(
+        source_sheet_path, expected_width=sheet_width, expected_height=sheet_height
+    )
     slice_source_path = source_sheet_path
     if args.transparent:
         remove_chroma_key(
@@ -210,7 +247,9 @@ def build(args: argparse.Namespace) -> int:
             blend=args.key_blend,
             force=args.force,
         )
-        validate_sheet_dimensions(alpha_sheet_path, expected_width=sheet_width, expected_height=sheet_height)
+        validate_sheet_dimensions(
+            alpha_sheet_path, expected_width=sheet_width, expected_height=sheet_height
+        )
         slice_source_path = alpha_sheet_path
 
     frames = slice_frames(
@@ -227,34 +266,55 @@ def build(args: argparse.Namespace) -> int:
     frame_analysis = analyze_frames(frames, edge_margin=args.edge_margin)
     edge_warnings = [item for item in frame_analysis if item.get("touches_edge")]
     if edge_warnings:
-        print(f"Warning: {len(edge_warnings)} frame(s) touch the safety edge after slicing.", file=sys.stderr)
+        print(
+            f"Warning: {len(edge_warnings)} frame(s) touch the safety edge after slicing.",
+            file=sys.stderr,
+        )
 
     output_frames = frames
     normalized_frame_paths: list[str] | None = None
     normalize_report: list[dict[str, Any]] | None = None
     preview_frames_dir = frames_dir
     if args.normalize_frames:
-        output_frames, normalize_report = normalize_frames(frames, normalized_frames_dir, margin=args.normalize_margin, force=args.force)
+        output_frames, normalize_report = normalize_frames(
+            frames, normalized_frames_dir, margin=args.normalize_margin, force=args.force
+        )
         normalized_frame_paths = output_frames
         preview_frames_dir = normalized_frames_dir
     upscaled_frames: list[str] | None = None
     ai_upscaled_frames: list[str] | None = None
     ai_upscale_report: list[dict[str, Any]] | None = None
     if abs(args.upscale_factor - 1.0) >= 0.0001:
-        upscaled_frames = upscale_frames(output_frames, upscaled_frames_dir, factor=args.upscale_factor, filter_name=args.upscale_filter, force=args.force)
+        upscaled_frames = upscale_frames(
+            output_frames,
+            upscaled_frames_dir,
+            factor=args.upscale_factor,
+            filter_name=args.upscale_filter,
+            force=args.force,
+        )
         output_frames = upscaled_frames
         preview_frames_dir = upscaled_frames_dir
     if args.ai_upscale_provider == "fal":
-        ai_upscaled_frames, ai_upscale_report = ai_upscale_frames_with_fal(output_frames, ai_upscaled_frames_dir, args=args, force=args.force)
+        ai_upscaled_frames, ai_upscale_report = ai_upscale_frames_with_fal(
+            output_frames, ai_upscaled_frames_dir, args=args, force=args.force
+        )
         output_frames = ai_upscaled_frames
         preview_frames_dir = ai_upscaled_frames_dir
 
     final_sheet_path: Path | None = None
     if preview_frames_dir != frames_dir:
-        assemble_sprite_sheet_from_frames(preview_frames_dir, processed_sheet_path, cols=cols, rows=rows, force=args.force)
+        assemble_sprite_sheet_from_frames(
+            preview_frames_dir, processed_sheet_path, cols=cols, rows=rows, force=args.force
+        )
         final_sheet_path = processed_sheet_path
 
-    assemble_review_video(preview_frames_dir, review_video_path, fps=args.fps, background=args.review_background, force=args.force)
+    assemble_review_video(
+        preview_frames_dir,
+        review_video_path,
+        fps=args.fps,
+        background=args.review_background,
+        force=args.force,
+    )
     if args.prores:
         assemble_prores_video(preview_frames_dir, master_video_path, fps=args.fps, force=args.force)
     web_outputs: dict[str, Any] | None = None
@@ -309,9 +369,15 @@ def build(args: argparse.Namespace) -> int:
             "provider": args.ai_upscale_provider,
             "model": args.ai_upscale_model if args.ai_upscale_provider != "none" else None,
             "factor": args.ai_upscale_factor if args.ai_upscale_provider != "none" else None,
-            "creativity": args.ai_upscale_creativity if args.ai_upscale_provider != "none" else None,
-            "resemblance": args.ai_upscale_resemblance if args.ai_upscale_provider != "none" else None,
-            "guidance_scale": args.ai_upscale_guidance_scale if args.ai_upscale_provider != "none" else None,
+            "creativity": args.ai_upscale_creativity
+            if args.ai_upscale_provider != "none"
+            else None,
+            "resemblance": args.ai_upscale_resemblance
+            if args.ai_upscale_provider != "none"
+            else None,
+            "guidance_scale": args.ai_upscale_guidance_scale
+            if args.ai_upscale_provider != "none"
+            else None,
             "steps": args.ai_upscale_steps if args.ai_upscale_provider != "none" else None,
             "report": ai_upscale_report,
         },
@@ -334,7 +400,9 @@ def build(args: argparse.Namespace) -> int:
     if args.transparent:
         universal_outputs.append({"path": "sprite_sheet_alpha.png", "type": "file"})
     if args.prores:
-        universal_outputs.append({"path": "sprite_preview_prores.mov", "type": "file", "optional": True})
+        universal_outputs.append(
+            {"path": "sprite_preview_prores.mov", "type": "file", "optional": True}
+        )
     if final_sheet_path is not None:
         universal_outputs.append({"path": "sprite_sheet_processed.png", "type": "file"})
     if args.normalize_frames and normalized_frame_paths:
@@ -365,47 +433,148 @@ def build(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Generate, slice, and preview a GPT Image sprite sheet.")
+    parser = argparse.ArgumentParser(
+        description="Generate, slice, and preview a GPT Image sprite sheet."
+    )
     add = parser.add_argument
     add("--animation", required=True, help="Specific animation to depict across the frames.")
     add("--subject", required=True, help="Character/object being animated.")
-    add("--style", default="clean high-quality 2D game animation, crisp silhouette, consistent character design")
+    add(
+        "--style",
+        default="clean high-quality 2D game animation, crisp silhouette, consistent character design",
+    )
     add("--background", default="plain white background")
-    add("--transparent", dest="transparent", action="store_true", default=True, help="Generate on chroma key and remove it into alpha PNG frames.")
-    add("--no-transparent", dest="transparent", action="store_false", help="Keep the prompted background instead of removing it.")
-    add("--key-color", default=DEFAULT_KEY_COLOR, help="Chroma-key color used when --transparent is enabled.")
+    add(
+        "--transparent",
+        dest="transparent",
+        action="store_true",
+        default=True,
+        help="Generate on chroma key and remove it into alpha PNG frames.",
+    )
+    add(
+        "--no-transparent",
+        dest="transparent",
+        action="store_false",
+        help="Keep the prompted background instead of removing it.",
+    )
+    add(
+        "--key-color",
+        default=DEFAULT_KEY_COLOR,
+        help="Chroma-key color used when --transparent is enabled.",
+    )
     add("--key-similarity", type=float, default=0.08, help="ffmpeg colorkey similarity threshold.")
     add("--key-blend", type=float, default=0.03, help="ffmpeg colorkey edge blend.")
-    add("--review-background", default="white", help="Background color for the review MP4 after alpha extraction.")
-    add("--edge-margin", type=int, default=4, help="Warn when sliced alpha content is within this many pixels of a frame edge.")
-    add("--normalize-frames", action="store_true", help="Crop each sliced frame to alpha content, scale down if needed, and recenter it in the frame.")
-    add("--normalize-margin", type=int, default=16, help="Minimum transparent margin for --normalize-frames.")
-    add("--upscale-factor", type=float, default=1.0, help="Scale transparent frames after slicing/normalization and before video/web exports.")
-    add_choice_arg(parser, "--upscale-filter", values=("lanczos", "bicubic", "spline", "neighbor"), default="lanczos", help="ffmpeg scale filter for --upscale-factor.")
-    add_choice_arg(parser, "--ai-upscale-provider", values=("none", "fal"), default="none", help="Run a proper AI upscaler after slicing/normalization. Use fal for FAL Clarity Upscaler.")
-    add("--ai-upscale-model", default=DEFAULT_FAL_UPSCALER, help="FAL model id for --ai-upscale-provider fal.")
-    add("--ai-upscale-factor", type=float, default=2.0, help="AI upscale multiplier passed to the provider.")
-    add("--ai-upscale-prompt", help="Prompt for the AI upscaler. Defaults to a sprite-preserving prompt derived from --subject and --animation.")
-    add("--ai-upscale-negative-prompt", default="low quality, blurry, distorted, changed pose, changed silhouette, extra limbs, background, text, watermark")
-    add("--ai-upscale-creativity", type=float, default=0.18, help="FAL Clarity creativity/denoise strength. Lower preserves sprite frames better.")
-    add("--ai-upscale-resemblance", type=float, default=0.9, help="FAL Clarity resemblance/control strength. Higher preserves the source frame better.")
+    add(
+        "--review-background",
+        default="white",
+        help="Background color for the review MP4 after alpha extraction.",
+    )
+    add(
+        "--edge-margin",
+        type=int,
+        default=4,
+        help="Warn when sliced alpha content is within this many pixels of a frame edge.",
+    )
+    add(
+        "--normalize-frames",
+        action="store_true",
+        help="Crop each sliced frame to alpha content, scale down if needed, and recenter it in the frame.",
+    )
+    add(
+        "--normalize-margin",
+        type=int,
+        default=16,
+        help="Minimum transparent margin for --normalize-frames.",
+    )
+    add(
+        "--upscale-factor",
+        type=float,
+        default=1.0,
+        help="Scale transparent frames after slicing/normalization and before video/web exports.",
+    )
+    add_choice_arg(
+        parser,
+        "--upscale-filter",
+        values=("lanczos", "bicubic", "spline", "neighbor"),
+        default="lanczos",
+        help="ffmpeg scale filter for --upscale-factor.",
+    )
+    add_choice_arg(
+        parser,
+        "--ai-upscale-provider",
+        values=("none", "fal"),
+        default="none",
+        help="Run a proper AI upscaler after slicing/normalization. Use fal for FAL Clarity Upscaler.",
+    )
+    add(
+        "--ai-upscale-model",
+        default=DEFAULT_FAL_UPSCALER,
+        help="FAL model id for --ai-upscale-provider fal.",
+    )
+    add(
+        "--ai-upscale-factor",
+        type=float,
+        default=2.0,
+        help="AI upscale multiplier passed to the provider.",
+    )
+    add(
+        "--ai-upscale-prompt",
+        help="Prompt for the AI upscaler. Defaults to a sprite-preserving prompt derived from --subject and --animation.",
+    )
+    add(
+        "--ai-upscale-negative-prompt",
+        default="low quality, blurry, distorted, changed pose, changed silhouette, extra limbs, background, text, watermark",
+    )
+    add(
+        "--ai-upscale-creativity",
+        type=float,
+        default=0.18,
+        help="FAL Clarity creativity/denoise strength. Lower preserves sprite frames better.",
+    )
+    add(
+        "--ai-upscale-resemblance",
+        type=float,
+        default=0.9,
+        help="FAL Clarity resemblance/control strength. Higher preserves the source frame better.",
+    )
     add("--ai-upscale-guidance-scale", type=float, default=4.0)
     add("--ai-upscale-steps", type=int, default=28)
-    add("--fal-env-file", type=Path, help="Explicitly named env file containing FAL_KEY (lowest-priority convenience tier; canonical precedence is explicit option, process env, keychain, then this file).")
+    add(
+        "--fal-env-file",
+        type=Path,
+        help="Explicitly named env file containing FAL_KEY (lowest-priority convenience tier; canonical precedence is explicit option, process env, keychain, then this file).",
+    )
     add("--fal-timeout", type=int, default=900)
     add("--fal-logs", action="store_true", help="Print FAL queue logs while AI upscaling.")
-    add("--frames", type=int, help="Number of animation frames to generate. Defaults to grid capacity, or 16 when no grid is supplied.")
+    add(
+        "--frames",
+        type=int,
+        help="Number of animation frames to generate. Defaults to grid capacity, or 16 when no grid is supplied.",
+    )
     add("--cols", type=int, help="Grid columns. If omitted, chosen automatically.")
     add("--rows", type=int, help="Grid rows. If omitted, chosen automatically.")
     add("--frame-width", type=int, default=256)
     add("--frame-height", type=int, default=256)
-    add("--safe-margin", type=int, help="Minimum pixel margin inside each cell requested in the layout guide and prompt. Defaults to max(24, frame_size/8).")
+    add(
+        "--safe-margin",
+        type=int,
+        help="Minimum pixel margin inside each cell requested in the layout guide and prompt. Defaults to max(24, frame_size/8).",
+    )
     add("--fps", type=int, default=8)
-    add("--slice-trim", type=int, default=0, help="Pixels to trim from each cell edge while slicing frames.")
+    add(
+        "--slice-trim",
+        type=int,
+        default=0,
+        help="Pixels to trim from each cell edge while slicing frames.",
+    )
     add("--model", default=DEFAULT_MODEL)
     add("--quality", default="medium")
     add("--out-dir", type=Path, default=Path("runs/sprite-sheet"))
-    add("--input-sheet", type=Path, help="Existing PNG sprite sheet to post-process instead of generating a new sheet.")
+    add(
+        "--input-sheet",
+        type=Path,
+        help="Existing PNG sprite sheet to post-process instead of generating a new sheet.",
+    )
     add(
         "--reference-image",
         "--input-image",
@@ -416,15 +585,43 @@ def build_parser() -> argparse.ArgumentParser:
     add("--timeout", type=int, default=240)
     add("--force", action="store_true")
     add("--dry-run", action="store_true")
-    add("--prores", dest="prores", action="store_true", default=True, help="Also write a high-quality ProRes MOV preview.")
+    add(
+        "--prores",
+        dest="prores",
+        action="store_true",
+        default=True,
+        help="Also write a high-quality ProRes MOV preview.",
+    )
     add("--no-prores", dest="prores", action="store_false")
-    add("--web", dest="web", action="store_true", default=True, help="Write web-optimized WebP frames/sheet and a lighter MP4 preview.")
+    add(
+        "--web",
+        dest="web",
+        action="store_true",
+        default=True,
+        help="Write web-optimized WebP frames/sheet and a lighter MP4 preview.",
+    )
     add("--no-web", dest="web", action="store_false")
     add("--web-quality", type=int, default=82, help="WebP quality for web exports.")
-    add("--web-lossless", action="store_true", help="Use lossless WebP for sheet and frame exports.")
-    add("--web-max-dim", type=int, default=512, help="Maximum width/height for web frame animation exports. Use 0 for original size.")
-    add("--web-mp4-crf", type=int, default=24, help="CRF for web MP4 preview; lower is higher quality.")
-    add("--web-animated", action="store_true", help="Also write animated WebP. Off by default because atlas/frame assets are faster for web runtimes.")
+    add(
+        "--web-lossless", action="store_true", help="Use lossless WebP for sheet and frame exports."
+    )
+    add(
+        "--web-max-dim",
+        type=int,
+        default=512,
+        help="Maximum width/height for web frame animation exports. Use 0 for original size.",
+    )
+    add(
+        "--web-mp4-crf",
+        type=int,
+        default=24,
+        help="CRF for web MP4 preview; lower is higher quality.",
+    )
+    add(
+        "--web-animated",
+        action="store_true",
+        help="Also write animated WebP. Off by default because atlas/frame assets are faster for web runtimes.",
+    )
     add("--use-layout-guide", dest="use_layout_guide", action="store_true", default=True)
     add("--no-layout-guide", dest="use_layout_guide", action="store_false")
     return parser
@@ -432,7 +629,6 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     from astrid.core.contracts.die import pack_die as _die
-    from astrid.packs.generation.executors.generate_image_openai.run import DEFAULT_MODEL
 
     args = build_parser().parse_args(argv)
     if args.cols is not None and args.cols < 1:

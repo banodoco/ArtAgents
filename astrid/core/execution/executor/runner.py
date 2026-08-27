@@ -902,6 +902,11 @@ def _prepare_project_request(
     if not request.project:
         return None, request
     _validate_project_owned_inputs(request, executor)
+    if request.out in (None, ""):
+        raise ExecutorRunnerError(
+            "project-scoped executor execution requires kernel admission to "
+            "supply a staging output directory"
+        )
     if not request.project_was_auto_resolved:
         reject_project_with_out(request.project, request.out)
     # A project-scoped lower-level call may use caller output or a kernel-owned

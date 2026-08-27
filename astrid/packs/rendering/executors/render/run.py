@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 
+# The canonical-entrypoint guard intentionally runs before imports.
+# ruff: noqa: E402
+
 from __future__ import annotations
 
 from astrid.core.pack.entrypoint import guard_canonical_entrypoint
 
-guard_canonical_entrypoint('rendering.render')
+guard_canonical_entrypoint("rendering.render")
 
 
 import argparse
@@ -21,6 +24,7 @@ from astrid.core import timeline
 from astrid.core.foundation.paths import REPO_ROOT
 from astrid.core.foundation.project_paths import resolve_projects_root
 from astrid.core.io.media_import import managed_media_path
+from astrid.core.rendering.errors import RendererException
 from astrid.core.rendering.output_policy import (
     DEFAULT_RENDER_OUTPUT_NAME,
     validate_output_basename,
@@ -34,6 +38,23 @@ from astrid.core.rendering.service import RenderService
 DEFAULT_OUTPUT_NAME = DEFAULT_RENDER_OUTPUT_NAME
 
 _SERVICE: RenderService | None = None
+_MAX_CLI_ERROR_CHARS = 3_500
+
+
+def _renderer_cli_error(exc: RendererException) -> str:
+    """Keep structured renderer reasons actionable across the CLI boundary."""
+
+    lines = [str(exc)]
+    reasons = exc.error.details.get("reasons")
+    if isinstance(reasons, list):
+        for reason in reasons:
+            text = str(reason).strip()
+            if text:
+                lines.append(f"reason: {text}")
+    message = "\n".join(lines)
+    if len(message) <= _MAX_CLI_ERROR_CHARS:
+        return message
+    return message[: _MAX_CLI_ERROR_CHARS - 30] + "\n…renderer detail truncated…"
 
 
 def _default_service() -> RenderService:
@@ -111,9 +132,7 @@ def _parse_backend_config(value: str | None) -> dict[str, dict[str, Any]]:
                 f"backend id, got {value!r}"
             ) from exc
     if not isinstance(parsed, dict):
-        raise ValueError(
-            f"--backend-config must be a JSON object keyed by qualified backend id"
-        )
+        raise ValueError("--backend-config must be a JSON object keyed by qualified backend id")
     return {str(key): dict(item) for key, item in parsed.items() if item is not None}
 
 
@@ -369,7 +388,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument("--project-dir", type=Path, default=REPO_ROOT / "remotion")
     parser.add_argument("--composition", default="TimelineComposition")
-    parser.add_argument("--min-free-gb", type=float, default=None, help="Abort before rendering unless this much free disk is available near --out.")
+    parser.add_argument(
+        "--min-free-gb",
+        type=float,
+        default=None,
+        help="Abort before rendering unless this much free disk is available near --out.",
+    )
     parser.add_argument(
         "--keep-previous-renders",
         nargs="?",
@@ -446,6 +470,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 profile=profile,
                 timeline_authority=timeline_authority,
             )
+    except RendererException as exc:  # pragma: no cover - CLI path
+        print(_renderer_cli_error(exc), file=sys.stderr)
+        return 1
     except Exception as exc:  # pragma: no cover - CLI path
         print(str(exc), file=sys.stderr)
         # The kernel's in-process capability path needs the structured

@@ -57,9 +57,7 @@ class _FcntlLock:
                 fcntl.flock(self._handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
                 return self
             except BlockingIOError as exc:
-                if timeout == 0 or (
-                    deadline is not None and time.monotonic() >= deadline
-                ):
+                if timeout == 0 or (deadline is not None and time.monotonic() >= deadline):
                     self._handle.close()
                     self._handle = None
                     raise Timeout(str(self.path)) from exc

@@ -50,7 +50,8 @@ _FILL_BY_KIND = {
 
 _BADGE_KINDS = frozenset({"breadcrumb", "snapshot_badge", "scope_badge", "cue"})
 
-_FONT_SIZE_BY_KIND = {    "breadcrumb": 26,
+_FONT_SIZE_BY_KIND = {
+    "breadcrumb": 26,
     "snapshot_badge": 26,
     "scope_badge": 24,
     "cue": 22,
@@ -178,9 +179,7 @@ def render_page_svg(page: LayoutPage) -> str:
 
     # Clip-family boxes painted bottom-to-top by z_order.
     clip_family = [
-        item
-        for item in page.objects
-        if item.kind in _FILL_BY_KIND and item.lane_index is not None
+        item for item in page.objects if item.kind in _FILL_BY_KIND and item.lane_index is not None
     ]
     for item in sorted(clip_family, key=lambda obj: obj.z_order):
         parts.append(
@@ -201,9 +200,7 @@ def render_page_svg(page: LayoutPage) -> str:
     # Focus rings: bright gold outline around the focused clip (Grok UX).
     for item in page.objects:
         if item.kind == "focus_ring":
-            parts.append(
-                _rect(item.box, "transparent", stroke=_FOCUS_RING, sw=4.0)
-            )
+            parts.append(_rect(item.box, "transparent", stroke=_FOCUS_RING, sw=4.0))
 
     # Ruler ticks (the tick itself; its text is a separate ``label`` object).
     for item in page.objects:
@@ -249,8 +246,9 @@ def render_page_svg(page: LayoutPage) -> str:
             continue
         bottom_strip_box = item.box
         if item.kind in ("clip", "continuation") and item.box.h >= 40:
-            bottom_strip_box = Box(item.box.x, item.box.y + item.box.h - _LABEL_STRIP_H,
-                                   item.box.w, _LABEL_STRIP_H)
+            bottom_strip_box = Box(
+                item.box.x, item.box.y + item.box.h - _LABEL_STRIP_H, item.box.w, _LABEL_STRIP_H
+            )
         parts.append(
             _text(
                 bottom_strip_box,
@@ -263,9 +261,7 @@ def render_page_svg(page: LayoutPage) -> str:
     # Footer continuation markers (lane_index is None).
     for item in page.objects:
         if item.kind == "continuation" and item.lane_index is None:
-            parts.append(
-                _rect(item.box, _CONTINUATION, stroke=_CLIP_EDGE)
-            )
+            parts.append(_rect(item.box, _CONTINUATION, stroke=_CLIP_EDGE))
             if item.label:
                 parts.append(
                     _text(

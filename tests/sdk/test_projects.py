@@ -58,17 +58,21 @@ def env(tmp_path: Path):
     """A fresh kernel writer, project repository, and project service."""
     registry = core_only_registry()
     writer = DatabaseWriter(tmp_path / "projects.sqlite3", registry)
+    # The repository-wide sandbox owns ``tmp_path / "projects"``. This
+    # fixture needs an initially absent root to prove repository-only writes
+    # do not materialize a workspace, so give the SDK surface its own root.
+    projects_root = tmp_path / "sdk-projects"
     try:
         events = EventAppendService(registry)
         receipts = ReceiptService()
         projects = ProjectRepository(events=events, receipts=receipts)
         yield SimpleNamespace(
             service=ProjectsService(
-                writer, projects, receipts, projects_root=tmp_path / "projects"
+                writer, projects, receipts, projects_root=projects_root
             ),
             writer=writer,
             root=tmp_path,
-            projects_root=tmp_path / "projects",
+            projects_root=projects_root,
         )
     finally:
         writer.close()

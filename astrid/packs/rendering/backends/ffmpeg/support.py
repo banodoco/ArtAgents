@@ -13,19 +13,17 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from fractions import Fraction
 from pathlib import Path
-
-from astrid.core.rendering.profile import _mp4_time_base
 from typing import Any
 
 from astrid.core.media import MediaProbe, ffprobe_metadata_strict
 from astrid.core.rendering.contracts import (
+    SCHEMA_VERSION,
     AudioOwnership,
     RenderRequest,
-    SCHEMA_VERSION,
     SupportReport,
 )
+from astrid.core.rendering.profile import _mp4_time_base
 from astrid.packs.rendering.backends.ffmpeg import audio_reactive_colour
-
 
 BACKEND_ID = "rendering.ffmpeg"
 BACKEND_VERSION = "1.0.0"
@@ -110,9 +108,7 @@ def _clip_range(clip: Mapping[str, Any]) -> _ClipRange:
     if at < 0:
         raise ValueError(f"Clip {clip_id!r} has a negative timeline frame bound")
     if source_from < 0 or source_to <= source_from:
-        raise ValueError(
-            f"Clip {clip_id!r} must have positive source bounds with to > from"
-        )
+        raise ValueError(f"Clip {clip_id!r} must have positive source bounds with to > from")
     return _ClipRange(
         clip=clip,
         at=at,
@@ -136,19 +132,17 @@ def _validate_track_semantics(track: Mapping[str, Any]) -> list[str]:
         effective_gain(track, {})
     except ValueError as exc:
         reasons.append(str(exc))
-    if not _is_default(track.get("scale"), 1) or not _is_default(
-        track.get("fit"), "contain"
-    ) or not _is_default(track.get("blendMode"), "normal"):
-        reasons.append(
-            f"Track {track_id!r} uses unsupported visual transform semantics"
-        )
+    if (
+        not _is_default(track.get("scale"), 1)
+        or not _is_default(track.get("fit"), "contain")
+        or not _is_default(track.get("blendMode"), "normal")
+    ):
+        reasons.append(f"Track {track_id!r} uses unsupported visual transform semantics")
     opacity = track.get("opacity")
     if opacity is not None:
         try:
             if _number(opacity, f"Track {track_id!r} opacity") != 1.0:
-                reasons.append(
-                    f"Track {track_id!r} uses unsupported non-default opacity"
-                )
+                reasons.append(f"Track {track_id!r} uses unsupported non-default opacity")
         except ValueError as exc:
             reasons.append(str(exc))
     return reasons
@@ -161,9 +155,7 @@ def _validate_clip_semantics(
     reasons: list[str] = []
     clip_id = clip.get("id")
     if "muted" in clip:
-        reasons.append(
-            f"Clip {clip_id!r} uses unsupported clip-level muted; use volume: 0"
-        )
+        reasons.append(f"Clip {clip_id!r} uses unsupported clip-level muted; use volume: 0")
     try:
         speed = _number(clip.get("speed", 1), f"Clip {clip_id!r} speed")
         if speed != 1.0:
@@ -175,34 +167,20 @@ def _validate_clip_semantics(
 
     positioned = sorted(key for key in _POSITION_KEYS if key in clip)
     if positioned:
-        reasons.append(
-            f"Clip {clip_id!r} uses unsupported transforms: {', '.join(positioned)}"
-        )
-    cropped = sorted(
-        key
-        for key in _CROP_KEYS
-        if key in clip and not _is_default(clip.get(key), 0)
-    )
+        reasons.append(f"Clip {clip_id!r} uses unsupported transforms: {', '.join(positioned)}")
+    cropped = sorted(key for key in _CROP_KEYS if key in clip and not _is_default(clip.get(key), 0))
     if cropped:
-        reasons.append(
-            f"Clip {clip_id!r} uses unsupported crop: {', '.join(cropped)}"
-        )
-    effects = sorted(
-        key for key in _EFFECT_KEYS if key in clip and _nonempty(clip.get(key))
-    )
+        reasons.append(f"Clip {clip_id!r} uses unsupported crop: {', '.join(cropped)}")
+    effects = sorted(key for key in _EFFECT_KEYS if key in clip and _nonempty(clip.get(key)))
     if effects:
-        reasons.append(
-            f"Clip {clip_id!r} uses unsupported effects: {', '.join(effects)}"
-        )
+        reasons.append(f"Clip {clip_id!r} uses unsupported effects: {', '.join(effects)}")
     if _nonempty(clip.get("transition")):
         reasons.append(f"Clip {clip_id!r} uses an unsupported transition")
     opacity = clip.get("opacity")
     if opacity is not None:
         try:
             if _number(opacity, f"Clip {clip_id!r} opacity") != 1.0:
-                reasons.append(
-                    f"Clip {clip_id!r} uses unsupported non-default opacity"
-                )
+                reasons.append(f"Clip {clip_id!r} uses unsupported non-default opacity")
         except ValueError as exc:
             reasons.append(str(exc))
 
@@ -211,14 +189,10 @@ def _validate_clip_semantics(
         reasons.append(f"Clip {clip_id!r} params must be an object")
     elif isinstance(params, Mapping):
         fades = [
-            name
-            for name in ("fadeIn", "fadeOut")
-            if name in params and _nonempty(params.get(name))
+            name for name in ("fadeIn", "fadeOut") if name in params and _nonempty(params.get(name))
         ]
         if fades:
-            reasons.append(
-                f"Clip {clip_id!r} uses unsupported audio fades: {', '.join(fades)}"
-            )
+            reasons.append(f"Clip {clip_id!r} uses unsupported audio fades: {', '.join(fades)}")
         other_params = sorted(set(params) - {"fadeIn", "fadeOut"})
         if other_params and clip.get("clipType") == "media":
             reasons.append(
@@ -227,9 +201,7 @@ def _validate_clip_semantics(
 
     if clip.get("clipType") == "media":
         if _nonempty(clip.get("hold")):
-            reasons.append(
-                f"Clip {clip_id!r} uses unsupported media hold semantics"
-            )
+            reasons.append(f"Clip {clip_id!r} uses unsupported media hold semantics")
         try:
             _clip_range(clip)
         except ValueError as exc:
@@ -299,9 +271,7 @@ def structural_reasons(
             seen_clip_ids.add(clip_id)
         track = tracks.get(str(raw_clip.get("track")))
         if track is None:
-            reasons.append(
-                f"Clip {clip_id!r} references unknown track {raw_clip.get('track')!r}"
-            )
+            reasons.append(f"Clip {clip_id!r} references unknown track {raw_clip.get('track')!r}")
             track = {}
         clip_type = raw_clip.get("clipType")
         if clip_type == audio_reactive_colour.EFFECT_ID:
@@ -311,16 +281,12 @@ def structural_reasons(
                     f"rendering.ffmpeg media path does not support clip kind {clip_type!r}"
                 )
         elif clip_type != "media":
-            reasons.append(
-                f"Clip {clip_id!r} has unsupported clip kind {clip_type!r}"
-            )
+            reasons.append(f"Clip {clip_id!r} has unsupported clip kind {clip_type!r}")
         reasons.extend(_validate_clip_semantics(raw_clip, track))
 
     if reactive_count:
         if reactive_count != 1:
-            reasons.append(
-                "audio-reactive-colour specialization requires exactly one effect clip"
-            )
+            reasons.append("audio-reactive-colour specialization requires exactly one effect clip")
         return _dedupe(reasons)
 
     visual_ranges: list[_ClipRange] = []
@@ -364,9 +330,7 @@ def structural_reasons(
                     f"Overlapping audio at clip {clip_id!r}: starts at {bounds.at:.6f}, previous audio ends at {audio_cursor:.6f}"
                 )
             if bounds.end > cursor + _TIMELINE_EPSILON_SECONDS:
-                reasons.append(
-                    f"Audio clip {clip_id!r} ends outside the visual frame bounds"
-                )
+                reasons.append(f"Audio clip {clip_id!r} ends outside the visual frame bounds")
             audio_cursor = max(audio_cursor, bounds.end)
     return _dedupe(reasons)
 
@@ -502,18 +466,14 @@ def _whole_media_optimization(
     )
 
 
-def _probe_time_base_matches(
-    probe: MediaProbe, expected: tuple[int, int]
-) -> bool:
+def _probe_time_base_matches(probe: MediaProbe, expected: tuple[int, int]) -> bool:
     """The probed stream time base must equal the canonical MP4 timescale."""
     if probe.time_base is None:
         return False
     return Fraction(*probe.time_base) == Fraction(*expected)
 
 
-def _profile_support_reasons(
-    request: RenderRequest, timeline_data: Mapping[str, Any]
-) -> list[str]:
+def _profile_support_reasons(request: RenderRequest, timeline_data: Mapping[str, Any]) -> list[str]:
     """Fail closed when the requested profile deviates from what the FFmpeg
     backend actually produces (canvas dims/fps, codecs, pixel format, and
     canonical audio rate/layout)."""
@@ -624,14 +584,10 @@ def support(
             reasons.append(f"required binary is unavailable: {binary}")
 
     if request.window is not None:
-        reasons.append(
-            "rendering.ffmpeg accepts complete timelines, not native frame windows"
-        )
+        reasons.append("rendering.ffmpeg accepts complete timelines, not native frame windows")
     config = request.backend_config.get(BACKEND_ID, {})
     if config:
-        reasons.append(
-            "rendering.ffmpeg does not accept backend-specific configuration"
-        )
+        reasons.append("rendering.ffmpeg does not accept backend-specific configuration")
     if request.assets_registry_path is None:
         reasons.append("rendering.ffmpeg requires an assets registry")
     try:
@@ -656,9 +612,7 @@ def support(
         if isinstance(clip, Mapping) and clip.get("clipType") == "media"
     ]
     audio_clips = [
-        clip
-        for clip in media_clips
-        if tracks.get(clip.get("track"), {}).get("kind") == "audio"
+        clip for clip in media_clips if tracks.get(clip.get("track"), {}).get("kind") == "audio"
     ]
     ownership, ownership_reasons = _requested_ownership(
         request,
@@ -688,7 +642,7 @@ def support(
                 if not isinstance(probed, MediaProbe):
                     raise TypeError("probe did not return MediaProbe")
                 probes[asset_id] = probed
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - per-asset probe failures become reasons
                 reasons.append(f"Asset {asset_id!r} cannot be probed: {exc}")
 
         media_probe = probes.get(asset_id)
@@ -697,13 +651,9 @@ def support(
         track = tracks.get(clip.get("track"), {})
         kind = track.get("kind")
         if kind == "visual" and not media_probe.has_video_stream:
-            reasons.append(
-                f"Visual clip {clip_id!r} source {asset_id!r} has no video stream"
-            )
+            reasons.append(f"Visual clip {clip_id!r} source {asset_id!r} has no video stream")
         if kind == "audio" and not media_probe.has_audio_stream:
-            reasons.append(
-                f"Audio clip {clip_id!r} source {asset_id!r} has no audio stream"
-            )
+            reasons.append(f"Audio clip {clip_id!r} source {asset_id!r} has no audio stream")
         if kind == "visual" and media_probe.has_audio_stream:
             try:
                 gain = effective_gain(track, clip)
@@ -719,9 +669,7 @@ def support(
             continue
         source_duration = _probe_duration(media_probe)
         if source_duration is None:
-            reasons.append(
-                f"Asset {asset_id!r} has no probed duration for source-bound validation"
-            )
+            reasons.append(f"Asset {asset_id!r} has no probed duration for source-bound validation")
         elif bounds.source_to > source_duration + _SOURCE_BOUND_TOLERANCE_SECONDS:
             reasons.append(
                 f"Clip {clip_id!r} source bound {bounds.source_to:.6f} exceeds "
@@ -729,8 +677,7 @@ def support(
             )
 
     reactive = any(
-        isinstance(clip, Mapping)
-        and clip.get("clipType") == audio_reactive_colour.EFFECT_ID
+        isinstance(clip, Mapping) and clip.get("clipType") == audio_reactive_colour.EFFECT_ID
         for clip in timeline_data.get("clips", [])
     )
     specialization = False
@@ -741,7 +688,7 @@ def support(
                 dict(assets),
                 assets_path,
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - specialization is optional support
             reasons.append(f"audio-reactive-colour specialization is unsupported: {exc}")
         else:
             specialization = spec is not None

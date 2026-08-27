@@ -10,7 +10,7 @@
 # address metadata live in timeline.created event payloads and the default
 # timeline id lives in projects.settings_json.
 id: timeline
-version: 1
+version: 2
 depends_on:
   - core >= 1
 migrations:
@@ -19,6 +19,10 @@ migrations:
     path: migrations/0001_initial.sql
     tables:
       - timelines
+  - version: 2
+    name: project-data
+    path: migrations/0002_project_data.sql
+    tables: []
 stream_types:
   - timeline.timeline
 event_kinds:

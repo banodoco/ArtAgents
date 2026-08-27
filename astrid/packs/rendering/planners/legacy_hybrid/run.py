@@ -27,14 +27,14 @@ from astrid.core.foundation.atomic_io import write_json_atomic
 from astrid.core.foundation.hash import sha256_file
 from astrid.core.foundation.paths import REPO_ROOT
 from astrid.core.rendering.contracts import (
+    SCHEMA_VERSION,
     FinalizerResolution,
     FrameWindow,
     PlannerResolution,
+    RendererResolution,
     RenderPlan,
     RenderRequest,
     RenderSegment,
-    RendererResolution,
-    SCHEMA_VERSION,
     SupportReport,
     compute_request_digest,
 )
@@ -51,7 +51,6 @@ from astrid.core.rendering.registry import (
     load_default_registries,
 )
 from astrid.core.rendering.transport import CommandTransport
-
 
 BACKEND_ID = "rendering.legacy_hybrid"
 BACKEND_VERSION = "1.0.0"
@@ -130,20 +129,12 @@ def _timeline_duration(timeline: Mapping[str, Any]) -> Fraction:
     clips = timeline.get("clips", [])
     if not isinstance(clips, list):
         raise TypeError("timeline clips must be an array")
-    ends = [
-        _clip_timeline_end(clip)
-        for clip in clips
-        if isinstance(clip, Mapping)
-    ]
+    ends = [_clip_timeline_end(clip) for clip in clips if isinstance(clip, Mapping)]
     return max(ends, default=Fraction(0))
 
 
-def _base_visual_track(
-    timeline: Mapping[str, Any], tracks: Mapping[Any, Mapping[str, Any]]
-) -> Any:
-    visual_ids = {
-        track_id for track_id, track in tracks.items() if track.get("kind") == "visual"
-    }
+def _base_visual_track(timeline: Mapping[str, Any], tracks: Mapping[Any, Mapping[str, Any]]) -> Any:
+    visual_ids = {track_id for track_id, track in tracks.items() if track.get("kind") == "visual"}
     coverage: dict[Any, Fraction] = {}
     for clip in timeline.get("clips", []):
         if (
@@ -170,11 +161,7 @@ def _complex_frame_windows(
     raw_clips = timeline.get("clips", [])
     if not isinstance(raw_tracks, list) or not isinstance(raw_clips, list):
         raise TypeError("timeline tracks and clips must be arrays")
-    tracks = {
-        track.get("id"): track
-        for track in raw_tracks
-        if isinstance(track, Mapping)
-    }
+    tracks = {track.get("id"): track for track in raw_tracks if isinstance(track, Mapping)}
     base_visual_track = _base_visual_track(timeline, tracks)
     windows: list[tuple[int, int]] = []
     clips = [clip for clip in raw_clips if isinstance(clip, Mapping)]
@@ -188,10 +175,7 @@ def _complex_frame_windows(
             complex_media = (
                 bool(clip.get("effects"))
                 or bool(clip.get("transition"))
-                or (
-                    track.get("kind") == "visual"
-                    and clip.get("track") != base_visual_track
-                )
+                or (track.get("kind") == "visual" and clip.get("track") != base_visual_track)
                 or (
                     isinstance(clip.get("opacity"), (int, float))
                     and not isinstance(clip.get("opacity"), bool)
@@ -220,17 +204,13 @@ def _complex_frame_windows(
                 transition_seconds = Fraction(8, 1) / fps
                 if isinstance(transition, Mapping):
                     if isinstance(transition.get("duration"), (int, float)):
-                        transition_seconds = _number(
-                            transition["duration"], "transition.duration"
-                        )
+                        transition_seconds = _number(transition["duration"], "transition.duration")
                     elif isinstance(transition.get("durationFrames"), (int, float)):
-                        transition_seconds = _number(
-                            transition["durationFrames"], "transition.durationFrames"
-                        ) / fps
+                        transition_seconds = (
+                            _number(transition["durationFrames"], "transition.durationFrames") / fps
+                        )
                 clip_end = _clip_timeline_end(clip)
-                next_start = _number(
-                    next_same_track.get("at", float(clip_end)), "clip.at"
-                )
+                next_start = _number(next_same_track.get("at", float(clip_end)), "clip.at")
                 start = max(
                     Fraction(0),
                     min(clip_end - transition_seconds, next_start) - handle_seconds,
@@ -249,9 +229,7 @@ def _complex_frame_windows(
         start = max(Fraction(0), _number(clip.get("at", 0), "clip.at") - handle_seconds)
         end = min(duration, _clip_timeline_end(clip) + handle_seconds)
         if end > start:
-            windows.append(
-                (max(0, _floor(start * fps)), min(total_frames, _ceil(end * fps)))
-            )
+            windows.append((max(0, _floor(start * fps)), min(total_frames, _ceil(end * fps))))
 
     windows = [(start, end) for start, end in windows if end > start]
     windows.sort()
@@ -329,9 +307,7 @@ def _structural_reasons(timeline: Mapping[str, Any]) -> list[str]:
     clips = timeline.get("clips", [])
     if not isinstance(tracks, list) or not isinstance(clips, list):
         return ["timeline tracks and clips must be arrays"]
-    track_by_id = {
-        track.get("id"): track for track in tracks if isinstance(track, Mapping)
-    }
+    track_by_id = {track.get("id"): track for track in tracks if isinstance(track, Mapping)}
     audio_ranges: list[tuple[Fraction, Fraction, Any]] = []
     for clip in clips:
         if not isinstance(clip, Mapping):
@@ -455,9 +431,7 @@ def support(request: RenderRequest, *, workspace: Path) -> SupportReport:
             if request.window.fps_rational != profile.fps_rational:
                 reasons.append("request window FPS does not match the canonical render profile")
             else:
-                total_frames = _ceil(
-                    _timeline_duration(timeline) * Fraction(*profile.fps_rational)
-                )
+                total_frames = _ceil(_timeline_duration(timeline) * Fraction(*profile.fps_rational))
                 if request.window.end_frame > total_frames:
                     reasons.append("request window extends beyond the timeline")
     except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
@@ -480,9 +454,7 @@ def support(request: RenderRequest, *, workspace: Path) -> SupportReport:
     )
 
 
-def _window_timeline(
-    timeline: Mapping[str, Any], window: FrameWindow
-) -> dict[str, Any]:
+def _window_timeline(timeline: Mapping[str, Any], window: FrameWindow) -> dict[str, Any]:
     fps = Fraction(*window.fps_rational)
     start = Fraction(window.start_frame, 1) / fps
     end = Fraction(window.end_frame, 1) / fps
@@ -629,9 +601,12 @@ class _CommandSupportResolver:
             write_json_atomic(path, timeline)
             projected = replace(projected, timeline_path=str(path), window=None)
         if "support" not in candidate.manifest.operations:
-            supports = candidate.manifest.capabilities.get(
-                "supports_windows" if projected.window is not None else "supports_full_timeline"
-            ) is True
+            supports = (
+                candidate.manifest.capabilities.get(
+                    "supports_windows" if projected.window is not None else "supports_full_timeline"
+                )
+                is True
+            )
             return SupportReport(
                 schema_version=SCHEMA_VERSION,
                 supported=supports,
@@ -695,9 +670,7 @@ def plan(
     finalizer_registry: FinalizerRegistry | None
     if registries is None and support_resolver is None:
         raw_extra_roots = config.get("extra_pack_roots", ())
-        if isinstance(raw_extra_roots, (str, bytes)) or not isinstance(
-            raw_extra_roots, Sequence
-        ):
+        if isinstance(raw_extra_roots, (str, bytes)) or not isinstance(raw_extra_roots, Sequence):
             raise TypeError("extra_pack_roots must be an array of paths")
         extra_roots = tuple(str(item) for item in raw_extra_roots)
         renderer_registry, _planners, finalizer_registry = load_default_registries(
@@ -752,7 +725,7 @@ def plan(
                     segment_request,
                     segment_timeline,
                 )
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - renderer candidates are independently attempted
                 attempts.append(f"{renderer_id}: {exc}")
                 continue
             # The support resolver already resolved the requested id through
@@ -763,20 +736,16 @@ def plan(
             if renderer_registry is not None:
                 try:
                     resolved_id = renderer_registry.get(renderer_id).id
-                except Exception:
+                except Exception:  # noqa: BLE001 - retain raw id when registry lookup fails
                     resolved_id = renderer_id
             if candidate_report.backend != resolved_id:
-                attempts.append(
-                    f"{renderer_id}: support report named {candidate_report.backend}"
-                )
+                attempts.append(f"{renderer_id}: support report named {candidate_report.backend}")
                 continue
             if candidate_report.supported:
                 selected_id = renderer_id
                 selected_report = candidate_report
                 break
-            attempts.append(
-                f"{renderer_id}: " + "; ".join(candidate_report.reasons)
-            )
+            attempts.append(f"{renderer_id}: " + "; ".join(candidate_report.reasons))
         if selected_id is None or selected_report is None:
             raise_unsupported_error(
                 backend=BACKEND_ID,
@@ -802,9 +771,7 @@ def plan(
                 },
             )
         )
-        reasons[str(index)] = (
-            f"{kind} legacy window assigned to {selected_id} by supported report"
-        )
+        reasons[str(index)] = f"{kind} legacy window assigned to {selected_id} by supported report"
 
     return RenderPlan(
         schema_version=SCHEMA_VERSION,

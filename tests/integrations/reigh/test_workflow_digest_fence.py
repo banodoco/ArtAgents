@@ -25,7 +25,6 @@ from astrid.core.integrations.reigh.capabilities import (
     CapabilityUnavailable,
     verify_registry_workflows,
 )
-
 from tests.integrations.reigh.test_task_routes import (
     TS,
     _create_project,
@@ -33,7 +32,6 @@ from tests.integrations.reigh.test_task_routes import (
     _post,
     task_server,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -69,11 +67,8 @@ def test_vibecomfy_entries_pin_vendored_bytes_matching_disk(entry) -> None:
         assert entry.template is None
         pytest.skip("non-vibecomfy binding carries no vendored workflow")
     if entry.capability_id == "local.workflow.run":
-        # The generic declared-custom-workflow row has no template of its
-        # own: declared local.<slug> rows pin their own bytes at admission
-        # (doc 27 §3.3).
         assert entry.template is None
-        pytest.skip("generic local row resolves declared workflows")
+        pytest.skip("declared local workflows pin their own bytes")
     assert entry.template is not None, f"{entry.capability_id} must pin a workflow"
     rel_path, expected = entry.template
     raw = (Path(caps.__file__).resolve().parent / rel_path).read_bytes()
@@ -192,6 +187,7 @@ def test_admission_snapshots_verified_workflow_into_spec_provenance(
         spec = json.loads(row[0])
         snapshot = spec["workflow"]
         entry = REGISTRY["reigh.image_upscale"]
+        assert spec["definition_version"] == entry.definition_version
         assert snapshot["path"] == entry.template[0]
         assert snapshot["sha256"] == entry.template[1]
         raw = (

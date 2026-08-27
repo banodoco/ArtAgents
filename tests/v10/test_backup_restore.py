@@ -217,6 +217,74 @@ def test_restore_rejects_corrupt_backup_without_mutating_live(tmp_path: Path) ->
     assert live_db.read_bytes() == before
 
 
+@pytest.mark.parametrize("allow_overwrite", [False, True])
+def test_restore_rejects_malformed_backup_metadata_without_mutating_live(
+    tmp_path: Path, allow_overwrite: bool
+) -> None:
+    _seed_project(tmp_path)
+    dest = tmp_path / "backup"
+    create_backup(projects_root=tmp_path, dest_path=dest)
+    (dest / "backup.json").write_text("{ not json", encoding="utf-8")
+
+    live_db = tmp_path / ".astrid" / "astrid.sqlite3"
+    live_media = tmp_path / ".astrid" / "media"
+    before_db = live_db.read_bytes()
+    before_media = {
+        path.relative_to(live_media): path.read_bytes()
+        for path in live_media.rglob("*")
+        if path.is_file()
+    }
+
+    with pytest.raises(RestoreValidationError, match="invalid backup metadata"):
+        restore_backup(
+            dest,
+            projects_root=tmp_path,
+            allow_overwrite=allow_overwrite,
+        )
+
+    assert live_db.read_bytes() == before_db
+    assert {
+        path.relative_to(live_media): path.read_bytes()
+        for path in live_media.rglob("*")
+        if path.is_file()
+    } == before_media
+
+
+@pytest.mark.parametrize("allow_overwrite", [False, True])
+def test_restore_rejects_future_backup_metadata_without_mutating_live(
+    tmp_path: Path, allow_overwrite: bool
+) -> None:
+    _seed_project(tmp_path)
+    dest = tmp_path / "backup"
+    create_backup(projects_root=tmp_path, dest_path=dest)
+    (dest / "backup.json").write_text('{"version": 999}\n', encoding="utf-8")
+
+    live_db = tmp_path / ".astrid" / "astrid.sqlite3"
+    live_media = tmp_path / ".astrid" / "media"
+    before_db = live_db.read_bytes()
+    before_media = {
+        path.relative_to(live_media): path.read_bytes()
+        for path in live_media.rglob("*")
+        if path.is_file()
+    }
+
+    with pytest.raises(
+        RestoreValidationError, match="unsupported backup metadata version"
+    ):
+        restore_backup(
+            dest,
+            projects_root=tmp_path,
+            allow_overwrite=allow_overwrite,
+        )
+
+    assert live_db.read_bytes() == before_db
+    assert {
+        path.relative_to(live_media): path.read_bytes()
+        for path in live_media.rglob("*")
+        if path.is_file()
+    } == before_media
+
+
 def test_restore_rejects_foreign_key_violation_without_mutating_live(
     tmp_path: Path,
 ) -> None:

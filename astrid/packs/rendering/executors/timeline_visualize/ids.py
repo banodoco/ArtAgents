@@ -14,16 +14,13 @@ from types import MappingProxyType
 from typing import Final, Mapping, TypeAlias
 from uuid import UUID
 
-
 SemanticIdentity: TypeAlias = tuple[str, str, str]
 
 ORDINAL_PATTERN: Final[str] = r"(?:0[1-9]|[1-9][0-9]+)"
 OBJECT_KIND_CODES: Final[tuple[str, ...]] = ("SH", "RG", "CL", "AS", "TS", "SP")
 STABLE_KIND_CODES: Final[tuple[str, ...]] = ("TL", *OBJECT_KIND_CODES)
 
-STABLE_ID_PATTERN: Final[str] = (
-    rf"^(?:{'|'.join(STABLE_KIND_CODES)}){ORDINAL_PATTERN}$"
-)
+STABLE_ID_PATTERN: Final[str] = rf"^(?:{'|'.join(STABLE_KIND_CODES)}){ORDINAL_PATTERN}$"
 QUALIFIED_REF_PATTERN: Final[str] = (
     rf"^TL{ORDINAL_PATTERN}(?:\.(?:{'|'.join(OBJECT_KIND_CODES)})"
     rf"{ORDINAL_PATTERN})?$"
@@ -190,9 +187,7 @@ def format_qualified_ref(
         return str(parse_qualified_ref(timeline_id))
 
     if object_ordinal is None:
-        if not _STABLE_ID_RE.fullmatch(object_kind_or_id) or object_kind_or_id.startswith(
-            "TL"
-        ):
+        if not _STABLE_ID_RE.fullmatch(object_kind_or_id) or object_kind_or_id.startswith("TL"):
             raise ValueError("object id must be a canonical non-TL stable id")
         object_id = object_kind_or_id
     else:
@@ -274,9 +269,7 @@ class RootIdMap:
             )
         for known_uuid, known_timeline_id in self._timeline_ids.items():
             if known_uuid != timeline_uuid and known_timeline_id == parsed.timeline_id:
-                raise ValueError(
-                    f"timeline display id {parsed.timeline_id!r} is already allocated"
-                )
+                raise ValueError(f"timeline display id {parsed.timeline_id!r} is already allocated")
 
         self._entries[normalized] = display_id
         self._display_to_identity[display_id] = normalized

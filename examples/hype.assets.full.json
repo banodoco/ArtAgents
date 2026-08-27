@@ -1,6 +1,7 @@
 {
   "assets": {
     "main": {
+      "media_id": "01m0zarrqkprrx8fyr8ez8dmt0",
       "file": "main.mp4",
       "url": "https://example.com/assets/main.mp4",
       "etag": "\"main-etag\"",

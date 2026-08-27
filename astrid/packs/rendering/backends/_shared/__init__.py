@@ -7,7 +7,8 @@ backend module itself.
 
 Deliberately NOT included here (backend-specific, see the C0 plan's LEAVE
 table): ``_execute_remotion`` (owns the Remotion render lock and the
-``npx remotion render`` invocation), settings parsers, project validation,
+trusted Node + project-local Remotion CLI invocation), settings parsers,
+project validation,
 and the ffmpeg backend's probe-form ``_duration_frames``.
 """
 
@@ -47,7 +48,9 @@ def _serialize_timeline(
     *,
     default_theme: str = "banodoco-default",
 ) -> dict[str, Any]:
-    return timeline.Timeline.load(timeline_path).for_render(default_theme=default_theme).to_json_data()
+    return (
+        timeline.Timeline.load(timeline_path).for_render(default_theme=default_theme).to_json_data()
+    )
 
 
 def _resolve_theme_path(theme_path: Path) -> Path:
@@ -153,6 +156,7 @@ def _render_provenance_payload(
     active_theme: dict[str, Any] | None,
     registry_state: dict[str, Any],
     stage_summary: dict[str, Any],
+    runtime: Mapping[str, Any] | None = None,
     segments: list[dict[str, float | str]] | None = None,
     segment_provenance: list[dict[str, Any]] | None = None,
     active_pack_order: list[dict[str, Any]] | None = None,
@@ -222,6 +226,8 @@ def _render_provenance_payload(
         ),
         "staged_asset_root": stage_summary.get("root"),
     }
+    if runtime is not None:
+        payload["runtime"] = dict(runtime)
     if segments is not None:
         payload["segments"] = segments
     if segment_provenance is not None:
@@ -234,9 +240,7 @@ def _canonical_profile(
     assets_data: Mapping[str, Any],
     theme_path: Path | None,
 ) -> RenderProfile:
-    fallback_theme = theme_path or (
-        WORKSPACE_ROOT / "themes" / "banodoco-default" / "theme.json"
-    )
+    fallback_theme = theme_path or (WORKSPACE_ROOT / "themes" / "banodoco-default" / "theme.json")
     active_theme = _resolved_theme_for_render(timeline_path, fallback_theme)
     return resolve_render_profile(
         timeline_path,

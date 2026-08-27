@@ -21,7 +21,7 @@ from json import dumps as _json_dumps
 from json import loads as _json_loads
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any, Mapping, Sequence
+from typing import Any, Sequence
 
 from astrid.core import timeline
 from astrid.core.audit import AuditContext
@@ -34,7 +34,6 @@ from astrid.packs.rendering.backends.ffmpeg import run as ffmpeg_backend
 from astrid.packs.rendering.backends.remotion import run as remotion_backend
 from astrid.packs.rendering.finalizers.ffmpeg import run as ffmpeg_finalizer
 from astrid.packs.rendering.planners.legacy_hybrid.run import (
-    _complex_clip_windows,
     _hybrid_segments,
 )
 
@@ -105,15 +104,15 @@ def _timeline_duration_seconds(timeline_data: dict) -> float:
         explicit = metadata.get("expected_duration_seconds")
     if isinstance(explicit, (int, float)):
         return float(explicit)
-    return max((_clip_timeline_end_seconds(clip) for clip in timeline_data.get("clips", [])), default=0.0)
+    return max(
+        (_clip_timeline_end_seconds(clip) for clip in timeline_data.get("clips", [])), default=0.0
+    )
 
 
 def _round_frame_time(seconds: float, fps: int | Fraction, *, mode: str) -> float:
     rate = fps if isinstance(fps, Fraction) else Fraction(fps, 1)
     instant = (
-        seconds
-        if isinstance(seconds, Fraction)
-        else Fraction(seconds).limit_denominator(1_000_000)
+        seconds if isinstance(seconds, Fraction) else Fraction(seconds).limit_denominator(1_000_000)
     )
     frames = instant * rate
     if mode == "floor":
@@ -153,7 +152,9 @@ def _window_clip(clip: dict, start: float, end: float) -> dict | None:
     return out
 
 
-def _window_timeline_data(timeline_data: dict, start: float, end: float, *, media_only: bool) -> dict:
+def _window_timeline_data(
+    timeline_data: dict, start: float, end: float, *, media_only: bool
+) -> dict:
     clips: list[dict] = []
     for clip in timeline_data.get("clips", []):
         if media_only and clip.get("clipType") != "media":
@@ -175,9 +176,7 @@ def _window_timeline_data(timeline_data: dict, start: float, end: float, *, medi
     return out
 
 
-_validate_ffmpeg_media_timeline = (
-    ffmpeg_command.validate_ffmpeg_media_timeline
-)
+_validate_ffmpeg_media_timeline = ffmpeg_command.validate_ffmpeg_media_timeline
 
 
 def _render_ffmpeg_media_to_path(
@@ -204,9 +203,7 @@ def _render_ffmpeg_media(
         assets_path,
         out_path,
         previous_outputs=(
-            _PUBLICATION_PREVIOUS_OUTPUTS.get()
-            if _previous_outputs is None
-            else _previous_outputs
+            _PUBLICATION_PREVIOUS_OUTPUTS.get() if _previous_outputs is None else _previous_outputs
         ),
         _render_to_path=_render_ffmpeg_media_to_path,
     )
@@ -226,11 +223,7 @@ def _concat_segments(segment_paths: list[Path], out_path: Path) -> None:
     profile = _HYBRID_FINALIZER_PROFILE.get()
     audio = None
     if profile is not None:
-        audio = (
-            AudioOwnership.RENDERED
-            if profile.has_audio
-            else AudioOwnership.NONE
-        )
+        audio = AudioOwnership.RENDERED if profile.has_audio else AudioOwnership.NONE
     ffmpeg_finalizer.concat_segment_files(
         segment_paths,
         out_path,
@@ -239,7 +232,9 @@ def _concat_segments(segment_paths: list[Path], out_path: Path) -> None:
     )
 
 
-def _render_hybrid(timeline_path: Path, assets_path: Path, out_path: Path, **remotion_kwargs) -> Path:
+def _render_hybrid(
+    timeline_path: Path, assets_path: Path, out_path: Path, **remotion_kwargs
+) -> Path:
     if not timeline_path.exists():
         raise FileNotFoundError(f"Timeline missing: {timeline_path}")
     if not assets_path.exists():
@@ -276,7 +271,9 @@ def _render_hybrid(timeline_path: Path, assets_path: Path, out_path: Path, **rem
             segment_dir.mkdir(parents=True, exist_ok=True)
             segment_timeline_path = segment_dir / "timeline.json"
             segment_out_path = segment_dir / "segment.mp4"
-            segment_timeline = _window_timeline_data(timeline_data, start, end, media_only=(engine == "ffmpeg"))
+            segment_timeline = _window_timeline_data(
+                timeline_data, start, end, media_only=(engine == "ffmpeg")
+            )
             if canonical_profile.fps_rational[1] != 1:
                 # Both extracted legacy renderers accept an integer canvas
                 # rate.  Render the window at the nearest rate, then let the
@@ -292,7 +289,9 @@ def _render_hybrid(timeline_path: Path, assets_path: Path, out_path: Path, **rem
                 visual["canvas"] = canvas
                 overrides["visual"] = visual
                 segment_timeline["theme_overrides"] = overrides
-            segment_timeline_path.write_text(_json_dumps(segment_timeline, indent=2) + "\n", encoding="utf-8")
+            segment_timeline_path.write_text(
+                _json_dumps(segment_timeline, indent=2) + "\n", encoding="utf-8"
+            )
             if engine == "ffmpeg":
                 _render_ffmpeg_media(
                     segment_timeline_path,
@@ -345,8 +344,15 @@ def _render_hybrid(timeline_path: Path, assets_path: Path, out_path: Path, **rem
 
     audit = AuditContext.from_env()
     if audit is not None:
-        timeline_id = audit.register_asset(kind="timeline", path=timeline_path, label="Render timeline", stage="render_hybrid")
-        assets_id = audit.register_asset(kind="assets_registry", path=assets_path, label="Render asset registry", stage="render_hybrid")
+        timeline_id = audit.register_asset(
+            kind="timeline", path=timeline_path, label="Render timeline", stage="render_hybrid"
+        )
+        assets_id = audit.register_asset(
+            kind="assets_registry",
+            path=assets_path,
+            label="Render asset registry",
+            stage="render_hybrid",
+        )
         render_id = audit.register_asset(
             kind="render",
             path=out_path,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 from uuid import uuid4
@@ -19,12 +20,9 @@ from astrid.core.timeline.eventlog.types import (
 from astrid.core.timeline.events.schema import EVENT_SCHEMA_VERSION, TimelineActor
 
 _ACTOR = TimelineActor(type="human", id="user-1", display="User One")
-_SQL_CONTRACT_MIGRATION = (
-    Path(__file__).resolve().parents[3]
-    / "reigh-app"
-    / "supabase"
-    / "migrations"
-    / "20260612100000_create_timeline_events_contract.sql"
+_REIGH_CHECKOUT_ENV = "ASTRID_REIGH_CHECKOUT"
+_SQL_CONTRACT_RELATIVE_PATH = Path(
+    "supabase/migrations/20260612100000_create_timeline_events_contract.sql"
 )
 
 
@@ -156,12 +154,21 @@ def test_live_append_transport_appends_config_and_registry_batch(monkeypatch) ->
 
 
 def test_event_schema_version_matches_sql_contract_seed_value() -> None:
-    if not _SQL_CONTRACT_MIGRATION.is_file():
+    raw_checkout = os.environ.get(_REIGH_CHECKOUT_ENV, "").strip()
+    if not raw_checkout:
         pytest.skip(
-            "external reigh-app SQL contract is not mounted; set up the sibling "
-            "reigh-app checkout to enable this integration assertion"
+            "cross-repo SQL contract check requires an explicit "
+            f"{_REIGH_CHECKOUT_ENV} release checkout"
         )
-    migration_sql = _SQL_CONTRACT_MIGRATION.read_text(encoding="utf-8")
+    reigh_checkout = Path(raw_checkout).expanduser()
+    if not reigh_checkout.is_absolute():
+        pytest.fail(f"{_REIGH_CHECKOUT_ENV} must be an absolute checkout path")
+    reigh_checkout = reigh_checkout.resolve()
+    if not reigh_checkout.is_dir():
+        pytest.fail(f"{_REIGH_CHECKOUT_ENV} is not a directory: {reigh_checkout}")
+    migration = reigh_checkout / _SQL_CONTRACT_RELATIVE_PATH
+    assert migration.is_file(), f"required Reigh migration missing: {migration}"
+    migration_sql = migration.read_text(encoding="utf-8")
     match = re.search(
         r"insert into public\.timeline_event_contract \(id, current_schema_version\)\s+values \(1, (\d+)\)",
         migration_sql,

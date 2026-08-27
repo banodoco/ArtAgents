@@ -25,7 +25,6 @@ unintentional drift is caught before it breaks ledgering.
 from __future__ import annotations
 
 import json
-import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -271,7 +270,10 @@ def _setup_project_env(
     with_timeline: bool = True,
 ) -> tuple[Path, Path]:
     """Set up a temp project and return (projects_root, project_path)."""
-    projects_root = tmp_path / "projects"
+    # The repository-wide sandbox owns ``tmp_path / "projects"``. Keep this
+    # helper's explicitly controlled root nested so setup ownership cannot
+    # collide with the autouse safety fixture.
+    projects_root = tmp_path / "ledger-projects"
     projects_root.mkdir()
     monkeypatch.setenv(project_paths.PROJECTS_ROOT_ENV, str(projects_root))
     create_project(project_slug)
@@ -303,7 +305,7 @@ def _project_run_records(projects_root: Path) -> list[dict[str, Any]]:
 
 
 def _kernel_db_path(projects_root: Path) -> Path:
-    return projects_root / "kernel.sqlite3"
+    return projects_root / ".astrid" / "astrid.sqlite3"
 
 
 def _kernel_counts(projects_root: Path) -> tuple[int, int, int, int]:
@@ -373,10 +375,15 @@ class TestExecutorCLIProject:
 
         projects_root, _ = _setup_project_env(tmp_path, monkeypatch, "demo")
         registry = ExecutorRegistry([_make_minimal_executor("test.noop")])
-        staging = tmp_path / "kernel-staging"
 
         result = run_executor(
-            ExecutorRunRequest("test.noop", out="", project="demo", run_root=staging), registry
+            ExecutorRunRequest(
+                "test.noop",
+                out=tmp_path / "kernel-staging",
+                project="demo",
+                project_was_auto_resolved=True,
+            ),
+            registry,
         )
         assert result.returncode == 0
 
@@ -389,17 +396,26 @@ class TestExecutorCLIProject:
         )
     def test_failed_validation_persists_ledger(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         from astrid.core.execution.executor.registry import ExecutorRegistry
-        from astrid.core.execution.executor.runner import ExecutorRunRequest, ExecutorRunnerError, run_executor
+        from astrid.core.execution.executor.runner import (
+            ExecutorRunnerError,
+            ExecutorRunRequest,
+            run_executor,
+        )
 
         projects_root, _ = _setup_project_env(tmp_path, monkeypatch, "demo")
-        staging = tmp_path / "kernel-staging"
 
         requires_exec = _make_minimal_requires_executor("test.requires")
         registry = ExecutorRegistry([requires_exec])
 
         with pytest.raises(ExecutorRunnerError, match="missing required input"):
             run_executor(
-                ExecutorRunRequest("test.requires", out="", project="demo", run_root=staging), registry
+                ExecutorRunRequest(
+                    "test.requires",
+                    out=tmp_path / "kernel-staging",
+                    project="demo",
+                    project_was_auto_resolved=True,
+                ),
+                registry,
             )
 
         records = _project_run_records(projects_root)
@@ -432,7 +448,10 @@ class TestOrchestratorCLIProject:
 
     def test_creates_exactly_one_run_json(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         from astrid.core.execution.orchestrator.registry import OrchestratorRegistry
-        from astrid.core.execution.orchestrator.runner import OrchestratorRunRequest, run_orchestrator
+        from astrid.core.execution.orchestrator.runner import (
+            OrchestratorRunRequest,
+            run_orchestrator,
+        )
         from astrid.core.project.run import ProjectRunError
 
         projects_root, _ = _setup_project_env(tmp_path, monkeypatch, "demo")
@@ -457,7 +476,10 @@ class TestOrchestratorCLIOut:
 
     def test_out_without_project_fails_closed(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         from astrid.core.execution.orchestrator.registry import OrchestratorRegistry
-        from astrid.core.execution.orchestrator.runner import OrchestratorRunRequest, run_orchestrator
+        from astrid.core.execution.orchestrator.runner import (
+            OrchestratorRunRequest,
+            run_orchestrator,
+        )
 
         projects_root, _ = _setup_project_env(tmp_path, monkeypatch, "default")
         monkeypatch.delenv("ASTRID_SESSION_ID", raising=False)
@@ -481,11 +503,13 @@ class TestSDKImageProject:
 
         projects_root, _ = _setup_project_env(tmp_path, monkeypatch, "demo")
         registry = ExecutorRegistry([_make_minimal_executor("generation.generate_image")])
-        staging = tmp_path / "kernel-staging"
 
         result = run_executor(
             ExecutorRunRequest(
-                "generation.generate_image", out="", project="demo", run_root=staging
+                "generation.generate_image",
+                out=tmp_path / "kernel-staging",
+                project="demo",
+                project_was_auto_resolved=True,
             ),
             registry,
         )
@@ -604,17 +628,17 @@ def _admit_and_complete_one(
 ) -> tuple[str, str]:
     """Create 1 task via TaskRepository and drive it to completed (kernel ledger)."""
     from astrid.core.events.service import EventAppendService
-    from astrid.core.events.registry import core_only_registry
     from astrid.core.ids import generate_lowercase_ulid
     from astrid.core.receipts import ReceiptService
     from astrid.core.repositories import ProjectRepository
     from astrid.core.repositories.tasks import TaskRepository, compute_spec_hash
     from astrid.core.store.uow import UnitOfWork
-    from astrid.core.store.writer import DatabaseWriter
+    from astrid.packs import build_standard_registry, open_standard_writer
 
-    registry = core_only_registry()
-    db_path = projects_root / "kernel.sqlite3"
-    writer = DatabaseWriter(db_path, registry)
+    registry = build_standard_registry()
+    db_path = _kernel_db_path(projects_root)
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    writer = open_standard_writer(db_path, registry=registry)
     try:
         events = EventAppendService(registry)
         receipts = ReceiptService()
@@ -662,24 +686,27 @@ def _admit_and_complete_one(
             pass
 def _drive_orchestrator_chain(projects_root: Path, project_slug: str) -> None:
     """Drive orchestrator hard-chain (4 tasks) to terminal via TaskRepository."""
-    from astrid.core.events.registry import core_only_registry
     from astrid.core.events.service import EventAppendService
     from astrid.core.receipts import ReceiptService
     from astrid.core.repositories.media import MediaRepository
+    from astrid.core.repositories.projects import ProjectRepository
     from astrid.core.repositories.tasks import TaskRepository
     from astrid.core.store.uow import UnitOfWork
-    from astrid.core.store.writer import DatabaseWriter
+    from astrid.packs import build_standard_registry, open_standard_writer
 
-    registry = core_only_registry()
-    db_path = projects_root / "kernel.sqlite3"
-    writer = DatabaseWriter(db_path, registry)
+    registry = build_standard_registry()
+    db_path = _kernel_db_path(projects_root)
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    writer = open_standard_writer(db_path, registry=registry)
     try:
         events = EventAppendService(registry)
         receipts = ReceiptService()
+        projects_repo = ProjectRepository(events=events, receipts=receipts)
         tasks_repo = TaskRepository(events=events, receipts=receipts)
         media_repo = MediaRepository(events=events, receipts=receipts, projects_root=projects_root)
+        project_id = projects_repo.resolve(writer, project_slug)
         for idx in range(8):
-            claim = UnitOfWork(writer).run(lambda u, _ck=f"drive-claim-{project_slug}-{idx}": tasks_repo.claim(u, project_id=project_slug, idempotency_key=_ck))
+            claim = UnitOfWork(writer).run(lambda u, _ck=f"drive-claim-{project_slug}-{idx}": tasks_repo.claim(u, project_id=project_id, idempotency_key=_ck))
             if claim is None:
                 break
             task_id = claim.task.id  # type: ignore[attr-defined]
@@ -687,9 +714,9 @@ def _drive_orchestrator_chain(projects_root: Path, project_slug: str) -> None:
             attempt_id = attempt.id  # type: ignore[attr-defined]
             lease_id = attempt.lease_id  # type: ignore[attr-defined]
             sv = int(attempt.status_version)  # type: ignore[attr-defined]
-            started = UnitOfWork(writer).run(lambda u, _tid=task_id, _aid=attempt_id, _lease=lease_id, _sv=sv, _ck=f"drive-start-{project_slug}-{idx}": tasks_repo.start(u, project_id=project_slug, task_id=_tid, attempt_id=_aid, lease_id=_lease, expected_status_version=_sv, idempotency_key=_ck))
+            started = UnitOfWork(writer).run(lambda u, _tid=task_id, _aid=attempt_id, _lease=lease_id, _sv=sv, _ck=f"drive-start-{project_slug}-{idx}": tasks_repo.start(u, project_id=project_id, task_id=_tid, attempt_id=_aid, lease_id=_lease, expected_status_version=_sv, idempotency_key=_ck))
             sv2 = int(started.status_version)  # type: ignore[attr-defined]
-            UnitOfWork(writer).run(lambda u, _tid=task_id, _aid=attempt_id, _lease=lease_id, _sv=sv2, _ck=f"drive-complete-{project_slug}-{idx}": tasks_repo.complete(u, project_id=project_slug, task_id=_tid, attempt_id=_aid, lease_id=_lease, expected_status_version=_sv, idempotency_key=_ck, outputs=[], result={"step": f"step-{idx}"}, media_repo=media_repo))
+            UnitOfWork(writer).run(lambda u, _tid=task_id, _aid=attempt_id, _lease=lease_id, _sv=sv2, _ck=f"drive-complete-{project_slug}-{idx}": tasks_repo.complete(u, project_id=project_id, task_id=_tid, attempt_id=_aid, lease_id=_lease, expected_status_version=_sv, idempotency_key=_ck, outputs=[], result={"step": f"step-{idx}"}, media_repo=media_repo))
     finally:
         try:
             writer.close()
@@ -742,7 +769,6 @@ class TestSingleLedgerHarness:
 
     def test_banodoco_worker_single_write_projection(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         from astrid.core.integrations.worker.banodoco_worker import _write_baseline_snapshot
-        import sqlite3
         projects_root = tmp_path / "banodoco-projects"
         projects_root.mkdir()
         monkeypatch.setenv(project_paths.PROJECTS_ROOT_ENV, str(projects_root))
@@ -768,4 +794,3 @@ class TestSingleLedgerHarness:
         # Kernel still has its run/task; zero authoritative FS ledger
         runs, tasks, events, receipts = _kernel_counts(projects_root)
         assert runs >= 1
-

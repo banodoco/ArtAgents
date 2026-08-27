@@ -166,9 +166,7 @@ def _lookup_display(identity_map: Any, display_id: str) -> tuple[str, str, str] 
     raise TypeError("identity_map must expose lookup_display or display_to_semantic")
 
 
-def _lookup_semantic(
-    identity_map: Any, kind: str, authored_id: str
-) -> str | None:
+def _lookup_semantic(identity_map: Any, kind: str, authored_id: str) -> str | None:
     method = getattr(identity_map, "lookup_semantic", None)
     if callable(method):
         return method(kind, authored_id)
@@ -211,7 +209,9 @@ def _ordered_object_refs(model: TimelineInspectionModel, identity_map: Any) -> l
 # ---------------------------------------------------------------------------
 
 
-def _snapshot_block(model: TimelineInspectionModel, snapshot: TimelineSnapshot) -> list[dict[str, Any]]:
+def _snapshot_block(
+    model: TimelineInspectionModel, snapshot: TimelineSnapshot
+) -> list[dict[str, Any]]:
     slug = model.slug if isinstance(model.slug, str) and model.slug else model.timeline_ulid.lower()
     return [
         {
@@ -671,9 +671,7 @@ def _clips(
     # active-stack set (timestamp/clip/asset/shot scopes).  Full timeline and
     # empty-emphasis scopes omit the field so unscoped emission stays stable.
     emphasized = (
-        set(scope.emphasized_clip_ids)
-        if scope is not None and scope.emphasized_clip_ids
-        else None
+        set(scope.emphasized_clip_ids) if scope is not None and scope.emphasized_clip_ids else None
     )
     result: list[dict[str, Any]] = []
     for clip in model.clips:
@@ -885,9 +883,7 @@ def _timeline_entry(
         "timeline_ref": _TIMELINE_REF,
         "durations": _durations(model),
         "tracks": _tracks(model, snapshot),
-        "clips": _clips(
-            model, identity_map, snapshot, scope, occurrences, attachment
-        ),
+        "clips": _clips(model, identity_map, snapshot, scope, occurrences, attachment),
         "assets": _assets(model, identity_map, scope),
     }
     if attachment is not None:
@@ -938,11 +934,7 @@ def emit_ground_truth(
         "project_slug": snapshot.project_slug,
         "scope": _scope_block(model, effective, scope),
         "objects": _objects(model, effective, scope),
-        "timelines": [
-            _timeline_entry(
-                model, effective, snapshot, scope, attachment, occurrences
-            )
-        ],
+        "timelines": [_timeline_entry(model, effective, snapshot, scope, attachment, occurrences)],
         # These three fields are the frozen-lineage substrate.  The ordinary
         # objects/timelines fields remain scope-filtered for consumers, while
         # descendants reconstruct the complete root map and normalized model
@@ -996,10 +988,7 @@ _METRIC_DEFINITIONS: tuple[dict[str, str], ...] = (
     {
         "id": "frame_quantized_visual_end_seconds",
         "name": "Frame-quantized visual end (seconds)",
-        "definition": (
-            "The frame-quantized visual end expressed in seconds: "
-            "visual_frames / fps."
-        ),
+        "definition": ("The frame-quantized visual end expressed in seconds: visual_frames / fps."),
         "formula": "frame_quantized_visual_end_frames / fps",
         "derivation": "duration.py: clip_end_frame / fps",
         "unit": "seconds",
@@ -1020,10 +1009,7 @@ _METRIC_DEFINITIONS: tuple[dict[str, str], ...] = (
     {
         "id": "all_track_composition_seconds",
         "name": "All-track composition extent (seconds)",
-        "definition": (
-            "The all-track composition extent in seconds: composition_frames / "
-            "fps."
-        ),
+        "definition": ("The all-track composition extent in seconds: composition_frames / fps."),
         "formula": "timeline_duration_frames(assembly, fps) / fps",
         "derivation": "duration.py: timeline_duration_seconds",
         "unit": "seconds",
@@ -1182,9 +1168,7 @@ def emit_metric_definitions(
 # ---------------------------------------------------------------------------
 
 
-def _clip_with_ref(
-    model: TimelineInspectionModel, identity_map: Any, ref: str
-) -> Any:
+def _clip_with_ref(model: TimelineInspectionModel, identity_map: Any, ref: str) -> Any:
     for clip in model.clips:
         if _lookup_semantic(identity_map, "clip", clip.clip_id) == ref:
             return clip
@@ -1240,9 +1224,7 @@ def _relations(
                 (
                     occurrence.segment_id
                     for occurrence in (occurrences or [])
-                    if transcript_segment_authored_id(
-                        transcript_hash, occurrence.segment_id
-                    )
+                    if transcript_segment_authored_id(transcript_hash, occurrence.segment_id)
                     == authored_id
                 ),
                 None,
@@ -1250,7 +1232,8 @@ def _relations(
             children = [
                 sp_ref
                 for occurrence in (occurrences or [])
-                if segment_id is not None and occurrence.segment_id == segment_id
+                if segment_id is not None
+                and occurrence.segment_id == segment_id
                 and (
                     sp_ref := _lookup_semantic(
                         identity_map,
@@ -1280,11 +1263,14 @@ def _relations(
                 None,
             )
             if matching is not None:
-                parent = _lookup_semantic(
-                    identity_map,
-                    "transcript_source_segment",
-                    transcript_segment_authored_id(transcript_hash, matching.segment_id),
-                ) or _TIMELINE_REF
+                parent = (
+                    _lookup_semantic(
+                        identity_map,
+                        "transcript_source_segment",
+                        transcript_segment_authored_id(transcript_hash, matching.segment_id),
+                    )
+                    or _TIMELINE_REF
+                )
                 # The reverse SP -> CL semantic relation is emitted as
                 # transcript-index.clip_ref, not as a hierarchy edge.
                 children = []
@@ -1424,7 +1410,9 @@ def _inspect_unavailable_reason(state: str) -> str:
             "the frozen project sources root)"
         ),
     }
-    return reasons.get(state, f"unavailable — asset integrity state {state!r} blocks original inspection")
+    return reasons.get(
+        state, f"unavailable — asset integrity state {state!r} blocks original inspection"
+    )
 
 
 def _inspect_original_action(
@@ -1534,12 +1522,8 @@ def emit_action_index(
             continue
         entries[ref] = {
             "canonical_ref": _canonical_ref(effective, ref),
-            "relations": _relations(
-                model, effective, ref, in_scope, attachment, occurrences
-            ),
-            "actions": _actions(
-                model, effective, snapshot, manifest, ref, attachment, occurrences
-            ),
+            "relations": _relations(model, effective, ref, in_scope, attachment, occurrences),
+            "actions": _actions(model, effective, snapshot, manifest, ref, attachment, occurrences),
         }
     return {
         "schema_version": SCHEMA_VERSION,
@@ -1667,9 +1651,7 @@ def emit_transcript_index(
                 "speaker_state": segment.speaker_state,
                 "speaker": segment.speaker,
                 "text": segment.text,
-                "word_timing": (
-                    "available" if segment.word_timing is not None else "unavailable"
-                ),
+                "word_timing": ("available" if segment.word_timing is not None else "unavailable"),
                 "words": (
                     [
                         {
@@ -1690,26 +1672,22 @@ def emit_transcript_index(
         assert attachment is not None and asset_ref is not None
         segment = segment_by_id.get(occurrence.segment_id)
         if segment is None:
-            raise ValueError(f"speech occurrence references unknown segment {occurrence.segment_id!r}")
+            raise ValueError(
+                f"speech occurrence references unknown segment {occurrence.segment_id!r}"
+            )
         source_authored_id = transcript_segment_authored_id(
             attachment.transcript_sha256, occurrence.segment_id
         )
         occurrence_authored_id = speech_occurrence_authored_id(
             attachment.transcript_sha256, occurrence.segment_id, occurrence.clip_id
         )
-        source_ref = _lookup_semantic(
-            identity_map, "transcript_source_segment", source_authored_id
-        )
-        occurrence_ref = _lookup_semantic(
-            identity_map, "speech_occurrence", occurrence_authored_id
-        )
+        source_ref = _lookup_semantic(identity_map, "transcript_source_segment", source_authored_id)
+        occurrence_ref = _lookup_semantic(identity_map, "speech_occurrence", occurrence_authored_id)
         clip_ref = _lookup_semantic(identity_map, "clip", occurrence.clip_id)
         if None in (source_ref, occurrence_ref, clip_ref):
             raise ValueError("speech occurrence TS/SP/CL identity is incomplete")
 
-        def mapping(
-            state: str, start: float | None, end: float | None
-        ) -> dict[str, Any]:
+        def mapping(state: str, start: float | None, end: float | None) -> dict[str, Any]:
             if start is None or end is None:
                 return {"state": "unavailable", "interval": None}
             return {
@@ -1861,8 +1839,7 @@ def emit_diagnostics(
                     "severity": "warning",
                     "code": "TRANSITION_IGNORED",
                     "message": _sanitize_diagnostic_message(
-                        f"transition {transition_id!r} on clip {clip.clip_id!r} "
-                        "was not scheduled"
+                        f"transition {transition_id!r} on clip {clip.clip_id!r} was not scheduled"
                     ),
                     "object_ref": clip_ref,
                 }
@@ -2074,9 +2051,7 @@ def emit_structure_md(
             ref = _lookup_semantic(
                 identity_map,
                 "transcript_source_segment",
-                transcript_segment_authored_id(
-                    attachment.transcript_sha256, segment.segment_id
-                ),
+                transcript_segment_authored_id(attachment.transcript_sha256, segment.segment_id),
             )
             lines.append(
                 f"- SPEECH SOURCE {ref}: [{segment.source_start:g},{segment.source_end:g}) "
@@ -2114,9 +2089,7 @@ def emit_structure_md(
     for ref in _ordered_object_refs(model, identity_map):
         parsed = parse_qualified_ref(ref)
         if parsed.kind == "CL":
-            suggested.append(
-                f"Focus clip {ref} (action-index.json: {ref} → focus_context)"
-            )
+            suggested.append(f"Focus clip {ref} (action-index.json: {ref} → focus_context)")
         elif parsed.kind == "AS":
             integrity = model.media_integrity[_lookup_display(identity_map, ref)[2]]
             if integrity.state == "verified_original":

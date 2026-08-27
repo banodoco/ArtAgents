@@ -1,6 +1,7 @@
 # Astrid Bridge Contract v10 (repository-backed)
 
-**Contract status:** frozen for milestone m1 (Sprint 1).
+**Contract status:** frozen v1 wire contract. The historical unprefixed paths
+remain compatibility aliases; `/v1/...` is canonical for new clients.
 
 **Normative sources:** `unified-data-model-plan-v10-20260813.md` §4.2 (SDK and bridge) and §2.3 (timeline CAS); the checked-in server behavior in `astrid/core/integrations/reigh/local_bridge_server.py`; the m1 plan `m1-event-core-and-20260814-2340`.
 
@@ -21,6 +22,13 @@
 | `/projects/:slug/timelines/:ref` | `GET` | load one timeline (config + registry + version) |
 | `/projects/:slug/timelines/:ref/save` | `POST` | whole-document CAS save |
 | `/projects/:slug/timelines/:ref/assets/:key` | `GET`, `HEAD` | asset byte serving with Range support |
+| `/v1/health` | `GET` | liveness + resolved projects root |
+| `/v1/projects` | `GET` | sorted project list |
+| `/v1/projects/:slug/timelines` | `GET` | timeline discovery list for one project |
+| `/v1/projects/:slug/timelines/:ref` | `GET` | load one timeline (config + registry + version) |
+| `/v1/projects/:slug/timelines/:ref/save` | `POST` | whole-document CAS save |
+| `/v1/projects/:slug/timelines/:ref/assets/:key` | `GET`, `HEAD` | asset byte serving with Range support |
+| `/v1/projects/:slug/runaway-transitions` | `GET` | snapshot-consistent typed transition pages |
 | any path | `OPTIONS` | CORS preflight (204) |
 
 `:slug` is a validated project slug. `:ref` is a timeline address: canonical UUID, lowercase 26-character ULID, or immutable slug (see §8). `:key` is an asset key resolved from the persisted timeline asset registry.
@@ -42,6 +50,12 @@ under `registry.assets`; that key is not the entry's `media_id`.
 
 All JSON responses use `Content-Type: application/json`, `Cache-Control: no-store`, and UTF-8 bodies.
 
+Every data response carries `X-Astrid-Bridge-Version: v1`,
+`X-Content-Type-Options: nosniff`, and `Referrer-Policy: no-referrer`. This
+includes JSON responses and asset `200`, `206`, `304`, `400`, and `416`
+responses, so clients can verify the protocol version before consuming either
+structured data or media bytes. CORS preflight remains version-neutral.
+
 ### 2.2 Error envelope
 
 Every error response is a JSON object with exactly:
@@ -59,23 +73,54 @@ Internal receipt fields — `txn_id`, `request_hash`, `idempotency_key`, `projec
 
 ### 2.3 CORS
 
-Only for an allowed `Origin` (exact match):
+Only for an allowed `Origin` (exact match). A supplied non-matching Origin is
+rejected with `403 forbidden`; an absent Origin is accepted for non-browser
+local clients:
 
 - Allowed origins: `http://localhost:2222`, `http://localhost:3000`, `http://localhost:5173`, `http://127.0.0.1:2222`, `http://127.0.0.1:3000`, `http://127.0.0.1:5173`.
 - Response headers when the origin matches:
   - `Access-Control-Allow-Origin: <origin>`
   - `Access-Control-Allow-Methods: GET, HEAD, POST, OPTIONS`
-  - `Access-Control-Allow-Headers: Content-Type, Range, If-None-Match, If-Modified-Since`
-  - `Access-Control-Expose-Headers: Accept-Ranges, Content-Length, Content-Range, Content-Type, ETag, Last-Modified`
+  - `Access-Control-Allow-Headers: Authorization, Content-Type, Range, If-None-Match, If-Modified-Since, X-Astrid-Bridge-Version`
+  - `Access-Control-Expose-Headers: Accept-Ranges, Content-Length, Content-Range, Content-Type, ETag, Last-Modified, X-Astrid-Bridge-Version`
   - `Access-Control-Max-Age: 86400`
   - `Vary: Origin`
-- Non-matching or absent `Origin`: no CORS headers are emitted.
+- Absent `Origin`: no CORS headers are emitted. Non-matching origins are 403.
+
+### 2.5 Local security and limits
+
+- The server refuses non-loopback bind hosts and rejects non-loopback `Host`
+  headers (DNS-rebinding defense).
+- `astrid serve --release-mode` (alias `--require-auth`) refuses to bind unless
+  `ASTRID_BRIDGE_TOKEN` is non-empty, then requires both
+  `Authorization: Bearer <token>` on data requests. CORS preflight remains
+  tokenless (browsers do not attach bearer values to OPTIONS) but still passes
+  the strict Host and Origin gates. Release requests must also send
+  `X-Astrid-Bridge-Version: v1`; a missing or mismatched version is
+  `426 protocol_version_mismatch`. Omitting release mode retains the explicit
+  development/test compatibility behavior in which a configured token is
+  enforced but an absent token does not silently create a release server.
+- When bearer auth is configured, serve boot rotates a private
+  `.astrid/bridge-boot-secret` integrity record. The managed directory is
+  `0700`, the record is `0600`, and it is atomically replaced and fsynced on
+  every boot. The record never appears in HTTP responses or replaces the
+  bearer token; if it is missing, tampered with, or has unsafe permissions,
+  authenticated requests fail closed with `500 internal`.
+- Request targets are capped at 8 KiB, JSON request bodies at 8 MiB, request
+  socket reads at 15 seconds, and Runaway pages at 1,000 rows.
+- Request admission is bounded to eight concurrent handlers and a process-local
+  token bucket (burst 32, refill 16 requests/second). Exhaustion is
+  `429 rate_limited` with `Retry-After`; disconnect and shutdown cancellation
+  stops chunked asset streaming and always releases the admission permit.
+- JSON and asset data responses carry `X-Astrid-Bridge-Version: v1`,
+  `X-Content-Type-Options: nosniff`, and `Referrer-Policy: no-referrer`.
 
 ### 2.4 Cache headers
 
 - JSON routes: `Cache-Control: no-store` on every response (including errors).
 - Asset routes: `Cache-Control: private, no-cache`.
-- `304` responses carry `ETag`, `Last-Modified`, and `Cache-Control: private, no-cache`.
+- `304` responses carry `X-Astrid-Bridge-Version: v1`, `ETag`, `Last-Modified`,
+  and `Cache-Control: private, no-cache`.
 
 ## 3. `GET /health`
 
@@ -216,6 +261,34 @@ Every asset response (200/206/304/416) emits CORS headers when allowed, plus:
 ## 10. `OPTIONS`
 
 - `204` with CORS headers (§2.3) and `Content-Length: 0`; no body.
+
+## 10.1 Typed Runaway pages
+
+`GET /v1/projects/:slug/runaway-transitions` accepts `run_id` (optional),
+`limit` (1–1000, default 1000), and an opaque `cursor`. Unknown or duplicate
+query fields are rejected. The response is:
+
+```json
+{
+  "api_version": "v1",
+  "project": "runaway-piano-colour-demo",
+  "count": 250,
+  "total_count": 566,
+  "snapshot": "runaway-v1:<project-id>:<snapshot>",
+  "page": {"limit": 250, "next_cursor": "<opaque-or-null>"},
+  "timing_summary": {"run_id": "...", "data": {"subtype": "runaway_timing_migrated"}},
+  "transitions": []
+}
+```
+
+The first request pins the maximum visible insert row. Process-local HMAC
+signatures bind each cursor to that snapshot, the resolved project, and the
+run filter, so concurrent appends cannot appear halfway through traversal and
+a cursor cannot be forged or replayed against another project. A bridge
+restart intentionally invalidates outstanding cursors. Bad/tampered cursors
+are `400 invalid_cursor`; invalid limits are `400 invalid_limit`. Runaway
+provenance uses the kernel-owned generic evidence kind `measurement` with
+`data.subtype=runaway_timing_migrated`.
 
 ## 11. Reserved route — `POST /projects/:slug/timelines/:ref/copy` (planned m6, NOT implemented in m4)
 

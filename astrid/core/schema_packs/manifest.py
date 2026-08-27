@@ -53,9 +53,11 @@ rejected before any registry mutation can occur.
 MIGRATION_DESCRIPTOR_FIELDS: tuple[str, ...] = ("version", "name", "path", "tables")
 """The exact keys of one ``migrations[]`` descriptor.
 
-``tables`` declares the tables the migration owns so catalog tests and the
-migration runner derive ownership without parsing SQL (decision artifact
-section 4).
+``tables`` declares tables first introduced (and therefore owned) by that
+migration so catalog tests and the migration runner derive ownership without
+parsing SQL (decision artifact section 4). An ALTER-only migration may use an
+empty list; a table must still be declared exactly once by an earlier or
+later creating migration in the same pack.
 """
 
 _LOWERCASE_IDENT_RE = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -112,7 +114,11 @@ class PackDependency:
 
 @dataclass(frozen=True, slots=True)
 class MigrationDescriptor:
-    """One forward-only migration declared by a schema pack."""
+    """One forward-only migration declared by a schema pack.
+
+    ``tables`` is empty for a migration that only changes a table declared by
+    an earlier migration; ownership remains with the creating migration.
+    """
 
     version: int
     name: str

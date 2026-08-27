@@ -34,12 +34,12 @@ from astrid.core.foundation.atomic_io import write_json_atomic
 from astrid.core.media import MediaProbe, MediaProbeError, ffprobe_metadata_strict
 from astrid.core.rendering.artifacts import validate_render_result
 from astrid.core.rendering.contracts import (
+    SCHEMA_VERSION,
     AudioOwnership,
     FinalizeRequest,
     RenderProfile,
     RenderRequest,
     RenderResult,
-    SCHEMA_VERSION,
     SupportReport,
     VideoArtifact,
 )
@@ -50,7 +50,6 @@ from astrid.core.rendering.errors import (
     raise_unsupported_error,
 )
 from astrid.packs.rendering.finalizers.ffmpeg import BACKEND_ID, BACKEND_VERSION
-
 
 FINALIZER_ID = BACKEND_ID
 _CONFIG_KEYS = frozenset({"faststart"})
@@ -295,9 +294,7 @@ def _profile_differences(
             actual_value = getattr(actual, field)
             expected_value = getattr(expected, field)
             if not _same_value(field, actual_value, expected_value):
-                differences.append(
-                    _ProfileDifference(field, actual_value, expected_value)
-                )
+                differences.append(_ProfileDifference(field, actual_value, expected_value))
     return differences
 
 
@@ -335,10 +332,7 @@ def _assembly_profile(
             ),
             None,
         )
-    if (
-        video_profile == canonical.video_profile
-        and video_level == canonical.video_level
-    ):
+    if video_profile == canonical.video_profile and video_level == canonical.video_level:
         return canonical
     return replace(
         canonical,
@@ -422,10 +416,7 @@ def _encoder_profile(codec: str, profile: str) -> str:
     if encoded is None:
         raise_unsupported_error(
             backend=BACKEND_ID,
-            message=(
-                f"unsupported {codec} encoder profile for FFmpeg finalization: "
-                f"{profile}"
-            ),
+            message=(f"unsupported {codec} encoder profile for FFmpeg finalization: {profile}"),
             recovery_command="select a supported canonical video profile",
             details={"video_codec": codec, "video_profile": profile},
         )
@@ -493,8 +484,7 @@ def _validate_target_profile(profile: RenderProfile) -> None:
             raise_unsupported_error(
                 backend=BACKEND_ID,
                 message=(
-                    "unsupported encoder level for FFmpeg finalization: "
-                    f"{profile.video_level}"
+                    f"unsupported encoder level for FFmpeg finalization: {profile.video_level}"
                 ),
                 recovery_command="select a supported canonical video level",
                 details={
@@ -533,9 +523,7 @@ def build_normalize_command(
     # grid) would otherwise extend the container, making ffprobe's
     # avg_frame_rate read frames/duration below the canonical rate.  Trimming
     # the output to the exact video duration keeps stream copy probes honest.
-    video_seconds = Fraction(segment.duration_frames, 1) / Fraction(
-        *target_profile.fps_rational
-    )
+    video_seconds = Fraction(segment.duration_frames, 1) / Fraction(*target_profile.fps_rational)
 
     argv = [
         "ffmpeg",
@@ -569,10 +557,7 @@ def build_normalize_command(
                         f"scale={target_profile.width}:{target_profile.height}:"
                         "force_original_aspect_ratio=decrease"
                     ),
-                    (
-                        f"pad={target_profile.width}:{target_profile.height}:"
-                        "(ow-iw)/2:(oh-ih)/2"
-                    ),
+                    (f"pad={target_profile.width}:{target_profile.height}:(ow-iw)/2:(oh-ih)/2"),
                 ]
             )
         if "fps_rational" in fields:
@@ -738,12 +723,9 @@ def _assemble_prepared_segments(
                 concat_paths.append(segment.path)
                 continue
             normalization.extend(
-                _normalization_record(segment.index, difference)
-                for difference in differences
+                _normalization_record(segment.index, difference) for difference in differences
             )
-            normalized_path = (
-                tmp_dir / "normalized" / f"segment-{segment.index:04d}.mp4"
-            )
+            normalized_path = tmp_dir / "normalized" / f"segment-{segment.index:04d}.mp4"
             normalized_path.parent.mkdir(parents=True, exist_ok=True)
             command = build_normalize_command(
                 segment,
@@ -756,9 +738,7 @@ def _assemble_prepared_segments(
             if not normalized_path.is_file() or normalized_path.stat().st_size <= 0:
                 raise_invalid_artifact_error(
                     backend=BACKEND_ID,
-                    message=(
-                        f"FFmpeg did not produce normalized segment[{segment.index}]"
-                    ),
+                    message=(f"FFmpeg did not produce normalized segment[{segment.index}]"),
                     recovery_command="rerun finalization in a fresh invocation workspace",
                     details={"segment_index": segment.index},
                 )
@@ -839,9 +819,7 @@ def _profile_from_probe(
     if ownership is AudioOwnership.RENDERED and not probe.has_audio_stream:
         raise MediaProbeError("media has no required audio stream")
     if ownership is not AudioOwnership.RENDERED and probe.has_audio_stream:
-        raise MediaProbeError(
-            f"visual-only {ownership.value} media unexpectedly contains audio"
-        )
+        raise MediaProbeError(f"visual-only {ownership.value} media unexpectedly contains audio")
     return RenderProfile(
         width=_required_probe_value(probe.width, "video width"),
         height=_required_probe_value(probe.height, "video height"),
@@ -923,9 +901,7 @@ def concat_segment_files(
         )
     else:
         target_profile = (
-            profile
-            if ownership is AudioOwnership.RENDERED
-            else _profile_without_audio(profile)
+            profile if ownership is AudioOwnership.RENDERED else _profile_without_audio(profile)
         )
 
     prepared: list[_PreparedSegment] = []
@@ -979,8 +955,7 @@ def concat_segment_files(
                 recovery_command="rerun finalization in a fresh invocation workspace",
                 details={
                     "mismatches": [
-                        _normalization_record(-1, difference)
-                        for difference in remaining
+                        _normalization_record(-1, difference) for difference in remaining
                     ]
                 },
             )
@@ -1055,11 +1030,8 @@ def _final_audio_ownership(request: FinalizeRequest) -> AudioOwnership:
     if request.plan.profile.has_audio:
         if all(ownership is AudioOwnership.PASSTHROUGH for ownership in ownerships):
             return AudioOwnership.PASSTHROUGH
-        if any(
-            ownership is AudioOwnership.RENDERED for ownership in ownerships
-        ) and all(
-            ownership in {AudioOwnership.RENDERED, AudioOwnership.NONE}
-            for ownership in ownerships
+        if any(ownership is AudioOwnership.RENDERED for ownership in ownerships) and all(
+            ownership in {AudioOwnership.RENDERED, AudioOwnership.NONE} for ownership in ownerships
         ):
             return AudioOwnership.RENDERED
         raise_invalid_artifact_error(
@@ -1071,8 +1043,7 @@ def _final_audio_ownership(request: FinalizeRequest) -> AudioOwnership:
             recovery_command="rerender passthrough segments with one consistent ownership mode",
             details={
                 "audio_ownership": [
-                    ownership.value if ownership is not None else None
-                    for ownership in ownerships
+                    ownership.value if ownership is not None else None for ownership in ownerships
                 ]
             },
         )
@@ -1141,9 +1112,7 @@ def _preflight_segments(
         if delta_frames > tolerance:
             raise_invalid_artifact_error(
                 backend=BACKEND_ID,
-                message=(
-                    f"segment[{index}] duration does not match its planned frame window"
-                ),
+                message=(f"segment[{index}] duration does not match its planned frame window"),
                 recovery_command="rerender the exact planned segment window and retry",
                 details={
                     "segment_index": index,
@@ -1203,15 +1172,11 @@ def _probe_normalized_segments(
         except (MediaProbeError, OSError, RuntimeError, TypeError, ValueError) as exc:
             raise_invalid_artifact_error(
                 backend=BACKEND_ID,
-                message=(
-                    f"normalized segment[{segment.index}] could not be validated: {exc}"
-                ),
+                message=(f"normalized segment[{segment.index}] could not be validated: {exc}"),
                 recovery_command="rerun finalization in a fresh invocation workspace",
                 details={"segment_index": segment.index},
             )
-        actual_frames = _duration_fraction(probe) * Fraction(
-            *target_profile.fps_rational
-        )
+        actual_frames = _duration_fraction(probe) * Fraction(*target_profile.fps_rational)
         duration_delta = abs(actual_frames - segment.duration_frames)
         if duration_delta > target_profile.duration_tolerance:
             raise_invalid_artifact_error(
@@ -1314,9 +1279,7 @@ def _validate_concat_output(
                 "actual": [probe.width, probe.height],
             },
         )
-    if probe.video_codec and _text(probe.video_codec) != _text(
-        target_profile.video_codec
-    ):
+    if probe.video_codec and _text(probe.video_codec) != _text(target_profile.video_codec):
         raise_invalid_artifact_error(
             backend=BACKEND_ID,
             message="final concat video codec does not match the canonical profile",
@@ -1368,17 +1331,13 @@ def finalize(
     assembly_profile = _assembly_profile(target_profile, prepared)
     _validate_target_profile(assembly_profile)
     output_path = _safe_protocol_output_path(workspace, request.output_name)
-    total_frames = sum(
-        segment.window.duration_frames for segment in request.plan.segments
-    )
+    total_frames = sum(segment.window.duration_frames for segment in request.plan.segments)
     recovery_tmp = TemporaryDirectory(
         prefix=f".{output_path.name}.ffmpeg-finalizer-recovery-",
         dir=str(output_path.parent),
     )
     previous_output = (
-        Path(recovery_tmp.name) / "previous-output.mp4"
-        if output_path.is_file()
-        else None
+        Path(recovery_tmp.name) / "previous-output.mp4" if output_path.is_file() else None
     )
     published = False
     assembly_started = False
@@ -1398,8 +1357,7 @@ def finalize(
                     normalized_prepared.append(segment)
                     continue
                 normalization.extend(
-                    _normalization_record(segment.index, difference)
-                    for difference in differences
+                    _normalization_record(segment.index, difference) for difference in differences
                 )
                 normalized_path = normalized_tmp / f"segment-{segment.index:04d}.mp4"
                 normalized_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1416,9 +1374,7 @@ def finalize(
                 if not normalized_path.is_file() or normalized_path.stat().st_size <= 0:
                     raise_invalid_artifact_error(
                         backend=BACKEND_ID,
-                        message=(
-                            f"FFmpeg did not produce normalized segment[{segment.index}]"
-                        ),
+                        message=(f"FFmpeg did not produce normalized segment[{segment.index}]"),
                         recovery_command="rerun finalization in a fresh invocation workspace",
                         details={"segment_index": segment.index},
                     )
@@ -1448,8 +1404,7 @@ def finalize(
                         normalization.append(record)
                         existing.add(record)
             normalized_prepared = [
-                replace(segment, profile=effective_profile)
-                for segment in normalized_prepared
+                replace(segment, profile=effective_profile) for segment in normalized_prepared
             ]
             # The prepared list now has a uniform canonical profile, so this
             # call performs only the concat-demuxer stream-copy assembly.

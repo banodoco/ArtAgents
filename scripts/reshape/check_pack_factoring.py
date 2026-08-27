@@ -1,6 +1,7 @@
 """Deterministic packaged and temporary-copy factoring checks.
 
-Proves that each in-tree schema pack (``timeline``, ``shots``, ``references``)
+Proves that each in-tree schema pack (``timeline``, ``shots``, ``references``,
+``runaway``)
 can be removed **only inside a temporary source copy** -- both the pack
 directory and the explicit standard registration tuple
 (``astrid.packs.STANDARD_SCHEMA_PACKS``, which drives
@@ -18,7 +19,7 @@ Lane completeness
 -----------------
 The enumerated :data:`KERNEL_LANE` is the fixed, complete set of kernel test
 files under ``tests/v10`` that import no domain schema pack at module level
-and whose assertions hold under *any* subset of the three packs:
+and whose assertions hold under *any* subset of the four packs:
 
 - kernel repositories/execution: fanout (run creation/continuation), the
   multi-task journey, task races, evidence, media, projects, receipts/events,
@@ -30,7 +31,7 @@ and whose assertions hold under *any* subset of the three packs:
 Deliberately excluded suites (asserted separately, see below):
 
 - ``test_registry.py`` / ``test_catalog_migrations.py`` assert the exact
-  *standard* 3-pack composition (e.g. the 20-table catalog), so they cannot
+  *standard* 4-pack composition, so they cannot
   run under a reduced composition; the check's own catalog verification step
   re-derives the remaining manifest-derived catalog from the modified
   registration instead.
@@ -43,7 +44,7 @@ Deliberately excluded suites (asserted separately, see below):
   requires the timeline pack.
 
 The remaining catalog is verified deterministically for every removal:
-core + the two remaining packs compose to exactly
+core + the three remaining packs compose to exactly
 ``CORE_TABLES | (all pack tables - the removed pack's tables)``, the removed
 pack is absent from the frozen registry and the registration tuple, and a
 fresh database opened from the modified composition contains exactly the
@@ -70,16 +71,15 @@ uninstalled.
 from __future__ import annotations
 
 import argparse
-from concurrent.futures import ThreadPoolExecutor
 import json
 import os
 import re
 import shutil
-import sqlite3
 import subprocess
 import sys
 import tempfile
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -88,7 +88,7 @@ from astrid.core.migrations.catalog import CORE_MIGRATIONS
 REPO_ROOT = Path(__file__).resolve().parents[2]
 """The repository root the check copies from (read-only)."""
 
-DOMAIN_PACKS: tuple[str, ...] = ("timeline", "shots", "references")
+DOMAIN_PACKS: tuple[str, ...] = ("timeline", "shots", "references", "runaway")
 """Exactly the in-tree schema packs the standard composition registers."""
 
 PACK_TABLES: dict[str, tuple[str, ...]] = {
@@ -100,6 +100,7 @@ PACK_TABLES: dict[str, tuple[str, ...]] = {
         "generation_variants",
     ),
     "references": ("project_references", "media_references", "reference_links"),
+    "runaway": ("runaway_transitions",),
 }
 """Tables each domain pack declares through its manifest migrations (frozen
 m1/m3 catalog; never inferred from a live database)."""
@@ -154,6 +155,14 @@ PACK_VOCABULARY: dict[str, dict[str, tuple[str, ...]]] = {
         "repositories": ("ReferenceRepository",),
         "cli_mounts": ("references",),
         "bridge_mounts": (),
+    },
+    "runaway": {
+        "stream_types": ("runaway.transition_set",),
+        "event_kinds": ("runaway.created",),
+        "command_kinds": ("runaway.create",),
+        "repositories": ("RunawayRepository",),
+        "cli_mounts": (),
+        "bridge_mounts": ("runaway_transitions",),
     },
 }
 """The complete vocabulary owned by each fixed schema pack.
@@ -474,6 +483,16 @@ expected = json.loads(sys.argv[2])
 artifact_root = Path(sys.argv[3]).resolve()
 assert Path(astrid.__file__).resolve().is_relative_to(artifact_root), astrid.__file__
 
+# The typed-timeline consumer is independently installable and must survive
+# removal of every schema pack, especially Runaway.  Its admitted-artifact
+# source seam must not import a domain repository or sqlite directly.
+from astrid.packs.typed_timeline.mapper import TypedDataTimelineMapper
+from astrid.packs.typed_timeline.sources import load_json_rows
+typed_source = Path(load_json_rows.__code__.co_filename).read_text(encoding="utf-8")
+assert "astrid.packs.runaway" not in typed_source
+assert "sqlite3" not in typed_source
+assert TypedDataTimelineMapper
+
 registry = SchemaPackRegistry()
 register_core_vocabulary(registry)
 register_standard_schema_packs(registry)
@@ -640,7 +659,7 @@ def run_artifact_kernel_suite(
     *,
     python: str | None = None,
     base_dir: Path | None = None,
-    timeout: int = 90,
+    timeout: int = 180,
 ) -> subprocess.CompletedProcess[str]:
     """Run the complete fixed kernel suite against one artifact root."""
     interpreter = python or sys.executable
@@ -658,14 +677,25 @@ def run_artifact_kernel_suite(
             "--no-header",
             *KERNEL_LANE,
         ]
-        return subprocess.run(
-            command,
-            cwd=test_workspace,
-            env=environment,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
+        try:
+            return subprocess.run(
+                command,
+                cwd=test_workspace,
+                env=environment,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired as exc:
+            stdout = exc.stdout.decode() if isinstance(exc.stdout, bytes) else exc.stdout
+            stderr = exc.stderr.decode() if isinstance(exc.stderr, bytes) else exc.stderr
+            return subprocess.CompletedProcess(
+                args=command,
+                returncode=124,
+                stdout=stdout or "",
+                stderr=(stderr or "")
+                + f"\nkernel lane exceeded deterministic {timeout}s deadline\n",
+            )
     finally:
         shutil.rmtree(test_workspace, ignore_errors=True)
 
@@ -705,7 +735,7 @@ def check_artifact_removal(
     python: str | None = None,
     base_dir: Path | None = None,
     keep_temp: bool = False,
-    kernel_timeout: int = 90,
+    kernel_timeout: int = 180,
     catalog_timeout: int = 30,
 ) -> ArtifactRemovalResult:
     """Remove one pack from a wheel root and run every packaged check."""
@@ -749,7 +779,7 @@ def check_artifact_factoring(
     python: str | None = None,
     base_dir: Path | None = None,
     keep_temp: bool = False,
-    kernel_timeout: int = 90,
+    kernel_timeout: int = 180,
     catalog_timeout: int = 30,
 ) -> ArtifactFactoringResult:
     """Run packaged factorability independently for every requested pack.
@@ -781,10 +811,12 @@ def check_artifact_factoring(
             shutil.copytree(source, base_root, symlinks=False)
 
         # Each reduced artifact is an isolated copy and its catalog/kernel
-        # probes run in subprocesses.  Keep the declared result order while
-        # running independent pack removals concurrently so the complete T9
-        # selector fits its aggregate verification budget.
-        with ThreadPoolExecutor(max_workers=len(requested)) as executor:
+        # probes run in subprocesses. Kernel lanes are CPU-heavy complete-suite
+        # processes, so keep the declared result order and run the
+        # independent reductions serially: concurrent lanes contend with the
+        # repository's other release gates and repeatedly turn a functional
+        # check into a scheduler-dependent timeout.
+        with ThreadPoolExecutor(max_workers=1) as executor:
             futures = [
                 executor.submit(
                     check_artifact_removal,
@@ -971,7 +1003,7 @@ def verify_sketch_kernel_inventory(repo_root: Path = REPO_ROOT) -> str:
 
 
 def run_kernel_lane(
-    work: Path, python: str, *, timeout: int = 90
+    work: Path, python: str, *, timeout: int = 180
 ) -> subprocess.CompletedProcess[str]:
     """Run the complete enumerated kernel lane against the temp copy."""
     env = os.environ.copy()
@@ -988,9 +1020,20 @@ def run_kernel_lane(
         "--no-header",
         *KERNEL_LANE,
     ]
-    return subprocess.run(
-        cmd, cwd=work, env=env, capture_output=True, text=True, timeout=timeout
-    )
+    try:
+        return subprocess.run(
+            cmd, cwd=work, env=env, capture_output=True, text=True, timeout=timeout
+        )
+    except subprocess.TimeoutExpired as exc:
+        stdout = exc.stdout.decode() if isinstance(exc.stdout, bytes) else exc.stdout
+        stderr = exc.stderr.decode() if isinstance(exc.stderr, bytes) else exc.stderr
+        return subprocess.CompletedProcess(
+            args=cmd,
+            returncode=124,
+            stdout=stdout or "",
+            stderr=(stderr or "")
+            + f"\nkernel lane exceeded deterministic {timeout}s deadline\n",
+        )
 
 
 @dataclass(frozen=True)
@@ -1014,7 +1057,7 @@ def check_removal(
     python: str | None = None,
     base_dir: Path | None = None,
     keep_temp: bool = False,
-    lane_timeout: int = 90,
+    lane_timeout: int = 180,
     catalog_timeout: int = 30,
 ) -> RemovalCheckResult:
     """Remove ``removed_pack`` from a temporary source composition and prove
@@ -1080,7 +1123,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--python", default=None, help="interpreter for subprocesses")
     parser.add_argument("--keep-temp", action="store_true", help="keep temp copies on failure")
-    parser.add_argument("--lane-timeout", type=int, default=90, help="per-lane pytest timeout")
+    parser.add_argument(
+        "--lane-timeout", type=int, default=180, help="per-lane pytest timeout"
+    )
     args = parser.parse_args(argv)
 
     if args.artifact_root is not None and args.wheel is None:

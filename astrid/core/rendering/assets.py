@@ -96,9 +96,7 @@ def _default_allowed_root(registry_path: Path) -> Path | None:
     """
 
     projects_root = resolve_projects_root().resolve(strict=False)
-    owner = os.environ.get(ASTRID_PROJECT_SLUG) or os.environ.get(
-        ASTRID_GATEWAY_RESOLVED_PROJECT
-    )
+    owner = os.environ.get(ASTRID_PROJECT_SLUG) or os.environ.get(ASTRID_GATEWAY_RESOLVED_PROJECT)
     if owner:
         return project_dir(owner, root=projects_root).resolve(strict=False)
 
@@ -182,7 +180,9 @@ def _owned_managed_locators(
 
 def _safe_staging_name(key: str, reference: str, index: int) -> str:
     parsed = urllib.parse.urlparse(reference)
-    candidate = Path(urllib.parse.unquote(parsed.path)).name if parsed.scheme else Path(reference).name
+    candidate = (
+        Path(urllib.parse.unquote(parsed.path)).name if parsed.scheme else Path(reference).name
+    )
     candidate = re.sub(r"[^A-Za-z0-9._-]+", "_", candidate).strip("._-") or "asset"
     candidate = candidate[-120:]
     digest = hashlib.sha256(key.encode("utf-8")).hexdigest()[:12]
@@ -220,9 +220,10 @@ def _hardlink_or_copy_checked(source: Path, destination: Path) -> None:
             pass
         destination.unlink(missing_ok=True)
         try:
-            with os.fdopen(os.dup(descriptor), "rb") as input_file, destination.open(
-                "xb"
-            ) as output_file:
+            with (
+                os.fdopen(os.dup(descriptor), "rb") as input_file,
+                destination.open("xb") as output_file,
+            ):
                 shutil.copyfileobj(input_file, output_file, length=1024 * 1024)
             os.chmod(destination, stat.S_IMODE(source_stat.st_mode))
             with contextlib.suppress(OSError):
@@ -267,9 +268,7 @@ class AssetMaterializer:
         if resolved_root is not None and not resolved_root.is_dir():
             raise NotADirectoryError(f"Asset root is not a directory: {resolved_root}")
         self.allowed_root = resolved_root
-        managed_root = (resolve_projects_root() / ".astrid" / "media").resolve(
-            strict=False
-        )
+        managed_root = (resolve_projects_root() / ".astrid" / "media").resolve(strict=False)
         self.allowed_managed_paths = {}
         for path, content_hash in (allowed_managed_paths or {}).items():
             candidate = Path(path).expanduser().resolve(strict=False)
@@ -381,7 +380,7 @@ class AssetMaterializer:
             if hasattr(os, "O_NOFOLLOW"):
                 file_flags |= os.O_NOFOLLOW
             descriptor = os.open(source_name, file_flags, dir_fd=directory_fd)
-        except BaseException as exc:
+        except BaseException as exc:  # noqa: BLE001 - cleanup must preserve all primary failures
             os.close(directory_fd)
             if isinstance(exc, (FileNotFoundError, NotADirectoryError)):
                 raise FileNotFoundError(
@@ -424,9 +423,10 @@ class AssetMaterializer:
             except OSError:
                 pass
             destination.unlink(missing_ok=True)
-            with os.fdopen(os.dup(descriptor), "rb") as input_file, destination.open(
-                "xb"
-            ) as output_file:
+            with (
+                os.fdopen(os.dup(descriptor), "rb") as input_file,
+                destination.open("xb") as output_file,
+            ):
                 shutil.copyfileobj(input_file, output_file, length=1024 * 1024)
             os.chmod(destination, stat.S_IMODE(source_stat.st_mode))
             with contextlib.suppress(OSError):
@@ -458,7 +458,9 @@ class AssetMaterializer:
             try:
                 resolved_source = source.resolve(strict=True)
             except FileNotFoundError as exc:
-                raise FileNotFoundError(f"Asset {key!r} resolved to missing file: {source}") from exc
+                raise FileNotFoundError(
+                    f"Asset {key!r} resolved to missing file: {source}"
+                ) from exc
             if not resolved_source.is_file():
                 raise FileNotFoundError(f"Asset {key!r} is not a file: {resolved_source}")
         destination = self.staging_dir / _safe_staging_name(key, reference, index)
@@ -492,8 +494,9 @@ class AssetMaterializer:
                 continue
             raw = Path(file_value).expanduser()
             requested_managed_paths.add(
-                (raw if raw.is_absolute() else self.registry_path.parent / raw)
-                .resolve(strict=False)
+                (raw if raw.is_absolute() else self.registry_path.parent / raw).resolve(
+                    strict=False
+                )
             )
         self.allowed_managed_paths.update(
             _owned_managed_locators(
@@ -529,9 +532,7 @@ class AssetMaterializer:
                     )
                     continue
                 fetch = self._cache_fetch if self._cache_fetch is not None else asset_cache.fetch
-                cached_path = Path(
-                    fetch(url, expected_sha256=entry.get("content_sha256"))
-                )
+                cached_path = Path(fetch(url, expected_sha256=entry.get("content_sha256")))
                 staged_path = self._stage(key, url, cached_path, index)
                 self.assets[key] = MaterializedAsset(
                     key=key,
@@ -608,43 +609,59 @@ class AssetMaterializer:
 
 
 _RANGE_RE = re.compile(r"^bytes=(\d*)-(\d*)$")
+REMOTION_BROWSER_ORIGIN = "http://localhost:3000"
 
 
 class RangeHTTPRequestHandler(SimpleHTTPRequestHandler):
     """File-only HTTP handler with single-range byte serving."""
 
+    def __init__(
+        self,
+        *args: Any,
+        allowed_origin: str = REMOTION_BROWSER_ORIGIN,
+        **kwargs: Any,
+    ) -> None:
+        self.allowed_origin = allowed_origin
+        super().__init__(*args, **kwargs)
+
     def log_message(self, format: str, *args: object) -> None:  # noqa: A002
         return
+
+    def _send_renderer_cors_headers(self) -> None:
+        """Allow only the server-owned Remotion browser to read an asset.
+
+        The renderer's Chromium page is served from one exact, invocation-owned
+        local origin.  Do not reflect arbitrary ``Origin`` values: this server
+        exposes invocation-scoped media and is intentionally not a general
+        CORS endpoint.
+        """
+
+        origin = self.headers.get("Origin")
+        if origin == self.allowed_origin:
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Vary", "Origin")
+
+    def do_OPTIONS(self) -> None:  # noqa: N802 - stdlib handler API
+        """Answer browser preflight without widening the asset origin policy."""
+
+        self.send_response(204)
+        self.send_header("Content-Length", "0")
+        self._send_renderer_cors_headers()
+        if self.headers.get("Origin") == self.allowed_origin:
+            self.send_header("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Range, Content-Type")
+            self.send_header(
+                "Access-Control-Expose-Headers",
+                "Accept-Ranges, Content-Length, Content-Range",
+            )
+        self.end_headers()
 
     def _send_416(self, size: int) -> None:
         self.send_response(416, "Range Not Satisfiable")
         self.send_header("Accept-Ranges", "bytes")
         self.send_header("Content-Range", f"bytes */{size}")
         self.send_header("Content-Length", "0")
-        self._send_cors_headers()
-        self.end_headers()
-
-    def _send_cors_headers(self) -> None:
-        """Permit the invocation's browser page to consume loopback assets.
-
-        The renderer page may be hosted by Remotion on ``localhost`` while
-        the bounded file server binds ``127.0.0.1``.  The server exposes only
-        its private invocation directory, so wildcard origin is the narrow
-        CORS policy appropriate to this ephemeral local transport.
-        """
-
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Range, Content-Type")
-        self.send_header(
-            "Access-Control-Expose-Headers",
-            "Accept-Ranges, Content-Length, Content-Range",
-        )
-
-    def do_OPTIONS(self) -> None:  # noqa: N802 - stdlib handler API
-        self.send_response(204)
-        self.send_header("Content-Length", "0")
-        self._send_cors_headers()
+        self._send_renderer_cors_headers()
         self.end_headers()
 
     def _resolved_file(self) -> Path | None:
@@ -716,7 +733,7 @@ class RangeHTTPRequestHandler(SimpleHTTPRequestHandler):
             self.send_header("Accept-Ranges", "bytes")
             self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
             self.send_header("Content-Length", str(length))
-            self._send_cors_headers()
+            self._send_renderer_cors_headers()
             self.end_headers()
             return source
 
@@ -725,7 +742,7 @@ class RangeHTTPRequestHandler(SimpleHTTPRequestHandler):
         self.send_header("Content-Type", self.guess_type(str(path)))
         self.send_header("Accept-Ranges", "bytes")
         self.send_header("Content-Length", str(size))
-        self._send_cors_headers()
+        self._send_renderer_cors_headers()
         self.end_headers()
         return source
 
@@ -760,13 +777,19 @@ class InvocationAssetServer:
     host = "127.0.0.1"
     bind_port = 0
 
-    def __init__(self, staging_dir: str | Path) -> None:
+    def __init__(
+        self,
+        staging_dir: str | Path,
+        *,
+        allowed_origin: str = REMOTION_BROWSER_ORIGIN,
+    ) -> None:
         self.staging_dir = Path(staging_dir).resolve(strict=True)
         if not self.staging_dir.is_dir():
             raise NotADirectoryError(f"Asset staging path is not a directory: {self.staging_dir}")
         self._server: ThreadingHTTPServer | None = None
         self.thread: threading.Thread | None = None
         self._closed = False
+        self.allowed_origin = allowed_origin
 
     @property
     def port(self) -> int:
@@ -789,7 +812,11 @@ class InvocationAssetServer:
             raise RuntimeError("Invocation asset server is closed")
         if self._server is not None:
             return self
-        handler = partial(RangeHTTPRequestHandler, directory=str(self.staging_dir))
+        handler = partial(
+            RangeHTTPRequestHandler,
+            directory=str(self.staging_dir),
+            allowed_origin=self.allowed_origin,
+        )
         server = ThreadingHTTPServer((self.host, self.bind_port), handler)
         try:
             thread = threading.Thread(
@@ -838,17 +865,17 @@ class InvocationAssetServer:
         try:
             if thread is not None and thread.is_alive():
                 server.shutdown()
-        except BaseException as exc:
+        except BaseException as exc:  # noqa: BLE001 - cleanup must preserve all primary failures
             cleanup_error = exc
         try:
             server.server_close()
-        except BaseException as exc:
+        except BaseException as exc:  # noqa: BLE001 - cleanup must preserve all primary failures
             if cleanup_error is None:
                 cleanup_error = exc
         try:
             if thread is not None and thread is not threading.current_thread():
                 thread.join()
-        except BaseException as exc:
+        except BaseException as exc:  # noqa: BLE001 - cleanup must preserve all primary failures
             if cleanup_error is None:
                 cleanup_error = exc
         if cleanup_error is not None:
@@ -868,4 +895,5 @@ __all__ = [
     "InvocationAssetServer",
     "MaterializedAsset",
     "RangeHTTPRequestHandler",
+    "REMOTION_BROWSER_ORIGIN",
 ]

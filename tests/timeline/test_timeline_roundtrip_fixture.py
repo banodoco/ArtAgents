@@ -6,10 +6,10 @@ The regression gate for the `Timeline` domain class. Three assertions:
    byte-for-byte (covers tracks, theme_overrides, generation_defaults,
    per-clip animation/transition/effects, mixed clipTypes).
 2. Unknown top-level fields survive load/dump via the passthrough bag.
-3. Astrid' Python allowlists (`_TIMELINE_TOP_ALLOWED`,
-   `_CLIP_ALLOWED`, `_TRACK_ALLOWED`) match the field set declared in
-   the canonical `@banodoco/timeline-schema` JSON Schema. The shared
-   schema is the source of truth.
+3. Astrid's Python allowlists (`_TIMELINE_TOP_ALLOWED`, `_CLIP_ALLOWED`,
+   `_TRACK_ALLOWED`) match the imported `@banodoco/timeline-schema` JSON
+   Schema. The shared schema is the source of truth, with Astrid's documented
+   top-level `app` extension metadata retained around the renderable shape.
 """
 
 from __future__ import annotations
@@ -23,51 +23,27 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 FIXTURE_PATH = REPO_ROOT / "examples" / "hype.timeline.full.json"
 
-# The shared schema lives inside the npm-installed package under remotion/.
-# That's the only on-disk copy available without network. If the install
-# moves we surface a clear skip rather than a misleading pass.
-_SHARED_SCHEMA_CANDIDATES = (
-    # Canonical artifact first (plan-v5 B2): the shared schema's single source
-    # of truth lives in the banodoco-workspace package. The remotion npm copy
-    # below is a fallback for environments without the workspace checkout.
-    REPO_ROOT.parent.parent
-    / "banodoco-workspace"
-    / "packages"
-    / "timeline-schema"
-    / "python"
-    / "banodoco_timeline_schema"
-    / "timeline.schema.json",
-    REPO_ROOT
-    / "remotion"
-    / "node_modules"
-    / "@banodoco"
-    / "timeline-schema"
-    / "python"
-    / "banodoco_timeline_schema"
-    / "timeline.schema.json",
-)
+_ASTRID_TOP_LEVEL_OVERLAY = frozenset({"app"})
 
 
-def _load_shared_schema() -> dict | None:
-    # Prefer the package actually used by Astrid's runtime validator.  The
-    # Remotion tree may contain an older copied schema (for example, one that
-    # predates the top-level ``app`` extension), so filesystem order is not a
-    # reliable indicator of the canonical contract.
+def _load_shared_schema() -> tuple[dict, str] | None:
+    """Load the schema from the same public package used by Astrid runtime.
+
+    The release verifier places the pinned Reigh schema package on the Python
+    path. Resolving sibling workspaces or npm copies here would make this test
+    pass against an unrelated schema revision.
+    """
     try:
+        import banodoco_timeline_schema
         from banodoco_timeline_schema import load_schema
-    except ModuleNotFoundError as exc:
-        if exc.name != "banodoco_timeline_schema":
-            raise
-    else:
-        return load_schema()
 
-    # Keep the source-checkout fallbacks for environments that deliberately do
-    # not install the optional Python package.  If neither artifact exists,
-    # the caller skips this one external-schema parity assertion.
-    for candidate in _SHARED_SCHEMA_CANDIDATES:
-        if candidate.is_file():
-            return json.loads(candidate.read_text(encoding="utf-8"))
-    return None
+        schema = load_schema()
+    except (ImportError, FileNotFoundError):
+        return None
+
+    module_path = Path(banodoco_timeline_schema.__file__).resolve()
+    schema_path = module_path.with_name("timeline.schema.json")
+    return schema, f"module={module_path}; schema={schema_path}"
 
 
 # Make the in-tree astrid package importable when running pytest from
@@ -170,15 +146,14 @@ class TimelineRoundTripFixtureTest(unittest.TestCase):
     # 3. Allowlist parity with the shared schema package
     # ------------------------------------------------------------------
     def test_allowlist_parity_with_shared_schema(self) -> None:
-        schema = _load_shared_schema()
-        if schema is None:
+        loaded = _load_shared_schema()
+        if loaded is None:
             self.skipTest(
-                "Shared @banodoco/timeline-schema JSON Schema not found; "
-                "expected at one of: "
-                + ", ".join(str(p) for p in _SHARED_SCHEMA_CANDIDATES)
-                + ". Build the package (npm run -w @banodoco/timeline-schema "
-                "build) to enable this assertion."
+                "Shared @banodoco/timeline-schema package is unavailable; "
+                "set PYTHONPATH or ASTRID_TIMELINE_SCHEMA_PYTHONPATH to the "
+                "pinned Python package to enable this assertion."
             )
+        schema, schema_origin = loaded
 
         defs = schema.get("definitions") or schema.get("$defs") or {}
         # Plan-v5 B2: TimelineConfig is the schema ROOT (the old $ref-root was
@@ -196,36 +171,33 @@ class TimelineRoundTripFixtureTest(unittest.TestCase):
         track_items = tracks_node.get("items") or {}
         shared_track = set((track_items.get("properties") or {}).keys())
 
-        # The shared schema is the source of truth (per astrid/timeline.py
-        # docstring: "the JSON-Schema validator there is the canonical shape
-        # check"). Astrid' frozensets must match exactly.
-        # ``app`` and clip ``label`` were adopted by the shared schema after
-        # Astrid first preserved them as opaque editor extensions. Keep the
-        # parity gate valid for both supported schema generations: subtract
-        # only an extension the active schema does not yet declare.
-        editor_top_extensions = {"app"} - shared_top
-        editor_clip_extensions = {"label"} - shared_clip
+        # The shared schema is the source of truth. Astrid retains only the
+        # documented top-level editor metadata overlay around that shape.
+        expected_top = shared_top | _ASTRID_TOP_LEVEL_OVERLAY
         self.assertEqual(
-            set(_TIMELINE_TOP_ALLOWED) - editor_top_extensions,
-            shared_top,
+            set(_TIMELINE_TOP_ALLOWED),
+            expected_top,
             "Timeline top-level allowlist drift between Astrid "
-            "(_TIMELINE_TOP_ALLOWED) and shared schema (TimelineConfig). "
-            f"only-in-astrid={set(_TIMELINE_TOP_ALLOWED) - editor_top_extensions - shared_top}, "
-            f"only-in-schema={shared_top - (set(_TIMELINE_TOP_ALLOWED) - editor_top_extensions)}",
+            "(_TIMELINE_TOP_ALLOWED) and imported schema (TimelineConfig); "
+            f"schema-origin={schema_origin}; "
+            f"only-in-astrid={set(_TIMELINE_TOP_ALLOWED) - expected_top}, "
+            f"only-in-schema={shared_top - set(_TIMELINE_TOP_ALLOWED)}",
         )
         self.assertEqual(
-            set(_CLIP_ALLOWED) - editor_clip_extensions,
+            set(_CLIP_ALLOWED),
             shared_clip,
             "Clip allowlist drift between Astrid (_CLIP_ALLOWED) and "
-            "shared schema (TimelineClip). "
-            f"only-in-astrid={set(_CLIP_ALLOWED) - editor_clip_extensions - shared_clip}, "
-            f"only-in-schema={shared_clip - (set(_CLIP_ALLOWED) - editor_clip_extensions)}",
+            "imported schema (TimelineClip); "
+            f"schema-origin={schema_origin}; "
+            f"only-in-astrid={set(_CLIP_ALLOWED) - shared_clip}, "
+            f"only-in-schema={shared_clip - set(_CLIP_ALLOWED)}",
         )
         self.assertEqual(
             set(_TRACK_ALLOWED),
             shared_track,
             "Track allowlist drift between Astrid (_TRACK_ALLOWED) and "
-            "shared schema (TimelineConfig.tracks[]). "
+            "imported schema (TimelineConfig.tracks[]); "
+            f"schema-origin={schema_origin}; "
             f"only-in-astrid={set(_TRACK_ALLOWED) - shared_track}, "
             f"only-in-schema={shared_track - set(_TRACK_ALLOWED)}",
         )

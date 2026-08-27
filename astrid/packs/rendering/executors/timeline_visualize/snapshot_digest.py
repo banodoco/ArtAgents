@@ -9,7 +9,6 @@ from collections.abc import Mapping
 from typing import Any, Final
 from uuid import UUID
 
-
 SNS_SCHEMA_VERSION: Final[int] = 1
 
 _REQUIRED_FIELDS: Final[tuple[str, ...]] = (
@@ -114,9 +113,7 @@ def _snapshot_envelope(snapshot_fields: Mapping[str, Any]) -> dict[str, Any]:
         head_last_event_id = None
         head_last_hash = None
     else:
-        head_last_event_id = _require_string(
-            head_last_event_id_raw, "head_last_event_id"
-        )
+        head_last_event_id = _require_string(head_last_event_id_raw, "head_last_event_id")
         if _ULID_RE.fullmatch(head_last_event_id) is None:
             raise ValueError("head_last_event_id must be an uppercase canonical ULID")
         head_last_hash = _require_sha256(head_last_hash_raw, "head_last_hash")
@@ -138,20 +135,14 @@ def _snapshot_envelope(snapshot_fields: Mapping[str, Any]) -> dict[str, Any]:
         "head_version": head_version,
         "head_last_event_id": head_last_event_id,
         "head_last_hash": head_last_hash,
-        "assembly_sha256": _require_sha256(
-            snapshot_fields["assembly_sha256"], "assembly_sha256"
-        ),
-        "registry_sha256": _require_sha256(
-            snapshot_fields["registry_sha256"], "registry_sha256"
-        ),
+        "assembly_sha256": _require_sha256(snapshot_fields["assembly_sha256"], "assembly_sha256"),
+        "registry_sha256": _require_sha256(snapshot_fields["registry_sha256"], "registry_sha256"),
         "media_hashes": media_hashes,
     }
 
     transcript_sha256 = snapshot_fields.get("transcript_sha256")
     if transcript_sha256 is not None:
-        envelope["transcript_sha256"] = _require_sha256(
-            transcript_sha256, "transcript_sha256"
-        )
+        envelope["transcript_sha256"] = _require_sha256(transcript_sha256, "transcript_sha256")
     return envelope
 
 

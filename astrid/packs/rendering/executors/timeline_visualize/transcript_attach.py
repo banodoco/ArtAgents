@@ -49,7 +49,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
 
-
 _SHA256_RE: Final[re.Pattern[str]] = re.compile(r"^[0-9a-f]{64}$")
 
 
@@ -98,9 +97,7 @@ def discover_attachment(
 
     project_base = Path(project_root).expanduser().resolve()
     timeline_base = (
-        Path(timeline_dir).expanduser().resolve()
-        if timeline_dir is not None
-        else project_base
+        Path(timeline_dir).expanduser().resolve() if timeline_dir is not None else project_base
     )
 
     if timeline_metadata is not None and "transcript" in timeline_metadata:
@@ -171,16 +168,12 @@ def _attachment_from_declaration(
     if schema_version != 1:
         return None
 
-    source_id = _non_empty_string(
-        declaration.get("source_id", declaration.get("sourceId"))
-    )
+    source_id = _non_empty_string(declaration.get("source_id", declaration.get("sourceId")))
     source_version = _non_empty_string(
         declaration.get("source_version", declaration.get("sourceVersion"))
     )
     producer = _non_empty_string(declaration.get("producer"))
-    file_value = _non_empty_string(
-        declaration.get("file", declaration.get("path"))
-    )
+    file_value = _non_empty_string(declaration.get("file", declaration.get("path")))
     transcript_sha256 = _sha256_value(
         declaration.get(
             "sha256",
@@ -202,9 +195,7 @@ def _attachment_from_declaration(
         return None
 
     transcript_file = (
-        None
-        if force_uncontained
-        else _resolve_contained_path(file_value, base=base, root=root)
+        None if force_uncontained else _resolve_contained_path(file_value, base=base, root=root)
     )
     observed: str | None = None
     integrity = "uncontained" if transcript_file is None else "missing"
@@ -218,9 +209,7 @@ def _attachment_from_declaration(
                 integrity = "ok"
             else:
                 integrity = "hash_mismatch"
-                notes.append(
-                    "transcript hash mismatch: the declared file was not substituted"
-                )
+                notes.append("transcript hash mismatch: the declared file was not substituted")
         elif transcript_file is not None:
             notes.append("declared transcript file is missing")
     except OSError:
@@ -228,9 +217,7 @@ def _attachment_from_declaration(
         notes.append("declared transcript file is unreadable")
 
     if media_sha256 is None:
-        notes.append(
-            "source-media hash was not recorded; media identity was not inferred"
-        )
+        notes.append("source-media hash was not recorded; media identity was not inferred")
 
     return TranscriptAttachment(
         source_id=source_id,
@@ -368,7 +355,11 @@ def _declared_timeline_run_paths(
     for run_id in run_ids:
         declared_root = runs_root / run_id
         run_root = declared_root.resolve()
-        if not declared_root.is_symlink() and run_root.parent == runs_root and run_root.name == run_id:
+        if (
+            not declared_root.is_symlink()
+            and run_root.parent == runs_root
+            and run_root.name == run_id
+        ):
             paths.append(run_root / "run.json")
     return paths
 

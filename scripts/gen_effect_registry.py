@@ -17,12 +17,17 @@ TOOLS_DIR = Path(__file__).resolve().parents[1]
 if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
-from astrid.core.element.registry import ElementRegistry, load_default_registry
-from astrid.core.element.schema import ELEMENT_MANIFEST_NAMES, ElementDefinition
+from astrid.core.element.registry import ElementRegistry, load_default_registry  # noqa: E402
+from astrid.core.element.schema import ELEMENT_MANIFEST_NAMES, ElementDefinition  # noqa: E402
 
 WORKSPACE_ROOT = TOOLS_DIR.parent
 THEMES_ROOT = WORKSPACE_ROOT / "themes"
-REMOTION_SRC = TOOLS_DIR / "remotion" / "src"
+# The default is the in-tree app.  Render workers override this for an
+# isolated/provisioned Remotion project so generated shims stay owned by that
+# project and concurrent workers cannot overwrite one another.
+REMOTION_SRC = Path(
+    os.environ.get("ASTRID_REMOTION_SRC", str(TOOLS_DIR / "remotion" / "src"))
+)
 # Sprint 5: composition source moved into
 # packages/timeline-composition. The codegen now writes the generated
 # registries directly into the package source so the package is the

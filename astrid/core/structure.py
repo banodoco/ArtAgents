@@ -18,8 +18,16 @@ from astrid.core.pack import (
     load_pack_manifest,
     pack_manifest_path,
 )
+from astrid.core.schema_packs.manifest import load_schema_pack_manifest
 
-LEGACY_PUBLIC_DIRS = ("conductors", "performers", "instruments", "primitives", "executors", "orchestrators")
+LEGACY_PUBLIC_DIRS = (
+    "conductors",
+    "performers",
+    "instruments",
+    "primitives",
+    "executors",
+    "orchestrators",
+)
 LEGACY_LOCAL_DIRS = ("performers", "conductors", "nodes", "instruments", "primitives")
 INTERNAL_PACK_DIRS = {"__pycache__", "schemas"}
 TOP_LEVEL_ASTRID_FILES = {
@@ -91,13 +99,15 @@ def validate_import_layering(root: str | Path = REPO_ROOT) -> list[str]:
             for module in imported:
                 if not _is_forbidden_core_import(module):
                     continue
-                if not _is_import_layering_exempt(path, repo_root):
+                if not (
+                    _is_import_layering_exempt(path, repo_root)
+                    or _is_declared_cli_mount_import(repo_root, _repo_rel(path, repo_root), module)
+                ):
                     violations.append(f"{rel}:{node.lineno} imports forbidden module {module!r}")
             for module in _dynamic_imported_modules_from_node(node):
-                if (
-                    _is_concrete_pack_implementation_module(module)
-                    and not _is_pack_import_bridge_exempt(path, repo_root)
-                ):
+                if _is_concrete_pack_implementation_module(
+                    module
+                ) and not _is_pack_import_bridge_exempt(path, repo_root):
                     violations.append(
                         f"{rel}:{node.lineno} dynamically imports forbidden concrete pack module {module!r}"
                     )
@@ -128,7 +138,9 @@ def validate_cli_domain_boundary(root: str | Path = REPO_ROOT) -> list[str]:
             try:
                 tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
             except SyntaxError as exc:
-                violations.append(f"could not parse imports in {rel}: {exc.msg} at line {exc.lineno}")
+                violations.append(
+                    f"could not parse imports in {rel}: {exc.msg} at line {exc.lineno}"
+                )
                 continue
             except UnicodeDecodeError as exc:
                 violations.append(f"could not read imports in {rel}: {exc}")
@@ -203,14 +215,18 @@ def validate_migration_completion(root: str | Path = REPO_ROOT) -> list[str]:
 
         deprecated_marker = "DE" + "PRECATED"
         if deprecated_marker in text and not _TODO_MILESTONE_RE.search(text):
-            advisories.append(f"{rel}: {deprecated_marker} marker lacks TODO(milestone) removal target")
+            advisories.append(
+                f"{rel}: {deprecated_marker} marker lacks TODO(milestone) removal target"
+            )
         if _contains_sys_modules_injection(path) and rel not in _SYS_MODULES_INJECTION_EXEMPTIONS:
             advisories.append(f"{rel}: sys.modules injection remains outside tests")
 
         try:
             tree = ast.parse(text, filename=str(path))
         except SyntaxError as exc:
-            advisories.append(f"{rel}: could not parse migration-completion scan: {exc.msg} at line {exc.lineno}")
+            advisories.append(
+                f"{rel}: could not parse migration-completion scan: {exc.msg} at line {exc.lineno}"
+            )
             continue
 
         advisories.extend(_dangling_all_alias_advisories(tree, rel))
@@ -219,7 +235,9 @@ def validate_migration_completion(root: str | Path = REPO_ROOT) -> list[str]:
             module_name = _module_name_for_path(path, repo_root)
             caller_count = len(import_map.get(module_name, set()))
             if caller_count > 0:
-                advisories.append(f"{rel}: compatibility shim still has {caller_count} live import caller(s)")
+                advisories.append(
+                    f"{rel}: compatibility shim still has {caller_count} live import caller(s)"
+                )
     return advisories
 
 
@@ -228,7 +246,9 @@ def _validate_legacy_dirs(repo_root: Path) -> list[str]:
     for dirname in LEGACY_PUBLIC_DIRS:
         candidate = repo_root / "astrid" / dirname
         if candidate.exists():
-            errors.append(f"legacy public package must not exist: {candidate.relative_to(repo_root)}")
+            errors.append(
+                f"legacy public package must not exist: {candidate.relative_to(repo_root)}"
+            )
     return errors
 
 
@@ -240,7 +260,9 @@ def _validate_local_state_dirs(repo_root: Path) -> list[str]:
     for dirname in LEGACY_LOCAL_DIRS:
         candidate = local_root / dirname
         if candidate.exists():
-            errors.append(f"legacy local state directory must not exist: {candidate.relative_to(repo_root)}")
+            errors.append(
+                f"legacy local state directory must not exist: {candidate.relative_to(repo_root)}"
+            )
     return errors
 
 
@@ -255,9 +277,13 @@ def _validate_top_level_astrid(package_root: Path) -> list[str]:
         if child.is_file() and child.name in _DEBRIS_FILE_NAMES:
             continue
         if child.is_file() and child.suffix == ".py" and child.name not in TOP_LEVEL_ASTRID_FILES:
-            errors.append(f"top-level astrid module must move to a canonical package: {child.relative_to(package_root.parents[0])}")
+            errors.append(
+                f"top-level astrid module must move to a canonical package: {child.relative_to(package_root.parents[0])}"
+            )
         if child.is_dir() and child.name not in TOP_LEVEL_ASTRID_DIRS:
-            errors.append(f"top-level astrid directory is not a canonical concept: {child.relative_to(package_root.parents[0])}")
+            errors.append(
+                f"top-level astrid directory is not a canonical concept: {child.relative_to(package_root.parents[0])}"
+            )
     return errors
 
 
@@ -327,7 +353,9 @@ def _validate_golden_build_dir_exemptions() -> list[str]:
     for rel, rationale in sorted(_COMMITTED_GOLDEN_BUILD_DIR_EXEMPTIONS.items()):
         path = Path(rel)
         if path.name != "build":
-            errors.append(f"{rel}: documented golden build exemption must point to an exact build/ directory")
+            errors.append(
+                f"{rel}: documented golden build exemption must point to an exact build/ directory"
+            )
             continue
         if not rationale.strip():
             errors.append(f"{rel}: documented golden build exemption must include a rationale")
@@ -347,18 +375,29 @@ def _validate_pack_executor_folders(packs_root: Path) -> list[str]:
     repo_root = packs_root.parents[1]
     for pack_dir in _public_child_dirs(packs_root, INTERNAL_PACK_DIRS):
         for folder in _public_child_dirs(pack_dir, INTERNAL_PACK_DIRS):
-            if not _has_any(folder, ("executor.yaml", "executor.yml", "executor.json", "executor.py")):
+            if not _has_any(
+                folder, ("executor.yaml", "executor.yml", "executor.json", "executor.py")
+            ):
                 continue
-            errors.extend(_require_files(folder, ("executor.yaml", "run.py", "STAGE.md"), root=repo_root))
-            if _has_any(folder, ("orchestrator.yaml", "orchestrator.yml", "orchestrator.json", "orchestrator.py")):
-                errors.append(f"executor folder contains orchestrator metadata: {folder.relative_to(repo_root)}")
+            errors.extend(
+                _require_files(folder, ("executor.yaml", "run.py", "STAGE.md"), root=repo_root)
+            )
+            if _has_any(
+                folder,
+                ("orchestrator.yaml", "orchestrator.yml", "orchestrator.json", "orchestrator.py"),
+            ):
+                errors.append(
+                    f"executor folder contains orchestrator metadata: {folder.relative_to(repo_root)}"
+                )
             try:
                 definitions = load_folder_executors(folder)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - structural validation reports loader failures
                 errors.append(f"invalid executor folder {folder.relative_to(repo_root)}: {exc}")
                 continue
             if not definitions:
-                errors.append(f"executor folder emitted no executor metadata: {folder.relative_to(repo_root)}")
+                errors.append(
+                    f"executor folder emitted no executor metadata: {folder.relative_to(repo_root)}"
+                )
                 continue
             for definition in definitions:
                 pack_segment = definition.id.split(".", 1)[0]
@@ -377,18 +416,27 @@ def _validate_pack_orchestrator_folders(packs_root: Path) -> list[str]:
     repo_root = packs_root.parents[1]
     for pack_dir in _public_child_dirs(packs_root, INTERNAL_PACK_DIRS):
         for folder in _public_child_dirs(pack_dir, INTERNAL_PACK_DIRS):
-            if not _has_any(folder, ("orchestrator.yaml", "orchestrator.yml", "orchestrator.json", "orchestrator.py")):
+            if not _has_any(
+                folder,
+                ("orchestrator.yaml", "orchestrator.yml", "orchestrator.json", "orchestrator.py"),
+            ):
                 continue
-            errors.extend(_require_files(folder, ("orchestrator.yaml", "run.py", "STAGE.md"), root=repo_root))
+            errors.extend(
+                _require_files(folder, ("orchestrator.yaml", "run.py", "STAGE.md"), root=repo_root)
+            )
             if _has_any(folder, ("executor.yaml", "executor.yml", "executor.json", "executor.py")):
-                errors.append(f"orchestrator folder contains executor metadata: {folder.relative_to(repo_root)}")
+                errors.append(
+                    f"orchestrator folder contains executor metadata: {folder.relative_to(repo_root)}"
+                )
             try:
                 definitions = load_folder_orchestrators(folder)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - structural validation reports loader failures
                 errors.append(f"invalid orchestrator folder {folder.relative_to(repo_root)}: {exc}")
                 continue
             if not definitions:
-                errors.append(f"orchestrator folder emitted no orchestrator metadata: {folder.relative_to(repo_root)}")
+                errors.append(
+                    f"orchestrator folder emitted no orchestrator metadata: {folder.relative_to(repo_root)}"
+                )
                 continue
             for definition in definitions:
                 pack_segment = definition.id.split(".", 1)[0]
@@ -413,7 +461,11 @@ def _public_child_dirs(root: Path, skipped: set[str]) -> tuple[Path, ...]:
 
 
 def _require_files(folder: Path, filenames: tuple[str, ...], *, root: Path) -> list[str]:
-    return [f"{folder.relative_to(root)} missing {filename}" for filename in filenames if not (folder / filename).is_file()]
+    return [
+        f"{folder.relative_to(root)} missing {filename}"
+        for filename in filenames
+        if not (folder / filename).is_file()
+    ]
 
 
 def _has_any(folder: Path, filenames: tuple[str, ...]) -> bool:
@@ -435,7 +487,7 @@ def _validate_pack_element_folders(packs_root: Path) -> list[str]:
         if manifest_path is not None:
             try:
                 kind_registry = element_kind_registry_for_pack(load_pack_manifest(manifest_path))
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - structural validation reports manifest failures
                 errors.append(f"invalid pack manifest {pack_dir.relative_to(repo_root)}: {exc}")
                 continue
         for kind_dir in _public_child_dirs(elements_root, INTERNAL_PACK_DIRS):
@@ -455,10 +507,13 @@ def _validate_pack_element_folders(packs_root: Path) -> list[str]:
                 if _elem_manifest.is_file():
                     try:
                         from astrid.core.pack.manifest import load_manifest_mapping
+
                         _payload = load_manifest_mapping(_elem_manifest, manifest_kind="element")
-                        if isinstance(_payload.get("runtime"), dict) and _payload["runtime"].get("adapter"):
+                        if isinstance(_payload.get("runtime"), dict) and _payload["runtime"].get(
+                            "adapter"
+                        ):
                             _needs_component = False
-                    except Exception:
+                    except Exception:  # noqa: BLE001 - malformed optional metadata is a structure error
                         pass
                 if _needs_component:
                     errors.extend(_require_files(element_dir, ("component.tsx",), root=repo_root))
@@ -473,7 +528,9 @@ def _iter_python_files(root: Path, *, excluded_parts: set[str] | None = None) ->
         sorted(
             path
             for path in root.rglob("*.py")
-            if not any(part in skipped or part.startswith(".") for part in path.relative_to(root).parts)
+            if not any(
+                part in skipped or part.startswith(".") for part in path.relative_to(root).parts
+            )
         )
     )
 
@@ -553,9 +610,31 @@ _LEGACY_PACK_PREFIXES = ("astrid.packs.rendering.", "astrid.packs.builtin.")
 def _is_forbidden_core_import(module: str) -> bool:
     if module != "astrid.packs" and not module.startswith("astrid.packs."):
         return False
-    return not any(
-        module.startswith(prefix) for prefix in _LEGACY_PACK_PREFIXES
-    )
+    return not any(module.startswith(prefix) for prefix in _LEGACY_PACK_PREFIXES)
+
+
+def _is_declared_cli_mount_import(root: Path, rel: str, module: str) -> bool:
+    """Allow only schema-pack CLI mounts declared by the target manifest.
+
+    A kernel family CLI may compose a nested schema-pack parser, but the
+    target pack must explicitly declare the host family in ``cli_mounts``.
+    This keeps the core-to-pack boundary closed for all other imports.
+    """
+    if not (module == "astrid.packs" or module.startswith("astrid.packs.")):
+        return False
+    parts = module.split(".")
+    if len(parts) < 3 or (len(parts) > 3 and parts[3] != "cli"):
+        return False
+    manifest_path = root / "astrid" / "packs" / parts[2] / "schema-pack.yaml"
+    if not manifest_path.is_file():
+        return False
+    try:
+        manifest = load_schema_pack_manifest(manifest_path)
+    except Exception:  # noqa: BLE001 - malformed manifests fail elsewhere
+        return False
+    families = {token for mount in manifest.cli_mounts.values() for token in (mount.split()[:1])}
+    prefix = "astrid/core/cli/domain_"
+    return rel.startswith(prefix) and rel.endswith(".py") and rel[len(prefix) : -3] in families
 
 
 def _is_concrete_pack_implementation_module(module: str) -> bool:
@@ -645,7 +724,9 @@ def _dangling_all_alias_advisories(tree: ast.AST, rel: str) -> list[str]:
         if not isinstance(target, ast.Name) or not isinstance(node.value, ast.Name):
             continue
         if target.id in exported and node.value.id in exported:
-            advisories.append(f"{rel}:{node.lineno}: __all__ exports alias {target.id} = {node.value.id}")
+            advisories.append(
+                f"{rel}:{node.lineno}: __all__ exports alias {target.id} = {node.value.id}"
+            )
     return advisories
 
 
@@ -654,7 +735,9 @@ def _literal_all_exports(tree: ast.AST) -> set[str]:
     for node in ast.walk(tree):
         if not isinstance(node, ast.Assign):
             continue
-        if not any(isinstance(target, ast.Name) and target.id == "__all__" for target in node.targets):
+        if not any(
+            isinstance(target, ast.Name) and target.id == "__all__" for target in node.targets
+        ):
             continue
         value = node.value
         if not isinstance(value, (ast.List, ast.Tuple, ast.Set)):
@@ -692,7 +775,9 @@ def _looks_like_compatibility_shim(text: str) -> bool:
     meaningful_lines = [
         line
         for line in text.splitlines()
-        if line.strip() and not line.lstrip().startswith("#") and not line.lstrip().startswith('"""')
+        if line.strip()
+        and not line.lstrip().startswith("#")
+        and not line.lstrip().startswith('"""')
     ]
     return len(meaningful_lines) <= 12
 

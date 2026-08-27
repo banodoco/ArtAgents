@@ -27,7 +27,6 @@ from scripts.reshape.s1_gate import (
     Lane,
     LaneResult,
     _select_lanes,
-    main,
     run_gate,
 )
 

@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """Scaffold a local Remotion HtmlInCanvas effect element."""
 
+# The canonical-entrypoint guard intentionally runs before imports.
+# ruff: noqa: E402
 
 from __future__ import annotations
 
 from astrid.core.contracts.errors import AstridError
 from astrid.core.pack.entrypoint import guard_canonical_entrypoint
 
-guard_canonical_entrypoint('rendering.html_canvas_effect')
+guard_canonical_entrypoint("rendering.html_canvas_effect")
 import argparse
 import json
 import os
@@ -15,7 +17,6 @@ import re
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
 
 from astrid.core._shared.result_manifest import build_manifest, write_manifest
 from astrid.core.foundation.paths import REPO_ROOT
@@ -67,7 +68,10 @@ def _element_manifest(effect_id: str, label: str, description: str) -> dict:
                 "background": {"type": "string"},
                 "foreground": {"type": "string"},
                 "accent": {"type": "string"},
-                "postProcess": {"type": "string", "enum": ["none", "soft-blur", "glow", "vignette"]},
+                "postProcess": {
+                    "type": "string",
+                    "enum": ["none", "soft-blur", "glow", "vignette"],
+                },
             },
         },
         "defaults": {
@@ -110,7 +114,9 @@ def scaffold(
     element_root = local_pack / "elements" / "effects" / effect_id
     if element_root.exists():
         if not force:
-            raise FileExistsError(f"local effect already exists: {element_root}; pass --force to overwrite")
+            raise FileExistsError(
+                f"local effect already exists: {element_root}; pass --force to overwrite"
+            )
         shutil.rmtree(element_root)
 
     element_root.mkdir(parents=True, exist_ok=False)
@@ -118,7 +124,12 @@ def scaffold(
     manifest_path = element_root / "element.yaml"
     component_path.write_text(_component_source(), encoding="utf-8")
     manifest_path.write_text(
-        json.dumps(_element_manifest(effect_id, resolved_label, resolved_description), indent=2, sort_keys=True) + "\n",
+        json.dumps(
+            _element_manifest(effect_id, resolved_label, resolved_description),
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
         encoding="utf-8",
     )
     ensure_local_pack_for_elements(project_root=project_root)
@@ -151,8 +162,12 @@ def scaffold(
     resolved_assets_path = assets_path or (out_path.parent / "assets.json")
     resolved_timeline_path.parent.mkdir(parents=True, exist_ok=True)
     resolved_assets_path.parent.mkdir(parents=True, exist_ok=True)
-    resolved_timeline_path.write_text(json.dumps(preview_timeline, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    resolved_assets_path.write_text(json.dumps(preview_assets, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    resolved_timeline_path.write_text(
+        json.dumps(preview_timeline, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    resolved_assets_path.write_text(
+        json.dumps(preview_assets, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
     report = {
         "ok": True,
         "effect_id": effect_id,
@@ -177,8 +192,12 @@ def scaffold(
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Scaffold a local Remotion HtmlInCanvas effect element.")
-    parser.add_argument("--effect-id", required=True, help="Bare kebab-case effect id, e.g. glass-product-card.")
+    parser = argparse.ArgumentParser(
+        description="Scaffold a local Remotion HtmlInCanvas effect element."
+    )
+    parser.add_argument(
+        "--effect-id", required=True, help="Bare kebab-case effect id, e.g. glass-product-card."
+    )
     parser.add_argument("--label", help="Human-readable effect label.")
     parser.add_argument("--description", help="Short effect description.")
     parser.add_argument("--project-root", type=Path, default=REPO_ROOT, help="Astrid project root.")
@@ -203,7 +222,10 @@ def main(argv: list[str] | None = None) -> int:
             force=args.force,
         )
     except (FileExistsError, OSError, ValueError) as exc:
-        raise AstridError(str(exc), recovery_command="check the effect id, file paths, and permissions, then rerun") from exc
+        raise AstridError(
+            str(exc),
+            recovery_command="check the effect id, file paths, and permissions, then rerun",
+        ) from exc
 
     # --- universal result manifest (output-contract M2) -----------------------
     out_file = args.out.resolve()
@@ -219,9 +241,18 @@ def main(argv: list[str] | None = None) -> int:
         },
         outputs=[
             {"path": out_file.name, "type": "file"},
-            {"path": os.path.relpath(Path(report["element_root"]).resolve(), manifest_dir), "type": "directory"},
-            {"path": os.path.relpath(Path(report["preview_timeline"]).resolve(), manifest_dir), "type": "file"},
-            {"path": os.path.relpath(Path(report["preview_assets"]).resolve(), manifest_dir), "type": "file"},
+            {
+                "path": os.path.relpath(Path(report["element_root"]).resolve(), manifest_dir),
+                "type": "directory",
+            },
+            {
+                "path": os.path.relpath(Path(report["preview_timeline"]).resolve(), manifest_dir),
+                "type": "file",
+            },
+            {
+                "path": os.path.relpath(Path(report["preview_assets"]).resolve(), manifest_dir),
+                "type": "file",
+            },
         ],
         created=datetime.now(timezone.utc).isoformat(),
     )

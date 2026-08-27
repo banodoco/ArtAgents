@@ -104,13 +104,17 @@ def _sha256_canonical(payload: Any) -> str:
 
 
 def registry_scope(registry: Mapping[str, CapabilityEntry]) -> dict[str, Any]:
-    """Registry scope: derived entry fields per capability id."""
+    """Registry scope: admission fields and pinned adapter bytes per id."""
     return {
         capability_id: {
             "definition_version": entry.definition_version,
             "binding": entry.binding,
             "output_policy": entry.output_policy,
             "probe": entry.probe,
+            # Template paths and digests are installed adapter inputs. Keep
+            # them in the boot scope so changing either cannot hide behind a
+            # stable capability id or definition version.
+            "template": list(entry.template) if entry.template is not None else None,
         }
         for capability_id, entry in sorted(registry.items())
     }
@@ -150,9 +154,20 @@ def compute_registry_digest(
     any fixture row changes the digest, and each direction is independently
     visible through :func:`registry_scope` / :func:`fixture_scope`.
     """
+    fixture_rows = tuple(fixtures)
+    fixture_ids = [fixture.capability_id for fixture in fixture_rows]
+    if len(fixture_ids) != len(set(fixture_ids)):
+        raise BootManifestError("duplicate capability conformance fixture id")
+    missing = sorted(set(registry) - set(fixture_ids))
+    extra = sorted(set(fixture_ids) - set(registry))
+    if missing or extra:
+        raise BootManifestError(
+            "capability conformance fixture census disagrees with registry "
+            f"(missing={missing}, extra={extra})"
+        )
     payload = {
         "registry": registry_scope(registry),
-        "fixtures": fixture_scope(fixtures),
+        "fixtures": fixture_scope(fixture_rows),
     }
     return _sha256_canonical(payload)
 
@@ -268,6 +283,12 @@ def _load_stored(path: Path) -> dict[str, Any]:
             f"stamped boot manifest at {path} is malformed "
             f"(missing/invalid fields: {missing or ['schema_version']})"
         )
+    try:
+        assert_secret_free(raw)
+    except BootManifestError as exc:
+        raise BootManifestCorrupt(
+            f"stamped boot manifest at {path} is not trusted: {exc}"
+        ) from None
     return raw
 
 
@@ -285,6 +306,7 @@ def stamp_boot_manifest(
     :class:`BootManifestDrift` naming each drifted field with both values.
     """
     current = build_manifest(registry=registry, fixtures=fixtures)
+    assert_secret_free(current)
     path = boot_manifest_path(projects_root)
     if path.exists():
         stored = _load_stored(path)

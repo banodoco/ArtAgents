@@ -595,9 +595,6 @@ def test_track_opacity_below_one_is_copied_onto_layer_ref(tmp_path: Path) -> Non
 # ---------------------------------------------------------------------------
 
 
-STACKED_PROOF = REPO_ROOT / ".oracle" / "findings" / "stacked-render-proof.txt"
-
-
 def _require_stacked_environment() -> None:
     from tests.packs.rendering.test_threejs_backend import _missing_environment
 
@@ -743,6 +740,7 @@ class _InjectPlanTransport:
 
 def _write_stacked_proof(
     *,
+    proof_path: Path,
     output: Path,
     probe: dict,
     sidecar: dict,
@@ -756,8 +754,7 @@ def _write_stacked_proof(
         (stream for stream in probe["streams"] if stream["codec_type"] == "audio"),
         None,
     )
-    STACKED_PROOF.parent.mkdir(parents=True, exist_ok=True)
-    STACKED_PROOF.write_text(
+    proof_path.write_text(
         "\n".join(
             [
                 "Layer Stack — real stacked render proof",
@@ -843,7 +840,9 @@ def _assert_stacked_output(
     assert _is_not_media(text_pixel), text_pixel
 
     if proof:
+        proof_path = tmp_path / "stacked-render-proof.txt"
         _write_stacked_proof(
+            proof_path=proof_path,
             output=output,
             probe=probe,
             sidecar=sidecar,
@@ -860,6 +859,7 @@ def _assert_stacked_output(
                 for segment in segments
             ],
         )
+        assert proof_path.is_file()
 
 
 @pytest.mark.timeout(900)

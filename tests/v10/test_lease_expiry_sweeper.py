@@ -121,3 +121,12 @@ def test_sweeper_expires_crashed_attempt_and_requeue_allows_claim(task_env) -> N
     assert second is not None
     assert second.task.id == task.id
     assert second.attempt.attempt_no == 2
+
+
+def test_writer_close_joins_sweeper_before_database_teardown(task_env) -> None:
+    """Closing a shared writer must not leave a daemon probing its DB."""
+    sweeper = LeaseExpirySweeper(
+        task_env.writer, task_env.task_repo, interval_seconds=60
+    )
+    task_env.writer.close()
+    assert not sweeper._thread.is_alive()

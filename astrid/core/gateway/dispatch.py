@@ -12,6 +12,7 @@ from typing import Any
 
 from astrid.core.contracts.errors import AstridError
 
+
 def _dispatch(raw: list[str]) -> int:
     from . import _print_entrypoint_help
 
@@ -154,7 +155,9 @@ def _dispatch_serve(args: list[str]) -> int:
         prog="astrid serve", description="Start the Astrid local bridge."
     )
     parser.add_argument(
-        "--host", default="127.0.0.1", help="Host to bind (default: 127.0.0.1)",
+        "--host",
+        default="127.0.0.1",
+        help="Loopback host to bind (default: 127.0.0.1; remote binds are refused)",
     )
     parser.add_argument(
         "--port", type=int, default=0, help="Port to bind (default: 0 = OS-assigned)",
@@ -176,7 +179,39 @@ def _dispatch_serve(args: list[str]) -> int:
         action="store_true",
         help="Skip opening the editor (headless/CI use).",
     )
+    parser.add_argument(
+        "--release-mode",
+        "--require-auth",
+        dest="release_mode",
+        action="store_true",
+        help=(
+            "Require ASTRID_BRIDGE_TOKEN bearer auth and the v1 client "
+            "protocol header; fail before binding when the token is absent."
+        ),
+    )
+    parser.add_argument(
+        "--no-render-worker",
+        action="store_true",
+        help="Do not start Astrid's serve-owned rendering.render worker.",
+    )
+    parser.add_argument(
+        "--render-worker-poll-seconds",
+        type=float,
+        default=1.0,
+        help="Render worker queue poll interval (default: 1 second).",
+    )
+    parser.add_argument(
+        "--render-worker-deadline-seconds",
+        type=float,
+        default=30 * 60,
+        help="Per-render worker deadline (default: 1800 seconds).",
+    )
     parsed = parser.parse_args(args)
+
+    if parsed.render_worker_poll_seconds <= 0:
+        parser.error("--render-worker-poll-seconds must be positive")
+    if parsed.render_worker_deadline_seconds <= 0:
+        parser.error("--render-worker-deadline-seconds must be positive")
 
     # Typed failure: a missing explicit editor path never silently falls back.
     if parsed.editor_path is not None and not Path(parsed.editor_path).exists():
@@ -197,63 +232,49 @@ def _dispatch_serve(args: list[str]) -> int:
         )
         return 1
 
+    # Verify-or-stamp the executor build receipt at the serve composition
+    # root, before transport creation. Pack conformance rows are supplied
+    # here at the sanctioned kernel/pack boundary; registry or fixture drift
+    # fails startup closed instead of being silently restamped.
+    from astrid.core.integrations.reigh.boot_manifest import (
+        BootManifestError,
+        stamp_boot_manifest,
+    )
+
     try:
-        # B9 boot manifest (plan task 11): verify-or-stamp the executor-build
-        # manifest at the composition root, BEFORE server creation — never in
-        # ``local_bridge_server`` (transport-only by construction). Registry or
-        # conformance-fixture drift since the last stamp fails startup closed.
-        from astrid.core.integrations.reigh.boot_manifest import (
-            BootManifestError,
-            stamp_boot_manifest,
+        from astrid.packs.shots.conformance import capability_conformance_specs
+
+        stamp_boot_manifest(
+            composition.projects_root,
+            fixtures=capability_conformance_specs(),
         )
+    except BootManifestError as exc:
+        print(f"serve failed: {exc}", file=sys.stderr)
+        composition.close()
+        return 1
 
+    try:
+        render_worker = None
+        server = None
         try:
-            from astrid.packs.shots.conformance import capability_conformance_specs
-
-            stamp_boot_manifest(
-                composition.projects_root,
-                fixtures=capability_conformance_specs(),
+            server = create_local_bridge_server(
+                host=parsed.host,
+                port=parsed.port,
+                projects_root=composition.projects_root,
+                # Bridge, writer, and database path are constructor-injected at
+                # this composition root (m4 plan step 21): there is no
+                # post-construction ``server.bridge = ...`` assignment, so the
+                # HTTP server never gains a second authority. The writer stays
+                # owned by this root and is closed on shutdown below.
+                bridge=composition.bridge,
+                task_bridge=composition.task_bridge,
+                writer=composition.writer,
+                database_path=composition.database_path,
+                release_mode=parsed.release_mode,
             )
-        except BootManifestError as exc:
+        except (OSError, ValueError) as exc:
             print(f"serve failed: {exc}", file=sys.stderr)
             return 1
-
-        # Compose the task/executor bridge alongside the timeline bridge. The
-        # HTTP discovery document advertises task admission, queue, and
-        # fenced-attempt routes; leaving this constructor input unset makes
-        # those public routes fail closed even though the kernel has all of
-        # the required repositories. Keep pack-owned imports in this
-        # composition root and reuse the composition's single repositories
-        # and writer for completion-time generation/timeline settlement.
-        from astrid.core.integrations.reigh.bridge_service import ReighTaskBridge
-
-        def _generation_repo_factory() -> object:
-            from astrid.packs.shots.generation_repository import GenerationRepository
-
-            return GenerationRepository()
-
-        task_bridge = ReighTaskBridge(
-            writer=composition.writer,
-            registry=composition.registry,
-            projects_root=composition.projects_root,
-            generation_repo_factory=_generation_repo_factory,
-            timeline_repo_factory=lambda: composition.timelines,
-        )
-
-        server = create_local_bridge_server(
-            host=parsed.host,
-            port=parsed.port,
-            projects_root=composition.projects_root,
-            # Bridge, writer, and database path are constructor-injected at
-            # this composition root (m4 plan step 21): there is no
-            # post-construction ``server.bridge = ...`` assignment, so the
-            # HTTP server never gains a second authority. The writer stays
-            # owned by this root and is closed on shutdown below.
-            bridge=composition.bridge,
-            writer=composition.writer,
-            database_path=composition.database_path,
-            task_bridge=task_bridge,
-        )
         host, port = server.server_address
 
         # Resolve and open the editor (readiness is printed after bind).
@@ -307,16 +328,59 @@ def _dispatch_serve(args: list[str]) -> int:
             "(not the media_id)."
         )
 
+        if not parsed.no_render_worker:
+            from astrid.core.integrations.reigh.render_export_worker import (
+                HttpRenderExportWorkerTransport,
+                RenderExportServeWorker,
+            )
+
+            worker_host = host
+            if ":" in worker_host and not worker_host.startswith("["):
+                worker_host = f"[{worker_host}]"
+            render_worker = RenderExportServeWorker(
+                HttpRenderExportWorkerTransport(
+                    f"http://{worker_host}:{port}",
+                    token=getattr(server, "bridge_auth_token", None) or "",
+                    require_auth=getattr(server, "bridge_auth_token", None) is not None,
+                    timeout_seconds=5.0,
+                ),
+                projects_root=composition.projects_root,
+                executor_id=f"astrid-serve-render-{os.getpid()}",
+                poll_interval_seconds=parsed.render_worker_poll_seconds,
+                deadline_seconds=parsed.render_worker_deadline_seconds,
+            )
+            render_worker.start()
+
+        shutdown_started = threading.Event()
+
         def _shutdown(_signum: int, _frame: Any) -> None:
+            if shutdown_started.is_set():
+                return
+            shutdown_started.set()
             print("\nShutting down...", flush=True)
-            # http.server contract: ``shutdown()`` blocks until the
-            # ``serve_forever()`` loop exits, so calling it from the signal
-            # handler on the serving thread deadlocks. Run it on a helper
-            # thread instead; the main thread then falls out of
-            # ``serve_forever()`` and closes the server normally.
+
+            def _coordinate_shutdown() -> None:
+                # Keep the bridge serving while the worker interrupts its
+                # child, reconciles any in-flight completion, and releases
+                # its claim.  The signal handler itself must return quickly:
+                # it runs on the serve_forever thread, which must continue
+                # accepting the worker's final heartbeat/ACK requests.
+                if render_worker is not None:
+                    try:
+                        render_worker.stop()
+                    except Exception as exc:  # noqa: BLE001 - fail visibly, retry in finally
+                        print(
+                            f"render worker shutdown failed: {type(exc).__name__}: {exc}",
+                            file=sys.stderr,
+                            flush=True,
+                        )
+                # ``shutdown()`` is called off the serving thread, as required
+                # by http.server, and only after worker settlement is stopped.
+                server.shutdown()
+
             threading.Thread(
-                target=server.shutdown,
-                name="astrid-serve-shutdown",
+                target=_coordinate_shutdown,
+                name="astrid-serve-shutdown-coordinator",
                 daemon=True,
             ).start()
 
@@ -327,12 +391,18 @@ def _dispatch_serve(args: list[str]) -> int:
             server.serve_forever()
         except KeyboardInterrupt:
             pass
-        finally:
-            server.server_close()
     finally:
-        # Closes the writer, then releases the exclusive-owner lock held
-        # since composition (StandardBridgeComposition.close contract).
-        composition.close()
+        try:
+            if render_worker is not None:
+                render_worker.stop()
+        finally:
+            try:
+                if server is not None:
+                    server.server_close()
+            finally:
+                # Closes the writer, then releases the exclusive-owner lock
+                # held since composition (StandardBridgeComposition.close).
+                composition.close()
 
     return 0
 

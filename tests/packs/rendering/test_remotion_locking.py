@@ -9,6 +9,7 @@ from unittest import mock
 
 import pytest
 
+from astrid.core.integrations.reigh.remotion_runtime import RemotionRuntimeTools
 from astrid.packs.rendering.backends.remotion import lock as remotion_lock
 from astrid.packs.rendering.backends.remotion import run as remotion
 from scripts import gen_effect_registry, gen_remotion_types
@@ -95,7 +96,15 @@ def test_lock_is_held_during_registry_generation_and_remotion_render(
                 events.append("lock-exit")
 
     monkeypatch.setattr(remotion_lock, "remotion_render_lock", observed_lock)
-    monkeypatch.setattr(remotion, "_validate_project_dir", lambda project_dir: None)
+    monkeypatch.setattr(
+        remotion,
+        "_validate_project_dir",
+        lambda project_dir: RemotionRuntimeTools(
+            Path("/trusted/node"),
+            "v20.19.4",
+            project_dir / "node_modules/@remotion/cli/remotion-cli.js",
+        ),
+    )
     monkeypatch.setattr(remotion, "_effective_registry_state", lambda theme: {"hash": "state"})
     monkeypatch.setattr(remotion, "_read_registry_state", lambda project_dir: None)
 
@@ -125,7 +134,11 @@ def test_lock_is_held_during_registry_generation_and_remotion_render(
             assert remotion_lock.REMOTION_LOCK_OWNER_ENV in kwargs["env"]
             events.append("generation")
         else:
-            assert normalized[:3] == ["npx", "remotion", "render"]
+            assert Path(normalized[0]).name == "node"
+            assert normalized[1].endswith(
+                "node_modules/@remotion/cli/remotion-cli.js"
+            )
+            assert normalized[2] == "render"
             events.append("render")
             output = Path(normalized[normalized.index("--output") + 1])
             output.write_bytes(b"video")

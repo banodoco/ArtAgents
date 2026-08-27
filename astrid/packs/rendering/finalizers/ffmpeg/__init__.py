@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-
 BACKEND_ID = "rendering.ffmpeg-finalizer"
 BACKEND_VERSION = "1.0.0"
 FINALIZER_ID = BACKEND_ID

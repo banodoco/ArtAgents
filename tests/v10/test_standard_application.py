@@ -13,7 +13,7 @@ Proves the deterministic kernel composition in ``astrid.application``:
 - **pack-independent core:** the kernel event repository and the
   ``compose_core_application`` wiring never import ``astrid.packs``;
 - **no table added:** a fresh composed database contains exactly the frozen
-  22-table catalog (14 kernel + 8 pack tables) and nothing else;
+  23-table catalog (14 kernel + 9 pack tables) and nothing else;
 - **no dynamic discovery:** the composition and event repository source
   contain no loader/scanning machinery;
 - **deterministic close:** ``close()`` drains queued work, is idempotent,
@@ -64,9 +64,9 @@ from astrid.sdk.shots import ShotsService
 from astrid.sdk.tasks import TasksService
 from astrid.sdk.timelines import TimelinesService
 
-EXPECTED_TABLE_COUNT = 22
-"""The frozen catalog: 14 kernel tables + 8 pack tables (timeline 1,
-shots 4, references 3)."""
+EXPECTED_TABLE_COUNT = 23
+"""The frozen catalog: 14 kernel tables + 9 pack tables (timeline 1,
+shots 4, references 3, runaway 1)."""
 
 
 # ---------------------------------------------------------------------------
@@ -300,7 +300,7 @@ def test_composed_database_is_exactly_the_frozen_catalog(tmp_path: Path) -> None
     with compose_standard_application(projects_root=tmp_path) as app:
         expected = set(app.registry.tables.keys())
         assert len(expected) == EXPECTED_TABLE_COUNT
-        assert set(STANDARD_SCHEMA_PACKS) == {"timeline", "shots", "references"}
+        assert set(STANDARD_SCHEMA_PACKS) == {"timeline", "shots", "references", "runaway"}
         with app.writer.read_only_connection() as conn:
             names = {
                 row[0]

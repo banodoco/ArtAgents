@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -51,6 +52,7 @@ def test_ci_json_stdout_is_pure_json_and_contract_matches() -> None:
     # (keys, per-lane shape, exit/ok invariant) is identical regardless.
     env = os.environ.copy()
     env["ASTRID_CI_SKIP_BROAD"] = "1"
+    env["PYTHON_BIN"] = sys.executable
     proc = subprocess.Popen(
         ["bash", str(ci_script), "--json"],
         stdout=subprocess.PIPE,

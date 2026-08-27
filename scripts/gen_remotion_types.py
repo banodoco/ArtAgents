@@ -1,17 +1,23 @@
 #!/usr/bin/env python3
 """Generate Remotion TypeScript types from banodoco_schema.py."""
 
+# The repository root is inserted before importing Astrid so this script works
+# directly from a checkout; that intentional path bootstrap triggers E402.
+# ruff: noqa: E402
+
 import argparse
 import sys
 import types
 from pathlib import Path
 from typing import Any, Literal, NotRequired, Required, Union, get_args, get_origin, get_type_hints
 from typing import is_typeddict as _stdlib_is_typeddict
+
 from typing_extensions import is_typeddict as _ext_is_typeddict
 
 
 def is_typeddict(value: object) -> bool:
     return _stdlib_is_typeddict(value) or _ext_is_typeddict(value)
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -67,9 +73,9 @@ def _is_public_typeddict(name: str, value: object) -> bool:
     return not name.startswith("_") and is_typeddict(value)
 
 
-def _build_typeddict_registry() -> (
-    tuple[dict[int, str], list[tuple[str, type[Any]]], dict[int, list[str]]]
-):
+def _build_typeddict_registry() -> tuple[
+    dict[int, str], list[tuple[str, type[Any]]], dict[int, list[str]]
+]:
     """Group TypedDicts by class identity and pick the canonical emit name.
 
     Returns ``(canonical_by_id, ordered_canonical_emissions, aliases_by_id)``.
@@ -79,9 +85,7 @@ def _build_typeddict_registry() -> (
     class becomes a ``export type X = Canonical;`` back-compat alias.
     """
     members = [
-        (name, value)
-        for name, value in vars(timeline).items()
-        if _is_public_typeddict(name, value)
+        (name, value) for name, value in vars(timeline).items() if _is_public_typeddict(name, value)
     ]
     by_id: dict[int, list[str]] = {}
     value_by_id: dict[int, type[Any]] = {}
@@ -99,7 +103,19 @@ def _build_typeddict_registry() -> (
         if id(typed_dict) in visited:
             continue
         visited.add(id(typed_dict))
-        for annotation in get_type_hints(typed_dict, include_extras=True).values():
+        names = by_id[id(typed_dict)]
+        shared = sorted(name for name in names if name.startswith("Shared"))
+        canonical_name = shared[0] if shared else sorted(names)[0]
+        for field_name, annotation in get_type_hints(typed_dict, include_extras=True).items():
+            # An override replaces the complete upstream annotation at the TS
+            # boundary. Do not recursively emit private codegen types that are
+            # reachable only through that replaced annotation: shared schema
+            # releases can expose a private ``Clip`` behind
+            # SharedTimelineConfig.clips, which otherwise collides with the
+            # intentional public ``Clip = SharedTimelineClip`` compatibility
+            # alias below.
+            if (canonical_name, field_name) in _FIELD_TYPE_OVERRIDES:
+                continue
             pending = [annotation]
             while pending:
                 candidate = pending.pop()

@@ -1,0 +1,530 @@
+"""Pack-owned task adapter for the real timeline MP4 renderer.
+
+The bridge's ``render_export`` task is admitted with a frozen timeline
+snapshot.  This adapter turns that snapshot back into the two concrete input
+files expected by the canonical ``rendering.render`` executor, invokes the
+existing renderer, and returns one universal result manifest.  It deliberately
+does not synthesize a placeholder video or fall back to the visualization
+renderer: missing inputs and renderer failures remain typed task failures.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import mimetypes
+import os
+import shutil
+import tempfile
+import time
+from contextlib import contextmanager
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Callable, Iterator, Mapping
+from urllib.parse import urlparse
+
+from astrid.core.env_vars import ASTRID_REMOTION_PROJECT_DIR
+from astrid.core.execution.executor.registry import load_default_registry
+from astrid.core.execution.executor.runner import ExecutorRunRequest, run_executor
+
+PACK_ID = "rendering.render"
+FAMILY = "render_export"
+# The paired/local worker uses the server-owned Remotion policy.  The
+# canonical service may support-route ordinary timelines to FFmpeg, while
+# Remotion-only caption/text timelines remain on the real Remotion backend.
+# This is fixed policy, never a browser parameter.
+DEFAULT_ENGINE = "remotion"
+DEFAULT_OUTPUT_NAME = "render.mp4"
+_MAX_DEADLINE_SECONDS = 60 * 60
+_FORBIDDEN_CALLER_PARAMS = frozenset({"engine", "backend", "backend_config", "project_dir"})
+
+
+class RenderExportRefused(RuntimeError):
+    """Raised when an admitted render cannot be executed safely."""
+
+
+@dataclass(frozen=True, slots=True)
+class RenderExportExecutionContext:
+    """Cooperative execution controls shared by local and HTTP workers.
+
+    The renderer remains a synchronous library call, so cancellation and the
+    deadline are checked at every adapter boundary and progress is emitted at
+    bounded phase transitions.  A transport worker can use ``progress`` to
+    heartbeat the live attempt without coupling this pack to HTTP.
+    """
+
+    deadline_at: float
+    cancelled: Callable[[], bool] = lambda: False
+    progress: Callable[[Mapping[str, Any]], None] = lambda _payload: None
+
+    @classmethod
+    def bounded(
+        cls,
+        *,
+        deadline_seconds: float = 30 * 60,
+        cancelled: Callable[[], bool] | None = None,
+        progress: Callable[[Mapping[str, Any]], None] | None = None,
+    ) -> "RenderExportExecutionContext":
+        if not isinstance(deadline_seconds, (int, float)) or isinstance(deadline_seconds, bool):
+            raise RenderExportRefused("render_export deadline_seconds must be numeric")
+        if deadline_seconds <= 0 or deadline_seconds > _MAX_DEADLINE_SECONDS:
+            raise RenderExportRefused(
+                f"render_export deadline_seconds must be in (0, {_MAX_DEADLINE_SECONDS}]"
+            )
+        return cls(
+            deadline_at=time.monotonic() + float(deadline_seconds),
+            cancelled=cancelled or (lambda: False),
+            progress=progress or (lambda _payload: None),
+        )
+
+    def check(self, phase: str) -> None:
+        if self.cancelled():
+            raise RenderExportRefused(f"render_export cancelled during {phase}")
+        if time.monotonic() >= self.deadline_at:
+            raise RenderExportRefused(f"render_export deadline exceeded during {phase}")
+
+    def report(self, phase: str, percent: int) -> None:
+        self.check(phase)
+        self.progress({"phase": phase, "percent": max(0, min(100, int(percent)))})
+
+
+def _require_string(value: object, field: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise RenderExportRefused(f"render_export {field} must be a non-empty string")
+    return value.strip()
+
+
+def _digest_file(path: Path) -> tuple[str, int]:
+    digest = hashlib.sha256()
+    size = 0
+    with path.open("rb") as handle:
+        while chunk := handle.read(1024 * 1024):
+            digest.update(chunk)
+            size += len(chunk)
+    return digest.hexdigest(), size
+
+
+def _digest_value(value: object) -> str:
+    if not isinstance(value, str):
+        raise RenderExportRefused("render_export asset digest must be a string")
+    digest = value.removeprefix("sha256:")
+    if len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+        raise RenderExportRefused("render_export asset digest is invalid")
+    return digest
+
+
+def _asset_extension(asset: Mapping[str, Any]) -> str:
+    mime = asset.get("type") or asset.get("mime_type")
+    guessed = mimetypes.guess_extension(str(mime)) if isinstance(mime, str) else None
+    return guessed or ".bin"
+
+
+def _stage_managed_registry(
+    *,
+    registry: Mapping[str, Any],
+    projects_root: Path,
+    inputs_dir: Path,
+    context: RenderExportExecutionContext,
+) -> Mapping[str, Any]:
+    assets = registry.get("assets")
+    if not isinstance(assets, Mapping):
+        raise RenderExportRefused("render_export timeline registry assets are invalid")
+    staged_assets = inputs_dir / "assets"
+    staged_assets.mkdir(mode=0o700, exist_ok=True)
+    rewritten: dict[str, Any] = {}
+    for ordinal, (asset_key, raw_asset) in enumerate(assets.items()):
+        context.report("stage_asset", min(25, 5 + ordinal))
+        if not isinstance(asset_key, str) or not asset_key:
+            raise RenderExportRefused("render_export asset key must be non-empty")
+        if not isinstance(raw_asset, Mapping):
+            raise RenderExportRefused(f"render_export asset {asset_key!r} is invalid")
+        display_file = raw_asset.get("file")
+        if display_file is not None:
+            if not isinstance(display_file, str) or not display_file:
+                raise RenderExportRefused(
+                    f"render_export asset {asset_key!r} file must be a string"
+                )
+            parsed = urlparse(display_file)
+            if (
+                Path(display_file).is_absolute()
+                or parsed.scheme
+                or parsed.netloc
+                or display_file.startswith("//")
+                or "\x00" in display_file
+                or ".." in Path(display_file).parts
+            ):
+                raise RenderExportRefused(
+                    f"render_export asset {asset_key!r} file must be a safe relative display name"
+                )
+        if any(key in raw_asset for key in ("path", "url", "uri")):
+            raise RenderExportRefused(
+                f"render_export asset {asset_key!r} contains an unmanaged locator"
+            )
+        media_id = _require_string(raw_asset.get("media_id"), f"asset {asset_key} media_id")
+        expected = _digest_value(raw_asset.get("content_sha256"))
+        source = (
+            projects_root / ".astrid" / "media" / "sha256" / expected[:2] / expected[2:4] / expected
+        )
+        source = source.resolve()
+        managed_root = (projects_root / ".astrid" / "media" / "sha256").resolve()
+        try:
+            source.relative_to(managed_root)
+        except ValueError as exc:
+            raise RenderExportRefused("render_export managed asset escaped its media tree") from exc
+        if source.is_symlink() or not source.is_file():
+            raise RenderExportRefused(f"render_export managed media {media_id!r} is missing")
+        actual, size = _digest_file(source)
+        if actual != expected:
+            raise RenderExportRefused(f"render_export managed media {media_id!r} digest mismatch")
+        destination = staged_assets / f"{ordinal:04d}{_asset_extension(raw_asset)}"
+        # Managed media is immutable authority. A writable hard link in task
+        # staging would let any downstream in-place write corrupt the CAS
+        # inode, so always create an independent file (fast-copy/COW where the
+        # platform supports it).
+        shutil.copyfile(source, destination)
+        staged_digest, staged_size = _digest_file(destination)
+        if staged_digest != expected or staged_size != size:
+            raise RenderExportRefused(
+                f"render_export staged media {media_id!r} failed verification"
+            )
+        entry = {
+            key: value
+            for key, value in raw_asset.items()
+            if key
+            not in {
+                "file",
+                "path",
+                "url",
+                "uri",
+                # These are queue/managed-media provenance fields, not
+                # renderer registry fields; FFmpeg/Remotion reject unknown
+                # asset keys by design.
+                "media_id",
+                "content_sha256",
+            }
+        }
+        entry.update(
+            {
+                "file": str(destination),
+            }
+        )
+        rewritten[asset_key] = entry
+    result = dict(registry)
+    result["assets"] = rewritten
+    return result
+
+
+@contextmanager
+def _scoped_env(key: str, value: str) -> Iterator[None]:
+    previous = os.environ.get(key)
+    os.environ[key] = value
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = previous
+
+
+@contextmanager
+def _project_env(project_root: Path) -> Iterator[None]:
+    with _scoped_env("ASTRID_PROJECTS_ROOT", str(project_root.parent)):
+        yield
+
+
+def _decode_spec(task: Any) -> tuple[str, Mapping[str, Any], Mapping[str, Any], dict[str, Any]]:
+    spec = getattr(task, "spec", None)
+    if not isinstance(spec, Mapping):
+        raise RenderExportRefused("render_export task spec must be an object")
+    if spec.get("family") not in (None, FAMILY):
+        raise RenderExportRefused("render_export task spec family is incompatible")
+    project_slug = _require_string(spec.get("project_slug"), "project_slug")
+    snapshot = spec.get("timeline_snapshot")
+    if not isinstance(snapshot, Mapping):
+        raise RenderExportRefused("render_export task is missing its timeline snapshot")
+    config = snapshot.get("config")
+    registry = snapshot.get("registry")
+    if not isinstance(config, Mapping):
+        raise RenderExportRefused("render_export timeline snapshot config is invalid")
+    if not isinstance(registry, Mapping) or not isinstance(registry.get("assets"), Mapping):
+        raise RenderExportRefused("render_export timeline snapshot registry is invalid")
+    params = spec.get("params")
+    if not isinstance(params, Mapping):
+        raise RenderExportRefused("render_export task params must be an object")
+    return project_slug, config, registry, dict(params)
+
+
+def _write_json(path: Path, payload: Mapping[str, Any]) -> None:
+    path.write_text(
+        json.dumps(dict(payload), sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8"
+    )
+
+
+class RenderExportTaskAdapter:
+    """Execute one admitted render-export task through ``rendering.render``."""
+
+    def __init__(self, *, projects_root: str | Path) -> None:
+        self._projects_root = Path(projects_root).expanduser().resolve()
+        if not self._projects_root.is_dir():
+            raise RenderExportRefused(f"projects root is not a directory: {self._projects_root}")
+
+    def execute(
+        self,
+        *,
+        task: Any,
+        staging_dir: Path,
+        context: RenderExportExecutionContext | None = None,
+    ) -> Mapping[str, Any]:
+        context = context or RenderExportExecutionContext.bounded()
+        context.report("admit", 0)
+        project_slug, config, registry, params = _decode_spec(task)
+        from astrid.core.integrations.reigh.remotion_runtime import (
+            remotion_runtime_status,
+            timeline_requires_remotion,
+        )
+
+        remotion_status = remotion_runtime_status(require_explicit_project=True)
+        if timeline_requires_remotion(config) and not remotion_status.available:
+            raise RenderExportRefused(
+                "server-owned Remotion runtime unavailable: "
+                + (remotion_status.reason or "unknown reason")
+            )
+        project_root = (self._projects_root / project_slug).resolve()
+        if not project_root.is_dir() or project_root.parent != self._projects_root:
+            raise RenderExportRefused(f"render_export project is missing: {project_slug}")
+
+        staging_dir = Path(staging_dir).resolve()
+        staging_dir.mkdir(parents=True, exist_ok=True)
+        inputs_dir = staging_dir / "render-inputs"
+        inputs_dir.mkdir(mode=0o700, exist_ok=True)
+        timeline_path = inputs_dir / "timeline.json"
+        assets_path = inputs_dir / "assets.json"
+        context.report("prepare_inputs", 5)
+        forbidden = sorted(_FORBIDDEN_CALLER_PARAMS.intersection(params))
+        if forbidden:
+            raise RenderExportRefused(
+                "render_export server-owned parameter(s) are not accepted: " + ", ".join(forbidden)
+            )
+        staged_registry = _stage_managed_registry(
+            registry=registry,
+            projects_root=self._projects_root,
+            inputs_dir=inputs_dir,
+            context=context,
+        )
+        _write_json(timeline_path, config)
+        _write_json(assets_path, staged_registry)
+
+        # The canonical executor enforces that declared timeline artifacts are
+        # project-owned. Keep the externally-visible staging pack unchanged,
+        # but provide short-lived owned copies for dispatch.
+        owned_inputs_dir = Path(tempfile.mkdtemp(prefix=".render-inputs-", dir=project_root))
+        try:
+            owned_timeline_path = owned_inputs_dir / "timeline.json"
+            owned_assets_path = owned_inputs_dir / "assets.json"
+            shutil.copy2(timeline_path, owned_timeline_path)
+            owned_assets = owned_inputs_dir / "assets"
+            owned_assets.mkdir(mode=0o700)
+            owned_registry = json.loads(assets_path.read_text(encoding="utf-8"))
+            for asset in owned_registry.get("assets", {}).values():
+                source = Path(asset["file"])
+                destination = owned_assets / source.name
+                # The renderer receives a writable private copy, never a hard
+                # link to managed media or the durable staging evidence.
+                shutil.copyfile(source, destination)
+                asset["file"] = str(destination)
+            _write_json(owned_assets_path, owned_registry)
+
+            # The server owns renderer selection; a caller cannot downgrade or
+            # inject backend configuration.
+            engine = DEFAULT_ENGINE
+            if "output_name" in params:
+                raise RenderExportRefused("render_export uses output_filename")
+            output_name = params.get("output_filename", DEFAULT_OUTPUT_NAME)
+            if (
+                not isinstance(output_name, str)
+                or Path(output_name).name != output_name
+                or not output_name.endswith(".mp4")
+            ):
+                raise RenderExportRefused(
+                    "render_export output_filename must be a plain .mp4 filename"
+                )
+            output_path = staging_dir / output_name
+
+            # Route through the canonical executor registry so this pack adapter
+            # never imports the facade runtime directly. The executor manifest is
+            # the ownership boundary for dispatch; this adapter supplies only the
+            # immutable, server-owned inputs admitted above.
+            context.report("render", 10)
+            with (
+                _project_env(project_root),
+                _scoped_env("ASTRID_RENDER_INHERIT_PROCESS_GROUP", "1"),
+                _scoped_env(
+                    ASTRID_REMOTION_PROJECT_DIR,
+                    str(remotion_status.project_dir),
+                ),
+            ):
+                result = run_executor(
+                    ExecutorRunRequest(
+                        executor_id=PACK_ID,
+                        out=staging_dir,
+                        project=project_slug,
+                        inputs={
+                            "timeline": str(owned_timeline_path),
+                            "assets_registry": str(owned_assets_path),
+                            "output_name": output_name,
+                            "engine": engine,
+                            "backend_config": {
+                                "rendering.remotion": {
+                                    # This is deployment configuration, never
+                                    # a task field.
+                                    "project_dir": str(remotion_status.project_dir),
+                                }
+                            },
+                            "keep_previous_renders": True,
+                        },
+                        project_was_auto_resolved=True,
+                        projects_root=self._projects_root,
+                        invocation="render-export-task",
+                        # The bridge worker already isolates this adapter in a
+                        # dedicated subprocess.  Running the pack entrypoint in
+                        # that process keeps the exact Astrid source/runtime
+                        # pin that admitted the task.  A second ``python -m``
+                        # hop drops the source checkout from the canonical
+                        # child environment and can import an unrelated
+                        # editable Astrid installation, whose schema-pack
+                        # composition may reject the project's migrations.
+                        execution_mode="in_process",
+                    ),
+                    load_default_registry(),
+                )
+            if not result.ok:
+                detail = result.error.message if result.error is not None else result.payload
+                raise RenderExportRefused(f"render_export executor failed: {detail}")
+            rendered = result.outputs.get("video", output_path)
+        except RenderExportRefused:
+            raise
+        except Exception as exc:  # noqa: BLE001 - typed by the task boundary
+            raise RenderExportRefused(f"render_export renderer failed: {exc}") from exc
+        finally:
+            shutil.rmtree(owned_inputs_dir, ignore_errors=True)
+
+        context.report("validate_output", 90)
+        rendered_path = Path(rendered).resolve()
+        if rendered_path != output_path.resolve() or not rendered_path.is_file():
+            raise RenderExportRefused("render_export renderer did not produce its declared MP4")
+        if rendered_path.stat().st_size <= 0:
+            raise RenderExportRefused("render_export renderer produced an empty MP4")
+        with rendered_path.open("rb") as handle:
+            header = handle.read(8)
+        if len(header) < 8 or header[4:8] != b"ftyp":
+            raise RenderExportRefused(
+                "render_export renderer produced bytes without an MP4 ftyp box"
+            )
+
+        digest, byte_size = _digest_file(rendered_path)
+        context.report("complete", 100)
+        return {
+            "schema_version": 1,
+            "kind": PACK_ID,
+            "inputs": {
+                "family": FAMILY,
+                "project_slug": project_slug,
+                "timeline_ref": params.get("timeline_ref"),
+                "expected_version": params.get("expected_version"),
+                "semantic_role": "render",
+                "engine": engine,
+            },
+            "outputs": [
+                {
+                    "path": output_name,
+                    "content_hash": f"sha256:{digest}",
+                    "bytes": byte_size,
+                    "ordinal": 0,
+                    "is_primary": True,
+                    "role": "result",
+                    "label": "render",
+                }
+            ],
+            "created": str(getattr(task, "created_at", "") or PACK_ID),
+            "warnings": [],
+        }
+
+
+def execute_render_export_task(
+    *,
+    task: Any,
+    staging_dir: Path,
+    projects_root: str | Path,
+    deadline_seconds: float = 30 * 60,
+    cancelled: Callable[[], bool] | None = None,
+    progress: Callable[[Mapping[str, Any]], None] | None = None,
+) -> Mapping[str, Any]:
+    """Bounded callable harness entrypoint for a local bridge worker."""
+    context = RenderExportExecutionContext.bounded(
+        deadline_seconds=deadline_seconds,
+        cancelled=cancelled,
+        progress=progress,
+    )
+    return RenderExportTaskAdapter(projects_root=projects_root).execute(
+        task=task, staging_dir=staging_dir, context=context
+    )
+
+
+def task_handler_for_capability(
+    capability_id: str, *, projects_root: str | Path
+) -> RenderExportTaskAdapter:
+    """Resolve the transport-neutral handler registered by this pack."""
+    if capability_id != PACK_ID:
+        raise RenderExportRefused(f"no render-export handler is registered for {capability_id!r}")
+    return RenderExportTaskAdapter(projects_root=projects_root)
+
+
+__all__ = [
+    "RenderExportExecutionContext",
+    "RenderExportRefused",
+    "RenderExportTaskAdapter",
+    "execute_render_export_task",
+    "task_handler_for_capability",
+]
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Narrow child-process entrypoint used by transport workers.
+
+    The parent owns fencing and termination; this command only transforms a
+    frozen task JSON into files under the caller-provided staging directory.
+    It never accepts renderer selection or a project checkout path.
+    """
+    parser = argparse.ArgumentParser(prog="astrid-render-export-child")
+    parser.add_argument("--task-json", type=Path, required=True)
+    parser.add_argument("--staging-dir", type=Path, required=True)
+    parser.add_argument("--projects-root", type=Path, required=True)
+    parser.add_argument("--deadline-seconds", type=float, default=30 * 60)
+    args = parser.parse_args(argv)
+    from types import SimpleNamespace
+
+    task_data = json.loads(args.task_json.read_text(encoding="utf-8"))
+    if not isinstance(task_data, Mapping):
+        raise RenderExportRefused("render_export child task JSON must be an object")
+    task = SimpleNamespace(
+        id=str(task_data.get("id", "render-export-child")),
+        created_at=str(task_data.get("created_at", "")),
+        spec=task_data.get("spec"),
+    )
+    manifest = execute_render_export_task(
+        task=task,
+        staging_dir=args.staging_dir,
+        projects_root=args.projects_root,
+        deadline_seconds=args.deadline_seconds,
+    )
+    (args.staging_dir / "manifest.json").write_text(
+        json.dumps(dict(manifest), sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+    return 0
+
+
+if __name__ == "__main__":  # pragma: no cover - exercised by worker subprocess
+    raise SystemExit(main())

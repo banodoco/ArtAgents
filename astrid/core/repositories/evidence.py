@@ -92,9 +92,12 @@ EVIDENCE_KINDS: tuple[str, ...] = (
 )
 """The closed m3 evidence kinds, in decision-artifact order.
 
-``evidence_items.kind`` has no DDL CHECK, so this repository-enforced
-closed vocabulary is the single gate before any evidence write.
+Domain packs classify their evidence with structured data (for example a
+``subtype`` field) instead of extending this kernel-owned vocabulary.
+``evidence_items.kind`` has no DDL CHECK, so this repository gate remains the
+single vocabulary enforcement point.
 """
+
 
 
 # ---------------------------------------------------------------------------

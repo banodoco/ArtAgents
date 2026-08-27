@@ -239,10 +239,7 @@ def _encoder_profile(codec: str, profile: str) -> str:
     if encoded is None:
         raise_unsupported_error(
             backend=BACKEND_ID,
-            message=(
-                f"unsupported {codec} encoder profile for FFmpeg compositing: "
-                f"{profile}"
-            ),
+            message=(f"unsupported {codec} encoder profile for FFmpeg compositing: {profile}"),
             recovery_command="select a supported canonical video profile",
             details={"video_codec": codec, "video_profile": profile},
         )
@@ -310,8 +307,7 @@ def _validate_target_profile(profile: RenderProfile) -> None:
             raise_unsupported_error(
                 backend=BACKEND_ID,
                 message=(
-                    "unsupported encoder level for FFmpeg compositing: "
-                    f"{profile.video_level}"
+                    f"unsupported encoder level for FFmpeg compositing: {profile.video_level}"
                 ),
                 recovery_command="select a supported canonical video level",
                 details={
@@ -398,10 +394,7 @@ def _plan_reasons(plan: Any) -> list[str]:
             "plan contains a layer=None segment; compositor requires an explicit "
             "layer on every segment (layer=None plans use rendering.ffmpeg-finalizer)"
         )
-    if any(
-        segment.layer is not None and segment.layer.blend != "normal"
-        for segment in segments
-    ):
+    if any(segment.layer is not None and segment.layer.blend != "normal" for segment in segments):
         reasons.append("compositor v1 supports only layer blend 'normal'")
     z_layers = [segment.layer.z for segment in segments if segment.layer is not None]
     if len(set(z_layers)) < 2:
@@ -496,9 +489,7 @@ def _probe_layer(
     if ownership is not AudioOwnership.RENDERED and probe.has_audio_stream:
         raise_invalid_artifact_error(
             backend=BACKEND_ID,
-            message=(
-                f"visual-only segment[{index}] unexpectedly contains an audio stream"
-            ),
+            message=(f"visual-only segment[{index}] unexpectedly contains an audio stream"),
             recovery_command="rerender the segment without an audio track",
             details={"segment_index": index},
         )
@@ -548,17 +539,13 @@ def _preflight_layers(
             *artifact.profile.fps_rational
         )
         if probe.frames is not None and probe.frames > 0:
-            artifact_seconds = Fraction(probe.frames, 1) / Fraction(
-                *artifact.profile.fps_rational
-            )
+            artifact_seconds = Fraction(probe.frames, 1) / Fraction(*artifact.profile.fps_rational)
         planned_seconds = Fraction(plan_segment.window.duration_frames, 1) / canonical_fps
         delta_frames = abs(artifact_seconds - planned_seconds) * canonical_fps
         if delta_frames > tolerance:
             raise_invalid_artifact_error(
                 backend=BACKEND_ID,
-                message=(
-                    f"segment[{index}] duration does not match its planned frame window"
-                ),
+                message=(f"segment[{index}] duration does not match its planned frame window"),
                 recovery_command="rerender the exact planned segment window and retry",
                 details={
                     "segment_index": index,
@@ -633,9 +620,7 @@ def build_composite_command(
     width = target_profile.width
     height = target_profile.height
     fps = f"{target_profile.fps_rational[0]}/{target_profile.fps_rational[1]}"
-    total_seconds = float(
-        Fraction(total_frames, 1) / Fraction(*target_profile.fps_rational)
-    )
+    total_seconds = float(Fraction(total_frames, 1) / Fraction(*target_profile.fps_rational))
     argv = [
         "ffmpeg",
         "-hide_banner",
@@ -684,14 +669,11 @@ def build_composite_command(
         )
         if position == len(layers) - 1:
             filters.append(
-                f"[{previous}][{label}]overlay=0:0:format=auto:eof_action=pass,"
-                f"format=yuv420p[vout]"
+                f"[{previous}][{label}]overlay=0:0:format=auto:eof_action=pass,format=yuv420p[vout]"
             )
         else:
             chain = f"l{layer.index}"
-            filters.append(
-                f"[{previous}][{label}]overlay=0:0:format=auto:eof_action=pass[{chain}]"
-            )
+            filters.append(f"[{previous}][{label}]overlay=0:0:format=auto:eof_action=pass[{chain}]")
             previous = chain
     argv.extend(["-filter_complex", ";".join(filters), "-map", "[vout]"])
 
@@ -705,9 +687,7 @@ def build_composite_command(
         if synthesize_audio:
             argv.extend(["-map", f"{len(layers) + 1}:a:0"])
         else:
-            audio_source = next(
-                layer for layer in layers if layer.audio is AudioOwnership.RENDERED
-            )
+            audio_source = next(layer for layer in layers if layer.audio is AudioOwnership.RENDERED)
             argv.extend(["-map", f"{audio_source.index}:a:0"])
         argv.extend(["-af", f"{audio_format},apad"])
         assert target_profile.audio_codec is not None
@@ -799,9 +779,7 @@ def _validate_compositor_output(
                 "actual": [probe.width, probe.height],
             },
         )
-    if probe.video_codec and _text(probe.video_codec) != _text(
-        target_profile.video_codec
-    ):
+    if probe.video_codec and _text(probe.video_codec) != _text(target_profile.video_codec):
         raise_invalid_artifact_error(
             backend=BACKEND_ID,
             message="final composite video codec does not match the canonical profile",
@@ -830,9 +808,7 @@ def _validate_compositor_output(
                 message="final composite is missing the required audio stream",
                 recovery_command="rerun finalization in a fresh invocation workspace",
             )
-        if probe.audio_codec and _text(probe.audio_codec) != _text(
-            target_profile.audio_codec
-        ):
+        if probe.audio_codec and _text(probe.audio_codec) != _text(target_profile.audio_codec):
             raise_invalid_artifact_error(
                 backend=BACKEND_ID,
                 message="final composite audio codec does not match the canonical profile",
@@ -886,9 +862,7 @@ def finalize(
         dir=str(output_path.parent),
     )
     previous_output = (
-        Path(recovery_tmp.name) / "previous-output.mp4"
-        if output_path.is_file()
-        else None
+        Path(recovery_tmp.name) / "previous-output.mp4" if output_path.is_file() else None
     )
     published = False
     try:
@@ -950,11 +924,7 @@ def finalize(
                     ],
                     "audio_mode": ownership.value,
                     "audio_source_z": next(
-                        (
-                            layer.z
-                            for layer in layers
-                            if layer.audio is AudioOwnership.RENDERED
-                        ),
+                        (layer.z for layer in layers if layer.audio is AudioOwnership.RENDERED),
                         None,
                     ),
                 }

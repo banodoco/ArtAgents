@@ -98,9 +98,13 @@ WORKER_CHILD_ALLOWLIST: frozenset[str] = frozenset(
         "reigh.join_clips_orchestrator",
     }
 )
-"""The executor-only child gate. Import-time compiler enforcement
-(doc 27 §3.1/§3.2) holds this set EXACTLY equal to the ``child_only``
-registry rows — one authority, no drift between the two declarations."""
+"""Capabilities that may be admitted through the fenced child gate.
+
+Most rows in this set are executor-only.  The two orchestration parents
+(``join_clips_orchestrator`` and ``travel_stitch``) are deliberately
+dual-use: their family derivation is public, while their child admission is
+still restricted to a live fenced executor envelope.
+"""
 
 # Active-but-dead / inactive legacy names (doc 27 §3.1, doc 16 §5): rejected
 # with ``capability_unavailable``, never aliased.
@@ -137,6 +141,8 @@ class CapabilityEntry:
     #: boot manifest digests it per row (doc 27 §3.2 receipt scope);
     #: bump it deliberately when a row's meaning changes.
     definition_version: int = 1
+    #: Optional transport-neutral pack task handler id.
+    task_handler: str | None = None
     #: Availability probe name resolved through :data:`AVAILABILITY_PROBES`.
     probe: str = "always_available"
 
@@ -258,6 +264,39 @@ def _validate_video_enhance(input: dict[str, Any]) -> None:
         )
 
 
+def _validate_render_export(input: dict[str, Any]) -> None:
+    """Validate a server-owned timeline render request."""
+    timeline_ref = input.get("timeline_ref")
+    if not isinstance(timeline_ref, str) or not timeline_ref:
+        raise CapabilityInputError("timeline_ref must be a non-empty string")
+    expected_version = input.get("expected_version")
+    if (
+        isinstance(expected_version, bool)
+        or not isinstance(expected_version, int)
+        or expected_version < 0
+    ):
+        raise CapabilityInputError("expected_version must be a non-negative integer")
+    forbidden = sorted(
+        {"engine", "backend", "backend_config", "project_dir"}.intersection(input)
+    )
+    if forbidden:
+        raise CapabilityInputError(
+            "render_export renderer parameters are server-owned: "
+            + ", ".join(forbidden)
+        )
+    filename = input.get("output_filename")
+    if filename is not None and (
+        not isinstance(filename, str)
+        or not filename
+        or filename != os.path.basename(filename)
+        or "/" in filename
+        or "\\" in filename
+        or not filename.endswith(".mp4")
+        or filename.startswith("..")
+    ):
+        raise CapabilityInputError("output_filename must be a plain .mp4 filename")
+
+
 #: Per-family input validators (required-field gates beyond the generic
 #: ``required_inputs`` table; doc 16 §3 resolver detail).
 FAMILY_VALIDATORS: dict[str, Callable[[dict[str, Any]], None]] = {
@@ -274,7 +313,7 @@ FAMILY_VALIDATORS: dict[str, Callable[[dict[str, Any]], None]] = {
     FAMILY_EDIT_VIDEO_ORCHESTRATOR: _require_non_empty_str("clip_source"),
     FAMILY_CHARACTER_ANIMATE: _require_non_empty_str("image_url"),
     FAMILY_KLEIN_EDIT: _require_non_empty_str("image_url", "prompt"),
-    FAMILY_RENDER_EXPORT: _require_non_empty_str("timeline_ref"),
+    FAMILY_RENDER_EXPORT: _validate_render_export,
     FAMILY_LOCAL_WORKFLOW: _require_non_empty_str("id"),
 }
 
@@ -299,7 +338,7 @@ FAMILY_DERIVATIONS: dict[
     ),
     FAMILY_CHARACTER_ANIMATE: _derive_single("reigh.animate_character"),
     FAMILY_KLEIN_EDIT: _derive_single("reigh.flux_klein_edit"),
-    FAMILY_RENDER_EXPORT: _derive_single("rendering.timeline_visualize"),
+    FAMILY_RENDER_EXPORT: _derive_single("rendering.render"),
     # local.<slug> — the derived id resolves against declared custom
     # workflows at admission time (doc 27 §3.3); the generic static row
     # below is the fallback capability when no slug is derived.
@@ -396,7 +435,6 @@ REGISTRY: dict[str, CapabilityEntry] = {
             BINDING_WGP,
             _policy(create_generation=False),
             required_inputs={"clip_source": (str, dict)},
-            child_only=True,
             probe="wgp_runtime",
         ),
         CapabilityEntry(
@@ -481,7 +519,6 @@ REGISTRY: dict[str, CapabilityEntry] = {
             BINDING_WGP,
             _policy(),
             required_inputs={"image_urls": list},
-            child_only=True,
             probe="wgp_runtime",
         ),
         CapabilityEntry(
@@ -526,6 +563,18 @@ REGISTRY: dict[str, CapabilityEntry] = {
             ),
             required_inputs={"timeline_ref": str},
             probe="remotion_ready",
+        ),
+        # Canonical server-owned render executor. Keep the historical
+        # timeline_visualize row above as a compatibility capability while
+        # new admissions resolve to this explicit task handler.
+        CapabilityEntry(
+            "rendering.render",
+            FAMILY_RENDER_EXPORT,
+            BINDING_ASTRID_REMOTION,
+            _policy(create_generation=False, managed_media_role="render"),
+            required_inputs={"timeline_ref": str},
+            probe="remotion_ready",
+            task_handler="render_export",
         ),
         # Worker-child-only entries: executor envelope admission exclusively.
         CapabilityEntry(
@@ -769,15 +818,10 @@ def _validate_registry() -> None:
                 "must be a positive integer"
             )
         seen_families.add(entry.family)
-    unflagged = sorted(
-        cid
-        for cid in WORKER_CHILD_ALLOWLIST
-        if REGISTRY.get(cid) is None or not REGISTRY[cid].child_only
-    )
+    unflagged = sorted(cid for cid in WORKER_CHILD_ALLOWLIST if REGISTRY.get(cid) is None)
     if unflagged:
         raise RuntimeError(
-            f"worker-child allowlist ids without a child_only registry "
-            f"row: {unflagged}"
+            f"worker-child allowlist ids without a registry row: {unflagged}"
         )
     missing = PUBLIC_FAMILIES - seen_families
     if missing:
@@ -915,7 +959,9 @@ def resolve_family_capability(
     if derivation is None:
         normalized = normalize_capability_name(family_key)
         direct = REGISTRY.get(f"reigh.{normalized}")
-        if direct is not None and direct.child_only:
+        if direct is not None and (
+            direct.child_only or direct.capability_id in WORKER_CHILD_ALLOWLIST
+        ):
             raise ChildAdmissionForbidden(
                 f"family {family_key!r} is executor-only; child families "
                 "are admitted only by the live fenced parent executor"
@@ -965,7 +1011,6 @@ def resolve_child_capability(family: str) -> CapabilityEntry:
     entry = REGISTRY.get(candidate)
     if (
         entry is None
-        or not entry.child_only
         or entry.capability_id not in WORKER_CHILD_ALLOWLIST
     ):
         raise ChildAdmissionForbidden(

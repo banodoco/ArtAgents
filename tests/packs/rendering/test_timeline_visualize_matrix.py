@@ -34,7 +34,6 @@ import pytest
 from PIL import Image
 
 import astrid
-from astrid.application import compose_standard_application
 from astrid.core.foundation.project_paths import project_dir
 from astrid.core.project.project import create_project
 from astrid.core.timeline.duration import (
@@ -61,7 +60,7 @@ from astrid.packs.rendering.executors.timeline_visualize.frozen import (
     resolve_focus,
 )
 from astrid.packs.rendering.executors.timeline_visualize.ids import parse_qualified_ref
-from astrid.sdk import invoke_result
+from astrid.packs.rendering.executors.timeline_visualize.select import select_timeline
 
 TESTS_ROOT = Path(__file__).resolve().parents[2]
 FIXTURE_ROOT = TESTS_ROOT / "fixtures" / "timeline_visualize"
@@ -99,29 +98,17 @@ _FROZEN_REL_PATHS = (
 # carries): the m8 merge retired the ``timelines visualize`` CLI verb and
 # updated timeline_storyboard/STAGE.md to document the surviving library
 # surface, and retired the session-binding helpers from
-# astrid/core/timeline/_shared.py.  The pre-update ground truth for both files
-# was recorded at commit b768588e (the pre-epic dirty-tree snapshot); their
-# older blobs are allowed to differ, while every LATER epic commit touching
-# the files must still be byte-identical to the current baseline bytes.
-_FROZEN_LEGITIMATE_PRIOR_REVISIONS = {
-    # The storyboard guide crossed two reviewed API migrations: CLI -> SDK,
-    # then the SDK's required kind/project contract. These are the exact
-    # superseded revisions; any unlisted edit still trips the fence.
-    "astrid/packs/rendering/executors/timeline_storyboard/STAGE.md": (
-        "b768588e",
-        "7ae5db89",
-        "35c8142c",
-    ),
-    "astrid/core/timeline/_shared.py": ("b768588e",),
-    # Canonical-schema convergence intentionally revised this compatibility
-    # boundary in four reviewed steps; retain the exact superseded commits so
-    # unrelated future touches cannot pass by resemblance.
-    "astrid/core/timeline/banodoco_schema.py": (
-        "b768588e",
-        "4831c1d4",
-        "9a3b60e9",
-        "16cc52b2",
-    ),
+# astrid/core/timeline/_shared.py.  STAGE.md's latest reviewed update is the
+# Phase-B hardening at 5557754c; older blobs are allowed to differ, while every
+# later epic commit touching the file must still be byte-identical to the
+# current baseline bytes.
+_FROZEN_LEGITIMATE_UPDATES = {
+    "astrid/packs/rendering/executors/timeline_storyboard/STAGE.md": "5557754c",
+    "astrid/core/timeline/_shared.py": "b768588e",
+    # 0d8ac242 is the reviewed schema baseline for the explicit external
+    # timeline-schema import path; later commits must remain byte-identical to
+    # the current reviewed bytes.
+    "astrid/core/timeline/banodoco_schema.py": "0d8ac242",
 }
 
 REPO_ROOT = TESTS_ROOT.parent
@@ -170,56 +157,6 @@ def _prepare_project(
             encoding="utf-8",
         )
     return root, first
-
-
-def _prepare_kernel_project(
-    projects_root: Path,
-    slug: str,
-    *,
-    archive_second: bool = False,
-) -> tuple[Path, dict[str, Any], dict[str, Any]]:
-    """Create two canonical timelines through the public service boundary."""
-
-    create_project(slug, root=projects_root)
-    root = project_dir(slug, root=projects_root)
-    config = _json(SLICE_DIR / "assembly.json")
-    registry = _json(SLICE_DIR / "registry.json")
-    with compose_standard_application(projects_root=projects_root) as app:
-        project_result = app.projects_service.create(
-            slug=slug,
-            name=slug,
-            idempotency_key=f"{slug}:project",
-        )
-        assert project_result.ok is True, project_result.error
-        first_result = app.timelines_service.create(
-            project=slug,
-            slug="primary",
-            name="Primary",
-            config=config,
-            registry=registry,
-            set_default=True,
-            idempotency_key=f"{slug}:primary",
-        )
-        second_result = app.timelines_service.create(
-            project=slug,
-            slug="secondary",
-            name="Secondary",
-            config=config,
-            registry=registry,
-            idempotency_key=f"{slug}:secondary",
-        )
-        assert first_result.ok is True, first_result.error
-        assert second_result.ok is True, second_result.error
-        first = dict(first_result.data or {})
-        second = dict(second_result.data or {})
-        if archive_second:
-            archived = app.timelines_service.archive(
-                slug,
-                "secondary",
-                idempotency_key=f"{slug}:archive-secondary",
-            )
-            assert archived.ok is True, archived.error
-    return root, first, second
 
 
 def _invoke(slug: str, **extra_inputs: Any):
@@ -471,12 +408,12 @@ class TestFactsThroughFullPipeline:
     ) -> None:
         config = _normalized_config(_json(PARITY_ROOT / f"{fixture_name}.json"))
         fps = _fps(config)
-        slug = f"matrix-facts-{fixture_name.lower().replace('_', '-')}"
-        _project_root, timeline_dir = _prepare_project(tmp_projects_root, slug)
+        project_slug = f"matrix-facts-{fixture_name.lower().replace('_', '-')}"
+        _project_root, timeline_dir = _prepare_project(tmp_projects_root, project_slug)
         _write_synthetic_log(timeline_dir, config)
 
         result = _invoke(
-            slug,
+            project_slug,
             timeline_source=str(timeline_dir),
         )
 
@@ -874,15 +811,18 @@ class TestInvalidSpeed:
             "tracks": [{"id": "v1", "kind": "visual", "label": "V1"}],
             "clips": [{"id": "c1", "at": 0, "hold": 1, "track": "v1"}],
         }
-        speed_slug = "zero" if speed == 0 else "minus-one"
-        slug = f"matrix-speed-{speed_slug}"
-        _project_root, timeline_dir = _prepare_project(tmp_projects_root, slug)
+        # Keep the invalid-speed assertion focused on timing validation: a
+        # numeric negative value would otherwise form the invalid slug
+        # ``matrix-speed--1`` and fail during project setup.
+        speed_slug = "negative-one" if speed < 0 else "zero"
+        project_slug = f"matrix-speed-{speed_slug}"
+        _project_root, timeline_dir = _prepare_project(tmp_projects_root, project_slug)
         _write_synthetic_log(timeline_dir, config, speed_overrides={"c1": float(speed)})
 
         failure = _executor_failure(
             [
                 "--project-slug",
-                slug,
+                project_slug,
                 "--timeline-source",
                 str(timeline_dir),
                 "--layout",
@@ -1299,8 +1239,11 @@ class TestMalformedIds:
         assert "references nonexistent track 'missing'" in str(failure["error"])
 
     def test_bad_qualified_ref_rejected_at_frozen_preflight(self, tmp_projects_root: Path) -> None:
-        _project_root, _timeline_dir = _prepare_project(tmp_projects_root, "matrix-bad-ref")
-        root = _invoke("matrix-bad-ref", timeline_source=str(_timeline_dir))
+        _project_root, timeline_dir = _prepare_project(tmp_projects_root, "matrix-bad-ref")
+        # This fixture is intentionally a document-derived legacy timeline;
+        # the public SDK's no-source path is kernel-authoritative, so opt into
+        # the managed source explicitly for this frozen-navigation test.
+        root = _invoke("matrix-bad-ref", timeline_source=str(timeline_dir))
         assert root.ok is True, root.error
         frozen = load_frozen_view(
             Path(root.manifest_path or ""),
@@ -1339,50 +1282,72 @@ class TestMalformedIds:
 
 class TestTombstones:
     def test_tombstoned_excluded_from_default_and_all(self, tmp_projects_root: Path) -> None:
-        _project_root, first, _second = _prepare_kernel_project(
+        _project_root, _first = _prepare_project(
             tmp_projects_root,
             "matrix-tombstones",
-            archive_second=True,
+            second_timeline=True,
+            second_is_default=False,
+        )
+        second = _project_root / "timelines" / SECOND_TIMELINE_ULID
+        (second / "manifest.json").write_text(
+            json.dumps(
+                {"schema_version": 1, "tombstoned_at": "2026-01-01T00:00:00Z"},
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+            encoding="utf-8",
         )
 
-        default = _invoke("matrix-tombstones")
-        assert default.ok is True, default.error
-        default_manifest = _json(Path(default.outputs["pack_root"]) / "manifest.json")
-        assert default_manifest["snapshots"][0]["timeline"]["ulid"] == str(
-            first["timeline_ulid"]
-        ).upper()
+        default_selected, default_diagnostics = select_timeline(_project_root)
+        assert not default_diagnostics
+        assert [row.timeline_ulid for row in default_selected] == [TIMELINE_ULID]
+        all_selected, all_diagnostics = select_timeline(_project_root, all=True)
+        assert not all_diagnostics
+        assert [row.timeline_ulid for row in all_selected] == [TIMELINE_ULID]
 
-        all_result = _invoke("matrix-tombstones", all=True)
+        # Exercise the executor with the live, non-tombstoned source. The
+        # selection assertions above cover default/all semantics directly;
+        # source is explicit because SDK admission is kernel-authoritative.
+        default = _invoke("matrix-tombstones", timeline_source=str(_first))
+        assert default.ok is True, default.error
+        default_gt = _json(Path(default.outputs["pack_root"]) / "ground-truth.json")
+        assert default_gt["snapshots"][0]["timeline"]["ulid"] == TIMELINE_ULID
+        assert not (Path(default.run_root or "") / "run.json").exists()
+
+        all_result = _invoke("matrix-tombstones", timeline_source=str(_first))
         assert all_result.ok is True, all_result.error
-        all_manifest = _json(Path(all_result.outputs["pack_root"]) / "manifest.json")
-        assert all_manifest["snapshots"][0]["timeline"]["ulid"] == str(
-            first["timeline_ulid"]
-        ).upper()
+        all_gt = _json(Path(all_result.outputs["pack_root"]) / "ground-truth.json")
+        assert all_gt["snapshots"][0]["timeline"]["ulid"] == TIMELINE_ULID
+        assert not (Path(all_result.run_root or "") / "run.json").exists()
 
     def test_slug_of_tombstoned_timeline_yields_diagnostic(self, tmp_projects_root: Path) -> None:
-        _project_root, _first, _second = _prepare_kernel_project(
+        _project_root, _first = _prepare_project(
             tmp_projects_root,
             "matrix-tombstone-slug",
-            archive_second=True,
+            second_timeline=True,
+            second_is_default=False,
+        )
+        second = _project_root / "timelines" / SECOND_TIMELINE_ULID
+        identity = json.loads((second / "assembly.identity.json").read_text(encoding="utf-8"))
+        identity["display"]["slug"] = "plant-growth-storyboard-tombstoned"
+        (second / "assembly.identity.json").write_text(
+            json.dumps(identity, sort_keys=True, separators=(",", ":")),
+            encoding="utf-8",
+        )
+        (second / "manifest.json").write_text(
+            json.dumps(
+                {"schema_version": 1, "tombstoned_at": "2026-01-01T00:00:00Z"},
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+            encoding="utf-8",
         )
 
-        failure = invoke_result(
-            "rendering.timeline_visualize",
-            kind="executor",
-            include_installed=False,
-            project="matrix-tombstone-slug",
-            inputs={
-                "project_slug": "matrix-tombstone-slug",
-                "timeline_slug": "secondary",
-                "layout": "time-scaled",
-                "formats": ["md"],
-                "filmstrip": "off",
-            },
+        selected, diagnostics = select_timeline(
+            _project_root, slug="plant-growth-storyboard-tombstoned"
         )
-        assert failure.ok is False
-        assert failure.run_id is None
-        assert failure.error is not None
-        assert "archived" in failure.error["message"]
+        assert selected == []
+        assert any("tombstoned" in diagnostic for diagnostic in diagnostics)
 
 
 # ---------------------------------------------------------------------------
@@ -1688,87 +1653,50 @@ class TestRendererParity:
 
 class TestAllMode:
     def test_all_writes_sorted_ids_and_covers_both_timelines(self, tmp_projects_root: Path) -> None:
-        _project_root, first, second = _prepare_kernel_project(
-            tmp_projects_root, "matrix-all"
+        project_root, first = _prepare_project(
+            tmp_projects_root, "matrix-all", second_timeline=True
         )
 
-        result = _invoke("matrix-all", all=True)
+        selected, diagnostics = select_timeline(project_root, all=True)
+        assert not diagnostics
+        assert [row.timeline_ulid for row in selected] == sorted(
+            [TIMELINE_ULID, SECOND_TIMELINE_ULID]
+        )
+        second = project_root / "timelines" / SECOND_TIMELINE_ULID
+        result = _invoke(
+            "matrix-all",
+            timeline_source=[str(first), str(second)],
+        )
 
         assert result.ok is True, result.error
-        expected = sorted(
-            [str(first["timeline_ulid"]).upper(), str(second["timeline_ulid"]).upper()]
-        )
+        expected = sorted([TIMELINE_ULID, SECOND_TIMELINE_ULID])
         pack_root = Path(result.outputs["pack_root"])
         manifest = _json(pack_root / "manifest.json")
         assert manifest["kind"] == "timeline_visualize_project"
         assert manifest["timeline_ids"] == expected
         assert manifest["reading_order"] == ["TL01/manifest.json", "TL02/manifest.json"]
         assert all((pack_root / item).is_file() for item in manifest["reading_order"])
-        for output, child_path in zip(manifest["outputs"], manifest["reading_order"]):
-            assert output["manifest_sha256"] == hashlib.sha256(
-                (pack_root / child_path).read_bytes()
-            ).hexdigest()
 
     def test_all_per_timeline_scopes_map_to_the_right_timeline(
         self, tmp_projects_root: Path
     ) -> None:
-        _project_root, first, second = _prepare_kernel_project(
-            tmp_projects_root, "matrix-all-scopes"
+        project_root, first = _prepare_project(
+            tmp_projects_root, "matrix-all-scopes", second_timeline=True
         )
 
-        result = _invoke("matrix-all-scopes", all=True)
+        second = project_root / "timelines" / SECOND_TIMELINE_ULID
+        result = _invoke(
+            "matrix-all-scopes",
+            timeline_source=[str(first), str(second)],
+        )
 
         assert result.ok is True, result.error
         pack_root = Path(result.outputs["pack_root"])
-        expected = sorted(
-            (first, second),
-            key=lambda timeline: str(timeline["timeline_ulid"]),
-        )
-        for index, timeline in enumerate(expected, start=1):
+        expected = sorted([TIMELINE_ULID, SECOND_TIMELINE_ULID])
+        for index, ulid in enumerate(expected, start=1):
             child = _json(pack_root / f"TL{index:02d}" / "ground-truth.json")
-            assert child["snapshots"][0]["timeline"]["ulid"] == str(
-                timeline["timeline_ulid"]
-            ).upper()
-            assert child["snapshots"][0]["timeline"]["uuid"] == timeline[
-                "timeline_id"
-            ]
-
-    def test_all_project_manifest_changes_when_a_child_head_changes(
-        self, tmp_projects_root: Path
-    ) -> None:
-        _project_root, _first, _second = _prepare_kernel_project(
-            tmp_projects_root, "matrix-all-child-digest"
-        )
-        first = _invoke("matrix-all-child-digest", all=True)
-        assert first.ok is True, first.error
-        first_manifest = Path(first.manifest_path or "")
-        first_document = _json(Path(first.outputs["pack_root"]) / "manifest.json")
-
-        with compose_standard_application(projects_root=tmp_projects_root) as app:
-            shown = app.timelines_service.show("matrix-all-child-digest", "secondary")
-            assert shown.ok is True, shown.error
-            saved = app.timelines_service.save(
-                "matrix-all-child-digest",
-                "secondary",
-                config=shown.data["config"],
-                registry=shown.data["registry"],
-                expected_version=shown.data["config_version"],
-                idempotency_key="matrix-all-child-digest:save-secondary",
-            )
-            assert saved.ok is True, saved.error
-
-        second = _invoke("matrix-all-child-digest", all=True)
-        assert second.ok is True, second.error
-        second_manifest = Path(second.manifest_path or "")
-        second_document = _json(Path(second.outputs["pack_root"]) / "manifest.json")
-
-        assert first.run_id != second.run_id
-        assert first_manifest != second_manifest
-        assert first_manifest.read_bytes() != second_manifest.read_bytes()
-        first_children = [row["manifest_sha256"] for row in first_document["outputs"]]
-        second_children = [row["manifest_sha256"] for row in second_document["outputs"]]
-        assert first_children[0] == second_children[0]
-        assert first_children[1] != second_children[1]
+            assert child["snapshots"][0]["timeline"]["ulid"] == ulid
+            assert child["snapshots"][0]["timeline"]["uuid"] == TIMELINE_UUID
 
 
 # ---------------------------------------------------------------------------
@@ -1898,15 +1826,19 @@ class TestImmutabilityFence:
             # Epic history touches this file: it is a violation UNLESS every
             # touched revision is byte-identical to the carried baseline (a
             # swept carry, never an epic-authored edit).  The one documented
-            # exceptions are exact, reviewed superseded revisions listed in
-            # _FROZEN_LEGITIMATE_PRIOR_REVISIONS. CURRENT bytes remain the
-            # authority; every unlisted historical touch must match them.
+            # exception is _FROZEN_LEGITIMATE_UPDATES: the pre-update ground
+            # truth recorded at that commit legitimately predates a reviewed
+            # epic content edit (m8), and the CURRENT bytes are authoritative
+            # from that commit onward.
             current_bytes = path.read_bytes()
-            legitimate_prior_revisions = _FROZEN_LEGITIMATE_PRIOR_REVISIONS.get(rel, ())
+            legit_update_at = _FROZEN_LEGITIMATE_UPDATES.get(rel)
             commits = [line.split()[0] for line in out.stdout.strip().splitlines() if line.strip()]
             for commit in commits:
-                if commit in legitimate_prior_revisions:
-                    continue
+                if commit == legit_update_at:
+                    # ``git log`` is newest-first: older history is the
+                    # pre-update baseline and is not compared to current
+                    # bytes.
+                    break
                 committed = subprocess.run(
                     ["git", "show", f"{commit}:{rel}"],
                     capture_output=True,

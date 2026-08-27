@@ -66,9 +66,8 @@ from __future__ import annotations
 import ast
 import json
 import re
-import sqlite3
-from dataclasses import dataclass
 from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -149,11 +148,11 @@ lint error.
 # non-product dead code and keep their own import graph.
 _PRODUCT_PATH_DIRS = (
     "astrid/core/gateway",  # eight-family dispatch routes
-    "astrid/sdk",           # SDK modules
+    "astrid/sdk",  # SDK modules
 )
 
 _PRODUCT_PATH_FILES = (
-    "astrid/application.py",                            # application composition
+    "astrid/application.py",  # application composition
     "astrid/core/integrations/reigh/bridge_service.py",  # bridge composition
 )
 
@@ -247,9 +246,7 @@ def _imported_modules(source: str) -> set[str]:
             if node.module:
                 modules.add(node.module)
                 modules.update(
-                    f"{node.module}.{alias.name}"
-                    for alias in node.names
-                    if alias.name != "*"
+                    f"{node.module}.{alias.name}" for alias in node.names if alias.name != "*"
                 )
     return modules
 
@@ -367,8 +364,7 @@ def lint_import_boundaries(root: Path) -> list[str]:
     schema_pack_dirs = [
         path
         for path in _child_dirs(packs_root)
-        if (path / "__init__.py").exists()
-        and (path / "schema-pack.yaml").is_file()
+        if (path / "__init__.py").exists() and (path / "schema-pack.yaml").is_file()
     ]
     for pack_dir in schema_pack_dirs:
         for path in _iter_python(pack_dir):
@@ -383,14 +379,9 @@ def lint_import_boundaries(root: Path) -> list[str]:
                 other_pack = module.split(".")[2]
                 if other_pack == pack_dir.name:
                     continue
-                if _is_declared_cli_mount_import(
-                    root, rel, module, pack_dir_name=pack_dir.name
-                ):
+                if _is_declared_cli_mount_import(root, rel, module, pack_dir_name=pack_dir.name):
                     continue
-                errors.append(
-                    f"{rel}: pack-to-pack import {module!r} from "
-                    f"pack {pack_dir.name!r}"
-                )
+                errors.append(f"{rel}: pack-to-pack import {module!r} from pack {pack_dir.name!r}")
     return errors
 
 
@@ -408,7 +399,6 @@ def lint_writer_authority(root: Path) -> list[str]:
     canonical ``read_only_uri`` helper are not writers and are never flagged.
     """
     errors: list[str] = []
-    store_root = root / "astrid" / "core" / "store"
     for path in _iter_python(root / "astrid"):
         rel = _rel(path, root)
         if rel.startswith("astrid/core/store/"):
@@ -421,19 +411,18 @@ def lint_writer_authority(root: Path) -> list[str]:
             source = path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
+        if "kernel.sqlite3" in source:
+            errors.append(f"{rel}: legacy kernel.sqlite3 path creates a ghost database authority")
+            continue
         if "DatabaseWriter(" in source:
-            errors.append(
-                f"{rel}: SQLite writer construction outside the kernel store"
-            )
+            errors.append(f"{rel}: SQLite writer construction outside the kernel store")
             continue
         if (
             "sqlite3.connect(" in source
             and "mode=ro" not in source
             and "read_only_uri(" not in source
         ):
-            errors.append(
-                f"{rel}: SQLite writer construction outside the kernel store"
-            )
+            errors.append(f"{rel}: SQLite writer construction outside the kernel store")
     return errors
 
 
@@ -451,8 +440,7 @@ def lint_legacy_authorities(root: Path) -> list[str]:
         for marker in LEGACY_AUTHORITY_MARKERS:
             if marker in source:
                 errors.append(
-                    f"{rel}: legacy authority marker {marker!r} in a "
-                    "supported v10 entry path"
+                    f"{rel}: legacy authority marker {marker!r} in a supported v10 entry path"
                 )
     return errors
 
@@ -476,9 +464,7 @@ def _schema_pack_ids(root: Path) -> frozenset[str]:
     """
     packs_root = root / "astrid" / "packs"
     return frozenset(
-        path.name
-        for path in _child_dirs(packs_root)
-        if (path / "schema-pack.yaml").is_file()
+        path.name for path in _child_dirs(packs_root) if (path / "schema-pack.yaml").is_file()
     )
 
 
@@ -523,10 +509,7 @@ def lint_removed_authorities(root: Path) -> list[str]:
             continue
         for module in sorted(modules):
             if _is_removed_authority(module):
-                errors.append(
-                    f"{rel}: removed-authority import {module!r} from a "
-                    "product path"
-                )
+                errors.append(f"{rel}: removed-authority import {module!r} from a product path")
     return errors
 
 
@@ -604,8 +587,7 @@ def lint_schema_ownership(root: Path) -> list[str]:
                 )
             if table in FORBIDDEN_TABLES:
                 errors.append(
-                    f"{rel}: forbidden table {table!r} violates the "
-                    "no-dormant-platform invariant"
+                    f"{rel}: forbidden table {table!r} violates the no-dormant-platform invariant"
                 )
             # Projected alias/default convenience columns (SD1): the rule
             # applies to pack-owned tables only. Kernel tables legitimately
@@ -631,14 +613,10 @@ def lint_schema_ownership(root: Path) -> list[str]:
                 if target_owner is None:
                     continue
                 if owner == "core" and target_owner != "core":
-                    errors.append(
-                        f"{rel}: kernel FK from {table} to pack table "
-                        f"{target!r}"
-                    )
+                    errors.append(f"{rel}: kernel FK from {table} to pack table {target!r}")
                 if owner != "core" and target_owner != "core" and target_owner != owner:
                     errors.append(
-                        f"{rel}: cross-pack FK from {table} to "
-                        f"{target!r} (pack {target_owner!r})"
+                        f"{rel}: cross-pack FK from {table} to {target!r} (pack {target_owner!r})"
                     )
         # Closed stream vocabulary: a hard-coded stream type in SQL must be
         # declared by the composed registry vocabulary.
@@ -646,8 +624,7 @@ def lint_schema_ownership(root: Path) -> list[str]:
             stream_type = match.group(1)
             if not _is_declared_stream_type(root, stream_type):
                 errors.append(
-                    f"{rel}: stream type {stream_type!r} is not declared "
-                    "by the composed registry"
+                    f"{rel}: stream type {stream_type!r} is not declared by the composed registry"
                 )
         # Undeclared named indexes (parse CREATE [UNIQUE] INDEX ... ON).
         for match in re.finditer(
@@ -672,7 +649,7 @@ def _is_declared_stream_type(root: Path, stream_type: str) -> bool:
 
         validate_stream_type(registry, stream_type)
         return True
-    except Exception:
+    except Exception:  # noqa: BLE001 - lint probes convert rejected vocabulary to false
         return False
 
 
@@ -762,9 +739,7 @@ _INSTALLED_FALLBACK_MARKERS = frozenset(
 _INSTALLED_DIAGNOSTIC_DIRS = frozenset(
     {"diagnostic", "diagnostics", "evidence", "log", "logs", "out", "output"}
 )
-_INSTALLED_BACKUP_DIRS = frozenset(
-    {"backup", "backups", "backup-output", "restore", "restores"}
-)
+_INSTALLED_BACKUP_DIRS = frozenset({"backup", "backups", "backup-output", "restore", "restores"})
 
 
 def _resolve_installed_layout(value: str | Path) -> tuple[_InstalledLayout | None, list[str]]:
@@ -790,9 +765,7 @@ def _resolve_installed_layout(value: str | Path) -> tuple[_InstalledLayout | Non
         root = candidate
         package_root = candidate / "astrid"
     else:
-        return None, [
-            f"installed root is missing the astrid package: {candidate}"
-        ]
+        return None, [f"installed root is missing the astrid package: {candidate}"]
 
     # A checkout root is not an installed root.  The explicit mode must never
     # silently certify source files just because their package layout matches.
@@ -874,7 +847,9 @@ def _ast_path_hint(node: ast.AST | None) -> str:
         return node.attr
     if isinstance(node, ast.JoinedStr):
         return "".join(
-            value.value if isinstance(value, ast.Constant) and isinstance(value.value, str) else "{value}"
+            value.value
+            if isinstance(value, ast.Constant) and isinstance(value.value, str)
+            else "{value}"
             for value in node.values
         )
     if isinstance(node, ast.Call):
@@ -910,7 +885,14 @@ def _is_semantic_path_hint(hint: str) -> bool:
 
 def _call_writes_file(node: ast.Call) -> bool:
     name = _ast_name(node.func).lower().rsplit(".", 1)[-1]
-    if name in {"write_text", "write_bytes", "write_json", "write_json_atomic", "write_json_sidecar", "write_text_sidecar"}:
+    if name in {
+        "write_text",
+        "write_bytes",
+        "write_json",
+        "write_json_atomic",
+        "write_json_sidecar",
+        "write_text_sidecar",
+    }:
         return True
     if name in {"open", "fdopen"}:
         mode: str | None = None
@@ -992,19 +974,31 @@ def _lint_installed_source_patterns(root: Path) -> list[str]:
                     add(node, f"Supabase authority call {name!r}")
                 if _call_writes_file(node):
                     call_leaf = name.rsplit(".", 1)[-1]
-                    if call_leaf in {"write_text", "write_bytes", "write_json", "write_json_atomic", "write_json_sidecar", "write_text_sidecar"} and isinstance(node.func, ast.Attribute):
+                    if call_leaf in {
+                        "write_text",
+                        "write_bytes",
+                        "write_json",
+                        "write_json_atomic",
+                        "write_json_sidecar",
+                        "write_text_sidecar",
+                    } and isinstance(node.func, ast.Attribute):
                         path_arg = node.func.value
                     else:
                         path_arg = node.args[0] if node.args else None
                     if name.endswith("json.dump") and len(node.args) > 1:
                         path_arg = node.args[1]
                     hint = _ast_path_hint(path_arg)
-                    if name.endswith("json.dump") and not _is_diagnostic_hint(hint) and hint not in {
-                        "sys.stdout",
-                        "sys.stderr",
-                        "stdout",
-                        "stderr",
-                    }:
+                    if (
+                        name.endswith("json.dump")
+                        and not _is_diagnostic_hint(hint)
+                        and hint
+                        not in {
+                            "sys.stdout",
+                            "sys.stderr",
+                            "stdout",
+                            "stderr",
+                        }
+                    ):
                         add(node, "semantic JSON writer is not a diagnostic output")
                     elif _is_semantic_path_hint(hint):
                         add(node, f"semantic JSON/JSONL/FSA writer targets {hint!r}")
@@ -1012,7 +1006,10 @@ def _lint_installed_source_patterns(root: Path) -> list[str]:
                 if any("supabase" in value.lower() for value in call_strings):
                     add(node, "Supabase authority value in installed product code")
                 if any(
-                    any(marker in value.lower().replace("_", "") for marker in _INSTALLED_FORBIDDEN_IDENTIFIERS)
+                    any(
+                        marker in value.lower().replace("_", "")
+                        for marker in _INSTALLED_FORBIDDEN_IDENTIFIERS
+                    )
                     for value in call_strings
                 ):
                     add(node, "forbidden FSA/removed-authority value in installed product code")
@@ -1027,17 +1024,21 @@ def _lint_installed_source_patterns(root: Path) -> list[str]:
                     handler_strings = " ".join(_ast_string_literals(handler)).lower()
                     combined = f"{handler_names} {handler_strings}"
                     diagnostic_sidecar = "returncode_sidecar" in combined
-                    if "fallback" in combined or any(
-                        marker in combined
-                        for marker in (
-                            "legacy",
-                            "localfs",
-                            "supabase",
-                            "sidecar",
-                            "jsonl",
-                            "file system",
+                    if (
+                        "fallback" in combined
+                        or any(
+                            marker in combined
+                            for marker in (
+                                "legacy",
+                                "localfs",
+                                "supabase",
+                                "sidecar",
+                                "jsonl",
+                                "file system",
+                            )
                         )
-                    ) and not diagnostic_sidecar:
+                        and not diagnostic_sidecar
+                    ):
                         add(handler, "silent fallback or legacy authority in exception path")
 
     return errors
@@ -1159,10 +1160,12 @@ def _is_catalog_observation(path: Path, catalog_paths: tuple[Path, ...]) -> bool
     if any(_relative_path(path, candidate) is not None for candidate in catalog_paths):
         return True
     name = path.name.lower()
-    return (
-        path.parent.name == ".astrid"
-        and name in {"astrid.sqlite3", "astrid.sqlite3-wal", "astrid.sqlite3-shm", "astrid.sqlite3-journal"}
-    )
+    return path.parent.name == ".astrid" and name in {
+        "astrid.sqlite3",
+        "astrid.sqlite3-wal",
+        "astrid.sqlite3-shm",
+        "astrid.sqlite3-journal",
+    }
 
 
 def _is_managed_media_observation(path: Path, media_roots: tuple[Path, ...]) -> bool:
@@ -1170,15 +1173,14 @@ def _is_managed_media_observation(path: Path, media_roots: tuple[Path, ...]) -> 
         return True
     parts = tuple(part.lower() for part in path.parts)
     return any(
-        parts[index : index + 2] == (".astrid", "media")
-        for index in range(max(0, len(parts) - 1))
+        parts[index : index + 2] == (".astrid", "media") for index in range(max(0, len(parts) - 1))
     )
 
 
 def _is_backup_observation(path: Path, backup_roots: tuple[Path, ...]) -> bool:
-    return any(_relative_path(path, candidate) is not None for candidate in backup_roots) or _path_has_component(
-        path, _INSTALLED_BACKUP_DIRS
-    )
+    return any(
+        _relative_path(path, candidate) is not None for candidate in backup_roots
+    ) or _path_has_component(path, _INSTALLED_BACKUP_DIRS)
 
 
 def _is_diagnostic_observation(path: Path, diagnostic_roots: tuple[Path, ...]) -> bool:
@@ -1229,11 +1231,7 @@ def lint_runtime_authority_observations(
     def expand_log_items(items: Iterable[object]) -> Iterable[object]:
         for item in items:
             if isinstance(item, Mapping):
-                nested = [
-                    item[key]
-                    for key in ("stdout", "stderr", "path", "file")
-                    if key in item
-                ]
+                nested = [item[key] for key in ("stdout", "stderr", "path", "file") if key in item]
                 if not nested:
                     errors.append("journey log observation has no readable path")
                 else:
@@ -1267,7 +1265,9 @@ def lint_runtime_authority_observations(
         else:
             text = str(item)
             origin = "<inline journey log>"
-            if "\n" not in text and ("/" in text or "\\" in text or text.endswith((".log", ".txt", ".json", ".jsonl"))):
+            if "\n" not in text and (
+                "/" in text or "\\" in text or text.endswith((".log", ".txt", ".json", ".jsonl"))
+            ):
                 errors.append(f"journey log does not exist: {candidate}")
                 continue
         errors.extend(_lint_runtime_log_text(text, origin))
@@ -1286,21 +1286,21 @@ def lint_runtime_authority_observations(
             continue
         path = Path(path_text).expanduser()
         if not _is_catalog_observation(path, catalog) and not _is_backup_observation(path, backups):
-            errors.append(
-                f"SQLite connection outside the catalog/backup authority: {path}"
-            )
+            errors.append(f"SQLite connection outside the catalog/backup authority: {path}")
         owner = str(
             metadata.get("owner", metadata.get("writer_owner", metadata.get("source", "")))
         ).lower()
         if owner and any(pack in owner for pack in _schema_pack_ids_from_paths(project)):
-            if any(
-                _truthy_observation(metadata.get(key))
-                for key in ("write", "writable", "transaction", "owns_transaction")
-            ) or "begin" in str(metadata.get("sql", "")).lower():
+            if (
+                any(
+                    _truthy_observation(metadata.get(key))
+                    for key in ("write", "writable", "transaction", "owns_transaction")
+                )
+                or "begin" in str(metadata.get("sql", "")).lower()
+            ):
                 errors.append(f"pack-owned SQLite writer/transaction observed: {path} ({owner})")
         if any(
-            _truthy_observation(metadata.get(key))
-            for key in ("semantic", "sidecar", "fallback")
+            _truthy_observation(metadata.get(key)) for key in ("semantic", "sidecar", "fallback")
         ):
             errors.append(f"forbidden semantic SQLite authority observation: {path}")
 
@@ -1320,7 +1320,9 @@ def lint_runtime_authority_observations(
         kind = str(metadata.get("kind", "")).lower()
         if kind in {"input", "source", "fixture", "external_input"}:
             continue
-        if _truthy_observation(metadata.get("semantic")) and not _is_catalog_observation(path, catalog):
+        if _truthy_observation(metadata.get("semantic")) and not _is_catalog_observation(
+            path, catalog
+        ):
             errors.append(f"semantic created-file authority observed: {path}")
             continue
         allowed = (
@@ -1489,11 +1491,11 @@ def run_installed_authority_lint(
     errors.extend(_safe_installed_rule("removed authorities", lint_removed_authorities, root))
     errors.extend(_safe_installed_rule("schema ownership", lint_schema_ownership, root))
     errors.extend(
-        _safe_installed_rule(
-            "pack dependency directions", lint_pack_dependency_directions, root
-        )
+        _safe_installed_rule("pack dependency directions", lint_pack_dependency_directions, root)
     )
-    errors.extend(_safe_installed_rule("installed source patterns", _lint_installed_source_patterns, root))
+    errors.extend(
+        _safe_installed_rule("installed source patterns", _lint_installed_source_patterns, root)
+    )
     errors.extend(
         lint_runtime_authority_observations(
             journey_logs=journey_logs,
@@ -1511,9 +1513,7 @@ def run_installed_authority_lint(
         sorted(_installed_rel(path, root) for path in _iter_python(layout.package_root))
     )
     counts = {
-        "journey_logs": len(
-            _observation_field(observations, journey_logs, "journey_logs", "logs")
-        ),
+        "journey_logs": len(_observation_field(observations, journey_logs, "journey_logs", "logs")),
         "sqlite_connections": len(
             _observation_field(
                 observations,

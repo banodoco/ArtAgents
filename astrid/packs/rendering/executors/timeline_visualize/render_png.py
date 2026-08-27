@@ -147,7 +147,9 @@ def _contain_fit(image: Image.Image, target_w: int, target_h: int) -> Image.Imag
     return image.resize((new_w, new_h), Image.LANCZOS)
 
 
-def _cover_fit(image: Image.Image, target_w: int, target_h: int, *, anchor_left: bool) -> Image.Image:
+def _cover_fit(
+    image: Image.Image, target_w: int, target_h: int, *, anchor_left: bool
+) -> Image.Image:
     """Resize an image to FILL (target_w, target_h), cropping overflow.
 
     Used for page-break continuation cards: the visible portion of a clip
@@ -245,9 +247,7 @@ def render_page_png(page: LayoutPage, *, scale: int = 1) -> bytes:
 
     # Clip-family boxes painted bottom-to-top by z_order.
     clip_family = [
-        item
-        for item in page.objects
-        if item.kind in _FILL_BY_KIND and item.lane_index is not None
+        item for item in page.objects if item.kind in _FILL_BY_KIND and item.lane_index is not None
     ]
     for item in sorted(clip_family, key=lambda obj: obj.z_order):
         _rect(
@@ -371,7 +371,9 @@ def render_page_png(page: LayoutPage, *, scale: int = 1) -> bytes:
         label_box = item.box
         if item.kind in ("clip", "continuation") and item.box.h >= 40:
             # Narrow cards: bottom-aligned label inside the card.
-            label_box = Box(item.box.x, item.box.y + item.box.h - _LABEL_STRIP_H, item.box.w, _LABEL_STRIP_H)
+            label_box = Box(
+                item.box.x, item.box.y + item.box.h - _LABEL_STRIP_H, item.box.w, _LABEL_STRIP_H
+            )
         _label(
             draw,
             label_box,

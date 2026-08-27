@@ -120,7 +120,9 @@ def scrub_fully_transparent_rgb(path: Path) -> None:
     _write_rgba_png(path, width, height, pixels)
 
 
-def _alpha_bbox(pixels: bytearray, width: int, height: int, threshold: int = 8) -> tuple[int, int, int, int] | None:
+def _alpha_bbox(
+    pixels: bytearray, width: int, height: int, threshold: int = 8
+) -> tuple[int, int, int, int] | None:
     min_x = width
     min_y = height
     max_x = -1
@@ -148,7 +150,12 @@ def analyze_frames(frames: list[str], *, edge_margin: int) -> list[dict[str, Any
             report.append({"path": str(path), "empty": True, "touches_edge": False})
             continue
         min_x, min_y, max_x, max_y = bbox
-        touches_edge = min_x <= edge_margin or min_y <= edge_margin or max_x >= width - 1 - edge_margin or max_y >= height - 1 - edge_margin
+        touches_edge = (
+            min_x <= edge_margin
+            or min_y <= edge_margin
+            or max_x >= width - 1 - edge_margin
+            or max_y >= height - 1 - edge_margin
+        )
         report.append(
             {
                 "path": str(path),

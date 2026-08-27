@@ -35,11 +35,7 @@ class RenderCommandInputs:
 
 
 def timeline_canvas(timeline_data: Mapping[str, Any]) -> tuple[int, int, int]:
-    canvas = (
-        timeline_data.get("theme_overrides", {})
-        .get("visual", {})
-        .get("canvas", {})
-    )
+    canvas = timeline_data.get("theme_overrides", {}).get("visual", {}).get("canvas", {})
     return (
         int(canvas.get("width", 1920)),
         int(canvas.get("height", 1080)),
@@ -66,9 +62,7 @@ def clip_duration_seconds(clip: Mapping[str, Any]) -> float:
     if speed <= 0:
         raise ValueError(f"Clip {clip_id!r} has non-positive speed {speed}")
     if start < 0 or end <= start:
-        raise ValueError(
-            f"Clip {clip_id!r} must have positive source bounds with to > from"
-        )
+        raise ValueError(f"Clip {clip_id!r} must have positive source bounds with to > from")
     return (end - start) / speed
 
 
@@ -89,9 +83,7 @@ def validate_ffmpeg_media_timeline(timeline_data: Mapping[str, Any]) -> None:
 
 def _input_path(raw_path: str, workspace: Path) -> Path:
     candidate = Path(raw_path).expanduser()
-    return (
-        candidate if candidate.is_absolute() else workspace / candidate
-    ).resolve()
+    return (candidate if candidate.is_absolute() else workspace / candidate).resolve()
 
 
 def _coerce_request(request: RenderRequest | Mapping[str, Any]) -> RenderRequest:
@@ -166,33 +158,15 @@ def build_filter_graph(
     timeline_data = inputs.timeline_data
     registry = inputs.registry
     width, height, fps = timeline_canvas(timeline_data)
-    tracks = {
-        track.get("id"): track for track in timeline_data.get("tracks", [])
-    }
-    visual_track_ids = {
-        track["id"]
-        for track in tracks.values()
-        if track.get("kind") == "visual"
-    }
-    audio_track_ids = {
-        track["id"]
-        for track in tracks.values()
-        if track.get("kind") == "audio"
-    }
+    tracks = {track.get("id"): track for track in timeline_data.get("tracks", [])}
+    visual_track_ids = {track["id"] for track in tracks.values() if track.get("kind") == "visual"}
+    audio_track_ids = {track["id"] for track in tracks.values() if track.get("kind") == "audio"}
     video_clips = sorted(
-        [
-            clip
-            for clip in timeline_data.get("clips", [])
-            if clip.get("track") in visual_track_ids
-        ],
+        [clip for clip in timeline_data.get("clips", []) if clip.get("track") in visual_track_ids],
         key=lambda clip: float(clip.get("at", 0) or 0),
     )
     audio_clips = sorted(
-        [
-            clip
-            for clip in timeline_data.get("clips", [])
-            if clip.get("track") in audio_track_ids
-        ],
+        [clip for clip in timeline_data.get("clips", []) if clip.get("track") in audio_track_ids],
         key=lambda clip: float(clip.get("at", 0) or 0),
     )
     if not video_clips:
@@ -204,16 +178,11 @@ def build_filter_graph(
         if not asset_key:
             raise ValueError(f"Clip {clip.get('id')!r} has no asset")
         if asset_key not in registry["assets"]:
-            raise ValueError(
-                f"Clip {clip.get('id')!r} references unknown asset "
-                f"{asset_key!r}"
-            )
+            raise ValueError(f"Clip {clip.get('id')!r} references unknown asset {asset_key!r}")
         if asset_key not in asset_keys:
             asset_keys.append(asset_key)
 
-    asset_index = {
-        asset_key: index for index, asset_key in enumerate(asset_keys)
-    }
+    asset_index = {asset_key: index for index, asset_key in enumerate(asset_keys)}
     filters: list[str] = []
     video_labels: list[str] = []
     copy_video_input: int | None = None
@@ -277,10 +246,7 @@ def build_filter_graph(
                 f"fps={fps},format=yuv420p[{label}]"
             )
             video_labels.append(f"[{label}]")
-        filters.append(
-            "".join(video_labels)
-            + f"concat=n={len(video_labels)}:v=1:a=0[vout]"
-        )
+        filters.append("".join(video_labels) + f"concat=n={len(video_labels)}:v=1:a=0[vout]")
 
     audio_labels: list[str] = []
     cursor = 0.0
@@ -316,8 +282,7 @@ def build_filter_graph(
 
     if audio_clips:
         visual_duration = max(
-            float(clip.get("at", 0)) + clip_duration_seconds(clip)
-            for clip in video_clips
+            float(clip.get("at", 0)) + clip_duration_seconds(clip) for clip in video_clips
         )
         if visual_duration > cursor + 1e-9:
             duration = visual_duration - cursor
@@ -327,10 +292,7 @@ def build_filter_graph(
                 f"atrim=duration={duration:.6f}[{label}]"
             )
             audio_labels.append(f"[{label}]")
-        filters.append(
-            "".join(audio_labels)
-            + f"concat=n={len(audio_labels)}:v=0:a=1[aout]"
-        )
+        filters.append("".join(audio_labels) + f"concat=n={len(audio_labels)}:v=0:a=1[aout]")
     return filters, copy_video_input
 
 
@@ -351,33 +313,15 @@ def _has_audio_clips(timeline_data: Mapping[str, Any]) -> bool:
 def _asset_input_argv(inputs: RenderCommandInputs) -> list[str]:
     timeline_data = inputs.timeline_data
     registry = inputs.registry
-    tracks = {
-        track.get("id"): track for track in timeline_data.get("tracks", [])
-    }
-    visual_track_ids = {
-        track["id"]
-        for track in tracks.values()
-        if track.get("kind") == "visual"
-    }
-    audio_track_ids = {
-        track["id"]
-        for track in tracks.values()
-        if track.get("kind") == "audio"
-    }
+    tracks = {track.get("id"): track for track in timeline_data.get("tracks", [])}
+    visual_track_ids = {track["id"] for track in tracks.values() if track.get("kind") == "visual"}
+    audio_track_ids = {track["id"] for track in tracks.values() if track.get("kind") == "audio"}
     video_clips = sorted(
-        [
-            clip
-            for clip in timeline_data.get("clips", [])
-            if clip.get("track") in visual_track_ids
-        ],
+        [clip for clip in timeline_data.get("clips", []) if clip.get("track") in visual_track_ids],
         key=lambda clip: float(clip.get("at", 0) or 0),
     )
     audio_clips = sorted(
-        [
-            clip
-            for clip in timeline_data.get("clips", [])
-            if clip.get("track") in audio_track_ids
-        ],
+        [clip for clip in timeline_data.get("clips", []) if clip.get("track") in audio_track_ids],
         key=lambda clip: float(clip.get("at", 0) or 0),
     )
     asset_keys: list[str] = []
@@ -391,10 +335,7 @@ def _asset_input_argv(inputs: RenderCommandInputs) -> list[str]:
         entry = registry["assets"][asset_key]
         file_value = entry.get("file")
         if not isinstance(file_value, str) or not file_value:
-            raise ValueError(
-                "ffmpeg engine requires local file assets; "
-                f"{asset_key!r} has no file"
-            )
+            raise ValueError(f"ffmpeg engine requires local file assets; {asset_key!r} has no file")
         asset_path = Path(file_value)
         if not asset_path.is_absolute():
             asset_path = (inputs.assets_path.parent / asset_path).resolve()
@@ -413,24 +354,12 @@ def build_render_command_from_inputs(inputs: RenderCommandInputs) -> list[str]:
         *_asset_input_argv(inputs),
         *(["-filter_complex", ";".join(filters)] if filters else []),
         "-map",
-        (
-            f"{copy_video_input}:v:0"
-            if copy_video_input is not None
-            else "[vout]"
-        ),
+        (f"{copy_video_input}:v:0" if copy_video_input is not None else "[vout]"),
         *(["-map", "[aout]"] if has_audio else []),
         "-c:v",
         "copy" if copy_video_input is not None else "libx264",
-        *(
-            ["-preset", "veryfast", "-crf", "20"]
-            if copy_video_input is None
-            else []
-        ),
-        *(
-            ["-c:a", "aac", "-b:a", "192k"]
-            if has_audio
-            else ["-an"]
-        ),
+        *(["-preset", "veryfast", "-crf", "20"] if copy_video_input is None else []),
+        *(["-c:a", "aac", "-b:a", "192k"] if has_audio else ["-an"]),
         "-movflags",
         "+faststart",
         str(inputs.output_path),
@@ -452,19 +381,15 @@ def build_render_command(
         from astrid.packs.rendering.backends.ffmpeg.support import support
 
         normalized_request = (
-            request
-            if isinstance(request, RenderRequest)
-            else RenderRequest.from_dict(request)
+            request if isinstance(request, RenderRequest) else RenderRequest.from_dict(request)
         )
         report = support(
             normalized_request,
             inputs.timeline_data,
             inputs.registry,
         )
-        stream_copy_allowed = (
-            report.supported and bool(report.features.get("stream_copy"))
-        )
-    except Exception:
+        stream_copy_allowed = report.supported and bool(report.features.get("stream_copy"))
+    except Exception:  # noqa: BLE001 - support probing is fail-closed
         stream_copy_allowed = False
     inputs = replace(inputs, stream_copy_allowed=stream_copy_allowed)
     return build_render_command_from_inputs(inputs)

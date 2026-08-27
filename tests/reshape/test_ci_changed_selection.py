@@ -70,7 +70,7 @@ def test_ci_changed_selection_includes_mapped_test(tmp_path: Path) -> None:
     )
 
     # ── Build environment with mock git on PATH ────────────────────────
-    mock_git = _create_mock_git(tmp_path)
+    _create_mock_git(tmp_path)
     env = os.environ.copy()
     env["PATH"] = str(tmp_path) + ":" + env["PATH"]
 
@@ -140,7 +140,7 @@ def test_ci_changed_selection_excludes_unrelated_when_only_structure_changes(
     directory-fallback would need a changed file under astrid/timeline/
     to trigger that).
     """
-    mock_git = _create_mock_git(tmp_path)
+    _create_mock_git(tmp_path)
     env = os.environ.copy()
     env["PATH"] = str(tmp_path) + ":" + env["PATH"]
 

@@ -12,6 +12,7 @@ EXPLICIT_WORKSPACE="${SMOKE_WHEEL_WORKSPACE:-}"
 
 cd "$REPO_ROOT"
 
+set --
 if [[ -n "$EXPLICIT_WORKSPACE" ]]; then
   set -- "$REPO_ROOT" --workspace "$EXPLICIT_WORKSPACE"
 else

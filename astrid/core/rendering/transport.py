@@ -14,6 +14,7 @@ import shutil
 import signal
 import stat
 import subprocess
+import sys
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
@@ -22,7 +23,7 @@ from typing import Any, Literal, TypeAlias
 
 from astrid.core.subprocess_env import build_child_subprocess_env
 
-from .contracts import RenderPlan, RenderResult, RendererError, SupportReport
+from .contracts import RendererError, RenderPlan, RenderResult, SupportReport
 from .errors import (
     RendererException,
     make_renderer_error,
@@ -34,7 +35,6 @@ from .errors import (
     raise_structured_failure,
     raise_timeout_error,
 )
-
 
 CommandVerb: TypeAlias = Literal["render", "support", "plan", "finalize"]
 CommandResult: TypeAlias = RenderResult | SupportReport | RenderPlan
@@ -132,6 +132,15 @@ class CommandTransport:
             )
         normalized_timeout = _validate_timeout(timeout, backend=selected_backend)
         argv_prefix = _normalize_command(command, backend=selected_backend)
+        # Source-pack manifests deliberately use a portable bare ``python3``
+        # token.  Resolve that generic token to the interpreter that owns this
+        # Astrid runtime instead of consulting the sanitized child PATH.  A
+        # PATH-selected interpreter can have a different ABI while PYTHONPATH
+        # still points at this runtime's site-packages (for example CPython
+        # 3.14 trying to import a CPython 3.11 native wheel).  Explicit paths
+        # and version-qualified commands remain caller-controlled.
+        if argv_prefix[0].casefold() in {"python", "python.exe", "python3", "python3.exe"}:
+            argv_prefix[0] = sys.executable
         cwd_path = _resolve_cwd(cwd, backend=selected_backend)
         request = _absolute_path(request_path)
         result = _absolute_path(result_path)
@@ -185,7 +194,12 @@ class CommandTransport:
                 text=True,
                 encoding="utf-8",
                 errors="replace",
-                start_new_session=True,
+                # A serve-owned render child may establish the outer process
+                # session as its containment boundary.  Keep the historical
+                # detached-session default for all other callers.
+                start_new_session=(
+                    os.environ.get("ASTRID_RENDER_INHERIT_PROCESS_GROUP") != "1"
+                ),
             )
         except (FileNotFoundError, PermissionError) as exc:
             raise_binary_missing_error(
@@ -238,13 +252,13 @@ class CommandTransport:
             exc.renderer_error = error  # type: ignore[attr-defined]
             exc.error = error  # type: ignore[attr-defined]
             raise
-        except Exception as exc:
+        except Exception:
             # Any other post-spawn failure (including a defect in result
             # parsing) must still terminate and reap the process group so no
             # orphan is left behind.
             try:
                 _terminate_process_group(process, grace=self.termination_grace)
-            except Exception:
+            except Exception:  # noqa: BLE001 - preserve the original renderer error
                 pass
             raise
 
@@ -437,7 +451,8 @@ def _remove_stale_result(result_path: Path, *, backend: str) -> None:
 def _signal_process_group(process: subprocess.Popen[str], sig: int) -> None:
     if hasattr(os, "killpg"):
         try:
-            # start_new_session=True makes the child's PID its process-group ID.
+            # The normal transport starts a new session; the contained worker
+            # deliberately inherits its already-scoped process group.
             os.killpg(process.pid, sig)
             return
         except ProcessLookupError:

@@ -8,7 +8,7 @@
 
 PY ?= $(if $(wildcard .venv/bin/python),.venv/bin/python,python3)
 
-.PHONY: help check ci preflight structure doctor ruff mypy cycles remotion-typecheck renderer-parity wheel ci-mirror editable s1-gate m4-baseline m4-gate m7-gate m8-gate
+.PHONY: help check ci preflight structure doctor ruff mypy cycles remotion-install remotion-typecheck renderer-parity wheel ci-mirror editable lock-build lock-runtime lock-validate toolchain-record s1-gate m4-baseline m4-gate m7-gate m8-gate
 
 help:
 	@echo "make check   - blocking gates: structure, doctor, ruff, mypy, cycles, Remotion, renderer parity"
@@ -18,7 +18,10 @@ help:
 	@echo "make m4-gate - m4 Step 33: 13 focused lanes + authority lint + drift rejection + feasibility admission (fails closed)"
 	@echo "make m7-gate - m7 GA evidence: admitted selectors 1-10 + provisional/retained dispositions (fails closed)"
 	@echo "make m8-gate - m8 packaged GA evidence: digest validation + atomic six-file release publication (set M8_EVIDENCE=... to publish a bundle)"
-	@echo "make <gate>  - run one gate: preflight | structure | doctor | ruff | mypy | cycles | remotion-typecheck | renderer-parity | wheel | ci-mirror | editable | s1-gate | m4-baseline | m4-gate | m7-gate | m8-gate"
+	@echo "make lock-runtime / lock-build - refresh universal SHA-256 dependency locks with uv"
+	@echo "make lock-validate - validate exact pins, hashes, and direct dependency coverage"
+	@echo "make <gate>  - run one gate: structure | doctor | ruff | mypy | cycles | remotion-install | remotion-typecheck | renderer-parity | wheel | ci-mirror | editable | s1-gate | m4-baseline | m4-gate | m7-gate | m8-gate"
+	@echo "make preflight - verify Python, Node, ffmpeg, and locked Remotion prerequisites"
 
 # --- Fast gates: catch the common deploy blockers in seconds. Run before every push. ---
 check: preflight structure doctor ruff mypy cycles remotion-typecheck renderer-parity
@@ -43,7 +46,7 @@ structure:
 	@echo "✓ repo structure (canonical top-level dirs)"
 
 doctor:
-	@$(PY) -m astrid doctor --json >/dev/null
+	@$(PY) scripts/reshape/ci_doctor.py
 	@echo "✓ doctor (deploy health gate)"
 
 ruff:
@@ -58,16 +61,14 @@ cycles:
 	@$(PY) -m scripts.reshape.import_cycles --baseline scripts/reshape/baselines/import_cycles.json
 	@echo "✓ import cycles (no new cross-package cycle)"
 
+remotion-install:
+	@$(PY) scripts/reshape/remotion_gate.py install
+
 remotion-typecheck:
-	@if [ -d remotion/node_modules ]; then \
-		$(PY) scripts/gen_remotion_types.py && \
-		cd remotion && npm run typecheck; \
-	else \
-		echo "LANE remotion-typecheck: SKIP (remotion/node_modules absent; run 'cd remotion && npm ci' to enable)"; \
-	fi
+	@$(PY) scripts/reshape/remotion_gate.py typecheck
 
 renderer-parity:
-	@$(PY) -m pytest -q -m renderer_parity tests/packs/test_renderer_parity.py
+	@$(PY) scripts/reshape/remotion_gate.py parity
 
 # --- Full mirror of the CI deploy job (slow). Run before a release / when in doubt. ---
 ci: check editable wheel ci-mirror
@@ -78,6 +79,19 @@ editable:
 
 wheel:
 	PYTHON_BIN="$(PY)" bash scripts/smoke_wheel_install.sh
+
+lock-build:
+	uv pip compile requirements/build.in --universal --python-version 3.11 --generate-hashes --no-annotate --custom-compile-command 'make lock-build' --output-file requirements/build.lock
+
+lock-runtime:
+	uv pip compile pyproject.toml --universal --python-version 3.11 --generate-hashes --no-annotate --custom-compile-command 'make lock-runtime' --output-file requirements/runtime.lock
+
+lock-validate:
+	@$(PY) -c "from scripts.reshape.release_reproducibility import validate_dependency_locks; validate_dependency_locks(); print('✓ hashed dependency locks')"
+
+toolchain-record:
+	@$(PY) -m scripts.reshape.release_reproducibility --output out/release-toolchain.json >/dev/null
+	@echo "✓ release toolchain recorded in out/release-toolchain.json"
 
 ci-mirror:
 	PYTHON_BIN="$(PY)" bash scripts/reshape/run_ci_checks.sh

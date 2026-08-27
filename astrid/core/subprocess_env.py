@@ -15,6 +15,9 @@ from astrid.core.env_vars import (
     ASTRID_HOME as ASTRID_HOME_ENV,
 )
 from astrid.core.env_vars import (
+    ASTRID_PACKS_PATH as PACKS_PATH_ENV,
+)
+from astrid.core.env_vars import (
     ASTRID_PROJECT_RUN as PROJECT_RUN_ENV,
 )
 from astrid.core.env_vars import (
@@ -45,7 +48,7 @@ from astrid.core.env_vars import (
     ASTRID_THEMES_ROOT as THEMES_ROOT_ENV,
 )
 from astrid.core.env_vars import (
-    ASTRID_PACKS_PATH as PACKS_PATH_ENV,
+    ASTRID_TIMELINE_SCHEMA_PYTHONPATH as TIMELINE_SCHEMA_PYTHONPATH_ENV,
 )
 
 _SAFE_BASE_ENV = frozenset(
@@ -72,6 +75,7 @@ _SAFE_BASE_ENV = frozenset(
 _ASTRID_PROPAGATED_ENV = frozenset(
     {
         ASTRID_HOME_ENV,
+        TIMELINE_SCHEMA_PYTHONPATH_ENV,
         ASTRID_SESSION_ID_ENV,
         PROJECTS_ROOT_ENV,
         PROJECT_RUN_ENV,

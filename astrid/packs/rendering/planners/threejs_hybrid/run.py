@@ -81,9 +81,7 @@ REMOTION_ID = "rendering.remotion"
 FINALIZER_ID = "rendering.ffmpeg-finalizer"
 _HANDLE_SECONDS = Fraction(1, 4)
 _ZERO_DIGEST = "0" * 64
-_PLANNER_CONFIG_KEYS = frozenset(
-    {"theme", "theme_path", "themes_root", "extra_pack_roots"}
-)
+_PLANNER_CONFIG_KEYS = frozenset({"theme", "theme_path", "themes_root", "extra_pack_roots"})
 
 SupportResolver = Callable[[str, RenderRequest, Mapping[str, Any]], SupportReport]
 
@@ -113,9 +111,7 @@ def _mp4_time_base(fps: Fraction) -> tuple[int, int]:
 # ---------------------------------------------------------------------------
 
 
-def _clip_frame_range(
-    clip: Mapping[str, Any], fps: Fraction
-) -> tuple[int, int]:
+def _clip_frame_range(clip: Mapping[str, Any], fps: Fraction) -> tuple[int, int]:
     """Half-open frame range for one clip using round(seconds * fps).
 
     A positive-duration clip always occupies at least one frame, so a
@@ -191,9 +187,7 @@ def _component_eligible(
     Remotion — an overlap is never split in v1.
     """
 
-    return not _three_support_reasons(
-        _component_timeline(timeline, clips, indexes)
-    )
+    return not _three_support_reasons(_component_timeline(timeline, clips, indexes))
 
 
 def _handle_frame_range(
@@ -255,24 +249,16 @@ def _window_plan(
             ranges.append((start, end, index))
     classified: list[tuple[int, int, str]] = []
     for start, end, indexes in _merged_components(ranges):
-        renderer = (
-            THREE_ID
-            if _component_eligible(timeline, clips, indexes)
-            else REMOTION_ID
-        )
+        renderer = THREE_ID if _component_eligible(timeline, clips, indexes) else REMOTION_ID
         classified.append((start, end, renderer))
     windows: list[tuple[int, int, str]] = []
     for position, (start, end, renderer) in enumerate(classified):
         if renderer == THREE_ID:
             windows.append((start, end, THREE_ID))
             continue
-        previous_occupied_end = (
-            classified[position - 1][1] if position > 0 else 0
-        )
+        previous_occupied_end = classified[position - 1][1] if position > 0 else 0
         next_occupied_start = (
-            classified[position + 1][0]
-            if position + 1 < len(classified)
-            else total_frames
+            classified[position + 1][0] if position + 1 < len(classified) else total_frames
         )
         handle_start, handle_end = _handle_frame_range(
             start,
@@ -341,10 +327,7 @@ def _assert_exact_tiling(
             )
     if window_end > total_frames:
         raise AssertionError("tiling extends beyond the timeline")
-    if any(
-        start < window_start or end > window_end
-        for start, end, _renderer in segments
-    ):
+    if any(start < window_start or end > window_end for start, end, _renderer in segments):
         raise AssertionError("tiling escapes the requested window")
 
 
@@ -400,9 +383,7 @@ def support(request: RenderRequest, *, workspace: Path) -> SupportReport:
             _window_plan(timeline, fps)
         if request.window is not None:
             if request.window.fps_rational != profile.fps_rational:
-                reasons.append(
-                    "request window FPS does not match the canonical render profile"
-                )
+                reasons.append("request window FPS does not match the canonical render profile")
             elif request.window.end_frame > total_frames:
                 reasons.append("request window extends beyond the timeline")
     except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
@@ -474,9 +455,7 @@ def plan(
     finalizer_registry: FinalizerRegistry | None
     if registries is None and support_resolver is None:
         raw_extra_roots = config.get("extra_pack_roots", ())
-        if isinstance(raw_extra_roots, (str, bytes)) or not isinstance(
-            raw_extra_roots, Sequence
-        ):
+        if isinstance(raw_extra_roots, (str, bytes)) or not isinstance(raw_extra_roots, Sequence):
             raise TypeError("extra_pack_roots must be an array of paths")
         extra_roots = tuple(str(item) for item in raw_extra_roots)
         renderer_registry, _planners, finalizer_registry = load_default_registries(
@@ -490,9 +469,7 @@ def plan(
         renderer_registry, finalizer_registry = registries
     if support_resolver is None:
         if renderer_registry is None:
-            raise RuntimeError(
-                "renderer registry is required for command support resolution"
-            )
+            raise RuntimeError("renderer registry is required for command support resolution")
         support_resolver = _CommandSupportResolver(
             renderer_registry,
             workspace=workspace,
@@ -541,9 +518,7 @@ def plan(
             raise_unsupported_error(
                 backend=BACKEND_ID,
                 message=f"no renderer supports planned window [{start},{end})",
-                recovery_command=(
-                    "install or configure a renderer supporting the reported window"
-                ),
+                recovery_command=("install or configure a renderer supporting the reported window"),
                 details={
                     "window": [start, end],
                     "attempts": [f"{renderer_id}: {exc}"],
@@ -561,28 +536,20 @@ def plan(
             raise_unsupported_error(
                 backend=BACKEND_ID,
                 message=f"no renderer supports planned window [{start},{end})",
-                recovery_command=(
-                    "install or configure a renderer supporting the reported window"
-                ),
+                recovery_command=("install or configure a renderer supporting the reported window"),
                 details={
                     "window": [start, end],
-                    "attempts": [
-                        f"{renderer_id}: support report named {candidate_report.backend}"
-                    ],
+                    "attempts": [f"{renderer_id}: support report named {candidate_report.backend}"],
                 },
             )
         if not candidate_report.supported:
             raise_unsupported_error(
                 backend=BACKEND_ID,
                 message=f"no renderer supports planned window [{start},{end})",
-                recovery_command=(
-                    "install or configure a renderer supporting the reported window"
-                ),
+                recovery_command=("install or configure a renderer supporting the reported window"),
                 details={
                     "window": [start, end],
-                    "attempts": [
-                        f"{renderer_id}: " + "; ".join(candidate_report.reasons)
-                    ],
+                    "attempts": [f"{renderer_id}: " + "; ".join(candidate_report.reasons)],
                 },
             )
         segments.append(
@@ -603,9 +570,7 @@ def plan(
                 },
             )
         )
-        reasons[str(index)] = (
-            f"threejs-hybrid window assigned to {renderer_id} by supported report"
-        )
+        reasons[str(index)] = f"threejs-hybrid window assigned to {renderer_id} by supported report"
 
     return RenderPlan(
         schema_version=SCHEMA_VERSION,

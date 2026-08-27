@@ -37,7 +37,7 @@ def core_registry():
 
 @pytest.fixture
 def standard_registry():
-    """Frozen standard-Astrid registry (core + the three in-tree packs)."""
+    """Frozen standard-Astrid registry (core + the four in-tree packs)."""
     return build_standard_registry()
 
 

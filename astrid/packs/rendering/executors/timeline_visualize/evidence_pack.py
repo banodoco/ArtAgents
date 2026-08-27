@@ -102,7 +102,9 @@ class PackLayout:
     svg_paths: tuple[Path, ...]
     structure_path: Path | None
     reading_guide_path: Path
-    json_paths: dict[str, Path]  # ground-truth, view-map, action-index, asset-index, transcript-index, diagnostics, manifest, pack-hashes
+    json_paths: dict[
+        str, Path
+    ]  # ground-truth, view-map, action-index, asset-index, transcript-index, diagnostics, manifest, pack-hashes
     file_hashes: dict[str, str]  # relative path -> sha256 (canonical bytes)
     total_bytes: int
 
@@ -238,7 +240,9 @@ def _build_manifest(
         raise ValueError("ground-truth.json project_slug must be a non-empty string")
 
     scope_block = gt.get("scope", {})
-    scope_kind = scope_block.get("kind", "timeline") if isinstance(scope_block, Mapping) else "timeline"
+    scope_kind = (
+        scope_block.get("kind", "timeline") if isinstance(scope_block, Mapping) else "timeline"
+    )
     scope_ref = scope_block.get("ref") if isinstance(scope_block, Mapping) else None
 
     layouts: list[str] = []

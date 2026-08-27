@@ -49,7 +49,18 @@ def remove_chroma_key(
     )
 
 
-def slice_frames(sheet_path: Path, frames_dir: Path, *, cols: int, rows: int, frame_width: int, frame_height: int, frame_count: int, trim: int, force: bool) -> list[str]:
+def slice_frames(
+    sheet_path: Path,
+    frames_dir: Path,
+    *,
+    cols: int,
+    rows: int,
+    frame_width: int,
+    frame_height: int,
+    frame_count: int,
+    trim: int,
+    force: bool,
+) -> list[str]:
     frames_dir.mkdir(parents=True, exist_ok=True)
     outputs: list[str] = []
     output_width = frame_width - trim * 2
@@ -84,7 +95,9 @@ def slice_frames(sheet_path: Path, frames_dir: Path, *, cols: int, rows: int, fr
     return outputs
 
 
-def assemble_review_video(frames_dir: Path, video_path: Path, *, fps: int, background: str, force: bool) -> None:
+def assemble_review_video(
+    frames_dir: Path, video_path: Path, *, fps: int, background: str, force: bool
+) -> None:
     if video_path.exists() and not force:
         _die(f"Output exists: {video_path} (use --force to overwrite)")
     video_path.parent.mkdir(parents=True, exist_ok=True)
@@ -155,7 +168,15 @@ def _scale_filter_for_web(max_dim: int | None) -> str:
     )
 
 
-def convert_image_to_webp(input_path: Path, output_path: Path, *, quality: int, lossless: bool, max_dim: int | None, force: bool) -> None:
+def convert_image_to_webp(
+    input_path: Path,
+    output_path: Path,
+    *,
+    quality: int,
+    lossless: bool,
+    max_dim: int | None,
+    force: bool,
+) -> None:
     if output_path.exists() and not force:
         _die(f"Output exists: {output_path} (use --force to overwrite)")
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -183,17 +204,36 @@ def convert_image_to_webp(input_path: Path, output_path: Path, *, quality: int, 
     )
 
 
-def convert_frames_to_webp(frames: list[str], out_dir: Path, *, quality: int, lossless: bool, max_dim: int | None, force: bool) -> list[str]:
+def convert_frames_to_webp(
+    frames: list[str],
+    out_dir: Path,
+    *,
+    quality: int,
+    lossless: bool,
+    max_dim: int | None,
+    force: bool,
+) -> list[str]:
     out_dir.mkdir(parents=True, exist_ok=True)
     outputs: list[str] = []
     for index, frame in enumerate(frames, start=1):
         out = out_dir / f"frame_{index:03d}.webp"
-        convert_image_to_webp(Path(frame), out, quality=quality, lossless=lossless, max_dim=max_dim, force=force)
+        convert_image_to_webp(
+            Path(frame), out, quality=quality, lossless=lossless, max_dim=max_dim, force=force
+        )
         outputs.append(str(out))
     return outputs
 
 
-def assemble_web_mp4(frames_dir: Path, video_path: Path, *, fps: int, background: str, max_dim: int | None, crf: int, force: bool) -> None:
+def assemble_web_mp4(
+    frames_dir: Path,
+    video_path: Path,
+    *,
+    fps: int,
+    background: str,
+    max_dim: int | None,
+    crf: int,
+    force: bool,
+) -> None:
     if video_path.exists() and not force:
         _die(f"Output exists: {video_path} (use --force to overwrite)")
     video_path.parent.mkdir(parents=True, exist_ok=True)
@@ -231,7 +271,9 @@ def assemble_web_mp4(frames_dir: Path, video_path: Path, *, fps: int, background
     )
 
 
-def assemble_animated_webp(frames_dir: Path, output_path: Path, *, fps: int, quality: int, max_dim: int | None, force: bool) -> None:
+def assemble_animated_webp(
+    frames_dir: Path, output_path: Path, *, fps: int, quality: int, max_dim: int | None, force: bool
+) -> None:
     if output_path.exists() and not force:
         _die(f"Output exists: {output_path} (use --force to overwrite)")
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -264,7 +306,9 @@ def assemble_animated_webp(frames_dir: Path, output_path: Path, *, fps: int, qua
     )
 
 
-def assemble_sprite_sheet_from_frames(frames_dir: Path, output_path: Path, *, cols: int, rows: int, force: bool) -> None:
+def assemble_sprite_sheet_from_frames(
+    frames_dir: Path, output_path: Path, *, cols: int, rows: int, force: bool
+) -> None:
     if output_path.exists() and not force:
         _die(f"Output exists: {output_path} (use --force to overwrite)")
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -311,16 +355,43 @@ def build_web_outputs(
     frames_web_dir = out_dir / "frames"
     mp4_path = out_dir / "sprite_preview_web.mp4"
     animated_webp = out_dir / "sprite_preview.webp"
-    convert_image_to_webp(source_sheet, sheet_webp, quality=quality, lossless=lossless_frames, max_dim=None, force=force)
-    frame_outputs = convert_frames_to_webp(frames, frames_web_dir, quality=quality, lossless=lossless_frames, max_dim=max_dim, force=force)
-    assemble_web_mp4(frames_dir, mp4_path, fps=fps, background=background, max_dim=max_dim, crf=mp4_crf, force=force)
+    convert_image_to_webp(
+        source_sheet,
+        sheet_webp,
+        quality=quality,
+        lossless=lossless_frames,
+        max_dim=None,
+        force=force,
+    )
+    frame_outputs = convert_frames_to_webp(
+        frames,
+        frames_web_dir,
+        quality=quality,
+        lossless=lossless_frames,
+        max_dim=max_dim,
+        force=force,
+    )
+    assemble_web_mp4(
+        frames_dir,
+        mp4_path,
+        fps=fps,
+        background=background,
+        max_dim=max_dim,
+        crf=mp4_crf,
+        force=force,
+    )
     animated_webp_path: str | None = None
     if animated:
         try:
-            assemble_animated_webp(frames_dir, animated_webp, fps=fps, quality=quality, max_dim=max_dim, force=force)
+            assemble_animated_webp(
+                frames_dir, animated_webp, fps=fps, quality=quality, max_dim=max_dim, force=force
+            )
             animated_webp_path = str(animated_webp)
-        except Exception as exc:
-            print(f"Warning: animated WebP export failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+        except Exception as exc:  # noqa: BLE001 - optional animated preview must not block export
+            print(
+                f"Warning: animated WebP export failed: {type(exc).__name__}: {exc}",
+                file=sys.stderr,
+            )
     web_manifest = {
         "sheet_webp": str(sheet_webp),
         "frames_webp": frame_outputs,
@@ -335,11 +406,15 @@ def build_web_outputs(
         "frame_count": len(frames),
         "recommended_runtime": "Use sheet_webp as a CSS/canvas atlas when frame dimensions match runtime needs; use frames_webp for lazy-loaded frame sequences.",
     }
-    (out_dir / "sprite_web_manifest.json").write_text(json.dumps(web_manifest, indent=2) + "\n", encoding="utf-8")
+    (out_dir / "sprite_web_manifest.json").write_text(
+        json.dumps(web_manifest, indent=2) + "\n", encoding="utf-8"
+    )
     return web_manifest
 
 
-def normalize_frame_frame(path: Path, out_path: Path, *, margin: int, force: bool) -> dict[str, Any]:
+def normalize_frame_frame(
+    path: Path, out_path: Path, *, margin: int, force: bool
+) -> dict[str, Any]:
     width, height, pixels = _read_rgba_png(path)
     bbox = _alpha_bbox(pixels, width, height)
     if bbox is None:
@@ -361,6 +436,7 @@ def normalize_frame_frame(path: Path, out_path: Path, *, margin: int, force: boo
         filter_chain = f"{crop_expr},pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color=0x00000000"
     if out_path.exists() and not force:
         from astrid.packs.generation.executors.generate_image_openai.run import _die
+
         _die(f"Output exists: {out_path} (use --force to overwrite)")
     out_path.parent.mkdir(parents=True, exist_ok=True)
     _run(
@@ -380,10 +456,18 @@ def normalize_frame_frame(path: Path, out_path: Path, *, margin: int, force: boo
         ]
     )
     scrub_fully_transparent_rgb(out_path)
-    return {"path": str(out_path), "empty": False, "scaled": scale < 0.999, "scale": scale, "source_bbox": [min_x, min_y, max_x, max_y]}
+    return {
+        "path": str(out_path),
+        "empty": False,
+        "scaled": scale < 0.999,
+        "scale": scale,
+        "source_bbox": [min_x, min_y, max_x, max_y],
+    }
 
 
-def normalize_frames(frames: list[str], out_dir: Path, *, margin: int, force: bool) -> tuple[list[str], list[dict[str, Any]]]:
+def normalize_frames(
+    frames: list[str], out_dir: Path, *, margin: int, force: bool
+) -> tuple[list[str], list[dict[str, Any]]]:
     normalized: list[str] = []
     report: list[dict[str, Any]] = []
     for index, frame in enumerate(frames, start=1):

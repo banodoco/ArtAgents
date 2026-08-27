@@ -57,6 +57,10 @@ from typing import Any, List
 
 from astrid.core.events.service import ACTOR_KINDS, EventAppendService
 from astrid.core.ids import generate_lowercase_ulid, is_lowercase_ulid
+from astrid.core.integrations.reigh.timeline_bundle import (
+    BUNDLE_MISSING,
+    validate_timeline_bundle,
+)
 from astrid.core.receipts.canonical import (
     CanonicalizationError,
     canonical_json,
@@ -90,6 +94,7 @@ The event carries the command delta (the newly committed ``config`` and
 ``registry`` plus the ``expected_version`` that was CAS-checked), so the
 event log alone can reconstruct every save that advanced the stream head.
 """
+_BUNDLE_MISSING = BUNDLE_MISSING
 
 TIMELINE_SAVE_COMMAND_KIND = "timeline.save"
 """The m1 command kind that timeline-save receipts are keyed on."""
@@ -119,34 +124,32 @@ when it does not.
 TIMELINE_ARCHIVE_COMMAND_KIND = "timeline.archive"
 """The m4 command kind that timeline-archive receipts are keyed on (plan
 step 7). Archive is event-backed (SD1): the frozen ``timelines`` table has
-no ``archived_at`` column, so archive state is derived from the latest
-archive/unarchive event on the timeline stream."""
+no ``archived_at`` column, so the archived state is derived from the
+presence of a ``timeline.archived`` event on the timeline stream."""
 
 TIMELINE_ARCHIVED_EVENT_KIND = "timeline.archived"
 """The m4 event kind appended by the archive command (plan step 7).
 
 The event carries the archived timestamp and advances the timeline stream
-head exactly once; the latest archive/unarchive event is the single
-event-backed authority for archived state (there is no column).
+head exactly once; its presence on the stream is the single event-backed
+authority for archived state (there is no column and no second authority).
 Archived timelines disappear from ordinary lists and reject further saves,
 while direct historical lookup (show/history/diff) keeps working."""
-TIMELINE_REGISTRY_MERGED_EVENT_KIND = "timeline.registry_merged"
-"""The event kind appended by the internal asset-registry merge.
-
-The completion unit of work merges new asset entries into
-``asset_registry_json`` additively (existing keys are never clobbered)
-without touching ``document_json``, so a worker completion makes media
-addressable against the current head while the editor's document stays
-byte-identical (27-build-spec section 5 step 7). The event carries the
-merged ``assets``, the sorted ``added_keys``, and the ``base_head`` the
-merge applied against; there is no receipt — the surrounding completion
-commit is the atomicity record."""
 
 TIMELINE_UNARCHIVE_COMMAND_KIND = "timeline.unarchive"
 """The recovery command that makes an archived timeline active again."""
 
 TIMELINE_UNARCHIVED_EVENT_KIND = "timeline.unarchived"
 """Append-only recovery event; the latest archive/unarchive event is authority."""
+
+TIMELINE_REGISTRY_MERGED_EVENT_KIND = "timeline.registry_merged"
+"""Completion-time additive registry merge event.
+
+Worker completion may add managed-media entries without replacing the
+editor-owned document. Existing registry keys are never overwritten; this
+event advances the same timeline stream head and therefore participates in
+the next whole-document CAS version.
+"""
 
 _TIMELINE_HISTORY_KINDS: tuple[str, ...] = (
     TIMELINE_CREATED_EVENT_KIND,
@@ -156,7 +159,7 @@ _TIMELINE_HISTORY_KINDS: tuple[str, ...] = (
     TIMELINE_UNARCHIVED_EVENT_KIND,
 )
 """The ordered timeline lifecycle event kinds history/diff read, in stream
-order (created first, then saves, then archive). Archive never changes
+order (created first, then saves, archive/recovery). Archive never changes
 document/registry, so the version content used by ``diff`` is carried by
 ``timeline.created`` and ``timeline.saved`` only."""
 
@@ -187,7 +190,9 @@ the same ``BEGIN IMMEDIATE`` without colliding.
 _SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 """Immutable slug grammar (same as projects): lowercase letters/digits."""
 
-_UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+_UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+)
 """Canonical lowercase UUID grammar (8-4-4-4-12 hex groups, bridge §8)."""
 
 
@@ -224,9 +229,17 @@ class TimelineValidationError(TimelineRepositoryError):
 
 
 class TimelineAmbiguousError(TimelineRepositoryError):
-    """Raised when a display name matches multiple timelines."""
+    """Raised when a display-name lookup matches multiple timelines.
 
-    def __init__(self, *, name: str, candidates: Sequence[Mapping[str, Any]]) -> None:
+    The canonical bridge addresses are still UUID, ULID, and slug.  This
+    error is kept in the repository taxonomy because SDK error mapping must be
+    able to import and classify the name-resolution failure without coupling
+    itself to a different pack revision.
+    """
+
+    def __init__(
+        self, *, name: str, candidates: Sequence[Mapping[str, Any]]
+    ) -> None:
         self.name = name
         self.candidates = [dict(candidate) for candidate in candidates]
         super().__init__(f"timeline display name is ambiguous: {name!r}")
@@ -251,7 +264,9 @@ class TimelineSlugConflictError(TimelineRepositoryError):
     def __init__(self, *, slug: str, project_id: str) -> None:
         self.slug: str = slug
         self.project_id: str = project_id
-        super().__init__(f"timeline slug already in use in project {project_id!r}: {slug!r}")
+        super().__init__(
+            f"timeline slug already in use in project {project_id!r}: {slug!r}"
+        )
 
 
 class TimelineUlidConflictError(TimelineRepositoryError):
@@ -266,7 +281,8 @@ class TimelineUlidConflictError(TimelineRepositoryError):
         self.timeline_ulid: str = timeline_ulid
         self.project_id: str = project_id
         super().__init__(
-            f"timeline ULID alias already in use in project {project_id!r}: {timeline_ulid!r}"
+            "timeline ULID alias already in use in project "
+            f"{project_id!r}: {timeline_ulid!r}"
         )
 
 
@@ -311,7 +327,9 @@ class TimelineNotFoundError(TimelineRepositoryError):
     def __init__(self, *, ref: str, project_id: str) -> None:
         self.ref: str = ref
         self.project_id: str = project_id
-        super().__init__(f"unknown timeline {ref!r} in project {project_id!r}")
+        super().__init__(
+            f"unknown timeline {ref!r} in project {project_id!r}"
+        )
 
 
 class TimelineArchivedError(TimelineRepositoryError):
@@ -328,7 +346,8 @@ class TimelineArchivedError(TimelineRepositoryError):
         self.timeline_id: str = timeline_id
         self.project_id: str = project_id
         super().__init__(
-            f"timeline is archived and cannot be mutated: {timeline_id!r} in project {project_id!r}"
+            f"timeline is archived and cannot be mutated: {timeline_id!r} "
+            f"in project {project_id!r}"
         )
 
 
@@ -355,10 +374,11 @@ class TimelineReadModel:
     config: Mapping[str, Any]
     registry: Mapping[str, Any]
     config_version: int
+    bundle: Mapping[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Return the JSON-safe dict persisted as the receipt result."""
-        return {
+        result = {
             "timeline_id": self.timeline_id,
             "timeline_ulid": self.timeline_ulid,
             "slug": self.slug,
@@ -368,6 +388,9 @@ class TimelineReadModel:
             "registry": dict(self.registry),
             "config_version": self.config_version,
         }
+        if self.bundle is not None:
+            result["bundle"] = dict(self.bundle)
+        return result
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> TimelineReadModel:
@@ -381,6 +404,7 @@ class TimelineReadModel:
             config=dict(value.get("config") or {}),
             registry=dict(value.get("registry") or {}),
             config_version=int(value["config_version"]),
+            bundle=(dict(value["bundle"]) if isinstance(value.get("bundle"), Mapping) else None),
         )
 
 
@@ -491,7 +515,7 @@ class TimelineUnarchiveReadModel:
         }
 
     @classmethod
-    def from_mapping(cls, value: Mapping[str, Any]) -> TimelineUnarchiveReadModel:
+    def from_mapping(cls, value: Mapping[str, Any]) -> "TimelineUnarchiveReadModel":
         return cls(
             timeline_id=str(value["timeline_id"]),
             project_id=str(value["project_id"]),
@@ -613,7 +637,9 @@ def _query_all(reader: Any, sql: str, parameters: Sequence[Any] = ()) -> list[An
     return list(cursor.fetchall())
 
 
-def _key_diff(before: Mapping[str, Any], after: Mapping[str, Any]) -> dict[str, list[str]]:
+def _key_diff(
+    before: Mapping[str, Any], after: Mapping[str, Any]
+) -> dict[str, list[str]]:
     """Deterministic top-level key diff between two JSON objects.
 
     Returns ``{"added": [...], "removed": [...], "changed": [...]}`` where
@@ -625,7 +651,9 @@ def _key_diff(before: Mapping[str, Any], after: Mapping[str, Any]) -> dict[str, 
     after_keys = set(after)
     added = sorted(after_keys - before_keys)
     removed = sorted(before_keys - after_keys)
-    changed = sorted(key for key in (before_keys & after_keys) if before[key] != after[key])
+    changed = sorted(
+        key for key in (before_keys & after_keys) if before[key] != after[key]
+    )
     return {"added": added, "removed": removed, "changed": changed}
 
 
@@ -699,11 +727,14 @@ class TimelineRepository:
         project_id = _require_non_empty_string("project_id", project_id)
         slug = _require_non_empty_string("slug", slug)
         name = _require_non_empty_string("name", name)
-        idempotency_key = _require_non_empty_string("idempotency_key", idempotency_key)
+        idempotency_key = _require_non_empty_string(
+            "idempotency_key", idempotency_key
+        )
         command_kind = _require_non_empty_string("command_kind", command_kind)
         if _SLUG_RE.fullmatch(slug) is None:
             raise TimelineValidationError(
-                f"slug must be lowercase letters/digits joined by single hyphens, got {slug!r}"
+                "slug must be lowercase letters/digits joined by single "
+                f"hyphens, got {slug!r}"
             )
         if not isinstance(config, Mapping):
             raise TimelineValidationError("config must be a JSON object")
@@ -713,7 +744,8 @@ class TimelineRepository:
             raise TimelineValidationError("set_default must be a boolean")
         if actor_kind not in ACTOR_KINDS:
             raise TimelineValidationError(
-                f"actor_kind must be one of {sorted(ACTOR_KINDS)}, got {actor_kind!r}"
+                f"actor_kind must be one of {sorted(ACTOR_KINDS)}, "
+                f"got {actor_kind!r}"
             )
         if timeline_id is None:
             timeline_id = str(uuid.uuid4())
@@ -732,7 +764,9 @@ class TimelineRepository:
             config_json = canonical_json(dict(config))
             assets_json = canonical_json(dict(assets))
         except CanonicalizationError as exc:
-            raise TimelineValidationError(f"cannot canonicalize timeline payload: {exc}") from exc
+            raise TimelineValidationError(
+                f"cannot canonicalize timeline payload: {exc}"
+            ) from exc
 
         # Semantic request identity: stable ids, slug, name, config,
         # registry, and the default flag all participate; generated
@@ -750,7 +784,9 @@ class TimelineRepository:
         try:
             request_digest = request_hash(command_kind, request)
         except CanonicalizationError as exc:
-            raise TimelineValidationError(f"cannot hash timeline create request: {exc}") from exc
+            raise TimelineValidationError(
+                f"cannot hash timeline create request: {exc}"
+            ) from exc
 
         # Idempotency gate first: replay or mismatch happens before any
         # sequence allocation, event append, or projection change.
@@ -765,7 +801,9 @@ class TimelineRepository:
             return TimelineReadModel.from_mapping(replayed)
 
         # Typed not-found before any mutation.
-        project = uow.query_one("SELECT id FROM projects WHERE id = ?", (project_id,))
+        project = uow.query_one(
+            "SELECT id FROM projects WHERE id = ?", (project_id,)
+        )
         if project is None:
             raise ProjectNotFoundError(project_id=project_id)
 
@@ -773,7 +811,9 @@ class TimelineRepository:
         # in timeline.created envelopes, so uniqueness is a transactional
         # query over the project's created events (SD1 — no convenience
         # columns).
-        existing = uow.query_one("SELECT id FROM timelines WHERE id = ?", (timeline_id,))
+        existing = uow.query_one(
+            "SELECT id FROM timelines WHERE id = ?", (timeline_id,)
+        )
         if existing is not None:
             raise TimelineAlreadyExistsError(timeline_id=timeline_id)
         dup_slug = uow.query_one(
@@ -792,7 +832,9 @@ class TimelineRepository:
             (project_id, TIMELINE_CREATED_EVENT_KIND, timeline_ulid),
         )
         if dup_ulid is not None:
-            raise TimelineUlidConflictError(timeline_ulid=timeline_ulid, project_id=project_id)
+            raise TimelineUlidConflictError(
+                timeline_ulid=timeline_ulid, project_id=project_id
+            )
 
         # Generated values for this attempt (excluded from request identity).
         txn_id = uuid.uuid4().hex
@@ -816,8 +858,8 @@ class TimelineRepository:
         uow.execute(
             "INSERT INTO timelines "
             "(id, project_id, event_stream_id, name, document_json, "
-            "asset_registry_json, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "asset_registry_json, project_data_json, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, 'null', ?, ?)",
             (
                 timeline_id,
                 project_id,
@@ -912,6 +954,7 @@ class TimelineRepository:
         config: Mapping[str, Any],
         registry: Mapping[str, Any],
         expected_version: int,
+        bundle: Mapping[str, Any] | None | object = _BUNDLE_MISSING,
         actor_kind: str = "local",
         command_kind: str = TIMELINE_SAVE_COMMAND_KIND,
         idempotency_key: str | None = None,
@@ -952,16 +995,26 @@ class TimelineRepository:
         ref = _require_non_empty_string("ref", ref)
         command_kind = _require_non_empty_string("command_kind", command_kind)
         if idempotency_key is not None:
-            idempotency_key = _require_non_empty_string("idempotency_key", idempotency_key)
+            idempotency_key = _require_non_empty_string(
+                "idempotency_key", idempotency_key
+            )
         if actor_kind not in ACTOR_KINDS:
             raise TimelineValidationError(
-                f"actor_kind must be one of {sorted(ACTOR_KINDS)}, got {actor_kind!r}"
+                f"actor_kind must be one of {sorted(ACTOR_KINDS)}, "
+                f"got {actor_kind!r}"
             )
         if not isinstance(config, Mapping):
             raise TimelineValidationError("config must be a JSON object")
         if not isinstance(registry, Mapping):
             raise TimelineValidationError("registry must be a JSON object")
-        if isinstance(expected_version, bool) or not isinstance(expected_version, int):
+        if bundle is not _BUNDLE_MISSING and bundle is not None:
+            try:
+                bundle = validate_timeline_bundle(bundle)
+            except ValueError as exc:
+                raise TimelineValidationError(str(exc)) from exc
+        if isinstance(expected_version, bool) or not isinstance(
+            expected_version, int
+        ):
             raise TimelineValidationError(
                 "expected_version must be an integer (a boolean is not a "
                 "version), got "
@@ -985,11 +1038,14 @@ class TimelineRepository:
             "config": dict(config),
             "registry": registry_shape,
             "expected_version": expected_version,
+            "bundle": "__omitted__" if bundle is _BUNDLE_MISSING else bundle,
         }
         try:
             bridge_request_digest = request_hash(command_kind, payload)
         except CanonicalizationError as exc:
-            raise TimelineValidationError(f"cannot hash timeline save request: {exc}") from exc
+            raise TimelineValidationError(
+                f"cannot hash timeline save request: {exc}"
+            ) from exc
 
         # Resolve the address to the canonical timeline id inside the same
         # transaction (project-scoped: UUID, then ULID, then slug).
@@ -1000,7 +1056,8 @@ class TimelineRepository:
         # identity + integer expected head + canonical payload (bridge §6.1
         # derivation rule). Both paths share the receipt gate below.
         derived_key = (
-            f"{command_kind}:{project_id}:{timeline_id}:{expected_version}:{bridge_request_digest}"
+            f"{command_kind}:{project_id}:{timeline_id}:"
+            f"{expected_version}:{bridge_request_digest}"
         )
         if idempotency_key is None:
             # Preserve the frozen bridge-derived key and its persisted
@@ -1022,7 +1079,9 @@ class TimelineRepository:
             try:
                 request_digest = request_hash(command_kind, caller_request)
             except CanonicalizationError as exc:  # pragma: no cover - payload hashed above
-                raise TimelineValidationError(f"cannot hash timeline save request: {exc}") from exc
+                raise TimelineValidationError(
+                    f"cannot hash timeline save request: {exc}"
+                ) from exc
             effective_key = idempotency_key
 
         # Idempotency gate first: replay or mismatch before any mutation.
@@ -1037,7 +1096,8 @@ class TimelineRepository:
             return TimelineReadModel.from_mapping(replayed)
 
         row = uow.query_one(
-            "SELECT t.id, t.project_id, t.event_stream_id, t.name "
+            "SELECT t.id, t.project_id, t.event_stream_id, t.name, "
+            "t.project_data_json "
             "FROM timelines t WHERE t.id = ? AND t.project_id = ?",
             (timeline_id, project_id),
         )
@@ -1045,14 +1105,22 @@ class TimelineRepository:
             raise TimelineNotFoundError(ref=ref, project_id=project_id)
         stream = uow._stream_row(str(row["event_stream_id"]))
         if stream is None:
-            raise TimelineRepositoryError(f"timeline {timeline_id!r} is missing its event stream")
+            raise TimelineRepositoryError(
+                f"timeline {timeline_id!r} is missing its event stream"
+            )
         current_head = int(stream["head_seq"])
+        current_bundle = self._parse_project_data(
+            str(row["project_data_json"]), timeline_id
+        )
+        committed_bundle = current_bundle if bundle is _BUNDLE_MISSING else bundle
 
         # Event-backed archive fence (SD1): an archived timeline rejects a
         # later save before any allocation or projection change. The archived
         # state is derived from the stream's ordered events, never a column.
         if self._archive_state(uow, str(row["event_stream_id"]))[0]:
-            raise TimelineArchivedError(timeline_id=timeline_id, project_id=project_id)
+            raise TimelineArchivedError(
+                timeline_id=timeline_id, project_id=project_id
+            )
 
         # Expected-head CAS before any allocation or projection change; a
         # stale save changes zero rows and carries the current head.
@@ -1074,6 +1142,7 @@ class TimelineRepository:
             {
                 "document_json": config_json,
                 "asset_registry_json": assets_json,
+                "project_data_json": canonical_json(committed_bundle),
                 "updated_at": stamp,
             },
             {"id": timeline_id, "project_id": project_id},
@@ -1085,18 +1154,22 @@ class TimelineRepository:
         #    the same effective key and a defense-in-depth expected-head CAS.
         txn_id = uuid.uuid4().hex
         event_id = uuid.uuid4().hex
+        event_data = {
+            "timeline_id": timeline_id,
+            "config": dict(config),
+            "registry": registry_shape,
+            "expected_version": expected_version,
+        }
+        if bundle is not _BUNDLE_MISSING:
+            event_data["bundle"] = committed_bundle
         append = self._events.append(
             uow,
             stream_id=str(row["event_stream_id"]),
             project_id=project_id,
             event_kind=TIMELINE_SAVED_EVENT_KIND,
-            data={
-                "timeline_id": timeline_id,
-                "config": dict(config),
-                "registry": registry_shape,
-                "expected_version": expected_version,
-            },
-            changes=["config", "registry"],
+            data=event_data,
+            changes=["config", "registry"]
+            + ([] if bundle is _BUNDLE_MISSING else ["bundle"]),
             idempotency_key=effective_key,
             txn_id=txn_id,
             actor_kind=actor_kind,
@@ -1118,20 +1191,24 @@ class TimelineRepository:
         )
         if alias is None:
             raise TimelineRepositoryError(
-                f"timeline {timeline_id!r} is missing its timeline.created alias metadata"
+                f"timeline {timeline_id!r} is missing its timeline.created "
+                "alias metadata"
             )
         timeline_ulid = alias["timeline_ulid"]
         slug = alias["slug"]
         if not isinstance(timeline_ulid, str) or not isinstance(slug, str):
             raise TimelineRepositoryError(
-                f"timeline {timeline_id!r} has malformed timeline.created alias metadata"
+                f"timeline {timeline_id!r} has malformed timeline.created "
+                "alias metadata"
             )
         project_row = uow.query_one(
             "SELECT settings_json FROM projects WHERE id = ?", (project_id,)
         )
         if project_row is None:
             raise ProjectNotFoundError(project_id=project_id)
-        default_id = self._default_timeline_id(str(project_row["settings_json"]), project_id)
+        default_id = self._default_timeline_id(
+            str(project_row["settings_json"]), project_id
+        )
 
         # 4. The complete receipt and the committed frozen load shape.
         read_model = TimelineReadModel(
@@ -1143,6 +1220,7 @@ class TimelineRepository:
             config=dict(config),
             registry=registry_shape,
             config_version=append.stream_seq,
+            bundle=committed_bundle,
         )
         self._receipts.record(
             uow,
@@ -1173,41 +1251,23 @@ class TimelineRepository:
         actor_kind: str = "system",
         created_at: str | None = None,
     ) -> int:
-        """Merge *entries* into ``asset_registry_json`` additively.
+        """Add missing registry entries inside a task-completion UoW.
 
-        The internal completion-time visibility path (27-build-spec §5
-        step 7): inside the caller's unit of work this reads the current
-        stream head, adds every entry whose key is not already present
-        (existing keys are editor authority and are never clobbered),
-        leaves ``document_json`` byte-identical, and appends one
-        hash-chained :data:`TIMELINE_REGISTRY_MERGED_EVENT_KIND` event
-        carrying the merged ``assets``, the sorted ``added_keys``, and the
-        ``base_head`` the merge applied against — with an
-        ``expected_head_seq`` defense-in-depth CAS on that head. There is
-        no caller ``expected_version`` and no receipt: the surrounding
-        completion commit is the atomicity record.
-
-        The event-backed archive fence applies: an archived timeline
-        rejects the merge before any change. A merge whose entries are all
-        already present changes zero rows and returns the current head
-        without appending anything. Returns the new stream head (the
-        value a client's next whole-document save must pass as its
-        ``expected_version``).
+        The current stream head is read and fenced inside the caller's one
+        transaction. Existing keys remain editor authority, document JSON is
+        untouched, archived timelines reject the merge, and a fully
+        redundant merge is a no-op. The surrounding completion receipt is
+        the atomicity record, so this internal helper creates no receipt.
         """
         project_id = _require_non_empty_string("project_id", project_id)
         timeline_id = _require_non_empty_string("timeline_id", timeline_id)
-        if actor_kind not in ACTOR_KINDS:
-            raise TimelineValidationError(
-                f"actor_kind must be one of {sorted(ACTOR_KINDS)}, got {actor_kind!r}"
-            )
         if not isinstance(entries, Mapping):
             raise TimelineValidationError("entries must be a JSON object")
         for key in entries:
             _require_non_empty_string("entry key", key)
         # Validate the complete request, including values for keys that may
-        # already exist. Otherwise a redundant merge containing NaN or an
-        # unserializable object would silently succeed while an additive merge
-        # rejects the same malformed payload.
+        # already exist. A redundant merge must not silently accept a
+        # non-JSON value merely because it would add no keys.
         try:
             canonical_json(dict(entries))
         except CanonicalizationError as exc:
@@ -1229,27 +1289,28 @@ class TimelineRepository:
             )
         base_head = int(stream["head_seq"])
 
-        # Event-backed archive fence (SD1), identical to save: the latest
-        # archive/unarchive transition is authoritative, never the mere
-        # historical presence of an archive event. A timeline recovered by
-        # unarchive is therefore eligible for a new additive merge.
         if self._archive_state(uow, str(row["event_stream_id"]))[0]:
             raise TimelineArchivedError(
                 timeline_id=timeline_id, project_id=project_id
             )
 
+        registry_row = uow.query_one(
+            "SELECT asset_registry_json FROM timelines WHERE id = ?",
+            (timeline_id,),
+        )
+        if registry_row is None:
+            raise TimelineNotFoundError(ref=timeline_id, project_id=project_id)
         existing = self._parse_document(
-            str(uow.query_one(
-                "SELECT asset_registry_json FROM timelines WHERE id = ?",
-                (timeline_id,),
-            )["asset_registry_json"]),
-            timeline_id,
+            str(registry_row["asset_registry_json"]), timeline_id
         )
         added_keys = sorted(key for key in entries if key not in existing)
         if not added_keys:
             return base_head
 
-        merged_assets = {**existing, **{key: entries[key] for key in added_keys}}
+        merged_assets = {
+            **existing,
+            **{key: entries[key] for key in added_keys},
+        }
         try:
             assets_json = canonical_json(merged_assets)
         except CanonicalizationError as exc:
@@ -1304,6 +1365,7 @@ class TimelineRepository:
         config: Mapping[str, Any],
         registry: Mapping[str, Any],
         expected_version: int,
+        bundle: Mapping[str, Any] | None | object = _BUNDLE_MISSING,
         actor_kind: str = "local",
         command_kind: str = TIMELINE_REPLACE_CONFIG_COMMAND_KIND,
         idempotency_key: str | None = None,
@@ -1350,16 +1412,26 @@ class TimelineRepository:
         ref = _require_non_empty_string("ref", ref)
         command_kind = _require_non_empty_string("command_kind", command_kind)
         if idempotency_key is not None:
-            idempotency_key = _require_non_empty_string("idempotency_key", idempotency_key)
+            idempotency_key = _require_non_empty_string(
+                "idempotency_key", idempotency_key
+            )
         if actor_kind not in ACTOR_KINDS:
             raise TimelineValidationError(
-                f"actor_kind must be one of {sorted(ACTOR_KINDS)}, got {actor_kind!r}"
+                f"actor_kind must be one of {sorted(ACTOR_KINDS)}, "
+                f"got {actor_kind!r}"
             )
         if not isinstance(config, Mapping):
             raise TimelineValidationError("config must be a JSON object")
         if not isinstance(registry, Mapping):
             raise TimelineValidationError("registry must be a JSON object")
-        if isinstance(expected_version, bool) or not isinstance(expected_version, int):
+        if bundle is not _BUNDLE_MISSING and bundle is not None:
+            try:
+                bundle = validate_timeline_bundle(bundle)
+            except ValueError as exc:
+                raise TimelineValidationError(str(exc)) from exc
+        if isinstance(expected_version, bool) or not isinstance(
+            expected_version, int
+        ):
             raise TimelineValidationError(
                 "expected_version must be an integer (a boolean is not a "
                 "version), got "
@@ -1383,6 +1455,7 @@ class TimelineRepository:
             "config": dict(config),
             "registry": registry_shape,
             "expected_version": expected_version,
+            "bundle": "__omitted__" if bundle is _BUNDLE_MISSING else bundle,
         }
         try:
             bridge_request_digest = request_hash(command_kind, payload)
@@ -1398,7 +1471,8 @@ class TimelineRepository:
         # Effective idempotency key: the caller's key when supplied,
         # otherwise the derived bridge key — mirroring save's derivation.
         derived_key = (
-            f"{command_kind}:{project_id}:{timeline_id}:{expected_version}:{bridge_request_digest}"
+            f"{command_kind}:{project_id}:{timeline_id}:"
+            f"{expected_version}:{bridge_request_digest}"
         )
         if idempotency_key is None:
             effective_key = derived_key
@@ -1429,7 +1503,8 @@ class TimelineRepository:
             return TimelineReadModel.from_mapping(replayed)
 
         row = uow.query_one(
-            "SELECT t.id, t.project_id, t.event_stream_id, t.name "
+            "SELECT t.id, t.project_id, t.event_stream_id, t.name, "
+            "t.project_data_json "
             "FROM timelines t WHERE t.id = ? AND t.project_id = ?",
             (timeline_id, project_id),
         )
@@ -1437,13 +1512,21 @@ class TimelineRepository:
             raise TimelineNotFoundError(ref=ref, project_id=project_id)
         stream = uow._stream_row(str(row["event_stream_id"]))
         if stream is None:
-            raise TimelineRepositoryError(f"timeline {timeline_id!r} is missing its event stream")
+            raise TimelineRepositoryError(
+                f"timeline {timeline_id!r} is missing its event stream"
+            )
         current_head = int(stream["head_seq"])
+        current_bundle = self._parse_project_data(
+            str(row["project_data_json"]), timeline_id
+        )
+        committed_bundle = current_bundle if bundle is _BUNDLE_MISSING else bundle
 
         # Event-backed archive fence (SD1): an archived timeline rejects a
         # later replacement before any allocation or projection change.
         if self._archive_state(uow, str(row["event_stream_id"]))[0]:
-            raise TimelineArchivedError(timeline_id=timeline_id, project_id=project_id)
+            raise TimelineArchivedError(
+                timeline_id=timeline_id, project_id=project_id
+            )
 
         # Expected-head CAS before any allocation or projection change; a
         # stale write changes zero rows and carries the current head.
@@ -1465,6 +1548,7 @@ class TimelineRepository:
             {
                 "document_json": config_json,
                 "asset_registry_json": assets_json,
+                "project_data_json": canonical_json(committed_bundle),
                 "updated_at": stamp,
             },
             {"id": timeline_id, "project_id": project_id},
@@ -1477,18 +1561,22 @@ class TimelineRepository:
         #    defense-in-depth expected-head CAS.
         txn_id = uuid.uuid4().hex
         event_id = uuid.uuid4().hex
+        event_data = {
+            "timeline_id": timeline_id,
+            "config": dict(config),
+            "registry": registry_shape,
+            "expected_version": expected_version,
+        }
+        if bundle is not _BUNDLE_MISSING:
+            event_data["bundle"] = committed_bundle
         append = self._events.append(
             uow,
             stream_id=str(row["event_stream_id"]),
             project_id=project_id,
             event_kind=TIMELINE_CONFIG_REPLACED_EVENT_KIND,
-            data={
-                "timeline_id": timeline_id,
-                "config": dict(config),
-                "registry": registry_shape,
-                "expected_version": expected_version,
-            },
-            changes=["config", "registry"],
+            data=event_data,
+            changes=["config", "registry"]
+            + ([] if bundle is _BUNDLE_MISSING else ["bundle"]),
             idempotency_key=effective_key,
             txn_id=txn_id,
             actor_kind=actor_kind,
@@ -1510,20 +1598,24 @@ class TimelineRepository:
         )
         if alias is None:
             raise TimelineRepositoryError(
-                f"timeline {timeline_id!r} is missing its timeline.created alias metadata"
+                f"timeline {timeline_id!r} is missing its timeline.created "
+                "alias metadata"
             )
         timeline_ulid = alias["timeline_ulid"]
         slug = alias["slug"]
         if not isinstance(timeline_ulid, str) or not isinstance(slug, str):
             raise TimelineRepositoryError(
-                f"timeline {timeline_id!r} has malformed timeline.created alias metadata"
+                f"timeline {timeline_id!r} has malformed timeline.created "
+                "alias metadata"
             )
         project_row = uow.query_one(
             "SELECT settings_json FROM projects WHERE id = ?", (project_id,)
         )
         if project_row is None:
             raise ProjectNotFoundError(project_id=project_id)
-        default_id = self._default_timeline_id(str(project_row["settings_json"]), project_id)
+        default_id = self._default_timeline_id(
+            str(project_row["settings_json"]), project_id
+        )
 
         # 4. The complete receipt and the committed frozen load shape.
         read_model = TimelineReadModel(
@@ -1535,6 +1627,7 @@ class TimelineRepository:
             config=dict(config),
             registry=registry_shape,
             config_version=append.stream_seq,
+            bundle=committed_bundle,
         )
         self._receipts.record(
             uow,
@@ -1578,7 +1671,7 @@ class TimelineRepository:
         saves, while direct historical lookup keeps working.
 
         Rejections happen before any write: a missing or foreign timeline
-        raises :class:`TimelineNotFoundError`, a currently archived timeline
+        raises :class:`TimelineNotFoundError`, an already-archived timeline
         raises :class:`TimelineArchivedError`, and the receipt gate runs
         first so an identical retry replays exactly the stored archive result
         with zero new rows while a changed request under the same key raises
@@ -1586,11 +1679,14 @@ class TimelineRepository:
         """
         project_id = _require_non_empty_string("project_id", project_id)
         ref = _require_non_empty_string("ref", ref)
-        idempotency_key = _require_non_empty_string("idempotency_key", idempotency_key)
+        idempotency_key = _require_non_empty_string(
+            "idempotency_key", idempotency_key
+        )
         command_kind = _require_non_empty_string("command_kind", command_kind)
         if actor_kind not in ACTOR_KINDS:
             raise TimelineValidationError(
-                f"actor_kind must be one of {sorted(ACTOR_KINDS)}, got {actor_kind!r}"
+                f"actor_kind must be one of {sorted(ACTOR_KINDS)}, "
+                f"got {actor_kind!r}"
             )
 
         # Resolve the address inside the same transaction (project-scoped).
@@ -1605,7 +1701,9 @@ class TimelineRepository:
         try:
             request_digest = request_hash(command_kind, request)
         except CanonicalizationError as exc:
-            raise TimelineValidationError(f"cannot hash timeline archive request: {exc}") from exc
+            raise TimelineValidationError(
+                f"cannot hash timeline archive request: {exc}"
+            ) from exc
 
         # Idempotency gate first: replay or mismatch before any mutation.
         replayed = self._receipts.check(
@@ -1619,18 +1717,23 @@ class TimelineRepository:
             return TimelineArchiveReadModel.from_mapping(replayed)
 
         # Fences before any write: the timeline exists in the project and is
-        # still active according to the latest archive-state transition.
+        # still active (no committed timeline.archived event on the stream).
         row = uow.query_one(
-            "SELECT t.id, t.event_stream_id FROM timelines t WHERE t.id = ? AND t.project_id = ?",
+            "SELECT t.id, t.event_stream_id FROM timelines t "
+            "WHERE t.id = ? AND t.project_id = ?",
             (timeline_id, project_id),
         )
         if row is None:
             raise TimelineNotFoundError(ref=ref, project_id=project_id)
         stream_id = str(row["event_stream_id"])
         if uow._stream_row(stream_id) is None:
-            raise TimelineRepositoryError(f"timeline {timeline_id!r} is missing its event stream")
+            raise TimelineRepositoryError(
+                f"timeline {timeline_id!r} is missing its event stream"
+            )
         if self._archive_state(uow, stream_id)[0]:
-            raise TimelineArchivedError(timeline_id=timeline_id, project_id=project_id)
+            raise TimelineArchivedError(
+                timeline_id=timeline_id, project_id=project_id
+            )
 
         stamp = created_at if created_at is not None else utc_now_iso()
         if not isinstance(stamp, str) or not stamp:
@@ -1688,21 +1791,17 @@ class TimelineRepository:
         created_at: str | None = None,
         command_kind: str = TIMELINE_UNARCHIVE_COMMAND_KIND,
     ) -> TimelineUnarchiveReadModel:
-        """Make an archived timeline active, safely reporting repeat calls.
-
-        The first recovery appends ``timeline.unarchived`` and records a
-        receipt. Calling recovery again on an already-active timeline is a
-        successful no-op with ``changed=false`` and no new event or receipt.
-        Identity, document, registry, default selection, and history are
-        untouched.
-        """
+        """Make an archived timeline active, safely reporting repeat calls."""
         project_id = _require_non_empty_string("project_id", project_id)
         ref = _require_non_empty_string("ref", ref)
-        idempotency_key = _require_non_empty_string("idempotency_key", idempotency_key)
+        idempotency_key = _require_non_empty_string(
+            "idempotency_key", idempotency_key
+        )
         command_kind = _require_non_empty_string("command_kind", command_kind)
         if actor_kind not in ACTOR_KINDS:
             raise TimelineValidationError(
-                f"actor_kind must be one of {sorted(ACTOR_KINDS)}, got {actor_kind!r}"
+                f"actor_kind must be one of {sorted(ACTOR_KINDS)}, "
+                f"got {actor_kind!r}"
             )
 
         timeline_id = self._resolve_id(uow, project_id, ref)
@@ -1710,8 +1809,9 @@ class TimelineRepository:
         try:
             request_digest = request_hash(command_kind, request)
         except CanonicalizationError as exc:
-            raise TimelineValidationError(f"cannot hash timeline unarchive request: {exc}") from exc
-
+            raise TimelineValidationError(
+                f"cannot hash timeline unarchive request: {exc}"
+            ) from exc
         replayed = self._receipts.check(
             uow,
             project_id=project_id,
@@ -1731,7 +1831,9 @@ class TimelineRepository:
         stream_id = str(row["event_stream_id"])
         stream = uow._stream_row(stream_id)
         if stream is None:
-            raise TimelineRepositoryError(f"timeline {timeline_id!r} is missing its event stream")
+            raise TimelineRepositoryError(
+                f"timeline {timeline_id!r} is missing its event stream"
+            )
         is_archived, last_transition_at = self._archive_state(uow, stream_id)
         if not is_archived:
             return TimelineUnarchiveReadModel(
@@ -1788,6 +1890,58 @@ class TimelineRepository:
 
     # -- address resolution ------------------------------------------------
 
+    def assert_current_version(
+        self,
+        uow: UnitOfWork,
+        *,
+        project_id: str,
+        ref: str,
+        expected_version: int,
+    ) -> str:
+        """Fence a dependent command against one active timeline head.
+
+        This check is deliberately UoW-only. A caller that validates here and
+        then writes its dependent row in the same ``BEGIN IMMEDIATE``
+        transaction cannot race a concurrent timeline save between validation
+        and admission. It returns the canonical timeline id and mutates no
+        timeline state.
+        """
+        _require_non_empty_string("project_id", project_id)
+        _require_non_empty_string("ref", ref)
+        if isinstance(expected_version, bool) or not isinstance(
+            expected_version, int
+        ) or expected_version < 0:
+            raise TimelineValidationError(
+                "expected_version must be a non-negative integer"
+            )
+        timeline_id = self._resolve_id(uow, project_id, ref)
+        row = uow.query_one(
+            "SELECT event_stream_id FROM timelines "
+            "WHERE id = ? AND project_id = ?",
+            (timeline_id, project_id),
+        )
+        if row is None:  # pragma: no cover - resolved in this transaction
+            raise TimelineNotFoundError(ref=ref, project_id=project_id)
+        stream_id = str(row["event_stream_id"])
+        if self._archive_state(uow, stream_id)[0]:
+            raise TimelineArchivedError(
+                timeline_id=timeline_id, project_id=project_id
+            )
+        stream = uow._stream_row(stream_id)
+        if stream is None:
+            raise TimelineRepositoryError(
+                f"timeline {timeline_id!r} is missing its event stream"
+            )
+        current_version = int(stream["head_seq"])
+        if current_version != expected_version:
+            raise TimelineVersionConflictError(
+                project_id=project_id,
+                timeline_id=timeline_id,
+                expected_version=expected_version,
+                current_version=current_version,
+            )
+        return timeline_id
+
     def resolve(self, writer: DatabaseWriter, project_id: str, ref: str) -> str:
         """Resolve a UUID, lowercase ULID, or slug to a timeline id.
 
@@ -1805,7 +1959,9 @@ class TimelineRepository:
             conn.row_factory = sqlite3.Row
             return self._resolve_id(conn, project_id, ref)
 
-    def _resolve_id(self, reader: Any, project_id: str, ref: str) -> str:
+    def _resolve_id(
+        self, reader: Any, project_id: str, ref: str
+    ) -> str:
         """Resolve *ref* to the canonical timeline id through *reader*.
 
         *reader* is anything exposing ``query_one(sql, parameters)`` (a unit
@@ -1813,7 +1969,9 @@ class TimelineRepository:
         project-scoped, order-fixed resolution runs both transaction-free on a
         read-only connection and inside a command's ``BEGIN IMMEDIATE``.
         """
-        project = _query_one(reader, "SELECT id FROM projects WHERE id = ?", (project_id,))
+        project = _query_one(
+            reader, "SELECT id FROM projects WHERE id = ?", (project_id,)
+        )
         if project is None:
             raise ProjectNotFoundError(project_id=project_id)
         if _UUID_RE.fullmatch(ref) is not None:
@@ -1888,7 +2046,8 @@ class TimelineRepository:
                 },
             )
         raise TimelineValidationError(
-            f"timeline address {ref!r} is not a canonical UUID, lowercase ULID, or immutable slug",
+            f"timeline address {ref!r} is not a canonical UUID, lowercase "
+            "ULID, or immutable slug",
             details={
                 "entity": "timeline",
                 "field": "ref",
@@ -1906,16 +2065,17 @@ class TimelineRepository:
         *,
         include_archived: bool = False,
     ) -> list[TimelineListRow | TimelineInclusiveListRow]:
-        """Sorted read-only list query: every active timeline in one project.
+        """Sorted read-only list query for one project.
 
         A transaction-free read on a separate read-only connection (the
         frozen bridge ``GET /timelines`` shape, §5.1). Rows carry exactly
         ``{timeline_id, timeline_ulid, slug, name, is_default}``, ordered by
         ``slug`` ascending (deterministic; ``timeline_id`` breaks ties).
-        Archived timelines are hidden by default: a timeline whose latest
-        state transition is ``timeline.archived`` is excluded, while direct
-        historical lookup (show/history/diff) keeps returning it. A project
-        with no timelines returns ``[]``; a missing project raises
+        Archived timelines are hidden by default (SD1/m4 plan step 7). When
+        ``include_archived`` is true, rows include an ``archived_at`` field
+        for recovery/admin views; direct historical lookup (show/history/diff)
+        always keeps returning archived timelines. A project with no timelines
+        returns ``[]``; a missing project raises
         :class:`ProjectNotFoundError` — never an empty authority-dependent
         view.
         """
@@ -1930,8 +2090,10 @@ class TimelineRepository:
             ).fetchone()
             if project is None:
                 raise ProjectNotFoundError(project_id=project_id)
-            default_id = self._default_timeline_id(str(project["settings_json"]), project_id)
-            rows = conn.execute(
+            default_id = self._default_timeline_id(
+                str(project["settings_json"]), project_id
+            )
+            query = (
                 "SELECT t.id AS timeline_id, t.event_stream_id, t.name, "
                 "json_extract(e.payload_json, '$.data.timeline_ulid') "
                 "AS timeline_ulid, "
@@ -1949,16 +2111,17 @@ class TimelineRepository:
                 ") "
                 "WHERE t.project_id = ? "
                 "AND (? OR state.kind IS NULL OR state.kind = ?) "
-                "ORDER BY slug ASC, timeline_id ASC",
-                (
-                    TIMELINE_CREATED_EVENT_KIND,
-                    TIMELINE_ARCHIVED_EVENT_KIND,
-                    TIMELINE_UNARCHIVED_EVENT_KIND,
-                    project_id,
-                    include_archived,
-                    TIMELINE_UNARCHIVED_EVENT_KIND,
-                ),
-            ).fetchall()
+                + "ORDER BY slug ASC, timeline_id ASC"
+            )
+            params: tuple[Any, ...] = (
+                TIMELINE_CREATED_EVENT_KIND,
+                TIMELINE_ARCHIVED_EVENT_KIND,
+                TIMELINE_UNARCHIVED_EVENT_KIND,
+                project_id,
+                include_archived,
+                TIMELINE_UNARCHIVED_EVENT_KIND,
+            )
+            rows = conn.execute(query, params).fetchall()
         rows_out: list[TimelineListRow | TimelineInclusiveListRow] = []
         for row in rows:
             timeline_ulid = row["timeline_ulid"]
@@ -1968,7 +2131,6 @@ class TimelineRepository:
                     f"timeline {row['timeline_id']!r} is missing its "
                     "timeline.created alias metadata"
                 )
-            row_type = TimelineInclusiveListRow if include_archived else TimelineListRow
             row_kwargs: dict[str, Any] = {
                 "timeline_id": str(row["timeline_id"]),
                 "timeline_ulid": timeline_ulid,
@@ -1984,13 +2146,15 @@ class TimelineRepository:
                     else None
                 )
             rows_out.append(
-                row_type(
-                    **row_kwargs,
+                (TimelineInclusiveListRow if include_archived else TimelineListRow)(
+                    **row_kwargs
                 )
             )
         return rows_out
 
-    def show(self, writer: DatabaseWriter, project_id: str, ref: str) -> TimelineReadModel:
+    def show(
+        self, writer: DatabaseWriter, project_id: str, ref: str
+    ) -> TimelineReadModel:
         """Typed show query: one timeline's frozen load shape (§5.2).
 
         A transaction-free read on a separate read-only connection: resolves
@@ -2009,7 +2173,7 @@ class TimelineRepository:
             timeline_id = self._resolve_id(conn, project_id, ref)
             row = conn.execute(
                 "SELECT t.id, t.project_id, t.event_stream_id, t.name, "
-                "t.document_json, t.asset_registry_json, t.created_at, "
+                "t.document_json, t.asset_registry_json, t.project_data_json, t.created_at, "
                 "t.updated_at, s.head_seq "
                 "FROM timelines t "
                 "JOIN event_streams s ON s.id = t.event_stream_id "
@@ -2032,19 +2196,28 @@ class TimelineRepository:
             ).fetchone()
         if alias is None:
             raise TimelineRepositoryError(
-                f"timeline {timeline_id!r} is missing its timeline.created alias metadata"
+                f"timeline {timeline_id!r} is missing its timeline.created "
+                "alias metadata"
             )
         timeline_ulid = alias["timeline_ulid"]
         slug = alias["slug"]
         if not isinstance(timeline_ulid, str) or not isinstance(slug, str):
             raise TimelineRepositoryError(
-                f"timeline {timeline_id!r} has malformed timeline.created alias metadata"
+                f"timeline {timeline_id!r} has malformed timeline.created "
+                "alias metadata"
             )
         if project is None:
             raise ProjectNotFoundError(project_id=project_id)
-        default_id = self._default_timeline_id(str(project["settings_json"]), project_id)
+        default_id = self._default_timeline_id(
+            str(project["settings_json"]), project_id
+        )
         config = self._parse_document(str(row["document_json"]), timeline_id)
-        assets = self._parse_document(str(row["asset_registry_json"]), timeline_id)
+        assets = self._parse_document(
+            str(row["asset_registry_json"]), timeline_id
+        )
+        bundle = self._parse_project_data(
+            str(row["project_data_json"]), timeline_id
+        )
         return TimelineReadModel(
             timeline_id=timeline_id,
             timeline_ulid=timeline_ulid,
@@ -2054,6 +2227,7 @@ class TimelineRepository:
             config=config,
             registry={"assets": assets},
             config_version=int(row["head_seq"]),
+            bundle=bundle,
         )
 
     # -- history and adjacent-version diff reads (m4 plan step 7) ----------
@@ -2077,7 +2251,9 @@ class TimelineRepository:
         with writer.read_only_connection() as conn:
             conn.row_factory = sqlite3.Row
             timeline_id = self._resolve_id(conn, project_id, ref)
-            events = self._lifecycle_events(conn, f"{timeline_id}:{TIMELINE_STREAM_TYPE}")
+            events = self._lifecycle_events(
+                conn, f"{timeline_id}:{TIMELINE_STREAM_TYPE}"
+            )
         entries: list[TimelineHistoryEntry] = []
         for event in events:
             kind = event["kind"]
@@ -2107,7 +2283,9 @@ class TimelineRepository:
             )
         return entries
 
-    def diff(self, writer: DatabaseWriter, project_id: str, ref: str) -> List[TimelineDiffEntry]:
+    def diff(
+        self, writer: DatabaseWriter, project_id: str, ref: str
+    ) -> List[TimelineDiffEntry]:
         """Deterministic adjacent-version diff read over document/registry keys.
 
         A transaction-free read on a separate read-only connection. Content
@@ -2123,7 +2301,9 @@ class TimelineRepository:
         with writer.read_only_connection() as conn:
             conn.row_factory = sqlite3.Row
             timeline_id = self._resolve_id(conn, project_id, ref)
-            events = self._lifecycle_events(conn, f"{timeline_id}:{TIMELINE_STREAM_TYPE}")
+            events = self._lifecycle_events(
+                conn, f"{timeline_id}:{TIMELINE_STREAM_TYPE}"
+            )
         versions: list[dict[str, Any]] = []
         for event in events:
             if event["kind"] not in (
@@ -2163,10 +2343,33 @@ class TimelineRepository:
 
     # -- private helpers ---------------------------------------------------
 
-    def _lifecycle_events(self, reader: Any, stream_id: str) -> List[dict[str, Any]]:
+    def _archive_state(
+        self, reader: Any, stream_id: str
+    ) -> tuple[bool, str | None]:
+        """Return current archive state from the latest lifecycle transition."""
+        row = _query_one(
+            reader,
+            "SELECT kind, created_at FROM events WHERE stream_id = ? "
+            "AND kind IN (?, ?) ORDER BY seq DESC LIMIT 1",
+            (
+                stream_id,
+                TIMELINE_ARCHIVED_EVENT_KIND,
+                TIMELINE_UNARCHIVED_EVENT_KIND,
+            ),
+        )
+        if row is None:
+            return False, None
+        return (
+            str(row["kind"]) == TIMELINE_ARCHIVED_EVENT_KIND,
+            str(row["created_at"]),
+        )
+
+    def _lifecycle_events(
+        self, reader: Any, stream_id: str
+    ) -> List[dict[str, Any]]:
         """Return the ordered timeline lifecycle events with parsed data.
 
-        Reads ``timeline.created`` / ``timeline.saved`` / ``timeline.archived``
+        Reads the timeline lifecycle events
         events in stream ``seq`` order and parses each canonical payload into
         ``{"version", "kind", "created_at", "data"}``. Archive state is
         derived from these ordered events alone (SD1).
@@ -2174,7 +2377,7 @@ class TimelineRepository:
         rows = _query_all(
             reader,
             "SELECT seq, kind, created_at, payload_json FROM events "
-            "WHERE stream_id = ? AND kind IN (?, ?, ?, ?, ?) ORDER BY seq ASC",
+            "WHERE stream_id = ? AND kind IN (?,?,?,?,?) ORDER BY seq ASC",
             (stream_id, *_TIMELINE_HISTORY_KINDS),
         )
         events: list[dict[str, Any]] = []
@@ -2199,23 +2402,9 @@ class TimelineRepository:
             )
         return events
 
-    def _archive_state(self, reader: Any, stream_id: str) -> tuple[bool, str | None]:
-        """Return current archive state from the latest lifecycle transition."""
-        row = _query_one(
-            reader,
-            "SELECT kind, created_at FROM events WHERE stream_id = ? "
-            "AND kind IN (?, ?) ORDER BY seq DESC LIMIT 1",
-            (
-                stream_id,
-                TIMELINE_ARCHIVED_EVENT_KIND,
-                TIMELINE_UNARCHIVED_EVENT_KIND,
-            ),
-        )
-        if row is None:
-            return False, None
-        return str(row["kind"]) == TIMELINE_ARCHIVED_EVENT_KIND, str(row["created_at"])
-
-    def _default_timeline_id(self, settings_json: str, project_id: str) -> str | None:
+    def _default_timeline_id(
+        self, settings_json: str, project_id: str
+    ) -> str | None:
         """Project the repository-owned default timeline id from settings."""
         try:
             parsed = parse_json(settings_json)
@@ -2232,7 +2421,9 @@ class TimelineRepository:
             return value
         return None
 
-    def _parse_document(self, document_json: str, timeline_id: str) -> dict[str, Any]:
+    def _parse_document(
+        self, document_json: str, timeline_id: str
+    ) -> dict[str, Any]:
         """Parse one timeline's JSON projection canonically."""
         try:
             parsed = parse_json(document_json)
@@ -2241,7 +2432,32 @@ class TimelineRepository:
                 f"timeline {timeline_id!r} has invalid stored JSON: {exc}"
             ) from exc
         if not isinstance(parsed, Mapping):
-            raise TimelineRepositoryError(f"timeline {timeline_id!r} stored JSON is not an object")
+            raise TimelineRepositoryError(
+                f"timeline {timeline_id!r} stored JSON is not an object"
+            )
+        return dict(parsed)
+
+    def _parse_project_data(
+        self, project_data_json: str, timeline_id: str
+    ) -> dict[str, Any] | None:
+        """Parse the bridge-owned project-data lane, failing closed."""
+        try:
+            parsed = parse_json(project_data_json)
+        except CanonicalizationError as exc:
+            raise TimelineRepositoryError(
+                f"timeline {timeline_id!r} has invalid project data JSON: {exc}"
+            ) from exc
+        if parsed is None:
+            return None
+        if not isinstance(parsed, Mapping):
+            raise TimelineRepositoryError(
+                f"timeline {timeline_id!r} project data is not an object"
+            )
+        # The bridge validates the opaque bundle at its HTTP boundary so a
+        # malformed or future persisted value becomes the typed 422
+        # ``schema_incompatible`` response.  The repository keeps the value
+        # lossless for SDK/read-model consumers and does not reinterpret an
+        # already-committed project-data lane.
         return dict(parsed)
 
 
@@ -2260,6 +2476,7 @@ __all__ = [
     "TIMELINE_SAVED_EVENT_KIND",
     "TIMELINE_STREAM_TYPE",
     "TimelineAlreadyExistsError",
+    "TimelineAmbiguousError",
     "TimelineArchiveReadModel",
     "TimelineArchivedError",
     "TimelineDiffEntry",

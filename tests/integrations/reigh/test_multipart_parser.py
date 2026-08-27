@@ -94,11 +94,8 @@ class TestParserAbuse:
         )
 
         def open_fds() -> int:
-            # Linux exposes the descriptor directory under /proc; macOS
-            # exposes the same live view at /dev/fd. Keep the assertion
-            # exact on both platforms rather than skipping the leak check.
-            fd_dir = "/proc/self/fd" if os.path.isdir("/proc/self/fd") else "/dev/fd"
-            return len(os.listdir(fd_dir))
+            fd_root = "/proc/self/fd" if os.path.isdir("/proc/self/fd") else "/dev/fd"
+            return len(os.listdir(fd_root))
 
         before = open_fds()
         for _ in range(50):

@@ -52,12 +52,24 @@ _CORE_NAMESPACE_REPOS: dict[str, tuple[str, str]] = {
     "evidence": ("astrid.core.repositories.evidence", "EvidenceRepository"),
 }
 
-# Schema-pack id -> repository module (the pack's declared repository lives
-# in ``astrid/packs/<id>/repository.py``).
-_PACK_REPOSITORY_MODULES: dict[str, str] = {
-    "timeline": "astrid.packs.timeline.repository",
-    "shots": "astrid.packs.shots.repository",
-    "references": "astrid.packs.references.repository",
+# Schema-pack id -> declared repository name -> canonical module. Most pack
+# repositories live in ``<pack>/repository.py``; the shots generation
+# aggregate is intentionally split into its own module because it owns the
+# generation-specific schema and completion surface.
+_PACK_REPOSITORY_MODULES: dict[str, dict[str, str]] = {
+    "timeline": {
+        "TimelineRepository": "astrid.packs.timeline.repository",
+    },
+    "shots": {
+        "ShotRepository": "astrid.packs.shots.repository",
+        "GenerationRepository": "astrid.packs.shots.generation_repository",
+    },
+    "references": {
+        "ReferenceRepository": "astrid.packs.references.repository",
+    },
+    "runaway": {
+        "RunawayRepository": "astrid.packs.runaway.repository",
+    },
 }
 
 # (b) command kind -> event kind for the irregular documented pairs. The
@@ -106,8 +118,7 @@ def _repository_labels(
         module_name, class_name = _CORE_NAMESPACE_REPOS[noun]
         module = importlib.import_module(module_name)
         return [(f"{module_name}.{class_name}", getattr(module, class_name))]
-    module_name = _PACK_REPOSITORY_MODULES[pack_id]
-    module = importlib.import_module(module_name)
+    modules = _PACK_REPOSITORY_MODULES[pack_id]
     declared = sorted(
         name for name, owner in registry.repositories.items() if owner == pack_id
     )
@@ -115,9 +126,16 @@ def _repository_labels(
         raise AssertionError(
             f"{command_kind}: pack {pack_id!r} declares no repository class"
         )
-    return [
-        (f"{module_name}.{name}", getattr(module, name)) for name in declared
-    ]
+    labels: list[tuple[str, type]] = []
+    for name in declared:
+        module_name = modules.get(name)
+        if module_name is None:
+            raise AssertionError(
+                f"{pack_id}: repository {name!r} has no canonical module mapping"
+            )
+        module = importlib.import_module(module_name)
+        labels.append((f"{module_name}.{name}", getattr(module, name)))
+    return labels
 
 
 def test_every_command_kind_has_a_repository_method(standard_registry) -> None:

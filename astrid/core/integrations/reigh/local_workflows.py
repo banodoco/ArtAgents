@@ -227,8 +227,8 @@ def declaration_entry(declaration: LocalWorkflowDeclaration) -> Any:
     """Build the registry-shaped capability entry for one declaration."""
     from astrid.core.integrations.reigh.capabilities import (
         BINDING_VIBECOMFY,
-        CapabilityEntry,
         FAMILY_LOCAL_WORKFLOW,
+        CapabilityEntry,
         _policy,
     )
 

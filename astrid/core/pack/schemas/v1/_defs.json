@@ -15,44 +15,114 @@
     },
     "runtime_python_cli": {
       "type": "object",
-      "required": ["type", "entrypoint"],
+      "required": [
+        "type",
+        "entrypoint"
+      ],
       "properties": {
-        "type": {"type": "string", "const": "python-cli"},
-        "entrypoint": {"type": "string"},
-        "callable": {"type": "string"},
-        "function": {"type": "string"}
+        "type": {
+          "type": "string",
+          "const": "python-cli"
+        },
+        "entrypoint": {
+          "type": "string"
+        },
+        "callable": {
+          "type": "string"
+        },
+        "function": {
+          "type": "string"
+        }
       },
       "additionalProperties": false
     },
     "runtime_python": {
       "type": "object",
       "description": "Runtime shape consumed by astrid.core.execution.orchestrator.schema.RuntimeSpec for Python orchestrators.",
-      "required": ["kind", "module", "function"],
+      "required": [
+        "kind",
+        "module",
+        "function"
+      ],
       "properties": {
-        "kind": {"type": "string", "const": "python"},
-        "module": {"type": "string"},
-        "function": {"type": "string"}
+        "kind": {
+          "type": "string",
+          "const": "python"
+        },
+        "module": {
+          "type": "string"
+        },
+        "function": {
+          "type": "string"
+        }
       },
       "additionalProperties": false
     },
     "runtime_command": {
       "type": "object",
       "description": "Runtime shape consumed by astrid.core.execution.orchestrator.schema.RuntimeSpec for command orchestrators.",
-      "required": ["kind", "command"],
+      "required": [
+        "kind",
+        "command"
+      ],
       "properties": {
-        "kind": {"type": "string", "const": "command"},
+        "kind": {
+          "type": "string",
+          "const": "command"
+        },
         "command": {
           "type": "object",
-          "required": ["argv"],
+          "required": [
+            "argv"
+          ],
           "properties": {
             "argv": {
               "type": "array",
-              "items": {"type": "string"}
+              "items": {
+                "type": "string"
+              }
             },
-            "cwd": {"type": "string"},
+            "cwd": {
+              "type": "string"
+            },
             "env": {
               "type": "object",
-              "additionalProperties": {"type": "string"}
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "input_args": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "input": {
+                    "type": "string"
+                  },
+                  "flag": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "repeatable": {
+                    "type": "boolean"
+                  },
+                  "optional": {
+                    "type": "boolean"
+                  },
+                  "before": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "input"
+                ],
+                "additionalProperties": false
+              }
             }
           },
           "additionalProperties": false
@@ -62,21 +132,68 @@
     },
     "runtime_command_legacy": {
       "type": "object",
-      "required": ["type", "command"],
+      "required": [
+        "type",
+        "command"
+      ],
       "properties": {
-        "type": {"type": "string", "const": "command"},
+        "type": {
+          "type": "string",
+          "const": "command"
+        },
         "command": {
           "type": "object",
-          "required": ["argv"],
+          "required": [
+            "argv"
+          ],
           "properties": {
             "argv": {
               "type": "array",
-              "items": {"type": "string"}
+              "items": {
+                "type": "string"
+              }
             },
-            "cwd": {"type": "string"},
+            "cwd": {
+              "type": "string"
+            },
             "env": {
               "type": "object",
-              "additionalProperties": {"type": "string"}
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "input_args": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "input": {
+                    "type": "string"
+                  },
+                  "flag": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "repeatable": {
+                    "type": "boolean"
+                  },
+                  "optional": {
+                    "type": "boolean"
+                  },
+                  "before": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "input"
+                ],
+                "additionalProperties": false
+              }
             }
           },
           "additionalProperties": false

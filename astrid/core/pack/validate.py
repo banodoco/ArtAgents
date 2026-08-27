@@ -85,6 +85,7 @@ _PACK_TAXONOMY_ENUMS: dict[str, tuple[str, ...]] = {
         "integration",
         "media",
         "system",
+        "timeline",
     ),
     "stability": ("stable", "experimental", "deprecated"),
     "support": ("project", "core", "community"),
@@ -122,8 +123,7 @@ def _check_schema_version(version_value: Any, manifest_relpath: str) -> int:
     version = int(version_value)
     if version not in KNOWN_SCHEMA_VERSIONS:
         raise ValidationError(
-            f"{manifest_relpath}: unknown schema_version {version} "
-            f"(known: {KNOWN_VERSIONS_STR})"
+            f"{manifest_relpath}: unknown schema_version {version} (known: {KNOWN_VERSIONS_STR})"
         )
     return version
 
@@ -269,9 +269,7 @@ class PackValidator:
         self._pack_data = pack_data
 
         # Check schema_version and validate against JSON Schema
-        version = self._validate_manifest(
-            pack_data, "pack", self._rel(pack_yaml)
-        )
+        version = self._validate_manifest(pack_data, "pack", self._rel(pack_yaml))
         if version is None:
             return self.errors  # schema_version error already recorded
 
@@ -357,17 +355,13 @@ class PackValidator:
         # Load and validate against JSON Schema
         schema_path = KNOWN_SCHEMA_VERSIONS[version].get(manifest_kind)
         if schema_path is None:
-            self.errors.append(
-                f"{relpath}: no schema for {manifest_kind} in version {version}"
-            )
+            self.errors.append(f"{relpath}: no schema for {manifest_kind} in version {version}")
             return None
 
         try:
             schema, registry = self._load_schema(schema_path, manifest_kind, version)
-        except Exception as e:
-            self.errors.append(
-                f"{relpath}: cannot load schema {schema_path} — {e}"
-            )
+        except Exception as e:  # noqa: BLE001 - validator reports malformed third-party schemas
+            self.errors.append(f"{relpath}: cannot load schema {schema_path} — {e}")
             return None
 
         validator = jsonschema.Draft7Validator(schema, registry=registry)
@@ -381,9 +375,7 @@ class PackValidator:
         if raw_errors:
             # Take the first few errors to avoid overwhelming output
             for err in raw_errors[:5]:
-                self.errors.append(
-                    _normalize_jsonschema_error(err, relpath, data)
-                )
+                self.errors.append(_normalize_jsonschema_error(err, relpath, data))
             if len(raw_errors) > 5:
                 self.errors.append(
                     f"{relpath}: ... and {len(raw_errors) - 5} more validation errors"
@@ -407,7 +399,7 @@ class PackValidator:
         try:
             pack = self._pack_definition_for_discovery({})
             element_kind_registry_for_pack(pack).normalize(kind_value)
-        except Exception:
+        except Exception:  # noqa: BLE001 - unknown pack element kinds are validation results
             return errors
         return [
             error
@@ -435,9 +427,7 @@ class PackValidator:
         if defs_path.is_file():
             with open(defs_path, "r", encoding="utf-8") as f:
                 defs_schema = json_loads(f.read())
-            registry = registry.with_resource(
-                "_defs.json", Resource.from_contents(defs_schema)
-            )
+            registry = registry.with_resource("_defs.json", Resource.from_contents(defs_schema))
 
         # Load the schema
         with open(schema_path, "r", encoding="utf-8") as f:
@@ -446,9 +436,7 @@ class PackValidator:
         # Also register the schema itself if it has an $id
         schema_id = schema.get("$id")
         if schema_id:
-            registry = registry.with_resource(
-                schema_id, Resource.from_contents(schema)
-            )
+            registry = registry.with_resource(schema_id, Resource.from_contents(schema))
 
         self._schema_cache[schema_key] = (schema, registry)
 
@@ -463,9 +451,7 @@ class PackValidator:
         """
         supported = {"executors", "orchestrators", "elements", "schemas", "examples", "docs"}
         for key in sorted(set(content) - supported):
-            self.warnings.append(
-                f"pack.yaml: unsupported content root {key!r}"
-            )
+            self.warnings.append(f"pack.yaml: unsupported content root {key!r}")
         _hard_roots = {"executors", "orchestrators", "elements"}
         for key in ("executors", "orchestrators", "elements", "schemas", "examples"):
             if key not in content:
@@ -505,9 +491,7 @@ class PackValidator:
                 continue
             doc_path = self.pack_root / doc_rel
             if not doc_path.is_file():
-                self.warnings.append(
-                    f"{self._rel(doc_path)}: declared docs file not found"
-                )
+                self.warnings.append(f"{self._rel(doc_path)}: declared docs file not found")
 
     def _validate_components(self, content: dict[str, Any]) -> None:
         """Validate all component manifests declared via content roots."""
@@ -530,7 +514,9 @@ class PackValidator:
             status=status,
             visibility=str(data.get("visibility") or "visible"),
             content=dict(content),
-            metadata=dict(data.get("metadata", {})) if isinstance(data.get("metadata", {}), dict) else {},
+            metadata=dict(data.get("metadata", {}))
+            if isinstance(data.get("metadata", {}), dict)
+            else {},
             agent=dict(data.get("agent", {})) if isinstance(data.get("agent", {}), dict) else {},
             aliases=_optional_pack_aliases(data.get("aliases"), path="pack.aliases"),
             permissions=_normalize_pack_permissions(data.get("permissions")),
@@ -543,9 +529,7 @@ class PackValidator:
         for comp_dir in iter_executor_roots(pack):
             manifest_path = find_component_manifest(comp_dir, "executor")
             if manifest_path is not None:
-                self._validate_component_manifest_file(
-                    pack, comp_dir, manifest_path, "executor"
-                )
+                self._validate_component_manifest_file(pack, comp_dir, manifest_path, "executor")
         for comp_dir in iter_orchestrator_roots(pack):
             manifest_path = find_component_manifest(comp_dir, "orchestrator")
             if manifest_path is not None:
@@ -661,9 +645,7 @@ class PackValidator:
         elif manifest_kind == "orchestrator":
             self._reconcile_runtime_module(data, "orchestrator", rel)
 
-    def _reconcile_runtime_module(
-        self, data: Any, component: str, rel: str
-    ) -> None:
+    def _reconcile_runtime_module(self, data: Any, component: str, rel: str) -> None:
         """Apply the pack-tier runtime-module reconciliation check to one manifest."""
         if not isinstance(data, dict):
             return
@@ -671,9 +653,7 @@ class PackValidator:
         if not isinstance(metadata, dict):
             return
         try:
-            reconcile_runtime_module(
-                data.get("runtime"), metadata, ValidationError, component
-            )
+            reconcile_runtime_module(data.get("runtime"), metadata, ValidationError, component)
         except ValidationError as exc:
             self.errors.append(f"{rel}: {exc}")
 
@@ -715,7 +695,9 @@ class PackValidator:
             self._check_runtime_entrypoint(component_dir, data.get("entrypoint"), "entrypoint")
             runtime = data.get("runtime", {})
             if isinstance(runtime, dict):
-                self._check_runtime_entrypoint(component_dir, runtime.get("entrypoint"), "runtime entrypoint")
+                self._check_runtime_entrypoint(
+                    component_dir, runtime.get("entrypoint"), "runtime entrypoint"
+                )
                 self._check_command_entrypoint(component_dir, runtime.get("command"))
             self._check_command_entrypoint(component_dir, data.get("command"))
             self._check_metadata_runtime_file(component_dir, data)
@@ -746,7 +728,9 @@ class PackValidator:
         metadata = data.get("metadata", {})
         if not isinstance(metadata, dict):
             return
-        self._check_runtime_entrypoint(component_dir, metadata.get("runtime_file"), "metadata.runtime_file")
+        self._check_runtime_entrypoint(
+            component_dir, metadata.get("runtime_file"), "metadata.runtime_file"
+        )
         self._check_python_module(
             component_dir,
             metadata.get("runtime_module"),
@@ -865,9 +849,13 @@ class PackValidator:
                 if isinstance(target, str):
                     self._alias_targets.append((relpath, f"metadata.aliases[{index}]", target))
                 else:
-                    self.errors.append(f"{relpath}: metadata.aliases[{index}] must declare canonical_id")
+                    self.errors.append(
+                        f"{relpath}: metadata.aliases[{index}] must declare canonical_id"
+                    )
             else:
-                self.errors.append(f"{relpath}: metadata.aliases[{index}] must be a string or object")
+                self.errors.append(
+                    f"{relpath}: metadata.aliases[{index}] must be a string or object"
+                )
 
     def _validate_pack_aliases(self) -> None:
         if self._pack_data is None:
@@ -1006,22 +994,32 @@ def _check_semantic_deps(data: dict[str, Any]) -> list[str]:
         for idx, dep in enumerate(python_deps):
             if not isinstance(dep, str) or not dep.strip():
                 warnings.append(f"dependencies.python[{idx}]: empty entry")
-            elif not _re.match(r"^[A-Za-z0-9_.-]+(\s*[><=!~]+\s*[A-Za-z0-9_.*-]+)*(\s*;\s*.*)?$", dep.strip()):
-                warnings.append(f"dependencies.python[{idx}]: '{dep}' does not look like a pip requirement")
+            elif not _re.match(
+                r"^[A-Za-z0-9_.-]+(\s*[><=!~]+\s*[A-Za-z0-9_.*-]+)*(\s*;\s*.*)?$", dep.strip()
+            ):
+                warnings.append(
+                    f"dependencies.python[{idx}]: '{dep}' does not look like a pip requirement"
+                )
     npm_deps = deps.get("npm")
     if isinstance(npm_deps, list):
         for idx, dep in enumerate(npm_deps):
             if not isinstance(dep, str) or not dep.strip():
                 warnings.append(f"dependencies.npm[{idx}]: empty entry")
-            elif not _re.match(r"^@?[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)?(@[A-Za-z0-9_.-]+)?$", dep.strip()):
-                warnings.append(f"dependencies.npm[{idx}]: '{dep}' does not look like an npm package specifier")
+            elif not _re.match(
+                r"^@?[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)?(@[A-Za-z0-9_.-]+)?$", dep.strip()
+            ):
+                warnings.append(
+                    f"dependencies.npm[{idx}]: '{dep}' does not look like an npm package specifier"
+                )
     system_deps = deps.get("system")
     if isinstance(system_deps, list):
         for idx, dep in enumerate(system_deps):
             if not isinstance(dep, str) or not dep.strip():
                 warnings.append(f"dependencies.system[{idx}]: empty entry")
             elif not _re.match(r"^[A-Za-z0-9_.-]+$", dep.strip()):
-                warnings.append(f"dependencies.system[{idx}]: '{dep}' does not look like a system command name")
+                warnings.append(
+                    f"dependencies.system[{idx}]: '{dep}' does not look like a system command name"
+                )
     return warnings
 
 
@@ -1048,15 +1046,29 @@ def extract_trust_summary(pack_root: str | Path) -> dict[str, Any]:
         comp_root_rel = content.get(key)
         if isinstance(comp_root_rel, str) and comp_root_rel.strip():
             comp_dir = root / comp_root_rel
-            component_counts[key] = sum(
-                1 for child in comp_dir.iterdir() if child.is_dir() and not child.name.startswith(".")
-            ) if comp_dir.is_dir() else 0
+            component_counts[key] = (
+                sum(
+                    1
+                    for child in comp_dir.iterdir()
+                    if child.is_dir() and not child.name.startswith(".")
+                )
+                if comp_dir.is_dir()
+                else 0
+            )
         else:
             component_counts[key] = 0
 
     agent = data.get("agent", {}) if isinstance(data.get("agent"), dict) else {}
-    normal_entrypoints = [str(ep) for ep in agent.get("normal_entrypoints", []) if ep] if isinstance(agent.get("normal_entrypoints"), list) else []
-    legacy_entrypoints = [str(ep) for ep in agent.get("entrypoints", []) if ep] if isinstance(agent.get("entrypoints"), list) else []
+    normal_entrypoints = (
+        [str(ep) for ep in agent.get("normal_entrypoints", []) if ep]
+        if isinstance(agent.get("normal_entrypoints"), list)
+        else []
+    )
+    legacy_entrypoints = (
+        [str(ep) for ep in agent.get("entrypoints", []) if ep]
+        if isinstance(agent.get("entrypoints"), list)
+        else []
+    )
     display_entrypoints = normal_entrypoints or legacy_entrypoints
 
     secrets_raw = data.get("secrets")
@@ -1089,7 +1101,9 @@ def extract_trust_summary(pack_root: str | Path) -> dict[str, Any]:
                 dependencies.append(str(value))
 
     docs = data.get("docs", {}) if isinstance(data.get("docs"), dict) else {}
-    doc_info = {key: str(docs.get(key)) if docs.get(key) else None for key in ("readme", "agents", "stage")}
+    doc_info = {
+        key: str(docs.get(key)) if docs.get(key) else None for key in ("readme", "agents", "stage")
+    }
 
     warnings: list[str] = []
     for key, comp_root_rel in content.items():
@@ -1098,9 +1112,21 @@ def extract_trust_summary(pack_root: str | Path) -> dict[str, Any]:
     warnings.extend(_check_semantic_secrets(data))
     warnings.extend(_check_semantic_deps(data))
 
-    keywords = [str(value) for value in data.get("keywords", []) if value] if isinstance(data.get("keywords"), list) else []
-    capabilities = [str(value) for value in data.get("capabilities", []) if value] if isinstance(data.get("capabilities"), list) else []
-    required_context = [str(value) for value in agent.get("required_context", []) if value] if isinstance(agent.get("required_context"), list) else []
+    keywords = (
+        [str(value) for value in data.get("keywords", []) if value]
+        if isinstance(data.get("keywords"), list)
+        else []
+    )
+    capabilities = (
+        [str(value) for value in data.get("capabilities", []) if value]
+        if isinstance(data.get("capabilities"), list)
+        else []
+    )
+    required_context = (
+        [str(value) for value in agent.get("required_context", []) if value]
+        if isinstance(agent.get("required_context"), list)
+        else []
+    )
     permissions = _normalize_pack_permissions(data.get("permissions"))
     normalized_permissions = [permission.to_dict() for permission in permissions]
     permission_ids = [permission.id for permission in permissions]

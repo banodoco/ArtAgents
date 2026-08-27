@@ -161,9 +161,12 @@ class BridgeTransport(Protocol):
 class HttpBridgeTransport:
     """The real-HTTP transport over the local bridge listener."""
 
-    def __init__(self, base_url: str, token: str) -> None:
+    def __init__(
+        self, base_url: str, token: str = "", *, protocol_version: str = "v1"
+    ) -> None:
         self._base_url = base_url.rstrip("/")
         self._token = token
+        self._protocol_version = protocol_version
 
     def _headers(
         self, content_type: str, key: str | None
@@ -172,7 +175,12 @@ class HttpBridgeTransport:
             TRUST_TOKEN_HEADER,
         )
 
-        headers = {"Content-Type": content_type, TRUST_TOKEN_HEADER: self._token}
+        headers = {
+            "Content-Type": content_type,
+            TRUST_TOKEN_HEADER: self._token,
+            "Authorization": f"Bearer {self._token}",
+            "X-Astrid-Bridge-Version": self._protocol_version,
+        }
         if key is not None:
             headers["Idempotency-Key"] = key
         return headers

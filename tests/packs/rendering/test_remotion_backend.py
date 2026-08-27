@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -15,6 +16,7 @@ import yaml
 
 from astrid.core import timeline
 from astrid.core.element.schema import ElementAsset, ElementDefinition
+from astrid.core.integrations.reigh import remotion_runtime
 from astrid.core.pack.discovery import discover_pack_metadata
 from astrid.core.rendering.contracts import (
     SCHEMA_VERSION,
@@ -35,6 +37,34 @@ from tests.packs.rendering._helpers import _execution_env, _probe
 ROOT = Path(__file__).resolve().parents[3]
 LOCAL_EFFECT_SMOKE_FIXTURE = ROOT / "tests" / "fixtures" / "local_effect_smoke"
 render_remotion = remotion
+
+
+def _is_remotion_render_command(command: list[str]) -> bool:
+    return (
+        len(command) >= 3
+        and Path(command[0]).name == "node"
+        and Path(command[1]).as_posix().endswith(
+            "node_modules/@remotion/cli/remotion-cli.js"
+        )
+        and command[2] == "render"
+    )
+
+
+@pytest.fixture(autouse=True)
+def _remotion_exec_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Ensure protocol children use the schema-bearing test interpreter."""
+    fake_node = tmp_path / "node"
+    fake_node.write_text("#!/bin/sh\nprintf 'v20.19.4\\n'\n", encoding="utf-8")
+    fake_node.chmod(0o755)
+    configured_node = shutil.which("node") or str(fake_node)
+    monkeypatch.setenv("ASTRID_NODE_EXECUTABLE", str(Path(configured_node).resolve()))
+    monkeypatch.setattr(
+        remotion_runtime,
+        "_probe_node",
+        lambda node_executable, *, cwd: ("v20.19.4", None),
+    )
+    with _execution_env():
+        yield
 
 
 def _write_fake_remotion_output(command: list[str]) -> Path:
@@ -69,6 +99,9 @@ def _write_project(tmp_path: Path) -> Path:
     ):
         (packages / package).mkdir(parents=True)
     (project / "package.json").write_text("{}\n", encoding="utf-8")
+    cli = project / "node_modules" / "@remotion" / "cli" / "remotion-cli.js"
+    cli.parent.mkdir(parents=True)
+    cli.write_text("// locked test CLI\n", encoding="utf-8")
     return project
 
 
@@ -110,7 +143,7 @@ def test_manifest_registers_static_raw_command_backend() -> None:
     assert manifest.command == ("python3", "run.py")
     assert manifest.operations == ("render", "support")
     assert manifest.required_permissions == ("project_files", "subprocess")
-    assert manifest.required_binaries == ("node", "npx", "ffprobe")
+    assert manifest.required_binaries == ("ffprobe",)
     assert (manifest_path.parents[2] / manifest.command[1]).is_file()
 
 
@@ -341,7 +374,7 @@ def test_render_preserves_props_command_cleanup_and_provenance(tmp_path: Path) -
 
     def fake_run(command, **kwargs):
         normalized = [str(part) for part in command]
-        if normalized[:3] == ["npx", "remotion", "render"]:
+        if _is_remotion_render_command(normalized):
             props_path = Path(normalized[normalized.index("--props") + 1])
             seen["props_path"] = props_path
             seen["props"] = json.loads(props_path.read_text(encoding="utf-8"))
@@ -380,6 +413,57 @@ def test_render_preserves_props_command_cleanup_and_provenance(tmp_path: Path) -
     assert provenance["engine"] == "remotion"
     assert provenance["composition_id"] == "TimelineComposition"
     assert provenance["registry_hash"] == "registry-hash"
+    assert provenance["runtime"]["node_executable"] == os.environ[
+        "ASTRID_NODE_EXECUTABLE"
+    ]
+    assert provenance["runtime"]["node_version"] == "v20.19.4"
+    assert provenance["runtime"]["remotion_cli"].endswith(
+        "node_modules/@remotion/cli/remotion-cli.js"
+    )
+
+
+def test_render_binds_asset_cors_to_selected_remotion_port(tmp_path: Path) -> None:
+    timeline_path, assets_path = _write_inputs(tmp_path)
+    source = tmp_path / "asset.png"
+    source.write_bytes(b"asset bytes")
+    timeline.save_registry(
+        {"assets": {"asset": {"file": str(source), "type": "image/png"}}},
+        assets_path,
+    )
+    project = _write_project(tmp_path)
+    output_path = tmp_path / "output" / "hype.mp4"
+    seen_commands: list[list[str]] = []
+    seen_origins: list[str] = []
+    real_server = remotion.InvocationAssetServer
+
+    class TrackingAssetServer(real_server):
+        def __init__(self, *args, **kwargs):
+            seen_origins.append(kwargs["allowed_origin"])
+            super().__init__(*args, **kwargs)
+
+    def fake_run(command, **kwargs):
+        normalized = [str(part) for part in command]
+        if _is_remotion_render_command(normalized):
+            seen_commands.append(normalized)
+            _write_fake_remotion_output(normalized)
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    with (
+        mock.patch.object(remotion, "_regenerate_element_registries"),
+        mock.patch.object(
+            remotion,
+            "_effective_registry_state",
+            return_value={"version": 1, "hash": "registry-hash"},
+        ),
+        mock.patch.object(remotion, "_available_remotion_port", return_value=3001),
+        mock.patch.object(remotion, "InvocationAssetServer", TrackingAssetServer),
+        mock.patch.object(remotion.subprocess, "run", side_effect=fake_run),
+    ):
+        remotion.render(timeline_path, assets_path, output_path, project_dir=project)
+
+    assert seen_origins == ["http://localhost:3001"]
+    assert len(seen_commands) == 1
+    assert "--port=3001" in seen_commands[0]
 
 
 def test_protocol_render_returns_valid_namespaced_artifact_shape(tmp_path: Path) -> None:
@@ -512,6 +596,9 @@ class RemotionBackendRegistryGenerationTest(unittest.TestCase):
         (banodoco_root / "timeline-schema").mkdir(parents=True)
         (banodoco_root / "timeline-theme-2rp").mkdir(parents=True)
         (project_dir / "package.json").write_text('{"scripts":{}}\n', encoding="utf-8")
+        cli = project_dir / "node_modules" / "@remotion" / "cli" / "remotion-cli.js"
+        cli.parent.mkdir(parents=True)
+        cli.write_text("// locked test CLI\n", encoding="utf-8")
         return project_dir, composition_src
 
     def _write_effect_definition(self, tmp: Path, effect_id: str, asset_text: str) -> ElementDefinition:
@@ -665,7 +752,7 @@ class RemotionBackendRegistryGenerationTest(unittest.TestCase):
                     for generated_output in generated_outputs:
                         generated_output.parent.mkdir(parents=True, exist_ok=True)
                         generated_output.write_text("// generated test fixture\n", encoding="utf-8")
-                elif command[:3] == ["npx", "remotion", "render"]:
+                elif _is_remotion_render_command(command):
                     remotion_runs += 1
                     _write_fake_remotion_output(command)
                 return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
@@ -743,7 +830,7 @@ class RemotionBackendRegistryGenerationTest(unittest.TestCase):
             def fake_run(cmd, **kwargs):
                 command = [str(part) for part in cmd]
                 calls.append((command, kwargs))
-                if command[:3] == ["npx", "remotion", "render"]:
+                if _is_remotion_render_command(command):
                     props_path = Path(command[command.index("--props") + 1])
                     props_paths.append(props_path)
                     props_payloads.append(json.loads(props_path.read_text(encoding="utf-8")))
@@ -751,7 +838,15 @@ class RemotionBackendRegistryGenerationTest(unittest.TestCase):
                 return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
             with (
-                mock.patch.dict(render_remotion.os.environ, {}, clear=True),
+                mock.patch.dict(
+                    render_remotion.os.environ,
+                    {
+                        "ASTRID_NODE_EXECUTABLE": os.environ[
+                            "ASTRID_NODE_EXECUTABLE"
+                        ]
+                    },
+                    clear=True,
+                ),
                 mock.patch.object(render_remotion.subprocess, "run", side_effect=fake_run),
             ):
                 result = render_remotion.render(
@@ -775,7 +870,13 @@ class RemotionBackendRegistryGenerationTest(unittest.TestCase):
         self.assertNotIn("--theme", registry_cmd)
         self.assertEqual(registry_kwargs["cwd"], str(ROOT))
 
-        self.assertEqual(remotion_cmd[:3], ["npx", "remotion", "render"])
+        self.assertEqual(Path(remotion_cmd[0]).name, "node")
+        self.assertTrue(
+            Path(remotion_cmd[1]).as_posix().endswith(
+                "node_modules/@remotion/cli/remotion-cli.js"
+            )
+        )
+        self.assertEqual(remotion_cmd[2], "render")
         self.assertEqual(remotion_cmd[3], "TimelineComposition")
         remotion_output = Path(remotion_cmd[remotion_cmd.index("--output") + 1])
         self.assertEqual(remotion_output.name, out_path.name)
@@ -837,7 +938,7 @@ class RemotionBackendRegistryGenerationTest(unittest.TestCase):
 
             def fake_run(cmd, **kwargs):
                 command = [str(part) for part in cmd]
-                if command[:3] == ["npx", "remotion", "render"]:
+                if _is_remotion_render_command(command):
                     props_path = Path(command[command.index("--props") + 1])
                     props = json.loads(props_path.read_text(encoding="utf-8"))
                     props_payloads.append(props)
@@ -913,7 +1014,7 @@ class RemotionBackendRegistryGenerationTest(unittest.TestCase):
 
             def fake_run(cmd, **kwargs):
                 command = [str(part) for part in cmd]
-                if command[:3] == ["npx", "remotion", "render"]:
+                if _is_remotion_render_command(command):
                     props_path = Path(command[command.index("--props") + 1])
                     props_paths_seen.append(props_path)
                     props = json.loads(props_path.read_text(encoding="utf-8"))
@@ -966,7 +1067,7 @@ class RemotionBackendRegistryGenerationTest(unittest.TestCase):
 
             def fake_run(cmd, **kwargs):
                 command = [str(part) for part in cmd]
-                if command[:3] == ["npx", "remotion", "render"]:
+                if _is_remotion_render_command(command):
                     _write_fake_remotion_output(command)
                 return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
@@ -1012,7 +1113,7 @@ class RemotionBackendRegistryGenerationTest(unittest.TestCase):
 
             def fake_run(cmd, **kwargs):
                 command = [str(part) for part in cmd]
-                if command[:3] == ["npx", "remotion", "render"]:
+                if _is_remotion_render_command(command):
                     remotion_envs.append(dict(kwargs["env"]))
                     _write_fake_remotion_output(command)
                 return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
@@ -1025,6 +1126,9 @@ class RemotionBackendRegistryGenerationTest(unittest.TestCase):
                 "ASTRID_SESSION_ID": "sess-123",
                 "ASTRID_TASK_RUN_ID": "task-run-9",
                 "ASTRID_ACTOR": "human:peter",
+                "ASTRID_NODE_EXECUTABLE": render_remotion.os.environ[
+                    "ASTRID_NODE_EXECUTABLE"
+                ],
             }
             with (
                 mock.patch.dict(render_remotion.os.environ, host_env, clear=True),
@@ -1066,12 +1170,18 @@ class RemotionBackendRegistryGenerationTest(unittest.TestCase):
 def _remotion_missing_environment() -> list[str]:
     missing = [
         f"{binary} executable"
-        for binary in ("node", "npx", "ffprobe")
+        for binary in ("ffprobe",)
         if shutil.which(binary) is None
     ]
+    node_executable = os.environ.get("ASTRID_NODE_EXECUTABLE", "").strip()
+    if not node_executable or not Path(node_executable).is_file():
+        missing.append("ASTRID_NODE_EXECUTABLE")
     node_modules = ROOT / "remotion" / "node_modules"
     if not node_modules.is_dir():
         missing.append("remotion/node_modules")
+    cli = node_modules / "@remotion" / "cli" / "remotion-cli.js"
+    if not cli.is_file():
+        missing.append("remotion local CLI")
     return missing
 
 
@@ -1245,7 +1355,7 @@ def test_alpha_stamp_appends_transparent_flags_to_remotion_cli(
 
     def fake_run(command, **kwargs):
         normalized = [str(part) for part in command]
-        if normalized[:3] == ["npx", "remotion", "render"]:
+        if _is_remotion_render_command(normalized):
             seen["commands"].append(normalized)
             props_path = Path(normalized[normalized.index("--props") + 1])
             props_seen.append(json.loads(props_path.read_text(encoding="utf-8")))
@@ -1267,6 +1377,7 @@ def test_alpha_stamp_appends_transparent_flags_to_remotion_cli(
                 "_effective_registry_state",
                 return_value={"version": 1, "hash": "registry-hash"},
             ),
+            mock.patch.object(remotion, "_available_remotion_port", return_value=3001),
             mock.patch.object(remotion.subprocess, "run", side_effect=fake_run),
         ):
             remotion.render(
@@ -1285,6 +1396,10 @@ def test_alpha_stamp_appends_transparent_flags_to_remotion_cli(
     for dead_flag in ("--codec=vp9", "--pixel-format=yuva420p"):
         assert dead_flag not in alpha_cmd
         assert dead_flag not in opaque_cmd
+    assert sum(part.startswith("--port=") for part in opaque_cmd) == 1
+    assert sum(part.startswith("--port=") for part in alpha_cmd) == 1
+    assert "--port=3001" in opaque_cmd
+    assert "--port=3001" in alpha_cmd
     # Stamped renders are remapped to the ProRes .mov container name.
     alpha_output = Path(alpha_cmd[alpha_cmd.index("--output") + 1])
     assert alpha_output.suffix == ".mov"

@@ -44,7 +44,9 @@ def _key_color_name(raw: str) -> str:
     return normalized
 
 
-def _set_pixel(pixels: bytearray, width: int, height: int, x: int, y: int, rgb: tuple[int, int, int]) -> None:
+def _set_pixel(
+    pixels: bytearray, width: int, height: int, x: int, y: int, rgb: tuple[int, int, int]
+) -> None:
     if x < 0 or y < 0 or x >= width or y >= height:
         return
     offset = (y * width + x) * 3
@@ -95,7 +97,14 @@ def _layout_is_valid(cols: int, rows: int, frame_width: int, frame_height: int) 
     return GPT_IMAGE_2_MIN_PIXELS <= pixels <= GPT_IMAGE_2_MAX_PIXELS
 
 
-def choose_layout(frame_count: int, *, frame_width: int, frame_height: int, fixed_cols: int | None = None, fixed_rows: int | None = None) -> dict[str, int]:
+def choose_layout(
+    frame_count: int,
+    *,
+    frame_width: int,
+    frame_height: int,
+    fixed_cols: int | None = None,
+    fixed_rows: int | None = None,
+) -> dict[str, int]:
     if frame_count < 1:
         _die("--frames must be >= 1")
     if fixed_cols is not None and fixed_cols < 1:
@@ -109,22 +118,41 @@ def choose_layout(frame_count: int, *, frame_width: int, frame_height: int, fixe
 
     if fixed_cols is not None and fixed_rows is not None:
         if fixed_cols * fixed_rows < frame_count:
-            _die(f"Grid {fixed_cols}x{fixed_rows} only has {fixed_cols * fixed_rows} cells for {frame_count} frames")
+            _die(
+                f"Grid {fixed_cols}x{fixed_rows} only has {fixed_cols * fixed_rows} cells for {frame_count} frames"
+            )
         if not _layout_is_valid(fixed_cols, fixed_rows, frame_width, frame_height):
-            _die(f"Grid {fixed_cols}x{fixed_rows} at {frame_width}x{frame_height} per frame violates gpt-image-2 size limits")
-        return {"cols": fixed_cols, "rows": fixed_rows, "frame_count": frame_count, "capacity": fixed_cols * fixed_rows}
+            _die(
+                f"Grid {fixed_cols}x{fixed_rows} at {frame_width}x{frame_height} per frame violates gpt-image-2 size limits"
+            )
+        return {
+            "cols": fixed_cols,
+            "rows": fixed_rows,
+            "frame_count": frame_count,
+            "capacity": fixed_cols * fixed_rows,
+        }
 
     if fixed_cols is not None:
         rows = (frame_count + fixed_cols - 1) // fixed_cols
         if not _layout_is_valid(fixed_cols, rows, frame_width, frame_height):
             _die(f"Auto rows for {fixed_cols} columns violates gpt-image-2 size limits")
-        return {"cols": fixed_cols, "rows": rows, "frame_count": frame_count, "capacity": fixed_cols * rows}
+        return {
+            "cols": fixed_cols,
+            "rows": rows,
+            "frame_count": frame_count,
+            "capacity": fixed_cols * rows,
+        }
 
     if fixed_rows is not None:
         cols = (frame_count + fixed_rows - 1) // fixed_rows
         if not _layout_is_valid(cols, fixed_rows, frame_width, frame_height):
             _die(f"Auto columns for {fixed_rows} rows violates gpt-image-2 size limits")
-        return {"cols": cols, "rows": fixed_rows, "frame_count": frame_count, "capacity": cols * fixed_rows}
+        return {
+            "cols": cols,
+            "rows": fixed_rows,
+            "frame_count": frame_count,
+            "capacity": cols * fixed_rows,
+        }
 
     for rows in range(1, max_rows + 1):
         cols = (frame_count + rows - 1) // rows
@@ -173,10 +201,30 @@ def write_layout_guide(
     safe = (255, 255, 255)
     for col in range(cols + 1):
         x = min(width - 1, col * frame_width)
-        _draw_line(pixels, width, height, x, 0, x, height - 1, border if col in {0, cols} else grid, 5 if col in {0, cols} else 3)
+        _draw_line(
+            pixels,
+            width,
+            height,
+            x,
+            0,
+            x,
+            height - 1,
+            border if col in {0, cols} else grid,
+            5 if col in {0, cols} else 3,
+        )
     for row in range(rows + 1):
         y = min(height - 1, row * frame_height)
-        _draw_line(pixels, width, height, 0, y, width - 1, y, border if row in {0, rows} else grid, 5 if row in {0, rows} else 3)
+        _draw_line(
+            pixels,
+            width,
+            height,
+            0,
+            y,
+            width - 1,
+            y,
+            border if row in {0, rows} else grid,
+            5 if row in {0, rows} else 3,
+        )
 
     inset = safe_margin if safe_margin is not None else max(24, min(frame_width, frame_height) // 8)
     for row in range(rows):
@@ -192,8 +240,28 @@ def write_layout_guide(
             center_x = col * frame_width + frame_width // 2
             center_y = row * frame_height + frame_height // 2
             cross = max(8, min(frame_width, frame_height) // 24)
-            _draw_line(pixels, width, height, center_x - cross, center_y, center_x + cross, center_y, safe, 2)
-            _draw_line(pixels, width, height, center_x, center_y - cross, center_x, center_y + cross, safe, 2)
+            _draw_line(
+                pixels,
+                width,
+                height,
+                center_x - cross,
+                center_y,
+                center_x + cross,
+                center_y,
+                safe,
+                2,
+            )
+            _draw_line(
+                pixels,
+                width,
+                height,
+                center_x,
+                center_y - cross,
+                center_x,
+                center_y + cross,
+                safe,
+                2,
+            )
 
     _write_rgb_png(path, width, height, pixels)
     capacity = cols * rows
@@ -227,7 +295,9 @@ def write_layout_guide(
     }
 
 
-def validate_sheet_dimensions(sheet_path: Path, *, expected_width: int, expected_height: int) -> None:
+def validate_sheet_dimensions(
+    sheet_path: Path, *, expected_width: int, expected_height: int
+) -> None:
     width, height = _png_dimensions(sheet_path)
     if width != expected_width or height != expected_height:
         _die(f"Sprite sheet is {width}x{height}, expected {expected_width}x{expected_height}")

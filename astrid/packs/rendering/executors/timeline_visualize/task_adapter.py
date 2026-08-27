@@ -74,12 +74,7 @@ class RendererInputs:
 
     def timeline_dir(self, projects_root: Path) -> Path:
         """The read-only managed timeline directory for this input."""
-        return (
-            Path(projects_root).resolve()
-            / self.project_slug
-            / "timelines"
-            / self.timeline_ulid
-        )
+        return Path(projects_root).resolve() / self.project_slug / "timelines" / self.timeline_ulid
 
 
 def _require_non_empty_string(value: object, field: str) -> str:
@@ -98,25 +93,14 @@ def _decode_inputs(spec: Mapping[str, Any]) -> RendererInputs:
         )
     project_slug = _require_non_empty_string(spec.get("project_slug"), "project_slug")
     timeline_ulid = _require_non_empty_string(spec.get("timeline_ulid"), "timeline_ulid")
-    layout = _require_non_empty_string(
-        spec.get("layout", _DEFAULT_LAYOUT), "layout"
-    )
-    filmstrip = _require_non_empty_string(
-        spec.get("filmstrip", _DEFAULT_FILMSTRIP), "filmstrip"
-    )
+    layout = _require_non_empty_string(spec.get("layout", _DEFAULT_LAYOUT), "layout")
+    filmstrip = _require_non_empty_string(spec.get("filmstrip", _DEFAULT_FILMSTRIP), "filmstrip")
     raw_formats = spec.get("formats", _DEFAULT_FORMATS)
     if not isinstance(raw_formats, Sequence) or isinstance(raw_formats, (str, bytes)):
         raise TimelineVisualizeAdapterError(
             f"task spec field 'formats' must be a list of strings, got {raw_formats!r}"
         )
-    formats = tuple(
-        sorted(
-            {
-                _require_non_empty_string(fmt, "formats[]")
-                for fmt in raw_formats
-            }
-        )
-    )
+    formats = tuple(sorted({_require_non_empty_string(fmt, "formats[]") for fmt in raw_formats}))
     if not formats:
         raise TimelineVisualizeAdapterError("task spec field 'formats' must not be empty")
     return RendererInputs(
@@ -158,9 +142,7 @@ class TimelineVisualizeAdapter:
                 f"projects root is not a directory: {self._projects_root}"
             )
 
-    def execute(
-        self, *, task: Any, staging_dir: Path
-    ) -> Mapping[str, Any]:
+    def execute(self, *, task: Any, staging_dir: Path) -> Mapping[str, Any]:
         """Run the real renderer and return a universal result manifest.
 
         ``task`` is the kernel :class:`TaskReadModel` (duck-typed: only
@@ -178,11 +160,16 @@ class TimelineVisualizeAdapter:
             )
 
         argv: list[str] = [
-            "--out", str(staging_dir),
-            "--project-slug", inputs.project_slug,
-            "--timeline-source", str(timeline_dir),
-            "--layout", inputs.layout,
-            "--filmstrip", inputs.filmstrip,
+            "--out",
+            str(staging_dir),
+            "--project-slug",
+            inputs.project_slug,
+            "--timeline-source",
+            str(timeline_dir),
+            "--layout",
+            inputs.layout,
+            "--filmstrip",
+            inputs.filmstrip,
         ]
         for fmt in inputs.formats:
             argv.extend(["--format", fmt])
@@ -210,14 +197,10 @@ class TimelineVisualizeAdapter:
                 if isinstance(error, Mapping)
                 else f"renderer returned {returncode!r}"
             )
-            raise TimelineVisualizeAdapterError(
-                f"{PACK_ID} renderer failed: {message}"
-            )
+            raise TimelineVisualizeAdapterError(f"{PACK_ID} renderer failed: {message}")
         outputs_info = result.get("outputs")
         if not isinstance(outputs_info, Mapping):
-            raise TimelineVisualizeAdapterError(
-                "renderer returned no outputs mapping"
-            )
+            raise TimelineVisualizeAdapterError("renderer returned no outputs mapping")
         return self._build_manifest(task, inputs, staging_dir, outputs_info)
 
     # -- manifest construction --------------------------------------------
@@ -245,9 +228,7 @@ class TimelineVisualizeAdapter:
             ) from exc
         file_hashes = outputs_info.get("file_hashes")
         if not isinstance(file_hashes, Mapping):
-            raise TimelineVisualizeAdapterError(
-                "renderer returned no file_hashes mapping"
-            )
+            raise TimelineVisualizeAdapterError("renderer returned no file_hashes mapping")
 
         rel_pack_posix = rel_pack.as_posix()
         primary_rel = f"{rel_pack_posix}/manifest.json"

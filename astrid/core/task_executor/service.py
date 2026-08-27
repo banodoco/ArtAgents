@@ -72,7 +72,6 @@ from astrid.core.receipts.canonical import (
 )
 from astrid.core.repositories.tasks import (
     CORE_TASK_COMPLETE_COMMAND_KIND,
-    DEFAULT_LEASE_SECONDS,
     TaskAttemptNotFoundError,
     TaskAttemptReadModel,
     TaskCompleteReadModel,

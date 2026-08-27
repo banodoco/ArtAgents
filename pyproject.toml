@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools==80.9.0", "wheel==0.46.3"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -55,7 +55,7 @@ dev = [
     # humans). This is the architectural guard against the "hung suite" class.
     "pytest-timeout>=2.4",
     "ruff==0.12.0",
-    "build",
+    "build==1.4.0",
     # sisypy backs the migrated tests/agentic/ suite (agentic scenario testing).
     # Private, not on PyPI — installed from its GitHub repo.
     "sisypy @ git+https://github.com/peteromallet/sisypy.git@dfb3fa3",
@@ -111,8 +111,8 @@ astrid = [
     "core/rendering/fixtures/renderer_parity/*",
     "core/rendering/schemas/v1/*.json",
 
-    # The frozen schema-pack composition: core plus timeline, shots, and
-    # references.  The three manifests and their migrations are required for
+    # The frozen schema-pack composition: core plus timeline, shots,
+    # references, and runaway.  The manifests and their migrations are required for
     # a first installed run and for too-new-schema refusal.
     "core/migrations/sql/core/*.sql",
     "packs/timeline/schema-pack.yaml",
@@ -121,6 +121,8 @@ astrid = [
     "packs/shots/migrations/*.sql",
     "packs/references/schema-pack.yaml",
     "packs/references/migrations/*.sql",
+    "packs/runaway/schema-pack.yaml",
+    "packs/runaway/migrations/*.sql",
 
     # Capability manifests and their runtime data.  STAGE.md, skill files,
     # requirements files, golden logs, and other authoring-only material are
@@ -191,6 +193,11 @@ show_error_codes = true
 warn_unused_configs = true
 
 [tool.pytest.ini_options]
+# Passed test sandboxes can contain full wheels, virtualenvs, rendered media,
+# and adversarial package copies. Remove each passed tmp_path at teardown so a
+# complete suite does not retain gigabytes until session end. Failed sandboxes
+# remain available for diagnosis.
+tmp_path_retention_policy = "failed"
 # --- Suite-wide hang guard (architectural root fix) ---
 # A DEFAULT per-test timeout applies to every test in the suite. Any test that
 # hangs (spawns a server/subprocess and waits forever, deadlocks, blocks on a

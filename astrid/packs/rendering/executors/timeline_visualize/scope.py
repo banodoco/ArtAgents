@@ -58,10 +58,7 @@ def _seconds_to_frame(seconds: float, model: TimelineInspectionModel) -> int:
 def _intersects(clip: ClipModel, start_frame: int, end_frame: int) -> bool:
     """Intersect a scope window with the clip's actual mounted Sequence."""
 
-    return (
-        clip.mounted.start_frame < end_frame
-        and clip.mounted.end_frame > start_frame
-    )
+    return clip.mounted.start_frame < end_frame and clip.mounted.end_frame > start_frame
 
 
 def _clips_intersecting(
@@ -69,11 +66,7 @@ def _clips_intersecting(
     start_frame: int,
     end_frame: int,
 ) -> tuple[str, ...]:
-    return tuple(
-        clip.clip_id
-        for clip in model.clips
-        if _intersects(clip, start_frame, end_frame)
-    )
+    return tuple(clip.clip_id for clip in model.clips if _intersects(clip, start_frame, end_frame))
 
 
 def _ordered_ids(
@@ -125,10 +118,7 @@ def _clip_scope(
         clip.clip_id
         for clip in model.clips
         if clip.clip_id in focused_ids
-        or (
-            clip.track_id != target.track_id
-            and _intersects(clip, start_frame, end_frame)
-        )
+        or (clip.track_id != target.track_id and _intersects(clip, start_frame, end_frame))
     )
     return Scope(
         kind="clip",
@@ -155,11 +145,7 @@ def _asset_scope(
         # Legacy fallback only.  Direct ``clip.asset`` / ``clip.source`` always
         # wins.  The desert fixture happens to have asset==clip id for each
         # plant frame, so either representation resolves to the same clip.
-        uses = [
-            clip
-            for clip in model.clips
-            if not clip.asset_keys and clip.clip_id == asset_key
-        ]
+        uses = [clip for clip in model.clips if not clip.asset_keys and clip.clip_id == asset_key]
     if not uses:
         return _empty(
             "asset",
@@ -241,10 +227,7 @@ def _range_scope(
     clipped_start_frame = min(raw_start_frame, composition_end)
     clipped_end_frame = min(raw_end_frame, composition_end)
     warnings: tuple[str, ...] = ()
-    if (
-        raw_start_frame != clipped_start_frame
-        or raw_end_frame != clipped_end_frame
-    ):
+    if raw_start_frame != clipped_start_frame or raw_end_frame != clipped_end_frame:
         warnings = ("range was clipped to the composition bounds",)
     return Scope(
         kind="range",
@@ -280,9 +263,7 @@ def _timestamp_scope(
     start_frame = min(composition_end, max(0, instant_frame - context_frames))
     end_frame = min(composition_end, instant_frame + context_frames)
     context_ids = _clips_intersecting(model, start_frame, end_frame)
-    visual_track_ids = {
-        track.track_id for track in model.tracks if track.kind == "visual"
-    }
+    visual_track_ids = {track.track_id for track in model.tracks if track.kind == "visual"}
     active_ids = tuple(
         clip.clip_id
         for clip in model.clips

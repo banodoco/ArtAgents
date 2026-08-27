@@ -278,19 +278,19 @@ class TestJourneyPhaseA:
             assert rstatus == 200
             assert repeat["task"]["status"] == "cancelled"
 
-            # Operator cancellation is cooperative and does not expose the
-            # executor's private attempt fence.
+            # A running task is owned by its live executor attempt.  An
+            # unfenced operator cancellation must fail closed rather than
+            # racing that executor's completion.
             _status, running = _admit_simple(env, slug, "cancel-r")
             running_id = running["task"]["id"]
-            claim = _claim(env)
+            _claim(env)
             ustatus, unfenced = _post(
                 env,
                 f"/projects/{slug}/tasks/{running_id}/cancel",
                 body={},
             )
-            assert ustatus == 200, unfenced
-            assert unfenced["task"]["status"] == "cancelled"
-            assert unfenced["attempt"]["status"] == "cancelled"
+            assert ustatus == 409, unfenced
+            assert unfenced["error"] == "conflict"
 
             # Executor callers may still cancel with the complete strict
             # fence when they own it.

@@ -1,15 +1,16 @@
 """Astrid pack content and the explicit standard-Astrid schema-pack composition.
 
 (m1 plan step 2.) :func:`register_standard_schema_packs` is the single explicit
-composition function: it registers exactly the three in-tree schema packs
-(timeline, shots, references) through ``register_pack()``. There is no dynamic
-discovery, no install/uninstall path, and no reuse of the capability-pack
+composition function: it registers exactly the four in-tree schema packs
+(timeline, shots, references, runaway) through ``register_pack()``. There is
+no dynamic discovery, no install/uninstall path, and no reuse of the
+capability-pack
 loader or definition machinery (v10 section 2 "Boundary now, loader later";
 decision artifact section 4).
 
 Core vocabulary is registered independently by
 ``astrid.core.events.registry.register_core_vocabulary``; this module registers
-only the three shipped packs. ``astrid.core.gateway.dispatch`` is the single
+only the four shipped packs. ``astrid.core.gateway.dispatch`` is the single
 application-composition boundary allowed to import this standard composition.
 
 (m1 plan step 18.) :func:`compose_standard_bridge` is the standard
@@ -49,21 +50,22 @@ import sqlite3
 import threading
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from astrid.core.backup.operations import recover_restore_staging
-from astrid.core.model_setup.journal import resolve_boot_state as _replay_setup_journal
 from astrid.core.events.registry import register_core_vocabulary
 from astrid.core.events.service import EventAppendService
-from astrid.core.foundation.project_paths import resolve_projects_root
+from astrid.core.foundation.project_paths import derive_database_path, resolve_projects_root
 from astrid.core.ids import generate_lowercase_ulid
-from astrid.core.integrations.reigh.bridge_service import derive_database_path
 from astrid.core.io.media_import import (
     MediaPreparationError,
     StagingGcResult,
     gc_unreferenced_staging,
     validate_txn_id,
 )
+from astrid.core.model_setup.journal import resolve_boot_state as _replay_setup_journal
 from astrid.core.receipts import ReceiptService
+from astrid.core.repositories.evidence import EvidenceRepository
 from astrid.core.repositories.projects import ProjectRepository
 from astrid.core.repositories.tasks import TaskRepository
 from astrid.core.schema_packs.manifest import load_schema_pack_manifest
@@ -78,12 +80,12 @@ from astrid.core.store.writer import (
     WriterShutdownError,
     open_database_writer,
 )
-from astrid.sdk.exceptions import ServiceUnavailableError
 from astrid.packs.timeline.bridge import TimelineBridgeAdapter
 from astrid.packs.timeline.repository import TimelineRepository
+from astrid.sdk.exceptions import ServiceUnavailableError
 from astrid.sdk.projects import ProjectsService
 
-STANDARD_SCHEMA_PACKS: tuple[str, ...] = ("timeline", "shots", "references")
+STANDARD_SCHEMA_PACKS: tuple[str, ...] = ("timeline", "shots", "references", "runaway")
 """Exactly the in-tree schema packs the standard composition registers.
 
 The literal tuple is required by the deterministic pack-factoring surgery
@@ -107,7 +109,7 @@ _PACKS_ROOT = Path(__file__).parent
 
 
 def register_standard_schema_packs(registry: SchemaPackRegistry) -> SchemaPackRegistry:
-    """Register exactly timeline, shots, and references into ``registry``.
+    """Register the four explicit in-tree schema packs into ``registry``.
 
     Each manifest is loaded from its in-tree ``schema-pack.yaml`` and passed to
     the immutable registry's ``register_pack()``. Nothing is discovered and the
@@ -121,7 +123,7 @@ def register_standard_schema_packs(registry: SchemaPackRegistry) -> SchemaPackRe
 
 
 def build_standard_registry() -> FrozenSchemaPackRegistry:
-    """Compose and freeze the standard-Astrid registry (core + three packs)."""
+    """Compose and freeze the standard-Astrid registry (core + four packs)."""
     registry = SchemaPackRegistry()
     register_core_vocabulary(registry)
     register_standard_schema_packs(registry)
@@ -242,6 +244,10 @@ class LeaseExpirySweeper:
             daemon=True,
         )
         self._thread.start()
+        # Some callers own the shared writer directly (notably lightweight
+        # test/application fixtures). Tie the sweeper to that lifecycle too,
+        # so writer.close() cannot leave a daemon probing a removed database.
+        writer.add_close_callback(self.stop)
 
     def stop(self) -> None:
         """Signal stop and join the sweep thread (idempotent)."""
@@ -292,7 +298,10 @@ class StandardBridgeComposition:
     writer: DatabaseWriter
     projects: ProjectRepository
     timelines: TimelineRepository
+    runaway: Any | None
+    runaway_evidence: EvidenceRepository | None
     bridge: TimelineBridgeAdapter
+    task_bridge: Any
     owner_lock: DatabaseOwnerLock | None
     """The exclusive-owner lock held for the composition's lifetime."""
     expiry_sweeper: LeaseExpirySweeper
@@ -388,6 +397,15 @@ def compose_standard_bridge(
         timelines = TimelineRepository(
             events=events, receipts=receipts, projects=projects
         )
+        runaway: Any | None = None
+        runaway_evidence: EvidenceRepository | None = None
+        if "runaway" in registry.packs:
+            # Keep the pack import lazy so reduced-pack factoring checks remain
+            # importable while the normal standard registry includes Runaway.
+            from astrid.packs.runaway.repository import RunawayRepository
+
+            runaway = RunawayRepository(receipts=receipts, events=events)
+            runaway_evidence = EvidenceRepository(events=events, receipts=receipts)
         # The bridge adapter is composed over the **typed SDK services**
         # (m4 plan step 20, task T21) — the same project/timeline services the
         # standard application wires for SDK/CLI consumers, over the one shared
@@ -406,6 +424,22 @@ def compose_standard_bridge(
             writer=writer,
             projects=projects_service,
             timelines=timelines_service,
+            runaway=runaway,
+            runaway_evidence=runaway_evidence,
+        )
+        # Task, gallery, and managed-media routes share this exact writer and
+        # registry lifetime. The bridge itself remains the sole composition
+        # boundary that constructs these adapters.
+        from astrid.core.integrations.reigh.task_bridge import ReighTaskBridge
+        from astrid.packs.shots.generation_repository import GenerationRepository
+
+        generation_repository = GenerationRepository()
+        task_bridge = ReighTaskBridge(
+            writer=writer,
+            registry=registry,
+            projects_root=root,
+            generation_repo_factory=lambda: generation_repository,
+            timeline_repo_factory=lambda: timelines,
         )
         # Lease-expiry sweeper (BC3 ops-lens gap 1): a crashed executor must
         # not wedge its attempt live forever. It uses the same writer queue as
@@ -420,7 +454,10 @@ def compose_standard_bridge(
             writer=writer,
             projects=projects,
             timelines=timelines,
+            runaway=runaway,
+            runaway_evidence=runaway_evidence,
             bridge=bridge,
+            task_bridge=task_bridge,
             owner_lock=owner_lock,
             expiry_sweeper=expiry_sweeper,
         )

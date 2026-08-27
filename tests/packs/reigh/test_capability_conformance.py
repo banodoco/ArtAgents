@@ -63,6 +63,11 @@ def test_every_registered_capability_has_exactly_one_fixture() -> None:
 def _resolve_entry(spec: CapabilityConformance) -> Any:
     if spec.child_only:
         return resolve_child_capability(spec.family)
+    # The historical visualization executor is a direct SDK capability.  It
+    # shares the render-export input family, whose browser derivation now
+    # intentionally resolves to the canonical rendering.render handler.
+    if spec.capability_id == "rendering.timeline_visualize":
+        return REGISTRY[spec.capability_id]
     return resolve_family_capability(spec.family, spec.accepted_input)
 
 
@@ -184,8 +189,7 @@ def _stage_smoke_declaration(
         f"id: smoke_red\n"
         f"workflow_path: {wf_path}\n"
         f"digest: {digest}\n"
-        f"ports:\n"
-        f"  size: str\n",
+        "",
         encoding="utf-8",
     )
     monkeypatch.setenv(DECLARATIONS_ENV, str(declarations))

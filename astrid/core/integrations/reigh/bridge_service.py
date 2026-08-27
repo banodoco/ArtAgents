@@ -33,6 +33,11 @@ from astrid.core.foundation.project_paths import (
     ASTROID_DIR_NAME,
     derive_database_path,
 )
+from astrid.core.integrations.reigh.timeline_bundle import (
+    BUNDLE_MISSING,
+    TimelineBundleValidationError,
+    validate_timeline_bundle,
+)
 
 # ---------------------------------------------------------------------------
 # Wire constants (frozen contract §2, §9)
@@ -57,6 +62,8 @@ RECEIPT_SECRECY_FIELDS: frozenset[str] = frozenset(
 )
 """Receipt/event internals that must never appear in any bridge response."""
 
+# ---------------------------------------------------------------------------
+# Path derivation is provided by ``project_paths`` above.
 # ---------------------------------------------------------------------------
 # Frozen DTOs
 # ---------------------------------------------------------------------------
@@ -116,9 +123,10 @@ class TimelineLoad:
     config: Mapping[str, Any]
     registry: Mapping[str, Any]
     config_version: int
+    bundle: Mapping[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "timeline_id": self.timeline_id,
             "timeline_ulid": self.timeline_ulid,
             "slug": self.slug,
@@ -127,6 +135,43 @@ class TimelineLoad:
             "config": dict(self.config),
             "registry": dict(self.registry),
             "config_version": self.config_version,
+        }
+        if self.bundle is not None:
+            payload["bundle"] = dict(self.bundle)
+        return payload
+
+
+@dataclass(frozen=True, slots=True)
+class RunawayTransitionPage:
+    """Versioned, snapshot-consistent page of typed Runaway rows."""
+
+    project: str
+    transitions: tuple[Mapping[str, Any], ...]
+    timing_summary: Mapping[str, Any] | None
+    snapshot: str
+    total_count: int
+    limit: int
+    next_cursor: str | None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "api_version": "v1",
+            "project": self.project,
+            # ``count`` remains the page count for compatibility with the
+            # original viewer; total_count makes pagination explicit.
+            "count": len(self.transitions),
+            "total_count": self.total_count,
+            "timing_summary": (
+                dict(self.timing_summary)
+                if self.timing_summary is not None
+                else None
+            ),
+            "snapshot": self.snapshot,
+            "page": {
+                "limit": self.limit,
+                "next_cursor": self.next_cursor,
+            },
+            "transitions": [dict(row) for row in self.transitions],
         }
 
 
@@ -145,6 +190,7 @@ class TimelineSaveRequest:
     config: Mapping[str, Any]
     registry: Mapping[str, Any]
     expected_version: int
+    bundle: Mapping[str, Any] | None | object = BUNDLE_MISSING
 
     @classmethod
     def parse(cls, body: Any) -> TimelineSaveRequest:
@@ -155,6 +201,7 @@ class TimelineSaveRequest:
         config = body.get("config", _MISSING)
         registry = body.get("registry", _MISSING)
         expected_version = body.get("expected_version", _MISSING)
+        bundle = body.get("bundle", BUNDLE_MISSING)
         if config is _MISSING or not isinstance(config, Mapping):
             raise BridgeConfigError("config must be a JSON object")
         if registry is _MISSING or not isinstance(registry, Mapping):
@@ -166,10 +213,19 @@ class TimelineSaveRequest:
                 "expected_version must be an integer (a boolean is not a "
                 "version)"
             )
+        if bundle is not BUNDLE_MISSING and bundle is not None:
+            try:
+                bundle = validate_timeline_bundle(bundle)
+            except TimelineBundleValidationError as exc:
+                raise BridgeSchemaIncompatibleError(
+                    "bundle failed schema validation",
+                    issues=[BridgeIssue(pointer=exc.pointer, message=exc.message)],
+                ) from exc
         return cls(
             config=config,
             registry=registry,
             expected_version=expected_version,
+            bundle=bundle,
         )
 
 
@@ -228,6 +284,55 @@ class BridgeExpectedVersionError(BridgeError):
 
     status_code = 400
     code = "invalid_expected_version"
+
+
+class BridgeCursorError(BridgeError):
+    """``400 invalid_cursor`` — malformed, stale, or cross-scope cursor."""
+
+    status_code = 400
+    code = "invalid_cursor"
+
+
+class BridgeLimitError(BridgeError):
+    """``400 invalid_limit`` — page size is absent from the supported range."""
+
+    status_code = 400
+    code = "invalid_limit"
+
+
+class BridgeAuthenticationError(BridgeError):
+    """``401 unauthorized`` — configured bearer token is missing/invalid."""
+
+    status_code = 401
+    code = "unauthorized"
+
+
+class BridgeProtocolVersionError(BridgeError):
+    """``426 protocol_version_mismatch`` — release client is incompatible."""
+
+    status_code = 426
+    code = "protocol_version_mismatch"
+
+
+class BridgeRateLimitError(BridgeError):
+    """``429 rate_limited`` — bounded local bridge admission is exhausted."""
+
+    status_code = 429
+    code = "rate_limited"
+
+
+class BridgeForbiddenError(BridgeError):
+    """``403 forbidden`` — Host or Origin violates the local bridge policy."""
+
+    status_code = 403
+    code = "forbidden"
+
+
+class BridgePayloadTooLargeError(BridgeError):
+    """``413 payload_too_large`` — request body exceeds the hard cap."""
+
+    status_code = 413
+    code = "payload_too_large"
 
 
 class BridgeInvalidProjectError(BridgeError):
@@ -1753,20 +1858,27 @@ __all__ = [
     "ASTROID_DATABASE_NAME",
     "ASTROID_DIR_NAME",
     "BRIDGE_ERROR_ENVELOPE_KEYS",
+    "BridgeAuthenticationError",
     "BridgeBodyError",
     "BridgeGenerationNotFoundError",
     "BridgeCapabilityUnavailableError",
     "BridgeChildAdmissionForbiddenError",
     "BridgeConfigError",
     "BridgeConflictError",
+    "BridgeCursorError",
     "BridgeError",
     "BridgeExpectedVersionError",
+    "BridgeForbiddenError",
     "BridgeInternalError",
     "BridgeInvalidProjectError",
     "BridgeInvalidTimelineError",
     "BridgeIssue",
     "BridgeNotFoundError",
+    "BridgeLimitError",
+    "BridgePayloadTooLargeError",
+    "BridgeProtocolVersionError",
     "BridgeProjectNotFoundError",
+    "BridgeRateLimitError",
     "BridgeRegistryError",
     "BridgeSchemaIncompatibleError",
     "BridgeTaskMismatchError",
@@ -1776,6 +1888,7 @@ __all__ = [
     "ProjectRow",
     "RECEIPT_SECRECY_FIELDS",
     "ReighTaskBridge",
+    "RunawayTransitionPage",
     "TimelineLoad",
     "TimelineRow",
     "TimelineSaveRequest",

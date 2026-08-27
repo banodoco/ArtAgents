@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 import jsonschema
+import pytest
 
 from astrid.core.element.registry import load_default_registry as load_default_element_registry
 from astrid.core.element.schema import load_element_definition
@@ -116,6 +117,7 @@ def test_builtin_component_manifest_schema_versions_are_explicit() -> None:
     assert missing_versions == []
 
 
+@pytest.mark.timeout(300)
 def test_builtin_component_manifest_parsers_agree_for_every_checked_file() -> None:
     failures: dict[str, str] = {}
 

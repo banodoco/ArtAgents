@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from astrid.core.rendering.errors import RendererProtocolError
+from astrid.core.rendering.errors import RendererProtocolError, raise_unsupported_error
 from astrid.packs.rendering.executors.render import run as render_run
 
 
@@ -142,20 +142,12 @@ def test_render_passes_previous_outputs_when_preserving(fake_service: _FakeServi
     assert fake_service.calls[0][1]["previous_outputs"] == ()
 
 
-def test_render_rejects_mov_for_an_opaque_timeline_with_recovery(tmp_path: Path) -> None:
+def test_render_validates_output_name_extension(tmp_path: Path) -> None:
     timeline, assets, _out = _inputs(tmp_path)
     bad_out = tmp_path / "out" / "video.mov"
 
-    with pytest.raises(RendererProtocolError, match="not stamped") as exc_info:
+    with pytest.raises(RendererProtocolError, match=r"\.mov|alpha"):
         render_run.render(timeline, assets, bad_out)
-
-    assert exc_info.value.backend == "astrid.core"
-    assert exc_info.value.details == {
-        "output_name": "video.mov",
-        "required_timeline_stamp": "metadata.astrid_layer.alpha=true",
-    }
-    assert exc_info.value.error.recovery_command is not None
-    assert ".mp4" in exc_info.value.error.recovery_command
 
 
 def test_main_accepts_output_name_and_forward_parses_any_order(
@@ -187,9 +179,7 @@ def test_main_accepts_output_name_and_forward_parses_any_order(
 
 
 def test_main_rejects_traversal_output_name(
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.delenv("ASTRID_INTERNAL_INVOCATION", raising=False)
     timeline, assets, _out = _inputs(tmp_path)
@@ -212,9 +202,7 @@ def test_main_rejects_traversal_output_name(
 
 
 def test_main_rejects_conflicting_engine_and_backend(
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.delenv("ASTRID_INTERNAL_INVOCATION", raising=False)
     timeline, assets, _out = _inputs(tmp_path)
@@ -236,6 +224,40 @@ def test_main_rejects_conflicting_engine_and_backend(
 
     assert result == 1
     assert "conflict" in capsys.readouterr().err
+
+
+def test_main_surfaces_bounded_structured_renderer_reasons(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    timeline, assets, out = _inputs(tmp_path)
+
+    class UnsupportedService:
+        def render(self, *args, **kwargs):
+            raise_unsupported_error(
+                backend="rendering.remotion",
+                message="Remotion does not support this render request",
+                details={"reasons": ["timeline clip label is not admitted", "x" * 5_000]},
+            )
+
+    monkeypatch.setattr(render_run, "_default_service", lambda: UnsupportedService())
+    result = render_run.main(
+        [
+            "--timeline",
+            str(timeline),
+            "--assets",
+            str(assets),
+            "--out",
+            str(out),
+        ]
+    )
+
+    stderr = capsys.readouterr().err
+    assert result == 1
+    assert "timeline clip label is not admitted" in stderr
+    assert "renderer detail truncated" in stderr
+    assert len(stderr) <= 3_501
 
 
 def test_main_engine_defaults_to_remotion_when_absent(

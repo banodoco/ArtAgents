@@ -104,9 +104,7 @@ def _validate_render_element_clip_types(
         metadata = element_catalog.read_effect_meta(effect_id, theme=active_theme)
         raw_aliases = metadata.get("clipTypeAliases")
         if isinstance(raw_aliases, list):
-            aliases.update(
-                alias for alias in raw_aliases if isinstance(alias, str) and alias
-            )
+            aliases.update(alias for alias in raw_aliases if isinstance(alias, str) and alias)
     builtins = {"media", "video", "image", "audio", "effect-layer"}
     known = builtins | effect_ids | aliases
     for index, clip in enumerate(config.get("clips", [])):
@@ -274,9 +272,7 @@ def resolve_managed_render_snapshot(
             (str(project["id"]), timeline_ref, timeline_ref, timeline_ref),
         ).fetchall()
         if not row:
-            raise ValueError(
-                f"timeline {timeline_ref!r} was not found in project {project_ref!r}"
-            )
+            raise ValueError(f"timeline {timeline_ref!r} was not found in project {project_ref!r}")
         if len(row) != 1:
             raise ValueError(f"timeline ref {timeline_ref!r} is ambiguous")
         timeline = row[0]

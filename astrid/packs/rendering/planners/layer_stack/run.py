@@ -85,9 +85,7 @@ _PLANNER_IDS = frozenset(
     }
 )
 _DEFAULT_CANDIDATE_IDS = (FFMPEG_ID, REMOTION_ID, THREE_ID)
-_PLANNER_CONFIG_KEYS = frozenset(
-    {"theme", "theme_path", "themes_root", "extra_pack_roots"}
-)
+_PLANNER_CONFIG_KEYS = frozenset({"theme", "theme_path", "themes_root", "extra_pack_roots"})
 
 SupportResolver = Callable[[str, RenderRequest, Mapping[str, Any]], SupportReport]
 
@@ -140,9 +138,7 @@ def _visual_tracks_bottom_to_top(
     return [(index, track) for index, track in enumerate(stacked)]
 
 
-def _project_tracks(
-    timeline: Mapping[str, Any], track_ids: Sequence[str]
-) -> dict[str, Any]:
+def _project_tracks(timeline: Mapping[str, Any], track_ids: Sequence[str]) -> dict[str, Any]:
     """Project the timeline onto the named tracks (and only their clips)."""
 
     raw_clips = timeline.get("clips", [])
@@ -158,9 +154,7 @@ def _track_has_clips(timeline: Mapping[str, Any], track_id: str) -> bool:
     clips = timeline.get("clips", [])
     if not isinstance(clips, list):
         return False
-    return any(
-        isinstance(clip, Mapping) and clip.get("track") == track_id for clip in clips
-    )
+    return any(isinstance(clip, Mapping) and clip.get("track") == track_id for clip in clips)
 
 
 def _track_id(track: Mapping[str, Any]) -> str:
@@ -175,9 +169,7 @@ def _track_blend(track: Mapping[str, Any]) -> str:
     if value is None:
         return "normal"
     if not isinstance(value, str):
-        raise ValueError(
-            f"visual track {track.get('id')!r} blendMode must be a string"
-        )
+        raise ValueError(f"visual track {track.get('id')!r} blendMode must be a string")
     return value
 
 
@@ -192,9 +184,7 @@ def _track_opacity(track: Mapping[str, Any]) -> float:
             f"visual track {track.get('id')!r} opacity is not a finite number"
         ) from exc
     if opacity <= 0 or opacity > 1:
-        raise ValueError(
-            f"visual track {track.get('id')!r} opacity {opacity} is outside (0, 1]"
-        )
+        raise ValueError(f"visual track {track.get('id')!r} opacity {opacity} is outside (0, 1]")
     return opacity
 
 
@@ -208,9 +198,7 @@ def _candidate_ids(registry: RendererRegistry | None) -> tuple[str, ...]:
     )
 
 
-def _resolved_renderer_id(
-    renderer_id: str, registry: RendererRegistry | None
-) -> str:
+def _resolved_renderer_id(renderer_id: str, registry: RendererRegistry | None) -> str:
     if registry is None:
         return renderer_id
     try:
@@ -350,21 +338,12 @@ def _assign_layers(
         if renderer_id is None or report is None:
             raise_unsupported_error(
                 backend=BACKEND_ID,
-                message=(
-                    f"visual track {track_id!r} is not supported by any "
-                    "eligible renderer"
-                ),
-                recovery_command=(
-                    "install or configure a renderer that supports this track"
-                ),
+                message=(f"visual track {track_id!r} is not supported by any eligible renderer"),
+                recovery_command=("install or configure a renderer that supports this track"),
                 details={"track": track_id, "attempts": attempts},
             )
         merged = False
-        if (
-            claims
-            and claims[-1].renderer_id == renderer_id
-            and claims[-1].opacity == opacity
-        ):
+        if claims and claims[-1].renderer_id == renderer_id and claims[-1].opacity == opacity:
             merged_tracks = (*claims[-1].tracks, track_id)
             merged_timeline = _project_tracks(timeline, merged_tracks)
             merged_report, _note = _probe_support(
@@ -415,14 +394,11 @@ def support(request: RenderRequest, *, workspace: Path) -> SupportReport:
         total_frames = _ceil(_timeline_duration(timeline) * fps)
         if total_frames == 0:
             reasons.append(
-                "empty timeline: the layer-stack planner cannot construct a "
-                "meaningful stack"
+                "empty timeline: the layer-stack planner cannot construct a meaningful stack"
             )
         if request.window is not None:
             if request.window.fps_rational != profile.fps_rational:
-                reasons.append(
-                    "request window FPS does not match the canonical render profile"
-                )
+                reasons.append("request window FPS does not match the canonical render profile")
             elif request.window.end_frame > total_frames:
                 reasons.append("request window extends beyond the timeline")
     except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
@@ -539,9 +515,7 @@ def plan(
     finalizer_registry: FinalizerRegistry | None
     if registries is None and support_resolver is None:
         raw_extra_roots = config.get("extra_pack_roots", ())
-        if isinstance(raw_extra_roots, (str, bytes)) or not isinstance(
-            raw_extra_roots, Sequence
-        ):
+        if isinstance(raw_extra_roots, (str, bytes)) or not isinstance(raw_extra_roots, Sequence):
             raise TypeError("extra_pack_roots must be an array of paths")
         extra_roots = tuple(str(item) for item in raw_extra_roots)
         renderer_registry, _planners, finalizer_registry = load_default_registries(
@@ -555,9 +529,7 @@ def plan(
         renderer_registry, finalizer_registry = registries
     if support_resolver is None:
         if renderer_registry is None:
-            raise RuntimeError(
-                "renderer registry is required for command support resolution"
-            )
+            raise RuntimeError("renderer registry is required for command support resolution")
         support_resolver = _CommandSupportResolver(
             renderer_registry,
             workspace=workspace,

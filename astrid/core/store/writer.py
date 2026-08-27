@@ -331,6 +331,7 @@ class DatabaseWriter:
         self._queue: queue.Queue[Any] = queue.Queue()
         self._closed = False
         self._submit_lock = threading.Lock()
+        self._close_callbacks: list[Callable[[], None]] = []
         self._idle = threading.Condition()
         self._pending = 0
         self._started = threading.Event()
@@ -417,8 +418,37 @@ class DatabaseWriter:
             if self._closed:
                 return
             self._closed = True
+            callbacks = tuple(self._close_callbacks)
+            self._close_callbacks.clear()
             self._queue.put(_SENTINEL)
+        # Notify dependent background services before joining the writer.
+        # Their callbacks may be waiting on a final writer submission; the
+        # sentinel remains behind already queued work, so both sides drain
+        # without a teardown race or lock inversion.
+        for callback in callbacks:
+            try:
+                callback()
+            except BaseException as exc:  # noqa: BLE001 - close must finish
+                print(
+                    f"astrid-sqlite-writer: close callback failed: {exc}",
+                    file=sys.stderr,
+                )
         self._thread.join()
+
+    def add_close_callback(self, callback: Callable[[], None]) -> None:
+        """Run *callback* when this writer begins deterministic shutdown.
+
+        Background services sharing the writer use this hook to stop before
+        the writer closes its connection. Registration is race-safe: a
+        callback added after shutdown has begun runs immediately.
+        """
+        if not callable(callback):
+            raise TypeError("close callback must be callable")
+        with self._submit_lock:
+            if not self._closed:
+                self._close_callbacks.append(callback)
+                return
+        callback()
 
     @property
     def closed(self) -> bool:

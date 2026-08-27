@@ -281,6 +281,7 @@ last step before optional YouTube upload or Reigh publish.
 
 ## Dependencies
 
-- **Remotion** (`npx remotion render`) — must be installed in `remotion/` project dir
+- **Remotion** — requires server-owned `ASTRID_REMOTION_PROJECT_DIR` and
+  `ASTRID_NODE_EXECUTABLE`; the locked project-local CLI is invoked directly
 - **Node.js / npm** — `npm install` must have been run in the Remotion project
 - **ffmpeg/ffprobe** — required by Remotion's render pipeline

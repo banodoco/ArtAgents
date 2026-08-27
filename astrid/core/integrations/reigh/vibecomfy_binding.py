@@ -612,11 +612,20 @@ class VibeComfyTaskHandler:
         elif capability_id.startswith("local."):
             declaration = resolve_local_declaration(capability_id)
             if declaration is None:
-                raise VibeComfyRefused(
-                    f"{capability_id}: no local workflow declaration found"
-                )
-            authority_digest = declaration.digest
-            authority_path = Path(declaration.workflow_path)
+                # A task admitted from a project-root declaration carries an
+                # absolute path+digest snapshot. Keep replay executable even
+                # if the declaration index is unavailable; bytes/digest
+                # verification below remains authoritative.
+                snapshot = spec.get("workflow")
+                if not isinstance(snapshot, Mapping):
+                    raise VibeComfyRefused(
+                        f"{capability_id}: no local workflow declaration found"
+                    )
+                authority_digest = str(snapshot.get("sha256", ""))
+                authority_path = Path(str(snapshot.get("path", "")))
+            else:
+                authority_digest = declaration.digest
+                authority_path = Path(declaration.workflow_path)
         else:
             raise VibeComfyRefused(
                 f"{capability_id}: capability has no vendored workflow"

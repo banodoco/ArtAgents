@@ -18,6 +18,7 @@ _CHECKOUT_ROOT = Path(__file__).resolve().parents[3]
 if str(_CHECKOUT_ROOT) not in sys.path:
     sys.path.insert(0, str(_CHECKOUT_ROOT))
 
+
 def _request_path(argv: Sequence[str]) -> Path | None:
     try:
         index = argv.index("--request")
@@ -55,9 +56,7 @@ def _selects_finalizer(argv: Sequence[str]) -> bool:
     if not isinstance(payload, Mapping):
         return False
     backend_config = payload.get("backend_config")
-    return isinstance(backend_config, Mapping) and (
-        "rendering.ffmpeg-finalizer" in backend_config
-    )
+    return isinstance(backend_config, Mapping) and ("rendering.ffmpeg-finalizer" in backend_config)
 
 
 def _transport_selected_backend() -> str | None:

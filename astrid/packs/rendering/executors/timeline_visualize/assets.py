@@ -56,12 +56,9 @@ _BADGES: Mapping[str, str] = {
 _SAMPLING_BLOCKED: Mapping[str, str] = {
     "missing": "missing — asset file is not present; sampling requires a verified original",
     "hash_mismatch": (
-        "hash_mismatch — observed bytes differ from the expected sha256; "
-        "sampling blocked"
+        "hash_mismatch — observed bytes differ from the expected sha256; sampling blocked"
     ),
-    "hash_unrecorded": (
-        "hash_unrecorded — no expected sha256 is recorded; sampling blocked"
-    ),
+    "hash_unrecorded": ("hash_unrecorded — no expected sha256 is recorded; sampling blocked"),
     "remote": "remote — media is never fetched; sampling blocked",
     "unsupported": "unsupported — path escapes project sources; sampling blocked",
     "thumbnail_only": "thumbnail_only — no original to sample",
@@ -103,7 +100,7 @@ def _image_dimensions(integrity: AssetIntegrity) -> dict[str, int] | None:
 
         with Image.open(path) as image:
             width, height = image.size
-    except Exception:
+    except Exception:  # noqa: BLE001 - corrupt optional image metadata is non-fatal
         return None
     return {"width_px": int(width), "height_px": int(height)}
 

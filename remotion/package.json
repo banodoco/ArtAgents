@@ -2,6 +2,10 @@
   "name": "tools-remotion",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": "=20.19.4",
+    "npm": "=10.8.2"
+  },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "bundle": "remotion bundle src/index.ts",

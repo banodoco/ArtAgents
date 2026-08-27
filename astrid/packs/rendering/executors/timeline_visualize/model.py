@@ -368,9 +368,7 @@ def _rootless_integrity(
             reason=reason,
             source_id=entry.get("sourceId") if isinstance(entry.get("sourceId"), str) else None,
             source_version=(
-                entry.get("sourceVersion")
-                if isinstance(entry.get("sourceVersion"), str)
-                else None
+                entry.get("sourceVersion") if isinstance(entry.get("sourceVersion"), str) else None
             ),
         )
     return results
@@ -449,8 +447,7 @@ def _shot_models(
         members = [by_id[clip_id] for clip_id in member_ids if clip_id in by_id]
         dangling = [clip_id for clip_id in member_ids if clip_id not in by_id]
         warnings = tuple(
-            f"pinned shot {shot_id!r} references missing clip {clip_id!r}"
-            for clip_id in dangling
+            f"pinned shot {shot_id!r} references missing clip {clip_id!r}" for clip_id in dangling
         )
 
         raw_start = raw_group.get("start")
@@ -526,9 +523,7 @@ def build_model(
         if not isinstance(track_id, str) or not track_id:
             raise ValueError(f"tracks[{config_order}].id must be a non-empty string")
         kind = _track_kind(raw_track.get("kind"))
-        paint_index = (
-            visual_paint_indices[track_id] if kind == "visual" else config_order
-        )
+        paint_index = visual_paint_indices[track_id] if kind == "visual" else config_order
         raw_label = raw_track.get("label")
         label = raw_label if isinstance(raw_label, str) else None
         tracks.append(TrackModel(track_id, kind, config_order, paint_index, label))
@@ -589,19 +584,11 @@ def build_model(
 
     composition_frames = timeline_duration_frames(assembly, fps)
     visual_frames = max(
-        (
-            clip.frames.end_frame
-            for clip in clips
-            if track_kinds.get(clip.track_id) == "visual"
-        ),
+        (clip.frames.end_frame for clip in clips if track_kinds.get(clip.track_id) == "visual"),
         default=0,
     )
     audible_frames = max(
-        (
-            clip.frames.end_frame
-            for clip in clips
-            if track_kinds.get(clip.track_id) == "audio"
-        ),
+        (clip.frames.end_frame for clip in clips if track_kinds.get(clip.track_id) == "audio"),
         default=0,
     )
     extents = ModelExtents(

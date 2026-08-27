@@ -38,6 +38,4 @@ required_permissions:
   - project_files
   - subprocess
 required_binaries:
-  - node
-  - npx
   - ffprobe

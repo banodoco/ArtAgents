@@ -7,7 +7,6 @@ import base64
 import json
 import subprocess
 import sys
-import time
 import uuid
 from pathlib import Path
 from typing import Any
@@ -17,11 +16,8 @@ from urllib.request import Request, urlopen
 from astrid.core.contracts.errors import AstridError
 from astrid.core.util.credentials_scope import CredentialsScope
 from astrid.packs.generation.executors.generate_image_openai.run import (
-    API_URL,
     DEFAULT_MODEL,
-    _call_image_api,
     _die,
-    _validate_payload,
 )
 
 from .png_io import (
@@ -94,7 +90,9 @@ def _ai_upscale_prompt(args: argparse.Namespace) -> str:
     )
 
 
-def _merge_upscaled_rgb_with_source_alpha(source_frame: Path, upscaled_rgb: Path, output_path: Path, *, factor: float, force: bool) -> None:
+def _merge_upscaled_rgb_with_source_alpha(
+    source_frame: Path, upscaled_rgb: Path, output_path: Path, *, factor: float, force: bool
+) -> None:
     width, height, _ = _read_rgba_png(source_frame)
     target_width = max(1, int(round(width * factor)))
     target_height = max(1, int(round(height * factor)))
@@ -128,7 +126,9 @@ def _merge_upscaled_rgb_with_source_alpha(source_frame: Path, upscaled_rgb: Path
     scrub_fully_transparent_rgb(output_path)
 
 
-def _scale_upscaled_image(source_frame: Path, upscaled_image: Path, output_path: Path, *, factor: float, force: bool) -> None:
+def _scale_upscaled_image(
+    source_frame: Path, upscaled_image: Path, output_path: Path, *, factor: float, force: bool
+) -> None:
     width, height = _png_dimensions(source_frame)
     target_width = max(1, int(round(width * factor)))
     target_height = max(1, int(round(height * factor)))
@@ -163,7 +163,9 @@ def ai_upscale_frames_with_fal(
     try:
         import fal_client
     except ImportError:
-        _die("fal-client is required for --ai-upscale-provider fal. Install requirements or run: pip install fal-client")
+        _die(
+            "fal-client is required for --ai-upscale-provider fal. Install requirements or run: pip install fal-client"
+        )
 
     fal_key = load_fal_key(args.fal_env_file or args.env_file)
     client = fal_client.SyncClient(key=fal_key, default_timeout=float(args.fal_timeout))
@@ -177,7 +179,10 @@ def ai_upscale_frames_with_fal(
         source_frame = Path(frame)
         raw_output = raw_dir / f"frame_{index:03d}.png"
         final_output = out_dir / f"frame_{index:03d}.png"
-        print(f"FAL upscaling frame {index}/{len(frames)} with {args.ai_upscale_model}", file=sys.stderr)
+        print(
+            f"FAL upscaling frame {index}/{len(frames)} with {args.ai_upscale_model}",
+            file=sys.stderr,
+        )
         image_url = client.upload_file(source_frame)
         payload = {
             "image_url": image_url,
@@ -207,7 +212,9 @@ def ai_upscale_frames_with_fal(
                 force=force,
             )
         else:
-            _scale_upscaled_image(source_frame, raw_output, final_output, factor=args.ai_upscale_factor, force=force)
+            _scale_upscaled_image(
+                source_frame, raw_output, final_output, factor=args.ai_upscale_factor, force=force
+            )
         outputs.append(str(final_output))
         reports.append(
             {
@@ -223,14 +230,20 @@ def ai_upscale_frames_with_fal(
     return outputs, reports
 
 
-def _sprite_prompt(args: argparse.Namespace, layout: dict[str, Any], *, has_reference_image: bool = False) -> str:
+def _sprite_prompt(
+    args: argparse.Namespace, layout: dict[str, Any], *, has_reference_image: bool = False
+) -> str:
     frame_count = int(layout["frame_count"])
     capacity = int(layout["capacity"])
     extra = ""
     if capacity > frame_count:
         extra = f" Use only the first {frame_count} cells for animation frames; leave the final {capacity - frame_count} unused cell(s) blank white."
     safe_margin = int(layout.get("safe_margin") or 0)
-    style = args.style.strip() if args.style else "clean high-quality 2D game animation, crisp silhouette, consistent character design"
+    style = (
+        args.style.strip()
+        if args.style
+        else "clean high-quality 2D game animation, crisp silhouette, consistent character design"
+    )
     if args.transparent:
         background = (
             f"perfectly flat solid {_key_color_name(args.key_color)} chroma-key background. "
@@ -277,9 +290,7 @@ def _sprite_prompt(args: argparse.Namespace, layout: dict[str, Any], *, has_refe
 
 def _multipart_field(name: str, value: str, boundary: str) -> bytes:
     return (
-        f"--{boundary}\r\n"
-        f'Content-Disposition: form-data; name="{name}"\r\n\r\n'
-        f"{value}\r\n"
+        f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n'
     ).encode("utf-8")
 
 
@@ -302,7 +313,9 @@ def _multipart_file(name: str, path: Path, boundary: str, content_type: str | No
     return header + path.read_bytes() + b"\r\n"
 
 
-def _call_image_edit_api(payload: dict[str, Any], image_paths: Path | list[Path], api_key: str, timeout: int) -> dict[str, Any]:
+def _call_image_edit_api(
+    payload: dict[str, Any], image_paths: Path | list[Path], api_key: str, timeout: int
+) -> dict[str, Any]:
     paths = [image_paths] if isinstance(image_paths, Path) else list(image_paths)
     if not paths:
         _die("At least one image is required for the image edit API")
@@ -335,7 +348,9 @@ def _call_image_edit_api(payload: dict[str, Any], image_paths: Path | list[Path]
     return {}
 
 
-def _request_payload_for_image_model(args: argparse.Namespace, prompt: str, size: str) -> dict[str, Any]:
+def _request_payload_for_image_model(
+    args: argparse.Namespace, prompt: str, size: str
+) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "model": args.model,
         "prompt": prompt,
@@ -360,7 +375,9 @@ def _write_first_image(response: dict[str, Any], out_path: Path, force: bool) ->
     print(f"Wrote {out_path}")
 
 
-def upscale_frames(frames: list[str], out_dir: Path, *, factor: float, filter_name: str, force: bool) -> list[str]:
+def upscale_frames(
+    frames: list[str], out_dir: Path, *, factor: float, filter_name: str, force: bool
+) -> list[str]:
     if factor <= 0:
         _die("--upscale-factor must be > 0")
     out_dir.mkdir(parents=True, exist_ok=True)

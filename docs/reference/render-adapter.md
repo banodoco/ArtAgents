@@ -59,6 +59,25 @@ graph. The default `pip install astrid` (or `pip install
 astrid.whl`) does not require Node.js, npm, Remotion, or any `@banodoco`
 package.
 
+## Release render worker configuration
+
+The Python wheel intentionally does not bundle the Remotion checkout or its
+Node dependencies. A release worker that must render text/effect timelines
+must set `ASTRID_REMOTION_PROJECT_DIR` to an absolute, server-owned Remotion
+project containing the pinned `node_modules` closure and set
+`ASTRID_NODE_EXECUTABLE` to the absolute, server-owned Node executable. The
+worker validates the executable with a bounded `--version` probe, requires the
+locked local CLI at
+`node_modules/@remotion/cli/remotion-cli.js`, and validates all three required
+`@banodoco/*` packages before admitting a Remotion-only timeline. Rendering
+invokes `[ASTRID_NODE_EXECUTABLE, <project>/node_modules/@remotion/cli/remotion-cli.js, "render", ...]`; it never resolves `node`, `npx`, or `remotion` through
+the ambient `PATH`. Set `ASTRID_TIMELINE_SCHEMA_PYTHONPATH` to the separate
+server-owned Python install root containing `banodoco_timeline_schema`; its
+module origin is checked before admission and propagated to renderer children.
+The public task envelope cannot override these paths. Media-only timelines may
+continue through the existing FFmpeg fallback when the optional Remotion
+runtime is absent.
+
 ## Owner Actions Required Before Publishing Can Replace the Adapter Path
 
 Before the adapter path (GitHub tarball → npm registry package) can be
@@ -118,9 +137,25 @@ wheel install) must never require Node.js, npm, Remotion, or any
 `@banodoco` package.** The render path is an optional runtime adapter
 that users opt into by:
 
-1. Installing Node.js and npm
-2. Running `npm install` in `remotion/`
-3. Invoking `rendering.render`
+1. Installing the pinned Node.js **20.19.4** toolchain (which supplies npm
+   **10.8.2**; `.node-version` records the pin)
+2. Running `python3 scripts/reshape/remotion_gate.py install` from the repo
+   root. This runs `npm ci` against `remotion/package-lock.json`, with a
+   2-GiB free-space safety floor, and never uses `npx`.
+3. Invoking `rendering.render` with `ASTRID_NODE_EXECUTABLE` set to that
+   absolute Node path (the gate exports this for its test process)
+
+The reproducible verification command is:
+
+```sh
+python3 scripts/reshape/remotion_gate.py all
+```
+
+It provisions the lockfile closure when absent, generates the renderer type
+surface, runs the Remotion typecheck, and then runs the complete renderer-
+parity selector. `remotion/package.json` and `remotion/.npmrc` reject other
+Node/npm versions; `node_modules/` remains ignored and must never be
+committed.
 
 The selected Remotion backend fails closed — if `node_modules/` is absent or
 any required `@banodoco/*` package directory is missing, it raises

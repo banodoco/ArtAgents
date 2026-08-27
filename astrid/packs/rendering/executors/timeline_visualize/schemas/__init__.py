@@ -12,7 +12,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-
 _SCHEMA_ROOT = Path(__file__).resolve().parent
 
 

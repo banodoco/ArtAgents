@@ -116,7 +116,7 @@ def _clear_task_env() -> None:
 
 @pytest.fixture(autouse=True)
 def _sandboxed_home_and_projects(
-    tmp_path_factory: pytest.TempPathFactory,
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> Iterator[None]:
     """Sandbox ``ASTRID_HOME``, workspace config, and the projects root.
@@ -128,9 +128,15 @@ def _sandboxed_home_and_projects(
     """
 
     _clear_task_env()
-    astrid_home = tmp_path_factory.mktemp("astrid_home_autouse")
-    projects_root = tmp_path_factory.mktemp("astrid_projects_autouse")
-    workspace_config_dir = tmp_path_factory.mktemp("astrid_workspace_config_autouse")
+    # This fixture is function-scoped, so keep all three roots under the
+    # function-scoped tmp_path. Using tmp_path_factory here retained three
+    # roots for every test until session end and exhausted disk in the full
+    # 7,000+ test suite before the installed-artifact lanes could start.
+    astrid_home = tmp_path / "astrid-home"
+    projects_root = tmp_path / "projects"
+    workspace_config_dir = tmp_path / "workspace-config"
+    for root in (astrid_home, projects_root, workspace_config_dir):
+        root.mkdir()
     monkeypatch.setenv("ASTRID_HOME", str(astrid_home))
     monkeypatch.setenv("ASTRID_WORKSPACE_CONFIG_DIR", str(workspace_config_dir))
     # Seed PROJECTS_ROOT to a tmp dir so tests never touch the real

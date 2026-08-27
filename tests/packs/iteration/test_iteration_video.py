@@ -15,7 +15,9 @@ TARGET_RUN_ID = "01ARZ3NDEKTSV4RRFFQ69G5FV1"
 ROOT_RUN_ID = "01ARZ3NDEKTSV4RRFFQ69G5FV2"
 
 
-def test_iteration_video_renders_hype_adapter_and_records_five_output_variant_group(tmp_path: Path, monkeypatch) -> None:
+def test_iteration_video_renders_attached_and_records_six_output_variant_group(
+    tmp_path: Path, monkeypatch
+) -> None:
     repo = tmp_path
     projects_root = repo / "projects"
     out_dir = repo / "runs" / "iteration-video"
@@ -43,7 +45,6 @@ def test_iteration_video_renders_hype_adapter_and_records_five_output_variant_gr
 
     monkeypatch.setenv("ASTRID_REPO_ROOT", str(repo))
     monkeypatch.setenv("ASTRID_PROJECTS_ROOT", str(projects_root))
-    monkeypatch.setattr(iteration_video, "REPO_ROOT", repo)
     create_project("demo", root=projects_root)
     monkeypatch.setattr(iteration_video.prepare, "prepare_iteration", fake_prepare_iteration)
     monkeypatch.setattr(iteration_video, "invoke_attached_render", fake_render)
@@ -53,11 +54,11 @@ def test_iteration_video_renders_hype_adapter_and_records_five_output_variant_gr
         result = run_orchestrator(
             OrchestratorRunRequest(
                 orchestrator_id="video_editing.iteration_video",
+                out=out_dir,
                 project="demo",
                 project_was_auto_resolved=True,
-                projects_root=projects_root,
                 run_root=out_dir,
-                inputs={"thread": THREAD_ID, "target_run_id": TARGET_RUN_ID},
+                inputs={"thread": THREAD_ID, "target_run_id": TARGET_RUN_ID, "repo_root": str(repo)},
                 orchestrator_args=(
                     "--max-iterations",
                     "7",
@@ -90,9 +91,8 @@ def test_iteration_video_renders_hype_adapter_and_records_five_output_variant_gr
     assert not (out_dir / "_prepare").exists()
 
     assert not (out_dir / "run.json").exists()
-    # The kernel owns the authoritative run ledger; this low-level runner
-    # consumes its attempt root and must not recreate a legacy run.json.
-    assert sorted((projects_root / "demo" / "runs").glob("*/run.json")) == []
+    run_records = sorted((projects_root / "demo" / "runs").glob("*/run.json"))
+    assert run_records == []
     sidecar = _read_json(out_dir / ".astrid.variants.json")
     variant_artifacts = [artifact for artifact in sidecar["artifacts"] if artifact.get("role") == "variant"]
     assert sorted(Path(item["path"]).name for item in variant_artifacts) == [

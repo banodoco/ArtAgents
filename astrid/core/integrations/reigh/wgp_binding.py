@@ -48,7 +48,13 @@ from .wgp_bridge import (
     require_checkout,
     wgp_session,
 )
-from .wgp_build import PINNED_WAN2GP_SHA, BuildManifestStore
+from .wgp_build import (
+    PINNED_WAN2GP_SHA,
+    UPSTREAM_BASE_SHA,
+    WORKER_CONTRACT_VERSION,
+    BuildManifestError,
+    BuildManifestStore,
+)
 from .wgp_conversion import (
     ConversionRefused,
     GenerationTask,
@@ -86,9 +92,7 @@ def build_store() -> BuildManifestStore:
 
 
 def _fence_build(store: BuildManifestStore) -> tuple[Any, str]:
-    """Prove the installed build matches the vendored pin; return digest."""
-    from .wgp_build import BuildManifestError
-
+    """Prove every build identity component matches this binding pin."""
     try:
         manifest = store.require_current()
     except BuildManifestError as exc:
@@ -98,6 +102,28 @@ def _fence_build(store: BuildManifestStore) -> tuple[Any, str]:
             f"installed build manifest targets {manifest.wan2gp_sha} but "
             f"the vendored tree is pinned at {PINNED_WAN2GP_SHA}; run the "
             "five-gate pipeline and swap the build explicitly"
+        )
+    mismatches: list[str] = []
+    if manifest.upstream_base != UPSTREAM_BASE_SHA:
+        mismatches.append(
+            f"upstream_base={manifest.upstream_base} (expected {UPSTREAM_BASE_SHA})"
+        )
+    from .wgp_patches import patchset_hash
+
+    expected_patchset = patchset_hash()
+    if manifest.patchset_hash != expected_patchset:
+        mismatches.append(
+            f"patchset_hash={manifest.patchset_hash} (expected {expected_patchset})"
+        )
+    if manifest.worker_contract_version != WORKER_CONTRACT_VERSION:
+        mismatches.append(
+            "worker_contract_version="
+            f"{manifest.worker_contract_version} (expected {WORKER_CONTRACT_VERSION})"
+        )
+    if mismatches:
+        raise BuildFenceMismatch(
+            "installed Wan2GP build manifest disagrees with the binding fence: "
+            + "; ".join(mismatches)
         )
     return manifest, manifest.digest()
 
@@ -118,8 +144,13 @@ class WgpTaskHandler:
         #    the vendored pin before any conversion or import happens.
         manifest, manifest_digest = _fence_build(self._store)
 
-        # 2. Declarative conversion (whitelist → default → force).
-        generation_task = convert_task(params, task_id=task_id, task_type=task_type)
+        # 2. Declarative conversion (whitelist → default → force). Kernel
+        # admission stores the canonical flat id; conversion tables use the
+        # worker's source task type, so normalize only that prefix.
+        conversion_task_type = task_type.removeprefix("reigh.")
+        generation_task = convert_task(
+            params, task_id=task_id, task_type=conversion_task_type
+        )
 
         # 3. Materialize LoRA URLs at conversion time (hook-injectable).
         checkout = require_checkout()
@@ -163,6 +194,9 @@ class WgpTaskHandler:
                 raw_outputs = session.wgp_module.generate_video(
                     **_generate_kwargs(generation_task)
                 )
+                return _collect_outputs(
+                    raw_outputs, staging_dir, base_dir=session.checkout
+                )
         except (CheckoutUnavailable, WgpImportUnavailable, WgpBridgeRefused):
             raise
         except ConversionRefused:
@@ -199,7 +233,7 @@ def _default_lora_downloader(url: str, target: Path) -> None:
 
 
 def _collect_outputs(
-    raw_outputs: Any, staging_dir: Path
+    raw_outputs: Any, staging_dir: Path, *, base_dir: Path | None = None
 ) -> list[dict[str, Any]]:
     """Normalize generation results into validated manifest entries."""
     sources: list[Path]
@@ -214,6 +248,8 @@ def _collect_outputs(
         )
     outputs: list[dict[str, Any]] = []
     for ordinal, src in enumerate(sources):
+        if not src.is_absolute() and base_dir is not None:
+            src = base_dir / src
         if not src.is_file():
             raise WgpGenerationFailed(f"declared output missing: {src}")
         dest = staging_dir / src.name

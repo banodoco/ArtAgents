@@ -22,9 +22,6 @@ import sys
 import tempfile
 from pathlib import Path
 
-import pytest
-
-
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -310,9 +307,9 @@ if __name__ == "__main__":
             f"External Python pack failed validation\nSTDOUT:\n{validate.stdout}\nSTDERR:\n{validate.stderr}"
         )
 
-        # Run the executor through the lower-level project-scoped runner with
-        # an explicit kernel-like staging root.  The runner may consume that
-        # root but never creates an authoritative project run record itself.
+        # Run the executor through the kernel-admitted internal boundary.  The
+        # supplied directory is staging; the runner must not create a second
+        # filesystem run ledger.
         projects_root = tmp_path / "projects"
         run_script = tmp_path / "run_executor.py"
         run_script.write_text(
@@ -324,24 +321,24 @@ if __name__ == "__main__":
             "from astrid.core.timeline.crud import create_timeline\n"
             "create_project('demo')\n"
             "create_timeline('demo', 'main', is_default=True)\n"
-            "staging = Path(sys.argv[1]) / 'kernel-staging'\n"
             "from astrid.core.execution.executor.registry import load_default_registry\n"
             "from astrid.core.execution.executor.runner import ExecutorRunRequest, run_executor\n"
             "registry = load_default_registry(include_installed=False)\n"
+            "staging = Path(sys.argv[2]) / 'demo' / '.astrid' / 'media' / '.staging' / 'external-pack'\n"
             "result = run_executor(\n"
             "    ExecutorRunRequest(\n"
             f"        executor_id='{pack_id}.echo',\n"
-            "        out=None,\n"
+            "        out=staging,\n"
             "        project='demo',\n"
             "        python_exec=sys.executable,\n"
-            "        run_root=staging,\n"
+            "        project_was_auto_resolved=True,\n"
             "    ),\n"
             "    registry,\n"
             ")\n"
             "assert result.ok, str(result.error)\n"
-            "run_root = Path(result.run_root) if result.run_root else None\n"
-            "assert run_root is not None, 'run_root not set'\n"
-            "assert (run_root / 'result.json').is_file(), 'result.json not written'\n"
+            "assert result.run_root is None\n"
+            "assert (staging / 'result.json').is_file(), 'result.json not written'\n"
+            "assert not list((Path(sys.argv[2]) / 'demo' / 'runs').glob('**/run.json'))\n"
             "print('ran')\n",
             encoding="utf-8",
         )
@@ -356,8 +353,15 @@ if __name__ == "__main__":
         assert run.returncode == 0, (
             f"External Python executor failed\nSTDOUT:\n{run.stdout}\nSTDERR:\n{run.stderr}"
         )
-        assert (tmp_path / "kernel-staging" / "result.json").is_file()
-        assert not list((projects_root / "demo" / "runs").glob("*/run.json"))
+        assert (
+            projects_root
+            / "demo"
+            / ".astrid"
+            / "media"
+            / ".staging"
+            / "external-pack"
+            / "result.json"
+        ).is_file()
 
 
 def test_test_file_itself_avoids_internal_imports() -> None:

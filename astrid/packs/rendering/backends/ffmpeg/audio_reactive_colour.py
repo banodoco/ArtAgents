@@ -68,9 +68,7 @@ class AudioReactiveColourSpec:
                 for event in self.events
             ],
         }
-        encoded = json.dumps(
-            payload, sort_keys=True, separators=(",", ":")
-        ).encode("utf-8")
+        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
         return hashlib.sha256(encoded).hexdigest()
 
 
@@ -86,13 +84,9 @@ def _positive_integer(value: Any, label: str) -> int:
     return value
 
 
-def _resolve_audio_path(
-    entry: dict[str, Any], assets_path: Path, asset_id: str
-) -> Path:
+def _resolve_audio_path(entry: dict[str, Any], assets_path: Path, asset_id: str) -> Path:
     if entry.get("url"):
-        raise ValueError(
-            f"{EFFECT_ID} FFmpeg specialization requires a local audio asset"
-        )
+        raise ValueError(f"{EFFECT_ID} FFmpeg specialization requires a local audio asset")
     file_value = entry.get("file")
     if not isinstance(file_value, str) or not file_value:
         raise ValueError(f"Audio asset {asset_id!r} has no local file")
@@ -115,22 +109,16 @@ def match_and_validate(
     if not isinstance(clips, list) or not isinstance(tracks, list):
         return None
     reactive = [
-        clip
-        for clip in clips
-        if isinstance(clip, dict) and clip.get("clipType") == EFFECT_ID
+        clip for clip in clips if isinstance(clip, dict) and clip.get("clipType") == EFFECT_ID
     ]
     if not reactive:
         return None
     if len(reactive) != 1:
         raise ValueError(f"{EFFECT_ID} fast path requires exactly one effect clip")
     if len(clips) != 2:
-        raise ValueError(
-            f"{EFFECT_ID} fast path requires one effect clip and one audio clip"
-        )
+        raise ValueError(f"{EFFECT_ID} fast path requires one effect clip and one audio clip")
 
-    track_by_id = {
-        track.get("id"): track for track in tracks if isinstance(track, dict)
-    }
+    track_by_id = {track.get("id"): track for track in tracks if isinstance(track, dict)}
     visual_tracks = [
         track for track in tracks if isinstance(track, dict) and track.get("kind") == "visual"
     ]
@@ -138,9 +126,7 @@ def match_and_validate(
         track for track in tracks if isinstance(track, dict) and track.get("kind") == "audio"
     ]
     if len(visual_tracks) != 1 or len(audio_tracks) != 1:
-        raise ValueError(
-            f"{EFFECT_ID} fast path requires exactly one visual and one audio track"
-        )
+        raise ValueError(f"{EFFECT_ID} fast path requires exactly one visual and one audio track")
 
     effect_clip = reactive[0]
     if track_by_id.get(effect_clip.get("track"), {}).get("kind") != "visual":
@@ -156,29 +142,21 @@ def match_and_validate(
     if hold <= 0:
         raise ValueError("Effect clip hold must be positive")
 
-    canvas = (
-        timeline_data.get("theme_overrides", {})
-        .get("visual", {})
-        .get("canvas", {})
-    )
+    canvas = timeline_data.get("theme_overrides", {}).get("visual", {}).get("canvas", {})
     width = _positive_integer(canvas.get("width"), "Canvas width")
     height = _positive_integer(canvas.get("height"), "Canvas height")
     fps = _positive_integer(canvas.get("fps"), "Canvas fps")
     total_frames_float = hold * fps
     total_frames = round(total_frames_float)
     if abs(total_frames_float - total_frames) > 1e-6:
-        raise ValueError(
-            f"{EFFECT_ID} hold must resolve to an integer number of frames"
-        )
+        raise ValueError(f"{EFFECT_ID} hold must resolve to an integer number of frames")
 
     params = effect_clip.get("params")
     if not isinstance(params, dict):
         raise ValueError(f"{EFFECT_ID} params must be an object")
     unexpected_params = sorted(set(params) - _ALLOWED_PARAM_KEYS)
     if unexpected_params:
-        raise ValueError(
-            f"Unexpected {EFFECT_ID} params: {', '.join(unexpected_params)}"
-        )
+        raise ValueError(f"Unexpected {EFFECT_ID} params: {', '.join(unexpected_params)}")
     if params.get("schemaVersion", 1) != 1:
         raise ValueError(f"{EFFECT_ID} schemaVersion must be 1")
     initial_color = params.get("initialColor")
@@ -195,9 +173,7 @@ def match_and_validate(
             raise ValueError(f"events[{index}] must be an object")
         unexpected_event = sorted(set(raw_event) - _ALLOWED_EVENT_KEYS)
         if unexpected_event:
-            raise ValueError(
-                f"Unexpected events[{index}] keys: {', '.join(unexpected_event)}"
-            )
+            raise ValueError(f"Unexpected events[{index}] keys: {', '.join(unexpected_event)}")
         frame = raw_event.get("frame")
         if isinstance(frame, bool) or not isinstance(frame, int):
             raise ValueError(f"events[{index}].frame must be an integer")
@@ -211,13 +187,9 @@ def match_and_validate(
         if not isinstance(color, str) or not _HEX_COLOUR.fullmatch(color):
             raise ValueError(f"events[{index}].color must be a six-digit hex colour")
         event_id = raw_event.get("id")
-        if event_id is not None and (
-            not isinstance(event_id, str) or not event_id
-        ):
+        if event_id is not None and (not isinstance(event_id, str) or not event_id):
             raise ValueError(f"events[{index}].id must be a non-empty string")
-        events.append(
-            ColourEvent(frame=frame, color=color.upper(), event_id=event_id)
-        )
+        events.append(ColourEvent(frame=frame, color=color.upper(), event_id=event_id))
         previous_frame = frame
 
     audio_candidates = [clip for clip in clips if clip is not effect_clip]
@@ -244,9 +216,7 @@ def match_and_validate(
     if audio_from < 0 or audio_to <= audio_from:
         raise ValueError("Audio clip must have a positive source range")
     if round((audio_to - audio_from) * fps) != total_frames:
-        raise ValueError(
-            "Audio clip duration and effect hold must resolve to the same frame count"
-        )
+        raise ValueError("Audio clip duration and effect hold must resolve to the same frame count")
     # Import locally because the support module also imports this specialization
     # to produce request-sensitive evidence.
     from astrid.packs.rendering.backends.ffmpeg.support import effective_gain
@@ -281,10 +251,7 @@ def match_and_validate(
 def write_sendcmd(spec: AudioReactiveColourSpec, path: Path) -> None:
     path.write_text(
         "".join(
-            (
-                f"{(event.frame - 1) / spec.fps:.9f} "
-                f"drawbox@bg color 0x{event.color[1:]};\n"
-            )
+            (f"{(event.frame - 1) / spec.fps:.9f} drawbox@bg color 0x{event.color[1:]};\n")
             for event in spec.events
         ),
         encoding="utf-8",
@@ -292,13 +259,7 @@ def write_sendcmd(spec: AudioReactiveColourSpec, path: Path) -> None:
 
 
 def _escape_filter_path(path: Path) -> str:
-    return (
-        path.resolve()
-        .as_posix()
-        .replace("\\", "\\\\")
-        .replace(":", "\\:")
-        .replace("'", "\\'")
-    )
+    return path.resolve().as_posix().replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
 
 
 def build_video_command(
@@ -307,9 +268,7 @@ def build_video_command(
     initial = f"0x{spec.initial_color[1:]}"
     video_filters: list[str] = []
     if spec.events:
-        video_filters.append(
-            f"drawbox@bg=x=0:y=0:w=iw:h=ih:color={initial}:t=fill"
-        )
+        video_filters.append(f"drawbox@bg=x=0:y=0:w=iw:h=ih:color={initial}:t=fill")
         # sendcmd deliberately follows drawbox. A command delivered at the
         # previous frame then affects drawbox on the next frame, making a
         # semantic marker F visible at exactly F rather than F-1.
@@ -343,9 +302,7 @@ def build_video_command(
     ]
 
 
-def build_mux_command(
-    spec: AudioReactiveColourSpec, video_path: Path, out_path: Path
-) -> list[str]:
+def build_mux_command(spec: AudioReactiveColourSpec, video_path: Path, out_path: Path) -> list[str]:
     audio_filter = (
         f"atrim=start={spec.audio_from:.9f}:end={spec.audio_to:.9f},"
         "asetpts=PTS-STARTPTS,"

@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Package the read-only timeline visualization pipeline as an executor."""
 
+# The canonical-entrypoint guard intentionally runs before imports.
+# ruff: noqa: E402
+
 from __future__ import annotations
 
 from astrid.core.pack.entrypoint import guard_canonical_entrypoint
@@ -77,6 +80,7 @@ from astrid.packs.rendering.executors.timeline_visualize.scope import select_sco
 from astrid.packs.rendering.executors.timeline_visualize.select import (
     KernelTimeline,
     ManagedTimeline,
+    discover_timelines,
     select_kernel_timelines,
     select_timeline,
 )
@@ -173,6 +177,7 @@ def _verify_selected_execution_authority(
     ):
         raise ValueError("timeline authority changed after admission; retry visualization")
 
+
 _LAYOUTS = ("time-scaled", "linear")
 _FORMATS = frozenset({"png", "svg", "md"})
 _CROCKFORD32 = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
@@ -208,7 +213,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--all", action="store_true", dest="select_all")
     parser.add_argument(
         "--scope",
-        choices=StaticChoices(("project", "timeline", "shot", "range", "clip", "asset", "timestamp")),
+        choices=StaticChoices(
+            ("project", "timeline", "shot", "range", "clip", "asset", "timestamp")
+        ),
         default="timeline",
     )
     parser.add_argument("--shot")
@@ -279,9 +286,7 @@ def _format_argument(value: str) -> str:
 
     values = [part.strip().lower() for part in value.split(",") if part.strip()]
     if not values:
-        raise argparse.ArgumentTypeError(
-            "format must name one or more of png, svg, md, or all"
-        )
+        raise argparse.ArgumentTypeError("format must name one or more of png, svg, md, or all")
     invalid = sorted(set(values) - (_FORMATS | {"all"}))
     if invalid:
         raise argparse.ArgumentTypeError(
@@ -312,9 +317,7 @@ def _validate_selectors(args: argparse.Namespace) -> None:
     if args.timeline_slug is not None and args.select_all:
         raise ValueError("--timeline-slug and --all are mutually exclusive")
     if args.timeline_source and (args.timeline_slug is not None or args.select_all):
-        raise ValueError(
-            "--timeline-source cannot be combined with --timeline-slug or --all"
-        )
+        raise ValueError("--timeline-source cannot be combined with --timeline-slug or --all")
     if (args.from_view is None) != (args.focus is None):
         raise ValueError("--from-view and --focus must be supplied together")
     if args.refresh_root and args.from_view is None:
@@ -335,9 +338,7 @@ def _validate_selectors(args: argparse.Namespace) -> None:
             if value not in (None, False, "")
         ]
         if conflicts:
-            raise ValueError(
-                "--from-view/--focus cannot be combined with " + ", ".join(conflicts)
-            )
+            raise ValueError("--from-view/--focus cannot be combined with " + ", ".join(conflicts))
         if args.refresh_root and parse_qualified_ref(args.focus).kind != "TL":
             raise ValueError("--refresh-root focus must be the frozen timeline reference")
     if args.rendered_video is not None and args.filmstrip not in {"auto", "rendered"}:
@@ -352,10 +353,13 @@ def _contained_timeline_sources(
 ) -> tuple[list[ManagedTimeline], list[str]]:
     timelines_root = (project_root / "timelines").resolve()
     discovered, diagnostics = select_timeline(project_root, all=True)
-    by_path = {
+    all_discovered = {
         row.timeline_dir.resolve(): row
-        for row in discovered
+        for row in discover_timelines(project_root)
         if row.timeline_dir is not None
+    }
+    by_path = {
+        row.timeline_dir.resolve(): row for row in discovered if row.timeline_dir is not None
     }
     selected: list[ManagedTimeline] = []
     missing: list[str] = []
@@ -383,6 +387,9 @@ def _contained_timeline_sources(
             )
         row = by_path.get(candidate_dir)
         if row is None:
+            tombstoned = all_discovered.get(candidate_dir)
+            if tombstoned is not None and tombstoned.is_tombstoned:
+                diagnostics.append(f"timeline source {raw!s} is tombstoned")
             missing.append(str(candidate))
             continue
         selected.append(row)
@@ -466,7 +473,10 @@ def _materialize_kernel_timeline(
         encoding="utf-8",
     )
     (destination / "assembly.jsonl").write_text(
-        "\n".join(json.dumps(event.to_json_obj(), sort_keys=True, separators=(",", ":")) for event in events)
+        "\n".join(
+            json.dumps(event.to_json_obj(), sort_keys=True, separators=(",", ":"))
+            for event in events
+        )
         + "\n",
         encoding="utf-8",
     )
@@ -568,9 +578,7 @@ def _mint_cold_range_root(
         raise ValueError("cold range scope must have frozen frame bounds")
     start_seconds = scope.start_frame / model.fps
     end_seconds = scope.end_frame / model.fps
-    authored_id = (
-        f"range:{format(start_seconds, '.17g')}:{format(end_seconds, '.17g')}"
-    )
+    authored_id = f"range:{format(start_seconds, '.17g')}:{format(end_seconds, '.17g')}"
     effective_map = assign_range_ids(
         identity_map,
         [(authored_id, start_seconds, end_seconds)],
@@ -626,10 +634,7 @@ def _normalized_formats(raw: list[str] | None) -> frozenset[str]:
     if not raw or "all" in raw:
         return _FORMATS
     values = {
-        part.strip().lower()
-        for token in raw
-        for part in str(token).split(",")
-        if part.strip()
+        part.strip().lower() for token in raw for part in str(token).split(",") if part.strip()
     }
     if "all" in values:
         return _FORMATS
@@ -666,9 +671,7 @@ def _rendered_expected_hash(
     return None
 
 
-def _page_asset_refs(
-    page: LayoutPage, model: Any, identity_map: Any
-) -> list[str]:
+def _page_asset_refs(page: LayoutPage, model: Any, identity_map: Any) -> list[str]:
     """Asset display refs on one page, deduped in reading order.
 
     The layout emits ``clip`` objects carrying clip display ids (``CL01``);
@@ -732,9 +735,7 @@ def _asset_filmstrips(
         return filmstrips
     classified = classify_registry(snapshot.registry, project_root=project_root)
     raw_assets = (
-        snapshot.registry.get("assets", {})
-        if isinstance(snapshot.registry, Mapping)
-        else {}
+        snapshot.registry.get("assets", {}) if isinstance(snapshot.registry, Mapping) else {}
     )
     filmstrips: dict[str, list[Path]] = {}
     for page in pages:
@@ -966,15 +967,9 @@ def _materialize_view(
         snapshot_version=_snapshot_head_version(snapshot),
     )
     formats = _normalized_formats(args.format)
-    png_bytes = (
-        {page.page_id: render_page_png(page) for page in pages}
-        if "png" in formats
-        else {}
-    )
+    png_bytes = {page.page_id: render_page_png(page) for page in pages} if "png" in formats else {}
     svg_bytes = (
-        {page.page_id: render_page_svg_bytes(page) for page in pages}
-        if "svg" in formats
-        else {}
+        {page.page_id: render_page_svg_bytes(page) for page in pages} if "svg" in formats else {}
     )
     pack_root.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(
@@ -1151,9 +1146,7 @@ def _pipeline_metadata_for_timeline(
                 continue
 
         artifacts = record.get("artifacts")
-        metadata_artifact = (
-            artifacts.get("metadata") if isinstance(artifacts, Mapping) else None
-        )
+        metadata_artifact = artifacts.get("metadata") if isinstance(artifacts, Mapping) else None
         if not isinstance(metadata_artifact, Mapping):
             continue
         raw_path = metadata_artifact.get("path")
@@ -1185,9 +1178,7 @@ def _pipeline_metadata_for_timeline(
             candidates.append((metadata, metadata_base, run_root))
 
     authorities = [
-        candidate
-        for candidate in candidates
-        if _has_pipeline_transcript_reference(candidate[0])
+        candidate for candidate in candidates if _has_pipeline_transcript_reference(candidate[0])
     ]
     if len(authorities) > 1:
         # Preserve the higher-priority pipeline level and fail closed in
@@ -1205,8 +1196,7 @@ def _has_pipeline_transcript_reference(metadata: Mapping) -> bool:
     if not isinstance(sources, Mapping):
         return False
     return any(
-        isinstance(source, Mapping)
-        and ("transcript" in source or "transcript_ref" in source)
+        isinstance(source, Mapping) and ("transcript" in source or "transcript_ref" in source)
         for source in sources.values()
     )
 
@@ -1225,18 +1215,14 @@ def _discover_snapshot_attachment(
     attachment = discover_attachment(
         project_root,
         timeline_dir=timeline_dir,
-        timeline_metadata=(
-            timeline_metadata if isinstance(timeline_metadata, Mapping) else None
-        ),
+        timeline_metadata=(timeline_metadata if isinstance(timeline_metadata, Mapping) else None),
         pipeline_metadata=pipeline_metadata,
         pipeline_metadata_base=pipeline_base,
         pipeline_root=pipeline_root,
     )
     if attachment is None or attachment.integrity != "uncontained":
         return attachment, snapshot
-    diagnostic = (
-        "TRANSCRIPT_PATH_UNCONTAINED: declared transcript path escaped its owning root"
-    )
+    diagnostic = "TRANSCRIPT_PATH_UNCONTAINED: declared transcript path escaped its owning root"
     return None, replace(
         snapshot,
         diagnostics=tuple(dict.fromkeys((*snapshot.diagnostics, diagnostic))),
@@ -1264,8 +1250,7 @@ def _render_one(
             (
                 row
                 for row in execution_authority.get("timelines", [])
-                if isinstance(row, Mapping)
-                and row.get("timeline_ulid") == selected.timeline_ulid
+                if isinstance(row, Mapping) and row.get("timeline_ulid") == selected.timeline_ulid
             ),
             None,
         )
@@ -1382,7 +1367,10 @@ def refresh_root(
     )
     if attachment is not None and attachment.integrity == "ok":
         snapshot = replace(snapshot, transcript_sha256=attachment.transcript_sha256)
-    if snapshot.timeline_id != frozen.timeline_uuid or snapshot.timeline_ulid != frozen.timeline_ulid:
+    if (
+        snapshot.timeline_id != frozen.timeline_uuid
+        or snapshot.timeline_ulid != frozen.timeline_ulid
+    ):
         raise ValueError("current managed timeline identity disagrees with the frozen lineage")
     model = build_model(snapshot, project_root=project_root)
     transcript_segments: list[TranscriptSegment] = []
@@ -1677,7 +1665,7 @@ def run_sdk(argv: list[str] | None = None) -> dict[str, Any]:
             "returncode": int(code),
             "error": {"type": "SystemExit", "message": str(exc.code or "")},
         }
-    except Exception as exc:  # executor boundary: return a process-like diagnostic
+    except Exception as exc:  # noqa: BLE001 - executor boundary returns process-like diagnostics
         return {
             "returncode": 1,
             "error": {"type": type(exc).__name__, "message": str(exc)},

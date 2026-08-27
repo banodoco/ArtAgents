@@ -59,6 +59,8 @@ jobs:
           cache: pip
           cache-dependency-path: |
             pyproject.toml
+            requirements/build.lock
+            requirements/runtime.lock
 
       - name: Install system media tools
         run: |
@@ -134,17 +136,14 @@ jobs:
       - name: Set up Node for repository typecheck
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "20.19.4"
           cache: npm
           cache-dependency-path: remotion/package-lock.json
 
-      - name: Install pinned Remotion toolchain
+      - name: Run pinned Remotion gate
         working-directory: remotion
-        run: npm ci
-
-      - name: Remotion typecheck
-        working-directory: remotion
-        run: npm run typecheck
+        run: |
+          python ../scripts/reshape/remotion_gate.py all
 
       - name: Revalidate admission immediately before m7 publication
         run: |
@@ -205,6 +204,8 @@ jobs:
           cache: pip
           cache-dependency-path: |
             pyproject.toml
+            requirements/build.lock
+            requirements/runtime.lock
 
       - name: Install system media tools
         run: |
@@ -229,9 +230,9 @@ jobs:
 
       - name: Run doctor check
         run: |
-          # Blocking: on a CI runner with no .env on disk, the env-template check
-          # reports advisory-only, so a clean checkout exits 0.
-          python -m astrid doctor --json
+          # Blocking: make doctor owns a disposable initialized projects root;
+          # the check must not depend on an ambient checkout database.
+          make doctor PY=python
 
       - name: Fresh-clone core smoke (advisory)
         continue-on-error: true
@@ -248,13 +249,13 @@ jobs:
       - name: Set up Node for blocking Remotion typecheck
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "20.19.4"
           cache: npm
           cache-dependency-path: remotion/package-lock.json
 
-      - name: Install pinned Remotion toolchain
+      - name: Provision pinned Remotion closure
         working-directory: remotion
-        run: npm ci
+        run: python ../scripts/reshape/remotion_gate.py install
 
       - name: Run local CI mirror
         env:
@@ -281,12 +282,9 @@ jobs:
           path: out/s1-gate/latest
           if-no-files-found: ignore
 
-      - name: Remotion typecheck (blocking, explicit)
+      - name: Remotion gate (blocking, explicit)
         working-directory: remotion
-        run: npm run typecheck
-
-      - name: Renderer parity (blocking, explicit)
-        run: python -m pytest -q -m renderer_parity tests/packs/test_renderer_parity.py
+        run: python ../scripts/reshape/remotion_gate.py all --reuse-installed
 
       - name: Upload coverage report
         if: always()
@@ -318,6 +316,8 @@ jobs:
           cache: pip
           cache-dependency-path: |
             pyproject.toml
+            requirements/build.lock
+            requirements/runtime.lock
 
       - name: Install system media tools
         run: |
@@ -475,14 +475,16 @@ jobs:
           cache: pip
           cache-dependency-path: |
             pyproject.toml
+            requirements/build.lock
+            requirements/runtime.lock
 
       - name: Install wheel builder
-        run: python -m pip install --upgrade pip build
+        run: python -m pip install --disable-pip-version-check --no-input --require-hashes -r requirements/build.lock
 
       - name: Build exactly one canonical release wheel
         run: |
           mkdir -p "$RUNNER_TEMP/m8-wheel" "$RUNNER_TEMP/m8-logs"
-          python -m build --wheel --outdir "$RUNNER_TEMP/m8-wheel" 2>&1 | tee "$RUNNER_TEMP/m8-logs/build.log"
+          python -m build --wheel --no-isolation --outdir "$RUNNER_TEMP/m8-wheel" 2>&1 | tee "$RUNNER_TEMP/m8-logs/build.log"
           python3 - <<'PY'
           import hashlib
           import json
@@ -533,6 +535,8 @@ jobs:
           cache: pip
           cache-dependency-path: |
             pyproject.toml
+            requirements/build.lock
+            requirements/runtime.lock
 
       - name: Set up Node for the browser lane
         uses: actions/setup-node@v4
@@ -555,6 +559,16 @@ jobs:
           fi
           python -m pip install --upgrade pip
           python -m pip install -e '.[dev]'
+
+      - name: Install and record required media tools
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            sudo apt-get update
+            sudo apt-get install -y ffmpeg
+          else
+            brew list ffmpeg >/dev/null 2>&1 || brew install ffmpeg
+          fi
 
       - name: Record the canonical wheel identity
         run: |
@@ -581,12 +595,22 @@ jobs:
         run: |
           set +e
           python -m venv "$RUNNER_TEMP/m8-venv"
+          "$RUNNER_TEMP/m8-venv/bin/python" -m pip install --disable-pip-version-check --no-input --require-hashes \
+            -r requirements/runtime.lock > "$RUNNER_TEMP/m8-logs/locked-runtime-install.log" 2>&1
+          deps_rc=$?
           "$RUNNER_TEMP/m8-venv/bin/python" -m pip install --disable-pip-version-check --no-input --no-deps --no-index \
             "$RUNNER_TEMP/m8-wheel"/*.whl > "$RUNNER_TEMP/m8-logs/exact-wheel-install.log" 2>&1
+          install_rc=$?
           "$RUNNER_TEMP/m8-venv/bin/python" -I -c \
             "import astrid, importlib.metadata; print(importlib.metadata.version('astrid')); print(astrid.__file__)" \
             > "$RUNNER_TEMP/m8-logs/exact-wheel-smoke.log" 2>&1
-          rc=$?
+          smoke_rc=$?
+          "$RUNNER_TEMP/m8-venv/bin/python" -m pip check > "$RUNNER_TEMP/m8-logs/exact-wheel-pip-check.log" 2>&1
+          check_rc=$?
+          rc=0
+          for value in "$deps_rc" "$install_rc" "$smoke_rc" "$check_rc"; do
+            if [[ "$value" -ne 0 ]]; then rc=1; fi
+          done
           printf '%s\n' "$rc" > "$RUNNER_TEMP/m8-exact-wheel-status"
           exit "$rc"
 
@@ -599,6 +623,15 @@ jobs:
           else
             npx playwright install chromium
           fi
+
+      - name: Validate locks and record the exact release toolchain
+        shell: bash
+        run: |
+          python -m scripts.reshape.release_reproducibility \
+            --expected-python "${{ matrix.python-version }}" \
+            --playwright-root scripts/reshape/editor_browser_smoke \
+            --output "$RUNNER_TEMP/m8-evidence/toolchain.json" \
+            > "$RUNNER_TEMP/m8-logs/toolchain.log"
 
       - name: Run installed wheel smoke and m8 contract lanes
         id: installed_lanes
@@ -616,7 +649,9 @@ jobs:
             tests/v10/test_m8_installed_factoring.py
           do
             safe_name=${selector//\//_}
-            timeout 300 python3 -m pytest "$selector" -q 2>&1 \
+            lane_timeout=300
+            if [[ "$selector" == *"installed_factoring.py" ]]; then lane_timeout=600; fi
+            timeout "$lane_timeout" python3 -m pytest "$selector" -q 2>&1 \
               | tee "$RUNNER_TEMP/m8-logs/${safe_name}.log"
             rc=${PIPESTATUS[0]}
             if [[ "$rc" -ne 0 ]]; then status=1; fi
@@ -683,6 +718,9 @@ jobs:
 
           bundle = {
               "schema": "astrid.m8.evidence.v1",
+              "toolchain": json.loads(
+                  (root / "m8-evidence" / "toolchain.json").read_text(encoding="utf-8")
+              ),
               "artifact_identity": record(
                   selector="installed-artifact:identity",
                   record_status="pass",
@@ -784,6 +822,7 @@ jobs:
           if len(records) != 4:
               raise SystemExit(f"expected four m8 matrix evidence records, found {len(records)}")
           keys = (
+              "toolchain",
               "artifact_identity",
               "matrix_lanes",
               "authority_census",

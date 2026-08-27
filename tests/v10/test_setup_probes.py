@@ -22,7 +22,6 @@ from astrid.core.integrations.reigh.capabilities import (
     resolve_probe,
 )
 from astrid.core.model_setup.acquire import acquire_artifact
-
 from tests.v10._setup_harness import (
     RangeOrigin,
     manifest_for,
@@ -150,7 +149,6 @@ def test_stamp_read_is_the_single_probe_read_place(
     root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The weight probe composes ONLY runtime closure + journal stamp."""
-    import astrid.core.foundation.project_paths as pp
 
     calls: list[tuple[str, tuple[str, ...]]] = []
 

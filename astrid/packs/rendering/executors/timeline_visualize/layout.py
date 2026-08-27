@@ -332,11 +332,7 @@ def _time_specs(
     max_objects_per_page: int,
 ) -> tuple[_PageSpec, ...]:
     bands = _lane_bands(len(tracks))
-    band_for_lane = {
-        lane: band_index
-        for band_index, band in enumerate(bands)
-        for lane in band
-    }
+    band_for_lane = {lane: band_index for band_index, band in enumerate(bands) for lane in band}
     owners: dict[tuple[int, int], list[str]] = {}
     scope_start = windows[0][0]
     scope_end = windows[-1][1]
@@ -465,11 +461,7 @@ def _chrome(
     cue_text: str | None = None,
 ) -> list[LayoutObject]:
     breadcrumb = timeline_ref if scope_ref == timeline_ref else f"{timeline_ref} > {scope_ref}"
-    mode = (
-        "TIME-SCALED"
-        if layout == "time-scaled"
-        else "LINEAR — WIDTHS ARE NOT TIME-SCALED"
-    )
+    mode = "TIME-SCALED" if layout == "time-scaled" else "LINEAR — WIDTHS ARE NOT TIME-SCALED"
     version_token = f" · v{snapshot_version}" if snapshot_version is not None else ""
     objects = [
         LayoutObject(
@@ -636,8 +628,10 @@ def _scope_cue(
         focus = _clip_ref_of(scope.clip_ids[0]) if scope.clip_ids else timeline_ref
         source = None
     elif scope.kind == "timestamp":
-        focused = scope.emphasized_clip_ids[0] if scope.emphasized_clip_ids else (
-            scope.clip_ids[0] if scope.clip_ids else None
+        focused = (
+            scope.emphasized_clip_ids[0]
+            if scope.emphasized_clip_ids
+            else (scope.clip_ids[0] if scope.clip_ids else None)
         )
         focus = _clip_ref_of(focused) if focused else timeline_ref
         if focused:
@@ -648,8 +642,10 @@ def _scope_cue(
                     speaker = _speaker_of(occurrence.segment_id)
                     break
     elif scope.kind == "clip":
-        focused = scope.emphasized_clip_ids[0] if scope.emphasized_clip_ids else (
-            scope.clip_ids[0] if scope.clip_ids else None
+        focused = (
+            scope.emphasized_clip_ids[0]
+            if scope.emphasized_clip_ids
+            else (scope.clip_ids[0] if scope.clip_ids else None)
         )
         if focused is None:
             focus = timeline_ref
@@ -671,9 +667,7 @@ def _scope_cue(
             (
                 _clip_ref_of(clip.clip_id)
                 for clip in model.clips
-                if scope_ref in {
-                    _asset_ref_of(asset_key) for asset_key in clip.asset_keys
-                }
+                if scope_ref in {_asset_ref_of(asset_key) for asset_key in clip.asset_keys}
             ),
             None,
         )
@@ -730,9 +724,7 @@ def _scope_cue(
         elif scope.kind == "timestamp":
             in_focus = occurrence.clip_id in scope.clip_ids
         if in_focus:
-            sp_token = (
-                f" · SP @ {occurrence.timeline_start:.3f}s–{occurrence.timeline_end:.3f}s"
-            )
+            sp_token = f" · SP @ {occurrence.timeline_start:.3f}s–{occurrence.timeline_end:.3f}s"
             break
 
     # Focused-clip window: for clip/timestamp/range scopes whose focused clip
@@ -756,9 +748,7 @@ def _scope_cue(
     elif scope.kind in {"range", "shot"}:
         focused_clip_id = scope.clip_ids[0] if scope.clip_ids else None
     if focused_clip_id is not None:
-        focused_clip = next(
-            (item for item in model.clips if item.clip_id == focused_clip_id), None
-        )
+        focused_clip = next((item for item in model.clips if item.clip_id == focused_clip_id), None)
         if focused_clip is not None:
             clip_window_token = (
                 f" · FOCUS CLIP {focused_clip.frames.start_frame}–"
@@ -783,27 +773,18 @@ def _scope_cue(
             return ""
         if anchor is None:
             return ""
-        anchor_clip = next(
-            (item for item in model.clips if item.clip_id == anchor), None
-        )
+        anchor_clip = next((item for item in model.clips if item.clip_id == anchor), None)
         if anchor_clip is None:
             return ""
         before = [
-            item for item in model.clips
-            if item.frames.end_frame <= anchor_clip.frames.start_frame
+            item for item in model.clips if item.frames.end_frame <= anchor_clip.frames.start_frame
         ]
         after = [
-            item for item in model.clips
-            if item.frames.start_frame >= anchor_clip.frames.end_frame
+            item for item in model.clips if item.frames.start_frame >= anchor_clip.frames.end_frame
         ]
         before_s = _seconds(anchor_clip.frames.start_frame / model.fps)
-        after_s = _seconds(
-            (model.extents.visual_frames - anchor_clip.frames.end_frame) / model.fps
-        )
-        return (
-            f" · RANGE ◀ {len(before)} clips · {before_s}s "
-            f"▶ {len(after)} clips · {after_s}s"
-        )
+        after_s = _seconds((model.extents.visual_frames - anchor_clip.frames.end_frame) / model.fps)
+        return f" · RANGE ◀ {len(before)} clips · {before_s}s ▶ {len(after)} clips · {after_s}s"
 
     return (
         f"FOCUS {focus or 'none'} · {parent_token} · {source_token} · "
@@ -967,9 +948,7 @@ def _cluster_inset_cards(
     cluster = _visual_cluster_clips(model, model.clips)
     if not cluster:
         return []
-    window_overlaps = (
-        spec.start_frame < model.extents.visual_frames and spec.end_frame > 0
-    )
+    window_overlaps = spec.start_frame < model.extents.visual_frames and spec.end_frame > 0
     if not window_overlaps and not focused:
         return []
     visual_lane = next(
@@ -1124,11 +1103,7 @@ def _add_footer_continuations(
                     Box(x, y, 380.0, 30.0),
                     None,
                     _Z_CHROME,
-                    (
-                        f"CONTINUE NEXT · {ref}"
-                        if direction == "next"
-                        else f"CONTINUE PREV · {ref}"
-                    ),
+                    (f"CONTINUE NEXT · {ref}" if direction == "next" else f"CONTINUE PREV · {ref}"),
                     None,
                 )
             )
@@ -1166,9 +1141,7 @@ def _layout_time_scaled(
     windows = _frame_windows(start_frame, end_frame, model.fps)
     specs = _time_specs(clips, tracks, lanes, windows, max_objects_per_page)
     owner_page: dict[str, int] = {
-        clip_id: page_index
-        for page_index, spec in enumerate(specs)
-        for clip_id in spec.clip_ids
+        clip_id: page_index for page_index, spec in enumerate(specs) for clip_id in spec.clip_ids
     }
 
     # Select one representative page for every clip/window intersection.  The
@@ -1177,10 +1150,7 @@ def _layout_time_scaled(
     for clip in clips:
         lane = lanes[clip.track_id]
         for window_index, (window_start, window_end) in enumerate(windows):
-            if not (
-                clip.frames.start_frame < window_end
-                and clip.frames.end_frame > window_start
-            ):
+            if not (clip.frames.start_frame < window_end and clip.frames.end_frame > window_start):
                 continue
             candidates = [
                 index
@@ -1209,9 +1179,7 @@ def _layout_time_scaled(
             continue
         next_ids = specs[page_index + 1].clip_ids
         boundary_ref = (
-            _clip_ref(identity_map, clip_by_id[next_ids[0]])
-            if next_ids
-            else timeline_ref
+            _clip_ref(identity_map, clip_by_id[next_ids[0]]) if next_ids else timeline_ref
         )
         continuation_sets[page_index].add(boundary_ref)
         continuation_sets[page_index + 1].add(boundary_ref)
@@ -1249,7 +1217,6 @@ def _layout_time_scaled(
         )
         objects.extend(_ruler(timeline_ref, spec.start_frame, spec.end_frame, model.fps))
 
-        local_by_lane = {lane: index for index, lane in enumerate(spec.lane_indices)}
         lane_y, lane_h = _lane_metrics(tracks, spec.lane_indices, focused=focused)
         for lane in spec.lane_indices:
             objects.append(
@@ -1266,8 +1233,7 @@ def _layout_time_scaled(
         continued = [
             clip
             for clip in clips
-            if zero_index in visible_pages[clip.clip_id]
-            and clip.clip_id not in primary_ids
+            if zero_index in visible_pages[clip.clip_id] and clip.clip_id not in primary_ids
         ]
         page_clips = [clip_by_id[clip_id] for clip_id in spec.clip_ids]
         emphasized = set(scope.emphasized_clip_ids)
@@ -1341,8 +1307,10 @@ def _layout_time_scaled(
                 # live in the cue line, ground-truth, and the reading guide,
                 # which is where navigation happens.
                 label = ref.rsplit(".", 1)[-1]
-                omitted = None if box.w >= 44.0 else (
-                    "time-scaled box is too narrow for its complete frame label"
+                omitted = (
+                    None
+                    if box.w >= 44.0
+                    else ("time-scaled box is too narrow for its complete frame label")
                 )
                 kind = "clip"
             else:
@@ -1350,9 +1318,7 @@ def _layout_time_scaled(
                 omitted = None if box.w >= 96.0 else "continuation segment is too narrow"
                 kind = "continuation"
             thumbnail_path = (
-                _clip_thumbnail(model, clip)
-                if kind in ("clip", "continuation")
-                else None
+                _clip_thumbnail(model, clip) if kind in ("clip", "continuation") else None
             )
             objects.append(
                 LayoutObject(
@@ -1445,9 +1411,7 @@ def _layout_time_scaled(
                     preceding_ref = _clip_ref(identity_map, candidate)
                     break
             if preceding_ref:
-                marker_label = (
-                    f"{abs(delta)}fr {relation} {preceding_ref}→{ref}"
-                )
+                marker_label = f"{abs(delta)}fr {relation} {preceding_ref}→{ref}"
             else:
                 marker_label = f"{abs(delta)}fr {relation}"
             objects.append(
@@ -1478,9 +1442,7 @@ def _layout_time_scaled(
                 key=lambda ref: _continuation_sort_key(ref, identity_map, timeline_ref),
             )
         )
-        represented = {
-            item.display_id for item in objects if item.kind == "continuation"
-        }
+        represented = {item.display_id for item in objects if item.kind == "continuation"}
         _add_footer_continuations(
             objects,
             represented,
@@ -1539,8 +1501,7 @@ def _layout_linear(
     clip_index = {clip.clip_id: index for index, clip in enumerate(model.clips)}
     capacity = min(max_objects_per_page, MAX_LINEAR_CARDS_PER_PAGE)
     chunks = tuple(
-        tuple(clips[index : index + capacity])
-        for index in range(0, len(clips), capacity)
+        tuple(clips[index : index + capacity]) for index in range(0, len(clips), capacity)
     ) or ((),)
     timeline_ref = _timeline_ref(model, identity_map)
 
@@ -1574,10 +1535,7 @@ def _layout_linear(
                 timeline_ref,
                 x=_PLOT_X,
                 tick_height=46.0,
-                label=(
-                    f"scope start={start_frame}fr/"
-                    f"{_seconds(start_frame / model.fps)}s"
-                ),
+                label=(f"scope start={start_frame}fr/{_seconds(start_frame / model.fps)}s"),
             )
         )
         objects.extend(
@@ -1585,10 +1543,7 @@ def _layout_linear(
                 timeline_ref,
                 x=_PLOT_X + _PLOT_W - 1.0,
                 tick_height=46.0,
-                label=(
-                    f"scope end={end_frame}fr/"
-                    f"{_seconds(end_frame / model.fps)}s"
-                ),
+                label=(f"scope end={end_frame}fr/{_seconds(end_frame / model.fps)}s"),
             )
         )
 
@@ -1600,10 +1555,9 @@ def _layout_linear(
             first_row = min(positions) // _LINEAR_COLUMNS
             last_row = max(positions) // _LINEAR_COLUMNS
             y = _LANES_Y + first_row * (_LINEAR_CARD_H + _LINEAR_CARD_GAP_Y)
-            height = (
-                (last_row - first_row + 1) * _LINEAR_CARD_H
-                + (last_row - first_row) * _LINEAR_CARD_GAP_Y
-            )
+            height = (last_row - first_row + 1) * _LINEAR_CARD_H + (
+                last_row - first_row
+            ) * _LINEAR_CARD_GAP_Y
             objects.append(_linear_lane_object(timeline_ref, tracks[lane], lane, y, height))
 
         for position, clip in enumerate(chunk):
@@ -1642,12 +1596,11 @@ def _layout_linear(
                     )
                 )
 
-        if (
-            zero_index == 0
-            and start_frame <= model.extents.visual_frames <= end_frame
-        ):
+        if zero_index == 0 and start_frame <= model.extents.visual_frames <= end_frame:
             objects.append(
-                _visual_detail_label(model, timeline_ref, start_frame, max(start_frame + 1, end_frame))
+                _visual_detail_label(
+                    model, timeline_ref, start_frame, max(start_frame + 1, end_frame)
+                )
             )
         ordered_continuations = tuple(
             sorted(
@@ -1694,7 +1647,6 @@ def _with_text_lanes(
     """Overlay three provenance-distinct compact evidence lanes on each page."""
 
     segment_by_id = {item.segment_id: item for item in segments}
-    clip_by_id = {item.clip_id: item for item in model.clips}
     base_lane = len(model.tracks)
     result: list[LayoutPage] = []
     for page in pages:
@@ -1905,9 +1857,7 @@ def _snapshot_blocks(snapshot: Any, identity_map: IdentityMap) -> list[dict[str,
     timeline_uuid = getattr(snapshot, "timeline_id", None)
     timeline_ulid = getattr(snapshot, "timeline_ulid", None)
     if not isinstance(timeline_uuid, str) or not isinstance(timeline_ulid, str):
-        raise TypeError(
-            "snapshot must be a TimelineSnapshot, a snapshot block, or a snapshot list"
-        )
+        raise TypeError("snapshot must be a TimelineSnapshot, a snapshot block, or a snapshot list")
     timeline_ref = identity_map.lookup_semantic("timeline", timeline_uuid)
     if timeline_ref is None:
         raise ValueError("snapshot timeline has no display id in identity_map")
@@ -2087,13 +2037,9 @@ def serialize_view_map(
                 {
                     "object_ref": item.display_id,
                     "text": item.label,
-                    "status": (
-                        "printed" if item.omitted_reason is None else "omitted"
-                    ),
+                    "status": ("printed" if item.omitted_reason is None else "omitted"),
                     "reason": item.omitted_reason,
-                    "bbox": (
-                        _bbox(item.box) if item.omitted_reason is None else None
-                    ),
+                    "bbox": (_bbox(item.box) if item.omitted_reason is None else None),
                 }
             )
 

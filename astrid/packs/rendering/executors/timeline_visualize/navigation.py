@@ -326,9 +326,7 @@ def assign_transcript_ids(
     )
     seen_segments: set[str] = set()
     for ordinal, segment in enumerate(segments, start=1):
-        authored_id = transcript_segment_authored_id(
-            transcript_sha256, segment.segment_id
-        )
+        authored_id = transcript_segment_authored_id(transcript_sha256, segment.segment_id)
         if authored_id in seen_segments:
             raise ValueError(f"duplicate transcript segment identity {authored_id!r}")
         seen_segments.add(authored_id)

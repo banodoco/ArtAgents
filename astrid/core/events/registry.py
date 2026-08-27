@@ -4,7 +4,7 @@
 independently of any Astrid pack: core declares the ``core.project``,
 ``core.task``, ``core.run``, and ``core.media`` stream types plus the m1/m2
 core event/command kinds, and only then may the explicit standard-Astrid
-composition in ``astrid/packs/__init__.py`` register the three in-tree schema
+composition in ``astrid/packs/__init__.py`` register the four in-tree schema
 packs (v10 section 2.3 law 5; decision artifact section 4).
 
 Rules kept here:
@@ -33,9 +33,10 @@ kinds the m2 repositories consume. m3 (plan step 1) adds the receipt-linked
 run continuation vocabulary (``core.run.continue``/``core.run.continued``),
 the kernel evidence event (``core.evidence.recorded``) and its receipt
 command kind (``core.evidence.record``), and registers
-aggregate agreement rules for the references and shots packs' own stream
-types (``reference.reference``, ``shot.shot``) so pack-owned repositories
-can create and write their aggregate streams without kernel DDL changes.
+aggregate agreement rules for the references, shots, and runaway packs' own
+stream types (``reference.reference``, ``shot.shot``, and
+``runaway.transition_set``) so pack-owned repositories can create and write
+their aggregate streams without kernel DDL changes.
 """
 
 from __future__ import annotations
@@ -299,12 +300,17 @@ STREAM_AGGREGATE_RULES: Mapping[str, StreamAggregateRule] = MappingProxyType(
             declaring_pack="shots",
             subject_type="shot",
         ),
+        "runaway.transition_set": StreamAggregateRule(
+            stream_type="runaway.transition_set",
+            declaring_pack="runaway",
+            subject_type="runaway",
+        ),
     }
 )
 """Aggregate agreement rules for every stream type the composed registry
-can declare today (core project/task/run/media, the timeline pack, and the
-m3 references/shots packs). The rule table lives here — the vocabulary
-module — not in repository handlers."""
+can declare today (core project/task/run/media, the timeline pack, the
+m3 references/shots packs, and the runaway pack). The rule table lives here —
+the vocabulary module — not in repository handlers."""
 
 
 def _require_namespaced(

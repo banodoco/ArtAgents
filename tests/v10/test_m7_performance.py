@@ -17,9 +17,10 @@ import pytest
 from astrid.application import compose_standard_application
 from tests.v10._m7_fixture import build_m7_fixture
 
-
 SAMPLE_COUNT = 3
 WARM_SAMPLE_COUNT = 8
+
+
 def _elapsed(operation: Callable[[], Any]) -> float:
     started = time.perf_counter_ns()
     operation()

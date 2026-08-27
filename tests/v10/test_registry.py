@@ -2,7 +2,7 @@
 
 Covers the kernel-only (core) registry that does not require Astrid packs, the
 explicit standard-Astrid composition that registers exactly timeline, shots,
-and references without discovery or the capability-pack loader, duplicate and
+references, and runaway without discovery or the capability-pack loader, duplicate and
 undeclared vocabulary rejection, and malformed-manifest / dependency-grammar
 errors. The plan-step-8 section at the bottom tests the runtime enforcement
 of the composed vocabulary: stream/event/command declaration checks and
@@ -71,8 +71,8 @@ from astrid.packs import (
 
 CORE_TABLE_COUNT = len(CORE_TABLES)
 # 14 kernel + timelines + shots/shot_items/generations/generation_variants
-# + the 3 reference tables.
-STANDARD_TABLE_COUNT = CORE_TABLE_COUNT + 1 + 4 + 3
+# + the 3 reference tables + the runaway transition table.
+STANDARD_TABLE_COUNT = CORE_TABLE_COUNT + 1 + 4 + 3 + 1
 
 
 def _empty_manifest(id_: str = "probe") -> dict:
@@ -152,16 +152,16 @@ def test_core_manifest_passes_strict_11_field_validation() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_standard_composition_registers_exactly_three_packs() -> None:
+def test_standard_composition_registers_exactly_four_packs() -> None:
     registry = SchemaPackRegistry()
     register_standard_schema_packs(registry)
     frozen = registry.freeze()
-    assert list(frozen.packs) == ["references", "shots", "timeline"]
+    assert list(frozen.packs) == ["references", "runaway", "shots", "timeline"]
     assert frozen.has_pack(CORE_PACK_ID) is False  # core is registered separately
 
 
 def test_standard_composition_declares_the_fixed_pack_order() -> None:
-    assert STANDARD_SCHEMA_PACKS == ("timeline", "shots", "references")
+    assert STANDARD_SCHEMA_PACKS == ("timeline", "shots", "references", "runaway")
 
 
 def test_standard_composition_has_no_discovery_beyond_in_tree_manifests() -> None:
@@ -170,16 +170,13 @@ def test_standard_composition_has_no_discovery_beyond_in_tree_manifests() -> Non
         path.parent.name for path in packs_root.glob("*/schema-pack.yaml")
     }
 
-    # Optional schema packs may be shipped in-tree without joining the fixed
-    # standard database composition. ``runaway`` is the concrete guard that
-    # makes a glob/discovery implementation observably different from the
-    # explicit allowlist.
+    # Every standard pack is explicit; optional in-tree manifests must not
+    # silently join the registry merely because they are discoverable.
     assert set(STANDARD_SCHEMA_PACKS) <= available_manifest_ids
-    assert "runaway" in available_manifest_ids - set(STANDARD_SCHEMA_PACKS)
 
     frozen = build_pack_standard_registry()
     assert set(frozen.packs) == {CORE_PACK_ID, *STANDARD_SCHEMA_PACKS}
-    assert frozen.has_pack("runaway") is False
+    assert frozen.has_pack("runaway") is True
 
 
 def _migration_contract(
@@ -217,12 +214,12 @@ def test_pack_and_kernel_standard_registry_builders_have_exact_parity() -> None:
     assert _migration_contract(pack_registry) == _migration_contract(kernel_registry)
 
 
-def test_standard_composition_derives_20_table_catalog() -> None:
+def test_standard_composition_derives_23_table_catalog() -> None:
     registry = SchemaPackRegistry()
     register_core_vocabulary(registry)
     register_standard_schema_packs(registry)
     frozen = registry.freeze()
-    assert len(frozen.tables) == STANDARD_TABLE_COUNT == 22
+    assert len(frozen.tables) == STANDARD_TABLE_COUNT == 23
     assert frozen.tables["timelines"] == "timeline"
     assert frozen.tables["shots"] == "shots"
     assert frozen.tables["shot_items"] == "shots"
@@ -231,6 +228,7 @@ def test_standard_composition_derives_20_table_catalog() -> None:
     assert frozen.tables["project_references"] == "references"
     assert frozen.tables["media_references"] == "references"
     assert frozen.tables["reference_links"] == "references"
+    assert frozen.tables["runaway_transitions"] == "runaway"
 
 
 def test_standard_composition_declares_pack_vocabulary_and_mounts() -> None:
@@ -395,7 +393,7 @@ def _insert_stream(
 
 
 def _build_standard_frozen():
-    """Compose core + the three in-tree packs and freeze (as conftest does)."""
+    """Compose core + the four in-tree packs and freeze (as conftest does)."""
     registry = SchemaPackRegistry()
     register_core_vocabulary(registry)
     register_standard_schema_packs(registry)
@@ -1013,6 +1011,8 @@ M3_SHOT_COMMAND_KINDS = (
     "shot.reorder",
 )
 
+M3_RUNAWAY_STREAM_TYPE = "runaway.transition_set"
+
 
 def test_m3_core_run_continuation_and_evidence_vocabulary_is_declared() -> None:
     frozen = core_only_registry()
@@ -1096,6 +1096,10 @@ def test_m3_reference_and_shot_streams_have_aggregate_rules() -> None:
     assert shot_rule.declaring_pack == "shots"
     assert shot_rule.subject_type == "shot"
     assert shot_rule.aggregate_is_project is False
+    runaway_rule = aggregate_rule_for(frozen, M3_RUNAWAY_STREAM_TYPE)
+    assert runaway_rule.declaring_pack == "runaway"
+    assert runaway_rule.subject_type == "runaway"
+    assert runaway_rule.aggregate_is_project is False
 
 
 def test_m3_every_declared_stream_type_still_has_an_aggregate_rule() -> None:
@@ -1204,18 +1208,19 @@ def test_m3_pack_vocabulary_is_namespaced_and_owned() -> None:
     assert set(all_kinds).isdisjoint(CORE_COMMAND_KINDS)
 
 
-def test_standard_catalog_is_frozen_at_22_tables() -> None:
+def test_standard_catalog_is_frozen_at_23_tables() -> None:
     """Manifest ownership, not DDL: pack vocabulary adds no tables."""
     registry = SchemaPackRegistry()
     register_core_vocabulary(registry)
     register_standard_schema_packs(registry)
     frozen = registry.freeze()
-    assert len(frozen.tables) == CORE_TABLE_COUNT + 1 + 4 + 3 == 22
+    assert len(frozen.tables) == CORE_TABLE_COUNT + 1 + 4 + 3 + 1 == 23
     assert frozen.tables["project_references"] == "references"
     assert frozen.tables["media_references"] == "references"
     assert frozen.tables["reference_links"] == "references"
     assert frozen.tables["shots"] == "shots"
     assert frozen.tables["shot_items"] == "shots"
     assert frozen.tables["timelines"] == "timeline"
+    assert frozen.tables["runaway_transitions"] == "runaway"
     for table in CORE_TABLES:
         assert frozen.tables[table] == CORE_PACK_ID

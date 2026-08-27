@@ -28,11 +28,11 @@ from astrid.core.foundation.paths import REPO_ROOT
 from astrid.core.media import MediaProbe, MediaProbeError, ffprobe_metadata_strict
 from astrid.core.rendering.artifacts import validate_render_result
 from astrid.core.rendering.contracts import (
+    SCHEMA_VERSION,
     AudioOwnership,
     RenderProfile,
     RenderRequest,
     RenderResult,
-    SCHEMA_VERSION,
     SupportReport,
     VideoArtifact,
 )
@@ -46,7 +46,6 @@ from astrid.core.rendering.publication import publish_render_result
 from astrid.packs.rendering.backends.ffmpeg import audio_reactive_colour
 from astrid.packs.rendering.backends.ffmpeg.command import (
     build_render_command,
-    build_render_command_for_paths,
     build_render_command_from_data,
     validate_ffmpeg_media_timeline,
 )
@@ -54,10 +53,11 @@ from astrid.packs.rendering.backends.ffmpeg.support import (
     ALTERNATIVE_BACKENDS,
     BACKEND_ID,
     BACKEND_VERSION,
+)
+from astrid.packs.rendering.backends.ffmpeg.support import (
     support as strict_support,
 )
 from astrid.packs.rendering.backends.remotion import run as remotion_backend
-
 
 # Compatibility spellings retained while callers migrate off the facade's
 # historical private helper names.
@@ -66,9 +66,7 @@ _validate_ffmpeg_media_timeline = validate_ffmpeg_media_timeline
 
 def _input_path(raw_path: str, workspace: Path) -> Path:
     candidate = Path(raw_path).expanduser()
-    return (
-        candidate if candidate.is_absolute() else workspace / candidate
-    ).resolve()
+    return (candidate if candidate.is_absolute() else workspace / candidate).resolve()
 
 
 def _render_ffmpeg_media_to_path(
@@ -86,14 +84,10 @@ def _render_ffmpeg_media_to_path(
     rather than rendered with -an.
     """
     try:
-        timeline_data = json.loads(
-            Path(timeline_path).read_text(encoding="utf-8")
-        )
+        timeline_data = json.loads(Path(timeline_path).read_text(encoding="utf-8"))
         assets_data = timeline.load_registry(Path(assets_path))
-    except Exception as exc:
-        raise ValueError(
-            f"cannot load timeline/assets for FFmpeg render: {exc}"
-        ) from exc
+    except Exception as exc:  # noqa: BLE001 - support reports normalize adapter failures
+        raise ValueError(f"cannot load timeline/assets for FFmpeg render: {exc}") from exc
     from astrid.core.rendering.contracts import RenderRequest
 
     request = RenderRequest(
@@ -107,8 +101,7 @@ def _render_ffmpeg_media_to_path(
     report = _support(request, timeline_data, assets_data)
     if not report.supported:
         raise ValueError(
-            "FFmpeg media render refused by strict support: "
-            + "; ".join(report.reasons)
+            "FFmpeg media render refused by strict support: " + "; ".join(report.reasons)
         )
 
     output = Path(out_path)
@@ -162,9 +155,7 @@ def render(
             staged_video,
             provenance,
             out_path=out_path,
-            sidecar_path=remotion_backend._render_provenance_sidecar_path(
-                out_path
-            ),
+            sidecar_path=remotion_backend._render_provenance_sidecar_path(out_path),
             previous_outputs=previous_outputs,
         )
 
@@ -208,17 +199,12 @@ def _legacy_media_acceptance(
     assets_path: Path,
 ) -> tuple[bool, str | None]:
     try:
-        timeline_data = json.loads(
-            Path(timeline_path).read_text(encoding="utf-8")
-        )
+        timeline_data = json.loads(Path(timeline_path).read_text(encoding="utf-8"))
         if not isinstance(timeline_data, dict):
             raise ValueError("timeline must contain a JSON object")
         timeline.load_registry(Path(assets_path))
         validate_ffmpeg_media_timeline(timeline_data)
-        tracks = {
-            track.get("id"): track
-            for track in timeline_data.get("tracks", [])
-        }
+        tracks = {track.get("id"): track for track in timeline_data.get("tracks", [])}
         has_visual_media_clip = any(
             clip.get("clipType") == "media"
             and tracks.get(clip.get("track"), {}).get("kind") == "visual"
@@ -226,7 +212,7 @@ def _legacy_media_acceptance(
         )
         if not has_visual_media_clip:
             return False, "ffmpeg engine needs at least one visual media clip"
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - support reports normalize adapter failures
         return False, str(exc) or type(exc).__name__
     return True, None
 
@@ -256,7 +242,7 @@ def support(request: RenderRequest, *, workspace: Path) -> SupportReport:
         if not isinstance(timeline_data, dict):
             raise ValueError("timeline must contain a JSON object")
         assets = timeline.load_registry(assets_path)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - support reports normalize adapter failures
         return _support_load_failure(str(exc) or type(exc).__name__)
 
     localized = replace(
@@ -299,11 +285,7 @@ def _audio_reactive_ffmpeg_element(
 ) -> Any | None:
     effects, _aliases = remotion_backend._effect_registry_for_assets(theme_path)
     element = effects.get(audio_reactive_colour.EFFECT_ID)
-    if (
-        element is None
-        or element.metadata.get("ffmpegAdapter")
-        != audio_reactive_colour.ADAPTER_ID
-    ):
+    if element is None or element.metadata.get("ffmpegAdapter") != audio_reactive_colour.ADAPTER_ID:
         return None
     return element
 
@@ -327,8 +309,7 @@ def render_audio_reactive_colour_if_supported(
         not isinstance(clips, list)
         or len(clips) != 2
         or sum(
-            isinstance(clip, dict)
-            and clip.get("clipType") == audio_reactive_colour.EFFECT_ID
+            isinstance(clip, dict) and clip.get("clipType") == audio_reactive_colour.EFFECT_ID
             for clip in clips
         )
         != 1
@@ -362,8 +343,7 @@ def render_audio_reactive_colour_if_supported(
                 "clip_ids": [
                     str(clip.get("id"))
                     for clip in timeline_data.get("clips", [])
-                    if isinstance(clip, dict)
-                    and clip.get("clipType") == element.id
+                    if isinstance(clip, dict) and clip.get("clipType") == element.id
                 ],
                 "staged_asset_ids": [],
                 "staged_assets": {},
@@ -385,9 +365,7 @@ def render_audio_reactive_colour_if_supported(
             composition_id=composition_id,
             theme_path=theme_path,
             active_theme=None,
-            registry_state=remotion_backend._effective_registry_state(
-                theme_path
-            ),
+            registry_state=remotion_backend._effective_registry_state(theme_path),
             stage_summary=stage_summary,
         )
         provenance["ffmpeg_specialization"] = audio_reactive_colour.ADAPTER_ID
@@ -409,9 +387,7 @@ def render_audio_reactive_colour_if_supported(
             rendered_video,
             provenance,
             out_path=out_path,
-            sidecar_path=remotion_backend._render_provenance_sidecar_path(
-                out_path
-            ),
+            sidecar_path=remotion_backend._render_provenance_sidecar_path(out_path),
             previous_outputs=previous_outputs,
         )
 
@@ -468,13 +444,9 @@ def _profile_from_probe(
     if not probe.has_video_stream:
         raise RuntimeError("ffprobe did not report a video stream")
     if ownership is AudioOwnership.RENDERED and not probe.has_audio_stream:
-        raise RuntimeError(
-            "rendering.ffmpeg media output did not contain its rendered audio"
-        )
+        raise RuntimeError("rendering.ffmpeg media output did not contain its rendered audio")
     if ownership is not AudioOwnership.RENDERED and probe.has_audio_stream:
-        raise RuntimeError(
-            "rendering.ffmpeg visual-only output unexpectedly contained audio"
-        )
+        raise RuntimeError("rendering.ffmpeg visual-only output unexpectedly contained audio")
     audio_layout = probe.audio_channel_layout
     if audio_layout is None and probe.audio_channels == 2:
         audio_layout = "stereo"
@@ -569,9 +541,7 @@ def _protocol_render(
             raise_invalid_artifact_error(
                 backend=BACKEND_ID,
                 message=f"FFmpeg output could not be validated: {exc}",
-                recovery_command=(
-                    "rerun rendering.ffmpeg in a fresh invocation workspace"
-                ),
+                recovery_command=("rerun rendering.ffmpeg in a fresh invocation workspace"),
                 details={"error_type": type(exc).__name__},
             )
         declared_profile = request.profile or probed_profile
@@ -612,13 +582,9 @@ def _protocol_render(
                 "marker_sha256": specialization_spec.marker_sha256,
             }
             fragment["specialization"] = specialization_fragment
-            provenance_v1["ffmpeg_specialization"] = (
-                audio_reactive_colour.ADAPTER_ID
-            )
+            provenance_v1["ffmpeg_specialization"] = audio_reactive_colour.ADAPTER_ID
             provenance_v1["audio_reactive_colour"] = {
-                key: value
-                for key, value in specialization_fragment.items()
-                if key != "id"
+                key: value for key, value in specialization_fragment.items() if key != "id"
             }
         video = VideoArtifact.from_file(
             path=output_path,
@@ -631,9 +597,7 @@ def _protocol_render(
             schema_version=SCHEMA_VERSION,
             video=video,
             audio_ownership=ownership,
-            backend_fragments={
-                BACKEND_ID: fragment
-            },
+            backend_fragments={BACKEND_ID: fragment},
             normalization=[],
             logs=[],
             metadata=request.metadata,

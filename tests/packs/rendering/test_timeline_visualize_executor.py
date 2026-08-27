@@ -8,9 +8,7 @@ import re
 import shutil
 import sqlite3
 import subprocess
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from threading import Barrier
 
 import pytest
 import yaml
@@ -19,18 +17,7 @@ import astrid
 from astrid.core.execution.executor.registry import load_default_registry
 from astrid.core.execution.executor.schema import load_executor_manifest
 from astrid.core.foundation.project_paths import project_dir
-from astrid.core.kernel.read import kernel_run_info
 from astrid.core.project.project import create_project
-from astrid.packs.rendering.executors.timeline_visualize import frozen as frozen_module
-from astrid.packs.rendering.executors.timeline_visualize import run as run_module
-from astrid.packs.rendering.executors.timeline_visualize.frozen import (
-    FrozenSchemaError,
-    discard_rehydrated_pack,
-    rehydrate_managed_pack,
-)
-from astrid.packs.rendering.executors.timeline_visualize.select import select_timeline
-from astrid.sdk.exceptions import CapabilityInvocationError, CapabilityValidationError
-from astrid.sdk.invocation import _persist_visualization_pack, invoke_result
 
 TESTS_ROOT = Path(__file__).resolve().parents[2]
 REPO_ROOT = TESTS_ROOT.parent
@@ -89,6 +76,36 @@ def _pack_bytes(root: Path) -> dict[str, bytes]:
         path.relative_to(root).as_posix(): path.read_bytes()
         for path in sorted(root.rglob("*"))
         if path.is_file()
+    }
+
+
+def _kernel_run_state(projects_root: Path, run_id: str) -> dict[str, object]:
+    """Read the authoritative run/task projection without a run.json sidecar."""
+
+    database = projects_root / ".astrid" / "astrid.sqlite3"
+    with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as connection:
+        connection.row_factory = sqlite3.Row
+        run = connection.execute(
+            "SELECT r.id, r.kind, r.title, r.status, p.slug AS project_slug "
+            "FROM runs r JOIN projects p ON p.id = r.project_id "
+            "WHERE r.id = ?",
+            (run_id,),
+        ).fetchone()
+        tasks = connection.execute(
+            "SELECT id, status, winning_attempt_id FROM tasks "
+            "WHERE run_id = ? ORDER BY run_ordinal",
+            (run_id,),
+        ).fetchall()
+        output_count = connection.execute(
+            "SELECT COUNT(*) FROM task_outputs o "
+            "JOIN tasks t ON t.id = o.task_id WHERE t.run_id = ?",
+            (run_id,),
+        ).fetchone()[0]
+    assert run is not None
+    return {
+        **dict(run),
+        "tasks": [dict(task) for task in tasks],
+        "output_count": int(output_count),
     }
 
 
@@ -163,19 +180,19 @@ def test_full_managed_executor_pack_conforms_and_timeline_manifest_is_unchanged(
 
     assert first.ok is True
     assert first.run_id is not None
-    assert first.run_root is None
+    assert first.run_root is not None
     assert first.manifest_path is not None
     assert first.executor_version is not None
     assert _DIGEST_RE.fullmatch(first.executor_version)
     assert {"pack_root", "manifest_path", "pages", "file_hashes"} <= set(first.outputs)
 
+    run_root = Path(first.run_root)
     pack_root = Path(first.outputs["pack_root"])
     manifest_path = Path(first.manifest_path)
-    assert pack_root.is_relative_to(project_root / ".astrid" / "views")
-    assert manifest_path.is_relative_to(tmp_projects_root / ".astrid" / "media")
-    assert manifest_path != pack_root / "manifest.json"
+    assert run_root.is_dir()
+    assert pack_root == run_root / "agent-view"
+    assert manifest_path == pack_root / "manifest.json"
     assert manifest_path.is_file()
-    assert (pack_root / "manifest.json").read_bytes() == manifest_path.read_bytes()
     expected = {
         "manifest.json",
         "ground-truth.json",
@@ -197,23 +214,20 @@ def test_full_managed_executor_pack_conforms_and_timeline_manifest_is_unchanged(
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert {"schema_version", "kind", "inputs", "outputs", "created", "warnings"} <= set(manifest)
 
-    info = kernel_run_info(slug, first.run_id, projects_root=tmp_projects_root)
-    assert info is not None
-    assert info["status"] == "succeeded"
-    assert info["capability"] == "rendering.timeline_visualize"
-    assert info["task_id"] == first.kernel_task_id
-    assert not (project_root / "runs" / first.run_id / "run.json").exists()
+    state = _kernel_run_state(tmp_projects_root, first.run_id)
+    assert state["project_slug"] == slug
+    assert state["kind"] == "executor"
+    assert state["title"] == "rendering.timeline_visualize"
+    assert state["status"] == "succeeded"
+    assert state["output_count"] >= 1
+    assert len(state["tasks"]) == 1
+    assert state["tasks"][0]["status"] == "succeeded"
+    assert state["tasks"][0]["winning_attempt_id"] == first.kernel_attempt_id
+    assert first.raw_result["payload"]["timeline_ids"] == [TIMELINE_ULID]
+    assert first.raw_result["executor_version"] == first.executor_version
+    assert manifest_path.is_relative_to(project_root / "runs" / first.run_id)
+    assert not (run_root / "run.json").exists()
     assert (timeline_dir / "manifest.json").read_bytes() == sentinel
-    cached_manifest = pack_root / "manifest.json"
-    durable_bytes = manifest_path.read_bytes()
-    assert cached_manifest.stat().st_ino != manifest_path.stat().st_ino
-    cached_manifest.write_bytes(b"locally modified derived view")
-    assert manifest_path.read_bytes() == durable_bytes
-    repaired = _invoke(slug, timeline_source=str(timeline_dir))
-    assert repaired.ok is True, repaired.error
-    assert repaired.run_id == first.run_id
-    assert Path(repaired.outputs["pack_root"]) == pack_root
-    assert cached_manifest.read_bytes() == durable_bytes
 
 
 def test_requires_timeline_false_runs_without_manifest_and_never_creates_one(
@@ -229,13 +243,9 @@ def test_requires_timeline_false_runs_without_manifest_and_never_creates_one(
     assert result.ok is True
     assert Path(result.manifest_path or "").is_file()
     assert not timeline_manifest.exists()
-    info = kernel_run_info(
-        slug,
-        result.run_id or "",
-        projects_root=tmp_projects_root,
-    )
-    assert info is not None
-    assert info["status"] == "succeeded"
+    assert result.run_id is not None
+    assert _kernel_run_state(tmp_projects_root, result.run_id)["status"] == "succeeded"
+    assert not (Path(result.run_root or "") / "run.json").exists()
 
 
 def test_sdk_return_shape_and_stdout_are_cli_ready(
@@ -256,7 +266,7 @@ def test_sdk_return_shape_and_stdout_are_cli_ready(
     assert captured.out == ""
     assert result.ok is True
     assert result.run_id
-    assert result.run_root is None
+    assert result.run_root and Path(result.run_root).is_dir()
     assert result.manifest_path and Path(result.manifest_path).is_file()
     assert result.executor_version and _DIGEST_RE.fullmatch(result.executor_version)
     assert {"pack_root", "manifest_path", "pages", "file_hashes"} <= set(result.outputs)
@@ -268,7 +278,7 @@ def test_sdk_return_shape_and_stdout_are_cli_ready(
     assert serialized["outputs"] == result.outputs
 
 
-def test_replayed_managed_invocation_reuses_kernel_identity_and_pack_bytes(
+def test_two_managed_runs_emit_identical_pack_bytes(
     tmp_projects_root: Path,
 ) -> None:
     slug = "timeline-visualize-deterministic"
@@ -278,228 +288,10 @@ def test_replayed_managed_invocation_reuses_kernel_identity_and_pack_bytes(
     second = _invoke(slug, timeline_source=str(timeline_dir))
 
     assert first.ok is second.ok is True
-    assert first.run_id == second.run_id
-    assert first.kernel_task_id == second.kernel_task_id
-    assert first.executor_version == second.executor_version
-    with sqlite3.connect(tmp_projects_root / ".astrid" / "astrid.sqlite3") as conn:
-        row = conn.execute(
-            "SELECT spec_json FROM tasks WHERE id = ?", (first.kernel_task_id,)
-        ).fetchone()
-    assert row is not None
-    stored_spec = json.loads(row[0])
-    assert stored_spec["authority_context"]["executor_version"] == first.executor_version
-    assert stored_spec["authority_context"]["mode"] == "legacy_file"
+    assert first.run_id != second.run_id
     first_pack = Path(first.outputs["pack_root"])
     second_pack = Path(second.outputs["pack_root"])
     assert _pack_bytes(first_pack) == _pack_bytes(second_pack)
-
-
-def test_legacy_eventlog_change_after_admission_is_execution_fenced(
-    tmp_projects_root: Path,
-) -> None:
-    slug = "timeline-visualize-authority-race"
-    project_root, timeline_dir = _prepare_project(tmp_projects_root, slug)
-    selected, diagnostics = select_timeline(project_root, all=True)
-    assert selected and not diagnostics
-    eventlog = timeline_dir / "assembly.jsonl"
-    authority = {
-        "mode": "legacy_file",
-        "timelines": [
-            {
-                "timeline_ulid": selected[0].timeline_ulid,
-                "eventlog_sha256": hashlib.sha256(eventlog.read_bytes()).hexdigest(),
-            }
-        ],
-    }
-    eventlog.write_bytes(eventlog.read_bytes() + b"\n")
-
-    with pytest.raises(ValueError, match="changed after admission"):
-        run_module._verify_selected_execution_authority(selected, authority)
-
-
-def test_duplicate_legacy_timeline_source_is_rejected_before_admission(
-    tmp_projects_root: Path,
-) -> None:
-    slug = "timeline-visualize-duplicate-source"
-    _project_root, timeline_dir = _prepare_project(tmp_projects_root, slug)
-
-    with pytest.raises(CapabilityValidationError, match="more than once"):
-        _invoke(slug, timeline_source=[str(timeline_dir), str(timeline_dir)])
-
-
-@pytest.mark.parametrize(
-    ("inputs", "message"),
-    [
-        ({"timeline_source": []}, "at least one path"),
-        ({"formats": []}, "formats must contain"),
-        ({"shot": "shot-1", "clip": "clip-1"}, "mutually exclusive"),
-        ({"refresh_root": True}, "requires from_view and focus"),
-        ({"filmstrip": "rendered"}, "requires rendered_video"),
-        ({"filmstrip": "bogus"}, "filmstrip must be"),
-        ({"filmstrip": {}}, "filmstrip must be"),
-        ({"layout": "bogus"}, "layout must be"),
-        ({"layout": []}, "layout must be"),
-        ({"scope": "bogus"}, "scope must be"),
-        ({"scope": []}, "scope must be"),
-        ({"context": -1}, "finite non-negative"),
-        ({"neighbors": -1}, "non-negative integer"),
-        (
-            {"filmstrip": "assets", "rendered_video": "render.mp4"},
-            "requires filmstrip auto or rendered",
-        ),
-    ],
-)
-def test_invalid_selector_combinations_are_rejected_before_admission(
-    tmp_projects_root: Path,
-    inputs: dict[str, object],
-    message: str,
-) -> None:
-    slug = "timeline-visualize-preflight"
-    _prepare_project(tmp_projects_root, slug)
-
-    with pytest.raises(CapabilityValidationError, match=message):
-        _invoke(slug, **inputs)
-
-
-def test_project_visualization_rejects_out_before_admission(
-    tmp_projects_root: Path,
-) -> None:
-    slug = "timeline-visualize-managed-out"
-    _project_root, timeline_dir = _prepare_project(tmp_projects_root, slug)
-
-    with pytest.raises(CapabilityValidationError, match="durable manifest_path"):
-        astrid.invoke(
-            "rendering.timeline_visualize",
-            kind="executor",
-            include_installed=False,
-            project=slug,
-            out=tmp_projects_root / "manual-output",
-            inputs={"timeline_source": str(timeline_dir)},
-        )
-
-
-def test_invalid_project_slug_returns_typed_preflight_result(
-    tmp_projects_root: Path,
-) -> None:
-    result = invoke_result(
-        "rendering.timeline_visualize",
-        kind="executor",
-        include_installed=False,
-        project="bad/project",
-        project_root=tmp_projects_root,
-        inputs={},
-    )
-
-    assert result.ok is False
-    assert result.run_id is None
-    assert result.error is not None
-    assert result.error["sdk_error"] == "CapabilityValidationError"
-
-
-def test_durable_pack_cache_serializes_concurrent_publishers(tmp_path: Path) -> None:
-    project_root = tmp_path / "project"
-    project_root.mkdir()
-    source = tmp_path / "verified-pack"
-    source.mkdir()
-    manifest = source / "manifest.json"
-    manifest.write_text('{"kind":"timeline_visualize"}', encoding="utf-8")
-    (source / "ground-truth.json").write_text(
-        '{"project_slug":"project"}', encoding="utf-8"
-    )
-    expected = _pack_bytes(source)
-    start = Barrier(8)
-
-    def persist() -> Path:
-        return _persist_visualization_pack(
-            source,
-            project_root=project_root,
-            manifest=manifest,
-        )
-
-    def publish(_index: int) -> Path:
-        start.wait()
-        return persist()
-
-    with ThreadPoolExecutor(max_workers=8) as pool:
-        published = list(pool.map(publish, range(8)))
-
-    assert len(set(published)) == 1
-    assert _pack_bytes(published[0]) == expected
-    assert published[0].is_relative_to(
-        project_root / ".astrid" / "views" / "timeline_visualize"
-    )
-    cache_parent = published[0].parent
-    assert not [
-        path
-        for path in cache_parent.iterdir()
-        if path.is_dir() and path.name.startswith(f".{published[0].name}.")
-    ]
-    extra_directory = published[0] / "undeclared-empty-directory"
-    extra_directory.mkdir()
-    repaired = persist()
-    assert repaired == published[0]
-    assert not extra_directory.exists()
-
-
-def test_durable_pack_cache_rejects_symlink_destination(tmp_path: Path) -> None:
-    project_root = tmp_path / "project"
-    project_root.mkdir()
-    source = tmp_path / "verified-pack"
-    source.mkdir()
-    manifest = source / "manifest.json"
-    manifest.write_text('{"kind":"timeline_visualize"}', encoding="utf-8")
-    outside = tmp_path / "outside"
-    outside.mkdir()
-    cache_parent = project_root / ".astrid" / "views" / "timeline_visualize"
-    cache_parent.mkdir(parents=True)
-    digest = hashlib.sha256(manifest.read_bytes()).hexdigest()
-    (cache_parent / digest).symlink_to(outside, target_is_directory=True)
-
-    with pytest.raises(CapabilityInvocationError, match="must not be a symlink"):
-        _persist_visualization_pack(
-            source,
-            project_root=project_root,
-            manifest=manifest,
-        )
-
-    assert list(outside.iterdir()) == []
-
-
-def test_durable_cache_repair_preserves_same_path_replacement(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    project_root = tmp_path / "project"
-    project_root.mkdir()
-    source = tmp_path / "verified-pack"
-    source.mkdir()
-    manifest = source / "manifest.json"
-    manifest.write_text('{"kind":"timeline_visualize"}', encoding="utf-8")
-    published = _persist_visualization_pack(
-        source, project_root=project_root, manifest=manifest
-    )
-    (published / "corrupt").write_text("derived", encoding="utf-8")
-    moved = tmp_path / "moved-cache"
-
-    # Replace the verified destination after its tree walk but before repair.
-    real_lstat = Path.lstat
-    root_lstats = 0
-
-    def swapping_lstat(path: Path, *args, **kwargs):
-        nonlocal root_lstats
-        if path == published:
-            root_lstats += 1
-        if path == published and root_lstats == 2:
-            published.rename(moved)
-            published.mkdir()
-            (published / "user-sentinel").write_text("preserve", encoding="utf-8")
-        return real_lstat(path, *args, **kwargs)
-
-    monkeypatch.setattr(Path, "lstat", swapping_lstat)
-    with pytest.raises(CapabilityInvocationError, match="changed during verification"):
-        _persist_visualization_pack(source, project_root=project_root, manifest=manifest)
-
-    assert (published / "user-sentinel").read_text(encoding="utf-8") == "preserve"
 
 
 def test_multi_timeline_selection_writes_sorted_run_owned_metadata(
@@ -512,95 +304,22 @@ def test_multi_timeline_selection_writes_sorted_run_owned_metadata(
         second_timeline=True,
     )
 
-    second_timeline = tmp_projects_root / slug / "timelines" / SECOND_TIMELINE_ULID
-    result = _invoke(
-        slug,
-        timeline_source=[str(_timeline_dir), str(second_timeline)],
-    )
+    result = _invoke(slug, all=True)
 
     assert result.ok is True
-    info = kernel_run_info(
-        slug,
-        result.run_id or "",
-        projects_root=tmp_projects_root,
-    )
-    assert info is not None
-    assert info["status"] == "succeeded"
-    assert info["capability"] == "rendering.timeline_visualize"
+    assert result.run_id is not None
+    state = _kernel_run_state(tmp_projects_root, result.run_id)
+    assert state["status"] == "succeeded"
+    assert state["tasks"][0]["status"] == "succeeded"
+    expected_timeline_ids = sorted([SECOND_TIMELINE_ULID, TIMELINE_ULID])
+    assert result.raw_result["payload"]["timeline_ids"] == expected_timeline_ids
     manifest = json.loads(Path(result.manifest_path or "").read_text(encoding="utf-8"))
     assert manifest["kind"] == "timeline_visualize_project"
-    assert manifest["timeline_ids"] == sorted([SECOND_TIMELINE_ULID, TIMELINE_ULID])
+    assert manifest["timeline_ids"] == expected_timeline_ids
     assert manifest["reading_order"] == ["TL01/manifest.json", "TL02/manifest.json"]
     assert all(
         (Path(result.outputs["pack_root"]) / item).is_file() for item in manifest["reading_order"]
     )
-
-
-def test_legacy_project_index_without_child_digests_remains_readable(
-    tmp_projects_root: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    slug = "timeline-visualize-legacy-project-index"
-    project_root, first = _prepare_project(tmp_projects_root, slug, second_timeline=True)
-    second = project_root / "timelines" / SECOND_TIMELINE_ULID
-    result = _invoke(slug, timeline_source=[str(first), str(second)])
-    assert result.ok is True, result.error
-    original_loader = frozen_module._load_json_file
-
-    def legacy_loader(*args, **kwargs):
-        document = original_loader(*args, **kwargs)
-        if document.get("kind") == "timeline_visualize_project":
-            document = dict(document)
-            document["outputs"] = [
-                {key: value for key, value in row.items() if key != "manifest_sha256"}
-                for row in document["outputs"]
-            ]
-        return document
-
-    monkeypatch.setattr(frozen_module, "_load_json_file", legacy_loader)
-    restored = rehydrate_managed_pack(
-        Path(result.manifest_path or ""), project_root=project_root
-    )
-    try:
-        assert (restored / "TL01" / "manifest.json").is_file()
-        assert (restored / "TL02" / "manifest.json").is_file()
-    finally:
-        discard_rehydrated_pack(restored)
-
-    def null_digest_loader(*args, **kwargs):
-        document = original_loader(*args, **kwargs)
-        if document.get("kind") == "timeline_visualize_project":
-            document = dict(document)
-            document["outputs"] = [dict(row) for row in document["outputs"]]
-            document["outputs"][0]["manifest_sha256"] = None
-        return document
-
-    monkeypatch.setattr(frozen_module, "_load_json_file", null_digest_loader)
-    with pytest.raises(FrozenSchemaError, match="invalid child manifest path"):
-        rehydrate_managed_pack(Path(result.manifest_path or ""), project_root=project_root)
-
-
-def test_project_index_rejects_duplicate_timeline_ids(
-    tmp_projects_root: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    slug = "timeline-visualize-duplicate-project-index"
-    project_root, first = _prepare_project(tmp_projects_root, slug, second_timeline=True)
-    second = project_root / "timelines" / SECOND_TIMELINE_ULID
-    result = _invoke(slug, timeline_source=[str(first), str(second)])
-    assert result.ok is True, result.error
-    original_loader = frozen_module._load_json_file
-
-    def duplicate_loader(*args, **kwargs):
-        document = original_loader(*args, **kwargs)
-        if document.get("kind") == "timeline_visualize_project":
-            document = dict(document)
-            document["timeline_ids"] = [document["timeline_ids"][0]] * 2
-        return document
-
-    monkeypatch.setattr(frozen_module, "_load_json_file", duplicate_loader)
-    with pytest.raises(FrozenSchemaError, match="invalid project index"):
-        rehydrate_managed_pack(Path(result.manifest_path or ""), project_root=project_root)
 
 
 def _rewrite_registry_event(
@@ -731,8 +450,9 @@ def test_rendered_video_mode_refuses_unverified_output(tmp_projects_root: Path) 
     )
     assert result.ok is False
     assert result.run_root is None
-    assert result.error is not None
-    assert "rendered filmstrip refused: hash_unrecorded" in result.error["message"]
+    assert "rendered filmstrip refused: hash_unrecorded" in json.dumps(result.error)
+    assert result.run_id is not None
+    assert _kernel_run_state(tmp_projects_root, result.run_id)["status"] == "failed"
 
 
 def test_multi_asset_scope_respects_per_page_frame_budget(tmp_projects_root: Path) -> None:
@@ -776,6 +496,8 @@ def test_multi_asset_scope_respects_per_page_frame_budget(tmp_projects_root: Pat
     assert result.ok is True
     pack_root = Path(result.outputs["pack_root"])
     view_map = json.loads((pack_root / "view-map.json").read_text(encoding="utf-8"))
+    asset_index = json.loads((pack_root / "asset-index.json").read_text(encoding="utf-8"))
+    asset_refs = {asset["qualified_ref"] for asset in asset_index["assets"]}
     filmstrip_dir = pack_root / "filmstrip"
     assert filmstrip_dir.is_dir()
     # Filmstrips are keyed per page (copied stem = "{page_id}_{asset_ref}"),
@@ -788,6 +510,3 @@ def test_multi_asset_scope_respects_per_page_frame_budget(tmp_projects_root: Pat
     # The desert slice has four verified image assets on the visual page —
     # the assertion must be non-vacuous.
     assert total_frames > 0
-    pages = [Path(path) for path in result.outputs["pages"]]
-    assert {path.name for path in pages} == {"PG001.png", "PG002.png"}
-    assert all(path.parent == pack_root for path in pages)

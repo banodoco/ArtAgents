@@ -13,7 +13,7 @@ import math
 import re
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Mapping, Sequence
 
 from astrid.packs.rendering.executors.timeline_visualize.model import (
     ClipModel,
@@ -53,12 +53,8 @@ class SpeechOccurrence:
     asset_key: str | None = None
 
 
-_SRT_TIME_RE = re.compile(
-    r"^(?P<a>\d{1,}):(?P<b>[0-5]\d):(?P<c>[0-5]\d)[,.](?P<ms>\d{3})$"
-)
-_VTT_TIME_RE = re.compile(
-    r"^(?:(?P<a>\d{1,}):)?(?P<b>[0-5]?\d):(?P<c>[0-5]\d)\.(?P<ms>\d{3})$"
-)
+_SRT_TIME_RE = re.compile(r"^(?P<a>\d{1,}):(?P<b>[0-5]\d):(?P<c>[0-5]\d)[,.](?P<ms>\d{3})$")
+_VTT_TIME_RE = re.compile(r"^(?:(?P<a>\d{1,}):)?(?P<b>[0-5]?\d):(?P<c>[0-5]\d)\.(?P<ms>\d{3})$")
 
 
 def transcript_segment_authored_id(transcript_sha256: str, segment_id: str) -> str:
@@ -71,9 +67,7 @@ def transcript_segment_authored_id(transcript_sha256: str, segment_id: str) -> s
     return f"transcript:{transcript_sha256}:segment:{segment_id}"
 
 
-def speech_occurrence_authored_id(
-    transcript_sha256: str, segment_id: str, clip_id: str
-) -> str:
+def speech_occurrence_authored_id(transcript_sha256: str, segment_id: str, clip_id: str) -> str:
     """Canonical SP identity for one source segment carried by one clip."""
 
     scoped = transcript_segment_authored_id(transcript_sha256, segment_id)
@@ -173,7 +167,12 @@ def _cue_time(value: str, *, vtt: bool) -> float:
     if match is None:
         raise ValueError(f"invalid {'VTT' if vtt else 'SRT'} timestamp {value!r}")
     hours = int(match.group("a") or 0)
-    return hours * 3600 + int(match.group("b")) * 60 + int(match.group("c")) + int(match.group("ms")) / 1000
+    return (
+        hours * 3600
+        + int(match.group("b")) * 60
+        + int(match.group("c"))
+        + int(match.group("ms")) / 1000
+    )
 
 
 def _cue_segments(path: Path, *, vtt: bool) -> list[TranscriptSegment]:
@@ -269,7 +268,11 @@ def resolve_attachment_asset_key(
 def _source_window(clip: ClipModel) -> tuple[float, float]:
     source = clip.source or {}
     raw_from = source.get("from", 0.0)
-    source_from = float(raw_from) if isinstance(raw_from, (int, float)) and not isinstance(raw_from, bool) else 0.0
+    source_from = (
+        float(raw_from)
+        if isinstance(raw_from, (int, float)) and not isinstance(raw_from, bool)
+        else 0.0
+    )
     raw_to = source.get("to")
     if isinstance(raw_to, (int, float)) and not isinstance(raw_to, bool):
         source_to = float(raw_to)
@@ -315,7 +318,10 @@ def map_occurrences(
             if timeline_end <= timeline_start:
                 continue
             clipped = overlap_start != segment.source_start or overlap_end != segment.source_end
-            if timeline_start != clip.authored.start + local_start or timeline_end != clip.authored.start + local_end:
+            if (
+                timeline_start != clip.authored.start + local_start
+                or timeline_end != clip.authored.start + local_end
+            ):
                 clipped = True
             effective_start = max(clip.effective.start, mounted_start + local_start, 0.0)
             effective_end = min(clip.effective.end, mounted_start + local_end, composition_end)

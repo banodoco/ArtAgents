@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import email
 import os
-import shutil
 import sqlite3
 import subprocess
 import sys
 import zipfile
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -42,6 +42,13 @@ EXPECTED_RUNTIME_MODULES = {
     "astrid/packs/shots/repository.py",
     "astrid/packs/references/__init__.py",
     "astrid/packs/references/repository.py",
+    "astrid/packs/runaway/__init__.py",
+    "astrid/packs/runaway/repository.py",
+    "astrid/packs/typed_timeline/mapper.py",
+    "astrid/packs/typed_timeline/sources.py",
+    "astrid/packs/typed_timeline/common.py",
+    "astrid/packs/typed_timeline/executors/map/run.py",
+    "astrid/packs/typed_timeline/orchestrators/render/run.py",
 }
 EXPECTED_RESOURCES = {
     "astrid/core/migrations/sql/core/0001_initial.sql",
@@ -49,8 +56,16 @@ EXPECTED_RESOURCES = {
     "astrid/packs/timeline/migrations/0001_initial.sql",
     "astrid/packs/shots/schema-pack.yaml",
     "astrid/packs/shots/migrations/0001_initial.sql",
+    "astrid/packs/shots/migrations/0002_generations.sql",
     "astrid/packs/references/schema-pack.yaml",
     "astrid/packs/references/migrations/0001_initial.sql",
+    "astrid/packs/runaway/schema-pack.yaml",
+    "astrid/packs/runaway/migrations/0001_initial.sql",
+    "astrid/packs/typed_timeline/pack.yaml",
+    "astrid/packs/typed_timeline/mappings/runaway_colour.yaml",
+    "astrid/packs/typed_timeline/mappings/runaway_text.yaml",
+    "astrid/packs/typed_timeline/executors/map/executor.yaml",
+    "astrid/packs/typed_timeline/orchestrators/render/orchestrator.yaml",
     "astrid/core/rendering/schemas/v1/request.json",
     "astrid/core/rendering/fixtures/renderer_parity/remotion_backend_wrapper.py",
     "astrid/packs/rendering/pack.yaml",
@@ -74,45 +89,16 @@ FORBIDDEN_WHEEL_MARKERS = (
 )
 
 
-def _snapshot_ignore(_directory: str, names: list[str]) -> set[str]:
-    ignored = {
-        ".git",
-        ".megaplan",
-        ".pytest_cache",
-        ".mypy_cache",
-        ".ruff_cache",
-        "__pycache__",
-        "build",
-        "dist",
-        "out",
-        "runs",
-        "projects",
-        "node_modules",
-        ".venv",
-        "venv",
-        "astrid.egg-info",
-    }
-    return {name for name in names if name in ignored or name.endswith(".egg-info")}
-
-
 @pytest.fixture(scope="module")
-def wheel(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    root = tmp_path_factory.mktemp("m8-packaging")
-    source = root / "source"
-    shutil.copytree(REPO_ROOT, source, ignore=_snapshot_ignore)
-    dist = root / "dist"
-    dist.mkdir()
-    result = subprocess.run(
-        [sys.executable, "-m", "build", "--wheel", "--outdir", str(dist)],
-        cwd=source,
-        capture_output=True,
-        text=True,
-        check=False,
+def wheel(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
+    harness = build_once(
+        REPO_ROOT,
+        workspace=tmp_path_factory.mktemp("m8-packaging") / "harness",
     )
-    assert result.returncode == 0, result.stdout + result.stderr
-    wheels = sorted(dist.glob("*.whl"))
-    assert len(wheels) == 1, [path.name for path in wheels]
-    return wheels[0]
+    try:
+        yield harness.artifact.path
+    finally:
+        harness.close()
 
 
 @pytest.fixture(scope="module")
@@ -217,6 +203,7 @@ def test_wheel_contains_complete_resource_matrix_and_excludes_authoring_material
         "astrid/packs/timeline/schema-pack.yaml",
         "astrid/packs/shots/schema-pack.yaml",
         "astrid/packs/references/schema-pack.yaml",
+        "astrid/packs/runaway/schema-pack.yaml",
     } <= names
 
 
@@ -300,6 +287,7 @@ def test_too_new_core_and_pack_migrations_refuse_without_mutation(
     assert database.read_bytes() == before
 
 
+@pytest.mark.timeout(300)
 def test_shared_harness_smoke_checks_installed_basics_and_failure_boundaries(
     tmp_path: Path,
 ) -> None:
@@ -340,7 +328,9 @@ def test_shared_harness_smoke_checks_installed_basics_and_failure_boundaries(
                 "from importlib import resources; "
                 "required=('core/migrations/sql/core/0001_initial.sql',"
                 "'packs/timeline/schema-pack.yaml','packs/shots/schema-pack.yaml',"
-                "'packs/references/schema-pack.yaml'); "
+                "'packs/references/schema-pack.yaml','packs/runaway/schema-pack.yaml',"
+                "'packs/runaway/migrations/0001_initial.sql',"
+                "'packs/typed_timeline/executors/map/executor.yaml'); "
                 "root=resources.files('astrid'); "
                 "missing=[name for name in required if not root.joinpath(*name.split('/')).is_file()]; "
                 "assert not missing, missing; print('resources: OK')",

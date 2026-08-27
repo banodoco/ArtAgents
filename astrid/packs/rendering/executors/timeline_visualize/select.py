@@ -139,9 +139,7 @@ _MANIFEST_FULL_TOP_LEVEL_KEYS = frozenset(
         "companions",
     }
 )
-_MANIFEST_COMPACT_TOP_LEVEL_KEYS = frozenset(
-    {"schema_version", "kind", "snapshots", "timeline"}
-)
+_MANIFEST_COMPACT_TOP_LEVEL_KEYS = frozenset({"schema_version", "kind", "snapshots", "timeline"})
 
 # ``_defs.json#/$defs/timeline_snapshot``: a snapshot carries the identity plus
 # ``digest`` (``SNS:<64 hex>``), ``event_head`` and ``fps`` (> 0); closed shape.
@@ -280,9 +278,7 @@ def select_kernel_timelines(
             continue
         if isinstance(assets.get("assets"), dict):
             assets = assets["assets"]
-        managed_media = importlib.import_module(
-            "astrid.core.io.managed_media_resolver"
-        )
+        managed_media = importlib.import_module("astrid.core.io.managed_media_resolver")
         assets = managed_media.rebase_timeline_registry_managed_assets(
             {"assets": assets},
             projects_root=Path(project_dir).resolve().parent,
@@ -316,7 +312,8 @@ def select_kernel_timelines(
     if slug is not None:
         needle = str(slug).strip().lower()
         matches = [
-            item for item in timelines
+            item
+            for item in timelines
             if item.slug.lower() == needle
             or item.timeline_id.lower() == needle
             or item.timeline_ulid.lower() == needle
@@ -550,27 +547,21 @@ def _select_by_slug(
         for t in timelines
         if not t.is_tombstoned
         and (
-            t.slug == raw
-            or t.timeline_id.lower() == lowered
-            or t.timeline_ulid.lower() == lowered
+            t.slug == raw or t.timeline_id.lower() == lowered or t.timeline_ulid.lower() == lowered
         )
     ]
     if len(matches) == 1:
         return matches, diagnostics
     if len(matches) > 1:
         ulids = ", ".join(t.timeline_ulid for t in matches)
-        diagnostics.append(
-            f"ambiguous slug {slug!r} matches {len(matches)} timelines: {ulids}"
-        )
+        diagnostics.append(f"ambiguous slug {slug!r} matches {len(matches)} timelines: {ulids}")
         return [], diagnostics
     tombstoned = [
         t
         for t in timelines
         if t.is_tombstoned
         and (
-            t.slug == raw
-            or t.timeline_id.lower() == lowered
-            or t.timeline_ulid.lower() == lowered
+            t.slug == raw or t.timeline_id.lower() == lowered or t.timeline_ulid.lower() == lowered
         )
     ]
     if tombstoned:
@@ -597,8 +588,7 @@ def _select_default(
         diagnostics.append("no eligible (non-tombstoned) managed timelines found")
         return [], diagnostics
     diagnostics.append(
-        f"no timeline marked default and {len(eligible)} timelines exist "
-        "(expected exactly 1)"
+        f"no timeline marked default and {len(eligible)} timelines exist (expected exactly 1)"
     )
     return [], diagnostics
 
@@ -696,7 +686,7 @@ def _rewrite_defs_refs(value: object) -> object:
                 and isinstance(nested, str)
                 and nested.startswith("_defs.json#/$defs/")
             ):
-                rewritten[key] = f"#/$defs/{nested[len('_defs.json#/$defs/'):]}"
+                rewritten[key] = f"#/$defs/{nested[len('_defs.json#/$defs/') :]}"
             else:
                 rewritten[key] = _rewrite_defs_refs(nested)
         return rewritten
@@ -729,14 +719,10 @@ def _manifest_full_validator() -> object | None:
         defs = json.loads((schemas_dir / "_defs.json").read_text(encoding="utf-8"))
         manifest_schema = json.loads((schemas_dir / "manifest.json").read_text(encoding="utf-8"))
         combined = {
-            key: value
-            for key, value in manifest_schema.items()
-            if key not in ("$schema", "$id")
+            key: value for key, value in manifest_schema.items() if key not in ("$schema", "$id")
         }
         combined["$defs"] = defs["$defs"]
-        _MANIFEST_FULL_VALIDATOR = jsonschema.Draft202012Validator(
-            _rewrite_defs_refs(combined)
-        )
+        _MANIFEST_FULL_VALIDATOR = jsonschema.Draft202012Validator(_rewrite_defs_refs(combined))
     except Exception:  # noqa: BLE001 - fall back to the hand mirror
         _MANIFEST_FULL_VALIDATOR = None
     return _MANIFEST_FULL_VALIDATOR
@@ -828,9 +814,7 @@ def _manifest_event_head_problem(event_head: dict) -> str | None:
         if last_event_id is not None or last_hash is not None:
             return "event_head version 0 requires null last_event_id and last_hash"
         return None
-    if not isinstance(last_event_id, str) or _MANIFEST_ULID_RE.fullmatch(
-        last_event_id
-    ) is None:
+    if not isinstance(last_event_id, str) or _MANIFEST_ULID_RE.fullmatch(last_event_id) is None:
         return "event_head last_event_id is not an uppercase canonical ULID"
     if not isinstance(last_hash, str) or _RAW_SHA256_RE.fullmatch(last_hash) is None:
         return "event_head last_hash is not a raw sha256"
@@ -858,9 +842,10 @@ def _manifest_identity_field_problem(identity: dict) -> str | None:
         return "timeline identity qualified_ref is not a valid TL reference"
     if _canonical_uuid(identity["uuid"]) is None:
         return "timeline identity uuid is not a canonical UUID"
-    if not isinstance(identity["ulid"], str) or _MANIFEST_ULID_RE.fullmatch(
-        identity["ulid"]
-    ) is None:
+    if (
+        not isinstance(identity["ulid"], str)
+        or _MANIFEST_ULID_RE.fullmatch(identity["ulid"]) is None
+    ):
         return "timeline identity ulid is not an uppercase canonical ULID"
     slug = identity["slug"]
     if not isinstance(slug, str) or _SLUG_RE.fullmatch(slug) is None:
@@ -975,9 +960,7 @@ def _manifest_identity_problem(manifest: dict) -> str | None:
             return None
     compact_validator = _manifest_validator()
     if compact_validator is not None:
-        compact_errors = [
-            error.message for error in compact_validator.iter_errors(manifest)
-        ]
+        compact_errors = [error.message for error in compact_validator.iter_errors(manifest)]
         if not compact_errors:
             if _manifest_timeline_identity(manifest) is None:
                 return "manifest carries no timeline identity"

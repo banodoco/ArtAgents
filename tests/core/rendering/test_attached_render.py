@@ -253,7 +253,10 @@ def test_executor_override_changes_attached_behavior(
 def test_unbound_falls_back_to_public_service_without_ledger(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    projects_root = tmp_path / "projects"
+    # The autouse suite sandbox already creates ``tmp_path / "projects"``;
+    # use a never-created caller-owned root so this test proves the unbound
+    # fallback does not initialize it.
+    projects_root = tmp_path / "unbound-projects"
     monkeypatch.setenv("ASTRID_PROJECTS_ROOT", str(projects_root))
     for name in (TASK_PROJECT_ENV, TASK_RUN_ID_ENV, TASK_STEP_ID_ENV):
         monkeypatch.delenv(name, raising=False)

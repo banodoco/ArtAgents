@@ -76,8 +76,7 @@ MAX_N_FRAMES = DEFAULT_N_FRAMES
 
 #: Deterministic note returned with the empty audio filmstrip.
 AUDIO_FILMSTRIP_NOTE = (
-    "audio filmstrips are not produced in M1: spectral and waveform "
-    "rendering is out of scope"
+    "audio filmstrips are not produced in M1: spectral and waveform rendering is out of scope"
 )
 
 _READ_CHUNK = 1024 * 1024
@@ -115,14 +114,9 @@ def _validate_limits(
     # HARD bounds (R13): these are caps, not defaults — callers cannot exceed
     # them in either sampler.
     if n_candidates > MAX_N_CANDIDATES:
-        raise ValueError(
-            f"n_candidates must not exceed {MAX_N_CANDIDATES} "
-            f"(got {n_candidates})"
-        )
+        raise ValueError(f"n_candidates must not exceed {MAX_N_CANDIDATES} (got {n_candidates})")
     if n_frames > MAX_N_FRAMES:
-        raise ValueError(
-            f"n_frames must not exceed {MAX_N_FRAMES} (got {n_frames})"
-        )
+        raise ValueError(f"n_frames must not exceed {MAX_N_FRAMES} (got {n_frames})")
 
 
 def per_page_frame_budget(asset_count: int) -> int:
@@ -316,13 +310,10 @@ def _sample_video(
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
             detail = getattr(exc, "stderr", None)
             tail = str(detail or "")[-400:]
-            raise RuntimeError(
-                f"ffmpeg frame extraction failed for {source_path}: {tail}"
-            ) from exc
+            raise RuntimeError(f"ffmpeg frame extraction failed for {source_path}: {tail}") from exc
         if not out_path.is_file():
             raise RuntimeError(
-                f"ffmpeg frame extraction produced no file at {seconds}s "
-                f"for {source_path}"
+                f"ffmpeg frame extraction produced no file at {seconds}s for {source_path}"
             )
         results.append(out_path)
     return results
@@ -490,8 +481,7 @@ def filmstrip_layout_objects(
         row, column = divmod(index, FILMSTRIP_COLUMNS)
         box = Box(
             base_box.x + column * (FILMSTRIP_FRAME_W + FILMSTRIP_GAP),
-            base_box.y + base_box.h + FILMSTRIP_GAP
-            + row * (FILMSTRIP_FRAME_H + FILMSTRIP_GAP),
+            base_box.y + base_box.h + FILMSTRIP_GAP + row * (FILMSTRIP_FRAME_H + FILMSTRIP_GAP),
             FILMSTRIP_FRAME_W,
             FILMSTRIP_FRAME_H,
         )

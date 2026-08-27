@@ -9,17 +9,33 @@ this file (pool/arrangement/metadata/registry types, transition validation,
 effect-id registry checks) is Banodoco-only.
 """
 
+# Validator exports intentionally remain below the fallback schema import.
+# ruff: noqa: E402, I001
+
 from __future__ import annotations
 
 import copy
 import functools
 import hashlib
 import json
+import os
+import sys
 from collections.abc import Mapping
 from enum import Enum
+from pathlib import Path
 from typing import Any, List, Literal, TypedDict, Union, cast
 
 import jsonschema
+
+from astrid.core.env_vars import ASTRID_TIMELINE_SCHEMA_PYTHONPATH
+
+_schema_pythonpath = os.environ.get(ASTRID_TIMELINE_SCHEMA_PYTHONPATH, "").strip()
+if _schema_pythonpath:
+    _schema_root = Path(_schema_pythonpath).expanduser()
+    if _schema_root.is_absolute():
+        _schema_root = _schema_root.resolve()
+        if str(_schema_root) not in sys.path:
+            sys.path.insert(0, str(_schema_root))
 
 try:
     from banodoco_timeline_schema import (
@@ -120,6 +136,7 @@ class DerivedFrom(TypedDict, total=False):
 
 class SharedAssetEntry(TypedDict, total=False):
     file: str
+    media_id: str
     url: str
     etag: str
     content_sha256: str
@@ -360,11 +377,11 @@ _LEGACY_CONTAINER_KEYS = frozenset({"schema_version", "assembly", "pool", "arran
 _THEME_OVERRIDES_ALLOWED = frozenset({"visual", "generation", "voice", "audio", "pacing"})
 _CLIP_ALLOWED = frozenset(
     {
-        "id", "at", "track", "clipType", "asset", "from", "to", "speed", "hold",
+        "id", "at", "track", "clipType", "label", "asset", "from", "to", "speed", "hold",
         "volume", "x", "y", "width", "height", "cropTop", "cropBottom",
         "cropLeft", "cropRight", "opacity", "params", "text", "entrance", "exit",
         "continuous", "transition", "effects", "source_uuid", "generation",
-        "pool_id", "clip_order", "app", "label",
+        "pool_id", "clip_order", "app", "label", "keyframes",
     }
 )
 _TRACK_ALLOWED = frozenset(
@@ -373,6 +390,7 @@ _TRACK_ALLOWED = frozenset(
 _ASSET_ENTRY_ALLOWED = frozenset(
     {
         "file",
+        "media_id",
         "url",
         "etag",
         "content_sha256",

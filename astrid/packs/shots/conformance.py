@@ -44,10 +44,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from astrid.core.conformance.kit import (
+    TS,
     CommandSpec,
     ConformanceContext,
     ConformanceError,
-    TS,
 )
 from astrid.core.io.media_import import prepare_media_file
 from astrid.core.receipts import ReceiptMismatchError
@@ -96,19 +96,13 @@ _SEED_KEYS: dict[str, str] = {
 
 def _media_id(variant: str) -> str:
     """Deterministic kernel media id for one fixture variant."""
-    return str(
-        uuid.uuid5(
-            uuid.NAMESPACE_URL, f"astrid-conformance-shot-media:{variant}"
-        )
-    )
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"astrid-conformance-shot-media:{variant}"))
 
 
 def _stable_shot_id(key: str, suffix: str = "") -> str:
     """Deterministic shot id for one kit key (stable-ID replay)."""
     namespace = (
-        f"astrid-conformance-shot:{suffix}:{key}"
-        if suffix
-        else f"astrid-conformance-shot:{key}"
+        f"astrid-conformance-shot:{suffix}:{key}" if suffix else f"astrid-conformance-shot:{key}"
     )
     return str(uuid.uuid5(uuid.NAMESPACE_URL, namespace))
 
@@ -132,9 +126,7 @@ def _require(ctx: ConformanceContext, name: str) -> Any:
     """Return one injected context repository or fail with a clear error."""
     value = getattr(ctx, name, None)
     if value is None:
-        raise ConformanceError(
-            f"shots conformance needs a context with {name!r} injected"
-        )
+        raise ConformanceError(f"shots conformance needs a context with {name!r} injected")
     return value
 
 
@@ -142,9 +134,7 @@ def _materialize_fixtures(context: ConformanceContext) -> None:
     """Write (idempotently) the prepared fixture files under the managed root."""
     root = context.managed_root
     if root is None:
-        raise ConformanceError(
-            "shots conformance needs a context with a managed_root"
-        )
+        raise ConformanceError("shots conformance needs a context with a managed_root")
     for _variant, rel, payload in _MEDIA_FIXTURES:
         path = root / rel
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -162,13 +152,9 @@ def _import_media(
     """Import one fixture variant as exact kernel media inside *uow*."""
     media = _require(context, "media")
     if context.managed_root is None:
-        raise ConformanceError(
-            "shots conformance needs a context with a managed_root"
-        )
+        raise ConformanceError("shots conformance needs a context with a managed_root")
     rel = dict((entry[0], entry[1]) for entry in _MEDIA_FIXTURES)[variant]
-    prepared = prepare_media_file(
-        context.managed_root / rel, root=context.managed_root
-    )
+    prepared = prepare_media_file(context.managed_root / rel, root=context.managed_root)
     return media.import_prepared(
         uow,
         project_id=project_id,
@@ -329,12 +315,8 @@ def _seed_create(context: ConformanceContext, writer: Any) -> dict[str, Any]:
             project_id="crash-proj",
             created_at=TS,
         )
-        _import_media(
-            context, uow, project_id="crash-proj", variant="a", key=f"{key}-media-a"
-        )
-        _import_media(
-            context, uow, project_id="crash-proj", variant="b", key=f"{key}-media-b"
-        )
+        _import_media(context, uow, project_id="crash-proj", variant="a", key=f"{key}-media-a")
+        _import_media(context, uow, project_id="crash-proj", variant="b", key=f"{key}-media-b")
 
     UnitOfWork(writer).run(_run)
     return {"project_id": "crash-proj", "ref": None, "key": key}
@@ -512,9 +494,7 @@ def _invoke_remove_item_changed(
     )
 
 
-def _seed_remove_item(
-    context: ConformanceContext, writer: Any
-) -> dict[str, Any]:
+def _seed_remove_item(context: ConformanceContext, writer: Any) -> dict[str, Any]:
     key = _SEED_KEYS["remove_item"]
     _seed_create(context, writer)
 
@@ -698,9 +678,7 @@ def _shot_read(
     return shots.show(writer, project_id, ref)
 
 
-def _shot_list_other(
-    context: ConformanceContext, writer: Any, project_id: str
-) -> Any:
+def _shot_list_other(context: ConformanceContext, writer: Any, project_id: str) -> Any:
     """Another project's shot list (typed empty for the other project)."""
     shots = _require(context, "shots")
     return shots.list(writer, project_id)
@@ -793,7 +771,8 @@ def shot_command_specs(
     }
 
 
-
+# Public command-spec surface; capability fixtures below are test-only data.
+__all__ = ["shot_command_specs"]
 
 # ---------------------------------------------------------------------------
 # Capability conformance fixtures (doc 27 §3.6 — phase-B B3 fan-out)
@@ -873,17 +852,9 @@ def manifest_census(workflow: dict[str, Any]) -> dict[str, Any]:
     one video file per run (``save_output`` selects the subfolder, not
     whether bytes are produced). Image presence wins the media kind.
     """
-    classes = [
-        node.get("class_type")
-        for node in workflow.values()
-        if isinstance(node, dict)
-    ]
+    classes = [node.get("class_type") for node in workflow.values() if isinstance(node, dict)]
     images = sum(1 for c in classes if c == "SaveImage")
-    videos = sum(
-        1
-        for c in classes
-        if isinstance(c, str) and c.startswith("VHS_VideoCombine")
-    )
+    videos = sum(1 for c in classes if isinstance(c, str) and c.startswith("VHS_VideoCombine"))
     if images:
         media = "image"
     elif videos:
@@ -1088,9 +1059,21 @@ def _capability_fixtures() -> tuple[CapabilityConformance, ...]:
         ),
         # -- render export -----------------------------------------------------
         CapabilityConformance(
+            "rendering.render",
+            "render_export",
+            {"timeline_ref": "tl-1", "expected_version": 0},
+            {"files": 1, "media": "video"},
+            _BINDING_PROVENANCE,
+            invalid_input={},
+        ),
+        # Historical visualization remains a supported direct executor
+        # capability for the evidence-pack surface.  New render-export
+        # family admission resolves to rendering.render, but the legacy row
+        # still participates in the boot census and probe contract.
+        CapabilityConformance(
             "rendering.timeline_visualize",
             "render_export",
-            {"timeline_ref": "tl-1"},
+            {"timeline_ref": "tl-1", "expected_version": 0},
             {"files": 1, "media": "video"},
             _BINDING_PROVENANCE,
             invalid_input={},
