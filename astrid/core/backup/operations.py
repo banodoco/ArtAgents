@@ -1107,6 +1107,19 @@ def _validate_backup_layout(backup: Path) -> None:
         raise RestoreValidationError(
             f"backup is missing {BACKUP_METADATA_NAME}: {backup}"
         )
+    try:
+        metadata = json.loads(
+            (backup / BACKUP_METADATA_NAME).read_text(encoding="utf-8")
+        )
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RestoreValidationError(f"invalid backup metadata: {backup}") from exc
+    if not isinstance(metadata, dict):
+        raise RestoreValidationError(f"backup metadata is not an object: {backup}")
+    if metadata.get("version") != BACKUP_FORMAT_VERSION:
+        raise RestoreValidationError(
+            "unsupported backup metadata version: "
+            f"{metadata.get('version')!r} (expected {BACKUP_FORMAT_VERSION})"
+        )
     if not _restore_is_dir(backup / BACKUP_MEDIA_DIR):
         raise RestoreValidationError(
             f"backup is missing {BACKUP_MEDIA_DIR}: {backup}"

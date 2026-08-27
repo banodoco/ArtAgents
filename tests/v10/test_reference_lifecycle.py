@@ -19,7 +19,7 @@ lifecycle contract over the frozen three-table schema:
   (non-cascading archive, SD1), direct historical lookup keeps working, and
   new active mutations of archived references fail;
 - reads are transaction-free on a separate read-only connection, and the
-  standard catalog stays exactly the frozen 22 tables.
+  standard catalog stays exactly the frozen 23 tables.
 
 Every command runs inside the caller's one ``BEGIN IMMEDIATE`` unit of work
 (:class:`astrid.core.store.uow.UnitOfWork`); every read runs on a separate
@@ -825,8 +825,8 @@ def test_reference_lifecycle_leaves_catalog_unchanged(env) -> None:
     )
     # The frozen standard catalog: 14 kernel tables + timelines + shots +
     # shot_items + generations + generation_variants + the three reference
-    # tables = 22, with no plan/step tables.
-    assert len(present) == 22
+    # tables + runaway_transitions = 23, with no plan/step tables.
+    assert len(present) == 23
     for table in (
         "project_references",
         "media_references",
@@ -834,6 +834,7 @@ def test_reference_lifecycle_leaves_catalog_unchanged(env) -> None:
         "timelines",
         "shots",
         "shot_items",
+        "runaway_transitions",
     ):
         assert table in present
     for forbidden in ("plans", "steps", "plan_steps"):

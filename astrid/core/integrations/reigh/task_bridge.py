@@ -25,6 +25,7 @@ from astrid.core.integrations.reigh.bridge_service import (
     BridgeProjectNotFoundError,
     BridgeSchemaIncompatibleError,
 )
+from astrid.core.integrations.reigh.orchestrator_transitions import orch_child_key
 
 
 class BridgeGenerationNotFoundError(BridgeError):
@@ -817,7 +818,7 @@ class ReighTaskBridge:
             raise BridgeChildAdmissionForbiddenError(
                 "child_admission.index must be a non-negative integer"
             )
-        expected_key = f"reigh.orch:v1:{parent_task_id}:{role}:{index}"
+        expected_key = orch_child_key(parent_task_id, str(role), index)
         if idempotency_key != expected_key:
             raise BridgeChildAdmissionForbiddenError(
                 f"child admission requires the deterministic key "
