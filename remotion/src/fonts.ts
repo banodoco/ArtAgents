@@ -1,22 +1,11 @@
-// Self-hosted font loading via CSS @font-face — zero network requests to Google Fonts CDN.
-// Font files are committed in remotion/public/fonts/ and served by Remotion's static file server.
-// The @font-face declarations are injected as a <style> tag by the FontProvider component.
-// This component must be rendered inside the composition (it returns a <style> element).
+// Loads the Google Fonts referenced by themes/2rp/theme.json so that
+// theme.type.families.{heading,body,mono} actually resolve at render time.
+// Importing this module triggers font loading as a side effect.
+// NOTE: loadFont takes (style, options) — style is "normal", options limits weights/subsets.
+import {loadFont as loadSixtyfour} from '@remotion/google-fonts/Sixtyfour';
+import {loadFont as loadInter} from '@remotion/google-fonts/Inter';
+import {loadFont as loadJetBrainsMono} from '@remotion/google-fonts/JetBrainsMono';
 
-import {staticFile} from 'remotion';
-import React from 'react';
-
-const FACES: {family: string; file: string; weight: string}[] = [
-  {family: 'Inter', file: 'fonts/Inter-Regular.woff2', weight: '400'},
-  {family: 'Inter', file: 'fonts/Inter-Bold.woff2', weight: '700'},
-  {family: 'JetBrains Mono', file: 'fonts/JetBrainsMono-Regular.woff2', weight: '400'},
-  {family: 'JetBrains Mono', file: 'fonts/JetBrainsMono-Bold.woff2', weight: '700'},
-];
-
-export const FontProvider: React.FC = () => {
-  const css = FACES.map(
-    ({family, file, weight}) =>
-      `@font-face { font-family: '${family}'; src: url('${staticFile(file)}') format('woff2'); font-weight: ${weight}; font-display: block; }`,
-  ).join('\n');
-  return <style>{css}</style>;
-};
+loadSixtyfour();
+loadInter('normal', {weights: ['400', '700'], subsets: ['latin']});
+loadJetBrainsMono('normal', {weights: ['400', '700'], subsets: ['latin']});
