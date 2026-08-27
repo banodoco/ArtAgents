@@ -136,6 +136,7 @@ def test_invoke_in_process_command_scopes_env_cwd_argv_and_reloads_module(
     assert result.payload["internal"] == "1"
     assert result.payload["sys_argv"] == ["astrid.packs.demo_runtime_test", "mapping"]
     assert json.loads(out_path.read_text(encoding="utf-8"))["marker"] == "v1"
+    assert "astrid.packs.demo_runtime_test" not in sys.modules
 
     _write_runtime_module(module_path, marker="v2")
     importlib.invalidate_caches()
@@ -150,6 +151,7 @@ def test_invoke_in_process_command_scopes_env_cwd_argv_and_reloads_module(
     assert result.returncode == 0
     assert result.payload["marker"] == "v2"
     assert result.payload["sample"] == "second"
+    assert "astrid.packs.demo_runtime_test" not in sys.modules
 
 
 def test_invoke_in_process_command_normalizes_common_runtime_return_patterns(

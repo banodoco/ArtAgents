@@ -8,6 +8,7 @@ import os
 import sys
 from contextlib import contextmanager, nullcontext, redirect_stderr, redirect_stdout
 from dataclasses import dataclass
+from functools import wraps
 from pathlib import Path
 from typing import IO, Any, Callable, Iterator, Mapping
 
@@ -193,18 +194,38 @@ def _resolve_in_process_callable(
             raise PackResolverError(f"failed to import module {module_path!r}: module spec not found")
         if not spec.origin:
             raise PackResolverError(f"failed to import module {module_path!r}: module origin not found")
-        sys.modules.pop(module_path, None)
+        missing = object()
+        previous_module = sys.modules.get(module_path, missing)
         module = importlib.util.module_from_spec(spec)
         sys.modules[module_path] = module
-        source = Path(spec.origin).read_text(encoding="utf-8")
-        with canonical_runtime_entrypoint(owner_id):
-            exec(compile(source, spec.origin, "exec"), module.__dict__)
-        target = getattr(module, callable_name, None)
-        if target is None or not callable(target):
-            raise CallableNotFoundError(
-                f"module {module_path!r} attribute {callable_name!r} is not callable"
-            )
-        return target
+        try:
+            source = Path(spec.origin).read_text(encoding="utf-8")
+            with canonical_runtime_entrypoint(owner_id):
+                exec(compile(source, spec.origin, "exec"), module.__dict__)
+            target = getattr(module, callable_name, None)
+            if target is None or not callable(target):
+                raise CallableNotFoundError(
+                    f"module {module_path!r} attribute {callable_name!r} is not callable"
+                )
+        finally:
+            if previous_module is missing:
+                sys.modules.pop(module_path, None)
+            else:
+                sys.modules[module_path] = previous_module
+
+        @wraps(target)
+        def _scoped_target(*args: Any, **kwargs: Any) -> Any:
+            displaced_module = sys.modules.get(module_path, missing)
+            sys.modules[module_path] = module
+            try:
+                return target(*args, **kwargs)
+            finally:
+                if displaced_module is missing:
+                    sys.modules.pop(module_path, None)
+                else:
+                    sys.modules[module_path] = displaced_module
+
+        return _scoped_target
 
     try:
         return resolve_callable_from_metadata(
