@@ -11,7 +11,7 @@ import type {
   TimelineThemeOverrides,
   VisualOverrides,
 } from './types.augmentations';
-import './fonts';
+import {FontProvider} from './fonts';
 
 const DEFAULT_PROPS: TimelineCompositionProps = {
   timeline: {
@@ -75,6 +75,7 @@ const getMetadata = async ({
 export const Root = (): ReactElement => {
   return (
     <>
+      <FontProvider />
       <Composition
         id="TimelineComposition"
         component={TimelineComposition}
