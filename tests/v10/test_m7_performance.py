@@ -19,6 +19,7 @@ from tests.v10._m7_fixture import build_m7_fixture
 
 SAMPLE_COUNT = 3
 WARM_SAMPLE_COUNT = 8
+ARTIFACT_PATH = Path(__file__).resolve().parents[2] / "artifacts" / "m7" / "performance.json"
 
 
 def _elapsed(operation: Callable[[], Any]) -> float:
@@ -131,7 +132,11 @@ def test_m7_performance_report_records_cold_warm_report_only_evidence(
     tmp_path: Path,
 ) -> None:
     """Measure supported public reads/writes without inventing host budgets."""
-    artifact_path = tmp_path / "performance.json"
+    # This is report-only evidence.  Never rewrite the tracked release
+    # artifact from a test: timing, platform, and dependency metadata are
+    # inherently host-specific and a CI run must remain hermetic.  Keep a
+    # byte snapshot so this test also acts as an explicit immutability fence.
+    tracked_before = ARTIFACT_PATH.read_bytes() if ARTIFACT_PATH.is_file() else None
     fixture_root = tmp_path / "warm-fixture"
     fixture = build_m7_fixture(fixture_root)
     assert fixture.snapshot["fixture_identity"]["fixture_id"] == fixture.spec["fixture_id"]
@@ -198,10 +203,11 @@ def test_m7_performance_report_records_cold_warm_report_only_evidence(
         "comparisons": [],
         "operations": measurements,
     }
-    artifact_path.write_text(
+    report_path = tmp_path / "performance.json"
+    report_path.write_text(
         json.dumps(artifact, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
-    persisted = json.loads(artifact_path.read_text(encoding="utf-8"))
+    persisted = json.loads(report_path.read_text(encoding="utf-8"))
     assert persisted["budget_status"] == "unresolved"
     assert persisted["report_only"] is True
     assert set(persisted["operations"]) == {
@@ -211,6 +217,10 @@ def test_m7_performance_report_records_cold_warm_report_only_evidence(
         "change_feed",
         "media_verify",
     }
+    if tracked_before is None:
+        assert not ARTIFACT_PATH.exists()
+    else:
+        assert ARTIFACT_PATH.read_bytes() == tracked_before
 
 
 __all__ = ["test_m7_performance_report_records_cold_warm_report_only_evidence"]

@@ -105,9 +105,11 @@ _FROZEN_REL_PATHS = (
 _FROZEN_LEGITIMATE_UPDATES = {
     "astrid/packs/rendering/executors/timeline_storyboard/STAGE.md": "5557754c",
     "astrid/core/timeline/_shared.py": "b768588e",
-    # 0d8ac242 is the reviewed schema baseline for the explicit external
-    # timeline-schema import path; later commits must remain byte-identical to
-    # the current reviewed bytes.
+    # The schema received several reviewed, additive/narrowing updates during
+    # the epic (the explicit schema import path, media identity, and the
+    # pinned clip allowlist).  ``git log`` is newest-first, so anchor at the
+    # newest reviewed revision; all older pre-update history is ignored while
+    # every later revision must remain byte-identical to the current bytes.
     "astrid/core/timeline/banodoco_schema.py": "0d8ac242",
 }
 
